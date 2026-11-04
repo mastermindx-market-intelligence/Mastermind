@@ -1553,11 +1553,13 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # Return plus attention composition changes the module; the installed entry
     # AST below remains identical to protected d65414e. This static literal
     # freezes the combined candidate, not independent review or release authority.
+    # P16 READ composition adds only the qualified Plan/Journal reader factories;
+    # the exact installed event-loop AST below and all dispatch guards stay fixed.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'c4b87d037656f10a05b2fef9da0df7f752b9ce4b5ceb608930ba6e2a61d953f0'):
+            'a81cdea9e79374fa3e95c10c3dcf6922f92fdf816e899c8c9abff0aab018f57c'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

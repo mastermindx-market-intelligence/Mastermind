@@ -341,9 +341,9 @@ def _next_proof(requirement: str, worker: dict[str, Any],
                     "consume the existing current-head CI run through its original observation path; "
                     "do not rerun or push an empty change; advance independent permitted work"
                 )
-            # STALE means the observation needs refreshed identity/state proof,
-            # not that the original check failed or deserves a repair.
-            if state in {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "SKIPPED", "NEUTRAL"}:
+            # STALE, SKIPPED and NEUTRAL do not establish a failed check.
+            # Reconcile identity and required status before any repair.
+            if state in {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"}:
                 return (
                     "inspect the original CI result and identify a permitted repair; "
                     "no blind retry or duplicate run"

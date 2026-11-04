@@ -1,10 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { createDirectionPreview, previewIsCurrent, type DirectionPreview } from "./preview";
+import { ProgrammeDirection, type ProgrammeDirectionProps } from "../direction/ProgrammeDirection";
 import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceClaim } from "./projection";
 import "./office.css";
 import { registerUnsavedNavigationHold } from "../auth-navigation-guard";
 import { FabricMissionInspector } from "../fabric/FabricMissionInspector";
-import { AttendedFabricInspector } from "../fabric/AttendedFabricInspector";
+import type { ResultSelection } from "../result";
+import { AttendedFabricWorkspace } from "../fabric/AttendedFabricWorkspace";
 import { AdmittedPlanInspector } from "../planning/AdmittedPlanInspector";
 import type { PlanSelection } from "../planning/admitted-plan";
 import type { ActivitySelection } from "../planning/retained-activity";
@@ -25,8 +27,12 @@ const officePlanPermission = () => {
 export interface OfficeDraft { text: string; context: ProjectionContext }
 export interface MetaCeoOfficeProps {
   projection: OfficeProjection;
+  /** Existing canonical Agent OS reader; authored objectives never confer adoption. */
+  programmeDirection?: Omit<ProgrammeDirectionProps, "locale">;
   draft: OfficeDraft;
   onDraftChange: (text: string) => void;
+  /** Reuse App's exact Result owner reader; this component never acquires content. */
+  onInspectWorkerResult?: (selection: ResultSelection) => void;
   locale?: "en" | "zh-CN";
 }
 
@@ -122,7 +128,7 @@ function SourceBadge({ source }: { source: SourceClaim }) {
   return <span className="office-state" data-state={source.state}>{source.state}</span>;
 }
 
-export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" }: MetaCeoOfficeProps) {
+export function MetaCeoOffice({ projection, draft, onDraftChange, onInspectWorkerResult, programmeDirection, locale = "en" }: MetaCeoOfficeProps) {
   const t = (en: keyof typeof OFFICE_ZH): string => locale === "zh-CN" ? OFFICE_ZH[en] : en;
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [preview, setPreview] = useState<DirectionPreview | null>(null);
@@ -173,10 +179,13 @@ export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" 
         <span className="office-state" data-state="UNKNOWN">{t("Read + preview only")}</span></div>
     </header>
 
-    <section className="office-direction" aria-label={t("Current direction")}>
+    {programmeDirection ? <ProgrammeDirection
+      key={`objective:${projection.context.authGeneration}`}
+      {...programmeDirection}
+      locale={locale} /> : <section className="office-direction" aria-label={t("Current direction")}>
       <div><p className="office-eyebrow">{t("Current direction")}</p><span className="office-muted">{t("Source unavailable")}</span></div>
       <p>{t("The adopted direction has not been supplied by its owner.")}</p>
-    </section>
+    </section>}
 
     {unknownEffect && <div className="office-effect-alert" role="alert">
       <strong>EFFECT_UNKNOWN</strong><p>{t("Reconcile the original operation. Resend, failover and target change remain held.")}</p>
@@ -204,8 +213,9 @@ export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" 
     <FabricMissionInspector
       key={JSON.stringify([projection.context.authGeneration, projection.context.selection])}
       mission={mission} locale={locale}
+      onInspectResult={projection.mission.source.state === "CURRENT" ? onInspectWorkerResult : undefined}
     />
-    <AttendedFabricInspector
+    <AttendedFabricWorkspace
       key={`attended:${projection.context.authGeneration}`}
       host={typeof window === "undefined" ? undefined : window.MastermindMissionHost}
       locale={locale}

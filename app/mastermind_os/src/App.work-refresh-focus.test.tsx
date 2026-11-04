@@ -36,7 +36,7 @@ async function click(label: string) {
 async function mountWork() {
   root = createRoot(container);
   await act(async () => { root!.render(<App />); });
-  await click("Work");
+  await click("Work queue");
 }
 function expectPending(control: HTMLButtonElement) {
   // This is the discriminator that the old jsdom focus assertion lacked.
@@ -196,7 +196,9 @@ describe("Work refresh pending-control semantics", () => {
     }));
     const readMission = vi.fn(async ({ workRef, rootJobId }: { workRef: string; rootJobId: string }) => missionFixture(workRef, rootJobId));
     window.MastermindMissionHost = { readProgramsObservation, readMission, readWork };
-    await mountWork(); await click("Projects"); await click("Open project Alpha program"); await click("Work");
+    await mountWork(); await click("Projects"); await click("Open project Alpha program"); await click("Project details");
+    await act(async () => { Array.from(container.querySelectorAll("summary")).find(n => n.textContent === "More work details")!.click(); });
+    await click("Work");
     const url = location.href;
     const programCalls = readProgramsObservation.mock.calls.length, missionCalls = readMission.mock.calls.length;
     const control = button("Refresh Work"); control.focus(); await click("Refresh Work");

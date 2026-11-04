@@ -538,6 +538,10 @@ def _seed_dispatchable_operator_planner(
     routing_capacity: bool = False,
     operator_model_alias: str = "coo.operator.readonly",
     interactive_operator: bool = False,
+    plan_schema_version: str | None = None,
+    create_planner: bool = True,
+    frontier_selection: dict[str, object] | None = None,
+    operator_harness_armed: bool = True,
 ):
     workspace_root = tmp_path / "workspaces"
     workspace = workspace_root / "g2-planner"
@@ -605,7 +609,7 @@ def _seed_dispatchable_operator_planner(
         "operator_capability_policy_digest": operator.capability_policy_digest,
         "operator_harness_binary_digest": "a" * 64,
         "operator_harness_version": "0.147.0",
-        "operator_harness_armed": True,
+        "operator_harness_armed": operator_harness_armed,
     }
     if routing_capacity:
         binding["host_execution_binding_version"] = "mastermind.host_execution_binding/v3"
@@ -686,24 +690,31 @@ def _seed_dispatchable_operator_planner(
             },
             "require_dialogue_source": True,
         }
+    selection_kwargs = {}
+    if frontier_selection is not None:
+        intent["frontier_model_alias"] = frontier_selection["model_alias"]
+        selection_kwargs["frontier_selection"] = frontier_selection
     receipt = submit_intent(
         runtime,
         intent,
         workspace_root=workspace_root,
         execution_binding=binding,
         **dialogue_kwargs,
+        **selection_kwargs,
     )
     root = runtime.jobs.get_job(receipt["job_id"])
     assert root is not None
+    planner = None
     if interactive_operator:
         planner = runtime.jobs.create_interactive_operator(
             root.job_id,
             command_id=f"coo-cycle:{root.job_id}:create-interactive:0",
         )
-    else:
+    elif create_planner:
         planner = runtime.jobs.create_cycle_planner(
             root.job_id,
             command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+            plan_schema_version=plan_schema_version,
         )
     return runtime, root, planner
 

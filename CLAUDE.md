@@ -25,7 +25,7 @@ permissions or override those actual controls.
 
 Fable is not a mandatory relay or universal merge approver. Routing, adjudication,
 and merge decisions follow the currently authorized role and operation, not a
-historical session name. Independent review and source/release protections still apply.
+historical session name. Independent review is not mandatory for CEO Web work; protected source/release controls still apply.
 These role descriptions do not themselves grant authority.
 
 **Source-of-truth order** — higher layer wins on conflict:
@@ -112,6 +112,21 @@ tests through existing interfaces; separate source readiness, human-only enrollm
 a bounded admitted canary and production release. Do not remove refusal guards or
 invent an admission receipt to make a dormant path appear live.
 
+### Responsibility continuity — no imaginary owners
+
+<!-- MMX_RESPONSIBILITY_CONTINUITY_BEGIN -->
+Within an assigned nonterminal job, the current session retains responsibility for the next step until it either executes that step, completes a concrete handoff/continuation to a proven exact receiver, records `WAITING_CAPACITY`, enters a lawful `PRESTART_REBIND`, returns `RUNTIME_BINDING_RECONCILIATION_REQUIRED` or `EFFECT_UNKNOWN`, or reaches a genuine Chairman/admin gate.
+
+- A component, service, repository, team, role, provider account, browser tab, or historical session is not a live assignee. `FACT_OWNER`/`CAPABILITY_OWNER` identifies where truth or implementation lives; it does not prove a current executor.
+- Before deferring because a capability is unavailable, inspect the actual current tool/connector/host surface once when it can materially answer the question. If the bounded action is inside current scope and this session is already authorized and capable, perform it instead of naming a conceptual owner.
+- Tool access is capability, not modification authority. Saying "I take ownership" does not create action-target or source-writer authority.
+- If another exact live action target or source writer is proven current, continue that target; do not steal the write. Perform the required delivery/continuation edge or return the exact transport/binding blocker.
+- With no receiver assignment edge before START and no effect, use existing placement / `WAITING_CAPACITY` / lawful `PRESTART_REBIND`; never invent an assignee.
+- `EFFECT_UNKNOWN` forbids takeover, retry, receiver rotation, provider failover, or replacement modification until canonical reconciliation.
+- Do not end at "the owner should do it" without an actual handoff or typed gate. A genuine Chairman/admin gate must name the exact external decision or credential boundary.
+- A dead or missing runtime/session is a reconciliation/succession problem for the existing canonical owner; it never grants this session automatic modifying authority.
+<!-- MMX_RESPONSIBILITY_CONTINUITY_END -->
+
 ### Reciprocal dialogue and watcher invariant
 
 For any watcher-enabled Sol↔worker/COO loop, `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` is the
@@ -142,9 +157,13 @@ universal procedure owner. Read it before creating or relying on a temporary wat
   proves ACK, START, execution, or reusable capacity. Preserve those states separately until the
   accepted RuntimeBinding/Wake path proves them.
 
-### Independent-review routing across sessions
+### Session-owned review — local native child first
 
-For independent PR/source review, load [the single shared session routing procedure](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md) and check actual admitted Fabric tool/root/effect evidence. A separately authorized Dot can receive one source-bound Slack technical-review assignment when genuinely eligible; no duplicate or refused-operation workaround, fictional START, or formal GitHub approval inferred from a Slack result. Existing Executive/GitHub authority remains controlling.
+For review decisions first load [the session-local policy](docs/SESSION_LOCAL_REVIEW_POLICY.md) at the accepted protected pin. The current Claude/Codex/Web parent may self-check or use a genuinely distinct read-only **native reviewer child within this same session** with real START, immutable source and returned findings; no different top-level chat is required. The attended CEO-Web handoff waiver is an instruction-consumer policy; its adoption does not depend on the separate signed-machine host. Other execution surfaces retain their applicable review requirements. A source candidate or protected merge alone proves neither instruction installation nor host enrollment. A technical child is not authenticated non-author GitHub `APPROVED`; maintain real required approvals, CI, holds and no self-merge.
+
+For a truly required independent external avenue load [the existing session routing procedure](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md), inspect actual admitted Fabric root/parent/effects and preserve the original carrier. On EFFECT_UNKNOWN, active review or explicit denial do not reroute through a Dot, account or provider. One actually eligible Dot may receive a source-bound Slack technical-review assignment; no fictional START or formal GitHub approval inferred from Slack. Existing Executive/GitHub authority remains controlling.
+
+A historically named GitHub reviewer login is a **placement preference, not an owner wait**, unless an actual current exact-seat instruction or repository rule binds it. The active assigned principal checks the review's exact PR/head, connected authenticated login, commit/author/coauthor independence and existing review/effect state under `docs/sol_skills/REVIEW_RETURN.md`; it may request a different eligible **genuinely independent** reviewer through GitHub's existing review path. Switching the same reasoning session between two GitHub accounts is not independent substantive review. No impersonation, author self-review, duplicate/denied-effect reroute, self-approval or self-merge. Keep executing other permitted work while the real review is pending.
 
 ## Agent OS — the organizational knowledge plane
 

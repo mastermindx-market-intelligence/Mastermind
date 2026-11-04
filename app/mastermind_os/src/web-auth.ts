@@ -1,3 +1,10 @@
+import { projectAdmissionPublicRequest, projectAdmissionQuery, type ProjectAdmissionPauseRequest, type ProjectAdmissionResumeRequest } from "./admission/project-admission-host";
+import { normalizeProjectAssociationSelection } from "./conversations/project-association";
+import { validResourceCapacitySelection } from "./resources/resource-capacity-read";
+import { isAutonomySelection, AUTONOMY_READ_BODY_SCHEMA } from "./supervision/autonomy-policy";
+import { validJournalSelection } from "./project-journal";
+import { validDirectionSelection } from "./direction/accepted-direction";
+import { validProjectPlanSelection } from "./planning/project-plan";
 import { guardAcceptanceRead, missionV4Selection, type MissionV4Selection, type ProductAcceptanceOwner } from "./product-acceptance/owner-observation";
 import {
   RESEARCH_SCOPE,
@@ -25,8 +32,15 @@ import { normalizeSelection, normalizeWorkspaceSelection, type MissionSelection 
 import { normalizeResultSelection, RESULT_HTTP_BODY_BYTES } from "./result";
 import { DIRECT_RESULT_BYTES, decodeDirectNativeResult, normalizeDirectSelection, parseDirectNativeJson } from "./direct-native-result";
 import { validActivitySelection } from "./planning/retained-activity";
+import { attendedSelection } from "./fabric/attended-status";
 import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import type { AuthState, RawClient } from "./host";
+import {
+  CONTROL_ROOM_REQUEST_BYTES, CONTROL_ROOM_RESPONSE_BYTES,
+  decodeControlRoomActionPayload, decodeControlRoomActionJson,
+  ControlRoomActionTransportError,
+  type ControlRoomOperation, type ControlRoomActionResult,
+} from "./control-room-actions";
 import { canNavigateForAutomaticSignIn } from "./auth-navigation-guard";
 import { evidenceUrl, EVIDENCE_BODY_BYTES } from "./research/evidence-contract";
 export type { AuthState } from "./host";
@@ -876,8 +890,156 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       researchRequests.delete(controller);
     }
   }
+  /** One fixed mutation on the original command; failures never trigger retry. */
+  async function projectAdmissionAction(mode:"pause"|"resume",request:ProjectAdmissionPauseRequest|ProjectAdmissionResumeRequest):Promise<unknown>{
+    const payload=projectAdmissionPublicRequest(mode,request),ticket=generation,token=tokens.acquisition;
+    if(!payload || !token || !valid("acquisition"))throw new Error("PROJECT_ADMISSION_UNAUTHORIZED");
+    const signal=request.signal,controller=new AbortController();let timeout:ReturnType<typeof setTimeout>|undefined;
+    let fail!:(reason:Error)=>void;
+    const interrupted=new Promise<never>((_,reject)=>{fail=reject;});
+    void interrupted.catch(()=>{});
+    const cancel=()=>{controller.abort();fail(new Error("PROJECT_ADMISSION_OUTCOME_UNCONFIRMED"));};
+    try {
+      signal.addEventListener("abort",cancel,{once:true});
+      timeout=later(cancel,60_000);if(signal.aborted)cancel();
+      const body=JSON.stringify(payload);if(new TextEncoder().encode(body).length>16_384)throw new Error("PROJECT_ADMISSION_REQUEST_INVALID");
+      const exchange=async()=>{
+        if(signal.aborted || controller.signal.aborted || ticket!==generation || !valid("acquisition"))throw new Error("PROJECT_ADMISSION_UNAUTHORIZED");
+        const response=await fetchFn(`${ORIGIN}/workspace/project-admission/${mode}`,{method:"POST",redirect:"error",credentials:"omit",cache:"no-store",
+          headers:{Accept:"application/json","Content-Type":"application/json",Authorization:`Bearer ${token.value}`},body,signal:controller.signal});
+        if(!response.ok)throw new Error("PROJECT_ADMISSION_REQUEST_FAILED");
+        const result=await boundedJson(response,32_768);
+        if(signal.aborted || controller.signal.aborted || ticket!==generation || tokens.acquisition!==token || !valid("acquisition"))throw new Error("PROJECT_ADMISSION_OUTCOME_UNCONFIRMED");
+        return result;
+      };
+      return await Promise.race([exchange(),interrupted]);
+    } finally {if(timeout!==undefined)clear(timeout);signal.removeEventListener("abort",cancel);controller.abort();}
+  }
+
+  /**
+   * One acquisition-authenticated attempt at a fixed Control Room route.
+   * The server owns each action grant. A post-dispatch auth change cannot
+   * turn an original result into a claim that the request was never sent.
+   */
+  function controlRoomAction(
+    operation: ControlRoomOperation,
+    input: unknown,
+    signal: AbortSignal,
+  ): Promise<ControlRoomActionResult> {
+    const ticket = generation, token = tokens.acquisition;
+    const controller = new AbortController();
+    const byteBrand = Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(Uint8Array.prototype), Symbol.toStringTag,
+    )?.get;
+    let dispatched = false, settled = false;
+    let response: Response | null = null;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    let readerReleased = false, bodyReleased = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    return new Promise((resolve, reject) => {
+      const releaseBody = () => {
+        if (reader && !readerReleased) {
+          readerReleased = true;
+          try { void Promise.resolve(reader.cancel()).catch(() => {}); } catch { /* lost cleanup */ }
+          try { reader.releaseLock(); } catch { /* a pending read may retain the lock */ }
+        } else if (!reader && response && !bodyReleased) {
+          bodyReleased = true;
+          try { void Promise.resolve(response.body?.cancel()).catch(() => {}); } catch { /* lost cleanup */ }
+        }
+      };
+      const finish = (result?: ControlRoomActionResult) => {
+        if (settled) return;
+        settled = true;
+        // Settle before any cleanup callback can move auth or abort again.
+        if (result) resolve(result);
+        else reject(new ControlRoomActionTransportError(
+          operation, dispatched ? "EFFECT_UNKNOWN" : "NOT_DISPATCHED",
+        ));
+        try { if (timer !== undefined) clear(timer); } catch { /* cleanup only */ }
+        try { signal.removeEventListener("abort", onAbort); } catch { /* invalid signal */ }
+        try { controller.abort(); } catch { /* cleanup only */ }
+        releaseBody();
+      };
+      const onAbort = () => finish();
+      void (async () => {
+        try {
+          const started = now();
+          if (!Number.isFinite(started)) throw new Error("ACTION_CLOCK_INVALID");
+          const deadline = started + 490_000;
+          // One total deadline, installed before payload preflight; never reset
+          // at response headers or while consuming the body.
+          timer = later(onAbort, 490_000);
+          signal.addEventListener("abort", onAbort, { once: true });
+          if (signal.aborted) { finish(); return; }
+          const payload = decodeControlRoomActionPayload(input, operation);
+          const body = JSON.stringify(payload) + "\n";
+          if (new TextEncoder().encode(body).length > CONTROL_ROOM_REQUEST_BYTES)
+            throw new Error("ACTION_INPUT_TOO_LARGE");
+          const options: RequestInit = {
+            method: "POST", redirect: "error", credentials: "omit", cache: "no-store",
+            headers: {
+              Accept: "application/json", "Content-Type": "application/json",
+              Authorization: "Bearer " + (token?.value ?? ""),
+            },
+            body, signal: controller.signal,
+          };
+          const aborted = signal.aborted || controller.signal.aborted;
+          const current = now();
+          if (!configured || !token || aborted || settled
+              || !Number.isFinite(current) || current >= deadline || token.expires <= current
+              || ticket !== generation || tokens.acquisition !== token)
+            throw new Error("ACTION_NOT_ADMITTED");
+          dispatched = true;
+          response = await fetchFn(ORIGIN + "/workspace/control-room/" + operation, options);
+          if (settled) { releaseBody(); return; }
+          const withinDeadline = () => {
+            const observed = now();
+            return Number.isFinite(observed) && observed < deadline;
+          };
+          if (!withinDeadline()) { finish(); return; }
+          const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+          const declared = response.headers.get("content-length");
+          if (contentType !== "application/json"
+              || (declared !== null && (!/^[0-9]+$/.test(declared)
+                || Number(declared) > CONTROL_ROOM_RESPONSE_BYTES))
+              || !response.body)
+            throw new Error("ACTION_RESPONSE_INVALID");
+          if (settled) { releaseBody(); return; }
+          reader = response.body.getReader();
+          const chunks: Uint8Array[] = [];
+          let size = 0;
+          while (true) {
+            const part = await reader.read();
+            if (settled) return;
+            if (!withinDeadline()) { finish(); return; }
+            if (part.done) break;
+            if (!ArrayBuffer.isView(part.value) || byteBrand?.call(part.value) !== "Uint8Array"
+                || part.value.byteLength > CONTROL_ROOM_RESPONSE_BYTES - size)
+              throw new Error("ACTION_RESPONSE_TOO_LARGE");
+            // The source reader may reuse its buffer on the following read.
+            const owned = new Uint8Array(part.value);
+            size += owned.byteLength;
+            chunks.push(owned);
+          }
+          const bytes = new Uint8Array(size);
+          let offset = 0;
+          for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+          if (settled) return;
+          if (!withinDeadline()) { finish(); return; }
+          const result = decodeControlRoomActionJson(bytes, operation, response.status);
+          // A qualified result is settled immediately, before any clock or cleanup
+          // callback can overwrite it. No post-dispatch READ/auth rewrite.
+          finish(result);
+        } catch {
+          // Never trust a dependency's claimed operation or NOT_DISPATCHED error.
+          // Only a decoded original-owner envelope can supply that proof here.
+          finish();
+        }
+      })();
+    });
+  }
   async function executivePost(
-    route: "context" | "submit" | "status" | "session/context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume",
+    route: "context" | "submit" | "status" | "session/context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction",
     arguments_: unknown,
     signal: AbortSignal,
   ) {
@@ -885,7 +1047,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     if (!configured || !executiveResource || !token || !valid("executive"))
       throw new Error("EXECUTIVE_AUTH_REQUIRED");
     // READ-only may observe but must never originate a SEND or Event ACK effect.
-    if ((route === "submit" || route === "session/send" || route === "direct-native/consume") &&
+    if ((route === "submit" || route === "session/send" || route === "direct-native/consume" || (route === "direct-native/correction" && (arguments_ as Record<string,unknown>)?.operation === "request")) &&
       token.executiveSend !== true)
       throw new Error("EXECUTIVE_SEND_SCOPE_REQUIRED");
     const direct = route.startsWith("direct-native/");
@@ -895,7 +1057,13 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     const abort = () => controller.abort();
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
-    const timer = later(abort, READ_TIMEOUT_MS);
+    // This one effect may first prepare its source (at most 120s), then owns
+    // the existing finite 300s foreground call. Reads and direct-native H2
+    // keep their incumbent deadline. No timeout can authorize a retry.
+    const foregroundResearch = route === "submit" && arguments_ !== null &&
+      typeof arguments_ === "object" && !Array.isArray(arguments_) &&
+      Reflect.get(arguments_, "execution_profile") === "research_only";
+    const timer = later(abort, foregroundResearch ? 430_000 : READ_TIMEOUT_MS);
     executiveRequests.add(controller);
     const current = () => !controller.signal.aborted && ticket === executiveGeneration &&
       tokens.executive === token && valid("executive");
@@ -949,6 +1117,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       submit: (arguments_, signal) => executivePost("submit", arguments_, signal),
       status: (arguments_, signal) => executivePost("status", { intent_id: arguments_.intent_id }, signal),
       directNative: {
+        correction: (request,signal)=>executivePost('direct-native/correction',request,signal),
         read: (selection, signal) => {
           const normalized=normalizeDirectSelection(selection);
           if(!normalized)return Promise.reject(new Error("DIRECT_SELECTION_INVALID"));
@@ -1002,6 +1171,14 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     restore,
     readPrograms: ({ signal }) =>
       read("acquisition", `${ORIGIN}/workspace/programs/current`, signal),
+    readControlRoomState: ({ signal }) =>
+      read("acquisition", `${ORIGIN}/workspace/control-room/state/current`, signal),
+    readControlRoomDiscovery: ({ signal }) =>
+      read("acquisition", `${ORIGIN}/workspace/control-room/discover/current`, signal),
+    openControlRoomSurface: ({ payload, signal }) => controlRoomAction("open", payload, signal),
+    bindControlRoomSurface: ({ payload, signal }) => controlRoomAction("bind", payload, signal),
+    unbindControlRoomSurface: ({ payload, signal }) => controlRoomAction("unbind", payload, signal),
+    refreshControlRoomBuilds: ({ signal }) => controlRoomAction("refresh-builds", {}, signal),
     readWork: ({ signal }) =>
       read(
         "acquisition",
@@ -1012,11 +1189,78 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
           typedUnavailableSchema: "mastermind.workspace_work_queue.v1",
         },
       ),
+    readAttendedFabricCatalog: ({ signal }) =>
+      read("acquisition", `${ORIGIN}/workspace/fabric/catalog/current`, signal,
+        { cap: 65_536, typedUnavailableSchema: null }),
+    readAttendedFabric: ({ rootId, runId, signal }) => {
+      const selected = attendedSelection({ rootId, runId });
+      if (!selected) return Promise.reject(new Error("FABRIC_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/fabric/status/current?${new URLSearchParams({
+        root_id: selected.rootId, run_id: selected.runId,
+      })}`, signal, { cap: 16_384, typedUnavailableSchema: null });
+    },
+    readProjectAdmissionControl: request => {
+      const payload=projectAdmissionPublicRequest("current",request);
+      if(!payload)return Promise.reject(new Error("PROJECT_ADMISSION_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/project-admission/current?${projectAdmissionQuery(payload)}`,request.signal,
+        {cap:32_768,typedUnavailableSchema:"mastermind.workspace_project_admission_control.v1"});
+    },
+    pauseProjectAdmission: request => projectAdmissionAction("pause",request),
+    resumeProjectAdmission: request => projectAdmissionAction("resume",request),
+    readProjectAdmissionOperation: request => {
+      const payload=projectAdmissionPublicRequest("status",request);
+      if(!payload)return Promise.reject(new Error("PROJECT_ADMISSION_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/project-admission/operation?${projectAdmissionQuery(payload)}`,request.signal,
+        {cap:32_768,typedUnavailableSchema:null});
+    },
+    readAutonomyPolicy: (request) => {
+      const { signal, ...selected } = request;
+      if (!isAutonomySelection(selected))
+        return Promise.reject(new Error("AUTONOMY_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/autonomy/current?${new URLSearchParams({
+        work_ref: selected.work_ref, root_job_id: selected.root_job_id,
+      })}`, signal, { cap: 32_768, typedUnavailableSchema: AUTONOMY_READ_BODY_SCHEMA });
+    },
+    readProjectPlan: (request) => {
+      const { signal, ...selected } = request;
+      if (!validProjectPlanSelection(selected))
+        return Promise.reject(new Error("PROJECT_PLAN_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-plan/current?${new URLSearchParams({ work_ref: selected.work_ref })}`,
+        signal, { cap: 131_072, typedUnavailableSchema: "mastermind.workspace_project_plan.v1" });
+    },
+    readProjectSessionAssociation: (request) => {
+      const { signal, ...value } = request;
+      const selected = normalizeProjectAssociationSelection(value);
+      if (!selected) return Promise.reject(new Error("PROJECT_SESSION_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-session/current?${new URLSearchParams({ work_ref: selected.workRef, root_job_id: selected.rootJobId })}`,
+        signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_project_session_association.v1" });
+    },
+    readProjectDirection: (request) => {
+      const { signal, ...selected } = request;
+      if (!validDirectionSelection(selected))
+        return Promise.reject(new Error("DIRECTION_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-direction/current?${new URLSearchParams({ work_ref: selected.work_ref })}`,
+        signal, { cap: 65_536, typedUnavailableSchema: "mastermind.workspace_project_direction.v1" });
+    },
+    readProjectJournal: (request) => {
+      const { signal, ...selected } = request;
+      if (!validJournalSelection(selected))
+        return Promise.reject(new Error("PROJECT_JOURNAL_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-journal/current?${new URLSearchParams({ work_ref: selected.work_ref })}`,
+        signal, { cap: 131_072, typedUnavailableSchema: "mastermind.workspace_project_journal.v1" });
+    },
     readAdmittedPlan: ({ work_ref, root_job_id, signal }) => {
       if (!/^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$/.test(work_ref) || !/^JOB-[0-9]{1,9}$/.test(root_job_id))
         return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
       return read("acquisition", `${ORIGIN}/workspace/plan/current?${new URLSearchParams({ work_ref, root_job_id })}`,
         signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_admitted_execution_plan.v1" });
+    },
+    readResourceCapacity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
+      const selected = { work_ref, root_job_id, job_id, attempt_id };
+      if (!validResourceCapacitySelection(selected))
+        return Promise.reject(new Error("RESOURCE_CAPACITY_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/resources/capacity/current?${new URLSearchParams(selected)}`,
+        signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_resource_capacity_result.v1" });
     },
     readRetainedActivity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
       const selected = { work_ref, root_job_id, job_id, attempt_id };

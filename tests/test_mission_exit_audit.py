@@ -911,9 +911,10 @@ def test_terminal_ci_failure_is_diagnosed_not_blindly_retried(state):
     assert "no blind retry" in guidance
 
 
-def test_stale_current_head_ci_observation_requires_reconciliation_not_repair():
+@pytest.mark.parametrize("state", ["STALE", "SKIPPED", "NEUTRAL"])
+def test_unproven_current_head_ci_observation_requires_reconciliation_not_repair(state):
     data = snapshot()
-    data["source"].update(ci_conclusion="STALE", ci_run_ref="github:existing-ci")
+    data["source"].update(ci_conclusion=state, ci_run_ref="github:existing-ci")
     guidance = _gap_guidance(data, "current_head_ci")
     assert "reconcile current-head CI identity and state with GitHub" in guidance
     assert "identify a permitted repair" not in guidance

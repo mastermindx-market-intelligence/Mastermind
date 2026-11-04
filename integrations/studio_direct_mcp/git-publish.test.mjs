@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile as execFileCallback, execFileSync } from 'node:child_process';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -1106,6 +1106,99 @@ test('sparse typed commit seeds its private index from the linked worktree index
     assert.equal(statusOut, '');
     assert.equal((await publisher.status({operation_id:f.operationId})).clean, true);
   } finally { await f.cleanup(); }
+});
+
+test('typed commit captures a same-size unstaged edit after copying a racily clean index', async () => {
+  const f = await fixture();
+  try {
+    await git(f.workspace, 'config', 'core.checkStat', 'minimal');
+    await git(f.workspace, 'config', 'core.trustctime', 'false');
+    await git(f.workspace, 'config', 'core.fsmonitor', 'false');
+
+    const proofPath = path.join(f.workspace, 'proof.txt');
+    const timestamp = 1_700_000_000;
+    await utimes(proofPath, timestamp, timestamp);
+    await git(f.workspace, 'add', '--', 'proof.txt');
+    const { stdout: indexOut } = await git(f.workspace, 'rev-parse', '--git-path', 'index');
+    const realIndexPath = path.resolve(f.workspace, indexOut.trim());
+    await utimes(realIndexPath, timestamp, timestamp);
+
+    const originalIndex = await readFile(realIndexPath);
+    const originalIndexMtime = (await stat(realIndexPath, { bigint: true })).mtimeNs;
+    const assertRealIndexUnchanged = async () => {
+      assert.deepEqual(await readFile(realIndexPath), originalIndex,
+        'pre-commit preparation must not rewrite the real index');
+      assert.equal((await stat(realIndexPath, { bigint: true })).mtimeNs, originalIndexMtime,
+        'pre-commit preparation must not retimestamp the real index');
+    };
+
+    // Keep v2 entirely unstaged with the same size and compared timestamp.
+    await writeFile(proofPath, 'v2\n');
+    await utimes(proofPath, timestamp, timestamp);
+    assert.equal((await stat(proofPath)).size, 3);
+    const diffNames = async (indexPath) => {
+      const { stdout } = await run(GIT, ['diff-files', '--name-only', '--', 'proof.txt'], {
+        cwd: f.workspace,
+        env: { ...process.env, GIT_INDEX_FILE: indexPath, GIT_OPTIONAL_LOCKS: '0' },
+      });
+      return stdout;
+    };
+
+    // Identical index bytes lose Git's racy-clean guard if the copy is newer.
+    const newerCopy = path.join(f.root, 'newer-index-control');
+    await writeFile(newerCopy, originalIndex);
+    await utimes(newerCopy, timestamp + 60, timestamp + 60);
+    assert.deepEqual(await readFile(newerCopy), originalIndex);
+    assert.equal(await diffNames(realIndexPath), 'proof.txt\n');
+    assert.equal(await diffNames(newerCopy), '');
+    await assertRealIndexUnchanged();
+
+    let candidateChecks = 0;
+    let refChecks = 0;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        if (file === GIT && args[0] === 'commit-tree') {
+          await assertRealIndexUnchanged();
+          const { stdout } = await git(f.workspace, 'show', args[1] + ':proof.txt');
+          assert.equal(stdout, 'v2\n',
+            'the actual candidate tree must contain the unstaged edit');
+          candidateChecks++;
+        }
+        if (file === GIT && args[0] === 'update-ref') {
+          await assertRealIndexUnchanged();
+          const { stdout: oldHead } = await git(f.workspace, 'rev-parse', 'HEAD');
+          assert.equal(oldHead.trim(), f.head,
+            'the branch must remain unchanged before its fenced update');
+          const { stdout: candidateContent } = await git(
+            f.workspace, 'show', args[2] + ':proof.txt');
+          assert.equal(candidateContent, 'v2\n',
+            'the commit admitted to update-ref must contain the edit');
+          refChecks++;
+        }
+        return execFile(file, args, options);
+      },
+    });
+    const result = await publisher.commit({
+      operation_id: f.operationId,
+      expected_head_sha: f.head,
+      message: 'test: preserve racily clean index semantics',
+    });
+    assert.equal(result.code, 'APPLIED', JSON.stringify(result));
+    assert.equal(result.status, 'OK');
+    assert.equal(result.effect_state, 'APPLIED');
+    assert.equal(result.index_synced, true);
+    assert.equal(candidateChecks, 1);
+    assert.equal(refChecks, 1);
+    assert.notEqual(result.commit_head_sha, f.head);
+    const { stdout: committed } = await git(
+      f.workspace, 'show', result.commit_head_sha + ':proof.txt');
+    assert.equal(committed, 'v2\n');
+    const { stdout: staged } = await git(f.workspace, 'show', ':proof.txt');
+    assert.equal(staged, 'v2\n',
+      'post-commit synchronization must install the committed content');
+  } finally {
+    await f.cleanup();
+  }
 });
 
 test('private-index preparation refuses concurrent real-index mutation before ref update', async () => {

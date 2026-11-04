@@ -15,6 +15,8 @@ const VERSION = '0.3.0';
 const ID_PATTERN = '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$';
 const ID_RE = new RegExp(ID_PATTERN);
 const MAX_RESPONSE_BYTES = 65536;
+const MAX_RETAINED_BYTES = 8_388_608; // incumbent adapter's fixed result ceiling
+const MAX_PAGE_BYTES = 4096; // base64 plus duplicate MCP envelope fits the 16-KiB gateway budget
 const MAX_PACKET_BYTES = 32768;
 const MAX_CONTROLLERS = 512;
 // Internal exact-ID history, not provider/task admission: at most 2 MiB of
@@ -25,13 +27,46 @@ const MAX_ATTEMPT_IDENTITIES = 8192;
 const MAX_RETENTION_CANDIDATES = 4;
 // Capture and hash the actual adapter stdout on M2, before a process transport can
 // normalize text or paginate it. This is a fixed program; no caller code is used.
-const CAPTURE_PROGRAM = `import base64,hashlib,json,subprocess,sys,tempfile
+const CAPTURE_PROGRAM = `import base64,hashlib,json,re,subprocess,sys,tempfile
 with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
  p=subprocess.run(sys.argv[1:],stdout=out,stderr=err)
  out.seek(0); data=out.read(131073)
  if len(data)>131072:
   print(json.dumps({'capture_error':'RESULT_RESPONSE_TOO_LARGE'}));sys.exit(0)
- print(json.dumps({'exit_code':p.returncode,'stdout_base64':base64.b64encode(data).decode('ascii'),'stdout_bytes':len(data),'stdout_sha256':hashlib.sha256(data).hexdigest()},separators=(',',':')))
+ reply={'exit_code':p.returncode,'stdout_base64':base64.b64encode(data).decode('ascii'),'stdout_bytes':len(data),'stdout_sha256':hashlib.sha256(data).hexdigest()}
+ # Native read-only preview emits rc=75 and a policy refusal on stderr.
+ # Never include raw stderr or any worker/request/result stderr in MCP.
+ if p.returncode and len(sys.argv)>3 and sys.argv[3]=='preview' and not data:
+  err.seek(0); line=err.read(128)
+  match=re.fullmatch(rb'NONE reason=([a-z][a-z0-9_]{0,79})\\r?\\n?',line)
+  if match: reply['native_reason']=match.group(1).decode('ascii')
+  elif re.fullmatch(rb'NONE reason=pool (?:grok|glm|minimax|bailian|cursor|ocfree|go) has no eligible mode on requested host\\r?\\n?',line):
+    reply['native_reason']='no_eligible_host'
+ print(json.dumps(reply,separators=(',',':')))
+`;
+// Capture the *incumbent adapter's* bounded response into an ephemeral local file,
+// hash and UTF-8 validate every byte, and return only one small page. No direct
+// artifact-file access, alternate result store, or caller-supplied program/path.
+const PAGE_CAPTURE_PROGRAM = `import base64,codecs,hashlib,json,subprocess,sys,tempfile
+offset=int(sys.argv[1]); length=int(sys.argv[2])
+with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+ p=subprocess.run(sys.argv[3:],stdout=out,stderr=err)
+ if p.returncode:
+  print(json.dumps({'exit_code':p.returncode},separators=(',',':')));sys.exit(0)
+ out.seek(0); full=hashlib.sha256(); decode=codecs.getincrementaldecoder('utf-8')('strict'); count=0
+ try:
+  while True:
+   part=out.read(65536)
+   if not part: break
+   count+=len(part)
+   if count>8388608:
+    print(json.dumps({'capture_error':'RESULT_RESPONSE_TOO_LARGE'}));sys.exit(0)
+   full.update(part);decode.decode(part)
+  decode.decode(b'',final=True)
+ except UnicodeDecodeError:
+  print(json.dumps({'capture_error':'RESULT_NOT_UTF8'}));sys.exit(0)
+ out.seek(offset); page=out.read(length)
+ print(json.dumps({'exit_code':0,'response_bytes':count,'response_sha256':full.hexdigest(),'offset':offset,'page_bytes':len(page),'page_sha256':hashlib.sha256(page).hexdigest(),'page_base64':base64.b64encode(page).decode('ascii')},separators=(',',':')))
 `;
 const CLASSES = ['mechanical', 'fix_build', 'review', 'census', 'audit'];
 // Fixed evidence-basis codes prevent acceptance metadata from becoming a
@@ -41,10 +76,18 @@ const ACCEPT_VERIFICATION_CODES = Object.freeze([
   'manual_result_review', 'independent_review_evidence'
 ]);
 const COMPLEXITIES = ['C0_MECHANICAL', 'C1_ROUTINE_BOUNDED', 'C2_COMPLEX_BOUNDED', 'C3_FRONTIER_JUDGMENT'];
+const MANUAL_POOLS = ['grok', 'glm', 'minimax', 'bailian', 'cursor', 'ocfree', 'go', 'experiential'];
+// Experiential uncensored pool: the exact slug is mandatory (never
+// glm-5.3-flash-uncensored, auto or omitted) and the provider retains prompts
+// and responses, so every request needs an explicit caller opt-in first.
+const EXPERIENTIAL_POOL = 'experiential';
+const EXPERIENTIAL_MODEL = 'glm-5.3-uncensored';
 const DEFAULT_ADAPTER = resolve(homedir(), '.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/fabric_task.py');
 const idSchema = { type: 'string', pattern: ID_PATTERN, minLength: 1, maxLength: 128 };
 const identity = { run_id: idSchema, root_id: idSchema };
 const maxBytes = { type: 'integer', minimum: 1024, maximum: MAX_RESPONSE_BYTES, default: 8192 };
+const pageBytes = { type:'integer', minimum:1, maximum:MAX_PAGE_BYTES, default:MAX_PAGE_BYTES };
+const pageOffset = { type:'integer', minimum:0, maximum:MAX_RETAINED_BYTES, default:0 };
 function tool(name, description, properties, required, readOnly) {
   return Object.freeze({ name, description, inputSchema: { type:'object', properties, required, additionalProperties:false },
     annotations: { title:name.replaceAll('_',' '), readOnlyHint:readOnly, destructiveHint:false,
@@ -52,18 +95,24 @@ function tool(name, description, properties, required, readOnly) {
 }
 export const FABRIC_TOOLS = Object.freeze([
   tool('fabric_capabilities', 'Read adapter availability and the fixed tool boundary. This does not dispatch, prove provider admission, or identify a ChatGPT user.', {}, [], true),
-  tool('fabric_request', 'Submit a new bounded commission to the existing M2 Fabric adapter. The installed owner may use up to three immutable attempts after proven pre-task capacity rejection. Checks the exact origin run ID first. A returned controller PID does not prove worker START. Never replay an interrupted request or move an existing Executive operation here.', {
+  tool('fabric_request', 'Submit a new bounded commission to the existing M2 Fabric adapter. The installed owner may use up to three immutable attempts after proven pre-task capacity rejection. Checks the exact origin run ID first. A returned controller PID does not prove worker START. Native placement for complex C2 reviews may require a factual escalation_reason; preview refusals never authorize retry. Never replay an interrupted request or move an existing Executive operation here.', {
     ...identity, parent_id:idSchema, task_class:{type:'string',enum:CLASSES}, task_complexity:{type:'string',enum:COMPLEXITIES},
     max_turns:{type:'integer',minimum:1,maximum:400,description:'Optional per-request Claude turn ceiling. Only tightens the admitted wrapper limit; not a token, tool-call, dollar or acceptance budget.'},
-    work_packet:{type:'string',minLength:1,maxLength:16000}, escalation_reason:{type:'string',minLength:1,maxLength:1000},
+    work_packet:{type:'string',minLength:1,maxLength:16000,description:'In human-readable brief prose, abbreviate SHA-256 file hashes and git commit IDs to their first ~12 hex characters. Preserve complete values in explicit machine-verification fields, code, or commands requiring exact identity. Packets are forwarded unchanged; no content scanner or secret/key rejection is added.'}, escalation_reason:{type:'string',minLength:1,maxLength:1000},
     subject_pool:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$'},
-    pool:{type:'string',enum:['grok','glm','minimax','bailian','cursor','ocfree','go'],description:'Optional strict provider-pool pin; omitted means native AUTO. No cross-provider quota continuation.'},
-    model:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$',description:'Optional exact qualified model inside pool. Use auto to let the pinned pool choose its admitted model.'},
+    pool:{type:'string',enum:MANUAL_POOLS,description:'Optional strict provider-pool pin; omitted means native AUTO. No cross-provider quota continuation. experiential additionally requires the exact model glm-5.3-uncensored and retention_opt_in:true on every request.'},
+    model:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$',description:'Optional exact qualified model inside pool. Use auto to let the pinned pool choose its admitted model. pool experiential accepts only the exact glm-5.3-uncensored; auto and every other slug are refused before dispatch.'},
+    retention_opt_in:{type:'boolean',description:'Experiential uncensored retains prompts and responses, including after storage settings are disabled. Required true for every explicit experiential manual request.'},
+    sensitive_data_opt_in:{type:'boolean',description:'Explicit approval for submitting this request to an external prompt-retaining provider. Required true for experiential only; not passed to the provider.'},
+    code_exposure_opt_in:{type:'boolean',description:'Explicit permission for potential proprietary code exposure by the worker to the retaining provider. Required true for experiential, even when the immediate packet is public, and independently rechecked by the native owner.'},
   }, ['run_id','root_id','parent_id','task_class','task_complexity','work_packet'], false),
   tool('fabric_status', 'Read the requested commission and its actual successor through fabric_task.py. Earlier failed attempts remain visible. NOT_FOUND after a lost request is not proof of no effect or permission to retry. Root metadata is not authentication.', identity, ['run_id','root_id'], true),
   tool('fabric_wait', 'Use the incumbent adapter bounded wait for this run, at most ten seconds. Creates no watcher, retry loop, cancellation or background wake.', {...identity,timeout_seconds:{type:'integer',minimum:0,maximum:10,default:5}}, ['run_id','root_id'], true),
   tool('fabric_result', 'Retrieve the actual successor result only when available and the ledger root matches. Returns accept_run_id for exact reviewed-leaf acceptance. Returns a digest of the complete adapter response, not an artifact attestation. Does not accept the result.', {...identity,max_bytes:maxBytes}, ['run_id','root_id'], true),
-  tool('fabric_accept', 'Effectful acceptance of one fully reviewed worker result. Requires independently checked evidence and the exact response digest. This changes the existing ledger; never retry an uncertain acceptance.', {
+  tool('fabric_result_page', 'Read one bounded page of the observed successor result; returns accept_run_id for exact-leaf acceptance after strict root and size checks. Each page carries the SHA256 of the complete UTF-8 result. Pages must cover all bytes in order before oversized acceptance; no new worker, result store or acceptance.', {
+    ...identity, offset:pageOffset, max_bytes:pageBytes, expected_response_sha256:{type:'string',pattern:'^[0-9a-f]{64}$'},
+  }, ['run_id','root_id'], true),
+  tool('fabric_accept', 'Effectful acceptance of one fully reviewed worker result. Requires independently checked evidence and the exact response digest. Oversized results require complete contiguous page delivery for this exact leaf in the current backend generation and a fresh full digest check. This changes the existing ledger; never retry an uncertain acceptance.', {
     ...identity, by:{type:'string',enum:['deterministic','reviewer']}, expected_response_sha256:{type:'string',pattern:'^[0-9a-f]{64}$'},
     verification_summary:{type:'string',enum:ACCEPT_VERIFICATION_CODES,
       description:'One fixed evidence-basis code after actual verification. No prose or workflow instructions. Backend does not attest external checks.'}, max_bytes:maxBytes,
@@ -103,6 +152,24 @@ function validate(name, args) {
     // Refuse incompatible manual pools before reserving a run or controller.
     if (args.pool && args.max_turns!==undefined && !['glm','minimax'].includes(args.pool))
       fail('INVALID_ARGUMENT',{field:'max_turns'});
+    // Experiential uncensored retention gate, enforced before reserving a run
+    // or touching the native adapter: exact-model pin plus explicit per-request
+    // opt-in for the prompt+response-retaining provider, scoped to this pool.
+    if (args.pool===EXPERIENTIAL_POOL) {
+      if (args.model!==EXPERIENTIAL_MODEL) fail('INVALID_ARGUMENT',{field:'model'});
+      if (args.retention_opt_in!==true) fail('INVALID_ARGUMENT',{field:'retention_opt_in'});
+      if (args.sensitive_data_opt_in!==true) fail('INVALID_ARGUMENT',{field:'sensitive_data_opt_in'});
+      // Treat the worker's potential code access as proprietary by default:
+      // never let the caller assert public-data-only to bypass code consent.
+      if (args.code_exposure_opt_in!==true) fail('INVALID_ARGUMENT',{field:'code_exposure_opt_in'});
+      // The native experiential53 source contract currently admits bounded labor only.
+      // Avoid misleading positive previews for reviewer/audit classes it cannot run.
+      if (!['mechanical','fix_build'].includes(args.task_class))
+        fail('INVALID_ARGUMENT',{field:'task_class'});
+    } else {
+      for(const field of ['retention_opt_in','sensitive_data_opt_in','code_exposure_opt_in'])
+        if(args[field]!==undefined) fail('INVALID_ARGUMENT',{field});
+    }
   }
 }
 function response(value, isError=false) {
@@ -132,12 +199,14 @@ function completedOutput(text) {
   if (!match) return null;
   return {stdout:text.slice(start,finish),exit_code:Number(match[1])};
 }
-function decodeCapturedEnvelope(envelopeText) {
+function decodeCapturedEnvelope(envelopeText, allowPreviewReason=false) {
   // Validate ONE complete capture envelope produced by the fixed CAPTURE_PROGRAM
   // wrapper. The envelope carries the original child adapter exit code and the
   // exact verified stdout bytes (base64 + byte count + sha256 + canonical
-  // base64 round-trip + strict UTF-8). Returns null on any malformed,
-  // truncated, oversized or mismatched framing. capture_error is surfaced via
+  // base64 round-trip + strict UTF-8). A bounded native stderr reason is
+  // admitted only for explicit read-only preview with nonzero exit and empty stdout.
+  // Returns null on malformed, truncated, oversized or mismatched framing.
+  // capture_error is surfaced via
   // the sole fixed captureError variant; strict UTF-8 retains its existing
   // result diagnostic. No transport-selected error code is reflected.
   let envelope;
@@ -148,7 +217,11 @@ function decodeCapturedEnvelope(envelopeText) {
         || envelope.capture_error !== 'RESULT_RESPONSE_TOO_LARGE') return null;
     return { captureError: 'RESULT_RESPONSE_TOO_LARGE' };
   }
-  if (Object.keys(envelope).length !== 4
+  const hasReason=Object.hasOwn(envelope,'native_reason');
+  if (Object.keys(envelope).length !== (hasReason?5:4)
+      || (hasReason && (!allowPreviewReason || envelope.exit_code===0
+          || envelope.stdout_bytes!==0 || typeof envelope.native_reason!=='string'
+          || !/^[a-z][a-z0-9_]{0,79}$/.test(envelope.native_reason)))
       || !Number.isSafeInteger(envelope.exit_code)
       || envelope.exit_code < -255 || envelope.exit_code > 255
       || typeof envelope.stdout_base64 !== 'string'
@@ -162,7 +235,8 @@ function decodeCapturedEnvelope(envelopeText) {
   let stdoutText;
   try { stdoutText = new TextDecoder('utf-8', {fatal: true}).decode(bytes); } catch { return {decodeError: 'RESULT_NOT_UTF8'}; }
   return { exit_code: envelope.exit_code, stdout: stdoutText,
-           stdout_sha256: envelope.stdout_sha256, stdout_bytes: envelope.stdout_bytes };
+           stdout_sha256: envelope.stdout_sha256, stdout_bytes: envelope.stdout_bytes,
+           ...(hasReason?{native_reason:envelope.native_reason}:{}) };
 }
 function statusJSON(result, runId, follow=false) {
   if (result.exit_code!==0) fail('ADAPTER_OBSERVATION_UNAVAILABLE',{adapter_exit_code:result.exit_code});
@@ -182,12 +256,21 @@ function checkRoot(s, args, strict=false) {
   if (s.root_id && s.root_id!==args.root_id) fail('ROOT_MISMATCH');
   if (strict && s.root_id!==args.root_id) fail('ROOT_UNVERIFIED');
 }
-function resultReady(s,args) {
+function resultIdentityReady(s,args) {
+  if(s.continuation?.controller_return==='UNCONFIRMED') fail('CONTROLLER_RETURN_UNCONFIRMED',{effective_run_id:s.run_id});
   checkRoot(s,args,true);
   if(s.state==='EFFECT_UNKNOWN') fail('EFFECT_UNKNOWN');
   if(!s.result_available) fail('RESULT_UNAVAILABLE');
   if(!Number.isSafeInteger(s.result_bytes) || s.result_bytes<0) fail('RESULT_SIZE_UNVERIFIED');
+}
+function resultReady(s,args) {
+  resultIdentityReady(s,args);
   if(s.result_bytes>(args.max_bytes??8192)) fail('RESULT_TOO_LARGE',{result_bytes:s.result_bytes,max_bytes:args.max_bytes??8192});
+}
+function pageReady(s,args,offset) {
+  resultIdentityReady(s,args);
+  if(s.result_bytes>MAX_RETAINED_BYTES) fail('RESULT_EXCEEDS_ADAPTER_LIMIT',{result_bytes:s.result_bytes,max_bytes:MAX_RETAINED_BYTES});
+  if(offset>=s.result_bytes) fail('RESULT_OFFSET_OUT_OF_RANGE',{offset,result_bytes:s.result_bytes});
 }
 
 /**
@@ -257,6 +340,9 @@ export function createFabricFacade(engine, options={}) {
   const controllers=new Map();
   const attempted=new Set(); // exact generation-local replay fence, never delete
   const reservations=new Map(); // preflight + dispatched/UNKNOWN slots, <=512
+  // Bounded generation-local read coverage, keyed by the observed effective leaf.
+  // Stores no result bytes and grants no worker, retry, or acceptance authority.
+  const deliveredPrefixes=new Map();
   let retentionCursor=0;
   function loseControllerBinding(pid) {
     const prior=controllers.get(pid);
@@ -340,8 +426,9 @@ export function createFabricFacade(engine, options={}) {
     reservations.set(key,binding);
     return binding;
   }
-  function command(argv, packet, capture=false) {
-    const prefix=capture?[cfg.python,'-c',CAPTURE_PROGRAM,cfg.python,cfg.adapterPath]:[cfg.python,cfg.adapterPath];
+  function command(argv, packet, capture=false, page=null) {
+    const prefix=page?[cfg.python,'-c',PAGE_CAPTURE_PROGRAM,String(page.offset),String(page.max_bytes),cfg.python,cfg.adapterPath]:
+      capture?[cfg.python,'-c',CAPTURE_PROGRAM,cfg.python,cfg.adapterPath]:[cfg.python,cfg.adapterPath];
     let c=[...prefix,...argv].map(shellQuote).join(' ');
     if(packet!==undefined) {
       let marker; do{marker='MMX_FABRIC_PACKET_'+randomBytes(12).toString('hex');}while(packet.split('\n').includes(marker));
@@ -349,8 +436,8 @@ export function createFabricFacade(engine, options={}) {
     } else c+='\n';
     return `printf '%s\\n' 'MMX_FABRIC_BEGIN'\n${c}mmx_fabric_rc=$?\nprintf '\\nMMX_FABRIC_EXIT=%s\\n' "$mmx_fabric_rc"`;
   }
-  async function runShort(argv, timeoutMs=10000, capture=false) {
-    const raw=await engine.callTool({name:'start_process',arguments:{command:command(argv,undefined,capture),timeout_ms:timeoutMs}});
+  async function runShort(argv, timeoutMs=10000, capture=false, page=null) {
+    const raw=await engine.callTool({name:'start_process',arguments:{command:command(argv,undefined,capture,page),timeout_ms:timeoutMs}});
     let text=engineText(raw), parsed=completedOutput(text); const pid=processPid(text);
     // Every start_process is a new process, including short observations.
     // A reused native PID cannot retain an older root's output authority.
@@ -368,13 +455,15 @@ export function createFabricFacade(engine, options={}) {
   // capabilities/help). Reuses the fixed CAPTURE_PROGRAM and validates ONE
   // complete capture envelope. Outer wrapper success is required; the
   // returned exit_code is the ORIGINAL child adapter exit code and the
-  // stdout is the exact verified bytes (no reserialization, no stderr use).
+  // stdout is the exact verified bytes. Native preview-only, nonzero-exit
+  // stderr may supply one validated, low-entropy reason token; never raw stderr.
   async function runCapturedShort(argv, timeoutMs=10000) {
     const parsed=await runShort(argv,timeoutMs,true);
     if(parsed.exit_code!==0) fail('CAPTURE_INVALID');
-    const decoded=decodeCapturedEnvelope(parsed.stdout);
+    const decoded=decodeCapturedEnvelope(parsed.stdout,argv[0]==='preview');
     if(!decoded || decoded.captureError || decoded.decodeError) fail('CAPTURE_INVALID');
-    return {exit_code:decoded.exit_code,stdout:decoded.stdout};
+    return {exit_code:decoded.exit_code,stdout:decoded.stdout,
+      ...(decoded.native_reason?{native_reason:decoded.native_reason}:{})};
   }
   async function continuityAvailable(requestHelp=null) {
     if(!cfg.quotaFallback) return false;
@@ -388,7 +477,6 @@ export function createFabricFacade(engine, options={}) {
     checkRoot(s,args);observeTerminal(s,args);return s;
   }
   async function retained(args,s) {
-    if(s.continuation?.controller_return==='UNCONFIRMED') fail('CONTROLLER_RETURN_UNCONFIRMED',{effective_run_id:s.run_id});
     resultReady(s,args);
     const r=await runShort(['result',s.run_id,'--max-bytes',String(args.max_bytes??8192)],10000,true);
     if(r.exit_code!==0) fail('RESULT_UNAVAILABLE',{adapter_exit_code:r.exit_code});
@@ -398,6 +486,50 @@ export function createFabricFacade(engine, options={}) {
     if(decoded.decodeError) fail('RESULT_NOT_UTF8');
     if(decoded.exit_code!==0) fail('RESULT_UNAVAILABLE',{adapter_exit_code:decoded.exit_code});
     return {adapter_response:decoded.stdout,response_sha256:decoded.stdout_sha256,response_bytes:decoded.stdout_bytes};
+  }
+  async function retainedPage(args,s,offset,length) {
+    pageReady(s,args,offset);
+    const r=await runShort(['result',s.run_id,'--max-bytes',String(MAX_RETAINED_BYTES)],10000,false,{offset,max_bytes:length});
+    if(r.exit_code!==0) fail('RESULT_UNAVAILABLE',{adapter_exit_code:r.exit_code});
+    let captured;try{captured=JSON.parse(r.stdout);}catch{fail('RESULT_TRANSFER_INVALID');}
+    if(!captured || typeof captured!=='object' || Array.isArray(captured)) fail('RESULT_TRANSFER_INVALID');
+    if(Object.hasOwn(captured,'capture_error')) {
+      if(Object.keys(captured).length===1 && ['RESULT_RESPONSE_TOO_LARGE','RESULT_NOT_UTF8'].includes(captured.capture_error)) fail(captured.capture_error);
+      fail('RESULT_TRANSFER_INVALID');
+    }
+    if(!Number.isSafeInteger(captured.exit_code) || captured.exit_code < -255 || captured.exit_code > 255) fail('RESULT_TRANSFER_INVALID');
+    if(captured.exit_code!==0) {
+      if(Object.keys(captured).length!==1) fail('RESULT_TRANSFER_INVALID');
+      fail('RESULT_UNAVAILABLE',{adapter_exit_code:captured.exit_code});
+    }
+    if(Object.keys(captured).length!==7 || !Number.isSafeInteger(captured.response_bytes) || captured.response_bytes!==s.result_bytes ||
+       captured.offset!==offset || !Number.isSafeInteger(captured.page_bytes) ||
+       captured.page_bytes!==Math.min(length,s.result_bytes-offset) ||
+       typeof captured.response_sha256!=='string' || !/^[0-9a-f]{64}$/.test(captured.response_sha256) ||
+       typeof captured.page_sha256!=='string' || !/^[0-9a-f]{64}$/.test(captured.page_sha256) ||
+       typeof captured.page_base64!=='string' || captured.page_base64.length > Math.ceil(length/3)*4 ||
+       !/^[A-Za-z0-9+/]*={0,2}$/.test(captured.page_base64))
+      fail('RESULT_TRANSFER_INVALID');
+    const bytes=Buffer.from(captured.page_base64,'base64');
+    if(bytes.length!==captured.page_bytes || hash(bytes)!==captured.page_sha256 ||
+       bytes.toString('base64')!==captured.page_base64) fail('RESULT_TRANSFER_INVALID');
+    if(args.expected_response_sha256 && captured.response_sha256!==args.expected_response_sha256)
+      fail('RESULT_CHANGED',{current_response_sha256:captured.response_sha256});
+    return {response_bytes:captured.response_bytes,response_sha256:captured.response_sha256,
+      offset,page_bytes:captured.page_bytes,page_sha256:captured.page_sha256,
+      page_base64:captured.page_base64,next_offset:offset+captured.page_bytes};
+  }
+  function recordPage(args,s,page) {
+    let witness=deliveredPrefixes.get(s.run_id);
+    if(!witness || witness.root_id!==args.root_id ||
+       witness.response_bytes!==page.response_bytes || witness.response_sha256!==page.response_sha256) {
+      if(!witness && deliveredPrefixes.size>=MAX_CONTROLLERS) fail('DELIVERY_TRACKING_CAPACITY');
+      witness={root_id:args.root_id,response_bytes:page.response_bytes,
+        response_sha256:page.response_sha256,contiguous_bytes:0};
+      deliveredPrefixes.set(s.run_id,witness);
+    }
+    if(page.offset===witness.contiguous_bytes) witness.contiguous_bytes+=page.page_bytes;
+    return witness.contiguous_bytes;
   }
   return { async call(name,args={}) {
     let effectStarted=false;
@@ -439,6 +571,15 @@ export function createFabricFacade(engine, options={}) {
         if(args.pool) {
           requestHelp ??= await runCapturedShort(['request','--help']);
           if(requestHelp.exit_code!==0 || !requestHelp.stdout.includes('--strict-manual-pin')) fail('MANUAL_ROUTE_UNAVAILABLE');
+          // The native request entrypoint must independently own and attest the
+          // retention, sensitive-disclosure, and conservative code-exposure gates.
+          // Old adapters never receive this request, even if preview claims a route.
+          if(args.pool===EXPERIENTIAL_POOL && ![
+            '--experiential-retention-acknowledged',
+            '--experiential-sensitive-data-opt-in',
+            '--experiential-proprietary-code',
+            '--experiential-code-exposure-opt-in',
+          ].every(flag=>requestHelp.stdout.includes(flag))) fail('MANUAL_ROUTE_UNAVAILABLE');
         }
         if(cfg.quotaFallback && !args.pool && !await continuityAvailable(requestHelp)) fail('ADAPTER_CONTINUITY_UNAVAILABLE');
         const s=await status(args,false);
@@ -454,9 +595,23 @@ export function createFabricFacade(engine, options={}) {
           let route;
           try {
             const preview=await runCapturedShort(previewArgs);
-            if(preview.exit_code!==0) fail('MANUAL_ROUTE_UNAVAILABLE');
+            if(preview.exit_code!==0) {
+              // Keep native policy refusal distinct from unavailable/invalid
+              // transport. Only a closed, low-entropy reason token is exposed.
+              // This is diagnosis, never permission to replay the same run.
+              const reason=preview.native_reason ?? /^NONE reason=([a-z][a-z0-9_]{0,79})\r?\n?$/.exec(preview.stdout)?.[1];
+              if(reason) fail('MANUAL_ROUTE_PREFLIGHT_REFUSED',{
+                native_reason:reason,
+                ...(reason==='bounded_complexity_requires_escalation'
+                  ?{required_field:'escalation_reason'}:{})
+              });
+              fail('MANUAL_ROUTE_UNAVAILABLE');
+            }
             route=JSON.parse(preview.stdout);
-          } catch(error) { fail('MANUAL_ROUTE_UNAVAILABLE'); }
+          } catch(error) {
+            if(error instanceof Refusal && error.code==='MANUAL_ROUTE_PREFLIGHT_REFUSED') throw error;
+            fail('MANUAL_ROUTE_UNAVAILABLE');
+          }
           if(route?.state!=='PREVIEW_ONLY' || route.reserved!==false
             || route.strict_pin_enforced_at_request!==true
             || route.selection_rechecked_at_request!==true
@@ -465,10 +620,22 @@ export function createFabricFacade(engine, options={}) {
             || (args.max_turns!==undefined && !['glm','minimax'].includes(route.mode))
             || (args.model && args.model.toLowerCase()!=='auto' && route.model.toLowerCase()!==args.model.toLowerCase()))
             fail('MANUAL_ROUTE_UNAVAILABLE');
+          // The experiential slug is checked exactly, not case-insensitively:
+          // the native recheck must witness the identical uncensored model.
+          if(args.pool===EXPERIENTIAL_POOL && (
+            route.model!==EXPERIENTIAL_MODEL || route.mode!==EXPERIENTIAL_POOL
+            || typeof route.host!=='string' || !/^[A-Za-z0-9_.:-]+$/.test(route.host)
+          )) fail('MANUAL_ROUTE_UNAVAILABLE');
         }
         const argv=['request','--id',args.run_id,'--class',args.task_class,'--task-complexity',args.task_complexity,'--cwd',cfg.workerCwd,'--root',args.root_id,'--parent',args.parent_id,'--stdin'];
         if(cfg.quotaFallback && !args.pool) argv.push('--quota-fallback');
         if(args.pool) argv.push('--pool',args.pool,'--strict-manual-pin');
+        if(args.pool===EXPERIENTIAL_POOL) argv.push(
+          '--experiential-retention-acknowledged',
+          '--experiential-sensitive-data-opt-in',
+          '--experiential-proprietary-code',
+          '--experiential-code-exposure-opt-in',
+        );
         if(args.model && args.model.toLowerCase()!=='auto') argv.push('--model',args.model);
         if(args.max_turns!==undefined) argv.push('--max-turns',String(args.max_turns));
         if(args.escalation_reason) argv.push('--escalation-reason',args.escalation_reason);
@@ -491,7 +658,10 @@ export function createFabricFacade(engine, options={}) {
         return response({action:name,run_id:args.run_id,root_id:args.root_id,parent_id:args.parent_id,controller_pid:pid,
           delivery:'CONTROLLER_CREATED',worker_started:null,worker_start_proven:false,
           ...(args.max_turns!==undefined?{requested_max_turns:args.max_turns}:{}),
-          ...(args.pool?{requested_pool:args.pool,requested_model:args.model??'auto',strict_manual_pin:true}:{}),
+          ...(args.pool?{requested_pool:args.pool,requested_model:args.model??'auto',strict_manual_pin:true,
+            ...(args.pool===EXPERIENTIAL_POOL?{
+              retention_opt_in:true,sensitive_data_opt_in:true,code_exposure_opt_in:true,
+            }:{})}:{}),
           adapter_exit_code:settled?.exit_code??null,execution_absence_proven:false,
           next_observation:'fabric_status with the same run and root; fabric_controller_output with this PID when needed'});
       }
@@ -505,7 +675,25 @@ export function createFabricFacade(engine, options={}) {
       }
       if(name==='fabric_accept' && s.accepted===true) fail('ALREADY_ACCEPTED');
       if(name==='fabric_accept' && s.run_id!==args.run_id) fail('ACCEPT_EXPLICIT_SUCCESSOR_REQUIRED',{effective_run_id:s.run_id});
-      const data=await retained(args,s);
+      if(name==='fabric_result_page') {
+        const page=await retainedPage(args,s,args.offset??0,args.max_bytes??MAX_PAGE_BYTES);
+        const contiguous_bytes=recordPage(args,s,page);
+        return response({action:name,run_id:args.run_id,effective_run_id:s.run_id,accept_run_id:s.run_id,root_id:args.root_id,...page,
+          delivered_prefix_bytes:contiguous_bytes,full_result_delivered:contiguous_bytes===page.response_bytes,
+          accepted:s.accepted===true,digest_scope:'exact complete adapter CLI response; not artifact attestation'});
+      }
+      let data;
+      if(name==='fabric_accept' && s.result_bytes>MAX_RESPONSE_BYTES) {
+        pageReady(s,args,0);
+        const witness=deliveredPrefixes.get(s.run_id);
+        if(!witness || witness.root_id!==args.root_id || witness.response_bytes!==s.result_bytes ||
+           witness.contiguous_bytes!==s.result_bytes) fail('RESULT_NOT_FULLY_DELIVERED');
+        const check=await retainedPage(args,s,0,1);
+        if(witness.response_sha256!==check.response_sha256 ||
+           args.expected_response_sha256!==check.response_sha256)
+          fail('RESULT_CHANGED',{current_response_sha256:check.response_sha256});
+        data={response_sha256:check.response_sha256};
+      } else data=await retained(args,s);
       if(name==='fabric_result') return response({action:name,run_id:args.run_id,effective_run_id:s.run_id,accept_run_id:s.run_id,root_id:args.root_id,...data,accepted:s.accepted===true,
         digest_scope:'exact complete adapter CLI response; not a cryptographic artifact attestation'});
       if(data.response_sha256!==args.expected_response_sha256) fail('RESULT_CHANGED',{current_response_sha256:data.response_sha256});

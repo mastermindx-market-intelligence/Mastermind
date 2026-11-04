@@ -200,6 +200,7 @@ def test_installer_refuses_partial_dialogue_bridge_release_schema(
 
 SAFE_OPTIONAL_DEFAULTS = {
     "ceo_submit_armed": False,
+    "coo_foreground_only": False,
     "exact_worker_claim_target": {"mode": "disabled"},
     "terminal_return_armed": False,
     "terminal_return_socket_path": "/var/db/mastermind-agent-relay/socket/agent-relay.sock",

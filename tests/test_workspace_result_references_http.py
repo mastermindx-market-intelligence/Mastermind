@@ -371,7 +371,23 @@ def test_public_edge_allowlist_and_caddy_template_carry_the_exact_path():
     from ops.executive_os.os_public_edge import GET_ROUTES, POST_ROUTES
 
     assert GET_ROUTES.count(ROUTE) == 1
-    assert GET_ROUTES.index(ROUTE) == GET_ROUTES.index("/workspace/result/current") + 1
+    # The composed profile retains the legacy ordering, then appends the
+    # reference reader, Control Room reads and Fabric reads in that order.
+    assert GET_ROUTES == (
+        "/os/", "/os/auth/callback", "/workspace/programs/current",
+        "/workspace/work/current", "/workspace/mission/current",
+        "/workspace/mission/v3/current", "/workspace/result/current",
+        "/workspace/window/current", "/workspace/plan/current",
+        "/workspace/operator/activity/current", ROUTE,
+        "/workspace/control-room/state/current",
+        "/workspace/control-room/discover/current",
+        "/workspace/mission/v4/current",
+        "/workspace/fabric/catalog/current", "/workspace/fabric/status/current",
+        "/workspace/project-plan/current", "/workspace/project-journal/current",
+        "/workspace/autonomy/current", "/workspace/project-session/current",
+        "/workspace/resources/capacity/current", "/workspace/project-direction/current",
+        "/workspace/project-admission/current", "/workspace/project-admission/operation",
+    )
     assert not any("result-references" in route for route in POST_ROUTES)
     names = ["index.html", "assets/index-a.css", "assets/index-b.js"]
     from integrations.mastermind_executive_app.os_assets import os_asset_mimes

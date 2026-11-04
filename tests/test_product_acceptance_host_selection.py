@@ -38,8 +38,11 @@ def configured(tmp_path, monkeypatch, selected):
         key: {"enabled": False, "binding": None} for key in ("web", "mac")}}
     monkeypatch.setattr(cli, "_attest_app_boot_runtime", lambda p: p)
     monkeypatch.setattr(lifecycle_mod, "_TRUSTED_SOCKET_PARENT_UID", os.geteuid())
-    fake_sockets = {}
-    listener_factory = fabric._workspace_aware_listener(raw)
+    room_listener, room_path = spawn_workspace_room_listener(monkeypatch)
+    raw["workspace_control_room"]["socket_path"] = room_path
+    fake_sockets = {"WorkspaceControlRoom": room_listener}
+    listener_factory = fabric._workspace_aware_listener(raw,
+        workspace_listener=room_listener, workspace_socket_path=room_path)
 
     def tracked_factory(name):
         listener = listener_factory(name)
@@ -62,7 +65,7 @@ def test_actual_host_selects_review_basis_on_the_same_runtime(tmp_path, monkeypa
         if mixed:
             options["fabric_worker_binding_source"] = cli._staged_fabric_binding_source(
                 {**raw, **fabric.staged(tmp_path, raw)})
-        service, supervisor, _ = fabric.compose(tmp_path, monkeypatch, raw, **options)
+        service, supervisor, _ = fabric.compose(tmp_path, monkeypatch, raw, workspace_listener=fake_sockets["WorkspaceControlRoom"], workspace_socket_path=raw["workspace_control_room"]["socket_path"], **options)
         owners = supervisor.owners.values() if type(supervisor) is MixedExecutionOwnerSupervisor else [supervisor]
         for worker_owner in owners:
             review = worker_owner._product_acceptance_review_owner
@@ -97,7 +100,7 @@ def test_selected_host_retains_original_intent_in_actual_review_schema(tmp_path,
         # reads remain the existing deterministic Agent OS fixture, not a live CLI.
         with monkeypatch.context() as scoped:
             scoped.setattr(fabric.Runtime, "at", lambda path: runtime)
-            _, supervisor, _ = fabric.compose(host_root, scoped, raw, **options)
+            _, supervisor, _ = fabric.compose(host_root, scoped, raw, workspace_listener=fake_sockets["WorkspaceControlRoom"], workspace_socket_path=raw["workspace_control_room"]["socket_path"], **options)
         owner = supervisor._product_acceptance_review_owner
         selected = owner.select_and_retain(job=job, attempt=attempt, commission=commission)
         assert read_retained_product_review_input(runtime, job=job, attempt=attempt) == selected
@@ -151,7 +154,7 @@ def test_selected_host_refuses_incomplete_principal_binding(tmp_path, monkeypatc
         else:
             options["coo_source"] = object()
         with pytest.raises(cli.ServiceError):
-            fabric.compose(tmp_path, monkeypatch, raw, **options)
+            fabric.compose(tmp_path, monkeypatch, raw, workspace_listener=fake_sockets["WorkspaceControlRoom"], workspace_socket_path=raw["workspace_control_room"]["socket_path"], **options)
     finally:
         for listener in fake_sockets.values():
             listener.close()
@@ -176,7 +179,7 @@ def test_selected_r2_host_preserves_ordinary_review_without_declared_acceptance(
             lambda *a, **kw: pytest.fail("ordinary review must not acquire an acceptance basis"))
         with monkeypatch.context() as scoped:
             scoped.setattr(fabric.Runtime, "at", lambda path: runtime)
-            _, supervisor, _ = fabric.compose(host_root, scoped, raw, **options)
+            _, supervisor, _ = fabric.compose(host_root, scoped, raw, workspace_listener=fake_sockets["WorkspaceControlRoom"], workspace_socket_path=raw["workspace_control_room"]["socket_path"], **options)
         assert supervisor._product_acceptance_review_owner.select_and_retain(
             job=job, attempt=attempt, commission=None) is None
         assert runtime.events.list_events(aggregate_type=AGGREGATE,

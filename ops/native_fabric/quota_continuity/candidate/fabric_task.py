@@ -114,22 +114,24 @@ def _bounded_regular(path: Path, limit: int) -> bytes:
     return data
 
 
-def _paths(run_id: str) -> tuple[Path, Path]:
+def _paths(run_id: str, *, owner_ext: Path | None = None) -> tuple[Path, Path]:
     rid = validate_run_id(run_id)
+    here = HERE if owner_ext is None else owner_ext
     return (
-        HERE / "state" / "remote_sub" / f"{rid}.log",
-        HERE / "lanes" / f"{rid}.remote.stdout",
+        here / "state" / "remote_sub" / f"{rid}.log",
+        here / "lanes" / f"{rid}.remote.stdout",
     )
 
 
 
 
-def _result_snapshot(rid: str, limit: int, original_log: bytes | None = None) -> bytes:
+def _result_snapshot(rid: str, limit: int, original_log: bytes | None = None,
+                     *, owner_ext: Path | None = None) -> bytes:
     """Read one coherent result observation under the current run's protocol."""
     from remote_sub_helpers import read_macro_result
-    log_path, result_path = _paths(rid)
+    log_path, result_path = _paths(rid, owner_ext=owner_ext)
     log = _bounded_regular(log_path, MAX_LOG_BYTES) if original_log is None else original_log
-    verified = read_macro_result(HERE, log_path, rid, limit, log)
+    verified = read_macro_result(HERE if owner_ext is None else owner_ext, log_path, rid, limit, log)
     if verified is not None:
         return verified
     # Intact legacy logs keep their bounded result reads.  An orphan or a
@@ -147,7 +149,8 @@ def _acceptance_unknown(reason: str) -> dict[str, Any]:
             "acceptance_reason": reason, "root_id": None, "parent_run_id": None}
 
 
-def _active_lineage_projection(rid: str, original_log: bytes) -> dict[str, Any]:
+def _active_lineage_projection(rid: str, original_log: bytes,
+                               *, owner_ext: Path | None = None) -> dict[str, Any]:
     """Read existing artifact PRE_LAUNCH correlation, never worker/auth proof.
 
     The original controller validates the artifact packet and acquire response
@@ -158,7 +161,7 @@ def _active_lineage_projection(rid: str, original_log: bytes) -> dict[str, Any]:
     unknown = {"controller_lineage": {"state": "UNVERIFIED"}}
     try:
         import artifact_delivery as delivery
-        log_path, _ = _paths(rid)
+        log_path, _ = _paths(rid, owner_ext=owner_ext)
         initial = log_path.lstat()
         def identity(info):
             return (info.st_dev, info.st_ino, info.st_uid, info.st_mode,
@@ -255,7 +258,9 @@ def _active_lineage_projection(rid: str, original_log: bytes) -> dict[str, Any]:
         return unknown
 
 
-def _acceptance_projection(rid: str, status: dict[str, Any], original_log: bytes) -> dict[str, Any]:
+def _acceptance_projection(rid: str, status: dict[str, Any], original_log: bytes,
+                           *, owner_ext: Path | None = None) -> dict[str, Any]:
+    ledger = {} if owner_ext is None else {"ledger_path": str(owner_ext.parent / "orch/fabric/ledger.jsonl")}
     # Retain all legacy execution fields. This additive observation neither
     # accepts a result nor creates a native RuntimeBinding or retry right.
     if (status["state"] != "TERMINAL" or status["rc"] != 0
@@ -266,17 +271,17 @@ def _acceptance_projection(rid: str, status: dict[str, Any], original_log: bytes
         if (status["state"] == "TERMINAL" and type(status["rc"]) is int
                 and status["rc"] != 0 and status["signal"] != "effect_unknown"):
             try:
-                log_path, _ = _paths(rid)
+                log_path, _ = _paths(rid, owner_ext=owner_ext)
                 if _bounded_regular(log_path, MAX_LOG_BYTES) != original_log:
                     return projection
                 identity = pool_ledger.read_execution_identity(
-                    rid, expected_rc=status["rc"], expected_signal=status["signal"])
+                    rid, expected_rc=status["rc"], expected_signal=status["signal"], **ledger)
                 if _bounded_regular(log_path, MAX_LOG_BYTES) == original_log:
                     projection.update(identity)
             except (AttributeError, OSError, FabricTaskError):
                 pass
         return projection
-    log_path, result_path = _paths(rid)
+    log_path, result_path = _paths(rid, owner_ext=owner_ext)
     # Transport retains group-writable result modes (e.g. 0664). Preserve that
     # existing format; require local ownership, no world write, and stable reads.
     # Ledger acceptance does not attest result bytes or authenticate the parent.
@@ -299,7 +304,7 @@ def _acceptance_projection(rid: str, status: dict[str, Any], original_log: bytes
             return _acceptance_unknown("RESULT_NOT_VERIFIABLE")
         if log[0] != original_log:
             return _acceptance_unknown("ARTIFACT_CHANGED")
-        projection = pool_ledger.read_acceptance(rid, expected_rc=status["rc"], expected_signal=status["signal"])
+        projection = pool_ledger.read_acceptance(rid, expected_rc=status["rc"], expected_signal=status["signal"], **ledger)
         if (artifact(result_path, MAX_RESULT_BYTES) != result
                 or artifact(log_path, MAX_LOG_BYTES) != log):
             return _acceptance_unknown("ARTIFACT_CHANGED")
@@ -365,9 +370,16 @@ def _controller_observation(text: str, rid: str) -> dict[str, Any] | None:
     }
 
 
-def inspect_run(run_id: str) -> dict[str, Any]:
+def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]:
+    # The original paid owner binds immutable code to its fixed existing data
+    # namespace. This read-only parameter grants no caller authority, starts
+    # no process, and never changes module globals shared by concurrent reads.
+    here = HERE if owner_ext is None else Path(owner_ext)
+    if not here.is_absolute() or ".." in here.parts:
+        raise ValueError("invalid Fabric owner namespace")
+    owner = {} if owner_ext is None else {"owner_ext": here}
     rid = validate_run_id(run_id)
-    log_path, result_path = _paths(rid)
+    log_path, result_path = _paths(rid, **owner)
     missing_log = False
     metadata_error = None
     try:
@@ -377,7 +389,7 @@ def inspect_run(run_id: str) -> dict[str, Any]:
     except OSError as exc:
         metadata_error = exc
     if missing_log:
-        retained = HERE / "state" / "remote_sub" / f"{rid}.request.json"
+        retained = here / "state" / "remote_sub" / f"{rid}.request.json"
         if retained.exists() or retained.is_symlink():
             try:
                 row = json.loads(_bounded_regular(retained, 32768))
@@ -437,7 +449,7 @@ def inspect_run(run_id: str) -> dict[str, Any]:
             "result_bytes": None,
         }
 
-    prelease = HERE / "state" / "remote_sub" / f"{rid}.prelease-quota.json"
+    prelease = here / "state" / "remote_sub" / f"{rid}.prelease-quota.json"
     if prelease.exists() or prelease.is_symlink():
         import quota_circuit
         # Preserve the incumbent sticky uncertainty rule before any new
@@ -459,7 +471,7 @@ def inspect_run(run_id: str) -> dict[str, Any]:
         try:
             request = json.loads(_bounded_regular(prelease.with_name(rid + ".request.json"), 32768))
             root, parent = request.get("root_id"), request.get("parent_run_id")
-            quota_circuit.validate_prelease_refusal(HERE, rid, root, parent,
+            quota_circuit.validate_prelease_refusal(here, rid, root, parent,
                                                    packet_limit=MAX_RESULT_BYTES)
             return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
                 **_acceptance_unknown("EXECUTION_NOT_ELIGIBLE"),
@@ -548,13 +560,13 @@ def inspect_run(run_id: str) -> dict[str, Any]:
     if state == "SETTLING" and rid in completion_reconcile.KNOWN_RUNS:
         verified = completion_reconcile.status_from_receipt(rid)
         if verified is not None:
-            verified.update(_acceptance_projection(rid, verified, original_log))
+            verified.update(_acceptance_projection(rid, verified, original_log, **owner))
             return verified
 
     result_available = False
     result_bytes = None
     try:
-        snapshot = _result_snapshot(rid, MAX_RESULT_BYTES, original_log)
+        snapshot = _result_snapshot(rid, MAX_RESULT_BYTES, original_log, **owner)
         result_available = True
         result_bytes = len(snapshot)
     except (OSError, ValueError, TypeError, KeyError, FabricTaskError):
@@ -573,11 +585,11 @@ def inspect_run(run_id: str) -> dict[str, Any]:
         observation = _controller_observation(text, rid)
         if observation is not None:
             status["controller_observation"] = observation
-    status.update(_acceptance_projection(rid, status, original_log))
+    status.update(_acceptance_projection(rid, status, original_log, **owner))
     if state == "ACTIVE_OR_WAITING":
-        status.update(_active_lineage_projection(rid, original_log))
+        status.update(_active_lineage_projection(rid, original_log, **owner))
     for suffix in (".session-retained.json", ".session-created.json"):
-        path = HERE / "state" / "remote_sub" / (rid + suffix)
+        path = here / "state" / "remote_sub" / (rid + suffix)
         if suffix == ".session-created.json" and rc == 0:
             continue
         try:
@@ -790,14 +802,14 @@ def request(
     if request_capacity_preflight is True:
         env["POOL_CAPACITY_PREFLIGHT"]="1"
     if request_remaining_seconds is not None:
-        if type(request_remaining_seconds) is not int or not 1 <= request_remaining_seconds <= 7200:
+        if type(request_remaining_seconds) is not int or not 1 <= request_remaining_seconds <= 14400:
             raise FabricTaskError("REQUEST_REMAINING_TIME_INVALID")
         env["POOL_COMMISSION_REMAINING_SECONDS"] = str(request_remaining_seconds)
     if request_deadline_ns is not None:
         from commission_deadline import (DEADLINE_ENV, CommissionDeadlineExpired,
                                          require_remaining, validate_deadline_ns)
         request_deadline_ns = validate_deadline_ns(request_deadline_ns)
-        if request_deadline_ns > time.monotonic_ns() + 7200 * 1_000_000_000:
+        if request_deadline_ns > time.monotonic_ns() + 14400 * 1_000_000_000:
             raise FabricTaskError("REQUEST_DEADLINE_INVALID")
         env[DEADLINE_ENV] = str(request_deadline_ns)
     def check_deadline():
@@ -840,6 +852,7 @@ def request(
         **({"max_turns": max_turns} if max_turns is not None else {}),
     })
     packet, stdin_bytes = retained_packet, None
+    selection_key, selection_facts, selection_line = object(), None, None
     try:
         check_deadline()
         # An explicit NEW worktree request is not permission to adopt an existing
@@ -880,7 +893,8 @@ def request(
                 requested_model=requested_model, route_key=rid,
                 **({"required_modes": sorted(artifact_production.MODES),
                     "required_platforms": ["linux"]} if artifact_names else
-                   {"required_platforms": ["linux"]} if (new_macro_worktree is not None or cpu_scope_percent is not None) else {}),
+                   {"required_modes": sorted({"glm", "glm-codex", "minimax", "qwen"}),
+                    "required_platforms": ["linux"]} if (new_macro_worktree is not None or cpu_scope_percent is not None) else {}),
             )
             if max_turns is not None:
                 # Only these admitted remote wrappers enforce the existing Claude
@@ -888,9 +902,20 @@ def request(
                 route_options["required_modes"] = sorted(
                     set(route_options.get("required_modes", ("glm", "minimax")))
                     & {"glm", "minimax"})
-            route = _parse_route(
-                _route_with_deadline(task_class, route_options, request_deadline_ns, env, state_dir, rid)
-                if request_deadline_ns is not None else pick.format_pick(task_class, **route_options))
+            if request_deadline_ns is not None:
+                selection_line = _route_with_deadline(
+                    task_class, route_options, request_deadline_ns, env, state_dir, rid)
+            else:
+                selection_request_sha = None
+                try:
+                    selection_request_sha = provider_outcome.digest(
+                        provider_outcome.regular_bytes(request_file, 32768))
+                except Exception:
+                    pass  # Optional diagnostics cannot prevent the original pick.
+                selection_line, selection_facts = pick.observed_format_pick(
+                    task_class, observation_key=selection_key,
+                    request_sha256=selection_request_sha, **route_options)
+            route = _parse_route(selection_line)
         if strict_manual_pin:
             _enforce_manual_route(route, pool, requested_model)
         check_deadline()
@@ -1037,11 +1062,19 @@ def request(
         launch = state_dir / f"{rid}.request-launch.json"
         if not any(p.exists() or p.is_symlink() for p in (*_paths(rid), launch)):
             try:
+                refused_request_sha = provider_outcome.digest(
+                    provider_outcome.regular_bytes(request_file, 32768))
+                try:
+                    selection_diagnostics = pick.consume_selection_refusal(
+                        selection_facts, selection_key, refused_request_sha, selection_line)
+                except Exception:
+                    selection_diagnostics = None
                 provider_outcome.write_new(state_dir / f"{rid}.request-refused.json", {
                     "schema": "mastermind.fabric_request_refusal.v1", "run_id": rid,
                     "root_id": observed_root, "parent_run_id": parent_run_id,
-                    "request_sha256": provider_outcome.digest(
-                        provider_outcome.regular_bytes(request_file, 32768)),
+                    "request_sha256": refused_request_sha,
+                    **({"selection_diagnostics": selection_diagnostics}
+                       if selection_diagnostics is not None else {}),
                     "reason": "prelaunch_" + type(exc).__name__,
                     **({"eligible_at": exc.eligible_at} if hasattr(exc, "eligible_at") else {}),
                     "launch_attempted": False, "created_at": time.time(),
@@ -1351,6 +1384,11 @@ def main(argv: list[str] | None = None) -> int:
         for name in (("binding", "destination") if command == "collect" else ("collection", "receipt-sha256")):
             collect_parser.add_argument("--"+name, required=True)
 
+    p_diag = sub.add_parser("provider-diagnostics", help="Explicit original-owner safe diagnostic projection; no raw capture or acceptance")
+    p_diag.add_argument("run_id")
+    for name in ("root", "parent", "binding", "destination"):
+        p_diag.add_argument("--"+name, required=True)
+
     p_status = sub.add_parser("status")
     p_status.add_argument("run_id")
     p_status.add_argument("--follow", action="store_true")
@@ -1446,6 +1484,15 @@ def main(argv: list[str] | None = None) -> int:
     p_completed.add_argument("--apply", action="store_true")
 
     args = parser.parse_args(argv)
+    if args.cmd == "provider-diagnostics":
+        import original_delivery_collector as collector
+        try:
+            result=collector.collect_provider_diagnostics(args.binding,run_id=args.run_id,root=args.root,parent=args.parent,destination=args.destination)
+            print(json.dumps(result,sort_keys=True))
+            return 0
+        except Exception:
+            print('{"state":"UNAVAILABLE","reason":"diagnostic_unavailable"}')
+            return 76
     if args.cmd in {"collect", "collection-result"}:
         command = ["/bin/bash", str(HERE/"remote_sub.sh"), "--collect-existing", args.run_id,
                    "--root", args.root, "--parent", args.parent]
