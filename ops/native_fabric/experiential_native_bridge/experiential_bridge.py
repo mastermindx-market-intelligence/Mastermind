@@ -235,7 +235,7 @@ def _syntax_gate(
         _refuse("EXPERIENTIAL_STRICT_PIN_REQUIRED",
                 "the sole admitted shape is --pool experiential "
                 "--model glm-5.3-uncensored --strict-manual-pin with all four consents")
-    if type(model) is not str or model.strip().casefold() != MODEL:
+    if type(model) is not str or model != MODEL:
         _refuse("EXPERIENTIAL_MODEL_SLUG_REFUSED",
                 f"the experiential pool admits exactly {MODEL!r}")
     # All four consents are mandatory and must be true for the experiential
@@ -295,7 +295,7 @@ def request_gate(
     code_exposure_opt_in: Any = False,
 ) -> dict[str, Any]:
     """The overlay fabric_task request-path gate. Raises typed refusals."""
-    if type(pool) is not str or pool.strip().casefold() != POOL:
+    if type(pool) is not str or pool != POOL:
         _refuse("EXPERIENTIAL_POOL_REQUIRED", "manual pin requires pool=experiential")
     return preflight(
         run_id=run_id, task_class=task_class, model=model, root=root_id,
@@ -410,9 +410,9 @@ def qualified_route(
 def launch_policy_witness(mode: Any, task_class: Any, model: Any) -> dict[str, Any]:
     """Strict static economic-shape witness (the bridge owns this pool's law;
     pick.py's own pool law stays byte-untouched for every other pool)."""
-    if type(mode) is not str or mode.strip().casefold() != POOL:
+    if type(mode) is not str or mode != POOL:
         _refuse("EXPERIENTIAL_MODE_MISMATCH", "launch witness covers mode=experiential only")
-    if type(model) is not str or model.strip().casefold() != MODEL:
+    if type(model) is not str or model != MODEL:
         _refuse("EXPERIENTIAL_MODEL_SLUG_REFUSED", f"exactly {MODEL!r} is admitted")
     if type(task_class) is not str or not _CLASS_TOKEN_RE.fullmatch(task_class.strip() or ""):
         _refuse("EXPERIENTIAL_TASK_CLASS_INVALID", "explicit class token required")
@@ -429,8 +429,8 @@ def preview_command(
     runtime_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """JSON PREVIEW_ONLY witness — only when every owner gate genuinely passes."""
-    if pool is None or (type(pool) is str and not pool.strip()):
-        _refuse("EXPERIENTIAL_POOL_REQUIRED", "preview requires an explicit pool")
+    if pool != POOL:
+        _refuse("EXPERIENTIAL_POOL_REQUIRED", "preview requires exact pool=experiential")
     witness = preflight(run_id=run_id, task_class=task_class, model=model,
                         runtime_root=runtime_root, phase="preview",
                         enforce_strict_pin_flag=False, enforce_consents=False)
