@@ -182,7 +182,7 @@ function KnowledgeBody({ projection, onOpenSource, readResultReferences, readRes
       <div className="knowledge-search"><label htmlFor={searchId}>{t("Search supplied knowledge")}</label>
         <input ref={search} id={searchId} type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder={t("Find an owner, reference or field")} /></div>
     </header>
-    <section className="knowledge-source" aria-label={t("Knowledge source")}><span data-state={source.state}>{source.state === "NOT_PROJECTED" ? t("Not available here") : source.state}</span>
+    <section className="knowledge-source" aria-label={t("Knowledge source")}><span data-state={source.state}>{source.coverage === "NOT_PROJECTED" ? t("Not available here") : source.state}</span>
       <p>{t("References from the selected work only. Other records may not appear here.")}</p>
       <details><summary>{t("Source details")}</summary><p>{source.state} · {source.coverage}</p></details></section>
     <div className="knowledge-collections">

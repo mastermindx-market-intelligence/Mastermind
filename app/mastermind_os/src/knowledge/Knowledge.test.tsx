@@ -159,3 +159,12 @@ describe("Knowledge owner-reference view", () => {
     expect(screen.getByRole<HTMLInputElement>("searchbox", { name: "Search supplied knowledge" }).value).toBe("");
   });
 });
+
+
+it.each(["en", "zh-CN"] as const)("shows the unavailable coverage label in %s without inventing a SourceState", locale => {
+  const i=input(); i.mission=null;
+  render(<Knowledge projection={projectOffice(i,context)} locale={locale}/>);
+  const region=screen.getByRole("region",{name:locale==="en"?"Knowledge source":"知识来源"});
+  expect(region.querySelector("span")?.textContent).toBe(locale==="en"?"Not available here":"此处暂不可用");
+  expect(region.querySelector("details")?.textContent).toContain("UNAVAILABLE · NOT_PROJECTED");
+});
