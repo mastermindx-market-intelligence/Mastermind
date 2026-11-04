@@ -92,17 +92,23 @@ When protected master advances after a semantic review:
 2. compare protected movement against candidate-owned paths;
 3. perform a `material-source comparison` over the governing Skillpack, architecture/authority law,
    imported interfaces, dependency closure and proof contract;
-4. obtain `latest-base merge-ref proof` or an equivalent immutable integrated-candidate result;
-5. read current CI/security, reviews, unresolved threads and capability claims;
+4. obtain `latest-base merge-ref proof` (compatible identity/conflict-free composition) or an
+   equivalent immutable integrated-candidate result;
+5. read head CI/security, reviews, unresolved threads and capability claims. If native GitHub
+   merge queue admission is permitted, required `merge_group` CI runs on its integrated candidate
+   **after entry and before merge**; absence of checks on a prequeue synthetic merge ref is not an
+   independent hold or a reason to create a new source commit;
 6. classify review reuse according to
    `docs/superpowers/specs/2026-09-02-autonomy-release-compatibility-review-reuse.md`.
 
 Do not merge protected master into the carrier merely to make `behind_by=0`.
 
 When candidate-owned blobs and paths remain byte-identical, governing material source is unchanged,
-protected movement is path/dependency-disjoint, the current merge ref is green and no blocker or
-stronger capability claim appears, `semantic review may be reused`. Refresh the compatibility receipt
-only; leave the source branch and substantive review intact.
+protected movement is path/dependency-disjoint, the current merge ref is conflict-free and no blocker
+or stronger capability claim appears, `semantic review may be reused` **before queue admission**.
+Required integrated checks still must pass on the native `merge_group` candidate before the protected
+merge; do not require nonexistent prequeue merge-ref check runs or falsely claim release readiness.
+Refresh the compatibility receipt only; leave the source branch and substantive review intact.
 
 When candidate semantics, governing source, dependency behavior, authority/security/effect/retry or
 persistence meaning changes, obtain a new immutable semantic head and full review.

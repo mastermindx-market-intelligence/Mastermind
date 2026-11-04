@@ -95,6 +95,14 @@ _ALLOWLIST: dict[tuple[str, str], str] = {
         "origin. The fixture creates local repositories and writes this URL into local "
         "Git config for identity comparison; it never performs an anonymous clone/fetch."
     ),
+    ("integrations/studio_direct_mcp/private_service.py",
+     "https://github.com/mastermindx-market-intelligence/macro.git"): (
+        "DEC:B1-MACRO-PRIVATE-CUTOVER / #1333 -- fixed host-owned publishing "
+        "remote identity in TYPED_GIT_CLOSED_PROFILES, checked against the "
+        "canonical authenticated mmx-workspace registration before typed Git. "
+        "This constant is not a clone, fetch, or anonymous read; mismatches "
+        "must fail closed."
+    ),
 }
 
 _ALLOWED_EXTS = {".py", ".sh", ".js", ".ts", ".yml", ".yaml", ".json", ".toml"}
@@ -194,11 +202,13 @@ def test_allowlist_entry_is_visible_and_still_matches():
     cover the production public-HTTPS default and its direct unit-test constant.
     The third is a synthetic local-Git workspace fixture that stores the same URL
     only to assert canonical-origin matching and performs no network clone/fetch.
-    Each exception remains keyed by exact file and matched text so none silently
+    The fourth is an opt-in Studio publisher's fixed remote identity, not a
+    clone/fetch. Each exception remains keyed by exact file and matched text so none silently
     covers drift in another file."""
-    assert len(_ALLOWLIST) == 3, (
-        f"expected exactly three allowlist entries (production _REMOTE, its direct "
-        f"test constant, and the synthetic workspace-origin fixture), found "
+    assert len(_ALLOWLIST) == 4, (
+        f"expected exactly four allowlist entries (production _REMOTE, its direct "
+        f"test constant, the workspace-origin fixture, and Studio publisher "
+        f"remote identity), found "
         f"{len(_ALLOWLIST)}: {list(_ALLOWLIST)}")
     for (rel, matched), reason in _ALLOWLIST.items():
         path = _ROOT / rel
@@ -212,6 +222,18 @@ def test_allowlist_entry_is_visible_and_still_matches():
             "exempted from")
         assert "DEC:B1-MACRO-PRIVATE-CUTOVER" in reason, (
             "allowlist entry must cite its authorizing decision")
+
+
+def test_studio_publisher_macro_url_is_one_closed_binding_not_anonymous_read():
+    """One fixed identity exception must never grow into a new read transport."""
+    rel = "integrations/studio_direct_mcp/private_service.py"
+    url = "https://github.com/mastermindx-market-intelligence/macro.git"
+    text = (_ROOT / rel).read_text()
+    assert text.count(url) == 1, "one exact host-owned Macro remote only"
+    assert "TYPED_GIT_CLOSED_PROFILES = (" in text
+    assert '("macro", Path("Documents/Cluade/macro-main"),' in text
+    assert "TYPED_GIT_WORKSPACE_CLI_REL" in text
+    assert (rel, url) in _ALLOWLIST
 
 
 def test_supabase_sdk_url_is_not_flagged():
@@ -450,7 +472,9 @@ def test_ci_yml_macro_checkout_step_is_authenticated():
     step while leaving this one bare."""
     ci_path = _WORKFLOWS_DIR / "ci.yml"
     workflow = yaml.safe_load(ci_path.read_text())
-    steps = workflow["jobs"]["test"]["steps"]
+    # The authenticated Macro checkout moved into every actual pytest runner.
+    # The fan-in `test` job only verifies the aggregated result.
+    steps = workflow["jobs"]["pytest_shards"]["steps"]
     macro_step = next(
         s for s in steps if isinstance(s, dict) and s.get("name") == "Checkout pinned Macro engine"
     )

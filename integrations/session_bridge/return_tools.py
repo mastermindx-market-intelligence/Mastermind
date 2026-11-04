@@ -23,7 +23,7 @@ _MAX_OUTPUT_BYTES = 24 * 1024
 _REPLY_KEYS = frozenset({"schema", "read_ref", "request_ref", "in_reply_to", "message_key",
     "fingerprint", "text", "next_step", "primary_ts", "reply_committed", "parent_consumed"})
 _ERRORS = {
-    "invalid_input": "reply read requires only one valid read_ref",
+    "invalid_input": "reply read requires one valid read_ref or original operation_key",
     "not_found": "unknown reply read tool",
     "reply_unavailable": "authorized canonical reply is unavailable",
     "output_too_large": "reply read exceeds the transport budget",
@@ -44,22 +44,27 @@ class NativeReplyReadTool:
     def tool_spec() -> ToolSpec:
         return ToolSpec(name=TOOL_NAME,
             description="Read the exact canonical native-session reply referenced by an authorized "
-                        "original-request notification. Read-only; this does not acknowledge consumption, "
+                        "original-request notification, or recover it using the original operation_key. "
+                        "Read-only; this does not acknowledge consumption, "
                         "send instructions, choose a recipient, or advance a Job.",
             input_schema={"type": "object", "properties": {
-                "read_ref": {"type": "string", "minLength": 1, "maxLength": 256}},
-                "required": ["read_ref"], "additionalProperties": False},
+                "read_ref": {"type": "string", "minLength": 1, "maxLength": 256},
+                "operation_key": {"type": "string", "minLength": 1, "maxLength": 256}},
+                "oneOf": [{"required": ["read_ref"]}, {"required": ["operation_key"]}],
+                "additionalProperties": False},
             output_description=RESULT_SCHEMA, read_only=True)
 
     @staticmethod
     def validate(name: str, arguments: Any) -> dict[str, str]:
         if name != TOOL_NAME:
             raise GatewayError("not_found", _ERRORS["not_found"])
-        if (not isinstance(arguments, Mapping) or set(arguments) != {"read_ref"}
-                or not isinstance(arguments["read_ref"], str)
-                or _REF.fullmatch(arguments["read_ref"]) is None):
+        if not isinstance(arguments, Mapping) or set(arguments) not in (
+                {"read_ref"}, {"operation_key"}):
             raise GatewayError("invalid_input", _ERRORS["invalid_input"])
-        return {"read_ref": arguments["read_ref"]}
+        field = next(iter(arguments))
+        if not isinstance(arguments[field], str) or _REF.fullmatch(arguments[field]) is None:
+            raise GatewayError("invalid_input", _ERRORS["invalid_input"])
+        return {field: arguments[field]}
 
     @staticmethod
     def error(name: str, code: Any, _message: Any = None) -> dict[str, Any]:
@@ -77,9 +82,12 @@ class NativeReplyReadTool:
             # verified type; a caller-supplied dict is never authentication.
             principal_projection(principal)
             data = await self._reader(principal, validated)
-            if (type(data) is not dict or set(data) != _REPLY_KEYS
+            expected_keys = _REPLY_KEYS | ({"operation_key"} if "operation_key" in validated else set())
+            if (type(data) is not dict or set(data) != expected_keys
                     or data["schema"] != "mastermind.native_reply_read.v1"
-                    or data["read_ref"] != validated["read_ref"]
+                    or not isinstance(data["read_ref"], str) or _REF.fullmatch(data["read_ref"]) is None
+                    or ("read_ref" in validated and data["read_ref"] != validated["read_ref"])
+                    or ("operation_key" in validated and data["operation_key"] != validated["operation_key"])
                     or data["reply_committed"] is not True
                     or data["parent_consumed"] is not False):
                 raise ValueError

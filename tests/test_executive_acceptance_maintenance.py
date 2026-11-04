@@ -64,16 +64,64 @@ def test_sealed_reader_detects_mutation_during_read(tmp_path, sealed_reader, mon
     target=tmp_path/"receipt.json"
     target.write_text('{"passed":true}')
     target.chmod(0o444)
-    original=m.json.load
-    def mutate(stream):
-        value=original(stream)
+    original=m.json.loads
+    def mutate(raw):
+        value=original(raw)
         target.chmod(0o644)
         target.write_text('{"passed":false}')
         target.chmod(0o444)
         return value
-    monkeypatch.setattr(m.json,"load",mutate)
+    monkeypatch.setattr(m.json,"loads",mutate)
     with pytest.raises(m.MaintenanceError,match="changed"):
         sealed_reader(target)
+
+
+def test_sealed_inventory_round_trips_real_host_scale(tmp_path, sealed_reader):
+    # The preserved host has 62,519 inventory entries; pretty JSON exceeded
+    # the former 16 MiB reader limit even though preparation accepted it.
+    inventory = {
+        "/var/db/mastermind-executive/workspaces/" + ("a" * 190) + f"/{n}":
+        {"uid": 450, "gid": 451, "mode": 384, "nlink": 1, "sha256": "b" * 64}
+        for n in range(62519)
+    }
+    target = tmp_path / "inventory.json"
+    m.write_sealed(target, inventory)
+    assert target.stat().st_size > 16 * 1024 * 1024
+    assert m.digest(sealed_reader(target)) == m.digest(inventory)
+
+
+@pytest.mark.parametrize("name", ["descriptor.json", "baseline.json", "inventory.json"])
+def test_document_limit_agrees_before_writer_creates_file(
+    tmp_path, sealed_reader, monkeypatch, name,
+):
+    monkeypatch.setattr(m, "_MAX_DOCUMENT_BYTES", 128)
+    monkeypatch.setattr(m, "_MAX_INVENTORY_BYTES", 256)
+    limit = 256 if name == "inventory.json" else 128
+    target = tmp_path / name
+    value = {"value": "x" * limit}
+    with pytest.raises(m.MaintenanceError, match="size limit"):
+        m.write_sealed(target, value)
+    assert not target.exists()
+    # A retained document from an older producer is also refused before parse.
+    target.write_text(json.dumps(value))
+    target.chmod(0o400)
+    monkeypatch.setattr(m.json, "loads", lambda *a, **k: pytest.fail("oversize JSON parsed"))
+    with pytest.raises(m.MaintenanceError, match="size limit"):
+        sealed_reader(target)
+
+
+def test_inventory_budget_does_not_widen_descriptor_budget(tmp_path, sealed_reader, monkeypatch):
+    monkeypatch.setattr(m, "_MAX_DOCUMENT_BYTES", 128)
+    monkeypatch.setattr(m, "_MAX_INVENTORY_BYTES", 256)
+    value = {"value": "x" * 150}
+    inventory = tmp_path / "inventory.json"
+    m.write_sealed(inventory, value)
+    assert sealed_reader(inventory) == value
+    descriptor = tmp_path / "descriptor.json"
+    descriptor.write_bytes(inventory.read_bytes())
+    descriptor.chmod(0o400)
+    with pytest.raises(m.MaintenanceError, match="size limit"):
+        sealed_reader(descriptor)
 
 
 def test_no_descriptor_preserves_normal_acceptance(monkeypatch):

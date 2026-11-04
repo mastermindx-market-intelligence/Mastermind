@@ -19,7 +19,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from common.executive_workspace_contract import _check_job_id
+from common.executive_workspace_contract import _check_job_id, _check_work_ref
 from control_plane.executive_runtime import JobStatus
 from control_plane import executive_ceo_ingress as ingress
 from control_plane.coo_principal_envelope import PrincipalAdmissionContext
@@ -179,6 +179,61 @@ class CooApp:
         observed = await self._auth(request)
         return not isinstance(observed, JSONResponse) and observed == expected
 
+    async def resolve_principal_dialogue_caller(self, request: Request, *,
+                                                work_ref: str, reasoning_surface: str):
+        """Derive current principal facts for trusted host composition only.
+
+        This is not a new HTTP/MCP action or a send authorization. A host must
+        separately bind the exact pending child and revalidate these facts at
+        COMMIT. The reasoning-surface label is host metadata, not identity proof.
+        The existing authenticated principal and mission owners supply authority.
+        """
+        from control_plane.coo_principal_mandate import NewEffectGate
+        from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import (
+            CooPrincipalDialogueCaller,
+        )
+
+        try:
+            if (type(work_ref) is not str or not _check_work_ref(work_ref)
+                    or type(reasoning_surface) is not str
+                    or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", reasoning_surface) is None):
+                return refused()
+            authenticated = await self._auth(request)
+            if isinstance(authenticated, JSONResponse):
+                return authenticated
+            principal, stamp = authenticated
+            authority, context = await self._authority(principal, work_ref, stamp)
+            if "governed_orchestration" not in authority.principal_actions:
+                return refused()
+            mandate = await self._mandate(principal, stamp, authority)
+            mission = mandate["mission"]
+            if (mandate["new_effect_gate"] != "OPEN"
+                    or mandate["decision_posture"] != "DECIDE_CONTINUE"
+                    or mission["work_ref"] != work_ref
+                    or not _check_job_id(mission["root_job_id"])
+                    or mission["accountable_seat"] != "coo"
+                    or mission["owed_turn"]["seat"] != "coo"
+                    or not await self._same_auth(request, authenticated)):
+                return refused()
+            # Owner reads can await. Re-read the same authenticated mission;
+            # never retarget the caller to a replacement principal or root.
+            current_authority, current_context = await self._authority(principal, work_ref, stamp)
+            current_mandate = await self._mandate(principal, stamp, current_authority)
+            if (current_authority != authority or current_context != context
+                    or current_mandate != mandate
+                    or not await self._same_auth(request, authenticated)):
+                return refused()
+            return CooPrincipalDialogueCaller(
+                admission_context=context, root_job_id=mission["root_job_id"],
+                reasoning_surface=reasoning_surface,
+                capability_profile_digest=authority.capability_profile_digest,
+                new_effect_gate=NewEffectGate(mandate["new_effect_gate"]),
+                accountable_seat=mission["accountable_seat"],
+                owed_seat=mission["owed_turn"]["seat"],
+            )
+        except Exception:
+            return refused()
+
     async def _send(self, frame, context, request_ref):
         try:
             response = await self._client.send_frame(self.settings.executive.ceo_ingress_socket_path, frame)
@@ -241,6 +296,8 @@ class CooApp:
         try:
             authority, context = await self._authority(principal, work_ref, stamp)
         except Exception:
+            return refused("authority_refused", 403)
+        if name == "submit_principal_intent" and "bounded_intent" not in authority.principal_actions:
             return refused("authority_refused", 403)
         if name == "executive_mandate":
             try:

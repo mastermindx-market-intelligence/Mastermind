@@ -1,0 +1,9 @@
+.mm-project-journal code,
+.mm-project-journal dd { overflow-wrap: anywhere; min-width: 0; }
+.mm-project-journal code { white-space: normal; }
+.mm-project-journal__record-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}

@@ -26,6 +26,13 @@ _REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{1,255}$")
 _WORK_REF_RE = re.compile(r"^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$")
 _SCOPE_RE = re.compile(r"^[a-z][a-z0-9._:-]{2,95}$")
 
+PRINCIPAL_ACTIONS = (
+    "bounded_intent",
+    "governed_orchestration",
+)
+DEFAULT_PRINCIPAL_ACTIONS = ("bounded_intent",)
+
+
 RESERVED_BOUNDARIES = (
     "OUTCOME_CHANGE",
     "COMPANY_STRATEGY_CHANGE",
@@ -81,6 +88,16 @@ def _optional_digest(value: object, *, field: str) -> str | None:
     return _digest(value, field=field)
 
 
+def _principal_actions_tuple(value: object) -> tuple[str, ...]:
+    if type(value) is not tuple or not value or len(value) > len(PRINCIPAL_ACTIONS):
+        raise ValueError("principal_actions must be a non-empty tuple")
+    if tuple(sorted(set(value))) != value:
+        raise ValueError("principal_actions must be sorted and unique")
+    if any(type(action) is not str or action not in PRINCIPAL_ACTIONS for action in value):
+        raise ValueError("principal_actions contains an unsupported action")
+    return value
+
+
 def _scope_tuple(value: object) -> tuple[str, ...]:
     if type(value) is not tuple or not value or len(value) > 16:
         raise ValueError("scopes must be a non-empty tuple with at most 16 entries")
@@ -127,6 +144,7 @@ class AuthorityFact:
     capability_profile_digest: str
     source_grant_digest: str | None
     economic_envelope_digest: str | None
+    principal_actions: tuple[str, ...] = DEFAULT_PRINCIPAL_ACTIONS
     live_source_or_lease_conflict: bool = False
 
     def __post_init__(self) -> None:
@@ -140,6 +158,11 @@ class AuthorityFact:
         _digest(self.capability_profile_digest, field="capability_profile_digest")
         _optional_digest(self.source_grant_digest, field="source_grant_digest")
         _optional_digest(self.economic_envelope_digest, field="economic_envelope_digest")
+        object.__setattr__(
+            self,
+            "principal_actions",
+            _principal_actions_tuple(self.principal_actions),
+        )
         if type(self.live_source_or_lease_conflict) is not bool:
             raise TypeError("live_source_or_lease_conflict must be bool")
 
@@ -485,6 +508,7 @@ def project_coo_principal_mandate(
             "capability_profile_digest": authority.capability_profile_digest,
             "source_grant_digest": authority.source_grant_digest,
             "economic_envelope_digest": authority.economic_envelope_digest,
+            "principal_actions": list(authority.principal_actions),
         },
         "release": {"release_class": authority.release_class.value},
         "continuity": {
@@ -500,6 +524,8 @@ def project_coo_principal_mandate(
 
 __all__ = [
     "SCHEMA",
+    "PRINCIPAL_ACTIONS",
+    "DEFAULT_PRINCIPAL_ACTIONS",
     "RESERVED_BOUNDARIES",
     "AuthorityFact",
     "DecisionPosture",
