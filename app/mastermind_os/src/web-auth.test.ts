@@ -1503,3 +1503,47 @@ describe("selected-root autonomy fixed Web READ", () => {
   expect(e.fetcher).toHaveBeenCalledTimes(3);
  });
 });
+
+import resourceCapacityFixture from "./resources/fixtures/resource-capacity-owner-read.json";
+describe("selected-work resource capacity fixed Web READ", () => {
+ const selection = resourceCapacityFixture.selection;
+ const request = () => ({ ...selection, signal: new AbortController().signal });
+ it("requires Acquisition and reads only the exact fixed four-field GET", async () => {
+  const e=setup(), host=bindMissionHost(e.client);
+  await expect(host.readResourceCapacity!(request())).rejects.toThrow("RESOURCE_CAPACITY_UNAUTHORIZED");
+  expect(e.fetcher).not.toHaveBeenCalled();
+  await e.login(); e.fetcher.mockClear(); e.fetcher.mockResolvedValueOnce(response(resourceCapacityFixture));
+  expect((await host.readResourceCapacity!(request())).state).toBe("AVAILABLE");
+  const [url,options]=e.fetcher.mock.calls[0];
+  expect(new URL(String(url)).origin).toBe(ORIGIN);
+  expect(new URL(String(url)).pathname).toBe("/workspace/resources/capacity/current");
+  expect(Object.fromEntries(new URL(String(url)).searchParams)).toEqual(selection);
+  expect(options).toMatchObject({method:"GET",credentials:"omit",redirect:"error",cache:"no-store"});
+  expect(e.fetcher).toHaveBeenCalledTimes(1);
+ });
+ it("keeps only typed unavailable503 and refuses older404 without a fallback", async () => {
+  const e=setup(); await e.login();e.fetcher.mockClear(); const host=bindMissionHost(e.client);
+  const body={...resourceCapacityFixture,availability:"UNAVAILABLE",provider_capacity:null,source_observation:null,reason_codes:["SOURCE_UNAVAILABLE"]};
+  e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(body),{status:503,headers:{"content-type":"application/json"}}));
+  await expect(host.readResourceCapacity!(request())).resolves.toEqual({state:"UNAVAILABLE"});
+  e.fetcher.mockResolvedValueOnce(new Response("missing",{status:404}));
+  await expect(host.readResourceCapacity!(request())).rejects.toThrow();
+  expect(e.fetcher).toHaveBeenCalledTimes(2);
+ });
+ it("discards a late body after signout without retry", async () => {
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client);
+  const late=deferred<Response>();e.fetcher.mockReturnValueOnce(late.promise);
+  const pending=host.readResourceCapacity!(request()),rejected=expect(pending).rejects.toThrow();
+  await host.auth!.signOut();late.resolve(response(resourceCapacityFixture));await rejected;
+  expect(e.fetcher).toHaveBeenCalledTimes(1);
+ });
+ it("refuses host selectors, foreign Attempt, raw extras and over16KiB bodies", async () => {
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client);
+  await expect(host.readResourceCapacity!({...request(),host_ref:"supplied"} as never)).rejects.toThrow("RESOURCE_CAPACITY_SELECTION_INVALID");
+  expect(e.fetcher).not.toHaveBeenCalled();
+  e.fetcher.mockResolvedValueOnce(response({...resourceCapacityFixture,selection:{...selection,attempt_id:"ATT-"+"9".repeat(32)}}));
+  await expect(host.readResourceCapacity!(request())).rejects.toThrow("RESOURCE_CAPACITY_INVALID");
+  e.fetcher.mockResolvedValueOnce(response({...resourceCapacityFixture,padding:"漢".repeat(6000)}));
+  await expect(host.readResourceCapacity!(request())).rejects.toThrow();
+ });
+});

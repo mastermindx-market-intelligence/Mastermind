@@ -88,14 +88,35 @@ aggregate, command, receipt and boot-qualified commitments to the original claim
 Historical snapshot validity uses the original claim clock. Current read time
 only determines receipt age; it cannot refresh quota or grant eligibility.
 
-The fixed authenticated Workspace frame/host port is not installed by this slice.
-Its current integration owner is Root after the existing READ freeze. That owner
-must independently authorize and bracket the selected root/current Attempt and
-current catalogue/permission publication before and after the bounded read.
-Never serve the internal raw `RetainedCapacitySnapshot` or accept browser-supplied
-host, metric, binding, path or clock fields.
+The fixed authenticated source join is implemented on the accepted READ freeze:
+`GET /workspace/resources/capacity/current` with exactly `work_ref`, `root_job_id`,
+`job_id` and `attempt_id`; frame `mastermind.workspace_resource_capacity_read.v1`,
+operation `resource_capacity`, result `mastermind.workspace_resource_capacity_result.v1`.
+It uses the existing Acquisition READ principal and independently enrolled original
+COO workstream membership. Generic Workspace login alone is insufficient. Permission,
+membership and source publication/currentness are rechecked around the bounded
+read; socket/HTTP/client budgets are 16,384 bytes including the socket envelope/LF.
+The edge validates the closed body and returns no-store. Missing or ambiguous
+capacity evidence is unavailable, never zero capacity or idle.
+
+`MissionHost.readResourceCapacity` decodes only the same selected four-field body
+after auth/source epoch and reader-identity fences. Web and native clients use
+only that fixed GET with the existing Acquisition bearer. The explicit
+`ResourceCapacityRead` component takes `host`, `selection` (the qualified current
+work/Attempt tuple), and optional `locale`; it reads only on click and clears
+receipts on selection/owner/auth changes. App composition remains with the sole
+App author. No source reader accepts host, metric, binding, path or clock fields,
+and the internal raw `RetainedCapacitySnapshot` is never a public response.
+
+This is tested source composition, not an installed authenticated journey or
+rendered Paper acceptance. The runtime/install/capture holds remain independent.
 
 `retained-provider-owner-projection.json` is generated from an actual inert
 Runtime/SQLite claim, bound observation close and safe Python projector, using
 synthetic source fixtures. The TypeScript consumer test reads those exact bytes.
 It provides source compatibility evidence, not a live provider/account claim.
+
+Multiple capability rows on the same host/boot remain a closed unavailable result:
+the retained claim does not carry a separately qualified selected-capability proof
+for a positive historical join. The reader never guesses a row or substitutes
+changed current worker metadata for missing original evidence.

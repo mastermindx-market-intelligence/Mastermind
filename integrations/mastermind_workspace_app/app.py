@@ -54,6 +54,7 @@ _PLAN_ROUTE = "/workspace/plan/current"
 _PROJECT_PLAN_ROUTE = "/workspace/project-plan/current"
 _PROJECT_JOURNAL_ROUTE = "/workspace/project-journal/current"
 _AUTONOMY_ROUTE = "/workspace/autonomy/current"
+_RESOURCE_CAPACITY_ROUTE = "/workspace/resources/capacity/current"
 _ACTIVITY_ROUTE = "/workspace/operator/activity/current"
 _FABRIC_CATALOG_ROUTE = "/workspace/fabric/catalog/current"
 _FABRIC_STATUS_ROUTE = "/workspace/fabric/status/current"
@@ -349,6 +350,12 @@ def _dispatch_v2_selection(operation: str, query: Mapping[str, str]) -> dict[str
         return _v2_selection(query)
     if operation == "result_references":
         return _mission_v3_selection(query)
+    if operation == "resource_capacity":
+        from common.workspace_resource_capacity_contract import selection
+        try:
+            return selection(dict(query))
+        except (TypeError, ValueError):
+            return None
     if operation == "retained_activity":
         from common import executive_workspace_activity_contract as activity
         try:
@@ -997,6 +1004,10 @@ async def _dispatch_v2(
                 "schema": acceptance_contract.FRAME_SCHEMA, "operation": operation,
                 "selection": selection_value, "principal": principal_frame,
             })
+        elif operation == "resource_capacity":
+            from common import workspace_resource_capacity_contract as capacity_wire
+            frame = capacity_wire.validate_frame({"schema": capacity_wire.FRAME_SCHEMA, "operation": operation,
+                     "selection": selection_value, "principal": principal_frame})
         elif operation == "retained_activity":
             from common import executive_workspace_activity_contract as activity
             frame = activity.validate_frame({
@@ -1041,7 +1052,7 @@ async def _dispatch_v2(
             return _refuse_json(403, "access_denied")
     except Exception:
         return _refuse_json(403, "access_denied")
-    if operation in ("admitted_plan", "retained_activity", "result_references", "project_plan", "project_journal", "autonomy") and isinstance(envelope, dict) and envelope.get("ok") is True:
+    if operation in ("admitted_plan", "retained_activity", "resource_capacity", "result_references", "project_plan", "project_journal", "autonomy") and isinstance(envelope, dict) and envelope.get("ok") is True:
         body = envelope.get("result")
         if type(body) is not dict or body.get("selection") != selection_value:
             return _refuse_json(503, "source_unavailable")
@@ -1281,6 +1292,25 @@ async def autonomy_current(request: Request, *, config: WorkspaceAppConfig) -> J
         required_keys=_MISSION_QUERY_KEYS, response_fn=_autonomy_envelope_response)
 
 
+def _capacity_envelope_response(envelope):
+    from common import workspace_resource_capacity_contract as capacity_wire
+    if type(envelope) is dict and envelope.get("ok") is True:
+        try:
+            if set(envelope) != {"ok", "result"}:
+                raise ValueError("invalid_response")
+            body = envelope["result"]
+            capacity_wire.validate_result(body, body["selection"])
+            contract.bounded_canonical(envelope, limit=capacity_wire.MAX_RESPONSE_BYTES - 1)
+        except (TypeError, ValueError, KeyError):
+            return _refuse_json(503, "source_unavailable")
+    return _v2_envelope_response(envelope, operation="result")
+
+
+async def resource_capacity_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    return await _dispatch_v2(request, config=config, operation="resource_capacity",
+        required_keys=_ACTIVITY_QUERY_KEYS, response_fn=_capacity_envelope_response)
+
+
 def _activity_envelope_response(envelope):
     """Closed 16KiB App boundary; never echo raw owner or provider fields."""
     from common import executive_workspace_activity_contract as activity
@@ -1319,6 +1349,7 @@ class _RawPathFence:
         _RESULT_REFERENCES_ROUTE,
         _PLAN_ROUTE,
         _ACTIVITY_ROUTE,
+        _RESOURCE_CAPACITY_ROUTE,
         _FABRIC_CATALOG_ROUTE,
         _FABRIC_STATUS_ROUTE,
         _CCR_STATE_ROUTE,
@@ -1397,6 +1428,9 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def autonomy_endpoint(request: Request) -> JSONResponse:
         return await autonomy_current(request, config=config)
 
+    async def resource_capacity_endpoint(request: Request) -> JSONResponse:
+        return await resource_capacity_current(request, config=config)
+
     async def activity_endpoint(request: Request) -> JSONResponse:
         return await activity_current(request, config=config)
 
@@ -1427,6 +1461,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_PROJECT_JOURNAL_ROUTE, project_journal_endpoint, methods=["GET"]),
         Route(_AUTONOMY_ROUTE, autonomy_endpoint, methods=["GET"]),
         Route(_ACTIVITY_ROUTE, activity_endpoint, methods=["GET"]),
+        Route(_RESOURCE_CAPACITY_ROUTE, resource_capacity_endpoint, methods=["GET"]),
         Route(_FABRIC_CATALOG_ROUTE, fabric_catalog_endpoint, methods=["GET"]),
         Route(_FABRIC_STATUS_ROUTE, fabric_status_endpoint, methods=["GET"]),
         Route(_CCR_STATE_ROUTE, ccr_state_endpoint, methods=["GET"]),

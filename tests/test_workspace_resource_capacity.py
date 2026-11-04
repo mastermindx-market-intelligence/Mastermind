@@ -9,8 +9,10 @@ from tests import test_executive_finite_guards as helpers
 def setup(tmp_path, monkeypatch):
     # Historical claims predate prospective capture retention. Preserve the
     # real original Event/Attempt transaction while exercising that absent path.
-    from control_plane import physical_capacity_capture_owner as capture
-    monkeypatch.setattr(capture, "mint_capacity_capture", lambda *a, **kw: None)
+    import importlib.util
+    if importlib.util.find_spec("control_plane.physical_capacity_capture_owner") is not None:
+        from control_plane import physical_capacity_capture_owner as capture
+        monkeypatch.setattr(capture, "mint_capacity_capture", lambda *a, **kw: None)
     original = helpers._drive_to_admitted
     def with_workstream(*args, **kwargs):
         return original(*args, **kwargs, workstream="WS:ONE")

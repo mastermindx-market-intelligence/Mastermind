@@ -1235,6 +1235,46 @@ impl RetainedActivitySelection {
         Ok(())
     }
 }
+const RESOURCE_CAPACITY_PATH: &str = "/workspace/resources/capacity/current";
+const RESOURCE_CAPACITY_SCHEMA: &str = "mastermind.workspace_resource_capacity_result.v1";
+const RESOURCE_CAPACITY_CAP: usize = 16_384;
+
+/// Same fixed public Workspace acquisition bearer and owner-issued generation
+/// fence as admitted plan; never pass private keys, native Fabric run IDs or
+/// raw Event rows into the webview. A 503 must keep the closed typed schema.
+#[tauri::command]
+pub async fn read_resource_capacity(app: AppHandle, selection: RetainedActivitySelection) -> Result<Value> {
+    selection.validate()?;
+    let mut url = Url::parse(&format!("{ORIGIN}{RESOURCE_CAPACITY_PATH}"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut()
+        .append_pair("work_ref", &selection.work_ref)
+        .append_pair("root_job_id", &selection.root_job_id)
+        .append_pair("job_id", &selection.job_id)
+        .append_pair("attempt_id", &selection.attempt_id);
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, RESOURCE_CAPACITY_CAP).await
+            .and_then(|value| typed_unavailable(value, RESOURCE_CAPACITY_SCHEMA, false))
+    } else {
+        bounded_json(response, RESOURCE_CAPACITY_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(RESOURCE_CAPACITY_SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // The existing host's strict DTO decoder removes unrecognized fields.
+    Ok(value)
+}
+
 const RETAINED_ACTIVITY_PATH: &str = "/workspace/operator/activity/current";
 const RETAINED_ACTIVITY_SCHEMA: &str = "mastermind.workspace_retained_activity.v1";
 const RETAINED_ACTIVITY_CAP: usize = 16_384;
@@ -2979,5 +3019,33 @@ mod retained_activity_selection_tests {
             "access_token":"a-valid-synthetic-access-token","expires_in":3600,
             "token_type":"Bearer","scope":"mastermind.executive.read offline_access"
         }), Resource::Executive).is_err());
+    }
+}
+
+#[cfg(test)]
+mod resource_capacity_read_tests {
+    use super::*;
+    fn selection() -> RetainedActivitySelection {
+        RetainedActivitySelection { work_ref: "WS:ONE".into(), root_job_id: "JOB-1".into(), job_id: "JOB-2".into(), attempt_id: format!("ATT-{}", "a".repeat(32)) }
+    }
+    #[test]
+    fn resource_capacity_read_is_only_fixed_historical_acquisition() {
+        assert!(selection().validate().is_ok());
+        assert_eq!(RESOURCE_CAPACITY_PATH, "/workspace/resources/capacity/current");
+        assert_eq!(RESOURCE_CAPACITY_SCHEMA, "mastermind.workspace_resource_capacity_result.v1");
+        assert_eq!(RESOURCE_CAPACITY_CAP, 16_384);
+    }
+    #[test]
+    fn resource_capacity_read_rejects_unknown_host_clock_and_path_fields() {
+        for key in ["host_ref", "clock", "path"] {
+            let mut value = serde_json::json!({"work_ref":"WS:ONE","root_job_id":"JOB-1","job_id":"JOB-2","attempt_id":format!("ATT-{}","a".repeat(32))});
+            value[key] = Value::String("supplied".into());
+            assert!(serde_json::from_value::<RetainedActivitySelection>(value).is_err());
+        }
+    }
+    #[test]
+    fn resource_capacity_read_requires_a_distinct_job_and_exact_attempt() {
+        let mut value=selection(); value.job_id=value.root_job_id.clone(); assert!(value.validate().is_err());
+        let mut value=selection(); value.attempt_id="../private".into(); assert!(value.validate().is_err());
     }
 }

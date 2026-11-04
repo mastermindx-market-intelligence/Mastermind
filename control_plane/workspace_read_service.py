@@ -1610,6 +1610,10 @@ class WorkspaceReadService:
             return await self._handle_v4_frame(frame)
         if isinstance(frame, dict) and frame.get("schema") == FRAME_SCHEMA_V3:
             return await self._handle_v3_frame(frame)
+        from common import workspace_resource_capacity_contract as capacity_wire
+        if type(frame) is dict and frame.get("schema") == capacity_wire.FRAME_SCHEMA:
+            from control_plane.workspace_resource_capacity_read import handle_capacity_frame
+            return await handle_capacity_frame(self, frame)
         from common.executive_workspace_activity_contract import FRAME_SCHEMA as ACTIVITY_FRAME_SCHEMA
         if isinstance(frame, dict) and frame.get("schema") == ACTIVITY_FRAME_SCHEMA:
             return await self._handle_activity_frame(frame)

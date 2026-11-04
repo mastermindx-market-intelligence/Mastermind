@@ -55,7 +55,11 @@ class CeoIngressWorkspaceClient:
         from common import workspace_project_plan_contract as plan_wire
         from common import workspace_project_journal_contract as journal_wire
         from common import workspace_autonomy_read_contract as autonomy_wire
-        if isinstance(frame, dict) and frame.get("schema") == autonomy_wire.FRAME_SCHEMA:
+        from common import workspace_resource_capacity_contract as capacity_wire
+        if isinstance(frame, dict) and frame.get("schema") == capacity_wire.FRAME_SCHEMA:
+            capacity_wire.validate_frame(frame)
+            ceiling = capacity_wire.MAX_RESPONSE_BYTES
+        elif isinstance(frame, dict) and frame.get("schema") == autonomy_wire.FRAME_SCHEMA:
             autonomy_wire.validate_frame(frame)
             ceiling = autonomy_wire.MAX_RESPONSE_BYTES
         elif isinstance(frame, dict) and frame.get("schema") == journal_wire.FRAME_SCHEMA:

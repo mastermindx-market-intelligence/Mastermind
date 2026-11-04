@@ -1,3 +1,4 @@
+import { decodeResourceCapacityRead, validResourceCapacitySelection, type ResourceCapacityReadSelection, type ResourceCapacityRead } from "./resources/resource-capacity-read";
 import { decodeAutonomyPolicy, isAutonomySelection, type AutonomyRead, type AutonomySelection } from "./supervision/autonomy-policy";
 import { decodeProjectJournal, validJournalSelection, type JournalSelection, type ProjectJournalDocument } from "./project-journal";
 import { decodeProjectPlan, validProjectPlanSelection, type ProjectPlanRead, type ProjectPlanSelection } from "./planning/project-plan";
@@ -79,6 +80,7 @@ export interface RawClient {
   readProjectPlan?(request: ProjectPlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readProjectJournal?(request: JournalSelection & { signal: AbortSignal }): Promise<unknown>;
   readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
+  readResourceCapacity?(request: ResourceCapacityReadSelection & { signal: AbortSignal }): Promise<unknown>;
   readRetainedActivity?(request: ActivitySelection & { signal: AbortSignal }): Promise<unknown>;
   readAttendedFabric?(request: AttendedSelection & { signal: AbortSignal }): Promise<unknown>;
   /** Optional authorized recent-run metadata; no source endpoint is implied by this interface. */
@@ -145,6 +147,7 @@ export interface MissionHost {
   readProjectPlan?: (request: ProjectPlanSelection & { signal: AbortSignal }) => Promise<ProjectPlanRead>;
   readProjectJournal?: (request: JournalSelection & { signal: AbortSignal }) => Promise<ProjectJournalDocument>;
   readAdmittedPlan?: (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
+  readResourceCapacity?: (request: ResourceCapacityReadSelection & { signal: AbortSignal }) => Promise<ResourceCapacityRead>;
   readRetainedActivity?: (request: ActivitySelection & { signal: AbortSignal }) => Promise<ActivityRead>;
   readAttendedFabric?: (request: AttendedSelection & { signal: AbortSignal }) => Promise<AttendedStatus>;
   readAttendedFabricCatalog?: (request: { signal: AbortSignal }) => Promise<FabricCatalog>;
@@ -350,6 +353,23 @@ export function bindMissionHost(
         const raw = await client.readAdmittedPlan!({ ...selected, signal: request.signal });
         if (!authorized()) throw new Error("READ_CANCELLED");
         return decodeAdmittedPlan(raw, selected);
+      },
+    } : {}),
+    ...(client.readResourceCapacity && client.invalidationGeneration ? {
+      async readResourceCapacity(request: ResourceCapacityReadSelection & { signal: AbortSignal }) {
+        const { signal, ...selected } = request;
+        if (!validResourceCapacitySelection(selected)) throw new Error("RESOURCE_CAPACITY_SELECTION_INVALID");
+        const started = epoch, source = client.invalidationGeneration!(), reader = client.readResourceCapacity!;
+        const verify = () => {
+          const state = client.getState();
+          if (signal.aborted || epoch !== started || !Number.isSafeInteger(source) || source !== client.invalidationGeneration?.() || reader !== client.readResourceCapacity)
+            throw new Error("READ_CANCELLED");
+          if (state.status !== "signed_in" || !state.acquisition) throw new Error("RESOURCE_CAPACITY_UNAUTHORIZED");
+        };
+        verify();
+        const raw = await reader.call(client, { ...selected, signal });
+        verify();
+        return decodeResourceCapacityRead(raw, selected);
       },
     } : {}),
     ...(client.readRetainedActivity && client.invalidationGeneration ? {
@@ -717,6 +737,7 @@ export async function createNativeClient(
       | "read_project_journal"
       | "read_admitted_plan"
       | "read_retained_activity"
+      | "read_resource_capacity"
       | "read_fabric_catalog"
       | "read_fabric_status"
       | "read_result"
@@ -833,6 +854,12 @@ export async function createNativeClient(
       if (!validPlanSelection({ work_ref, root_job_id }))
         return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
       return read("read_admitted_plan", signal, { selection: { work_ref, root_job_id } });
+    },
+    readResourceCapacity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
+      const selection = { work_ref, root_job_id, job_id, attempt_id };
+      if (!validResourceCapacitySelection(selection))
+        return Promise.reject(new Error("RESOURCE_CAPACITY_SELECTION_INVALID"));
+      return read("read_resource_capacity", signal, { selection });
     },
     readRetainedActivity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
       const selection = { work_ref, root_job_id, job_id, attempt_id };

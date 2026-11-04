@@ -1,3 +1,4 @@
+import { validResourceCapacitySelection } from "./resources/resource-capacity-read";
 import { isAutonomySelection, AUTONOMY_READ_BODY_SCHEMA } from "./supervision/autonomy-policy";
 import { validJournalSelection } from "./project-journal";
 import { validProjectPlanSelection } from "./planning/project-plan";
@@ -1196,6 +1197,13 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
       return read("acquisition", `${ORIGIN}/workspace/plan/current?${new URLSearchParams({ work_ref, root_job_id })}`,
         signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_admitted_execution_plan.v1" });
+    },
+    readResourceCapacity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
+      const selected = { work_ref, root_job_id, job_id, attempt_id };
+      if (!validResourceCapacitySelection(selected))
+        return Promise.reject(new Error("RESOURCE_CAPACITY_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/resources/capacity/current?${new URLSearchParams(selected)}`,
+        signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_resource_capacity_result.v1" });
     },
     readRetainedActivity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
       const selected = { work_ref, root_job_id, job_id, attempt_id };
