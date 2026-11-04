@@ -57,6 +57,28 @@ Record observable mode/model, timestamp and error when material. Selected mode i
 The installed CI guard's `REDUNDANT POLL` is a finite read-frequency cooldown, not a permanent permission denial. Do not sleep/retry, reset its state, switch readers or mutate a PR merely to clear it; continue useful work. At the next real integration boundary or existing scheduled wake after expiry, one bounded same-carrier read is eligible when no verified observer supplies completion. Permission, safety, custody and effect-unknown refusals remain binding; elapsed time does not clear them.
 
 After two equivalent no-progress wakes, diagnose the missing external observation or return path once and change tactic; re-reading a self-written receipt is not progress and cannot prove the dependency remains pending. Reuse the existing observer and Class-M backoff (15m -> 30m -> 60m; default 60m) in `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md`; do not create another watcher or lifecycle ledger. If a human action is the only remaining path, name it once and keep its answer pending — do not repeatedly ask, manufacture busywork, or imply completion. Keep aggregate mission attention only under its existing lifetime rule; a blocked child does not authorize stopping it. Notify only on a material result or required action, and preserve original owners, roots, grants and unresolved effects.
+
+**Short attended validation.** When the exact run or an accepted fast-lane contract
+supports completion in seconds to minutes, remain in the same healthy session:
+a pending fast check is not a reason to checkpoint and end. Bind the exact repository, PR, head and run;
+reuse the verified observation handle and its actual return path. Continue useful,
+path-disjoint work while CI executes. When no useful independent work is ready,
+use a bounded wait through that same process/CI owner, then consume the terminal result
+and perform the next authorized repair, integration or release step in this turn.
+No new watcher, duplicate run, empty push or fabricated asynchronous wake is needed.
+
+This is attended result consumption, not a background Web turn or a promise of
+unlimited runtime. Keep the existing cooldown and observation budget unchanged;
+do not busy-poll, sleep-and-read around a guard, switch readers after a refusal,
+or treat queued, skipped, missing or stale-head checks as success. The Class-M
+backoff above is for genuinely long or unattended dependencies, not a default
+15-minute handoff for a seconds-long fast check. If the run is actually long or
+stalled, diagnose that evidence and choose the next useful action; do not retain
+a fictional fast estimate. Save progress without ending the session. A genuine session boundary
+(actual health/context pressure, user stop, unavailable permitted return path,
+or all useful lanes blocked) still requires the existing exact continuation or
+stop classification. Passing CI does not itself authorize merge or deployment.
+
 <!-- /mastermind-ci-observation-liveness-v1 -->
 
 **Problem-solve before escalating.** Use checkpoint/minimum source, inspect exact failure and perform lawful bounded repair or change lane. Two unchanged failures require new evidence/hypothesis. Ask only precise reserved human controls; keep action/evidence/resolver/return facts in the existing checkpoint, not a new ledger.
