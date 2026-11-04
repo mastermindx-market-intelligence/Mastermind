@@ -1,0 +1,89 @@
+# experiential53/pools.yaml.experiential.poolblock.yaml
+#
+# Declarative registry delta for the RUNTIME pool registry
+# (orch/fabric/pools.yaml — host state; the canonical copy lives outside the
+# repository, consistent with pick.py's POOLS_YAML resolution).  This file is
+# a self-contained block for the registry/deployment OWNER to merge under
+# `pools:`.  It is NOT installed by this child and is NOT a patch against
+# moving runtime bytes: the owner applies it at enablement time, after the
+# gateway/transport qualification named in README.md.
+#
+# Indentation is the incumbent file's shape: pool key at two spaces.
+  experiential:
+    role: [executor]
+    # MANUAL ONLY.  This pool is never auto-selected, never scored, never a
+    # default promotion, never an escalation or fallback target.  Admission
+    # requires an explicit pin: pool=experiential AND model=glm-5.3-uncensored,
+    # re-checked strictly at the transport before any effect (launch-policy
+    # recheck law).  experiential53/experiential_pin.py is the typed law.
+    manual_only: true
+    enabled: false                # owner flips only after gateway/transport qualification
+    access: "explicit manual pin via the existing shared Experiential gateway; Attempt-owned client/transport; provider secret owner unchanged (the gateway holds the upstream provider key; no new key storage, queue or ledger here)"
+    models:
+      default: glm-5.3-uncensored
+    default_model: glm-5.3-uncensored
+    model_distinctness:
+      # NOT a Z.AI canonical model and never a glm-pool model.  The canonical
+      # glm tier (glm-5.3 / glm-5.3-flash) is untouched by this block.
+      distinct_from: [glm-5.3, glm-5.3-flash]
+      not_pool_glm: true
+    task_classes:
+      - executor
+      - extract
+      - execute
+      - fix_build
+      - mechanical
+      - verify
+      - build
+      - fix
+      - heal
+      - tests-only-repair
+    forbidden_classes:
+      - architecture
+      - integration
+      - design
+      - ruling
+      - decompose
+      - adjudicate
+      - orchestration
+      - review
+      - audit
+      - high_level
+      - operator
+      - reviewer
+    eligibility:                  # same labor-tier law shape as ocfree (R20)
+      one_objective: true
+      max_constraints: 5
+      owned_files: true
+      executable_gate: true
+      fixed_return: true
+      independent_review: "mandatory; never self-accept (R21)"
+    caps:
+      concurrent: 1               # conservative hint; unproven provider
+    windows: {}
+    task_class_fit: {}            # EMPTY BY LAW: no scoring, no auto promotion
+    accounts:
+      a:
+        status: HELD_HTTP403      # original denial stands; never retried, never bypassed
+        retry: forbidden
+      b:
+        daily_cap_usd: 1.0        # provider key cap preserved exactly
+        readback_authenticated: false   # NO authenticated quota readback today
+        policy: "unknown quota is not capacity; execution fails closed until an owner-verified readback exists"
+    sensitivity:
+      provider_retention: "provider retains prompt and response even after settings are disabled or the account is deleted"
+      funded_by: platform_only
+      sensitive_data_disclosure: required_opt_in
+      proprietary_code: "no automatic exposure; independent explicit opt-in required"
+      execution_requires:
+        - retention_acknowledged
+        - sensitive_data_opt_in
+    policies:
+      - id: experiential_manual_only
+        desc: "Exact manual pin only (pool=experiential + model=glm-5.3-uncensored). No automatic selection, no default promotion, no cross-model/provider fallback or retry; strict transport recheck before any effect."
+      - id: experiential_fail_closed_transport
+        desc: "No native worker admission until the existing shared gateway + Attempt-owned transport are qualified on the host; until then every execution refuses (EXPERIENTIAL_TRANSPORT_NOT_INSTALLED)."
+    notes:
+      - "slug is Experiential Labs GLM 5.3 UNCENSORED; distinct from Z.AI glm-5.3 and glm-5.3-flash"
+      - "manual selectability does not change canonical GLM model tier or default task routing"
+      - "censorship-off retention: platform-funded only; disclosure and retention opt-ins enforced per attempt"

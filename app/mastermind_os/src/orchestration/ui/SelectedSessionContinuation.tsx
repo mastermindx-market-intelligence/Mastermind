@@ -314,7 +314,7 @@ export function SelectedSessionContinuation({
               : "Ctrl / Cmd + Enter to send when ready. Enter and Shift + Enter insert new lines."}</p>
             <div className="form-actions">
               <button type="submit" disabled={!canContinue} className="primary">
-                {dispatchBusy ? ui(locale, "Sending\u2026") : ui(locale, "Send")}
+                {sending || inFlight ? ui(locale, "Sending\u2026") : ui(locale, "Send")}
               </button>
             </div>
           </form>
