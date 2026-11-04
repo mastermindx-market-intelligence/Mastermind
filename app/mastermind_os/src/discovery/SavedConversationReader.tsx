@@ -88,13 +88,13 @@ function ReaderBody(props:SavedConversationReaderProps){
     <button className="knowledge-library-button" type="button" disabled={!props.onBack||phase==='closed'} onClick={back}>{t('Back to search','返回搜索')}</button>
     <h1>{t('Saved reply','已保存的回复')}</h1>
     {available&&source.text!==null?<SourceMarkdown source={source.text} locale={props.locale}/>:<p role="status">{phase==='loading'&&current(props)?t('Loading source…','正在加载来源…'):t('This saved reply is unavailable here. Return to search to try again.','此处无法查看此已保存的回复。请返回搜索后重试。')}</p>}
-    {!available&&reason?<details><summary>{t('Source details','来源详情')}</summary><p>{reason}</p></details>:null}
+    {!available&&reason?<details className="knowledge-library-details"><summary>{t('Source details','来源详情')}</summary><p>{reason}</p></details>:null}
    </article>
    {available&&ref?<aside className="knowledge-library-aside">
     {props.renderSourceCompanion?.(source)}
     <div className="knowledge-library-aside-panel"><h2>{t('Source','来源')}</h2>
      <p>{t('Request time','请求时间')}: {ref.requested_at}</p>
-     <details><summary>{t('Source details','来源详情')}</summary><dl>
+     <details className="knowledge-library-details"><summary>{t('Source details','来源详情')}</summary><dl>
       {Object.entries(ref).map(([key,value])=><div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}
       <div><dt>sourceTextSha256</dt><dd>{source.sourceTextSha256}</dd></div>
      </dl></details>
