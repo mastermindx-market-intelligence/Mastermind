@@ -29,7 +29,7 @@ class Leaf(unittest.TestCase):
 
 def tracked(tmp_path, source=LEAF):
     root=tmp_path/'repo';root.mkdir()
-    for name in ['scripts/ci_fixed_diagnostics.py','scripts/native_unittest_diagnostics.py','tests/test_native_fabric_quota_continuity.py']:
+    for name in ['scripts/ci_fixed_diagnostics.py','scripts/native_unittest_diagnostics.py','tests/test_native_fabric_quota_continuity.py','tests/test_fabric_request_turn_budget.py']:
         p=root/name;p.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(ROOT/name,p)
     p=root/MODULE;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(source)
     for args in [('init','-q'),('add','.'),('-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture')]:
@@ -304,3 +304,61 @@ def test_catalog_head_change_between_validation_and_publication_refuses(tmp_path
         diagnostics.failure_record('tests/test_native_fabric_quota_continuity.py::test_native_quota_continuity_owners','call',error=caught.value)
     assert calls[0]==2 and diagnostics.native_catalog.head!=catalog.head
     assert (directory/'ci-fixed-diagnostics.json').read_bytes()==before
+
+
+def test_exact_commission_profile_publishes_live_leaf_without_broadening_discovery(tmp_path,monkeypatch):
+    root=tracked(tmp_path, 'import unittest\nclass PrivateOther(unittest.TestCase):\n def test_not_selected(self):raise RuntimeError("PRIVATE other file")\n')
+    leaf=root/native.PREFIX/'tests/test_commission_deadline.py';leaf.write_text(LEAF)
+    subprocess.run(['git','-C',str(root),'add','.'],check=True,capture_output=True)
+    subprocess.run(['git','-C',str(root),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','profile'],check=True,capture_output=True)
+    spec=importlib.util.spec_from_file_location('commission_wrapper',root/'tests/test_fabric_request_turn_budget.py')
+    wrapper=importlib.util.module_from_spec(spec);spec.loader.exec_module(wrapper)
+    monkeypatch.setenv('MMX_CI_FIXED_DIAGNOSTICS_DIR',str(tmp_path/'unused'))
+    args=[sys.executable,'-m','unittest',*native.COMMISSION_ARGS]
+    ordinary=subprocess.run(args,cwd=root,capture_output=True,text=True,timeout=10)
+    with pytest.raises(AssertionError) as error:wrapper._run(args,timeout=240)
+    assert str(error.value).endswith('FAILED (failures=1, errors=1)\n')
+    directory=tmp_path/'fixed';directory.mkdir(mode=0o700)
+    diagnostics=fixed.FixedDiagnostics(fixed.PublicCatalog(root),directory)
+    diagnostics.failure_record('tests/test_fabric_request_turn_budget.py::test_existing_commission_deadlines_remain_binding','call',error=error.value)
+    raw=(directory/'ci-fixed-diagnostics.json').read_bytes();value=json.loads(raw)
+    rows=[row for row in value['failures'] if row['module'].startswith(native.PREFIX)]
+    assert value['head']==fixed.PublicCatalog(root).head and not value['truncated']
+    assert len(value['failures'])==3 and b'PRIVATE' not in raw
+    assert all(row['native_wrapper']=='test_existing_commission_deadlines_remain_binding' for row in rows)
+    assert ordinary.returncode==1 and len(rows)==2
+    assert {row['case'] for row in rows}=={'Leaf.test_failure','Leaf.test_error'}
+    assert all(row['module']==native.PREFIX+'tests/test_commission_deadline.py' for row in rows)
+    assert 'PRIVATE' not in json.dumps(rows)
+    assert native.records_for_error(error.value,'tests/test_fabric_request_turn_budget.py::test_existing_commission_deadlines_remain_binding',root,fixed.PublicCatalog(root).head)[0]==[]
+
+
+def test_commission_profile_original_command_environment_and_limit_are_exact(tmp_path,monkeypatch):
+    monkeypatch.delenv('MMX_CI_FIXED_DIAGNOSTICS_DIR',raising=False)
+    env={'PRIVATE_ENV':'unchanged','PYTHONDONTWRITEBYTECODE':'1'}
+    with mock.patch.object(native.subprocess,'run',return_value=subprocess.CompletedProcess([],0,'ordinary','OK')) as run:
+        result,facts=native.run_native('tests',timeout_seconds=240,root=tmp_path,cwd=tmp_path,
+            pattern='test_commission_deadline.py',env=env)
+    assert result.returncode==0 and facts is None
+    assert run.call_args.args[0]==[sys.executable,'-m','unittest',*native.COMMISSION_ARGS]
+    assert run.call_args.kwargs==dict(cwd=tmp_path,env=env,capture_output=True,text=True,timeout=240)
+    for directory,pattern in [('rollout','test_commission_deadline.py'),('tests','test_private.py'),('tests','../private')]:
+        with pytest.raises(ValueError):native.run_native(directory,timeout_seconds=240,root=tmp_path,cwd=tmp_path,pattern=pattern)
+
+
+def test_timeout_kind_is_exact_stdlib_type_not_attacker_name_or_output():
+    error=subprocess.TimeoutExpired(['PRIVATE command'],300,output='PRIVATE stdout',stderr='PRIVATE stderr')
+    assert fixed.KINDS.get(type(error))=='TimeoutExpired'
+    impostor=type('TimeoutExpired',(Exception,),{})('PRIVATE message')
+    subclass=type('PrivateTimeout',(subprocess.TimeoutExpired,),{})('PRIVATE',300)
+    assert type(impostor) not in fixed.KINDS and type(subclass) not in fixed.KINDS
+
+
+def test_aggregate_owners_ceiling_preserves_original_rollout_limit_and_selection(tmp_path):
+    root=tracked(tmp_path);wrapper=load_wrapper(root)
+    import inspect
+    assert inspect.signature(wrapper._qualify).parameters['timeout_seconds'].default==240
+    with mock.patch.object(wrapper,'_qualify') as qualify:
+        wrapper.test_native_quota_continuity_owners()
+        wrapper.test_native_generation_and_ingress_rollout()
+    assert qualify.call_args_list==[mock.call('tests',timeout_seconds=600),mock.call('rollout')]

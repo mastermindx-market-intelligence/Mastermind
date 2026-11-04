@@ -23,6 +23,12 @@ COUNTS = frozenset({'tests_run','failures','errors','skipped','expected_failures
 SCHEMA = 'ci.native-unittest-facts.v1'
 FIELDS = frozenset({'module','case','function','phase','line','kind'})
 PREFIX = 'ops/native_fabric/quota_continuity/'
+COMMISSION_ARGS = ['discover','-s',PREFIX+'tests','-p','test_commission_deadline.py']
+WRAPPERS = {
+ 'tests/test_native_fabric_quota_continuity.py::test_native_quota_continuity_owners': ('tests','test_*.py'),
+ 'tests/test_native_fabric_quota_continuity.py::test_native_generation_and_ingress_rollout': ('rollout','test_*.py'),
+ 'tests/test_fabric_request_turn_budget.py::test_existing_commission_deadlines_remain_binding': ('tests','test_commission_deadline.py'),
+}
 
 
 def _fixed():
@@ -98,19 +104,18 @@ class NativeInvocation:
     No global/persistent registry. The matching exception owns consumption;
     whole old carriers cannot be attached to a later wrapper exception.
     """
-    __slots__=('directory','started','token','head','issued','error','wrapper','consumed')
+    __slots__=('directory','pattern','started','token','head','issued','error','wrapper','consumed')
     def __init__(self,directory):
-        self.directory=directory;self.started=False;self.token=None;self.head=None
+        self.directory=directory;self.pattern=None;self.started=False;self.token=None;self.head=None
         self.issued=None;self.error=None;self.wrapper=None;self.consumed=False
 
 
 def bind_facts(error, facts, invocation, nodeid):
-    expected={'tests/test_native_fabric_quota_continuity.py::test_native_quota_continuity_owners':'tests',
-        'tests/test_native_fabric_quota_continuity.py::test_native_generation_and_ingress_rollout':'rollout'}
+    expected=WRAPPERS
     if (type(error) is not AssertionError or type(facts) is not NativeFacts
             or type(invocation) is not NativeInvocation or invocation.issued is not facts
             or invocation.error is not None or invocation.consumed or not invocation.started
-            or nodeid not in expected or invocation.directory!=expected[nodeid]
+            or nodeid not in expected or (invocation.directory,invocation.pattern)!=expected[nodeid]
             or invocation.token!=facts.invocation or invocation.head!=facts.head):
         return False
     invocation.error=error;invocation.wrapper=nodeid
@@ -119,9 +124,8 @@ def bind_facts(error, facts, invocation, nodeid):
 
 
 def records_for_error(error, nodeid, root, head):
-    """Only the existing two wrapper cases can contribute this typed channel."""
-    expected={'tests/test_native_fabric_quota_continuity.py::test_native_quota_continuity_owners':'tests',
-        'tests/test_native_fabric_quota_continuity.py::test_native_generation_and_ingress_rollout':'rollout'}
+    """Only the exact allowlisted wrapper cases can contribute this typed channel."""
+    expected=WRAPPERS
     if type(error) is not AssertionError or nodeid not in expected:
         return [],False
     try:
@@ -130,8 +134,8 @@ def records_for_error(error, nodeid, root, head):
         if (type(facts) is not NativeFacts or type(invocation) is not NativeInvocation
                 or invocation.error is not error or invocation.issued is not facts
                 or invocation.wrapper!=nodeid or invocation.consumed
-                or facts.head!=head or invocation.head!=head or facts.directory!=expected[nodeid]
-                or invocation.directory!=expected[nodeid] or facts.invocation!=invocation.token):return [],True
+                or facts.head!=head or invocation.head!=head or facts.directory!=expected[nodeid][0]
+                or (invocation.directory,invocation.pattern)!=expected[nodeid] or facts.invocation!=invocation.token):return [],True
         invocation.consumed=True;invocation.error=None;invocation.issued=None
         value=decode(facts.raw,head=head,invocation=invocation.token,directory=facts.directory,
             catalog=_fixed().PublicCatalog(root,native=True),returncode=facts.returncode)
@@ -141,10 +145,17 @@ def records_for_error(error, nodeid, root, head):
         return [],True
 
 
-def run_native(directory, *, timeout_seconds, root, cwd, invocation=None):
+def run_native(directory, *, timeout_seconds, root, cwd, invocation=None, pattern="test_*.py", env=None):
     """Same CLI discovery and private output; opt-in diagnostics are incidental."""
-    env=os.environ.copy();env['PYTHONDONTWRITEBYTECODE']='1'
-    args=['discover','-s',directory,'-p','test_*.py','-v']
+    env=os.environ.copy() if env is None else env.copy();env['PYTHONDONTWRITEBYTECODE']='1'
+    if pattern == 'test_commission_deadline.py':
+        if directory != 'tests' or Path(cwd) != Path(root):
+            raise ValueError('native_diagnostic_profile_invalid')
+        args=COMMISSION_ARGS.copy()
+    elif pattern == 'test_*.py':
+        args=['discover','-s',directory,'-p','test_*.py','-v']
+    else:
+        raise ValueError('native_diagnostic_profile_invalid')
     ordinary=[sys.executable,'-m','unittest',*args]
     head=None
     if env.get('MMX_CI_FIXED_DIAGNOSTICS_DIR'):
@@ -155,7 +166,7 @@ def run_native(directory, *, timeout_seconds, root, cwd, invocation=None):
     if invocation is None:invocation=NativeInvocation(directory)
     if (type(invocation) is not NativeInvocation or invocation.directory!=directory or invocation.started):
         return subprocess.run(ordinary,cwd=cwd,env=env,capture_output=True,text=True,timeout=timeout_seconds),None
-    invocation.started=True;invocation.token=secrets.token_hex(16);invocation.head=head
+    invocation.pattern=pattern;invocation.started=True;invocation.token=secrets.token_hex(16);invocation.head=head
     token=invocation.token
     try:
         channel=tempfile.TemporaryFile()
@@ -237,13 +248,13 @@ def _holder(test, catalog, directory):
 
 def main(argv=None):
     argv=sys.argv[1:] if argv is None else argv
-    if (len(argv)!=12 or argv[0]!='--result-fd' or not argv[1].isdigit()
+    if (len(argv) not in (11,12) or argv[0]!='--result-fd' or not argv[1].isdigit()
             or argv[2]!='--head' or not re.fullmatch(r'[a-f0-9]{40}',argv[3])
             or argv[4]!='--invocation' or not re.fullmatch(r'[a-f0-9]{32}',argv[5])
             or argv[6:] not in (['discover','-s','tests','-p','test_*.py','-v'],
-                               ['discover','-s','rollout','-p','test_*.py','-v'])):
+                               ['discover','-s','rollout','-p','test_*.py','-v'], COMMISSION_ARGS)):
         return 2
-    descriptor=int(argv[1]);head=argv[3];invocation=argv[5];directory=argv[8]
+    descriptor=int(argv[1]);head=argv[3];invocation=argv[5];directory="tests" if argv[6:]==COMMISSION_ARGS else argv[8]
     root=Path(__file__).resolve().parents[1]
     try:catalog=_fixed().PublicCatalog(root,native=True)
     except Exception:
