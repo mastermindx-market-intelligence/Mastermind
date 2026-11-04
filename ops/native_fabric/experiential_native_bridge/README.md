@@ -112,3 +112,15 @@ Tests: 52 hermetic cases in test_experiential_native_bridge.py, plus a
 disposable integration run of 212 tests with native pin, billing transport
 and manual picker. A real owner module bundle was also dry-run composed and
 byte-compared. No worker, native install, paid request or provider activation.
+
+## Current Linux installed-generation forward-port
+
+The original four source-overlay preimages are not the current Ubuntu kit.
+`linux_current_profile/` provides a **separate exact-hash qualification**
+for the observed Ubuntu0/Ubuntu3 installed-generation source, retaining its
+newer route and lease semantics. Its checks and generated candidate never
+write to installed `~/lanes/ext`; the owner generation publisher and real
+gateway/account admission remain binding. Ubuntu1 and M1 have different
+source digests and are not automatically admitted. See
+`linux_current_profile/README.md` and its 10 hermetic negative/positive
+qualification tests.
