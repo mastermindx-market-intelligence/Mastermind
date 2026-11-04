@@ -125,6 +125,17 @@ Common Mastermind examples:
 A substantive handoff must declare whether the parent mission is complete rather than assuming it.
 Use the current ACTIVE_EXECUTION finalization classification when that procedure applies.
 
+**Handoff writer responsibility.** Do not write a continuation whose only next action is
+"the original writer or parent must act" when that describes historical authorship or
+an archived conversation, rather than a verified live recipient. Anchor the next
+permitted recovery action to a reachable currently assigned receiver or identify the
+next receiver that must be lawfully assigned. Specify the original PR/workspace,
+live writer/lease/effect reconciliation, what the new receiver can safely advance,
+and actual CI/review/release/production gates. This does not transfer a STARTed
+operation, live exclusive source lease, or EFFECT_UNKNOWN to another carrier.
+An actual exact-session proof still names and preserves that target; the next receiver
+must advance independent authorized work rather than wait on an imaginary chat.
+
 ```text
 FINALIZATION_CLASSIFICATION: <current permitted class>
 MISSION_COMPLETE: true | false
@@ -211,6 +222,18 @@ If the answer is a ruling, discovery, implementation status, proof requirement o
 put it in the appropriate durable source before closing.
 
 Do not solve the question by expanding the Skillpack with live company state.
+
+### Project-plan continuity check
+
+For a multi-phase project, verify that the same-pinned
+`docs/CEO_PROJECT_PLAN_CONTINUITY.md` is satisfied: workstream waves and the latest
+dated handoff are the pinned plan; the versioned master plan is the task tree and
+lists stable step/substep IDs with editorial labels only. `DO_NOT_REDO`, the next
+action, and live effects stay on the handoff and `control_plane`. Report the
+workstream key, the handoff path, the task-tree path/SHA, and any unresolved
+cross-owner projection or effect explicitly. Do not create a second `latest`
+store, require a plan-SHA field the handoff schema does not have, or overclaim
+an unmerged plan as adopted organizational truth.
 
 ## Step 11 — State the next action precisely
 

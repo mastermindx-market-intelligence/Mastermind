@@ -6,7 +6,7 @@ Status: implementation intake for existing owners; source PR #1247 does not itse
 
 `control_plane/capacity_economics_projection.py` adds `project_capacity_bounded_preference` and immutable `CapacityProjectionScope` / `CapacityBoundedPreference` to the existing projection owner. The v1 economic API remains. The additive v2 validates a complete, fresh, scoped envelope and clamps a preference; it does not obtain observations, grant rights, normalize native quotas, reserve capacity, choose a weaker suitability tier or launch a process.
 
-The two published stages are distinguishable. The first candidate passed 121 focused tests. Adversarial host/reviewer transplantation then reproduced two defects against that candidate; the repaired source binds both identities independently and passes 127 focused tests, including 500 seeded budget/monotonicity cases. These tests do not prove atomic fleet accounting or production throughput.
+The original 2026-10-04 stages are distinguishable. The first candidate passed 121 focused tests. Adversarial host/reviewer transplantation then reproduced two defects; the repaired source bound both identities independently and passed 127 tests, including 500 seeded budget/monotonicity cases. The 2026-11-04 composition preserves those feature bytes plus current protected admission checks and passed 148 actual native focused tests with zero failures/errors/skips. These tests do not prove atomic fleet accounting or production throughput.
 
 ## B. Producer/caller join
 
@@ -57,7 +57,14 @@ The provider ledger and host registry must include legacy and Executive work dur
 
 ## D. Native client embedding
 
-A native parent uses the installed existing Fabric tool contract, through #1217's projection where applicable and #600/#1041's execution/return owners. Tool discovery must expose actual supported actions and bounds. This document intentionally invents no `fabric.spawn` API, MCP server name, credential path or shell launcher.
+A native parent uses the installed existing Fabric tool contract, through #1217's
+client projection where applicable and the existing Executive Runtime/COO/Capacity
+execution, admission and return owners under the #600 integration programme.
+Consume the accepted versioned hierarchy contract; #1041 supplies historical
+context only and is not an integration or rollout owner. Tool discovery must
+expose actual supported actions and bounds. This document invents no
+`fabric.spawn` API, MCP server, credential path, shell launcher or new lifecycle
+owner.
 
 The deterministic client adapter carries existing identifiers, the exact brief and source refs into the admitted submission. Child creation remains with the Executive owner; status and result consumption remain with the same original parent/attempt. Direct native subagents are usable only when that path is admitted and all their effects and consumption are charged to the same envelope. Do not run a free-standing built-in subagent and merely annotate it afterward as governed Fabric execution.
 
@@ -89,12 +96,21 @@ Sources:
 
 | Existing carrier | Requested next consumer capability | Proof before calling it complete |
 | --- | --- | --- |
-| #1041, operation `mastermind-os-orchestrator-launchpad-20260926-sol-001` | Join complete owner observations and v2 projection into existing hierarchy admission without changing sole runtime custody | Concurrent sibling claims conserve root/provider budgets; review/repair/final return charged; terminal shutdown/death/release and parent consumption proven |
+| Existing Executive Runtime/COO/Capacity owners, under the #600 integration programme | Join complete canonical owner observations and the advisory v2 projection at the existing admission/claim boundary, using the selected accepted hierarchy contract | Concurrent claims conserve the original root/provider/host/reviewer budgets; review, repair and final return remain charged; original-attempt settlement and parent consumption are proven |
 | #600, operation `agent-fabric-end-to-end-fable-integration-20260913-sol-001` | Qualify one heterogeneous native program using the existing principal and current hierarchy source | Actual two-provider work, independent review, exact parent result consumption; Web re-entry only if separately proven |
 | #1217, Studio/native client projection | Prove capability discovery and selected per-client configuration for the existing admitted tools | Actual parent and child tool inventory, attenuated identity, supported model/effort mapping, and original-return addressing |
 | Provider Control / current native broker owner, coordinated through the existing Fabric intake | Supply versioned quota domains/window sets and model-aware planning from existing authoritative accounting | Real configured/observed/forecast distinction, shared-key accounting, reset/429 handling and current usage eligibility |
 
-#1041 was re-observed open/draft at head `b3816bb75fa328ec6df1f92a77e8377016efdc8e`; its body cites an older tested head, so those older test counts are not asserted for this current head. #600 remains a draft plan at `a5c4f0f4c9561874ded59abf9a9466fe33734538`. Historical depth/slot counts in that plan are not deployed current policy. This operation does not modify either incumbent's implementation files or claim their workers are live.
+#1041 at `b3816bb75fa328ec6df1f92a77e8377016efdc8e` closed unmerged on
+2026-10-06 and remains historical V1.x/reference material only. Do not import its
+rejected accounting, schema-collision or domain-custody changes. #600 remains the
+existing integration programme; its draft plan at
+`a5c4f0f4c9561874ded59abf9a9466fe33734538` does not override the current protected
+[versioned hierarchy contract](../EXECUTIVE_COO_HIERARCHY.md). At this reconciliation,
+that source offers selected plan v5 with one 16-descendant root allowance while
+preserving default V1 planner/native bindings. Neither source support nor this
+owner map proves installed adoption, worker liveness, a transferred lease or
+permission to change the original carrier.
 
 ## F. Acceptance sequence and measured ramp
 
@@ -109,4 +125,10 @@ Each stage records source candidate, selected installed generation, exact runtim
 
 ## G. Current frontier
 
-The source projection, focused tests, reviewable amendment and this integration contract are the independent #1247 contribution. Runtime producer adoption, law-loader adoption, native installation, plan entitlement, atomic claim behavior and complete parent-return canaries are still open. Preserve the original managed workspace and all previously recorded host refusals; do not replay those effects through another surface. Source review and incumbent intake can proceed without pretending the native gate has cleared.
+The source projection, focused tests, reviewable amendment and this integration
+contract are the independent #1247 contribution. Runtime producer adoption,
+law-loader adoption, native installation, plan entitlement, atomic claim behavior
+and complete parent-return canaries remain open. Preserve the original managed
+workspace and every actual denied or uncertain effect. The 2026-11-04 same-carrier
+status/guard/normal-merge recovery is reconciled in README and the PR receipts;
+it does not prove runtime adoption or clear an unrelated host permission gate.

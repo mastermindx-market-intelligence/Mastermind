@@ -387,6 +387,60 @@ def test_storage_policy_accepts_bounded_inert_rationale_metadata(storage_cli, ca
     assert not root.exists()
 
 
+def _overflow_member():
+    return {
+        "mount_point": "/Volumes/Secondary", "root": "/Volumes/Secondary/workspaces",
+        "volume_uuid": "BDB7D9BA-7145-4115-B6BA-EB9B54896B67", "min_free_bytes": 100,
+    }
+
+
+@pytest.mark.parametrize("free,state,allowed", [(100, "READY", True), (99, "LOW_SPACE", False)])
+def test_existing_pool_metadata_preserves_primary_admission(
+    storage_cli, monkeypatch, capsys, free, state, allowed,
+):
+    cli, root, policy, data = storage_cli
+    data.update(overflow_volumes=[_overflow_member()], _pool_note="existing pool policy")
+    payload = json.dumps(data)
+    policy.write_text(payload)
+    monkeypatch.setattr(cli, "_storage_free_bytes", lambda p: free, raising=False)
+    code, result = _call_storage_cli(cli, capsys, "storage")
+    assert code == 0
+    receipt = result["receipt"]
+    assert receipt["state"] == state
+    assert receipt["admission_allowed"] is allowed
+    assert receipt["workspace_root"] == str(root)
+    assert receipt["mount_point"] == data["mount_point"]
+    assert receipt["volume_uuid"] == data["volume_uuid"]
+    assert receipt["min_free_bytes"] == 100
+    import hashlib
+    assert receipt["policy_sha256"] == hashlib.sha256(payload.encode()).hexdigest()
+    assert result["effect"] == "NOT_APPLIED"
+    assert not root.exists()
+
+
+@pytest.mark.parametrize("change", [
+    {"_pool_note": None}, {"_pool_note": True}, {"_pool_note": ""},
+    {"_pool_note": "x" * 8193}, {"overflow_volumes": None},
+    {"overflow_volumes": {}}, {"overflow_volumes": [False]},
+    {"overflow_volumes": [_overflow_member()] * 9},
+    {"overflow_volumes": [{**_overflow_member(), "unknown_switch": True}]},
+    {"overflow_volumes": [{**_overflow_member(), "mount_point": "relative"}]},
+    {"overflow_volumes": [{**_overflow_member(), "root": "/Volumes/Bad\x00root"}]},
+    {"overflow_volumes": [{**_overflow_member(), "volume_uuid": "not-a-uuid"}]},
+    {"overflow_volumes": [{**_overflow_member(), "min_free_bytes": True}]},
+    {"overflow_volumes": [{**_overflow_member(), "min_free_bytes": -1}]},
+])
+def test_malformed_pool_metadata_is_refused(storage_cli, capsys, change):
+    cli, root, policy, data = storage_cli
+    data.update(change)
+    policy.write_text(json.dumps(data))
+    code, result = _call_storage_cli(cli, capsys, "storage")
+    assert code == 2
+    assert "STORAGE_POLICY_INVALID" in result["error"]
+    assert result["effect"] == "NOT_APPLIED"
+    assert not root.exists()
+
+
 @pytest.mark.parametrize("why", [None, True, 7, ["text"], {"note": "text"}, "x" * 8193])
 def test_storage_policy_rejects_malformed_rationale_metadata(storage_cli, capsys, why):
     cli, root, policy, data = storage_cli
@@ -640,3 +694,27 @@ def test_installation_profile_keeps_required_mount_without_fallback(storage_cli,
     selected = cli.installation_storage_profile(home)
     assert selected["root"] == str(root.resolve())
     assert selected["mount_point"] == data["mount_point"]
+
+
+def test_cli_release_explains_ignored_cache_when_git_status_looks_clean(tmp_path: Path):
+    source, _base = _repository(tmp_path)
+    (source / ".gitignore").write_text(".pytest_cache/\n", encoding="utf-8")
+    _git(source, "add", ".gitignore")
+    _git(source, "commit", "-qm", "ignore generated test cache")
+    base = _git(source, "rev-parse", "HEAD")
+    root = tmp_path / "workspaces"
+    code, acquired = _run_cli(source, root, "acquire", "--operation-id", "cli-dirty-explanation", "--base-sha", base)
+    assert code == 0
+    workspace = Path(acquired["receipt"]["workspace_path"])
+    payload = workspace / ".pytest_cache" / "keep-until-qualified"
+    payload.parent.mkdir()
+    payload.write_text("do not automatically delete ignored evidence", encoding="utf-8")
+    assert _git(workspace, "status", "--porcelain=v1") == ""
+    code, observed = _run_cli(source, root, "release", "--operation-id", "cli-dirty-explanation")
+    assert code == 0 and observed["effect"] == "NOT_APPLIED"
+    assert observed["receipt"]["state"] == "PRESERVED_DIRTY"
+    assert "tracked_changes=absent" in observed["receipt"]["reason"]
+    assert "all_untracked=present" in observed["receipt"]["reason"]
+    assert "including ignored files" in observed["receipt"]["reason"]
+    assert "git ls-files --others -z" in observed["receipt"]["reason"]
+    assert payload.read_text(encoding="utf-8") == "do not automatically delete ignored evidence"

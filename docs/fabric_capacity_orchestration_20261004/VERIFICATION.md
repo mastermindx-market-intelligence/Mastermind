@@ -10,7 +10,7 @@ It does not change native quota accounting, live broker behavior, Model Router's
 
 The v1 API/schema remain. Its expiry-pressure scalar now rejects nonfinite, negative and nonnumeric values, and its options scan is bounded. The additive v2 requires explicit caller-supplied scope, clock and freshness policy. Every v2 output continues to declare `NONE_PREVIEW_ONLY`, `binding_verification=NOT_PERFORMED`, `live_admission=false`, `selection_is_commitment=false`, and `claim_time_revalidation_required=true`.
 
-## Causal test evidence
+## Historical causal test evidence (2026-10-04)
 
 Environment: offline conversation verification container, Python 3.13.5. Only the selected module and focused tests were reconstructed. No native-host installation, provider call or whole-repository test execution is claimed.
 
@@ -35,7 +35,7 @@ Result: **127 passed in 0.16 seconds**. One test executes **500 seeded cases**, 
 
 Coverage includes GLM Flash ceiling versus tighter shared-account headroom; distinct full-model limits; zero and unknown evidence on every required axis; missing windows/ancestors; account/model/root/operation/workload/host/reviewer substitution; reset-epoch substitution; stale/future/expired timestamps; forecasts and TTL not replenishing present capacity; immutable results; unchanged lawful tier; and preview-only output in all states.
 
-## Exact tested objects
+## Historical tested objects (2026-10-04)
 
 | Path | Git blob SHA | SHA-256 |
 | --- | --- | --- |
@@ -46,7 +46,7 @@ Coverage includes GLM Flash ceiling versus tighter shared-account headroom; dist
 
 GitHub blob-creation receipts matched the tested module and test objects before tree assembly. No hash is inferred from a display name.
 
-## Routing-law preservation
+## Historical routing-law preservation (2026-10-04)
 
 The complete pre-existing `docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md` was reconstructed and byte-verified against blob `5bfb9bbc91177e2400da596b45ec809d294a3242` (22,436 bytes). The default branch was re-read at the decision boundary and still reported that blob. The proposed file appends only Section 12 (1,229 bytes), referencing the new amendment; all earlier content remains unchanged.
 
@@ -55,6 +55,44 @@ The complete pre-existing `docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md` w
 - Native integration contract: `e76b981a51700d45084aa4bb3a1a2d9b3c6587e9`.
 
 These document blob receipts also matched their inspected local objects. Branch/PR law text is not protected law until accepted; an accepted link is not proof of current-session loading or installation.
+
+## Current protected composition and verification (2026-11-04)
+
+The original managed carrier normally fast-forwarded to published
+`0b76d83cb49ccfadaf749e9442531b00dbae0de2`, then integrated protected
+`0a2768613c280102617c92c8e4d16e7585384293`. The sole textual conflict was the
+routing addendum append point. Its complete protected blob
+`c10fda0c2cbe8c16ce04dd6f3b6971ac6d03ed7a` is retained byte-for-byte as a prefix,
+followed by the original compact Section12. The current accepted hierarchy is
+referenced without importing closed-unmerged #1041's rejected implementation.
+
+The capacity module automatically composed the protected BytePlus provider/model
+spoof-admission guard with the original scalar/owner-envelope work. Its only
+change against the reviewed feature module is that protected guard. The two
+candidate test files remain unchanged; the protected v1 tests include the newer
+admission negatives and ordinary-provider controls.
+
+Actual execution on the original native carrier: Python3.14.7,
+`python3 -m pytest -q tests/test_capacity_economics_projection.py tests/test_capacity_economics_scalar_hardening.py tests/test_capacity_economics_owner_envelope.py`.
+Process68330 exited0; JUnit records **148 tests,0 failures,0 errors,0 skips**
+in1.326seconds. Inputs were hashed before and after and remained identical.
+
+| Current tested path | Git blob SHA | SHA-256 |
+| --- | --- | --- |
+| `control_plane/capacity_economics_projection.py` | `af5bbd94c00deea08d466333ffde9979412c09e2` | `f40a411babdb2ca9cc8f9d899f0c2ff9cc76d4922a538e11f1e0cb27151e24a0` |
+| `tests/test_capacity_economics_projection.py` | `c51a9d78a8c489d7b129fdd847b17eb7b5e4ee3b` | `a5f6656f58abdd832d55b53211ca07da94e93ea68101715e96dc9bca56542e63` |
+| `tests/test_capacity_economics_owner_envelope.py` | `fbd163e54814cb660cfc696c13157710fae51cf2` | `4b6c85cac924c5569b0ad463d553aba8c2b9afc6ed441c60c86c3fce429984f8` |
+| `tests/test_capacity_economics_scalar_hardening.py` | `c43b90c3c6e4835951ed10ab7b51cc711cc637bc` | `774ea50fd4d707039969fab408e6be542c409e08f26f032e5ada609a8890fec5` |
+
+The complete feature delta remains eight paths. Its diff check against the
+current protected parent passes. An initial comparison against the old October
+head also scanned3530 incoming protected paths and reported pre-existing
+whitespace in protected notices/research files; those unrelated accepted bytes
+were preserved. This is not a new failure in the eight-path feature delta.
+
+This refresh changes source composition and integration guidance only. No
+provider model-list utility, worker launch, quota mutation, installed selection
+or native runtime canary was executed.
 
 ## Release held
 

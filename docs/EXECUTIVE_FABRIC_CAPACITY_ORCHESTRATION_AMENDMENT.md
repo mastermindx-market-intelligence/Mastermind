@@ -29,7 +29,19 @@ A parent may execute a tiny local check rather than pay delegation, context-tran
 
 ## 3. One bounded hierarchy, one conserved root budget
 
-Use the existing root -> domain -> worker/independent-reviewer structure where its source and installed runtime are qualified. The incumbent #1041 draft describes a two-edge hierarchy, but a draft does not alter deployed depth. Use the minimum of accepted policy, actual harness capability and current attenuated grant. Deeper nesting requires an explicit existing-owner policy change and real-path qualification, not recursively spawning around the leaf boundary.
+Consume the existing Runtime/COO/Capacity hierarchy through the current accepted
+[versioned hierarchy contract](EXECUTIVE_COO_HIERARCHY.md), under the #600 native
+integration programme. At this source reconciliation, protected plan v5 supports
+root/coordinator/worker composition with one conserved allowance of 16 descendant
+Jobs, including planners, coordinators, work, review and repair; it does not create
+a fresh allowance for each branch. The public planner and default native
+handshakes retain their frozen V1 contract unless the existing version-aware owner
+explicitly selects and qualifies another supported version. Source capability is
+not installed capability or a live grant: use only the intersection of accepted
+policy, the selected contract, actual installed harness capability and current
+attenuated grants. #1041 is historical, closed-unmerged V1.x work, not a rollout
+dependency or source to import wholesale. This amendment authorizes no new schema
+migration, provider-charge ledger, domain-custody service or global depth change.
 
 Every descendant retains the original root and immediate parent references. New child names, sessions, provider aliases and domains do not create fresh root allowances, fair-share identities or credits. Domain grants only attenuate their ancestor's rights, paths, budgets and effect scope. A parent remains responsible for children and returns after its own reasoning turn finishes.
 

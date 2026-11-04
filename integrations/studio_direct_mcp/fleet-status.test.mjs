@@ -299,3 +299,43 @@ test('malformed owner output is a bounded refusal', async t => {
   assert.equal(result.structuredContent.state, 'REFUSED');
   assert.equal(result.structuredContent.code, 'FLEET_STATUS_OWNER_RESULT_INVALID');
 });
+
+
+test('fully absent tunnel with null TTL is a bounded DEGRADED seat', async t => {
+  const row = statusRow('chatgpt1', false);
+  row.tunnel.gatewayReady = false;
+  row.tunnel.transportTTL = null;
+  const fx = await fixture(JSON.stringify(ownerFor([row])));
+  t.after(() => rm(fx.dir, {recursive:true, force:true}));
+  const result = await createFleetStatus(fx.config).status();
+  assert.equal(result.state, 'DEGRADED');
+  assert.equal(result.accountCount, 1);
+  assert.equal(result.readyCount, 0);
+  assert.deepEqual(result.accounts[0].issues, ['TUNNEL_NOT_LOADED', 'TUNNEL_NOT_RUNNING']);
+  assert.equal(result.accounts[0].tunnel.transportTTL, null);
+  assert.equal(JSON.stringify(fleetStatusToolResult(result)).includes(row.tunnel.tunnelId), false);
+});
+
+test('null TTL still refuses loaded, active, anomalous, or claimed-ready tunnels', async t => {
+  const variants = [
+    ['loaded', row => { row.tunnel.loaded = true; }],
+    ['running', row => { row.tunnel.loaded = true; row.tunnel.running = true; }],
+    ['healthy', row => { row.tunnel.healthy = true; }],
+    ['poll-ready', row => { row.tunnel.controlPlanePollReady = true; }],
+    ['transport-ready', row => { row.tunnel.tunnelReady = true; }],
+    ['gateway-ready', row => { row.tunnel.gatewayReady = true; }],
+    ['owner-claims-ready', row => { row.ready = true; }],
+    ['unauthorized-ttl', row => { row.tunnel.transportTTL = '4h'; }],
+    ['missing-ttl-field', row => { delete row.tunnel.transportTTL; }],
+  ];
+  for (const [name, mutate] of variants) {
+    const row = statusRow('chatgpt1', false);
+    row.tunnel.gatewayReady = false;
+    row.tunnel.transportTTL = null;
+    mutate(row);
+    const fx = await fixture(JSON.stringify(ownerFor([row])));
+    t.after(() => rm(fx.dir, {recursive:true, force:true}));
+    await assert.rejects(() => createFleetStatus(fx.config).status(),
+      /FLEET_STATUS_OWNER_RESULT_INVALID/, name);
+  }
+});

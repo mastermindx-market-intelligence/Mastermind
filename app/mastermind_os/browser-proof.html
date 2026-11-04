@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>
+      SOURCE FIXTURE — Mastermind OS selected-session answer flow (no
+      authentication, provider task, real SEND or parent consumption)
+    </title>
+  </head>
+  <body>
+    <!--
+      Permanent SOURCE FIXTURE banner, rendered OUTSIDE the App root and kept
+      visible on every viewport. This is fixture chrome, not product art
+      direction; the product itself stays on its hard-coded dark Noir theme.
+    -->
+    <div
+      id="fixture-banner"
+      style="position: sticky; top: 0; z-index: 2147483647; box-sizing: border-box; width: 100%; margin: 0; padding: 8px 12px; background: #7f1d1d; color: #fef2f2; font: 700 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center"
+    >
+      SOURCE FIXTURE — no authentication, provider task, real SEND or parent consumption
+    </div>
+    <!-- Product App root: the real App mounts here. -->
+    <div id="root"></div>
+    <!-- Separate fixture controls root, outside the App DOM subtree. -->
+    <div id="fixture-controls"></div>
+    <script type="module" src="/src/browser-proof.tsx"></script>
+  </body>
+</html>
