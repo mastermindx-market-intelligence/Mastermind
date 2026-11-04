@@ -398,6 +398,17 @@ commission_refresh_runtime() {
       RC=75; log "COMMISSION_TIME_EXHAUSTED stage=$stage"; return "$RC"
     fi
     MAX_SECS="$seconds"
+    # Do not start a new remote effect with too little original commission
+    # time left to publish and observe its terminal RC. A <=4-second launch
+    # opportunity becomes a clean pre-task refusal, not EFFECT_UNKNOWN with
+    # an indefinitely retained provider lease. This is not a retry or a
+    # longer deadline; a prior observed terminal still follows the existing
+    # same-run admission-refusal collection branch.
+    if [ "$stage" = launch ] && [ "$MAX_SECS" -lt 5 ]; then
+      RC=75
+      log "COMMISSION_TIME_EXHAUSTED stage=launch observation_reserve=5"
+      return "$RC"
+    fi
   fi
   # Leave two complete poll intervals for remote child startup, bounded
   # cleanup/RC publication and a final in-deadline controller observation.
