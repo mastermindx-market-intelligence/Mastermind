@@ -584,7 +584,7 @@ test('real subprocess captures the exact native C2 policy refusal from STDERR, w
    'cmd=sys.argv[1]',
    'if cmd=="request" and "--help" in sys.argv: print("usage: request --strict-manual-pin")',
    'elif cmd=="status": print(json.dumps({"schema":"mastermind.fabric_task_status.v1","run_id":"web-fabric-001","root_id":None,"parent_run_id":None,"state":"NOT_FOUND","result_available":False,"accepted":None}))',
-   'elif cmd=="preview": sys.stderr.write("NONE reason=bounded_complexity_requires_escalation\\n"); sys.exit(75)',
+   'elif cmd=="preview": sys.stderr.write("NONE reason=bounded_complexity_requires_escalation"+chr(10)); sys.exit(75)',
    'else: sys.exit(66)',
    ''
   ].join('\n'));
