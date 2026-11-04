@@ -34,14 +34,19 @@ CHANGES = (
         'return (model == "cursor-grok-4.6-high" and _grok_exhausted()\n'
         '            and policy_allows("grok", task_class, doc)[0])',
         'return (model == "cursor-grok-4.6-high"\n'
-        '            and policy_allows("grok", task_class, doc)[0])',
+        '            and policy_allows("grok", task_class, doc)[0]\n'
+        '            and (_grok_exhausted()\n'
+        '                 or (task_class.lower() not in LABOR_CLASSES_R30\n'
+        '                     and (task_class.lower() == "review"\n'
+        '                          or is_judgment_class(task_class, doc)\n'
+        '                          or task_class.lower() in operator_classes(doc)))))',
     ),
     (
         "    # Chairman's quota-only exception follows this exact Grok model's class\n"
         "    # capability. Composer and ordinary Cursor routes retain R30 unchanged.",
-        "    # The exact Cursor Grok 4.6-high alias inherits Grok role eligibility.\n"
-        "    # Automatic cross-pool fallback remains restricted to Grok exhaustion;\n"
-        "    # Composer and ordinary Cursor routes retain R30 unchanged.",
+        "    # Exact Cursor Grok 4.6-high manual judgment inherits Grok role eligibility.\n"
+        "    # Labor retains the old Grok-exhausted-only exception (R30);\n"
+        "    # ordinary Cursor and automatic fallback remain unchanged.",
     ),
     (
         'return "NONE reason=Cursor Grok alias requires exhausted weekly Grok and eligible Grok task"',
@@ -54,8 +59,8 @@ CHANGES = (
         '            if not _grok_exhausted() and _slot_concurrent("grok") < _pool_cap("grok"):\n'
         '                return False, "grok_before_cursor policy"',
         '        # Grok-first is an AUTO preference, not a veto of the one exact\n'
-        '        # explicitly selected Cursor Grok 4.6 alias. Other Cursor models retain\n'
-        '        # the ordinary Grok-before-Cursor routing policy.\n'
+        '        # manually pinned Cursor Grok 4.6 review/judgment route.\n'
+        '        # Labor still needs Grok exhaustion through the affinity gate.\n'
         '        tc = task_class.lower()\n'
         '        if tc in ("fix_build", "high_level") and model != "cursor-grok-4.6-high":\n'
         '            if not _grok_exhausted() and _slot_concurrent("grok") < _pool_cap("grok"):\n'

@@ -106,6 +106,37 @@ class Cursor46ExplicitPin(unittest.TestCase):
                     self.assertFalse(pick.launch_policy(
                         "cursor", "orchestration", ALIAS, doc=POLICY)["allowed"])
 
+    def test_r30_labor_only_uses_legacy_exhaustion_exception(self):
+        # Manual monthly Cursor is independent for *judgment* work, but must
+        # not widen the historical quota-only labor exception (R30).
+        task_classes = ["review", "high_level", "execute", "fix_build",
+                        "mechanical", "census", "extract"]
+        policy = {"pools": {p: {"task_classes": task_classes}
+                            for p in ("grok", "cursor")}}
+        for source in PICKERS:
+            with self.subTest(source=str(source)):
+                pick = load(source)
+                with patch.object(pick, "_grok_exhausted", return_value=False):
+                    for task in ("execute", "fix_build", "mechanical", "census", "extract"):
+                        with self.subTest(task=task, exhausted=False):
+                            self.assertFalse(pick._cursor_grok_quota_affinity(
+                                ALIAS, task, policy))
+                            self.assertFalse(pick.policy_allows(
+                                "cursor", task, policy, model=ALIAS)[0])
+                    self.assertTrue(pick.policy_allows(
+                        "cursor", "review", policy, model=ALIAS)[0])
+                    self.assertTrue(pick.policy_allows(
+                        "cursor", "high_level", policy, model=ALIAS)[0])
+                # Under a genuine Grok exhausted marker, preserve the exact
+                # original quota-only labor failover for eligible Grok classes.
+                with patch.object(pick, "_grok_exhausted", return_value=True):
+                    for task in ("execute", "fix_build", "mechanical", "census", "extract"):
+                        with self.subTest(task=task, exhausted=True):
+                            self.assertTrue(pick._cursor_grok_quota_affinity(
+                                ALIAS, task, policy))
+                            self.assertTrue(pick.policy_allows(
+                                "cursor", task, policy, model=ALIAS)[0])
+
     def test_high_level_manual_pin_does_not_inherit_auto_preference_veto(self):
         # The production quota/broker check is not skipped. This test supplies
         # a qualified healthy broker response and isolates only the preference.
