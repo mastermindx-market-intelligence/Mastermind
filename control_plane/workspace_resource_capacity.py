@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import re
 from typing import Any
 
 
@@ -109,3 +110,31 @@ def acquire_retained_capacity(acquisition, vm_guard, *, root_job_id, job_id, att
     finally:
         vm_guard.deactivate()
 
+
+def project_capacity_source(snapshot: RetainedCapacitySnapshot, receipt, *, work_ref: str, root_job_id: str, job_id: str, attempt_id: str, now_ms: int):
+    """Safe detached source body. Caller still owns auth/bracket/SAME receipt."""
+    from control_plane.executive_runtime import RuntimeReadObservationReceipt
+    if (type(receipt) is not RuntimeReadObservationReceipt or receipt.schema != "mastermind.runtime_read_observation.v1"
+            or receipt.state != "SAME" or type(receipt.source_identity) is not str
+            or re.fullmatch(r"[0-9a-f]{32}", receipt.source_identity) is None
+            or type(receipt.before) is not int or receipt.before < 0
+            or type(receipt.after) is not int or receipt.after != receipt.before
+            or type(snapshot) is not RetainedCapacitySnapshot
+            or snapshot.observation_source_identity != receipt.source_identity
+            or snapshot.root_metadata.work_ref != work_ref
+            or snapshot.root_metadata.root_job_id != root_job_id
+            or snapshot.job.job_id != job_id or snapshot.attempt.attempt_id != attempt_id):
+        raise ValueError("RETAINED_CAPACITY_SOURCE_MISMATCH")
+    from control_plane.retained_capacity_projection import project_retained_capacity
+    root = snapshot.root_metadata.job_id
+    claim, attempt = snapshot.claim_event, snapshot.attempt
+    command = f"coo-cycle:{root}:dispatch:{snapshot.job.job_id}:attempt:1"
+    body = project_retained_capacity(
+        root_job_id=root, job_id=snapshot.job.job_id, attempt_id=attempt.attempt_id,
+        worker_id=attempt.worker_id, quota_class=attempt.quota_class, command_id=command,
+        claim_event=dataclasses.asdict(claim), begin_event=dataclasses.asdict(snapshot.begin_event), now_ms=now_ms,
+    )
+    encoded = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode()
+    if len(encoded) > MAX_RESPONSE_BYTES:
+        raise ValueError("RETAINED_CAPACITY_RESPONSE_OVER_BUDGET")
+    return body

@@ -59,3 +59,43 @@ Missing telemetry remains an engineering obligation, not product acceptance.
 the actual Python producer and its existing deterministic test inputs:
 `tests/test_executive_native_host_capacity.py::project(snapshot())`.
 Its synthetic clock/identity are test data and provide no live host evidence.
+
+## Historical provider evidence: implemented source
+
+This is a different source from host telemetry. The original successful Runtime
+`JOB_CLAIMED` Event already retains `mastermind.finite_initial_claim/v1` with a
+qualified `mastermind.provider_capacity.v2` snapshot. No new acquisition or store
+is needed to read that historical receipt.
+
+The implemented internal source API is:
+
+```python
+with runtime.observe_bounded_read() as observation:
+    snapshot = observation.read_retained_capacity_bounded(root_id, job_id, attempt_id)
+body = project_capacity_source(
+    snapshot, observation.receipt,
+    work_ref=work_ref, root_job_id=root_id, job_id=job_id,
+    attempt_id=attempt_id, now_ms=runtime.store.now_ms(),
+)
+```
+
+`project_capacity_source` is in `control_plane/workspace_resource_capacity.py`.
+It requires the finalized SAME receipt, exact per-read source identity and
+independently qualified workstream/root/job/current-Attempt tuple. Its response
+budget is 16,384 bytes. The source acquisition verifies claim/BEGIN metadata
+before reading bounded payloads; the safe projector binds the immutable BEGIN
+aggregate, command, receipt and boot-qualified commitments to the original claim.
+Historical snapshot validity uses the original claim clock. Current read time
+only determines receipt age; it cannot refresh quota or grant eligibility.
+
+The fixed authenticated Workspace frame/host port is not installed by this slice.
+Its current integration owner is Root after the existing READ freeze. That owner
+must independently authorize and bracket the selected root/current Attempt and
+current catalogue/permission publication before and after the bounded read.
+Never serve the internal raw `RetainedCapacitySnapshot` or accept browser-supplied
+host, metric, binding, path or clock fields.
+
+`retained-provider-owner-projection.json` is generated from an actual inert
+Runtime/SQLite claim, bound observation close and safe Python projector, using
+synthetic source fixtures. The TypeScript consumer test reads those exact bytes.
+It provides source compatibility evidence, not a live provider/account claim.
