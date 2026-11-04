@@ -62,12 +62,12 @@ The baseline records six successes and two compatibility failures. It exits 1 wh
 
 This is a compatibility gap when pairing current V3 source with the V2-scoped #1150 consumer. It does not invalidate #1150's declared V2-only acceptance.
 
-The proposed patch changes only the E1 version check to an explicit set containing **1.2.0 and 1.4.0**. All schema, tool, mode, key-set, error, JSON, intent, and receipt guards remain unchanged.
+The proposed patch changes only the E1 version check to an explicit set containing **1.2.0, 1.4.0 and 1.5.0**. All schema, tool, mode, key-set, error, JSON, intent, and receipt guards remain unchanged.
 
-With that patch applied only to the temporary snapshot:
+With that patch applied only to the temporary snapshot, requalified on C19 request-reconciliation candidate `ee8f01583a08a06f24d7cf72aba3ecf1a290da16`:
 
-- All eight real consumer/backend journeys pass.
-- All 52 negative controls pass: 13 per recovered profile/receipt-mode combination.
+- All eight real consumer/backend journeys pass, including V3 lost-reply recovery from actual `1.5.0` status envelopes in both receipt modes.
+- All 52 negative controls pass: 13 per recovered profile/receipt-mode combination. The unsupported-version guard was advanced from newly-qualified `1.5.0` to unqualified `1.6.0`; `1.3.0`, installed-but-unqualified `1.3.1`, 2.x, non-string versions and the other structural guards remain rejected.
 - Negative controls reject unsupported versions, non-string versions, extra envelope fields, a foreign tool, wrong mode, foreign intent identity, malformed degradation data, and an unsupported receipt schema.
 - Every rejected status leaves the exact pending pointer intact and issues no second submit.
 - Changing the current UI workstream before recovery does not alter the original mission selection.
@@ -84,6 +84,8 @@ Committed reports:
 - [Proposed consumer patch](../../../tests/fixtures/mastermind_os_v3_recovery_compat.patch)
 
 The JSON reports record the original five-file source manifest, consumer commit, actual producer-envelope digests, receipt schemas/work references, observed UI states, Job/attempt/worker counts, and negative controls. The patched report also records the exact patch and modified-source hashes.
+
+Current 1.5.0 requalification binds the committed patched report SHA-256 `020fe2f2f4bb3b8b1d49c02cd6593bd1d8c457453b29ea004e25e0f2a474f894`, consumer patch SHA-256 `4c5092e149ea7171aff297674b7d6fc6a1c9f2407b9689cb5eff911205e9a68c`, and launch-client negative-control source SHA-256 `de9005a4af5e31a190981e575a2d60d58dcd408308ead278126815133b3fc61a`. The two V3 lost-reply cases record `ceo_intent_status` producer version `1.5.0`; this supersedes the earlier 1.4.0 patched-report bytes without rewriting the historical unmodified baseline.
 
 The consumer commit must be available as a Git object. On a new checkout, fetch that exact object from the existing origin before running the probe. No checkout or worktree switch is required.
 

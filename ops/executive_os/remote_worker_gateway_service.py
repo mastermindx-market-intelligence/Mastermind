@@ -20,12 +20,20 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping
 
 from ops.executive_os.remote_worker_gateway import RemoteWorkerGateway
-from ops.executive_os.remote_worker_gateway_config import RemoteWorkerGatewayConfig
+from ops.executive_os.remote_worker_gateway_config import (
+    FABRIC_BROKER_TARGET,
+    WORKER_BROKER_TARGET,
+    RemoteWorkerGatewayConfig,
+)
+from ops.executive_os.remote_assignment_control import AssignmentControlBinding
 
 SERVICE_LABEL = "com.mastermind.executive.remote-worker-gateway"
 SERVICE_CHECK_SCHEMA = "mastermind.remote_worker_gateway_service_check/v1"
 DEFAULT_GATEWAY_ROOT = Path("/Library/Application Support/MastermindExecutive/remote-worker-gateway")
 DEFAULT_BROKER_SOCKET_ROOT = Path("/var/run/mastermind-executive")
+DARWIN_FABRIC_SOCKET_ROOT = Path("/private/var/run/mastermind-executive")
+LINUX_GATEWAY_ROOT = Path("/etc/mastermind-executive")
+LINUX_BROKER_SOCKET_ROOT = Path("/run")
 MAX_CONFIG_BYTES = 64 * 1024
 MAX_TLS_FILE_BYTES = 1024 * 1024
 _ACCOUNT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
@@ -225,7 +233,14 @@ def _closed_json(raw: bytes) -> dict[str, Any]:
         value = json.loads(raw.decode("utf-8", errors="strict"), object_pairs_hook=pairs)
     except (UnicodeDecodeError, json.JSONDecodeError):
         raise RemoteWorkerGatewayServiceError("GATEWAY_CONFIG_INVALID") from None
-    if type(value) is not dict or set(value) != CONFIG_FIELDS:
+    loader_fields = (
+        CONFIG_FIELDS,
+        CONFIG_FIELDS | {"assignment_control"},
+        CONFIG_FIELDS | {"broker_target", "expected_broker_peer_uid"},
+        CONFIG_FIELDS
+        | {"assignment_control", "broker_target", "expected_broker_peer_uid"},
+    )
+    if type(value) is not dict or set(value) not in loader_fields:
         _refuse("GATEWAY_CONFIG_INVALID")
     return value
 
@@ -257,19 +272,34 @@ def _canonical_config(config: RemoteWorkerGatewayConfig) -> bytes:
         "request_timeout_seconds": float(config.request_timeout_seconds),
         "max_frame_bytes": config.max_frame_bytes,
     }
+    if config.assignment_control is not None:
+        value["assignment_control"] = config.assignment_control.to_wire()
+    if config.broker_target == FABRIC_BROKER_TARGET:
+        # Only the explicit Fabric target carries these fields, so every
+        # existing default-target digest stays byte-identical.
+        value["broker_target"] = config.broker_target
+        value["expected_broker_peer_uid"] = config.expected_broker_peer_uid
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
 
 
 def load_remote_worker_gateway_config(
     path: Path | str,
     *,
-    allowed_root: Path | str = DEFAULT_GATEWAY_ROOT,
-    broker_socket_root: Path | str = DEFAULT_BROKER_SOCKET_ROOT,
+    allowed_root: Path | str | None = None,
+    broker_socket_root: Path | str | None = None,
     expected_owner_uid: int = 0,
     expected_group_gid: int | None = None,
 ) -> RemoteWorkerGatewayConfig:
     """Read one immutable root-owned local gateway configuration."""
 
+    # Match the existing Linux installer's systemd configuration. Selecting
+    # the platform namespace is not a fallback to a caller-selected root.
+    if allowed_root is None:
+        allowed_root = LINUX_GATEWAY_ROOT if sys.platform == "linux" else DEFAULT_GATEWAY_ROOT
+    default_socket_root = broker_socket_root is None
+    if default_socket_root:
+        broker_socket_root = (LINUX_BROKER_SOCKET_ROOT if sys.platform == "linux"
+                              else DEFAULT_BROKER_SOCKET_ROOT)
     if type(expected_owner_uid) is not int or expected_owner_uid < 0:
         _refuse("GATEWAY_IDENTITY_INVALID")
     if expected_group_gid is None:
@@ -291,6 +321,12 @@ def load_remote_worker_gateway_config(
         read_bytes=True,
     )
     document = _closed_json(raw)
+    if (default_socket_root and sys.platform == 'darwin'
+            and document.get('broker_target') == FABRIC_BROKER_TARGET):
+        # This new target requires a canonical root-installed endpoint. Keep
+        # the legacy worker-broker default/digest unchanged; never resolve an
+        # arbitrary symlink to make the strict Fabric parent guard pass.
+        socket_root = DARWIN_FABRIC_SOCKET_ROOT
     for key in (
         "schema",
         "host_ref",
@@ -342,6 +378,15 @@ def load_remote_worker_gateway_config(
         _refuse("GATEWAY_CONFIG_INVALID")
     if type(timeout) not in (int, float) or isinstance(timeout, bool):
         _refuse("GATEWAY_CONFIG_INVALID")
+    if "broker_target" in document or "expected_broker_peer_uid" in document:
+        # The optional broker endpoint fields are paired: never accept one alone.
+        if "broker_target" not in document or "expected_broker_peer_uid" not in document:
+            _refuse("GATEWAY_CONFIG_INVALID")
+        if type(document["broker_target"]) is not str:
+            _refuse("GATEWAY_CONFIG_INVALID")
+        peer_uid = document["expected_broker_peer_uid"]
+        if isinstance(peer_uid, bool) or not isinstance(peer_uid, int) or peer_uid <= 0:
+            _refuse("GATEWAY_CONFIG_INVALID")
     try:
         return RemoteWorkerGatewayConfig(
             schema=document["schema"],
@@ -357,6 +402,10 @@ def load_remote_worker_gateway_config(
             allowed_operations=frozenset(operations),
             request_timeout_seconds=float(timeout),
             max_frame_bytes=frame_bytes,
+            assignment_control=(AssignmentControlBinding.from_wire(document["assignment_control"])
+                                if "assignment_control" in document else None),
+            broker_target=document.get("broker_target", WORKER_BROKER_TARGET),
+            expected_broker_peer_uid=document.get("expected_broker_peer_uid"),
         )
     except (TypeError, ValueError):
         raise RemoteWorkerGatewayServiceError("GATEWAY_CONFIG_INVALID") from None
@@ -486,6 +535,52 @@ async def wait_for_gateway_shutdown() -> None:
             loop.remove_signal_handler(item)
 
 
+def _lstat(path: Path) -> os.stat_result:
+    try:
+        return path.lstat()
+    except OSError:
+        raise RemoteWorkerGatewayServiceError("GATEWAY_BROKER_SOCKET_INVALID") from None
+
+
+def _fabric_socket_identity(path: Path) -> tuple[int, ...]:
+    """Prove the attended-Fabric broker endpoint before exposing the gateway.
+
+    The Fabric socket is created by root, so every parent directory and the
+    socket node itself must be root-owned and symlink-free, no parent may be
+    group- or world-writable, and the socket carries no world permissions.
+    This is endpoint metadata only: no Fabric connection, status request,
+    admission check or START is ever attempted here.
+    """
+    if not path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        _refuse("GATEWAY_BROKER_SOCKET_INVALID")
+    directories: list[Path] = []
+    current = path.parent
+    while True:
+        directories.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    for directory in reversed(directories):
+        info = _lstat(directory)
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != 0
+            or stat.S_IMODE(info.st_mode) & 0o022
+        ):
+            _refuse("GATEWAY_BROKER_SOCKET_INVALID")
+    info = _lstat(path)
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISSOCK(info.st_mode)
+        or info.st_nlink != 1
+        or info.st_uid != 0
+        or stat.S_IMODE(info.st_mode) & 0o007
+    ):
+        _refuse("GATEWAY_BROKER_SOCKET_INVALID")
+    return _metadata_tuple(info)
+
+
 def _broker_socket_identity(path: Path) -> tuple[int, int, int, int, int]:
     """Prove the current local broker endpoint before exposing the gateway."""
 
@@ -513,19 +608,26 @@ async def serve_remote_worker_gateway(
 ) -> None:
     if not isinstance(config, RemoteWorkerGatewayConfig):
         raise TypeError("config must be RemoteWorkerGatewayConfig")
-    broker_identity = _broker_socket_identity(config.broker_socket_path)
+    fabric = config.broker_target == FABRIC_BROKER_TARGET
+    endpoint_identity = _fabric_socket_identity if fabric else _broker_socket_identity
+    broker_identity = endpoint_identity(config.broker_socket_path)
     gateway = gateway_factory(config)
-    if _broker_socket_identity(config.broker_socket_path) != broker_identity:
+    if endpoint_identity(config.broker_socket_path) != broker_identity:
         _refuse("GATEWAY_BROKER_SOCKET_INVALID")
-    try:
-        broker_status = await asyncio.wait_for(
-            gateway.broker_call("status", {}),
-            timeout=config.request_timeout_seconds,
-        )
-    except Exception:
-        raise RemoteWorkerGatewayServiceError("GATEWAY_BROKER_UNAVAILABLE") from None
-    if not isinstance(broker_status, Mapping):
-        _refuse("GATEWAY_BROKER_UNAVAILABLE")
+    if not fabric:
+        try:
+            broker_status = await asyncio.wait_for(
+                gateway.broker_call("status", {}),
+                timeout=config.request_timeout_seconds,
+            )
+        except Exception:
+            raise RemoteWorkerGatewayServiceError("GATEWAY_BROKER_UNAVAILABLE") from None
+        if not isinstance(broker_status, Mapping):
+            _refuse("GATEWAY_BROKER_UNAVAILABLE")
+    # A Fabric target has no startup RPC at all: readiness is the verified
+    # endpoint metadata above, never a fabricated status request or an
+    # invented Attempt.  The bridge peer uid is enforced on every actual
+    # request by WorkerBrokerClient.
     server = await gateway.start_server()
     try:
         async with server:

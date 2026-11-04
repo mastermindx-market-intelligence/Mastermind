@@ -1,0 +1,966 @@
+{
+  "capture": {
+    "capture_dir": "/Volumes/Mastermind/evidence/pbr/research-capture-20261022T073549Z",
+    "captured_utc": "2026-10-22T07:35:49Z",
+    "manifest_sha256": "4c55f3f8df454ecfcb2742b0b7bec5043ac35d4919a66026888541fa4bf976aa"
+  },
+  "case_id": "mu_2026-10-02_entry",
+  "case_role": "regression",
+  "defect_ref": "A14",
+  "derived": {
+    "settlement_fill_ids_absent_from_capture": [
+      "2501e62b953c2b6166c641bfe389dc24aa4ab9981e5ed4f6f288597cd673e811"
+    ]
+  },
+  "external_facts": [
+    {
+      "event_date": "2026-09-30",
+      "fact": "Micron announced on 2026-08-26 that fiscal Q4 2026 results would be reported on 2026-09-30",
+      "published": "2026-08-26",
+      "url": "https://investors.micron.com/news/press-release/2026/Micron-Technology-to-Report-Fiscal-Fourth-Quarter-Results-on-September-30-2026/default.aspx",
+      "verification_status": "cited_by_audit_not_refetched"
+    },
+    {
+      "event_date": "2026-09-30",
+      "fact": "Micron reported fiscal Q4 and full-year 2026 results on 2026-09-30",
+      "published": "2026-09-30",
+      "url": "https://investors.micron.com/news/press-release/2026/Micron-Technology-Inc--Reports-Record-Fiscal-Fourth-Quarter-and-Full-Year-2026-Results/",
+      "verification_status": "cited_by_audit_not_refetched"
+    },
+    {
+      "fact": "SEC-hosted fiscal Q4 2026 results release (exhibit 99.1)",
+      "published": "2026-09-30",
+      "url": "https://www.sec.gov/Archives/edgar/data/723125/000072312526000018/a2026q4ex991-pressrelease.htm",
+      "verification_status": "cited_by_audit_not_refetched"
+    }
+  ],
+  "fills": [
+    {
+      "line_index_0based": 91,
+      "line_sha256": "ffc9ece7eb2a3f7b5fe5958f419f7f79ed7b8895af6cbc750e18200d3f946b79",
+      "linked_decision_ids": [
+        "decision.v1.8d700b90434853b846f2ef2e"
+      ],
+      "row": {
+        "date": "2026-10-05",
+        "fill_id": "c9ec0d95c95320ead67363ccc42e3bb20ef1c9fa08878248a0a36e9287e901d9",
+        "price": 1069.68,
+        "shares": 92.0,
+        "side": "buy",
+        "ticker": "MU",
+        "transaction_id": "b222043d08f9b091bbeea96bf59bac2ab6b67ccdc2448923afb5c7e0000c0eb8",
+        "value": 98410.56
+      }
+    }
+  ],
+  "linkage_note": "decision.v1.8d700b90434853b846f2ef2e settled_asof 2026-10-05, settlement_fill_ids[0]=c9ec0d95... = fills.jsonl MU buy 92 sh @ 1069.68 value 98410.56, transaction_id b222043d...",
+  "provenance": [
+    {
+      "decision_id": "decision.v1.8d700b90434853b846f2ef2e",
+      "line_index_0based": 75,
+      "line_sha256": "de8f662f6c8fac99b418850ae58ec1498102c16c057db052dd77c113ed2ac8f1",
+      "source_book": "autonomous",
+      "source_file_sha256": "c82e2270adf611919118175b50313a1b5bb8ce9238e676f2ba734a3547e37f76",
+      "source_host_path": "/opt/mastermind-live-data/portfolios/autonomous/decisions.jsonl",
+      "source_in_service_path": "/opt/mastermind/data/portfolios/autonomous/decisions.jsonl"
+    }
+  ],
+  "records": [
+    {
+      "case_effective_holding": {
+        "action_effective": "add",
+        "action_requested": "add",
+        "conviction": "medium",
+        "evidence": [
+          {
+            "iso_dates": [],
+            "length": 83,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "548258f6ea48bcb0a605797692656c2dde4f1188756ff9e36eac05d2b5ee61c5",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 107,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "4b344195c9dda8c8b6560b299741905690e4c4c89616eb0d99b51dc3feee4f15",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 133,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "e20d246f22b3105d44fb5e32d9d6127b025e3055457144c8c2ee5611eeb07c5c",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 83,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "d19b824807dff703f2f6cb339e4a05ff2bc655dc48b29a692b769af982c99eda",
+            "terms": []
+          }
+        ],
+        "exit_plan": {
+          "iso_dates": [],
+          "length": 210,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "bda8a5c4fd805838d714a5cdf7174719e0fc66290f408018434c71f41c1df12f",
+          "terms": [
+            "earnings"
+          ]
+        },
+        "expected_horizon": {
+          "iso_dates": [],
+          "length": 61,
+          "period_labels": [
+            "FY2027"
+          ],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "6eef8bee775d9cb7c4349058bcd7914448009e0e2af70e369940907a4001641e",
+          "terms": []
+        },
+        "falsifier": {
+          "iso_dates": [
+            "2026-10-22"
+          ],
+          "length": 209,
+          "period_labels": [
+            "Q4 FY2026"
+          ],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "bb74d2e837e7dbdba398c3fdd64fd18d4239edbca8da0fc30b961a20ffc2c6da",
+          "terms": []
+        },
+        "identity_status": "trusted_company_profile.v1",
+        "proposed_weight": 0.08,
+        "rationale": {
+          "iso_dates": [],
+          "length": 645,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "9cce45a1255bdb263191d24cace8b2f6f9a2cfcd6106f12cc2571f31ac5cc2a6",
+          "terms": []
+        },
+        "source_provenance": [
+          "mcp__bot__get_intake_candidates",
+          "mcp__bot__get_daily_briefing",
+          {
+            "iso_dates": [],
+            "length": 102,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "b4804bb796aea8a8e4eec355af55c61e5b77a6d5718e5ed5458d664beb87c2f3",
+            "terms": []
+          }
+        ],
+        "ticker": "MU",
+        "weight": 0.1,
+        "weight_source": "deterministic_conviction_allocator.v2",
+        "why_now": {
+          "iso_dates": [],
+          "length": 177,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "abd5e36612e03c0d2b5eecbc93dbfce1e98d691aa6e3f093417be5b339ae4b24",
+          "terms": [
+            "earnings"
+          ]
+        }
+      },
+      "case_holding": {
+        "action_effective": "add",
+        "action_requested": "add",
+        "conviction": "medium",
+        "evidence": [
+          {
+            "iso_dates": [],
+            "length": 83,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "548258f6ea48bcb0a605797692656c2dde4f1188756ff9e36eac05d2b5ee61c5",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 107,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "4b344195c9dda8c8b6560b299741905690e4c4c89616eb0d99b51dc3feee4f15",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 133,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "e20d246f22b3105d44fb5e32d9d6127b025e3055457144c8c2ee5611eeb07c5c",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 83,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "d19b824807dff703f2f6cb339e4a05ff2bc655dc48b29a692b769af982c99eda",
+            "terms": []
+          }
+        ],
+        "exit_plan": {
+          "iso_dates": [],
+          "length": 210,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "bda8a5c4fd805838d714a5cdf7174719e0fc66290f408018434c71f41c1df12f",
+          "terms": [
+            "earnings"
+          ]
+        },
+        "expected_horizon": {
+          "iso_dates": [],
+          "length": 61,
+          "period_labels": [
+            "FY2027"
+          ],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "6eef8bee775d9cb7c4349058bcd7914448009e0e2af70e369940907a4001641e",
+          "terms": []
+        },
+        "falsifier": {
+          "iso_dates": [
+            "2026-10-22"
+          ],
+          "length": 209,
+          "period_labels": [
+            "Q4 FY2026"
+          ],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "bb74d2e837e7dbdba398c3fdd64fd18d4239edbca8da0fc30b961a20ffc2c6da",
+          "terms": []
+        },
+        "identity_status": "trusted_company_profile.v1",
+        "proposed_weight": 0.08,
+        "rationale": {
+          "iso_dates": [],
+          "length": 645,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "9cce45a1255bdb263191d24cace8b2f6f9a2cfcd6106f12cc2571f31ac5cc2a6",
+          "terms": []
+        },
+        "source_provenance": [
+          "mcp__bot__get_intake_candidates",
+          "mcp__bot__get_daily_briefing",
+          {
+            "iso_dates": [],
+            "length": 102,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "b4804bb796aea8a8e4eec355af55c61e5b77a6d5718e5ed5458d664beb87c2f3",
+            "terms": []
+          }
+        ],
+        "ticker": "MU",
+        "weight": 0.1,
+        "weight_source": "deterministic_conviction_allocator.v2",
+        "why_now": {
+          "iso_dates": [],
+          "length": 177,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "abd5e36612e03c0d2b5eecbc93dbfce1e98d691aa6e3f093417be5b339ae4b24",
+          "terms": [
+            "earnings"
+          ]
+        }
+      },
+      "case_row_falsifiers": [
+        {
+          "iso_dates": [
+            "2026-10-22"
+          ],
+          "length": 119,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "613f7238e46de760b23493b95691e3ddbc1a8fb960283135c85940269c06f975",
+          "terms": []
+        },
+        {
+          "iso_dates": [],
+          "length": 132,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "d5922c1879d8a66ad1467d7cd0681e782b19ad0adc80c3194fce4325846ab59d",
+          "terms": []
+        }
+      ],
+      "decision_id": "decision.v1.8d700b90434853b846f2ef2e",
+      "line_index_0based": 75,
+      "row": {
+        "accepted_asof": "2026-10-02",
+        "allocation_review": {
+          "cash": 0.6568,
+          "cash_rationale_present": true,
+          "cash_rationale_required": true,
+          "note": {
+            "iso_dates": [],
+            "length": 119,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "349254947ae66a759e0b616cd68b1f45d82c4682b1c1b3b3246d21c4016872f7",
+            "terms": []
+          }
+        },
+        "asof": "2026-10-02",
+        "brain_text": {
+          "iso_dates": [
+            "2026-10-02"
+          ],
+          "length": 1993,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "60c33689f1dda2240f3b5f7e044a94a139022310a197d6bd69fbf1c906208449",
+          "terms": [
+            "earnings"
+          ]
+        },
+        "cash_rationale": {
+          "iso_dates": [],
+          "length": 871,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "21f6217d96a05d824e7e8adf2b1e803a5f99989619da6812f494291a15201d47",
+          "terms": []
+        },
+        "cost_usd": 1.542436,
+        "decision_effective": true,
+        "decision_id": "decision.v1.8d700b90434853b846f2ef2e",
+        "decision_memo": {
+          "alternatives": {
+            "iso_dates": [],
+            "length": 283,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "1758cbe6f13dff98c49ea9bd770cb3bd20e440c43f7c0850323475175a72aa13",
+            "terms": []
+          },
+          "candidate_funnel": {
+            "iso_dates": [],
+            "length": 247,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "c9d4e5a518bcb1bd9047bd9dce4a86b31a96adf458ac649f607791044fc67d58",
+            "terms": []
+          },
+          "changes": {
+            "iso_dates": [],
+            "length": 108,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "0a8b4ca7c82be5af002631e08e625398fd67d28c63c882b9b6d448404a07f154",
+            "terms": []
+          },
+          "context_gaps": {
+            "iso_dates": [
+              "2026-06-30"
+            ],
+            "length": 247,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "e8da6d7b305a782e3d9e1813a92312f692617ee6caa6cf8384479e9eb4d4a6d0",
+            "terms": []
+          },
+          "lessons_applied": [
+            "lesson.v1.US_ONLY.cash_opportunity_cost"
+          ],
+          "market_frame": {
+            "iso_dates": [],
+            "length": 395,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "a1dbca0185f783faaeea3acac3c863d2dc31153c978943aa97648a97566d6301",
+            "terms": []
+          },
+          "rejected": {
+            "iso_dates": [],
+            "length": 268,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "aae142a76575a83a8aa24150d5e38ab047749f8f708693782d871cfe9604ae3f",
+            "terms": []
+          },
+          "risk_deliberation": {
+            "iso_dates": [],
+            "length": 360,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "31caae899edfe495342c0c2b00c921687b39919e3c9bf7dfeda7c5d1c9bb7405",
+            "terms": [
+              "earnings"
+            ]
+          },
+          "selected": {
+            "iso_dates": [],
+            "length": 75,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "f9ab0095b01c00d563ec212c16fcb9c1df327bd792e034f8f5af4a437596f589",
+            "terms": []
+          },
+          "timing": {
+            "iso_dates": [
+              "2026-10-22"
+            ],
+            "length": 206,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "21634b6111d9411b6d75c85b3a8da7d7a7a457902c020d9fe105301310527525",
+            "terms": [
+              "earnings"
+            ]
+          }
+        },
+        "effective_holdings": [
+          {
+            "action_effective": "add",
+            "action_requested": "add",
+            "conviction": "medium",
+            "evidence": [
+              {
+                "iso_dates": [],
+                "length": 83,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "548258f6ea48bcb0a605797692656c2dde4f1188756ff9e36eac05d2b5ee61c5",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 107,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "4b344195c9dda8c8b6560b299741905690e4c4c89616eb0d99b51dc3feee4f15",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 133,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "e20d246f22b3105d44fb5e32d9d6127b025e3055457144c8c2ee5611eeb07c5c",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 83,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "d19b824807dff703f2f6cb339e4a05ff2bc655dc48b29a692b769af982c99eda",
+                "terms": []
+              }
+            ],
+            "exit_plan": {
+              "iso_dates": [],
+              "length": 210,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "bda8a5c4fd805838d714a5cdf7174719e0fc66290f408018434c71f41c1df12f",
+              "terms": [
+                "earnings"
+              ]
+            },
+            "expected_horizon": {
+              "iso_dates": [],
+              "length": 61,
+              "period_labels": [
+                "FY2027"
+              ],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "6eef8bee775d9cb7c4349058bcd7914448009e0e2af70e369940907a4001641e",
+              "terms": []
+            },
+            "falsifier": {
+              "iso_dates": [
+                "2026-10-22"
+              ],
+              "length": 209,
+              "period_labels": [
+                "Q4 FY2026"
+              ],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "bb74d2e837e7dbdba398c3fdd64fd18d4239edbca8da0fc30b961a20ffc2c6da",
+              "terms": []
+            },
+            "identity_status": "trusted_company_profile.v1",
+            "proposed_weight": 0.08,
+            "rationale": {
+              "iso_dates": [],
+              "length": 645,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "9cce45a1255bdb263191d24cace8b2f6f9a2cfcd6106f12cc2571f31ac5cc2a6",
+              "terms": []
+            },
+            "source_provenance": [
+              "mcp__bot__get_intake_candidates",
+              "mcp__bot__get_daily_briefing",
+              {
+                "iso_dates": [],
+                "length": 102,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "b4804bb796aea8a8e4eec355af55c61e5b77a6d5718e5ed5458d664beb87c2f3",
+                "terms": []
+              }
+            ],
+            "ticker": "MU",
+            "weight": 0.1,
+            "weight_source": "deterministic_conviction_allocator.v2",
+            "why_now": {
+              "iso_dates": [],
+              "length": 177,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "abd5e36612e03c0d2b5eecbc93dbfce1e98d691aa6e3f093417be5b339ae4b24",
+              "terms": [
+                "earnings"
+              ]
+            }
+          }
+        ],
+        "error": null,
+        "evidence_planes": [
+          {
+            "iso_dates": [],
+            "length": 83,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "7a41e9ab64155a901fee472fd0a8c0a2474f75fea6f62cbaa5c759d9a34a66e6",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 63,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "01d36f0c60c199d0842abb52d8415d2fb0b252ce25b81f3e4871780923b17ac3",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 101,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "51b6baec02b1c179afb9bac9a53f44bf155ead9fa660204b4fec80c2f141b915",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 28,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "2eaace33e8517fb847c5568e6129b05f98bae0b6f1049d5b8244dc0239cb7dae",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 69,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "92205a79446efb3e0f8e6dbed37cbe5f7b3691737fad27d130b021a7f08ea578",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 31,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "8f00612b7ce4877af6ad8b3324f018fe8409b95cc9e72e4cf730b5020c5ae049",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 28,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "b4b13ea53daa15c1b0bbffbbe1d5ce8e798e0a45357e464ea6c678b197320560",
+            "terms": []
+          }
+        ],
+        "executed": [
+          {
+            "fill_id": "c9ec0d95c95320ead67363ccc42e3bb20ef1c9fa08878248a0a36e9287e901d9",
+            "fill_price_source": "polygon_open",
+            "price": 1069.68,
+            "shares": 92.0,
+            "side": "buy",
+            "ticker": "MU",
+            "transaction_id": "b222043d08f9b091bbeea96bf59bac2ab6b67ccdc2448923afb5c7e0000c0eb8",
+            "value": 98410.56
+          },
+          {
+            "fill_id": "2501e62b953c2b6166c641bfe389dc24aa4ab9981e5ed4f6f288597cd673e811",
+            "fill_price_source": "polygon_open",
+            "price": 521.62,
+            "shares": 34.0,
+            "side": "buy",
+            "ticker": "MSFT",
+            "transaction_id": "b222043d08f9b091bbeea96bf59bac2ab6b67ccdc2448923afb5c7e0000c0eb8",
+            "value": 17735.08
+          }
+        ],
+        "exit_decisions": [],
+        "expected_failure_mode": {
+          "iso_dates": [],
+          "length": 383,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "9794d4782b85d4ef7090b4faa7ba21f6f09442260784342e44bf6573a0632a0a",
+          "terms": []
+        },
+        "falsifiers": [
+          {
+            "iso_dates": [
+              "2026-10-22"
+            ],
+            "length": 119,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "613f7238e46de760b23493b95691e3ddbc1a8fb960283135c85940269c06f975",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 132,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "d5922c1879d8a66ad1467d7cd0681e782b19ad0adc80c3194fce4325846ab59d",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 142,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "228fcbe9ee9e6424895c3507ef4d448838c5e3ef2fc556c2a706843e92204abc",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 92,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "fa98b2459df189b7696da6bbb0c7c8b407bb4c4c63f5a62762024a56c0b5d0dd",
+            "terms": []
+          }
+        ],
+        "holdings": [
+          {
+            "action_effective": "add",
+            "action_requested": "add",
+            "conviction": "medium",
+            "evidence": [
+              {
+                "iso_dates": [],
+                "length": 83,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "548258f6ea48bcb0a605797692656c2dde4f1188756ff9e36eac05d2b5ee61c5",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 107,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "4b344195c9dda8c8b6560b299741905690e4c4c89616eb0d99b51dc3feee4f15",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 133,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "e20d246f22b3105d44fb5e32d9d6127b025e3055457144c8c2ee5611eeb07c5c",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 83,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "d19b824807dff703f2f6cb339e4a05ff2bc655dc48b29a692b769af982c99eda",
+                "terms": []
+              }
+            ],
+            "exit_plan": {
+              "iso_dates": [],
+              "length": 210,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "bda8a5c4fd805838d714a5cdf7174719e0fc66290f408018434c71f41c1df12f",
+              "terms": [
+                "earnings"
+              ]
+            },
+            "expected_horizon": {
+              "iso_dates": [],
+              "length": 61,
+              "period_labels": [
+                "FY2027"
+              ],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "6eef8bee775d9cb7c4349058bcd7914448009e0e2af70e369940907a4001641e",
+              "terms": []
+            },
+            "falsifier": {
+              "iso_dates": [
+                "2026-10-22"
+              ],
+              "length": 209,
+              "period_labels": [
+                "Q4 FY2026"
+              ],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "bb74d2e837e7dbdba398c3fdd64fd18d4239edbca8da0fc30b961a20ffc2c6da",
+              "terms": []
+            },
+            "identity_status": "trusted_company_profile.v1",
+            "proposed_weight": 0.08,
+            "rationale": {
+              "iso_dates": [],
+              "length": 645,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "9cce45a1255bdb263191d24cace8b2f6f9a2cfcd6106f12cc2571f31ac5cc2a6",
+              "terms": []
+            },
+            "source_provenance": [
+              "mcp__bot__get_intake_candidates",
+              "mcp__bot__get_daily_briefing",
+              {
+                "iso_dates": [],
+                "length": 102,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "b4804bb796aea8a8e4eec355af55c61e5b77a6d5718e5ed5458d664beb87c2f3",
+                "terms": []
+              }
+            ],
+            "ticker": "MU",
+            "weight": 0.1,
+            "weight_source": "deterministic_conviction_allocator.v2",
+            "why_now": {
+              "iso_dates": [],
+              "length": 177,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "abd5e36612e03c0d2b5eecbc93dbfce1e98d691aa6e3f093417be5b339ae4b24",
+              "terms": [
+                "earnings"
+              ]
+            }
+          }
+        ],
+        "lesson_application_ids": [
+          "application.v1.a8dfc0303d8494fc4842be1e"
+        ],
+        "lesson_ids_cited": [
+          "lesson.v1.US_ONLY.cash_opportunity_cost"
+        ],
+        "lesson_presentation_id": "presentation.v1.b2b6bee5b05abed3074e456c",
+        "lesson_trace_cohort": "portfolio_v2_lesson_trace",
+        "lesson_trace_status": "accepted_executed",
+        "liquidity_notes": {
+          "iso_dates": [],
+          "length": 184,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "700d5c7182877ae4a4b65130dd822922b21f89f33100362dd45d99da9f241895",
+          "terms": []
+        },
+        "model": "opus",
+        "packet_id": "e1152cde0a41a952",
+        "requested_exit_decisions": [],
+        "risk_posture": "caution",
+        "run_id": "2026-10-02T23-10-07-010Z00-00",
+        "schema": "mastermind.target_book.v2",
+        "settled_asof": "2026-10-05",
+        "settlement_fill_ids": [
+          "c9ec0d95c95320ead67363ccc42e3bb20ef1c9fa08878248a0a36e9287e901d9",
+          "2501e62b953c2b6166c641bfe389dc24aa4ab9981e5ed4f6f288597cd673e811"
+        ],
+        "settlement_receipt_sha256": "b4a7bb95a3b93ea6f5f30947cd4953aa87408bff612a5b6cc77e657567fdb53f",
+        "settlement_transaction_id": "b222043d08f9b091bbeea96bf59bac2ab6b67ccdc2448923afb5c7e0000c0eb8",
+        "skipped_unpriceable": [],
+        "sold_note": {
+          "iso_dates": [],
+          "length": 194,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "2cc598f542987847efc5fc43bc449d875b125628cd957b8508a82bb1530f724f",
+          "terms": []
+        },
+        "source_provenance": [
+          "mcp__desk__get_my_book",
+          "mcp__desk__get_market_packet",
+          "mcp__bot__get_daily_briefing",
+          "mcp__bot__get_intake_candidates",
+          "mcp__bot__get_standouts",
+          "mcp__bot__get_regime",
+          "mcp__bot__get_decision_matrix",
+          {
+            "iso_dates": [],
+            "length": 46,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "5b938e3c3e6513952aa1d07ea6f23cc3257837fd57e2a3fada8418053fe8018e",
+            "terms": []
+          }
+        ],
+        "submission_audit": {
+          "blocked_actions": [],
+          "blocked_early_exits": [],
+          "blocked_exits": [],
+          "carried": [],
+          "identity": [
+            {
+              "kind": "common_stock",
+              "status": "trusted_company_profile.v1",
+              "ticker": "MU",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "status": "trusted_company_profile.v1",
+              "ticker": "MSFT",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "status": "trusted_company_profile.v1",
+              "ticker": "XOM",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "status": "trusted_company_profile.v1",
+              "ticker": "AAPL",
+              "verified": true
+            }
+          ],
+          "ignored_exit_requests": [],
+          "invalid_exit_requests": [],
+          "mandatory_instrument_migrations": [],
+          "quarantined": [],
+          "quote_fallback_holdings": [],
+          "rejected": [],
+          "sizing": {
+            "conviction_caps": {
+              "high": 0.15,
+              "low": 0.05,
+              "medium": 0.1
+            },
+            "max_single_weight": 0.15,
+            "model_weight_is_advisory_only": true,
+            "no_forced_marginal_names": true,
+            "policy": "deterministic_conviction_allocator.v2",
+            "posture_target_gross": 0.6,
+            "protected_gross": 0.225111,
+            "weight_quantization": {
+              "digits": 6,
+              "gross_increased": false,
+              "quantized_gross": 0.34322400000000003,
+              "raw_gross": 0.3432249219705277
+            }
+          },
+          "unallocated_adds": []
+        },
+        "submission_sha256": "ab82fb59cb7df55d13aab28c03a07bb86b01bd2ed404f4ce29ae66877f7654d4",
+        "summary": {
+          "iso_dates": [],
+          "length": 690,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "18503c9d81b6cece528515c2ed8274961e0a18d28c7ea6b7bbd4ad80f7311394",
+          "terms": []
+        },
+        "target_sha256": "8142aaeebf95e1562e8b75a83d4fc576f4dc140f3b5f7c1484b9159e7d5e2128",
+        "target_status": "executed",
+        "tools_used": [
+          "ToolSearch",
+          "ToolSearch",
+          "mcp__desk__get_my_book",
+          "mcp__desk__get_market_packet",
+          "mcp__bot__get_daily_briefing",
+          "mcp__bot__get_intake_candidates",
+          "mcp__bot__get_standouts",
+          "mcp__bot__get_regime",
+          "Agent",
+          "Agent",
+          "mcp__bot__get_decision_matrix",
+          "mcp__desk__submit_book"
+        ],
+        "ts": "2026-10-02T23:15:13.743114+00:00"
+      }
+    }
+  ],
+  "records_sha256": "7ae825fe0e8285472e19351c042a65ea54da447a4328555271bd4e06923ba4aa",
+  "redaction": {
+    "dropped_row_fields": [
+      {
+        "dropped_fields": [],
+        "line_index_0based": 75
+      }
+    ],
+    "other_holdings": [
+      {
+        "conviction": "low",
+        "line_index_0based": 75,
+        "ticker": "MSFT",
+        "weight": 0.05
+      },
+      {
+        "conviction": "medium",
+        "line_index_0based": 75,
+        "ticker": "XOM",
+        "weight": 0.151395
+      },
+      {
+        "conviction": "medium",
+        "line_index_0based": 75,
+        "ticker": "AAPL",
+        "weight": 0.041829
+      }
+    ],
+    "policy": "drop perception_input; filter holdings and effective_holdings to the case ticker; in records, fills and derived, replace every whitespace-bearing string (narrative / PM prose) with a pbr.prose_digest.v1 object; keep whitespace-free strings and all numbers verbatim",
+    "prose_digest": {
+      "applies_to": [
+        "records",
+        "fills",
+        "derived"
+      ],
+      "declared_terms": [
+        "earnings",
+        "held_without_active_plan",
+        "no live thesis",
+        "single-source",
+        "starter"
+      ],
+      "iso_date_pattern": "(?<![0-9])([0-9]{4}-[0-9]{2}-[0-9]{2})(?![0-9])",
+      "length_unit": "unicode code points",
+      "originals": "outside the repository; set PBR_DECISION_CASE_INPUT_DIR to verify",
+      "period_label_pattern": "\\b(Q[1-4] ?FY ?[0-9]{2,4}|FY ?[0-9]{4})\\b",
+      "prose_rule": "a string value is prose when it contains any whitespace character",
+      "schema": "pbr.prose_digest.v1",
+      "sha256_over": "utf-8 bytes of the original string"
+    }
+  },
+  "schema": "pbr.decision_case_fixture.v1",
+  "ticker": "MU"
+}

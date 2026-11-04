@@ -1194,7 +1194,7 @@ def live_worker_runner(
         "-u",
         config.worker_user,
         "-g",
-        WORKER_GROUP,
+        f"#{config.worker_gid}",
         "/usr/bin/env",
         "-i",
         *env_args,

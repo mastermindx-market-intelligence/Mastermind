@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { lstat } from 'node:fs/promises';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createGitPublisher, resolveGitPublishConfig, STUDIO_GIT_PUBLISH_TOOLS } from './git-publish.mjs';
@@ -33,7 +34,7 @@ export const STUDIO_WORKSPACE_TOOLS = Object.freeze([
 
 const PUBLICATION_DESCRIPTIONS = [
   'Read publication status for one existing managed workspace. Optional repository is a closed host-enrolled alias; omission preserves the legacy Mastermind route. The installed owner supplies the workspace and source binding. No workspace allocation, commit or push is performed.',
-  'MODIFYING. Commit current committable changes in one existing managed workspace through the existing exact-HEAD-fenced publisher. Optional repository is a closed host-enrolled alias; omission preserves Mastermind. No caller path, branch, remote, credential or command. This operation is local-only and has no push capability.',
+  'MODIFYING. Commit current committable changes in one existing managed workspace through the existing exact-HEAD-fenced publisher. Optional repository is a closed host-enrolled alias; omission preserves Mastermind. Optional merge fences retain the exact host-fixed protected-base ancestry and prepared tree. No caller path, branch, remote, credential or command. This operation is local-only and has no push capability.',
   'MODIFYING. Push the exact expected HEAD of one existing clean managed workspace through the existing same-branch, canonical-origin publisher. Optional repository is a closed host-enrolled alias; omission preserves Mastermind. No force, tag, arbitrary destination or credential input. Unknown effects convey no retry or retargeting authority.',
 ];
 export const STUDIO_REPOSITORY_GIT_TOOLS = Object.freeze(STUDIO_GIT_PUBLISH_TOOLS.map((tool, i) => Object.freeze({
@@ -104,6 +105,7 @@ export function createRepositoryWorkspaceAccess(config, gitConfig, dependencies 
   const execute = dependencies.execFile ?? execFileDefault;
   const publisherFactory = dependencies.publisherFactory ?? createGitPublisher;
   const legacy = publisherFactory(git);
+  const mastermind = git.repositories?.find((profile) => profile?.repository === 'mastermind') ?? git;
 
   async function owner(args) {
     const result = await execute(git.workspaceCli, args, {
@@ -123,8 +125,8 @@ export function createRepositoryWorkspaceAccess(config, gitConfig, dependencies 
     selectAlias(alias);
     const row = (await currentRows()).find((row) => row.alias === alias);
     if (row?.state !== 'READY') throw new Error('REPOSITORY_NOT_READY');
-    if (alias === 'mastermind' && (row.source_repository !== path.resolve(git.sourceRepository) ||
-        !git.allowedRemoteUrls.includes(row.remote_url))) throw new Error('WORKSPACE_OWNER_RESPONSE_INVALID');
+    if (alias === 'mastermind' && (row.source_repository !== path.resolve(mastermind.sourceRepository) ||
+        !mastermind.allowedRemoteUrls.includes(row.remote_url))) throw new Error('WORKSPACE_OWNER_RESPONSE_INVALID');
     return row;
   }
   async function repositories(args) {
@@ -164,9 +166,44 @@ export function createRepositoryWorkspaceAccess(config, gitConfig, dependencies 
       return { ...identity, status: 'PARTIAL', effect_state: 'EFFECT_UNKNOWN', code: 'WORKSPACE_ACQUISITION_UNQUALIFIED' };
     }
   }
+  // Internal commission composition only; no additional public tool.
+  async function inspect(args) {
+    closed(args, ['repository', 'operation_id']);
+    selectAlias(args.repository);
+    if (typeof args.operation_id !== 'string' || !OPERATION.test(args.operation_id)) throw new Error('WORKSPACE_ARGUMENTS_INVALID');
+    const row = await selected(args.repository);
+    const workspacePath = path.join(row.workspace_root, 'web', args.operation_id.toLowerCase());
+    let value;
+    try {
+      value = await owner(['status', '--repository', args.repository, '--operation-id', args.operation_id, '--lane', 'web']);
+    } catch (error) {
+      if (error?.code !== 2) throw new Error('WORKSPACE_INSPECTION_UNKNOWN');
+      const refused = parse(error.stderr);
+      if (refused.schema_version !== 'mastermind.workspace_cli/v2' || refused.action !== 'status' ||
+          refused.effect !== 'NOT_APPLIED' || refused.repository !== args.repository ||
+          refused.error !== 'workspace is not registered to the source repository') throw new Error('WORKSPACE_INSPECTION_UNKNOWN');
+      try { await lstat(workspacePath); }
+      catch (missing) {
+        if (missing.code === 'ENOENT') return { status: 'ABSENT', operation_id: args.operation_id, repository: args.repository };
+        throw new Error('WORKSPACE_INSPECTION_UNKNOWN');
+      }
+      // An unregistered directory is foreign custody, never absence.
+      throw new Error('WORKSPACE_INSPECTION_UNKNOWN');
+    }
+    const receipt = value?.receipt;
+    if (value?.schema_version !== 'mastermind.workspace_cli/v2' || value.action !== 'status' ||
+        value.effect !== 'NOT_APPLIED' || value.repository !== args.repository || !object(receipt) ||
+        receipt.source_repository !== row.source_repository || receipt.workspace_path !== workspacePath ||
+        receipt.branch !== 'sol/web-' + args.operation_id.toLowerCase() ||
+        typeof receipt.head_sha !== 'string' || !SHA.test(receipt.head_sha) ||
+        typeof receipt.dirty !== 'boolean' || receipt.removed !== false) throw new Error('WORKSPACE_INSPECTION_UNKNOWN');
+    return { status: 'PRESENT', operation_id: args.operation_id, repository: args.repository, receipt };
+  }
   async function publication(method, args) {
-    const keys = method === 'status' ? ['operation_id', 'repository'] : method === 'commit'
-      ? ['operation_id', 'repository', 'expected_head_sha', 'message'] : ['operation_id', 'repository', 'expected_head_sha'];
+    const keys = ['status', 'commissionStatus'].includes(method) ? ['operation_id', 'repository'] : method === 'commit'
+      ? ['operation_id', 'repository', 'expected_head_sha', 'message', 'merge'] : method === 'commitCommission'
+        ? ['operation_id', 'repository', 'expected_head_sha', 'expected_content_sha256']
+        : ['operation_id', 'repository', 'expected_head_sha'];
     closed(args, keys);
     if (args.repository === undefined) return legacy[method](args);
     selectAlias(args.repository);
@@ -179,6 +216,8 @@ export function createRepositoryWorkspaceAccess(config, gitConfig, dependencies 
     const result = await publisher[method](original);
     return { ...result, schema: result.schema.replace(/\.v1$/, '.v2'), repository };
   }
-  return Object.freeze({ repositories, acquire,
+  return Object.freeze({ repositories, acquire, inspect,
+    commitCommission: (args) => publication('commitCommission', args),
+    commissionStatus: (args) => publication('commissionStatus', args),
     status: (args) => publication('status', args), commit: (args) => publication('commit', args), push: (args) => publication('push', args) });
 }

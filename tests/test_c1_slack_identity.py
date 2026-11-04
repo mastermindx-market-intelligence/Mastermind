@@ -11,6 +11,7 @@ TOKEN = "INERT-C1-IDENTITY-TOKEN"
 WORKSPACE = "T0BRD2AQXQV"
 BOT = "U0C1BOTFIX1"
 SCOPES = ("chat:write", "groups:history")
+SHARED_SCOPES = ("channels:history", "chat:write", "groups:history")
 
 
 def _module():
@@ -82,6 +83,25 @@ def test_verify_slack_identity_uses_auth_test_and_matches_workspace_bot_and_scop
             "token": TOKEN,
         }
     ]
+
+
+def test_verify_slack_identity_accepts_shared_executive_relay_scope_set():
+    c1_runtime = _module()
+    transport = _Transport(
+        lambda call: _response(
+            {"ok": True, "team_id": WORKSPACE, "user_id": BOT},
+            scopes=SHARED_SCOPES,
+        )
+    )
+    receipt = asyncio.run(
+        c1_runtime.verify_slack_identity(
+            token=TOKEN,
+            expected_workspace_id=WORKSPACE,
+            expected_bot_user_id=BOT,
+            transport=transport,
+        )
+    )
+    assert receipt.scopes == SHARED_SCOPES
 
 
 def test_verify_slack_identity_rejects_wrong_observed_workspace_without_raw_payload():

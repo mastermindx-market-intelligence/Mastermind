@@ -1,9 +1,12 @@
 """Calibrated child fit must not inherit principal cost or lose risk gates."""
+import dataclasses
 import json
 import pytest
 
+from control_plane.executive_responsibility import ResponsibilityIntent
 from control_plane.model_router import (
-    ModelRouter, RouteMode, RoutingPolicyError, TaskFit, WorkRequest,
+    ChatReasoningMode, CognitionRoute, ModelRouter, RouteMode, RoutingPolicyError,
+    SuitabilityTier, TaskFit, WorkRequest,
 )
 from scripts.executive_os_phase1b import main
 
@@ -25,10 +28,11 @@ def test_importance_and_hierarchy_do_not_promote_bounded_work(kind, impact, topo
     assert f"task_topology_{topology}" in decision.job_constraints()["routing_reason_codes"]
 
 
-def test_c2_uses_reviewed_stronger_worker_band_without_relabelling_execution_risk():
+@pytest.mark.parametrize("kind", ["implementation", "mechanical", "tests", "research", "review"])
+def test_c2_uses_reviewed_stronger_worker_band_without_relabelling_execution_risk(kind):
     router = ModelRouter.load()
-    decision = router.route(WorkRequest("implementation", task_fit=TaskFit("C2")))
-    stronger = router.route(WorkRequest("implementation", risk="elevated"))
+    decision = router.route(WorkRequest(kind, task_fit=TaskFit("C2")))
+    stronger = router.route(WorkRequest(kind, risk="elevated"))
     assert decision.mode is RouteMode.WORKER
     assert decision.suitability_tiers == stronger.suitability_tiers
     assert decision.risk == "routine"
@@ -127,4 +131,133 @@ def test_calibrated_cli_seeds_existing_review_gate_not_a_second_review_loop(tmp_
     job = json.loads(capsys.readouterr().out)
     assert job["review_required"] is expected
     assert job["business_impact"] == "critical"
+    assert "task_complexity_c1" in job["constraints"]["routing_reason_codes"]
+
+
+
+def test_task_fit_preserves_the_existing_positional_responsibility_argument():
+    role = ResponsibilityIntent("operator", "execute")
+    fit = TaskFit("C1", business_impact="material")
+    request = WorkRequest("implementation", "routine", "low", (), (), role, fit)
+    assert request.responsibility_intent == role
+    assert request.task_fit is fit
+    decision = ModelRouter.load().route(request)
+    assert decision.responsibility_intent == role
+    assert decision.task_fit is fit
+    malformed = {**role.to_dict(), "allowed_child_roles": ["worker"]}
+    with pytest.raises(RoutingPolicyError):
+        WorkRequest("implementation", "routine", "low", (), (), malformed, fit)
+
+
+@pytest.mark.parametrize("with_role, with_fit", [
+    (False, False), (True, False), (False, True), (True, True),
+])
+def test_task_fit_and_responsibility_keep_independent_wire_contracts(with_role, with_fit):
+    role = ResponsibilityIntent("operator", "execute")
+    fit = TaskFit("C1", business_impact="material")
+    decision = ModelRouter.load().route(WorkRequest(
+        "implementation",
+        excluded_worker_ids=("worker-author",),
+        responsibility_intent=role if with_role else None,
+        task_fit=fit if with_fit else None,
+    ))
+    wire = decision.to_dict()
+    constraints = decision.job_constraints()
+    if with_role:
+        assert wire["responsibility_intent"] == role.to_dict()
+        assert wire["responsibility_intent_digest"] == role.digest
+        assert constraints["responsibility_intent"] == role.to_dict()
+        assert constraints["responsibility_intent_digest"] == role.digest
+    else:
+        for value in (wire, constraints):
+            assert "responsibility_intent" not in value
+            assert "responsibility_intent_digest" not in value
+    if with_fit:
+        assert wire["task_fit"] == fit.to_dict()
+        assert wire["independent_review_required"] is True
+    else:
+        assert "task_fit" not in wire
+        assert "independent_review_required" not in wire
+    assert constraints["excluded_worker_ids"] == ["worker-author"]
+
+
+@pytest.mark.parametrize("complexity", ["C1", "C2"])
+@pytest.mark.parametrize("topology", ["worker", "coordinator"])
+def test_classification_cannot_convert_coordinate_intent_to_worker_admission(complexity, topology):
+    decision = ModelRouter.load().route(WorkRequest(
+        "implementation",
+        responsibility_intent=ResponsibilityIntent("operator", "coordinate"),
+        task_fit=TaskFit(complexity, topology=topology),
+    ))
+    assert decision.mode is RouteMode.WORKER
+    with pytest.raises(RoutingPolicyError, match="coordinator admission"):
+        decision.job_constraints()
+
+
+def test_c2_preserves_elevated_tier_order_and_first_profile():
+    router = ModelRouter.load()
+    first = router.routes["implementation"]["elevated"][0]
+    later = SuitabilityTier(
+        "implementation.elevated.later",
+        router.routes["implementation"]["routine"][0].model_aliases,
+    )
+    router.routes["implementation"]["elevated"] = (first, later)
+    decision = router.route(WorkRequest("implementation", task_fit=TaskFit("C2")))
+    assert decision.suitability_tiers == (first, later)
+    assert decision.preferred_model_aliases == first.model_aliases
+    assert decision.execution_profile_id == router.model_aliases[first.model_aliases[0]].execution_profile_id
+    assert decision.risk == "routine"
+
+
+def test_c3_preserves_responsibility_and_current_frontier_selection_guards():
+    router = ModelRouter.load()
+    role = ResponsibilityIntent("operator", "execute")
+    fit = TaskFit("C3", frontier_witness_kind="hard_debugging",
+                  frontier_witness="Resolve incompatible custody and rollback constraints.")
+    request = WorkRequest("implementation", responsibility_intent=role, task_fit=fit)
+    decision = router.route(request, frontier_model_alias="frontier.orchestrator")
+    assert decision.mode is RouteMode.FRONTIER_LEAD
+    assert decision.responsibility_intent == role
+    assert decision.task_fit is fit
+    assert decision.to_dict()["responsibility_intent_digest"] == role.digest
+    with pytest.raises(RoutingPolicyError):
+        decision.job_constraints()
+    with pytest.raises(RoutingPolicyError, match="non-worker"):
+        router.route(request, frontier_model_alias="standard.engineering")
+    router.model_aliases["frontier.orchestrator"] = dataclasses.replace(
+        router.model_aliases["frontier.orchestrator"],
+        capabilities=("implementation",),
+    )
+    with pytest.raises(RoutingPolicyError, match="lead capabilities"):
+        router.route(request, frontier_model_alias="frontier.orchestrator")
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"frontier_model_alias": "frontier.orchestrator"},
+    {"cognition_route": CognitionRoute.CHAT_INCLUDED_DEFAULT},
+    {"chat_reasoning_mode": ChatReasoningMode.PRO_MODE_EXCEPTION},
+    {"pro_mode_receipt": object()},
+])
+def test_c2_does_not_acquire_frontier_cognition_or_pro_authority(kwargs):
+    with pytest.raises(RoutingPolicyError):
+        ModelRouter.load().route(
+            WorkRequest("implementation", task_fit=TaskFit("C2")), **kwargs,
+        )
+
+
+def test_legacy_unrouted_creation_keeps_business_impact_without_task_fit(tmp_path, capsys):
+    assert main(["--root", str(tmp_path), "create-job", "legacy bounded work",
+                 "--business-impact", "critical"]) == 0
+    job = json.loads(capsys.readouterr().out)
+    assert job["business_impact"] == "critical"
+    assert job["review_required"] is False
+    assert "routing_reason_codes" not in job["constraints"]
+
+
+def test_explicit_review_still_binds_a_calibrated_review_job(tmp_path, capsys):
+    assert main(["--root", str(tmp_path), "create-job", "explicit review gate",
+                 "--task-kind", "review", "--task-complexity", "C1",
+                 "--business-impact", "critical", "--review-required"]) == 0
+    job = json.loads(capsys.readouterr().out)
+    assert job["review_required"] is True
     assert "task_complexity_c1" in job["constraints"]["routing_reason_codes"]

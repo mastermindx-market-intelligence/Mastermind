@@ -1,11 +1,18 @@
 # Fabric capacity and orchestration upgrade: execution record
 
 Operation: `fabric-capacity-orchestration-upgrade-20261005-sol-001`.
-Current Chairman intent: upgrade native Codex/Claude orchestration, cheaper-worker
+Chairman intent recorded at the 2026-10-05 checkpoint: upgrade native Codex/Claude orchestration, cheaper-worker
 utilization, multi-level hierarchy, concurrency and future-quota-aware routing.
-Protected procedure/source pin: `5b244a2bbe4c2a94ec25a887eb4a0d8fafe1ea2f`;
-skillpack 1.0.1 / bootstrap major 1. Actual selected model/mode is unverified.
+Historical protected procedure/source pin: `5b244a2bbe4c2a94ec25a887eb4a0d8fafe1ea2f`;
+skillpack 1.0.1 / bootstrap major 1. Actual selected model/mode was unverified at that checkpoint.
 This record is evidence and continuation, not a second task queue or authority.
+
+The observations and test receipts below describe the original 2026-10-05
+checkpoint unless explicitly updated. They do not establish the current installed
+native generation, provider balances, #1228 disposition or qualification of the
+later integrated source tree. Current work continues on the original #1248
+operation and PR under the assigned receiver, preserving actual writer, lease,
+access and effect constraints.
 
 ## DONE_WHEN
 
@@ -52,6 +59,16 @@ Preview remains free of Runtime creation. Calibrated consequential build jobs se
 the existing review gate; review jobs do not recursively create another review
 requirement. Partial classification is rejected rather than silently ignored.
 
+**Current native-integration boundary:** Executive TaskFit/Phase1B uses short
+`C0`–`C3` tokens; the observed native consumer requires `C0_MECHANICAL`,
+`C1_ROUTINE_BOUNDED`, `C2_COMPLEX_BOUNDED` and `C3_FRONTIER_JUDGMENT`.
+[Finding6187002077](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1248#issuecomment-6187002077)
+remains unresolved until an actual producer-consumer handoff is identified,
+implemented and qualified. Routing reason codes and an unused conversion helper
+do not prove that handoff. TaskFit source tests and native model-planning fixture
+tests do not establish end-to-end native classification, installation or program
+acceptance.
+
 `ops/native_fabric/patches/lease_broker_model_planning.patch` repairs the incumbent
 broker's advisory model planning. Its manifest and inert exact-source fixture
 allow reproducible review without modifying the installed kit. The patch offers
@@ -59,11 +76,13 @@ an account/model intersection, preserves legacy pool-only calls and explicitly
 marks quota and future capacity as unproven. It changes no live lease store,
 provider setting, admission/lifecycle function or wrapper.
 
-Section 12 of `docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md` is the proposed
-protected-law update: useful native principal capacity, fresh per-child fit,
-conserved hierarchical budgets, multidimensional headroom, current observations,
-quality-adjusted economics and separate production qualification. It becomes
-protected law only through normal acceptance; this branch does not self-arm it.
+The program amendment remains on [#1247's existing carrier](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1247):
+`docs/EXECUTIVE_FABRIC_CAPACITY_ORCHESTRATION_AMENDMENT.md` and its single
+addendum pointer, under [#600 ruling6626757718](https://github.com/mastermindx-market-intelligence/Mastermind/issues/600#issuecomment-6626757718).
+This #1248 retains the distinct TaskFit, Phase1B and native model-planning
+implementation; it adds no competing Section 12. Proposed amendment text becomes
+governing source only through protected acceptance and is consumed from the same
+verified pin.
 
 ## Verification checkpoint
 
@@ -94,19 +113,50 @@ The side-effect assertions now use a dedicated absent CLI root and still require
 that it remain absent. No production change was needed for that correction.
 The 147-test set is a subset of this run, not additional independent coverage.
 
-Before publication, protected master was fetched and remained the same pinned
+Before the original publication, protected master was fetched and remained the same pinned
 `5b244a2bbe4c2a94ec25a887eb4a0d8fafe1ea2f`. No governing/source drift was present.
+
+## Current source integration (2026-11-04)
+
+The original carrier is composed with protected
+`cb8fa9132770b1967d585e323dd72b145c580601`. The router retains the complete
+protected responsibility normalization, canonical digest/wire handling, coordinate
+admission refusal, attended/frontier selection and first-lawful-tier guards.
+Optional TaskFit is appended after responsibility_intent, preserving existing
+positional callers. Removing only the reviewed TaskFit additions exactly
+reconstructs the protected router. Phase1B, native patch, manifest and inert
+fixture retain their original implementation bytes; the competing addendum
+insertion is removed.
+
+Native PID49998 completed exit 0 on Python 3.14.7: **309 tests passed, 0
+failures/errors/skips**, JUnit 13.769s, across TaskFit, executive responsibility,
+ModelRouter, attended routing, Chat cognition and native model-planning suites.
+The new cases discriminate combined wire omission/digests, positional role
+compatibility, coordinate-refusal despite task topology, all five C2 elevated
+bands and tier ordering, critical/frontier/cognition guards, and legacy versus
+explicit CLI review behavior. This is a current source test receipt, not a native
+provider or installation result.
+
+Tested router SHA256:
+`614e9b167b8eb2f8eec2dc272836c76207b82a789f7c01eac0039851dec08446`.
+TaskFit test SHA256:
+`ea60a0ab39f3b06031c83eaa9b0ca1c166a5a8ad75767071511e9f29b5842b8d`.
+All 13 observed input hashes and the prepared tree matched before/after that run.
+The subsequent README/report qualifications change no tested code, test, patch,
+manifest or fixture bytes; no further test run is claimed for those prose edits.
+Current exact-head hosted checks and applicable protected review/release remain
+required. Source publication and the full original program outcome are distinct.
 
 ## Incumbents: reuse, do not fork
 
 | Existing carrier | Ownership / next qualification |
 | --- | --- |
-| Mastermind #600 | Existing Fable integration umbrella and ready-frontier/native-return program. |
-| Mastermind #1041, observed head `b3816bb75fa328ec6df1f92a77e8377016efdc8e` | Historical V1.x hierarchy candidate, NOT an approved release dependency. Fable/Opus audit comment5976714813 recommends closing unmerged: schema conflict, extra charge ledger, live depth change and serialized dispatch. Preserve incumbent disposition; do not merge wholesale or transfer custody. |
+| Mastermind #600 | Existing integration, ready-frontier and native-return program; follow its canonical owner/ruling, not a historical session name as approver. |
+| Mastermind #1041, observed head `b3816bb75fa328ec6df1f92a77e8377016efdc8e` | Closed-unmerged historical V1.x candidate, neither a rollout dependency nor a source to restore. Audit comment5976714813 identified schema conflict, an extra charge ledger, live depth change and serialized dispatch. Do not restore that implementation or transfer its held effects. |
 | Mastermind #981 and #1013 | Native Codex principal/child role and attended orchestration bundle. Source installation and exact-parent proof remain distinct. |
 | Mastermind #955 | Authenticated Claude Executive client edge; preserve existing auth/enrollment gates. |
 | Mastermind #1217 | Universal Studio/Paper/fabric client projection; avoid a competing MCP projector. |
-| Mastermind #1228 | Existing native policy-deployment owner, currently held for reproduced migration, cross-session cooldown and hook-verification defects in review5408319347/comment5984558903. Repairs and source-custody refusals remain with the incumbent. No hot-editing provider homes or alternate installer here. |
+| Mastermind #1228 | Existing native policy-deployment owner. At the recorded census, held for reproduced migration, cross-session cooldown and hook-verification defects in review5408319347/comment5984558903. Current source/install status is not established by this report; reconcile actual writer, access and effects. No hot-editing provider homes or alternate installer here. |
 | Mastermind #1143 | Live interconnect launch/return acceptance. Last owner observation is queue-only with configuration-generation disagreement; do not toggle/replay an arm. |
 | Mastermind #947 | MiniMax route seam; this operation does not edit its policy or existing router-test file. |
 | Macro #7103 / #7116 | Subscription catalog and existing multi-window quota economics. #7116 already intersects shared/model/short/weekly/monthly/concurrency budgets and measures cost per accepted output. Its unpublished two-file repair, denied publication and CI base gates must be reconciled by the incumbent; no alternate host/transport or replacement quota engine here. |
@@ -138,7 +188,7 @@ verified resource identity. Quota exhaustion, concurrency saturation, unknown
 telemetry, authentication/permission denial and uncertain effects are different
 states with different recovery actions.
 
-Current public product evidence, retrieved 2026-10-05:
+Historical public product evidence, retrieved 2026-10-05:
 
 - Alibaba Token Plan Personal documentation, updated 2026-09-28, states monthly
   credits and removal of the weekly quota on 2026-09-22; Pro advertises 6-8 agents.
@@ -156,19 +206,21 @@ Current public product evidence, retrieved 2026-10-05:
 ## Native embedding and hierarchy release sequence
 
 1. Accept the disjoint task-fit and model-planning repairs with exact-head tests,
-   independent review and required hosted checks. Preserve all incumbent work.
-2. Have #1228's incumbent repair its three reproduced defects and reconcile its
-   original action/custody gates before its installer consumes accepted policy.
-   Preserve observed M2 settings as prior evidence, not all-profile runtime proof.
+   applicable exact-head review, required hosted checks and protected release
+   requirements. Preserve all incumbent work.
+2. Reconcile #1228's current source/installation disposition and actual original
+   writer, access and effect constraints before its installer consumes accepted
+   policy. The three recorded findings and prior M2 observations are historical
+   evidence, not current-head or all-profile installation proof.
    Qualify Codex #981/#1013 and Claude #955 through #1143's existing launch/return
    acceptance; publishing a profile is not installation, trust or active selection.
-3. Preserve the current depth-one Runtime/COO baseline and close the real V1
-   capacity/worker-transport parallelism gap first. Do NOT release #1041 wholesale:
-   its incumbent Fable/Opus disposition recommends closure unmerged. A later
-   bounded hierarchy extension must be explicitly reconciled through the same
-   Runtime/COO/Capacity owners, use the existing accounting rather than a second
-   charge ledger, preserve schema ownership and prove conservation/cleanup.
-   Desired multi-level planning labels are not already-admitted Job depth.
+3. Preserve the accepted Runtime/COO contract: default V1 remains, and an
+   explicitly selected v5 plan uses the existing conserved budget of up to 16
+   descendants under one original root. Preserve existing accounting, schema
+   ownership, admission, cleanup and parent-return controls. #1041 is closed
+   unmerged and is not a release dependency; do not restore its conflicting
+   hierarchy or charge ledger. Planning topology, native harness nesting and
+   admitted Job depth remain distinct. This selects or installs no native depth.
 4. Reconcile #7103/#7116's original source/custody/denial/CI gates. Feed accepted,
    authenticated quota observations and cost cohorts into the existing capacity
    path, not a new pool-side quota ledger. Keep interactive-only products outside
@@ -177,13 +229,14 @@ Current public product evidence, retrieved 2026-10-05:
    planning repair. Prove wrapper forwarding and actual account/model contention;
    never overwrite a moved broker or an active writer's unreviewed changes.
 6. Run one admitted bounded project through each qualified native parent, with
-   two eligible worker providers, a domain coordinator only if installed depth
-   permits, independent review, one repair and exact-parent consumption. Test
+   two eligible worker providers, a domain coordinator only where the selected
+   accepted plan and actual admission permit, independent review, one repair and
+   exact-parent consumption. Test
    stale/unknown quota, exhausted shared bucket, cancellation, interruption,
    root-budget exhaustion and orphan cleanup. Compare accepted work per scarce
    model budget and wall time against the baseline before increasing load.
 
-## Post-publication boundary reconciliation
+## Historical post-publication boundary reconciliation
 
 Candidate fab47ba8 was published as Mastermind PR#1248. A fresh incumbent-comment
 read materially corrected the initial dependency plan: #1041 is a historical
@@ -193,12 +246,15 @@ profile/source-access gate. These comments are evidence of incumbent disposition
 not protected new law or authority to close/edit their branches. This records
 correction changes no runtime, classification, quota or native broker bytes.
 
-Existing source baseline (per the #1228 owner): depth1, fanout8, total reserved
+Historical source baseline reported by the #1228 owner at that boundary: depth1,
+fanout8, total reserved
 children16. One fully reviewed item reserves9 slots; two reviewed items plus a
 planner require19. Raising a YAML integer alone is invalid under the exact-value
 loader and is not the authorized fix. Separate planning topology, native harness
 nesting, actual Job depth and shared provider quotas. Retain the four optional
-planning shapes rather than imposing a mandatory management chain.
+planning shapes rather than imposing a mandatory management chain. This
+calculation records the earlier baseline; it is not the admission formula for
+the currently accepted selected-plan v5 contract described above.
 
 A separate disposable before/after discriminator used the actual original and
 patched broker plus the same synthetic three-account configuration. Original
@@ -220,13 +276,16 @@ running checks are not failure and not acceptance.
 
 ## Compact frontier / DO_NOT_REDO
 
-The operation retains its managed workspace/branch. Source implementation/tests,
-the inert patch artifact and proposed law are published on PR#1248. The native
-broker remains at the before hash; no installation, provider call, Job submission,
-authentication change or runtime arm occurred. The review request is terminal at
-the account-linking gate, not active computation. The documentation correction
-must be committed/read back on the same PR; no code-test rerun is claimed for a
-docs-only update.
+At the original checkpoint, this operation had not installed the broker patch,
+called a provider, submitted a Job, changed authentication or armed runtime. Its
+recorded native before-hash is historical evidence; this report does not reobserve
+current installation. Source recovery continues on the original managed operation
+and PR. The integrated TaskFit/Phase1B source requires current exact-head
+qualification; native mapping, installation and original program acceptance
+remain separately unproven. The original Codex request remains terminal at its
+account-linking response, with no reviewer START or findings. A currently
+authorized native-session review is a separate source-review avenue, not a retry,
+impersonation or completion claim for that Codex request.
 
 DO_NOT_REDO: do not recreate #7116 quota economics or its denied publication,
 #1041's conflicting hierarchy/ledger, native MCP, account registry, reset ledger
@@ -235,8 +294,10 @@ refusals through another carrier. Do not re-run prior M2 prompt/guard proofs as
 if they establish fleet adoption. Do not submit another Codex review until the
 same account-linking gate is actually resolved.
 
-Next: publish the corrected same-PR records, reconcile required checks and make
-the integration delta available to the existing #600 owner. Acceptance then needs
-an authorized independent review on the exact final candidate. Runtime rollout
-separately requires incumbent fixes, supported observed quota input and admitted
-native launch/reviewed-return proof. The full Chairman mission remains incomplete.
+Next: publish and read back the original-carrier integrated source and its
+current regression evidence, then satisfy hosted checks and applicable protected
+review/release controls. Keep #600's original program outcome and #1247's
+amendment ownership intact. Native rollout separately requires reconciliation of
+actual incumbent installation constraints, the classification handoff, supported
+observed quota input, and admitted native launch/reviewed-return proof. The full
+program remains incomplete.

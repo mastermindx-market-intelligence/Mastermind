@@ -1,9 +1,10 @@
-/** Disposable component proof for the frozen #1150 port/controller. */
+/** Disposable component proof for an exact frozen or current port/controller. */
 import assert from "node:assert/strict";
 import readline from "node:readline";
 import { pathToFileURL } from "node:url";
 
-const [portFile, controllerFile, scenario] = process.argv.slice(2);
+const [portFile, controllerFile, scenario, storeContract = "legacy"] = process.argv.slice(2);
+assert(["legacy", "atomic"].includes(storeContract));
 const { ExecutiveLaunchCommandPort } = await import(pathToFileURL(portFile));
 const { OperationController } = await import(pathToFileURL(controllerFile));
 const input = readline.createInterface({ input: process.stdin });
@@ -39,14 +40,30 @@ const form = { goal: "Read the disposable fixture and return evidence.",
   projectRef: "executive-infrastructure", profileRef: "research_only" };
 function pointerStore(initial) {
   const hints = new Map(initial ? [[ctx.principalScope, structuredClone(initial)]] : []);
-  return { hints, store: {
+  const store = {
     read(scope) { return hints.get(scope) ?? null; },
+  };
+  if (storeContract === "atomic") Object.assign(store, {
+    reserve(scope, pointer) {
+      const prior = hints.get(scope);
+      if (prior) return { reserved: false, pointer: structuredClone(prior) };
+      hints.set(scope, structuredClone(pointer));
+      return { reserved: true };
+    },
+    clearIfEqual(scope, pointer) {
+      assert.deepEqual(hints.get(scope), pointer);
+      hints.delete(scope);
+      return true;
+    },
+  });
+  else Object.assign(store, {
     write(scope, pointer) { hints.set(scope, structuredClone(pointer)); },
     clear(scope, pointer) {
       assert.deepEqual(hints.get(scope), pointer);
       hints.delete(scope);
     },
-  } };
+  });
+  return { hints, store };
 }
 const { hints, store } = pointerStore();
 const port = new ExecutiveLaunchCommandPort(config, client, () => ctx);
@@ -85,9 +102,38 @@ if (final.status === "accepted") {
 assert.equal(calls.filter(call => call.name === "submit_ceo_intent").length, 1);
 
 const guardResults = [];
+const positiveVersionControls = [];
 if (statusEnvelope && final.status === "accepted") {
+  {
+    const altered = structuredClone(statusEnvelope);
+    altered.server_version = "1.5.0";
+    let reads = 0;
+    const positiveClient = { async callTool(tool, args) {
+      assert.equal(tool, "ceo_intent_status", "positive version control cannot submit");
+      assert.deepEqual(args, calls.find(call => call.name === tool).args);
+      reads += 1;
+      return altered;
+    } };
+    const pending = pointerStore(originalPointer);
+    const positivePort = new ExecutiveLaunchCommandPort(
+      { ...config, workstream: "WS:CHANGED-UI" }, positiveClient, () => ctx);
+    const positiveController = new OperationController(positivePort, pending.store);
+    const blocked = await positiveController.begin(positivePort.makeLaunchIntent(form));
+    assert.equal(blocked.reason, "PENDING_POINTER");
+    assert.equal(reads, 0);
+    const result = await positiveController.recover();
+    assert.equal(result.status, "accepted", "qualified 1.5.0 recovery must remain accepted");
+    assert.equal(result.missionSelection.workRef, config.workstream);
+    assert.equal(pending.hints.size, 0);
+    assert.equal(reads, 1);
+    positiveVersionControls.push({
+      name: "qualified-version:1.5.0",
+      status: result.status,
+      pending_pointer_cleared: true,
+    });
+  }
   const mutations = [
-    ...["1.3.0", "1.3.1", "1.5.0", "2.0.0", null, 1.4, {}].map(version => [
+    ...["1.3.0", "1.3.1", "1.6.0", "2.0.0", null, 1.4, {}].map(version => [
       "unsupported-version:" + JSON.stringify(version),
       value => { value.server_version = version; },
     ]),
@@ -130,6 +176,7 @@ process.stdout.write(JSON.stringify({
   submit_calls: 1, status_calls: calls.filter(call => call.name === "ceo_intent_status").length,
   pending_hints: hints.size,
   compatibility_passed: final.status === "accepted",
+  positive_version_controls: positiveVersionControls,
   negative_controls: guardResults,
 }) + "\n");
 input.close();
