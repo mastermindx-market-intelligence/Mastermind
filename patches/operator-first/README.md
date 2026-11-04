@@ -1,6 +1,6 @@
 # Incumbent installer extension — source integration only
 
-This directory extends Mastermind #1228 at exact head `d2f73a8fbd360f2cfbcb39e67ff2dece1bde403c`. It does not install a replacement policy service. The current operation leaves the incumbent branch and all real provider homes untouched.
+This directory extends Mastermind #1228 at exact head `a2b4964e789b5b75ac9236f8db6f839a41813d52`. It does not install a replacement policy service. The current operation leaves the incumbent branch and all real provider homes untouched.
 
 Before source integration, verify the current installer and its test file against the `before_sha256` values in `source-pins.json`. A mismatch requires source reconciliation; do not fuzz-apply, overwrite or fetch-and-reset the incumbent. Apply `provider-orchestrator-policy.patch` and `provider-policy-tests.patch` only inside the existing source owner's reviewed workspace. Copy the six exact `skills/mastermind-fabric-orchestration` source assets from the same reviewed candidate. Verify the complete after hashes and role hashes against source-pins.json. Run the original provider-policy suite and the new operator-first suite before source publication. Do not run an installer against production during patch integration.
 

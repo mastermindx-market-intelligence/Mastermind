@@ -31,7 +31,7 @@ from integrations.executive_mcp.adapter import (
     ExecutiveMcpGateway, GatewayConfig, _open_readonly_runtime,
 )
 from integrations.executive_mcp.schemas import (
-    GatewayError, MODIFYING_TOOL, READ_TIMEOUT_SECONDS, ServerMode,
+    ERROR_CODES, GatewayError, MODIFYING_TOOL, READ_TIMEOUT_SECONDS, ServerMode,
     bound_document, bound_job_document, canonical_json, result_envelope,
     validate_tool_arguments,
 )
@@ -55,6 +55,201 @@ def _valid_sha(value: object) -> bool:
         and len(value) == 40
         and all(ch in "0123456789abcdef" for ch in value)
     )
+
+
+# ---------------------------------------------------------------------------
+# installed packet error diagnostics
+# ---------------------------------------------------------------------------
+
+#: Approved repository labels for diagnostic recognition. Other observation
+#: labels remain unclassified; no caller-supplied label enters the projection.
+_INSTALLED_DIAGNOSTIC_LABELS = (
+    "Mastermind source",
+    "Macro source",
+    "materialized Macro source",
+)
+
+#: Broad stage of a packet read in which a recognized refusal is authored.
+#: Deliberately coarse: the projection derives the stage from the refusal
+#: text alone and never claims exact pre/post checkpoint telemetry.
+_INSTALLED_DIAGNOSTIC_STAGES = (
+    "SOURCE",
+    "MACRO_PLAN",
+    "MATERIALIZATION",
+    "INNER_PACKET",
+    "PACKET_BINDING",
+    "POST_SEAL",
+    "UNKNOWN",
+)
+
+#: Immediate-cause class labels.  Class identity and the stdlib hierarchy
+#: only; ``__name__``, ``args``, ``str`` and ``repr`` never participate.
+_INSTALLED_DIAGNOSTIC_CAUSE_CLASSES = (
+    "NONE",
+    "GATEWAY_ERROR",
+    "PERMISSION_ERROR",
+    "TIMEOUT_ERROR",
+    "OS_ERROR",
+    "VALUE_ERROR",
+    "TYPE_ERROR",
+    "OTHER",
+)
+
+#: Source-authored tails of ``installed {label} <tail>`` refusal messages,
+#: each with the broad stage its family is observed in.  Every tail is
+#: copied verbatim from an existing GatewayError message expression in this
+#: module.
+_INSTALLED_DIAGNOSTIC_TAIL_STAGES: Mapping[str, str] = MappingProxyType({
+    "repository topology is unsafe": "SOURCE",
+    "observation failed": "SOURCE",
+    "HEAD is unavailable": "SOURCE",
+    "HEAD changed": "SOURCE",
+    "repository objects are incomplete": "SOURCE",
+    "worktree path set differs": "SOURCE",
+    "worktree bytes differ": "SOURCE",
+    "worktree observation failed": "SOURCE",
+    "admitted worktree omits read bytes": "SOURCE",
+    "admitted worktree is incomplete": "SOURCE",
+    "admitted worktree differs": "SOURCE",
+    "symlinks are unsupported": "SOURCE",
+    "tree is malformed": "SOURCE",
+    "tree is unsupported": "SOURCE",
+    "checkout is not clean": "SOURCE",
+    "content scope is invalid": "SOURCE",
+    "identity is ambiguous": "SOURCE",
+    "generation seal is unavailable": "SOURCE",
+    "generation seal failed": "SOURCE",
+    "exceeded its cumulative deadline": "SOURCE",
+})
+
+#: Exact non-templated refusal messages this module authors, each with its
+#: broad stage; the authored text itself is the category.  Refusals whose
+#: text coincides with a templated instantiation above inherit that mapping
+#: and are not repeated here.
+_INSTALLED_DIAGNOSTIC_EXACT_STAGES: Mapping[str, str] = MappingProxyType({
+    "installed Macro repository topology is unsafe": "SOURCE",
+    "installed Macro materialization plan is unavailable": "MACRO_PLAN",
+    "installed Macro path-list frontmatter is unsupported": "MACRO_PLAN",
+    "installed Macro materialization SHA differs": "MATERIALIZATION",
+    "installed Macro materialization failed": "MATERIALIZATION",
+    "installed Macro verified snapshot is unavailable": "MACRO_PLAN",
+    "installed boot-packet collector failed": "INNER_PACKET",
+    "installed boot-packet collector emitted invalid JSON": "INNER_PACKET",
+    "installed boot-packet collector emitted the wrong schema":
+        "INNER_PACKET",
+    "installed boot-packet collector exceeded its cumulative deadline":
+        "UNKNOWN",
+    "installed Context record unavailable": "INNER_PACKET",
+    "installed boot-packet roots changed": "PACKET_BINDING",
+    "installed boot-packet roots differ": "PACKET_BINDING",
+    "installed boot-packet SHA binding differs": "PACKET_BINDING",
+    "installed Macro source SHA changed": "SOURCE",
+    "installed Mastermind source SHA changed": "SOURCE",
+    "installed source changed during boot-packet read": "POST_SEAL",
+    "installed materialized Macro changed during boot-packet read":
+        "POST_SEAL",
+    "installed snapshot seal is unavailable": "SOURCE",
+    "installed repository topology is unsafe": "SOURCE",
+})
+
+#: Frozen recognition table: exact refusal text -> (stage, category).
+#: Templated refusals are instantiated with the approved labels only, so the
+#: table is a finite constant fixed at import time.
+_INSTALLED_DIAGNOSTIC_TABLE: Mapping[str, tuple[str, str]] = MappingProxyType({
+    **{
+        f"installed {label} {tail}": (stage, tail)
+        for label in _INSTALLED_DIAGNOSTIC_LABELS
+        for tail, stage in _INSTALLED_DIAGNOSTIC_TAIL_STAGES.items()
+    },
+    **{
+        message: (stage, message)
+        for message, stage in _INSTALLED_DIAGNOSTIC_EXACT_STAGES.items()
+    },
+})
+
+
+def _installed_diagnostic_message(error: BaseException) -> str | None:
+    """Return the exact authored refusal text, or ``None`` when unusable.
+
+    Only the exact GatewayError type and a plain string message are read.
+    Exception args and string-subclass hooks never participate.
+    """
+    if type(error) is not GatewayError:
+        return None
+    message = getattr(error, "message", None)
+    return message if type(message) is str else None
+
+
+def _installed_diagnostic_cause_class(cause: object) -> str:
+    """Classify the immediate cause only; never walk the cause chain."""
+    if cause is None:
+        return "NONE"
+    cause_type = type(cause)
+    if issubclass(cause_type, GatewayError):
+        return "GATEWAY_ERROR"
+    if issubclass(cause_type, PermissionError):
+        return "PERMISSION_ERROR"
+    if issubclass(cause_type, TimeoutError):
+        return "TIMEOUT_ERROR"
+    if issubclass(cause_type, OSError):
+        return "OS_ERROR"
+    if issubclass(cause_type, ValueError):
+        return "VALUE_ERROR"
+    if issubclass(cause_type, TypeError):
+        return "TYPE_ERROR"
+    return "OTHER"
+
+
+def installed_packet_error_diagnostic(
+    error: BaseException,
+) -> Mapping[str, str]:
+    """Project a raised error onto the bounded installed-packet vocabulary.
+
+    Pure observation of an already-raised exception.  The return value is an
+    ordinary mapping carrying exactly four finite fields: ``error_code``,
+    ``stage``, ``category`` and ``cause_class``.  Recognition is exact
+    membership against refusal messages this module authors; any other text
+    -- prefix, suffix, newline, path, token, case change or partial match --
+    stays ``UNKNOWN``/``UNCLASSIFIED`` and is never echoed.  The error is
+    not mutated, ``str()``/``repr()`` are never called, the cause chain is
+    not walked beyond the immediate cause, and no secondary exception is
+    raised; malformed or tampered input fails closed to finite values.
+    """
+    error_code = "internal_error"
+    stage = "UNKNOWN"
+    category = "UNCLASSIFIED"
+    cause_class = "NONE"
+    if type(error) is not GatewayError:
+        return {
+            "error_code": error_code, "stage": stage,
+            "category": category, "cause_class": cause_class,
+        }
+    try:
+        message = _installed_diagnostic_message(error)
+    except Exception:
+        message = None
+    if message is not None:
+        entry = _INSTALLED_DIAGNOSTIC_TABLE.get(message)
+        if entry is not None:
+            stage, category = entry
+    try:
+        code = getattr(error, "code", None)
+        if type(code) is str and code in ERROR_CODES:
+            error_code = code
+    except Exception:
+        error_code = "internal_error"
+    try:
+        cause_class = _installed_diagnostic_cause_class(
+            getattr(error, "__cause__", None)
+        )
+    except Exception:
+        cause_class = "NONE"
+    return {
+        "error_code": error_code,
+        "stage": stage,
+        "category": category,
+        "cause_class": cause_class,
+    }
 
 
 def _direct_git_directory(path: Path, *, label: str) -> Path | None:
@@ -411,6 +606,8 @@ def _raw_worktree_blob_oid(
 _MACRO_BRIEF_FIXED_CONTENT = frozenset({
     "scripts/__init__.py",
     "scripts/agentos.py",
+    "scripts/agentos_direction.py",
+    "scripts/agentos_project_plan_contract.py",
     "scripts/audit_stranded_work.py",
     "config/mastermind_programs.yml",
     "data/governance/active_builds.json",
@@ -2131,8 +2328,128 @@ class InstalledBootPacketCollector:
             acceptance_request=(work_ref, execution_commission_ref, root_objective),
         )
 
+    def project_plan_reader(self, *, macro_root: Path):
+        """Issue a read facade bound to this exact installed source owner."""
+        from control_plane.agentos_project_plan import AgentOsProjectPlanReader, _SOURCE_ROOT
+        root = Path(macro_root)
+        if (not root.is_absolute() or type(self) is not InstalledBootPacketCollector
+                or self._macro_root != root.resolve() or self._code_root != _SOURCE_ROOT.resolve()
+                or self._expected_source_sha is None or self._allow_synthetic_fixture):
+            raise ValueError("installed project plan source is unavailable")
+        reader = AgentOsProjectPlanReader(macro_root=root)
+        reader._installed_context_owner = self
+        reader._installed_context_binding = reader._context_binding(self)
+        from control_plane.installed_project_read_binding import _issue_installed_project_read
+        reader._installed_reader_binding = _issue_installed_project_read(
+            reader, owner=self, kind="project_plan",
+            qualified_owner=lambda owner: type(owner) is InstalledBootPacketCollector,
+        )
+        return reader
+
+    def read_project_plan(self, *, work_ref: str, timeout: float = 15.0):
+        from common.workspace_project_plan_contract import validate_selection
+        import math
+        validate_selection({"work_ref": work_ref})
+        if (type(timeout) not in (int, float) or not math.isfinite(timeout)
+                or not 0 < timeout <= 15 or self._expected_source_sha is None):
+            raise ValueError("installed project plan source is unavailable")
+        return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
+                                    project_plan_request=work_ref)
+
+    def project_direction_reader(self, *, macro_root: Path):
+        """Issue the fixed Direction facade after exact installed qualification."""
+        from control_plane.agentos_project_direction import AgentOsProjectDirectionReader, _SOURCE_ROOT
+        from control_plane.installed_project_read_binding import _issue_installed_project_read
+        root = Path(macro_root)
+        if (not root.is_absolute() or type(self) is not InstalledBootPacketCollector
+                or self._macro_root != root.resolve() or self._code_root != _SOURCE_ROOT.resolve()
+                or self._expected_source_sha is None or self._allow_synthetic_fixture):
+            raise ValueError("SOURCE_UNAVAILABLE")
+        reader = AgentOsProjectDirectionReader(macro_root=root)
+        reader._installed_context_owner = self
+        reader._installed_context_binding = reader._context_binding(self)
+        reader._installed_reader_binding = _issue_installed_project_read(
+            reader, owner=self, kind="project_direction",
+            qualified_owner=lambda owner: type(owner) is InstalledBootPacketCollector,
+        )
+        return reader
+
+    def read_project_direction(self, *, work_ref: str, timeout: float = 15.0):
+        from common.workspace_project_direction_contract import selection
+        import math
+        selection({"work_ref": work_ref})
+        if (type(timeout) not in (int, float) or not math.isfinite(timeout)
+                or not 0 < timeout <= 15 or self._expected_source_sha is None):
+            raise ValueError("SOURCE_UNAVAILABLE")
+        return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
+                                    project_direction_request=work_ref)
+
+    def project_journal_reader(self, *, macro_root: Path):
+        """Issue a read facade bound to this exact installed source owner."""
+        from control_plane.agentos_project_journal import AgentOsProjectJournalReader, _SOURCE_ROOT
+        root = Path(macro_root)
+        if (not root.is_absolute() or type(self) is not InstalledBootPacketCollector
+                or self._macro_root != root.resolve() or self._code_root != _SOURCE_ROOT.resolve()
+                or self._expected_source_sha is None or self._allow_synthetic_fixture):
+            raise ValueError("installed project journal source is unavailable")
+        reader = AgentOsProjectJournalReader(macro_root=root)
+        reader._installed_context_owner = self
+        reader._installed_context_binding = reader._context_binding(self)
+        from control_plane.installed_project_read_binding import _issue_installed_project_read
+        reader._installed_reader_binding = _issue_installed_project_read(
+            reader, owner=self, kind="project_journal",
+            qualified_owner=lambda owner: type(owner) is InstalledBootPacketCollector,
+        )
+        return reader
+
+    def read_project_journal(self, *, work_ref: str, timeout: float = 15.0):
+        from common.workspace_project_journal_contract import validate_selection
+        import math
+        validate_selection({"work_ref": work_ref})
+        if (type(timeout) not in (int, float) or not math.isfinite(timeout)
+                or not 0 < timeout <= 15 or self._expected_source_sha is None):
+            raise ValueError("installed project journal source is unavailable")
+        return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
+                                    project_journal_request=work_ref)
+
+    def project_creation_source_reader(self, *, macro_root: Path):
+        from control_plane.agentos_project_creation_source import AgentOsProjectCreationReader, _SOURCE_ROOT
+        from control_plane.installed_project_read_binding import _issue_installed_project_read
+        root = Path(macro_root)
+        if (not root.is_absolute() or type(self) is not InstalledBootPacketCollector
+                or self._macro_root != root.resolve() or self._code_root != _SOURCE_ROOT.resolve()
+                or self._expected_source_sha is None or self._allow_synthetic_fixture):
+            raise ValueError("installed project creation source is unavailable")
+        reader = AgentOsProjectCreationReader(macro_root=root)
+        reader._installed_context_owner = self
+        reader._installed_context_binding = reader._context_binding(self)
+        reader._installed_reader_binding = _issue_installed_project_read(reader, owner=self,
+            kind="project_creation_source", qualified_owner=lambda owner: type(owner) is InstalledBootPacketCollector)
+        return reader
+
+    def read_project_creation_source(self, *, work_ref, record_commit, expected_current_macro_sha=None, timeout=15.0):
+        from common.workspace_project_journal_contract import validate_selection
+        from common.workspace_project_session_contract import _hex
+        import math
+        validate_selection({"work_ref": work_ref})
+        if (not _hex(record_commit, 40) or not _hex(expected_current_macro_sha, 40)
+                or type(timeout) not in (int, float) or not math.isfinite(timeout)
+                or not 0 < timeout <= 15 or self._expected_source_sha is None):
+            raise ValueError("installed project creation source is unavailable")
+        packet = self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
+            project_creation_request=(work_ref, record_commit, expected_current_macro_sha))
+        if packet["availability"] != "AVAILABLE":
+            raise ValueError(packet["reason"].lower())
+        return packet["source"]
+
     def _collect_packet(self, *, repo: Path, now: str | None,
-                        timeout: float, acceptance_request: tuple | None = None) -> Any:
+                        timeout: float, acceptance_request: tuple | None = None,
+                        project_plan_request: str | None = None,
+                        project_journal_request: str | None = None,
+                        project_creation_request: tuple | None = None,
+                        project_direction_request: str | None = None) -> Any:
+        if sum(x is not None for x in (acceptance_request, project_plan_request, project_journal_request, project_creation_request, project_direction_request)) > 1:
+            raise ValueError("ambiguous installed source read")
         deadline = time.monotonic() + timeout
 
         def remaining() -> float:
@@ -2158,6 +2475,8 @@ class InstalledBootPacketCollector:
                 ),
             )
         )
+        if project_creation_request is not None and pre_macro_sha != project_creation_request[2]:
+            raise GatewayError("backend_unavailable", "project catalogue source changed")
         materialization_plan = None
         if not self._allow_synthetic_fixture:
             if len(macro_snapshots) != 1:
@@ -2210,8 +2529,39 @@ class InstalledBootPacketCollector:
             if acceptance_request is not None:
                 argv.extend(["--workstream", acceptance_request[0][3:],
                              "--expected-macro-sha", pre_macro_sha])
-            output_limit = (262144 if acceptance_request is not None
+            if project_plan_request is not None:
+                argv = [os.fspath(self._python), "-I", "-B",
+                        os.fspath(self._code_root / "scripts" / "agentos_project_plan_entry.py"),
+                        "--macro-root", os.fspath(packet_macro_root),
+                        "--expected-macro-sha", pre_macro_sha,
+                        "--work-ref", project_plan_request,
+                        "--continuity",
+                        "--timeout", f"{inner_timeout:g}"]
+            if project_journal_request is not None:
+                argv = [os.fspath(self._python), "-I", "-B",
+                        os.fspath(self._code_root / "scripts" / "agentos_project_journal_entry.py"),
+                        "--macro-root", os.fspath(packet_macro_root),
+                        "--expected-macro-sha", pre_macro_sha,
+                        "--work-ref", project_journal_request,
+                        "--timeout", f"{inner_timeout:g}"]
+            if project_creation_request is not None:
+                argv = [os.fspath(self._python), "-I", "-B",
+                    os.fspath(self._code_root / "scripts" / "agentos_project_creation_source_entry.py"),
+                    "--macro-root", os.fspath(packet_macro_root), "--expected-macro-sha", pre_macro_sha,
+                    "--work-ref", project_creation_request[0], "--record-commit", project_creation_request[1],
+                    "--timeout", f"{inner_timeout:g}"]
+            if project_direction_request is not None:
+                argv = [os.fspath(self._python), "-I", "-B",
+                        os.fspath(self._code_root / "scripts" / "agentos_project_direction_entry.py"),
+                        "--macro-root", os.fspath(packet_macro_root),
+                        "--expected-macro-sha", pre_macro_sha,
+                        "--work-ref", project_direction_request,
+                        "--timeout", f"{inner_timeout:g}"]
+            output_limit = (65536 if project_direction_request is not None else
+                            262144 if acceptance_request is not None or project_plan_request is not None or project_journal_request is not None
                             else ceo_boot_packet.DEFAULT_MAX_OUTPUT_BYTES)
+            if project_creation_request is not None:
+                output_limit = 4096
             try:
                 result = self._runner(
                     argv, cwd=self._code_root, timeout=remaining(),
@@ -2226,7 +2576,80 @@ class InstalledBootPacketCollector:
             stdout = result.get("stdout")
             if type(stdout) is not str:
                 raise GatewayError("backend_unavailable", "installed boot-packet collector failed")
-            if acceptance_request is not None:
+            if project_creation_request is not None:
+                from common.workspace_project_session_contract import validate_source_observation
+                try:
+                    def unique_creation_object(pairs):
+                        value = {}
+                        for key, item in pairs:
+                            if key in value: raise ValueError("duplicate creation field")
+                            value[key] = item
+                        return value
+                    packet = validate_source_observation(json.loads(stdout, object_pairs_hook=unique_creation_object),
+                        work_ref=project_creation_request[0], record_commit=project_creation_request[1])
+                except (ValueError, TypeError, KeyError, RecursionError):
+                    raise GatewayError("backend_unavailable", "installed project creation source unavailable") from None
+            elif project_direction_request is not None:
+                from common.workspace_project_direction_contract import validate_body
+                try:
+                    def unique_direction_object(pairs):
+                        result = {}
+                        for key, item in pairs:
+                            if key in result:
+                                raise ValueError("SOURCE_UNAVAILABLE")
+                            result[key] = item
+                        return result
+                    packet = validate_body(json.loads(stdout, object_pairs_hook=unique_direction_object))
+                    if (packet["selection"] != {"work_ref": project_direction_request}
+                            or packet["availability"] == "AVAILABLE" and packet["source"]["commit"] != pre_macro_sha):
+                        raise ValueError("SOURCE_UNAVAILABLE")
+                except (ValueError, TypeError, KeyError, RecursionError):
+                    raise GatewayError("backend_unavailable", "installed Direction source unavailable") from None
+            elif project_journal_request is not None:
+                from common.workspace_project_journal_contract import BODY_SCHEMA, validate_body
+                try:
+                    def unique_plan_object(pairs):
+                        result = {}
+                        for key, item in pairs:
+                            if key in result:
+                                raise ValueError("invalid project journal")
+                            result[key] = item
+                        return result
+                    packet = validate_body(json.loads(stdout, object_pairs_hook=unique_plan_object))
+                    if (type(packet) is not dict or packet.get("schema") != BODY_SCHEMA
+                            or packet.get("selection") != {"work_ref": project_journal_request}):
+                        raise ValueError("project journal response invalid")
+                    if packet.get("availability") == "AVAILABLE":
+                        source = packet["source"]
+                        if source["commit"] != pre_macro_sha:
+                            raise ValueError("project journal source changed")
+                    elif packet.get("availability") != "UNAVAILABLE":
+                        raise ValueError("project journal availability invalid")
+                except (ValueError, TypeError, KeyError, RecursionError):
+                    raise GatewayError("backend_unavailable", "installed project journal source unavailable") from None
+            elif project_plan_request is not None:
+                from common.workspace_project_plan_contract import BODY_SCHEMAS, validate_source, validate_body
+                try:
+                    def unique_plan_object(pairs):
+                        result = {}
+                        for key, item in pairs:
+                            if key in result:
+                                raise ValueError("invalid project plan")
+                            result[key] = item
+                        return result
+                    packet = validate_body(json.loads(stdout, object_pairs_hook=unique_plan_object))
+                    if (type(packet) is not dict or packet.get("schema") not in BODY_SCHEMAS
+                            or packet.get("selection") != {"work_ref": project_plan_request}):
+                        raise ValueError("project plan response invalid")
+                    if packet.get("availability") == "AVAILABLE":
+                        source = validate_source(packet.get("source"), project_plan_request)
+                        if source["commit"] != pre_macro_sha:
+                            raise ValueError("project plan source changed")
+                    elif packet.get("availability") != "UNAVAILABLE":
+                        raise ValueError("project plan availability invalid")
+                except (ValueError, TypeError, KeyError, RecursionError):
+                    raise GatewayError("backend_unavailable", "installed project plan source unavailable") from None
+            elif acceptance_request is not None:
                 from common.commission_ref import normalize_commission_ref
                 from control_plane.agentos_product_acceptance_basis import (
                     AgentOsProductAcceptanceBasisReader, ProductAcceptanceBasisUnavailable,
@@ -2350,7 +2773,7 @@ class InstalledBootPacketCollector:
                 or post_macro_seal != pre_macro_seal
             ):
                 raise GatewayError("backend_unavailable", "installed source changed during boot-packet read")
-            if acceptance_request is None:
+            if acceptance_request is None and project_plan_request is None and project_journal_request is None and project_creation_request is None and project_direction_request is None:
                 packet = _project_macro_identity(
                     packet, materialized_root=packet_macro_root, canonical_root=self._macro_root,
                 )

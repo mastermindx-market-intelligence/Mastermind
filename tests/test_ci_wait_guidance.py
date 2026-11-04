@@ -190,10 +190,79 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(result.replace('\n\n' + installer.guidance(), ''), source)
 
     def test_shared_liveness_contract_has_return_path_and_backoff(self):
-        block = installer.guidance()
-        for phrase in ('not a launched', 'not a\ncompletion-event source',
+        # These are semantic clauses, not a canonical Markdown line-wrap format.
+        block = ' '.join(installer.guidance().split())
+        for phrase in ('not a launched', 'not a completion-event source',
                        '15m -> 30m -> 60m', 'two equivalent no-progress',
                        'elapsed time does not clear', 'original owners, roots, grants'):
+            self.assertIn(phrase, block)
+
+    def test_shared_liveness_contract_accepts_equivalent_line_wrapping(self):
+        words = installer.guidance().split()
+        for separator in (' ', '\n', ' \n\t '):
+            with self.subTest(separator=repr(separator)):
+                with patch.object(installer, 'guidance', return_value=separator.join(words)):
+                    self.test_shared_liveness_contract_has_return_path_and_backoff()
+
+    def test_shared_liveness_contract_still_rejects_each_missing_guard(self):
+        block = ' '.join(installer.guidance().split())
+        for phrase in ('not a launched', 'not a completion-event source',
+                       '15m -> 30m -> 60m', 'two equivalent no-progress',
+                       'elapsed time does not clear', 'original owners, roots, grants'):
+            with self.subTest(missing=phrase):
+                self.assertIn(phrase, block)
+                with patch.object(installer, 'guidance', return_value=block.replace(phrase, '')):
+                    with self.assertRaises(AssertionError):
+                        self.test_shared_liveness_contract_has_return_path_and_backoff()
+
+
+class AttendedValidationTests(unittest.TestCase):
+    def previous(self):
+        return (installer.ROOT / 'tests/fixtures/ci_wait_guidance_v1.md').read_text()
+
+    def test_attended_guidance_fits_existing_source_budget(self):
+        self.assertLessEqual(len(installer.guidance().encode()), len(self.previous().encode()))
+
+    def test_previous_fixture_is_exact_accepted_migration(self):
+        self.assertIn(installer.digest(self.previous().encode()), installer.PREVIOUS_GUIDANCE_SHA256)
+
+    def test_known_previous_guidance_upgrades_once_and_preserves_surroundings(self):
+        for kind in ('codex', 'claude'):
+            with self.subTest(kind=kind):
+                source = 'private prefix\n' + self.previous() + '\nprivate suffix'
+                expected = 'private prefix\n' + installer.guidance() + '\nprivate suffix'
+                actual = installer.render(kind, source)
+                self.assertEqual(actual, expected)
+                self.assertEqual(installer.render(kind, actual), actual)
+
+    def test_unknown_modified_previous_block_cannot_be_overwritten(self):
+        source = self.previous().replace('elapsed time does not clear', 'elapsed time clears')
+        for kind in ('codex', 'claude'):
+            with self.subTest(kind=kind), self.assertRaises(ValueError):
+                installer.render(kind, source)
+
+    def test_duplicate_missing_and_reversed_markers_refuse(self):
+        old = self.previous()
+        for text in (old + old, old.replace(installer.END, ''),
+                     old.replace(installer.START, ''), installer.END + old,
+                     installer.END + '\nforeign\n' + installer.START):
+            with self.subTest(text=text[:70]), self.assertRaises(ValueError):
+                installer.render('codex', text)
+
+    def test_attended_fast_validation_contract(self):
+        block = ' '.join(installer.guidance().split())
+        for phrase in ('Short attended validation', 'seconds to minutes',
+                       'same healthy session', 'consume the terminal result',
+                       'not a reason to checkpoint and end', 'exact repository, PR, head and run',
+                       'bounded wait', 'cooldown', 'No new watcher',
+                       'genuine session boundary', 'not a background Web turn'):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, block)
+
+    def test_attended_rule_does_not_weaken_existing_refusal_guards(self):
+        block = ' '.join(installer.guidance().split())
+        for phrase in ('Permission, safety, custody and effect-unknown refusals remain binding',
+                       '15m -> 30m -> 60m', 'two equivalent no-progress'):
             self.assertIn(phrase, block)
 
 

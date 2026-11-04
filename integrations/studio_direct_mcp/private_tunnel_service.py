@@ -14,6 +14,7 @@ Gateway label stays com.mastermind.studio-direct-private.<account>.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -41,17 +42,39 @@ LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS = 8
 C2_BUSINESS_LEGACY_TUNNEL_MANIFEST_SHA256 = (
     "b6f511fc7d9c263914af0490ea0912c127979c85a0a3740e4834e12f716ee8fc"
 )
-# Exact historical on-host manifest digests, recorded per public seat.
-# A rewritten 8-concurrency manifest is not admitted. New stages stay at 4.
-LEGACY_EIGHT_TUNNEL_MANIFEST_SHA256 = {
-    "admin-business": "c7cfae3f955144a12c4e6f611b459329c554d4a871f86d977efe2ef2f83ed827",
-    "chatgpt1": "cfcd0578efe7a0a851ad48da6c9f6652f5ff95d4d81a226529c58ffab53cfdee",
-    "chatgpt2-business": C2_BUSINESS_LEGACY_TUNNEL_MANIFEST_SHA256,
-    "chatgpt2-personal": "2e65e5f610a44a7717fccf34aee57df98a3689c115ec3b5073b71c71ada3e522",
-    "chatgpt3": "b3fb25f4df0638a511ccfdf5c6d3427c6c814e07dd83dcba1615056efddcfb04",
-    "chatgpt3-w570f6f34": "8b7b908da1374d9c0cc50fc12917bf9c08f1cb65b0c6480560c996a5b39b178e",
-    "chatgpt3-wa2a9e6f9": "bdb8e6fe6d099a606caaa76e0807df410cbb0f143cba13ddc620d5ea9c3399ac",
-    "chatgpt4": "a86e709d5db144b0d7b6804d3d0155afb3017290e56819085c7bca21bb285d4e",
+# The other seven pre-existing eight-request seats are admitted only at their
+# exact previously observed v1 semantic AND raw manifest identities. This is
+# compatibility for already enrolled accounts, not a new 8-request grant.
+# New tunnel installations remain constrained to MAX_CONCURRENT_REQUESTS=4.
+LEGACY_PUBLIC_EIGHT_SEALS = {
+    "admin-business": (
+        "2dbbcfe81c561dc304aae2911a2828351de8d56d17b2d489ed76ad14ee9b4e00",
+        "c7cfae3f955144a12c4e6f611b459329c554d4a871f86d977efe2ef2f83ed827",
+    ),
+    "chatgpt1": (
+        "f505097d853ca471567fa54c7dbc1bfeb45e8dd2e41250cdf354153e3902897c",
+        "cfcd0578efe7a0a851ad48da6c9f6652f5ff95d4d81a226529c58ffab53cfdee",
+    ),
+    "chatgpt2-personal": (
+        "9b54addb78270eb1d47fce115a1d0f0c3be1af17d9739206177142e0ecd8e8c2",
+        "2e65e5f610a44a7717fccf34aee57df98a3689c115ec3b5073b71c71ada3e522",
+    ),
+    "chatgpt3": (
+        "9afad01b9b53b09096027bad15a865ce7173b669ac328f1f480546b857595093",
+        "b3fb25f4df0638a511ccfdf5c6d3427c6c814e07dd83dcba1615056efddcfb04",
+    ),
+    "chatgpt3-w570f6f34": (
+        "e8f688bd15f79ced968149abdc37469de167b767f8cc1d511edeefcbfa8d063e",
+        "8b7b908da1374d9c0cc50fc12917bf9c08f1cb65b0c6480560c996a5b39b178e",
+    ),
+    "chatgpt3-wa2a9e6f9": (
+        "66c23ef26dcd5077435f8ff4f6a2ae64db11aa4fd3397cd9387aed2241c847ab",
+        "bdb8e6fe6d099a606caaa76e0807df410cbb0f143cba13ddc620d5ea9c3399ac",
+    ),
+    "chatgpt4": (
+        "2b1a7fbea02a09d03c3807a0b2175da36a35343df51e737096d086cc283c4116",
+        "a86e709d5db144b0d7b6804d3d0155afb3017290e56819085c7bca21bb285d4e",
+    ),
 }
 CONTROL_PLANE_BASE_URL = "https://api.openai.com"
 # A historical successful poll is not evidence of a connected transport.
@@ -443,11 +466,20 @@ def _valid_manifest(data, account: str, label: str) -> bool:
     if data.get("transportTTL") != TRANSPORT_TTL:
         return False
     concurrency = data.get("maxConcurrentRequests")
-    if concurrency != MAX_CONCURRENT_REQUESTS and not (
-        account in LEGACY_EIGHT_TUNNEL_MANIFEST_SHA256
+    legacy_c2 = (
+        account == "chatgpt2-business"
         and data.get("version") == 1
         and concurrency == LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS
-    ):
+    )
+    legacy_public = (
+        data.get("version") == 1
+        and concurrency == LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS
+        and account in LEGACY_PUBLIC_EIGHT_SEALS
+        and hashlib.sha256(json.dumps(
+            data, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest() == LEGACY_PUBLIC_EIGHT_SEALS[account][0]
+    )
+    if concurrency != MAX_CONCURRENT_REQUESTS and not (legacy_c2 or legacy_public):
         return False
     if data.get("tunnelClient") != PINNED_TUNNEL_CLIENT:
         return False
@@ -478,14 +510,31 @@ def _read_manifest(
             raise SystemExit("not staged: tunnel manifest missing")
         return None
     try:
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        # Read and authenticate exactly the bytes that will be parsed. A
+        # pathname read followed by a second hash read admits a swap race.
+        with os.fdopen(os.open(
+            manifest_path, os.O_RDONLY | os.O_NOFOLLOW |
+            getattr(os, "O_CLOEXEC", 0) | os.O_NONBLOCK,
+        ), "rb") as reader:
+            info = os.fstat(reader.fileno())
+            if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= 65536:
+                raise ValueError("tunnel manifest is not a bounded regular file")
+            raw = reader.read(65537)
+        if len(raw) != info.st_size:
+            raise ValueError("tunnel manifest changed during capture")
+        data = json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError, UnicodeError):
         raise SystemExit("corrupt tunnel manifest")
     if not _valid_manifest(data, account, label):
         raise SystemExit("corrupt tunnel manifest")
-    if (data.get("maxConcurrentRequests") == LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS
-            and _sha256_file(manifest_path) != LEGACY_EIGHT_TUNNEL_MANIFEST_SHA256.get(account)):
-        raise SystemExit("corrupt tunnel manifest")
+    if data.get("maxConcurrentRequests") == LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS:
+        expected = (
+            C2_BUSINESS_LEGACY_TUNNEL_MANIFEST_SHA256
+            if account == "chatgpt2-business" else
+            LEGACY_PUBLIC_EIGHT_SEALS.get(account, (None, None))[1]
+        )
+        if expected is None or hashlib.sha256(raw).hexdigest() != expected:
+            raise SystemExit("corrupt tunnel manifest")
     return data
 
 

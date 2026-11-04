@@ -69,6 +69,36 @@ class ProjectionTests(unittest.TestCase):
             first = mod.project('Existing content.\n', 'Brief.', profile)
             self.assertEqual(mod.project(first, 'Brief.', profile), first)
 
+
+    def test_current_owner_takeover_block_replaced_not_duplicated(self):
+        mod = self.module()
+        marker = 'mastermind-active-owner-takeover-20261102'
+        old = ('# Local host storage restrictions\n'
+               'Never use internal SSD for worktrees.\n'
+               f'<!-- {marker} -->\n'
+               'Old rollout owner guidance; do not keep a second copy.\n'
+               f'<!-- /{marker} -->\n'
+               '<!-- non-mastermind-host-policy -->\n'
+               'Local SSH policy stays.\n'
+               '<!-- /non-mastermind-host-policy -->\n')
+        for profile in ('codex', 'claude'):
+            brief = 'Active assigned session owns recovery and protects EFFECT_UNKNOWN.'
+            first = mod.project(old, brief, profile)
+            self.assertNotIn('Old rollout owner guidance', first)
+            self.assertNotIn(marker, first)
+            self.assertEqual(first.count('<!-- mastermind-assigned-execution-v1 -->'), 1)
+            self.assertIn('Never use internal SSD for worktrees.', first)
+            self.assertIn('Local SSH policy stays.', first)
+            self.assertIn('Active assigned session owns recovery', first)
+            self.assertEqual(mod.project(first, brief, profile), first)
+
+    def test_unbalanced_new_owner_block_fails_closed(self):
+        mod = self.module()
+        for profile in ('codex', 'claude'):
+            with self.assertRaises(ValueError):
+                mod.project('<!-- mastermind-active-owner-takeover-20261102 -->\nUnbalanced',
+                            'Current brief.', profile)
+
     def test_memory_preserves_header_and_historical_effects(self):
         mod = self.module()
         old = 'v1\n\n## History\nEFFECT_UNKNOWN: operation-123 needs reconciliation.\n'
@@ -77,6 +107,8 @@ class ProjectionTests(unittest.TestCase):
         self.assertIn('EFFECT_UNKNOWN: operation-123 needs reconciliation.', new)
         self.assertIn('historical evidence', new)
         self.assertIn('not live authority', new)
+        self.assertIn('without mandatory independent review', new)
+        self.assertNotIn('one proportionate review', new)
 
     def test_unbalanced_marker_is_not_silently_deleted(self):
         mod = self.module()

@@ -204,7 +204,11 @@ export GLM_SHIM_URL=http://127.0.0.1:4141
 # Bind MiniMax admission to the *real* immutable source commit on Ubuntu.
 # An absent checkout leaves the source gate closed; no fallback or bypass.
 [ -d \"\$HOME/lanes/authority/mastermind-minimax-4d1f45bf600afc2d264a74852c69887084aa52ff/.git\" ] && export MINIMAX_GIT_OBJECT_ROOT=\"\$HOME/lanes/authority/mastermind-minimax-4d1f45bf600afc2d264a74852c69887084aa52ff\"
-[ -f \"\$HOME/lanes/ext/.host_glm_token.sh\" ] && . \"\$HOME/lanes/ext/.host_glm_token.sh\"
+# Missing optional GLM credentials must not falsely fail the host environment.
+# A present but invalid credential file still propagates its sourcing error.
+if [ -f \"\$HOME/lanes/ext/.host_glm_token.sh\" ]; then
+  . \"\$HOME/lanes/ext/.host_glm_token.sh\"
+fi
 HOST_ENV_EOF
 chmod 755 \"\$HOME/lanes/ext/HOST_ENV.sh\"
 "

@@ -123,7 +123,7 @@ class ForegroundOperation:
     def require_arguments(self, arguments):
         self._require_live()
         try:
-            normalized = ceo_request.normalize_high_level_request(arguments)
+            normalized = ceo_request.normalize_app_request(arguments)
         except (TypeError, ValueError, ceo_request.CeoRequestError):
             raise ForegroundOperationRefusal("arguments_changed", "invocation arguments changed") from None
         if _digest(normalized) != self._arguments_sha256:
@@ -278,7 +278,7 @@ async def _session_bridge_foreground_dispatch(runtime, frame, require_host_curre
         if not isinstance(raw, Mapping) or set(raw) != _PRINCIPAL or type(raw["scopes"]) is not list:
             raise ValueError("principal")
         p = neutral_principal_projection(**{**dict(raw), "scopes": tuple(raw["scopes"])})
-        arguments = ceo_request.normalize_high_level_request(frame["arguments"])
+        arguments = ceo_request.normalize_app_request(frame["arguments"])
         operation = ForegroundOperation(mint=_MINT, runtime=runtime,
             host_current=require_host_current, principal=p, arguments=arguments)
     except (TypeError, ValueError, ceo_request.CeoRequestError):
