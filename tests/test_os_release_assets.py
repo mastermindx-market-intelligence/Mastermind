@@ -592,7 +592,7 @@ def test_installer_optional_preflight_refuses_before_service_stop(bundle, tmp_pa
     variables = {"PYTHON_BINARY": str(wrapper), "SCRIPT_DIR": str(root / "ops/executive_os"),
                  "SOURCE_REPO": str(out.parent / "source"), "EXPECTED_SHA": "a" * 40 if choice == "wrong_source" else sha,
                  "TREE_SHA": tree, "OS_WEB_ASSETS": "" if choice == "absent" else str(out),
-                 "RELEASE_ROOT": str(release)}
+                 "RELEASE_ROOT": str(release), "CONTROL_AEAD_BUNDLE": ""}
     script = "set -euo pipefail\n" + "\n".join(f"{k}={shlex.quote(v)}" for k, v in variables.items())
     script += "\n" + block + f"\nprintf stopped > {shlex.quote(str(effects))}\n"
     result = subprocess.run(["/bin/bash", "-c", script], capture_output=True, text=True)
