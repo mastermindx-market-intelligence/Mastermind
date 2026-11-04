@@ -1275,7 +1275,7 @@ def _escalate_picked_token(pool: str, model: Optional[str]) -> str:
 
 def _cursor_grok_quota_affinity(model: Optional[str], task_class: str,
                                 doc: Optional[Dict[str, Any]] = None) -> bool:
-    return (model == "cursor-grok-4.6-high" and _grok_exhausted()
+    return (model == "cursor-grok-4.6-high"
             and policy_allows("grok", task_class, doc)[0])
 
 
@@ -1285,8 +1285,9 @@ def policy_allows(pool: str, task_class: str,
     """Enforce role/class (R20/R23). One-line reason on refuse."""
     tc = task_class.lower()
     p = canonical_pool(pool) or pool
-    # Chairman's quota-only exception follows this exact Grok model's class
-    # capability. Composer and ordinary Cursor routes retain R30 unchanged.
+    # The exact Cursor Grok 4.6-high alias inherits Grok role eligibility.
+    # Automatic cross-pool fallback remains restricted to Grok exhaustion;
+    # Composer and ordinary Cursor routes retain R30 unchanged.
     if p == "cursor" and _cursor_grok_quota_affinity(model, tc, doc):
         p = "grok"
     # Hard boundary independent of optional YAML parsing: top-level orchestration
@@ -1995,7 +1996,7 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
         if forced != "cursor":
             return "NONE reason=exact native alias requires cursor pool"
         if not _cursor_grok_quota_affinity(explicit_model, tc, doc):
-            return "NONE reason=Cursor Grok alias requires exhausted weekly Grok and eligible Grok task"
+            return "NONE reason=Cursor Grok 4.6 alias requires eligible Grok task"
         ok, reason = _subject_ok("grok", tc, subject_pool, doc)
         if not ok:
             return f"NONE reason={reason}"
