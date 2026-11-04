@@ -96,8 +96,10 @@ class LongHorizonRuntimeTests(unittest.TestCase):
     def test_c3_controller_poll_stays_live_after_7200_seconds(self):
         """Exercise the installed controller's real poll guard at the 2h boundary.
 
-        Bash SECONDS is advanced synthetically; the test never waits two hours,
-        spawns a worker, polls SSH, or acquires a provider/broker lease. This
+        The real guard is verified in source, then its SECONDS clock token is
+        replaced with an inert scalar to avoid wall-clock tick flakiness.
+        The test never waits two hours, spawns a worker, polls SSH, or
+        acquires a provider/broker lease. This
         protects the 4h C3 control fuse without claiming real-worker survival.
         """
         source = (CANDIDATE / "remote_sub.sh").read_text()
@@ -106,6 +108,10 @@ class LongHorizonRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(source.count(loop_guard), 1)
         predicate = loop_guard[len("while "):-len("; do")]
+        clock_expression = "SECONDS - WAIT_STARTED_SECONDS"
+        self.assertEqual(predicate.count(clock_expression), 1)
+        predicate = predicate.replace(
+            clock_expression, "CLOCK_SECONDS - WAIT_STARTED_SECONDS")
         for elapsed, deadline, should_continue in (
             (7199, 14400, True),
             (7200, 14400, True),
@@ -119,7 +125,7 @@ class LongHorizonRuntimeTests(unittest.TestCase):
             with self.subTest(elapsed=elapsed, deadline=deadline):
                 shell = (
                     f"WAIT_STARTED_SECONDS=0; MAX_SECS={deadline}; "
-                    f"SECONDS={elapsed}; "
+                    f"CLOCK_SECONDS={elapsed}; "
                     f"if {predicate}; then printf CONTINUE; else printf STOP; fi"
                 )
                 result = subprocess.run(
