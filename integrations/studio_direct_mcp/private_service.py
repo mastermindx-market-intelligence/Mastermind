@@ -781,6 +781,24 @@ def _pin_owner_module():
     return module
 
 
+def _fleet_status_successor_owner_module():
+    import importlib.util
+    path = Path(__file__).resolve().with_name("private_service_status_successor.py")
+    spec = importlib.util.spec_from_file_location("_studio_status_successor_owner", path)
+    owner = importlib.util.module_from_spec(spec)
+    # Frozen dataclasses introspect their live defining module during import.
+    sys.modules[spec.name] = owner
+    spec.loader.exec_module(owner)
+    return owner
+
+
+def cmd_fleet_status_module_upgrade(args):
+    owner = _fleet_status_successor_owner_module()
+    value = owner.run(sys.modules[__name__], args)
+    print(json.dumps(value, sort_keys=True))
+    return 0
+
+
 def _pin_enrollment_owner_module():
     import importlib.util
     path = Path(__file__).resolve().with_name("private_service_pin_enrollment.py")
@@ -917,6 +935,11 @@ def _pin_reject_generic_restage(account):
 def _pin_require_start(account, roots):
     if account not in NATIVE_POOL_PIN_ACCOUNTS:
         return
+    if os.path.lexists(roots["state"] / "fleet-status-module-successor"):
+        owner = _fleet_status_successor_owner_module()
+        if owner.require_start(sys.modules[__name__], account, roots):
+            return
+        raise SystemExit("FLEET_STATUS_SUCCESSOR_START_REFUSED")
     if account == "chatgpt4" and os.path.lexists(roots["state"] / "native-pool-pin-enrollment"):
         _pin_enrollment_owner_module().require_start(sys.modules[__name__], account, roots)
         return
@@ -1319,6 +1342,16 @@ def _valid_manifest(data, account: str, label: str) -> bool:
     if not isinstance(files, dict):
         return False
     fileset = frozenset(files)
+    # Only eight exact, originally enrolled installed successor manifests.
+    # The general validator and the original pin/start proof remain binding.
+    status_owner = _fleet_status_successor_owner_module()
+    qualified_status_successor = (
+        version == MANIFEST_VERSION
+        and account in status_owner.POST_MANIFEST_CANONICAL_SHA256
+        and files.get(status_owner.MODULE) == status_owner.TARGET_SOURCE_SHA256
+        and _canonical_json_sha256(data)
+            == status_owner.POST_MANIFEST_CANONICAL_SHA256.get(account)
+    )
     c2_paper_predecessor = (
         version == MANIFEST_VERSION and account == C2_PAPER_ACCOUNT
         and files == C2_PAPER_FILES_SHA256
@@ -1338,6 +1371,7 @@ def _valid_manifest(data, account: str, label: str) -> bool:
                     and fileset == V2_C2_BUSINESS_FLEET_PREDECESSOR)
             ))
             and not c2_paper_predecessor and not c4_paper_cohort
+            and not qualified_status_successor
             and not (version == MANIFEST_VERSION and account in NATIVE_POOL_PIN_PREDECESSORS
                      and files == NATIVE_POOL_PIN_PREDECESSORS[account])):
         return False
@@ -3893,6 +3927,22 @@ def cmd_stop(args) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="private_service")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    status = sub.add_parser("fleet-status-module-upgrade")
+    status.add_argument("--account", choices=(
+        "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt2-personal",
+        "chatgpt3", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9", "chatgpt4",
+    ), required=True)
+    status.add_argument("--operation", choices=(
+        "preview", "apply", "status", "reconcile",
+    ), required=True)
+    status.add_argument("--release-commit",
+                        help="accepted protected Mastermind merge commit; required for preview/apply")
+    status.add_argument("--expected-manifest-sha256",
+                        help="exact frozen original public-seat manifest CAS")
+    status.add_argument("--expected-plan-sha256",
+                        help="exact owner preview plan SHA256; required for apply")
+    status.set_defaults(func=cmd_fleet_status_module_upgrade)
 
     pin = sub.add_parser("native-pool-pin")
     pin.add_argument("--account", required=True)

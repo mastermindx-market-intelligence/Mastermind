@@ -48,6 +48,24 @@ class BundleTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_legacy_three_file_bundle_verifies_then_adopts_fourth_atomically(self):
+        manifest = self.control / "manifest.json"
+        value = json.loads(manifest.read_text(encoding="utf-8"))
+        old = {name: value["files"][name] for name in bundle.LEGACY_CONTROL_FILES}
+        value["files"] = old
+        value["bundleDigest"] = bundle._bundle_digest(old, value["launcherHash"])
+        manifest.write_text(json.dumps(value), encoding="utf-8")
+        (self.control / "private_service_status_successor.py").unlink()
+        self.assertEqual(set(bundle.verify(
+            control_root=self.control, launcher=self.launcher)["files"]), set(old))
+        installed = bundle.install(
+            source=self.source, control_root=self.control, launcher=self.launcher)
+        self.assertEqual(installed["state"], "CONTROL_BUNDLE_INSTALLED")
+        self.assertEqual(set(installed["files"]), set(bundle.CONTROL_FILES))
+        self.assertEqual(set(bundle.verify(
+            control_root=self.control, launcher=self.launcher)["files"]),
+            set(bundle.CONTROL_FILES))
+
     def test_install_adopts_exact_helpers_and_reseals_manifest(self):
         result = bundle.install(source=self.source, control_root=self.control, launcher=self.launcher)
         self.assertEqual(result["state"], "CONTROL_BUNDLE_INSTALLED")

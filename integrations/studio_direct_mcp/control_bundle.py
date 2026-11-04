@@ -19,11 +19,14 @@ import sys
 import tempfile
 
 SCHEMA = "mastermind.studio_direct_control_bundle.v1"
-CONTROL_FILES = (
+# The new fleet-status module successor remains part of the ONE original
+# private-service control bundle, never an independently installed helper.
+LEGACY_CONTROL_FILES = (
     "private_service.py",
     "private_tunnel_service.py",
     "studio_direct_control.py",
 )
+CONTROL_FILES = (*LEGACY_CONTROL_FILES, "private_service_status_successor.py")
 FILE_MODE = 0o600
 DIR_MODE = 0o700
 
@@ -104,7 +107,11 @@ def _read_manifest(path: Path) -> dict:
     if not isinstance(value, dict) or set(value) != expected_keys or value.get("schema") != SCHEMA:
         raise Refusal("CONTROL_MANIFEST_INVALID")
     files = value.get("files")
-    if not isinstance(files, dict) or set(files) != set(CONTROL_FILES):
+    # Accept the exact prior 3-file generation for read-only verification and
+    # atomic install. The post-install manifest must include all four files.
+    if (not isinstance(files, dict)
+            or frozenset(files) not in (frozenset(LEGACY_CONTROL_FILES),
+                                       frozenset(CONTROL_FILES))):
         raise Refusal("CONTROL_MANIFEST_INVALID")
     if any(not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest) for digest in files.values()):
         raise Refusal("CONTROL_MANIFEST_INVALID")
@@ -131,7 +138,7 @@ def verify(*, control_root: Path, launcher: Path) -> dict:
     if manifest.get("launcher") != str(launcher) or manifest.get("launcherHash") != _sha256(launcher):
         raise Refusal("CONTROL_BUNDLE_MISMATCH")
     observed = {}
-    for name in CONTROL_FILES:
+    for name in manifest["files"]:
         path = _require_regular(root / name)
         observed[name] = _sha256(path)
         if manifest["files"].get(name) != observed[name]:
