@@ -27,13 +27,20 @@ const MAX_ATTEMPT_IDENTITIES = 8192;
 const MAX_RETENTION_CANDIDATES = 4;
 // Capture and hash the actual adapter stdout on M2, before a process transport can
 // normalize text or paginate it. This is a fixed program; no caller code is used.
-const CAPTURE_PROGRAM = `import base64,hashlib,json,subprocess,sys,tempfile
+const CAPTURE_PROGRAM = `import base64,hashlib,json,re,subprocess,sys,tempfile
 with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
  p=subprocess.run(sys.argv[1:],stdout=out,stderr=err)
  out.seek(0); data=out.read(131073)
  if len(data)>131072:
   print(json.dumps({'capture_error':'RESULT_RESPONSE_TOO_LARGE'}));sys.exit(0)
- print(json.dumps({'exit_code':p.returncode,'stdout_base64':base64.b64encode(data).decode('ascii'),'stdout_bytes':len(data),'stdout_sha256':hashlib.sha256(data).hexdigest()},separators=(',',':')))
+ reply={'exit_code':p.returncode,'stdout_base64':base64.b64encode(data).decode('ascii'),'stdout_bytes':len(data),'stdout_sha256':hashlib.sha256(data).hexdigest()}
+ # Native read-only preview emits rc=75 and a policy refusal on stderr.
+ # Never include raw stderr or any worker/request/result stderr in MCP.
+ if p.returncode and len(sys.argv)>3 and sys.argv[3]=='preview' and not data:
+  err.seek(0); line=err.read(128)
+  match=re.fullmatch(rb'NONE reason=([a-z][a-z0-9_]{0,79})\r?\n?',line)
+  if match: reply['native_reason']=match.group(1).decode('ascii')
+ print(json.dumps(reply,separators=(',',':')))
 `;
 // Capture the *incumbent adapter's* bounded response into an ephemeral local file,
 // hash and UTF-8 validate every byte, and return only one small page. No direct
@@ -163,7 +170,7 @@ function completedOutput(text) {
   if (!match) return null;
   return {stdout:text.slice(start,finish),exit_code:Number(match[1])};
 }
-function decodeCapturedEnvelope(envelopeText) {
+function decodeCapturedEnvelope(envelopeText, allowPreviewReason=false) {
   // Validate ONE complete capture envelope produced by the fixed CAPTURE_PROGRAM
   // wrapper. The envelope carries the original child adapter exit code and the
   // exact verified stdout bytes (base64 + byte count + sha256 + canonical
@@ -179,7 +186,11 @@ function decodeCapturedEnvelope(envelopeText) {
         || envelope.capture_error !== 'RESULT_RESPONSE_TOO_LARGE') return null;
     return { captureError: 'RESULT_RESPONSE_TOO_LARGE' };
   }
-  if (Object.keys(envelope).length !== 4
+  const hasReason=Object.hasOwn(envelope,'native_reason');
+  if (Object.keys(envelope).length !== (hasReason?5:4)
+      || (hasReason && (!allowPreviewReason || envelope.exit_code===0
+          || envelope.stdout_bytes!==0 || typeof envelope.native_reason!=='string'
+          || !/^[a-z][a-z0-9_]{0,79}$/.test(envelope.native_reason)))
       || !Number.isSafeInteger(envelope.exit_code)
       || envelope.exit_code < -255 || envelope.exit_code > 255
       || typeof envelope.stdout_base64 !== 'string'
@@ -193,7 +204,8 @@ function decodeCapturedEnvelope(envelopeText) {
   let stdoutText;
   try { stdoutText = new TextDecoder('utf-8', {fatal: true}).decode(bytes); } catch { return {decodeError: 'RESULT_NOT_UTF8'}; }
   return { exit_code: envelope.exit_code, stdout: stdoutText,
-           stdout_sha256: envelope.stdout_sha256, stdout_bytes: envelope.stdout_bytes };
+           stdout_sha256: envelope.stdout_sha256, stdout_bytes: envelope.stdout_bytes,
+           ...(hasReason?{native_reason:envelope.native_reason}:{}) };
 }
 function statusJSON(result, runId, follow=false) {
   if (result.exit_code!==0) fail('ADAPTER_OBSERVATION_UNAVAILABLE',{adapter_exit_code:result.exit_code});
@@ -416,9 +428,10 @@ export function createFabricFacade(engine, options={}) {
   async function runCapturedShort(argv, timeoutMs=10000) {
     const parsed=await runShort(argv,timeoutMs,true);
     if(parsed.exit_code!==0) fail('CAPTURE_INVALID');
-    const decoded=decodeCapturedEnvelope(parsed.stdout);
+    const decoded=decodeCapturedEnvelope(parsed.stdout,argv[0]==='preview');
     if(!decoded || decoded.captureError || decoded.decodeError) fail('CAPTURE_INVALID');
-    return {exit_code:decoded.exit_code,stdout:decoded.stdout};
+    return {exit_code:decoded.exit_code,stdout:decoded.stdout,
+      ...(decoded.native_reason?{native_reason:decoded.native_reason}:{})};
   }
   async function continuityAvailable(requestHelp=null) {
     if(!cfg.quotaFallback) return false;
@@ -545,10 +558,10 @@ export function createFabricFacade(engine, options={}) {
               // Keep native policy refusal distinct from unavailable/invalid
               // transport. Only a closed, low-entropy reason token is exposed.
               // This is diagnosis, never permission to replay the same run.
-              const refusal=/^NONE reason=([a-z][a-z0-9_]{0,79})\r?\n?$/.exec(preview.stdout);
-              if(refusal) fail('MANUAL_ROUTE_PREFLIGHT_REFUSED',{
-                native_reason:refusal[1],
-                ...(refusal[1]==='bounded_complexity_requires_escalation'
+              const reason=preview.native_reason ?? /^NONE reason=([a-z][a-z0-9_]{0,79})\r?\n?$/.exec(preview.stdout)?.[1];
+              if(reason) fail('MANUAL_ROUTE_PREFLIGHT_REFUSED',{
+                native_reason:reason,
+                ...(reason==='bounded_complexity_requires_escalation'
                   ?{required_field:'escalation_reason'}:{})
               });
               fail('MANUAL_ROUTE_UNAVAILABLE');
