@@ -512,14 +512,18 @@ def create_app(
         }
         if 300 <= upstream_response.status_code < 400:
             # An unexpected redirect must not send a worker (or its token) elsewhere.
-            await upstream_response.aclose()
-            await request.app.state.admissions.release(slot)
+            try:
+                await upstream_response.aclose()
+            finally:
+                await request.app.state.admissions.release(slot)
             return JSONResponse({"error": {"message": "upstream redirect refused"}}, status_code=502)
         if upstream_response.status_code >= 400:
             if endpoint in ACCOUNT_METADATA:
                 # Local clients only need the refusal status; don't reveal provider account error bodies.
-                await upstream_response.aclose()
-                await request.app.state.admissions.release(slot)
+                try:
+                    await upstream_response.aclose()
+                finally:
+                    await request.app.state.admissions.release(slot)
                 return JSONResponse(
                     {"error": {"message": "provider account metadata refused"}},
                     status_code=upstream_response.status_code,
@@ -596,8 +600,10 @@ def create_app(
                     status_code=502,
                 )
             finally:
-                await upstream_response.aclose()
-                await request.app.state.admissions.release(slot)
+                try:
+                    await upstream_response.aclose()
+                finally:
+                    await request.app.state.admissions.release(slot)
 
         async def stream_bytes():
             async for part in upstream_response.aiter_raw():

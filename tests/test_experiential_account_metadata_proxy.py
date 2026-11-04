@@ -302,3 +302,58 @@ def test_financial_metadata_rejects_excessive_json_nesting(tmp_path, path):
 
     asyncio.run(exercise())
     assert seen == [path]
+
+
+@pytest.mark.parametrize("path", ["/api/whoami", "/api/v1/key", "/api/v1/credits"])
+@pytest.mark.parametrize("mode", ["refusal", "redirect", "oversized"])
+def test_metadata_close_failure_still_releases_admission(tmp_path, path, mode):
+    seen, closed, read = [], [], []
+
+    class FailingCloseStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            read.append("body")
+            yield b"SENSITIVE-METADATA" + b"x" * (65 * 1024)
+
+        async def aclose(self):
+            closed.append("close")
+            raise httpx.ReadError("fixture close failure")
+
+    def upstream(request):
+        assert request.headers["authorization"] == "Bearer " + PROVIDER
+        seen.append(request.url.path)
+        status = {"refusal": 403, "redirect": 302, "oversized": 200}[mode]
+        return httpx.Response(
+            status,
+            headers={
+                "content-type": "application/json",
+                "location": "https://untrusted.example/never-follow",
+            },
+            stream=FailingCloseStream(),
+        )
+
+    app = create_app(
+        settings(tmp_path, enable_account_metadata=True, max_inflight_per_key=1),
+        transport=httpx.MockTransport(upstream),
+    )
+
+    async def exercise():
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                base_url="http://proxy",
+            ) as client:
+                headers = {"Authorization": "Bearer " + LOCAL}
+                response = await client.get(path, headers=headers)
+                # A failed close stays a failed cleanup, without stranding the
+                # admission slot or pretending the provider operation succeeded.
+                assert response.status_code == 500
+                assert response.text == "Internal Server Error"
+                assert "SENSITIVE-METADATA" not in response.text
+                assert PROVIDER not in response.text
+                assert LOCAL not in response.text
+                await assert_one_metadata_admission(client, headers)
+
+    asyncio.run(exercise())
+    assert seen == [path]
+    assert closed == ["close"]
+    assert read == (["body"] if mode == "oversized" else [])
