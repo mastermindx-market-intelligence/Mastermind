@@ -120,6 +120,24 @@ class PairedLauncherUpgrade(unittest.TestCase):
             if g.digest(pool_preimage) != '85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e' or old['ext/pool_ledger.py'] != g.digest(pool_preimage):
                 raise AssertionError('historical pool ledger preimage differs')
             (cls.built / 'native-code-stage/ext/pool_ledger.py').write_bytes(pool_preimage)
+            # S7 changed two members that the authentic historical95 inverse
+            # previously left untouched. Restore their exact protected bytes;
+            # never repin the immutable95 manifest or its paired-upgrade owner.
+            diagnostic_raw = fixture.with_name('native-diagnostic-predecessors-e5f49cf4.json').read_bytes()
+            if g.digest(diagnostic_raw) != 'fcc3ab7de9a8f517ca59d94cf745c1d894fc14478f399e7d18f198f0679233df':
+                raise AssertionError('diagnostic predecessor fixture changed')
+            diagnostic = json.loads(diagnostic_raw)
+            if (diagnostic['schema'] != 'mastermind.test_native_diagnostic_predecessors/v1'
+                    or diagnostic['source_commit'] != 'e5f49cf4dbe8d06382c1d6f32368e9e9fb51c63d'
+                    or set(diagnostic['files']) != {'ext/original_delivery_collector.py',
+                        'ext/provider_outcome.py', 'ext/remote_sub.sh'}):
+                raise AssertionError('diagnostic predecessor scope differs')
+            for name in ('ext/original_delivery_collector.py','ext/provider_outcome.py'):
+                item=diagnostic['files'][name]
+                payload=zlib.decompress(base64.b64decode(item['zlib_base64'],validate=True))
+                if len(payload)!=item['bytes'] or g.digest(payload)!=item['sha256'] or item['sha256']!=old[name]:
+                    raise AssertionError('historical95 diagnostic preimage differs')
+                (cls.built/'native-code-stage'/name).write_bytes(payload)
             cls.manifest = old
             for name,wanted in cls.manifest.items():
                 if g.digest((cls.built / 'native-code-stage' / name).read_bytes()) != wanted:
