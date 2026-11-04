@@ -18,7 +18,7 @@ Every request supplies a verified original operation root, the actual immediate 
 
 The tools do not accept arbitrary shell commands, adapter paths, working directories, hosts, accounts or credentials. An optional *closed-schema* provider-pool and exact-model constraint is available only on `fabric_request`, subject to the original native selection and admission policy; this does not grant arbitrary providers or models. The operator pins the adapter, Python interpreter and worker working directory at installation. The default working directory is the literal `~`, expanded by the receiving worker's existing adapter path. A bounded packet must contain the required input or exact worker-accessible references; neither a Web `/mnt/data` file nor an M2 workspace is assumed available on another worker host.
 
-Parameters have closed schemas. IDs use `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`. Packets are limited to 16,000 characters / 32,768 UTF-8 bytes, contain no NUL, and travel as literal stdin using a quoted heredoc. C0/C1/C2 classify the child independently; C3 requires a specific escalation reason. The existing router selects admitted qualified provider/host capacity. `subject_pool` expresses author-pool review independence only; it does not select the reviewer.
+Parameters have closed schemas. IDs use `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`. Packets are limited to 16,000 characters / 32,768 UTF-8 bytes, contain no NUL, and travel as literal stdin using a quoted heredoc. Human-readable briefs use approximately 12 leading hex characters for SHA-256 file digests and 40-hex Git commit IDs. Keep complete values in fields or commands that actually need exact machine identity. Fabric run/root/parent IDs remain complete. The backend does not rewrite packets or perform secret/key content rejection; authorized key-bearing work retains the existing transport behavior. C0/C1/C2 classify the child independently; C3 requires a specific escalation reason. The existing router selects admitted qualified provider/host capacity. `subject_pool` expresses author-pool review independence only; it does not select the reviewer.
 
 ## Opt-in strict provider and model constraints (source integration)
 
@@ -37,7 +37,27 @@ Unsupported, stale or malformed selection refuses `MANUAL_ROUTE_UNAVAILABLE` bef
 controller dispatch. Native `request --strict-manual-pin` must independently recheck
 the same pool/model before launch. Preview does not reserve quota or prove a worker
 will start. Manual pins disable cross-provider/model quota continuation; a 429 cannot
-silently substitute another model. Optional `max_turns` is limited by native
+silently substitute another model.
+
+**Manual C2 review refusal diagnostics (source candidate, not installed):** Native
+economic/task-fit policy may require a factual `escalation_reason` for a
+`C2_COMPLEX_BOUNDED` review. Read-only preview can refuse with
+`NONE reason=bounded_complexity_requires_escalation` on **stderr**, not
+stdout, if it is absent. The candidate Web facade captures only one validated
+closed `native_reason` token for a nonzero read-only preview with empty stdout;
+it never forwards raw stderr, full provider output or arbitrary diagnostics.
+It preserves this pre-dispatch refusal as
+`MANUAL_ROUTE_PREFLIGHT_REFUSED` with a low-entropy `native_reason` and, for
+that exact reason only, `required_field: escalation_reason`. This is neither
+an adapter outage nor permission to invent an escalation or retry the refused
+run. No controller is launched for this refusal. Other well-formed native
+`NONE reason=<bounded-token>` refusals are surfaced without trusting arbitrary
+stdout. Unsupported native help or a malformed/mismatched preview still yields
+`MANUAL_ROUTE_UNAVAILABLE`. All declined requests retain
+`retry_allowed=false`; any future genuinely separate review needs a new,
+properly admitted run after the actual policy/capacity issue is resolved.
+
+Optional `max_turns` is limited by native
 policy to GLM/MiniMax: incompatible pool pins fail before dispatch, and the
 read-only preview must report a compatible native execution mode. `subject_pool` remains the separate author
 independence filter.

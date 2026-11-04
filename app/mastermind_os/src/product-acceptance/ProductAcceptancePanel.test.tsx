@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { openLegacyProjectTabs } from "../test-operational-navigation";
 import userEvent from "@testing-library/user-event";
 import { App } from "../App";
 import { decodeProgramsObservation } from "../programs-observation";
@@ -59,12 +60,13 @@ describe("actual App Evidence composition",()=>{
   try {
    await user.click(screen.getByRole("button",{name:"Projects"}));
    await user.click(await screen.findByRole("button",{name:"Open project Acceptance project"}));
+   await openLegacyProjectTabs(user);
    const tab=await screen.findByRole("tab",{name:"Evidence"});
    await user.click(tab);
    const panel=await screen.findByRole("region",{name:"Product acceptance receipt"});
    if(attached)await within(panel).findByText("PRODUCT_ACCEPTED");
    else{expect(within(panel).getByText("UNAVAILABLE")).toBeTruthy();expect(e.read).not.toHaveBeenCalled();}
-   expect(screen.getAllByRole("tab").map(n=>n.textContent)).toEqual(["Overview","Plan","Work","Evidence","More"]);
+   expect(screen.getAllByRole("tab").map(n=>n.textContent)).toEqual(["Conversation","Overview","Plan","Work","Evidence","Journal","More"]);
   } finally {ui.unmount();delete window.MastermindMissionHost;history.replaceState(null,"","/os/");}
  });
 });

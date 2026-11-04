@@ -87,6 +87,25 @@ test('request preflights exact ID and starts only the incumbent adapter, with ex
  assert.equal(e.calls.length,2);assert.match(e.calls[0].arguments.command,/'status' 'web-fabric-001'/);assert.match(e.calls[1].arguments.command,/'request' '--id' 'web-fabric-001'/);assert.match(e.calls[1].arguments.command,/'--root' 'mission-001' '--parent' 'mission-001'/);
  assert.ok(!e.calls[1].arguments.command.includes('ssh '));assert.ok(!e.calls[1].arguments.command.includes('spawn_agent'));
 });
+test('abbreviated brief refs remain presentation-only; full machine refs and authorized key text pass unchanged',async()=>{
+ const spec=api.FABRIC_TOOLS.find(t=>t.name==='fabric_request').inputSchema.properties.work_packet;
+ assert.match(spec.description,/12 hex/);
+ assert.match(spec.description,/machine-verification/);
+ const fullFileHash='a'.repeat(64),fullCommit='b'.repeat(40);
+ const payload=`Prose: file hash ${fullFileHash.slice(0,12)}, commit ${fullCommit.slice(0,12)}.
+MACHINE_SHA256=${fullFileHash}
+GIT_CHECKOUT_SHA=${fullCommit}
+KEY=synthetic-fixture-key`;
+ const e=engine([capturedJSON(absent),pending()]);
+ const out=unwrap(await facade(e).call('fabric_request',{...packet,work_packet:payload}));
+ assert.equal(out.delivery,'CONTROLLER_CREATED');
+ const transmitted=e.calls[1].arguments.command;
+ assert.ok(transmitted.includes(payload));
+ assert.ok(transmitted.includes(fullFileHash));
+ assert.ok(transmitted.includes(fullCommit));
+ assert.ok(transmitted.includes('KEY=synthetic-fixture-key'));
+});
+
 test('packet metacharacters remain literal stdin, never interpolated arguments',async()=>{
  const e=engine([capturedJSON(absent),pending()]);const f=facade(e);
  const malicious="$(touch /tmp/not-authorized)\n' ; echo not-a-command\nWORK_PACKET\n`id`";
@@ -508,6 +527,115 @@ test('strict manual request cannot dispatch if native pin flag is unavailable',a
  const out=unwrap(await facade(e).call('fabric_request',manualPinned));
  assert.equal(out.error,'MANUAL_ROUTE_UNAVAILABLE');assert.equal(out.retry_allowed,false);
  assert.equal(e.calls.length,1);assert.match(e.calls[0].arguments.command,/'request' '--help'/);
+});
+
+
+test('native C2 manual preview refusal explains the policy hold without a worker or replay',async()=>{
+  const native='bounded_complexity_requires_escalation';
+  const previewFailed=finished(JSON.stringify({exit_code:75,stdout_base64:'',stdout_bytes:0,
+    stdout_sha256:digest(''),native_reason:native}));
+  const e=engine([manualHelp,capturedJSON(absent),previewFailed]);
+  const req={...manualPinned,pool:'glm',model:'auto'};
+  const out=unwrap(await facade(e).call('fabric_request',req));
+  assert.equal(out.error,'MANUAL_ROUTE_PREFLIGHT_REFUSED');
+  assert.equal(out.native_reason,'bounded_complexity_requires_escalation');
+  assert.equal(out.required_field,'escalation_reason');
+  assert.equal(out.retry_allowed,false);
+  assert.equal(out.execution_absence_proven,false);
+  assert.equal(e.calls.length,3);
+  assert.match(e.calls[2].arguments.command,/'preview' '--id' 'web-fabric-001'/);
+  assert.equal(e.calls.filter(x=>x.arguments?.command?.includes("'request' '--id'")).length,0);
+});
+
+test('native manual preview reports a bounded no-host reason without inventing escalation instructions',async()=>{
+  const native='no_eligible_host';
+  const refused=finished(JSON.stringify({exit_code:75,stdout_base64:'',stdout_bytes:0,
+    stdout_sha256:digest(''),native_reason:native}));
+  const e=engine([manualHelp,capturedJSON(absent),refused]);
+  const out=unwrap(await facade(e).call('fabric_request',manualPinned));
+  assert.equal(out.error,'MANUAL_ROUTE_PREFLIGHT_REFUSED');
+  assert.equal(out.native_reason,'no_eligible_host');
+  assert.equal(Object.hasOwn(out,'required_field'),false);
+  assert.equal(out.retry_allowed,false);
+  assert.equal(e.calls.length,3);
+});
+
+test('untrusted or ambiguous native preview stdout remains unavailable with no raw reason echo',async()=>{
+  for(const native of ['NONE reason=bad;do_something\n','NONE reason=bounded_complexity_requires_escalation\nANOTHER LINE',
+    '{"state":"PREVIEW_ONLY"}','NONE reason=bad-with-dash\n']) {
+    const refused=finished(JSON.stringify({exit_code:75,stdout_base64:Buffer.from(native).toString('base64'),
+      stdout_bytes:Buffer.byteLength(native),stdout_sha256:digest(native)}));
+    const e=engine([manualHelp,capturedJSON(absent),refused]);
+    const out=unwrap(await facade(e).call('fabric_request',manualPinned));
+    assert.equal(out.error,'MANUAL_ROUTE_UNAVAILABLE');
+    assert.equal(Object.hasOwn(out,'native_reason'),false);
+    assert.equal(out.retry_allowed,false);
+    assert.equal(e.calls.length,3);
+  }
+});
+
+test('legitimate C2 GLM escalation remains a strict original-route request with no substitution',async()=>{
+  const justification='Independent security review of Browser Link native host bridge';
+  const req={...manualPinned,pool:'glm',model:'glm-5.3',escalation_reason:justification};
+  const preview={...manualPreview,pool:'glm',model:'glm-5.3',mode:'glm',host:'ubuntu0'};
+  const e=engine([manualHelp,capturedJSON(absent),capturedJSON(preview),pending()]);
+  const out=unwrap(await continuingFacade(e).call('fabric_request',req));
+  assert.equal(out.delivery,'CONTROLLER_CREATED');
+  assert.equal(out.worker_start_proven,false);
+  assert.equal(out.requested_pool,'glm');
+  assert.equal(out.requested_model,'glm-5.3');
+  assert.equal(e.calls.length,4);
+  assert.match(e.calls[2].arguments.command,/'--escalation-reason'/);
+  assert.match(e.calls[3].arguments.command,/'--strict-manual-pin'/);
+  assert.match(e.calls[3].arguments.command,/'--escalation-reason'/);
+  assert.doesNotMatch(e.calls[3].arguments.command,/'--quota-fallback'/);
+});
+
+
+test('real subprocess captures the exact native C2 policy refusal from STDERR, without a worker',async()=>{
+ const {mkdtemp,writeFile,rm}=await import('node:fs/promises');
+ const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+ const dir=await mkdtemp(join(tmpdir(),'mmx-fabric-native-stderr-'));
+ try {
+  const fixture=join(dir,'native-preview.py');
+  await writeFile(fixture,[
+   'import json,sys',
+   'cmd=sys.argv[1]',
+   'if cmd=="request" and "--help" in sys.argv: print("usage: request --strict-manual-pin")',
+   'elif cmd=="status": print(json.dumps({"schema":"mastermind.fabric_task_status.v1","run_id":"web-fabric-001","root_id":None,"parent_run_id":None,"state":"NOT_FOUND","result_available":False,"accepted":None}))',
+   'elif cmd=="preview": sys.stderr.write("NONE reason=bounded_complexity_requires_escalation"+chr(10)); sys.exit(75)',
+   'else: sys.exit(66)',
+   ''
+  ].join('\n'));
+  const e=await makeRealSubprocessEngine(dir,fixture);
+  const req={...manualPinned,pool:'glm',model:'auto'};
+  const out=unwrap(await api.createFabricFacade(e,{adapterPath:fixture,python:'python3',workerCwd:'~'}).call('fabric_request',req));
+  assert.equal(out.error,'MANUAL_ROUTE_PREFLIGHT_REFUSED');
+  assert.equal(out.native_reason,'bounded_complexity_requires_escalation');
+  assert.equal(out.required_field,'escalation_reason');
+  assert.equal(out.retry_allowed,false);
+  assert.equal(e.calls.length,3,'help, NOT_FOUND and one preview only');
+  assert.equal(e.calls.filter(x=>x.arguments.command.includes("'request' '--id'")).length,0);
+ } finally {await rm(dir,{recursive:true,force:true});}
+});
+
+test('extra unverified native refusal fields cannot pass the capture boundary',async()=>{
+ for(const reason of ['bad-hyphen','x'.repeat(81),'<malicious>']){
+  const raw=JSON.stringify({exit_code:75,stdout_base64:'',stdout_bytes:0,stdout_sha256:digest(''),native_reason:reason});
+  const e=engine([manualHelp,capturedJSON(absent),finished(raw)]);
+  const out=unwrap(await facade(e).call('fabric_request',manualPinned));
+  assert.equal(out.error,'MANUAL_ROUTE_UNAVAILABLE');
+  assert.equal(Object.hasOwn(out,'native_reason'),false);
+  assert.equal(out.retry_allowed,false);
+  assert.equal(e.calls.length,3);
+ }
+ const raw=JSON.stringify({exit_code:0,stdout_base64:Buffer.from(JSON.stringify(absent)).toString('base64'),
+  stdout_bytes:Buffer.byteLength(JSON.stringify(absent)),stdout_sha256:digest(JSON.stringify(absent)),
+  native_reason:'bounded_complexity_requires_escalation'});
+ const e=engine([finished(raw)]);
+ const out=unwrap(await facade(e).call('fabric_status',id));
+ assert.equal(out.error,'CAPTURE_INVALID');
+ assert.equal(e.calls.length,1);
 });
 
 test('native preview failure or mismatch refuses before controller creation',async()=>{

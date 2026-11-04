@@ -27,13 +27,20 @@ const MAX_ATTEMPT_IDENTITIES = 8192;
 const MAX_RETENTION_CANDIDATES = 4;
 // Capture and hash the actual adapter stdout on M2, before a process transport can
 // normalize text or paginate it. This is a fixed program; no caller code is used.
-const CAPTURE_PROGRAM = `import base64,hashlib,json,subprocess,sys,tempfile
+const CAPTURE_PROGRAM = `import base64,hashlib,json,re,subprocess,sys,tempfile
 with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
  p=subprocess.run(sys.argv[1:],stdout=out,stderr=err)
  out.seek(0); data=out.read(131073)
  if len(data)>131072:
   print(json.dumps({'capture_error':'RESULT_RESPONSE_TOO_LARGE'}));sys.exit(0)
- print(json.dumps({'exit_code':p.returncode,'stdout_base64':base64.b64encode(data).decode('ascii'),'stdout_bytes':len(data),'stdout_sha256':hashlib.sha256(data).hexdigest()},separators=(',',':')))
+ reply={'exit_code':p.returncode,'stdout_base64':base64.b64encode(data).decode('ascii'),'stdout_bytes':len(data),'stdout_sha256':hashlib.sha256(data).hexdigest()}
+ # Native read-only preview emits rc=75 and a policy refusal on stderr.
+ # Never include raw stderr or any worker/request/result stderr in MCP.
+ if p.returncode and len(sys.argv)>3 and sys.argv[3]=='preview' and not data:
+  err.seek(0); line=err.read(128)
+  match=re.fullmatch(rb'NONE reason=([a-z][a-z0-9_]{0,79})\\r?\\n?',line)
+  if match: reply['native_reason']=match.group(1).decode('ascii')
+ print(json.dumps(reply,separators=(',',':')))
 `;
 // Capture the *incumbent adapter's* bounded response into an ephemeral local file,
 // hash and UTF-8 validate every byte, and return only one small page. No direct
@@ -86,10 +93,10 @@ function tool(name, description, properties, required, readOnly) {
 }
 export const FABRIC_TOOLS = Object.freeze([
   tool('fabric_capabilities', 'Read adapter availability and the fixed tool boundary. This does not dispatch, prove provider admission, or identify a ChatGPT user.', {}, [], true),
-  tool('fabric_request', 'Submit a new bounded commission to the existing M2 Fabric adapter. The installed owner may use up to three immutable attempts after proven pre-task capacity rejection. Checks the exact origin run ID first. A returned controller PID does not prove worker START. Never replay an interrupted request or move an existing Executive operation here.', {
+  tool('fabric_request', 'Submit a new bounded commission to the existing M2 Fabric adapter. The installed owner may use up to three immutable attempts after proven pre-task capacity rejection. Checks the exact origin run ID first. A returned controller PID does not prove worker START. Native placement for complex C2 reviews may require a factual escalation_reason; preview refusals never authorize retry. Never replay an interrupted request or move an existing Executive operation here.', {
     ...identity, parent_id:idSchema, task_class:{type:'string',enum:CLASSES}, task_complexity:{type:'string',enum:COMPLEXITIES},
     max_turns:{type:'integer',minimum:1,maximum:400,description:'Optional per-request Claude turn ceiling. Only tightens the admitted wrapper limit; not a token, tool-call, dollar or acceptance budget.'},
-    work_packet:{type:'string',minLength:1,maxLength:16000}, escalation_reason:{type:'string',minLength:1,maxLength:1000},
+    work_packet:{type:'string',minLength:1,maxLength:16000,description:'In human-readable brief prose, abbreviate SHA-256 file hashes and git commit IDs to their first ~12 hex characters. Preserve complete values in explicit machine-verification fields, code, or commands requiring exact identity. Packets are forwarded unchanged; no content scanner or secret/key rejection is added.'}, escalation_reason:{type:'string',minLength:1,maxLength:1000},
     subject_pool:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$'},
     pool:{type:'string',enum:MANUAL_POOLS,description:'Optional strict provider-pool pin; omitted means native AUTO. No cross-provider quota continuation. experiential additionally requires the exact model glm-5.3-uncensored and retention_opt_in:true on every request.'},
     model:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$',description:'Optional exact qualified model inside pool. Use auto to let the pinned pool choose its admitted model. pool experiential accepts only the exact glm-5.3-uncensored; auto and every other slug are refused before dispatch.'},
@@ -190,12 +197,14 @@ function completedOutput(text) {
   if (!match) return null;
   return {stdout:text.slice(start,finish),exit_code:Number(match[1])};
 }
-function decodeCapturedEnvelope(envelopeText) {
+function decodeCapturedEnvelope(envelopeText, allowPreviewReason=false) {
   // Validate ONE complete capture envelope produced by the fixed CAPTURE_PROGRAM
   // wrapper. The envelope carries the original child adapter exit code and the
   // exact verified stdout bytes (base64 + byte count + sha256 + canonical
-  // base64 round-trip + strict UTF-8). Returns null on any malformed,
-  // truncated, oversized or mismatched framing. capture_error is surfaced via
+  // base64 round-trip + strict UTF-8). A bounded native stderr reason is
+  // admitted only for explicit read-only preview with nonzero exit and empty stdout.
+  // Returns null on malformed, truncated, oversized or mismatched framing.
+  // capture_error is surfaced via
   // the sole fixed captureError variant; strict UTF-8 retains its existing
   // result diagnostic. No transport-selected error code is reflected.
   let envelope;
@@ -206,7 +215,11 @@ function decodeCapturedEnvelope(envelopeText) {
         || envelope.capture_error !== 'RESULT_RESPONSE_TOO_LARGE') return null;
     return { captureError: 'RESULT_RESPONSE_TOO_LARGE' };
   }
-  if (Object.keys(envelope).length !== 4
+  const hasReason=Object.hasOwn(envelope,'native_reason');
+  if (Object.keys(envelope).length !== (hasReason?5:4)
+      || (hasReason && (!allowPreviewReason || envelope.exit_code===0
+          || envelope.stdout_bytes!==0 || typeof envelope.native_reason!=='string'
+          || !/^[a-z][a-z0-9_]{0,79}$/.test(envelope.native_reason)))
       || !Number.isSafeInteger(envelope.exit_code)
       || envelope.exit_code < -255 || envelope.exit_code > 255
       || typeof envelope.stdout_base64 !== 'string'
@@ -220,7 +233,8 @@ function decodeCapturedEnvelope(envelopeText) {
   let stdoutText;
   try { stdoutText = new TextDecoder('utf-8', {fatal: true}).decode(bytes); } catch { return {decodeError: 'RESULT_NOT_UTF8'}; }
   return { exit_code: envelope.exit_code, stdout: stdoutText,
-           stdout_sha256: envelope.stdout_sha256, stdout_bytes: envelope.stdout_bytes };
+           stdout_sha256: envelope.stdout_sha256, stdout_bytes: envelope.stdout_bytes,
+           ...(hasReason?{native_reason:envelope.native_reason}:{}) };
 }
 function statusJSON(result, runId, follow=false) {
   if (result.exit_code!==0) fail('ADAPTER_OBSERVATION_UNAVAILABLE',{adapter_exit_code:result.exit_code});
@@ -439,13 +453,15 @@ export function createFabricFacade(engine, options={}) {
   // capabilities/help). Reuses the fixed CAPTURE_PROGRAM and validates ONE
   // complete capture envelope. Outer wrapper success is required; the
   // returned exit_code is the ORIGINAL child adapter exit code and the
-  // stdout is the exact verified bytes (no reserialization, no stderr use).
+  // stdout is the exact verified bytes. Native preview-only, nonzero-exit
+  // stderr may supply one validated, low-entropy reason token; never raw stderr.
   async function runCapturedShort(argv, timeoutMs=10000) {
     const parsed=await runShort(argv,timeoutMs,true);
     if(parsed.exit_code!==0) fail('CAPTURE_INVALID');
-    const decoded=decodeCapturedEnvelope(parsed.stdout);
+    const decoded=decodeCapturedEnvelope(parsed.stdout,argv[0]==='preview');
     if(!decoded || decoded.captureError || decoded.decodeError) fail('CAPTURE_INVALID');
-    return {exit_code:decoded.exit_code,stdout:decoded.stdout};
+    return {exit_code:decoded.exit_code,stdout:decoded.stdout,
+      ...(decoded.native_reason?{native_reason:decoded.native_reason}:{})};
   }
   async function continuityAvailable(requestHelp=null) {
     if(!cfg.quotaFallback) return false;
@@ -577,9 +593,23 @@ export function createFabricFacade(engine, options={}) {
           let route;
           try {
             const preview=await runCapturedShort(previewArgs);
-            if(preview.exit_code!==0) fail('MANUAL_ROUTE_UNAVAILABLE');
+            if(preview.exit_code!==0) {
+              // Keep native policy refusal distinct from unavailable/invalid
+              // transport. Only a closed, low-entropy reason token is exposed.
+              // This is diagnosis, never permission to replay the same run.
+              const reason=preview.native_reason ?? /^NONE reason=([a-z][a-z0-9_]{0,79})\r?\n?$/.exec(preview.stdout)?.[1];
+              if(reason) fail('MANUAL_ROUTE_PREFLIGHT_REFUSED',{
+                native_reason:reason,
+                ...(reason==='bounded_complexity_requires_escalation'
+                  ?{required_field:'escalation_reason'}:{})
+              });
+              fail('MANUAL_ROUTE_UNAVAILABLE');
+            }
             route=JSON.parse(preview.stdout);
-          } catch(error) { fail('MANUAL_ROUTE_UNAVAILABLE'); }
+          } catch(error) {
+            if(error instanceof Refusal && error.code==='MANUAL_ROUTE_PREFLIGHT_REFUSED') throw error;
+            fail('MANUAL_ROUTE_UNAVAILABLE');
+          }
           if(route?.state!=='PREVIEW_ONLY' || route.reserved!==false
             || route.strict_pin_enforced_at_request!==true
             || route.selection_rechecked_at_request!==true

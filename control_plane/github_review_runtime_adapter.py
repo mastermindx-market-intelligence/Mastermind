@@ -8,12 +8,15 @@ the existing broker/supervisor exclusively owns Attempts, Workers and START.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 from collections.abc import Callable, Mapping
 from typing import Any
 
 from control_plane.executive_runtime import Runtime, StateConflict
-from control_plane.github_review_intent import ReviewIntentDecision
-from control_plane.github_review_intent_ingress import AdmittedJobFacts
+from control_plane.github_review_intent import ReviewIntentDecision, ReviewIntentError
+from control_plane.github_review_intent_ingress import (
+    AdmittedJobFacts, ReviewAdmissionReceipt, ExistingReviewDecisionUnavailable,
+)
 
 PREFIX = "gh-review-intent:"
 SCHEMA = "mastermind.github_review_runtime_admission.v1"
@@ -54,6 +57,22 @@ class ExecutiveReviewJobAdmission:
         events = self._runtime.store.list_events(command_id_prefix=PREFIX)
         return frozenset(e.command_id for e in events if e.event_type == "JOB_CREATED")
 
+    def has_admitted_command(self, command_id: str) -> bool:
+        """Exact read-only canonical command existence for FAST skip fencing.
+
+        This uses the incumbent EventStore UNIQUE key, not a new cache or
+        review registry. An inconsistent event refuses before any new Job.
+        """
+        self._authorize()
+        if type(command_id) is not str or not command_id.startswith(PREFIX):
+            raise ReviewAdmissionUnavailable("REVIEW_COMMAND_ID_INVALID")
+        existing = self._runtime.store.get_event_by_command_id(command_id)
+        if existing is None:
+            return False
+        if existing.event_type != "JOB_CREATED" or not existing.job_id:
+            raise ReviewAdmissionUnavailable("REVIEW_COMMAND_ID_COLLISION")
+        return True
+
     def _reconcile(
         self, *, decision: ReviewIntentDecision, objective: str
     ) -> str | None:
@@ -78,7 +97,89 @@ class ExecutiveReviewJobAdmission:
             or provenance.get("actor") != decision.actor
         ):
             raise ReviewAdmissionUnavailable("REVIEW_COMMAND_IDENTITY_CONFLICT")
+        if ("decision" in provenance and provenance["decision"] != decision.to_dict()):
+            raise ReviewAdmissionUnavailable("REVIEW_COMMAND_PROVENANCE_CONFLICT")
         return job.job_id
+
+    def read_existing_review(self, *, decision: ReviewIntentDecision) -> ReviewAdmissionReceipt | None:
+        """Read the immutable first admission for this identity, never reattribute it.
+
+        Legacy records establish existence but cannot reconstruct a delivery or
+        channel they never recorded. Refuse that join rather than redispatch.
+        """
+        try:
+            ReviewIntentDecision.from_admitted_dict(decision.to_dict())
+        except (ReviewIntentError, AttributeError):
+            raise ReviewAdmissionUnavailable("REVIEW_JOB_IDENTITY_INVALID") from None
+        event = self._runtime.store.get_event_by_command_id(decision.command_id)
+        if event is None:
+            return None
+        if (event.event_type != "JOB_CREATED" or not event.job_id
+                or event.aggregate_type != "job" or event.aggregate_id != event.job_id):
+            raise ReviewAdmissionUnavailable("REVIEW_COMMAND_ID_COLLISION")
+        job = self._runtime.jobs.get_job(event.job_id)
+        provenance = event.payload.get("provenance")
+        if (job is None or job.job_id != event.job_id or not isinstance(provenance, dict)
+                or provenance.get("schema") != SCHEMA):
+            raise ReviewAdmissionUnavailable("REVIEW_COMMAND_PROVENANCE_CONFLICT")
+        if "decision" not in provenance:
+            if (any(provenance.get(field) != getattr(decision, field)
+                    for field in ("repository", "pull_number", "frozen_head_sha", "intent_id", "command_id"))
+                    or event.command_id != decision.command_id
+                    or job.requested_authorities != ["READ"] or job.allowed_write_paths != []
+                    or job.parent_job_id is not None or job.orchestration_role is not None):
+                raise ReviewAdmissionUnavailable("REVIEW_COMMAND_PROVENANCE_CONFLICT")
+            raise ExistingReviewDecisionUnavailable(
+                job_id=job.job_id, command_id=event.command_id,
+                repository=provenance["repository"], pull_number=provenance["pull_number"],
+                frozen_head_sha=provenance["frozen_head_sha"],
+            )
+        try:
+            original = ReviewIntentDecision.from_admitted_dict(provenance["decision"])
+        except ReviewIntentError:
+            raise ReviewAdmissionUnavailable("REVIEW_COMMAND_PROVENANCE_CONFLICT") from None
+        for field in ("repository", "pull_number", "frozen_head_sha", "intent_id", "command_id"):
+            if (getattr(original, field) != getattr(decision, field)
+                    or provenance.get(field) != getattr(original, field)):
+                raise ReviewAdmissionUnavailable("REVIEW_COMMAND_IDENTITY_CONFLICT")
+        if (event.command_id != original.command_id
+                or provenance.get("actor") != original.actor
+                or provenance.get("objective_sha256") != hashlib.sha256(job.objective.encode("utf-8")).hexdigest()
+                or job.requested_authorities != ["READ"] or job.allowed_write_paths != []
+                or job.parent_job_id is not None or job.orchestration_role is not None):
+            raise ReviewAdmissionUnavailable("REVIEW_COMMAND_PROVENANCE_CONFLICT")
+        return ReviewAdmissionReceipt(job_id=job.job_id, decision=original, created=False)
+
+    def admit_or_join_review_intent(
+        self, *, decision: ReviewIntentDecision, objective: str,
+    ) -> ReviewAdmissionReceipt:
+        """Atomically create or join an authorized trigger for the same PR head."""
+        self._authorize()
+        if type(objective) is not str or not objective.strip():
+            raise ReviewAdmissionUnavailable("REVIEW_JOB_IDENTITY_INVALID")
+        objective = objective.strip()
+
+        def existing_receipt() -> ReviewAdmissionReceipt | None:
+            receipt = self.read_existing_review(decision=decision)
+            if receipt is not None and receipt.decision == decision:
+                # An exact submission replay must still reconcile its payload.
+                self._reconcile(decision=decision, objective=objective)
+            return receipt
+
+        existing = existing_receipt()
+        if existing is not None:
+            return existing
+        try:
+            self._create(decision=decision, objective=objective)
+        except StateConflict:
+            existing = existing_receipt()
+            if existing is not None:
+                return existing
+            raise ReviewAdmissionUnavailable("REVIEW_RUNTIME_ADMISSION_REFUSED") from None
+        receipt = self.read_existing_review(decision=decision)
+        if receipt is None:
+            raise ReviewAdmissionUnavailable("REVIEW_RUNTIME_ADMISSION_UNRECONCILED")
+        return dataclasses.replace(receipt, created=True)
 
     def read_admitted_job(self, *, command_id: str) -> AdmittedJobFacts | None:
         """Re-read the incumbent JOB_CREATED event, Job, and provenance.
@@ -112,11 +213,23 @@ class ExecutiveReviewJobAdmission:
         head_sha = provenance.get("frozen_head_sha")
         actor = provenance.get("actor")
         intent_id = provenance.get("intent_id")
+        stored_decision = None
+        if "decision" in provenance:
+            try:
+                stored_decision = ReviewIntentDecision.from_admitted_dict(provenance["decision"])
+                if stored_decision.command_id != command_id:
+                    return None
+                receipt = self.read_existing_review(decision=stored_decision)
+                if receipt is None or receipt.job_id != event.job_id:
+                    return None
+            except (ReviewIntentError, ReviewAdmissionUnavailable):
+                return None
         if (
             not isinstance(repository, str) or not repository
             or type(pull_number) is not int or pull_number <= 0
             or not isinstance(head_sha, str) or not head_sha
-            or not isinstance(actor, str) or not actor
+            or (actor is None and (stored_decision is None or stored_decision.policy_authority is None))
+            or (actor is not None and (not isinstance(actor, str) or not actor))
             or not isinstance(intent_id, str) or not intent_id
         ):
             return None
@@ -128,6 +241,7 @@ class ExecutiveReviewJobAdmission:
             frozen_head_sha=head_sha,
             actor=actor,
             intent_id=intent_id,
+            decision=stored_decision,
         )
 
     def admit_review_intent(
@@ -143,9 +257,23 @@ class ExecutiveReviewJobAdmission:
             or not objective
         ):
             raise ReviewAdmissionUnavailable("REVIEW_JOB_IDENTITY_INVALID")
+        objective = objective.strip()
         existing = self._reconcile(decision=decision, objective=objective)
         if existing is not None:
             return existing
+        try:
+            return self._create(decision=decision, objective=objective)
+        except StateConflict:
+            existing = self._reconcile(decision=decision, objective=objective)
+            if existing is not None:
+                return existing
+            raise ReviewAdmissionUnavailable("REVIEW_RUNTIME_ADMISSION_REFUSED") from None
+
+    def _create(self, *, decision: ReviewIntentDecision, objective: str) -> str:
+        try:
+            ReviewIntentDecision.from_admitted_dict(decision.to_dict())
+        except ReviewIntentError:
+            raise ReviewAdmissionUnavailable("REVIEW_JOB_IDENTITY_INVALID") from None
         provenance = {
             "schema": SCHEMA,
             "repository": decision.repository,
@@ -154,9 +282,10 @@ class ExecutiveReviewJobAdmission:
             "actor": decision.actor,
             "intent_id": decision.intent_id,
             "command_id": decision.command_id,
+            "decision": decision.to_dict(),
+            "objective_sha256": hashlib.sha256(objective.encode("utf-8")).hexdigest(),
         }
-        try:
-            job = self._runtime.jobs.create_job(
+        job = self._runtime.jobs.create_job(
                 objective,
                 department="engineering",
                 priority=0,
@@ -176,11 +305,4 @@ class ExecutiveReviewJobAdmission:
                 orchestration_role=None,
                 _principal_commit_guard=self._authorize,
             )
-            return job.job_id
-        except StateConflict:
-            # Creation may have committed in a concurrent first delivery.
-            # Reconcile the exact object instead of making a second Job.
-            existing = self._reconcile(decision=decision, objective=objective)
-            if existing is not None:
-                return existing
-            raise ReviewAdmissionUnavailable("REVIEW_RUNTIME_ADMISSION_REFUSED") from None
+        return job.job_id

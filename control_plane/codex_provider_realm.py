@@ -735,7 +735,15 @@ def _native_enrollment(config: Mapping[str, Any]):
         if type(enrollment[key]) is not str or not pattern.fullmatch(enrollment[key]):
             _native_refuse()
     try:
-        slot = (native_slot_from_config(config) if config.get("native_provider") == "claude"
+        # Only this explicit future Codex Pro seat uses the existing root-
+        # pinned config projection. All legacy static Codex and native Claude
+        # slots retain their previous resolved identities and refusal gates.
+        config_bound = (
+            config.get("native_provider") == "claude"
+            or (config.get("native_provider") == "codex"
+                and enrollment["slot_id"] == "codex-pro-04")
+        )
+        slot = (native_slot_from_config(config) if config_bound
                 else get_slot(enrollment["slot_id"]))
     except (SlotCatalogError, TypeError):
         raise ProviderRealmError("NATIVE_REALM_IDENTITY_UNAVAILABLE") from None
