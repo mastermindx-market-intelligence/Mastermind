@@ -68,5 +68,67 @@ class WorkerResponsibilityContinuityContractTests(unittest.TestCase):
         self.assertIn("Perform the required delivery/continuation edge", contract)
 
 
+    def test_original_administrator_result_is_not_a_permanent_chat_owner(self) -> None:
+        contract = _extract_contract(ROOT / "AGENTS.md")
+        for required in (
+            'A named "original administrator," publisher, reviewer, host owner, or ChatGPT conversation',
+            "the immutable effect/result carrier",
+            "not permanent staffing",
+            "The currently assigned session owns this recovery triage",
+            "original carrier",
+            "not canonically reconciled",
+            "do not infer PASS from rc0",
+            "do not rerun the operation",
+            "an explicit safety/permission denial",
+            "advance genuinely independent authorized work",
+            "all useful independent lanes are exhausted",
+            '"Ask the original owner/chat"',
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, contract)
+
+    def test_web_native_and_fabric_load_same_protected_result_gate(self) -> None:
+        active = (ROOT / "docs/sol_skills/ACTIVE_EXECUTION.md").read_text(encoding="utf-8")
+        reconcile = (ROOT / "docs/sol_skills/RECONCILE_STATE.md").read_text(encoding="utf-8")
+        clients = (ROOT / "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md").read_text(encoding="utf-8")
+        for required in (
+            "Original-owner result gates are proof obligations",
+            "an archived \"original owner\" is never itself an",
+            "reported successful exit",
+            "specific unavailable human/admin credential or control",
+            "MORE_WORK_EXISTS",
+        ):
+            with self.subTest(source="active", required=required):
+                self.assertIn(required, active)
+        for required in (
+            "Reported terminal, protected result still outstanding",
+            "two distinct facts",
+            "existing original operation's authorized result/status interface",
+            "do **not** reattempt",
+            "not a human-control proof",
+        ):
+            with self.subTest(source="reconcile", required=required):
+                self.assertIn(required, reconcile)
+        for required in (
+            "Web, Codex, Claude or Fabric",
+            "Never retry through a second reader/account",
+            "EXACT_HUMAN_GATE",
+            "exhausted safe lanes",
+        ):
+            with self.subTest(source="clients", required=required):
+                self.assertIn(required, clients)
+
+    def test_existing_protected_result_hold_does_not_authorize_clearing_it(self) -> None:
+        contract = _extract_contract(ROOT / "AGENTS.md")
+        for phrase in (
+            "An explicit safety/permission denial ends that action",
+            "preserve its original carrier and release hold",
+            "do not infer PASS from rc0",
+            "Do not rerun the operation",
+            "do not",
+        ):
+            self.assertIn(phrase, contract)
+
+
 if __name__ == "__main__":
     unittest.main()
