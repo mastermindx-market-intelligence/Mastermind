@@ -54,7 +54,7 @@ FORWARD EXECUTION + BLOCKERS
 CONTEXT + RECOVERY
 24. Compact frontier: mission, authority, refs, effects, DO_NOT_REDO, blockers, children, next action and capability evidence. No history replay.
 25. Prefer bounded reads and concise evidence over logs/threads/rescans. Keep results, not raw output. Soft compaction/mode switching does not remove old context.
-26. Preserve original DONE_WHEN and allowed surfaces. Save material results at milestones or interruption, not each tool call.
+26. Keep DONE_WHEN and allowed surfaces. Save material results at milestones or interruption, not each tool call.
 27. Tool failure is not chat corruption. Isolated "Thinking failed" with light context permits one bounded recovery after effect reconciliation; cause unproven.
 28. HARD_ROTATION after repeated thinking/session failure, or "Thinking failed" in a heavy/unstable chat: stop heavy work; reconcile only if safe; persist frontier; SEAL. Switching is not rotation.
 29. If persistence fails, emit NOT_CANONICALLY_PERSISTED + last durable ref/uncertainties; no write loops. Successor reconciles/persists. Classify by observed cause; never invent HUMAN_GATE/EFFECT_UNKNOWN.
