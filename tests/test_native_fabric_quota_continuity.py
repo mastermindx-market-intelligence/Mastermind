@@ -28,7 +28,11 @@ def _qualify(directory, *, timeout_seconds=240):
 
 
 def test_native_quota_continuity_owners():
-    _qualify("tests", timeout_seconds=300)
+    # Aggregate qualification only: 532 discovered cases include independent
+    # 20/40/60-second fixture ceilings (the deadline module alone totals 340).
+    # Keep every inner deadline/lease budget and the original discovery intact;
+    # this finite outer ceiling remains inside the 45-minute CI test step.
+    _qualify("tests", timeout_seconds=600)
 
 
 def test_native_generation_and_ingress_rollout():

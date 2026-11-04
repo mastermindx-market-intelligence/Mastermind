@@ -8,7 +8,8 @@ const DEFAULT_PERMISSION = () => true;
 function ProgrammeDirection(props: ProgrammeDirectionProps) {
   return <ActualProgrammeDirection sourceGeneration={DEFAULT_GENERATION} canRead={DEFAULT_PERMISSION} {...props} />;
 }
-import type { ProjectPlanRead, ProjectPlanSelection } from '../planning/project-plan';
+import {decodeProjectPlan, type ProjectPlanRead, type ProjectPlanSelection} from '../planning/project-plan';
+import v2Fixture from '../fixtures/project-plan-v2-owner.json';
 
 afterEach(cleanup);
 
@@ -459,3 +460,17 @@ describe('ProgrammeDirection', () => {
     });
   });
 });
+
+it.each([['en','Adoption recorded by source','The authored record differs from the recorded adopted source.'],
+  ['zh-CN','来源已记录采纳决定','编写记录与已记录的采纳来源不同。']] as const)(
+  'shows actual decoded v2 source adoption separately from authored record in %s',async (locale,label,relation) => {
+    const selection={work_ref:'WS:PLAN-TEST'};
+    const body=decodeProjectPlan(v2Fixture.cases.available_pending,selection);
+    const read=vi.fn(async()=>body);
+    render(<ProgrammeDirection selection={selection} read={read} locale={locale}/>);
+    fireEvent.click(screen.getByRole('button',{name:locale==='en'?'Read programme objective':'读取项目目标'}));
+    expect(await screen.findByText(`${label} · DEC:PLAN-FIRST`,{exact:false})).toBeTruthy();
+    expect(screen.getByText(relation)).toBeTruthy();
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button',{name:/Adopt|采纳/})).toBeNull();
+  });

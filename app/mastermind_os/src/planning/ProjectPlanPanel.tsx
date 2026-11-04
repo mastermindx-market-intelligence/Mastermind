@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { validProjectPlanSelection, type ProjectPlanRead, type ProjectPlanSelection } from "./project-plan";
 import "./project-plan-panel.css";
+import { ProjectPlanContinuity } from "./ProjectPlanContinuity";
 
 /**
  * Task-tab content for one canonical Agent OS project-plan read. The
@@ -60,6 +61,16 @@ const COPY = {
   adoptionLabel: { en: "Adoption", zh: "采用状态" },
   adoptionUnavailable: { en: "This source does not declare plan adoption. Adoption and proposal history are unavailable in this read.",
     zh: "此来源未声明计划采用状态。此次读取无法提供采用或提案历史。" },
+  adoptionRecorded: { en: "An adoption decision is recorded. The planning details below identify its exact baseline.",
+    zh: "已记录采纳决定。下方规划详情列明其准确基线。" },
+  authoredMatches: { en: "This recorded plan matches the adopted baseline content.",
+    zh: "此记录的计划与已采纳基线内容一致。" },
+  authoredDiffers: { en: "The recorded programme and adopted baseline contain different content. Review both before choosing a change.",
+    zh: "已记录方案与已采纳基线的内容不同。选择变更前请查看两者。" },
+  adoptionReadUnavailable: { en: "Adoption information is unavailable in this read. Recorded programme content remains available.",
+    zh: "此次读取无法提供采纳信息，已记录的方案内容仍可查看。" },
+  noAdoptedBaseline: { en: "No adopted baseline is recorded in the captured planning sources. Recorded proposals can be reviewed below.",
+    zh: "已捕获的规划来源未记录已采纳基线，可在下方查看已记录的提案。" },
   historyLabel: { en: "Record revision history", zh: "记录修订历史" },
   historyNote: { en: "Recent changes to the source record. Adoption status is shown separately.",
     zh: "来源记录的近期修订。采用状态另行显示。" },
@@ -73,8 +84,8 @@ const COPY = {
     zh: "此视图使用的记录及其修订。" },
   repositoryLabel: { en: "Repository", zh: "仓库" },
   pathLabel: { en: "Path", zh: "路径" },
-  footnote: { en: "Authored status values, including done, describe the record only; this panel asserts no execution, acceptance or approval.",
-    zh: "写明的状态值（包括 done）仅描述记录本身；本面板不主张任何执行、验收或批准。" },
+  footnote: { en: "Planning records describe plans and source decisions. Execution and product acceptance are reported separately.",
+    zh: "规划记录说明计划与来源决定，执行情况及产品验收另行报告。" },
 } satisfies Record<string, CopyEntry>;
 
 const REASON_COPY: Record<string, CopyEntry> = {
@@ -170,8 +181,8 @@ function RevisionHistory({ history, chinese }: { history: PlanDetail["version_hi
   </div>;
 }
 
-function AvailablePlanBody({ plan, source, chinese }: {
-  plan: PlanDetail; source: PlanSource | null; chinese: boolean;
+function AvailablePlanBody({ plan, source, chinese, hasContinuity, continuity }: {
+  plan: PlanDetail; source: PlanSource | null; chinese: boolean; hasContinuity: boolean; continuity?: ReactNode;
 }) {
   const waves: WaveView[] = plan.waves;
   const [showAllWaves, setShowAllWaves] = useState(false);
@@ -184,8 +195,11 @@ function AvailablePlanBody({ plan, source, chinese }: {
     <div className="mm-project-plan__adoption">
       <h3 className="mm-project-plan__section-title">{text(COPY.adoptionLabel, chinese)}</h3>
       {plan.adoption.state === "UNAVAILABLE"
-        ? <p className="mm-project-plan__note" role="status">{text(COPY.adoptionUnavailable, chinese)}</p>
-        : null}
+        ? <p className="mm-project-plan__note" role="status">{text(plan.adoption.reason === "NOT_DECLARED"
+          ? hasContinuity ? COPY.noAdoptedBaseline : COPY.adoptionUnavailable : COPY.adoptionReadUnavailable, chinese)}</p>
+        : <><p className="mm-project-plan__note">{text(COPY.adoptionRecorded, chinese)}</p>
+          <p className="mm-project-plan__note">{text(plan.adoption.matches_authored_record
+            ? COPY.authoredMatches : COPY.authoredDiffers, chinese)}</p></>}
     </div>
       <dl className="mm-project-plan__facts">
         <div><dt>{text(COPY.statusLabel, chinese)}</dt><dd>{plan.status}</dd></div>
@@ -195,6 +209,7 @@ function AvailablePlanBody({ plan, source, chinese }: {
         </div>}
       </dl>
     </div>
+    {continuity}
     <div className="mm-project-plan__waves-section">
       <h3 className="mm-project-plan__section-title">{text(COPY.wavesLabel, chinese)}</h3>
       {waves.length === 0
@@ -398,7 +413,10 @@ export function ProjectPlanPanel({
       displayedPlan.plan !== null &&
       <div className="mm-project-plan__results"
         key={`${displayedPlan.selection.work_ref}:${documentGeneration}`}>
-        <AvailablePlanBody plan={displayedPlan.plan} source={displayedPlan.source} chinese={chinese} />
+        <AvailablePlanBody plan={displayedPlan.plan} source={displayedPlan.source} chinese={chinese}
+          hasContinuity={displayedPlan.schema === "mastermind.workspace_project_plan.v2"}
+          continuity={displayedPlan.schema === "mastermind.workspace_project_plan.v2"
+            ? <ProjectPlanContinuity data={displayedPlan.continuity} locale={locale} /> : undefined} />
       </div>}
   </section>;
   return renderWorkspace ? renderWorkspace({

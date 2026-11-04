@@ -51,7 +51,8 @@ class AgentOsProjectPlanReader:
 
 
 def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
-                          work_ref: str, timeout: float = 10.0, runner=None):
+                          work_ref: str, timeout: float = 10.0, runner=None,
+                          include_continuity: bool = False):
     """Fixed child entry used inside the collector's pre/post seal bracket.
 
     Macro's actual parser and validator consume bounded captured bytes. No
@@ -63,6 +64,7 @@ def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
     selected = validate_selection({"work_ref": work_ref})
     if (not Path(macro_root).is_absolute()
             or type(expected_macro_sha) is not str
+            or type(include_continuity) is not bool
             or re.fullmatch(r"[0-9a-f]{40}", expected_macro_sha) is None
             or type(timeout) not in (int, float) or not 0 < timeout <= 15):
         raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
@@ -71,12 +73,13 @@ def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
     deadline = time.monotonic() + timeout
     run = runner or bounded_subprocess_runner
 
-    def git(*args, limit=_RECORD_BYTES):
+    def git(*args, limit=_RECORD_BYTES, input_bytes=None):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
+        options = {} if input_bytes is None else {"input_bytes": input_bytes}
         value = run(["git", "--no-optional-locks", "--no-replace-objects", "-C", str(root), *args],
-                    cwd=root, timeout=remaining, max_bytes=limit)
+                    cwd=root, timeout=remaining, max_bytes=limit, **options)
         if (not isinstance(value, dict) or value.get("code") != 0
                 or type(value.get("stdout")) is not str
                 or any(value.get(flag) is True for flag in ("timed_out", "limit_exceeded", "invalid_utf8"))):
@@ -150,6 +153,14 @@ def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
                 value["plan"]["version_history"] = {"state": "UNAVAILABLE", "reason": "SOURCE_UNAVAILABLE"}
         if git("rev-parse", "HEAD").strip() != expected_macro_sha:
             return unavailable(work_ref, "SOURCE_CHANGED")
+        if include_continuity and value.get("availability") == "AVAILABLE":
+            from control_plane.agentos_plan_continuity_capture import capture_plan_continuity
+            from common.project_plan_continuity_contract import compose_body_v2
+            continuity = capture_plan_continuity(owner=owner, git=git, work_ref=work_ref,
+                macro_sha=expected_macro_sha, workstream_source=source, workstream_bytes=text.encode("utf-8"))
+            value = compose_body_v2(value, continuity, authored_bytes=text.encode("utf-8"))
+            if git("rev-parse", "HEAD").strip() != expected_macro_sha:
+                return unavailable(work_ref, "SOURCE_CHANGED")
         from common.executive_workspace_contract import bounded_canonical
         from common.workspace_project_plan_contract import MAX_RESPONSE_BYTES
         try:

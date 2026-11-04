@@ -162,7 +162,9 @@ elif name == 'ssh':
         raise SystemExit(0)
     if 'mkdir -p ~/lanes/tmp ' in command:
         record('setup')
-        if case == 'slow_setup': time.sleep(10)
+        # Exceed both real setup-expiry commissions (8s and 12s). The
+        # original controller deadline, not host overhead, must end this stall.
+        if case == 'slow_setup': time.sleep(20)
         raise SystemExit(0)
     if 'mkdir ' in command:
         record('support_mkdir'); raise SystemExit(0)
@@ -374,7 +376,7 @@ class ControllerDeadline(unittest.TestCase):
         self.assertIn('LEASE_REFUSED rc=75',result['stderr'])
 
     def test_owned_setup_expiry_releases_only_unlaunched_provider_lease(self):
-        # Reach granted-lease setup before its finite ten-second stall.
+        # Reach granted-lease setup before its finite twenty-second stall.
         result=self.run_controller('slow_setup',budget=8)
         self.assertIn('setup',[row['stage'] for row in result['events']],result)
         self.check_prelaunch_expiry(result,'commission-setup')
@@ -397,6 +399,48 @@ class ControllerDeadline(unittest.TestCase):
         self.assertTrue(receipt['timed_out'])
         self.assertTrue(receipt['cleanup']['census_proven'])
         self.assertEqual(receipt['cleanup']['residual_count'],0)
+
+    def test_each_launch_refresh_recomputes_remaining_duration_deterministically(self):
+        # Execute the existing exact Bash policy seam. This is duration
+        # derivation coverage, not a claim that full setup reached two launches.
+        spec=importlib.util.spec_from_file_location('deadline_observation_policy',
+            ROOT/'tests/test_launch_observation_reserve.py')
+        policy=importlib.util.module_from_spec(spec);spec.loader.exec_module(policy)
+        states=self.root/'refresh-state.json'
+        helper=self.bin/'remaining-reader'
+        write(helper, '#!'+sys.executable+'\n'+textwrap.dedent(f"""
+            import json,sys
+            from pathlib import Path
+            path=Path({str(states)!r})
+            calls=json.loads(path.read_text()) if path.exists() else []
+            assert sys.argv[2]=='deadline-seconds'
+            calls.append(int(sys.argv[3]));path.write_text(json.dumps(calls))
+            print([9,6,5,4][len(calls)-1])
+        """),executable=True)
+        script=('log() {{ printf "%s\\n" "$*" >&2; }}; '
+            'COMMISSION_ACTIVE=1; MAX_SECS=12; POLL_SECS=1; RC=0; '
+            'REMOTE_SUB_PYTHON="{helper}"; HERE="{ext}";\n').format(helper=helper,ext=self.ext)
+        script+=policy._policy()+\
+            '\nfor attempt in 1 2 3; do commission_refresh_runtime launch || exit $?; printf "%s,%s\\n" "$MAX_SECS" "$CHILD_TIMEOUT"; done\n'+\
+            'commission_refresh_runtime launch; printf "refused=%s\\n" "$?"\n'
+        result=subprocess.run(['/bin/bash','-c',script],capture_output=True,text=True,timeout=5)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout.splitlines(),['9,7','6,4','5,3','refused=75'])
+        self.assertEqual(json.loads(states.read_text()),[12,9,6,5])
+        self.assertIn('observation_reserve=5',result.stderr)
+
+    def test_original_twelve_second_controller_expiry_stays_prelaunch(self):
+        # Full real-clock setup remains charged to the original12s budget.
+        # The inert setup stall exceeds the entire commission even on a fast
+        # host; verify actual owned setup timeout, not a later-stage refusal.
+        result=self.run_controller('slow_setup',budget=12,broker_delay=1)
+        self.check_prelaunch_expiry(result,'commission-setup')
+        self.assertNotIn('scp',[row['stage'] for row in result['events']])
+        self.assertNotIn('LEASE_PRESERVED effect_unknown=1',result['stderr'])
+        self.assertTrue(result['receipts'])
+        for receipt in result['receipts']:
+            self.assertTrue(receipt['cleanup']['census_proven'])
+            self.assertEqual(receipt['cleanup']['residual_count'],0)
 
     def test_each_actual_launch_recomputes_duration_and_keeps_ambiguous_lease(self):
         # This positive case must reach two launches; short-budget expiry
