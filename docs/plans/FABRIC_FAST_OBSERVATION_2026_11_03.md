@@ -148,3 +148,24 @@ Current source is composed against true two-parent #2019 runtime source `d0891a8
 The original production host remains on older immutable generation `8cefc4b27b2036f86bcec1d626e864f45f792e2c290ab8de56fbde89f78ac94a`; this is source qualification, not new live worker proof. Do not install until genuine head CI, independent nonauthor GitHub review, protected merge, and owner-native generation admission.
 
 A bounded read-only census of the latest 40 stored M2 controller logs found 30 terminal runs with minute-resolution median worker launch-to-result of roughly **6 minutes**, p90 roughly **7 minutes**, and generally immediate lease and support setup. Faster result observation addresses post-completion latency, not model inference; follow-on throughput optimization requires measured model routing and task subdivision through the existing owner. No new monitoring store was created.
+
+
+## Current stack reconciled with reviewed slot-fuse repair
+
+The original runtime source has advanced from the prior \`d0891a8\` head
+to \`aca5a01582aa6cf0cc6e9ad918c5962c4112307c\`, repairing a major
+independent-review defect in which an inner slot supervisor could terminate
+an outer four-hour C3 worker at its original two-hour default. This
+performance branch now **includes** that exact repair and the existing
+source-selected 102-member generation, retaining its independent adaptive
+polling changes without globally increasing slot defaults. The selected
+stacked manifest SHA-256 is
+\`f8dc6414b3a6217f125442d6c123a0d33e2fd67a815cd96a266cbe6c6c1521ba\`.
+The separate \`tests/test_fabric_native_feature_suite_coverage.py\` CI guard
+now recognizes the two distinct valid cleanup-margin source policies:
+the current adaptive controller uses a <=30s **actual** poll interval,
+while unchanged Grok overlay uses its original caller configuration.
+Both still enforce the two-observation settlement margin, and the
+real native margin test suite is executed rather than skipped. CI on
+superseded \`d02075e\` was red ONLY on the obsolete source-marker
+assertion; current-head CI and formal review are pending.

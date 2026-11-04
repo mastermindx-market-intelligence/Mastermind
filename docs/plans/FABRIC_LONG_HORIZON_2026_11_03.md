@@ -79,7 +79,7 @@ The new deterministic unit test also covers 4h unbounded-broker allowance
 smaller requested wait, invalid reserve selectors, and expired deadlines.
 
 Release qualification: 102-file native manifest now
-`cd5ed73bd283d25d64061ae13c7d2ef72ff8cea73b1b36143030ff3f07dcba2a`;
+`40c0a698ed32cadb5d7d508dc141e9d299addc24ba524106ad3040a3438bfafe`;
 review-stage manifest and inventory are regenerated from the exact selected
 candidate. The historical 95-file fixture is restored using byte-pinned
 predecessor inversion rather than silently changing old source. The combined
@@ -141,7 +141,7 @@ Local **consolidated source-qualification suite PASS**, covering closed
 forward map, exact manual-auto predecessor, all B11 historical successor
 fixtures, paid initializer, source/manifest check, and historical95 upgrade;
 the dedicated long-horizon suite also PASS. The selected current102 source
-manifest SHA is `cd5ed73bd283d25d64061ae13c7d2ef72ff8cea73b1b36143030ff3f07dcba2a`.
+manifest SHA is `40c0a698ed32cadb5d7d508dc141e9d299addc24ba524106ad3040a3438bfafe`.
 
 This is not a production acceptance or a hosted green receipt. This branch
 still needs new exact-head GitHub CI, formal nonauthor review, protected
@@ -155,7 +155,49 @@ draft and uninstalled.
 
 - Protected source read pinned at `Mastermind@93c8c3c01f9226d1ea267e21c548f047458654dc` (schema `mastermind.sol_skillpack.v1`, `1.0.1`, compatible bootstrap 1). GitHub source PR #2019 previous exact head `97f7a728367b86e861d7a337e585ab0726ecfec3` had all 12 current-head GitHub checks green, but a real content conflict with current protected master.
 - Source integration uses a **real two-parent merge** of that exact protected commit into the existing operation-bound `fabric-long-horizon-timeout-20261103-sol-001` worktree, not a force push or second writer. The 10 content conflicts in the selected stage, manifest/inventory, source-qualification pins and historical tests were resolved to preserve **both** four-hour runtime limits and the merged protected S9 same-selection diagnostic observer.
-- Source selection regenerated with the canonical builder: 102 native members, source manifest SHA-256 `cd5ed73bd283d25d64061ae13c7d2ef72ff8cea73b1b36143030ff3f07dcba2a`. Candidate `fabric_task.py` composed SHA-256 `778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b`; test inverses the **two bounded runtime budget changes** to the exact protected diagnostic source SHA `ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88`.
+- Source selection regenerated with the canonical builder: 102 native members, source manifest SHA-256 `40c0a698ed32cadb5d7d508dc141e9d299addc24ba524106ad3040a3438bfafe`. Candidate `fabric_task.py` composed SHA-256 `778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b`; test inverses the **two bounded runtime budget changes** to the exact protected diagnostic source SHA `ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88`.
 - Historical B11 test now checks both the prior five source preimages, the five sealed long-runtime original preimages, the five unchanged source/overlay original preimages, **and** protected S9 preobserver picker. Original B11/95 manifests and independent byte hashes were not rewritten or waived.
 - Focused release source tests `tests/test_h1_native100_packaging.py`, `test_native_manual_auto_source_20261024.py`, all B11 successor-transition tests, paid initializer, source/manifest, native95 upgrade and runtime C2/C3 budget cases **passed** before this merge publication. `git diff --check` for the candidate-owned delta relative to protected `93c8c3c` also passed. Protected master research Markdown trailing whitespace is unrelated and was not touched.
 - The next irreversible effect is the existing workspace owner making one merge commit with exactly the original PR head + protected `93c8c3c` parent, followed by same-branch nonforce push, current-head CI, source review and release. No deployment or fleet worker proof exists from this source qualification.
+
+
+## Independent review 5763157664 — real nested child fuse repair (2026-11-03)
+
+The nonauthor reviewer \`mastermidx4\` requested changes on original exact-head
+\`d0891a8ad99640b223cafb55c717f169e4a20819\`: even after increasing
+the outer C3 worker ceiling to 14,400s, the real nested \`slot.py\`
+still defaults to 7,200s and would terminate a qualified worker after two
+hours. This is a **confirmed source defect**, not a reviewer process problem.
+
+The original repair carrier now passes the **already-narrowed** parent
+commission/lease timeout to the existing slot owner as
+\`SLOT_CHILD_TIMEOUT_SECONDS\`, after late commission deadline rechecking,
+for ordinary remote \`glm\`/\`minimax\`/\`qwen\` worker paths. Any stricter
+pre-existing slot or pool timeout stays stricter; malformed/overflow values
+refuse before worker START. Signed GLM remains capped by its existing
+outer 7,200s/7,500s attestation, and the special go-codex path is unchanged.
+
+For standalone Grok, the existing embedded Python launcher now supplies the
+validated worker timeout through the same slot-owned environment key.
+It also no longer raises an **explicit** shorter \`POOL_CHILD_TIMEOUT_SECONDS\`
+commission to a four-hour worker solely because the task is C3;
+classification can raise the **default** only. It does not change
+the slot default, broker heartbeat/lease owner, or global timing semantics.
+The original outer process remains the earlier terminating owner.
+
+Source-extracted hermetic tests execute the actual Grok budget resolution and
+slot launch fragment with an inert process recorder, and compile the exact
+remote child handoff function from its current AST, invoking the real slot
+timeout parser. They cover 14,400/14,340s, explicit 1,200s budget, inherited
+500s and 210s bounds, malformed/NaN/overflow refusals, no implicit 2h
+cap, and retained original supervisor. These are **not** provider/live
+long-duration tests. Source stage rebuilt at exactly 102 members with
+selected manifest SHA-256
+\`40c0a698ed32cadb5d7d508dc141e9d299addc24ba524106ad3040a3438bfafe\`,
+remote executor SHA
+\`9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1\`,
+and embedded Grok launcher SHA
+\`4956942c77421b9d1015889995ebf0419399ea62c16de608765a0795b5fb551f\`.
+Current-head CI, independent nonauthor re-review, protected merge,
+immutable installed-generation readback and genuine single-run result
+acceptance remain separate required gates.

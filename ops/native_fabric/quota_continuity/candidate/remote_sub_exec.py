@@ -36,6 +36,29 @@ from lane_runtime import (
 )
 
 
+
+def _slot_child_timeout_env(child_env: dict[str, str], outer_timeout: float) -> dict[str, str]:
+    """Preserve a stricter slot limit while passing the original outer fuse.
+
+    Called after the existing commissioner/lease clock has narrowed the
+    outer process timeout. Slot remains the sole nested timeout monitor.
+    This is an environment contract, not a second clock or lease.
+    """
+    deadline = parse_bounded_seconds(
+        outer_timeout, default=7200.0, minimum=1.0, maximum=14400.0,
+        key="SLOT_CHILD_TIMEOUT_SECONDS",
+    )
+    for key in ("SLOT_CHILD_TIMEOUT_SECONDS", "POOL_CHILD_TIMEOUT_SECONDS"):
+        raw = child_env.get(key)
+        if raw is not None and str(raw).strip():
+            deadline = min(deadline, parse_bounded_seconds(
+                raw, default=7200.0, minimum=1.0, maximum=14400.0,
+                key=key,
+            ))
+    result = dict(child_env)
+    result["SLOT_CHILD_TIMEOUT_SECONDS"] = str(deadline)
+    return result
+
 def _fail(message: str, code: int) -> int:
     print(message, file=sys.stderr, flush=True)
     return code
@@ -966,6 +989,15 @@ def _execute(argv: list[str], state: dict, *, _canonical_context=None) -> int:
                         timeout = min(timeout, require_remaining(state['commission_deadline_ns'], minimum_seconds=0.05))
                     except CommissionDeadlineExpired:
                         return _fail('REMOTE_SUB_COMMISSION_TIME_EXHAUSTED before_worker=1 stage=launch', 75)
+                # The provider child may enter slot.py under sub.sh. Pass the
+                # *narrowed* existing owner timeout, never the nominal 4h
+                # complexity profile. Without this slot silently defaults to
+                # 7200s and kills a qualified 4h child prematurely.
+                if canonical_command is None and mode in ("glm", "minimax", "qwen"):
+                    try:
+                        child_env = _slot_child_timeout_env(child_env, timeout)
+                    except LaneRuntimeConfigError:
+                        return _fail("REMOTE_SUB_SLOT_TIMEOUT_REFUSED before_worker=1", 78)
                 state["started"] = True
                 result = run_owned_process(
                     command,
