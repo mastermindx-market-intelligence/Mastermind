@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import "./supervision-trace.css";
 import type { MissionSelection } from "../mission";
 import {
-  AUTONOMY_ROOT_JOB_ID_PATTERN,
-  AUTONOMY_WORK_REF_PATTERN,
+  isAutonomySelection,
   decodeAutonomyPolicy,
   type AutonomyRead,
   type AutonomySelection,
@@ -38,7 +37,7 @@ const STRINGS = {
     standingInstructions: "Standing instructions are not supplied by this read.",
     pauseNote: "Project pause is not available from this read.",
     sourceSummary: "Source details",
-    unavailable: "This read is currently unavailable:",
+    unavailable: "Existing execution limits are unavailable.",
     readFailed: "The autonomy read did not complete.",
     readInvalid: "The autonomy read returned a response this panel cannot decode.",
     noSelection: "Select a mission to review its autonomy policy.",
@@ -80,7 +79,7 @@ const STRINGS = {
     standingInstructions: "此读取不提供常设指令。",
     pauseNote: "此读取不提供项目暂停。",
     sourceSummary: "来源详情",
-    unavailable: "此读取当前不可用：",
+    unavailable: "暂时无法获取现有执行上限。",
     readFailed: "自主读取未完成。",
     readInvalid: "自主读取返回了无法解读的结果。",
     noSelection: "请先选定一个任务，再查看其自主策略。",
@@ -139,8 +138,7 @@ export function AutonomyPanel(props: AutonomyPanelProps) {
   const { selection, canRead, sourceGeneration, read, locale = "en" } = props;
   const t = locale === "zh-CN" ? STRINGS["zh-CN"] : STRINGS.en;
   const eligible: AutonomySelection | null = selection !== null
-    && AUTONOMY_WORK_REF_PATTERN.test(selection.workRef)
-    && AUTONOMY_ROOT_JOB_ID_PATTERN.test(selection.rootJobId)
+    && isAutonomySelection({work_ref: selection.workRef, root_job_id: selection.rootJobId})
     ? { work_ref: selection.workRef, root_job_id: selection.rootJobId }
     : null;
   // Owner source key: exact selection + host generation + reader identity + current permission.
@@ -248,21 +246,28 @@ export function AutonomyPanel(props: AutonomyPanelProps) {
       {visible.errorText !== null ? <p className="muted">{visible.errorText}</p> : null}
     </div>
     {decodedRead !== null && decodedRead.availability === "UNAVAILABLE" ? <p className="muted">
-      <span>{t.unavailable}</span> <code>{decodedRead.reason_codes[0]}</code>
+      {t.unavailable}
     </p> : null}
+    {decodedRead !== null && decodedRead.availability === "UNAVAILABLE" ? <details className="reason-details mm-supervision-trace__expand">
+      <summary>{t.sourceSummary}</summary><code>{decodedRead.reason_codes[0]}</code>
+    </details> : null}
     {decodedRead !== null && decodedRead.availability === "AVAILABLE" ? <>
       <h3>{t.limitsHeading}</h3>
-      <table><tbody>
-        {limitRows.map(([label, field, value]) => (
-          <tr key={field}><th scope="row">{label} <code>{field}</code></th><td>{value}</td></tr>
-        ))}
-      </tbody></table>
       <p className="muted">{t.ceilingsNote}</p>
+      <dl className="mm-supervision-trace__facts" aria-label={t.limitsHeading}>
+        {limitRows.map(([label, field, value]) => (
+          <div className="mm-supervision-trace__fact" key={field}>
+            <dt className="mm-supervision-trace__fact-label">{label}</dt>
+            <dd className="mm-supervision-trace__fact-value">{value}</dd>
+          </div>
+        ))}
+      </dl>
       <p className="muted">{t.standingInstructions}</p>
       <p className="muted">{t.pauseNote}</p>
       <details className="reason-details mm-supervision-trace__expand">
         <summary>{t.sourceSummary}</summary>
         <dl>
+          {limitRows.map(([label, field]) => <div key={field}><dt>{label}</dt><dd><code>{field}</code></dd></div>)}
           <dt>{t.workRef}</dt><dd>{decodedRead.selection.work_ref}</dd>
           <dt>{t.rootJobId}</dt><dd>{decodedRead.selection.root_job_id}</dd>
           <dt>{t.policySha}</dt><dd><code>{decodedRead.policy.policy_sha}</code></dd>

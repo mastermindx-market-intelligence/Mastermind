@@ -43,7 +43,7 @@ describe("AutonomyPanel",()=>{
   expect(e.read).not.toHaveBeenCalled();
   await act(async()=>{});
   expect(e.read).not.toHaveBeenCalled();
-  expect(screen.queryByRole("table")).toBeNull();
+  expect(screen.queryByLabelText("Existing plan limits")).toBeNull();
   const user=userEvent.setup();
   await user.click(readButton());
   expect(e.read).toHaveBeenCalledTimes(1);
@@ -58,11 +58,16 @@ describe("AutonomyPanel",()=>{
   expect(screen.getByRole("heading",{name:"Autonomy"})).toBeTruthy();
   expect(screen.getByText("Review how work follows this selected mission.")).toBeTruthy();
   expect(screen.getByText("Existing plan limits")).toBeTruthy();
-  const table=screen.getByRole("table");
-  expect(within(table).getAllByRole("row")).toHaveLength(8);
-  expect(within(table).getByRole("row",{name:/Max children total/}).textContent).toContain("4");
-  expect(within(table).getByRole("row",{name:/Max fan-out per parent/}).textContent).toContain("3");
-  expect(within(table).getByRole("row",{name:/Allowed child cost classes/}).textContent).toContain("standard · deep_research");
+  const table=screen.getByLabelText("Existing plan limits");
+  expect(within(table).getAllByRole("term")).toHaveLength(8);
+  expect(screen.getByText("Policy ceilings, not remaining budget or permission for new work.").compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const source = screen.getByText("Source details").closest("details")!;
+  expect(source.open).toBe(false);
+  expect(within(table).queryByText("max_attempts_per_orchestration_job")).toBeNull();
+  expect(within(source).getByText("max_attempts_per_orchestration_job")).toBeTruthy();
+  expect(within(table).getByText("Max children total").parentElement?.textContent).toContain("4");
+  expect(within(table).getByText("Max fan-out per parent").parentElement?.textContent).toContain("3");
+  expect(within(table).getByText("Allowed child cost classes").parentElement?.textContent).toContain("standard · deep_research");
   expect(screen.getByText("Policy ceilings, not remaining budget or permission for new work.")).toBeTruthy();
   expect(screen.getByText("Standing instructions are not supplied by this read.")).toBeTruthy();
   expect(screen.getByText("Project pause is not available from this read.")).toBeTruthy();
@@ -173,9 +178,9 @@ describe("AutonomyPanel",()=>{
   const user=userEvent.setup();
   await user.click(readButton());
   expect(screen.queryByText("Select a mission to review its autonomy policy.")).toBeNull();
-  expect(screen.queryByRole("table")).toBeNull();
+  expect(screen.queryByLabelText("Existing plan limits")).toBeNull();
   await act(async()=>{flight.resolve(structuredClone(UNAVAILABLE_BODY()));await flight.promise;});
-  expect(screen.getByText("This read is currently unavailable:")).toBeTruthy();
+  expect(screen.getByText("Existing execution limits are unavailable.")).toBeTruthy();
   expect(screen.getByText("SOURCE_CHANGED")).toBeTruthy();
   expect(screen.queryByText("Existing plan limits")).toBeNull();
   ui.rerender(<AutonomyPanel {...e.props()} selection={null}/>);
@@ -190,7 +195,7 @@ describe("AutonomyPanel",()=>{
   ui.rerender(<AutonomyPanel selection={{...SELECTION}} canRead sourceGeneration={1}/>);
   expect(screen.getByText("No autonomy read is connected to this panel.")).toBeTruthy();
   expect(readButton().disabled).toBe(true);
-  expect(screen.queryByRole("table")).toBeNull();
+  expect(screen.queryByLabelText("Existing plan limits")).toBeNull();
  });
  it("presents the same honest read in Chinese without fake pause or command controls",async()=>{
   const e=setup(),flight=deferred();e.read.mockImplementationOnce(()=>flight.promise);
@@ -202,10 +207,10 @@ describe("AutonomyPanel",()=>{
   await user.click(screen.getByRole("button",{name:"读取现有上限"}));
   await act(async()=>{flight.resolve(structuredClone(BODY()));await flight.promise;});
   expect(screen.getByText("现有计划上限")).toBeTruthy();
-  const table=screen.getByRole("table");
-  expect(within(table).getAllByRole("row")).toHaveLength(8);
-  expect(within(table).getByRole("row",{name:/子工作总数上限/}).textContent).toContain("4");
-  expect(within(table).getByRole("row",{name:/允许的子工作成本类别/}).textContent).toContain("standard · deep_research");
+  const table=screen.getByLabelText("现有计划上限");
+  expect(within(table).getAllByRole("term")).toHaveLength(8);
+  expect(within(table).getByText("子工作总数上限").parentElement?.textContent).toContain("4");
+  expect(within(table).getByText("允许的子工作成本类别").parentElement?.textContent).toContain("standard · deep_research");
   expect(screen.getByText("这些是策略上限，不是剩余预算，也不是新工作的许可。")).toBeTruthy();
   expect(screen.getByText("此读取不提供常设指令。")).toBeTruthy();
   expect(screen.getByText("此读取不提供项目暂停。")).toBeTruthy();
