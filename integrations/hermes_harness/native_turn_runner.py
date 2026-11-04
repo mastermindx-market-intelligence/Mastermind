@@ -104,7 +104,12 @@ def _private_child_environment(profile: RuntimeProfile, env: Mapping[str, str]) 
 
 
 def _terminate_group(proc: subprocess.Popen[bytes]) -> None:
-    if proc.poll() is None:
+    # Error cleanup in _capture_bounded_child precedes its only wait(). Do not
+    # poll here: polling can reap an exited leader and lose its retained group
+    # identity while descendants still own the capture pipes. returncode=None
+    # means this Popen has not reaped the leader; signal its original group first.
+    # A successful wait has already reaped it and must not signal a reusable PID.
+    if proc.returncode is None:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except (OSError, ProcessLookupError):

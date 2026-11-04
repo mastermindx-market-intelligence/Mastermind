@@ -143,6 +143,8 @@ def observe_native_turn(
                 or tokens["input"] <= 0 or tokens["output"] <= 0):
             issues.add("USAGE_NOT_OBSERVED")
         session = final.get("session_id")
+        if init.get("session_id") != session:
+            issues.add("INIT_SESSION_IDENTITY_MISMATCH")
         if not isinstance(session, str) or not _SESSION.fullmatch(session):
             issues.add("SESSION_IDENTITY_MISSING")
         elif (not isinstance(stderr, bytes) or len(stderr) > 1024
