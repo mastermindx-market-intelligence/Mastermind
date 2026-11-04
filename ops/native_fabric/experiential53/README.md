@@ -16,9 +16,11 @@ directory is entirely NEW files; no incumbent file is modified.
 | File | Role |
 |---|---|
 | `experiential_pin.py` | Typed manual-pin law: exact pool/slug pin, distinctness from the canonical Z.AI glm tier, no-default-promotion, no-fallback, and the ordered fail-closed execution admission. Stdlib only; no network, no credential, no storage access. |
+| `experiential_transport.py` | The actual opt-in native gateway inference transport: one bounded, non-streaming OpenAI-compatible `chat/completions` POST to the shared loopback gateway (PR #1849 contract). Disabled at source until qualification (`ROUTE_QUALIFIED = False`); every run refuses before any dial. Stdlib only; no env/file credential path; secret-free result/refusal surfaces. |
 | `experiential_exec.sh` | Fail-closed worker scaffold in the incumbent exec-wrapper shape. Every path ends in a typed refusal (exit 78). Zero writes, zero reads of the packet, zero provider contact. |
 | `pools.yaml.experiential.poolblock.yaml` | Declarative registry block for the runtime pool registry owner to merge under `pools:`. Not a patch against moving runtime bytes and NOT installed by this child. |
 | `test_experiential_pin_contract.py` | Hermetic deterministic contract suite (unittest; also pytest-collectable). |
+| `test_experiential_transport.py` | Hermetic mock-localhost suite for the transport: exact frame, one POST, the full fail-closed status/redirect/timeout ladder, proxy-poisoning, secret-free surfaces, and every admission gate through the transport. In-process mock on an ephemeral loopback port; zero provider contact. |
 
 ## The law this encodes
 
@@ -53,6 +55,60 @@ directory is entirely NEW files; no incumbent file is modified.
   only route; the existing provider secret owner keeps custody of the
   upstream key.
 
+## The transport (experiential_transport.py)
+
+The missing piece this generation contributes is the ACTUAL executable
+inference transport behind the manual pin — not a second status scaffold:
+
+* **Contract reuse, no duplication.** It speaks the existing shared
+  gateway's wire contract (PR #1849): `POST /v1/chat/completions` on
+  loopback with the host-managed proxy token as `Bearer`, `stream: false`,
+  and the run id as `Idempotency-Key` for one logical request. It composes
+  the pin law unchanged instead of re-deriving admission, and it names the
+  Attempt-owned consumer seam (`control_plane.experiential_harness_endpoint`,
+  PR #1920) with an explicit probe/refusal (`EXPERIENTIAL_ATTEMPT_SEAM_UNAVAILABLE`)
+  while that PR is unmerged — never a shim.
+* **Disabled at source until qualification.** `ROUTE_QUALIFIED = False` is an
+  immutable module constant, the transport-side twin of the pin's
+  `TRANSPORT_INSTALLED`. Every run refuses
+  `EXPERIENTIAL_GATEWAY_ROUTE_UNQUALIFIED` before any dial; the constant is
+  never an argument. Flipping either constant is an owner source attestation
+  on a qualified host, and the mock suite proves behaviour by patching them
+  in-process only.
+* **Transport laws (all typed, all mock-tested).** Pinned numeric
+  `127.0.0.1` host (a name cannot re-resolve a bearer request off loopback);
+  `http`/owner-qualified `https` loopback scheme only; exact `/v1` base path
+  and `/v1/chat/completions` dialled path; `ProxyHandler({})` opener so no
+  ambient `http(s)_proxy`/`all_proxy`/`trust_env` value is consulted; any 3xx
+  refused and never followed; exactly one POST — no retry, no key rotation,
+  no cross-account or cross-route fallback, and `Retry-After` observed but
+  never obeyed; bounded prompt/system chars, 1 MiB encoded request cap,
+  8 MiB response cap, bounded timeouts; every non-200 refused with a status
+  class (401/403 auth, 413 body, 429 rate limit, 503/504 local queue, other
+  4xx/5xx, and 204 never silently accepted as empty success); a 200 must be
+  JSON with non-empty `choices` and content, and a substituted `model` echo
+  is refused (`GATEWAY_RESPONSE_MODEL_MISMATCH`).
+* **Secret-free surface.** The proxy token is host-managed and org-scoped,
+  supplied per-forward by trusted host composition — this module has NO
+  environment or file credential path (it does not even import `os`), and a
+  provider `xpl_` key is refused outright (`PROVIDER_KEY_REFUSED`). The token
+  is excluded from `repr`/results/summaries/refusal details; refusal details
+  carry metadata only, so they are log-safe.
+* **Per-request acks.** Retention acknowledgement, sensitive-data disclosure
+  opt-in and the independent proprietary-code opt-in are re-validated by the
+  pin admission on every call — nothing cached, nothing implied. Account A
+  stays `HELD_HTTP403`; account B keeps the $1/day cap and, without an
+  authenticated readback, has unknown quota = no capacity.
+* **Packet identity preserved.** `run_id` and `packet_root` are validated,
+  carried through unchanged, and returned on the secret-free outcome.
+* **Mock proof vs live proof.** `test_experiential_transport.py` (64 tests)
+  and the CLI `mockproof` subcommand prove every law above against an
+  in-process mock gateway on an ephemeral loopback port with zero provider
+  contact. That is SOURCE MOCK PROOF only — not a live provider call, not an
+  installed service, not a worker START. `status` (exit 78) reports the
+  shipped fail-closed gate state; `route` proves the refusal ladder without
+  dialing.
+
 ## Custody respected
 
 * `quota_continuity/source/pick.py` and `candidate/pick.py` have a live
@@ -74,11 +130,13 @@ directory is entirely NEW files; no incumbent file is modified.
 3. **Transport wiring**: a `experiential` mode in `remote_sub.sh`/`sub.sh`
    mapping to this exec wrapper, plus `slot.py` cap registration — same
    owners, same fence.
-4. **Qualified gateway transport**: an installed, attested loopback
-   Experiential gateway route (PR #1849) consumed by the Attempt-owned
-   client (PR #1920), qualified on the host, before
-   `EXPERIENTIAL_TRANSPORT_NOT_INSTALLED` may be flipped — by the transport
-   owner, never by this scaffold.
+4. **Qualified gateway transport**: the transport SOURCE now exists
+   (`experiential_transport.py`) and is fully mock-proven, but it ships
+   disabled. An installed, attested loopback Experiential gateway route
+   (PR #1849) consumed directly or via the Attempt-owned client (PR #1920),
+   qualified on the host, must exist before the transport owner flips
+   `ROUTE_QUALIFIED` in source and the pin owner flips
+   `TRANSPORT_INSTALLED` — never as runtime flags, and never by this child.
 5. **Account B quota readback**: an authenticated $1/day readback does not
    exist; until an owner provides one, execution stays refused regardless
    of any other gate.
@@ -87,8 +145,15 @@ directory is entirely NEW files; no incumbent file is modified.
 
 ```sh
 python3 ops/native_fabric/experiential53/test_experiential_pin_contract.py
-# or: pytest ops/native_fabric/experiential53/test_experiential_pin_contract.py --basetemp <dir>
+python3 ops/native_fabric/experiential53/test_experiential_transport.py
+# or: pytest ops/native_fabric/experiential53/ --basetemp <dir>
+
+# zero-network gate report (exit 78 while fail-closed) and the hermetic
+# loopback mock proof (no provider contact):
+python3 ops/native_fabric/experiential53/experiential_transport.py status
+python3 ops/native_fabric/experiential53/experiential_transport.py mockproof
 ```
 
 No test contacts a provider, reads credentials or the runtime registry, or
-writes outside a temporary directory.
+writes outside a temporary directory. Transport tests dial only an in-process
+mock gateway bound to an ephemeral `127.0.0.1` port.
