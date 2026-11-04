@@ -352,3 +352,13 @@ def test_timeout_kind_is_exact_stdlib_type_not_attacker_name_or_output():
     impostor=type('TimeoutExpired',(Exception,),{})('PRIVATE message')
     subclass=type('PrivateTimeout',(subprocess.TimeoutExpired,),{})('PRIVATE',300)
     assert type(impostor) not in fixed.KINDS and type(subclass) not in fixed.KINDS
+
+
+def test_aggregate_owners_ceiling_preserves_original_rollout_limit_and_selection(tmp_path):
+    root=tracked(tmp_path);wrapper=load_wrapper(root)
+    import inspect
+    assert inspect.signature(wrapper._qualify).parameters['timeout_seconds'].default==240
+    with mock.patch.object(wrapper,'_qualify') as qualify:
+        wrapper.test_native_quota_continuity_owners()
+        wrapper.test_native_generation_and_ingress_rollout()
+    assert qualify.call_args_list==[mock.call('tests',timeout_seconds=600),mock.call('rollout')]
