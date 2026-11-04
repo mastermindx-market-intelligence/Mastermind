@@ -8,6 +8,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -162,6 +163,51 @@ class ConfigGuardTests(unittest.TestCase):
         payload = json.loads(buffer.getvalue())
         self.assertEqual(payload["status"], "PASS_OFFLINE_STEWARD_READ_CONFIG")
         self.assertNotIn("MASTERMIND_STEWARD_ACCESS_TOKEN", json.dumps(payload["issues"]))
+
+    def test_public_projection_preserves_valid_structural_report(self) -> None:
+        result = self.check()
+        self.assertEqual(config_guard.public_report(result), result)
+        config = copy.deepcopy(self.config)
+        config["mcp_servers"]["mastermind_steward"]["access_token"] = SENTINEL
+        blocked = self.check(config)
+        projection = config_guard.public_report(blocked)
+        self.assertEqual(projection, blocked)
+        self.assertNotIn(SENTINEL, json.dumps(projection))
+        with mock.patch.object(config_guard, "inspect_file", return_value=blocked), \
+                redirect_stdout(io.StringIO()) as output:
+            code = main(["--config", "synthetic-not-opened.yaml"])
+        self.assertEqual(code, 2)
+        self.assertNotIn(SENTINEL, output.getvalue())
+        self.assertIn("INLINE_SECRET_FIELD", output.getvalue())
+
+    def test_cli_refuses_future_or_forged_output_without_echo(self) -> None:
+        good = self.check()
+        mutations = [
+            lambda r: r.update(extra=SENTINEL),
+            lambda r: r["observations"].update(extra=SENTINEL),
+            lambda r: r.update(issues=[SENTINEL]),
+            lambda r: r.update(config_sha256=SENTINEL),
+            lambda r: r.update(identity_or_authority_granted=True),
+            lambda r: r["observations"].update(server_count=SENTINEL),
+            lambda r: r["observations"].update(inline_secret_field_count=True),
+            lambda r: r["observations"].update(extra_tool_count=-1),
+            lambda r: r["observations"].update(allowlist_count=131073),
+            lambda r: r["observations"].update(missing_tools=[SENTINEL]),
+            lambda r: r["observations"].update(base_status=SENTINEL),
+            lambda r: r.update(status="BLOCKED"),
+        ]
+        for mutate in mutations:
+            report = copy.deepcopy(good)
+            mutate(report)
+            with self.subTest(report_keys=sorted(report)), \
+                    mock.patch.object(config_guard, "inspect_file", return_value=report), \
+                    redirect_stdout(io.StringIO()) as output:
+                code = main(["--config", "synthetic-not-opened.yaml"])
+            self.assertEqual(code, 3)
+            self.assertEqual(json.loads(output.getvalue()), {
+                "schema": config_guard.SCHEMA, "status": "INPUT_REFUSED", "reason": "ValueError",
+            })
+            self.assertNotIn(SENTINEL, output.getvalue())
 
     def test_qualification_profiles_do_not_gain_mcp(self) -> None:
         profiles = ROOT / "integrations" / "hermes_qualification" / "profiles"
