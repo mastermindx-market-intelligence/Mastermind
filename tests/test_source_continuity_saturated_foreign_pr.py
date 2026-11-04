@@ -422,6 +422,7 @@ def test_parallel_shared_call_budget_never_overadmits(monkeypatch) -> None:
             OWNED,
         )
 
+    # One complete short roster leaves exactly five foreign-read admissions.
     assert bounded._calls == 6
     assert len(transport.file_calls) == 5
     assert len(set(transport.file_calls)) == 5
@@ -1129,7 +1130,7 @@ def test_saturated_compare_representation_binds_exact_requested_url(bad_url) -> 
 
 TARGET_PULL_URL = f"https://api.github.com/repos/{REPOSITORY}/pulls/{TARGET_PR}"
 OPEN_PULLS_URL = (
-    f"https://api.github.com/repos/{REPOSITORY}/pulls?state=open&per_page=100&page=1"
+    f"https://api.github.com/repos/{REPOSITORY}/pulls?state=open&sort=created&direction=asc&per_page=100&page=1"
 )
 FOREIGN_FILES_URL = (
     f"https://api.github.com/repos/{REPOSITORY}/pulls/{FOREIGN_PR}"
@@ -1548,7 +1549,7 @@ def test_main_issues_receipt_when_changed_open_roster_keeps_collision_semantics(
 
     module = _module()
     open_pulls = (
-        f"{fx.API_ROOT}/repos/{fx.REPOSITORY}/pulls?state=open&per_page=100&page=1"
+        f"{fx.API_ROOT}/repos/{fx.REPOSITORY}/pulls?state=open&sort=created&direction=asc&per_page=100&page=1"
     )
     first_roster = [
         {
@@ -1591,9 +1592,12 @@ def test_main_issues_receipt_when_changed_open_roster_keeps_collision_semantics(
     assert payload["local_equals_remote"] is True
     # Collision-census reads are intentionally not strict ETag obligations:
     # they are re-proved by one complete second census under the same budget.
+    tail_pulls = open_pulls.replace("direction=asc", "direction=desc")
     conditional_urls = [url for url, _ in http.conditional_calls]
     assert open_pulls not in conditional_urls
+    assert tail_pulls not in conditional_urls
     assert http.first_calls.count(open_pulls) == 2
+    assert http.first_calls.count(tail_pulls) == 0
     assert len(http.conditional_calls) == len(http.first_calls) - 2
 
 
