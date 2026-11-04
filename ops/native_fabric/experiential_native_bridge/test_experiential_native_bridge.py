@@ -558,6 +558,47 @@ def test_env_or_caller_paths_never_supply_adapter(tmp_path, monkeypatch):
     assert exc.value.reason == "EXPERIENTIAL_HOST_ADAPTER_MISSING"
 
 
+@pytest.mark.parametrize("pool,model", [
+    ("EXPERIENTIAL", "glm-5.3-uncensored"),
+    ("experiential ", "glm-5.3-uncensored"),
+    ("experiential", "GLM-5.3-Uncensored"),
+    ("experiential", "glm-5.3-uncensored "),
+    ("experiential", "glm-5.3-flash"),
+])
+def test_native_direct_pin_requires_exact_pool_and_model(tmp_path, pool, model):
+    bridge = sandbox_with_bridge(tmp_path)
+    with pytest.raises(bridge.ExperientialBridgeRefused) as exc:
+        bridge.request_gate(
+            run_id=RUN_ID, task_class="fix_build", pool=pool, model=model,
+            root_id=ROOT_ID, parent_run_id=ROOT_ID, runtime_root=tmp_path,
+            **CONSENT_KWARGS)
+    assert exc.value.reason in {
+        "EXPERIENTIAL_POOL_REQUIRED", "EXPERIENTIAL_MODEL_SLUG_REFUSED"}
+    assert not (tmp_path / "experiential53" / "post_calls.json").exists()
+
+
+@pytest.mark.parametrize("pool", [None, "EXPERIENTIAL", "experiential ", "glm"])
+def test_native_preview_never_qualifies_a_different_pool(tmp_path, pool):
+    bridge = sandbox_with_bridge(tmp_path)
+    with pytest.raises(bridge.ExperientialBridgeRefused) as exc:
+        bridge.preview_command(
+            run_id=RUN_ID, task_class="fix_build", pool=pool,
+            model="glm-5.3-uncensored", runtime_root=tmp_path)
+    assert exc.value.reason == "EXPERIENTIAL_POOL_REQUIRED"
+
+
+@pytest.mark.parametrize("mode,model", [
+    ("EXPERIENTIAL", "glm-5.3-uncensored"),
+    ("experiential", "GLM-5.3-Uncensored"),
+])
+def test_native_economic_witness_never_normalizes_the_manual_pin(
+    tmp_path, mode, model,
+):
+    bridge = sandbox_with_bridge(tmp_path)
+    with pytest.raises(bridge.ExperientialBridgeRefused):
+        bridge.launch_policy_witness(mode, "fix_build", model)
+
+
 def test_class_law_delegates_to_owner_pin(tmp_path):
     bridge = sandbox_with_bridge(tmp_path)
     with pytest.raises(bridge.ExperientialBridgeRefused) as exc:
