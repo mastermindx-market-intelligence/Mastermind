@@ -123,23 +123,24 @@ def test_source_only_prevents_false_installed_and_live_claims():
     assert "fresh" in guide.lower()
 
 
-def test_session_local_review_does_not_preempt_unmerged_standard_policy():
+def test_session_local_review_all_tiers_preserves_actual_native_gates():
     policy = _read("docs/SESSION_LOCAL_REVIEW_POLICY.md")
-    agents = _read("AGENTS.md")
     claude = _read("CLAUDE.md")
     for required in (
-        "Before #2018 is protected",
-        "one independent technical assessment and real non-author formal approval",
+        "Attended CEO Web FAST / STANDARD / CRITICAL",
+        "Zero blanket independent technical reviewers",
+        "CRITICAL classification by itself does",
+        "signed AUTOMATIC GitHub/Executive",
+        "native GitHub/CODEOWNERS",
         "SELF_REVIEWED",
-        "a second prompt in the builder's own context is SELF_REVIEWED",
-        "On `EFFECT_UNKNOWN`",
+        "EFFECT_UNKNOWN",
         "original",
     ):
-        assert required in policy, f"local-first cannot silently waive prior source: {required}"
-    assert "Only after #2018's risk-tier source is protected" in agents
-    assert "STANDARD's zero-extra-review rule is conditional" in claude
+        assert required in policy, f"missing all-tier attended waiver or gate: {required}"
+    assert "Before #2018 is protected" not in policy
+    assert "CRITICAL's two technical perspectives must show" not in policy
     assert "docs/SESSION_LOCAL_REVIEW_POLICY.md" in claude
-    assert GUIDE in claude, "external avenue remains discoverable when genuinely needed"
+    assert GUIDE in claude, "optional lawful external review remains discoverable"
 
 
 def test_project_installed_fence_separates_native_review_from_formal_approval():
