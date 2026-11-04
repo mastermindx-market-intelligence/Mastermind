@@ -369,9 +369,14 @@ def test_selected_import_and_fixture_failures_keep_qualified_module(selection, p
     module = SELECTION_MODULES[selection]
     root = tracked(tmp_path, source, module)
     head,result,raw = run_child(root, directory=selection[0], selection=selection)
-    assert result.returncode == 1
+    args=(['discover','-s',native.PREFIX+'tests','-p','test_commission_deadline.py']
+        if selection==native.COMMISSION_SELECTION else ['discover','-s',selection[0],'-p',selection[1],'-v'])
+    cwd=root if selection==native.COMMISSION_SELECTION else root/'ops/native_fabric/quota_continuity'
+    ordinary = subprocess.run([sys.executable,'-m','unittest',*args], cwd=cwd,
+        capture_output=True, timeout=10)
+    assert result.returncode == ordinary.returncode != 0
     value = native.decode(raw, head=head, invocation='a'*32, directory=selection[0],
-        selection=selection, catalog=fixed.PublicCatalog(root,native=True), returncode=1)
+        selection=selection, catalog=fixed.PublicCatalog(root,native=True), returncode=result.returncode)
     assert len(value['records']) == 1 and value['records'][0]['module'] == module
     assert value['records'][0]['phase'] == phase and b'PRIVATE' not in raw
 
