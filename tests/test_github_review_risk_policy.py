@@ -79,7 +79,7 @@ def test_small_sensitive_changes_never_use_fast_lane(paths):
     decision = assess_review_risk(facts(paths, additions=1, deletions=0))
     assert decision.tier is ReviewTier.CRITICAL
     assert decision.minimum_independent_assessments == 2
-    assert decision.minimum_formal_non_author_approvals == 0
+    assert decision.minimum_formal_non_author_approvals == 1
     assert not decision.fast_lane_candidate
 
 
@@ -92,11 +92,11 @@ def test_small_sensitive_changes_never_use_fast_lane(paths):
     ("package-lock.json",),
     ("backend/schema/price.ts",),
 ])
-def test_consequential_code_keeps_standard_tier_without_external_review_by_default(paths):
+def test_consequential_code_keeps_machine_standard_risk(paths):
     decision = assess_review_risk(facts(paths))
     assert decision.tier is ReviewTier.STANDARD
-    assert decision.minimum_independent_assessments == 0
-    assert decision.minimum_formal_non_author_approvals == 0
+    assert decision.minimum_independent_assessments == 1
+    assert decision.minimum_formal_non_author_approvals == 1
 
 
 def test_large_unremarkable_diff_gets_one_review():
@@ -265,4 +265,4 @@ def test_real_managed_workspace_identity_change_is_critical_with_verified_metric
     verdict = assess_review_risk(source)
     assert verdict.tier is ReviewTier.CRITICAL
     assert verdict.minimum_independent_assessments == 2
-    assert verdict.minimum_formal_non_author_approvals == 0
+    assert verdict.minimum_formal_non_author_approvals == 1

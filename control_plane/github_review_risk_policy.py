@@ -248,15 +248,15 @@ def _validate(facts: ReviewChangeFacts) -> None:
 
 
 def _result(facts: ReviewChangeFacts, tier: ReviewTier, *reasons: str) -> ReviewRiskAssessment:
+    # This same assessment is consumed by signed AUTOMATIC GitHub/Executive
+    # ingress; it cannot authenticate attended CEO Web provenance from a PR.
+    # Preserve the existing machine review-risk requirements at this boundary.
+    # The Chairman's no-mandatory-review waiver covers attended CEO Web author
+    # workflow at every tier, NOT the signed machine reviewer (default OFF).
     review_counts = {
         ReviewTier.FAST: (0, 0),
-        # Normal code is verified by source-bound CI; independent review is
-        # optional unless another explicit gate makes it mandatory.
-        ReviewTier.STANDARD: (0, 0),
-        # Two distinct technical reviewers still required for CRITICAL.
-        # Internal policy does not demand a separate GitHub account/session;
-        # actual branch-protection or explicit security holds may require one.
-        ReviewTier.CRITICAL: (2, 0),
+        ReviewTier.STANDARD: (1, 1),
+        ReviewTier.CRITICAL: (2, 1),
         ReviewTier.HOLD: (0, 0),
     }
     assessments, approvals = review_counts[tier]

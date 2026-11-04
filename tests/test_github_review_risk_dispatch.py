@@ -55,9 +55,9 @@ def test_auto_fast_skips_review_job_only_for_matching_current_source():
     assert (result.repository, result.pull_number, result.head_sha) == (REPO, PR, SHA)
 
 
-def test_auto_standard_follows_ci_without_mandatory_review():
+def test_signed_auto_standard_keeps_separate_machine_review():
     result = auto(risk(("server/api/refresh.py",)))
-    assert result.action is ReviewDispatch.SKIP_NO_REVIEW_NEEDED
+    assert result.action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
     assert result.source_tier is ReviewTier.STANDARD
 
 
@@ -147,3 +147,15 @@ def test_manual_review_without_risk_stays_on_existing_ingress():
 def test_caller_text_is_not_verified_origin(bad_origin):
     with pytest.raises(ReviewRiskDispatchError):
         decide_risk_dispatch(origin=bad_origin, assessment=risk())
+
+
+def test_signed_standard_machine_review_cannot_be_skipped_by_forged_zero_counts():
+    assessment = replace(risk(("server/api/refresh.py",)),
+        minimum_independent_assessments=0, minimum_formal_non_author_approvals=0)
+    assert auto(assessment).action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
+
+
+def test_signed_critical_machine_review_cannot_be_skipped_by_forged_zero_counts():
+    assessment = replace(risk((".github/workflows/release.yml",)),
+        minimum_independent_assessments=0, minimum_formal_non_author_approvals=0)
+    assert auto(assessment).action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
