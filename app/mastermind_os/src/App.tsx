@@ -3605,6 +3605,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       generation: host?.invalidationGeneration ? () => host.invalidationGeneration!() : undefined,
       plan: host?.readProjectPlan ? (request: Parameters<NonNullable<MissionHost["readProjectPlan"]>>[0]) => host.readProjectPlan!(request) : undefined,
       journal: host?.readProjectJournal ? ({workRef, signal}: {workRef: string; signal: AbortSignal}) => host.readProjectJournal!({work_ref: workRef, signal}) : undefined,
+      association: host?.readProjectSessionAssociation ? (request: Parameters<NonNullable<MissionHost["readProjectSessionAssociation"]>>[0]) => host.readProjectSessionAssociation!(request) : undefined,
       autonomy: host?.readAutonomyPolicy ? (request: Parameters<NonNullable<MissionHost["readAutonomyPolicy"]>>[0]) => host.readAutonomyPolicy!(request) : undefined,
     };
   }, [retainedResultHost, authRevision]);
@@ -3624,9 +3625,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       ? {workRef: projectWorkRef, rootJobId: projectCard.rootJobId} : null;
   const projectSessionEvidence = <ProjectConversationAssociation selection={projectAssociationSelection}
     authGeneration={authRevision} hostGeneration={retainedResultHost?.invalidationGeneration?.() ?? null}
-    locale={locale}/>;
-  // The fixed signed owner port is not part of the current host closure. Its
-  // absence is explicit; never substitute a URL, guessed receipt or local reader.
+    readAssociation={projectReaders.association} locale={locale}/>;
   const recordedProjectJournal = projectWorkRef ? <ProjectJournalReader selection={{workRef: projectWorkRef}}
       read={projectReaders.journal} generation={projectReaders.generation?.() ?? "SOURCE_UNAVAILABLE"}
       authGeneration={authRevision} canRead={projectReaders.canRead} locale={locale}/> : null;
