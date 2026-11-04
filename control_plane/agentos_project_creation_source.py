@@ -97,7 +97,7 @@ def read_from_macro_owner(*, macro_root, expected_macro_sha, work_ref, record_co
     if re.fullmatch(r"100644 blob [0-9a-f]{40}\t" + re.escape(path) + "\x00", member) is None:
         raise ValueError("source_mismatch")
     content = captured(path, 32768)
-    module = types.ModuleType("_mastermind_bound_project_creation_agentos")
+    module = types.ModuleType("agentos_bound_project_creation_source")
     module.__file__ = str(root / "scripts/agentos.py")
     previous = sys.modules.get(module.__name__)
     original_path = list(sys.path)

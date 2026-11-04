@@ -11,6 +11,7 @@ from control_plane.workspace_owned_task import await_owned
 import copy
 import dataclasses
 import math
+from http import HTTPStatus
 import re
 import time
 from collections.abc import Callable, Mapping
@@ -616,7 +617,7 @@ class WorkspaceReadService:
         try: wire.validate_frame(frame)
         except (TypeError, ValueError): return error("invalid_input", 400)
         try:
-            if self.authorize(frame["principal"]) is not True: return error("access_denied", 403)
+            if self.authorize(frame["principal"]) is not True: return error("access_denied", HTTPStatus.FORBIDDEN)
             stamp = permission_stamp(self.authorize, frame["principal"])
         except Exception: return error("access_denied", 403)
         task = asyncio.create_task(asyncio.to_thread(self._read_project_session, frame["selection"]))

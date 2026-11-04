@@ -531,3 +531,7 @@ REVIEWED_FILES['integrations/session_bridge/mmtask_restore/preimage/mmtask'] = {
     'sha256': '9567ecad658e50b149a14f4c0cd0c7b42d15ad546b0508e2153619f14d0eb336',
     'sites': ((556, 93, 96, 'int', '400'),),
 }
+
+# Exact unchanged JSON traversal node budget, never an OS identity or grant.
+# Any changed source byte/site returns this numeric token to the ordinary D8 guard.
+REVIEWED_FILES['app/mastermind_os/src/admission/project-admission-command-port.ts'] = {'sha256': 'bc14696fce184ce0d186431f044a79d93c61ca07b8c4eaf718e4ed19b3af2571', 'sites': ((37, 87, 90, 'int', '400'),)}
