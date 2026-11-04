@@ -91,24 +91,37 @@ class WorkerResponsibilityContinuityContractTests(unittest.TestCase):
         active = (ROOT / "docs/sol_skills/ACTIVE_EXECUTION.md").read_text(encoding="utf-8")
         reconcile = (ROOT / "docs/sol_skills/RECONCILE_STATE.md").read_text(encoding="utf-8")
         clients = (ROOT / "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md").read_text(encoding="utf-8")
+        self.assertIn(
+            "Protected results: use `RECONCILE_STATE.md` Step 4A.",
+            active,
+        )
+        gate_heading = "## Step 4A — Reported terminal, protected result still outstanding"
+        self.assertIn(gate_heading, reconcile)
+        protected_result_gate = reconcile.split(gate_heading, 1)[1].split("\n## Step 5 —", 1)[0]
         for required in (
-            "Original-owner result gates are proof obligations",
-            "an archived \"original owner\" is never itself an",
-            "reported successful exit",
-            "specific unavailable human/admin credential or control",
-            "MORE_WORK_EXISTS",
-        ):
-            with self.subTest(source="active", required=required):
-                self.assertIn(required, active)
-        for required in (
-            "Reported terminal, protected result still outstanding",
             "two distinct facts",
+            "original authorized carrier",
+            "Where current authority actually permits",
+            "consuming the already-requested result on its original carrier",
             "existing original operation's authorized result/status interface",
+            "without issuing a new operation or reader",
+            "canonical checkpoint owner to record/read back",
             "do **not** reattempt",
+            "invoke an alternate privileged reader",
+            "change account/tool/provider",
+            "copy credentials",
+            "restart services to sidestep the hold",
+            "Keep the dependent modification held",
+            "all provably disjoint authorized work",
+            "specific unavailable credential, physical ceremony or nondelegable control",
             "not a human-control proof",
+            "If unrelated ready work exists",
+            "not a new owner registry or invented lease transfer",
+            "no-duplicate-effect invariants",
+            "this section adds no retry or modification authority",
         ):
             with self.subTest(source="reconcile", required=required):
-                self.assertIn(required, reconcile)
+                self.assertIn(required, protected_result_gate)
         for required in (
             "Web, Codex, Claude or Fabric",
             "Never retry through a second reader/account",
