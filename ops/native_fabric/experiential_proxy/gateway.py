@@ -411,7 +411,7 @@ def create_app(
             return JSONResponse({"error": {"message": "route not supported", "type": "invalid_request_error"}}, status_code=404)
         if endpoint in ACCOUNT_METADATA and not cfg.enable_account_metadata:
             # Neither status nor raw provider metadata is exposed to inference-only workers by default.
-            return JSONResponse({"error": {"message": "account metadata disabled"}}, status_code=404)
+            return JSONResponse({"error": {"message": "account metadata disabled"}}, status_code=HTTPStatus.NOT_FOUND)
         declared_length = request.headers.get("content-length")
         if declared_length and declared_length.isdigit() and int(declared_length) > cfg.max_body_bytes:
             return JSONResponse({"error": {"message": "request body too large"}}, status_code=413)
