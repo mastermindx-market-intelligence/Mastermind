@@ -63,16 +63,40 @@ class OriginBoundRedirectHandler(HTTPRedirectHandler):
             # Never put a launch token, cookie, or untrusted URL into a receipt.
             raise Refused("UNTRUSTED_ORIGIN", "Web response left the admitted loopback origin") from None
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        # Validate raw input before urljoin can discard malformed whitespace.
+    def _checked_target(self, request_url: str, newurl: str) -> str:
         if not isinstance(newurl, str) or any(
                 ord(char) <= 32 or ord(char) == 127 for char in newurl):
             raise Refused("UNTRUSTED_ORIGIN", "Web redirect has a malformed target")
         try:
-            target = urljoin(req.full_url, newurl)
+            target = urljoin(request_url, newurl)
         except ValueError:
             raise Refused("UNTRUSTED_ORIGIN", "Web redirect has a malformed target") from None
         self.require_origin(target)
+        return target
+
+    def http_error_302(self, req, fp, code, msg, headers):
+        # urllib normalizes Location before redirect_request; inspect the
+        # actual selected header first so malformed input cannot disappear.
+        for field in ("location", "uri"):
+            if field in headers:
+                try:
+                    self._checked_target(req.full_url, headers[field])
+                except Refused:
+                    try:
+                        fp.close()
+                    except (OSError, ValueError):
+                        pass
+                    raise
+                break
+        return super().http_error_302(req, fp, code, msg, headers)
+
+    http_error_301 = http_error_302
+    http_error_303 = http_error_302
+    http_error_307 = http_error_302
+    http_error_308 = http_error_302
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = self._checked_target(req.full_url, newurl)
         return super().redirect_request(req, fp, code, msg, headers, target)
 
 

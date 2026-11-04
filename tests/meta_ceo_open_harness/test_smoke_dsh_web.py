@@ -233,6 +233,12 @@ class NativeAppSmokeTests(unittest.TestCase):
         self.assertNotIn("fixture_token", json.dumps(result))
         self.assertNotIn("dsh_session", json.dumps(result))
 
+    def test_malformed_raw_location_refuses_before_normalization(self) -> None:
+        self._set_mode("redirect:./\tmalformed")
+        result = self._run()
+        self.assertEqual(result["status"], "UNTRUSTED_ORIGIN", result)
+        self.assertTrue(result["owned_process_stopped"])
+
     def _uncertain_cleanup(self, real_terminate, *, error=None):
         def stop_then_report_uncertain(process):
             self.assertTrue(real_terminate(process), "fixture child must actually be reaped")
@@ -341,6 +347,24 @@ class OriginBoundaryTests(unittest.TestCase):
             self.assertEqual(caught.exception.status, "UNTRUSTED_ORIGIN")
             self.assertNotIn("secret", str(caught.exception))
             self.assertNotIn(self.TOKEN, str(caught.exception))
+
+    def test_every_redirect_status_checks_raw_location_or_uri_and_closes_response(self):
+        for code in (301, 302, 303, 307, 308):
+            for field in ("Location", "URI"):
+                with self.subTest(code=code, field=field):
+                    handler = smoke.OriginBoundRedirectHandler(self.PORT)
+                    handler.parent = Mock()
+                    request = Request(f"http://127.0.0.1:{self.PORT}/?token={self.TOKEN}")
+                    request.timeout = .45
+                    headers = Message()
+                    headers[field] = "./\tmalformed"
+                    response = Mock()
+                    with self.assertRaises(smoke.Refused) as caught:
+                        getattr(handler, f"http_error_{code}")(
+                            request, response, code, "Redirect", headers)
+                    self.assertEqual(caught.exception.status, "UNTRUSTED_ORIGIN")
+                    handler.parent.open.assert_not_called()
+                    response.close.assert_called_once_with()
 
     def test_relative_same_origin_redirect_remains_valid(self):
         handler = smoke.OriginBoundRedirectHandler(self.PORT)
