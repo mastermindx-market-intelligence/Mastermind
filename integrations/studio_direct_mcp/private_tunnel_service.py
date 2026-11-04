@@ -510,19 +510,30 @@ def _read_manifest(
             raise SystemExit("not staged: tunnel manifest missing")
         return None
     try:
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        # Read and authenticate exactly the bytes that will be parsed. A
+        # pathname read followed by a second hash read admits a swap race.
+        with os.fdopen(os.open(
+            manifest_path, os.O_RDONLY | os.O_NOFOLLOW |
+            getattr(os, "O_CLOEXEC", 0) | os.O_NONBLOCK,
+        ), "rb") as reader:
+            info = os.fstat(reader.fileno())
+            if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= 65536:
+                raise ValueError("tunnel manifest is not a bounded regular file")
+            raw = reader.read(65537)
+        if len(raw) != info.st_size:
+            raise ValueError("tunnel manifest changed during capture")
+        data = json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError, UnicodeError):
         raise SystemExit("corrupt tunnel manifest")
     if not _valid_manifest(data, account, label):
         raise SystemExit("corrupt tunnel manifest")
     if data.get("maxConcurrentRequests") == LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS:
-        # A compatible parsed object is not proof of unmodified original bytes.
         expected = (
             C2_BUSINESS_LEGACY_TUNNEL_MANIFEST_SHA256
             if account == "chatgpt2-business" else
             LEGACY_PUBLIC_EIGHT_SEALS.get(account, (None, None))[1]
         )
-        if expected is None or _sha256_file(manifest_path) != expected:
+        if expected is None or hashlib.sha256(raw).hexdigest() != expected:
             raise SystemExit("corrupt tunnel manifest")
     return data
 

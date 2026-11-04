@@ -1197,6 +1197,32 @@ class TestSealedHistoricalPublicEightRequestTunnels(unittest.TestCase):
             self.assertFalse(svc._valid_manifest(
                 unknown, unknown["account"], unknown["label"]))
 
+    def test_single_buffer_denies_manifest_swap_between_parse_and_hash(self):
+        # The old implementation read forged JSON, then separately hashed a
+        # pathname. Returning a known-good hash from that second read admitted
+        # the forged object. The accepted parser must hash its captured bytes.
+        import hashlib
+        forged = TestC2HistoricalEightRequestTunnel()._manifest("chatgpt1")
+        forged["gatewayPort"] = 45030
+        canonical = hashlib.sha256(json.dumps(
+            forged, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        genuine = dict(forged, gatewayPort=45028)
+        genuine_raw = (json.dumps(genuine, indent=2, sort_keys=True) + "\n").encode()
+        old_good_raw_digest = hashlib.sha256(genuine_raw).hexdigest()
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "tunnel-manifest.json"
+            path.write_bytes(json.dumps(forged).encode("utf-8"))
+            with mock.patch.object(
+                svc, "LEGACY_PUBLIC_EIGHT_SEALS",
+                {"chatgpt1": (canonical, old_good_raw_digest)},
+            ), mock.patch.object(
+                svc, "_sha256_file", return_value=old_good_raw_digest,
+            ) as second_read:
+                with self.assertRaisesRegex(SystemExit, "corrupt tunnel manifest"):
+                    svc._read_manifest(path, forged["account"], forged["label"])
+                second_read.assert_not_called()
+
     def test_default_is_still_four(self):
         self.assertEqual(svc.MAX_CONCURRENT_REQUESTS, 4)
         self.assertIn("4", svc._expected_argv(
