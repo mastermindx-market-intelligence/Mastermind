@@ -1164,10 +1164,10 @@ def load_control_config(
         config["workspace_control_room"] = validate_workspace_control_room(
             config["workspace_control_room"], control_uid=config["control_uid"])
         from integrations.business_mcp_auth.contracts import load_resource_policy
-        from integrations.mastermind_workspace_app.contract import validate_workspace_bindings
+        from integrations.mastermind_workspace_app.project_authoring_grant import validate_project_bindings
         try:
             workspace_policy = load_resource_policy(config["workspace_resource_policy"])
-            config["workspace_acquisition"] = validate_workspace_bindings(config["workspace_acquisition"], workspace_policy)
+            config["workspace_acquisition"] = validate_project_bindings(config["workspace_acquisition"], workspace_policy)
         except Exception:
             raise ServiceError("workspace acquisition policy or binding refused") from None
     if content_sources:
@@ -2466,12 +2466,15 @@ def _service_from_config(
             if workspace_acquisition_loader is None:
                 raise ServiceError("sealed current workspace acquisition loader is required")
             policy = load_resource_policy(raw["workspace_resource_policy"])
-            _, authorize = workspace_authorizers(policy=policy, load_bindings=workspace_acquisition_loader)
+            from integrations.mastermind_workspace_app.project_authoring_grant import legacy_workspace_document
+            def legacy_workspace_loader(current_loader=workspace_acquisition_loader, project_policy=policy):
+                return legacy_workspace_document(current_loader(), project_policy)
+            _, authorize = workspace_authorizers(policy=policy, load_bindings=legacy_workspace_loader)
             _, authorize_discovery = workspace_control_room_authorizers(
-                policy=policy, load_bindings=workspace_acquisition_loader, action="discover")
+                policy=policy, load_bindings=legacy_workspace_loader, action="discover")
             authorize_actions = {
                 operation: workspace_control_room_authorizers(
-                    policy=policy, load_bindings=workspace_acquisition_loader, action=operation)[1]
+                    policy=policy, load_bindings=legacy_workspace_loader, action=operation)[1]
                 for operation in OPERATIONS
             }
             # Installed source join: the trusted parent builds the composer from
@@ -2537,8 +2540,17 @@ def _service_from_config(
                     def original_target_guard():
                         if target_reader() is not original_target:
                             raise ServiceError("installed acceptance target changed")
+            creation_source_reader = packet_collector.project_creation_source_reader(
+                macro_root=Path(raw["ceo_ingress_app_macro_root"]))
+            def managed_project_session_source(runtime):
+                from control_plane.workspace_managed_project_session_source import ExistingManagedProjectSessionSource
+                if service._require_runtime() is not runtime:
+                    raise ServiceError("project session source Runtime differs")
+                return ExistingManagedProjectSessionSource(service, creation_source_reader)
+            from integrations.mastermind_workspace_app.project_admission_permissions import project_admission_permissions
             workspace_factories["workspace_read_provider_factory"] = workspace_provider_factory(
                 control_room=workspace_control_room, authorize=authorize,
+                project_admission_permissions=project_admission_permissions(policy=policy,load_bindings=workspace_acquisition_loader),
                 authorize_discovery=authorize_discovery, authorize_actions=authorize_actions,
                 armed={**{key: raw.get(key) if type(raw.get(key)) is bool else None for key in ARM_KEYS}, "source": "control.json"},
                 runtime_identity={"root": None, "db_present": True, "identity": None},
@@ -2547,6 +2559,13 @@ def _service_from_config(
                 # exact Runtime supplied by its App request handler.
                 bounded_runtime=lambda runtime: service._namespace_custody.bound_runtime(runtime),
                 product_acceptance_basis_reader=packet_collector.product_acceptance_basis_reader(
+                    macro_root=Path(raw["ceo_ingress_app_macro_root"])),
+                project_plan_reader=packet_collector.project_plan_reader(
+                    macro_root=Path(raw["ceo_ingress_app_macro_root"])),
+                project_journal_reader=packet_collector.project_journal_reader(
+                    macro_root=Path(raw["ceo_ingress_app_macro_root"])),
+                project_session_source_factory=managed_project_session_source,
+                project_direction_reader=packet_collector.project_direction_reader(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),
                 product_acceptance_owner_target=original_target,
                 product_acceptance_owner_guard=original_target_guard,

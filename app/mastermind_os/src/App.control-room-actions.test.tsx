@@ -58,8 +58,8 @@ describe("mounted Control Room actions use the existing authenticated Host", () 
       openControlRoomSurface: open,
     };
     render(<App />);
-    await user.click(within(screen.getByRole("navigation", { name: "Company operations" }))
-      .getByRole("button", { name: "Control Room" }));
+    await user.click(within(screen.getByRole("navigation", { name: "Mission navigation" }))
+      .getByRole("button", { name: "Control Room workspace" }));
     const operator = await screen.findByRole("region", { name: "Workspace surfaces" });
     const openButton = await within(operator).findByRole("button",
       { name: `Open Cursor agent binding ${firstHandle}` });
@@ -86,7 +86,7 @@ describe("mounted Control Room actions use the existing authenticated Host", () 
       })),
     };
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Control Room" }));
+    await user.click(screen.getByRole("button", { name: "Control Room workspace" }));
     const operator = await screen.findByRole("region", { name: "Workspace surfaces" });
     await user.click(await within(operator).findByRole("button", { name: `Open Cursor agent binding ${firstHandle}` }));
     const status = within(operator).getByText("Action outcome unknown").closest('[role="status"]');
@@ -108,7 +108,7 @@ describe("mounted Control Room actions use the existing authenticated Host", () 
       }),
     };
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Control Room" }));
+    await user.click(screen.getByRole("button", { name: "Control Room workspace" }));
     expect(await screen.findByRole("button", { name: `Open Cursor agent binding ${firstHandle}` })).toBeTruthy();
     await act(async () => owner.leave());
     await waitFor(() => expect(screen.queryByRole("button", { name: `Open Cursor agent binding ${firstHandle}` })).toBeNull());

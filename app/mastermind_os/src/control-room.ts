@@ -5,6 +5,7 @@
 import { programsFromControlRoom, type ProgramCard } from "./mission";
 import { decodeControlRoomNavigation, type ControlRoomNavigation } from "./control-room-navigation";
 import { decodeCrossPlaneRead, type CrossPlaneRead } from "./control-room-cross-plane";
+import { decodeSupervisionRead, type SupervisionRead } from "./supervision/supervision-read";
 
 const FIELDS = [
   "control_room",
@@ -26,6 +27,8 @@ export type ControlRoomRead = {
   readonly freshness: "OWNER_QUALIFIED" | "UNKNOWN";
   readonly publicationSeq: number | null;
   readonly crossPlane: CrossPlaneRead;
+  /** Same bounded owner read; never a policy, action grant or liveness claim. */
+  readonly supervision?: SupervisionRead;
 };
 export type ControlRoomState = (
   | { state: "PENDING" }
@@ -78,6 +81,7 @@ export function decodeControlRoomRead(raw: unknown): ControlRoomRead {
   return Object.freeze({
     state: "AVAILABLE",
     navigation: decodeControlRoomNavigation(raw.control_room, raw.capabilities),
+    supervision: decodeSupervisionRead(raw.control_room),
     programs: Object.freeze(
       parsed.programs.map((p) =>
         Object.freeze({

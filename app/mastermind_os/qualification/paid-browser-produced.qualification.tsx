@@ -45,6 +45,15 @@ function connectedHost() {
   };
 }
 
+function expectCapacityUnknown() {
+  const resource = within(screen.getByRole("region", { name: "Selected resource" }));
+  for (const label of ["Host readiness", "Serviceability / task preflight", "Queue pressure"])
+    expect(resource.getByText(label).nextElementSibling?.textContent).toBe("Not supplied");
+  const telemetry = within(screen.getByRole("region", { name: "Host telemetry observation" }));
+  expect(telemetry.getByText("No qualified retained host observation is connected. CPU, memory and disk readings remain unknown.")).toBeTruthy();
+  expect(telemetry.queryByText("Not evaluated; cannot place work")).toBeNull();
+}
+
 beforeEach(async () => {
   history.replaceState(null, "", "/os/?work_ref=WS%3AALPHA&root_job_id=JOB-A");
   delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
@@ -81,7 +90,7 @@ describe(`actual native producer → browser/App (${produced.case})`, () => {
     const user = userEvent.setup();
     render(<App />);
     await navigateCompanyOperation(user, "Fleet & Capacity");
-    expect(screen.getByText("CAPACITY_SOURCE_NOT_CONNECTED")).toBeTruthy();
+    expectCapacityUnknown();
     expect(owner.catalogRead).not.toHaveBeenCalled();
     expect(owner.statusRead).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Load runs" }));
@@ -125,7 +134,7 @@ describe(`actual native producer → browser/App (${produced.case})`, () => {
       expect(inspector.getByText(/Exit 0: result not accepted/)).toBeTruthy();
     if (produced.case === "accepted")
       expect(inspector.queryByText(/Exit 0: result not accepted/)).toBeNull();
-    expect(screen.getByText("CAPACITY_SOURCE_NOT_CONNECTED")).toBeTruthy();
+    expectCapacityUnknown();
     expect(document.body.textContent).not.toContain("Private retained answer");
     act(() => owner.revoke());
     await waitFor(() => expect(screen.queryByRole("button", { name: rowName })).toBeNull());

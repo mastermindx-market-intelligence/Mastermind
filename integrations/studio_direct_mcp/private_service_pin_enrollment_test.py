@@ -118,6 +118,67 @@ class AdminBusinessProfileTests(unittest.TestCase):
         self.assertEqual(profile["original_plan"], owner.ORIGINAL_PLAN)
 
 
+WORKSPACE_PREIMAGES = {'chatgpt3-w570f6f34': (45032, 'aa24bddbad7e989cedf566f4fbf4288fa333ee8fac8d2585cdcd9c954736eab3', '6e527360ba76034d0bde30943cb1025f82489525445bcac2ab86c8b190df8fbc', '1239d26202ea93279e356578910fd6ca326006cf39db41b82aefd3fb16213051'), 'chatgpt3-wa2a9e6f9': (45034, '38d5427f418f9f3f7aa1ff671befa55555f276cd4b639a6312e24fa0672965a3', '4e9aad915c1ea46e5de79c158d233d911e5aef7832d2016a2616a2996fa8fa68', 'bf798b50b2c25df035c6ddd7d4e9a09db8246423a2176c1983fdde56f8c2da45')}
+
+class ChatGPT3WorkspaceBatchProfilesTests(unittest.TestCase):
+    """Frozen, exact-account enrollment profiles; no account or repo globbing."""
+
+    def test_two_exact_installed_preimages(self):
+        for account, expected in WORKSPACE_PREIMAGES.items():
+            with self.subTest(account=account):
+                p=owner.frozen_profile(account)
+                self.assertEqual((p["port"], p["before_manifest"],
+                                  p["before_config"],p["original_plan"]), expected)
+                self.assertEqual(p["account"], account)
+                self.assertEqual(p["generation"],
+                                 "chatgpt3-workspaces-closed-repositories-20261104-v1")
+
+    def test_both_keep_immutable_three_repositories_and_timeouts(self):
+        home=Path("/Users/fixture")
+        original={"gitPublish":svc._typed_git_config(home), "survives":{"opaque":True}}
+        for account in WORKSPACE_PREIMAGES:
+            with self.subTest(account=account):
+                p=owner.frozen_profile(account)
+                before={**original,"accountLabel":account}
+                after=owner.target_config(home,before,p)
+                self.assertEqual(after["survives"],before["survives"])
+                self.assertEqual([r["repository"] for r in after["gitPublish"]["repositories"]],
+                                 ["mastermind","macro","terminal"])
+                self.assertEqual(after["repositoryWorkspaces"]["allowedRepositories"],
+                                 ["mastermind","macro","terminal"])
+                self.assertEqual(after["gitPublish"]["commandTimeoutMs"],45000)
+                self.assertEqual(after["gitPublish"]["pushTimeoutMs"],60000)
+                self.assertNotIn("repositoryWorkspaces",before)
+
+    def test_wrong_account_label_refused_even_with_matching_legacy_git(self):
+        home=Path("/Users/fixture")
+        for account in WORKSPACE_PREIMAGES:
+            with self.subTest(account=account):
+                other=next(x for x in WORKSPACE_PREIMAGES if x!=account)
+                before={"accountLabel":other,"gitPublish":svc._typed_git_config(home)}
+                with self.assertRaisesRegex(SystemExit, "PROFILE_REFUSED"):
+                    owner.target_config(home,before,owner.frozen_profile(account))
+
+    def test_only_exact_four_owner_profiles_not_glob_or_other_seats(self):
+        self.assertEqual(set(owner.PROFILES),
+                         {"chatgpt4","admin-business",*WORKSPACE_PREIMAGES})
+        for excluded in ("chatgpt1", "chatgpt2-business", "chatgpt2-personal",
+                         "chatgpt3","chatgpt3-unknown","fabric-read","admin-business-2"):
+            with self.subTest(account=excluded),self.assertRaisesRegex(
+                    SystemExit,"INPUT_REFUSED"):
+                owner.frozen_profile(excluded)
+
+    def test_cli_has_two_frozen_workspace_accounts_not_repository_input(self):
+        for account in WORKSPACE_PREIMAGES:
+            with self.subTest(account=account):
+                a=svc.build_parser().parse_args([
+                    "native-pool-pin-enrollment","--account",account,
+                    "--operation","preview","--expected-manifest-sha256",
+                    owner.frozen_profile(account)["before_manifest"],"--source","/fixture"])
+                self.assertEqual(a.func,svc.cmd_native_pool_pin_enrollment)
+                self.assertFalse(hasattr(a,"repository"))
+
+
 class EnrollmentTests(unittest.TestCase):
     def patch(self, target, attribute, value):
         patcher = mock.patch.object(target, attribute, value)
@@ -402,6 +463,112 @@ class EnrollmentTests(unittest.TestCase):
         before = self.snapshot()
         self.assertEqual(self.invoke()["effect"], "APPLIED")
         self.assertEqual(self.snapshot(), before)
+
+    def _select_paper_after_enrollment(self):
+        """Test-only exact Paper-v20 selection after one completed C4 enrollment."""
+        self.applied()
+        raw_c = (self.tx / "config.after").read_bytes()
+        raw_m = (self.tx / "manifest.after").read_bytes()
+        current = json.loads(raw_c)
+        current_manifest = json.loads(raw_m)
+        old_paper = copy.deepcopy(current["paperDesign"])
+        new_paper = {
+            "enabled": True,
+            "bridgeSha256": svc.PAPER_V20_BRIDGE_SHA256,
+            "bridgePath": str(self.home / ".local/share/mastermind-paper/runtime/v20/source/bridge.py"),
+            "pythonPath": str(self.home / ".local/share/mastermind-paper/runtime/v20/venv/bin/python"),
+            "appPath": str(self.home / "Applications/Paper.app"),
+            "commandTimeoutMs": 70000,
+        }
+        def paper(_home, *, rel=None, bridge_sha256=None):
+            if rel is None:
+                return old_paper
+            if rel != svc.PAPER_RUNTIME_V20_REL or bridge_sha256 != svc.PAPER_V20_BRIDGE_SHA256:
+                raise AssertionError("foreign Paper runtime request")
+            return new_paper
+        self.patch(svc, "_paper_design_config", paper)
+        after = copy.deepcopy(current)
+        after["paperDesign"] = new_paper
+        future = copy.deepcopy(current_manifest)
+        future["configHash"] = owner.digest(owner.encode(after))
+        new_config = owner.encode(after)
+        new_manifest = owner.encode(future)
+        self.patch(owner, "C4_ENROLLED_CONFIG_SHA256", owner.digest(raw_c))
+        self.patch(owner, "C4_ENROLLED_MANIFEST_SHA256", owner.digest(raw_m))
+        self.patch(owner, "C4_PAPER_V20_CONFIG_SHA256", owner.digest(new_config))
+        self.patch(owner, "C4_PAPER_V20_MANIFEST_SHA256", owner.digest(new_manifest))
+        svc._atomic_write_bytes(self.roots["config"], new_config)
+        svc._atomic_write_bytes(self.roots["manifest"], new_manifest)
+        return current, current_manifest, new_config, new_manifest
+
+    def test_post_enrollment_paper_v20_allows_only_existing_owner_start(self):
+        self._select_paper_after_enrollment()
+        frozen_original_pin = {x.name: x.read_bytes() for x in self.pin_path.iterdir()}
+        frozen_enrollment = {x.name: x.read_bytes() for x in self.tx.iterdir()}
+        before = self.snapshot()
+        self.assertFalse(self.loaded)
+        self.assertEqual(self.start()["started"], True)
+        self.assertEqual(self.native_operations[-1], "status")
+        self.assertEqual(before, {
+            key: value for key, value in self.snapshot().items()
+        })
+        self.assertEqual(frozen_original_pin, {
+            x.name: x.read_bytes() for x in self.pin_path.iterdir()})
+        self.assertEqual(frozen_enrollment, {
+            x.name: x.read_bytes() for x in self.tx.iterdir()})
+
+    def test_post_enrollment_paper_v20_status_is_readonly_and_reports_selected(self):
+        self._select_paper_after_enrollment()
+        self.args.operation = "status"
+        before = self.snapshot()
+        status = self.invoke()
+        self.assertEqual((status["effect"], status["phase"]), ("APPLIED", "COMPLETE"))
+        self.assertTrue(status["paperV20Selected"])
+        self.assertEqual(self.snapshot(), before)
+        self.args.operation = "reconcile"
+        with self.assertRaisesRegex(SystemExit, "FOREIGN_STATE"):
+            self.invoke()
+
+    def test_post_enrollment_paper_v20_requires_original_result_and_native_pool(self):
+        self._select_paper_after_enrollment()
+        receipt = self.tx / "result.json"
+        retained = receipt.read_bytes()
+        receipt.unlink()
+        with self.assertRaises(SystemExit):
+            self.start()
+        receipt.write_bytes(retained)
+        native_bytes = self.pool.read_bytes()
+        self.pool.write_bytes(b"unreviewed-pool")
+        with self.assertRaisesRegex(SystemExit, "ORIGINAL_PIN_REFUSED"):
+            self.start()
+        self.pool.write_bytes(native_bytes)
+        self.assertFalse(self.loaded)
+
+    def test_post_enrollment_paper_v20_refuses_config_and_module_drift(self):
+        _, _, after_c, after_m = self._select_paper_after_enrollment()
+        tampered = json.loads(after_c)
+        tampered["gitPublish"]["commandTimeoutMs"] = 10
+        svc._atomic_write_bytes(self.roots["config"], owner.encode(tampered))
+        with self.assertRaises(SystemExit):
+            self.start()
+        svc._atomic_write_bytes(self.roots["config"], after_c)
+        tampered = json.loads(after_m)
+        tampered["configHash"] = "0" * 64
+        svc._atomic_write_bytes(self.roots["manifest"], owner.encode(tampered))
+        with self.assertRaises(SystemExit):
+            self.start()
+        svc._atomic_write_bytes(self.roots["manifest"], after_m)
+        p = self.roots["base"] / "git-publish.mjs"
+        old = p.read_bytes()
+        svc._atomic_write_bytes(p, b"foreign publisher code")
+        with self.assertRaises(SystemExit):
+            self.start()
+        svc._atomic_write_bytes(p, old)
+        self.roots["config"].chmod(0o644)
+        with self.assertRaises(SystemExit):
+            self.start()
+        self.roots["config"].chmod(0o600)
+        self.assertFalse(self.loaded)
 
     def test_all_intent_files_precede_installation_writes(self):
         self.prepare()

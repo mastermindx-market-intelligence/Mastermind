@@ -55,16 +55,33 @@ def test_auto_fast_skips_review_job_only_for_matching_current_source():
     assert (result.repository, result.pull_number, result.head_sha) == (REPO, PR, SHA)
 
 
-def test_auto_consequential_gets_review():
-    result = auto(risk(("server/api/refresh.py",)))
+def test_auto_consequential_keeps_separate_machine_review():
+    result = auto(risk(("server/schema/refresh.py",)))
     assert result.action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
     assert result.source_tier is ReviewTier.STANDARD
 
 
-def test_auto_sensitive_gets_review():
+def test_auto_sensitive_keeps_separate_machine_review():
     result = auto(risk((".github/workflows/release.yml",)))
     assert result.action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
     assert result.source_tier is ReviewTier.CRITICAL
+
+
+@pytest.mark.parametrize("path", [
+    "control_plane/packet_gate.py",
+    "control_plane/governance.py",
+    "control_plane/strategic_state.py",
+    "config/strategic_state.yml",
+    "config/contracts.yml",
+    "research/MASTERMIND_CHARTER_V2.md",
+    "DOCTRINE.md",
+])
+def test_auto_constitution_and_governor_paths_are_not_silent_standard_skips(path):
+    # A verified one-line governance change still needs independent CRITICAL
+    # technical scrutiny; an author label cannot demote source-owned authority.
+    result = auto(risk((path,)))
+    assert result.source_tier is ReviewTier.CRITICAL
+    assert result.action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
 
 
 def test_auto_partial_source_cannot_claim_exemption_or_auto_review():
@@ -130,3 +147,24 @@ def test_manual_review_without_risk_stays_on_existing_ingress():
 def test_caller_text_is_not_verified_origin(bad_origin):
     with pytest.raises(ReviewRiskDispatchError):
         decide_risk_dispatch(origin=bad_origin, assessment=risk())
+
+
+def test_auto_bounded_app_source_keeps_signed_machine_review_when_host_enabled():
+    result = auto(risk(("app/src/component.tsx",)))
+    assert result.action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
+    assert result.source_tier is ReviewTier.STANDARD
+
+
+def test_forged_zero_assessment_counts_cannot_skip_signed_critical_machine_risk():
+    assessment = replace(
+        risk((".github/workflows/ci.yml",)),
+        minimum_independent_assessments=0,
+        minimum_formal_non_author_approvals=0,
+    )
+    assert auto(assessment).action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
+
+
+def test_signed_standard_machine_review_cannot_be_skipped_by_forged_zero_counts():
+    assessment = replace(risk(("server/api/refresh.py",)),
+        minimum_independent_assessments=0, minimum_formal_non_author_approvals=0)
+    assert auto(assessment).action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE

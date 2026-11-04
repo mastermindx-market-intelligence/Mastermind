@@ -1,6 +1,8 @@
 mod auth;
 mod native_client;
 mod native_refresh;
+mod terminal_handoff;
+mod terminal_navigation;
 use sha2::{Digest, Sha256};
 use tauri_plugin_deep_link::DeepLinkExt;
 
@@ -72,6 +74,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             readiness,
+            terminal_navigation::open_terminal_briefs,
             auth::auth_status,
             auth::sign_in,
             auth::sign_out,
@@ -79,8 +82,18 @@ fn main() {
             auth::read_work,
             auth::read_mission,
             auth::read_mission_v3,
+            auth::read_project_plan,
+            auth::read_project_journal,
+            auth::read_project_session,
+            auth::read_project_direction,
+            auth::read_project_admission_control,
+            auth::pause_project_admission,
+            auth::resume_project_admission,
+            auth::read_project_admission_operation,
+            auth::read_autonomy_policy,
             auth::read_admitted_plan,
             auth::read_retained_activity,
+            auth::read_resource_capacity,
             auth::read_fabric_catalog,
             auth::read_fabric_status,
             auth::read_result,

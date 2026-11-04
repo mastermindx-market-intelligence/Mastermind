@@ -40,6 +40,8 @@ with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
   err.seek(0); line=err.read(128)
   match=re.fullmatch(rb'NONE reason=([a-z][a-z0-9_]{0,79})\\r?\\n?',line)
   if match: reply['native_reason']=match.group(1).decode('ascii')
+  elif re.fullmatch(rb'NONE reason=pool (?:grok|glm|minimax|bailian|cursor|ocfree|go) has no eligible mode on requested host\\r?\\n?',line):
+    reply['native_reason']='no_eligible_host'
  print(json.dumps(reply,separators=(',',':')))
 `;
 // Capture the *incumbent adapter's* bounded response into an ephemeral local file,

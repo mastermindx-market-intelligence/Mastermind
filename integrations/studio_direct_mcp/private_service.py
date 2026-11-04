@@ -95,7 +95,7 @@ PAPER_RUNTIME_V20_REL = Path(".local/share/mastermind-paper/runtime/v20")
 PAPER_V20_BRIDGE_SHA256 = "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced"
 PAPER_RUNTIME_V10_REL = Path(".local/share/mastermind-paper/runtime/v10")
 PAPER_V10_BRIDGE_SHA256 = "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc"
-FLEET_V20_COHORT_SOURCE_SHA256 = "60baccde73b771b9a1d149b9e899d95ed8c70c08f431dba6eda661c950e91e0f"
+FLEET_V20_COHORT_SOURCE_SHA256 = "e4d5bccfec19ee3c88a3c73ed2484f34d119896086d0da9485c0baf5638bc10d"
 # One closed admission set shared by the dispatcher and real lifecycle-lock gate.
 FLEET_V20_ENROLLED_ACCOUNTS = frozenset((
     "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt3",
@@ -846,17 +846,21 @@ if current==old:
  i._upgrade_entries(p);phase='PREVIOUS'
 elif current==new:
  i._upgrade_entries(p,complete=True);phase='SELECTED'
-elif (sys.argv[4] in ('chatgpt4','admin-business')
+elif (sys.argv[4] in (
+        'admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt3',
+        'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4')
       and p['digest']=='77c2c136852a783a1e2572c145af7536ee6cd0d7f443daa4c09795c333fd3dc7'
       and new['generation']=='28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce'
       and new['sequence']==24
       and isinstance(current,dict)
-      and current.get('sequence',0)>new['sequence']
+      and current.get('schema')==g.POINTER_SCHEMA
+      and type(current.get('sequence')) is int
+      and current['sequence']>new['sequence']
       and current.get('previous') not in (None,current.get('generation'))):
- # The selected native owner may legitimately publish a *newer* immutable
- # generation. This exception permits the two frozen C4/admin original
- # historical pins only; no new pin, unverified code or a
- # changed pool ingress. Native verification owns current code identity.
+ # Each original seven-seat native pin shares this exact completed immutable
+ # sequence-24 successor. Later native releases do not invalidate historical
+ # ingress, but only these seven enrolled accounts may accept the verified
+ # forward selection. No other pin/generation/account gains admission.
  g.verify(store,new['generation'])
  g.verify(store,current['generation'])
  g.verify(store,current['previous'])
@@ -917,7 +921,7 @@ def _pin_reject_generic_restage(account):
 def _pin_require_start(account, roots):
     if account not in NATIVE_POOL_PIN_ACCOUNTS:
         return
-    if account in ("chatgpt4", "admin-business") and os.path.lexists(roots["state"] / "native-pool-pin-enrollment"):
+    if account in ("chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9") and os.path.lexists(roots["state"] / "native-pool-pin-enrollment"):
         _pin_enrollment_owner_module().require_start(sys.modules[__name__], account, roots)
         return
     _pin_owner_module().require_start(sys.modules[__name__], account, roots)
@@ -3236,6 +3240,8 @@ def _frozen_paper_fleet_module():
     module.__file__ = str(path)
     exec(compile(source_bytes, str(path), "exec"), module.__dict__)
     if (frozenset(module.COHORTS) != FLEET_V20_ENROLLED_ACCOUNTS
+            or module.C4_POST_ENROLLMENT["manifest_sha256"]
+               != "3648a9a8e9711bab7be9fc7a3950f73579ce7d78358a18c15ac7d39adf924a9f"
             or module.TARGET_BRIDGE_SHA256 != PAPER_V20_BRIDGE_SHA256
             or module.PREDECESSORS != {
                 "v10": PAPER_V10_BRIDGE_SHA256,
@@ -3253,7 +3259,12 @@ def _upgrade_paper_frozen_fleet_v20(args) -> int:
     cohorts = _frozen_paper_fleet_module()
     if account not in cohorts.COHORTS:
         raise SystemExit("Paper fleet account not in reviewed cohort")
-    if expected != cohorts.COHORTS[account]["manifest_sha256"]:
+    enrolled_c4 = (
+        account == C4_PAPER_ACCOUNT
+        and expected == cohorts.C4_POST_ENROLLMENT["manifest_sha256"]
+    )
+    if (expected != cohorts.COHORTS[account]["manifest_sha256"]
+            and not enrolled_c4):
         raise SystemExit("Paper fleet original manifest is not frozen predecessor")
     label = f"com.mastermind.studio-direct-private.{account}"
     roots = _build_runtime_roots(account)
@@ -3269,6 +3280,12 @@ def _upgrade_paper_frozen_fleet_v20(args) -> int:
             or hashlib.sha256(old_config_bytes).hexdigest() != prior["configHash"]
             or hashlib.sha256(plist_bytes).hexdigest() != prior["plistHash"]):
         raise SystemExit("Paper fleet predecessor changed during inspection")
+    if enrolled_c4:
+        # Read-only qualification of the actual accepted enrollment owner and
+        # original native-pool receipt, not a hash-only assertion. It must be
+        # committed and selected before this second Paper-only CAS can begin.
+        _pin_enrollment_owner_module().require_start(
+            sys.modules[__name__], account, roots)
     home = _user_root()
     try:
         plan = cohorts.plan_selection(
@@ -3904,7 +3921,7 @@ def build_parser() -> argparse.ArgumentParser:
     pin.set_defaults(func=cmd_native_pool_pin)
 
     enrollment = sub.add_parser("native-pool-pin-enrollment")
-    enrollment.add_argument("--account", choices=("chatgpt4", "admin-business"), required=True)
+    enrollment.add_argument("--account", choices=("chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9"), required=True)
     enrollment.add_argument("--expected-manifest-sha256", required=True)
     enrollment.add_argument("--expected-plan-sha256")
     enrollment.add_argument("--source", help="exact reviewed payload under the installed owner's home; preview/apply only")
