@@ -64,9 +64,9 @@ must not be installed on unenrolled hosts because it will refuse Grok calls.
   388c412ee5803ac54356275323eba5fb0ee57519a8810490f81fe13977459f9e
 - Separate historical predecessor fixture SHA256:
   a37bd58d7c972cabbeb0f247811a001d3fccb4d4e6b626417f06f4fb5e4962b0
-- Existing builder produced 102 native members. Provisional current manifest SHA256:
+- Existing builder produced 102 native members. Pre-integration manifest SHA256 (superseded by later composition):
   6e1b8022edd501af52daef9dc3a40913923cb1a26160eee2a571a8210081a3ea
-- Provisional source inventory SHA256:
+- Pre-integration source inventory SHA256 (superseded):
   dc752d57ad2fc7efa1004ae1a1a1e35937767c8d2087fa37238143c71d4da2b9
 - Offline current-source tests: 225 pass / 6 skips /
   0 failures / 0 errors, across 231 actual test cases.
@@ -93,3 +93,18 @@ the accepted protected native movements in this same managed branch,
 rebuild and retest, then use the normal protected PR source/review gates.
 A true first Grok 4.7 worker still requires the typed broker host/account
 fence and an independently verified subscriber identity.
+
+## Protected integration (source-only)
+
+A local two-parent integration with protected SHA 1548ad095387838ff1a22133879d37b40fb180d8 retains protected picker 747a55a50f..., sparse executor 7c7b94a974..., and Grok account guard 8ea3fed6a49.... The combined current manifest SHA256 is 44579551a1c01a25712d8e59441e88258780ef2fea082d17e7b2d2b501453587. The original historical test targets and immutable source fixtures remain unchanged. This is a local source composition, not a merge of PR #2007 into protected main, a runtime installation or a review receipt.
+
+
+Integrated offline regression evidence: 225 passed, 6 expected Linux-only skips,
+zero failures/errors across 231 distinct testcase records. The retained local
+JUnit digest is 1c084a06ffb88518686d6fc4a1f7289af44ceb2d2d58cd6f2329d8703ba2baca.
+Final combined manifest hash: 44579551a1c01a25712d8e59441e88258780ef2fea082d17e7b2d2b501453587.
+Final combined inventory hash: 6a181c3866cf402965b05d36d6471f9b066985fb0f18b1f828ac486bf5840484.
+Only native_remote.py, remote_sub_exec.py and pick.py use the exact
+expected qualified forward hashes; other protected source is inherited.
+No host registry binding has been enrolled, so the live Grok preflight
+remains unchanged on the currently selected native generation.

@@ -88,11 +88,21 @@ def source_owners(tmp_path_factory):
     assert set(retained['files']) == {'ext/fabric_task.py', 'ext/pool_ledger.py'}
     assert set(diagnostic['files']) == {'ext/original_delivery_collector.py',
                                       'ext/provider_outcome.py', 'ext/remote_sub.sh'}
-    assert {name for name in manifest if manifest[name] != historical_manifest[name]} == (
-        set(retained['files']) | set(diagnostic['files']) | set(sparse['files']) | set(grok['files']))
+    # S9 also changes the CURRENT picker. Bind its authentic protected
+    # pre-observer bytes; never widen the immutable B11 transition target.
+    selection_raw = (ROLLOUT.parents[3] / 'tests/fixtures/fabric-selection-preobserver-pick-9f65957e.json').read_bytes()
+    assert g.digest(selection_raw) == 'b8792950a718d9b7628a8d3917f3ce11c567cfb87fdaa0e917dc6e7fb8c5866c'
+    selection = json.loads(selection_raw)
+    assert selection['schema'] == 'fabric.selection-preobserver-source.v1'
+    assert selection['commit'] == '9f65957e29eba92245d78609f032aaea523b7cb4'
+    assert selection['blob'] == 'dd542dbc5bb746c0ad1428b177b25a98b7a02536'
+    assert selection['path'] == 'ops/native_fabric/quota_continuity/candidate/pick.py'
+    predecessor_files = {**retained['files'], **diagnostic['files'], **sparse['files'],
+                         **grok['files'], 'ext/pick.py': selection}
+    assert {name for name in manifest if manifest[name] != historical_manifest[name]} == set(predecessor_files)
     for name, digest in manifest.items():
         assert g.digest((target / 'native-code-stage' / name).read_bytes()) == digest
-    for name, item in {**retained['files'], **diagnostic['files'], **sparse['files'], **grok['files']}.items():
+    for name, item in predecessor_files.items():
         raw = zlib.decompress(base64.b64decode(item['zlib_base64'], validate=True))
         assert len(raw) == item['bytes']
         assert g.digest(raw) == item['sha256'] == historical_manifest[name]

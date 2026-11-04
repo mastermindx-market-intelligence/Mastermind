@@ -135,6 +135,28 @@ Pending CI blocks the gated release, not unrelated implementation or diagnosis. 
 observer request is not a running observer. Verify its successful launch and real return
 path before relying on it; never promise that a finished Web turn keeps working.
 
+## Cross-repository PR auto-merge discipline
+
+For any source release, first read the same-pinned
+[`docs/DELIVERY_WORKFLOW.md`](DELIVERY_WORKFLOW.md). In particular, **Macro**
+`main` uses its existing `merge-on-green` label-driven sweeper; native GitHub
+auto-merge is **not** a safe shortcut where binding checks are not protected.
+The label is an opt-in, not a reviewer verdict, hold release or proof of merge.
+Check current PR/head, binding CI, genuine independent formal GitHub review,
+title/body/comments for recorded holds and repository source/lease gates
+**before** adding the label. **Until the incumbent controller or protected
+policy actually enforces those gates and is proven live**, retain the current
+independent non-author arming/release decision. **After** that machine guard
+is installed and verified, review once and let existing automation perform
+the protected release without a second human operator. Never auto-arm all
+open PRs, mistake a technical `SOURCE_PASS` for approval, or self-merge
+through a shared author account or REST/admin bypass. A full successful sweeper run may still defer a PR because
+`main` changed CI definitions, active CI workload exceeds the controller
+refresh cap, or the branch conflicts; read the exact PR verdict, not the workflow
+success badge. Mastermind `master` retains its separate protected merge-queue
+path. An updated repository source pointer is not evidence that the live ChatGPT
+Project setting has been installed or freshly consumed.
+
 ## Preserve real controls and prove the result
 
 An explicit permission or safety refusal ends that effect's retry. Do not change tools,
