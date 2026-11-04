@@ -1,0 +1,40 @@
+{
+  "schema": "mastermind.fabric_source_component.v1",
+  "scope": "GLM original MODE glm host/account compatibility before lease; no new capacity authority",
+  "preimages": {
+    "glm_keys.py": "0d84fe666e8e2c1e29297a31a99ce225a30a832c20e9514a5afcb2816a38d458",
+    "host_pick.py": "c0cf204cf9edddaddee60973a83ab180275a5416e333e89c206ca3e5d67e462c",
+    "host_pull.sh": "82bba0be6e85075f6e2962dbae6205b64efa756848bdb72840055e33d82818df",
+    "host_pull_backend.py": "65cf8d2b33d3314e09c66f026b805b05385c59e7c65c1e0de481dbdc8f0fb651",
+    "host_pull_probe.template": "3d517e79aef5bc551b80b11abd273fb65fa6768d6ac5e66efabbe276ffd859c3",
+    "lease_broker.py": "c17558441d408ed743ef3e282b50db1f4cf8926aad9cca3977ceb867c0d8eb4f",
+    "model_tier.py": "507a8aa66015848873f1831dfaa7efabc619362c0dafb28238aa21a1ad8e2d7d",
+    "pick.py": "43fe863bd2207e55ca6d619aa92a55750f9468e05dd6b3567811eca96c288b4c",
+    "pool_status.py": "ec1c15f8090aafd509db8b6943513ae33f5f6013b5c8dbb78f2827e50e6aceb0"
+  },
+  "installed_postimages": {
+    "host_pull.sh": "22c68f40ef4bb2e7157c29979141aa867d53a97e9ab0572a8280c27a51a47f1c",
+    "host_pull_probe.template": "2db9af35d7ae0262c94e49b21d318e11e0d58fd4a62e5601453c3403874ced8a",
+    "host_pull_backend.py": "6c10385be89c32627bbb87a5f088e36e849de84b0635f02d460138d8e6884ad5",
+    "pick.py": "c2d5420bbaf5b06b47788fecd999b7f920f60fe5f25154f2ab8a22afa2d58b29",
+    "lease_broker.py": "a72bc031ddb81e559e0cf48fcbf824a959edfcf445c1d3d2d89348c3c66c6f0c",
+    "glm_host_account_readiness.py": "738792f6d4a22e51befb71496b831715c9ab038218063c3802fd4540736c96ed",
+    "glm_host_account_source.py": "3f30dc5f67cc1d4cf812bce521676866b13218a6f64bf983ce539151ec73839a",
+    "glm_host_account_probe.py": "8c6959be6b153dd907b557f2b844b4ce69706d2fd01c6f4fef6e0d2aca07d0ec"
+  },
+  "new_files": [
+    "glm_host_account_readiness.py",
+    "glm_host_account_source.py",
+    "glm_host_account_probe.py"
+  ],
+  "patch_sha256": "55fdbca61880b8834dd33cd22a9263927c8dc36735dfde4d069461ab78dd9b66",
+  "worker": {
+    "run_id": "fabric-glm-host-account-predicate-01a11e90-v1",
+    "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+    "parent": "01a1321e-f5fc-7e10-b790-f06f300206b9",
+    "retained_stdout_sha256": "21742bf799de98701165f234e128480150db318a37df9cae5821f44578461fb6",
+    "retained_bytes": 23825,
+    "qualified_helper_sha256": "738792f6d4a22e51befb71496b831715c9ab038218063c3802fd4540736c96ed",
+    "correction": "OverflowError rejects oversized integers; original return preserved"
+  }
+}

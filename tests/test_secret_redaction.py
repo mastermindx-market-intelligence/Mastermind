@@ -330,7 +330,7 @@ def _run_reason_with_sdk_exception(monkeypatch, exc):
 
     monkeypatch.setattr(cli_bridge, "_via_sdk", _boom)
     result = asyncio.run(
-        cli_bridge._reason("hello", arm=True, log_run=False, _oauth_candidates=[])
+        cli_bridge._reason("hello", arm=True, log_run=False, _subscription_slots=[])
     )
     assert "sdk_error" in result, "never reached the SDK-failure branch"
     return result
@@ -392,7 +392,7 @@ def test_cli_bridge_still_cools_a_key_on_a_long_classifiable_failure(monkeypatch
     asyncio.run(
         cli_bridge._reason(
             "hello", arm=True, log_run=False,
-            _oauth_candidates=[{"key_id": "k1", "env_name": "CLAUDE_CODE_OAUTH_TOKEN"}],
+            _subscription_slots=[{"key_id": "k1", "env_name": "CLAUDE_CODE_OAUTH_TOKEN"}],
         )
     )
 

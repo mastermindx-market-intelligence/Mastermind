@@ -1,15 +1,23 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
 from control_plane.executive_agent_capabilities import (
+    CAPABILITY_POLICY_SCHEMA,
+    CAPABILITY_POLICY_SCHEMA_V3,
+    CAPABILITY_POLICY_SCHEMA_V4,
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
+    adapter_supports_execution_surface,
     app_server_security_config_digest,
+    app_server_security_config_projection,
     observed_mcp_tool_schema_digest,
+    claude_security_config_digest,
+    claude_security_config_projection,
 )
 from control_plane.operator_harness_contract import NativeHelperPolicy
 from integrations.mastermind_company_mcp.schemas import (
@@ -29,6 +37,75 @@ def _write(tmp_path: Path, value: dict) -> Path:
     path = tmp_path / "capabilities.json"
     path.write_text(json.dumps(value), encoding="utf-8")
     return path
+
+
+def _claude_candidate_policy():
+    raw = _raw_policy()
+    raw["profiles"]["operator.claude.readonly.v1"] = {
+        **raw["profiles"]["operator.appserver.readonly.v1"],
+        "enabled": False, "execution_surface": "claude-agent-sdk"}
+    return raw
+
+
+def test_claude_policy_is_a_distinct_disabled_projection_not_an_attestation(tmp_path):
+    registry = ExecutionCapabilityRegistry.load(_write(tmp_path, _claude_candidate_policy()))
+    profile = registry.profiles["operator.claude.readonly.v1"]
+    assert profile.enabled is False
+    assert profile.execution_surface == "claude-agent-sdk"
+    requested = profile.claude_sdk_config_projection()
+    assert requested["tools"] == ["Read", "Glob", "Grep"]
+    manifest = profile.capability_manifest(harness_binary_digest="a" * 64)
+    assert {(item.kind, item.name) for item in manifest.required} == {
+        ("tool", name) for name in ("Read", "Glob", "Grep", "StructuredOutput")}
+    assert all(item.harness_binary_digest == "a" * 64 for item in manifest.required)
+    assert manifest.allowed_ambient == ()
+    assert requested["sandbox"]["failIfUnavailable"] is True
+    assert requested["sandbox"]["allowUnsandboxedCommands"] is False
+    assert requested["sandbox"]["excludedCommands"] == []
+    assert requested["mcp_servers"] == {}
+    assert "observed" not in json.dumps(requested)
+    assert profile.expected_config_digest != registry.profiles["operator.appserver.readonly.v1"].expected_config_digest
+    with pytest.raises(CapabilityPolicyError, match="Claude policy cannot use"):
+        profile.app_server_config_projection()
+    with pytest.raises(CapabilityPolicyError, match="not an App Server profile"):
+        profile.app_server_config_overrides()
+
+
+def test_claude_cannot_be_enabled_by_a_config_flag_before_policy_observation(tmp_path):
+    raw = _claude_candidate_policy()
+    raw["profiles"]["operator.claude.readonly.v1"]["enabled"] = True
+    with pytest.raises(CapabilityPolicyError, match="policy observation is not admitted"):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
+
+
+def test_claude_cannot_inherit_codex_capability_or_write_authority(tmp_path):
+    import dataclasses
+    profile = ExecutionCapabilityRegistry.load(_write(tmp_path, _claude_candidate_policy())).profiles["operator.claude.readonly.v1"]
+    for overrides in ({"write_capable": True}, {"skills": ("arbitrary",)},
+                      {"network_policy": "loopback-browser-only"}):
+        changed = dataclasses.replace(profile, **overrides)
+        with pytest.raises(CapabilityPolicyError, match="exceeds its unadmitted first profile"):
+            changed.claude_sdk_config_projection()
+
+
+def test_claude_digest_uses_actual_security_state_and_detects_drift(tmp_path):
+    profile = ExecutionCapabilityRegistry.load(_write(tmp_path, _claude_candidate_policy())).profiles["operator.claude.readonly.v1"]
+    sandbox = profile.claude_sdk_config_projection()["sandbox"]
+    provenance = {"setting_sources": [], "strict_mcp_config": True, "skills": []}
+    observed = {"sandbox": sandbox, "model": "irrelevant-model-field"}
+    assert claude_security_config_digest(observed, launch_provenance=provenance) == profile.expected_config_digest
+    assert claude_security_config_digest(observed, launch_provenance={**provenance, "skills": ["unexpected"]}) != profile.expected_config_digest
+    with pytest.raises(CapabilityPolicyError, match="launch provenance"):
+        claude_security_config_digest(observed, launch_provenance={})
+    assert claude_security_config_digest({"sandbox": {**sandbox, "allowUnsandboxedCommands": True}}, launch_provenance=provenance) != profile.expected_config_digest
+    assert claude_security_config_digest({"sandbox": sandbox, "permissions": {"allow": ["Bash"]}}, launch_provenance=provenance) != profile.expected_config_digest
+    for bad in ({}, {"sandbox": None}, {"sandbox": sandbox, "permissions": None},
+                {"sandbox": {**sandbox, "enabled": 1}}, {"sandbox": {**sandbox, "unexpected": float("nan")}}):
+        with pytest.raises(CapabilityPolicyError):
+            claude_security_config_digest(bad, launch_provenance=provenance)
+    snapshot = claude_security_config_projection(observed, launch_provenance=provenance)
+    sandbox["enabled"] = False
+    assert snapshot["sandbox"]["enabled"] is True
 
 
 def _company_dialogue_fixture_policy() -> dict:
@@ -60,7 +137,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-08-29.browser-b1"
+    assert registry.policy_version == "2026-10-14.attended-qualification"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -68,6 +145,23 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     assert sealed.write_capable is True
     assert sealed.native_helper_policy is NativeHelperPolicy.DISABLED
     assert sealed.required_capability_names == ()
+
+    claude_read = registry.resolve("sealed.worker.claude.readonly.no-extensions.v1")
+    assert claude_read.execution_surface == "claude-code"
+    assert claude_read.write_capable is False
+    assert claude_read.required_capability_names == ()
+
+    claude_write = registry.resolve("sealed.worker.claude.write.no-extensions.v1")
+    assert claude_write.execution_surface == "claude-code"
+    assert claude_write.write_capable is True
+    assert claude_write.native_helper_policy is NativeHelperPolicy.DISABLED
+    assert claude_write.required_capability_names == ()
+
+    assert adapter_supports_execution_surface("codex-cli", "codex-exec")
+    assert adapter_supports_execution_surface("codex-cli", "codex-app-server")
+    assert not adapter_supports_execution_surface("codex-cli", "claude-code")
+    assert adapter_supports_execution_surface("claude-code", "claude-code")
+    assert not adapter_supports_execution_surface("claude-code", "codex-exec")
 
     operator = registry.resolve("operator.appserver.readonly.v1")
     assert operator.execution_surface == "codex-app-server"
@@ -92,6 +186,18 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     assert helper.native_helper.hide_spawn_agent_metadata is True
     assert helper.mcp_servers == ("openai-developer-docs-v1",)
 
+
+
+def test_native_claude_sealed_surface_refuses_extension_capabilities(tmp_path):
+    raw = _raw_policy()
+    profile = raw["profiles"]["sealed.worker.claude.readonly.no-extensions.v1"]
+    profile["mcp_servers"] = ["openai-developer-docs-v1"]
+
+    with pytest.raises(
+        CapabilityPolicyError,
+        match="sealed worker execution surface",
+    ):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
 
 def test_profile_compiles_exact_mcp_manifest_and_secret_free_config():
     profile = ExecutionCapabilityRegistry.load().resolve(
@@ -194,11 +300,16 @@ def test_company_dialogue_fixture_compiles_through_existing_capability_authority
     assert widened.expected_config_digest != expected_digest
 
 
-def test_production_policy_has_no_company_dialogue_placeholder_endpoint_or_profile():
+def test_production_policy_has_no_legacy_company_dialogue_placeholder():
     raw = _raw_policy()
     rendered = json.dumps(raw, sort_keys=True)
-    assert "mastermind-company-dialogue" not in rendered
-    assert "mastermindCompanyDialogue" not in rendered
+    # The old test-only HTTPS placeholder remains forbidden. H1-RG1 now has a
+    # distinct reviewed principal Company Dialogue grant, covered separately.
+    assert "mastermind-company-dialogue-v1" not in raw["mcp_servers"]
+    assert (
+        "operator.appserver.readonly.company-dialogue.fixture.v1"
+        not in raw["profiles"]
+    )
     assert "company-dialogue.test.invalid" not in rendered
 
 
@@ -271,6 +382,61 @@ def test_docs_mcp_schema_and_security_projection_are_exact_and_drift_sensitive()
     }
     assert app_server_security_config_digest(widened_projection) != (
         profile.expected_config_digest
+    )
+
+
+def test_security_config_projection_without_skills_bundled_key_is_byte_identical_to_pre_change_shape():
+    """CAP-S1 digest-stability pin (protocol amendment §5).
+
+    A raw config whose ``skills`` mapping never carries a ``bundled`` key
+    (every V3 profile, and any V4 config/plugin/agent host that predates the
+    Skill-package surface) must project and digest EXACTLY as it did before
+    ``app_server_security_config_projection`` learned to observe
+    ``skills.bundled`` -- this is the "V3 config/profile/policy digests
+    remain byte-identical" half of the amendment.
+    """
+
+    config = {
+        "agents": {"enabled": False},
+        "features": {
+            "apps": False,
+            "auth_elicitation": False,
+            "enable_mcp_apps": False,
+            "mcp_2026_07_28": False,
+            "multi_agent": False,
+            "multi_agent_v2": False,
+            "plugins": False,
+            "remote_plugin": False,
+            "tool_call_mcp_elicitation": False,
+        },
+        "mcp_servers": {},
+        "plugins": {},
+        "skills": {"config": None},
+    }
+    projection = app_server_security_config_projection(config)
+    assert projection == {
+        "agents": {"enabled": False},
+        "features": {
+            "apps": False,
+            "auth_elicitation": False,
+            "enable_mcp_apps": False,
+            "mcp_2026_07_28": False,
+            "multi_agent": False,
+            "multi_agent_v2": False,
+            "plugins": False,
+            "remote_plugin": False,
+            "tool_call_mcp_elicitation": False,
+        },
+        "mcp_servers": {},
+        "plugins": {},
+        "skills": {"config": None},
+    }
+    # Pre-change literal: computed against this exact config with
+    # ``python3 -c`` immediately BEFORE the CAP-S1 observed-``bundled``
+    # production edit landed. Absence of "bundled" in the raw config's
+    # "skills" mapping must keep producing this exact digest forever.
+    assert app_server_security_config_digest(config) == (
+        "16f3a01790a8fad7b098a037018b55dd49c9c4fcf99ec0d5872cec992fdcfd61"
     )
 
 
@@ -413,7 +579,7 @@ def test_browser_profile_uses_existing_capability_registry_for_stdio_mcp_and_one
         "worker-browser-b1-install-manifest.json"
     )
     assert resource.runtime_manifest_digest == (
-        "ca55da0fbdd1366bfc6fd78612ebe9cc669e45ef5c21b084ad338b50e2d0e49d"
+        "c4b15f3ba4d5c20e869b63af86109ed57d2da929d525d1d8a0a2c65625209e9f"
     )
 
     assert profile.mcp_server_grants[0] == registry.mcp_servers[
@@ -520,3 +686,362 @@ def test_browser_grants_refuse_transport_identity_or_profile_widening(tmp_path, 
     mutation(raw)
     with pytest.raises(CapabilityPolicyError):
         ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
+
+
+def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
+    """Preserve protected native-return and explicit RG1 predecessor identities."""
+    assert CAPABILITY_POLICY_SCHEMA == CAPABILITY_POLICY_SCHEMA_V3
+    assert CAPABILITY_POLICY_SCHEMA_V3 == "mastermind.executive_agent_capabilities/v3"
+    assert CAPABILITY_POLICY_SCHEMA_V4 == "mastermind.executive_agent_capabilities/v4"
+
+    default = ExecutionCapabilityRegistry.load()
+    assert default.schema_version == CAPABILITY_POLICY_SCHEMA_V3
+    assert default.capability_packages == {}
+    root = Path(__file__).resolve().parents[1]
+    candidate_raw = json.loads(
+        (root / "config" / "candidates" / "claude_principal_rg1.json").read_text()
+    )
+    candidate = ExecutionCapabilityRegistry.load(
+        root / "config" / "candidates" / "claude_principal_rg1.json",
+        source_root=root,
+    )
+    del candidate_raw["profiles"]["principal.claude.coo.rich.v1"]
+    del candidate_raw["mcp_servers"]["executive-coo-mcp-v1"]
+    del candidate_raw["mcp_servers"]["company-dialogue-principal-mcp-v1"]
+    candidate_raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
+    previous = ExecutionCapabilityRegistry.load(_write(tmp_path, candidate_raw))
+    assert candidate.policy_digest != previous.policy_digest
+    assert previous.policy_digest == (
+        "506c1e2aa4bb730bf0325383bfdbbcf73adba7f248378af4dfc7d89ff23c6dd5"
+    )
+
+    # The accepted native-return generation remains in the default policy;
+    # removing only its own additions recovers the same frozen predecessor.
+    protected_raw = _raw_policy()
+    del protected_raw["profiles"]["operator.appserver.interactive.product-acceptance.v1"]
+    del protected_raw["mcp_servers"]["product-acceptance-mcp-v1"]
+    del protected_raw["profiles"]["fabric.attended.claude.bounded.v1"]
+    del protected_raw["profiles"]["fabric.paid.glm.sealed-input.v1"]
+    del protected_raw["profiles"]["operator.appserver.interactive.native-return.v1"]
+    del protected_raw["mcp_servers"]["native-return-mcp-v1"]
+    # The new ACP read-only generation is independent of the frozen
+    # predecessor too; remove it only for this historical digest assertion.
+    # Default policy still tests both the protected attended and ACP profiles.
+    del protected_raw["profiles"]["worker.acp.providerfree.readonly.v1"]
+    del protected_raw["mcp_servers"]["mastermind-acp-workspace-read-v1"]
+    protected_raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
+    protected_previous = ExecutionCapabilityRegistry.load(_write(tmp_path, protected_raw))
+    assert default.policy_digest != protected_previous.policy_digest
+    assert protected_previous.policy_digest == previous.policy_digest
+
+    older_raw = json.loads(json.dumps(candidate_raw))
+    del older_raw["profiles"]["operator.browser.isolated.v1"]
+    del older_raw["resources"]["worker-browser-isolated"]
+    older = ExecutionCapabilityRegistry.load(_write(tmp_path, older_raw))
+    assert older.policy_digest == (
+        "0568a41fe7b16b20f3945e79ce87d736fa75bc90c1e747a2b7f1c0c8ffc495d5"
+    )
+    assert older.resolve(
+        "operator.appserver.readonly.docs-mcp.native-helper.v1"
+    ).profile_digest == (
+        "028fce73ff8c4cb8f8ada7b514e89b74fba64b92f29db3780004a360e0995d39"
+    )
+    for profile in older.profiles.values():
+        assert profile.skill_grants == ()
+        assert profile.app_server_config_projection()["skills"] == {"config": None}
+
+
+@pytest.mark.parametrize(
+    "raw_key_path",
+    [
+        (),
+        ("profiles", "operator.appserver.readonly.v1"),
+    ],
+)
+def test_duplicate_json_keys_refuse_for_v3_documents(tmp_path, raw_key_path):
+    """Identity amendment §5.1: duplicate JSON keys refuse at every depth,
+
+    including for V3 documents, under the shared object_pairs_hook.
+    """
+
+    raw_text = json.dumps(_raw_policy())
+    # Build a hand-crafted duplicate: re-serialize the target object with one
+    # of its own keys repeated, verbatim, as a second occurrence.
+    raw = _raw_policy()
+    target = raw
+    for key in raw_key_path:
+        target = target[key]
+    dup_key = next(iter(target))
+    dup_value = target[dup_key]
+
+    def _canon(value):
+        if isinstance(value, dict):
+            return "{" + ",".join(f"{json.dumps(k)}:{_canon(v)}" for k, v in value.items()) + "}"
+        if isinstance(value, list):
+            return "[" + ",".join(_canon(v) for v in value) + "]"
+        return json.dumps(value)
+
+    def _canon_with_dup(value, path):
+        if not path:
+            assert isinstance(value, dict)
+            inner = ",".join(f"{json.dumps(k)}:{_canon(v)}" for k, v in value.items())
+            inner += f",{json.dumps(dup_key)}:{_canon(dup_value)}"
+            return "{" + inner + "}"
+        head, *rest = path
+        parts = []
+        for k, v in value.items():
+            if k == head:
+                parts.append(f"{json.dumps(k)}:{_canon_with_dup(v, rest)}")
+            else:
+                parts.append(f"{json.dumps(k)}:{_canon(v)}")
+        return "{" + ",".join(parts) + "}"
+
+    duplicated_text = _canon_with_dup(raw, list(raw_key_path))
+    path = tmp_path / "dup.json"
+    path.write_text(duplicated_text, encoding="utf-8")
+    with pytest.raises(CapabilityPolicyError, match="duplicate JSON key"):
+        ExecutionCapabilityRegistry.load(path)
+
+
+# ---------------------------------------------------------------------------
+# WAVE-3 REPAIR A, Part 2: fixed non-echoing duplicate-JSON-key refusal
+# (review 5087139217 BLOCKER 4). A duplicate JSON object key is completely
+# attacker-controlled and has no length or character-set bound the way every
+# OTHER validated field in this module does -- the refusal must never echo
+# any fragment of it into the exception text, its exception chain, or any
+# captured log/stdout/stderr surface.
+# ---------------------------------------------------------------------------
+
+
+def test_wave3_partB_duplicate_key_shaped_like_secret_does_not_echo(tmp_path, capsys, caplog):
+    poison = "sk-live-EXAMPLESECRETTOKEN"
+    raw_text = "{" + f'"{poison}": 1, "{poison}": 2' + "}"
+    path = tmp_path / "dup_secret.json"
+    path.write_text(raw_text, encoding="utf-8")
+
+    with pytest.raises(CapabilityPolicyError) as excinfo:
+        ExecutionCapabilityRegistry.load(path)
+
+    exc = excinfo.value
+    assert poison not in str(exc)
+    assert poison not in repr(exc)
+
+    cause = exc.__cause__
+    context = exc.__context__
+    assert cause is None or poison not in str(cause)
+    assert cause is None or poison not in repr(cause)
+    assert context is None or poison not in str(context)
+    assert context is None or poison not in repr(context)
+
+    captured = capsys.readouterr()
+    assert poison not in captured.out
+    assert poison not in captured.err
+    assert poison not in caplog.text
+
+
+def test_wave3_partB_duplicate_key_refusal_reason_is_fixed_regardless_of_key(tmp_path):
+    """The refusal reason is IDENTICAL byte-for-byte no matter which key
+    repeated, how long it was, or at what depth -- proving it is a fixed
+    token rather than a template that merely omits the key in this one
+    case."""
+    from control_plane.executive_agent_capabilities import _DUPLICATE_JSON_KEY_REASON
+
+    messages: set[str] = set()
+    for poison in ("short", "a-very-different-and-much-longer-duplicate-key-value-entirely"):
+        raw_text = "{" + f'"{poison}": 1, "{poison}": 2' + "}"
+        path = tmp_path / f"dup-{len(poison)}.json"
+        path.write_text(raw_text, encoding="utf-8")
+        with pytest.raises(CapabilityPolicyError) as excinfo:
+            ExecutionCapabilityRegistry.load(path)
+        messages.add(str(excinfo.value))
+
+    assert messages == {_DUPLICATE_JSON_KEY_REASON}
+
+
+# The policy source has a 2 MiB raw acquisition budget, independently of the
+# schema's object/cardinality limits and of retained Runtime SQLite budgets.
+_BOUNDED_POLICY_SOURCE_BYTES = 2 * 1024 * 1024
+
+
+def _record_capability_policy_source_reads(monkeypatch, selected):
+    original_open = Path.open
+    requests, handles = [], []
+
+    class Reader:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            self.handle.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.handle.__exit__(*args)
+
+        def read(self, size=-1):
+            value = self.handle.read(size)
+            requests.append((size, len(value)))
+            return value
+
+    def tracked_open(path, *args, **kwargs):
+        handle = original_open(path, *args, **kwargs)
+        if path != selected:
+            return handle
+        handles.append(handle)
+        return Reader(handle)
+
+    monkeypatch.setattr(Path, "open", tracked_open)
+    return requests, handles
+
+
+@pytest.mark.parametrize("relative", [
+    "config/executive_agent_capabilities.json",
+    "config/candidates/claude_principal_rg1.json",
+    "scripts/ohf/fixtures/executive_agent_capabilities_v4_mastermind_operator.json",
+    "scripts/ohf/fixtures/executive_agent_capabilities_v4_rich_write_operator.json",
+])
+def test_bounded_policy_source_capability_exact_limit_preserves_registry(
+    tmp_path, monkeypatch, relative,
+):
+    import dataclasses
+    root = Path(__file__).resolve().parent.parent
+    expected = ExecutionCapabilityRegistry.load(root / relative, source_root=root)
+    raw = (root / relative).read_bytes()
+    limit = _BOUNDED_POLICY_SOURCE_BYTES
+    assert len(raw) < limit
+    selected = tmp_path / "bounded-capabilities.json"
+    selected.write_bytes(raw + b" " * (limit - len(raw)))
+    requests, handles = _record_capability_policy_source_reads(monkeypatch, selected)
+    actual = ExecutionCapabilityRegistry.load(selected, source_root=root)
+    for field in dataclasses.fields(expected):
+        if field.name != "source_path":
+            assert getattr(actual, field.name) == getattr(expected, field.name)
+    assert actual.source_path == selected
+    assert requests == [(limit + 1, limit)]
+    assert len(handles) == 1 and handles[0].closed
+
+
+@pytest.mark.parametrize("fault", ["valid", "invalid_utf8", "multibyte"])
+def test_bounded_policy_source_capability_overflow_precedes_decode_and_parse(
+    tmp_path, monkeypatch, fault,
+):
+    from types import SimpleNamespace
+    import control_plane.executive_agent_capabilities as policy_module
+    limit = _BOUNDED_POLICY_SOURCE_BYTES
+    raw = Path("config/executive_agent_capabilities.json").read_bytes()
+    raw += b" " * (limit + 1 - len(raw))
+    if fault == "invalid_utf8":
+        raw = b"\xff" + raw[1:]
+    elif fault == "multibyte":
+        raw = ('"' + 'é' * (limit // 2) + '"').encode("utf-8")
+        assert len(raw.decode("utf-8")) < limit < len(raw)
+    selected = tmp_path / "over-limit-capabilities.json"
+    selected.write_bytes(raw)
+    requests, handles = _record_capability_policy_source_reads(monkeypatch, selected)
+
+    def forbidden_parse(*_args, **_kwargs):
+        pytest.fail("over-limit capability source reached the JSON parser")
+
+    # Replace only this owner's JSON reference, never the shared json module.
+    monkeypatch.setattr(policy_module, "json", SimpleNamespace(
+        loads=forbidden_parse, JSONDecodeError=json.JSONDecodeError,
+    ))
+    with pytest.raises(CapabilityPolicyError, match="source exceeds byte limit"):
+        ExecutionCapabilityRegistry.load(selected)
+    assert requests == [(limit + 1, limit + 1)]
+    assert len(handles) == 1 and handles[0].closed
+
+
+def test_bounded_policy_source_capability_preserves_universal_newlines(tmp_path):
+    raw = Path("config/executive_agent_capabilities.json").read_bytes()
+    selected = tmp_path / "mixed-newlines.json"
+    lines = raw.split(b"\n")
+    mixed = b"".join(line + (b"\r\n" if i % 2 else b"\r")
+                     for i, line in enumerate(lines))
+    selected.write_bytes(mixed)
+    expected = ExecutionCapabilityRegistry.load()
+    actual = ExecutionCapabilityRegistry.load(selected)
+    assert actual.policy_digest == expected.policy_digest
+    assert actual.profiles == expected.profiles
+
+    # A bare CR is invisible to JSONDecodeError's own newline counter. This
+    # distinguishes the former read_text translation from raw decode alone.
+    malformed = b'{\r\n"schema_version": 1,\r"profiles": }'
+    selected.write_bytes(malformed)
+    with pytest.raises(CapabilityPolicyError) as caught:
+        ExecutionCapabilityRegistry.load(selected)
+    cause = caught.value.__cause__
+    assert isinstance(cause, json.JSONDecodeError)
+    expected_text = '{\n"schema_version": 1,\n"profiles": }'
+    assert cause.doc == expected_text
+    assert cause.lineno == 3 and cause.colno == 13
+
+
+@pytest.mark.parametrize("raw, cause", [
+    (b"\xff", UnicodeDecodeError),
+    (b"\xef\xbb\xbf{}", json.JSONDecodeError),
+    ("{}".encode("utf-16"), UnicodeDecodeError),
+    ("{}".encode("utf-32"), UnicodeDecodeError),
+])
+def test_bounded_policy_source_capability_keeps_encoding_refusals(tmp_path, raw, cause):
+    selected = tmp_path / "bad-encoding.json"
+    selected.write_bytes(raw)
+    with pytest.raises(CapabilityPolicyError) as caught:
+        ExecutionCapabilityRegistry.load(selected)
+    assert isinstance(caught.value.__cause__, cause)
+
+
+def test_bounded_policy_source_capability_missing_path_keeps_resolve_exception(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        ExecutionCapabilityRegistry.load(tmp_path / "missing-capabilities.json")
+
+
+def test_checked_in_provider_free_acp_profile_uses_exact_workspace_read_grant():
+    from control_plane.executive_agent_capabilities import (
+        ACP_EXECUTION_SURFACE,
+        ACP_PROVIDER_FREE_AUTH_REALM,
+        ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,
+        ACP_WORKSPACE_READ_MCP_COMMAND,
+        ACP_WORKSPACE_READ_MCP_TOOL_SCHEMA_DIGEST,
+    )
+
+    registry = ExecutionCapabilityRegistry.load()
+    profile = registry.resolve("worker.acp.providerfree.readonly.v1")
+    assert profile.enabled is True
+    assert profile.execution_surface == ACP_EXECUTION_SURFACE == "acp-agent"
+    assert profile.auth_realm == ACP_PROVIDER_FREE_AUTH_REALM == "dedicated-worker-no-auth"
+    assert profile.write_capable is False
+    assert profile.network_policy == "disabled"
+    assert profile.native_helper_policy is NativeHelperPolicy.DISABLED
+    assert profile.skills == profile.plugins == profile.resource_grants == ()
+    assert len(profile.mcp_server_grants) == 1
+    grant = profile.mcp_server_grants[0]
+    assert grant.capability_id == ACP_WORKSPACE_READ_MCP_CAPABILITY_ID
+    assert grant.transport == "stdio"
+    assert grant.command == ACP_WORKSPACE_READ_MCP_COMMAND
+    assert grant.args == ()
+    assert grant.auth_status == "unsupported"
+    assert grant.enabled_tools == ("read_file", "search_text")
+    assert grant.tool_schema_digest == ACP_WORKSPACE_READ_MCP_TOOL_SCHEMA_DIGEST
+    projection = profile.acp_config_projection()
+    assert projection["execution_surface"] == "acp-agent"
+    assert projection["auth_realm"] == "dedicated-worker-no-auth"
+    assert projection["mcp_servers"] == [{
+        "capability_id": ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,
+        "grant_digest": grant.grant_digest,
+    }]
+    assert profile.expected_config_digest == hashlib.sha256(
+        json.dumps(
+            projection,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode()
+    ).hexdigest()
+    assert registry.production_armed is False
+
+
+def test_acp_projection_refuses_non_acp_surface():
+    profile = ExecutionCapabilityRegistry.load().profiles["operator.appserver.readonly.v1"]
+    with pytest.raises(CapabilityPolicyError, match="not an ACP profile"):
+        profile.acp_config_projection()

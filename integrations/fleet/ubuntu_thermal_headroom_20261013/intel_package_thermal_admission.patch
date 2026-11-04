@@ -1,0 +1,70 @@
+--- a/hosts.json
++++ b/hosts.json
+@@ -863,7 +863,10 @@
+     },
+     "windows": [],
+     "worktree_root": null,
+-    "checkout_reserve_gb": 15
++    "checkout_reserve_gb": 15,
++    "require_thermal": true,
++    "cpu_tctl_limit_c": 90.0,
++    "nvme_min_crit_headroom_c": 8.0
+   },
+   "ubuntu2": {
+     "_cursor_native_qual_20261008": {
+--- a/lane_runtime.py
++++ b/lane_runtime.py
+@@ -1555,30 +1555,43 @@
+ 
+ 
+ def _linux_cpu_tctl_c() -> float | None:
+-    """Read one live AMD CPU Tctl sensor; unknown must block enrolled admission.
+-
+-    This is a last-mile physical admission check, not another telemetry store
+-    or process controller. No caller may infer that a missing sensor is cool.
++    """Read AMD Tctl or hottest Intel CPU package temperature from Linux hwmon.
++
++    For enrolled hosts, missing or untrustworthy package thermals refuse
++    new work under the incumbent LaneLease lock; never infer a cool host.
++    Core temperatures are not interchangeable with package observations.
+     """
+     hwmon = Path("/sys/class/hwmon")
+     try:
+         chips = list(hwmon.glob("hwmon*"))
+     except OSError:
+         return None
++    amd_tctl = None
++    intel_packages: list[float] = []
+     for chip in chips:
+         try:
+-            if (chip / "name").read_text().strip() != "k10temp":
++            kind = (chip / "name").read_text().strip()
++            if kind not in ("k10temp", "coretemp"):
+                 continue
+             for sensor in chip.glob("temp*_input"):
+                 label = sensor.with_name(sensor.name.replace("_input", "_label"))
+-                if label.read_text().strip() != "Tctl":
++                label_value = label.read_text().strip()
++                is_amd = kind == "k10temp" and label_value == "Tctl"
++                is_intel = kind == "coretemp" and label_value.startswith("Package id ")
++                if not is_amd and not is_intel:
+                     continue
+                 value = int(sensor.read_text().strip()) / 1000.0
+-                return value if 10 <= value <= 120 else None
+-        except (OSError, ValueError):
++                if not math.isfinite(value) or not 10 <= value <= 120:
++                    continue
++                if is_amd:
++                    amd_tctl = value if amd_tctl is None else max(amd_tctl, value)
++                else:
++                    intel_packages.append(value)
++        except (OSError, ValueError, OverflowError):
+             continue
+-    return None
+-
++    return amd_tctl if amd_tctl is not None else (
++        max(intel_packages) if intel_packages else None
++    )
+ 
+ class LaneLease:
+     def __init__(self, path: Path, fd: int, snapshot: HostAdmissionSnapshot,

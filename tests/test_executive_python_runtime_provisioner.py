@@ -1,6 +1,8 @@
 """Static, Linux-safe checks for the reviewed macOS Python provisioner."""
 from __future__ import annotations
 
+import hashlib
+import json
 import stat
 import subprocess
 from pathlib import Path
@@ -142,6 +144,90 @@ def test_runtime_provisioner_does_not_mutate_compliant_sip_ancestors() -> None:
     )
 
 
+def test_bounded_signature_resource_repair_is_exact_and_verified() -> None:
+    source = _source()
+    paths = (
+        '"$root/_CodeSignature/CodeResources"',
+        '"$root/Resources/Python.app/Contents/_CodeSignature/CodeResources"',
+    )
+    assert "verify_signature_resources() {" in source
+    assert "normalize_signature_resources() {" in source
+    for path in paths:
+        assert path in source
+    assert '/bin/chmod 0644 "$path"' in source
+    assert "/bin/chmod 0644 \"$path\"" == source[
+        source.index('/bin/chmod 0644 "$path"'):
+    ].splitlines()[0]
+    verifier = source[
+        source.index("verify_signature_resources() {"):
+        source.index("\n}\n", source.index("verify_signature_resources() {"))
+    ]
+    normalizer = source[
+        source.index("normalize_signature_resources() {"):
+        source.index("\n}\n", source.index("normalize_signature_resources() {"))
+    ]
+    assert '"0:0:644:1"' in verifier
+    assert '"0:0:640:1"' in normalizer
+    assert "/bin/chmod -R" not in normalizer
+    assert "verify_consumer_readability \"$CANDIDATE\"" not in source
+    assert "verify_signature_resources \"$INSTALL_STAGE\"" in source
+    assert "verify_consumer_readability \"$INSTALL_STAGE\"" in source
+    assert "verify_signature_resources \"$RUNTIME_ROOT\"" in source
+    assert "verify_consumer_readability \"$RUNTIME_ROOT\"" in source
+
+
+def test_uid450_codesign_is_required_after_root_verification() -> None:
+    source = _source()
+    install = INSTALL.read_text(encoding="utf-8")
+    assert 'verify_consumer_readability() {' in source
+    assert '[ "$(/usr/bin/id -u 450)" = "450" ] || return 1' in source
+    assert (
+        "/usr/bin/sudo -n -u '#450' \\\n"
+        '    /usr/bin/codesign --verify --deep --strict "$root" >/dev/null 2>&1'
+    ) in source
+
+    root_checks = [
+        index
+        for index in range(len(source))
+        if source.startswith('runtime_tree_static_checks "$CANDIDATE"', index)
+    ]
+    normalization = source.index('normalize_signature_resources "$CANDIDATE"')
+    stage_uid450_check = source.index('verify_consumer_readability "$INSTALL_STAGE"')
+    assert root_checks[0] < normalization < root_checks[1] < stage_uid450_check
+
+    install_root_check = install.index(
+        '/usr/bin/codesign --verify --deep --strict "$PYTHON_RUNTIME_ROOT"'
+    )
+    uid450_check = install.index('/usr/bin/sudo -n -u "$CONTROL_USER"')
+    assert install_root_check < install.index(
+        '"$PYTHON_RUNTIME_ROOT/_CodeSignature/CodeResources"'
+    )
+    assert install.index(
+        '"$PYTHON_RUNTIME_ROOT/Resources/Python.app/Contents/_CodeSignature/CodeResources"'
+    ) < uid450_check
+
+    verify_only = source.split("verify_installed_runtime() {", 1)[1].split("\n}", 1)[0]
+    assert 'verify_signature_resources "$RUNTIME_ROOT"' in verify_only
+    assert 'verify_consumer_readability "$RUNTIME_ROOT"' in verify_only
+
+
+def test_installer_requires_exact_signature_resources_without_mutation() -> None:
+    install = INSTALL.read_text(encoding="utf-8")
+    for path in (
+        '"$PYTHON_RUNTIME_ROOT/_CodeSignature/CodeResources"',
+        '"$PYTHON_RUNTIME_ROOT/Resources/Python.app/Contents/_CodeSignature/CodeResources"',
+    ):
+        assert path in install
+    assert '"0:0:644:1"' in install
+    assert "Python signature resource has a filesystem ACL" in install
+    assert "normalize_signature_resources" not in install
+    preflight = install[
+        install.index("Python runtime root must be"):
+        install.index("PYTHON_RUNTIME_PROVENANCE_DIGEST=")
+    ]
+    assert "/bin/chmod" not in preflight
+
+
 def test_runtime_replacement_is_staged_and_quiescent_before_adjacent_swap() -> None:
     source = _source()
     stage_copy = '/usr/bin/ditto --noqtn "$CANDIDATE" "$INSTALL_STAGE"'
@@ -179,6 +265,80 @@ def test_runtime_receipt_is_exact_transactional_and_installer_required() -> None
     assert 'sys.version.split()[0] == "3.12.10"' in install
     assert "Python runtime ancestor" in install
     assert "Python runtime provenance receipt validation failed" in install
+
+
+def test_installer_projects_exact_validated_python_runtime_provenance() -> None:
+    install = INSTALL.read_text(encoding="utf-8")
+    derivation = install.split(
+        'PYTHON_RUNTIME_PROVENANCE_DIGEST="$("$PYTHON_BINARY"', 1
+    )[1].split("\nPY\n", 1)[0]
+    generator = install.split("import json, os, pathlib, re, sys\n", 1)[1].split(
+        "\nPY\n)", 1
+    )[0]
+
+    identity_fields = {
+        "schema_version": '"mastermind.executive_python_runtime/v1"',
+        "python_version": "version",
+        "runtime_root": "runtime_root",
+        "python_binary": "python_binary",
+        "team_identifier": "team",
+        "package_sha256": "package_sha",
+        "python_binary_sha256": "binary_sha",
+        "python_framework_sha256": "framework_sha",
+    }
+    assert 'b"mastermind.executive_python_runtime_provenance/v1\\x00"' in derivation
+    for key, value in identity_fields.items():
+        assert f'    "{key}": {value},' in derivation
+    assert '"python_runtime_provenance_digest": python_runtime_provenance_digest,' in generator
+    assert "python_runtime_provenance_digest,\n) = sys.argv[1:]" in generator
+    assert install.index('"$PYTHON_RUNTIME_PROVENANCE_DIGEST"') < install.index(
+        "if source:"
+    )
+    assert '"prior_runtime_archive"' not in generator
+    assert '"prior_runtime_receipt_archive"' not in generator
+    assert install.index("PYTHON_RUNTIME_PROVENANCE_DIGEST=\"$") > install.index(
+        "Python runtime provenance receipt validation failed"
+    )
+    assert (
+        'value.get("python_runtime_provenance_digest") not in '
+        "(None, python_runtime_provenance_digest)"
+    ) in generator
+
+    identity = {
+        "schema_version": "mastermind.executive_python_runtime/v1",
+        "python_version": "3.12.10",
+        "runtime_root": "/Library/Frameworks/Python.framework/Versions/3.12",
+        "python_binary": (
+            "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
+        ),
+        "team_identifier": "BMM5U3QVKW",
+        "package_sha256": "a" * 64,
+        "python_binary_sha256": "b" * 64,
+        "python_framework_sha256": "c" * 64,
+    }
+    expected = hashlib.sha256(
+        b"mastermind.executive_python_runtime_provenance/v1\x00"
+        + json.dumps(
+            identity,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    assert expected == hashlib.sha256(
+        b"mastermind.executive_python_runtime_provenance/v1\x00"
+        + (
+            '{"package_sha256":"' + "a" * 64 + '",'
+            '"python_binary":"'
+            "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
+            '","python_binary_sha256":"' + "b" * 64 + '",'
+            '"python_framework_sha256":"' + "c" * 64 + '",'
+            '"python_version":"3.12.10",'
+            '"runtime_root":"/Library/Frameworks/Python.framework/Versions/3.12",'
+            '"schema_version":"mastermind.executive_python_runtime/v1",'
+            '"team_identifier":"BMM5U3QVKW"}'
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def test_runtime_provisioner_verify_only_is_non_mutating_before_exit() -> None:
