@@ -32,11 +32,19 @@ POLICY = {
 }
 
 
+QUALIFIER_PATH = ROOT / "grok47" / "qualify_cursor46_current.py"
+_qspec = importlib.util.spec_from_file_location("cursor46_qualifier_tests", QUALIFIER_PATH)
+qualifier = importlib.util.module_from_spec(_qspec)
+assert _qspec.loader is not None
+_qspec.loader.exec_module(qualifier)
+
+
 def load(path: Path):
+    """Execute the reviewed minimal delta in memory; never edit accepted files."""
     spec = importlib.util.spec_from_file_location("offline_" + path.parent.name + "_pick", path)
     module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
+    patched_source = qualifier.apply_reviewed_hunks(path.read_bytes())
+    exec(compile(patched_source, str(path), "exec"), module.__dict__)
     return module
 
 
@@ -121,18 +129,26 @@ class Cursor46ExplicitPin(unittest.TestCase):
                     self.assertEqual(ordinary_reason, "grok_before_cursor policy")
 
     def test_current_generation_qualification_requires_exact_sealed_picker(self):
-        qualifier_path = ROOT / "grok47" / "qualify_cursor46_current.py"
-        spec = importlib.util.spec_from_file_location("cursor46_sealed_qualifier", qualifier_path)
-        qualifier = importlib.util.module_from_spec(spec)
-        assert spec.loader is not None
-        spec.loader.exec_module(qualifier)
-        # Neither an old source copy nor an arbitrary staged payload can be
-        # promoted as generation26 code merely by containing matching hunks.
+        # The released source fixture is intentionally historical. It cannot
+        # impersonate the exact sealed native gen27 selected on the host.
         stale = (ROOT / "quota_continuity" / "source" / "pick.py").read_bytes()
-        with self.assertRaisesRegex(ValueError, "native_gen26_picker_preimage_changed"):
-            qualifier.patched(stale)
-        with self.assertRaisesRegex(ValueError, "native_gen26_picker_preimage_changed"):
-            qualifier.patched(b"arbitrary source containing a Grok marker")
+        current = "8cefc4b27b2036f86bcec1d626e864f45f792e2c290ab8de56fbde89f78ac94a"
+        with self.assertRaisesRegex(ValueError, "sealed_picker_preimage_changed"):
+            qualifier.patched(stale, current)
+        with self.assertRaisesRegex(ValueError, "sealed_picker_preimage_changed"):
+            qualifier.patched(b"arbitrary source containing a Grok marker", current)
+        with self.assertRaisesRegex(ValueError, "sealed_picker_preimage_changed"):
+            qualifier.patched(stale, "0" * 64)
+
+    def test_canonical_historical_picker_is_not_mutated_by_in_memory_candidate(self):
+        for source in PICKERS:
+            with self.subTest(source=str(source)):
+                raw = source.read_bytes()
+                candidate = qualifier.apply_reviewed_hunks(raw)
+                self.assertNotEqual(candidate, raw)
+                self.assertEqual(source.read_bytes(), raw)
+                self.assertIn(b"cursor-grok-4.6-high", candidate)
+                self.assertIn(b"and _grok_exhausted()", raw)
 
 
 if __name__ == "__main__":

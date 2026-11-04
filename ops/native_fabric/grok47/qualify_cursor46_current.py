@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline-only qualification of one Cursor 4.6 selector edit over sealed native gen26.
+"""Offline-only qualification of one Cursor 4.6 selector edit over sealed native code.
 
 This does not publish or select anything in the installed store, run paid
 models, acquire leases, or edit installed source or provider state.
@@ -21,10 +21,14 @@ generation = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(generation)
 
-EXPECTED_BASE = "9eec6f73903fabfdd6d15bfe6f815f652f0946b5838cef6d40e96ca5b7e7f185"
-EXPECTED_PICK_SHA = "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b"
+SEALED_PREDECESSORS = {
+    "9eec6f73903fabfdd6d15bfe6f815f652f0946b5838cef6d40e96ca5b7e7f185":
+        "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b",
+    "8cefc4b27b2036f86bcec1d626e864f45f792e2c290ab8de56fbde89f78ac94a":
+        "747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132",
+}
 PICK = "ext/pick.py"
-POST = HERE / "overlay" / "pick.py"
+HISTORICAL_OVERLAY = HERE / "overlay" / "pick.py"
 CHANGES = (
     (
         'return (model == "cursor-grok-4.6-high" and _grok_exhausted()\n'
@@ -64,36 +68,44 @@ def sha(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def patched(raw: bytes) -> bytes:
-    if sha(raw) != EXPECTED_PICK_SHA:
-        raise ValueError("native_gen26_picker_preimage_changed")
+def apply_reviewed_hunks(raw: bytes) -> bytes:
+    """Pure source transform. No historical release or installed file is mutated."""
     text = raw.decode("utf-8")
-    reviewed = POST.read_text(encoding="utf-8")
+    original_overlay = HISTORICAL_OVERLAY.read_text(encoding="utf-8")
     for old, new in CHANGES:
-        if text.count(old) != 1 or reviewed.count(new) != 1:
+        if (text.count(old) != 1 or text.count(new) != 0
+                or original_overlay.count(old) != 1):
             raise ValueError("reviewed_selector_hunk_identity_mismatch")
         text = text.replace(old, new, 1)
-    ast.parse(text, filename="qualified-native-gen26-pick.py")
+    ast.parse(text, filename="qualified-native-cursor46-pick.py")
     output = text.encode("utf-8")
     if output == raw:
         raise ValueError("no_candidate_change")
     return output
 
 
+def patched(raw: bytes, predecessor: str) -> bytes:
+    expected = SEALED_PREDECESSORS.get(predecessor)
+    if expected is None or sha(raw) != expected:
+        raise ValueError("sealed_picker_preimage_changed")
+    return apply_reviewed_hunks(raw)
+
+
 def run(store: Path, stage: Path | None) -> dict:
     store = store.resolve(strict=True)
     original_pointer = (store / "CURRENT.json").read_bytes()
     current = generation.current(store)
-    if current is None or current["generation"] != EXPECTED_BASE:
+    if current is None or current["generation"] not in SEALED_PREDECESSORS:
         raise ValueError("installed_native_predecessor_changed")
-    sealed, incumbent = generation.verify(store, EXPECTED_BASE)
+    predecessor = current["generation"]
+    sealed, incumbent = generation.verify(store, predecessor)
     originals = {rel: (sealed / rel).read_bytes() for rel in incumbent["files"]}
     if set(originals) != set(incumbent["files"]):
         raise ValueError("installed_code_manifest_incomplete")
     if any(sha(originals[rel]) != expected for rel, expected in incumbent["files"].items()):
         raise ValueError("installed_code_manifest_drift")
     successor = dict(originals)
-    successor[PICK] = patched(originals[PICK])
+    successor[PICK] = patched(originals[PICK], predecessor)
     hashes = {rel: sha(raw) for rel, raw in successor.items()}
     changed = sorted(rel for rel in hashes if hashes[rel] != incumbent["files"][rel])
     if changed != [PICK]:
@@ -136,9 +148,9 @@ def run(store: Path, stage: Path | None) -> dict:
             or generation.current(store) != current):
         raise ValueError("installed_native_selection_moved_during_qualification")
     result = {
-        "schema": "mastermind.fabric_cursor46_gen26_prepublication.v1",
+        "schema": "mastermind.fabric_cursor46_sealed_prepublication.v2",
         "state": "QUALIFIED_SOURCE_ONLY_NOT_INSTALLED",
-        "installed_predecessor": EXPECTED_BASE,
+        "installed_predecessor": predecessor,
         "candidate_generation_expected": predicted,
         "file_count": len(hashes),
         "changed_files": changed,
