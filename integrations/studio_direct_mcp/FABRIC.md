@@ -42,8 +42,11 @@ silently substitute another model.
 **Manual C2 review refusal diagnostics (source candidate, not installed):** Native
 economic/task-fit policy may require a factual `escalation_reason` for a
 `C2_COMPLEX_BOUNDED` review. Read-only preview can refuse with
-`NONE reason=bounded_complexity_requires_escalation` if it is absent. The
-candidate Web facade preserves this pre-dispatch refusal as
+`NONE reason=bounded_complexity_requires_escalation` on **stderr**, not
+stdout, if it is absent. The candidate Web facade captures only one validated
+closed `native_reason` token for a nonzero read-only preview with empty stdout;
+it never forwards raw stderr, full provider output or arbitrary diagnostics.
+It preserves this pre-dispatch refusal as
 `MANUAL_ROUTE_PREFLIGHT_REFUSED` with a low-entropy `native_reason` and, for
 that exact reason only, `required_field: escalation_reason`. This is neither
 an adapter outage nor permission to invent an escalation or retry the refused
