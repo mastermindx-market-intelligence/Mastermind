@@ -79,7 +79,7 @@ The new deterministic unit test also covers 4h unbounded-broker allowance
 smaller requested wait, invalid reserve selectors, and expired deadlines.
 
 Release qualification: 102-file native manifest now
-`40c0a698ed32cadb5d7d508dc141e9d299addc24ba524106ad3040a3438bfafe`;
+`a130be866589897c74a09ee5689ad9df751ce2207b8e5768cb5b58274292bbed`;
 review-stage manifest and inventory are regenerated from the exact selected
 candidate. The historical 95-file fixture is restored using byte-pinned
 predecessor inversion rather than silently changing old source. The combined
@@ -141,7 +141,7 @@ Local **consolidated source-qualification suite PASS**, covering closed
 forward map, exact manual-auto predecessor, all B11 historical successor
 fixtures, paid initializer, source/manifest check, and historical95 upgrade;
 the dedicated long-horizon suite also PASS. The selected current102 source
-manifest SHA is `40c0a698ed32cadb5d7d508dc141e9d299addc24ba524106ad3040a3438bfafe`.
+manifest SHA is `a130be866589897c74a09ee5689ad9df751ce2207b8e5768cb5b58274292bbed`.
 
 This is not a production acceptance or a hosted green receipt. This branch
 still needs new exact-head GitHub CI, formal nonauthor review, protected
@@ -155,7 +155,7 @@ draft and uninstalled.
 
 - Protected source read pinned at `Mastermind@93c8c3c01f9226d1ea267e21c548f047458654dc` (schema `mastermind.sol_skillpack.v1`, `1.0.1`, compatible bootstrap 1). GitHub source PR #2019 previous exact head `97f7a728367b86e861d7a337e585ab0726ecfec3` had all 12 current-head GitHub checks green, but a real content conflict with current protected master.
 - Source integration uses a **real two-parent merge** of that exact protected commit into the existing operation-bound `fabric-long-horizon-timeout-20261103-sol-001` worktree, not a force push or second writer. The 10 content conflicts in the selected stage, manifest/inventory, source-qualification pins and historical tests were resolved to preserve **both** four-hour runtime limits and the merged protected S9 same-selection diagnostic observer.
-- Source selection regenerated with the canonical builder: 102 native members, source manifest SHA-256 `40c0a698ed32cadb5d7d508dc141e9d299addc24ba524106ad3040a3438bfafe`. Candidate `fabric_task.py` composed SHA-256 `778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b`; test inverses the **two bounded runtime budget changes** to the exact protected diagnostic source SHA `ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88`.
+- Source selection regenerated with the canonical builder: 102 native members, source manifest SHA-256 `a130be866589897c74a09ee5689ad9df751ce2207b8e5768cb5b58274292bbed`. Candidate `fabric_task.py` composed SHA-256 `778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b`; test inverses the **two bounded runtime budget changes** to the exact protected diagnostic source SHA `ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88`.
 - Historical B11 test now checks both the prior five source preimages, the five sealed long-runtime original preimages, the five unchanged source/overlay original preimages, **and** protected S9 preobserver picker. Original B11/95 manifests and independent byte hashes were not rewritten or waived.
 - Focused release source tests `tests/test_h1_native100_packaging.py`, `test_native_manual_auto_source_20261024.py`, all B11 successor-transition tests, paid initializer, source/manifest, native95 upgrade and runtime C2/C3 budget cases **passed** before this merge publication. `git diff --check` for the candidate-owned delta relative to protected `93c8c3c` also passed. Protected master research Markdown trailing whitespace is unrelated and was not touched.
 - The next irreversible effect is the existing workspace owner making one merge commit with exactly the original PR head + protected `93c8c3c` parent, followed by same-branch nonforce push, current-head CI, source review and release. No deployment or fleet worker proof exists from this source qualification.
@@ -193,7 +193,7 @@ timeout parser. They cover 14,400/14,340s, explicit 1,200s budget, inherited
 cap, and retained original supervisor. These are **not** provider/live
 long-duration tests. Source stage rebuilt at exactly 102 members with
 selected manifest SHA-256
-\`40c0a698ed32cadb5d7d508dc141e9d299addc24ba524106ad3040a3438bfafe\`,
+\`a130be866589897c74a09ee5689ad9df751ce2207b8e5768cb5b58274292bbed\`,
 remote executor SHA
 \`9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1\`,
 and embedded Grok launcher SHA
@@ -201,3 +201,31 @@ and embedded Grok launcher SHA
 Current-head CI, independent nonauthor re-review, protected merge,
 immutable installed-generation readback and genuine single-run result
 acceptance remain separate required gates.
+
+
+## Original controller near-expiry launch prevention
+
+The downstream strict commission fixture discovered a real *prelaunch*
+uncertainty hazard: after source/support preparation used almost all of a
+14-second caller commission, the remote controller still accepted a one-second
+remaining budget for a **new** SSH launch. The result was a needless terminal
+\`EFFECT_UNKNOWN\` and preserved broker lease with no time left to read
+the remote RC. This is a canonical process-owner bug, not permission to replay.
+
+The original \`remote_sub.sh\` commissioner now refuses a **new**
+original-commission launch when fewer than five seconds remain. It does not
+extend the monotonic deadline, alter the ordinary runtime fuse, bypass
+pre-existing leases, or abort an already-observed terminal: the same-run
+admission-retry path still collects the original result when \`RC_OBSERVED=1\`.
+The special no-commission explicit short run retains its old contract.
+
+A new source-extracted, no-SSH/broker/provider
+\`test_launch_observation_reserve.py\` executes the actual launch-budget
+shell function and checks 1–4 seconds refuse cleanly with RC75, 5+ seconds
+retain bounded worker budgets, and non-launch stages stay unchanged:
+**five tests PASS**. The 102-member source manifest was rebuilt, SHA-256
+\`a130be866589897c74a09ee5689ad9df751ce2207b8e5768cb5b58274292bbed\`,
+remote controller SHA-256
+\`e24d6123ae1c303fe7a72b88c9ae6093979dcf35a9984d7ba16ccb9689700b05\`.
+The dependent fast-observation PR #2023 needs to recompose this exact source
+head before claiming the accepted long-horizon/fast result contract.
