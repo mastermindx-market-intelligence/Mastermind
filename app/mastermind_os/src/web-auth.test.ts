@@ -1631,3 +1631,45 @@ describe("canonical accepted Direction fixed Web READ", () => {
     await expect(host.readProjectDirection!(request())).rejects.toThrow();
   });
 });
+
+import admissionFixture from './admission/fixtures/project-admission-owner.json';
+describe('fixed authenticated project admission Web transport',()=>{
+ const selection=admissionFixture.open.selection;
+ const command_id='mmos-project-pause-'+'a'.repeat(40);
+ const request=()=>({selection,signal:new AbortController().signal});
+ it('joins closed current and original status GETs plus one explicit Pause POST on fixed acquisition origin',async()=>{
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client);
+  e.fetcher.mockResolvedValueOnce(response(admissionFixture.open));
+  await expect(host.readProjectAdmissionControl!(request())).resolves.toEqual(admissionFixture.open);
+  e.fetcher.mockResolvedValueOnce(response(admissionFixture.pause_result));
+  await host.pauseProjectAdmission!({...request(),command_id});
+  e.fetcher.mockResolvedValueOnce(response(admissionFixture.pause_result));
+  await host.readProjectAdmissionOperation!({...request(),command_id,kind:'project_pause'});
+  expect(e.fetcher.mock.calls.map(([url,options])=>[new URL(String(url)).origin,new URL(String(url)).pathname,options?.method])).toEqual([
+   [ORIGIN,'/workspace/project-admission/current','GET'],[ORIGIN,'/workspace/project-admission/pause','POST'],[ORIGIN,'/workspace/project-admission/operation','GET']
+  ]);
+  const post=e.fetcher.mock.calls[1][1];expect(post).toMatchObject({redirect:'error',credentials:'omit',cache:'no-store'});
+  expect(JSON.parse(String(post?.body))).toEqual({selection,command_id});
+  expect(Object.fromEntries(new URL(String(e.fetcher.mock.calls[2][0])).searchParams)).toEqual({...selection,command_id,kind:'project_pause'});
+ });
+ it('never dispatches without login or when request contains caller authority/private fields',async()=>{
+  const e=setup(),host=bindMissionHost(e.client);
+  await expect(host.pauseProjectAdmission!({...request(),command_id})).rejects.toThrow();expect(e.fetcher).not.toHaveBeenCalled();
+  await e.login();e.fetcher.mockClear();
+  await expect(host.pauseProjectAdmission!({...request(),command_id,principal:'caller'} as never)).rejects.toThrow();expect(e.fetcher).not.toHaveBeenCalled();
+ });
+ it('withholds late mutation result after auth departure and never resends',async()=>{
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client),late=deferred<Response>();
+  e.fetcher.mockReturnValueOnce(late.promise);
+  const pending=host.pauseProjectAdmission!({...request(),command_id}),rejected=expect(pending).rejects.toThrow();
+  await host.auth!.signOut();late.resolve(response(admissionFixture.pause_result));await rejected;expect(e.fetcher).toHaveBeenCalledTimes(1);
+ });
+ it('bounds streamed action responses and closes a timed-out original without a replacement',async()=>{
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client);
+  e.fetcher.mockResolvedValueOnce(response({padding:'x'.repeat(32769)}));
+  await expect(host.pauseProjectAdmission!({...request(),command_id})).rejects.toThrow();expect(e.fetcher).toHaveBeenCalledTimes(1);
+  e.fetcher.mockImplementationOnce(()=>new Promise(()=>{}));
+  const pending=host.pauseProjectAdmission!({...request(),command_id}),rejected=expect(pending).rejects.toThrow();
+  await vi.advanceTimersByTimeAsync(60_001);await rejected;expect(e.fetcher).toHaveBeenCalledTimes(2);
+ });
+});

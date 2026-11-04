@@ -1128,6 +1128,193 @@ pub async fn read_project_journal(app: AppHandle, selection: ProjectPlanSelectio
     Ok(value)
 }
 
+
+// Project admission uses a dedicated fixed action/status surface. These selectors
+// carry no principal, grant, path or mutation authority from the webview.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectAdmissionSelection {
+    work_ref: String,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "admission_optional_root")]
+    root_job_id: Option<String>,
+}
+fn admission_optional_root<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Option<String>, D::Error> {
+    String::deserialize(d).map(Some)
+}
+impl ProjectAdmissionSelection {
+    fn validate(&self) -> Result<()> {
+        ProjectPlanSelection { work_ref: self.work_ref.clone() }.validate()?;
+        if let Some(root) = &self.root_job_id { validate_workspace_pair(&self.work_ref, root)?; }
+        Ok(())
+    }
+}
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectAdmissionPauseRequest { selection: ProjectAdmissionSelection, command_id: String }
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectAdmissionPauseToken { event_id: u64, receipt_digest: String }
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectAdmissionResumeRequest {
+    selection: ProjectAdmissionSelection, command_id: String, pause_token: ProjectAdmissionPauseToken,
+}
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectAdmissionStatusRequest { selection: ProjectAdmissionSelection, command_id: String, kind: String }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ProjectAdmissionMode { Current, Pause, Resume, PauseStatus, ResumeStatus }
+fn project_admission_command(command: &str, resume: bool) -> Result<()> {
+    let prefix = if resume { "mmos-project-resume-" } else { "mmos-project-pause-" };
+    if !command.strip_prefix(prefix).is_some_and(|suffix| lowercase_hex(suffix, 40)) {
+        return Err("REQUEST_INVALID".into());
+    }
+    Ok(())
+}
+fn project_admission_target(mode: ProjectAdmissionMode, selection: &ProjectAdmissionSelection, command: Option<&str>) -> Result<Url> {
+    selection.validate()?;
+    let path = match mode {
+        ProjectAdmissionMode::Current => "current", ProjectAdmissionMode::Pause => "pause",
+        ProjectAdmissionMode::Resume => "resume", _ => "operation",
+    };
+    let mut url = Url::parse(&format!("{ORIGIN}/workspace/project-admission/{path}")).map_err(|_| "REQUEST_INVALID")?;
+    if mode == ProjectAdmissionMode::Current || matches!(mode, ProjectAdmissionMode::PauseStatus | ProjectAdmissionMode::ResumeStatus) {
+        url.query_pairs_mut().append_pair("work_ref", &selection.work_ref);
+        if let Some(root) = &selection.root_job_id { url.query_pairs_mut().append_pair("root_job_id", root); }
+    }
+    if mode != ProjectAdmissionMode::Current {
+        let command = command.ok_or("REQUEST_INVALID")?;
+        let resume = matches!(mode, ProjectAdmissionMode::Resume | ProjectAdmissionMode::ResumeStatus);
+        project_admission_command(command, resume)?;
+        if matches!(mode, ProjectAdmissionMode::PauseStatus | ProjectAdmissionMode::ResumeStatus) {
+            url.query_pairs_mut().append_pair("command_id", command)
+                .append_pair("kind", if resume { "project_resume" } else { "project_pause" });
+        }
+    } else if command.is_some() { return Err("REQUEST_INVALID".into()); }
+    Ok(url)
+}
+fn project_admission_header_matches(value: &Value, mode: ProjectAdmissionMode, selection: &ProjectAdmissionSelection, command: Option<&str>) -> bool {
+    let schema = match mode {
+        ProjectAdmissionMode::Current => "mastermind.workspace_project_admission_control.v1",
+        ProjectAdmissionMode::Pause => "mastermind.workspace_project_admission_action_result.v1",
+        ProjectAdmissionMode::Resume => "mastermind.workspace_project_resumption_action_result.v1",
+        ProjectAdmissionMode::PauseStatus => "mastermind.workspace_project_admission_status_result.v1",
+        ProjectAdmissionMode::ResumeStatus => "mastermind.workspace_project_resumption_status_result.v1",
+    };
+    let Ok(mut expected) = serde_json::to_value(selection) else { return false; };
+    if let Some(command) = command { expected["command_id"] = Value::String(command.into()); }
+    value.get("schema").and_then(Value::as_str) == Some(schema) && value.get("selection") == Some(&expected)
+}
+async fn project_admission_exchange(app: AppHandle, mode: ProjectAdmissionMode, selection: ProjectAdmissionSelection, command: Option<String>, body: Option<Value>) -> Result<Value> {
+    let url = project_admission_target(mode, &selection, command.as_deref())?;
+    let action = matches!(mode, ProjectAdmissionMode::Pause | ProjectAdmissionMode::Resume);
+    if action != body.is_some() { return Err("REQUEST_INVALID".into()); }
+    let encoded = body.map(|body| serde_json::to_vec(&body).map_err(|_| "REQUEST_INVALID".to_owned())).transpose()?;
+    if encoded.as_ref().is_some_and(|v| v.len() > 16_384) { return Err("REQUEST_BOUND".into()); }
+    let state = app.state::<NativeAuth>();
+    let before = state.lock()?.generation;
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    // Authentication may change while token acquisition awaits; no action may
+    // cross that identity change, even if the replacement user is signed in.
+    if before != generation || !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let mut request = if let Some(bytes) = encoded {
+        state.http.post(url).header("Content-Type", "application/json").body(bytes)
+    } else { state.http.get(url) };
+    request = request.bearer_auth(token).header("Accept", "application/json")
+        .header("Cache-Control", "no-store").timeout(Duration::from_secs(60));
+    let response = request.send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, 32_768).await
+    } else { bounded_json(response, 32_768).await };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) { return Err("AUTHENTICATION_CHANGED".into()); }
+    let value = result?;
+    if !project_admission_header_matches(&value, mode, &selection, command.as_deref()) { return Err("RESPONSE_INVALID".into()); }
+    // The typed host decodes the full current document; the incumbent finite
+    // port decodes every action/status receipt before controller publication.
+    Ok(value)
+}
+#[tauri::command]
+pub async fn read_project_admission_control(app: AppHandle, selection: ProjectAdmissionSelection) -> Result<Value> {
+    project_admission_exchange(app, ProjectAdmissionMode::Current, selection, None, None).await
+}
+#[tauri::command]
+pub async fn pause_project_admission(app: AppHandle, request: ProjectAdmissionPauseRequest) -> Result<Value> {
+    project_admission_command(&request.command_id, false)?;
+    let body = serde_json::to_value(&request).map_err(|_| "REQUEST_INVALID")?;
+    project_admission_exchange(app, ProjectAdmissionMode::Pause, request.selection, Some(request.command_id), Some(body)).await
+}
+#[tauri::command]
+pub async fn resume_project_admission(app: AppHandle, request: ProjectAdmissionResumeRequest) -> Result<Value> {
+    project_admission_command(&request.command_id, true)?;
+    if request.pause_token.event_id == 0 || request.pause_token.event_id > MAX_SAFE_GENERATION
+        || !lowercase_hex(&request.pause_token.receipt_digest, 64) { return Err("REQUEST_INVALID".into()); }
+    let body = serde_json::to_value(&request).map_err(|_| "REQUEST_INVALID")?;
+    project_admission_exchange(app, ProjectAdmissionMode::Resume, request.selection, Some(request.command_id), Some(body)).await
+}
+#[tauri::command]
+pub async fn read_project_admission_operation(app: AppHandle, request: ProjectAdmissionStatusRequest) -> Result<Value> {
+    let mode = match request.kind.as_str() { "project_pause" => ProjectAdmissionMode::PauseStatus,
+        "project_resume" => ProjectAdmissionMode::ResumeStatus, _ => return Err("REQUEST_INVALID".into()) };
+    project_admission_exchange(app, mode, request.selection, Some(request.command_id), None).await
+}
+
+
+#[cfg(test)]
+mod project_admission_transport_tests {
+    use super::*;
+    fn selection() -> ProjectAdmissionSelection { ProjectAdmissionSelection { work_ref: "WS:PROJECT-ONE".into(), root_job_id: None } }
+    #[test]
+    fn fixed_targets_and_exact_original_namespaces() {
+        let selection = selection();
+        let pause = format!("mmos-project-pause-{}", "a".repeat(40));
+        let resume = format!("mmos-project-resume-{}", "b".repeat(40));
+        let current = project_admission_target(ProjectAdmissionMode::Current, &selection, None).unwrap();
+        assert_eq!(current.as_str(), "https://mcp.mastermind-x.com/workspace/project-admission/current?work_ref=WS%3APROJECT-ONE");
+        let status = project_admission_target(ProjectAdmissionMode::ResumeStatus, &selection, Some(&resume)).unwrap();
+        assert_eq!(status.path(), "/workspace/project-admission/operation");
+        assert!(status.query_pairs().any(|(k,v)| k == "kind" && v == "project_resume"));
+        let mutation = project_admission_target(ProjectAdmissionMode::Pause, &selection, Some(&pause)).unwrap();
+        assert_eq!(mutation.path(), "/workspace/project-admission/pause"); assert_eq!(mutation.query(), None);
+        assert!(project_admission_target(ProjectAdmissionMode::Pause, &selection, Some(&resume)).is_err());
+        assert!(project_admission_target(ProjectAdmissionMode::ResumeStatus, &selection, Some(&pause)).is_err());
+        assert!(project_admission_target(ProjectAdmissionMode::Current, &selection, Some(&pause)).is_err());
+        for command in [pause.clone()+"\n", pause.to_uppercase(), "mmos-project-pause-a".into()] { assert!(project_admission_command(&command, false).is_err()); }
+    }
+    #[test]
+    fn closed_selectors_and_requests_reject_private_or_foreign_fields() {
+        for bad in [serde_json::json!({"work_ref":"WS:PROJECT-ONE","root_job_id":null}),
+            serde_json::json!({"work_ref":"WS:PROJECT-ONE","principal":"caller"}),
+            serde_json::json!({"work_ref":"WS:PROJECT-ONE","root_job_id":1})] {
+            assert!(serde_json::from_value::<ProjectAdmissionSelection>(bad).is_err());
+        }
+        for bad in ["WS:x", "WS:PROJECT--ONE", "WS:PROJECT_ONE", "WS:PROJECT-ONE\n"] {
+            let selected = ProjectAdmissionSelection { work_ref:bad.into(), root_job_id:None };
+            assert!(project_admission_target(ProjectAdmissionMode::Current,&selected,None).is_err());
+        }
+        let mut selected=selection();
+        for root in ["JOB-0", "JOB-0001", "JOB-999999999"] { selected.root_job_id=Some(root.into()); assert!(selected.validate().is_ok()); }
+        for root in ["JOB-", "JOB-1000000000", "JOB-1\n", "JOB-other"] { selected.root_job_id=Some(root.into()); assert!(selected.validate().is_err()); }
+        let pause = serde_json::json!({"selection":{"work_ref":"WS:PROJECT-ONE"},"command_id":format!("mmos-project-pause-{}","a".repeat(40))});
+        assert!(serde_json::from_value::<ProjectAdmissionPauseRequest>(pause.clone()).is_ok());
+        for field in ["url","actor","permission_digest","pause_token","kind"] { let mut v=pause.clone(); v[field]=Value::String("private".into()); assert!(serde_json::from_value::<ProjectAdmissionPauseRequest>(v).is_err()); }
+        assert!(serde_json::from_value::<ProjectAdmissionPauseToken>(serde_json::json!({"event_id":1,"receipt_digest":"a".repeat(64),"extra":true})).is_err());
+    }
+    #[test]
+    fn response_header_withholds_other_originals_and_scope() {
+        let selection=selection(); let command=format!("mmos-project-pause-{}","a".repeat(40));
+        let mut value=serde_json::json!({"schema":"mastermind.workspace_project_admission_status_result.v1","selection":{"work_ref":"WS:PROJECT-ONE","command_id":command}});
+        assert!(project_admission_header_matches(&value,ProjectAdmissionMode::PauseStatus,&selection,Some(&command)));
+        assert!(!project_admission_header_matches(&value,ProjectAdmissionMode::ResumeStatus,&selection,Some(&command)));
+        value["selection"]["root_job_id"]=Value::String("JOB-1".into());
+        assert!(!project_admission_header_matches(&value,ProjectAdmissionMode::PauseStatus,&selection,Some(&command)));
+        value["selection"].as_object_mut().unwrap().remove("root_job_id");
+        value["selection"]["command_id"]=Value::String(format!("mmos-project-pause-{}","b".repeat(40)));
+        assert!(!project_admission_header_matches(&value,ProjectAdmissionMode::PauseStatus,&selection,Some(&command)));
+    }
+}
+
 const PROJECT_SESSION_PATH: &str = "/workspace/project-session/current";
 const PROJECT_SESSION_SCHEMA: &str = "mastermind.workspace_project_session_association.v1";
 const PROJECT_SESSION_RESPONSE_CAP: usize = 16_384;

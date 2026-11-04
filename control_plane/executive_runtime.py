@@ -12463,6 +12463,64 @@ def _require_coo_child_workspace_completion(connection, row, *, required=True):
     return value
 
 
+def _admission_workstream_from_provenance(provenance: Mapping[str, Any] | None) -> str | None:
+    """Use only the immutable creation source, never mutable Job constraints."""
+    if provenance is None:
+        return None  # Explicitly unscoped legacy/infrastructure work.
+    if not isinstance(provenance, Mapping):
+        raise StateConflict("WORKSTREAM_ADMISSION_SOURCE_INVALID")
+    if "workstream" not in provenance:
+        if "dialogue_source" in provenance or "dialogue_source_digest" in provenance or "direct_native" in provenance:
+            raise StateConflict("WORKSTREAM_ADMISSION_SOURCE_MISSING")
+        return None
+    from control_plane.workstream_admission_contract import canonical_work_ref
+    try:
+        work_ref = canonical_work_ref(provenance["workstream"])
+    except ValueError:
+        raise StateConflict("WORKSTREAM_ADMISSION_SOURCE_INVALID") from None
+    dialogue = provenance.get("dialogue_source")
+    if dialogue is not None and (not isinstance(dialogue, Mapping) or dialogue.get("work_ref") != work_ref):
+        raise StateConflict("WORKSTREAM_ADMISSION_SOURCE_MISMATCH")
+    return work_ref
+
+
+def _admission_root_workstream(connection: sqlite3.Connection, root_job_id: str) -> str | None:
+    root = connection.execute("SELECT parent_job_id,root_job_id FROM jobs WHERE job_id=?", (root_job_id,)).fetchone()
+    if root is None or root["parent_job_id"] is not None or root["root_job_id"] != root_job_id:
+        raise StateConflict("WORKSTREAM_ADMISSION_ROOT_INVALID")
+    rows = connection.execute("SELECT aggregate_type,aggregate_id,payload_json FROM events WHERE event_type='JOB_CREATED' AND job_id=? LIMIT 2", (root_job_id,)).fetchall()
+    if len(rows) != 1 or rows[0]["aggregate_type"] != "job" or rows[0]["aggregate_id"] != root_job_id:
+        raise StateConflict("WORKSTREAM_ADMISSION_ROOT_SOURCE_MISSING")
+    try:
+        payload = _strict_canonical_json_loads(str(rows[0]["payload_json"]), name="root admission provenance")
+    except PersistenceError:
+        raise StateConflict("WORKSTREAM_ADMISSION_ROOT_SOURCE_INVALID") from None
+    if (type(payload) is not dict or payload.get("root_job_id") != root_job_id
+            or payload.get("parent_job_id") is not None):
+        raise StateConflict("WORKSTREAM_ADMISSION_ROOT_SOURCE_INVALID")
+    return _admission_workstream_from_provenance(payload.get("provenance"))
+
+
+def _workstream_suspension_receipt(row: sqlite3.Row) -> dict[str, Any]:
+    from control_plane.workstream_admission_contract import parse_suspension_event
+    try:
+        return parse_suspension_event({key: row[key] for key in (
+            "event_id", "aggregate_type", "aggregate_id", "event_type", "command_id", "actor", "payload_json", "created_at_ms")})
+    except (ValueError, KeyError, TypeError):
+        raise StateConflict("WORKSTREAM_SUSPENSION_SOURCE_INVALID") from None
+
+
+def _current_workstream_suspension(connection: sqlite3.Connection, work_ref: str) -> dict[str, Any] | None:
+    from control_plane.workstream_admission_state import current_transition
+    receipt = current_transition(connection, work_ref)
+    return receipt if receipt is not None and receipt["state"] == "PAUSED" else None
+
+
+def _assert_workstream_admission_open(connection: sqlite3.Connection, work_ref: str | None) -> None:
+    if work_ref is not None and _current_workstream_suspension(connection, work_ref) is not None:
+        raise StateConflict("WORKSTREAM_ADMISSION_SUSPENDED")
+
+
 def _insert_cycle_child(
     connection: sqlite3.Connection,
     store: RuntimeStore,
@@ -12494,6 +12552,8 @@ def _insert_cycle_child(
     business_impact: str | None = None,
 ) -> sqlite3.Row:
     """Insert one cycle-owned direct child inside its caller's transaction."""
+    store._assert_owned_snapshot_connection(connection)
+    _assert_workstream_admission_open(connection, _admission_root_workstream(connection, str(root_row["root_job_id"])))
 
     nested_plan = plan_schema_version == "mastermind.execution_plan/v5"
     policy = CooCyclePolicy.load(version=2 if nested_plan else 1)
@@ -13738,6 +13798,119 @@ class JobRegistry:
     def __init__(self, store: RuntimeStore) -> None:
         self.store = store
 
+    def admission_workstream_for_root(self, root_job_id: str) -> str | None:
+        """Read the actual root creation association for a qualified App guard."""
+        if type(root_job_id) is not str or re.fullmatch(r"JOB-[0-9]{1,9}", root_job_id) is None:
+            raise StateConflict("WORKSTREAM_ADMISSION_ROOT_INVALID")
+        with self.store.read() as connection:
+            return _admission_root_workstream(connection, root_job_id)
+
+    def read_workstream_admission_suspension(self, work_ref: str) -> dict[str, Any] | None:
+        """Read a committed gate receipt; absence establishes no work eligibility."""
+        from control_plane.workstream_admission_contract import canonical_work_ref
+        try:
+            selected = canonical_work_ref(work_ref)
+        except ValueError:
+            raise StateConflict("WORKSTREAM_SUSPENSION_INVALID") from None
+        with self.store.read() as connection:
+            return _current_workstream_suspension(connection, selected)
+
+    def read_workstream_admission_pause_command(self, work_ref: str, *, command_id: str, actor: str) -> dict[str, Any] | None:
+        """Read only the exact original command receipt, never invoke a pause.
+
+        None means not observed in this snapshot, not proof of no concurrent
+        effect. The returned historical receipt is not a current-state read.
+        """
+        from control_plane.workstream_admission_contract import make_pause_request, request_digest
+        try:
+            expected = request_digest(make_pause_request(work_ref, command_id, actor))
+        except ValueError:
+            raise StateConflict("WORKSTREAM_SUSPENSION_INVALID") from None
+        with self.store.read() as connection:
+            row = connection.execute("SELECT * FROM events WHERE command_id=?", (command_id,)).fetchone()
+            if row is None:
+                return None
+            receipt = _workstream_suspension_receipt(row)
+            if receipt["work_ref"] != work_ref or receipt["request_digest"] != expected:
+                raise StateConflict("WORKSTREAM_SUSPENSION_COMMAND_MISMATCH")
+            return receipt
+
+    def pause_workstream_admission(self, work_ref: str, *, command_id: str, actor: str,
+            _commit_guard: Callable[[], None] | None = None) -> dict[str, Any]:
+        """Commit stop-new-work in the existing Event owner, without cancelling.
+
+        Caller authorization is not derived from ``actor``. No public action
+        port is exposed here. Publish PAUSED only after this transaction commits;
+        identical command reconciliation writes nothing and never resumes work.
+        """
+        from control_plane.workstream_admission_contract import make_pause_request, make_pause_payload, request_digest
+        if _commit_guard is not None and not callable(_commit_guard):
+            raise StateConflict("WORKSTREAM_SUSPENSION_GUARD_INVALID")
+        def recheck() -> None:
+            if _commit_guard is not None:
+                _commit_guard()
+        recheck()
+        try:
+            request = make_pause_request(work_ref, command_id, actor)
+            payload = make_pause_payload(request)
+            expected_digest = request_digest(request)
+        except ValueError:
+            raise StateConflict("WORKSTREAM_SUSPENSION_INVALID") from None
+        def reconcile(connection: sqlite3.Connection) -> dict[str, Any] | None:
+            previous = connection.execute("SELECT * FROM events WHERE command_id=?", (command_id,)).fetchone()
+            if previous is None:
+                return None
+            _current_workstream_suspension(connection, work_ref)
+            receipt = _workstream_suspension_receipt(previous)
+            if receipt["work_ref"] != work_ref or receipt["request_digest"] != expected_digest:
+                raise StateConflict("WORKSTREAM_SUSPENSION_COMMAND_MISMATCH")
+            return receipt
+        # Original-command recovery is an actual read; it takes no writer lock
+        # and does not need a writable Runtime just to observe a committed receipt.
+        with self.store.read() as connection:
+            existing = reconcile(connection)
+        if existing is not None:
+            recheck()
+            return existing
+        with self.store.transaction() as connection:
+            recheck()
+            receipt = reconcile(connection)  # A concurrent identical writer may have won.
+            if receipt is None:
+                # Unknown/corrupt latest state cannot be silently overwritten.
+                _current_workstream_suspension(connection, work_ref)
+                self.store.append_event(connection, aggregate_type="workstream", aggregate_id=work_ref,
+                    event_type="WORKSTREAM_ADMISSION_SUSPENDED", command_id=command_id, actor=actor, payload=payload)
+                row = connection.execute("SELECT * FROM events WHERE command_id=?", (command_id,)).fetchone()
+                if row is None:
+                    raise PersistenceError("workstream suspension receipt disappeared")
+                receipt = _workstream_suspension_receipt(row)
+            recheck()  # A revoked host-owned permission/source bracket rolls back.
+        return receipt
+
+    def read_workstream_admission_transition(self, work_ref: str) -> dict[str, Any] | None:
+        """Current validated pause/resume transition; not a work-readiness claim."""
+        from control_plane.workstream_admission_contract import canonical_work_ref
+        from control_plane.workstream_admission_state import current_transition
+        try:
+            selected = canonical_work_ref(work_ref)
+        except ValueError:
+            raise StateConflict("WORKSTREAM_SUSPENSION_INVALID") from None
+        with self.store.read() as connection:
+            return current_transition(connection, selected)
+
+    def read_workstream_admission_resume_command(self, work_ref: str, *, command_id: str, actor: str) -> dict[str, Any] | None:
+        from control_plane.workstream_admission_state import read_resume_command
+        return read_resume_command(self, work_ref, command_id=command_id, actor=actor)
+
+    def resume_workstream_admission(self, work_ref: str, *, command_id: str, actor: str,
+            expected_pause_event_id: int, expected_pause_receipt_digest: str,
+            _commit_guard: Callable[[], None] | None = None) -> dict[str, Any]:
+        """Reopen only new admission, comparing the exact current pause token."""
+        from control_plane.workstream_admission_state import resume_in_owner
+        return resume_in_owner(self, work_ref, command_id=command_id, actor=actor,
+            expected_pause_event_id=expected_pause_event_id, expected_pause_receipt_digest=expected_pause_receipt_digest,
+            _commit_guard=_commit_guard)
+
     def _create_job_in_transaction(
         self,
         connection: sqlite3.Connection,
@@ -13819,6 +13992,13 @@ class JobRegistry:
             raise StateConflict(
                 "private C2 capability requires exact carrier provenance"
             )
+
+        # The same writer lock orders pause against every normal/root/child
+        # insert, including the private carrier caller. Children inherit only
+        # their actual root's immutable creation source.
+        work_ref = (_admission_workstream_from_provenance(spec.event_provenance)
+            if spec.parent_job_id is None else _admission_root_workstream(connection, str(spec.parent_root_job_id)))
+        _assert_workstream_admission_open(connection, work_ref)
 
         numbers: list[int] = []
         for row in connection.execute("SELECT job_id FROM jobs"):
@@ -17730,6 +17910,11 @@ class AttemptRegistry:
         """Own the existing quota/Attempt/Job/claim mutation sequence."""
 
         self.store._assert_owned_snapshot_connection(connection)
+        # A pause cannot revoke an already-issued lease. This gate is only on
+        # fresh Attempt creation, under the original atomic claim transaction.
+        work_ref = _admission_root_workstream(connection, str(job_row["root_job_id"]))
+        if work_ref is not None and _current_workstream_suspension(connection, work_ref) is not None:
+            return None
         unresolved = ReleaseMaintenanceRegistry(self.store).read_unresolved_admission(
             connection
         )

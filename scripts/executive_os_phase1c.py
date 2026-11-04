@@ -1164,10 +1164,10 @@ def load_control_config(
         config["workspace_control_room"] = validate_workspace_control_room(
             config["workspace_control_room"], control_uid=config["control_uid"])
         from integrations.business_mcp_auth.contracts import load_resource_policy
-        from integrations.mastermind_workspace_app.contract import validate_workspace_bindings
+        from integrations.mastermind_workspace_app.project_authoring_grant import validate_project_bindings
         try:
             workspace_policy = load_resource_policy(config["workspace_resource_policy"])
-            config["workspace_acquisition"] = validate_workspace_bindings(config["workspace_acquisition"], workspace_policy)
+            config["workspace_acquisition"] = validate_project_bindings(config["workspace_acquisition"], workspace_policy)
         except Exception:
             raise ServiceError("workspace acquisition policy or binding refused") from None
     if content_sources:
@@ -2466,12 +2466,15 @@ def _service_from_config(
             if workspace_acquisition_loader is None:
                 raise ServiceError("sealed current workspace acquisition loader is required")
             policy = load_resource_policy(raw["workspace_resource_policy"])
-            _, authorize = workspace_authorizers(policy=policy, load_bindings=workspace_acquisition_loader)
+            from integrations.mastermind_workspace_app.project_authoring_grant import legacy_workspace_document
+            def legacy_workspace_loader(current_loader=workspace_acquisition_loader, project_policy=policy):
+                return legacy_workspace_document(current_loader(), project_policy)
+            _, authorize = workspace_authorizers(policy=policy, load_bindings=legacy_workspace_loader)
             _, authorize_discovery = workspace_control_room_authorizers(
-                policy=policy, load_bindings=workspace_acquisition_loader, action="discover")
+                policy=policy, load_bindings=legacy_workspace_loader, action="discover")
             authorize_actions = {
                 operation: workspace_control_room_authorizers(
-                    policy=policy, load_bindings=workspace_acquisition_loader, action=operation)[1]
+                    policy=policy, load_bindings=legacy_workspace_loader, action=operation)[1]
                 for operation in OPERATIONS
             }
             # Installed source join: the trusted parent builds the composer from
@@ -2546,6 +2549,7 @@ def _service_from_config(
                 return ExistingManagedProjectSessionSource(service, creation_source_reader)
             workspace_factories["workspace_read_provider_factory"] = workspace_provider_factory(
                 control_room=workspace_control_room, authorize=authorize,
+                project_admission_policy=policy, project_admission_load_bindings=workspace_acquisition_loader,
                 authorize_discovery=authorize_discovery, authorize_actions=authorize_actions,
                 armed={**{key: raw.get(key) if type(raw.get(key)) is bool else None for key in ARM_KEYS}, "source": "control.json"},
                 runtime_identity={"root": None, "db_present": True, "identity": None},

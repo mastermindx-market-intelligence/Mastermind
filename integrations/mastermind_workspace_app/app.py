@@ -400,10 +400,13 @@ class WorkspaceAppConfig:
     now: Callable[[], int] = dataclasses.field(default=lambda: int(time.time()))
     authorize_principal: Callable[[VerifiedPrincipal], bool] | None = None
     client: Any = None
+    project_admission_load_bindings: Callable[[], Any] | None = None
     authorize_discovery: Callable[[VerifiedPrincipal], bool] | None = None
     authorize_actions: Mapping[str, Callable[[VerifiedPrincipal], bool]] | None = None
 
     def __post_init__(self) -> None:
+        if self.project_admission_load_bindings is not None and not callable(self.project_admission_load_bindings):
+            raise ValueError("sealed current project membership loader required")
         if self.authorize_discovery is not None and not callable(self.authorize_discovery):
             raise ValueError("authorize_discovery must be callable or absent")
         if self.authorize_actions is not None:
@@ -1496,6 +1499,20 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def project_journal_endpoint(request: Request) -> JSONResponse:
         return await project_journal_current(request, config=config)
 
+    async def admission_endpoint(request: Request, mode: str):
+        from integrations.mastermind_workspace_app.project_admission import project_admission_http
+        loader = config.project_admission_load_bindings
+        if loader is None:
+            return _with_no_store(_refuse_json(503, "source_unavailable"))
+        return await project_admission_http(request, config=config, load_bindings=loader, mode=mode)
+    async def project_admission_current(request: Request):
+        return await admission_endpoint(request, "current")
+    async def project_admission_status(request: Request):
+        return await admission_endpoint(request, "status")
+    async def project_admission_pause(request: Request):
+        return await admission_endpoint(request, "pause")
+    async def project_admission_resume(request: Request):
+        return await admission_endpoint(request, "resume")
     async def autonomy_endpoint(request: Request) -> JSONResponse:
         return await autonomy_current(request, config=config)
 
@@ -1533,6 +1550,11 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_PROJECT_SESSION_ROUTE, project_session_endpoint, methods=["GET"]),
         Route(_PROJECT_DIRECTION_ROUTE, project_direction_endpoint, methods=["GET"]),
         Route(_AUTONOMY_ROUTE, autonomy_endpoint, methods=["GET"]),
+        Route("/workspace/project-admission/current", project_admission_current, methods=["GET"]),
+        Route("/workspace/project-admission/operation", project_admission_status, methods=["GET"]),
+        Route("/workspace/project-admission/pause", project_admission_pause, methods=["POST"]),
+        Route("/workspace/project-admission/resume", project_admission_resume, methods=["POST"]),
+
         Route(_ACTIVITY_ROUTE, activity_endpoint, methods=["GET"]),
         Route(_RESOURCE_CAPACITY_ROUTE, resource_capacity_endpoint, methods=["GET"]),
         Route(_FABRIC_CATALOG_ROUTE, fabric_catalog_endpoint, methods=["GET"]),

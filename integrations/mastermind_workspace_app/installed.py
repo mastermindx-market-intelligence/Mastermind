@@ -38,6 +38,10 @@ class CeoIngressWorkspaceClient:
         self.action_timeout_seconds = action_timeout_seconds
 
     async def request(self, frame):
+        from common import workspace_project_admission_wire as project_admission_wire
+        if project_admission_wire.is_project_admission_frame(frame):
+            from integrations.mastermind_workspace_app.project_admission_client import request_project_admission
+            return await request_project_admission(self, frame)
         from common import workspace_control_room_action_contract as action_wire
         if type(frame) is dict and frame.get("schema") == action_wire.FRAME_SCHEMA:
             return await self._request_action(frame)

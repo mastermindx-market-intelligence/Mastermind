@@ -1,3 +1,4 @@
+import { projectAdmissionHostMethods, projectAdmissionPublicRequest, type ProjectAdmissionRawMethods, type ProjectAdmissionHostMethods } from "./admission/project-admission-host";
 import { decodeProjectAssociation, normalizeProjectAssociationSelection, type ProjectAssociationSelection, type ProjectAssociationDocument } from "./conversations/project-association";
 import { decodeResourceCapacityRead, validResourceCapacitySelection, type ResourceCapacityReadSelection, type ResourceCapacityRead } from "./resources/resource-capacity-read";
 import { decodeAutonomyPolicy, isAutonomySelection, type AutonomyRead, type AutonomySelection } from "./supervision/autonomy-policy";
@@ -60,7 +61,7 @@ import {
   type ControlRoomOperation, type ControlRoomActionResult,
 } from "./control-room";
 
-export interface RawClient {
+export interface RawClient extends Partial<ProjectAdmissionRawMethods> {
   /** Public fixed navigation only; Terminal owns its user's authentication and access. */
   openTerminalBriefs?(): Promise<unknown>;
   /** Existing authenticated original-owner acquisition; no caller-supplied request key. */
@@ -139,7 +140,7 @@ export interface RawClient {
 export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
 }
-export interface MissionHost {
+export interface MissionHost extends Partial<ProjectAdmissionHostMethods> {
   /** Optional zero-input navigation; no private content or access receipt. */
   openTerminalBriefs?: TerminalBriefsNavigationPort;
   /** Existing authenticated original-owner acquisition; no caller-supplied request key. */
@@ -305,6 +306,7 @@ export function bindMissionHost(
         return client.signOut();
       },
     },
+    ...projectAdmissionHostMethods(client,()=>epoch),
     ...(client.readAutonomyPolicy && client.invalidationGeneration ? {
       async readAutonomyPolicy(request: AutonomySelection & { signal: AbortSignal }) {
         const { signal, ...selected } = request;
@@ -781,6 +783,10 @@ export async function createNativeClient(
       | "read_work"
       | "read_mission"
       | "read_mission_v3"
+      | "read_project_admission_control"
+      | "pause_project_admission"
+      | "resume_project_admission"
+      | "read_project_admission_operation"
       | "read_autonomy_policy"
       | "read_project_plan"
       | "read_project_journal"
@@ -883,6 +889,26 @@ export async function createNativeClient(
       return read("read_mission", signal, {
         selection: { work_ref, root_job_id },
       });
+    },
+    readProjectAdmissionControl: (request) => {
+      const input=projectAdmissionPublicRequest("current",request);
+      if(!input)return Promise.reject(new Error("PROJECT_ADMISSION_REQUEST_INVALID"));
+      return read("read_project_admission_control",request.signal,{selection:input.selection});
+    },
+    pauseProjectAdmission: (request) => {
+      const input=projectAdmissionPublicRequest("pause",request);
+      if(!input)return Promise.reject(new Error("PROJECT_ADMISSION_REQUEST_INVALID"));
+      return read("pause_project_admission",request.signal,{request:input});
+    },
+    resumeProjectAdmission: (request) => {
+      const input=projectAdmissionPublicRequest("resume",request);
+      if(!input)return Promise.reject(new Error("PROJECT_ADMISSION_REQUEST_INVALID"));
+      return read("resume_project_admission",request.signal,{request:input});
+    },
+    readProjectAdmissionOperation: (request) => {
+      const input=projectAdmissionPublicRequest("status",request);
+      if(!input)return Promise.reject(new Error("PROJECT_ADMISSION_REQUEST_INVALID"));
+      return read("read_project_admission_operation",request.signal,{request:input});
     },
     readAutonomyPolicy: (request) => {
       const { signal, ...selected } = request;

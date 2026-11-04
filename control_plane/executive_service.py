@@ -5497,6 +5497,40 @@ class ExecutiveControlService:
                     writer, result, response_ceiling=action_wire.MAX_RESPONSE_BYTES,
                 )
                 return
+            from common import workspace_project_admission_wire as admission_wire
+            if admission_wire.is_project_admission_frame(parsed):
+                if not app_peer:
+                    await self._send_ceo_ingress_error(writer, "peer_denied", "Project controls require the installed App peer")
+                    return
+                try:
+                    admission_request = admission_wire.decode_frame(raw)
+                except (TypeError, ValueError):
+                    await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                        response_ceiling=admission_wire.MAX_RESPONSE_BYTES)
+                    return
+                factory = app_binding.workspace_read_provider_factory
+                def admission_host_ready():
+                    return (app_binding is self._ceo_ingress_app_binding
+                        and app_binding.workspace_read_provider_factory is factory and callable(factory)
+                        and not self._closing and self._ceo_ingress_ready
+                        and self._service_state in {"READY", "AWAITING_CANARY"})
+                delegated = False
+                try:
+                    if not admission_host_ready():
+                        result = admission_wire.withheld(admission_request, reason="OWNER_NOT_READY")
+                    else:
+                        from control_plane.workspace_read_service import WorkspaceReadService
+                        provider = factory(self._require_runtime())
+                        if type(provider) is not WorkspaceReadService or not admission_host_ready():
+                            result = admission_wire.withheld(admission_request, reason="OWNER_NOT_READY")
+                        else:
+                            delegated = True
+                            result = await provider.handle_frame(admission_request, action_host_ready=admission_host_ready)
+                    result = admission_wire.validate_result(result, admission_request)
+                except Exception:
+                    result = admission_wire.withheld(admission_request, attempted=delegated)
+                await self._send_ceo_ingress_response(writer, result, response_ceiling=admission_wire.MAX_RESPONSE_BYTES)
+                return
             from common import workspace_project_plan_contract as project_plan_wire
             from common import workspace_project_journal_contract as project_journal_wire
             from common import workspace_project_session_contract as project_session_wire

@@ -1,3 +1,4 @@
+import { projectAdmissionPublicRequest, projectAdmissionQuery, type ProjectAdmissionPauseRequest, type ProjectAdmissionResumeRequest } from "./admission/project-admission-host";
 import { normalizeProjectAssociationSelection } from "./conversations/project-association";
 import { validResourceCapacitySelection } from "./resources/resource-capacity-read";
 import { isAutonomySelection, AUTONOMY_READ_BODY_SCHEMA } from "./supervision/autonomy-policy";
@@ -889,6 +890,32 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       researchRequests.delete(controller);
     }
   }
+  /** One fixed mutation on the original command; failures never trigger retry. */
+  async function projectAdmissionAction(mode:"pause"|"resume",request:ProjectAdmissionPauseRequest|ProjectAdmissionResumeRequest):Promise<unknown>{
+    const payload=projectAdmissionPublicRequest(mode,request),ticket=generation,token=tokens.acquisition;
+    if(!payload || !token || !valid("acquisition"))throw new Error("PROJECT_ADMISSION_UNAUTHORIZED");
+    const signal=request.signal,controller=new AbortController();let timeout:ReturnType<typeof setTimeout>|undefined;
+    let fail!:(reason:Error)=>void;
+    const interrupted=new Promise<never>((_,reject)=>{fail=reject;});
+    void interrupted.catch(()=>{});
+    const cancel=()=>{controller.abort();fail(new Error("PROJECT_ADMISSION_OUTCOME_UNCONFIRMED"));};
+    try {
+      signal.addEventListener("abort",cancel,{once:true});
+      timeout=later(cancel,60_000);if(signal.aborted)cancel();
+      const body=JSON.stringify(payload);if(new TextEncoder().encode(body).length>16_384)throw new Error("PROJECT_ADMISSION_REQUEST_INVALID");
+      const exchange=async()=>{
+        if(signal.aborted || controller.signal.aborted || ticket!==generation || !valid("acquisition"))throw new Error("PROJECT_ADMISSION_UNAUTHORIZED");
+        const response=await fetchFn(`${ORIGIN}/workspace/project-admission/${mode}`,{method:"POST",redirect:"error",credentials:"omit",cache:"no-store",
+          headers:{Accept:"application/json","Content-Type":"application/json",Authorization:`Bearer ${token.value}`},body,signal:controller.signal});
+        if(!response.ok)throw new Error("PROJECT_ADMISSION_REQUEST_FAILED");
+        const result=await boundedJson(response,32_768);
+        if(signal.aborted || controller.signal.aborted || ticket!==generation || tokens.acquisition!==token || !valid("acquisition"))throw new Error("PROJECT_ADMISSION_OUTCOME_UNCONFIRMED");
+        return result;
+      };
+      return await Promise.race([exchange(),interrupted]);
+    } finally {if(timeout!==undefined)clear(timeout);signal.removeEventListener("abort",cancel);controller.abort();}
+  }
+
   /**
    * One acquisition-authenticated attempt at a fixed Control Room route.
    * The server owns each action grant. A post-dispatch auth change cannot
@@ -1171,6 +1198,20 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       return read("acquisition", `${ORIGIN}/workspace/fabric/status/current?${new URLSearchParams({
         root_id: selected.rootId, run_id: selected.runId,
       })}`, signal, { cap: 16_384, typedUnavailableSchema: null });
+    },
+    readProjectAdmissionControl: request => {
+      const payload=projectAdmissionPublicRequest("current",request);
+      if(!payload)return Promise.reject(new Error("PROJECT_ADMISSION_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/project-admission/current?${projectAdmissionQuery(payload)}`,request.signal,
+        {cap:32_768,typedUnavailableSchema:"mastermind.workspace_project_admission_control.v1"});
+    },
+    pauseProjectAdmission: request => projectAdmissionAction("pause",request),
+    resumeProjectAdmission: request => projectAdmissionAction("resume",request),
+    readProjectAdmissionOperation: request => {
+      const payload=projectAdmissionPublicRequest("status",request);
+      if(!payload)return Promise.reject(new Error("PROJECT_ADMISSION_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/project-admission/operation?${projectAdmissionQuery(payload)}`,request.signal,
+        {cap:32_768,typedUnavailableSchema:null});
     },
     readAutonomyPolicy: (request) => {
       const { signal, ...selected } = request;
