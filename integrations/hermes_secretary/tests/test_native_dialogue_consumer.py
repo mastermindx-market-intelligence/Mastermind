@@ -301,5 +301,61 @@ class ConsumerTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(hasattr(candidate, "submit_fabric"))
 
 
+
+    async def test_quoted_credentials_in_canonical_fields_refuse_before_inference(self):
+        samples = (
+            '{"password":"SYNTHETIC_QUOTED_SECRET"}',
+            '{"api_key": "SYNTHETIC_QUOTED_SECRET"}',
+            "'token': 'SYNTHETIC_QUOTED_SECRET'",
+            '"authorization" = "SYNTHETIC_QUOTED_SECRET"',
+        )
+        for field in ("summary", "instruction", "stop_condition"):
+            for sample in samples:
+                with self.subTest(field=field, sample_format=samples.index(sample)):
+                    self.setUp()
+                    body = {"instruction": "Read source.", "stop_condition": "Return receipt.", "scope_change": False}
+                    summary = "Continue bounded work."
+                    if field == "summary":
+                        summary = sample
+                    else:
+                        body[field] = sample
+                    self.service.items[0]["message"] = _request(summary=summary, body=body)
+                    with self.assertRaises(ConsumerRefusal) as cm:
+                        await self.run_turn()
+                    self.assertEqual(cm.exception.code, "CANONICAL_PROMPT_SECRET_REFUSED")
+                    self.assertNotIn("SYNTHETIC_QUOTED_SECRET", str(cm.exception))
+                    self.assertEqual(self.model.prompts, [])
+                    self.assertEqual(self.send_count(), 0)
+
+    async def test_quoted_model_credentials_refuse_before_canonical_send(self):
+        for sample in (
+            '{"password":"SYNTHETIC_QUOTED_SECRET"}',
+            '{"api_key": "SYNTHETIC_QUOTED_SECRET"}',
+            "'token': 'SYNTHETIC_QUOTED_SECRET'",
+            '"authorization" = "SYNTHETIC_QUOTED_SECRET"',
+        ):
+            with self.subTest(sample_format=sample.split(":", 1)[0]):
+                self.setUp()
+                self.model.response = sample
+                with self.assertRaises(ConsumerRefusal) as cm:
+                    await self.run_turn()
+                self.assertEqual(cm.exception.code, "MODEL_REPLY_UNQUALIFIED")
+                self.assertNotIn("SYNTHETIC_QUOTED_SECRET", str(cm.exception))
+                self.assertEqual(len(self.model.prompts), 1)
+                self.assertEqual(self.send_count(), 0)
+
+    async def test_benign_quoted_text_and_json_still_reach_original_parent(self):
+        for sample in ('{"status":"working"}', "'result': 'source verified'", 'The "token count" is 12.'):
+            with self.subTest(sample=sample):
+                self.setUp()
+                self.service.items[0]["message"] = _request(summary=sample)
+                self.model.response = sample
+                result = await self.run_turn()
+                self.assertEqual(result["status"], "CANONICAL_REPLY_COMMITTED")
+                self.assertEqual(result["thread_ts"], THREAD)
+                self.assertEqual(len(self.model.prompts), 1)
+                self.assertEqual(self.send_count(), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
