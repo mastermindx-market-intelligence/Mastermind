@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { normalizeSelection } from "../mission";
 import type {
   EvidenceRef,
   MissionDocument,
@@ -781,25 +782,6 @@ export function SupervisionTrace({
               )}
             </p>
           )}
-          {onReadCurrent && (
-            <div className="mm-supervision-trace__read">
-              <button
-                type="button"
-                className="mm-supervision-trace__read-button"
-                onClick={() => {
-                  onReadCurrent();
-                }}
-              >
-                {t("Read current mission", "读取当前任务")}
-              </button>
-              <span className="mm-supervision-trace__read-note">
-                {t(
-                  "Optional host-provided read; this view performs no read on its own.",
-                  "可选的宿主读取；本视图自身不执行任何读取。",
-                )}
-              </span>
-            </div>
-          )}
           <OrchestrationTraceBlock document={document} chinese={chinese} t={t} />
           <ReturnAcceptanceBlock document={document} chinese={chinese} t={t} />
           <SupervisionBlock document={document} chinese={chinese} t={t} />
@@ -819,6 +801,17 @@ export function SupervisionTrace({
               )}
         </p>
       )}
+      {onReadCurrent && selection && normalizeSelection(selection) ? (
+        <div className="mm-supervision-trace__read">
+          <button type="button" className="mm-supervision-trace__read-button"
+            onClick={() => onReadCurrent()}>
+            {t("Read current mission", "读取当前任务")}
+          </button>
+          <span className="mm-supervision-trace__read-note">
+            {t("Read the selected work from its existing source.", "从已有来源读取所选工作。")}
+          </span>
+        </div>
+      ) : null}
     </section>
   );
 }

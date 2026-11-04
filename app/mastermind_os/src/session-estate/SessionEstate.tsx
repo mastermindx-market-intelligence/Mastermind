@@ -20,83 +20,87 @@ type Binding = AvailableNavigation["bindings"][number];
 const INITIAL_ROWS = 8;
 
 const EN = {
-  title: "Session Estate",
+  title: "Sessions",
   boundAnswer: (n: number) =>
-    `Bounded read: ${n} observed ${n === 1 ? "binding" : "bindings"}.`,
-  emptyAnswer: "Bounded read: no bindings observed.",
-  caution: "Saved bindings do not prove running sessions.",
-  pending: "Waiting for the next owner read. No count is shown.",
-  unavailable: "Session estate unavailable.",
-  ownerReason: (reason: string) => `Owner reason: ${reason}`,
-  navInvalid: "Navigation projection unavailable (CONTROL_ROOM_NAVIGATION_INVALID).",
-  sourceDetails: "Observation details",
+    `${n} saved session ${n === 1 ? "connection" : "connections"} supplied · total unknown`,
+  emptyAnswer: "No saved session connections were supplied. The estate total is unknown.",
+  caution: "Saved connections do not confirm that a session is running.",
+  pending: "Session information is not available yet.",
+  unavailable: "Session information is unavailable.",
+  ownerReason: (reason: string) => `Why unavailable: ${reason}`,
+  navInvalid: "Session information could not be displayed.",
+  sourceDetails: "Technical details",
   observedAt: "Observed at",
   publication: "Publication sequence",
   freshness: "Source validity",
-  freshnessQualified: "Owner-qualified publication.",
-  freshnessUnknown: "Unknown for this read; no overall live claim is made.",
+  freshnessQualified: "Source validity details supplied; current availability is not established.",
+  freshnessUnknown: "Current session availability is not established by this read.",
   notReported: "not reported",
-  searchLabel: "Search bindings",
+  searchLabel: "Find a session connection",
   searchPlaceholder: "provider, role, work reference or seat",
-  listHeading: "Bindings",
+  listHeading: "Saved connections",
   shown: (shown: number, total: number) => `Showing ${shown} of ${total}.`,
   noMatch: "No bindings match this search.",
   showAll: (n: number) => `Show all ${n} bindings`,
   showFewer: (n: number) => `Show the first ${n} bindings`,
   inspect: "Inspect",
-  detailHeading: "Binding detail",
+  detailHeading: "Connection details",
   fieldBindingId: "Binding id",
   fieldRole: "Role",
   fieldProvider: "Provider",
   fieldSeat: "Seat reference",
   fieldWorkRef: "Work reference",
+  fieldRoot: "Mission root",
   fieldLocator: "Locator kind",
   fieldObserved: "Observed at",
   fieldVerified: "Last verified",
   fieldStatus: "Binding status",
-  statusBound: "Work reference present in this programme observation",
-  statusUnbound: "Work reference outside this programme observation",
+  statusBound: "Work reference present in this supplied project list",
+  statusUnbound: "Work reference outside this supplied project list",
   fieldConflicts: "Conflicts",
   noConflicts: "None observed for this binding.",
   conflictGroup: (ids: readonly string[]) =>
     `Ambiguous group (${ids.length}): ${ids.join(", ")}`,
-  missionHeading: "Exact mission",
-  openMission: "Open Mission",
+  missionHeading: "Work details",
+  openMission: "Open work details",
   openNote: "Read navigation only; it does not open or activate any runtime surface.",
-  suppressUnbound: "This binding is outside the current programme observation, so no mission was guessed.",
+  suppressUnbound: "This binding is outside the current supplied project list, so no mission was guessed.",
   suppressConflict:
     "This binding sits in a conflicting work/role group, so no exact mission is offered.",
-  suppressNoProgram: "No programme is observed for this work reference.",
+  suppressNoProgram: "No project is supplied for this work reference.",
   suppressMultiProgram:
-    "Several programmes share this work reference, so the mission is ambiguous.",
+    "Several projects share this work reference, so the mission is ambiguous.",
   suppressRootConflict: "The root candidates for this work reference conflict.",
   suppressRootUnresolved: "The root job for this work reference is not resolved.",
   suppressNoRootJobId: "The resolved programme carries no root job identifier.",
   invalidated: "The selected binding is no longer present in the current read. Inspect another binding.",
-  placeholder: "Select a binding to inspect its bounded detail.",
+  placeholder: "Select a saved connection to see its details.",
   refresh: "Refresh",
   refreshing: "Refreshing…",
+  technical: "Technical details",
+  advanced: "Advanced session controls",
+  controlsHeld: "A session action remains unresolved. Advanced controls stay paused.",
 } as const;
 type Copy = { [K in keyof typeof EN]: (typeof EN)[K] extends (...args: infer A) => string
   ? (...args: A) => string : string };
 
 const ZH: Copy = {
-  title: "会话工作区",
-  boundAnswer: (n) => `有界读取：观察到 ${n} 条绑定。`,
-  emptyAnswer: "有界读取：未观察到任何绑定。",
-  caution: "已保存的绑定不代表会话正在运行。",
-  pending: "等待所有者的下一次读取；不显示任何数量。",
-  unavailable: "会话工作区不可用。",
-  ownerReason: (reason) => `所有者原因：${reason}`,
-  navInvalid: "导航投影不可用（CONTROL_ROOM_NAVIGATION_INVALID）。",
-  sourceDetails: "观察详情",
+  title: "会话",
+  boundAnswer: (n) => `已提供 ${n} 个保存的会话连接 · 总数未知`,
+  emptyAnswer: "未提供保存的会话连接。会话总数未知。",
+  caution: "保存的连接不能确认会话正在运行。",
+  pending: "会话信息尚不可用。",
+  unavailable: "会话信息不可用。",
+  ownerReason: (reason) => `不可用原因：${reason}`,
+  navInvalid: "无法显示会话信息。",
+  sourceDetails: "技术详情",
   observedAt: "观察时间",
   publication: "发布序号",
   freshness: "来源有效性",
-  freshnessQualified: "所有者已确认的发布。",
-  freshnessUnknown: "本次读取未知；不作任何整体在线判断。",
+  freshnessQualified: "已提供来源有效性详情；尚未确认当前可用性。",
+  freshnessUnknown: "此读取不能确认会话当前可用。",
   notReported: "未报告",
-  searchLabel: "搜索绑定",
+  searchLabel: "查找会话连接",
   searchPlaceholder: "提供方、角色、工作引用或席位",
   listHeading: "绑定列表",
   shown: (shown, total) => `已显示 ${shown} / ${total} 条。`,
@@ -104,12 +108,13 @@ const ZH: Copy = {
   showAll: (n) => `显示全部 ${n} 条绑定`,
   showFewer: (n) => `仅显示前 ${n} 条绑定`,
   inspect: "查看",
-  detailHeading: "绑定详情",
+  detailHeading: "连接详情",
   fieldBindingId: "绑定标识",
   fieldRole: "角色",
   fieldProvider: "提供方",
   fieldSeat: "席位引用",
   fieldWorkRef: "工作引用",
+  fieldRoot: "任务根",
   fieldLocator: "定位方式",
   fieldObserved: "观察时间",
   fieldVerified: "最近核验",
@@ -119,8 +124,8 @@ const ZH: Copy = {
   fieldConflicts: "冲突",
   noConflicts: "未观察到与此绑定相关的冲突。",
   conflictGroup: (ids) => `歧义分组（${ids.length} 条）：${ids.join("、")}`,
-  missionHeading: "精确任务",
-  openMission: "打开任务",
+  missionHeading: "工作详情",
+  openMission: "打开工作详情",
   openNote: "仅作只读导航；不会打开或激活任何运行时界面。",
   suppressUnbound: "该绑定不在当前项目观察范围内，因此不会猜测任务。",
   suppressConflict: "该绑定属于冲突的工作/角色分组，因此不提供精确任务导航。",
@@ -130,9 +135,12 @@ const ZH: Copy = {
   suppressRootUnresolved: "该工作引用的根任务尚未解析。",
   suppressNoRootJobId: "已解析的项目缺少根任务标识。",
   invalidated: "所选绑定已不在当前读取中。请查看其他绑定。",
-  placeholder: "选择一条绑定以查看其有界详情。",
+  placeholder: "选择保存的连接以查看详情。",
   refresh: "刷新",
   refreshing: "刷新中…",
+  technical: "技术详情",
+  advanced: "高级会话操作",
+  controlsHeld: "某项会话操作仍未确认结果。高级操作保持暂停。",
 };
 
 type SuppressionKind = "unbound" | "conflict" | "noProgram" | "multiProgram"
@@ -218,6 +226,10 @@ function DetailBody({
   const resolution = resolveMission(read, navigation, binding);
   return (
     <div className="session-estate__detail-body">
+      <p>{binding.provider} · {binding.role}</p>
+      <p>{unbound ? copy.statusUnbound : copy.statusBound}</p>
+      <details className="session-estate__source">
+        <summary>{copy.technical}</summary>
       <dl className="session-estate__fields">
         <div className="session-estate__field">
           <dt>{copy.fieldBindingId}</dt>
@@ -255,10 +267,9 @@ function DetailBody({
           <dt>{copy.fieldVerified}</dt>
           <dd>{binding.last_verified_at ?? copy.notReported}</dd>
         </div>
-        <div className="session-estate__field">
-          <dt>{copy.fieldStatus}</dt>
-          <dd>{unbound ? copy.statusUnbound : copy.statusBound}</dd>
-        </div>
+        {resolution.kind === "resolved" ? <div className="session-estate__field">
+          <dt>{copy.fieldRoot}</dt><dd><code>{resolution.rootJobId}</code></dd>
+        </div> : null}
         <div className="session-estate__field">
           <dt>{copy.fieldConflicts}</dt>
           <dd>
@@ -276,13 +287,11 @@ function DetailBody({
           </dd>
         </div>
       </dl>
+      </details>
       <div className="session-estate__mission">
         <h4 className="session-estate__mission-title">{copy.missionHeading}</h4>
         {resolution.kind === "resolved" ? (
           <>
-            <p className="session-estate__mission-root">
-              <code className="session-estate__code">{resolution.rootJobId}</code>
-            </p>
             <button
               type="button"
               className="button session-estate__open"
@@ -307,6 +316,7 @@ export function SessionEstate({
   onRefresh,
   onOpenMission,
   children,
+  controlsHeld = false,
 }: {
   readonly state: ControlRoomState;
   readonly locale?: SessionEstateLocale;
@@ -314,6 +324,8 @@ export function SessionEstate({
   readonly onRefresh: () => void;
   readonly onOpenMission: (workRef: string, rootJobId: string) => void;
   readonly children?: ReactNode;
+  /** Actual command-owner hold, independent of saved-connection observations. */
+  readonly controlsHeld?: boolean;
 }) {
   const copy = locale === "zh-CN" ? ZH : EN;
   const titleId = useId();
@@ -370,10 +382,14 @@ export function SessionEstate({
         </button>
       </header>
       <p className="session-estate__caution">{copy.caution}</p>
+      {controlsHeld ? <p role="status" className="session-estate__caution">{copy.controlsHeld}</p> : null}
       {available ? (
         <details className="details session-estate__source">
           <summary>{copy.sourceDetails}</summary>
           <dl className="session-estate__source-list">
+            {navigation?.state === "UNAVAILABLE" ? <div className="session-estate__source-row">
+              <dt>{copy.ownerReason("")}</dt><dd><code>{navigation.reason}</code></dd>
+            </div> : null}
             <div className="session-estate__source-row">
               <dt>{copy.observedAt}</dt>
               <dd>{available.observedAt ?? copy.notReported}</dd>
@@ -425,6 +441,8 @@ export function SessionEstate({
                 <ul className="session-estate__rows">
                   {visible.map((binding) => {
                     const isSelected = binding.binding_id === selectedId;
+                    const projects = available.programs.filter(p => p.workRef === binding.work_ref);
+                    const projectTitle = projects.length === 1 ? projects[0].title : null;
                     return (
                       <li
                         key={binding.binding_id}
@@ -437,7 +455,8 @@ export function SessionEstate({
                         aria-current={isSelected ? "true" : undefined}
                       >
                         <span className="session-estate__row-main">
-                          <span className="session-estate__row-ref">{binding.work_ref}</span>
+                          <span className="session-estate__row-ref">{projectTitle || binding.work_ref}</span>
+                          {projectTitle ? <span className="session-estate__row-meta">{binding.work_ref}</span> : null}
                           <span className="session-estate__row-meta">
                             {binding.provider} · {binding.role}
                           </span>
@@ -493,7 +512,9 @@ export function SessionEstate({
           </section>
         </div>
       )}
-      {children ? <div className="session-estate__controls">{children}</div> : null}
+      {children ? <details className="session-estate__controls session-estate__source">
+        <summary>{copy.advanced}</summary>{children}
+      </details> : null}
     </section>
   );
 }

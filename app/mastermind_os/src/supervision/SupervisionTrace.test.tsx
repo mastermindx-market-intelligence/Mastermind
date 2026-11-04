@@ -204,10 +204,25 @@ describe("SupervisionTrace", () => {
   });
 
   it("shows unavailable without source details when no document is provided", () => {
-    render(<SupervisionTrace document={null} selection={selection} onReadCurrent={() => {}} />);
+    const read = vi.fn();
+    render(<SupervisionTrace document={null} selection={selection} onReadCurrent={read} />);
     expect(screen.getByText(/No mission observation is available/i)).toBeTruthy();
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", {name:"Read current mission"}));
+    expect(read).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("heading", { name: "Orchestration trace" })).toBeNull();
+  });
+  it("permits a selected-source refresh while foreign fields remain withheld", () => {
+    const read = vi.fn();
+    const view = render(<SupervisionTrace document={fixture()}
+      selection={{workRef:"WS:OTHER",rootJobId:ROOT_JOB_ID}} onReadCurrent={read} />);
+    expect(screen.queryByText("worker-fixture-1")).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", {name:"Read current mission"}));
+    expect(read).toHaveBeenCalledTimes(1);
+    view.rerender(<SupervisionTrace document={null}
+      selection={{workRef:"WS:OTHER",rootJobId:"latest"}} onReadCurrent={read} />);
+    expect(screen.queryByRole("button")).toBeNull();
   });
 
   it("keeps the held headline when dispatch reports EFFECT_UNKNOWN even with completed and accepted fields", () => {

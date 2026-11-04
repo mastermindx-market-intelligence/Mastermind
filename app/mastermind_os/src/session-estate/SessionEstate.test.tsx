@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-/** Inert Session Estate tests: typed fixtures only. No network, storage,
+/** Inert Sessions tests: typed fixtures only. No network, storage,
  * timers, dispatch or live effects — every callback is an in-memory vi.fn(),
  * and fixture types are derived from the existing Control Room contract.
  */
@@ -158,12 +158,29 @@ async function inspect(row: HTMLElement, user: ReturnType<typeof userEvent.setup
 }
 
 function detailRegion(): HTMLElement {
-  const region = screen.queryByRole("region", { name: "Binding detail" });
+  const region = screen.queryByRole("region", { name: "Connection details" });
   if (!(region instanceof HTMLElement)) throw new Error("detail region missing");
   return region;
 }
 
 describe("SessionEstate", () => {
+  it("leads with the real supplied project and retains a visible hold above closed advanced controls", async () => {
+    const user = userEvent.setup();
+    render(<SessionEstate state={mainRead({programs:[makeProgram(ALPHA_WORK, {
+      title:"Source project",rootState:"RESOLVED",rootJobId:ALPHA_ROOT,rootCandidates:[ALPHA_ROOT],
+    })]})} controlsHeld canRefresh onRefresh={vi.fn()} onOpenMission={vi.fn()}>
+      <span data-testid="mounted-command-owner">Existing command owner</span>
+    </SessionEstate>);
+    expect(within(requireRow(bindingId(1))).getByText("Source project")).toBeTruthy();
+    const advanced = screen.getByText("Advanced session controls").closest("details");
+    expect(advanced?.open).toBe(false);
+    expect(screen.getByTestId("mounted-command-owner")).toBeTruthy();
+    expect(screen.getByText(/A session action remains unresolved/).closest("details")).toBeNull();
+    await inspect(requireRow(bindingId(1)), user);
+    const technical = within(detailRegion()).getByText("Technical details").closest("details");
+    expect(technical?.open).toBe(false);
+    expect(within(technical!).getByText(bindingId(1))).toBeTruthy();
+  });
   it("does not navigate when a resolved label lacks its exact singleton root", async () => {
     const user = userEvent.setup();
     for (const roots of [[], ["foreign-root"], [ALPHA_ROOT, "foreign-root"]]) {
@@ -172,7 +189,7 @@ describe("SessionEstate", () => {
         rootState:"RESOLVED",rootJobId:ALPHA_ROOT,rootCandidates:roots,
       })]})} canRefresh onRefresh={vi.fn()} onOpenMission={onOpenMission} />);
       await inspect(requireRow(bindingId(1)), user);
-      expect(screen.queryByRole("button", {name:"Open Mission"})).toBeNull();
+      expect(screen.queryByRole("button", {name:"Open work details"})).toBeNull();
       expect(onOpenMission).not.toHaveBeenCalled();
       view.unmount();
     }
@@ -182,7 +199,7 @@ describe("SessionEstate", () => {
     render(
       <SessionEstate state={pendingState} canRefresh onRefresh={onRefresh} onOpenMission={vi.fn()} />,
     );
-    expect(screen.getByText("Waiting for the next owner read. No count is shown.")).toBeTruthy();
+    expect(screen.getByText("Session information is not available yet.")).toBeTruthy();
     expect(screen.queryByText(/no bindings observed/i)).toBeNull();
     expect(refreshButton().disabled).toBe(true);
     expect(onRefresh).not.toHaveBeenCalled();
@@ -198,10 +215,10 @@ describe("SessionEstate", () => {
         onOpenMission={vi.fn()}
       />,
     );
-    expect(screen.getByText("Session estate unavailable.")).toBeTruthy();
-    expect(screen.getByText("Owner reason: CONTROL_ROOM_SOURCE_UNAVAILABLE")).toBeTruthy();
+    expect(screen.getByText("Session information is unavailable.")).toBeTruthy();
+    expect(screen.getByText("Why unavailable: CONTROL_ROOM_SOURCE_UNAVAILABLE")).toBeTruthy();
     expect(screen.queryByText(/no bindings observed/i)).toBeNull();
-    expect(screen.queryByLabelText("Search bindings")).toBeNull();
+    expect(screen.queryByLabelText("Find a session connection")).toBeNull();
     expect(onRefresh).not.toHaveBeenCalled();
   });
 
@@ -211,15 +228,15 @@ describe("SessionEstate", () => {
     });
     render(<SessionEstate state={read} canRefresh onRefresh={vi.fn()} onOpenMission={vi.fn()} />);
     expect(
-      screen.getByText("Navigation projection unavailable (CONTROL_ROOM_NAVIGATION_INVALID)."),
+      screen.getByText("Session information could not be displayed."),
     ).toBeTruthy();
-    expect(screen.queryByLabelText("Search bindings")).toBeNull();
+    expect(screen.queryByLabelText("Find a session connection")).toBeNull();
     expect(screen.queryByText(/no bindings observed/i)).toBeNull();
   });
 
   it("reports an explicit bounded zero when the read is available but empty", () => {
     render(<SessionEstate state={makeRead()} canRefresh onRefresh={vi.fn()} onOpenMission={vi.fn()} />);
-    expect(screen.getByText("Bounded read: no bindings observed.")).toBeTruthy();
+    expect(screen.getByText("No saved session connections were supplied. The estate total is unknown.")).toBeTruthy();
     expect(screen.getByText("Showing 0 of 0.")).toBeTruthy();
     expect(screen.getByText("No bindings match this search.")).toBeTruthy();
   });
@@ -235,7 +252,7 @@ describe("SessionEstate", () => {
     await user.click(refreshButton());
     expect(onRefresh).toHaveBeenCalledTimes(1);
 
-    await user.type(screen.getByLabelText("Search bindings"), "codex");
+    await user.type(screen.getByLabelText("Find a session connection"), "codex");
     expect(onRefresh).toHaveBeenCalledTimes(1);
 
     await inspect(requireRow(bindingId(3)), user);
@@ -275,7 +292,7 @@ describe("SessionEstate", () => {
     render(
       <SessionEstate state={mainRead()} canRefresh onRefresh={vi.fn()} onOpenMission={vi.fn()} />,
     );
-    const search = screen.getByLabelText("Search bindings");
+    const search = screen.getByLabelText("Find a session connection");
 
     await user.type(search, "codex");
     expect(screen.getByTestId(`session-estate-row-${bindingId(3)}`)).toBeTruthy();
@@ -333,9 +350,9 @@ describe("SessionEstate", () => {
     expect(within(detail).getByText("codex")).toBeTruthy();
     expect(within(detail).queryByText(bindingId(1))).toBeNull();
     // WS:platform has no observed programme, so navigation stays withheld.
-    expect(within(detail).queryByRole("button", { name: "Open Mission" })).toBeNull();
+    expect(within(detail).queryByRole("button", { name: "Open work details" })).toBeNull();
     expect(
-      within(detail).getByText("No programme is observed for this work reference."),
+      within(detail).getByText("No project is supplied for this work reference."),
     ).toBeTruthy();
   });
 
@@ -351,7 +368,7 @@ describe("SessionEstate", () => {
         "Read navigation only; it does not open or activate any runtime surface.",
       ),
     ).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Open Mission" }));
+    await user.click(screen.getByRole("button", { name: "Open work details" }));
     expect(onOpenMission).toHaveBeenCalledTimes(1);
     expect(onOpenMission).toHaveBeenCalledWith(ALPHA_WORK, ALPHA_ROOT);
   });
@@ -370,14 +387,14 @@ describe("SessionEstate", () => {
       <SessionEstate state={read} canRefresh onRefresh={vi.fn()} onOpenMission={onOpenMission} />,
     );
     await inspect(requireRow(id), user);
-    expect(screen.queryByRole("button", { name: "Open Mission" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open work details" })).toBeNull();
     expect(
       within(detailRegion()).getByText(
-        "This binding is outside the current programme observation, so no mission was guessed.",
+        "This binding is outside the current supplied project list, so no mission was guessed.",
       ),
     ).toBeTruthy();
     expect(
-      within(detailRegion()).getByText("Work reference outside this programme observation"),
+      within(detailRegion()).getByText("Work reference outside this supplied project list"),
     ).toBeTruthy();
     expect(onOpenMission).not.toHaveBeenCalled();
   });
@@ -410,11 +427,11 @@ describe("SessionEstate", () => {
         "This binding sits in a conflicting work/role group, so no exact mission is offered.",
       ),
     ).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Open Mission" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open work details" })).toBeNull();
 
     await inspect(requireRow(idB), user);
     expect(within(detailRegion()).getByText(bindingId(31))).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Open Mission" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open work details" })).toBeNull();
     expect(onOpenMission).not.toHaveBeenCalled();
   });
 
@@ -432,10 +449,10 @@ describe("SessionEstate", () => {
       <SessionEstate state={read} canRefresh onRefresh={vi.fn()} onOpenMission={onOpenMission} />,
     );
     await inspect(requireRow(bindingId(40)), user);
-    expect(screen.queryByRole("button", { name: "Open Mission" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open work details" })).toBeNull();
     expect(
       within(detailRegion()).getByText(
-        "Several programmes share this work reference, so the mission is ambiguous.",
+        "Several projects share this work reference, so the mission is ambiguous.",
       ),
     ).toBeTruthy();
     expect(onOpenMission).not.toHaveBeenCalled();
@@ -453,7 +470,7 @@ describe("SessionEstate", () => {
       <SessionEstate state={unresolved} canRefresh onRefresh={vi.fn()} onOpenMission={onOpenMission} />,
     );
     await inspect(requireRow(bindingId(50)), user);
-    expect(screen.queryByRole("button", { name: "Open Mission" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open work details" })).toBeNull();
     expect(
       within(detailRegion()).getByText("The root job for this work reference is not resolved."),
     ).toBeTruthy();
@@ -477,7 +494,7 @@ describe("SessionEstate", () => {
       />,
     );
     await inspect(requireRow(bindingId(50)), user);
-    expect(screen.queryByRole("button", { name: "Open Mission" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open work details" })).toBeNull();
     expect(
       within(detailRegion()).getByText("The root candidates for this work reference conflict."),
     ).toBeTruthy();
@@ -491,7 +508,7 @@ describe("SessionEstate", () => {
       <SessionEstate state={rootless} canRefresh onRefresh={vi.fn()} onOpenMission={onOpenMission} />,
     );
     await inspect(requireRow(bindingId(50)), user);
-    expect(screen.queryByRole("button", { name: "Open Mission" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open work details" })).toBeNull();
     expect(
       within(detailRegion()).getByText("The resolved programme carries no root job identifier."),
     ).toBeTruthy();
@@ -505,7 +522,7 @@ describe("SessionEstate", () => {
     );
     await inspect(requireRow(bindingId(51)), user);
     expect(
-      within(detailRegion()).getByText("No programme is observed for this work reference."),
+      within(detailRegion()).getByText("No project is supplied for this work reference."),
     ).toBeTruthy();
     fourth.unmount();
 
@@ -544,7 +561,7 @@ describe("SessionEstate", () => {
       ),
     ).toBeTruthy();
     expect(screen.queryByText(bindingId(1))).toBeNull();
-    expect(screen.queryByRole("button", { name: "Open Mission" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open work details" })).toBeNull();
     expect(within(detailRegion()).queryByText(ALPHA_ROOT)).toBeNull();
   });
 
@@ -560,15 +577,15 @@ describe("SessionEstate", () => {
         onOpenMission={onOpenMission}
       />,
     );
-    expect(screen.getByText("会话工作区")).toBeTruthy();
-    expect(screen.getByText("已保存的绑定不代表会话正在运行。")).toBeTruthy();
-    expect(screen.getByText("有界读取：观察到 11 条绑定。")).toBeTruthy();
-    expect(screen.getByLabelText("搜索绑定")).toBeTruthy();
+    expect(screen.getByText("会话")).toBeTruthy();
+    expect(screen.getByText("保存的连接不能确认会话正在运行。")).toBeTruthy();
+    expect(screen.getByText("已提供 11 个保存的会话连接 · 总数未知")).toBeTruthy();
+    expect(screen.getByLabelText("查找会话连接")).toBeTruthy();
     expect(screen.getByRole("button", { name: "显示全部 11 条绑定" })).toBeTruthy();
 
     await inspect(requireRow(bindingId(1)), user);
-    expect(screen.getByRole("region", { name: "绑定详情" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "打开任务" }));
+    expect(screen.getByRole("region", { name: "连接详情" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "打开工作详情" }));
     expect(onOpenMission).toHaveBeenCalledTimes(1);
     expect(onOpenMission).toHaveBeenCalledWith(ALPHA_WORK, ALPHA_ROOT);
   });
