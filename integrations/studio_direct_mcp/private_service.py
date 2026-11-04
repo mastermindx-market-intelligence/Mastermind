@@ -846,13 +846,31 @@ if current==old:
  i._upgrade_entries(p);phase='PREVIOUS'
 elif current==new:
  i._upgrade_entries(p,complete=True);phase='SELECTED'
+elif (sys.argv[4]=='chatgpt4'
+      and p['digest']=='77c2c136852a783a1e2572c145af7536ee6cd0d7f443daa4c09795c333fd3dc7'
+      and new['generation']=='28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce'
+      and new['sequence']==24
+      and isinstance(current,dict)
+      and current.get('sequence',0)>new['sequence']
+      and current.get('previous') not in (None,current.get('generation'))):
+ # The selected native owner may legitimately publish a *newer* immutable
+ # generation. This exception is C4-only and binds one frozen, completed
+ # historical pin; it does not admit a new pin, unverified native code or a
+ # changed pool ingress. Native verification owns current code identity.
+ g.verify(store,new['generation'])
+ g.verify(store,current['generation'])
+ g.verify(store,current['previous'])
+ i._upgrade_entries(p,complete=True)
+ phase='SELECTED'
 else:raise ValueError('selection_refused')
-print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_generation'],'expected_selection':old,'pool_target':e['target'],'pool_previous':e['previous'],'pool_bridge':e['bridge'],'store':p['store'],'phase':phase},sort_keys=True))
+# Include the exact selected pointer in both lock-bound proofs. Without it,
+# a sequence-26 -> sequence-27 change could masquerade as identical SELECTED.
+print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_generation'],'expected_selection':old,'pool_target':e['target'],'pool_previous':e['previous'],'pool_bridge':e['bridge'],'store':p['store'],'phase':phase,'selection':current},sort_keys=True))
 """
     def proof():
         try:
             r = subprocess.run([sys.executable, "-I", "-B", "-c", code, str(rollout),
-                str(args.successor_bundle), args.successor_plan_sha256],
+                str(args.successor_bundle), args.successor_plan_sha256, args.account],
                 capture_output=True, timeout=30)
         except (OSError, subprocess.SubprocessError):
             raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED") from None
@@ -860,7 +878,7 @@ print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_g
             raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
         value = _pin_owner_module().decode(r.stdout)
         if set(value) != {"successor_digest", "target_generation", "expected_selection",
-                "pool_target", "pool_previous", "pool_bridge", "store", "phase"}:
+                "pool_target", "pool_previous", "pool_bridge", "store", "phase", "selection"}:
             raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
         return value
     first = proof()
