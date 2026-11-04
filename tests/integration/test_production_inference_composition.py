@@ -1,8 +1,8 @@
 """Actual Brain -> Macro composition; only the provider SDK/network is replaced.
 
 Run with the paired Macro engine/lib/config importable (vendor bootstrap or
-PYTHONPATH) and MM_REQUIRE_PRODUCTION_MODE_COMPOSITION=1. The required CI
-composition job supplies both; ordinary discovery skips this cross-repository
+PYTHONPATH) and MM_REQUIRE_PRODUCTION_MODE_COMPOSITION=1. The required full-CI
+composition step supplies both; ordinary discovery skips this cross-repository
 class rather than using the unrelated legacy Macro pin. All credentials are
 synthetic; incumbent ledgers are redirected to a temporary directory.
 """
@@ -47,7 +47,7 @@ class ProductionModeCompositionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if os.environ.get("MM_REQUIRE_PRODUCTION_MODE_COMPOSITION") != "1":
-            raise unittest.SkipTest("Run in the required paired Macro composition job")
+            raise unittest.SkipTest("Run in the required paired Macro composition step")
         try:
             from engine import provider_production_modes as owner
         except ImportError as exc:

@@ -107,8 +107,13 @@ The existing Macro #7142 selector has an explicit release hold, verified from it
 
 ## Source qualification and CI dependency correction
 
-The new Mastermind composition now has an explicit required CI job that checks out paired Macro `09f0385c2ed3d9060362f3cf20e705bcb7db6043` with its configuration. Default discovery skips the cross-repository class; the existing protected fan-in requires the dedicated no-skip composition job. The unrelated legacy Macro pin and all prior gates remain. The hosted whitespace finding in `brain/client.py` was corrected, and the required local 14-test CIO composition still passes.
+The new Mastermind composition now has an explicit required step in existing full-CI shard zero that checks out paired Macro `09f0385c2ed3d9060362f3cf20e705bcb7db6043` with its configuration. Default discovery skips the cross-repository class; the existing protected fan-in requires the full-CI shard containing the no-skip composition step. The unrelated legacy Macro pin and all prior gates remain. The hosted whitespace finding in `brain/client.py` was corrected, and the required local 14-test CIO composition still passes.
 
 The existing native selector #7142 received verified non-author source-only review at its unchanged exact head, supported by a fresh isolated 36-test run with blob verification. That review explicitly supersedes the handoff's inaccurate 84-test attribution. The existing Draft/release hold and unproven current-base/runtime binding remain; no native activation or merge was performed. See https://github.com/mastermindx-market-intelligence/macro/pull/7142#pullrequestreview-5766694663 .
 
 Current publication, check and original runtime-effect observations belong to the programme issue. Their projection is not a release receipt, and this plan does not turn pending checks or held components into parent completion.
+
+
+### CI structure reconciliation
+
+The first dedicated-job attempt produced a successful hosted 14-test composition but violated the protected four-job parallel-CI structure. It was replaced with a required step inside existing shard zero, before full-suite reuse. The normal vendor-bootstrap fixture passes all 14 tests; the unchanged protected `validate_parallel_workflow` accepts the revised YAML. No CI policy, fast-scope classifier, full-suite membership or fan-in rule was weakened. Fresh hosted full-CI evidence remains required for the revised source.

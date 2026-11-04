@@ -283,6 +283,37 @@ jobs:
               echo "::notice title=H1 isolated provider module fixture proof::all 23 exact nodes passed; zero skipped, failures or errors; CI fixture only"
             '
 
+      # Use a separate pinned owner fixture; keep the ordinary Macro vendor pin.
+      # This executes before any full-suite reuse decision, including merge_group.
+      - name: Checkout paired Brain production owner fixture
+        if: matrix.index == 0
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 09f0385c2ed3d9060362f3cf20e705bcb7db6043
+          path: .ci-production-macro
+          sparse-checkout: |
+            engine
+            lib
+            config
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - name: Verify actual Brain production inference composition
+        if: matrix.index == 0
+        env:
+          MM_REQUIRE_PRODUCTION_MODE_COMPOSITION: "1"
+        run: |
+          set -euo pipefail
+          brain_composition_root="$(mktemp -d "${RUNNER_TEMP}/brain-production-composition.XXXXXX")"
+          trap 'rm -rf "$brain_composition_root" "$GITHUB_WORKSPACE/.ci-production-macro"' EXIT
+          git archive HEAD brain bot common tests/integration/test_production_inference_composition.py |
+            tar -x -C "$brain_composition_root"
+          mkdir -p "$brain_composition_root/vendor"
+          ln -s "$GITHUB_WORKSPACE/.ci-production-macro" "$brain_composition_root/vendor/macro"
+          cd "$brain_composition_root"
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_production_inference_composition.py -v
+
       - name: Prepare fixed test diagnostics
         run: |
           diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/ci-fixed.XXXXXX")"
@@ -320,51 +351,13 @@ jobs:
           retention-days: 3
           compression-level: 0
 
-  # This consumer needs the paired production owner and its configuration.
-  # The ordinary shard checkout intentionally keeps its unrelated legacy Macro
-  # pin. Require the actual composition here; a discovery skip is never proof.
-  production_inference_composition:
-    name: Brain production inference composition
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Checkout exact paired Macro production owner
-        uses: actions/checkout@v4
-        with:
-          repository: mastermindx-market-intelligence/macro
-          ref: 09f0385c2ed3d9060362f3cf20e705bcb7db6043
-          path: vendor/macro_src
-          sparse-checkout: |
-            engine
-            lib
-            config
-          persist-credentials: false
-          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install minimal composition dependency
-        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
-      - name: Run actual CIO to production-owner composition
-        env:
-          MM_REQUIRE_PRODUCTION_MODE_COMPOSITION: "1"
-          PYTHONPATH: .:vendor/macro_src
-        run: >-
-          python -m unittest discover -s tests/integration
-          -p test_production_inference_composition.py -v
-
   # Branch protection requires one stable context "test", on both PRs and
   # native merge_group candidates. A skipped matrix is accepted ONLY for a
   # verified, completed PR fast lane; merge_group always requires full shards.
   # There is no green fan-in if scope, smoke, or any required shard failed.
   test:
     name: test
-    needs: [pr_scope, pr_fast, pytest_shards, production_inference_composition]
+    needs: [pr_scope, pr_fast, pytest_shards]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -383,13 +376,8 @@ jobs:
           PR_SCOPE_MODE: ${{ needs.pr_scope.outputs.mode }}
           PR_FAST_STATUS: ${{ needs.pr_fast.result }}
           SHARDS_STATUS: ${{ needs.pytest_shards.result }}
-          PRODUCTION_COMPOSITION_STATUS: ${{ needs.production_inference_composition.result }}
         run: |
           set -euo pipefail
-          if [ "$PRODUCTION_COMPOSITION_STATUS" != success ]; then
-            echo "paired Brain production composition must pass without skips"
-            exit 1
-          fi
           if [ "$EVENT_TYPE" = "pull_request" ]; then
             if [ "$PR_SCOPE_STATUS" != success ]; then
               echo "trusted PR risk-source qualification unavailable"
