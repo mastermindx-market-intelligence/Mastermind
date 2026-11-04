@@ -422,10 +422,10 @@ def test_parallel_shared_call_budget_never_overadmits(monkeypatch) -> None:
             OWNED,
         )
 
-    # The roster costs two calls: the oldest-first page and the newest-first tail.
+    # One complete short roster leaves exactly five foreign-read admissions.
     assert bounded._calls == 6
-    assert len(transport.file_calls) == 4
-    assert len(set(transport.file_calls)) == 4
+    assert len(transport.file_calls) == 5
+    assert len(set(transport.file_calls)) == 5
 
 
 def _sparse_repo(tmp_path: Path) -> tuple[Path, str]:
@@ -1597,8 +1597,8 @@ def test_main_issues_receipt_when_changed_open_roster_keeps_collision_semantics(
     assert open_pulls not in conditional_urls
     assert tail_pulls not in conditional_urls
     assert http.first_calls.count(open_pulls) == 2
-    assert http.first_calls.count(tail_pulls) == 2
-    assert len(http.conditional_calls) == len(http.first_calls) - 4
+    assert http.first_calls.count(tail_pulls) == 0
+    assert len(http.conditional_calls) == len(http.first_calls) - 2
 
 
 def test_main_accepts_changed_200_on_target_pr_when_identity_is_identical(

@@ -1,10 +1,7 @@
-"""Open-PR roster paging under live churn; no real HTTP or token.
+"""Roster coverage containment and single-response custody revalidation.
 
-GitHub pages `pulls` by offset in creation order. A row inserted before the
-cursor while the roster is being paged duplicates a row; a row removed before
-the cursor skips one. Paging oldest-first makes a newly opened PR append after
-the rows already read, and a first-pass PR missing from the second roster is
-read directly instead of being presumed closed.
+The retained live-churn fake can model the unsafe offset/tail algorithm. The
+real reader now refuses its full first page instead of claiming coverage.
 """
 from __future__ import annotations
 
@@ -51,6 +48,7 @@ class ChurnHTTP(fx._ProbeHTTP):
         self.served: dict[int, list[int]] = {}
         self.tail_served: dict[int, list[int]] = {}
         self.tail_mutator = None
+        self.before_second = None
         self.roster_urls: list[str] = []
         self.direct_reads: list[int] = []
         self.direct_mutators: dict[int, object] = {}
@@ -84,6 +82,9 @@ class ChurnHTTP(fx._ProbeHTTP):
                 event(self, tail)
             return payload
         if page == 1:
+            if self.passes == 1 and self.before_second is not None:
+                self.before_second(self)
+                self.before_second = None
             self.passes += 1
         newest_first = query.get("direction") != ["asc"]
         ordered = sorted(self.open, reverse=newest_first)
@@ -193,256 +194,114 @@ def _churn(**kwargs) -> ChurnHTTP:
     return ChurnHTTP(fx._cli_module(), **kwargs)
 
 
-def _skipped_in_second_pass(http: ChurnHTTP) -> set[int]:
-    return set(http.served[1]) - set(http.served[2])
+def _short_churn(**kwargs) -> ChurnHTTP:
+    http = _churn(**kwargs)
+    http.open = {fx.PR_NUMBER, FOREIGN[0], BOUNDARY_PR}
+    return http
 
 
-def test_roster_pages_oldest_first_with_an_exact_query(capsys, monkeypatch) -> None:
-    http = _churn()
+@pytest.mark.parametrize(
+    "event",
+    [None, open_pr(NEW_PR), open_pr(1005, collides=True), close_served(50)],
+    ids=["stable", "new-pr", "reopened-collider", "closure"],
+)
+def test_full_roster_refuses_before_offset_or_tail_reads(
+    event, capsys, monkeypatch
+) -> None:
+    http = _churn(events={} if event is None else {(1, 1): event})
 
     rc, payload = _run(http, capsys, monkeypatch)
 
-    assert rc == 0, payload
-    assert payload["collision_state"] == "DISJOINT"
-    expected = [
-        f"{ROSTER_URL}?state=open&sort=created&direction=asc&per_page=100&page={page}"
-        for page in (1, 2, 3)
-    ] + [f"{ROSTER_URL}?state=open&sort=created&direction=desc&per_page=100&page=1"]
-    assert http.roster_urls == expected * 2
-    assert http.tail_served[2] == sorted(http.open, reverse=True)[:100]
-    assert http.served[1][0] == fx.PR_NUMBER
+    assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
+    assert http.roster_urls == [
+        f"{ROSTER_URL}?state=open&sort=created&direction=asc&per_page=100&page=1"
+    ]
+    assert http.passes == 1
+    assert http.tail_served == {}
+    assert http.direct_reads == http.file_reads == []
+
+
+def test_older_reopened_collider_cannot_mint_a_complete_receipt(
+    capsys, monkeypatch
+) -> None:
+    # Exact accepted counterexample from #2006 comment6613931737: 1990 is
+    # absent in observation one, reopens after its tail, then closure of 1000
+    # shifts it behind observation two's cursor. Its old creation order also
+    # excludes it from the tail. The former reader returned complete/DISJOINT.
+    def close_1000(http, _served):
+        http.open.discard(1000)
+
+    http = _churn(
+        colliders={BOUNDARY_PR},
+        events={
+            (1, "tail"): open_pr(BOUNDARY_PR, collides=True),
+            (2, 1): close_1000,
+        },
+    )
+    http.open.discard(BOUNDARY_PR)
+
+    rc, payload = _run(http, capsys, monkeypatch)
+
+    assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
+    assert payload["schema"] == "mastermind.source_continuity_refusal/v1"
+    assert http.passes == 1 and http.tail_served == {}
+    assert http.file_reads == http.direct_reads == []
+
+
+def test_short_roster_uses_one_exact_response_per_observation(capsys, monkeypatch):
+    http = _short_churn()
+
+    rc, payload = _run(http, capsys, monkeypatch)
+
+    assert rc == 0 and payload["collision_state"] == "DISJOINT"
+    assert http.roster_urls == [
+        f"{ROSTER_URL}?state=open&sort=created&direction=asc&per_page=100&page=1"
+    ] * 2
     assert http.direct_reads == []
+    assert http.tail_served == {}
+
+
+@pytest.mark.parametrize(
+    ("defect", "rc", "code"),
+    [
+        ("wrong-number", 2, "REMOTE_PROBE_FAILED"),
+        ("missing-state", 1, "REMOTE_PROOF_CHANGED"),
+        ("merged-state", 1, "REMOTE_PROOF_CHANGED"),
+        ("upper-state", 1, "REMOTE_PROOF_CHANGED"),
+    ],
+)
+def test_short_roster_missing_pr_still_validates_direct_detail(
+    defect, rc, code, capsys, monkeypatch
+):
+    http = _short_churn()
+    http.before_second = lambda source: source.open.discard(BOUNDARY_PR)
+    if defect == "wrong-number":
+        http.direct_mutators[BOUNDARY_PR] = lambda row: row.update(number=BOUNDARY_PR+1)
+    else:
+        invalid_state = {"missing-state": None, "merged-state": "merged", "upper-state": "OPEN"}[defect]
+        http.direct_mutators[BOUNDARY_PR] = lambda row: row.update(state=invalid_state)
+
+    actual_rc, payload = _run(http, capsys, monkeypatch)
+
+    assert actual_rc == rc and payload["code"] == code
+    assert http.direct_reads == [BOUNDARY_PR]
+    assert http.tail_served == {}
 
 
 @pytest.mark.parametrize("observation", [1, 2])
-def test_pr_opened_mid_roster_appends_instead_of_duplicating(
-    observation, capsys, monkeypatch
-) -> None:
-    http = _churn(events={(observation, 1): open_pr(NEW_PR)})
-
-    rc, payload = _run(http, capsys, monkeypatch)
-
-    assert rc == 0, payload
-    assert payload["collision_state"] == "DISJOINT"
-    assert len(http.served[observation]) == len(set(http.served[observation]))
-    assert NEW_PR in http.served[observation]
-    assert http.file_reads.count(NEW_PR) == 1
-    assert http.direct_reads == []
-
-
-def test_colliding_pr_opened_mid_second_roster_refuses_changed(
-    capsys, monkeypatch
-) -> None:
-    http = _churn(events={(2, 1): open_pr(NEW_PR, collides=True)})
-
-    rc, payload = _run(http, capsys, monkeypatch)
-
-    assert rc == 1 and payload["code"] == "REMOTE_PROOF_CHANGED"
-    assert NEW_PR in http.served[2]
-
-
-def test_disjoint_pr_skipped_by_a_mid_roster_closure_is_read_directly(
-    capsys, monkeypatch
-) -> None:
-    http = _churn(events={(2, 1): close_served(50)})
-
-    rc, payload = _run(http, capsys, monkeypatch)
-
-    assert rc == 0, payload
-    assert payload["collision_state"] == "DISJOINT"
-    # The closed row was served before it closed; only the row it pushed back
-    # onto page 1 is skipped.
-    assert _skipped_in_second_pass(http) == {BOUNDARY_PR}
-    assert http.direct_reads == [BOUNDARY_PR]
-    # An unchanged identity reuses its first collision evidence.
-    assert http.file_reads.count(BOUNDARY_PR) == 1
-
-
-def test_collider_skipped_by_a_mid_roster_closure_is_reproved_directly(
-    capsys, monkeypatch
-) -> None:
-    http = _churn(colliders={BOUNDARY_PR}, events={(2, 1): close_served(50)})
-
-    rc, payload = _run(http, capsys, monkeypatch)
-
-    assert rc == 0, payload
-    assert payload["collision_state"] == "OVERLAP"
-    assert payload["colliding_pr_numbers"] == [BOUNDARY_PR]
-    assert BOUNDARY_PR not in http.served[2]
-    assert http.direct_reads == [BOUNDARY_PR]
-
-
-def test_skipped_collider_that_moved_refuses_changed(capsys, monkeypatch) -> None:
-    http = _churn(
-        colliders={BOUNDARY_PR},
-        events={(2, 1): both(close_served(50), move(BOUNDARY_PR, collides=True))},
-    )
-
-    rc, payload = _run(http, capsys, monkeypatch)
-
-    assert rc == 1 and payload["code"] == "REMOTE_PROOF_CHANGED"
-    assert BOUNDARY_PR in http.direct_reads
-
-
-def test_skipped_collider_that_closed_refuses_changed(capsys, monkeypatch) -> None:
-    def close_boundary(http: ChurnHTTP, served: list[int]) -> None:
-        http.open.discard(BOUNDARY_PR)
-
-    http = _churn(
-        colliders={BOUNDARY_PR},
-        events={(2, 1): both(close_served(50), close_boundary)},
-    )
-
-    rc, payload = _run(http, capsys, monkeypatch)
-
-    assert rc == 1 and payload["code"] == "REMOTE_PROOF_CHANGED"
-    assert BOUNDARY_PR in http.direct_reads
-
-
-@pytest.mark.parametrize(
-    ("collides", "rc", "code"),
-    [(False, 0, None), (True, 1, "REMOTE_PROOF_CHANGED")],
-)
-def test_skipped_disjoint_pr_that_moved_is_freshly_reproved(
-    collides, rc, code, capsys, monkeypatch
-) -> None:
-    http = _churn(
-        events={(2, 1): both(close_served(50), move(BOUNDARY_PR, collides=collides))},
-    )
-
-    result_rc, payload = _run(http, capsys, monkeypatch)
-
-    assert result_rc == rc, payload
-    if code is None:
-        assert payload["collision_state"] == "DISJOINT"
+def test_short_roster_must_contain_the_target(observation, capsys, monkeypatch):
+    http = _short_churn()
+    if observation == 1:
+        http.open.discard(fx.PR_NUMBER)
     else:
-        assert payload["code"] == code
-    assert BOUNDARY_PR in http.direct_reads
-    assert http.file_reads.count(BOUNDARY_PR) == 2
-
-
-def test_direct_read_naming_another_pr_fails_closed(capsys, monkeypatch) -> None:
-    http = _churn(events={(2, 1): close_served(50)})
-    http.direct_mutators[BOUNDARY_PR] = lambda row: row.update(number=BOUNDARY_PR + 1)
+        http.before_second = lambda source: source.open.discard(fx.PR_NUMBER)
 
     rc, payload = _run(http, capsys, monkeypatch)
 
-    assert rc == 2 and payload["code"] == "REMOTE_PROBE_FAILED"
-
-
-@pytest.mark.parametrize("state", [None, "merged", "OPEN"])
-def test_direct_read_with_an_unknown_state_refuses_changed(
-    state, capsys, monkeypatch
-) -> None:
-    http = _churn(events={(2, 1): close_served(50)})
-    http.direct_mutators[BOUNDARY_PR] = lambda row: row.update(state=state)
-
-    rc, payload = _run(http, capsys, monkeypatch)
-
-    assert rc == 1 and payload["code"] == "REMOTE_PROOF_CHANGED"
-    assert http.direct_reads == [BOUNDARY_PR]
-
-
-def test_collider_skipped_by_the_first_roster_is_caught_by_the_second(
-    capsys, monkeypatch
-) -> None:
-    http = _churn(colliders={BOUNDARY_PR}, events={(1, 1): close_served(50)})
-
-    rc, payload = _run(http, capsys, monkeypatch)
-
-    assert BOUNDARY_PR not in http.served[1]
-    assert BOUNDARY_PR in http.served[2]
-    assert rc == 1 and payload["code"] == "REMOTE_PROOF_CHANGED"
-
-
-def test_reopened_older_pr_before_the_cursor_still_refuses(
-    capsys, monkeypatch
-) -> None:
-    # Residual: oldest-first, a reopened PR older than the cursor duplicates a row.
-    http = _churn(events={(2, 1): open_pr(1005)})
-
-    rc, payload = _run(http, capsys, monkeypatch)
-
-    assert rc == 2 and payload["code"] == "REMOTE_PROBE_FAILED"
-    assert len(http.served[2]) != len(set(http.served[2]))
-
-
-@pytest.mark.parametrize(
-    ("collides", "rc", "code"),
-    [(False, 0, None), (True, 1, "REMOTE_PROOF_CHANGED")],
-)
-def test_new_pr_skipped_at_the_roster_end_is_read_from_the_tail_page(
-    collides, rc, code, capsys, monkeypatch
-) -> None:
-    # The first observation reads 200 rows. A PR opened after its roster sorts
-    # last, first on page 3, and a closure on page 2 pushes it back onto the
-    # page already read. It is in no first-pass record, so no direct read
-    # would find it.
-    http = _churn(
-        events={(2, 1): open_pr(NEW_PR, collides=collides), (2, 2): close_served(0)},
+    assert (rc, payload["code"]) == (
+        (2, "REMOTE_PROBE_FAILED") if observation == 1
+        else (1, "REMOTE_PROOF_CHANGED")
     )
-    http.open = {fx.PR_NUMBER, *FOREIGN[:199]}
-
-    result_rc, payload = _run(http, capsys, monkeypatch)
-
-    assert NEW_PR not in http.served[2]
-    assert http.file_reads.count(NEW_PR) == 1
-    assert result_rc == rc, payload
-    if code is None:
-        assert payload["collision_state"] == "DISJOINT"
-    else:
-        assert payload["code"] == code
-    assert NEW_PR in http.tail_served[2]
-    assert http.direct_reads == []
-
-
-@pytest.mark.parametrize(("opened", "rc"), [(99, 0), (100, 2)])
-def test_a_tail_page_of_only_new_prs_leaves_the_second_census_incomplete(
-    opened, rc, capsys, monkeypatch
-) -> None:
-    # A full tail page vouches only for PRs created at least as recently as its
-    # oldest row. Once every row is newer than the first observation, a new PR
-    # skipped below it could be missed.
-    def open_many(http: ChurnHTTP, served: list[int]) -> None:
-        for number in range(NEW_PR, NEW_PR + opened):
-            open_pr(number)(http, served)
-
-    http = _churn(events={(2, 1): open_many})
-
-    result_rc, payload = _run(http, capsys, monkeypatch)
-
-    assert result_rc == rc, payload
-    if rc == 0:
-        assert payload["collision_state"] == "DISJOINT"
-        assert min(http.tail_served[2]) == FOREIGN[-1]
-    else:
-        assert payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
-        assert min(http.tail_served[2]) == NEW_PR
-
-
-@pytest.mark.parametrize(
-    "mutate",
-    [
-        pytest.param(lambda rows: {"items": rows}, id="not-a-list"),
-        pytest.param(lambda rows: rows + rows[:1], id="over-a-page"),
-        pytest.param(lambda rows: rows[:-1] + rows[:1], id="repeated-row"),
-        pytest.param(lambda rows: rows[:-1] + ["row"], id="not-an-object"),
-        pytest.param(
-            lambda rows: [{**rows[0], "number": True}, *rows[1:]], id="bool-number"
-        ),
-        pytest.param(
-            lambda rows: [{**rows[0], "number": 0}, *rows[1:]], id="zero-number"
-        ),
-    ],
-)
-def test_malformed_tail_page_fails_closed(mutate, capsys, monkeypatch) -> None:
-    http = _churn()
-    http.tail_mutator = mutate
-
-    rc, payload = _run(http, capsys, monkeypatch)
-
-    assert rc == 2 and payload["code"] == "REMOTE_PROBE_FAILED"
-    assert 1 in http.tail_served
 
 
 def _roster_row(number: int) -> dict[str, object]:

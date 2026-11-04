@@ -1,4 +1,97 @@
-# Source Continuity Roster Order Implementation Plan
+# Source continuity: contain unproven multi-page collision coverage
+
+## Current correction — November 4, 2026
+
+This supersedes the roster-order proposal below wherever that proposal treats a
+multi-page open-PR listing or tail union as complete coverage. The retained
+consumer is the existing source-continuity CLI and its existing
+`REMOTE_CENSUS_INCOMPLETE` result; there is no new controller or authority.
+
+The accepted [reopened-collider counterexample](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2006#issuecomment-6613931737)
+binds candidate `cc507363beff691a0979498c2ddab6c9c70553a0`. PR 1990 can
+be closed during observation one, reopen after its tail, and be skipped in
+observation two after PR 1000 closes. Its old creation order excludes it from
+the newest-created tail. The candidate returns successful complete DISJOINT
+evidence without reading that collider's files.
+
+The separate [authenticated Macro ordering evidence](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2006#issuecomment-6614952253)
+also disproves an updated-time page-one watermark as a coverage certificate.
+An additional sweep, creation-number floor, unchanged observed membership, or
+updated-time tail cannot qualify identities omitted from every observation.
+
+### Bounded implementation
+
+`_read_open_pull_roster` makes the existing oldest-created-first request for
+page 1. It validates the list size and each row's positive integer number,
+duplicate-free membership and open-state shape.
+
+- A valid response shorter than 100 rows retains the existing single-response
+  observation and custody-revalidation contract.
+- Exactly 100 rows returns incomplete immediately, including a repository with
+  exactly 100 actual open PRs. This response has no qualified end certificate.
+- No later offset page, newest-created tail, foreign-file fanout, or merged
+  union of different responses may convert that incomplete result to success.
+- The existing first-observation guard, identity-aware conditional path,
+  identityless fallback and legacy re-census all propagate incomplete coverage
+  through `REMOTE_CENSUS_INCOMPLETE`, exit status 2.
+- Existing malformed identity, missing-target, collision, changed-proof,
+  authentication, retry and resource-limit rules remain in force.
+
+The retained `newest_known` argument provides caller compatibility only; it is
+not coverage evidence. The 4,096-call, 900-second, 768-MiB, 1,500-PR and
+four-worker profile is unchanged. Those resource ceilings do not authorize
+multi-page traversal or establish completeness. The historical 16-page ceiling
+is retained, but the corrected reader refuses at the first full page.
+
+### Acceptance and intentional limitation
+
+This is a source-safety containment with an intentional availability reduction.
+For repositories with at least 100 open PRs, qualified collision coverage is
+unavailable through this reader. The result means missing coverage, not a
+detected collision or a permission denial. It must not be promoted into a
+complete NONE/DISJOINT result, a successful source-continuity receipt, custody
+transfer, release eligibility, or repaired fleet throughput.
+
+Single-response acceptance still uses the existing two-observation and identity
+checks. It is not a new promise of an atomic, race-free repository snapshot.
+A failed dependent census does not change writer ownership, cancel workers, or
+block unrelated authorized work.
+
+Tests preserve real CLI consumers for both checkpoint and remote-complete
+requests across conditional, identityless and legacy transports. They cover
+99/100/101/920/1500 rows, a short first observation followed by a full second,
+malformed rows, missing targets, direct-detail identity checks, the accepted
+reopened-collider scenario, real Git checkout verification, bounded file fanout,
+shared worker admission, and unchanged authentication/retry limits.
+
+Old large-estate success expectations are deliberately replaced by incomplete
+coverage assertions. Independent resource-budget and worker tests use a
+qualified short roster while retaining their relevant file fanout and actual
+limits. Passing these tests does not qualify large-repository enumeration.
+
+### Remaining permanent capability
+
+Large-estate progress requires accepted coverage evidence through the existing
+owner: a provider-supported snapshot or equivalent independently qualified
+coverage plus the existing effect/freshness fence. A cursor or `state=all`
+listing is not itself that proof. An exact-number scan also needs a qualified
+upper bound and treatment of holes, transfer, deletion, reopening and same-count
+replacement; resource capacity and identity coverage do not prove simultaneous
+state.
+
+Any future restoration must satisfy the existing call, time, byte and worker
+limits against realistic Macro history and hostile churn, without another
+ledger, watcher, queue, credential route or automatic retry. The current
+correction supplies neither that capability nor production adoption.
+
+Integrate through incumbent #2006 after current-head review and normal release
+qualification. The original source and live writers are preserved. This source
+contribution does not grant review approval, merge, installation or a new
+runtime effect.
+
+---
+
+## Historical roster-order proposal — superseded for coverage
 
 **Predecessor:** `2026-11-03-source-continuity-read-retry.md` (Mastermind #1983), whose residual risk names this follow-up
 **Consumers:** release gate 4 for the Macro vertical carriers (macro#7870, macro#8250), currently met by a manual five-leg substitute

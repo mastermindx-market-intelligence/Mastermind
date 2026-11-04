@@ -1586,59 +1586,38 @@ def _read_open_pull_roster(
     *,
     newest_known: int | None = None,
 ) -> tuple[list[object], bool]:
-    # Offset pages, oldest first: a PR opened mid-read appends after the rows
-    # already read instead of pushing one of them onto the next page.
-    pulls: list[object] = []
-    for page in range(1, _MAX_ROSTER_PAGES + 1):
-        payload = _api(
-            http_get,
-            token,
-            f"repos/{repository}/pulls?state=open&sort=created&direction=asc"
-            f"&per_page={_PAGE_SIZE}&page={page}",
-        )
-        if not isinstance(payload, list) or len(payload) > _PAGE_SIZE:
-            raise _RemoteProbeError()
-        pulls.extend(payload)
-        if len(pulls) > _MAX_COLLISION_PRS:
-            return pulls, False
-        if len(payload) < _PAGE_SIZE:
-            break
-    else:
-        return pulls, False
-
-    # A row closed before the cursor makes the next page skip a row, and
-    # oldest-first puts the newest PRs where that skip can land. One
-    # newest-first page re-reads them; a row it adds was skipped above.
-    tail = _api(
+    # A short first response retains the existing observation contract. Offset
+    # pages over mutable state=open cannot prove complete membership: closure
+    # and reopening can omit an old collider from every observation and tail.
+    # Neither a creation-number floor nor an updated-time tail repairs that.
+    # Keep newest_known in the caller contract, but never use it as coverage.
+    pulls = _api(
         http_get,
         token,
-        f"repos/{repository}/pulls?state=open&sort=created&direction=desc"
+        f"repos/{repository}/pulls?state=open&sort=created&direction=asc"
         f"&per_page={_PAGE_SIZE}&page=1",
     )
-    if not isinstance(tail, list) or len(tail) > _PAGE_SIZE:
+    if not isinstance(pulls, list) or len(pulls) > _PAGE_SIZE:
         raise _RemoteProbeError()
-    seen_numbers = {row.get("number") for row in pulls if isinstance(row, dict)}
-    tail_numbers: set[int] = set()
-    for row in tail:
+
+    # Preserve malformed-response refusal even when coverage is incomplete.
+    seen_numbers: set[int] = set()
+    for row in pulls:
         number = row.get("number") if isinstance(row, dict) else None
-        if type(number) is not int or number <= 0 or number in tail_numbers:
+        state = row.get("state") if isinstance(row, dict) else None
+        if (
+            type(number) is not int
+            or number <= 0
+            or number in seen_numbers
+            or (state is not None and state != "open")
+        ):
             raise _RemoteProbeError()
-        tail_numbers.add(number)
-        if number not in seen_numbers:
-            pulls.append(row)
-    if len(pulls) > _MAX_COLLISION_PRS:
-        return pulls, False
-    # A full tail page vouches only for PRs created at least as recently as its
-    # oldest row. Every PR created since the first observation is numbered above
-    # newest_known. A reopened PR keeps its creation place, so the tail does
-    # not cover it.
-    if (
-        newest_known is not None
-        and len(tail) == _PAGE_SIZE
-        and min(tail_numbers) > newest_known
-    ):
-        return pulls, False
-    return pulls, True
+        seen_numbers.add(number)
+
+    # Exactly one full page is also unqualified: this API response supplies no
+    # end-of-enumeration certificate. Refuse before another page, a tail union,
+    # or foreign-file work can promote partial coverage into a complete result.
+    return pulls, len(pulls) < _PAGE_SIZE and len(pulls) <= _MAX_COLLISION_PRS
 
 
 def _collision_census_details(
@@ -1797,9 +1776,8 @@ def _revalidate_collision_census(
 
     Stable foreign identities reuse their first collision evidence. New or
     moved disjoint identities are freshly checked. A first-pass PR missing
-    from the second roster is read directly, because offset paging skips a row
-    when an earlier row closes mid-read. A colliding PR may never move or
-    close.
+    from the second roster is read directly: absence alone does not establish
+    closure. A colliding PR may never move or close.
     """
 
     reader = _collision_reader(http_get)
@@ -1852,7 +1830,7 @@ def _revalidate_collision_census(
             raise _RemoteProbeError()
         raw_pr = second_foreign.pop(number, None)
         if raw_pr is None:
-            # Absence from an offset-paged roster is not proof of closure.
+            # Absence from the second observation is not proof of closure.
             direct = _api(http_get=reader, token=token, endpoint=f"repos/{repository}/pulls/{number}")
             if not isinstance(direct, dict):
                 return False, True
