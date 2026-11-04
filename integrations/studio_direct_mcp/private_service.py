@@ -846,7 +846,7 @@ if current==old:
  i._upgrade_entries(p);phase='PREVIOUS'
 elif current==new:
  i._upgrade_entries(p,complete=True);phase='SELECTED'
-elif (sys.argv[4] in ('chatgpt4','admin-business')
+elif (sys.argv[4] in ('chatgpt4','admin-business','chatgpt3-w570f6f34','chatgpt3-wa2a9e6f9')
       and p['digest']=='77c2c136852a783a1e2572c145af7536ee6cd0d7f443daa4c09795c333fd3dc7'
       and new['generation']=='28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce'
       and new['sequence']==24
@@ -854,7 +854,7 @@ elif (sys.argv[4] in ('chatgpt4','admin-business')
       and current.get('sequence',0)>new['sequence']
       and current.get('previous') not in (None,current.get('generation'))):
  # The selected native owner may legitimately publish a *newer* immutable
- # generation. This exception permits the two frozen C4/admin original
+ # generation. This exception permits four frozen C4/admin/workspace original
  # historical pins only; no new pin, unverified code or a
  # changed pool ingress. Native verification owns current code identity.
  g.verify(store,new['generation'])
@@ -917,7 +917,7 @@ def _pin_reject_generic_restage(account):
 def _pin_require_start(account, roots):
     if account not in NATIVE_POOL_PIN_ACCOUNTS:
         return
-    if account in ("chatgpt4", "admin-business") and os.path.lexists(roots["state"] / "native-pool-pin-enrollment"):
+    if account in ("chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9") and os.path.lexists(roots["state"] / "native-pool-pin-enrollment"):
         _pin_enrollment_owner_module().require_start(sys.modules[__name__], account, roots)
         return
     _pin_owner_module().require_start(sys.modules[__name__], account, roots)
@@ -3904,7 +3904,7 @@ def build_parser() -> argparse.ArgumentParser:
     pin.set_defaults(func=cmd_native_pool_pin)
 
     enrollment = sub.add_parser("native-pool-pin-enrollment")
-    enrollment.add_argument("--account", choices=("chatgpt4", "admin-business"), required=True)
+    enrollment.add_argument("--account", choices=("chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9"), required=True)
     enrollment.add_argument("--expected-manifest-sha256", required=True)
     enrollment.add_argument("--expected-plan-sha256")
     enrollment.add_argument("--source", help="exact reviewed payload under the installed owner's home; preview/apply only")
