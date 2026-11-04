@@ -25,7 +25,7 @@ permissions or override those actual controls.
 
 Fable is not a mandatory relay or universal merge approver. Routing, adjudication,
 and merge decisions follow the currently authorized role and operation, not a
-historical session name. Independent review and source/release protections still apply.
+historical session name. Independent review is not mandatory for CEO Web work; protected source/release controls still apply.
 These role descriptions do not themselves grant authority.
 
 **Source-of-truth order** — higher layer wins on conflict:
@@ -159,7 +159,7 @@ universal procedure owner. Read it before creating or relying on a temporary wat
 
 ### Session-owned review — local native child first
 
-For review decisions first load [the session-local policy](docs/SESSION_LOCAL_REVIEW_POLICY.md) at the accepted protected pin. The current Claude/Codex/Web parent may self-check or use a genuinely distinct read-only **native reviewer child within this same session** with real START, immutable source and returned findings; no different top-level chat is required. STANDARD's zero-extra-review rule is conditional on #2018 being protected AND required host enrollment, not this proposed document. A technical child is not authenticated non-author GitHub `APPROVED`; maintain real required approvals, CI, holds and no self-merge.
+For review decisions first load [the session-local policy](docs/SESSION_LOCAL_REVIEW_POLICY.md) at the accepted protected pin. The current Claude/Codex/Web parent may self-check or use a genuinely distinct read-only **native reviewer child within this same session** with real START, immutable source and returned findings; no different top-level chat is required. The attended CEO-Web handoff waiver is an instruction-consumer policy; its adoption does not depend on the separate signed-machine host. Other execution surfaces retain their applicable review requirements. A source candidate or protected merge alone proves neither instruction installation nor host enrollment. A technical child is not authenticated non-author GitHub `APPROVED`; maintain real required approvals, CI, holds and no self-merge.
 
 For a truly required independent external avenue load [the existing session routing procedure](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md), inspect actual admitted Fabric root/parent/effects and preserve the original carrier. On EFFECT_UNKNOWN, active review or explicit denial do not reroute through a Dot, account or provider. One actually eligible Dot may receive a source-bound Slack technical-review assignment; no fictional START or formal GitHub approval inferred from Slack. Existing Executive/GitHub authority remains controlling.
 

@@ -41,7 +41,7 @@ a new session needs real creation and assignment. Preserve actual active writers
 exact-session proof obligations and unresolved effects on their original carrier.
 
 Prefer verified end-to-end delivery, the shallowest useful admitted delegation,
-one proportionate review and reuse of unchanged relevant evidence. Checkpoints
+risk-tied proof without mandatory independent review, and reuse unchanged evidence. Checkpoints
 are saves followed by the next safe ready phase, not automatic stops. Do not
 reconstruct the whole history, repeat routine approvals or tests, or wait for a
 historical named owner when current assigned work can proceed safely. Old model

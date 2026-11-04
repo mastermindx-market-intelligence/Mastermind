@@ -145,7 +145,7 @@ elif name == 'ssh':
         record('poll'); print('0' if case == 'plain_ok' else '75'); raise SystemExit(0)
     if 'tail -c 4096' in command:
         record('admission_read')
-        if case == 'admission_expiry': time.sleep(10)
+        if case == 'admission_expiry': time.sleep(35)
         print('REMOTE_SUB_ADMISSION_REFUSED {"reasons":["active_lane_limit_reached"]}')
         raise SystemExit(0)
     if 'support_bundle.py' in command:
@@ -374,12 +374,16 @@ class ControllerDeadline(unittest.TestCase):
         self.assertIn('LEASE_REFUSED rc=75',result['stderr'])
 
     def test_owned_setup_expiry_releases_only_unlaunched_provider_lease(self):
-        result=self.run_controller('slow_setup',budget=3)
+        # Reach granted-lease setup before its finite ten-second stall.
+        result=self.run_controller('slow_setup',budget=8)
+        self.assertIn('setup',[row['stage'] for row in result['events']],result)
         self.check_prelaunch_expiry(result,'commission-setup')
         self.assertNotIn('scp',[row['stage'] for row in result['events']])
 
     def test_owned_support_transfer_expiry_never_launches_worker(self):
-        result=self.run_controller('slow_scp',budget=3)
+        # Reach packet upload before its finite ten-second fixture stall.
+        result=self.run_controller('slow_scp',budget=8)
+        self.assertIn('scp',[row['stage'] for row in result['events']],result)
         self.check_prelaunch_expiry(result,'commission-packet-upload')
 
     def check_prelaunch_expiry(self,result,label):
@@ -387,17 +391,67 @@ class ControllerDeadline(unittest.TestCase):
         stages=[row['stage'] for row in result['events']]
         self.assertIn('granted',stages);self.assertIn('release',stages);self.assertNotIn('launch',stages)
         self.assertLess(result['elapsed'],result['budget']+2,result)
-        receipt=next(row for row in result['receipts'] if row['label']==label)
+        receipts=[row for row in result['receipts'] if row['label']==label]
+        self.assertEqual(len(receipts),1,result)
+        receipt=receipts[0]
         self.assertTrue(receipt['timed_out'])
         self.assertTrue(receipt['cleanup']['census_proven'])
         self.assertEqual(receipt['cleanup']['residual_count'],0)
 
+    def test_each_launch_refresh_recomputes_remaining_duration_deterministically(self):
+        # Execute the existing exact Bash policy seam. This is duration
+        # derivation coverage, not a claim that full setup reached two launches.
+        spec=importlib.util.spec_from_file_location('deadline_observation_policy',
+            ROOT/'tests/test_launch_observation_reserve.py')
+        policy=importlib.util.module_from_spec(spec);spec.loader.exec_module(policy)
+        states=self.root/'refresh-state.json'
+        helper=self.bin/'remaining-reader'
+        write(helper, '#!'+sys.executable+'\n'+textwrap.dedent(f"""
+            import json,sys
+            from pathlib import Path
+            path=Path({str(states)!r})
+            calls=json.loads(path.read_text()) if path.exists() else []
+            assert sys.argv[2]=='deadline-seconds'
+            calls.append(int(sys.argv[3]));path.write_text(json.dumps(calls))
+            print([9,6,5,4][len(calls)-1])
+        """),executable=True)
+        script=('log() {{ printf "%s\\n" "$*" >&2; }}; '
+            'COMMISSION_ACTIVE=1; MAX_SECS=12; POLL_SECS=1; RC=0; '
+            'REMOTE_SUB_PYTHON="{helper}"; HERE="{ext}";\n').format(helper=helper,ext=self.ext)
+        script+=policy._policy()+\
+            '\nfor attempt in 1 2 3; do commission_refresh_runtime launch || exit $?; printf "%s,%s\\n" "$MAX_SECS" "$CHILD_TIMEOUT"; done\n'+\
+            'commission_refresh_runtime launch; printf "refused=%s\\n" "$?"\n'
+        result=subprocess.run(['/bin/bash','-c',script],capture_output=True,text=True,timeout=5)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout.splitlines(),['9,7','6,4','5,3','refused=75'])
+        self.assertEqual(json.loads(states.read_text()),[12,9,6,5])
+        self.assertIn('observation_reserve=5',result.stderr)
+
+    def test_original_twelve_second_controller_expiry_stays_prelaunch(self):
+        # Full real-clock setup remains charged to the original12s budget.
+        # Deliberate inert setup delay makes this negative independent of a
+        # fast-host premise; expiry must never be called ambiguous execution.
+        result=self.run_controller('slow_setup',budget=12,broker_delay=1)
+        self.assertEqual(result['returncode'],75,result['stderr'])
+        stages=[row['stage'] for row in result['events']]
+        self.assertIn('granted',stages);self.assertIn('release',stages)
+        self.assertNotIn('launch',stages)
+        self.assertNotIn('LEASE_PRESERVED effect_unknown=1',result['stderr'])
+        self.assertLess(result['elapsed'],result['budget']+2,result)
+        self.assertTrue(result['receipts'])
+        for receipt in result['receipts']:
+            self.assertTrue(receipt['cleanup']['census_proven'])
+            self.assertEqual(receipt['cleanup']['residual_count'],0)
+
     def test_each_actual_launch_recomputes_duration_and_keeps_ambiguous_lease(self):
-        result=self.run_controller('retry_ambiguous',budget=12,broker_delay=1)
+        # This positive case must reach two launches; short-budget expiry
+        # remains covered by the separate finite negative fixtures.
+        result=self.run_controller('retry_ambiguous',budget=30,broker_delay=1,
+                                   harness_timeout=40)
         self.assertEqual(result['returncode'],255,result['stderr'])
         launches=[row for row in result['events'] if row['stage']=='launch']
         self.assertEqual(len(launches),2,result['stderr'])
-        self.assertLess(launches[0]['child_timeout'],10)
+        self.assertLess(launches[0]['child_timeout'],result['budget']-2)
         self.assertLess(launches[1]['child_timeout'],launches[0]['child_timeout'])
         for row in launches:
             self.assertEqual(row['remote_budget'],row['child_timeout'])
@@ -407,11 +461,13 @@ class ControllerDeadline(unittest.TestCase):
         self.assertIn('LEASE_PRESERVED effect_unknown=1',result['stderr'])
 
     def test_expired_admission_retry_keeps_terminal_and_collects_after_deadline(self):
-        # Leave room for real prelaunch preparation; the finite 10-second
-        # admission-read stall still exceeds the entire original budget.
-        result=self.run_controller('admission_expiry',budget=8)
+        # Reach the first observed terminal before the finite 35-second
+        # admission-read stall exceeds the same original 30-second budget.
+        result=self.run_controller('admission_expiry',budget=30,
+                                   harness_timeout=40)
         self.assertEqual(result['returncode'],75,result['stderr'])
         stages=[row['stage'] for row in result['events']]
+        self.assertIn('admission_read',stages)
         self.assertEqual(stages.count('launch'),1,result['stderr'])
         self.assertIn('collect',stages);self.assertIn('release',stages)
         collection=next(row for row in result['events'] if row['stage']=='collect')
@@ -519,8 +575,9 @@ class ControllerDeadline(unittest.TestCase):
         self.assertEqual(before,(retained.read_bytes(),retained.stat().st_ino,retained.stat().st_mtime_ns))
 
     def test_replaced_transport_observation_refuses_before_worker_launch(self):
-        result=self.run_controller('transport_observation_replaced',budget=8,
-                                   mode='qwen',model='qwen3.8-flash')
+        result=self.run_controller('transport_observation_replaced',budget=30,
+                                   mode='qwen',model='qwen3.8-flash',
+                                   harness_timeout=40)
         self.assertEqual(result['returncode'],78,result['stderr'])
         self.assertIn('TRANSPORT_VERIFICATION_REFUSED',result['stderr'])
         stages=[row['stage'] for row in result['events']]
@@ -530,8 +587,9 @@ class ControllerDeadline(unittest.TestCase):
                           /'offline-transport_observation_replaced.transport-verified.json').exists())
 
     def test_mutated_remote_packet_refuses_launch_and_binding(self):
-        result=self.run_controller('transport_mutated_packet',budget=8,
-                                   mode='qwen',model='qwen3.8-flash')
+        result=self.run_controller('transport_mutated_packet',budget=30,
+                                   mode='qwen',model='qwen3.8-flash',
+                                   harness_timeout=40)
         self.assertEqual(result['returncode'],78,result['stderr'])
         self.assertIn('TRANSPORT_VERIFICATION_REFUSED',result['stderr'])
         stages=[row['stage'] for row in result['events']]
