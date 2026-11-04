@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import unittest
 
 from control_plane.fabric_model_readiness import (
-    ModelWitness, qualify_model, MAX_AGE
+    ModelWitness, qualify_model, qualify_grok_native_route, MAX_AGE
 )
 
 NOW = datetime(2026, 11, 3, 23, 0, tzinfo=timezone.utc)
@@ -81,6 +81,52 @@ class TestModelReadiness(unittest.TestCase):
         self.assertEqual(decision(host="bad host").code, "MODEL_PREFLIGHT_SCOPE_INVALID")
         self.assertEqual(decision(now=NOW.replace(tzinfo=None)).code,
                          "MODEL_PREFLIGHT_CLOCK_INVALID")
+
+
+class TestNativeGrokRoute(unittest.TestCase):
+    def test_incident_route_unavailable_without_model_switch(self):
+        route = {"POOL": "grok", "MODE": "grok", "MODEL": "grok-4.7",
+                 "HOST": "ubuntu3", "KEY": "-", "REASON": "judgment_order_grok"}
+        snapshot = witness(host="ubuntu3", models=("grok-4.6",))
+        found = qualify_grok_native_route(route, snapshot, now=NOW, original_state="NEW_UNATTEMPTED")
+        self.assertEqual(found.code, "MODEL_PREFLIGHT_MODEL_UNAVAILABLE")
+        self.assertFalse(found.eligible)
+        self.assertFalse(found.retry_authorized)
+        self.assertFalse(found.dispatch_authorized)
+
+    def test_exact_selected_model_and_host_only_evidence(self):
+        route = {"POOL": "grok", "MODE": "grok", "MODEL": "grok-4.6",
+                 "HOST": "ubuntu3"}
+        found = qualify_grok_native_route(
+            route, witness(host="ubuntu3"), now=NOW, original_state="NEW_UNATTEMPTED")
+        self.assertEqual(found.code, "MODEL_ID_LISTED")
+        self.assertTrue(found.eligible)
+        self.assertFalse(found.dispatch_authorized)
+
+    def test_terminal_and_effect_unknown_cannot_reuse_eligibility(self):
+        route = {"POOL": "grok", "MODE": "grok", "MODEL": "grok-4.6",
+                 "HOST": "ubuntu3"}
+        for prior in ("TERMINAL", "EFFECT_UNKNOWN", "ACTIVE_OR_WAITING", "",
+                      "REQUEST_REFUSED_BEFORE_LAUNCH"):
+            with self.subTest(prior=prior):
+                found = qualify_grok_native_route(
+                    route, witness(host="ubuntu3"), now=NOW, original_state=prior)
+                self.assertEqual(found.code, "MODEL_PREFLIGHT_EXISTING_OPERATION")
+                self.assertFalse(found.eligible)
+                self.assertFalse(found.retry_authorized)
+
+    def test_unverified_route_and_wrong_pool_refuse(self):
+        cases = (None, {}, {"POOL": "grok", "MODE": "grok", "HOST": "ubuntu3"},
+                 {"POOL": "glm", "MODE": "grok", "MODEL": "grok-4.6", "HOST": "ubuntu3"},
+                 {"POOL": "grok", "MODE": "cursor", "MODEL": "grok-4.6", "HOST": "ubuntu3"},
+                 {"POOL": "grok", "MODE": "grok", "MODEL": "grok-4.6", "HOST": "../host"},
+                 {"POOL": "grok", "MODE": "grok", "MODEL": "grok-4.6", "HOST": 3})
+        for route in cases:
+            with self.subTest(route=route):
+                found = qualify_grok_native_route(
+                    route, witness(host="ubuntu3"), now=NOW, original_state="NEW_UNATTEMPTED")
+                self.assertFalse(found.eligible)
+                self.assertFalse(found.dispatch_authorized)
 
 
 if __name__ == "__main__":

@@ -83,3 +83,33 @@ def qualify_model(
     if requested_model not in witness.models:
         return ModelPreflight(False, "MODEL_PREFLIGHT_MODEL_UNAVAILABLE")
     return ModelPreflight(True, "MODEL_ID_LISTED")
+
+
+def qualify_grok_native_route(
+    route: dict[str, str] | None,
+    witness: ModelWitness | None,
+    *,
+    now: datetime,
+    original_state: str,
+) -> ModelPreflight:
+    """Adapt an incumbent native pick to the read-only model-identity guard.
+
+    This function cannot reconcile or retry a prior native run. A real caller
+    must prove NEW_UNATTEMPTED from its existing operation/ledger owner, not
+    from a request argument. The selected host must *also* supply its own
+    authenticated complete catalog evidence through its existing native
+    owner. No caller-supplied dataclass or source_verified flag is trusted
+    without that owner-bound proof.
+    """
+    if original_state != "NEW_UNATTEMPTED":
+        return ModelPreflight(False, "MODEL_PREFLIGHT_EXISTING_OPERATION")
+    if type(route) is not dict:
+        return ModelPreflight(False, "MODEL_PREFLIGHT_ROUTE_INVALID")
+    if route.get("POOL") != "grok" or route.get("MODE") != "grok":
+        return ModelPreflight(False, "MODEL_PREFLIGHT_MODE_UNSUPPORTED")
+    for field in ("HOST", "MODEL"):
+        if not _valid_identifier(route.get(field), _OWNER if field == "HOST" else _MODEL):
+            return ModelPreflight(False, "MODEL_PREFLIGHT_ROUTE_INVALID")
+    return qualify_model(
+        route["MODEL"], witness, provider="grok", host=route["HOST"], now=now
+    )
