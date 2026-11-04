@@ -1,5 +1,6 @@
 import { ObservedTranscript } from "./ObservedTranscript";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { registerUnsavedNavigationHold } from "../auth-navigation-guard";
 import { observedMissionAssociation } from "../workspace-contract";
 import type { OfficeProjection, SourceClaim } from "../meta-ceo/projection";
 import type { MissionResultRead } from "../host";
@@ -114,6 +115,8 @@ export interface ConversationWindowProps {
   /** Called after the actual current React DOM commit, never by a receipt. */
   onQualifiedAnswerCommitted?: (value: QualifiedConversationReply) => void;
   notesPresentation?: "inline" | "collapsed";
+  /** Only the App auth owner may explicitly allow copy-only text on passive expiry. */
+  retainUnsentOnExpiry?: boolean;
   projection: OfficeProjection;
   /** Shell-controlled, unsent text. Scope and auth isolation live in drafts.ts. */
   draft: string;
@@ -137,7 +140,7 @@ function observationKey(projection: OfficeProjection) {
     conversation.source.state, mission.source.state, result.source.state]);
 }
 function ConversationBody({ projection, draft, onDraftChange, readResult, draftRevision,
-  draftInsertion, onAppendSource, onUndoSource, locale = "en", notesPresentation = "inline", continuation }: ConversationWindowProps) {
+  draftInsertion, onAppendSource, onUndoSource, locale = "en", notesPresentation = "inline", retainUnsentOnExpiry = false, continuation }: ConversationWindowProps) {
   const [notesOpen, setNotesOpen] = useState(notesPresentation !== "collapsed");
   const notesTrigger = useRef<HTMLButtonElement>(null);
   const pendingNotesFocus = useRef(false);
@@ -229,13 +232,13 @@ function ConversationBody({ projection, draft, onDraftChange, readResult, draftR
           <h2>{privateHidden ? ui(locale, "Content is withheld.") : ui(locale, "A qualified window is not available.")}</h2>
           <p>{read.reason || ui(locale, "The current owner source does not establish this conversation.")}</p>
           <p>{ui(locale, "No transcript or session relationship is reconstructed from neighboring records.")}</p></div>}
-        {!privateHidden && <div className="conversation-notes" onKeyDown={event => {
+        {(!privateHidden || (retainUnsentOnExpiry && draft.length > 0)) && <div className="conversation-notes" onKeyDown={event => {
           if (notesPresentation === "collapsed" && event.key === "Escape" && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { setNotesOpen(false); notesTrigger.current?.focus(); }
         }}>
           {notesPresentation === "collapsed" && <button ref={notesTrigger} type="button" className="conversation-notes-trigger" aria-expanded={notesOpen} aria-controls={`${panelId}-notes`} onClick={() => setNotesOpen(open => !open)}>{ui(locale, "Unsent notes")}</button>}
-          {notesOpen && <div id={`${panelId}-notes`} className="conversation-composer">
+          {(notesOpen || (privateHidden && retainUnsentOnExpiry && draft.length > 0)) && <div id={`${panelId}-notes`} className="conversation-composer">
           <label htmlFor={`${panelId}-draft`}>{ui(locale, notesPresentation === "collapsed" ? "Unsent notes" : "Unsent draft")}</label>
-          <textarea ref={draftInput} id={`${panelId}-draft`} value={draft} rows={3} onChange={event => onDraftChange(event.target.value)}
+          <textarea ref={draftInput} id={`${panelId}-draft`} value={draft} readOnly={privateHidden} rows={3} onChange={event => onDraftChange(event.target.value)}
             placeholder={ui(locale, "Keep a thought here…")} aria-describedby={`${panelId}-draft-reason`} />
           <div className="conversation-composer-actions"><p id={`${panelId}-draft-reason`}>{ui(locale, "No recipient is qualified by this window. Send is unavailable.")}</p>
             {notesPresentation === "inline" && <button type="button" disabled aria-label={ui(locale, "Send message")} title={ui(locale, "Send message is unavailable")}>↑</button>}</div>
@@ -274,6 +277,8 @@ function ConversationBody({ projection, draft, onDraftChange, readResult, draftR
 /** Read-only owner projection. Exact managed sessions use the separate canonical
  * command binding; this component cannot promote a window to that capability. */
 export function ConversationWindow(props: ConversationWindowProps) {
+  useEffect(() => registerUnsavedNavigationHold(() => props.draft.length > 0),
+    [props.draft]);
   const { context, conversation, mission, result } = props.projection;
   // Privacy/target changes still replace the body. Passive evidence refreshes
   // only withdraw inspection state, preserving the actual notes textarea.

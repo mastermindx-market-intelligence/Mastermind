@@ -195,3 +195,52 @@ def test_claude_fabric_only_installer_rejects_ambiguous_marker_before_writing(tm
         policy.apply_claude_fabric_entrypoint(home)
     assert source.read_text() == bad
     assert not (d / "skills").exists()
+
+
+def _protected_pre_review_guide_claude_skill() -> bytes:
+    """Recover only the exact previous protected skill; no duplicate source file."""
+    current = (ROOT / "skills/mastermind-claude-fabric-delegation/SKILL.md").read_bytes()
+    marker = b"\n## Independent PR review: shared session-side guide\n"
+    next_heading = b"\n## First 30 seconds: choose the existing entrypoint\n"
+    assert current.count(marker) == current.count(next_heading) == 1
+    prefix, rest = current.split(marker, 1)
+    _, suffix = rest.split(next_heading, 1)
+    return prefix + next_heading + suffix
+
+
+def test_previous_protected_claude_skill_upgrades_safely(tmp_path: Path) -> None:
+    current = (ROOT / "skills/mastermind-claude-fabric-delegation/SKILL.md").read_bytes()
+    previous = _protected_pre_review_guide_claude_skill()
+    blob = hashlib.sha1(b"blob " + str(len(previous)).encode("ascii") + b"\0" + previous).hexdigest()
+    assert blob == "a4a29ba025db0e50f084179b248501fd27327bfb"
+    assert blob in policy.CLAUDE_FABRIC_PREVIOUS_BLOB_SHAS
+    assert 8192 < len(current) <= policy.CLAUDE_FABRIC_SKILL_MAX_BYTES
+    home = tmp_path / "home"
+    skill = home / ".claude/skills/mastermind-claude-fabric-delegation/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_bytes(previous)
+    doc = home / ".claude/CLAUDE.md"
+    doc.write_text("# Existing Claude user instructions\nKeep other hooks and sessions.\n")
+    original_doc = doc.read_bytes()
+    outcome = policy.apply_claude_fabric_entrypoint(home)
+    assert outcome["state"] == "READY"
+    assert outcome["native_capacity_modified"] is False
+    assert outcome["provider_settings_modified"] is False
+    assert skill.read_bytes() == current
+    assert original_doc in doc.read_bytes()
+    assert not (home / ".claude/settings.json").exists()
+
+
+def test_unknown_claude_skill_preimage_is_refused_without_writes(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    skill = home / ".claude/skills/mastermind-claude-fabric-delegation/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_bytes(b"Unrecognized local skill customization: keep intact.\n")
+    doc = home / ".claude/CLAUDE.md"
+    doc.write_bytes(b"# Original user instructions\n")
+    before_skill, before_doc = skill.read_bytes(), doc.read_bytes()
+    with pytest.raises(policy.OrchestratorPolicyError, match="installed Skill changed"):
+        policy.apply_claude_fabric_entrypoint(home)
+    assert skill.read_bytes() == before_skill
+    assert doc.read_bytes() == before_doc
+    assert not (home / ".claude/settings.json").exists()

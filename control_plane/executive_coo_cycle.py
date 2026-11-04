@@ -159,8 +159,12 @@ class CooCycle:
     """Choose and commit the first eligible mutation for one explicit root."""
 
     def __init__(self, runtime: Runtime, *, dispatcher: Dispatch | None = None,
-                 before_admission: Callable[[str], None] | None = None) -> None:
+                 before_admission: Callable[[str], None] | None = None,
+                 planner_plan_schema_version: str | None = None) -> None:
         self.runtime = runtime
+        # Validate this preference only if the cycle reaches fresh creation.
+        # Existing planner recovery must not consult a new producer default.
+        self._planner_plan_schema_version = planner_plan_schema_version
         if before_admission is not None and not callable(before_admission):
             raise TypeError("before_admission must be a trusted callable")
         self._before_admission = before_admission
@@ -1492,6 +1496,7 @@ class CooCycle:
                 planner = self.runtime.jobs.create_cycle_planner(
                     root_id,
                     command_id=f"coo-cycle:{root_id}:create-planner:0",
+                    plan_schema_version=self._planner_plan_schema_version,
                 )
             except StateConflict as exc:
                 return self._block(root_id, root_id, _classify_invalid(exc))

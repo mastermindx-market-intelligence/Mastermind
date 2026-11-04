@@ -96,3 +96,100 @@ installation, registration, or release is performed by these checks.
 Approved design references remain #702's workspace and #704's consumer freeze.
 The header uses the existing facts/buttons and the content uses existing cards,
 state labels and typography; no additional design system was introduced.
+
+## Web SSO restoration candidate (review required)
+
+The web client now attempts hidden-frame authorization-code + PKCE (`prompt=none`) on
+startup and after silent tokens expire. The fixed callback hands a code only to a
+same-origin, state/source-checked parent. Access tokens remain in memory, with no
+refresh token or bearer serialized into browser storage. A nonsecret localStorage
+logout marker prevents an explicit local sign-out being undone by page reload;
+interactive sign-in clears that marker. Resource audiences remain distinct.
+
+This is **best-effort SSO restoration, not unlimited sign-in**: third-party cookie
+blocking, Auth0 session expiration, tenant iframe restrictions, revocation, and
+browser profile cleanup can require interactive sign-in. Full persistence across
+those conditions requires a separately reviewed first-party/BFF session owner or
+qualified rotating refresh-token implementation, with explicit revoke/logout,
+rotation and server-side revocation guarantees. Native macOS Keychain renewal is a
+separate implementation. Source tests do not prove live Auth0 tenant behavior.
+
+## Same-tab fallback when the live edge forbids silent frames (stacked draft)
+
+The existing production edge serves `default-src 'none'` without `frame-src`,
+and its callback sets `frame-ancestors 'none'`. Consequently hidden-iframe
+Auth0 restoration is currently **blocked by CSP**, independently of cookie
+availability. The follow-up web-auth candidate does not weaken those headers.
+It detects a frame-source CSP denial and, **only for a browser profile with a
+previously completed Workspace login**, attempts a single top-level
+`prompt=none` PKCE authorization on the fixed Auth0 issuer. The registered
+same-tab callback validates state, client, issuer and TTL, scrubs its code and
+exchanges it privately before the React app mounts. A nonsecret prior-login
+hint and one-attempt marker live in browser storage; tokens never do. Failed
+Auth0 SSO restores the ordinary manual sign-in path without an endless loop.
+Explicit logout prevents redirect, including if a subsequent popup is blocked.
+
+**This only reacquires the Workspace acquisition audience**: the separate
+Content and optional Executive grants can remain unavailable if their iframe
+attempts are also blocked. The existing user-initiated Auth0 popup may recover
+those scopes. True unattended, all-resource, cross-restart persistence in
+privacy-restricted browsers requires an independently reviewed first-party
+Auth0 custom domain + scoped CSP changes or a secure cookie/BFF credential
+custodian. The redirect candidate is a scoped fallback, not a substitute for
+those release/tenant and real-browser acceptance requirements.
+
+### Authentication restoration and multi-tab safety follow-up
+
+A prior Workspace user whose token expires can try the same **single bounded**
+first-party browser-tab `prompt=none` authorization fallback after the
+iframe's CSP failure, subject to the user's existing Auth0 cookie/session and
+standard expiry policy. A tab that observes an explicit logout from another
+tab immediately invalidates its private bearer owner, read generations and
+Executive/Research capabilities; it never converts logout into an automatic
+new sign-in. Manual Workspace and Research logins reauthorize only after a
+successful new grant. Complete Content/Executive renewal remains a distinct
+first-party backend/session-owner or qualified Auth0 integration gate.
+
+**Unsent work and automatic authentication:** OS keeps an in-memory navigation
+hold on unsent Office and Conversation notes, Session messages, Launch goals,
+and unresolved command effects. An automatic Auth0 top-level redirect is
+deferred while any such work is active, rather than silently discarding it.
+This is a user-data safety gate, not an implementation of indefinite login;
+a saved/finished draft may be followed by explicit sign-in or page reopen.
+All draft/credential storage, live Auth0 tenant, Content/Executive authorization
+and deployment remain with their existing qualified owners.
+
+**Browser-session expiry and privacy:** On an unambiguous passive web token
+expiry, user-authored unsent Office/Conversation/Launch/Session text is kept
+only in the mounted page until explicitly copied, discarded or replaced by
+new authentication. Source data and command authority remain invalid. Both
+same-tab and cross-tab logout immediately clear the retained text even if
+browser quota prevents writing the logout marker. No draft or credential is
+persisted as a workaround for third-party-cookie restrictions.
+
+## Native Keychain refresh-token persistence candidate (not installed)
+
+The macOS Tauri native client has a separate opt-in Auth0 refresh-token
+candidate, compiled only with `MM_NATIVE_REFRESH_ENABLED=1` **after**
+the existing native public Auth0 client and the Workspace acquisition/content
+APIs have been verified to permit `offline_access`, rotating refresh tokens,
+and the intended expiration/revocation policy. With the option absent, the
+protected native behavior is unchanged: in-memory access tokens only.
+
+In the candidate, the native credential owner stores individual rotating
+refresh tokens by client/audience in macOS Keychain; access tokens are never
+stored in React or Keychain. Native reads and startup restore per-resource
+credentials without requiring the login popup after normal application restart.
+Only the acquisition and content grants participate. Executive SEND authority
+does not acquire offline renewal by default. The owner serializes refreshes
+per resource and records a Keychain pending marker before a rotating exchange;
+a crash or unknown response refuses replay and requires explicit sign-in.
+Sign-out invalidates the generation and deletes both credentials and markers,
+returning an error if deletion could not be confirmed.
+
+**Limitations:** This is source code pending native macOS build/test, independent
+security review, configured tenant/client readback, signed installed-app restart
+and Keychain access-control acceptance. Keychain locked/refused, token revocation,
+absolute/inactivity expiration, ambiguous token rotation, or damaged credentials
+can still require interactive sign-in. Never represent the candidate as a
+permanent or irrevocable Auth0 login.

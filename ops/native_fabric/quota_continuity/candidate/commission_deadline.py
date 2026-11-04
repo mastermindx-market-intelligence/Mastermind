@@ -50,7 +50,7 @@ def _seconds(value: object) -> float:
         result = float(value)
     except OverflowError as exc:
         raise CommissionDeadlineInvalid("commission_duration_invalid") from exc
-    if not math.isfinite(result) or not 0 <= result <= 7200:
+    if not math.isfinite(result) or not 0 <= result <= 14400:
         raise CommissionDeadlineInvalid("commission_duration_invalid")
     return result
 

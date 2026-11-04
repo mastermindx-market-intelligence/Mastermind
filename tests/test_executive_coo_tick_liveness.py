@@ -9,9 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from control_plane.executive_runtime import JobPayload
 from control_plane.executive_service import ExecutiveControlService
-from control_plane.executive_supervisor import NoEligibleWorkerCapacity
+from control_plane.executive_runtime import JobPayload, StateConflict
 from test_executive_service import (
     _FakeSupervisor, _config, _coo_intent, _request, _service,
 )
@@ -139,6 +138,83 @@ def test_disarmed_background_tick_does_not_advance_either_admitted_root(tmp_path
     asyncio.run(exercise())
 
 
+def test_independent_ready_root_is_not_starved_by_unresolved_other_root(tmp_path, monkeypatch):
+    """Persist A's real marker; admit B once, then return to A's exact barrier."""
+    async def exercise():
+        async with _prepared_pair(tmp_path) as (config, seed, ids, _):
+            a, b = ids
+            planner = seed.runtime.jobs.create_cycle_planner(
+                a, command_id=f"coo-cycle:{a}:create-planner:0")
+            exact_command = f"coo-cycle:{a}:dispatch:{planner.job_id}:attempt:1"
+            claimed = seed.runtime.attempts.dispatch_cycle_job(
+                planner.job_id, command_id=exact_command,
+                lease_owner="retained-original-owner")
+            assert claimed is not None and claimed.claimed_now
+            seed.runtime.attempts.fail_attempt(
+                claimed.attempt.attempt_id,
+                fence_generation=claimed.attempt.fence_generation,
+                lease_token=claimed.lease_token,
+                payload=JobPayload(summary="Fixture provider refused before execution"))
+            seed.runtime.jobs.record_cycle_dispatch_effect_unknown(
+                a, selected_job_id=planner.job_id,
+                dispatch_command_id=exact_command)
+            marker = seed.runtime.jobs.pending_cycle_dispatch_effect_unknown(a)
+            assert marker is not None and marker["dispatch_command_id"] == exact_command
+            await seed.close()
+            finish_gate = asyncio.Event()
+            running, _ = _service(tmp_path, config=dataclasses.replace(
+                config, coo_tick_interval_seconds=1.0,
+                shutdown_grace_seconds=3.0), finish_gate=finish_gate)
+            await running.start()
+            try:
+                assert running.runtime.jobs.pending_cycle_dispatch_effect_unknown(a) == marker
+                assert running._next_bound_coo_root(previous_root_id=a) == b
+                # A remains the very next choice even if B keeps appearing
+                # in the status scan and has not yet done useful work.
+                assert running._next_bound_coo_root(previous_root_id=b) == a
+                # A corrupt B-only marker is a local admission failure, not
+                # a reason to erase A's original reconciliation fallback.
+                reader = running.runtime.jobs.pending_cycle_dispatch_effect_unknown
+
+                def bad_b(root_id):
+                    if root_id == b:
+                        raise StateConflict("B has multiple pending effects")
+                    return reader(root_id)
+
+                with monkeypatch.context() as patch:
+                    patch.setattr(running.runtime.jobs,
+                                  "pending_cycle_dispatch_effect_unknown", bad_b)
+                    assert running._next_bound_coo_root(previous_root_id=a) == a
+                observed = []
+                actual_cycle = running._run_coo_cycle
+
+                async def bounded_cycle(root_id):
+                    observed.append(root_id)
+                    if root_id == a:
+                        # An unsettled same-run outcome cannot be retried here.
+                        raise StateConflict("synthetic original effect still unresolved")
+                    return await actual_cycle(root_id)
+
+                running._run_coo_cycle = bounded_cycle
+                assert await _until(lambda: len(observed) >= 3, timeout=8.0), {
+                    "last_error": running._coo_last_error,
+                    "last_tick": running._coo_last_tick_at,
+                    "selected": observed,
+                }
+                assert observed[:3] == [b, a, b]
+                assert _children(running, b)
+                assert await _until(
+                    lambda: any(child.attempt_count > 0 for child in _children(running, b)),
+                    timeout=4.0,
+                ), "B must progress beyond planner creation on its second tick"
+                assert running.runtime.jobs.pending_cycle_dispatch_effect_unknown(a) == marker
+                assert running.service_state == "READY"
+            finally:
+                finish_gate.set()
+                await running.close()
+    asyncio.run(exercise())
+
+
 def test_ambiguous_claimed_start_quarantines_instead_of_draining_another_root(tmp_path):
     class LostStartReceipt(_FakeSupervisor):
         async def start_cycle_job(self, job_id, *, command_id):
@@ -164,6 +240,11 @@ def test_ambiguous_claimed_start_quarantines_instead_of_draining_another_root(tm
             await running.start()
             try:
                 assert await _until(lambda: running.service_state == "QUARANTINED")
+                # Quarantine is published before the original cycle thread returns.
+                # Observe completion before the fixture's 100 ms shutdown drain.
+                assert await _until(
+                    lambda: not running._physical_workers and not running._coo_action_tasks
+                ), running._coo_last_error
                 assert _children(running, ids[1]) == []
                 attempted = _children(running, ids[0])
                 assert len(attempted) == 1
@@ -203,374 +284,170 @@ def test_background_tick_rechecks_restored_workspace_without_manual_continue(tmp
     asyncio.run(exercise())
 
 
-class _LostStartReceipt(_FakeSupervisor):
-    """Loses the dispatch response after the durable claim is committed."""
-
-    async def start_cycle_job(self, job_id, *, command_id):
-        await super().start_cycle_job(job_id, command_id=command_id)
-        raise RuntimeError("fixture lost response after durable claim")
-
-
-class _CapacityBlockedSupervisor(_FakeSupervisor):
-    """Can never dispatch the named job, so that root can never act."""
-
-    blocked_job_id: str | None = None
-
-    async def start_cycle_job(self, job_id, *, command_id):
-        if job_id == self.blocked_job_id:
-            raise NoEligibleWorkerCapacity(job_id)
-        return await super().start_cycle_job(job_id, command_id=command_id)
-
-
-def _raw_events(service, root_id):
-    """Read one root's persisted events byte for byte."""
-    with service.runtime.store.read() as connection:
-        return [
-            tuple(row)
-            for row in connection.execute(
-                "SELECT * FROM events WHERE job_id=? ORDER BY event_id",
-                (root_id,),
-            ).fetchall()
-        ]
-
-
-def _subtree_facts(service, root_id):
-    """Read one root's whole subtree as comparable facts."""
-    return sorted(
-        (
-            job.job_id,
-            job.status.value,
-            job.attempt_count,
-            job.current_attempt_id,
-            job.parent_job_id,
-        )
-        for job in service.runtime.jobs.list_jobs()
-        if job.root_job_id == root_id
-    )
-
-
-async def _seal_failed_planner(service, root_id):
-    """Give one root a planner child whose claim is already settled.
-
-    The claim is terminal, so the runtime holds no unowned active Attempt and
-    the root keeps its lawful reconciliation path.
-    """
-    created = await _request(service, "run-coo-cycle", {"root_job_id": root_id})
-    assert created["ok"] is True, created
-    planner = _children(service, root_id)[0]
-    runtime = service.runtime
+def _corrupt_real_pending_effect(service, root_id):
+    """Damage a real persisted receipt while retaining its original claim."""
+    planner = service.runtime.jobs.create_cycle_planner(
+        root_id, command_id=f"coo-cycle:{root_id}:create-planner:0")
     command = f"coo-cycle:{root_id}:dispatch:{planner.job_id}:attempt:1"
-    outcome = runtime.attempts.dispatch_cycle_job(
-        planner.job_id, command_id=command, lease_owner="fixture-marker")
-    assert outcome is not None and outcome.lease_token is not None
-    payload = JobPayload(
-        summary="fixture work complete",
-        completed_steps=["fixture"],
-        current_state="complete",
-    )
-    runtime.attempts.checkpoint_attempt(
-        outcome.attempt.attempt_id,
-        fence_generation=outcome.attempt.fence_generation,
-        lease_token=outcome.lease_token,
-        payload=payload,
-    )
-    runtime.attempts.fail_attempt(
-        outcome.attempt.attempt_id,
-        fence_generation=outcome.attempt.fence_generation,
-        lease_token=outcome.lease_token,
-        payload=payload,
-    )
-    return planner, command
-
-
-async def _persist_pending_effect(service, root_id):
-    """Persist one real unresolved dispatch effect for one bound root.
-
-    The effect is written by the incumbent Runtime through its canonical
-    EventStore and read back through its canonical reader, so no marker
-    lookup is faked anywhere in this regression.
-    """
-    planner, command = await _seal_failed_planner(service, root_id)
+    claim = service.runtime.attempts.dispatch_cycle_job(
+        planner.job_id, command_id=command, lease_owner="retained-original-owner")
+    assert claim is not None and claim.claimed_now
+    service.runtime.attempts.fail_attempt(
+        claim.attempt.attempt_id,
+        fence_generation=claim.attempt.fence_generation,
+        lease_token=claim.lease_token,
+        payload=JobPayload(summary="Fixture provider refused before execution"))
     service.runtime.jobs.record_cycle_dispatch_effect_unknown(
-        root_id,
-        selected_job_id=planner.job_id,
-        dispatch_command_id=command,
+        root_id, selected_job_id=planner.job_id, dispatch_command_id=command)
+    marker = service.runtime.jobs.pending_cycle_dispatch_effect_unknown(root_id)
+    assert marker is not None and marker["dispatch_command_id"] == command
+    with service.runtime.store.transaction() as connection:
+        trigger = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' "
+            "AND name='events_are_immutable_update'").fetchone()
+        assert trigger is not None
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        changed = connection.execute(
+            "UPDATE events SET actor='fixture-untrusted-actor' "
+            "WHERE event_type='COO_DISPATCH_EFFECT_UNKNOWN' AND job_id=?",
+            (root_id,))
+        assert changed.rowcount == 1
+        connection.execute(trigger[0])
+    with pytest.raises(StateConflict):
+        service.runtime.jobs.pending_cycle_dispatch_effect_unknown(root_id)
+
+
+def _original_effect_facts(service, root_id):
+    """Observe original history, subtree and claims, excluding new diagnostics."""
+    with service.runtime.store.read() as connection:
+        history = [
+            tuple(row) for row in connection.execute(
+                "SELECT * FROM events WHERE job_id=? "
+                "AND event_type!='COO_SERVICE_TICK_REFUSED' ORDER BY event_id",
+                (root_id,)).fetchall()
+        ]
+        attempts = [
+            tuple(row) for row in connection.execute(
+                "SELECT * FROM attempts WHERE job_id IN "
+                "(SELECT job_id FROM jobs WHERE root_job_id=?) ORDER BY attempt_id",
+                (root_id,)).fetchall()
+        ]
+    subtree = sorted(
+        (job.job_id, job.status.value, job.attempt_count, job.current_attempt_id)
+        for job in service.runtime.jobs.list_jobs() if job.root_job_id == root_id
     )
-    assert service.runtime.jobs.pending_cycle_dispatch_effect_unknown(root_id) is not None
+    return history, attempts, subtree
 
 
-@asynccontextmanager
-async def _pair_with_real_pending_effect(tmp_path, marked_index=0):
-    """Seed two roots and persist a real unresolved dispatch effect on one."""
-    async with _prepared_pair(tmp_path) as (config, seed, ids, paths):
-        await seed.close()
-        seeding, _ = _service(tmp_path, config=dataclasses.replace(
-            config, coo_tick_interval_seconds=3600.0), finish_gate=asyncio.Event())
-        await seeding.start()
-        try:
-            await _persist_pending_effect(seeding, ids[marked_index])
-        finally:
-            await seeding.close()
-        yield config, ids, paths
+def _tick_refusals(service, root_id):
+    return [
+        event for event in service.runtime.events.list_events(job_id=root_id)
+        if event.event_type == "COO_SERVICE_TICK_REFUSED"
+    ]
 
 
-def test_real_pending_effect_root_defers_to_an_independent_ready_root(tmp_path):
+def test_corrupt_effect_selector_collects_refusal_without_writing_or_losing_fairness(tmp_path):
     async def exercise():
-        async with _pair_with_real_pending_effect(tmp_path) as (config, ids, paths):
+        async with _prepared_pair(tmp_path) as (_, service, ids, _):
+            a, b = ids
+            _corrupt_real_pending_effect(service, a)
+            original = _original_effect_facts(service, a)
+            refusals = {}
+            assert service._next_bound_coo_root(prestart_refusals=refusals) == b
+            assert set(refusals) == {a}
+            assert isinstance(refusals[a], StateConflict)
+            # Omitting the collector keeps the same read-only selector contract.
+            assert service._next_bound_coo_root() == b
+            assert service._next_bound_coo_root(previous_root_id=b) == a
+            assert service._next_bound_coo_root(previous_root_id=a) == b
+            assert _tick_refusals(service, a) == []
+            assert _original_effect_facts(service, a) == original
+            assert _children(service, b) == []
+            assert service.runtime.jobs.get_job(b).attempt_count == 0
+            with pytest.raises(StateConflict):
+                service.runtime.jobs.pending_cycle_dispatch_effect_unknown(a)
+    asyncio.run(exercise())
+
+
+def test_corrupt_effect_tick_records_one_refusal_before_independent_progress(tmp_path):
+    async def exercise():
+        async with _prepared_pair(tmp_path) as (config, seed, ids, _):
+            a, b = ids
+            _corrupt_real_pending_effect(seed, a)
+            original = _original_effect_facts(seed, a)
+            await seed.close()
+            finish_gate = asyncio.Event()
             running, _ = _service(tmp_path, config=dataclasses.replace(
-                config, coo_tick_interval_seconds=1.0), finish_gate=asyncio.Event())
+                config, coo_tick_interval_seconds=1.0,
+                shutdown_grace_seconds=3.0), finish_gate=finish_gate)
             await running.start()
             try:
-                marker_before = running.runtime.jobs.pending_cycle_dispatch_effect_unknown(ids[0])
-                assert marker_before is not None
-                events_before = _raw_events(running, ids[0])
-                facts_before = _subtree_facts(running, ids[0])
-                workers_before = [w.worker_id for w in running.runtime.workers.list_workers()]
-                # The unresolved effect of one root does not fence a different
-                # root that is ready and independent of it.
-                assert running._next_bound_coo_root() == ids[1]
-                assert await _until(lambda: bool(_children(running, ids[1]))), {
-                    "last_error": running._coo_last_error,
-                    "last_tick": running._coo_last_tick_at,
+                observed = []
+                receipts_before_action = []
+                actual_cycle = running._run_coo_cycle
+
+                async def observe_cycle(root_id):
+                    observed.append(root_id)
+                    receipts_before_action.append(_tick_refusals(running, a))
+                    return await actual_cycle(root_id)
+
+                running._run_coo_cycle = observe_cycle
+                assert await _until(lambda: len(observed) >= 3, timeout=8.0), {
+                    "last_error": running._coo_last_error, "selected": observed,
                 }
-                # The deferred root is neither advanced nor acknowledged, and
-                # the deferral admits no new worker and no second effect.
-                assert running.runtime.jobs.pending_cycle_dispatch_effect_unknown(ids[0]) == marker_before
-                assert _raw_events(running, ids[0]) == events_before
-                assert _subtree_facts(running, ids[0]) == facts_before
-                assert [w.worker_id for w in running.runtime.workers.list_workers()] == workers_before
+                assert observed[:3] == [b, a, b]
+                assert all(len(receipts) == 1 for receipts in receipts_before_action[:3])
+                assert await _until(
+                    lambda: any(child.attempt_count > 0 for child in _children(running, b)),
+                    timeout=4.0,
+                ), "B must progress again even while A's original receipt stays corrupt"
+                refusals = _tick_refusals(running, a)
+                assert len(refusals) == 1
+                assert refusals[0].payload == {
+                    "schema_version": "mastermind.executive_coo_tick_refusal/v1",
+                    "root_job_id": a,
+                    "error_type": "StateConflict",
+                    "reason_code": "bounded_cycle_action_refused",
+                    "routing_policy_version": running._coo_execution_binding[
+                        "routing_policy_version"],
+                    "capability_policy_digest": running._coo_execution_binding[
+                        "capability_policy_digest"],
+                }
+                assert _original_effect_facts(running, a) == original
+                with pytest.raises(StateConflict):
+                    running.runtime.jobs.pending_cycle_dispatch_effect_unknown(a)
                 assert running.service_state == "READY"
             finally:
+                finish_gate.set()
                 await running.close()
     asyncio.run(exercise())
 
 
-def test_deferred_root_regains_its_own_reconciliation_path(tmp_path):
+@pytest.mark.parametrize("gate", ["disarmed", "autonomy_revoked", "quarantined"])
+def test_corrupt_effect_diagnostic_obeys_existing_tick_authority_gates(tmp_path, gate):
     async def exercise():
-        async with _pair_with_real_pending_effect(tmp_path) as (config, ids, paths):
-            running, _ = _service(tmp_path, config=dataclasses.replace(
-                config, coo_tick_interval_seconds=3600.0), finish_gate=asyncio.Event())
-            await running.start()
-            try:
-                assert running.runtime.jobs.pending_cycle_dispatch_effect_unknown(ids[0]) is not None
-                # The independent root is selected while it still owns
-                # actionable work of its own.
-                assert running._next_bound_coo_root() == ids[1]
-                # Give that root its own unresolved effect as well, so no root
-                # has independently actionable work left.
-                await _persist_pending_effect(running, ids[1])
-                # The deferred root is then selected for its own lawful
-                # reconciliation instead of being starved by the scan.
-                assert running._next_bound_coo_root() == ids[0]
-                attempts_before = len(running.runtime.attempts.list_attempts())
-                await running._run_coo_cycle(ids[0])
-                # The reconciliation is finite and exact: the very same claim
-                # is resolved, and no second effect is created.
-                assert running.runtime.jobs.pending_cycle_dispatch_effect_unknown(ids[0]) is None
-                assert len(running.runtime.attempts.list_attempts()) == attempts_before
-            finally:
-                await running.close()
-    asyncio.run(exercise())
-
-
-def test_unreadable_effect_state_fails_closed_for_its_own_root_only(tmp_path):
-    async def exercise():
-        async with _pair_with_real_pending_effect(tmp_path) as (config, ids, paths):
-            running, _ = _service(tmp_path, config=dataclasses.replace(
-                config, coo_tick_interval_seconds=3600.0), finish_gate=asyncio.Event())
-            await running.start()
-            try:
-                # Corrupt the persisted effect receipt the way history can rot.
-                with running.runtime.store.transaction() as connection:
-                    connection.execute("DROP TRIGGER events_are_immutable_update")
-                    connection.execute(
-                        "UPDATE events SET actor='foreign' "
-                        "WHERE event_type='COO_DISPATCH_EFFECT_UNKNOWN' AND job_id=?",
-                        (ids[0],),
-                    )
-                # An unreadable effect state is never treated as "no effect",
-                # never dispatches that root and never aborts another root's
-                # selection.
-                assert running._next_bound_coo_root() == ids[1]
-                # The refusal is recorded, so the condition is not silent.
-                refusals = [
-                    event
-                    for event in running.runtime.events.list_events(job_id=ids[0])
-                    if event.event_type == "COO_SERVICE_TICK_REFUSED"
-                ]
-                assert len(refusals) == 1
-            finally:
-                await running.close()
-    asyncio.run(exercise())
-
-
-def test_live_dispatch_keeps_the_serialized_worker_on_its_own_root(tmp_path):
-    async def exercise():
-        async with _pair_with_real_pending_effect(tmp_path) as (config, ids, paths):
-            running, _ = _service(tmp_path, config=dataclasses.replace(
-                config, coo_tick_interval_seconds=1.0), finish_gate=asyncio.Event())
-            await running.start()
-            try:
-                facts_before = _subtree_facts(running, ids[0])
-                # Drive the independent root onto the serialized worker.
-                await running._run_coo_cycle(ids[1])
-                await running._run_coo_cycle(ids[1])
-                live = [
-                    job_id
-                    for job_id, task in running._dispatch_tasks.items()
-                    if not task.done()
-                ]
-                assert live, "the independent root must own the serialized worker"
-                await asyncio.sleep(1.5)
-                # The live dispatch keeps the tick on its own root, so the
-                # deferred root is not reconciled behind the running worker.
-                assert running.runtime.jobs.pending_cycle_dispatch_effect_unknown(ids[0]) is not None
-                assert _subtree_facts(running, ids[0]) == facts_before
-                # The deferred root is not even attempted while that worker
-                # owns the serialized dispatch.
-                assert not [
-                    event
-                    for event in running.runtime.events.list_events(job_id=ids[0])
-                    if event.event_type == "COO_SERVICE_TICK_REFUSED"
-                ]
-            finally:
-                await running.close()
-    asyncio.run(exercise())
-
-
-def test_root_without_independently_ready_work_does_not_starve_the_deferred_root(tmp_path):
-    """A root that cannot act must not starve the deferred root's turn.
-
-    The independent root can never dispatch its work, so it proves that it
-    cannot act. The deferred root must then receive its own reconciliation
-    turn instead of waiting behind a root that made no progress.
-    """
-    async def exercise():
-        async with _pair_with_real_pending_effect(tmp_path) as (config, ids, paths):
-            holder = {}
-
-            def factory(runtime):
-                supervisor = _CapacityBlockedSupervisor(runtime)
-                holder["supervisor"] = supervisor
-                return supervisor
-
-            running = ExecutiveControlService(
-                dataclasses.replace(config, coo_tick_interval_seconds=1.0),
-                supervisor_factory=factory,
-                autonomy_guard=lambda: None,
-            )
-            await running.start()
-            try:
-                # The independent root creates its planner and can never
-                # dispatch it, so its cycle can make no progress at all.
-                await running._run_coo_cycle(ids[1])
-                planner = _children(running, ids[1])[0]
-                holder["supervisor"].blocked_job_id = planner.job_id
-                # The deferred root's own reconciliation still happens, and it
-                # resolves the very same claim without a second effect.
-                assert await _until(
-                    lambda: running.runtime.jobs.pending_cycle_dispatch_effect_unknown(ids[0]) is None,
-                    timeout=10.0,
-                ), {
-                    "last_error": running._coo_last_error,
-                    "last_tick": running._coo_last_tick_at,
-                }
-                assert running.runtime.jobs.get_job(ids[0]).attempt_count == 0
-            finally:
-                await running.close()
-    asyncio.run(exercise())
-
-
-def test_deferred_turn_needs_a_no_progress_outcome_and_a_free_worker(tmp_path):
-    """The deferred root's turn is bounded by both of its own conditions."""
-    async def exercise():
-        async with _pair_with_real_pending_effect(tmp_path) as (config, ids, paths):
-            running, _ = _service(tmp_path, config=dataclasses.replace(
-                config, coo_tick_interval_seconds=3600.0), finish_gate=asyncio.Event())
-            await running.start()
-            try:
-                # A root that acted keeps the tick to itself.
-                assert running._deferred_effect_turn_allowed("DISPATCHED") is False
-                assert running._deferred_effect_turn_allowed("PLAN_ADMITTED") is False
-                # A root that proved it cannot act frees the tick, but only
-                # while the serialized worker is free.
-                assert running._deferred_effect_turn_allowed("NO_ACTION") is True
-                release = asyncio.Event()
-                running._dispatch_tasks["live-fixture"] = asyncio.create_task(release.wait())
-                try:
-                    assert running._deferred_effect_turn_allowed("NO_ACTION") is False
-                finally:
-                    release.set()
-                    for task in tuple(running._dispatch_tasks.values()):
-                        task.cancel()
-                    await asyncio.gather(
-                        *tuple(running._dispatch_tasks.values()),
-                        return_exceptions=True,
-                    )
-                assert running._deferred_effect_turn_allowed("NO_ACTION") is True
-            finally:
-                await running.close()
-    asyncio.run(exercise())
-
-
-def test_root_that_owns_queued_work_is_still_selected_over_the_deferred_root(tmp_path):
-    """Ready work of its own is never withheld from an independent root."""
-    async def exercise():
-        async with _pair_with_real_pending_effect(tmp_path) as (config, ids, paths):
-            running, _ = _service(tmp_path, config=dataclasses.replace(
-                config, coo_tick_interval_seconds=3600.0), finish_gate=asyncio.Event())
-            await running.start()
-            try:
-                # The independent root now owns work it can dispatch on its own.
-                await running._run_coo_cycle(ids[1])
-                queued = [
-                    job for job in _children(running, ids[1])
-                    if job.status.value == "QUEUED"
-                ]
-                assert queued
-                assert running._next_bound_coo_root() == ids[1]
-            finally:
-                await running.close()
-    asyncio.run(exercise())
-
-
-def test_quarantined_service_never_advances_another_root(tmp_path):
-    async def exercise():
-        async with _prepared_pair(tmp_path) as (config, seed, ids, paths):
+        async with _prepared_pair(tmp_path) as (config, seed, ids, _):
+            a, b = ids
+            _corrupt_real_pending_effect(seed, a)
+            original = _original_effect_facts(seed, a)
             await seed.close()
-            lossy = ExecutiveControlService(
-                dataclasses.replace(config, coo_tick_interval_seconds=1.0),
-                supervisor_factory=_LostStartReceipt,
-                autonomy_guard=lambda: None,
-            )
-            await lossy.start()
-            try:
-                await _request(lossy, "run-coo-cycle", {"root_job_id": ids[0]})
-                await _request(lossy, "run-coo-cycle", {"root_job_id": ids[0]})
-                assert lossy.service_state == "QUARANTINED"
-                await asyncio.sleep(1.5)
-                # A globally quarantined service stops every root, including
-                # the independent ready one.
-                assert _children(lossy, ids[1]) == []
-            finally:
-                await lossy.close()
-    asyncio.run(exercise())
-
-
-def test_unbound_independent_root_is_not_selected_over_the_deferred_root(tmp_path):
-    async def exercise():
-        async with _pair_with_real_pending_effect(tmp_path) as (config, ids, paths):
             running, _ = _service(tmp_path, config=dataclasses.replace(
-                config, coo_tick_interval_seconds=3600.0), finish_gate=asyncio.Event())
+                config, coo_autonomy_armed=gate != "disarmed",
+                coo_tick_interval_seconds=1.0, shutdown_grace_seconds=3.0),
+                finish_gate=asyncio.Event())
             await running.start()
             try:
-                bound = running._is_bound_coo_root
-                running._is_bound_coo_root = lambda root: (
-                    root.job_id != ids[1] and bound(root)
-                )
-                # An unbound root is never selected. The deferred root keeps
-                # its own reconciliation path.
-                assert running._next_bound_coo_root() == ids[0]
+                if gate == "autonomy_revoked":
+                    def refuse_autonomy():
+                        raise StateConflict("fixture-private-authority-detail")
+                    running._require_current_autonomy = refuse_autonomy
+                elif gate == "quarantined":
+                    running._service_state = "QUARANTINED"
+                await asyncio.sleep(1.2)
+                assert _tick_refusals(running, a) == []
+                assert _original_effect_facts(running, a) == original
+                assert _children(running, b) == []
+                assert running.runtime.jobs.get_job(b).attempt_count == 0
             finally:
                 await running.close()
     asyncio.run(exercise())
