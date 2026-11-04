@@ -557,6 +557,25 @@ _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES: tuple[str, ...] = (
     "/workspace/control-room/refresh-builds",
 )
 
+# Fixed already-owned inner routes. These are transport classifications only;
+# the Workspace App retains each original READ/action principal and grant gate.
+_WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES: tuple[str, ...] = (
+    "/workspace/project-session/current",
+    "/workspace/project-admission/current",
+    "/workspace/project-admission/operation",
+    "/workspace/fabric/status/current",
+)
+_WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
+    "/workspace/fabric/catalog/current",
+)
+_WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES: tuple[str, ...] = (
+    "/workspace/project-admission/pause",
+    "/workspace/project-admission/resume",
+)
+_WORKSPACE_ACTION_ROUTES = (
+    _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES + _WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES
+)
+
 
 def _refuse_public_policies(settings: Any, builder: str) -> None:
     """Never admit the public ``/mcp`` audience at an unrestricted outer layer.
@@ -614,6 +633,8 @@ class _ExecutivePathFence:
                 "/workspace/autonomy/current",
                 "/workspace/operator/activity/current", "/workspace/resources/capacity/current",
             ))
+            self._workspace_routes.update(_WORKSPACE_ADDITIONAL_GET_ROUTES)
+            self._query_routes.update(_WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES)
         if content_app is not None:
             self._workspace_routes.add("/workspace/window/current")
         self._routes.update({path: "GET" for path in self._workspace_routes})
@@ -621,9 +642,9 @@ class _ExecutivePathFence:
         if workspace_app is not None:
             # Fixed actions share the incumbent public credential/host fences
             # but must not be included in the preceding GET method expansion.
-            self._routes.update({path: "POST" for path in _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES})
-            self._workspace_routes.update(_WORKSPACE_CONTROL_ROOM_ACTION_ROUTES)
-            self._public_routes.update(_WORKSPACE_CONTROL_ROOM_ACTION_ROUTES)
+            self._routes.update({path: "POST" for path in _WORKSPACE_ACTION_ROUTES})
+            self._workspace_routes.update(_WORKSPACE_ACTION_ROUTES)
+            self._public_routes.update(_WORKSPACE_ACTION_ROUTES)
         if os_app is not None:
             if type(os_app) is not OsStaticApp:
                 raise ValueError("fixed OS static owner required")
@@ -1420,10 +1441,11 @@ def _build_profile_mcp_app(
                 "/workspace/project-journal/current",
                 "/workspace/project-direction/current",
                 "/workspace/autonomy/current",
-                             "/workspace/operator/activity/current", "/workspace/resources/capacity/current"))
+                             "/workspace/operator/activity/current", "/workspace/resources/capacity/current")
+                             + _WORKSPACE_ADDITIONAL_GET_ROUTES)
         outer_routes.extend(
             Route(path, workspace_app, methods=["POST"])
-            for path in _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES
+            for path in _WORKSPACE_ACTION_ROUTES
         )
     if content_app is not None:
         outer_routes.append(Route("/workspace/window/current", content_app, methods=["GET"]))
