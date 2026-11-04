@@ -46,7 +46,7 @@ class AppSource:
                 **({} if fault == "missing_patch" else {"patch": "@@ -1 +1 @@"}),
             }]
         reads = sum(n == number and not f for n, f in self.calls)
-        sha = "c" * 40 if (fault == "moved_during" and reads >= 2) or (fault == "moved_after" and reads >= 3) else HEAD
+        sha = "c" * 40 if fault == "moved_during" and reads >= 2 else HEAD
         return {
             "number": number + 1 if fault == "identity" else number,
             "state": "closed" if fault == "closed" else "open", "draft": False,
@@ -69,7 +69,7 @@ def read_numbers(pulls):
 
 
 @pytest.mark.parametrize("fault", [
-    "missing_page", "missing_patch", "moved_during", "moved_after", "oversized", "closed",
+    "missing_page", "missing_patch", "moved_during", "oversized", "closed",
 ])
 def test_local_risk_failure_does_not_starve_the_next_pr(fault):
     source, pulls, ledger = AppSource(fault), pages(), Ledger()

@@ -133,9 +133,9 @@ def _validate_file(value: object) -> SourceFile:
     return value
 
 
-def assess_current_pr_risk(
+def assess_current_pr_risk_with_final(
     reader: RiskGitHubReadPort, *, repository: str, pull_number: int
-) -> ReviewRiskAssessment:
+) -> tuple[ReviewRiskAssessment, SourcePR]:
     """Read complete authentic files, fence moved heads, then classify.
 
     Any missing page, renamed sensitive previous file, mismatched stats, stale
@@ -175,7 +175,7 @@ def assess_current_pr_risk(
         if file.status == "removed":
             hints.add("destructive_change")
     try:
-        return assess_review_risk(ReviewChangeFacts(
+        assessment = assess_review_risk(ReviewChangeFacts(
             repository=repository, pull_number=pull_number,
             head_sha=first.head_sha, changed_paths=tuple(paths),
             additions=first.additions, deletions=first.deletions,
@@ -185,5 +185,16 @@ def assess_current_pr_risk(
                 previous_path=f.previous_filename
             ) for f in files),
         ))
+        return assessment, final
     except RiskPolicyInputError as exc:
         raise RiskSourceUnavailable("PR_SOURCE_INVALID_FOR_POLICY") from exc
+
+
+def assess_current_pr_risk(
+    reader: RiskGitHubReadPort, *, repository: str, pull_number: int
+) -> ReviewRiskAssessment:
+    """Backward-compatible assessment, with no redundant source read."""
+    assessment, _ = assess_current_pr_risk_with_final(
+        reader, repository=repository, pull_number=pull_number,
+    )
+    return assessment

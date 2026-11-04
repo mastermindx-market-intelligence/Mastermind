@@ -120,7 +120,7 @@ def test_incomplete_or_denied_source_holds_before_job(failure):
 
 def test_stale_signed_source_holds_before_job():
     source = ExistingApp()
-    source.move_after = 4
+    source.move_after = 3
     ledger = Ledger()
     with pytest.raises(ReviewRiskSourceUnqualified):
         ready(source, ledger)

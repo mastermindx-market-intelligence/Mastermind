@@ -104,8 +104,13 @@ def test_signed_ordinary_guide_skips_without_job_or_post():
     advice = consumer(decision=intent(), pull_request=facts())
     assert advice.action is ReviewDispatch.SKIP_NO_REVIEW_NEEDED
     assert (advice.repository, advice.pull_number, advice.head_sha) == (REPO, PR, SHA)
-    assert len(source.calls) == 4
+    assert len(source.calls) == 3
     assert all(method == "GET" for method, _ in source.calls)
+    assert [route for _, route in source.calls] == [
+        f"/repos/{REPO}/pulls/{PR}",
+        f"/repos/{REPO}/pulls/{PR}/files?per_page=100&page=1",
+        f"/repos/{REPO}/pulls/{PR}",
+    ]
 
 
 @pytest.mark.parametrize("path,expected", [
@@ -121,7 +126,7 @@ def test_actual_source_path_controls_automatic_admission(path, expected):
         decision=intent(), pull_request=facts(),
     )
     assert advice.action is expected
-    assert len(source.calls) == 4
+    assert len(source.calls) == 3
 
 
 def test_authorized_manual_review_skips_risk_reader_entirely():
@@ -144,7 +149,7 @@ def test_source_identity_conflict_holds_with_no_approval_or_mutation(field):
     elif field == "cross_repo":
         pr = replace(pr, repository="other/repo")
     else:
-        source.move_after = 4
+        source.move_after = 3
     advice = GitHubReviewRiskConsumer(github=source.api, repository=REPO)(
         decision=decision, pull_request=pr,
     )

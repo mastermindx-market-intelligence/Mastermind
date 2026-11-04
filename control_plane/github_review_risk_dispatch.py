@@ -20,7 +20,7 @@ from control_plane.github_review_risk_source import (
     RiskGitHubReadPort,
     RiskSourceUnavailable,
     SourcePR,
-    assess_current_pr_risk,
+    assess_current_pr_risk_with_final,
 )
 
 
@@ -161,11 +161,11 @@ def advise_current_pr_review(
     if origin is ReviewOrigin.MANUAL_AUTHORIZED:
         return decide_risk_dispatch(origin=origin, assessment=None)
     try:
-        assessment = assess_current_pr_risk(
+        # The collector's final authenticated source read is already AFTER
+        # complete pagination and verified against its first read. Reuse that
+        # exact final snapshot rather than spending a redundant serial GET.
+        assessment, latest = assess_current_pr_risk_with_final(
             reader, repository=repository, pull_number=pull_number,
-        )
-        latest = reader.read_pr_risk_source(
-            repository=repository, pull_number=pull_number,
         )
     except RiskSourceUnavailable as exc:
         if (type(exc) is RiskSourceUnavailable

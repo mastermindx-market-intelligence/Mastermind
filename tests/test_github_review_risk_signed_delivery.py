@@ -88,7 +88,7 @@ def test_signed_fast_webhook_skips_without_admitting_or_notifying():
     assert body["reason"] == "REVIEW_NOT_REQUIRED"
     assert "job_id" not in body
     assert ledger.jobs == {} and ledger.calls == 0
-    assert len(source.calls) == 5
+    assert len(source.calls) == 4
     assert all(method == "GET" for method, _ in source.calls)
 
 
@@ -102,7 +102,7 @@ def test_signed_standard_and_critical_use_original_one_job(path):
     assert status == 202 and body["status"] == "ADMITTED", body
     assert body["job_id"] == "JOB-1"
     assert len(ledger.jobs) == 1
-    assert len(source.calls) == 5
+    assert len(source.calls) == 4
 
 
 def test_signed_source_incomplete_holds_no_admission():
