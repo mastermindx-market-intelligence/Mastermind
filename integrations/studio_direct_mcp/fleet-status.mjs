@@ -84,7 +84,17 @@ const PUBLIC_ACCOUNTS = new Set([
 const PUBLIC_TRANSPORT_TTL = '5h';
 const TUNNEL_ID = /^tunnel_[0-9a-f]{32}$/;
 const ORGANIZATION_ID = /^org-[A-Za-z0-9]+$/;
-const MAX_ACCOUNTS = PUBLIC_ACCOUNTS.size;
+// The installed status owner also reports six fixed internal services. They are
+// validated, but never exposed through this ChatGPT-account projection.
+const INTERNAL_ACCOUNTS = new Set([
+  'fabric-c3-570f6f34',
+  'fabric-chatgpt3-w570f6f34',
+  'fabric-design',
+  'fabric-read',
+  'mastermind-os-publication',
+  'subagent-fabric-c3',
+]);
+const MAX_OWNER_ACCOUNTS = PUBLIC_ACCOUNTS.size + INTERNAL_ACCOUNTS.size;
 const MAX_OWNER_ERROR_CHARS = 4096;
 
 function invalidOwner() {
@@ -129,14 +139,15 @@ function expectNullableBoundedString(value, maxChars, pattern = null) {
   return value;
 }
 
-function expectAccount(value) {
-  if (typeof value !== 'string' || !PUBLIC_ACCOUNTS.has(value)) invalidOwner();
+function expectAccount(value, internal = false) {
+  const allowed = internal ? INTERNAL_ACCOUNTS : PUBLIC_ACCOUNTS;
+  if (typeof value !== 'string' || !allowed.has(value)) invalidOwner();
   return value;
 }
 
-function projectErrorRow(row) {
+function projectErrorRow(row, internal = false) {
   exactKeys(row, ['account', 'ready', 'error']);
-  const account = expectAccount(row.account);
+  const account = expectAccount(row.account, internal);
   if (row.ready !== false) invalidOwner();
   if (typeof row.error !== 'string' || row.error.length < 1 || row.error.length > MAX_OWNER_ERROR_CHARS) {
     invalidOwner();
@@ -151,11 +162,12 @@ function projectErrorRow(row) {
   };
 }
 
-function projectStatusRow(row) {
+function projectStatusRow(row, internal = false) {
   exactKeys(row, ['account', 'action', 'steps', 'ready', 'gateway', 'tunnel']);
-  const account = expectAccount(row.account);
+  const account = expectAccount(row.account, internal);
   if (row.action !== 'status' || !Array.isArray(row.steps) || row.steps.length !== 0) invalidOwner();
   const ready = expectBoolean(row.ready);
+  if (internal && ready) invalidOwner();
 
   exactKeys(row.gateway, ['account', 'label', 'loaded', 'pid', 'port', 'running']);
   if (row.gateway.account !== account) invalidOwner();
@@ -279,26 +291,33 @@ function validateAndProjectOwnerResult(value) {
   if (value.schema !== OWNER_SCHEMA || value.action !== 'status' || !Array.isArray(value.accounts)) {
     invalidOwner();
   }
-  const accountCount = expectBoundedInteger(value.accountCount, 0, MAX_ACCOUNTS);
-  const readyCount = expectBoundedInteger(value.readyCount, 0, MAX_ACCOUNTS);
+  const accountCount = expectBoundedInteger(value.accountCount, 0, MAX_OWNER_ACCOUNTS);
+  const readyCount = expectBoundedInteger(value.readyCount, 0, MAX_OWNER_ACCOUNTS);
   const allReady = expectBoolean(value.allReady);
   if (value.accounts.length !== accountCount || readyCount > accountCount) invalidOwner();
 
-  const accounts = value.accounts.map((row) =>
-    Object.hasOwn(row ?? {}, 'error') ? projectErrorRow(row) : projectStatusRow(row));
+  // Validate every raw row and the owner's original aggregate first. Unknown,
+  // duplicated or malformed internal rows cannot be used to hide a bad owner
+  // result. Only the validated public subset is returned to ChatGPT.
   const seen = new Set();
-  for (const row of accounts) {
-    if (seen.has(row.account)) invalidOwner();
-    seen.add(row.account);
-  }
-  const computedReadyCount = accounts.filter((row) => row.ready).length;
-  const computedAllReady = accountCount > 0 && computedReadyCount === accountCount;
-  if (readyCount !== computedReadyCount || allReady !== computedAllReady) invalidOwner();
+  const projected = value.accounts.map((row) => {
+    const internal = INTERNAL_ACCOUNTS.has(row?.account);
+    const result = Object.hasOwn(row ?? {}, 'error')
+      ? projectErrorRow(row, internal) : projectStatusRow(row, internal);
+    if (seen.has(result.account)) invalidOwner();
+    seen.add(result.account);
+    return { internal, result };
+  });
+  const ownerReadyCount = projected.filter(({result}) => result.ready).length;
+  const ownerAllReady = accountCount > 0 && ownerReadyCount === accountCount;
+  if (readyCount !== ownerReadyCount || allReady !== ownerAllReady) invalidOwner();
 
+  const accounts = projected.filter(({internal}) => !internal).map(({result}) => result);
+  const publicReadyCount = accounts.filter((row) => row.ready).length;
   return {
-    accountCount,
-    readyCount,
-    allReady,
+    accountCount: accounts.length,
+    readyCount: publicReadyCount,
+    allReady: accounts.length > 0 && publicReadyCount === accounts.length,
     accounts,
   };
 }

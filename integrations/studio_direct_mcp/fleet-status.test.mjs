@@ -128,6 +128,54 @@ test('status returns only the bounded public fleet projection', async t => {
   assert.equal(Object.hasOwn(result, 'owner'), false);
 });
 
+test('extra closed internal service rows do not invalidate eight public ChatGPT seats', async t => {
+  const publicSeats = [
+    'admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt2-personal',
+    'chatgpt3', 'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4',
+  ];
+  const internal = [
+    'fabric-c3-570f6f34', 'fabric-chatgpt3-w570f6f34', 'fabric-design',
+    'fabric-read', 'mastermind-os-publication', 'subagent-fabric-c3',
+  ];
+  const raw = ownerFor([
+    ...publicSeats.map(name => statusRow(name, true)),
+    ...internal.map(name => ({...statusRow(name, false), tunnel: {
+      ...statusRow(name, false).tunnel, gatewayReady: false, transportTTL: null,
+    }})),
+  ]);
+  assert.equal(raw.accountCount, 14);
+  assert.equal(raw.readyCount, 8);
+  const fx = await fixture(JSON.stringify(raw));
+  t.after(() => rm(fx.dir, {recursive:true, force:true}));
+  const result = await createFleetStatus(fx.config).status();
+  assert.equal(result.state, 'READY');
+  assert.equal(result.accountCount, 8);
+  assert.equal(result.readyCount, 8);
+  assert.equal(result.allReady, true);
+  assert.deepEqual(result.accounts.map(a => a.account), publicSeats);
+  const out = JSON.stringify(fleetStatusToolResult(result));
+  for (const name of internal) assert.equal(out.includes(name), false);
+});
+
+test('internal fleet status rows cannot hide malformed or duplicated owner evidence', async t => {
+  const internal = statusRow('fabric-design', false);
+  internal.tunnel.gatewayReady = false;
+  internal.tunnel.transportTTL = null;
+  const cases = [
+    ownerFor([statusRow('chatgpt1'), internal, {...internal}]),
+    ownerFor([statusRow('chatgpt1'), {...internal, extraField: true}]),
+    ownerFor([statusRow('chatgpt1'), {...internal, ready: true}]),
+    ownerFor([statusRow('chatgpt1'), {...internal, gateway: {...internal.gateway, account: 'chatgpt1'}}]),
+    ownerFor([statusRow('chatgpt1'), statusRow('unknown-fabric-service', false)]),
+  ];
+  for (const [index, raw] of cases.entries()) {
+    const fx = await fixture(JSON.stringify(raw));
+    t.after(() => rm(fx.dir, {recursive:true, force:true}));
+    await assert.rejects(() => createFleetStatus(fx.config).status(),
+      /FLEET_STATUS_OWNER_RESULT_INVALID/, 'invalid internal case ' + index);
+  }
+});
+
 test('raw owner internals never appear in structured or text output', async t => {
   const rawError = '/Users/chriswong/private sk-proj-secret-shape raw stderr 987654321 45018';
   const owner = ownerFor([
