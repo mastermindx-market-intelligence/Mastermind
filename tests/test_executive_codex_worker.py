@@ -656,6 +656,34 @@ def test_git_snapshot_preserves_typed_nonzero_instead_of_collapsing_to_stage(
     assert "top-secret" not in str(raised.value)
 
 
+@pytest.mark.parametrize("legacy", (False, True))
+def test_reviewed_coordinator_configs_are_exact_worker_inputs(
+    tmp_path: Path, legacy: bool
+) -> None:
+    workspace, _ = _workspace(tmp_path)
+    config = workspace / ".codex" / "config.toml"
+    if legacy:
+        config.write_text(
+            '[shell_environment_policy]\ninherit = "core"\n\n'
+            '[shell_environment_policy.set]\nBOT_REASONING_LAYER = "1"\n\n'
+            '[agents]\nenabled = true\n'
+            '# Daily portfolio research is read-heavy. Keep fan-out bounded so one nightly run\n'
+            '# cannot turn a wide Prophet board into an unbounded token tree.\n'
+            'max_concurrent_threads_per_session = 3\n'
+            'default_subagent_model = "gpt-5.6-terra"\n'
+            'default_subagent_reasoning_effort = "medium"\n',
+            encoding="utf-8",
+        )
+    cw._validate_project_configuration(workspace)
+
+    # Neither a similar configuration nor an added configuration layer is
+    # admitted merely because the approved coordinator defaults are enabled.
+    with config.open("a", encoding="utf-8") as handle:
+        handle.write('\n[features]\nmulti_agent_v2 = true\n')
+    with pytest.raises(cw.LaunchValidationError, match="audited worker-safe hash"):
+        cw._validate_project_configuration(workspace)
+
+
 def test_project_configuration_failure_is_attributed_without_private_detail(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -903,6 +931,8 @@ def test_success_uses_exact_one_shot_argv_empty_env_and_private_logs(tmp_path: P
     assert 'default_permissions="mastermind_exec_read"' in rendered
     assert 'approval_policy="never"' in rendered
     assert "agents.enabled=false" in rendered
+    assert ("--disable", "multi_agent") in pairs
+    assert ("--disable", "multi_agent_v2") in pairs
     assert 'web_search="disabled"' in rendered
     assert (
         f'projects={{{json.dumps(str(workspace))}={{trust_level="untrusted"}}}}'
@@ -946,14 +976,16 @@ def test_complete_launch_attestation_is_redacted_and_principal_bound(tmp_path: P
     prompt = "private task packet that must only be hashed"
 
     async def exercise():
+        uid, gid = os.geteuid(), os.getegid()
         adapter, spec, workspace, run_dir = _fixture(tmp_path, prompt=prompt)
+        os.chown(run_dir, -1, gid)
         run_dir.chmod(0o770)
         spec = dataclasses.replace(
             spec,
-            expected_worker_uid=os.geteuid(),
-            expected_worker_gid=os.getegid(),
-            worker_user=pwd.getpwuid(os.geteuid()).pw_name,
-            shared_run_gid=os.getegid(),
+            expected_worker_uid=uid,
+            expected_worker_gid=gid,
+            worker_user=pwd.getpwuid(uid).pw_name,
+            shared_run_gid=gid,
             secret_canary_verdict=_passing_canary(),
             require_secret_canary=True,
         )
@@ -4539,3 +4571,19 @@ def test_split_git_snapshot_rejects_real_tracked_and_untracked_dirt(
     snapshot = cw._git_snapshot(workspace, require_clean=False)
     assert bool(snapshot.status) is tracked
     assert relative_path in cw._git_changed_paths(workspace)
+
+
+def test_shared_worker_sandbox_renderer_is_byte_identical_to_codex_policy(tmp_path: Path) -> None:
+    adapter, spec, workspace, run_dir = _fixture(tmp_path)
+    expected = adapter._permission_overrides(
+        spec,
+        workspace.resolve(strict=True),
+        codex_home=adapter.codex_home,
+    )
+    actual = cw.render_worker_sandbox_permission_overrides(
+        spec,
+        workspace.resolve(strict=True),
+        run_dir.resolve(strict=True),
+        adapter.codex_home.resolve(strict=True),
+    )
+    assert actual == expected

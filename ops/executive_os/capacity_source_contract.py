@@ -948,6 +948,198 @@ def validate_host_receipt_v2(
     return expected
 
 
+def validate_native_subscription_capacity_enrollment(value: object) -> dict[str, Any]:
+    """Closed inert stanza for the incumbent finite root-config publisher.
+
+    Validation is syntax only. Publication must bind the actual qualified
+    immutable source export and host/principal/custody owners; no input is an
+    enrollment grant, readiness result or accepted-source proof by itself.
+    """
+    fields = {"schema_version", "host_ref", "os_principal_ref", "config_custody_ref",
+              "enrollment_state", "registration_source"}
+    if (type(value) is not dict or set(value) != fields
+            or value["schema_version"] != "mastermind.native_subscription_capacity_enrollment/v1"
+            or value["enrollment_state"] not in ("enrolled", "unenrolled")):
+        raise CapacitySourceContractError("NATIVE_ENROLLMENT_INVALID")
+    for key, prefix in (("host_ref", "host"), ("os_principal_ref", "principal"),
+                        ("config_custody_ref", "custody")):
+        if type(value[key]) is not str or re.fullmatch(prefix + r"-[0-9a-f]{64}", value[key]) is None:
+            raise CapacitySourceContractError("NATIVE_ENROLLMENT_INVALID")
+    source = validate_native_registration_source(value["registration_source"])
+    return {**value, "registration_source": source}
+
+
+def validate_native_registration_source(source: object) -> dict[str, str]:
+    """Copy the existing four source pins; syntax confers no acceptance."""
+    if (type(source) is not dict or set(source) != {"release_commit", "previous_release_commit", "material_source_digest", "export_sha256"}
+            or any(type(source[key]) is not str or _COMMIT_RE.fullmatch(source[key]) is None
+                   for key in ("release_commit", "previous_release_commit"))
+            or source["release_commit"] == source["previous_release_commit"]
+            or any(type(source[key]) is not str or _DIGEST_RE.fullmatch(source[key]) is None
+                   for key in ("material_source_digest", "export_sha256"))):
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_SOURCE_INVALID")
+    return dict(source)
+
+
+def acquire_native_registration(realm_owner: object) -> dict[str, Any]:
+    """Read a source-owner-published immutable Macro export for one root realm.
+
+    The existing root Worker config pins an already-qualified Macro release,
+    its accepted predecessor, material identity and exact exported bytes. The
+    publication owner must acquire that export from the actual accepted source
+    CLI, never a model/request document. This reader cannot qualify a Git branch
+    or infer release acceptance from a public hash. There is no default stanza.
+
+    The export is an immutable projection in Capacity configuration, never an
+    extra file inside a sealed Macro checkout or a second capability registry.
+    No credential or provider is read.
+    Return values are observations, not bearer authentication or availability.
+    """
+    from control_plane import codex_provider_realm as realm
+
+    if (type(realm_owner) is not realm.SubscriptionRealmOwner
+            or realm_owner._seal is not realm._SUBSCRIPTION_REALM_OWNER_SEAL):
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_OWNER_REQUIRED")
+    path, config_sha = realm_owner._config_path, realm_owner._config_sha256
+    return _acquire_native_registration(path, config_sha)
+
+
+def acquire_control_native_registration(probe_source: object, physical: object) -> dict[str, Any]:
+    """Read through the existing fixed Control owner, not a supplied config.
+
+    The Control definition/attestation and physical worker digest are reread by
+    that owner's current configuration method. No worker UID impersonation,
+    credential metadata read or public serialized receipt is accepted here.
+    """
+    from control_plane.fabric_attended_canary import AttendedControlProbeSource
+    from control_plane.executive_fabric_adapter import FabricHostBinding
+    if type(probe_source) is not AttendedControlProbeSource or type(physical) is not FabricHostBinding:
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_OWNER_REQUIRED")
+    raw, worker, attestation = probe_source.configuration(physical)
+    path = Path(raw['fabric_attended_probe']['worker_config_path'])
+    value = _acquire_native_registration(path, physical.worker_source_config_digest)
+    if probe_source.configuration(physical) != (raw, worker, attestation):
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_CHANGED")
+    return value
+
+
+def _acquire_native_registration(path: Path, config_sha: str) -> dict[str, Any]:
+    # Private common read, entered only from the actual Worker or Control owner.
+    from control_plane import codex_provider_realm as realm
+    config = realm._native_read_config(path, config_sha)
+    if "native_capacity_enrollment" not in config:
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_UNBOUND")
+    enrollment = validate_native_subscription_capacity_enrollment(config["native_capacity_enrollment"])
+    if enrollment["enrollment_state"] != "enrolled":
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_UNBOUND")
+    source = enrollment["registration_source"]
+    export_path = SYSTEM_ROOT / "config" / "capacity-source-components-native-v2" / (source["release_commit"] + ".json")
+    document = realm._native_read_config(export_path, source["export_sha256"])
+    selected = validate_native_registration_document(config, document)
+    # A root publication/revocation during collection invalidates the whole read.
+    if (realm._native_read_config(export_path, source["export_sha256"]) != document
+            or realm._native_read_config(path, config_sha) != config):
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_CHANGED")
+    return dict(selected, source_release_commit=source["release_commit"],
+                previous_release_commit=source["previous_release_commit"],
+                source_receipt_digest=source["export_sha256"])
+
+
+def validate_native_registration_document(config: object, document: object) -> dict[str, Any]:
+    """Validate candidate registration content without granting enrollment.
+
+    The existing realm reader and fixed root publisher supply their protected,
+    digest-pinned reads. Dictionaries alone establish neither source custody
+    nor a host/provider identity; this function performs no I/O or admission.
+    """
+    if type(config) is not dict or type(document) is not dict:
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_SOURCE_MISMATCH")
+    enrollment = validate_native_subscription_capacity_enrollment(config.get("native_capacity_enrollment"))
+    source = enrollment["registration_source"]
+    if (set(document) != {"repository_commit", "previous_repository_commit", "material_source_digest", "registrations"}
+            or document["repository_commit"] != source["release_commit"]
+            or document["previous_repository_commit"] != source["previous_release_commit"]
+            or document["material_source_digest"] != source["material_source_digest"]
+            or type(document["registrations"]) is not list or len(document["registrations"]) > 32):
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_SOURCE_MISMATCH")
+    row_fields = {"schema", "capacity_capability_id", "capability_generation", "provider", "billing_mode",
+                  "credential_kind", "execution_surface", "registration_state", "material_source_digest",
+                  "registration_receipt_digest"}
+    selected = None
+    identities: set[str] = set()
+    for row in document["registrations"]:
+        if (type(row) is not dict or set(row) != row_fields
+                or row["schema"] != "mastermind.provider_native_capability_registration/v1"
+                or type(row["capacity_capability_id"]) is not str
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", row["capacity_capability_id"]) is None
+                or row["capacity_capability_id"] in identities
+                or type(row["capability_generation"]) is not int or not 1 <= row["capability_generation"] < 2**63
+                or any(type(row[key]) is not str for key in ("provider", "credential_kind", "registration_state"))
+                or row["billing_mode"] != "subscription" or row["execution_surface"] != "native_cli"
+                or (row["provider"], row["credential_kind"]) not in {("claude", "attached_login"), ("minimax", "api_key")}
+                or row["registration_state"] not in {"registered", "revoked"}
+                or row["material_source_digest"] != source["material_source_digest"]):
+            raise CapacitySourceContractError("NATIVE_REGISTRATION_INVALID")
+        unsigned = {key: value for key, value in row.items() if key != "registration_receipt_digest"}
+        expected = hashlib.sha256(json.dumps(unsigned, sort_keys=True, separators=(",", ":"),
+                    ensure_ascii=False, allow_nan=False).encode("utf-8")).hexdigest()
+        if row["registration_receipt_digest"] != expected:
+            raise CapacitySourceContractError("NATIVE_REGISTRATION_DIGEST_MISMATCH")
+        identities.add(row["capacity_capability_id"])
+        if row["capacity_capability_id"] == config.get("capacity_capability_id"):
+            selected = row
+    if selected is None or selected["registration_state"] != "registered":
+        raise CapacitySourceContractError("NATIVE_REGISTRATION_NOT_CURRENT")
+    return dict(selected)
+
+
+def validate_native_identity_observation(value: object) -> dict[str, Any]:
+    """Closed initial B3 projection; custody never becomes provider readiness.
+
+    This checks secret-free wire shape only. It grants no producer authenticity,
+    freshness, provider normalization, Capacity eligibility or Runtime authority.
+    Positive provider facts require their actual owners and a reviewed successor.
+    """
+    from datetime import datetime, timezone
+    from control_plane.executive_host_pressure import HOST_REF_RE, BOOT_REF_RE
+    fields = {"schema", "capacity_capability_id", "capability_generation", "host_ref", "boot_ref",
+              "realm_generation", "enrollment_receipt_digest", "observed_at", "realm_auth",
+              "provider_health", "cooling", "quota_horizons", "last_provider_outcome", "source_receipt_digest"}
+    def refuse():
+        raise CapacitySourceContractError("NATIVE_OBSERVATION_INVALID")
+    if type(value) is not dict or set(value) != fields:
+        refuse()
+    if value["schema"] != "mastermind.provider_native_realm_observation/v1":
+        refuse()
+    for key, pattern in (("host_ref", HOST_REF_RE), ("boot_ref", BOOT_REF_RE),
+            ("capacity_capability_id", re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")),
+            ("enrollment_receipt_digest", re.compile(r"[0-9a-f]{64}")),
+            ("source_receipt_digest", re.compile(r"[0-9a-f]{64}"))):
+        if type(value[key]) is not str or pattern.fullmatch(value[key]) is None:
+            refuse()
+    for key in ("capability_generation", "realm_generation"):
+        if type(value[key]) is not int or not 1 <= value[key] < 2**63:
+            refuse()
+    observed = value["observed_at"]
+    if type(observed) is not str or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", observed):
+        refuse()
+    try:
+        if datetime.fromisoformat(observed.replace("Z", "+00:00")).utcoffset() != timezone.utc.utcoffset(None):
+            refuse()
+    except ValueError:
+        refuse()
+    unknown = {
+        "realm_auth": {"state": "unknown", "method": "unknown", "source_quality": "unknown"},
+        "provider_health": {"state": "unknown", "error_class": None, "scope": "unknown", "observed_at": None},
+        "cooling": {"active": None, "kind": None, "reset_at": None, "evidence": "unknown", "scope": "unknown", "observed_at": None},
+        "quota_horizons": [],
+        "last_provider_outcome": {"class": "unknown", "observed_at": None, "scope": "unknown"},
+    }
+    if any(value[key] != expected for key, expected in unknown.items()):
+        refuse()
+    return json.loads(json.dumps(value, sort_keys=True, allow_nan=False))
+
+
 def _read_json(source: Path) -> Any:
     try:
         return json.loads(source.read_text(encoding="utf-8"))

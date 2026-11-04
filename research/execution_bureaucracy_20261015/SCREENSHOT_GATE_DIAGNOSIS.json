@@ -1,0 +1,38 @@
+{
+  "reviewed_service_pr": 1147,
+  "source_head": "f34a02badd25f2dd1f72841bcde8f91c4cf031db",
+  "source_file": "scripts/executive_os_phase1c.py",
+  "source_sha256": "accf4a5039b4edce733055ba4cc83a1c4e3f2181b0e12c6fe36a9ccaa568c9e1",
+  "method": "Exact AST-selected pure config functions with synthetic config and nonprivileged stub OS identity; not a full launcher/installed-service test",
+  "checks": [
+    {
+      "case": "bridge_disabled",
+      "result": false
+    },
+    {
+      "case": "bridge_armed",
+      "error_type": "FabricActivationRefused",
+      "message": "Fabric activation is disabled until an actual backend and isolation profile are admitted"
+    },
+    {
+      "case": "bridge_armed_with_binding",
+      "error_type": "FabricActivationRefused",
+      "message": "Fabric activation is disabled until an actual backend and isolation profile are admitted"
+    },
+    {
+      "case": "peer_dormant",
+      "result": 10001
+    },
+    {
+      "case": "peer_armed",
+      "error_type": "FabricActivationRefused",
+      "message": "inference admission remains disabled until its installed service and backend are proven"
+    }
+  ],
+  "finding": "This candidate deliberately has no armed inference/bridge configuration path. OAuth/OS enrollment alone cannot unlock it; an admitted implementation and installed host composition are additionally missing. Do not remove refusal checks to simulate qualification.",
+  "production_effects": false,
+  "privileged_file_reads": false,
+  "real_credentials_used": false,
+  "provider_started": false,
+  "held_original_supervisor_and_bot_edits_replayed": false
+}

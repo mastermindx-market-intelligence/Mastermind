@@ -72,6 +72,26 @@ class DshProjectionTests(unittest.TestCase):
                 changed['tools'][0][field] = {'changed': True}
                 with self.assertRaises(self.api.DshMcpProjectionError): self.project(catalog=changed)
 
+    def test_selected_undigested_execution_metadata_refused(self):
+        # The canonical schema digest excludes execution metadata. A remote
+        # catalog must not silently introduce executable DSH configuration.
+        changed = copy.deepcopy(self.catalog)
+        changed['tools'][0]['execution'] = {'taskSupport': 'optional'}
+        unchanged_digest = observed_mcp_tool_schema_digest(
+            {'tools': {'read_file': changed['tools'][0]}})
+        self.assertEqual(unchanged_digest,
+                         self.profile.mcp_server_grants[0].tool_schema_digest)
+        with self.assertRaisesRegex(self.api.DshMcpProjectionError,
+                                    'undigested execution'):
+            self.project(catalog=changed)
+
+        # An UNGRANTED catalog entry cannot change the projected grant, even
+        # if the remote server advertises execution metadata there.
+        ungranted = copy.deepcopy(self.catalog)
+        ungranted['tools'][1]['execution'] = {'taskSupport': 'optional'}
+        self.assertEqual(self.project(catalog=ungranted).configuration(),
+                         self.project().configuration())
+
     def test_missing_or_duplicate_catalog_tool_refused(self):
         for tools in [[], [self.catalog['tools'][1]], self.catalog['tools'] * 2]:
             with self.subTest(tools=len(tools)):

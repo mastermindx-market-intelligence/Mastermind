@@ -1082,9 +1082,9 @@ def test_planner_routing_options_expose_pools_models_without_worker_identity(tmp
 
     options = _planner_routing_options(runtime, planner)
     assert options is not None
-    assert options["schema_version"] == "mastermind.planner_routing_options/v1"
+    assert options["schema_version"] == "mastermind.planner_routing_options/v2"
     assert options["default_mode"] == "AUTO"
-    assert options["manual_override_plan_schema"] == "mastermind.execution_plan/v4"
+    assert options["manual_override_plan_schema"] == "mastermind.execution_plan/v5"
     assert options["default_route"] == {
         "provider_realm": "codex",
         "eligible_quota_classes": ["codex-hf1q-step"],

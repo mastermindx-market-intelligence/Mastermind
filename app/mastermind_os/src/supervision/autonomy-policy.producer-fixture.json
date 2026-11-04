@@ -1,0 +1,54 @@
+{
+  "availability": "AVAILABLE",
+  "policy": {
+    "limits": {
+      "allowed_child_cost_classes": [
+        "default",
+        "small"
+      ],
+      "max_attempts_per_orchestration_job": 2,
+      "max_children_total": 16,
+      "max_depth": 1,
+      "max_fan_out_per_parent": 8,
+      "max_repair_rounds": 2,
+      "max_review_attempts_per_job": 2,
+      "review_job_attempt_limit": 1,
+      "schema_version": 1
+    },
+    "plan_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "policy_sha": "6cc80806fb0aa48a10f45f8d6483c3718d70c841aef671f501374f8b4ac4ed60",
+    "reservation_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "scope": "ADMITTED_ROOT",
+    "source_sha256": "83b46f13bd4a881ea7c261647b8e0ef9fc700d8424a8a60cbf7dd81f95d0ed83"
+  },
+  "reason_codes": [],
+  "schema": "mastermind.workspace_autonomy_read_result.v1",
+  "selection": {
+    "root_job_id": "JOB-1",
+    "work_ref": "WS:ONE"
+  },
+  "source_observation": {
+    "control_room": {
+      "cache_currentness_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "document_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "instance_after": "owner1",
+      "instance_before": "owner1",
+      "publication_after": 7,
+      "publication_before": 7,
+      "source_validity_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "runtime": {
+      "after": 5,
+      "before": 5,
+      "schema": "mastermind.runtime_read_observation.v1",
+      "source_identity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": "SAME"
+    },
+    "schema": "mastermind.workspace_plan_observation.v1",
+    "selection": {
+      "root_job_id": "JOB-1",
+      "work_ref": "WS:ONE"
+    },
+    "state": "SAME"
+  }
+}
