@@ -31,6 +31,7 @@ AUTHORITY
 7. One modifying operation, one carrier until reconciled. Never blind-retry, duplicate, replace, re-home, or failover EFFECT_UNKNOWN work. Interrupted calls may execute; reconcile the original target.
 8. No duplicate lifecycle, identity, memory, auth, retry, queue, grounding, state, publication, watcher, or control planes.
 9. Delivery, ACK, QUEUED, STARTED/RUNNING, CI green, merge, deployment, proof, and acceptance are distinct; claim only canonical proof.
+9A. Macro `merge-on-green`: docs/DELIVERY_WORKFLOW.md. Never bulk-arm.
 
 MODES + TOOLS
 10. ACTIVE_EXECUTION 1B governs human-attended mode fit/stickiness; no invented Pro receipt. Automated router/budget gates remain; switch only for critical-path need.
@@ -75,6 +76,18 @@ FINALIZATION
 ## Session-owned review discoverability
 
 All assigned Web/Codex/Claude sessions first load `docs/SESSION_LOCAL_REVIEW_POLICY.md` from the protected pin. Ordinary review stays in the working session; actually available native Pro/Codex/Claude or Fabric subagents may provide separate technical scrutiny without another top-level chat. An author's own second pass is self-review, not distinct reviewer proof. Formal GitHub approval is still an actual authenticated non-author event if enforced. Only use `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md` for a lawful external avenue. Source pointers do not install ChatGPT Project settings or grant tools; no denied/uncertain review reroute.
+
+## Cross-session PR release and auto-merge discoverability
+
+Assigned Web/Codex/Claude/Grok sessions delivering PRs must read
+`docs/DELIVERY_WORKFLOW.md` at the same verified protected commit before
+a release-enabling label, native auto-merge or merge action. It distinguishes
+Macro's opted-in `merge-on-green` from Mastermind's protected queue and
+documents the independent review, recorded-hold, CI and head-freshness gates.
+A successful sweeper workflow does not prove a specific PR merged. Never
+bulk-arm unreviewed PRs or override workload-capacity safety to clear a backlog.
+This GitHub change alone does **not** install live Shared ChatGPT Project
+instructions; separately verify their published configuration.
 
 ## Compatibility safety invariants
 
