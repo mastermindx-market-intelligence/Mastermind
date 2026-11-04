@@ -1,7 +1,7 @@
 # CEO Project Plan and Crash-Continuity Contract
 
 **Status:** source contract. A branch/draft is `SPEC_ONLY`, not an installed editor,
-Project setting, Agent OS grant or automatic recovery. Adoption needs reviewed
+Project setting, Agent OS grant or automatic recovery. Adoption needs tested
 protected release and a real consumer canary.
 
 ## Purpose and scope

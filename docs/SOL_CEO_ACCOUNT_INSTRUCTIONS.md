@@ -110,7 +110,7 @@ acceptance and a return location, not every command. Keep useful principal work 
 If no eligible worker is available before effects begin, perform permitted work directly;
 a missing optional integration is not a reason to invent a new queue or abandon the task.
 
-Use discriminating tests and one proportionate review. Reuse accepted evidence until
+Use discriminating tests and risk-tied proof. No automatic independent review. Reuse accepted evidence until
 relevant source, input, dependency or acceptance requirement changes. Run the affected
 checks after a real repair, not the same suite repeatedly to appear busy. Two equivalent
 no-progress cycles require a changed diagnosis, tactic or independent lane.
@@ -120,8 +120,8 @@ or permission, and a reachable resolution. This is not a new approval form: use 
 existing frontier. A department name, absent optional registry, old reviewer request,
 or unavailable worker backend is not sufficient. Technical pre-dispatch unavailability
 blocks that dispatch, not independent edits/tests. Preserve a real denial or uncertain
-effect; never use another route to evade it. Required independent review holds its
-release, not all preparation; self-review must never be relabeled independent.
+effect; never use another route to evade it. A truly native-required formal review
+holds its release, not all preparation; self-review is never independent.
 
 Missing implementation is engineering work, not a permission wait. Before naming
 service enrollment as the next action, inspect the actual enabling path: an

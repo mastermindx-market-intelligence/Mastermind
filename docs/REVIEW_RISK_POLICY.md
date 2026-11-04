@@ -47,9 +47,9 @@ A review is requested **only** through an explicit eligible manual request or a 
 - Pass unit tests including sensitive one-line changes, incomplete source, forged hints, duplicate paths and elevated test deletions.
 - Run read-only classification over a real mixed recent-PR cohort from Mastermind, Macro and Terminal. Manually adjudicate false FAST classifications; report proportion of eligible changes and reviewer time saved only from observed receipts.
 - Reconcile source-law wording in `docs/sol_skills/ACTIVE_EXECUTION.md`, `docs/CEO_PROJECT_PLAN_CONTINUITY.md`, `AGENTS.md`, `CLAUDE.md` and native consumers without overwriting in-flight compaction PR #1967. Do not claim acceptance from this document alone.
-- Integrate this policy into existing PR #1977 GitHub/Executive ingress **after** its source writer and effects are reconciled. The repo-policy auto-coverage mode must be held default OFF for FAST until the installed consumer provably skips them. No cross-carrier replay of existing review intent.
+- Keep the existing GitHub/Executive **automatic review host OFF** for this no-mandatory-review policy. Its unfinished Executive socket binding is not a prerequisite for eliminating reviewer handoffs. If a separately authorized administrator later enables manual/optional review ingress, integrate this policy into original #1977 and prove signed FAST/STANDARD/CRITICAL skips, explicit MANUAL routing and HOLD refusal before arming. No denied-handler replay or second ingress.
 - Verify actual GitHub rulesets / branch protection with administrative readback for each repo. A 403 on the branch-protection endpoint means UNKNOWN, not zero. Update a rule only by its authorized admin owner after a separate compatible source release; never use bypass to test.
-- Require protected merge/CI, targeted security tests, installed instruction and host proof, signed ingress canaries verifying FAST/STANDARD/CRITICAL all skip automatic Jobs, HOLD fails closed, manual review still works, and downstream merge/rollback behavior. Production `PROVEN_LIVE` only after those receipts.
+- Prove the no-review release path with protected CI, native rule readback, approved instructions loaded in real CEO sessions and one genuine PR reaching protected merge without a fabricated reviewer. The automatic-review host remains OFF, so it owes **no production webhook canary** for this waiver. If optional ingress is separately activated later, it must first prove signed FAST/STANDARD/CRITICAL => zero Jobs, HOLD refusal, manual-only admission, and rollback. Never claim optional review-host production proof from source tests.
 
 
 ## Chairman-directed broad FAST expansion — source candidate, 2026-11-03
@@ -65,8 +65,9 @@ acceptance. The sample was a path-only diagnostic, not a proven cohort KPI.
 
 There is no universal reviewer handoff after each patch, commit, fix, test,
 or CEO task. Review occurs only on an explicit authorized request or actually binding native requirement.
-The existing signed #1977 GitHub/Executive consumer must adopt the accepted
-policy via its original source writer, and prove FAST has zero new review Jobs
-with a real signed delivery. No source document edits live ChatGPT Project
-settings; a per-Project editor must install the new accepted compact kernel and
-obtain saved readback and fresh-session behavioral proof.
+The signed #1977 consumer is optional infrastructure, not a required
+reviewer or release dependency; leave its automatic policy OFF. A future opt-in
+must use its original authorized writer and signed canaries, never the
+previously denied Executive handler edit. Source text does not change live
+ChatGPT Projects: an authorized editor must save the accepted compact kernel
+and verify each intended account in a fresh session.
