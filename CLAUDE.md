@@ -125,6 +125,9 @@ Within an assigned nonterminal job, the current session retains responsibility f
 - `EFFECT_UNKNOWN` forbids takeover, retry, receiver rotation, provider failover, or replacement modification until canonical reconciliation.
 - Do not end at "the owner should do it" without an actual handoff or typed gate. A genuine Chairman/admin gate must name the exact external decision or credential boundary.
 - A dead or missing runtime/session is a reconciliation/succession problem for the existing canonical owner; it never grants this session automatic modifying authority.
+- A named "original administrator," publisher, reviewer, host owner, or ChatGPT conversation may identify provenance or the immutable effect/result carrier; it is not permanent staffing. Resolve exact operation/request identity, original authorized carrier, canonical pending result, live writer/lease, prior read/refusal and next lawful action. The currently assigned session owns this recovery triage, not a missing historical chat.
+- If an old operation reportedly exited successfully but its protected result is not canonically reconciled, do not infer PASS from rc0, a Slack report or a historical owner claim. Do not rerun the operation, trigger a second protected read, switch tools/accounts/credentials or activate a held service. An explicit safety/permission denial ends that action; preserve its original carrier and release hold, and advance genuinely independent authorized work.
+- `EXACT_HUMAN_GATE` requires a demonstrated unavailable human credential/control, its exact action and evidence that other useful independent lanes are exhausted. "Ask the original owner/chat" or a conceptual department is not that proof. If useful independent work exists, the mission remains `MORE_WORK_EXISTS`; save the accurate blocker in the existing canonical checkpoint, never in a new owner registry.
 <!-- MMX_RESPONSIBILITY_CONTINUITY_END -->
 
 ### Reciprocal dialogue and watcher invariant
