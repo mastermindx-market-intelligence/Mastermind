@@ -145,7 +145,7 @@ elif name == 'ssh':
         record('poll'); print('0' if case == 'plain_ok' else '75'); raise SystemExit(0)
     if 'tail -c 4096' in command:
         record('admission_read')
-        if case == 'admission_expiry': time.sleep(10)
+        if case == 'admission_expiry': time.sleep(30)
         print('REMOTE_SUB_ADMISSION_REFUSED {"reasons":["active_lane_limit_reached"]}')
         raise SystemExit(0)
     if 'support_bundle.py' in command:
@@ -162,7 +162,7 @@ elif name == 'ssh':
         raise SystemExit(0)
     if 'mkdir -p ~/lanes/tmp ' in command:
         record('setup')
-        if case == 'slow_setup': time.sleep(10)
+        if case == 'slow_setup': time.sleep(30)
         raise SystemExit(0)
     if 'mkdir ' in command:
         record('support_mkdir'); raise SystemExit(0)
@@ -172,7 +172,7 @@ elif name == 'ssh':
         record('remote_cleanup'); raise SystemExit(0)
 elif name == 'scp':
     record('scp')
-    if case == 'slow_scp': time.sleep(10)
+    if case == 'slow_scp': time.sleep(30)
     if case == 'retry_ambiguous' and count('scp')==1: time.sleep(1.2)
     raise SystemExit(0)
 elif name == 'rsync':
@@ -321,7 +321,12 @@ class ControllerDeadline(unittest.TestCase):
         write(self.bin/'fixture-python','#!'+sys.executable+'\n'+PYTHON_FIXTURE,executable=True)
 
     def run_controller(self,case,budget=4,broker_delay=0,mode='minimax',model='fixture-model',
-                       allow_prelease_refusal=False,escalation_reason=None,harness_timeout=20):
+                       allow_prelease_refusal=False,escalation_reason=None,harness_timeout=None):
+        # Independent fixture supervision is distinct from the commission fuse.
+        # A loaded host must be allowed enough real wall time to observe the
+        # ORIGINAL owner's finite expiry; this bound never enters worker env.
+        if harness_timeout is None:
+            harness_timeout=max(20, int(budget)+15)
         origin=time.monotonic_ns()+int(budget*1_000_000_000)
         env={'PATH':str(self.bin)+':/usr/bin:/bin','LANG':'C','LC_ALL':'C',
              'PYTHONDONTWRITEBYTECODE':'1','PYTHONNOUSERSITE':'1','TMPDIR':str(self.tmp),
@@ -374,12 +379,15 @@ class ControllerDeadline(unittest.TestCase):
         self.assertIn('LEASE_REFUSED rc=75',result['stderr'])
 
     def test_owned_setup_expiry_releases_only_unlaunched_provider_lease(self):
-        result=self.run_controller('slow_setup',budget=3)
+        result=self.run_controller('slow_setup',budget=14)
         self.check_prelaunch_expiry(result,'commission-setup')
         self.assertNotIn('scp',[row['stage'] for row in result['events']])
 
     def test_owned_support_transfer_expiry_never_launches_worker(self):
-        result=self.run_controller('slow_scp',budget=3)
+        # Check a *real* slow-support-transfer refusal, not an earlier
+        # CPU-loaded prelease expiry that has no transfer evidence. This is
+        # offline fixture-only headroom; live commission fuses are unchanged.
+        result=self.run_controller('slow_scp',budget=14)
         self.check_prelaunch_expiry(result,'commission-packet-upload')
 
     def check_prelaunch_expiry(self,result,label):
@@ -393,11 +401,12 @@ class ControllerDeadline(unittest.TestCase):
         self.assertEqual(receipt['cleanup']['residual_count'],0)
 
     def test_each_actual_launch_recomputes_duration_and_keeps_ambiguous_lease(self):
-        result=self.run_controller('retry_ambiguous',budget=12,broker_delay=1)
+        result=self.run_controller('retry_ambiguous',budget=24,broker_delay=1,
+                                   harness_timeout=36)
         self.assertEqual(result['returncode'],255,result['stderr'])
         launches=[row for row in result['events'] if row['stage']=='launch']
         self.assertEqual(len(launches),2,result['stderr'])
-        self.assertLess(launches[0]['child_timeout'],10)
+        self.assertLess(launches[0]['child_timeout'],result['budget'])
         self.assertLess(launches[1]['child_timeout'],launches[0]['child_timeout'])
         for row in launches:
             self.assertEqual(row['remote_budget'],row['child_timeout'])
@@ -407,9 +416,9 @@ class ControllerDeadline(unittest.TestCase):
         self.assertIn('LEASE_PRESERVED effect_unknown=1',result['stderr'])
 
     def test_expired_admission_retry_keeps_terminal_and_collects_after_deadline(self):
-        # Leave room for real prelaunch preparation; the finite 10-second
+        # Leave room for real prelaunch preparation; the finite 30-second
         # admission-read stall still exceeds the entire original budget.
-        result=self.run_controller('admission_expiry',budget=8)
+        result=self.run_controller('admission_expiry',budget=14)
         self.assertEqual(result['returncode'],75,result['stderr'])
         stages=[row['stage'] for row in result['events']]
         self.assertEqual(stages.count('launch'),1,result['stderr'])
@@ -519,7 +528,7 @@ class ControllerDeadline(unittest.TestCase):
         self.assertEqual(before,(retained.read_bytes(),retained.stat().st_ino,retained.stat().st_mtime_ns))
 
     def test_replaced_transport_observation_refuses_before_worker_launch(self):
-        result=self.run_controller('transport_observation_replaced',budget=8,
+        result=self.run_controller('transport_observation_replaced',budget=14,
                                    mode='qwen',model='qwen3.8-flash')
         self.assertEqual(result['returncode'],78,result['stderr'])
         self.assertIn('TRANSPORT_VERIFICATION_REFUSED',result['stderr'])

@@ -60,6 +60,20 @@ class TerminalPollBudgetTests(unittest.TestCase):
                     self.assertGreater(child, 0)
                     self.assertLessEqual(child, fuse)
 
+    def test_fast_observer_caps_large_caller_poll_margin_at_30s(self):
+        # Candidate only: the older Grok overlay has its own original
+        # 120-second observation contract and is not silently republished.
+        file = ROOT / 'candidate/remote_sub.sh'
+        for max_secs, poll, expected_child in (
+                (14400, 120, 14340),
+                (3600, 120, 3540),
+                (7200, 45, 7140),
+                (210, 120, 150),
+        ):
+            with self.subTest(max_secs=max_secs, poll=poll):
+                self.assertEqual(budget(file, max_secs, poll),
+                                 (max_secs, expected_child))
+
     def test_edge_cases_do_not_make_negative_timeout(self):
         for file in PATHS:
             for maximum, poll, child_expected in ((45, 30, 15), (30, 30, 30), (2, 1, 1)):
@@ -119,7 +133,7 @@ class TerminalPollBudgetTests(unittest.TestCase):
         # binds S7 same-operation private-diagnostic proof retention.
         selected = candidate
         self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),
-                         '6294d27e65f47d5d0cfdf8a3afdb53df691f8e648f8592c501bb2a2dff61a678')
+                         '89d01ed97bd2b68aacb575ea16905fbf410735a5875cc385e3cc3e3c78d000f8')
         self.assertEqual(inventory['files']['ext/remote_sub.sh']['source'],
                          'candidate/remote_sub.sh')
         self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),

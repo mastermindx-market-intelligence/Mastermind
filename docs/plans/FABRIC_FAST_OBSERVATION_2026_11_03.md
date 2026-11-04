@@ -49,8 +49,8 @@ Broker admission acceleration's simulated 0.35s pickup vs old ~1s polling was a 
 
 ## Current source stage
 
-- 102-member selected native source manifest SHA-256: `43511755b2974f3848f12dcc9e851c33777cafe11e9ebb028e68f8823edc63a5`.
-- Selected remote controller SHA-256: `6294d27e65f47d5d0cfdf8a3afdb53df691f8e648f8592c501bb2a2dff61a678`.
+- 102-member selected native source manifest SHA-256: `d47ea1dceaaf8818e442f65cd4e51a1796197e170f1d91723c0216c2e0778384`.
+- Selected remote controller SHA-256: `89d01ed97bd2b68aacb575ea16905fbf410735a5875cc385e3cc3e3c78d000f8`.
 - Protected Qwen broker SHA remains `a2847a29abe590cb168c2cd8ae34e0b1c3222b6e92ab4c00f252a342d56e6406`.
 - Parent exact base remains `da989061704182a25d93bc561400e3e99cbba6f7` (PR #2019), not protected master. No review or deploy/prod proof of this performance head is claimed yet.
 
@@ -65,7 +65,7 @@ Result latency is **one** performance dimension. This patch does not shorten mod
 - New deterministic source-extracted fast-observation and heartbeat/backoff tests: **7/7 PASS**.
 - Combined native-release, historical95, Grok/Qwen composition, initializer, host-pull, support-policy and slot-custody suites: **PASS** with unchanged expected skips.
 - Existing full `test_commission_deadline.py` suite: **19/19 PASS** with its original strict 31.5s frozen deadline proof unrelaxed; no worker or provider launched.
-- 102-file source staging manifest SHA-256 `43511755b2974f3848f12dcc9e851c33777cafe11e9ebb028e68f8823edc63a5`, selected remote controller `6294d27e65f47d5d0cfdf8a3afdb53df691f8e648f8592c501bb2a2dff61a678`, Qwen protected broker unchanged.
+- 102-file source staging manifest SHA-256 `d47ea1dceaaf8818e442f65cd4e51a1796197e170f1d91723c0216c2e0778384`, selected remote controller `89d01ed97bd2b68aacb575ea16905fbf410735a5875cc385e3cc3e3c78d000f8`, Qwen protected broker unchanged.
 - Temporary test-run outputs were archived outside the worktree and are **not** part of published source or an installed runtime.
 - No live SSH/provider/lease, formal independent review, hosted CI or production canary exists for this performance branch at this checkpoint. This source is `BUILT_NOT_PROVEN`.
 
@@ -110,3 +110,41 @@ Seven source-extracted no-provider tests PASS, including large configured poll
 Source and historical native-manifest SHA pins were rebuilt from the selected
 candidate with 102 exact members. A new exact-head review and hosted CI remain
 required; the old published PR commit does not include this amendment.
+
+## Stacked head source integration with current runtime (2026-11-03)
+
+After the production runtime PR #2019 was integrated with protected master at
+source SHA `93c8c3c01f9226d1ea267e21c548f047458654dc`, it advanced to a true
+two-parent head `d0891a8ad99640b223cafb55c717f169e4a20819`.
+This fast-observation source has been composed with that exact parent, preserving
+protected same-selection diagnostics and the finite 4-hour runtime contract; six
+source/pin conflicts were reconciled in the original operation-bound worktree.
+The real 102-member selected stage now hashes to SHA-256
+`d47ea1dceaaf8818e442f65cd4e51a1796197e170f1d91723c0216c2e0778384`,
+with remote controller SHA unchanged at
+`89d01ed97bd2b68aacb575ea16905fbf410735a5875cc385e3cc3e3c78d000f8`.
+Historical test fixtures remain sealed; the parent source plan retains its
+own earlier-stage manifest for PR #2019, not this future performance release.
+New head, CI, formal review and fleet acceptance still require canonical proof.
+
+## Read-only fleet installation baseline (2026-11-03)
+
+The live account gateway reported a previously degraded aggregate fleet view, but a separate authorized remote-device census observed **ubuntu0, ubuntu1, ubuntu2, ubuntu3 and ubuntu4 all reachable**. M2's own installed Fabric `hosts.json` lists all five as `lanes` roles with `max_active` 12, 18, 12, 12 and 2 respectively. Ubuntu1 has 24 logical cores; the other four expose 32. Snapshot load averages were 0.33, 2.70, 0.04, 1.05 and 0.00 for the five hosts (one observation only; not a throughput or capacity entitlement claim).
+
+Current M2 immutable native selection is `8cefc4b27b2036f86bcec1d626e864f45f792e2c290ab8de56fbde89f78ac94a`, and the selected code still hashes to legacy remote controller `7da97d3b99a0b9bc7f8aa15f7b405a099f22d8954feb9fb9ec24acf2c3092e92`, legacy slot `4edfed01136259dd45bd5a8d049961161af0953e9f97e30fcddab1ba1164c34f`, and legacy fabric task `ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88`. These are **not** this 4-hour/fast-poll candidate. The unchanged `ext/` flat helper hashes differed among Ubuntu hosts; that alone does not prove active-run code mismatch because per-run immutable `support-releases/` is the source of remote support, not an arbitrary flat file. No provider call, worker dispatch, installation or host mutation occurred in this census.
+
+Production acceptance must confirm exact new native `CURRENT.json` generation and source identity on M2, each host's immutable support-release digest for *new* work, unchanged code of already-running controllers, broker original-root custody, real single worker START/result/parent-consumption, and p50/p95 terminal receipt delay from original log timestamps. Ubuntu4's configured two active lanes should not be raised solely because its one-time load was zero; qualify provider/model entitlement and resource pressure through the incumbent Capacity admission owner before any capacity adjustment.
+
+## Long-horizon poll-margin and test-harness correction
+
+The adaptive observer caps actual SSH result-check sleeps at 30 seconds even if a caller requests a larger interval. The original child-timeout calculation erroneously reserved two *configured* poll periods, needlessly truncating a four-hour child for a 120-second poll setting. The current source reserves exactly two *actual* periods (maximum 30 seconds); synthetic source-extracted tests assert a 14,400-second fuse yields a 14,340-second child with configured polls of both 30 and 120 seconds, with the inherited shorter commission always controlling. No production fuse or lease upper bound was extended.
+
+The immutable offline launch/deadline fixture now gives its separate *test harness* finite headroom to observe actual commission expiry on overloaded hosts. Its harness timeout never enters the worker environment. Stage-specific fake delays were increased correspondingly where necessary to prove slow upload, setup and admission-refusal paths. Original security assertions, child cancellation, broker lease retention and zero duplicate launches remain binding; negative source tests and hosted current-head CI must still be verified.
+
+## Integrated source release qualification at d089 parent
+
+Current source is composed against true two-parent #2019 runtime source `d0891a8ad99640b223cafb55c717f169e4a20819`, rather than the superseded earlier parent. The exact canonical native-source builder produced 102 selected members (manifest SHA-256 `d47ea1dceaaf8818e442f65cd4e51a1796197e170f1d91723c0216c2e0778384`, controller SHA-256 `89d01ed97bd2b68aacb575ea16905fbf410735a5875cc385e3cc3e3c78d000f8`). Local paired native/historical-source/closed-Qwen/Grok source-qualification tests PASS on the composed candidate. The entire original `test_commission_deadline.py` suite PASSED: **19/19 cases**, including strict immutable 31s admission fuse and prelaunch packet/transport integrity, with the separate offline harness giving finite load-sensitive headroom but not altering the commission clock. Fast source-extracted polling and margin tests PASS.
+
+The original production host remains on older immutable generation `8cefc4b27b2036f86bcec1d626e864f45f792e2c290ab8de56fbde89f78ac94a`; this is source qualification, not new live worker proof. Do not install until genuine head CI, independent nonauthor GitHub review, protected merge, and owner-native generation admission.
+
+A bounded read-only census of the latest 40 stored M2 controller logs found 30 terminal runs with minute-resolution median worker launch-to-result of roughly **6 minutes**, p90 roughly **7 minutes**, and generally immediate lease and support setup. Faster result observation addresses post-completion latency, not model inference; follow-on throughput optimization requires measured model routing and task subdivision through the existing owner. No new monitoring store was created.

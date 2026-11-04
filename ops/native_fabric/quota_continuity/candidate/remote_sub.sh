@@ -383,8 +383,13 @@ commission_run() {
 }
 
 commission_refresh_runtime() {
-  local stage seconds
+  local stage seconds actual_observation_poll
   stage="$1"
+  # The adaptive same-run observer never sleeps more than 30s, even when
+  # configured POLL_SECS is higher. Reserve two *actual* observation periods,
+  # not a needlessly large value that truncates a healthy long-horizon worker.
+  actual_observation_poll="$POLL_SECS"
+  [ "$actual_observation_poll" -le 30 ] || actual_observation_poll=30
   if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
     seconds=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$MAX_SECS") || {
       RC=$?; log "COMMISSION_TIME_EXHAUSTED stage=$stage"; return "$RC";
@@ -398,10 +403,10 @@ commission_refresh_runtime() {
   # cleanup/RC publication and a final in-deadline controller observation.
   # This narrows the worker only; it never extends the MAX_SECS fuse, broker
   # lease, provider budget, or commission deadline.
-  if [ "$MAX_SECS" -gt $((2 * POLL_SECS)) ]; then
-    CHILD_TIMEOUT=$((MAX_SECS - 2 * POLL_SECS))
-  elif [ "$MAX_SECS" -gt "$POLL_SECS" ]; then
-    CHILD_TIMEOUT=$((MAX_SECS - POLL_SECS))
+  if [ "$MAX_SECS" -gt $((2 * actual_observation_poll)) ]; then
+    CHILD_TIMEOUT=$((MAX_SECS - 2 * actual_observation_poll))
+  elif [ "$MAX_SECS" -gt "$actual_observation_poll" ]; then
+    CHILD_TIMEOUT=$((MAX_SECS - actual_observation_poll))
   else
     CHILD_TIMEOUT=$MAX_SECS
   fi
