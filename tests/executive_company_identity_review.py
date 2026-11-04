@@ -34,7 +34,7 @@ REVIEWED_ANCHORS = {
         # in addition to the method AST; all three literal lines are ASCII.
         # f950 fixed READ additions change the enclosing ingress AST.
         # The original CCR branch and listener remain structurally unchanged.
-        "source_sha256": "b90a91a064e05531f86fbfab8ac9fa8960fda0dcfd7fb731bbd5f9c99f99255c",
+        "source_sha256": "44376eee4b4f1592ebd225942baaea9160dfd8a5d418fcf160273948c0fc0978",
         "ast_sha256": "9f79a19cd2518e8a964f4fb20ad0f019088e52f5290f7f51ab0951827555b599",
         "sites": (
             (("body", 3, "body", 30, "body", 3, "orelse", 0, "body", 2,
