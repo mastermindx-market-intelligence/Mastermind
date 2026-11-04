@@ -38,7 +38,7 @@ with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
  # Never include raw stderr or any worker/request/result stderr in MCP.
  if p.returncode and len(sys.argv)>3 and sys.argv[3]=='preview' and not data:
   err.seek(0); line=err.read(128)
-  match=re.fullmatch(rb'NONE reason=([a-z][a-z0-9_]{0,79})\r?\n?',line)
+  match=re.fullmatch(rb'NONE reason=([a-z][a-z0-9_]{0,79})\\r?\\n?',line)
   if match: reply['native_reason']=match.group(1).decode('ascii')
  print(json.dumps(reply,separators=(',',':')))
 `;
