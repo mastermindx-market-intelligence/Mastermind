@@ -1,7 +1,7 @@
 # CEO Project Plan and Crash-Continuity Contract
 
 **Status:** source contract. Branch/draft = `SPEC_ONLY`, not installed editor/Project
-settings, Agent OS grant or automatic recovery. Adoption requires reviewed protected
+settings, Agent OS grant or automatic recovery. Adoption requires tested protected
 release and a real consumer canary.
 
 ## Purpose and scope
@@ -31,7 +31,7 @@ belong to Executive. Reuse `WS:ORCHESTRATOR-PROJECT-CONTINUITY` W0/W1/W2
 
 Roles, not sessions/authors/chats/titles, own work. Current assignment owns recovery:
 record source-linked handoff takeover, no orphan ACK/old-chat wait. Protect A.2 live
-owners/effects. Independent non-author review required; never self-merge/approve.
+owners/effects. CEO Web needs no independent review. Native gates bind; no self-merge/approve.
 
 This contract does not edit `docs/sol_skills/BOOTSTRAP_KERNEL.md` (recorded blob
 `0cc09227c77068c3997ff0a24bfef58cadeb7f44`); #1846 is the single kernel. Cockpit
