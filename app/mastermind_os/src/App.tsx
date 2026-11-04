@@ -16,6 +16,7 @@ import { qualifyWorkerResultRef } from "./fabric/mission-worker-result";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
 import { Projects } from "./projects/Projects";
 import { ProjectWorkspace } from "./projects/ProjectWorkspace";
+import { ProjectConversationAssociation } from "./conversations/ProjectConversationAssociation";
 import { Inbox } from "./inbox/Inbox";
 import { Knowledge } from "./knowledge/Knowledge";
 import { DiscoveryWorkspace } from "./discovery/DiscoveryWorkspace";
@@ -3614,6 +3615,18 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     index.state === "AVAILABLE" && requestedProjectWorkRef
       ? index.programs.filter(card => card.workRef === requestedProjectWorkRef) : [];
   const projectWorkRef = currentProjectCards.length === 1 ? currentProjectCards[0].workRef : null;
+  // Observational association reads use the canonical catalogue pair, independently
+  // of the Mission/conversation-send selection. No association grants a send target.
+  const projectCard = currentProjectCards.length === 1 ? currentProjectCards[0] : null;
+  const projectAssociationSelection = projectWorkRef && projectReaders.canRead() &&
+    projectCard?.rootState === "RESOLVED" && projectCard.rootJobId &&
+    projectCard.rootCandidates.length === 1 && projectCard.rootCandidates[0] === projectCard.rootJobId
+      ? {workRef: projectWorkRef, rootJobId: projectCard.rootJobId} : null;
+  const projectSessionEvidence = <ProjectConversationAssociation selection={projectAssociationSelection}
+    authGeneration={authRevision} hostGeneration={retainedResultHost?.invalidationGeneration?.() ?? null}
+    locale={locale}/>;
+  // The fixed signed owner port is not part of the current host closure. Its
+  // absence is explicit; never substitute a URL, guessed receipt or local reader.
   const recordedProjectJournal = projectWorkRef ? <ProjectJournalReader selection={{workRef: projectWorkRef}}
       read={projectReaders.journal} generation={projectReaders.generation?.() ?? "SOURCE_UNAVAILABLE"}
       authGeneration={authRevision} canRead={projectReaders.canRead} locale={locale}/> : null;
@@ -3856,7 +3869,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               </details>
             </> : undefined}
             detailsPanel={<>
-              {panel}{recordedProjectJournal}
+              {panel}{projectSessionEvidence}{recordedProjectJournal}
               {projectConversationActive ? <>
                 <AutonomyPanel selection={selection} read={projectReaders.autonomy}
                   canRead={Boolean(projectReaders.generation) && projectReaders.canRead()}
