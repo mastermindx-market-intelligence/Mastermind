@@ -67,6 +67,23 @@ def test_auto_sensitive_gets_review():
     assert result.source_tier is ReviewTier.CRITICAL
 
 
+@pytest.mark.parametrize("path", [
+    "control_plane/packet_gate.py",
+    "control_plane/governance.py",
+    "control_plane/strategic_state.py",
+    "config/strategic_state.yml",
+    "config/contracts.yml",
+    "research/MASTERMIND_CHARTER_V2.md",
+    "DOCTRINE.md",
+])
+def test_auto_constitution_and_governor_paths_are_not_silent_standard_skips(path):
+    # A verified one-line governance change still needs independent CRITICAL
+    # technical scrutiny; an author label cannot demote source-owned authority.
+    result = auto(risk((path,)))
+    assert result.source_tier is ReviewTier.CRITICAL
+    assert result.action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
+
+
 def test_auto_partial_source_cannot_claim_exemption_or_auto_review():
     assert auto(risk(verified=False)).action is ReviewDispatch.HOLD_UNQUALIFIED_SOURCE
 
