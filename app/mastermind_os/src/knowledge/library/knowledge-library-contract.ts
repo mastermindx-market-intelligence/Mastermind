@@ -11,6 +11,7 @@
  */
 
 import type { ReactNode } from 'react';
+import type {ProjectSourceDraftPort} from './project-source-draft';
 import type {ProjectFileMatch,ProjectFileSearchOwner} from '../../discovery/project-file-search';
 
 /* ------------------------------------------------------------------ */
@@ -249,7 +250,13 @@ export interface KnowledgeLibraryReadActionsRequest {
   readonly signal: AbortSignal;
 }
 
+/** One currently mounted fixed catalogue owner, not a new read/grant. */
+export interface KnowledgeLibrarySourceOwner {
+  current(snapshot:KnowledgeLibrarySourceContext):KnowledgeLibrarySourceContext;
+}
 export interface KnowledgeLibraryProps {
+  readonly onCurrentSourceOwner?: (owner:KnowledgeLibrarySourceOwner|null)=>void;
+  readonly draftPort?: ProjectSourceDraftPort;
   /** Original explicit Search selection; always re-read through its real owner. */
   readonly requestedFile?: Readonly<{match:ProjectFileMatch;workRef:string;authGeneration:number;hostGeneration:string|number}>;
   readonly fileSearchOwner?: ProjectFileSearchOwner;

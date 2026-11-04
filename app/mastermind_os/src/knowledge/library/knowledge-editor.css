@@ -267,3 +267,9 @@
     width: 100%;
   }
 }
+
+.knowledge-editor--zh,
+.knowledge-editor--zh :is(h2, label, button, summary, p, span) {
+  letter-spacing: normal;
+  text-transform: none;
+}

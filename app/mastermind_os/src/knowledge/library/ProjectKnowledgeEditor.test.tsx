@@ -534,6 +534,25 @@ describe('actual parent binding repairs',()=>{
  });
 });
 
+describe('owner-state presentation copy',()=>{
+ it.each(['pending','unknown'] as const)('names closing the editor without cancelling %s original request',phase=>{
+  const onClose=vi.fn();const {container}=renderPreferenceEditor({phase,onClose});
+  expect(container.querySelector('section')!.lang).toBe('en');
+  expect(screen.getByText('Closing does not cancel the original request.')).toBeTruthy();
+  fireEvent.click(buttonNamed('Close editor'));expect(onClose).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('button',{name:'Cancel'})).toBeNull();
+ });
+ it('shows prospective preservation and file bounds before saving',()=>{
+  const pref=renderPreferenceEditor();expect(screen.getByText('Your text and line breaks will be preserved.')).toBeTruthy();pref.unmount();
+  renderFileEditor();expect(screen.getByText('.md or .txt, up to 32 KiB. Choosing a file does not save it.')).toBeTruthy();
+ });
+ it('marks Chinese language and gives the same pending close semantics',()=>{
+  const {container}=renderPreferenceEditor({locale:'zh-CN',phase:'unknown',onClose:vi.fn()});
+  expect(container.querySelector('section')!.lang).toBe('zh-CN');expect(buttonNamed('关闭编辑器')).toBeTruthy();
+  expect(screen.getByText('关闭编辑器不会取消原请求。')).toBeTruthy();
+ });
+});
+
 describe('locale and styling contract', () => {
   it('renders the zh-CN labels and plain copy', () => {
     renderPreferenceEditor({
@@ -565,3 +584,18 @@ async function actOnly(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
 }
+
+
+it.each(['en','zh-CN'] as const)('keeps literal draft when server preparation is unavailable without claiming a pending publication %s',locale=>{
+ const context=makeContext();
+ const props:ProjectKnowledgeEditorPreferenceProps={mode:'preference',sourceContext:context,requestId:PREF_REQUEST_ID,
+  authGeneration:1,hostGeneration:1,current:currentSame,phase:'idle',initialValue:'Exact original\n中文',
+  expectedPreferenceRevision:null,onSubmitPreference:vi.fn(),locale};
+ const view=render(<ProjectKnowledgeEditor {...props}/>);
+ const field=screen.getByRole('textbox');fireEvent.change(field,{target:{value:'Changed literal\n保留'}});
+ view.rerender(<ProjectKnowledgeEditor {...props} phase="prepare-unavailable"/>);
+ expect((field as HTMLTextAreaElement).value).toBe('Changed literal\n保留');
+ expect(screen.getByRole('status').textContent).toContain(locale==='en'?'Nothing was submitted for publication':'尚未提交发布');
+ expect(screen.queryByRole('button',{name:locale==='en'?'Check original operation':'检查原操作'})).toBeNull();
+ expect(screen.getByRole('button',{name:locale==='en'?'Save preference':'保存偏好'}).hasAttribute('disabled')).toBe(true);
+});

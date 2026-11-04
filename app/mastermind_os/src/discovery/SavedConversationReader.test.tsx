@@ -3,6 +3,8 @@ import {afterEach,describe,expect,it,vi} from 'vitest';
 import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {createSavedConversationNavigation,SavedConversationReader} from './SavedConversationReader';
 import {searchSavedConversations,type SavedConversationSearchOwner} from './saved-conversations';
+import {emptyDrafts,readDraft,readDraftRevision,readDraftInsertion,appendDraftSource,undoDraftSource,type DraftSource} from '../conversations/drafts';
+import type {ProjectSourceDraftPort} from '../knowledge/library/project-source-draft';
 afterEach(cleanup);
 const work='WS:SAVED',hex=(c:string)=>c.repeat(64);
 const text='# Actual reply\r\n\r\n中文 source 🌟\r\nexact second line';
@@ -72,4 +74,25 @@ describe('saved Search source reader integration',()=>{
   render(<SavedConversationReader selection={selection} workRef={work} authGeneration={3} hostGeneration={1} owner={f.owner} renderSourceCompanion={s=><pre data-testid="exact">{s.text}</pre>}/>);
   await screen.findByText('INVALID_SOURCE');expect(screen.queryByTestId('exact')).toBeNull();
  });
+});
+
+
+it('joins actual saved reply re-read to the genuine same-work destination while preserving a different source root',async()=>{
+ const f=fixture(),selection=await navigation(f);
+ const context={authGeneration:3,selection:{workRef:work,rootJobId:'JOB-DESTINATION'},sessionRef:'genuine-destination',
+  bindingGeneration:'session-current',revisions:{mission:null,programs:null,result:null,conversation:null}};
+ let drafts=emptyDrafts(3);
+ const append=(source:DraftSource,revision:number)=>{drafts=appendDraftSource(drafts,context,revision,source);return readDraftRevision(drafts,context)===revision+1;};
+ const undo=(identity:string,revision:number)=>{drafts=undoDraftSource(drafts,context,revision,identity);return readDraftRevision(drafts,context)===revision+1;};
+ const readWitness=()=>({workRef:work,binding:'genuine-current-destination',revision:readDraftRevision(drafts,context)});
+ const port=():ProjectSourceDraftPort=>({text:readDraft(drafts,context),revision:readDraftRevision(drafts,context),insertion:readDraftInsertion(drafts,context),append,undo,readWitness});
+ const props={selection,workRef:work,authGeneration:3,hostGeneration:1,owner:f.owner};
+ const view=render(<SavedConversationReader {...props} draftPort={port()}/>);
+ fireEvent.click(await screen.findByRole('button',{name:'Add excerpt to draft'}));
+ expect(readDraft(drafts,context)).toContain(text);
+ expect(readDraftInsertion(drafts,context)!.source.label).toContain('JOB-123');
+ expect(readDraftInsertion(drafts,context)!.source.label).not.toContain('JOB-DESTINATION');
+ view.rerender(<SavedConversationReader {...props} draftPort={port()}/>);
+ fireEvent.click(await screen.findByRole('button',{name:'Remove added excerpt'}));
+ expect(readDraft(drafts,context)).toBe('');expect(f.owner.readAnswer).toHaveBeenCalledTimes(1);
 });

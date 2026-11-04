@@ -17,6 +17,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentType, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import './knowledge-library.css';
+import {captureProjectSourceDraftRead, completeProjectSourceDraftRead, type ProjectSourceDraftProof} from './project-source-draft';
+import {ProjectSourceDraftCompanion} from './ProjectSourceDraftCompanion';
 import {readProjectFileMatchSource} from '../../discovery/project-file-open';
 import {
   KnowledgeContractError,
@@ -134,6 +136,8 @@ function resolveScopeError(props: KnowledgeLibraryProps): string | null {
 }
 
 interface BodyProps {
+  readonly onCurrentSourceOwner?: KnowledgeLibraryProps['onCurrentSourceOwner'];
+  readonly draftPort?: KnowledgeLibraryProps['draftPort'];
   readonly requestedFile?: KnowledgeLibraryProps['requestedFile'];
   readonly fileSearchOwner?: KnowledgeLibraryProps['fileSearchOwner'];
   readonly onReturnToSearch?: KnowledgeLibraryProps['onReturnToSearch'];
@@ -285,6 +289,8 @@ export function KnowledgeLibrary(props: KnowledgeLibraryProps) {
       <KnowledgeLibraryBody
         key={identity}
         identity={identity}
+        draftPort={props.draftPort}
+        onCurrentSourceOwner={props.onCurrentSourceOwner}
         workRef={props.workRef}
         authGeneration={props.authGeneration}
         hostGeneration={props.hostGeneration}
@@ -331,6 +337,28 @@ function KnowledgeLibraryBody(props: BodyProps) {
   const [markdown, setMarkdown] = useState<MarkdownComponent | null>(null);
   const [openRow, setOpenRow] = useState<{ sourceRef: string; expectedRevision: string } | null>(null);
 
+  const [draftProof,setDraftProof]=useState<ProjectSourceDraftProof|null>(null);
+  const liveProps=useRef(props); liveProps.current=props;
+  const bodyLive=useRef(false);
+  const catalogueWitness=useRef<{catalogue:KnowledgeCatalogue;current:()=>boolean}|null>(null);
+  useLayoutEffect(()=>{bodyLive.current=true;return()=>{bodyLive.current=false;catalogueWitness.current=null;};},[]);
+  // This fixed host owner supplies current signed scope independently of the
+  // destination draft. Missing owner remains a read-only presentation.
+  function captureSourceGuard(handle:ReadHandle,isCurrent=sourceRead.isCurrent) {
+    const owner=props.fileSearchOwner;
+    if(!owner)return ()=>false;
+    try {
+      const methods=[owner.context,owner.authGeneration,owner.readCatalogue,owner.readSource] as const;
+      const context=owner.context(),auth=owner.authGeneration();
+      if(!context?.generation || !Number.isSafeInteger(auth))return ()=>false;
+      return ()=>{
+        if(!bodyLive.current||!isCurrent(handle)||liveProps.current.fileSearchOwner!==owner)return false;
+        const now=owner.context();
+        return !!now&&now.generation===context.generation&&owner.authGeneration()===auth&&
+          owner.context===methods[0]&&owner.authGeneration===methods[1]&&owner.readCatalogue===methods[2]&&owner.readSource===methods[3];
+      };
+    }catch{return ()=>false;}
+  }
   const memoryRequestedRef = useRef(false);
   const focusRestoreRef = useRef<HTMLElement | null>(null);
   const restoreFocusRef = useRef(false);
@@ -346,6 +374,22 @@ function KnowledgeLibraryBody(props: BodyProps) {
   const sourceRead = useGuardedRead();
 
   const catalogue = catalogueState.phase === 'READY' ? catalogueState.result?.catalogue ?? null : null;
+  useLayoutEffect(()=>{
+    const witness=catalogueWitness.current;
+    const registration=props.onCurrentSourceOwner;
+    if(!registration)return;
+    if(!catalogue||witness?.catalogue!==catalogue){registration(null);return;}
+    const bound=Object.freeze({workRef:catalogue.workRef,sourceCommit:catalogue.sourceCommit,baseRevision:catalogue.workstreamSha256});
+    registration(Object.freeze({current(snapshot:KnowledgeLibrarySourceContext){
+      try {
+        if(!bodyLive.current||catalogueWitness.current!==witness||!witness.current()||
+          snapshot.workRef!==bound.workRef||snapshot.sourceCommit!==bound.sourceCommit||snapshot.baseRevision!==bound.baseRevision)throw Error();
+        return {...bound};
+      }catch{throw new Error('SOURCE_CHANGED');}
+    }}));
+    return()=>registration(null);
+  },[catalogue,props.onCurrentSourceOwner]);
+
   const actions = actionsState.result;
   const sourceContext: KnowledgeLibrarySourceContext | null = catalogue
     ? { workRef: catalogue.workRef, sourceCommit: catalogue.sourceCommit, baseRevision: catalogue.workstreamSha256 }
@@ -354,6 +398,7 @@ function KnowledgeLibraryBody(props: BodyProps) {
   /* --- Catalogue: exactly one read per identity / explicit refresh ----- */
 
   const runCatalogue = useCallback(() => {
+    catalogueWitness.current=null;
     if (!workRef || scopeError) {
       setCatalogueState({ phase: 'OWNER_UNAVAILABLE', result: unavailableCatalogue(['SOURCE_UNAVAILABLE']), detail: scopeError ? [scopeError] : [] });
       return;
@@ -367,6 +412,7 @@ function KnowledgeLibraryBody(props: BodyProps) {
     setActionsState({result:null,detail:[]}); setMemoryState(initialRead()); setSourceState(initialRead());
     const read = props.readCatalogue;
     const handle = catalogueRead.begin();
+    const ownerCurrent=captureSourceGuard(handle,catalogueRead.isCurrent);
     setCatalogueState({ phase: 'LOADING', result: null, detail: [] });
     void (async () => {
       try {
@@ -374,6 +420,8 @@ function KnowledgeLibraryBody(props: BodyProps) {
         if (!catalogueRead.isCurrent(handle)) return;
         const validated = validate_catalogue(raw, workRef);
         if (!catalogueRead.isCurrent(handle)) return;
+        if(validated.availability==='AVAILABLE'&&validated.catalogue&&ownerCurrent())
+          catalogueWitness.current={catalogue:validated.catalogue,current:ownerCurrent};
         setCatalogueState(
           validated.availability === 'AVAILABLE'
             ? { phase: 'READY', result: validated, detail: [] }
@@ -389,7 +437,7 @@ function KnowledgeLibraryBody(props: BodyProps) {
       }
     })();
     return () => handle.controller.abort();
-  }, [workRef, scopeError, props.readCatalogue, catalogueRead, actionsRead, memoryRead, sourceRead]);
+  }, [workRef, scopeError, props.readCatalogue, props.fileSearchOwner, catalogueRead, actionsRead, memoryRead, sourceRead]);
 
   useEffect(() => {
     const cleanup = runCatalogue();
@@ -493,6 +541,10 @@ function KnowledgeLibraryBody(props: BodyProps) {
       }
       const read = props.readSource;
       const handle = sourceRead.begin();
+      const sourceIsCurrent=captureSourceGuard(handle);
+      const destination=liveProps.current.draftPort;
+      const ticket=destination?captureProjectSourceDraftRead(destination,workRef,sourceIsCurrent):null;
+      setDraftProof(null);
       setSourceState({ phase: 'LOADING', result: null, detail: [] });
       void (async () => {
         try {
@@ -518,6 +570,11 @@ function KnowledgeLibraryBody(props: BodyProps) {
             setSourceState({ phase: 'STALE', result: validated, detail: ['SOURCE_CHANGED'] });
             return;
           }
+          const proof=ticket&&liveProps.current.draftPort?await completeProjectSourceDraftRead(ticket,
+            {kind:'mediaType' in candidate?'PROJECT_FILE':'PROJECT_RECORD',sourceRef,result:validated},liveProps.current.draftPort):null;
+          if(!sourceRead.isCurrent(handle))return;
+          if(ticket&&!sourceIsCurrent()){setSourceState({phase:'STALE',result:null,detail:['SOURCE_CONTEXT_CHANGED']});return;}
+          setDraftProof(proof);
           setSourceState({ phase: 'READY', result: validated, detail: [] });
         } catch (error) {
           if (handle.controller.signal.aborted) return;
@@ -529,7 +586,7 @@ function KnowledgeLibraryBody(props: BodyProps) {
         }
       })();
     },
-    [props.readSource, workRef, catalogue, sourceRead],
+    [props.readSource, workRef, catalogue, sourceRead, props.fileSearchOwner],
   );
 
   const openSourceRow = useCallback(
@@ -549,6 +606,9 @@ function KnowledgeLibraryBody(props: BodyProps) {
   useEffect(() => {
     if (!props.requestedFile || !catalogue || !workRef || scopeError) return;
     const handle=sourceRead.begin();
+    const sourceIsCurrent=captureSourceGuard(handle);
+    const ticket=props.draftPort?captureProjectSourceDraftRead(props.draftPort,workRef,sourceIsCurrent):null;
+    setDraftProof(null);
     setView('READER'); setOpenRow(null);
     setSourceState({phase:'LOADING',result:null,detail:[]});
     if (props.requestedFile.workRef!==workRef || props.requestedFile.authGeneration!==props.authGeneration ||
@@ -560,7 +620,7 @@ function KnowledgeLibraryBody(props: BodyProps) {
       setSourceState({phase:'OWNER_UNAVAILABLE',result:null,detail:['FILE_SEARCH_OWNER_ABSENT']});
       return () => handle.controller.abort();
     }
-    void readProjectFileMatchSource({workRef,match:props.requestedFile.match,signal:handle.controller.signal},props.fileSearchOwner).then(opened=>{
+    void readProjectFileMatchSource({workRef,match:props.requestedFile.match,signal:handle.controller.signal},props.fileSearchOwner).then(async opened=>{
       if (!sourceRead.isCurrent(handle)) return;
       const result=opened.document, reference=opened.reference;
       if (opened.state !== 'AVAILABLE' || !reference || !result?.source || !result.document) {
@@ -571,6 +631,11 @@ function KnowledgeLibraryBody(props: BodyProps) {
       if (candidates.length!==1 || catalogue.sourceCommit!==result.source.commit) {
         setSourceState({phase:'STALE',result:null,detail:['SOURCE_CHANGED']}); return;
       }
+      const proof=ticket&&liveProps.current.draftPort?await completeProjectSourceDraftRead(ticket,
+        {kind:'PROJECT_FILE',sourceRef:reference.sourceRef,result},liveProps.current.draftPort):null;
+      if(!sourceRead.isCurrent(handle))return;
+      if(ticket&&!sourceIsCurrent()){setSourceState({phase:'STALE',result:null,detail:['SOURCE_CONTEXT_CHANGED']});return;}
+      setDraftProof(proof);
       setOpenRow({sourceRef:reference.sourceRef,expectedRevision:reference.expectedRevision});
       setSourceState({phase:'READY',result,detail:[]});
     }).catch(()=>{
@@ -582,6 +647,7 @@ function KnowledgeLibraryBody(props: BodyProps) {
   const closeReader = useCallback(() => {
     restoreFocusRef.current=true;
     sourceRead.cancel();
+    setDraftProof(null);
     setSourceState(initialRead()); setOpenRow(null);
     if (props.requestedFile && props.onReturnToSearch) { props.onReturnToSearch(); return; }
     setView(readerOrigin);
@@ -924,6 +990,7 @@ function KnowledgeLibraryBody(props: BodyProps) {
             )}
           </article>
           <aside className="knowledge-library-aside">
+            {props.draftPort?<ProjectSourceDraftCompanion proof={draftProof} port={props.draftPort} locale={locale}/>:null}
             {props.renderSourceCompanion ? props.renderSourceCompanion(sourceDocument) : null}
             <div className="knowledge-library-aside-panel">
               <h2>{copy.provenance}</h2>

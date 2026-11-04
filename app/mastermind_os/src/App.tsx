@@ -23,6 +23,8 @@ import { AcceptedDirectionPanel } from "./direction/AcceptedDirectionPanel";
 import { useProjectAdmissionWorkspace } from "./useProjectAdmissionWorkspace";
 import { Inbox } from "./inbox/Inbox";
 import { Knowledge } from "./knowledge/Knowledge";
+import { knowledgeDraftBinding, type KnowledgeDraftPort } from "./knowledge/KnowledgeDraftCompanion";
+import type { ProjectSourceDraftPort } from "./knowledge/library/project-source-draft";
 import { ProjectKnowledgeLibrary } from "./knowledge/library/ProjectKnowledgeLibrary";
 import type { KnowledgeLibraryProps } from "./knowledge/library/knowledge-library-contract";
 import { ProjectSearchWorkspace } from "./discovery/ProjectSearchWorkspace";
@@ -3687,6 +3689,47 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) archiveHostGeneration = value;
   } catch { /* Missing current owner cannot qualify an archive read. */ }
   const archiveScopeKey = JSON.stringify([authRevision, archiveHostGeneration]);
+  const genuineProjectDraft: KnowledgeDraftPort = {projection: observedConversation.projection,
+    text: observedConversation.draft, revision: observedConversation.draftRevision,
+    insertion: observedConversation.draftInsertion, append: observedConversation.appendSource,
+    undo: observedConversation.undoSource, edit: () => setActive("Conversations")};
+  const projectDraftOwner = useRef({host: retainedResultHost, generation: archiveHostGeneration,
+    context: observedConversation.projection.context, port: genuineProjectDraft});
+  projectDraftOwner.current = {host: retainedResultHost, generation: archiveHostGeneration,
+    context: observedConversation.projection.context, port: genuineProjectDraft};
+  const projectDraftMethods = useMemo(() => {
+    const readWitness: ProjectSourceDraftPort["readWitness"] = () => {
+      const owner = projectDraftOwner.current, host = owner.host, auth = host?.auth;
+      const getState = auth?.getState, getGeneration = host?.invalidationGeneration;
+      try {
+        if (!host || !auth || !getState || !getGeneration || owner.generation === null ||
+            window.MastermindMissionHost !== host) return null;
+        const state = getState.call(auth), generation = getGeneration.call(host);
+        if (state.status !== "signed_in" || state.content !== true || generation !== owner.generation ||
+            owner.context.authGeneration !== authRevisionRef.current || projectDraftOwner.current !== owner ||
+            window.MastermindMissionHost !== host || host.auth !== auth || auth.getState !== getState ||
+            host.invalidationGeneration !== getGeneration) return null;
+        const binding = knowledgeDraftBinding(owner.context, owner.port);
+        return binding && owner.context.selection ? {workRef: owner.context.selection.workRef,
+          binding, revision: owner.port.revision} : null;
+      } catch { return null; }
+    };
+    return {readWitness,
+      append: ((source, revision) => {
+        const owner = projectDraftOwner.current, witness = readWitness();
+        return !!witness && witness.revision === revision && projectDraftOwner.current === owner &&
+          owner.port.append(source, revision);
+      }) as ProjectSourceDraftPort["append"],
+      undo: ((identity, revision) => {
+        const owner = projectDraftOwner.current, witness = readWitness();
+        return !!witness && witness.revision === revision && projectDraftOwner.current === owner &&
+          owner.port.undo(identity, revision);
+      }) as ProjectSourceDraftPort["undo"],
+      edit: () => { if (readWitness()) projectDraftOwner.current.port.edit?.(); }};
+  }, []);
+  const projectSourceDraftPort: ProjectSourceDraftPort = {text: genuineProjectDraft.text,
+    revision: genuineProjectDraft.revision, insertion: genuineProjectDraft.insertion, ...projectDraftMethods};
+
   const [knowledgeMode, setKnowledgeMode] = useState<"project" | "retained">("project");
   const [projectSearchSelected, setProjectSearchSelected] = useState(true);
   const [requestedProjectFile, setRequestedProjectFile] = useState<KnowledgeLibraryProps["requestedFile"]>();
@@ -3931,12 +3974,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   else if (active === "Search")
     content = savedConversationNavigation ? <SavedConversationReader
       selection={savedConversationNavigation} workRef={projectWorkRef} authGeneration={authRevision}
-      hostGeneration={archiveHostGeneration} owner={projectHistoryOwner} locale={locale} theme={theme}
+      hostGeneration={archiveHostGeneration} owner={projectHistoryOwner} locale={locale} theme={theme} draftPort={projectSourceDraftPort}
       onBack={() => setSavedConversationNavigation(null)}/> : null;
   else if (active === "Knowledge" && hasProjectLibrary && knowledgeMode === "project")
     content = <ProjectKnowledgeLibrary host={retainedResultHost} workRef={projectWorkRef}
       authGeneration={authRevision} hostGeneration={archiveHostGeneration} locale={locale} theme={theme}
-      requestedFile={requestedProjectFile}
+      requestedFile={requestedProjectFile} draftPort={projectSourceDraftPort}
       onReturnToSearch={() => { setRequestedProjectFile(undefined); setActive("Search"); setProjectSearchSelected(true); }}/>
   else if (active === "Knowledge")
     content = <Knowledge projection={office.projection} locale={locale}

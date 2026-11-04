@@ -3,6 +3,8 @@
 import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {SourceMarkdown} from '../conversations/SourceMarkdown';
 import '../knowledge/library/knowledge-library.css';
+import {captureProjectSourceDraftRead,completeProjectSourceDraftRead,type ProjectSourceDraftPort,type ProjectSourceDraftProof} from '../knowledge/library/project-source-draft';
+import {ProjectSourceDraftCompanion} from '../knowledge/library/ProjectSourceDraftCompanion';
 import {readSavedConversationSource,type SavedConversationMatch,type SavedConversationSearchOwner,type SavedConversationSourceRead} from './saved-conversations';
 
 type Context=NonNullable<ReturnType<SavedConversationSearchOwner['context']>>;
@@ -34,6 +36,7 @@ export function createSavedConversationNavigation(
  return Object.freeze({...selection,owner,context:captured.context,ownerAuthGeneration:captured.auth,methods:captured.methods});
 }
 export interface SavedConversationReaderProps {
+ readonly draftPort?:ProjectSourceDraftPort;
  readonly selection:SavedConversationNavigation;
  readonly workRef:string|null; readonly authGeneration:number; readonly hostGeneration:string|number|null;
  readonly owner?:SavedConversationSearchOwner;readonly locale?:'en'|'zh-CN';readonly theme?:'dark'|'light';
@@ -60,6 +63,7 @@ export function SavedConversationReader(props:SavedConversationReaderProps){
 }
 function ReaderBody(props:SavedConversationReaderProps){
  const zh=props.locale==='zh-CN';const t=(en:string,cn:string)=>zh?cn:en;
+ const [draftProof,setDraftProof]=useState<ProjectSourceDraftProof|null>(null);
  const [source,setSource]=useState<SavedConversationSourceRead|null>(null);
  const [phase,setPhase]=useState<'loading'|'ready'|'unavailable'|'closed'>('loading');
  const [reason,setReason]=useState<string|null>(null);
@@ -69,10 +73,15 @@ function ReaderBody(props:SavedConversationReaderProps){
   if(!current(props)){setPhase('unavailable');setReason('SOURCE_CONTEXT_CHANGED');return;}
   const controller=new AbortController();active.current=controller;
   const {selection:s,owner}=props;
+  const sourceIsCurrent=()=>!controller.signal.aborted&&!closed.current&&current(live.current);
+  const ticket=props.draftPort?captureProjectSourceDraftRead(props.draftPort,s.workRef,sourceIsCurrent):null;
   void readSavedConversationSource({workRef:s.workRef,match:s.match,expectedHighWater:s.expectedHighWater,
-   ...(s.pageCursor!==undefined?{pageCursor:s.pageCursor}:{}),signal:controller.signal},owner!).then(result=>{
+   ...(s.pageCursor!==undefined?{pageCursor:s.pageCursor}:{}),signal:controller.signal},owner!).then(async result=>{
     if(controller.signal.aborted||closed.current||!current(live.current))return;
-    if(result.state==='AVAILABLE'&&result.reference&&result.text!==null&&result.sourceTextSha256){setSource(result);setPhase('ready');}
+    if(result.state==='AVAILABLE'&&result.reference&&result.text!==null&&result.sourceTextSha256){
+      const proof=ticket&&live.current.draftPort?await completeProjectSourceDraftRead(ticket,{kind:'SAVED_REPLY',result},live.current.draftPort):null;
+      if(!sourceIsCurrent())return;
+      setDraftProof(proof);setSource(result);setPhase('ready');}
     else{setSource(null);setReason(result.reason);setPhase('unavailable');}
    }).catch(()=>{if(!controller.signal.aborted&&!closed.current){setSource(null);setPhase('unavailable');setReason('SOURCE_UNAVAILABLE');}});
   return()=>controller.abort();
@@ -91,6 +100,7 @@ function ReaderBody(props:SavedConversationReaderProps){
     {!available&&reason?<details className="knowledge-library-details"><summary>{t('Source details','来源详情')}</summary><p>{reason}</p></details>:null}
    </article>
    {available&&ref?<aside className="knowledge-library-aside">
+    {props.draftPort?<ProjectSourceDraftCompanion proof={draftProof} port={props.draftPort} locale={props.locale}/>:null}
     {props.renderSourceCompanion?.(source)}
     <div className="knowledge-library-aside-panel"><h2>{t('Source','来源')}</h2>
      <p>{t('Request time','请求时间')}: {ref.requested_at}</p>

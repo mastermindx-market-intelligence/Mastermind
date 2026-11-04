@@ -54,6 +54,8 @@ import type {
 export type KnowledgeEditPhase =
   | 'idle'
   | 'pending'
+  | 'prepared'
+  | 'prepare-unavailable'
   | 'unknown'
   | 'proposal-published'
   | 'source-published'
@@ -448,6 +450,10 @@ function EditorCore(props: EditorCoreProps) {
   // --- Closed public copy ------------------------------------------------
   const statusCopy = (() => {
     switch (effectivePhase) {
+      case 'prepared':
+        return zh ? '更改已准备好供你检查，尚未发布。' : 'Your changes are prepared for review. Nothing has been published.';
+      case 'prepare-unavailable':
+        return zh ? '暂时无法准备更改。尚未提交发布，你的草稿已保留。' : 'Your changes could not be prepared. Nothing was submitted for publication. Your draft is kept.';
       case 'pending':
         return zh ? '正在保存…' : 'Saving…';
       case 'proposal-published':
@@ -472,12 +478,13 @@ function EditorCore(props: EditorCoreProps) {
   const preferenceLabel = zh ? '沟通偏好' : 'Communication preference';
   const primaryLabel = mode === 'file' ? (zh ? '添加文件' : 'Add file') : zh ? '保存偏好' : 'Save preference';
   const checkLabel = zh ? '检查原操作' : 'Check original operation';
-  const cancelLabel = zh ? '取消' : 'Cancel';
+  const originalInFlight = effectivePhase==='pending' || effectivePhase==='unknown' || effectivePhase==='proposal-published';
+  const cancelLabel = originalInFlight || effectivePhase==='source-published' ? (zh ? '关闭编辑器' : 'Close editor') : (zh ? '取消' : 'Cancel');
   const unavailableCopy = zh ? '保存功能不可用。' : 'Saving is unavailable.';
   const noSelectionCopy = zh ? '尚未选择文件。' : 'No file is selected yet.';
   const selectedNoteCopy = zh ? '已选择，尚未保存。' : 'Selected — not saved yet.';
   const bytesUnit = zh ? '字节' : 'bytes';
-  const preferenceHintCopy = zh ? '将按原样保存，包括换行。' : 'Saved exactly as written, including line breaks.';
+  const preferenceHintCopy = zh ? '将保留你的文字和换行。' : 'Your text and line breaks will be preserved.';
   const detailsSummary = zh ? '来源详情' : 'Source details';
 
   const rootClassName = zh ? 'knowledge-editor knowledge-editor--zh' : 'knowledge-editor';
@@ -486,6 +493,7 @@ function EditorCore(props: EditorCoreProps) {
   return (
     <section
       className={rootClassName}
+      lang={zh ? 'zh-CN' : 'en'}
       data-knowledge-editor-mode={mode}
       data-knowledge-editor-phase={effectivePhase}
     >
@@ -506,6 +514,7 @@ function EditorCore(props: EditorCoreProps) {
             accept=".md,.txt,text/markdown,text/plain"
             onChange={handleFileInputChange}
           />
+          <p className="knowledge-editor-hint">{zh ? 'Markdown 或纯文本（.md/.txt），不超过32KiB；选择文件不会保存。' : '.md or .txt, up to 32 KiB. Choosing a file does not save it.'}</p>
           {selectedFile === null ? (
             <p className="knowledge-editor-hint">{noSelectionCopy}</p>
           ) : (
@@ -581,6 +590,8 @@ function EditorCore(props: EditorCoreProps) {
           </button>
         ) : null}
       </div>
+
+      {originalInFlight && onClose ? <p className="knowledge-editor-hint">{zh ? '关闭编辑器不会取消原请求。' : 'Closing does not cancel the original request.'}</p> : null}
 
       <details className="knowledge-editor-details">
         <summary>{detailsSummary}</summary>

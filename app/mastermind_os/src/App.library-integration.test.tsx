@@ -7,20 +7,39 @@ import type {SavedConversationSearchOwner} from './discovery/saved-conversations
 import {controlRoomFixture} from './test-fixtures';
 import programs from './fixtures/programs-available-workspace-service.json';
 import library from './fixtures/project-knowledge-owner.json';
+import paired from './fixtures/window-mission-association-producer.json';
+import {decodeWindow,observedMissionAssociation} from './workspace-contract';
+import {decodeMissionv3} from './mission';
 const signed={status:'signed_in',reason:null,acquisition:true,content:false};
 const uploaded=library.catalogue.project.files.find(row=>row.origin.kind==='PRINCIPAL_UPLOAD')!;
 beforeEach(async()=>{history.replaceState(null,'','/os/');delete window.MastermindMissionHost;delete (window as any).__TAURI_INTERNALS__;
  const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');vi.stubGlobal('crypto',webcrypto);});
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();delete window.MastermindMissionHost;});
-async function setup(pendingSource=false, historyOwner?:SavedConversationSearchOwner){
+async function setup(pendingSource=false, historyOwner?:SavedConversationSearchOwner, destination=false){
  const room=controlRoomFixture(),row=structuredClone(room.work[0]);row.work_ref=library.work_ref;row.agent_os.workstream=library.work_ref.slice(3);
- row.agent_os.title='Qualified library project';row.executive.jobs=[];row.bindings=[];room.work=[row];room.autonomy.responsibilities=[];
+ row.agent_os.title='Qualified library project';
+ const destinationPair=JSON.parse(JSON.stringify(paired).replaceAll(paired.selection.work_ref,library.work_ref)) as typeof paired;
+ if(!destination){row.executive.jobs=[];row.bindings=[];room.autonomy.responsibilities=[];}
+ else {
+   const responsibility=structuredClone(room.autonomy.responsibilities[0]);
+   Object.assign(responsibility,{responsibility_ref:library.work_ref,root_job_id:paired.selection.root_job_id,
+    root_job_candidates:[paired.selection.root_job_id],root_job_ambiguous:false,runtime_root_state:'RESOLVED'});
+   room.autonomy.responsibilities=[responsibility];
+   history.replaceState(null,'',`/os/?work_ref=${library.work_ref}&root_job_id=${paired.selection.root_job_id}`);
+   // Controlled destination uses the producer's complete tuple, rebound to the
+   // actual file source work; real decoders must qualify it before App sees it.
+   const selection={workRef:library.work_ref,rootJobId:paired.selection.root_job_id};
+   expect(observedMissionAssociation(await decodeWindow(destinationPair.window),decodeMissionv3(destinationPair.mission,selection),selection)).not.toBeNull();
+ }
+ room.work=[row];
  const collection={...structuredClone(programs),control_room:room};
  let notify!:(event:{payload:unknown})=>void,finish!:(value:unknown)=>void;
  const held=new Promise(resolve=>{finish=resolve;});
  const invoke=vi.fn(async(command:string,args?:any)=>{
-  if(command==='auth_status')return signed;if(command==='executive_auth_status')return {generation:0,available:false};
+  if(command==='auth_status')return {...signed,content:destination};if(command==='executive_auth_status')return {generation:0,available:false};
   if(command==='read_programs')return structuredClone(collection);
+  if(command==='read_mission_v3')return structuredClone(destinationPair.mission);
+  if(command==='read_current_window')return structuredClone(destinationPair.window);
   if(command==='read_project_knowledge_catalogue')return structuredClone(library.catalogue);
   if(command==='read_project_knowledge_memory')return structuredClone(library.memory);
   if(command==='read_project_knowledge_source')return pendingSource?held:structuredClone(library.sources[args.selection.source_ref as keyof typeof library.sources]);
@@ -37,9 +56,10 @@ async function setup(pendingSource=false, historyOwner?:SavedConversationSearchO
     makeLaunchIntent:noEffect,makeMessageIntent:noEffect,makeStopIntent:noEffect,makeSessionMessageIntent:noEffect} as never;
  }
  window.MastermindMissionHost=host;
- render(<App/>);fireEvent.click(screen.getByRole('button',{name:'Projects'}));
- fireEvent.click(await screen.findByRole('button',{name:'Open project Qualified library project'}));
- return {invoke,notify,finish};
+ render(<App/>);
+ if(!destination){fireEvent.click(screen.getByRole('button',{name:'Projects'}));
+ fireEvent.click(await screen.findByRole('button',{name:'Open project Qualified library project'}));}
+ return {invoke,notify,finish,host,destinationPair};
 }
 it('opens actual rootless project Library source through fixed native reads without creating Mission or draft authority',async()=>{
  const e=await setup();fireEvent.click(screen.getByRole('button',{name:'Knowledge'}));
@@ -92,4 +112,37 @@ it('opens a saved Search reply only through its independently supplied Session o
  expect(e.invoke.mock.calls.filter(([name])=>name==='read_project_knowledge_source')).toHaveLength(0);
  fireEvent.click(screen.getByRole('button',{name:'Back to search'}));
  expect((screen.getByLabelText('Search this project') as HTMLInputElement).value).toBe('中文');
+});
+
+async function openFileWithGenuineDraft(){
+ const e=await setup(false,undefined,true);
+ fireEvent.click(screen.getByRole('button',{name:'Conversations'}));
+ await screen.findByText(e.destinationPair.window.view.items.find(item=>item.text)!.text!);
+ fireEvent.click(screen.getByRole('button',{name:'Unsent notes'}));
+ fireEvent.change(screen.getByRole('textbox',{name:'Unsent notes'}),{target:{value:'Original current App draft'}});
+ fireEvent.click(screen.getByRole('button',{name:'Knowledge'}));
+ await screen.findByRole('heading',{level:1,name:library.catalogue.project.title});
+ fireEvent.click(within(screen.getByText('Uploaded file').closest('.knowledge-library-row')! as HTMLElement).getByRole('button',{name:'Open'}));
+ await screen.findByRole('button',{name:'Add excerpt to draft'});
+ return e;
+}
+it('appends and undoes an actual Library source in the genuine mounted unsent draft without a file root or send',async()=>{
+ const e=await openFileWithGenuineDraft();
+ fireEvent.click(screen.getByRole('button',{name:'Add excerpt to draft'}));
+ expect(await screen.findByText('Excerpt added to the draft. Not sent.')).toBeTruthy();
+ fireEvent.click(screen.getByRole('button',{name:'Remove added excerpt'}));
+ fireEvent.click(screen.getByRole('button',{name:'Conversations'}));
+ fireEvent.click(screen.getByRole('button',{name:'Unsent notes'}));
+ expect(screen.getByRole('textbox',{name:'Unsent notes'})).toHaveProperty('value','Original current App draft');
+ expect(e.invoke.mock.calls.some(([name])=>/submit|prepare|send|create|source_operation/.test(name))).toBe(false);
+});
+it('refuses a stale Library append when actual Content permission disappears without a React notification',async()=>{
+ const e=await openFileWithGenuineDraft(),oldAdd=screen.getByRole('button',{name:'Add excerpt to draft'});
+ vi.spyOn(e.host.auth!,'getState').mockReturnValue({...signed,content:false} as never);
+ fireEvent.click(oldAdd);
+ expect(screen.queryByText('Excerpt added to the draft. Not sent.')).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'Conversations'}));
+ fireEvent.click(screen.getByRole('button',{name:'Unsent notes'}));
+ expect(screen.getByRole('textbox',{name:'Unsent notes'})).toHaveProperty('value','Original current App draft');
+ expect(e.invoke.mock.calls.some(([name])=>/submit|prepare|send|create|source_operation/.test(name))).toBe(false);
 });
