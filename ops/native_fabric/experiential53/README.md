@@ -11,12 +11,23 @@ Base: protected `mastermindx-market-intelligence/Mastermind` master
 `910803421beca53ca25145392725ab2d84c7a8e9` (Skillpack v1.0.1). This
 directory is entirely NEW files; no incumbent file is modified.
 
+Stack provenance (billing01 corrective child): this generation is stacked
+EXACTLY on upstream transport PR #2035 head
+`f68b5b25d57c8ca90e3e503b5388d6e292a0fc7b` (itself stacked on the manual-pin
+base PR #2031 head `b983bf9fd78e8a11c4ba60c691c6b627b0b5a7f3`). The
+transport source author of PR #2035 remains its live writer and was NOT
+touched: the corrective delta lives only on this child's own branch, scoped
+to the three transport source files in this directory. The vendor
+single-attempt/no-fallback gateway routing control from `f68b5b2`
+(`gateway.retry` one-dispatch budget + `gateway.routing.allow_fallbacks=false`)
+is preserved byte-for-byte.
+
 ## Files
 
 | File | Role |
 |---|---|
 | `experiential_pin.py` | Typed manual-pin law: exact pool/slug pin, distinctness from the canonical Z.AI glm tier, no-default-promotion, no-fallback, and the ordered fail-closed execution admission. Stdlib only; no network, no credential, no storage access. |
-| `experiential_transport.py` | The actual opt-in native gateway inference transport: one bounded, non-streaming OpenAI-compatible `chat/completions` POST to the shared loopback gateway (PR #1849 contract). Disabled at source until qualification (`ROUTE_QUALIFIED = False`); every run refuses before any dial. Stdlib only; no env/file credential path; secret-free result/refusal surfaces. |
+| `experiential_transport.py` | The actual opt-in native gateway inference transport: one bounded, non-streaming OpenAI-compatible `chat/completions` POST to the shared loopback gateway (PR #1849 contract). Disabled at source until qualification (`ROUTE_QUALIFIED = False`); every run refuses before any dial. Stdlib only; no env/file credential path; secret-free result/refusal surfaces. Carries a fixed conservative `max_tokens` worst-case output bound (tighten-only), preserves/validates the provider `X-Request-Id` response handle as an opaque reconciliation key, and reports a typed never-invented cost posture (`COST_RECONCILIATION_PENDING` / inline-observation-only; `usage.is_byok` true fails closed). |
 | `experiential_exec.sh` | Fail-closed worker scaffold in the incumbent exec-wrapper shape. Every path ends in a typed refusal (exit 78). Zero writes, zero reads of the packet, zero provider contact. |
 | `pools.yaml.experiential.poolblock.yaml` | Declarative registry block for the runtime pool registry owner to merge under `pools:`. Not a patch against moving runtime bytes and NOT installed by this child. |
 | `test_experiential_pin_contract.py` | Hermetic deterministic contract suite (unittest; also pytest-collectable). |
@@ -93,6 +104,44 @@ inference transport behind the manual pin — not a second status scaffold:
   4xx/5xx, and 204 never silently accepted as empty success); a 200 must be
   JSON with non-empty `choices` and content, and a substituted `model` echo
   is refused (`GATEWAY_RESPONSE_MODEL_MISMATCH`).
+* **Bounded worst-case output (billing01).** Every admitted frame carries a
+  fixed conservative `max_tokens` (module constant `MAX_OUTPUT_TOKENS = 512`
+  — ample for bounded fix_build-class packet work, small enough to cap the
+  billed exposure of any single request, including one that fails or
+  disconnects mid-generation, which the vendor documents as possibly still
+  charged). A caller may tighten the cap per request
+  (`max_output_tokens=64`); nothing can loosen it — the constant is the
+  ceiling, never a runtime flag or route field
+  (`MAX_OUTPUT_TOKENS_INVALID`).
+* **Provider reconciliation handle (billing01).** The provider/gateway
+  `X-Request-Id` RESPONSE header is captured, validated against a strict
+  bounded printable-ASCII shape (1–128 chars, log-safe by construction) and
+  surfaced on the outcome/summary as an opaque, non-secret reconciliation
+  key that is distinct from the locally sent `Idempotency-Key`. Missing is
+  typed `PROVIDER_REQUEST_ID_MISSING`; a malformed value is discarded and
+  typed `PROVIDER_REQUEST_ID_MALFORMED`, never surfaced or logged raw. A
+  validated handle on a FAILED post rides the typed refusal detail (vendor
+  law: failed/disconnected requests may still incur charge, so the billing
+  owner can reconcile even refused POSTs). Settlement belongs to the
+  EXISTING billing owner via `GET /api/v1/generation?id=<x-request-id>` /
+  the settled org-scoped usage export — this module never dials either.
+* **Cost is never invented (billing01).** Per the Experiential Cost API
+  law, any request carrying an `Idempotency-Key` is deliberately NOT
+  annotated with `usage.cost`, so per-request cost is UNKNOWN at transport
+  time. The outcome therefore reports `COST_RECONCILIATION_PENDING` unless
+  a type-safe inline `usage.cost` observation exists
+  (`COST_RECONCILIATION_OBSERVED_INLINE` — explicitly an inline observation,
+  `cost_settled` is `False` by law). Zero USD is never synthesized;
+  untrusted observations (wrong type, negative, non-finite, beyond the
+  typed sanity bound) are recorded PENDING, never surfaced as a figure; no
+  ledger write, no charge, no provider query. `usage.is_byok` true fails
+  the request closed (`COST_BYOK_REFUSED`) for this platform-funded-only
+  pool — completion discarded, no retry, no fallback.
+* **Exact model echo (billing01).** A present echoed `model` must equal the
+  pinned slug byte-for-byte: `GLM-5.3-UNCENSORED`, mixed-case and
+  whitespace-padded variants are substituted-model refusals — the incumbent
+  case-insensitive fold could accept case variants contrary to exact-slug
+  law and no longer does.
 * **Secret-free surface.** The proxy token is host-managed and org-scoped,
   supplied per-forward by trusted host composition — this module has NO
   environment or file credential path (it does not even import `os`), and a
@@ -106,7 +155,7 @@ inference transport behind the manual pin — not a second status scaffold:
   authenticated readback, has unknown quota = no capacity.
 * **Packet identity preserved.** `run_id` and `packet_root` are validated,
   carried through unchanged, and returned on the secret-free outcome.
-* **Mock proof vs live proof.** `test_experiential_transport.py` (64 tests)
+* **Mock proof vs live proof.** `test_experiential_transport.py` (86 tests)
   and the CLI `mockproof` subcommand prove every law above against an
   in-process mock gateway on an ephemeral loopback port with zero provider
   contact. That is SOURCE MOCK PROOF only — not a live provider call, not an

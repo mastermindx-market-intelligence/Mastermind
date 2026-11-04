@@ -53,14 +53,18 @@ QUALIFIED = (
 )
 
 
-def completion_frame(content: str = "ok", model: str = transport.MODEL) -> bytes:
-    return json.dumps({
+def completion_frame(content: str = "ok", model: str = transport.MODEL,
+                     usage: "dict | None" = None) -> bytes:
+    frame = {
         "id": "chatcmpl-mock-1",
         "object": "chat.completion",
         "model": model,
         "choices": [{"index": 0, "finish_reason": "stop",
                      "message": {"role": "assistant", "content": content}}],
-    }).encode()
+    }
+    if usage is not None:
+        frame["usage"] = usage
+    return json.dumps(frame).encode()
 
 
 class MockGateway(ThreadingHTTPServer):
@@ -232,7 +236,12 @@ class HappyPathTests(unittest.TestCase):
         self.assertEqual(frame["model"], "glm-5.3-uncensored")
         self.assertIs(frame["stream"], False)
         self.assertEqual(frame["messages"], [{"role": "user", "content": PROMPT}])
-        self.assertEqual(set(frame), {"model", "messages", "stream", "gateway"})
+        # billing01 corrective child: the frame now also carries the fixed
+        # conservative worst-case output bound; everything else is unchanged.
+        self.assertEqual(set(frame),
+                         {"model", "messages", "stream", "max_tokens", "gateway"})
+        self.assertEqual(frame["max_tokens"], transport.MAX_OUTPUT_TOKENS)
+        self.assertEqual(outcome.max_output_tokens, transport.MAX_OUTPUT_TOKENS)
         # Experiential's default waterfall can perform multiple generation
         # dispatches inside one HTTP request. Pin both budgets to one and
         # disable internal provider-rung fallback, not just SDK retries.
@@ -258,8 +267,11 @@ class HappyPathTests(unittest.TestCase):
         self.assertGreater(outcome.bytes_received, 0)
         self.assertEqual(outcome.route_id, ROUTE_ID)
         self.assertEqual(outcome.route_generation, ROUTE_GENERATION)
-        # the summary is metadata-only: no completion text
-        self.assertNotIn(outcome.content, json.dumps(outcome.summary()))
+        # the summary is metadata-only: no completion text.  billing01:
+        # matched as a quoted JSON VALUE — the summary's typed key names
+        # (e.g. the literal string "max_output_tokens") are metadata, not
+        # completion content, and must not trip a blunt substring check.
+        self.assertNotIn(json.dumps(outcome.content), json.dumps(outcome.summary()))
         self.assertIn("content_chars", json.dumps(outcome.summary()))
 
     def test_system_prompt_frames_system_role_first(self):
@@ -756,6 +768,320 @@ class CliTests(unittest.TestCase):
         self.assertIn("MOCKPROOF", done.stdout)
 
 
+class OutputTokenBoundTests(unittest.TestCase):
+    """The fixed conservative max_tokens law: emitted on every frame,
+    tighten-only, refused before any dial when violated."""
+
+    def setUp(self):
+        self.server = MockGateway(
+            lambda *a: (200, "application/json", completion_frame(), {}))
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def test_default_cap_is_the_module_constant(self):
+        self.assertEqual(transport.MAX_OUTPUT_TOKENS, 512)
+        outcome = run_ok(self.server)
+        frame = json.loads(self.server.requests[0][3])
+        self.assertEqual(frame["max_tokens"], 512)
+        self.assertEqual(outcome.max_output_tokens, 512)
+        # The gateway retry policy rides the SAME frame, unchanged: one
+        # vendor dispatch total, no internal provider-rung fallback.
+        self.assertEqual(frame["gateway"], {
+            "retry": {
+                "max_attempts_per_route": 1,
+                "max_total_attempts": 1,
+                "backoff": {"type": "none"},
+            },
+            "routing": {"allow_fallbacks": False},
+        })
+
+    def test_cap_can_be_tightened_per_request(self):
+        outcome = run_ok(self.server, max_output_tokens=64)
+        frame = json.loads(self.server.requests[0][3])
+        self.assertEqual(frame["max_tokens"], 64)
+        self.assertEqual(outcome.max_output_tokens, 64)
+
+    def test_cap_cannot_be_loosened_and_never_dials(self):
+        for bad in (transport.MAX_OUTPUT_TOKENS + 1, 4096, 0, -5,
+                    True, 1.5, "512"):
+            with self.assertRaisesRegex(REFUSED, "MAX_OUTPUT_TOKENS_INVALID"):
+                run_ok(self.server, max_output_tokens=bad)
+        self.assertEqual(self.server.requests, [])
+
+
+class ProviderRequestIdTests(unittest.TestCase):
+    """The provider ``X-Request-Id`` response handle: captured, validated,
+    surfaced as opaque bounded metadata — distinct from the Idempotency-Key,
+    and usable by the billing owner without any second dial."""
+
+    HANDLE = "req-01HV2Zexample9f8e7d6c5b4a"
+
+    def _server_with(self, status: int, extra: "dict | None" = None,
+                     payload: "bytes | None" = None):
+        server = MockGateway(
+            lambda *a: (status, "application/json",
+                        payload if payload is not None else completion_frame(),
+                        extra or {}))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return server
+
+    def _run(self, server, **overrides):
+        try:
+            return run_ok(server, **overrides)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_positive_handle_is_surfaced_as_opaque_metadata(self):
+        server = self._server_with(200, {"X-Request-Id": self.HANDLE})
+        outcome = self._run(server)
+        self.assertEqual(outcome.provider_request_id, self.HANDLE)
+        self.assertEqual(outcome.provider_request_id_status,
+                         transport.PROVIDER_REQUEST_ID_PRESENT)
+        # distinct from the locally sent Idempotency-Key
+        self.assertNotEqual(outcome.provider_request_id, outcome.idempotency_key)
+        # reflected in outcome/metadata only — and the ONLY dial is the
+        # single chat/completions POST (no Cost API call, no GET, ever)
+        self.assertIn(self.HANDLE, json.dumps(outcome.summary()))
+        self.assertEqual(len(server.requests), 1)
+        self.assertEqual(server.requests[0][0], "POST")
+        self.assertEqual(server.requests[0][1], "/v1/chat/completions")
+
+    def test_header_name_lookup_is_case_insensitive(self):
+        server = self._server_with(200, {"x-request-id": self.HANDLE})
+        outcome = self._run(server)
+        self.assertEqual(outcome.provider_request_id, self.HANDLE)
+
+    def test_missing_handle_is_typed_never_synthesized(self):
+        server = self._server_with(200)
+        outcome = self._run(server)
+        self.assertIsNone(outcome.provider_request_id)
+        self.assertEqual(outcome.provider_request_id_status,
+                         transport.PROVIDER_REQUEST_ID_MISSING)
+        self.assertIn('"provider_request_id": null',
+                      json.dumps(outcome.summary()))
+
+    def test_malformed_handle_is_discarded_raw_value_never_surfaced(self):
+        for bad in ("bad handle with spaces", "tab\there", "x" * 300, "",
+                    "  "):
+            server = self._server_with(200, {"X-Request-Id": bad})
+            try:
+                outcome = run_ok(server)
+            finally:
+                server.shutdown()
+                server.server_close()
+            self.assertIsNone(outcome.provider_request_id, bad)
+            self.assertEqual(outcome.provider_request_id_status,
+                             transport.PROVIDER_REQUEST_ID_MALFORMED, bad)
+            # the malformed RAW value must never reach any surface (only
+            # values with visible content can leak; "" trivially cannot)
+            if bad.strip():
+                surfaces = (json.dumps(outcome.summary()), str(outcome),
+                            repr(outcome))
+                for surface in surfaces:
+                    self.assertNotIn(bad, surface, bad)
+
+    def test_handle_on_failed_post_reaches_the_typed_refusal(self):
+        # vendor law: a failed/disconnected request may still incur charge,
+        # so the validated handle rides the typed refusal for reconciliation
+        server = self._server_with(401, {"X-Request-Id": self.HANDLE},
+                                   b'{"error": {"message": "unauthorized"}}')
+        try:
+            with self.assertRaises(REFUSED) as caught:
+                run_ok(server)
+            self.assertEqual(caught.exception.reason, "GATEWAY_AUTH_REFUSED")
+            self.assertIn(f"provider_request_id={self.HANDLE}",
+                          caught.exception.detail)
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(len(server.requests), 1)
+
+    def test_no_handle_on_failed_post_is_omitted_not_fabricated(self):
+        server = self._server_with(429, {"Retry-After": "1"},
+                                   b'{"error": {"message": "slow down"}}')
+        try:
+            with self.assertRaises(REFUSED) as caught:
+                run_ok(server)
+            self.assertNotIn("provider_request_id", caught.exception.detail)
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(len(server.requests), 1, "one POST, never retried")
+
+
+class CostReconciliationTests(unittest.TestCase):
+    """Cost is never invented: missing/unusable inline observations stay
+    COST_RECONCILIATION_PENDING (never zero USD), a type-safe observation is
+    explicitly inline-only, and no provider/billing endpoint is ever dialed."""
+
+    def _run_with_usage(self, usage, *, expect_refusal: "str | None" = None):
+        server = MockGateway(
+            lambda *a: (200, "application/json", completion_frame(usage=usage), {}))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            if expect_refusal is not None:
+                with self.assertRaises(REFUSED) as caught:
+                    run_ok(server)
+                return None, caught.exception, server
+            outcome = run_ok(server)
+            return outcome, None, server
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def _assert_one_post_no_provider_dial(self, server):
+        self.assertEqual(len(server.requests), 1)
+        self.assertTrue(all(r[0] == "POST" for r in server.requests))
+        self.assertEqual({r[1] for r in server.requests},
+                         {"/v1/chat/completions"})
+
+    def test_idempotent_response_without_usage_is_pending_not_zero(self):
+        outcome, refusal, server = self._run_with_usage(None)
+        self.assertIsNotNone(outcome)
+        self.assertEqual(outcome.cost_status, "COST_RECONCILIATION_PENDING")
+        self.assertIsNone(outcome.cost_usd_observed)
+        self.assertIs(outcome.cost_settled, False)
+        self.assertEqual(outcome.cost_detail, "usage_frame_missing")
+        summary = json.dumps(outcome.summary())
+        self.assertIn('"cost_status": "COST_RECONCILIATION_PENDING"', summary)
+        self.assertIn('"cost_usd_observed": null', summary)
+        self.assertIn('"cost_settled": false', summary)
+        self.assertNotIn('"cost_usd_observed": 0', summary)
+        self._assert_one_post_no_provider_dial(server)
+
+    def test_usage_without_cost_is_pending(self):
+        outcome, _, server = self._run_with_usage({"prompt_tokens": 5})
+        self.assertEqual(outcome.cost_status, "COST_RECONCILIATION_PENDING")
+        self.assertIsNone(outcome.cost_usd_observed)
+        self.assertEqual(outcome.cost_detail, "usage_cost_missing")
+        self._assert_one_post_no_provider_dial(server)
+
+    def test_type_safe_cost_is_inline_observation_not_settled(self):
+        outcome, _, server = self._run_with_usage({"cost": 0.0042,
+                                                   "is_byok": False})
+        self.assertEqual(outcome.cost_status,
+                         "COST_RECONCILIATION_OBSERVED_INLINE")
+        self.assertAlmostEqual(outcome.cost_usd_observed, 0.0042)
+        self.assertIs(outcome.cost_settled, False)
+        self.assertEqual(outcome.cost_detail, "inline_observation_not_settled")
+        summary = json.dumps(outcome.summary())
+        self.assertIn("COST_RECONCILIATION_OBSERVED_INLINE", summary)
+        self.assertIn('"cost_settled": false', summary)
+        self._assert_one_post_no_provider_dial(server)
+
+    def test_untrusted_cost_is_never_surfaced_as_a_dollar_figure(self):
+        for usage, detail in (
+                ({"cost": "0.01"}, "usage_cost_unusable_type"),
+                ({"cost": True}, "usage_cost_unusable_type"),
+                ({"cost": [1, 2]}, "usage_cost_unusable_type"),
+                ({"cost": -1}, "usage_cost_unusable_value"),
+                ({"cost": 1e400}, "usage_cost_unusable_value"),
+                ({"cost": 101.0}, "usage_cost_unusable_value"),
+        ):
+            outcome, _, server = self._run_with_usage(usage)
+            self.assertEqual(outcome.cost_status,
+                             "COST_RECONCILIATION_PENDING", usage)
+            # the unusable value is never surfaced as a dollar figure
+            self.assertIsNone(outcome.cost_usd_observed, usage)
+            self.assertIn('"cost_usd_observed": null',
+                          json.dumps(outcome.summary()))
+            self.assertEqual(outcome.cost_detail, detail, usage)
+            server.shutdown()
+            server.server_close()
+
+    def test_unusable_usage_frame_is_pending(self):
+        outcome, _, server = self._run_with_usage("3 cents")
+        self.assertEqual(outcome.cost_status, "COST_RECONCILIATION_PENDING")
+        self.assertIsNone(outcome.cost_usd_observed)
+        self.assertEqual(outcome.cost_detail, "usage_frame_unusable")
+        self._assert_one_post_no_provider_dial(server)
+
+    def test_non_boolean_is_byok_poisons_the_observation_not_the_content(self):
+        outcome, _, server = self._run_with_usage({"cost": 0.01,
+                                                   "is_byok": "true"})
+        self.assertEqual(outcome.cost_status, "COST_RECONCILIATION_PENDING")
+        self.assertIsNone(outcome.cost_usd_observed)
+        self.assertEqual(outcome.cost_detail, "usage_is_byok_unusable")
+        self.assertEqual(outcome.content, "ok")
+        self._assert_one_post_no_provider_dial(server)
+
+
+class ByokFailClosedTests(unittest.TestCase):
+    """usage.is_byok=true fails closed for the platform-funded-only pool."""
+
+    def test_byok_refused_no_retry_completion_discarded(self):
+        server = MockGateway(
+            lambda *a: (200, "application/json",
+                        completion_frame(usage={"cost": 0.01,
+                                                "is_byok": True}), {}))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            with self.assertRaisesRegex(REFUSED, "COST_BYOK_REFUSED") as caught:
+                run_ok(server)
+            self.assertIn("platform-funded", caught.exception.detail)
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(len(server.requests), 1, "one POST, no retry")
+
+    def test_explicit_false_byok_is_the_normal_inline_path(self):
+        server = MockGateway(
+            lambda *a: (200, "application/json",
+                        completion_frame(usage={"cost": 0.01,
+                                                "is_byok": False}), {}))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            outcome = run_ok(server)
+            self.assertEqual(outcome.cost_status,
+                             "COST_RECONCILIATION_OBSERVED_INLINE")
+        finally:
+            server.shutdown()
+            server.server_close()
+
+
+class ExactModelEchoTests(unittest.TestCase):
+    """The echoed model must equal the pinned slug byte-for-byte."""
+
+    def _case(self, echoed_model: str):
+        server = MockGateway(
+            lambda *a: (200, "application/json",
+                        completion_frame(model=echoed_model), {}))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            with self.assertRaises(REFUSED) as caught:
+                run_ok(server)
+            self.assertEqual(caught.exception.reason,
+                             "GATEWAY_RESPONSE_MODEL_MISMATCH")
+            self.assertEqual(len(server.requests), 1)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_uppercase_variant_refused(self):
+        self._case("GLM-5.3-UNCENSORED")
+
+    def test_mixed_case_variant_refused(self):
+        self._case("Glm-5.3-Uncensored")
+
+    def test_casefold_is_no_longer_accepted(self):
+        # the exact slug casefolds to itself, so the incumbent case-insensitive
+        # law could not tell these apart; the exact law does
+        self.assertNotEqual("GLM-5.3-uncensored".casefold(), "GLM-5.3-uncensored")
+        self._case("GLM-5.3-uncensored")
+
+    def test_whitespace_padded_variants_refused(self):
+        self._case("glm-5.3-uncensored ")
+        self._case(" glm-5.3-uncensored")
+
+    def test_near_alias_refused(self):
+        self._case("glm-5.3-uncensored-v2")
+        self._case("glm-5.3")
+
+
 def run_mockproof() -> bool:
     """The CLI-embedded hermetic proof.  Loopback mock only; no provider.
 
@@ -773,6 +1099,16 @@ def run_mockproof() -> bool:
                        outcome.content == "ok" and len(server.requests) == 1))
         checks.append(("packet_identity",
                        outcome.run_id == RUN_ID and outcome.packet_root == PACKET_ROOT))
+        # billing01 laws: cost pending (never zero), bounded output, BYOK
+        # fail-closed, provider reconciliation handle surfaced
+        checks.append(("cost_pending_not_zero",
+                       outcome.cost_status == transport.COST_RECONCILIATION_PENDING
+                       and outcome.cost_usd_observed is None
+                       and outcome.cost_settled is False))
+        checks.append(("bounded_output",
+                       json.loads(server.requests[0][3])["max_tokens"]
+                       == transport.MAX_OUTPUT_TOKENS
+                       and outcome.max_output_tokens == transport.MAX_OUTPUT_TOKENS))
 
         server.script = (lambda *a: (429, "application/json",
                                      b'{"error": {"message": "slow down"}}',
@@ -795,6 +1131,32 @@ def run_mockproof() -> bool:
                            exc.reason == "GATEWAY_REDIRECT_REFUSED"
                            and all(r[1] == "/v1/chat/completions"
                                    for r in server.requests)))
+
+        server.script = (lambda *a: (200, "application/json",
+                                     completion_frame(usage={"cost": 0.01,
+                                                             "is_byok": True}),
+                                     {}))
+        try:
+            run_ok(server)
+            checks.append(("byok_refused", False))
+        except REFUSED as exc:
+            checks.append(("byok_fail_closed",
+                           exc.reason == "COST_BYOK_REFUSED"
+                           and len(server.requests) == 4))
+
+        server.script = (lambda *a: (200, "application/json", completion_frame(),
+                                     {"X-Request-Id": "req-mockproof-1"}))
+        try:
+            surfaced = run_ok(server)
+            checks.append(("provider_request_id_surfaced",
+                           surfaced.provider_request_id == "req-mockproof-1"
+                           and surfaced.provider_request_id_status
+                           == transport.PROVIDER_REQUEST_ID_PRESENT
+                           and surfaced.cost_status
+                           == transport.COST_RECONCILIATION_PENDING
+                           and len(server.requests) == 5))
+        except Exception:
+            checks.append(("provider_request_id_surfaced", False))
     except Exception:
         checks.append(("unexpected_error", False))
     finally:

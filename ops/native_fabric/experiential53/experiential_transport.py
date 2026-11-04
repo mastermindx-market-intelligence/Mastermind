@@ -67,6 +67,33 @@ Transport laws (each one typed, fail-closed, and mock-tested):
   validated, carried through unchanged, and returned on the outcome;
   ``run_id`` is also the gateway ``Idempotency-Key`` for the one logical
   request (the #1849 worker-client law).
+* **Worst-case output is bounded.**  Every admitted frame carries a fixed
+  conservative ``max_tokens`` (module constant ``MAX_OUTPUT_TOKENS``).  A
+  caller may TIGHTEN it per request; nothing can loosen it — the constant is
+  the ceiling, never a runtime flag and never a route field.  This also caps
+  the billed exposure of a request that fails mid-generation (vendor law: a
+  failed or disconnected request may still incur charge).
+* **Provider reconciliation handle.**  The provider/gateway ``X-Request-Id``
+  RESPONSE header is captured, strictly shape-validated and surfaced on the
+  outcome as an opaque, bounded, non-secret reconciliation handle that is
+  distinct from the locally sent ``Idempotency-Key``.  A missing or malformed
+  handle is typed, never synthesized and never logged raw.  It is the key
+  the EXISTING billing owner uses against the settled Cost API
+  (``GET /api/v1/generation?id=<x-request-id>``) / usage export — this
+  module never dials it.
+* **Cost is never invented.**  Per the Experiential Cost API law, a request
+  carrying an ``Idempotency-Key`` is NOT annotated with ``usage.cost``, so
+  the per-request cost is UNKNOWN at transport time.  A response without a
+  usable inline ``usage.cost`` observation is therefore explicitly
+  ``COST_RECONCILIATION_PENDING`` — never zero USD, never a fabricated
+  figure, never a provider query, never a ledger write.  A type-safe inline
+  observation is surfaced as ``COST_RECONCILIATION_OBSERVED_INLINE`` and is
+  explicitly NOT settled billing.  ``usage.is_byok`` true fails the request
+  closed for this platform-funded-only pool (``COST_BYOK_REFUSED``): the
+  completion is discarded, no retry, no fallback.
+* **Exact model echo.**  A present echoed ``model`` must equal the pinned
+  request slug BYTE-FOR-BYTE (case-sensitive); uppercase, mixed-case and
+  near-alias variants are substituted-model refusals.
 * **Unmerged dependency is named, not bypassed.**  Composition with the
   Attempt-owned consumer seam (``control_plane.experiential_harness_endpoint``,
   PR #1920, unmerged) is available only as an explicit probe:
@@ -86,6 +113,7 @@ from __future__ import annotations
 import argparse
 import http.client
 import json
+import math
 import re
 import socket
 import sys
@@ -134,6 +162,42 @@ MAX_SYSTEM_CHARS = 50_000
 MAX_CONNECT_TIMEOUT_S = 30.0
 MAX_READ_TIMEOUT_S = 900.0
 
+#: Worst-case completion size bound sent on EVERY admitted request.  This
+#: transport serves bounded manual fix_build-class packet work, not free-form
+#: generation: 512 output tokens is ample headroom for those task classes
+#: while capping the worst-case billed exposure per request — including a
+#: request that fails or disconnects mid-generation (vendor law: that may
+#: still incur charge and is never retried or refunded here).  A caller may
+#: tighten the cap per request via ``max_output_tokens=``; NOTHING can
+#: loosen it: the constant is the ceiling, never an argument default that
+#: admits a larger value and never a route field.
+MAX_OUTPUT_TOKENS = 512
+
+#: The provider reconciliation handle (response header ``X-Request-Id``) is
+#: an opaque, bounded, non-secret string.  Strict shape law: printable ASCII
+#: (no whitespace, no control characters — log-safe by construction), at
+#: most 128 characters.  Anything else is unusable and is NEVER surfaced,
+#: logged raw or substituted by the local ``Idempotency-Key``.
+MAX_PROVIDER_REQUEST_ID_CHARS = 128
+_PROVIDER_REQUEST_ID_RE = re.compile(r"^[\x21-\x7e]{1,128}$")
+
+#: Cost reconciliation status vocabulary (typed, metadata-only).  This
+#: transport NEVER invents a cost figure: a missing/unusable inline
+#: observation stays PENDING for the EXISTING billing owner to reconcile via
+#: the provider request id and the settled usage export; a type-safe
+#: observation is surfaced inline-only and is explicitly NOT settled
+#: billing.  ``cost_settled`` is False by law on this surface.
+COST_RECONCILIATION_PENDING = "COST_RECONCILIATION_PENDING"
+COST_RECONCILIATION_OBSERVED_INLINE = "COST_RECONCILIATION_OBSERVED_INLINE"
+PROVIDER_REQUEST_ID_PRESENT = "PROVIDER_REQUEST_ID_PRESENT"
+PROVIDER_REQUEST_ID_MISSING = "PROVIDER_REQUEST_ID_MISSING"
+PROVIDER_REQUEST_ID_MALFORMED = "PROVIDER_REQUEST_ID_MALFORMED"
+
+#: A type-safe inline cost observation must be a finite, non-negative number
+#: within this typed sanity bound; anything else is untrusted and recorded
+#: as unusable (PENDING), never as a dollar figure.
+MAX_INLINE_COST_USD = 100.0
+
 _RUN_ID_RE = pin.RUN_ID_RE
 _PACKET_ROOT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./:-]{0,255}$")
 _PROXY_TOKEN_RE = re.compile(r"^[\x21-\x7e]{24,256}$")
@@ -148,8 +212,11 @@ class ExperientialTransportRefused(RuntimeError):
     """Typed, fail-closed transport refusal (stable upper-snake ``reason``).
 
     ``detail`` is metadata-only by construction: status codes, header names,
-    limit names.  Prompt, response body and the proxy token can never enter
-    it, so a refusal is safe to log.
+    limit names, and — since billing01 — the SHAPE-VALIDATED provider
+    reconciliation handle (bounded printable ASCII, log-safe by
+    construction).  Prompt, response body, the proxy token and any
+    malformed/unvalidated header value can never enter it, so a refusal is
+    safe to log.
     """
 
     def __init__(self, reason: str, detail: str = "") -> None:
@@ -213,6 +280,23 @@ class InferenceOutcome:
 
     Carries the packet identity verbatim and the completion text.  No token,
     no route credentials, no request bodies beyond the returned content.
+
+    Cost/reconciliation fields (typed, never invented):
+
+    * ``provider_request_id`` — the validated opaque provider
+      ``X-Request-Id`` response handle (or ``None`` when missing/malformed;
+      the raw malformed value never surfaces).  Distinct from the locally
+      sent ``Idempotency-Key``.
+    * ``cost_status`` — ``COST_RECONCILIATION_PENDING`` while the per-request
+      cost is UNKNOWN (the default for idempotent-annotated requests, which
+      the provider deliberately does not annotate with ``usage.cost``), or
+      ``COST_RECONCILIATION_OBSERVED_INLINE`` for a type-safe inline
+      observation that is explicitly NOT settled.
+    * ``cost_usd_observed`` — only ever a type-safe inline observation;
+      ``None`` otherwise.  Zero is never synthesized.
+    * ``cost_settled`` — False by law on this surface; settlement belongs to
+      the existing billing owner via the settled usage export.
+    * ``max_output_tokens`` — the worst-case output bound actually sent.
     """
 
     run_id: str
@@ -230,6 +314,13 @@ class InferenceOutcome:
     content: str
     model_echo: Optional[str]
     source: str = "gateway"
+    provider_request_id: Optional[str] = None
+    provider_request_id_status: str = PROVIDER_REQUEST_ID_MISSING
+    cost_status: str = COST_RECONCILIATION_PENDING
+    cost_usd_observed: Optional[float] = None
+    cost_settled: bool = False
+    cost_detail: str = "not_observed"
+    max_output_tokens: int = MAX_OUTPUT_TOKENS
 
     def summary(self) -> Dict[str, Any]:
         """Metadata-only view (no completion text, no credentials)."""
@@ -249,6 +340,13 @@ class InferenceOutcome:
             "bytes_received": self.bytes_received,
             "content_chars": len(self.content),
             "model_echo": self.model_echo,
+            "provider_request_id": self.provider_request_id,
+            "provider_request_id_status": self.provider_request_id_status,
+            "cost_status": self.cost_status,
+            "cost_usd_observed": self.cost_usd_observed,
+            "cost_settled": self.cost_settled,
+            "cost_detail": self.cost_detail,
+            "max_output_tokens": self.max_output_tokens,
         }
 
 
@@ -352,9 +450,11 @@ def _validate_prompt(prompt: Any, system: Any, limits: TransportLimits) -> str:
     return prompt
 
 
-def _build_request_frame(prompt: str, system: Any) -> bytes:
+def _build_request_frame(prompt: str, system: Any, max_tokens: int) -> bytes:
     """The exact admitted request frame.  The model is the pin's law; the
-    frame is non-streaming by law; no caller-supplied field can enter it."""
+    frame is non-streaming by law; ``max_tokens`` is the validated
+    tighten-only worst-case output bound; no other caller-supplied field can
+    enter it."""
     messages: list = []
     if isinstance(system, str) and system:
         messages.append({"role": "system", "content": system})
@@ -367,6 +467,11 @@ def _build_request_frame(prompt: str, system: Any) -> bytes:
         "model": MODEL,
         "messages": messages,
         "stream": False,
+        # Fixed conservative worst-case output bound.  A request that fails
+        # or disconnects mid-generation may still incur charge (vendor law),
+        # so the cap also bounds failed-call exposure; there is no refund or
+        # retry path here to lean on.
+        "max_tokens": max_tokens,
         "gateway": {
             "retry": {
                 "max_attempts_per_route": 1,
@@ -384,39 +489,62 @@ def _build_request_frame(prompt: str, system: Any) -> bytes:
     return body
 
 
-def _classify_http_error(status: int, content_type: str) -> ExperientialTransportRefused:
-    """One typed refusal per status class.  No status is silently accepted."""
+def _classify_http_error(status: int, content_type: str,
+                         provider_request_id: str = "") -> ExperientialTransportRefused:
+    """One typed refusal per status class.  No status is silently accepted.
+
+    ``provider_request_id`` (when the failed response carried a VALIDATED
+    ``X-Request-Id``) is appended to the typed detail: the vendor documents
+    that a failed or disconnected request may still incur charge, so the
+    existing billing owner must be able to reconcile even refused POSTs via
+    the provider handle.  The handle is shape-validated printable ASCII, so
+    the detail stays metadata-only and log-safe.
+    """
     if 300 <= status < 400:
-        return ExperientialTransportRefused(
+        refusal = ExperientialTransportRefused(
             "GATEWAY_REDIRECT_REFUSED", f"status {status}")
-    if status in (401, 403):
-        return ExperientialTransportRefused(
+    elif status in (401, 403):
+        refusal = ExperientialTransportRefused(
             "GATEWAY_AUTH_REFUSED", f"status {status}")
-    if status == 413:
-        return ExperientialTransportRefused("GATEWAY_REQUEST_TOO_LARGE", "status 413")
-    if status == 429:
-        return ExperientialTransportRefused(
+    elif status == 413:
+        refusal = ExperientialTransportRefused("GATEWAY_REQUEST_TOO_LARGE", "status 413")
+    elif status == 429:
+        refusal = ExperientialTransportRefused(
             "GATEWAY_RATE_LIMITED", "status 429; Retry-After is never obeyed (one POST)")
-    if 400 <= status < 500:
-        return ExperientialTransportRefused("GATEWAY_REQUEST_REFUSED", f"status {status}")
-    if status == 503:
-        return ExperientialTransportRefused(
+    elif 400 <= status < 500:
+        refusal = ExperientialTransportRefused("GATEWAY_REQUEST_REFUSED", f"status {status}")
+    elif status == 503:
+        refusal = ExperientialTransportRefused(
             "GATEWAY_LOCAL_QUEUE_FULL", "status 503")
-    if status == 504:
-        return ExperientialTransportRefused(
+    elif status == 504:
+        refusal = ExperientialTransportRefused(
             "GATEWAY_QUEUE_WAIT_EXPIRED", "status 504")
-    if status >= 500:
-        return ExperientialTransportRefused("GATEWAY_UPSTREAM_ERROR", f"status {status}")
-    if status != 200:
+    elif status >= 500:
+        refusal = ExperientialTransportRefused("GATEWAY_UPSTREAM_ERROR", f"status {status}")
+    elif status != 200:
         # e.g. the gateway's 204 disconnected-caller response: not a success,
         # and never silently accepted as an empty completion.
-        return ExperientialTransportRefused("GATEWAY_STATUS_REFUSED", f"status {status}")
-    return ExperientialTransportRefused(
-        "GATEWAY_RESPONSE_MALFORMED", f"content-type {content_type!r}")
+        refusal = ExperientialTransportRefused("GATEWAY_STATUS_REFUSED", f"status {status}")
+    else:
+        refusal = ExperientialTransportRefused(
+            "GATEWAY_RESPONSE_MALFORMED", f"content-type {content_type!r}")
+    if provider_request_id:
+        refusal.detail = (f"{refusal.detail}; provider_request_id="
+                          f"{provider_request_id}")
+    return refusal
 
 
-def _parse_completion(raw: bytes, content_type: str) -> Tuple[str, Optional[str]]:
-    """The exact JSON response law: 200 + JSON + non-empty choices + content."""
+def _parse_completion(raw: bytes, content_type: str) -> Tuple[str, Optional[str], Any]:
+    """The exact JSON response law: 200 + JSON + non-empty choices + content.
+
+    The echoed ``model`` must match the pinned request slug BYTE-FOR-BYTE —
+    case-sensitive (``GLM-5.3-UNCENSORED`` and other variants are substituted
+    models, never accepted foldings).  A response carrying NO ``model`` field
+    keeps the incumbent metadata tolerance and is refused downstream by the
+    choices/content law instead.  The raw ``usage`` object, if any, is
+    returned unvalidated; typed cost observation is :func:`_observe_cost`'s
+    law.
+    """
     if not content_type.lower().startswith("application/json"):
         raise ExperientialTransportRefused(
             "GATEWAY_RESPONSE_MALFORMED", f"content-type {content_type!r}")
@@ -429,7 +557,7 @@ def _parse_completion(raw: bytes, content_type: str) -> Tuple[str, Optional[str]
         raise ExperientialTransportRefused("GATEWAY_RESPONSE_MALFORMED", "frame is not an object")
     model_echo = frame.get("model")
     if model_echo is not None:
-        if not isinstance(model_echo, str) or model_echo.casefold() != MODEL:
+        if not isinstance(model_echo, str) or model_echo != MODEL:
             raise ExperientialTransportRefused(
                 "GATEWAY_RESPONSE_MODEL_MISMATCH",
                 f"expected {MODEL!r}, gateway returned {model_echo!r}")
@@ -448,7 +576,117 @@ def _parse_completion(raw: bytes, content_type: str) -> Tuple[str, Optional[str]
     if not content.strip():
         raise ExperientialTransportRefused(
             "GATEWAY_RESPONSE_EMPTY", "completion content is empty")
-    return content, model_echo if isinstance(model_echo, str) else None
+    return (content,
+            model_echo if isinstance(model_echo, str) else None,
+            frame.get("usage"))
+
+
+def _validate_output_tokens(value: Any) -> int:
+    """Tighten-only worst-case output law.  ``None`` selects the constant.
+
+    The module constant ``MAX_OUTPUT_TOKENS`` is the ceiling; a caller may
+    lower the cap for one request, and ANY other value (too large, non-int,
+    bool, zero, negative) is refused BEFORE any dial.  There is no parameter,
+    flag or route field that raises the cap.
+    """
+    if value is None:
+        return MAX_OUTPUT_TOKENS
+    if isinstance(value, bool) or not isinstance(value, int) \
+            or not 1 <= value <= MAX_OUTPUT_TOKENS:
+        raise ExperientialTransportRefused(
+            "MAX_OUTPUT_TOKENS_INVALID",
+            f"expected an int in [1, {MAX_OUTPUT_TOKENS}]; "
+            "the worst-case output cap is never loosened")
+    return int(value)
+
+
+def _validate_provider_request_id(value: Any) -> Optional[str]:
+    """The provider ``X-Request-Id`` RESPONSE header, as an opaque handle.
+
+    Returns the handle only when it passes the strict bounded printable-ASCII
+    shape (1-128 chars, no whitespace/control — log-safe by construction);
+    anything else returns ``None`` and the raw value is discarded: never
+    surfaced, never logged, never replaced by the locally sent
+    ``Idempotency-Key``.  The handle is NOT a secret and NOT a credential —
+    it is the reconciliation key the EXISTING billing owner uses against the
+    settled Cost API (``GET /api/v1/generation?id=<x-request-id>``) / usage
+    export.  This module never dials that API.
+    """
+    if not isinstance(value, str):
+        return None
+    handle = value.strip()
+    if not handle \
+            or len(handle) > MAX_PROVIDER_REQUEST_ID_CHARS \
+            or _PROVIDER_REQUEST_ID_RE.fullmatch(handle) is None:
+        return None
+    return handle
+
+
+def _provider_handle_status(raw: Any, handle: Optional[str]) -> str:
+    """Typed observation status for the provider reconciliation handle."""
+    if handle is not None:
+        return PROVIDER_REQUEST_ID_PRESENT
+    if raw is None:
+        return PROVIDER_REQUEST_ID_MISSING
+    return PROVIDER_REQUEST_ID_MALFORMED
+
+
+def _observe_cost(usage: Any) -> Tuple[str, Optional[float], bool, str]:
+    """Typed, fail-safe cost observation from the response ``usage`` object.
+
+    Returns ``(cost_status, cost_usd_observed, cost_settled, cost_detail)``:
+
+    * NO usable inline observation -> ``COST_RECONCILIATION_PENDING`` /
+      ``None`` / ``False``.  Requests sent with an ``Idempotency-Key`` are
+      deliberately NOT annotated with ``usage.cost`` by the vendor, so this
+      is the EXPECTED posture: the per-request cost is UNKNOWN here and the
+      existing billing owner reconciles later via the provider request id /
+      settled usage export.  Zero USD is NEVER synthesized.
+    * a type-safe observation (finite, non-negative, within the typed sanity
+      bound) -> ``COST_RECONCILIATION_OBSERVED_INLINE`` / the value /
+      ``False`` — explicitly an INLINE OBSERVATION, not settled billing;
+      never accumulated, never written anywhere by this module.
+    * present-but-untrusted values (wrong type, negative, non-finite, beyond
+      the bound) -> PENDING with a typed detail; the raw value never surfaces.
+    * ``usage.is_byok`` true -> typed ``COST_BYOK_REFUSED``: this
+      platform-funded-only pool never consumes caller-brought provider
+      credentials.  Fail closed; the completion is discarded; no retry, no
+      fallback, no refund path (settlement/reconciliation stays with the
+      existing billing owner).
+    """
+    cost_settled = False  # this surface NEVER asserts settled billing
+    if not isinstance(usage, dict):
+        if usage is None:
+            return (COST_RECONCILIATION_PENDING, None, cost_settled,
+                    "usage_frame_missing")
+        return (COST_RECONCILIATION_PENDING, None, cost_settled,
+                "usage_frame_unusable")
+    is_byok = usage.get("is_byok")
+    if is_byok is True:
+        raise ExperientialTransportRefused(
+            "COST_BYOK_REFUSED",
+            "usage.is_byok=true: this pool is platform-funded only and never "
+            "runs on caller-brought provider credentials; no retry, no "
+            "fallback")
+    if is_byok is not None and is_byok is not False:
+        # A non-boolean is_byok cannot be interpreted: no inline observation
+        # may be claimed from an untrusted usage block (the cost law stays
+        # PENDING).  Typed detail only; the raw value never surfaces.
+        return (COST_RECONCILIATION_PENDING, None, cost_settled,
+                "usage_is_byok_unusable")
+    raw_cost = usage.get("cost")
+    if raw_cost is None:
+        return (COST_RECONCILIATION_PENDING, None, cost_settled,
+                "usage_cost_missing")
+    if isinstance(raw_cost, bool) or not isinstance(raw_cost, (int, float)):
+        return (COST_RECONCILIATION_PENDING, None, cost_settled,
+                "usage_cost_unusable_type")
+    cost = float(raw_cost)
+    if not math.isfinite(cost) or cost < 0 or cost > MAX_INLINE_COST_USD:
+        return (COST_RECONCILIATION_PENDING, None, cost_settled,
+                "usage_cost_unusable_value")
+    return (COST_RECONCILIATION_OBSERVED_INLINE, cost, cost_settled,
+            "inline_observation_not_settled")
 
 
 def require_route_qualified() -> None:
@@ -498,6 +736,7 @@ def run_opt_in_inference(
     prompt: str,
     system: str = "",
     limits: Optional[TransportLimits] = None,
+    max_output_tokens: Optional[int] = None,
 ) -> InferenceOutcome:
     """The ONE admitted, opt-in inference request through the local gateway.
 
@@ -511,12 +750,22 @@ def run_opt_in_inference(
        (``pin.TRANSPORT_INSTALLED``),
     4. transport-owned route attestation (``ROUTE_QUALIFIED``) and structural
        route validation,
-    5. bounded request framing,
+    5. bounded request framing — fixed conservative ``max_tokens`` worst-case
+       output bound (tighten-only; the module constant is the ceiling),
     6. exactly one fail-closed POST,
-    7. exact JSON response law -> secret-free outcome.
+    7. exact JSON response law -> provider ``X-Request-Id`` reconciliation
+       handle + typed cost posture -> secret-free outcome.
 
     No step is optional and no step is cached: the acks, the account law and
     the readback are re-evaluated per request.
+
+    The outcome NEVER asserts a settled cost: a response without a usable
+    inline ``usage.cost`` is ``COST_RECONCILIATION_PENDING`` (the expected
+    posture for idempotency-annotated requests), and the provider
+    ``X-Request-Id`` handle — not this module — is what the existing billing
+    owner reconciles against the settled usage export.  A ``usage.is_byok``
+    true response fails closed (``COST_BYOK_REFUSED``) with the completion
+    discarded and no retry.
     """
     bounded = limits if limits is not None else DEFAULT_LIMITS
     if not isinstance(bounded, TransportLimits):
@@ -545,7 +794,8 @@ def run_opt_in_inference(
     require_route_qualified()
     _validate_route(route)
     _validate_prompt(prompt, system, bounded)
-    body = _build_request_frame(prompt, system)
+    output_cap = _validate_output_tokens(max_output_tokens)
+    body = _build_request_frame(prompt, system, output_cap)
 
     headers = {
         "Authorization": f"Bearer {route.proxy_token}",
@@ -565,13 +815,21 @@ def run_opt_in_inference(
         raise
     except urllib.error.HTTPError as exc:
         content_type = exc.headers.get("Content-Type", "") if exc.headers else ""
+        # A failed POST may still incur charge (vendor law): surface the
+        # provider's reconciliation handle on the typed refusal when it is
+        # present and shape-valid, so the billing owner can reconcile it
+        # later.  A malformed/absent handle is simply omitted here and typed
+        # on the success path only.
+        failed_handle = _validate_provider_request_id(
+            exc.headers.get("X-Request-Id") if exc.headers else None)
         try:
             exc.read(MAX_ERROR_BODY_BYTES)  # drained, never surfaced or logged
         except Exception:
             pass
         finally:
             exc.close()
-        raise _classify_http_error(exc.code, content_type)
+        raise _classify_http_error(exc.code, content_type,
+                                   provider_request_id=failed_handle or "")
     except (socket.timeout, TimeoutError, http.client.HTTPException) as exc:
         raise ExperientialTransportRefused(
             "GATEWAY_TIMEOUT", type(exc).__name__)
@@ -584,13 +842,19 @@ def run_opt_in_inference(
     status = getattr(response, "status", None) or response.getcode()
     content_type = response.headers.get("Content-Type", "")
     if status != 200:
+        non200_handle = _validate_provider_request_id(
+            response.headers.get("X-Request-Id") if response.headers else None)
         try:
             response.read(MAX_ERROR_BODY_BYTES)
         except Exception:
             pass
         finally:
             response.close()
-        raise _classify_http_error(status, content_type)
+        raise _classify_http_error(status, content_type,
+                                   provider_request_id=non200_handle or "")
+    provider_handle_raw = (response.headers.get("X-Request-Id")
+                           if response.headers else None)
+    provider_handle = _validate_provider_request_id(provider_handle_raw)
     try:
         raw = response.read(MAX_RESPONSE_BYTES + 1)
     except (socket.timeout, TimeoutError, http.client.HTTPException) as exc:
@@ -601,7 +865,11 @@ def run_opt_in_inference(
         raise ExperientialTransportRefused(
             "GATEWAY_RESPONSE_TOO_LARGE",
             f"exceeds {MAX_RESPONSE_BYTES} bytes")
-    content, model_echo = _parse_completion(raw, content_type)
+    content, model_echo, usage = _parse_completion(raw, content_type)
+    # Fail-closed BYOK law first, then the typed (never invented) cost
+    # observation.  Neither dials anything: settlement belongs to the
+    # existing billing owner via the provider request id / usage export.
+    cost_status, cost_usd, cost_settled, cost_detail = _observe_cost(usage)
     return InferenceOutcome(
         run_id=rid,
         packet_root=root,
@@ -617,6 +885,14 @@ def run_opt_in_inference(
         bytes_received=len(raw),
         content=content,
         model_echo=model_echo,
+        provider_request_id=provider_handle,
+        provider_request_id_status=_provider_handle_status(
+            provider_handle_raw, provider_handle),
+        cost_status=cost_status,
+        cost_usd_observed=cost_usd,
+        cost_settled=cost_settled,
+        cost_detail=cost_detail,
+        max_output_tokens=output_cap,
     )
 
 
@@ -641,6 +917,9 @@ def _cli_status(_args: argparse.Namespace) -> int:
     print(f"ATTEMPT_SEAM_AVAILABLE={str(attempt_seam_available()).lower()}")
     print(f"GATEWAY_HOST={GATEWAY_HOST}")
     print(f"GATEWAY_BASE_PATH={GATEWAY_BASE_PATH}")
+    print(f"MAX_OUTPUT_TOKENS={MAX_OUTPUT_TOKENS}")
+    print(f"COST_LAW={COST_RECONCILIATION_PENDING}_OR_"
+          f"{COST_RECONCILIATION_OBSERVED_INLINE}_NEVER_SYNTHESIZED")
     print("STATE=FAIL_CLOSED_SHIPPED generation routes every run to a typed refusal")
     return 78
 
