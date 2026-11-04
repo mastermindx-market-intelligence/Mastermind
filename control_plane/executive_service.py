@@ -5497,14 +5497,42 @@ class ExecutiveControlService:
                     writer, result, response_ceiling=action_wire.MAX_RESPONSE_BYTES,
                 )
                 return
+            from common import workspace_project_plan_contract as project_plan_wire
+            from common import workspace_project_journal_contract as project_journal_wire
+            from common import workspace_autonomy_read_contract as autonomy_wire
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
-                    ACTIVITY_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA}:
+                    ACTIVITY_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA,
+                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
                 operation = parsed.get("operation") if isinstance(parsed, dict) else None
-                if parsed.get("schema") == fabric_read_wire.FRAME_SCHEMA:
+                if parsed.get("schema") == autonomy_wire.FRAME_SCHEMA:
+                    ceiling = autonomy_wire.MAX_RESPONSE_BYTES
+                    try:
+                        autonomy_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == project_journal_wire.FRAME_SCHEMA:
+                    ceiling = project_journal_wire.MAX_RESPONSE_BYTES
+                    try:
+                        project_journal_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == project_plan_wire.FRAME_SCHEMA:
+                    ceiling = project_plan_wire.MAX_RESPONSE_BYTES
+                    try:
+                        project_plan_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == fabric_read_wire.FRAME_SCHEMA:
                     ceiling = fabric_read_wire.MAX_STATUS_BYTES
                     try:
                         fabric_read_wire.validate_frame(parsed)

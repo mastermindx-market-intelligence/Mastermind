@@ -1000,6 +1000,91 @@ pub async fn read_mission(app: AppHandle, selection: MissionSelection) -> Result
     )
     .await
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectPlanSelection {
+    work_ref: String,
+}
+impl ProjectPlanSelection {
+    fn validate(&self) -> Result<()> {
+        let work = self.work_ref.strip_prefix("WS:").ok_or("SELECTION_INVALID")?;
+        if !(2..=64).contains(&work.len()) || work.split('-').any(|part|
+            part.is_empty() || !part.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())) {
+            return Err("SELECTION_INVALID".into());
+        }
+        Ok(())
+    }
+}
+const PROJECT_PLAN_PATH: &str = "/workspace/project-plan/current";
+const PROJECT_PLAN_SCHEMA: &str = "mastermind.workspace_project_plan.v1";
+const PROJECT_PLAN_RESPONSE_CAP: usize = 131_072;
+fn project_plan_target(selection: &ProjectPlanSelection) -> Result<Url> {
+    selection.validate()?;
+    let mut url = Url::parse(&format!("{ORIGIN}{PROJECT_PLAN_PATH}")).map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut().append_pair("work_ref", &selection.work_ref);
+    Ok(url)
+}
+#[tauri::command]
+pub async fn read_project_plan(app: AppHandle, selection: ProjectPlanSelection) -> Result<Value> {
+    let url = project_plan_target(&selection)?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, PROJECT_PLAN_RESPONSE_CAP).await
+            .and_then(|value| typed_unavailable(value, PROJECT_PLAN_SCHEMA, false))
+    } else {
+        bounded_json(response, PROJECT_PLAN_RESPONSE_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(PROJECT_PLAN_SCHEMA)
+        || value.get("selection").and_then(|s| s.get("work_ref")).and_then(Value::as_str) != Some(selection.work_ref.as_str()) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // The existing host performs the sole full closed-body decode before display.
+    Ok(value)
+}
+
+const PROJECT_JOURNAL_PATH: &str = "/workspace/project-journal/current";
+const PROJECT_JOURNAL_SCHEMA: &str = "mastermind.workspace_project_journal.v1";
+const PROJECT_JOURNAL_RESPONSE_CAP: usize = 131_072;
+fn project_journal_target(selection: &ProjectPlanSelection) -> Result<Url> {
+    selection.validate()?;
+    let mut url = Url::parse(&format!("{ORIGIN}{PROJECT_JOURNAL_PATH}")).map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut().append_pair("work_ref", &selection.work_ref);
+    Ok(url)
+}
+#[tauri::command]
+pub async fn read_project_journal(app: AppHandle, selection: ProjectPlanSelection) -> Result<Value> {
+    let url = project_journal_target(&selection)?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, PROJECT_JOURNAL_RESPONSE_CAP).await
+            .and_then(|value| typed_unavailable(value, PROJECT_JOURNAL_SCHEMA, false))
+    } else {
+        bounded_json(response, PROJECT_JOURNAL_RESPONSE_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(PROJECT_JOURNAL_SCHEMA)
+        || value.get("selection").and_then(|s| s.get("work_ref")).and_then(Value::as_str) != Some(selection.work_ref.as_str()) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // The existing host performs the sole full closed-body decode before display.
+    Ok(value)
+}
+
 #[tauri::command]
 pub async fn read_admitted_plan(app: AppHandle, selection: MissionSelection) -> Result<Value> {
     // Original Workspace selection grammar is narrower than legacy Mission selection.
@@ -1657,6 +1742,40 @@ mod tests {
         assert!(valid_original_operation_key(&format!("session-continue-{}", "a".repeat(64))));
         assert!(!valid_original_operation_key(&format!("session-continue-{}", "A".repeat(64))));
         assert!(!valid_original_operation_key("session-continue-invalid"));
+    }
+    #[test]
+    fn project_plan_read_is_one_fixed_rootless_acquisition_target() {
+        let selection: ProjectPlanSelection = serde_json::from_value(serde_json::json!({"work_ref": "WS:PLAN-ONE"})).unwrap();
+        let url = project_plan_target(&selection).unwrap();
+        assert_eq!(url.path(), "/workspace/project-plan/current");
+        assert_eq!(url.origin().ascii_serialization(), ORIGIN);
+        assert_eq!(url.query_pairs().collect::<Vec<_>>(), vec![("work_ref".into(), "WS:PLAN-ONE".into())]);
+        assert_eq!(PROJECT_PLAN_RESPONSE_CAP, 131_072);
+        for key in ["root_job_id", "path", "commit", "resource", "operation"] {
+            let mut value = serde_json::json!({"work_ref": "WS:PLAN-ONE"});
+            value[key] = serde_json::json!("foreign");
+            assert!(serde_json::from_value::<ProjectPlanSelection>(value).is_err());
+        }
+        for work in ["WS:A", "WS:plan", "WS:PLAN\n", "WS:PLAN/../../private", "WS:PLAN--ONE", "WS:-PLAN", "WS:PLAN-", "JOB-1", "WS:計画"] {
+            assert!(project_plan_target(&ProjectPlanSelection { work_ref: work.into() }).is_err());
+        }
+    }
+    #[test]
+    fn project_journal_read_is_one_fixed_rootless_acquisition_target() {
+        let selection: ProjectPlanSelection = serde_json::from_value(serde_json::json!({"work_ref": "WS:PLAN-ONE"})).unwrap();
+        let url = project_journal_target(&selection).unwrap();
+        assert_eq!(url.path(), "/workspace/project-journal/current");
+        assert_eq!(url.origin().ascii_serialization(), ORIGIN);
+        assert_eq!(url.query_pairs().collect::<Vec<_>>(), vec![("work_ref".into(), "WS:PLAN-ONE".into())]);
+        assert_eq!(PROJECT_JOURNAL_RESPONSE_CAP, 131_072);
+        for key in ["root_job_id", "path", "commit", "resource", "operation"] {
+            let mut value = serde_json::json!({"work_ref": "WS:PLAN-ONE"});
+            value[key] = serde_json::json!("foreign");
+            assert!(serde_json::from_value::<ProjectPlanSelection>(value).is_err());
+        }
+        for work in ["WS:A", "WS:plan", "WS:PLAN\n", "WS:PLAN/../../private", "WS:PLAN--ONE", "WS:-PLAN", "WS:PLAN-", "JOB-1", "WS:計画"] {
+            assert!(project_journal_target(&ProjectPlanSelection { work_ref: work.into() }).is_err());
+        }
     }
     fn inner() -> Inner {
         Inner::new(Some("public-client"))

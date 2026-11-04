@@ -79,6 +79,8 @@ fn main() {
             auth::read_work,
             auth::read_mission,
             auth::read_mission_v3,
+            auth::read_project_plan,
+            auth::read_project_journal,
             auth::read_admitted_plan,
             auth::read_retained_activity,
             auth::read_fabric_catalog,

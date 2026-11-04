@@ -497,19 +497,10 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # 2026-11-03 catalog composition adds fixed metadata GETs before that handler;
 # its AST is still identical and all eight sites move by 58 lines. Previous
 # source SHA de6f82cd7861cd79d90bc058c2753f5912a20e47c4ff992201962d8abdc78f31.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {
-    'sha256': '624b6a49ac97eea32adfa0691e85f5d0c7dcdb784b00f5192b1c227dbce8e5eb',
-    'sites': (
-        (820, 71, 74, 'int', '400'),
-        (831, 71, 74, 'int', '403'),
-        (839, 71, 74, 'int', '400'),
-        (845, 79, 82, 'int', '400'),
-        (854, 71, 74, 'int', '400'),
-        (864, 71, 74, 'int', '403'),
-        (869, 76, 79, 'int', '503'),
-        (875, 71, 74, 'int', '403'),
-    ),
-}
+# Journal source-only read composition: exact unchanged action-handler AST and
+# original eight complete literal tokens; new GET registration is reviewed separately.
+# Composed READ source: original eight whole action tokens and action AST unchanged.
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '89ae236897aa2a8150fdae59f77a9fc073f76a201726c0d474cce63c6568cdaf', 'sites': ((835, 71, 74, 'int', '400'), (846, 71, 74, 'int', '403'), (854, 71, 74, 'int', '400'), (860, 79, 82, 'int', '400'), (869, 71, 74, 'int', '400'), (879, 71, 74, 'int', '403'), (884, 76, 79, 'int', '503'), (890, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.

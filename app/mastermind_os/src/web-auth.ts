@@ -1,3 +1,5 @@
+import { validJournalSelection } from "./project-journal";
+import { validProjectPlanSelection } from "./planning/project-plan";
 import { guardAcceptanceRead, missionV4Selection, type MissionV4Selection, type ProductAcceptanceOwner } from "./product-acceptance/owner-observation";
 import {
   RESEARCH_SCOPE,
@@ -1165,6 +1167,20 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       return read("acquisition", `${ORIGIN}/workspace/fabric/status/current?${new URLSearchParams({
         root_id: selected.rootId, run_id: selected.runId,
       })}`, signal, { cap: 16_384, typedUnavailableSchema: null });
+    },
+    readProjectPlan: (request) => {
+      const { signal, ...selected } = request;
+      if (!validProjectPlanSelection(selected))
+        return Promise.reject(new Error("PROJECT_PLAN_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-plan/current?${new URLSearchParams({ work_ref: selected.work_ref })}`,
+        signal, { cap: 131_072, typedUnavailableSchema: "mastermind.workspace_project_plan.v1" });
+    },
+    readProjectJournal: (request) => {
+      const { signal, ...selected } = request;
+      if (!validJournalSelection(selected))
+        return Promise.reject(new Error("PROJECT_JOURNAL_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-journal/current?${new URLSearchParams({ work_ref: selected.work_ref })}`,
+        signal, { cap: 131_072, typedUnavailableSchema: "mastermind.workspace_project_journal.v1" });
     },
     readAdmittedPlan: ({ work_ref, root_job_id, signal }) => {
       if (!/^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$/.test(work_ref) || !/^JOB-[0-9]{1,9}$/.test(root_job_id))
