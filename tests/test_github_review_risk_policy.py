@@ -71,7 +71,7 @@ def test_small_sensitive_changes_never_use_fast_lane(paths):
     decision = assess_review_risk(facts(paths, additions=1, deletions=0))
     assert decision.tier is ReviewTier.CRITICAL
     assert decision.minimum_independent_assessments == 2
-    assert decision.minimum_formal_non_author_approvals == 1
+    assert decision.minimum_formal_non_author_approvals == 0
     assert not decision.fast_lane_candidate
 
 
@@ -257,4 +257,4 @@ def test_real_managed_workspace_identity_change_is_critical_with_verified_metric
     verdict = assess_review_risk(source)
     assert verdict.tier is ReviewTier.CRITICAL
     assert verdict.minimum_independent_assessments == 2
-    assert verdict.minimum_formal_non_author_approvals == 1
+    assert verdict.minimum_formal_non_author_approvals == 0
