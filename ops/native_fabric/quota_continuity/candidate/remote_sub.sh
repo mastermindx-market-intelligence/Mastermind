@@ -927,11 +927,13 @@ case "$MAX_SECS" in ''|*[!0-9]*|0) echo "invalid REMOTE_SUB_MAX_SECS" >&2; RC=2;
 # decimal input can overflow Bash/test and silently bypass a guard.
 # This changes no valid 1..14400 second configured observation/runtime.
 if [ "${#POLL_SECS}" -gt 5 ] || [ "$POLL_SECS" -eq 0 ] ||
-   [ "$POLL_SECS" -gt 14400 ]; then
+   [ "$POLL_SECS" -gt 14400 ] ||
+   [ "${POLL_SECS#0}" != "$POLL_SECS" ]; then
   echo "invalid REMOTE_SUB_POLL_SECS" >&2
   RC=2; exit "$RC"
 fi
-if [ "${#MAX_SECS}" -gt 5 ] || [ "$MAX_SECS" -eq 0 ]; then
+if [ "${#MAX_SECS}" -gt 5 ] || [ "$MAX_SECS" -eq 0 ] ||
+   [ "${MAX_SECS#0}" != "$MAX_SECS" ]; then
   echo "invalid REMOTE_SUB_MAX_SECS" >&2
   RC=2; exit "$RC"
 fi
@@ -958,7 +960,11 @@ fabric_poll_delay() {
   elif [ "$failed_reads" -eq 1 ] && [ "$proposed" -lt 5 ]; then
     proposed=5
   fi
+  # A caller's large observation interval must not leave the lease owner
+  # asleep beyond the 30-second heartbeat duty. The configured value is a
+  # maximum, not permission to delay live-liveness observations for hours.
   [ "$proposed" -le "$POLL_SECS" ] || proposed="$POLL_SECS"
+  [ "$proposed" -le 30 ] || proposed=30
   [ "$proposed" -le "$remaining_seconds" ] || proposed="$remaining_seconds"
   FABRIC_POLL_DELAY_S="$proposed"
 }

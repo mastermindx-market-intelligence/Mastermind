@@ -63,7 +63,10 @@ class AdaptiveResultPollingTests(unittest.TestCase):
         guard = source[start:stop]
         examples = (
             ("10", "14400", True),
-            ("00010", "07200", True),
+            ("10", "7200", True),
+            ("00010", "07200", False),
+            ("00008", "7200", False),
+            ("10", "07200", False),
             ("1", "1", True),
             ("00", "14400", False),
             ("00000", "14400", False),
@@ -120,6 +123,16 @@ class AdaptiveResultPollingTests(unittest.TestCase):
                 # The controller's previously verified double-poll margin
                 # is unchanged, even though early observations are faster.
                 self.assertIn("CHILD_TIMEOUT", (CANDIDATE / "remote_sub.sh").read_text())
+
+    def test_large_configured_poll_never_misses_lease_heartbeat_window(self):
+        # The poll configuration is a maximum, not permission to sleep for
+        # hours while the native broker owner needs regular liveness.
+        times = schedule(14400, 120)
+        self.assertTrue(all(0 < b-a <= 30 for a, b in zip(times, times[1:])))
+        self.assertLessEqual(max(first_observation(times, t)-t
+                                 for t in (601, 1201, 3601, 12001)), 29)
+        source = (CANDIDATE / 'remote_sub.sh').read_text()
+        self.assertIn('[ "$proposed" -le 30 ] || proposed=30', source)
 
     def test_early_fast_observations_do_not_multiply_broker_heartbeats(self):
         for interval in (10, 30):

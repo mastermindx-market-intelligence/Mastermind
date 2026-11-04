@@ -53,7 +53,7 @@ def _current_native_count():
     owner=importlib.util.module_from_spec(spec);spec.loader.exec_module(owner)
     return len(owner.BASE_FILES|owner.ADDITIONS)+1
 EXPECTED_NATIVE_FILES = _current_native_count()
-NATIVE_MANIFEST_SHA = "d6cdc450467af8ccfc2ff33edb2ea5d9d73adfa60d1d9434901354cbd33d4fed"
+NATIVE_MANIFEST_SHA = "43511755b2974f3848f12dcc9e851c33777cafe11e9ebb028e68f8823edc63a5"
 
 
 def _sha(raw):

@@ -49,8 +49,8 @@ Broker admission acceleration's simulated 0.35s pickup vs old ~1s polling was a 
 
 ## Current source stage
 
-- 102-member selected native source manifest SHA-256: `d6cdc450467af8ccfc2ff33edb2ea5d9d73adfa60d1d9434901354cbd33d4fed`.
-- Selected remote controller SHA-256: `6dcf9da5ad3fd72babfcb593e0a81d2370c7a0f11236d8a6d571d9310637b4fc`.
+- 102-member selected native source manifest SHA-256: `43511755b2974f3848f12dcc9e851c33777cafe11e9ebb028e68f8823edc63a5`.
+- Selected remote controller SHA-256: `6294d27e65f47d5d0cfdf8a3afdb53df691f8e648f8592c501bb2a2dff61a678`.
 - Protected Qwen broker SHA remains `a2847a29abe590cb168c2cd8ae34e0b1c3222b6e92ab4c00f252a342d56e6406`.
 - Parent exact base remains `da989061704182a25d93bc561400e3e99cbba6f7` (PR #2019), not protected master. No review or deploy/prod proof of this performance head is claimed yet.
 
@@ -62,10 +62,10 @@ Result latency is **one** performance dimension. This patch does not shorten mod
 
 ## Source qualification receipts — 2026-11-03
 
-- New deterministic source-extracted fast-observation and heartbeat/backoff tests: **6/6 PASS**.
+- New deterministic source-extracted fast-observation and heartbeat/backoff tests: **7/7 PASS**.
 - Combined native-release, historical95, Grok/Qwen composition, initializer, host-pull, support-policy and slot-custody suites: **PASS** with unchanged expected skips.
 - Existing full `test_commission_deadline.py` suite: **19/19 PASS** with its original strict 31.5s frozen deadline proof unrelaxed; no worker or provider launched.
-- 102-file source staging manifest SHA-256 `d6cdc450467af8ccfc2ff33edb2ea5d9d73adfa60d1d9434901354cbd33d4fed`, selected remote controller `6dcf9da5ad3fd72babfcb593e0a81d2370c7a0f11236d8a6d571d9310637b4fc`, Qwen protected broker unchanged.
+- 102-file source staging manifest SHA-256 `43511755b2974f3848f12dcc9e851c33777cafe11e9ebb028e68f8823edc63a5`, selected remote controller `6294d27e65f47d5d0cfdf8a3afdb53df691f8e648f8592c501bb2a2dff61a678`, Qwen protected broker unchanged.
 - Temporary test-run outputs were archived outside the worktree and are **not** part of published source or an installed runtime.
 - No live SSH/provider/lease, formal independent review, hosted CI or production canary exists for this performance branch at this checkpoint. This source is `BUILT_NOT_PROVEN`.
 
@@ -90,3 +90,23 @@ Before/after deploy comparisons must separate actual model inference time, waiti
 ## Bounded test-fixture stability amendment
 
 The expanded offline deadline suite hit an intermittent assertion for `test_mutated_remote_packet_refuses_launch_and_binding`: the controller refused the corrupted packet with RC78, but setup had consumed its original eight-second fixture budget before the expected verification marker. One bounded no-provider diagnostic reproduced the **intended** transport refusal at 6.264 seconds with a real `TRANSPORT_VERIFICATION_REFUSED rc=78 before_launch=1` marker and no worker launch. The negative test's original purpose is packet tamper refusal, not an eight-second performance deadline. It now supplies **14 seconds** of finite startup headroom, while retaining *all* exact substantive assertions: RC78, transport read, zero launch, no trusted transport-verification record and no launch binding. The focused negative test PASSED on the new fixture. The 31-second/31.5-second strict deadline test and all production timeout defaults remain unchanged; test-fixture headroom is not provider authority or a performance claim.
+
+
+## Canonical decimal and 30-second heartbeat observation (2026-11-03)
+
+Adversarial prelaunch validation identified a second numeric corner: Bash interprets
+leading-zero positive integer strings as octal during `$((...))`; the existing
+prelaunch guard rejected `00` but let `00010`, `00008` and `07200` through.
+Those are now **rejected**, rather than normalized by introducing new arithmetic
+or preserving ambiguous spellings. The valid input contract remains canonical
+1..14,400 decimal seconds. A large configured poll interval can no longer leave
+an active worker unobserved for hours; the existing same-run result-check sleep
+is capped at **30 seconds**, matching the incumbent heartbeat duty. Caller
+poll settings below 30s are still honored. No extra lease/heartbeat owner,
+new child, replay or transport is introduced.
+
+Seven source-extracted no-provider tests PASS, including large configured poll
+(`120` seconds) never producing a >30s gap over an entire virtual 4h run.
+Source and historical native-manifest SHA pins were rebuilt from the selected
+candidate with 102 exact members. A new exact-head review and hosted CI remain
+required; the old published PR commit does not include this amendment.
