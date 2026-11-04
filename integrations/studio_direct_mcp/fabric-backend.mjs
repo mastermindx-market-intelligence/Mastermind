@@ -147,6 +147,10 @@ function validate(name, args) {
     if (args.pool===EXPERIENTIAL_POOL) {
       if (args.model!==EXPERIENTIAL_MODEL) fail('INVALID_ARGUMENT',{field:'model'});
       if (args.retention_opt_in!==true) fail('INVALID_ARGUMENT',{field:'retention_opt_in'});
+      // The native experiential53 source contract currently admits bounded labor only.
+      // Avoid misleading positive previews for reviewer/audit classes it cannot run.
+      if (!['mechanical','fix_build'].includes(args.task_class))
+        fail('INVALID_ARGUMENT',{field:'task_class'});
     } else if (args.retention_opt_in!==undefined) fail('INVALID_ARGUMENT',{field:'retention_opt_in'});
   }
 }

@@ -574,7 +574,7 @@ test('manual request max-turn ceiling permits only admitted GLM/MiniMax modes',a
 // Experiential uncensored pool: strictly manual, exact-slug-only, explicit
 // retention opt-in. The uncensored provider retains prompts and responses, so
 // nothing may reach it without both the exact pin and a deliberate opt-in.
-const experientialPinned={...packet,task_class:'review',task_complexity:'C2_COMPLEX_BOUNDED',
+const experientialPinned={...packet,task_class:'mechanical',task_complexity:'C0_MECHANICAL',
   pool:'experiential',model:'glm-5.3-uncensored',retention_opt_in:true};
 const experientialPreview={state:'PREVIEW_ONLY',reserved:false,selection_rechecked_at_request:true,
   strict_pin_enforced_at_request:true,run_id:id.run_id,pool:'experiential',
@@ -590,7 +590,8 @@ test('experiential pool accepts only the exact uncensored slug with explicit ret
  for(const args of [noModel,variant({model:'auto'}),variant({model:'glm-5.3-flash-uncensored'}),
    variant({model:'GLM-5.3-Uncensored'}),variant({model:'glm-5.3'}),variant({retention_opt_in:false}),
    variant({retention_opt_in:'yes'}),variant({pool:'glm',model:'glm-5.3',retention_opt_in:true}),
-   variant({pool:'experiential',max_turns:12})]) {
+   variant({pool:'experiential',max_turns:12}),variant({task_class:'review'}),
+   variant({task_class:'audit'}),variant({task_class:'census'})]) {
    const out=unwrap(await f.call('fabric_request',args));
    assert.equal(out.error,'INVALID_ARGUMENT');assert.equal(out.retry_allowed,false);
  }
@@ -620,7 +621,7 @@ test('experiential request refuses a native adapter without a qualified route be
    const out=unwrap(await facade(e).call('fabric_request',experientialPinned));
    assert.equal(out.error,'MANUAL_ROUTE_UNAVAILABLE');assert.equal(out.retry_allowed,false);
    assert.equal(out.controller_pid,undefined);assert.equal(e.calls.length,3,'preview refusal cannot create a controller');
-   assert.match(e.calls[2].arguments.command,/'preview' '--id' 'web-fabric-001' '--class' 'review' '--pool' 'experiential' '--model' 'glm-5.3-uncensored'/);
+   assert.match(e.calls[2].arguments.command,/'preview' '--id' 'web-fabric-001' '--class' 'mechanical' '--pool' 'experiential' '--model' 'glm-5.3-uncensored'/);
    assert.doesNotMatch(e.calls[2].arguments.command,/'--max-turns'/);
  }
 });

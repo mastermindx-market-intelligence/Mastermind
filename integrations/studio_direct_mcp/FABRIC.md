@@ -45,8 +45,10 @@ independence filter.
 `pool: "experiential"` is an additional strictly manual pin for the Experiential Labs
 uncensored route and accepts exactly `model: "glm-5.3-uncensored"` — no omitted model, no
 `auto`, and no other slug (including `glm-5.3-flash-uncensored` or any case variant);
-every deviation is refused before reservation or dispatch. **That provider retains prompts
-and responses.** Each request must therefore also carry `retention_opt_in: true`, an
+every deviation is refused before reservation or dispatch. The current native
+source contract admits only the plugin's `mechanical` and `fix_build` labor
+classes; `review`, `audit`, and `census` are refused before any native call.
+**That provider retains prompts and responses.** Each request must therefore also carry `retention_opt_in: true`, an
 explicit per-request caller acknowledgment that the packet will reach a prompt+response-
 retaining provider; the field is refused for every other pool and is never forwarded to the
 provider. Never send proprietary or unpublished source to this pool without that deliberate
