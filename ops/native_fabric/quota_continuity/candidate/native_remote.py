@@ -60,7 +60,8 @@ def studio_projection(mode, env):
 _GROK_ACCOUNT_BINDING_SCHEMA = "mastermind.grok_host_account_binding.v1"
 
 
-def _bound_grok_auth(entry, selected_host, account, env):
+def grok_registry_binding(entry, selected_host, account):
+    """Pure broker/host contract: an enrollment assertion, not OAuth proof."""
     if type(entry) is not dict:
         raise ValueError("native_grok_account_binding_unqualified")
     binding = entry.get("grok_account_binding")
@@ -77,6 +78,13 @@ def _bound_grok_auth(entry, selected_host, account, env):
     if (type(expected) is not dict or set(expected) != set(fields)
             or any(type(expected[f]) is not int or expected[f] < 0 for f in fields)):
         raise ValueError("native_grok_account_binding_unqualified")
+    return binding
+
+
+def _bound_grok_auth(entry, selected_host, account, env):
+    binding = grok_registry_binding(entry, selected_host, account)
+    expected = binding["auth_identity"]
+    fields = ("uid", "dev", "ino", "size", "mtime_ns", "ctime_ns")
     home = Path(env.get("HOME", str(Path.home())))
     if not home.is_absolute():
         raise ValueError("native_grok_account_binding_unqualified")

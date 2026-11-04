@@ -1043,6 +1043,45 @@ class Broker:
             finally:
                 conn.close()
         compatible_accounts = None
+        if pool == "grok" and task_class == "remote-grok":
+            # Original broker grant owner, before capacity demand/lease creation.
+            # A shared account alias cannot prove which remote credential pays.
+            # Reuse existing host registry plus account catalog; the remote
+            # executor separately rechecks the actual local auth inode.
+            try:
+                from glm_host_account_source import owned_bytes
+                from native_remote import grok_registry_binding
+                registry = json.loads(owned_bytes(self.hosts_path, maximum=65536))
+                entry = registry.get(host) if type(registry) is dict else None
+                if type(entry) is not dict:
+                    raise ValueError("grok_host_not_enrolled")
+                roles = entry.get("roles")
+                modes = entry.get("allowed_modes")
+                held_modes = entry.get("qualification_only_modes", [])
+                if (entry.get("local") is True or type(roles) is not list
+                        or "lanes" not in roles or type(modes) is not list
+                        or "grok" not in modes or type(held_modes) is not list
+                        or "grok" in held_modes):
+                    raise ValueError("grok_host_not_enrolled")
+                compatible_accounts = []
+                for row in self.grantable_accounts(pool):
+                    name = row.get("name")
+                    if type(name) is not str or (account is not None and name != account):
+                        continue
+                    try:
+                        enrollment = grok_registry_binding(entry, host, name)
+                    except ValueError:
+                        continue
+                    # Original account catalog owns the subscription-scope claim.
+                    required_scope = row.get("subscription_scope")
+                    if (type(required_scope) is str and required_scope
+                            and required_scope == enrollment["subscription_scope"]):
+                        compatible_accounts.append(row)
+                if not compatible_accounts:
+                    raise ValueError("grok_subscription_not_qualified")
+            except (OSError, ValueError, KeyError, TypeError, ImportError):
+                return (AcquireResult(ok=False, reason="host_account_unavailable",
+                    pool=pool, orchestrator_id=orch), waiter_id, "host_account_unavailable")
         if (pool == "glm" and task_class == "remote-glm") or (
                 self.provider_name(pool) == "bailian" and task_class == "remote-qwen"):
             # Pairing precedes capacity demand; no new waiter for an unavailable

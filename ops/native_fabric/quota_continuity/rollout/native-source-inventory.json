@@ -252,10 +252,10 @@
       "source": "source/go_remote_transport.py"
     },
     "ext/host_pick.py": {
-      "bytes": 28203,
+      "bytes": 28964,
       "installed_preimage_sha256": "e5a398a0a2178abd9a79c9f9693b2528cf3a6d8b21d5829541e01158f952a092",
-      "sha256": "e5a398a0a2178abd9a79c9f9693b2528cf3a6d8b21d5829541e01158f952a092",
-      "source": "source/host_pick.py"
+      "sha256": "025ca9fea8ba96c4a66c26ad7be8c1e8b317e81101e67b5f6dc42c606a10fa6a",
+      "source": "candidate/host_pick.py"
     },
     "ext/host_pull.sh": {
       "bytes": 15118,
@@ -294,9 +294,9 @@
       "source": "candidate/lane_runtime.py"
     },
     "ext/lease_broker.py": {
-      "bytes": 73321,
+      "bytes": 75780,
       "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
-      "sha256": "a2847a29abe590cb168c2cd8ae34e0b1c3222b6e92ab4c00f252a342d56e6406",
+      "sha256": "ede49e98ef4df55bb561716c734aa79a3637b5257c79a6f757645791a870c846",
       "source": "candidate/lease_broker.py"
     },
     "ext/linux_process_identity.py": {
@@ -390,9 +390,9 @@
       "source": "candidate/native_prestart_reconcile.py"
     },
     "ext/native_remote.py": {
-      "bytes": 19449,
+      "bytes": 19781,
       "installed_preimage_sha256": "a111878452f2d7ba6ad97af53055d77ed9de13d783653029e5f20311902ff051",
-      "sha256": "8ea3fed6a49a54b83b161b2a1341bbd3d5ade34111f7a2b1735d3a8f32d4495b",
+      "sha256": "da3a0ebd46357036b770aff40f2aab7ee4aa377e9aaebfb0a53d537d5962fa21",
       "source": "candidate/native_remote.py"
     },
     "ext/native_runtime_bindings.py": {

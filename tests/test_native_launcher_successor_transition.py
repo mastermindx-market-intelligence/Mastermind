@@ -85,6 +85,14 @@ def source_owners(tmp_path_factory):
     assert grok['schema'] == 'mastermind.test_native_grok_account_predecessor/v1'
     assert grok['source_commit'] == '9f65957e29eba92245d78609f032aaea523b7cb4'
     assert set(grok['files']) == {'ext/native_remote.py'}
+    # The new broker/host-picker admission guard is CURRENT-only.
+    # Restore its exact last protected predecessor for historical B11.
+    prelease_raw = (ROLLOUT.parents[3] / 'tests/fixtures/native-grok-prelease-predecessors-74efbfd1.json').read_bytes()
+    assert g.digest(prelease_raw) == '728d67e580b2598c609cbc28a23d53505f3d65b4680d7a0625c1b1eb16cc75a5'
+    prelease = json.loads(prelease_raw)
+    assert prelease['schema'] == 'mastermind.test_grok_prelease_predecessors/v1'
+    assert prelease['source_commit'] == '74efbfd170edb15bd5f4915698c1a37a1583412e'
+    assert set(prelease['files']) == {'ext/lease_broker.py', 'ext/host_pick.py'}
     assert set(retained['files']) == {'ext/fabric_task.py', 'ext/pool_ledger.py'}
     assert set(diagnostic['files']) == {'ext/original_delivery_collector.py',
                                       'ext/provider_outcome.py', 'ext/remote_sub.sh'}
@@ -98,7 +106,7 @@ def source_owners(tmp_path_factory):
     assert selection['blob'] == 'dd542dbc5bb746c0ad1428b177b25a98b7a02536'
     assert selection['path'] == 'ops/native_fabric/quota_continuity/candidate/pick.py'
     predecessor_files = {**retained['files'], **diagnostic['files'], **sparse['files'],
-                         **grok['files'], 'ext/pick.py': selection}
+                         **grok['files'], **prelease['files'], 'ext/pick.py': selection}
     assert {name for name in manifest if manifest[name] != historical_manifest[name]} == set(predecessor_files)
     for name, digest in manifest.items():
         assert g.digest((target / 'native-code-stage' / name).read_bytes()) == digest

@@ -124,6 +124,25 @@ class HostAccountBindingTest(unittest.TestCase):
             native_remote.environment("grok", "grok-4.7", "test-run", self.here, self.env)
         self.assertFalse((self.here / "lanes").exists())
 
+    def _host_picker_account_gate(self):
+        from host_pick import evaluate_hosts
+        state = {self.host: {"ts": time.time(), "reachable": True}}
+        rows = evaluate_hosts({self.host: self.entry}, str(self.root),
+                              "grok", states=state)
+        return next(g for g in rows[0]["gates"] if g["gate"] == "grok-account-binding")
+
+    def test_host_picker_accepts_enrolled_registry_only(self):
+        self.assertEqual("PASS", self._host_picker_account_gate()["result"])
+        self.entry.pop("grok_account_binding")
+        self.assertEqual("FAIL", self._host_picker_account_gate()["result"])
+
+    def test_host_picker_refuses_wrong_account_or_subscriber_shape(self):
+        self.entry["grok_account_binding"]["account"] = "secretary2"
+        self.assertEqual("FAIL", self._host_picker_account_gate()["result"])
+        self.set_binding()
+        self.entry["grok_account_binding"]["auth_identity"]["ino"] = True
+        self.assertEqual("FAIL", self._host_picker_account_gate()["result"])
+
     def test_valid_environment_binds_only_fixture_auth_and_private_workspace(self):
         with patch.object(native_remote, "studio_projection",
                           return_value=SimpleNamespace(config_text="")):

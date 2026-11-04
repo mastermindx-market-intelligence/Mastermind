@@ -64,7 +64,7 @@ GROK47_MERGED_SOURCE_DIGESTS = {
 # Grok bases above as well as the
 # closed composed candidate bytes; neither source may silently replace the other.
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
-    'native_remote.py': '8ea3fed6a49a54b83b161b2a1341bbd3d5ade34111f7a2b1735d3a8f32d4495b',
+    'native_remote.py': 'da3a0ebd46357036b770aff40f2aab7ee4aa377e9aaebfb0a53d537d5962fa21',
     'remote_sub_exec.py': '7c7b94a974b85804598c49fc21ea1eb0d5ea55888dc3a6394dde8ab0b4d113e2',
     'pick.py': '747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132',
     'remote_sub.sh': '7da97d3b99a0b9bc7f8aa15f7b405a099f22d8954feb9fb9ec24acf2c3092e92',

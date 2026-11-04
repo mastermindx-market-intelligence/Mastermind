@@ -108,3 +108,70 @@ Only native_remote.py, remote_sub_exec.py and pick.py use the exact
 expected qualified forward hashes; other protected source is inherited.
 No host registry binding has been enrolled, so the live Grok preflight
 remains unchanged on the currently selected native generation.
+
+
+## Broker and automatic-host prelease continuation (2026-11-04T05:36:50+00:00)
+
+**BUILT_NOT_PROVEN; MISSION_COMPLETE=false.** This source-only continuation
+extends the earlier provider-side credential guard through the *incumbent*
+host picker and lease broker, not a new account directory, scheduler or
+lease/identity plane.
+
+- The original host picker now stages from candidate/host_pick.py and adds
+  a Grok-only, fail-closed account-binding gate using the shared strict
+  schema validator in native_remote.py. An unbound host is not eligible
+  for automatic Grok placement; Cursor, GLM, Qwen and other modes keep
+  their existing gates.
+- The original lease_broker.py adds a remote-grok-only check *before new
+  lease or waiter creation*. It compares the candidate host's existing
+  trusted hosts.json binding with the original YAML account catalog
+  subscription_scope. Mismatched, missing, stale, malformed or
+  qualification-only hosts return host_account_unavailable. No cross-pool
+  fallback or model substitution is introduced.
+- The remote host still compares exact UID/device/inode/size/mtime/ctime
+  against the enrolled metadata before CLI execution. Registry data
+  and filesystem custody are **not** proof of an OAuth principal or
+  actual model served; the Chairman's Chris Grok, Cursor, Grok Bot and
+  Secretary2 capacity scopes remain distinct.
+
+Current exact forward code SHA256:
+  native_remote.py = da3a0ebd46357036b770aff40f2aab7ee4aa377e9aaebfb0a53d537d5962fa21
+  lease_broker.py = ede49e98ef4df55bb561716c734aa79a3637b5257c79a6f757645791a870c846
+  host_pick.py = 025ca9fea8ba96c4a66c26ad7be8c1e8b317e81101e67b5f6dc42c606a10fa6a
+
+Source package retains **102 members**. Manifest SHA256 = f3c1157c94756eb67f72ca50200f6b4d489c5e418ca145ea8fe9eed6620474f3;
+inventory SHA256 = 8d2ea87a750aedb2eb1f6a42f8cd89ba452735c4e8b7bc3003cacc16d13975f9. Previous accepted source and immutable
+historical95/102 manifest targets remain untouched. A separate fixture
+tests/fixtures/native-grok-prelease-predecessors-74efbfd1.json
+SHA256 728d67e580b2598c609cbc28a23d53505f3d65b4680d7a0625c1b1eb16cc75a5 retains only the exact two public predecessor
+code files from PR-head 74efbfd1; no secrets or provider credentials.
+
+Offline integrated packaging/historical suite: 236
+passed, 6 expected Linux-only skips, 0 failures,
+0 errors across 242 actual testcase records; JUnit SHA256
+1965d2183857f3d95fe518716b2715d0f1a36725354c2dbfaf3a3689a167f881.
+Separate broker/host account-adjacent suite: 115
+passed, 0 skipped, 0 failures/errors across
+115 records; JUnit SHA256 ac94ea9026295268385b2b387d7527cf06347d1aa64ccf85d3ef2b44021d900b.
+The JUnit files under /tmp are local evidence only, not published attachments
+or live production receipts.
+
+**Original runtime configuration gate observed read-only:** active M2 pool
+status identified selected native generation
+8cefc4b27b2036f86bcec1d626e864f45f792e2c290ab8de56fbde89f78ac94a.
+Its existing Grok account catalog has one account but **zero populated
+subscription_scope fields**; Ubuntu0-4's existing hosts.json entries have
+**zero Grok account bindings**. No live config/credential bytes were edited.
+The new fail-closed source would refuse all Grok remote workers until the
+original provider-account and host-registry owners enroll and independently
+attest the correct Chris subscription. Do not select/publish that generation
+before gated enrollment, non-author review and real-path qualification.
+
+**Next action:** publish this same existing PR #2007 source revision through
+normal non-merge source gates and inspect its exact-head CI. Then obtain
+original-account-scope and per-host registry enrollment through the existing
+configuration owners with a retained human-verified account identity, and
+prove one real Grok 4.7 worker/return through the admitted native route.
+The PR #2008 independent Ubuntu4 writer, original four Ubuntu2 effect-unknown
+markers, Ubuntu0/3 cache effect hold, and #1632 RELEASE storage restrictions
+are unchanged.

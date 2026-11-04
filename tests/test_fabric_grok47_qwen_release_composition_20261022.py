@@ -55,6 +55,11 @@ REVIEWED_QWEN_FORWARD_DIGESTS = {
     "glm_host_account_source.py": "cf2be3503d31d8b3f5d2098ebab5d6c2e61e46842468db73baf2f7d8f8b70855",
 }
 
+GROK_PRELEASE_BROKER_FORWARD_DIGESTS = {
+    "lease_broker.py": "ede49e98ef4df55bb561716c734aa79a3637b5257c79a6f757645791a870c846",
+}
+
+
 
 def digest(raw):
     return hashlib.sha256(raw).hexdigest()
@@ -339,8 +344,10 @@ def test_protected_qwen_files_and_exact_context_reader_forward():
     manifest = json.loads((NATIVE / "rollout/native-manifest.json").read_text())
     inventory = json.loads((NATIVE / "rollout/native-source-inventory.json").read_text())
     assert set(REVIEWED_QWEN_FORWARD_DIGESTS) == {"glm_host_account_source.py"}
+    assert set(GROK_PRELEASE_BROKER_FORWARD_DIGESTS) == {"lease_broker.py"}
     for name, original in sorted(PROTECTED_QWEN_SOURCE_DIGESTS.items()):
-        expected = REVIEWED_QWEN_FORWARD_DIGESTS.get(name, original)
+        expected = REVIEWED_QWEN_FORWARD_DIGESTS.get(
+            name, GROK_PRELEASE_BROKER_FORWARD_DIGESTS.get(name, original))
         assert name in builder.BASE_FILES
         candidate = NATIVE / "candidate" / name
         assert candidate.is_file() and not candidate.is_symlink()
