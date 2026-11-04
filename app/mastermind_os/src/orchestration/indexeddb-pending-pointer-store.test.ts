@@ -265,3 +265,19 @@ it('retains v5 original source-write through unknown and app reopen without anot
  expect(status.mock.calls).toHaveLength(1);expect(await store.read(scope)).toEqual(original);
  expect(await raw(factory)).toEqual({v:5,...original});
 });
+
+it('keeps the real v5 durable pointer after a refused observational POST and permits later readonly settlement',async()=>{
+ const target='project-source-write.v1:'+JSON.stringify({action:'add_project_file',base_revision:'b'.repeat(64),expected_preference_revision:null,request_sha256:'c'.repeat(64),source_commit:'a'.repeat(40),work_ref:'WS:PROJECT-ONE'});
+ const original={kind:'project_source_write' as const,operationKey:'mmos-project-file-add-'+'d'.repeat(40),targetKey:target};
+ const factory=new IDBFactory(),store=createIndexedDbPendingPointerStore(factory);await store.reserve(scope,original);
+ const observer=vi.fn(async()=>({...original,disposition:'refused' as const,reason:'owner preflight refused'}));
+ const read=vi.fn(async()=>({...original,disposition:'accepted' as const}));
+ const prepare=vi.fn(()=>{throw Error('recovery must never prepare');}),submit=vi.fn(async()=>{throw Error('recovery must never submit');});
+ const port:FiniteCommandPort={context:()=>({principalScope:scope,generation:'1'}),prepare,submit,readOperation:read,reconcileOperation:observer};
+ expect((await new OperationController(port,store).recover({reconcileSource:true})).status).toBe('unknown');
+ expect(await raw(factory)).toEqual({v:5,...original});expect(observer).toHaveBeenCalledTimes(1);expect(read).not.toHaveBeenCalled();
+ const reopened=createIndexedDbPendingPointerStore(factory);
+ expect((await new OperationController(port,reopened).recover()).status).toBe('accepted');
+ expect(await reopened.read(scope)).toBeNull();expect(observer).toHaveBeenCalledTimes(1);expect(read).toHaveBeenCalledTimes(1);
+ expect(prepare).not.toHaveBeenCalled();expect(submit).not.toHaveBeenCalled();
+});
