@@ -14,6 +14,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import math
 from http import HTTPStatus
 import os
 from pathlib import Path
@@ -575,9 +576,21 @@ def create_app(
                         ("limit", "limit_remaining")
                         if endpoint == "api/v1/key" else ("total_credits", "total_usage")
                     )
-                    safe = {"data": {name: data.get(name) for name in names}}
+                    safe_data = {}
+                    for name in names:
+                        if name not in data:
+                            raise ValueError("missing account metadata field")
+                        value = data[name]
+                        # Closed numeric observation contract, without coercion.
+                        # Integers stay exact; bool is not a monetary scalar.
+                        if type(value) not in (int, float) or (
+                            type(value) is float and not math.isfinite(value)
+                        ):
+                            raise ValueError("invalid account metadata value")
+                        safe_data[name] = value
+                    safe = {"data": safe_data}
                 return JSONResponse(safe)
-            except (ValueError, UnicodeError, httpx.RequestError):
+            except (ValueError, UnicodeError, RecursionError, httpx.RequestError):
                 return JSONResponse(
                     {"error": {"message": "invalid provider account metadata"}},
                     status_code=502,

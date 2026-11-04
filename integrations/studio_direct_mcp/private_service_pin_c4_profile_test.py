@@ -43,6 +43,8 @@ ORIGINAL = json.loads(r'''{
 }''')
 POST_CONFIG_SHA256 = "f02e385e234f7f88619058485b61f17834d3cfc33896ce3f5606bd64fcecce21"
 POST_CANONICAL_SHA256 = "e10730454cd343b8774929b9c6d39f5dfbf1c9b7e83bfdc82636b8e54d0437a0"
+V20_CONFIG_SHA256 = "e6fdf97910e70f2f82fec64691b99e2d7f53420cbbbdae64430af7d77b3dfd48"
+V20_CANONICAL_SHA256 = "f46f1aeec2c5b0baa98f7c655723bbdfbb0a4765f87a98aacb29381750382b1e"
 LABEL = "com.mastermind.studio-direct-private.chatgpt4"
 
 
@@ -64,6 +66,38 @@ class C4NativePinPostimageTests(unittest.TestCase):
         self.assertEqual([k for k in ORIGINAL if ORIGINAL[k] != future[k]], ["configHash"])
         self.assertTrue(svc._valid_manifest(future, "chatgpt4", LABEL))
 
+    def test_only_exact_v20_paper_c4_successor_is_admitted(self):
+        successor = postimage()
+        successor["configHash"] = V20_CONFIG_SHA256
+        self.assertEqual(svc._canonical_json_sha256(successor), V20_CANONICAL_SHA256)
+        self.assertTrue(svc._valid_manifest(successor, "chatgpt4", LABEL))
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "manifest.json"
+            target.write_bytes(svc._fabric_release_json(successor))
+            self.assertEqual(
+                svc._read_manifest(target, "chatgpt4", LABEL, required=True),
+                successor,
+            )
+
+    def test_v20_c4_rejects_all_manifest_identity_drift(self):
+        successor = postimage()
+        successor["configHash"] = V20_CONFIG_SHA256
+        for name in ("nodeHash", "backendHash", "dependencyTreeHash",
+                     "plistHash", "port", "account", "label"):
+            with self.subTest(field=name):
+                changed = copy.deepcopy(successor)
+                changed[name] = "0" * 64 if "Hash" in name else (
+                    "unreviewed" if name in ("account", "label") else 45124
+                )
+                self.assertFalse(svc._valid_manifest(
+                    changed, "chatgpt4", LABEL))
+        changed = copy.deepcopy(successor)
+        changed["files"]["paper-design.mjs"] = "0" * 64
+        self.assertFalse(svc._valid_manifest(changed, "chatgpt4", LABEL))
+        changed = copy.deepcopy(successor)
+        changed["configHash"] = "0" * 64
+        self.assertFalse(svc._valid_manifest(changed, "chatgpt4", LABEL))
+
     def test_normal_manifest_reader_accepts_exact_postimage(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "manifest.json"
@@ -75,7 +109,7 @@ class C4NativePinPostimageTests(unittest.TestCase):
         self.assertEqual(svc.C4_PAPER_MANIFEST_CANONICAL_SHA256, frozenset((
             "e0e7865965285af6372fdf27ee70ae27f494b37fe19e1f5af763406295a96ec2",
             "2252819766e266ac0be6b30c94694b503aad4634d8de184f62611542fb581bd0",
-            POST_CANONICAL_SHA256,
+            POST_CANONICAL_SHA256, V20_CANONICAL_SHA256,
         )))
         self.assertNotIn(frozenset(ORIGINAL["files"]), svc.KNOWN_MANIFEST_FILESETS)
 

@@ -17,7 +17,15 @@ key never leaves the host. The gateway emits **only** the Brain-required
 `org_id/org_slug`, `data.limit/limit_remaining` and
 `data.total_credits/total_usage` fields: it strips arbitrary provider
 account metadata and error bodies, caps decoded metadata at 64 KiB, and
-refuses unexpected paths or malformed JSON. The local bearer remains sensitive;
+refuses unexpected paths or malformed JSON. Both selected financial fields
+must be present as finite JSON numbers. This local observation contract rejects
+nulls, booleans, strings, arrays and objects with a generic 502; it never turns
+missing or unverifiable funding into zero. Integers are preserved exactly, and
+floating values are checked without coercion. The proxy validates shape only:
+cap, remaining-balance and funding-policy decisions still belong to Brain's
+separate reviewed consumer. Invalid replies retain the one consumed RPM
+reservation and release the same in-flight slot, with no replay or key rotation.
+The local bearer remains sensitive;
 any holder of the inference proxy token can also query these reduced account
 values when this switch is on. Keep this endpoint loopback-only and distribute
 tokens only to the authorized Brain/account consumer. Two different serving
@@ -103,4 +111,4 @@ python -m pytest -q tests/test_experiential_proxy.py tests/test_experiential_sys
 
 Offline qualification on the Mac can run `python -m pytest --noconftest -q tests/test_experiential_proxy.py`; the full test set now includes a real ephemeral local TCP upstream using actual HTTPX connection pooling, non-loopback refusal, SDK idempotency setup and bounded provider errors. These tests use fixture credentials and no vendor calls. A green test is **not** approval to install an unreviewed branch.
 
-Provider references: <https://platform.experientiallabs.ai/docs>, <https://platform.experientiallabs.ai/docs/openai-compatibility>, <https://platform.experientiallabs.ai/docs/errors>.
+Provider references: <https://platform.experientiallabs.ai/docs>, <https://platform.experientiallabs.ai/docs/openai-compatibility>, <https://platform.experientiallabs.ai/docs/errors>, <https://platform.experientiallabs.ai/docs/account-api>, <https://platform.experientiallabs.ai/docs/cost-api>.

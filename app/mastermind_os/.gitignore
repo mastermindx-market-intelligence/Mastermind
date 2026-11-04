@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .cargo-target/
+src-tauri/target/
 tsconfig.tsbuildinfo
 src-tauri/icons/*.png
 src-tauri/icons/*.ico
