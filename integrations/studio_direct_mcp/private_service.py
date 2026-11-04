@@ -95,7 +95,7 @@ PAPER_RUNTIME_V20_REL = Path(".local/share/mastermind-paper/runtime/v20")
 PAPER_V20_BRIDGE_SHA256 = "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced"
 PAPER_RUNTIME_V10_REL = Path(".local/share/mastermind-paper/runtime/v10")
 PAPER_V10_BRIDGE_SHA256 = "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc"
-FLEET_V20_COHORT_SOURCE_SHA256 = "17ec687b5d26ec3d51a21258b4bf1f0d9521189c572a5d2bcec55d753aeea36a"
+FLEET_V20_COHORT_SOURCE_SHA256 = "e4d5bccfec19ee3c88a3c73ed2484f34d119896086d0da9485c0baf5638bc10d"
 # One closed admission set shared by the dispatcher and real lifecycle-lock gate.
 FLEET_V20_ENROLLED_ACCOUNTS = frozenset((
     "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt3",
@@ -846,13 +846,35 @@ if current==old:
  i._upgrade_entries(p);phase='PREVIOUS'
 elif current==new:
  i._upgrade_entries(p,complete=True);phase='SELECTED'
+elif (sys.argv[4] in (
+        'admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt3',
+        'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4')
+      and p['digest']=='77c2c136852a783a1e2572c145af7536ee6cd0d7f443daa4c09795c333fd3dc7'
+      and new['generation']=='28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce'
+      and new['sequence']==24
+      and isinstance(current,dict)
+      and current.get('schema')==g.POINTER_SCHEMA
+      and type(current.get('sequence')) is int
+      and current['sequence']>new['sequence']
+      and current.get('previous') not in (None,current.get('generation'))):
+ # Each original seven-seat native pin shares this exact completed immutable
+ # sequence-24 successor. Later native releases do not invalidate historical
+ # ingress, but only these seven enrolled accounts may accept the verified
+ # forward selection. No other pin/generation/account gains admission.
+ g.verify(store,new['generation'])
+ g.verify(store,current['generation'])
+ g.verify(store,current['previous'])
+ i._upgrade_entries(p,complete=True)
+ phase='SELECTED'
 else:raise ValueError('selection_refused')
-print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_generation'],'expected_selection':old,'pool_target':e['target'],'pool_previous':e['previous'],'pool_bridge':e['bridge'],'store':p['store'],'phase':phase},sort_keys=True))
+# Include the exact selected pointer in both lock-bound proofs. Without it,
+# a sequence-26 -> sequence-27 change could masquerade as identical SELECTED.
+print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_generation'],'expected_selection':old,'pool_target':e['target'],'pool_previous':e['previous'],'pool_bridge':e['bridge'],'store':p['store'],'phase':phase,'selection':current},sort_keys=True))
 """
     def proof():
         try:
             r = subprocess.run([sys.executable, "-I", "-B", "-c", code, str(rollout),
-                str(args.successor_bundle), args.successor_plan_sha256],
+                str(args.successor_bundle), args.successor_plan_sha256, args.account],
                 capture_output=True, timeout=30)
         except (OSError, subprocess.SubprocessError):
             raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED") from None
@@ -860,7 +882,7 @@ print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_g
             raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
         value = _pin_owner_module().decode(r.stdout)
         if set(value) != {"successor_digest", "target_generation", "expected_selection",
-                "pool_target", "pool_previous", "pool_bridge", "store", "phase"}:
+                "pool_target", "pool_previous", "pool_bridge", "store", "phase", "selection"}:
             raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
         return value
     first = proof()

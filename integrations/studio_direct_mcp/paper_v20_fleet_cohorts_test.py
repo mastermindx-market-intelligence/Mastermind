@@ -95,7 +95,7 @@ class TestPaperV20SealedFleet(unittest.TestCase):
         publication = cohorts.COHORTS["mastermind-os-publication"]
         self.assertEqual(
             publication["manifest_sha256"],
-            "aba7a5755ae71a12b9359890cb5d8cda7bd179b176fcb77d6119edd802809983",
+            "bd9dfc4e315541085342c410f0575ddbba0d40afb9d0208709078bf9b3b0c9ed",
         )
         self.assertNotEqual(
             publication["manifest_sha256"],
@@ -103,7 +103,7 @@ class TestPaperV20SealedFleet(unittest.TestCase):
         )
         self.assertEqual(
             publication["config_sha256"],
-            "ace958d0fe23f0a1fe4f02de835ad152a42d0a0c2eaebb98df5e48cc84e9773a",
+            "6b1f07a31e207828473f0f387515db02139731aaa1508bd8d34bc826a2753f11",
         )
         self.assertEqual(
             publication["plist_sha256"],
