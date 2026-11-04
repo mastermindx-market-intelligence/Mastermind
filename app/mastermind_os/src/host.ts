@@ -1,3 +1,4 @@
+import { decodeProjectAssociation, normalizeProjectAssociationSelection, type ProjectAssociationSelection, type ProjectAssociationDocument } from "./conversations/project-association";
 import { decodeResourceCapacityRead, validResourceCapacitySelection, type ResourceCapacityReadSelection, type ResourceCapacityRead } from "./resources/resource-capacity-read";
 import { decodeAutonomyPolicy, isAutonomySelection, type AutonomyRead, type AutonomySelection } from "./supervision/autonomy-policy";
 import { decodeProjectJournal, validJournalSelection, type JournalSelection, type ProjectJournalDocument } from "./project-journal";
@@ -78,6 +79,7 @@ export interface RawClient {
   /** Optional owner-authorized status-only Fabric port. No default browser/machine credential bridge. */
   readAutonomyPolicy?(request: AutonomySelection & { signal: AbortSignal }): Promise<unknown>;
   readProjectPlan?(request: ProjectPlanSelection & { signal: AbortSignal }): Promise<unknown>;
+  readProjectSessionAssociation?(request: ProjectAssociationSelection & { signal: AbortSignal }): Promise<unknown>;
   readProjectJournal?(request: JournalSelection & { signal: AbortSignal }): Promise<unknown>;
   readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readResourceCapacity?(request: ResourceCapacityReadSelection & { signal: AbortSignal }): Promise<unknown>;
@@ -145,6 +147,7 @@ export interface MissionHost {
   ) => Promise<unknown>;
   readAutonomyPolicy?: (request: AutonomySelection & { signal: AbortSignal }) => Promise<AutonomyRead>;
   readProjectPlan?: (request: ProjectPlanSelection & { signal: AbortSignal }) => Promise<ProjectPlanRead>;
+  readProjectSessionAssociation?: (request: ProjectAssociationSelection & { signal: AbortSignal }) => Promise<ProjectAssociationDocument>;
   readProjectJournal?: (request: JournalSelection & { signal: AbortSignal }) => Promise<ProjectJournalDocument>;
   readAdmittedPlan?: (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
   readResourceCapacity?: (request: ResourceCapacityReadSelection & { signal: AbortSignal }) => Promise<ResourceCapacityRead>;
@@ -321,6 +324,24 @@ export function bindMissionHost(
         const raw = await client.readProjectPlan!({ ...selected, signal });
         if (!authorized()) throw new Error("READ_CANCELLED");
         return decodeProjectPlan(raw, selected);
+      },
+    } : {}),
+    ...(client.readProjectSessionAssociation && client.invalidationGeneration ? {
+      async readProjectSessionAssociation(request: ProjectAssociationSelection & { signal: AbortSignal }) {
+        const { signal, ...value } = request;
+        const selected = normalizeProjectAssociationSelection(value);
+        if (!selected) throw new Error("PROJECT_SESSION_SELECTION_INVALID");
+        const started = epoch, source = client.invalidationGeneration!();
+        const authorized = () => { const state = client.getState();
+          return !signal.aborted && started === epoch && source === client.invalidationGeneration?.() &&
+            state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("PROJECT_SESSION_READ_UNAUTHORIZED");
+        const raw = await client.readProjectSessionAssociation!({ ...selected, signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        const body = decodeProjectAssociation(raw, selected);
+        if (!body) throw new Error("PROJECT_SESSION_RESPONSE_INVALID");
+        return body;
       },
     } : {}),
     ...(client.readProjectJournal && client.invalidationGeneration ? {
@@ -735,6 +756,7 @@ export async function createNativeClient(
       | "read_autonomy_policy"
       | "read_project_plan"
       | "read_project_journal"
+      | "read_project_session"
       | "read_admitted_plan"
       | "read_retained_activity"
       | "read_resource_capacity"
@@ -843,6 +865,12 @@ export async function createNativeClient(
       if (!validProjectPlanSelection(selected))
         return Promise.reject(new Error("PROJECT_PLAN_SELECTION_INVALID"));
       return read("read_project_plan", signal, { selection: selected });
+    },
+    readProjectSessionAssociation: (request) => {
+      const { signal, ...value } = request;
+      const selected = normalizeProjectAssociationSelection(value);
+      if (!selected) return Promise.reject(new Error("PROJECT_SESSION_SELECTION_INVALID"));
+      return read("read_project_session", signal, { selection: { work_ref: selected.workRef, root_job_id: selected.rootJobId } });
     },
     readProjectJournal: (request) => {
       const { signal, ...selected } = request;

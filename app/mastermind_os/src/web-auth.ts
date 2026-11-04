@@ -1,3 +1,4 @@
+import { normalizeProjectAssociationSelection } from "./conversations/project-association";
 import { validResourceCapacitySelection } from "./resources/resource-capacity-read";
 import { isAutonomySelection, AUTONOMY_READ_BODY_SCHEMA } from "./supervision/autonomy-policy";
 import { validJournalSelection } from "./project-journal";
@@ -1184,6 +1185,13 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         return Promise.reject(new Error("PROJECT_PLAN_SELECTION_INVALID"));
       return read("acquisition", `${ORIGIN}/workspace/project-plan/current?${new URLSearchParams({ work_ref: selected.work_ref })}`,
         signal, { cap: 131_072, typedUnavailableSchema: "mastermind.workspace_project_plan.v1" });
+    },
+    readProjectSessionAssociation: (request) => {
+      const { signal, ...value } = request;
+      const selected = normalizeProjectAssociationSelection(value);
+      if (!selected) return Promise.reject(new Error("PROJECT_SESSION_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-session/current?${new URLSearchParams({ work_ref: selected.workRef, root_job_id: selected.rootJobId })}`,
+        signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_project_session_association.v1" });
     },
     readProjectJournal: (request) => {
       const { signal, ...selected } = request;

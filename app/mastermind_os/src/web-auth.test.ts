@@ -1547,3 +1547,42 @@ describe("selected-work resource capacity fixed Web READ", () => {
   await expect(host.readResourceCapacity!(request())).rejects.toThrow();
  });
 });
+
+import planV2Fixture from "./fixtures/project-plan-v2-owner.json";
+it("joins actual Python v2 continuity through the existing authenticated fixed Web read", async () => {
+  const e = setup(); await e.login(); e.fetcher.mockClear();
+  const selection = { work_ref: "WS:PLAN-TEST" };
+  e.fetcher.mockResolvedValueOnce(response(planV2Fixture.cases.available_pending));
+  const value = await bindMissionHost(e.client).readProjectPlan!({ ...selection, signal: new AbortController().signal });
+  expect(value).toEqual(planV2Fixture.cases.available_pending);
+  const [url, options] = e.fetcher.mock.calls[0];
+  expect(new URL(String(url)).pathname).toBe("/workspace/project-plan/current");
+  expect(Object.fromEntries(new URL(String(url)).searchParams)).toEqual(selection);
+  expect(options).toMatchObject({ method: "GET", credentials: "omit", redirect: "error", cache: "no-store" });
+  expect(e.fetcher).toHaveBeenCalledTimes(1);
+});
+
+import projectSessionFixture from "./fixtures/project-session-association-producer.json";
+describe("project-session fixed Web READ", () => {
+  const request = () => ({ workRef: projectSessionFixture.selection.work_ref, rootJobId: projectSessionFixture.selection.root_job_id, signal: new AbortController().signal });
+  it("uses actual paired owner body and one fixed acquisition route", async () => {
+    const e = setup(); const host = bindMissionHost(e.client);
+    await expect(host.readProjectSessionAssociation!(request())).rejects.toThrow("PROJECT_SESSION_READ_UNAUTHORIZED");
+    expect(e.fetcher).not.toHaveBeenCalled();
+    await e.login(); e.fetcher.mockClear(); e.fetcher.mockResolvedValueOnce(response(projectSessionFixture));
+    await expect(host.readProjectSessionAssociation!(request())).resolves.toEqual(projectSessionFixture);
+    const [url, options] = e.fetcher.mock.calls[0];
+    expect(new URL(String(url)).pathname).toBe("/workspace/project-session/current");
+    expect(Object.fromEntries(new URL(String(url)).searchParams)).toEqual(projectSessionFixture.selection);
+    expect(options).toMatchObject({ method: "GET", credentials: "omit", redirect: "error", cache: "no-store" });
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("withholds late owner body after sign-out and never retries", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    const late = deferred<Response>(); e.fetcher.mockReturnValueOnce(late.promise);
+    const host = bindMissionHost(e.client); const pending = host.readProjectSessionAssociation!(request());
+    const rejected = expect(pending).rejects.toThrow();
+    await host.auth!.signOut(); late.resolve(response(projectSessionFixture)); await rejected;
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+});

@@ -50,7 +50,8 @@ FABRIC_READ_ROUTES = ("/workspace/fabric/catalog/current", "/workspace/fabric/st
 PRE_PROJECT_PLAN_GET_ROUTES = COMPOSED_GET_ROUTES + FABRIC_READ_ROUTES
 PRE_PROJECT_JOURNAL_GET_ROUTES = PRE_PROJECT_PLAN_GET_ROUTES + ("/workspace/project-plan/current",)
 PRE_AUTONOMY_GET_ROUTES = PRE_PROJECT_JOURNAL_GET_ROUTES + ("/workspace/project-journal/current",)
-GET_ROUTES = PRE_AUTONOMY_GET_ROUTES + ("/workspace/autonomy/current",)
+PRE_PROJECT_SESSION_GET_ROUTES = PRE_AUTONOMY_GET_ROUTES + ("/workspace/autonomy/current",)
+GET_ROUTES = PRE_PROJECT_SESSION_GET_ROUTES + ("/workspace/project-session/current",)
 # Preserve exactly the profiles admitted by the two predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
 # partial upgrades, wildcards and extra paths cannot become transition inputs.
@@ -65,6 +66,7 @@ TRANSITION_ROUTE_PROFILES = (
     (PRE_PROJECT_PLAN_GET_ROUTES, POST_ROUTES),
     (PRE_PROJECT_JOURNAL_GET_ROUTES, POST_ROUTES),
     (PRE_AUTONOMY_GET_ROUTES, POST_ROUTES),
+    (PRE_PROJECT_SESSION_GET_ROUTES, POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 

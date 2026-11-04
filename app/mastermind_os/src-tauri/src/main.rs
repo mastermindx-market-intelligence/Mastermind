@@ -81,6 +81,7 @@ fn main() {
             auth::read_mission_v3,
             auth::read_project_plan,
             auth::read_project_journal,
+            auth::read_project_session,
             auth::read_autonomy_policy,
             auth::read_admitted_plan,
             auth::read_retained_activity,

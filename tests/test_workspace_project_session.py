@@ -111,6 +111,21 @@ def test_queued_root_never_becomes_a_conversation_without_real_epoch_and_broker_
     assert body["state"] == "UNAVAILABLE" and body["materialization"] is None
 
 
+def test_frame_reuses_exact_workspace_read_principal_and_refuses_caller_session_fields():
+    from tests.test_workspace_member_bindings import fixture, principal
+    _, bindings = fixture()
+    request = {"schema": wire.FRAME_SCHEMA, "operation": wire.OPERATION, "principal": principal(bindings),
+               "selection": {"work_ref": "WS:SYNTHETIC-PROJECT", "root_job_id": "JOB-001"}}
+    assert wire.validate_frame(request) == request
+    for fields in ({"provider_session_id": "client-session"}, {"epoch": "client-epoch"}, {"principal": "chairman"}):
+        changed = copy.deepcopy(request)
+        changed["selection"].update(fields)
+        with pytest.raises(ValueError): wire.validate_frame(changed)
+    changed = copy.deepcopy(request)
+    changed["principal"]["scopes"] = ["mastermind.executive.intent.submit"]
+    with pytest.raises(ValueError): wire.validate_frame(changed)
+
+
 def test_foreign_or_changed_source_and_profile_cannot_bind_a_session(tmp_path):
     fixture = owner_fixture(tmp_path)
     runtime, selected, source = fixture[:3]

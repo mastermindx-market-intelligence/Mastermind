@@ -57,3 +57,22 @@ describe("canonical project-plan native host composition", () => {
     await expect(bindMissionHost(env.raw).readProjectPlan!(request())).rejects.toThrow("PROJECT_PLAN_INVALID");
   });
 });
+
+import planV2Fixture from "./fixtures/project-plan-v2-owner.json";
+describe("project plan v2 through incumbent native read", () => {
+  const selection = { work_ref: "WS:PLAN-TEST" };
+  it("decodes actual Python v2 with the same sole fixed command", async () => {
+    const body = planV2Fixture.cases.available_pending;
+    const env = await native(async () => body);
+    const value = await bindMissionHost(env.raw).readProjectPlan!({ ...selection, signal: new AbortController().signal });
+    expect(value).toEqual(body);
+    expect(env.invoke.mock.calls.filter(([command]) => command === "read_project_plan")).toEqual([["read_project_plan", { selection }]]);
+  });
+  it("discards v2 continuity on the same existing revocation fence", async () => {
+    const late = deferred(); const env = await native(() => late.promise);
+    const pending = bindMissionHost(env.raw).readProjectPlan!({ ...selection, signal: new AbortController().signal });
+    const rejected = expect(pending).rejects.toThrow("READ_CANCELLED");
+    env.notify(out); late.resolve(planV2Fixture.cases.available_pending); await rejected;
+    expect(env.invoke.mock.calls.filter(([command]) => command === "read_project_plan")).toHaveLength(1);
+  });
+});

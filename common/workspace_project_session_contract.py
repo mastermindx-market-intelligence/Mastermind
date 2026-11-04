@@ -5,10 +5,12 @@ import datetime as dt
 import json
 import re
 
-from common.executive_workspace_contract import canonical, _check_job_id
+from common.executive_workspace_contract import canonical, _check_job_id, validate_v3_frame, FRAME_SCHEMA_V3
 from common.workspace_project_journal_contract import validate_selection as work_selection
 
 SCHEMA = "mastermind.workspace_project_session_association.v1"
+FRAME_SCHEMA = "mastermind.workspace_project_session_read.v1"
+OPERATION = "project_session"
 MAX_RESPONSE_BYTES = 16_384
 REASONS = frozenset({"MATERIALIZATION_CONFLICT", "SOURCE_UNAVAILABLE", "SOURCE_CHANGED",
                      "SOURCE_MISMATCH", "RESPONSE_OVER_BUDGET"})
@@ -22,6 +24,17 @@ def selection(value):
         raise ValueError("invalid_input")
     work_selection({"work_ref": value["work_ref"]})
     return dict(value)
+
+
+def validate_frame(value):
+    """The original Workspace READ principal; no caller session selectors."""
+    if (type(value) is not dict or set(value) != {"schema", "operation", "principal", "selection"}
+            or value["schema"] != FRAME_SCHEMA or value["operation"] != OPERATION):
+        raise ValueError("invalid_input")
+    selected = selection(value["selection"])
+    validate_v3_frame({"schema": FRAME_SCHEMA_V3, "operation": "admitted_plan",
+                       "principal": value["principal"], "selection": selected})
+    return json.loads(canonical(value))
 
 
 def _require(condition):
@@ -95,3 +108,20 @@ def unavailable(selected, reason="SOURCE_UNAVAILABLE"):
     return validate_body({"schema": SCHEMA, "selection": selection(selected), "availability": "UNAVAILABLE",
         "state": "UNAVAILABLE", "reason": reason, "observational_only": True, "can_send": False,
         "continuation_target": None, "project_source": None, "runtime_creation": None, "materialization": None})
+
+
+def validate_source_observation(value, *, work_ref, record_commit):
+    """Private sealed-child output, not an authenticated browser request."""
+    work_selection({"work_ref": work_ref})
+    _require(_hex(record_commit, 40))
+    _require(type(value) is dict and set(value) == {"schema", "work_ref", "availability", "source", "reason"})
+    _require(value["schema"] == "mastermind.agentos_project_creation_source.v1" and value["work_ref"] == work_ref)
+    if value["availability"] == "AVAILABLE":
+        validate_project_source(value["source"], {"work_ref": work_ref})
+        _require(value["source"]["commit"] == record_commit and value["reason"] is None)
+    else:
+        _require(value["availability"] == "UNAVAILABLE" and value["source"] is None
+            and type(value["reason"]) is str and value["reason"] in {"SOURCE_UNAVAILABLE", "SOURCE_CHANGED", "SOURCE_MISMATCH"})
+    raw = canonical(value)
+    _require(len(raw) + 1 <= 4096)
+    return json.loads(raw)

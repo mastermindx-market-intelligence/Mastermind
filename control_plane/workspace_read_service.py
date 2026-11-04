@@ -495,7 +495,7 @@ class WorkspaceReadService:
                  product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                  product_acceptance_owner_guard=None, product_acceptance_read=None,
                  product_acceptance_observe=None, activity_membership=None,
-                 project_plan_reader=None, project_journal_reader=None,
+                 project_plan_reader=None, project_journal_reader=None, project_session_source=None,
                  control_room_presenter=None,
                  control_room_actions=None):
         self.cache = cache
@@ -571,6 +571,53 @@ class WorkspaceReadService:
             if type(project_journal_reader) is not AgentOsProjectJournalReader:
                 raise ValueError("exact installed Agent OS journal reader required")
         self._project_journal_reader = project_journal_reader
+        if project_session_source is not None:
+            from control_plane.workspace_managed_project_session_source import ExistingManagedProjectSessionSource
+            if type(project_session_source) is not ExistingManagedProjectSessionSource:
+                raise ValueError("exact managed project session source required")
+        self._project_session_source = project_session_source
+
+    def _read_project_session(self, selected):
+        from common import workspace_project_session_contract as wire
+        def member(snapshot):
+            if not _qualified(snapshot): raise ValueError("source_unavailable")
+            if _join(snapshot.document, selected) is None: raise LookupError("selection_not_found")
+            macro = snapshot.document.get("sources", {}).get("macro_sha")
+            if not wire._hex(macro, 40): raise ValueError("source_unavailable")
+            return macro
+        before = self.cache.snapshot()
+        macro = member(before)
+        source = self._project_session_source
+        if source is None: return wire.unavailable(selected)
+        body = wire.validate_body(source.read(**selected, expected_macro_sha=macro))
+        after = self.cache.snapshot()
+        if (member(after) != macro or self._project_session_source is not source
+                or body["selection"] != selected or before.owner is not after.owner
+                or before.instance != after.instance or before.publication != after.publication
+                or digest(before.document) != digest(after.document)
+                or _plan_validity_identity(before.validity) != _plan_validity_identity(after.validity)):
+            return wire.unavailable(selected, "SOURCE_CHANGED")
+        bounded_canonical({"ok": True, "result": body}, limit=wire.MAX_RESPONSE_BYTES)
+        return body
+
+    async def _handle_project_session_frame(self, frame):
+        from common import workspace_project_session_contract as wire
+        try: wire.validate_frame(frame)
+        except (TypeError, ValueError): return error("invalid_input", 400)
+        try:
+            if self.authorize(frame["principal"]) is not True: return error("access_denied", 403)
+            stamp = permission_stamp(self.authorize, frame["principal"])
+        except Exception: return error("access_denied", 403)
+        task = asyncio.create_task(asyncio.to_thread(self._read_project_session, frame["selection"]))
+        try: result = {"ok": True, "result": await await_owned(task)}
+        except LookupError: result = error("selection_not_found", 404)
+        except Exception: result = {"ok": True, "result": wire.unavailable(frame["selection"])}
+        try:
+            if (self.authorize(frame["principal"]) is not True
+                    or permission_stamp(self.authorize, frame["principal"]) != stamp):
+                return error("access_denied", 403)
+        except Exception: return error("access_denied", 403)
+        return result
 
     def _read_project_plan(self, selected):
         from common import workspace_project_plan_contract as wire
@@ -1571,6 +1618,9 @@ class WorkspaceReadService:
         if type(frame) is dict and frame.get("schema") == AUTONOMY_READ_FRAME_SCHEMA:
             from control_plane.workspace_autonomy_policy_adapter import read_autonomy_policy
             return await read_autonomy_policy(self, frame)
+        from common.workspace_project_session_contract import FRAME_SCHEMA as PROJECT_SESSION_FRAME_SCHEMA
+        if isinstance(frame, dict) and frame.get("schema") == PROJECT_SESSION_FRAME_SCHEMA:
+            return await self._handle_project_session_frame(frame)
         from common.workspace_project_journal_contract import FRAME_SCHEMA as PROJECT_JOURNAL_FRAME_SCHEMA
         if type(frame) is dict and frame.get("schema") == PROJECT_JOURNAL_FRAME_SCHEMA:
             return await self._handle_project_journal_frame(frame)
@@ -1807,7 +1857,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                                product_acceptance_owner_guard=None, product_acceptance_read=None,
                                product_acceptance_observe=None, activity_membership=None,
-                               project_plan_reader=None, project_journal_reader=None,
+                               project_plan_reader=None, project_journal_reader=None, project_session_source_factory=None,
                                cross_plane_context=None, cross_plane_enrollment=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
 
@@ -1825,6 +1875,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
     from that same trusted enrollment owner; omission keeps mutations unavailable.
     """
     from control_plane.workspace_control_room_lifecycle import HostedControlRoom
+    from control_plane.workspace_managed_project_session_source import ExistingManagedProjectSessionSource
     if type(control_room) is not HostedControlRoom or not callable(authorize):
         raise ValueError("workspace owner configuration refused")
     if cross_plane_enrollment is not None:
@@ -1852,7 +1903,13 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
         actions = ExistingControlRoomActions(
             control_room, authorize=authorize, authorize_actions=authorize_actions, now=action_now,
         )
+    if project_session_source_factory is not None and not callable(project_session_source_factory):
+        raise ValueError("project session source factory must be installed")
     def provide(runtime):
+        session_source = project_session_source_factory(runtime) if project_session_source_factory is not None else None
+        if session_source is not None and (type(session_source) is not ExistingManagedProjectSessionSource
+                or session_source._service._require_runtime() is not runtime):
+            raise ValueError("project session source Runtime differs")
         return WorkspaceReadService(cache=cache, runtime=runtime, authorize=authorize,
                                     armed=armed, runtime_identity=runtime_identity,
                                     control_room_presenter=presenter, control_room_actions=actions,
@@ -1864,5 +1921,6 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     product_acceptance_observe=product_acceptance_observe,
                                     project_plan_reader=project_plan_reader,
                                     project_journal_reader=project_journal_reader,
+                                    project_session_source=session_source,
                                     activity_membership=activity_membership)
     return provide
