@@ -426,7 +426,8 @@ export function createFabricFacade(engine, options={}) {
   // capabilities/help). Reuses the fixed CAPTURE_PROGRAM and validates ONE
   // complete capture envelope. Outer wrapper success is required; the
   // returned exit_code is the ORIGINAL child adapter exit code and the
-  // stdout is the exact verified bytes (no reserialization, no stderr use).
+  // stdout is the exact verified bytes. Native preview-only, nonzero-exit
+  // stderr may supply one validated, low-entropy reason token; never raw stderr.
   async function runCapturedShort(argv, timeoutMs=10000) {
     const parsed=await runShort(argv,timeoutMs,true);
     if(parsed.exit_code!==0) fail('CAPTURE_INVALID');
