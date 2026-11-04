@@ -1,0 +1,3 @@
+2026-11-04T11:36Z [remote_sub id=offline-original-deadline host=fixture] RUN_RESERVED explicit=1
+2026-11-04T11:36Z [remote_sub id=offline-original-deadline host=fixture] LEASE_WAIT pool=minimax wait=27
+2026-11-04T11:36Z [remote_sub id=offline-original-deadline host=fixture] LEASE_REFUSED rc=75

@@ -1,0 +1,66 @@
+{
+  "broker_entered": {
+    "inherited_remaining_seconds": 30,
+    "lease_granted": false,
+    "parent_pid": 80931,
+    "pid": 80986,
+    "requested_wait_seconds": 27,
+    "started_monotonic": 808203.470319666,
+    "task_started": false
+  },
+  "broker_returned": {
+    "inherited_remaining_seconds": 30,
+    "lease_granted": false,
+    "parent_pid": 80931,
+    "pid": 80986,
+    "requested_wait_seconds": 27,
+    "returncode": 75,
+    "returned_monotonic": 808230.477871583,
+    "slept_seconds": 27,
+    "started_monotonic": 808203.470319666,
+    "task_started": false
+  },
+  "cli_returncode": 75,
+  "continuation_finished": {
+    "background_execution": false,
+    "controller_rc": 75,
+    "effective_run_id": "offline-original-deadline",
+    "origin_run_id": "offline-original-deadline",
+    "parent_run_id": "offline-deadline-parent",
+    "reason": "commission_time_exhausted",
+    "root_id": "offline-deadline-root",
+    "schema": "mastermind.fabric_continuation.v1"
+  },
+  "continuation_request": {
+    "background_execution": false,
+    "deadline_ns": 808232908130416,
+    "max_attempts": 3,
+    "origin_run_id": "offline-original-deadline",
+    "parent_run_id": "offline-deadline-parent",
+    "root_id": "offline-deadline-root",
+    "schema": "mastermind.fabric_continuation.v1",
+    "wall_seconds": 31
+  },
+  "controller_log": "2026-11-04T11:36Z [remote_sub id=offline-original-deadline host=fixture] RUN_RESERVED explicit=1\n2026-11-04T11:36Z [remote_sub id=offline-original-deadline host=fixture] LEASE_WAIT pool=minimax wait=27\n2026-11-04T11:36Z [remote_sub id=offline-original-deadline host=fixture] LEASE_REFUSED rc=75\n",
+  "elapsed_seconds": 28.93653487507254,
+  "harness_limit_seconds": 45,
+  "harness_timed_out": false,
+  "launch_log_present": false,
+  "original_budget_seconds": 31,
+  "schema": "offline.original_deadline_regression.v1",
+  "source_directory": "/Volumes/Mastermind/agent-workspaces/web/review-fastlane-broadening-20261103-ceo-001/ops/native_fabric/quota_continuity/tests/full-cli-boghdcoy/source",
+  "source_sha256": {
+    "commission_deadline.py": "76d6523f94d9d8a7323766eb957b93bdd37240c7b4c13a4b097555ed53e8829a",
+    "fabric_continuation.py": "7a4050051378fcacada2f2fe6d056649fb514077aacfb02751d61d6e67dfe405",
+    "fabric_task.py": "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b",
+    "lane_runtime.py": "61350902dcf90ac65800f81e20acf473092c45738bbbef9b582548777e4e0329",
+    "lease_broker.py": "a2847a29abe590cb168c2cd8ae34e0b1c3222b6e92ab4c00f252a342d56e6406",
+    "provider_outcome.py": "22b5ae9325118327b8b0734514c6f5711e39ae919f0e04426f7fac182895bf24",
+    "quota_circuit.py": "0962d638a0a5655a71ea7a6eeb83088ad60af30f4a26e9c5bc47a92c3ab77945",
+    "remote_sub.sh": "e24d6123ae1c303fe7a72b88c9ae6093979dcf35a9984d7ba16ccb9689700b05",
+    "remote_sub_helpers.py": "3a4efaefd63244e77cee385d83da0bb4e53b86a0e83a183601f2fa80ec4d602b"
+  },
+  "stdout": "",
+  "transport_or_task_invocation_count": 0,
+  "unexpected_broker_operation": null
+}
