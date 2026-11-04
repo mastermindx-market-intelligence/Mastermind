@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 import sys
 import unittest
 from unittest.mock import patch
@@ -96,6 +97,28 @@ class Cursor46ExplicitPin(unittest.TestCase):
                         "cursor", "orchestration", POLICY, model=ALIAS)[0])
                     self.assertFalse(pick.launch_policy(
                         "cursor", "orchestration", ALIAS, doc=POLICY)["allowed"])
+
+    def test_high_level_manual_pin_does_not_inherit_auto_preference_veto(self):
+        # The production quota/broker check is not skipped. This test supplies
+        # a qualified healthy broker response and isolates only the preference.
+        available = {
+            "lease_broker": SimpleNamespace(default_broker=lambda: object()),
+            "quota_circuit": SimpleNamespace(pool_blocked=lambda *_: False),
+        }
+        for source in PICKERS:
+            with self.subTest(source=str(source)):
+                pick = load(source)
+                with patch.dict(sys.modules, available), \
+                     patch.object(pick, "_grok_exhausted", return_value=False), \
+                     patch.object(pick, "_slot_concurrent", return_value=0), \
+                     patch.object(pick, "_pool_cap", return_value=8):
+                    permitted, reason = pick.hard_filter(
+                        "cursor", "high_level", POLICY, model=ALIAS)
+                    self.assertTrue(permitted, reason)
+                    ordinary, ordinary_reason = pick.hard_filter(
+                        "cursor", "high_level", POLICY, model="composer-2.5")
+                    self.assertFalse(ordinary)
+                    self.assertEqual(ordinary_reason, "grok_before_cursor policy")
 
 
 if __name__ == "__main__":

@@ -1759,9 +1759,11 @@ def hard_filter(pool: str, task_class: str,
         cap = _pool_cap(pool)
         if _slot_concurrent(pool) >= cap:
             return False, f"cursor at cap {cap}"
-        # grok_before_cursor: if grok not exhausted and fits, prefer it
+        # Grok-first is an AUTO preference, not a veto of the one exact
+        # explicitly selected Cursor Grok 4.6 alias. Other Cursor models retain
+        # the ordinary Grok-before-Cursor routing policy.
         tc = task_class.lower()
-        if tc in ("fix_build", "high_level"):
+        if tc in ("fix_build", "high_level") and model != "cursor-grok-4.6-high":
             if not _grok_exhausted() and _slot_concurrent("grok") < _pool_cap("grok"):
                 return False, "grok_before_cursor policy"
 
