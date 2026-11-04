@@ -537,3 +537,13 @@ REVIEWED_FILES['integrations/session_bridge/mmtask_restore/preimage/mmtask'] = {
     'sha256': '9567ecad658e50b149a14f4c0cd0c7b42d15ad546b0508e2153619f14d0eb336',
     'sites': ((556, 93, 96, 'int', '400'),),
 }
+
+# PR1917 source review5761933327 at63d184218e8d6a2b7da48f98045a2e67f504f5aa:
+# default HTTPS port in the exact parsed-origin condition, not a UID/GID.
+# Existing full-file SHA + token-span verification binds this one Constant;
+# any source/path/context drift restores the ordinary D8 scanner. This does
+# not change the URL/port policy or the separate reviewed Squid ACL exception.
+REVIEWED_FILES['integrations/hermes_secretary/tab_sweep.py'] = {
+    'sha256': '12d2c8f059f941eb908cc9d7ec3651763f8102832e05435118ce8e1385d5fd46',
+    'sites': ((19, 77, 80, 'int', '443'),),
+}
