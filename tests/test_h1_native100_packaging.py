@@ -22,9 +22,9 @@ def test_explicit_new_pair_in_native100_and_all_old_base_checks_retained():
         assert hashlib.sha256((ROOT/'ops/native_fabric/grok47/overlay'/name).read_bytes()).hexdigest()==expected
 
 
-def test_four_exact_forward_compositions_include_actual_executor():
+def test_five_exact_forward_compositions_include_account_host_guard():
     m=builder()
-    assert set(m.GROK47_CANDIDATE_COMPOSITION_DIGESTS)=={'pick.py','remote_sub.sh','remote_sub_exec.py','remote_sub_helpers.py'}
+    assert set(m.GROK47_CANDIDATE_COMPOSITION_DIGESTS)=={'native_remote.py','pick.py','remote_sub.sh','remote_sub_exec.py','remote_sub_helpers.py'}
     for name,expected in m.GROK47_CANDIDATE_COMPOSITION_DIGESTS.items():
         assert hashlib.sha256((DRAFT.parent/'candidate'/name).read_bytes()).hexdigest()==expected
 

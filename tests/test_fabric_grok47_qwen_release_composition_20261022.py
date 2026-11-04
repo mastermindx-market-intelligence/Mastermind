@@ -33,10 +33,10 @@ NAMES = (
 )
 QWEN = ("bailian_keys.py", "lease_broker.py",
         "glm_host_account_probe.py", "glm_host_account_source.py")
-FORWARD_NAMES = ("pick.py", "remote_sub.sh", "remote_sub_exec.py", "remote_sub_helpers.py")
+FORWARD_NAMES = ("native_remote.py", "pick.py", "remote_sub.sh", "remote_sub_exec.py", "remote_sub_helpers.py")
 BASE_ONLY_OVERLAY_NAMES = (
     "artifact_delivery.py", "fabric_operator_client.py",
-    "fabric_operator_contract.py", "native_remote.py", "sub.sh",
+    "fabric_operator_contract.py", "sub.sh",
 )
 PROTECTED_QWEN_SOURCE_DIGESTS = {
     "bailian_keys.py":
@@ -311,13 +311,13 @@ def test_builder_refuses_tampered_overlay_base_despite_valid_forward(tmp_path, n
     assert not (stage / "native-source-inventory.json").exists()
 
 
-def test_forward_map_is_the_closed_reviewed_four_name_set():
-    """The forward substitution is exactly four reviewed names over nine bases."""
+def test_forward_map_is_the_closed_reviewed_five_name_set():
+    """The forward substitution is exactly five reviewed names over nine bases."""
     builder = read_builder()
     forward = builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS
     merged = builder.GROK47_MERGED_SOURCE_DIGESTS
     assert len(merged) == 9 and set(merged) == set(NAMES)
-    assert set(forward) == set(FORWARD_NAMES) and len(forward) == 4
+    assert set(forward) == set(FORWARD_NAMES) and len(forward) == 5
     assert set(forward) < set(merged)
     assert set(merged) - set(forward) == set(BASE_ONLY_OVERLAY_NAMES)
     for name, value in sorted(forward.items()):

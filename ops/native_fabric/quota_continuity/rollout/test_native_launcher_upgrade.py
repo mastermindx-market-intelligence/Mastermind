@@ -138,6 +138,16 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 if len(payload)!=item['bytes'] or g.digest(payload)!=item['sha256'] or item['sha256']!=old[name]:
                     raise AssertionError('historical95 diagnostic preimage differs')
                 (cls.built/'native-code-stage'/name).write_bytes(payload)
+            # The Grok host/account binding guard is CURRENT-only. The original
+            # historical95 stage must retain the exact protected Grok base,
+            # not the forward-composed candidate or a repinned old digest.
+            grok_preimage = (Path(builder.__file__).parents[2] /
+                             'grok47/overlay/native_remote.py').read_bytes()
+            if (g.digest(grok_preimage) !=
+                    '388c412ee5803ac54356275323eba5fb0ee57519a8810490f81fe13977459f9e'
+                    or old['ext/native_remote.py'] != g.digest(grok_preimage)):
+                raise AssertionError('historical95 native Grok preimage differs')
+            (cls.built/'native-code-stage/ext/native_remote.py').write_bytes(grok_preimage)
             cls.manifest = old
             for name,wanted in cls.manifest.items():
                 if g.digest((cls.built / 'native-code-stage' / name).read_bytes()) != wanted:

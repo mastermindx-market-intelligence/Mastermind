@@ -390,10 +390,10 @@
       "source": "candidate/native_prestart_reconcile.py"
     },
     "ext/native_remote.py": {
-      "bytes": 17000,
+      "bytes": 19449,
       "installed_preimage_sha256": "a111878452f2d7ba6ad97af53055d77ed9de13d783653029e5f20311902ff051",
-      "sha256": "388c412ee5803ac54356275323eba5fb0ee57519a8810490f81fe13977459f9e",
-      "source": "../grok47/overlay/native_remote.py"
+      "sha256": "8ea3fed6a49a54b83b161b2a1341bbd3d5ade34111f7a2b1735d3a8f32d4495b",
+      "source": "candidate/native_remote.py"
     },
     "ext/native_runtime_bindings.py": {
       "bytes": 5346,

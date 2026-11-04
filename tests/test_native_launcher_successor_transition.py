@@ -77,14 +77,22 @@ def source_owners(tmp_path_factory):
     assert sparse['schema'] == 'mastermind.test_native_sparse_executor_predecessor/v1'
     assert sparse['source_commit'] == 'e39a617b6771cb6b07323a533b4cf9db7e78900a'
     assert set(sparse['files']) == {'ext/remote_sub_exec.py'}
+    # The new Grok host/account guard is a forward-only CURRENT member.
+    # Restore its exact unchanged protected base in the historical B11 test.
+    grok_raw = (ROLLOUT.parents[3] / 'tests/fixtures/native-grok-account-predecessor-388c412e.json').read_bytes()
+    assert g.digest(grok_raw) == 'a37bd58d7c972cabbeb0f247811a001d3fccb4d4e6b626417f06f4fb5e4962b0'
+    grok = json.loads(grok_raw)
+    assert grok['schema'] == 'mastermind.test_native_grok_account_predecessor/v1'
+    assert grok['source_commit'] == '9f65957e29eba92245d78609f032aaea523b7cb4'
+    assert set(grok['files']) == {'ext/native_remote.py'}
     assert set(retained['files']) == {'ext/fabric_task.py', 'ext/pool_ledger.py'}
     assert set(diagnostic['files']) == {'ext/original_delivery_collector.py',
                                       'ext/provider_outcome.py', 'ext/remote_sub.sh'}
     assert {name for name in manifest if manifest[name] != historical_manifest[name]} == (
-        set(retained['files']) | set(diagnostic['files']) | set(sparse['files']))
+        set(retained['files']) | set(diagnostic['files']) | set(sparse['files']) | set(grok['files']))
     for name, digest in manifest.items():
         assert g.digest((target / 'native-code-stage' / name).read_bytes()) == digest
-    for name, item in {**retained['files'], **diagnostic['files'], **sparse['files']}.items():
+    for name, item in {**retained['files'], **diagnostic['files'], **sparse['files'], **grok['files']}.items():
         raw = zlib.decompress(base64.b64decode(item['zlib_base64'], validate=True))
         assert len(raw) == item['bytes']
         assert g.digest(raw) == item['sha256'] == historical_manifest[name]
