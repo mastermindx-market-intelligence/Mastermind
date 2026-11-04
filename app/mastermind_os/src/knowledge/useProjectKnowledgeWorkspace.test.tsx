@@ -6,7 +6,7 @@ import fixture from '../fixtures/knowledge-write-owner.json';
 import {createIndexedDbPendingPointerStore} from '../orchestration/indexeddb-pending-pointer-store';
 import type {SourceOperationTransport} from '../source-operations/transport';
 import {useProjectKnowledgeWorkspace,type ProjectKnowledgeWorkspaceProps} from './useProjectKnowledgeWorkspace';
-import type {ProjectFileAddRequest} from './library/project-knowledge-requests';
+import {publicRequestSha256,type ProjectFileAddRequest} from './library/project-knowledge-requests';
 afterEach(cleanup);
 function setup() {
   const journey=fixture.journeys[0]!,request=journey.request as ProjectFileAddRequest;
@@ -50,7 +50,7 @@ it('same-coordinate Library replacement cannot reuse an old prepared witness',as
   expect(f.transport.submitSourceOperation).not.toHaveBeenCalled();expect(await f.store.read(f.journey.context.owner_context.principal_scope)).toBeNull();
 });
 it('withdraws the exact durable store immediately and recovers its original after restoration and source loss',async()=>{
-  const f=setup();await f.ready();await act(async()=>{await f.result.current.prepare(f.request);await f.result.current.publish();});
+  const f=setup();await f.ready();await act(async()=>{await f.result.current.prepare(f.request);});await act(async()=>{await f.result.current.publish();});
   const pointer=await f.store.read(f.journey.context.owner_context.principal_scope);expect(pointer).not.toBeNull();
   f.rerender({...f.props,store:undefined});expect(f.result.current.controller).toBeUndefined();
   await act(async()=>{await f.result.current.checkOriginal();});expect(f.transport.reconcileSourceOperation).not.toHaveBeenCalled();
@@ -90,4 +90,22 @@ it('preserves another pending kind and does not compile or publish a replacement
   await act(async()=>{await f.result.current.prepare(f.request);});
   expect(f.result.current.phase).toBe('publication-held');expect(await f.store.read(scope)).toEqual(original);
   expect(f.transport.prepareSourceOperation).not.toHaveBeenCalled();expect(f.transport.submitSourceOperation).not.toHaveBeenCalled();
+});
+
+it('binds a retained same-scope Review callback to A and only the rendered B callback may submit B',async()=>{
+  const f=setup();await f.ready();await act(async()=>{await f.result.current.prepare(f.request);});
+  const oldPublish=f.result.current.publish;act(()=>{expect(f.result.current.startDraft()).toBe(true);});
+  const replacement=structuredClone(f.request);replacement.request_id='mmos-project-file-add-'+'b'.repeat(40);
+  const next=structuredClone(f.journey.preview);next.selection.request_id=replacement.request_id;
+  next.request_sha256=await publicRequestSha256(replacement);
+  vi.mocked(f.transport.prepareSourceOperation).mockResolvedValue(next);
+  const nextStatus=structuredClone(f.journey.proposal_status);nextStatus.selection.request_id=replacement.request_id;nextStatus.request_sha256=next.request_sha256;
+  vi.mocked(f.transport.submitSourceOperation).mockResolvedValue(nextStatus);
+  await act(async()=>{await f.result.current.prepare(replacement);});
+  expect(f.result.current.prepared?.request.request_id).toBe(replacement.request_id);
+  await act(async()=>{await oldPublish();});expect(f.transport.submitSourceOperation).not.toHaveBeenCalled();
+  expect(await f.store.read(f.journey.context.owner_context.principal_scope)).toBeNull();
+  await act(async()=>{await f.result.current.publish();});
+  expect(f.transport.submitSourceOperation).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(f.transport.submitSourceOperation).mock.calls[0]![0]).toMatchObject({request_id:replacement.request_id});
 });

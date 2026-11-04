@@ -144,9 +144,9 @@ export function useProjectKnowledgeWorkspace(props: ProjectKnowledgeWorkspacePro
     const anchor=prepared.current;
     return !!anchor && anchor.scope===scope && current() && sourceOwner.current?.value===anchor.sourceOwner && contexts.current===anchor.contextTicket && sourceCurrent({workRef:anchor.value.request.work_ref,sourceCommit:anchor.value.request.source_commit,baseRevision:anchor.value.request.base_revision});
   }
-  async function publish() {
+  async function publish(expected:PreparedProjectKnowledgeWrite) {
     const anchor=prepared.current;
-    if (!current() || !controller || anchor?.scope!==scope) return;
+    if (!current() || !controller || anchor?.scope!==scope || anchor.value!==expected) return;
     if (!canPublish()) {setPhase('stale');return;}
     setPhase('pending');
     const result=await controller.begin({kind:'project_source_write',targetKey:anchor.value.targetKey,
@@ -162,6 +162,7 @@ export function useProjectKnowledgeWorkspace(props: ProjectKnowledgeWorkspacePro
     const result=await controller.recover({reconcileSource:true});
     if(current()){if(result.status==='unknown' && result.pointer.kind!=='project_source_write')setPhase('publication-held');else repaint(n=>n+1);}
   }
+  const renderedPrepared=prepared.current?.scope===scope?prepared.current.value:null;
   const methods=useRef({readActions,prepare,publish,checkOriginal,startDraft,
     currentSource:(snapshot:ProjectKnowledgeSourceContext)=>{if(!sourceCurrent(snapshot))throw Error('SOURCE_CHANGED');return {...snapshot};}});
   methods.current={readActions,prepare,publish,checkOriginal,startDraft,
@@ -172,11 +173,14 @@ export function useProjectKnowledgeWorkspace(props: ProjectKnowledgeWorkspacePro
     readActions:(...args:Parameters<typeof readActions>)=>live.current.scope===scope?methods.current.readActions(...args):Promise.reject(Error('SOURCE_CHANGED')),
     startDraft:()=>live.current.scope===scope && methods.current.startDraft(),
     prepare:(request:Request)=>live.current.scope===scope?methods.current.prepare(request):Promise.resolve(),
-    publish:()=>live.current.scope===scope?methods.current.publish():Promise.resolve(),
     checkOriginal:()=>live.current.scope===scope?methods.current.checkOriginal():Promise.resolve(),
     currentSource:(snapshot:ProjectKnowledgeSourceContext)=>{if(live.current.scope!==scope)throw Error('SOURCE_CHANGED');return methods.current.currentSource(snapshot);},
   }),[scope]);
-  return {scope,registerSourceOwner,...stable,canPublish:canPublish(),
+  // Bind the destructive gesture to the exact Review rendered to the user.
+  // A callback retained from A can never submit a later prepared original B.
+  const publishRendered=useMemo(()=>()=>live.current.scope===scope && renderedPrepared
+    ? methods.current.publish(renderedPrepared):Promise.resolve(),[scope,renderedPrepared]);
+  return {scope,registerSourceOwner,...stable,publish:publishRendered,canPublish:canPublish(),
     phase:phaseRef.current.scope===scope?phaseRef.current.value:'idle' as KnowledgeEditPhase,
     prepared:prepared.current?.scope===scope?prepared.current.value:null,
     status:lastStatus.current?.scope===scope?lastStatus.current.value:null,
