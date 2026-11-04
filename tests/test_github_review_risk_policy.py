@@ -76,13 +76,13 @@ def test_small_sensitive_changes_never_use_fast_lane(paths):
 
 
 @pytest.mark.parametrize("paths", [
-    ("brain/macro_models.py",),
-    ("server/handler.py",),
-    ("app/src/business_logic.ts",),
-    ("tests/test_model.py",),
-    ("tests/test_component.py",),
+    ("brain/risk/macro_models.py",),
+    ("server/schema/handler.py",),
+    ("app/src/portfolio/position.ts",),
     ("package-lock.json",),
     ("backend/schema/price.ts",),
+    ("control_plane/ordinary_worker.py",),
+    ("integrations/external_client.py",),
 ])
 def test_consequential_code_gets_one_review(paths):
     decision = assess_review_risk(facts(paths))
@@ -92,19 +92,19 @@ def test_consequential_code_gets_one_review(paths):
 
 
 def test_large_unremarkable_diff_gets_one_review():
-    assert assess_review_risk(facts(additions=201, deletions=0)).tier is ReviewTier.STANDARD
+    assert assess_review_risk(facts(additions=2401, deletions=0)).tier is ReviewTier.STANDARD
 
 
 def test_many_small_paths_get_one_review():
-    assert assess_review_risk(facts(tuple(f"ui/panel{i}.tsx" for i in range(9)))).tier is ReviewTier.STANDARD
+    assert assess_review_risk(facts(tuple(f"ui/panel{i}.tsx" for i in range(41)))).tier is ReviewTier.STANDARD
 
 
 def test_test_only_large_deletion_gets_one_review():
     assert assess_review_risk(facts(("tests/test_component.py",), additions=1, deletions=51)).tier is ReviewTier.STANDARD
 
 
-def test_smaller_test_cleanup_requires_standard_review():
-    assert assess_review_risk(facts(("tests/test_component.py",), additions=1, deletions=49)).tier is ReviewTier.STANDARD
+def test_smaller_test_cleanup_uses_fast_lane():
+    assert assess_review_risk(facts(("tests/test_component.py",), additions=1, deletions=49)).tier is ReviewTier.FAST
 
 
 @pytest.mark.parametrize("hint,expected", [
@@ -185,7 +185,7 @@ def test_previous_rename_path_is_accounted_for_in_verified_metrics():
     assert assess_review_risk(source).tier is ReviewTier.CRITICAL
 
 
-def test_ui_executable_change_requires_standard_even_with_large_verification_evidence():
+def test_bounded_ui_executable_change_fast_with_large_verification_evidence():
     source = replace(
         facts(("terminal/components/ChartPanel.tsx", "terminal/docs/verification/replay.log"),
               additions=900, deletions=3),
@@ -194,7 +194,7 @@ def test_ui_executable_change_requires_standard_even_with_large_verification_evi
             ReviewFileStat(path="terminal/docs/verification/replay.log", additions=880, deletions=0),
         ),
     )
-    assert assess_review_risk(source).tier is ReviewTier.STANDARD
+    assert assess_review_risk(source).tier is ReviewTier.FAST
 
 
 @pytest.mark.parametrize("protected_path", [
@@ -229,14 +229,14 @@ def test_inert_evidence_only_stays_fast_with_full_verified_metrics():
     assert assess_review_risk(source).tier is ReviewTier.FAST
 
 
-def test_test_only_one_line_addition_is_standard_until_semantics_qualified():
+def test_test_only_one_line_addition_is_fast_without_sensitive_paths():
     source = replace(
         facts(("tests/test_behavior.py",), additions=1, deletions=0),
         file_metrics=(ReviewFileStat(
             path="tests/test_behavior.py", additions=1, deletions=0
         ),),
     )
-    assert assess_review_risk(source).tier is ReviewTier.STANDARD
+    assert assess_review_risk(source).tier is ReviewTier.FAST
 
 
 def test_real_managed_workspace_identity_change_is_critical_with_verified_metrics():
@@ -258,3 +258,37 @@ def test_real_managed_workspace_identity_change_is_critical_with_verified_metric
     assert verdict.tier is ReviewTier.CRITICAL
     assert verdict.minimum_independent_assessments == 2
     assert verdict.minimum_formal_non_author_approvals == 1
+
+
+@pytest.mark.parametrize("path", [
+    "app/src/components/PriceChart.tsx",
+    "app/static/landing.css",
+    "server/handler.py",
+    "backend/formatters.py",
+    "tests/test_component.py",
+    "tests/test_model.py",
+    "scripts/helpers.py",
+])
+def test_chairman_broadened_fast_lane_for_bounded_routine_code(path):
+    result = assess_review_risk(facts((path,), additions=90, deletions=20))
+    assert result.tier is ReviewTier.FAST
+    assert result.minimum_independent_assessments == 0
+    assert result.minimum_formal_non_author_approvals == 0
+
+
+@pytest.mark.parametrize("path", [
+    "backend/auth/session.py",
+    "server/payment/charge.py",
+    "app/src/trade_execution/order.ts",
+    ".github/workflows/ci.yml",
+    "tests/test_security_gateway.py",
+    "integrations/github_review_risk_reader.py",
+    "docs/sol_skills/ACTIVE_EXECUTION.md",
+    "config/ci_checks.yml",
+])
+def test_broadening_never_downgrades_privileged_changes(path):
+    assert assess_review_risk(facts((path,), additions=1, deletions=0)).tier is ReviewTier.CRITICAL
+
+
+def test_broad_fast_lane_does_not_accept_unknown_executable_format():
+    assert assess_review_risk(facts(("app/native/main.rs",))).tier is ReviewTier.STANDARD

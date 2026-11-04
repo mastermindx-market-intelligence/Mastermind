@@ -83,9 +83,9 @@ def test_one_line_auth_filename_is_critical():
     assert assess(reader).tier is ReviewTier.CRITICAL
 
 
-def test_unknown_backend_file_defaults_to_standard_not_fast():
+def test_bounded_backend_file_uses_fast_lane():
     reader = Reader(pages={1: (file("server/handler.py"),)})
-    assert assess(reader).tier is ReviewTier.STANDARD
+    assert assess(reader).tier is ReviewTier.FAST
 
 
 def test_file_deletion_escalates_even_docs():

@@ -56,7 +56,7 @@ def test_auto_fast_skips_review_job_only_for_matching_current_source():
 
 
 def test_auto_consequential_gets_review():
-    result = auto(risk(("server/api/refresh.py",)))
+    result = auto(risk(("server/schema/refresh.py",)))
     assert result.action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
     assert result.source_tier is ReviewTier.STANDARD
 
@@ -130,3 +130,9 @@ def test_manual_review_without_risk_stays_on_existing_ingress():
 def test_caller_text_is_not_verified_origin(bad_origin):
     with pytest.raises(ReviewRiskDispatchError):
         decide_risk_dispatch(origin=bad_origin, assessment=risk())
+
+
+def test_auto_bounded_app_source_skips_review_job():
+    result = auto(risk(("app/src/component.tsx",)))
+    assert result.action is ReviewDispatch.SKIP_NO_REVIEW_NEEDED
+    assert result.source_tier is ReviewTier.FAST

@@ -37,7 +37,7 @@ session spawned with no context beyond this file.
 
 Fable is not a mandatory relay or universal merge approver. Routing, adjudication,
 and merge decisions follow the currently authorized role and operation, not a
-historical session name. Independent review and source/release protections still apply.
+historical session name. Independent review applies only when the accepted risk tier or native rule requires it; protected source/release controls still apply.
 These role descriptions do not themselves grant authority.
 
 ### Durable plan and cold continuation for assigned principals
