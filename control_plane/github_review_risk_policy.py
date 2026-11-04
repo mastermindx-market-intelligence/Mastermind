@@ -74,6 +74,15 @@ _CRITICAL_EXACT = frozenset({
     "CODEOWNERS",
     "SECURITY.md",
     "config/authority_map.yml",
+    # Constitutional and original authority owners are CRITICAL even when the
+    # changed line is tiny or their basename lacks "policy"/"security".
+    "control_plane/packet_gate.py",
+    "control_plane/governance.py",
+    "control_plane/strategic_state.py",
+    "config/strategic_state.yml",
+    "config/contracts.yml",
+    "research/MASTERMIND_CHARTER_V2.md",
+    "DOCTRINE.md",
     "control_plane/executive_runtime.py",
     "control_plane/github_release_assessment.py",
     "docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md",
@@ -376,6 +385,6 @@ def assess_review_risk(facts: ReviewChangeFacts) -> ReviewRiskAssessment:
         return _result(facts, ReviewTier.FAST, "ROUTINE_DOCUMENTATION_TESTS_OR_EVIDENCE")
     if total > _FAST_MAX_LINES or material_count > _FAST_MAX_FILES:
         return _result(facts, ReviewTier.STANDARD, "SCOPE_EXCEEDS_FAST_LIMIT")
-    # Executable components, CSS and unqualified code require review even
+    # Executable components, CSS and unqualified code are not inert FAST changes even
     # when the source diff is small. Patch availability is not proof of inertness.
     return _result(facts, ReviewTier.STANDARD, "SOURCE_NOT_SEMANTICALLY_QUALIFIED_FOR_FAST")
