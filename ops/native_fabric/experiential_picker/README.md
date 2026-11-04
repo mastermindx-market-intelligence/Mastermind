@@ -143,3 +143,21 @@ installed-release change, no automatic-routing change, no pool promotion, no
 provider key use, no paid calls, no caller-assertable entitlement, no edits to
 #2029/#2031/#2032/#1849/#1934/#1945/#1920/#1918/#1946 files or the
 `experiential53` workspace, no hidden CI skip, no manifest relaxation.
+
+## Observed installed Linux picker compatibility
+
+The original sealed current-generation picker fixture `747a55a5…` is no
+longer the source installed on Ubuntu0/Ubuntu3. The exact installed preimage
+there is `bab2bcc1d71d7b8b2a7d5b78247326d5057815c6ed063143c451990b577e13d8`.
+A dedicated source-only forward-port
+`qualify_linux_installed_picker.py` handles that one precise generation,
+retaining the existing GLM provider and legacy routing semantics while
+restricting the Experiential model to the exact manual pin and owner witnesses.
+This is **not** permission to publish to the installed kit, modify
+`pools.yaml`, or start workers. Unknown generations (including Ubuntu1's
+different picker) refuse before output. A sealed source-only fixture under
+`fixtures/` permits offline CI and the 15 new deterministic tests in
+`test_qualify_linux_installed_picker.py`. Repeated real-host qualification
+produced `postimage_sha256=414e4fc73e865480ea19a52ea96207c400eb9b599fbece28a7063d6de30dfa30`
+without changing installed bytes. Native publication and owner-authenticated
+entitlement/cap/transport remain separate exact gates.
