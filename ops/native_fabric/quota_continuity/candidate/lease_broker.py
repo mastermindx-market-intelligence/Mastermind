@@ -1043,7 +1043,10 @@ class Broker:
             finally:
                 conn.close()
         compatible_accounts = None
-        if pool == "grok" and task_class == "remote-grok":
+        if pool == "grok":
+            # Every Grok grant needs an enrolled original subscriber + host.
+            # Neither task_class nor caller-controlled broker-host identity is
+            # authentication; unenrolled local hosts also fail closed.
             # Original broker grant owner, before capacity demand/lease creation.
             # A shared account alias cannot prove which remote credential pays.
             # Reuse existing host registry plus account catalog; the remote

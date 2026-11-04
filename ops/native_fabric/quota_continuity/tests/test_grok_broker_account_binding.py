@@ -146,6 +146,41 @@ class GrokBrokerAccountBindingTest(unittest.TestCase):
                 self.assertEqual(self.counts(), (0, 0))
                 self.host_entry[key] = previous
 
+    def test_caller_task_class_cannot_bypass_unbound_remote_host(self):
+        # The broker's task_class is a caller field, not authenticated routing
+        # proof. The same off-host account fence must apply across classes.
+        for cls in ("audit", "review", "mechanical", "remote-grok"):
+            with self.subTest(task_class=cls):
+                self.host_entry.pop("grok_account_binding", None)
+                self.write_hosts()
+                result = self.grant(task_class=cls)
+                self.assertFalse(result.ok)
+                self.assertEqual(result.reason, "host_account_unavailable")
+                self.assertEqual(self.counts(), (0, 0))
+
+    def test_remote_grok_cannot_claim_broker_host_as_local(self):
+        result = self.grant(host="fixture-broker", task_class="remote-grok")
+        self.assertFalse(result.ok)
+        self.assertEqual(result.reason, "host_account_unavailable")
+        self.assertEqual(self.counts(), (0, 0))
+
+    def test_generic_local_task_class_cannot_bypass_missing_binding(self):
+        # A caller may change task class and even claim the broker host.
+        # Neither is a subscription/account identity.
+        result = self.grant(host="fixture-broker", task_class="audit")
+        self.assertFalse(result.ok)
+        self.assertEqual(result.reason, "host_account_unavailable")
+        self.assertEqual(self.counts(), (0, 0))
+
+    def test_spoofed_broker_host_identity_cannot_override_missing_binding(self):
+        self.broker.this_host = self.host
+        self.host_entry.pop("grok_account_binding")
+        self.write_hosts()
+        result = self.grant(task_class="audit")
+        self.assertFalse(result.ok)
+        self.assertEqual(result.reason, "host_account_unavailable")
+        self.assertEqual(self.counts(), (0, 0))
+
     def test_unsafe_host_registry_path_refuses(self):
         self.hosts.unlink()
         self.hosts.symlink_to(self.accounts)

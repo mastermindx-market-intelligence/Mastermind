@@ -175,3 +175,63 @@ prove one real Grok 4.7 worker/return through the admitted native route.
 The PR #2008 independent Ubuntu4 writer, original four Ubuntu2 effect-unknown
 markers, Ubuntu0/3 cache effect hold, and #1632 RELEASE storage restrictions
 are unchanged.
+
+
+## Grok task-class and broker-host bypass hardening
+
+**Source-only correction after the previously green e142 head.** The first
+prelease implementation limited the broker fence to task_class=remote-grok.
+A later hardening candidate limited it to remote-grok or host differing
+from this_host. Both were insufficient: isolated original-configuration
+tests proved an **unbound Ubuntu1** account could obtain a disposable
+Grok lease by presenting task_class=audit; a caller-controlled broker
+host identity of ubuntu1 could also make that unbound host look local.
+No production leases or workers were created in these falsifying tests.
+
+The final guard is therefore **unconditional for every pool=grok
+lease**, regardless of task class, provider model or asserted broker host.
+Only an original-host-registry binding matching the incumbent account
+catalog subscription scope may grant a Grok lease. This deliberately
+blocks unbound local/M2 Grok usage until that distinct local principal
+and host are enrolled; it never substitutes a Secretary2 token or
+silently changes a paid provider. Cursor/GLM/Qwen/other pools remain
+under their existing unchanged admission policies.
+
+Added permanent tests for caller-controlled alternate task classes,
+claimed local broker host, and invalid remote host. Real original M2
+configuration was also exercised against eight pairs of requested
+host/task class/broker identity using only disposable fixture SQLite:
+all qualified Ubuntu0 cases admitted, all unbound Ubuntu1 cases
+refused host_account_unavailable; no production lease, provider
+inference or host credential bytes were accessed.
+
+Exact revised native source SHA256 lease_broker.py:
+  a83a2fd667b1b6055d8aa07bb0a9f9f438baf6d6ca610c11256eb6faf7c27b3e
+
+Combined 102-member source package SHA256:
+  manifest be7b70d73ef45640777b1677f3ab4dae8caed6d3ece0292aa9c1c6e07615f8fe
+  source inventory b31fc69a205d3f4554539f29f0164149a9ae674e2c26afa36d18ba4df466d638
+
+The former e142 hashes and green CI belong to the **previous**
+candidate and are retained above as historical provenance. They do
+not qualify this revised broker source. Historical95/102 predecessor
+fixtures and manifest hashes remain unchanged. Current source tests,
+hosted CI, non-author review, protected merge and native publication
+are separate gates. No live generation or stored credential was changed
+by this source repair. The original M2 policy has already enrolled
+Chris Grok Ubuntu0 only, and Ubuntu1-4 remain held from Grok AUTO.
+
+
+Final offline regression receipt for unconditional Grok grant fence:
+355 passed, 6 expected Linux-only skipped, zero failures/errors among 361
+actual testcase records. JUnit SHA256:
+f6fb8f18a61c0a637c3289822e73659614a5e560e957dd7d71e1d6ad21d711a4
+Local original M2 test file /tmp/mmx-grok-all-lease-fence.xml only (not a
+public attachment). The historical source/manifest fixtures were preserved.
+Adversarial original M2 account/registry tests across task classes
+remote-grok and audit and broker-host identities m2studio/ubuntu1 separately
+verified eight temporary-DB cases: qualified Ubuntu0 accepts, unbound
+Ubuntu1 denies across all combinations. No production lease or provider
+worker was run by those tests.
+This change requires NEW current-head hosted CI and independent review;
+prior green CI on e142376f does not qualify the successor candidate.

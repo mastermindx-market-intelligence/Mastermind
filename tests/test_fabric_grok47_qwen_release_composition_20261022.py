@@ -56,7 +56,7 @@ REVIEWED_QWEN_FORWARD_DIGESTS = {
 }
 
 GROK_PRELEASE_BROKER_FORWARD_DIGESTS = {
-    "lease_broker.py": "ede49e98ef4df55bb561716c734aa79a3637b5257c79a6f757645791a870c846",
+    "lease_broker.py": "a83a2fd667b1b6055d8aa07bb0a9f9f438baf6d6ca610c11256eb6faf7c27b3e",
 }
 
 
