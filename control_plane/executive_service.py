@@ -5535,17 +5535,25 @@ class ExecutiveControlService:
             from common import workspace_project_journal_contract as project_journal_wire
             from common import workspace_project_session_contract as project_session_wire
             from common import workspace_project_direction_contract as project_direction_wire
+            from common import workspace_project_archive_contract as project_archive_wire
             from common import workspace_autonomy_read_contract as autonomy_wire
             from common import workspace_resource_capacity_contract as capacity_wire
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
                     ACTIVITY_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA,
-                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA}:
+                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
                 operation = parsed.get("operation") if isinstance(parsed, dict) else None
-                if parsed.get("schema") == project_direction_wire.FRAME_SCHEMA:
+                if parsed.get("schema") in {project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA}:
+                    ceiling = project_archive_wire.MAX_RESPONSE_BYTES
+                    try:
+                        project_archive_wire.validate_read_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == project_direction_wire.FRAME_SCHEMA:
                     ceiling = project_direction_wire.MAX_RESPONSE_BYTES
                     try:
                         project_direction_wire.validate_frame(parsed)

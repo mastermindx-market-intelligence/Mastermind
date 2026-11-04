@@ -1055,6 +1055,61 @@ pub async fn read_project_plan(app: AppHandle, selection: ProjectPlanSelection) 
     Ok(value)
 }
 
+const PROJECT_ARCHIVE_PATH: &str = "/workspace/projects/archive/current";
+const PROJECT_ARCHIVE_SCHEMA: &str = "mastermind.workspace_project_archive.v1";
+const PROJECT_ARCHIVE_RESPONSE_CAP: usize = 262_144;
+fn project_archive_target() -> Result<Url> {
+    Url::parse(&format!("{ORIGIN}{PROJECT_ARCHIVE_PATH}")).map_err(|_| "REQUEST_INVALID".into())
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectArchiveCursor {
+    after_work_ref: String,
+    catalogue_digest: String,
+}
+fn project_archive_page_target(cursor: &ProjectArchiveCursor) -> Result<Url> {
+    ProjectPlanSelection { work_ref: cursor.after_work_ref.clone() }.validate()?;
+    if cursor.catalogue_digest.len() != 64 || !cursor.catalogue_digest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err("REQUEST_INVALID".into());
+    }
+    let mut url = project_archive_target()?;
+    url.query_pairs_mut().append_pair("after_work_ref", &cursor.after_work_ref)
+        .append_pair("catalogue_digest", &cursor.catalogue_digest);
+    Ok(url)
+}
+#[tauri::command]
+pub async fn read_project_archive(app: AppHandle) -> Result<Value> {
+    let target = project_archive_target()?;
+    read_project_archive_at(app, target).await
+}
+#[tauri::command]
+pub async fn read_project_archive_page(app: AppHandle, cursor: ProjectArchiveCursor) -> Result<Value> {
+    let target = project_archive_page_target(&cursor)?;
+    read_project_archive_at(app, target).await
+}
+async fn read_project_archive_at(app: AppHandle, target: Url) -> Result<Value> {
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(target).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, PROJECT_ARCHIVE_RESPONSE_CAP).await
+            .and_then(|value| typed_unavailable(value, PROJECT_ARCHIVE_SCHEMA, false))
+    } else {
+        bounded_json(response, PROJECT_ARCHIVE_RESPONSE_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(PROJECT_ARCHIVE_SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // The existing host performs the full closed-body decode before display.
+    Ok(value)
+}
+
 const PROJECT_DIRECTION_PATH: &str = "/workspace/project-direction/current";
 const PROJECT_DIRECTION_SCHEMA: &str = "mastermind.workspace_project_direction.v1";
 const PROJECT_DIRECTION_RESPONSE_CAP: usize = 65_536;
@@ -3394,5 +3449,32 @@ mod project_direction_read_tests {
             "selection": {"work_ref": "WS:DIRECTION-TEST"}}), &selected));
         assert!(!project_direction_header_matches(&serde_json::json!({"schema": PROJECT_DIRECTION_SCHEMA,
             "selection": {"work_ref": "WS:OTHER"}}), &selected));
+    }
+}
+
+#[cfg(test)]
+mod project_archive_read_tests {
+    use super::*;
+    #[test]
+    fn project_archive_has_only_one_fixed_rootless_acquisition_target() {
+        let target = project_archive_target().unwrap();
+        assert_eq!(target.origin().ascii_serialization(), ORIGIN);
+        assert_eq!(target.path(), "/workspace/projects/archive/current");
+        assert!(target.query().is_none());
+        assert_eq!(PROJECT_ARCHIVE_RESPONSE_CAP, 262_144);
+        assert_eq!(PROJECT_ARCHIVE_SCHEMA, "mastermind.workspace_project_archive.v1");
+    }
+    #[test]
+    fn project_archive_continuation_has_only_fixed_member_and_digest_selectors() {
+        let cursor = ProjectArchiveCursor { after_work_ref: "WS:PAGE-127".into(), catalogue_digest: "a".repeat(64) };
+        let target = project_archive_page_target(&cursor).unwrap();
+        assert_eq!(target.origin().ascii_serialization(), ORIGIN);
+        assert_eq!(target.path(), PROJECT_ARCHIVE_PATH);
+        assert_eq!(target.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect::<Vec<_>>(),
+            vec![("after_work_ref".to_owned(), "WS:PAGE-127".to_owned()), ("catalogue_digest".to_owned(), "a".repeat(64))]);
+        let extra = serde_json::json!({"after_work_ref":"WS:PAGE-127","catalogue_digest":"a".repeat(64),"root_job_id":"JOB-1"});
+        assert!(serde_json::from_value::<ProjectArchiveCursor>(extra).is_err());
+        assert!(project_archive_page_target(&ProjectArchiveCursor { after_work_ref: "../private".into(), catalogue_digest: "a".repeat(64) }).is_err());
+        assert!(project_archive_page_target(&ProjectArchiveCursor { after_work_ref: "WS:PAGE-127".into(), catalogue_digest: "A".repeat(64) }).is_err());
     }
 }

@@ -496,7 +496,7 @@ class WorkspaceReadService:
                  product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                  product_acceptance_owner_guard=None, product_acceptance_read=None,
                  product_acceptance_observe=None, activity_membership=None,
-                 project_plan_reader=None, project_journal_reader=None, project_session_source=None, project_direction_reader=None,
+                 project_plan_reader=None, project_journal_reader=None, project_session_source=None, project_direction_reader=None, project_archive_reader=None,
                  control_room_presenter=None,
                  control_room_actions=None, project_admission_permissions=None):
         from control_plane.workspace_project_permission_binding import ProjectAdmissionPermissions
@@ -578,6 +578,11 @@ class WorkspaceReadService:
             if type(project_journal_reader) is not AgentOsProjectJournalReader:
                 raise ValueError("exact installed Agent OS journal reader required")
         self._project_journal_reader = project_journal_reader
+        self._project_archive_reader = project_archive_reader
+        self._archive_read_adapter = None
+        if project_archive_reader is not None:
+            from control_plane.workspace_project_archive_read import ProjectArchiveReadAdapter
+            self._archive_read_adapter = ProjectArchiveReadAdapter(workspace=self, reader=project_archive_reader)
         self._project_direction_reader = project_direction_reader
         self._direction_read_adapter = None
         if project_direction_reader is not None:
@@ -1626,6 +1631,11 @@ class WorkspaceReadService:
         return self._read_mission_v3({"selection": selection})["result"]
 
     async def handle_frame(self, frame, *, action_host_ready=None):
+        from common.workspace_project_archive_contract import FRAME_SCHEMA as ARCHIVE_FRAME_SCHEMA, PAGE_FRAME_SCHEMA as ARCHIVE_PAGE_FRAME_SCHEMA
+        if type(frame) is dict and frame.get("schema") in {ARCHIVE_FRAME_SCHEMA, ARCHIVE_PAGE_FRAME_SCHEMA}:
+            from control_plane.workspace_project_archive_read import ProjectArchiveReadAdapter
+            adapter = self._archive_read_adapter or ProjectArchiveReadAdapter(workspace=self, reader=None)
+            return await adapter.handle_frame(frame)
         from common.workspace_project_direction_contract import FRAME_SCHEMA as DIRECTION_FRAME_SCHEMA
         if type(frame) is dict and frame.get("schema") == DIRECTION_FRAME_SCHEMA:
             from control_plane.workspace_project_direction_read import ProjectDirectionReadAdapter
@@ -1898,7 +1908,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                                product_acceptance_owner_guard=None, product_acceptance_read=None,
                                product_acceptance_observe=None, activity_membership=None,
-                               project_plan_reader=None, project_journal_reader=None, project_session_source_factory=None, project_direction_reader=None,
+                               project_plan_reader=None, project_journal_reader=None, project_session_source_factory=None, project_direction_reader=None, project_archive_reader=None,
                                cross_plane_context=None, cross_plane_enrollment=None,
                                project_admission_permissions=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
@@ -1965,6 +1975,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     project_journal_reader=project_journal_reader,
                                     project_session_source=session_source,
                                     project_direction_reader=project_direction_reader,
+                                    project_archive_reader=project_archive_reader,
                                     activity_membership=activity_membership,
                                     project_admission_permissions=project_admission_permissions)
     return provide

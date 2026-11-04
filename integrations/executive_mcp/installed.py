@@ -607,6 +607,7 @@ _MACRO_BRIEF_FIXED_CONTENT = frozenset({
     "scripts/__init__.py",
     "scripts/agentos.py",
     "scripts/agentos_direction.py",
+    "scripts/agentos_project_archive.py",
     "scripts/agentos_project_plan_contract.py",
     "scripts/audit_stranded_work.py",
     "config/mastermind_programs.yml",
@@ -2356,6 +2357,31 @@ class InstalledBootPacketCollector:
         return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
                                     project_plan_request=work_ref)
 
+    def project_archive_reader(self, *, macro_root: Path):
+        from control_plane.agentos_project_archive import AgentOsProjectArchiveReader, _SOURCE_ROOT
+        from control_plane.installed_project_read_binding import _issue_installed_project_read
+        root = Path(macro_root)
+        if (not root.is_absolute() or type(self) is not InstalledBootPacketCollector
+                or self._macro_root != root.resolve() or self._code_root != _SOURCE_ROOT.resolve()
+                or self._expected_source_sha is None or self._allow_synthetic_fixture):
+            raise ValueError("SOURCE_UNAVAILABLE")
+        reader = AgentOsProjectArchiveReader(macro_root=root)
+        reader._installed_context_owner = self
+        reader._installed_context_binding = reader._context_binding(self)
+        reader._installed_reader_binding = _issue_installed_project_read(reader, owner=self, kind="project_archive",
+            qualified_owner=lambda owner: type(owner) is InstalledBootPacketCollector)
+        return reader
+
+    def read_project_archive(self, *, work_refs, expected_current_macro_sha, timeout: float = 15.0):
+        from common import workspace_project_archive_contract as wire
+        import math
+        refs = wire.validate_refs(work_refs)
+        if (type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 15
+                or not wire._hex(expected_current_macro_sha, 40) or self._expected_source_sha is None):
+            raise ValueError("SOURCE_UNAVAILABLE")
+        return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
+            project_archive_request=(refs, expected_current_macro_sha))
+
     def project_direction_reader(self, *, macro_root: Path):
         """Issue the fixed Direction facade after exact installed qualification."""
         from control_plane.agentos_project_direction import AgentOsProjectDirectionReader, _SOURCE_ROOT
@@ -2447,8 +2473,9 @@ class InstalledBootPacketCollector:
                         project_plan_request: str | None = None,
                         project_journal_request: str | None = None,
                         project_creation_request: tuple | None = None,
-                        project_direction_request: str | None = None) -> Any:
-        if sum(x is not None for x in (acceptance_request, project_plan_request, project_journal_request, project_creation_request, project_direction_request)) > 1:
+                        project_direction_request: str | None = None,
+                        project_archive_request: tuple | None = None) -> Any:
+        if sum(x is not None for x in (acceptance_request, project_plan_request, project_journal_request, project_creation_request, project_direction_request, project_archive_request)) > 1:
             raise ValueError("ambiguous installed source read")
         deadline = time.monotonic() + timeout
 
@@ -2476,6 +2503,8 @@ class InstalledBootPacketCollector:
             )
         )
         if project_creation_request is not None and pre_macro_sha != project_creation_request[2]:
+            raise GatewayError("backend_unavailable", "project catalogue source changed")
+        if project_archive_request is not None and pre_macro_sha != project_archive_request[1]:
             raise GatewayError("backend_unavailable", "project catalogue source changed")
         materialization_plan = None
         if not self._allow_synthetic_fixture:
@@ -2557,7 +2586,14 @@ class InstalledBootPacketCollector:
                         "--expected-macro-sha", pre_macro_sha,
                         "--work-ref", project_direction_request,
                         "--timeout", f"{inner_timeout:g}"]
-            output_limit = (65536 if project_direction_request is not None else
+            if project_archive_request is not None:
+                argv = [os.fspath(self._python), "-I", "-B",
+                    os.fspath(self._code_root / "scripts" / "agentos_project_archive_entry.py"),
+                    "--macro-root", os.fspath(packet_macro_root), "--expected-macro-sha", pre_macro_sha,
+                    "--work-refs-json", json.dumps(project_archive_request[0], separators=(",", ":")),
+                    "--timeout", f"{inner_timeout:g}"]
+            output_limit = (131072 if project_archive_request is not None else
+                            65536 if project_direction_request is not None else
                             262144 if acceptance_request is not None or project_plan_request is not None or project_journal_request is not None
                             else ceo_boot_packet.DEFAULT_MAX_OUTPUT_BYTES)
             if project_creation_request is not None:
@@ -2589,6 +2625,19 @@ class InstalledBootPacketCollector:
                         work_ref=project_creation_request[0], record_commit=project_creation_request[1])
                 except (ValueError, TypeError, KeyError, RecursionError):
                     raise GatewayError("backend_unavailable", "installed project creation source unavailable") from None
+            elif project_archive_request is not None:
+                from common.workspace_project_archive_contract import validate_sample
+                try:
+                    def unique_archive_object(pairs):
+                        result = {}
+                        for key, value in pairs:
+                            if key in result: raise ValueError("SOURCE_UNAVAILABLE")
+                            result[key] = value
+                        return result
+                    packet = validate_sample(json.loads(stdout, object_pairs_hook=unique_archive_object),
+                        project_archive_request[0], pre_macro_sha)
+                except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
+                    raise GatewayError("backend_unavailable", "installed archive source unavailable") from None
             elif project_direction_request is not None:
                 from common.workspace_project_direction_contract import validate_body
                 try:
@@ -2773,7 +2822,7 @@ class InstalledBootPacketCollector:
                 or post_macro_seal != pre_macro_seal
             ):
                 raise GatewayError("backend_unavailable", "installed source changed during boot-packet read")
-            if acceptance_request is None and project_plan_request is None and project_journal_request is None and project_creation_request is None and project_direction_request is None:
+            if acceptance_request is None and project_plan_request is None and project_journal_request is None and project_creation_request is None and project_direction_request is None and project_archive_request is None:
                 packet = _project_macro_identity(
                     packet, materialized_root=packet_macro_root, canonical_root=self._macro_root,
                 )

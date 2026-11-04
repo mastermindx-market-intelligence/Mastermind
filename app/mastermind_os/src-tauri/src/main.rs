@@ -90,6 +90,8 @@ fn main() {
             auth::pause_project_admission,
             auth::resume_project_admission,
             auth::read_project_admission_operation,
+            auth::read_project_archive,
+            auth::read_project_archive_page,
             auth::read_autonomy_policy,
             auth::read_admitted_plan,
             auth::read_retained_activity,

@@ -1,4 +1,5 @@
 import { projectAdmissionPublicRequest, projectAdmissionQuery, type ProjectAdmissionPauseRequest, type ProjectAdmissionResumeRequest } from "./admission/project-admission-host";
+import { validArchiveCursor } from "./projects/archive/project-archive-continuation";
 import { normalizeProjectAssociationSelection } from "./conversations/project-association";
 import { validResourceCapacitySelection } from "./resources/resource-capacity-read";
 import { isAutonomySelection, AUTONOMY_READ_BODY_SCHEMA } from "./supervision/autonomy-policy";
@@ -1235,6 +1236,14 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       return read("acquisition", `${ORIGIN}/workspace/project-session/current?${new URLSearchParams({ work_ref: selected.workRef, root_job_id: selected.rootJobId })}`,
         signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_project_session_association.v1" });
     },
+    readProjectArchivePage: (request) => {
+      const { signal, ...cursor } = request;
+      if (!validArchiveCursor(cursor)) return Promise.reject(new Error("PROJECT_ARCHIVE_REQUEST_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/projects/archive/current?${new URLSearchParams({ after_work_ref: cursor.after_work_ref, catalogue_digest: cursor.catalogue_digest })}`,
+        signal, { cap: 262_144, typedUnavailableSchema: "mastermind.workspace_project_archive.v1" });
+    },
+    readProjectArchive: ({ signal }) => read("acquisition", `${ORIGIN}/workspace/projects/archive/current`,
+      signal, { cap: 262_144, typedUnavailableSchema: "mastermind.workspace_project_archive.v1" }),
     readProjectDirection: (request) => {
       const { signal, ...selected } = request;
       if (!validDirectionSelection(selected))

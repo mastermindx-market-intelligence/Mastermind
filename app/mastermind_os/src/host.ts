@@ -1,4 +1,6 @@
 import { projectAdmissionHostMethods, projectAdmissionPublicRequest, type ProjectAdmissionRawMethods, type ProjectAdmissionHostMethods } from "./admission/project-admission-host";
+import { validArchiveCursor, type ArchiveCursor } from "./projects/archive/project-archive-continuation";
+import { decodeProjectArchive, type ProjectArchiveRead } from "./projects/archive/project-archive";
 import { decodeProjectAssociation, normalizeProjectAssociationSelection, type ProjectAssociationSelection, type ProjectAssociationDocument } from "./conversations/project-association";
 import { decodeResourceCapacityRead, validResourceCapacitySelection, type ResourceCapacityReadSelection, type ResourceCapacityRead } from "./resources/resource-capacity-read";
 import { decodeAutonomyPolicy, isAutonomySelection, type AutonomyRead, type AutonomySelection } from "./supervision/autonomy-policy";
@@ -86,6 +88,8 @@ export interface RawClient extends Partial<ProjectAdmissionRawMethods> {
   readProjectPlan?(request: ProjectPlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readProjectSessionAssociation?(request: ProjectAssociationSelection & { signal: AbortSignal }): Promise<unknown>;
   readProjectJournal?(request: JournalSelection & { signal: AbortSignal }): Promise<unknown>;
+  readProjectArchivePage?(request: ArchiveCursor & { signal: AbortSignal }): Promise<unknown>;
+  readProjectArchive?(request: { signal: AbortSignal }): Promise<unknown>;
   readProjectDirection?(request: DirectionSelection & { signal: AbortSignal }): Promise<unknown>;
   readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readResourceCapacity?(request: ResourceCapacityReadSelection & { signal: AbortSignal }): Promise<unknown>;
@@ -157,6 +161,8 @@ export interface MissionHost extends Partial<ProjectAdmissionHostMethods> {
   readProjectPlan?: (request: ProjectPlanSelection & { signal: AbortSignal }) => Promise<ProjectPlanRead>;
   readProjectSessionAssociation?: (request: ProjectAssociationSelection & { signal: AbortSignal }) => Promise<ProjectAssociationDocument>;
   readProjectJournal?: (request: JournalSelection & { signal: AbortSignal }) => Promise<ProjectJournalDocument>;
+  readProjectArchivePage?: (request: ArchiveCursor & { signal: AbortSignal }) => Promise<ProjectArchiveRead>;
+  readProjectArchive?: (request: { signal: AbortSignal }) => Promise<ProjectArchiveRead>;
   readProjectDirection?: (request: DirectionSelection & { signal: AbortSignal }) => Promise<AcceptedDirectionRead>;
   readAdmittedPlan?: (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
   readResourceCapacity?: (request: ResourceCapacityReadSelection & { signal: AbortSignal }) => Promise<ResourceCapacityRead>;
@@ -355,6 +361,43 @@ export function bindMissionHost(
         const body = decodeProjectAssociation(raw, selected);
         if (!body) throw new Error("PROJECT_SESSION_RESPONSE_INVALID");
         return body;
+      },
+    } : {}),
+    ...(client.readProjectArchivePage && client.invalidationGeneration ? {
+      async readProjectArchivePage(request: ArchiveCursor & { signal: AbortSignal }) {
+        const { signal, ...cursor } = request;
+        if (!validArchiveCursor(cursor)) throw new Error("PROJECT_ARCHIVE_REQUEST_INVALID");
+        const started = epoch, source = client.invalidationGeneration!(), reader = client.readProjectArchivePage!;
+        const authorized = () => {
+          const state = client.getState();
+          return !signal.aborted && Number.isSafeInteger(source) && source >= 0 && started === epoch &&
+            source === client.invalidationGeneration?.() && reader === client.readProjectArchivePage &&
+            state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("PROJECT_ARCHIVE_READ_UNAUTHORIZED");
+        const raw = await reader.call(client, { ...cursor, signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        const body = decodeProjectArchive(raw);
+        if (body.availability === "AVAILABLE" && body.catalogue.document_digest !== cursor.catalogue_digest)
+          throw new Error("PROJECT_ARCHIVE_PAGE_CHANGED");
+        return body;
+      },
+    } : {}),
+    ...(client.readProjectArchive && client.invalidationGeneration ? {
+      async readProjectArchive(request: { signal: AbortSignal }) {
+        if (Object.keys(request).length !== 1 || !("signal" in request)) throw new Error("PROJECT_ARCHIVE_REQUEST_INVALID");
+        const { signal } = request;
+        const started = epoch, source = client.invalidationGeneration!(), reader = client.readProjectArchive!;
+        const authorized = () => {
+          const state = client.getState();
+          return !signal.aborted && Number.isSafeInteger(source) && source >= 0 && started === epoch &&
+            source === client.invalidationGeneration?.() && reader === client.readProjectArchive &&
+            state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("PROJECT_ARCHIVE_READ_UNAUTHORIZED");
+        const raw = await reader.call(client, { signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        return decodeProjectArchive(raw);
       },
     } : {}),
     ...(client.readProjectDirection && client.invalidationGeneration ? {
@@ -792,6 +835,8 @@ export async function createNativeClient(
       | "read_project_journal"
       | "read_project_session"
       | "read_project_direction"
+      | "read_project_archive"
+      | "read_project_archive_page"
       | "read_admitted_plan"
       | "read_retained_activity"
       | "read_resource_capacity"
@@ -928,6 +973,12 @@ export async function createNativeClient(
       if (!selected) return Promise.reject(new Error("PROJECT_SESSION_SELECTION_INVALID"));
       return read("read_project_session", signal, { selection: { work_ref: selected.workRef, root_job_id: selected.rootJobId } });
     },
+    readProjectArchivePage: (request) => {
+      const { signal, ...cursor } = request;
+      if (!validArchiveCursor(cursor)) return Promise.reject(new Error("PROJECT_ARCHIVE_REQUEST_INVALID"));
+      return read("read_project_archive_page", signal, { cursor });
+    },
+    readProjectArchive: ({ signal }) => read("read_project_archive", signal),
     readProjectDirection: (request) => {
       const { signal, ...selected } = request;
       if (!validDirectionSelection(selected))

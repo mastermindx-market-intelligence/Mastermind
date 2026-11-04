@@ -55,6 +55,7 @@ _PROJECT_PLAN_ROUTE = "/workspace/project-plan/current"
 _PROJECT_JOURNAL_ROUTE = "/workspace/project-journal/current"
 _PROJECT_SESSION_ROUTE = "/workspace/project-session/current"
 _PROJECT_DIRECTION_ROUTE = "/workspace/project-direction/current"
+_PROJECT_ARCHIVE_ROUTE = "/workspace/projects/archive/current"
 _AUTONOMY_ROUTE = "/workspace/autonomy/current"
 _RESOURCE_CAPACITY_ROUTE = "/workspace/resources/capacity/current"
 _ACTIVITY_ROUTE = "/workspace/operator/activity/current"
@@ -1284,6 +1285,64 @@ def _project_direction_envelope_response(envelope):
                     media_type="application/json", headers={"Cache-Control": "no-store"})
 
 
+async def project_archive_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    """Existing READ authority, no caller catalogue/host/path/revision selectors."""
+    from common import workspace_project_archive_contract as archive_wire
+    principal = await _authenticate(request, config.authenticator, clock=config.now)
+    if isinstance(principal, JSONResponse):
+        return _with_no_store(principal)
+    refusal = await _reject_any_body(request)
+    if refusal is not None:
+        return refusal
+    cursor = None
+    raw_query = request.scope.get("query_string") or b""
+    if raw_query:
+        try:
+            cursor = archive_wire.page_selection(_decode_v2_query(raw_query,
+                required_keys=frozenset({"after_work_ref", "catalogue_digest"})))
+        except (ValueError, TypeError):
+            return _refuse_json(400, "invalid_input")
+    authorizer = config.authorize_principal
+    refusal = _check_authorize(authorizer, principal)
+    if refusal is not None:
+        return refusal
+    try:
+        stamp = contract.permission_stamp(authorizer, principal)
+        if stamp is None:
+            return _refuse_json(403, "access_denied")
+        if cursor is None:
+            frame = archive_wire.validate_frame({"schema": archive_wire.FRAME_SCHEMA,
+                "operation": archive_wire.OPERATION, "principal": contract.principal_frame(principal)})
+        else:
+            frame = archive_wire.validate_page_frame({"schema": archive_wire.PAGE_FRAME_SCHEMA,
+                "operation": archive_wire.PAGE_OPERATION, "selection": cursor,
+                "principal": contract.principal_frame(principal)})
+    except (ValueError, TypeError):
+        return _refuse_json(403, "access_denied")
+    try:
+        envelope = await config.client.request(frame)
+    except Exception:
+        return _refuse_json(503, "source_unavailable")
+    try:
+        now = config.now()
+        if (type(now) is not int or now >= principal.expires_at or config.authorize_principal is not authorizer
+                or authorizer(principal) is not True or contract.permission_stamp(authorizer, principal) != stamp):
+            return _refuse_json(403, "access_denied")
+    except Exception:
+        return _refuse_json(403, "access_denied")
+    if type(envelope) is not dict or envelope.get("ok") is not True:
+        return _envelope_response(envelope)
+    try:
+        if set(envelope) != {"ok", "result"}:
+            raise ValueError("source_unavailable")
+        body = archive_wire.validate_body(envelope["result"])
+        raw = contract.bounded_canonical(body, limit=archive_wire.MAX_RESPONSE_BYTES - 1)
+    except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
+        return _refuse_json(503, "source_unavailable")
+    return Response(raw, status_code=200 if body["availability"] == "AVAILABLE" else 503,
+        media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
 async def project_direction_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
     return await _dispatch_v2(request, config=config, operation="project_direction",
         required_keys=frozenset({"work_ref"}), response_fn=_project_direction_envelope_response)
@@ -1416,6 +1475,7 @@ class _RawPathFence:
         _PROJECT_PLAN_ROUTE,
         _PROJECT_JOURNAL_ROUTE,
         _PROJECT_DIRECTION_ROUTE,
+        _PROJECT_ARCHIVE_ROUTE,
         _PROJECT_SESSION_ROUTE,
         _AUTONOMY_ROUTE,
         _ACTIVITY_ROUTE,
@@ -1494,6 +1554,8 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         return await project_plan_current(request, config=config)
     async def project_session_endpoint(request: Request) -> JSONResponse:
         return await project_session_current(request, config=config)
+    async def project_archive_endpoint(request: Request) -> JSONResponse:
+        return await project_archive_current(request, config=config)
     async def project_direction_endpoint(request: Request) -> JSONResponse:
         return await project_direction_current(request, config=config)
     async def project_journal_endpoint(request: Request) -> JSONResponse:
@@ -1549,6 +1611,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_PROJECT_JOURNAL_ROUTE, project_journal_endpoint, methods=["GET"]),
         Route(_PROJECT_SESSION_ROUTE, project_session_endpoint, methods=["GET"]),
         Route(_PROJECT_DIRECTION_ROUTE, project_direction_endpoint, methods=["GET"]),
+        Route(_PROJECT_ARCHIVE_ROUTE, project_archive_endpoint, methods=["GET"]),
         Route(_AUTONOMY_ROUTE, autonomy_endpoint, methods=["GET"]),
         Route("/workspace/project-admission/current", project_admission_current, methods=["GET"]),
         Route("/workspace/project-admission/operation", project_admission_status, methods=["GET"]),

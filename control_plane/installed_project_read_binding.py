@@ -13,7 +13,7 @@ import weakref
 _ISSUE_KEY = object()
 _METHODS = {"project_plan": "read_project_plan", "project_journal": "read_project_journal",
             "project_creation_source": "read_project_creation_source",
-            "project_direction": "read_project_direction"}
+            "project_direction": "read_project_direction", "project_archive": "read_project_archive"}
 _COORDINATES = ("_source_root", "_macro_root", "_code_root", "_python",
                 "_expected_source_sha", "_allow_synthetic_fixture")
 
@@ -84,6 +84,21 @@ def read_installed_project_binding(reader, *, kind, work_ref):
         raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
     value = binding.callback(work_ref=work_ref)
     if not _matches(binding, reader=reader, owner=owner, kind=kind):
+        raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
+    return value
+
+
+def read_installed_project_archive_binding(reader, *, work_refs, expected_current_macro_sha):
+    """Only the server-qualified bounded catalogue may select archive members."""
+    from common import workspace_project_archive_contract as wire
+    refs = wire.validate_refs(work_refs)
+    if not wire._hex(expected_current_macro_sha, 40):
+        raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
+    binding, owner = reader._installed_reader_binding, reader._installed_context_owner
+    if not _matches(binding, reader=reader, owner=owner, kind="project_archive"):
+        raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
+    value = binding.callback(work_refs=refs, expected_current_macro_sha=expected_current_macro_sha)
+    if not _matches(binding, reader=reader, owner=owner, kind="project_archive"):
         raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
     return value
 

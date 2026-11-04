@@ -1673,3 +1673,69 @@ describe('fixed authenticated project admission Web transport',()=>{
   await vi.advanceTimersByTimeAsync(60_001);await rejected;expect(e.fetcher).toHaveBeenCalledTimes(2);
  });
 });
+
+import projectArchiveFixture from "./projects/archive/fixtures/project-archive-owner.json";
+describe("canonical archive fixed Web READ", () => {
+  const request = () => ({ signal: new AbortController().signal });
+  it("uses one fixed rootless Acquisition GET and actual native helper body", async () => {
+    const e = setup(); const host = bindMissionHost(e.client);
+    await expect(host.readProjectArchive!(request())).rejects.toThrow("PROJECT_ARCHIVE_READ_UNAUTHORIZED");
+    expect(e.fetcher).not.toHaveBeenCalled();
+    await e.login(); e.fetcher.mockClear(); e.fetcher.mockResolvedValueOnce(response(projectArchiveFixture));
+    await expect(host.readProjectArchive!(request())).resolves.toEqual(projectArchiveFixture);
+    const [url, options] = e.fetcher.mock.calls[0];
+    expect(new URL(String(url)).pathname).toBe("/workspace/projects/archive/current");
+    expect(new URL(String(url)).search).toBe("");
+    expect(options).toMatchObject({ method: "GET", credentials: "omit", redirect: "error", cache: "no-store" });
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("preserves unavailable sample without inventing empty archives", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    const absent = { schema: "mastermind.workspace_project_archive.v1", availability: "UNAVAILABLE", catalogue: null, sample: null, reason_codes: ["SOURCE_UNAVAILABLE"] };
+    e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(absent), { status: 503, headers: { "content-type": "application/json" } }));
+    await expect(bindMissionHost(e.client).readProjectArchive!(request())).resolves.toMatchObject({ availability: "UNAVAILABLE", sample: null });
+    e.fetcher.mockResolvedValueOnce(new Response("not installed", { status: 404 }));
+    await expect(bindMissionHost(e.client).readProjectArchive!(request())).rejects.toThrow();
+  });
+  it("withholds late archive content after identity loss without a retry", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    const late = deferred<Response>(); e.fetcher.mockReturnValueOnce(late.promise);
+    const host = bindMissionHost(e.client); const pending = host.readProjectArchive!(request());
+    const rejected = expect(pending).rejects.toThrow();
+    await host.auth!.signOut(); late.resolve(response(projectArchiveFixture)); await rejected;
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("refuses caller members and oversized raw bodies", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear(); const host = bindMissionHost(e.client);
+    await expect(host.readProjectArchive!({ ...request(), work_refs: ["WS:FOREIGN"] } as never)).rejects.toThrow("PROJECT_ARCHIVE_REQUEST_INVALID");
+    expect(e.fetcher).not.toHaveBeenCalled();
+    e.fetcher.mockResolvedValueOnce(response({ padding: "x".repeat(262_145) }));
+    await expect(host.readProjectArchive!(request())).rejects.toThrow();
+  });
+});
+
+
+describe("canonical archive continuation Web READ", () => {
+  const cursor = { after_work_ref: projectArchiveFixture.catalogue.work_refs[0]!, catalogue_digest: projectArchiveFixture.catalogue.document_digest };
+  const request = () => ({ ...cursor, signal: new AbortController().signal });
+  it("uses only the same fixed GET with the member anchor and catalogue digest", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    const page = structuredClone(projectArchiveFixture); page.catalogue.work_refs = [projectArchiveFixture.catalogue.work_refs[1]!]; page.sample.items = [];
+    page.sample.coverage.supplied_count = 1; page.sample.coverage.observed_count = 1;
+    e.fetcher.mockResolvedValueOnce(response(page));
+    await expect(bindMissionHost(e.client).readProjectArchivePage!(request())).resolves.toEqual(page);
+    const [url, options] = e.fetcher.mock.calls[0];
+    expect(new URL(String(url)).pathname).toBe("/workspace/projects/archive/current");
+    expect(Object.fromEntries(new URL(String(url)).searchParams)).toEqual(cursor);
+    expect(options).toMatchObject({ method: "GET", credentials: "omit", redirect: "error", cache: "no-store" });
+  });
+  it("rejects private selectors and changed catalogue replies without a retry", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear(); const host = bindMissionHost(e.client);
+    await expect(host.readProjectArchivePage!({ ...request(), work_refs: ["WS:FOREIGN"] } as never)).rejects.toThrow("PROJECT_ARCHIVE_REQUEST_INVALID");
+    expect(e.fetcher).not.toHaveBeenCalled();
+    const changed = structuredClone(projectArchiveFixture); changed.catalogue.document_digest = "f".repeat(64);
+    e.fetcher.mockResolvedValueOnce(response(changed));
+    await expect(host.readProjectArchivePage!(request())).rejects.toThrow("PROJECT_ARCHIVE_PAGE_CHANGED");
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+});

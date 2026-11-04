@@ -16,6 +16,7 @@ import { AttendedFabricWorkspace } from "./fabric/AttendedFabricWorkspace";
 import { qualifyWorkerResultRef } from "./fabric/mission-worker-result";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
 import { Projects } from "./projects/Projects";
+import { ProjectArchiveBrowser } from "./projects/archive/ProjectArchiveBrowser";
 import { ProjectWorkspace } from "./projects/ProjectWorkspace";
 import { ProjectConversationAssociation } from "./conversations/ProjectConversationAssociation";
 import { AcceptedDirectionPanel } from "./direction/AcceptedDirectionPanel";
@@ -3609,11 +3610,19 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       generation: host?.invalidationGeneration ? () => host.invalidationGeneration!() : undefined,
       plan: host?.readProjectPlan ? (request: Parameters<NonNullable<MissionHost["readProjectPlan"]>>[0]) => host.readProjectPlan!(request) : undefined,
       journal: host?.readProjectJournal ? ({workRef, signal}: {workRef: string; signal: AbortSignal}) => host.readProjectJournal!({work_ref: workRef, signal}) : undefined,
+      archive: host?.readProjectArchive ? (request: Parameters<NonNullable<MissionHost["readProjectArchive"]>>[0]) => host.readProjectArchive!(request) : undefined,
+      archivePage: host?.readProjectArchivePage ? (request: Parameters<NonNullable<MissionHost["readProjectArchivePage"]>>[0]) => host.readProjectArchivePage!(request) : undefined,
       direction: host?.readProjectDirection ? (request: Parameters<NonNullable<MissionHost["readProjectDirection"]>>[0]) => host.readProjectDirection!(request) : undefined,
       association: host?.readProjectSessionAssociation ? (request: Parameters<NonNullable<MissionHost["readProjectSessionAssociation"]>>[0]) => host.readProjectSessionAssociation!(request) : undefined,
       autonomy: host?.readAutonomyPolicy ? (request: Parameters<NonNullable<MissionHost["readAutonomyPolicy"]>>[0]) => host.readAutonomyPolicy!(request) : undefined,
     };
   }, [retainedResultHost, authRevision]);
+  let archiveHostGeneration: number | null = null;
+  try {
+    const value = projectReaders.generation?.();
+    if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) archiveHostGeneration = value;
+  } catch { /* Missing current owner cannot qualify an archive read. */ }
+  const archiveScopeKey = JSON.stringify([authRevision, archiveHostGeneration]);
   const catalogueWorkRef = catalogueProject?.authRevision === authRevision &&
     catalogueProject.epoch === programIndexEpoch ? catalogueProject.workRef : null;
   const requestedProjectWorkRef = catalogueProject ? catalogueWorkRef : selection?.workRef ?? null;
@@ -4000,6 +4009,24 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           )}
         </>
       ) : (
+        projectReaders.archive && projectReaders.archivePage && projectReaders.generation ?
+        <ProjectArchiveBrowser locale={locale} scopeKey={archiveScopeKey}
+          programs={office.projection.programs} read={projectReaders.archive} readPage={projectReaders.archivePage}
+          sourceGeneration={projectReaders.generation} canRead={projectReaders.canRead}
+          onOpenProject={workRef => {
+            if (office.projection.programs.source.state !== "CURRENT" || index.state !== "AVAILABLE") return;
+            const cards = index.programs.filter(card => card.workRef === workRef);
+            if (cards.length !== 1) return;
+            const card = cards[0];
+            // Current catalogue navigation preserves the existing conversation
+            // path only for its exact singleton root. Archived Open never calls
+            // this callback and remains the archive component's read-only view.
+            if (card.rootState === "RESOLVED" && card.rootJobId && card.rootCandidates.length === 1 && card.rootCandidates[0] === card.rootJobId) {
+              open(card.workRef, card.rootJobId); return;
+            }
+            setCatalogueProject({workRef, authRevision, epoch: programIndexEpoch});
+            setProjectTab("More");
+          }} /> :
         <Projects locale={locale}
           programs={office.projection.programs}
           selectedProject={selection}
