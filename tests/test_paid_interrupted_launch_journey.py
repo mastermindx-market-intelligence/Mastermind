@@ -27,7 +27,7 @@ from tests.test_paid_authenticated_launch_producer import (
 rsa_key=auth.rsa_key
 short_socket_root=auth.short_socket_root
 EXTRA_PINS={
- 'orchestration/operation-controller.ts':'3aee15a462a8f87b49808647882a8a1fd6c39c9e2d57e13bdda465305f7074d7',
+ 'orchestration/operation-controller.ts':'9f21d8b2231be09048b38c5c696e14d9c2a53d0a47d75387e4cd8f544fb444fd',
  'mission.ts':'20bf1a35c5be760c8418930972ad9adaab23bbde36a3e8b88a2caa72b42b67bb',
  'workspace-contract.ts':'14992cfc81dbc577cf50ba7198285b21652bb25eb5cc6c0efc53954e33ef11b1',
 }

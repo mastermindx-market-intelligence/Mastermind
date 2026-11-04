@@ -671,8 +671,13 @@ def main(argv: list[str] | None = None) -> int:
                 repository=selected,
             )
         if args.action == "status":
+            # The Git publisher calls this on every source-status/commit precheck.
+            # Verify the exact .git <-> common/worktrees registration and managed
+            # lock without enumerating unrelated worktrees. Release still uses
+            # the existing full-fleet identity/custody checks.
             receipt = inspect_linked_worktree(
                 source, root, destination, expected_operation_id=args.operation_id,
+                status_direct_registration=True,
             )
             return _emit("status", receipt, effect="NOT_APPLIED", repository=selected)
         receipt = release_linked_worktree(

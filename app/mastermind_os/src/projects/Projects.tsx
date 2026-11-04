@@ -59,7 +59,8 @@ function Collection({ cards, history, selectedProject, onNavigateMission }: {
   const [query, setQuery] = useState("");
   const inputId = useId();
   const term = query.trim().toLocaleLowerCase();
-  const visible = cards.filter(card => !term || `${card.title ?? ""}\n${card.workRef}`.toLocaleLowerCase().includes(term));
+  // Search the displayed root label, never hidden identity fields.
+  const visible = cards.filter(card => !term || `${card.title ?? ""}\n${card.workRef}\n${rootLabel(card)}`.toLocaleLowerCase().includes(term));
   const featured = visible.find(card => resolvedSelection(card) && card.workRef === selectedProject?.workRef && card.rootJobId === selectedProject.rootJobId);
   const rows = visible.filter(card => card !== featured);
   return <>

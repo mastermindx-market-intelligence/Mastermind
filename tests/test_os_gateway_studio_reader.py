@@ -215,11 +215,19 @@ def instrumented(**config):
     os.fstat = log.fstat
     saved_acl = reader.has_macos_acl
     reader.has_macos_acl = log.acl
+    saved_guard = reader._PrefixMutationGuard
+    if sys.platform != "darwin":
+        # Synthetic syscall/ACL tests are not Darwin vnode qualification.
+        # Production has no unsupported-platform fallback; this seam lives
+        # only in the existing mechanical fixture. Native cases test kqueue.
+        from test_os_gateway_studio_prefix_identity import MechanicalPrefixGuard
+        reader._PrefixMutationGuard = MechanicalPrefixGuard
     try:
         yield log
     finally:
         os.read, os.stat, os.open, os.fstat = saved
         reader.has_macos_acl = saved_acl
+        reader._PrefixMutationGuard = saved_guard
 
 
 class FDClosureTracker:
@@ -365,6 +373,11 @@ class Fixture:
 
 class StudioReaderTestCase(unittest.TestCase):
     def setUp(self) -> None:
+        if sys.platform != "darwin":
+            # Every inert case, including direct positive observations, needs
+            # the test-only kernel seam. unittest restores it even on failure.
+            from test_os_gateway_studio_prefix_identity import MechanicalPrefixGuard
+            self.enterContext(patched_constant("_PrefixMutationGuard", MechanicalPrefixGuard))
         self._tmp = tempfile.mkdtemp(prefix="studio-reader-fixture-", dir=TESTS_DIR.parent)
         self.fx = Fixture(Path(self._tmp)).build()
         self._uid = observed_uid_fixture()
