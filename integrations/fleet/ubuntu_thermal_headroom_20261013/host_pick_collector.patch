@@ -1,0 +1,58 @@
+--- a/host_pick.py
++++ b/host_pick.py
+@@ -163,7 +163,7 @@
+     mode: str,
+     *,
+     required_tools: Optional[Iterable[str]] = None,
+-    max_age: int = 600,
++    max_age: int = 180,
+     excluded: Optional[Iterable[str]] = None,
+     now: Optional[datetime] = None,
+     states: Optional[Dict[str, Optional[Dict[str, Any]]]] = None,
+@@ -438,6 +438,17 @@
+             load_headroom = 1.0 - (load1 / ncpu)
+             lane_headroom = (effective_ceiling - active_lanes) / effective_ceiling
+             score = lane_headroom * 0.5 + load_headroom * 0.5
++            # Existing validated thermal gate remains authoritative. Rank
++            # eligible warm hosts below cooler alternatives before the hard
++            # cutoff; advisory scoring grants no extra capacity or admission.
++            if entry.get("require_thermal") is True:
++                therm = (state or {}).get("thermal")
++                therm = therm if isinstance(therm, dict) else {}
++                tctl = _finite_nonnegative(therm.get("cpu_tctl_c"))
++                ceiling = _finite_nonnegative(entry.get("cpu_tctl_limit_c"))
++                if tctl is not None and ceiling is not None:
++                    near_hot = min(1.0, max(0.0, (tctl - (ceiling - 25.0)) / 25.0))
++                    score -= 0.20 * near_hot
+ 
+         rows.append(
+             {
+@@ -561,7 +572,7 @@
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument("--mode", required=True, choices=sorted(MODE_TOOLS))
+     parser.add_argument("--require-tool", action="append", default=[])
+-    parser.add_argument("--max-age", type=int, default=600)
++    parser.add_argument("--max-age", type=int, default=180)
+     parser.add_argument("--exclude", action="append", default=[])
+     parser.add_argument("--refresh", action="store_true")
+     parser.add_argument("--seat-ok", action="store_true",
+--- a/host_pull.sh
++++ b/host_pull.sh
+@@ -2,7 +2,7 @@
+ # host_pull.sh — P1 fleet telemetry: probe active lane hosts and local seat,
+ # ext/state/hosts/<host>.json (read by pool_status.py's HOST table).
+ # usage: bash host_pull.sh --once    one pass over all hosts, then exit
+-#        bash host_pull.sh           daemon: lanes + local seat every 150 s
++#        bash host_pull.sh           daemon: lanes + local seat every 60 s
+ # The local host (hosts.json "local": true) is probed in-process; every remote
+ # host via ONE  perl -e 'alarm 25; exec @ARGV' ssh -o BatchMode=yes
+ # -o ConnectTimeout=8 <alias> '<probe>'  call per pass. The probe is a
+@@ -16,7 +16,7 @@
+ HOSTS_JSON="${HOST_PULL_HOSTS_JSON:-$HERE/hosts.json}"
+ STATE_DIR="${HOST_PULL_STATE_DIR:-$HERE/state/hosts}"
+ PIDFILE="${HOST_PULL_PIDFILE:-$HERE/state/host_pull.pid}"
+-INTERVAL=150
++INTERVAL=60
+ 
+ ONCE=0
+ SELECTED=""

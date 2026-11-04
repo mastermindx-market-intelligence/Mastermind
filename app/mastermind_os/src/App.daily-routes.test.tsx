@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { openLegacyProjectTabs } from "./test-operational-navigation";
 import {
   act,
   cleanup,
@@ -112,6 +113,7 @@ describe("owner-backed daily routes in App", () => {
     window.MastermindMissionHost = e.host;
     const user = userEvent.setup();
     render(<App />);
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     await waitFor(() =>
       expect(
         screen.getByRole("region", { name: "Meta-CEO answer" }).textContent,
@@ -131,12 +133,13 @@ describe("owner-backed daily routes in App", () => {
     ).toContain("CURRENT");
     await user.click(screen.getByRole("button", { name: "Conversations" }));
     expect(await screen.findByText(visible)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Unsent notes" }));
     expect(
-      screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Unsent draft" })
+      screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Unsent notes" })
         .value,
     ).toBe("");
     await user.type(
-      screen.getByRole("textbox", { name: "Unsent draft" }),
+      screen.getByRole("textbox", { name: "Unsent notes" }),
       "Keep this conversation thought",
     );
     await user.click(screen.getByRole("button", { name: "Review evidence" }));
@@ -151,15 +154,16 @@ describe("owner-backed daily routes in App", () => {
     await user.click(screen.getByRole("button", { name: "Knowledge" }));
     await user.click(screen.getByRole("button", { name: "Conversations" }));
     expect(await screen.findByText(visible)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Unsent notes" }));
     expect(
-      screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Unsent draft" })
+      screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Unsent notes" })
         .value,
     ).toBe("Keep this conversation thought");
     expect(
-      screen.getByRole<HTMLButtonElement>("button", { name: "Send message" })
-        .disabled,
-    ).toBe(true);
-    await user.click(screen.getByRole("button", { name: "Today" }));
+      screen.queryByRole("button", { name: "Send message" }),
+    ).toBeNull();
+    expect(screen.getByText("No recipient is qualified by this window. Send is unavailable.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     expect(
       screen.getByRole<HTMLTextAreaElement>("textbox", {
         name: "Direction to Meta-CEO",
@@ -189,8 +193,9 @@ describe("owner-backed daily routes in App", () => {
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Conversations" }));
     expect(await screen.findByText(visible)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Unsent notes" }));
     await user.type(
-      screen.getByRole("textbox", { name: "Unsent draft" }),
+      screen.getByRole("textbox", { name: "Unsent notes" }),
       "Private draft",
     );
     await user.click(screen.getByRole("button", { name: "Review evidence" }));
@@ -204,20 +209,20 @@ describe("owner-backed daily routes in App", () => {
       expect(
         screen.queryByRole("region", { name: "Conversation evidence" }),
       ).toBeNull();
-      expect(
-        screen.getByRole<HTMLTextAreaElement>("textbox", {
-          name: "Unsent draft",
-        }).value,
-      ).toBe("");
+      expect(screen.queryByRole("textbox", { name: "Unsent notes" })).toBeNull();
+      expect(Array.from(document.querySelectorAll("textarea"), input => input.value))
+        .not.toContain("Private draft");
     } finally {
       await act(async () => {
         e.settle();
         for (let n = 0; n < 20; n++) await Promise.resolve();
       });
     }
+    await user.click(screen.getByRole("button", { name: "Unsent notes" }));
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Unsent notes" }).value).toBe("");
   });
 
-  it("opens an exact project into the Paper five-tab local workspace without removing legacy reachability", async () => {
+  it("opens a conversation-first project with Files/Details and preserves legacy reader reachability", async () => {
     const e = await hostFixture();
     window.MastermindMissionHost = e.host;
     const user = userEvent.setup();
@@ -227,6 +232,10 @@ describe("owner-backed daily routes in App", () => {
       name: /^Open project /,
     });
     await user.click(openProject);
+    expect(await screen.findByRole("button", {name:"Project details"})).toBeTruthy();
+    expect(screen.getByRole("button", {name:"Files"})).toBeTruthy();
+    await openLegacyProjectTabs(user);
+    await user.click(screen.getByRole("tab", {name:"Overview"}));
     const tabs = screen.getByRole("tablist", { name: "Project workspace" });
     for (const tab of ["Overview", "Plan", "Work", "Evidence", "More"])
       expect(within(tabs).getByRole("tab", { name: tab })).toBeTruthy();
@@ -254,13 +263,13 @@ describe("owner-backed daily routes in App", () => {
 
     await user.click(within(tabs).getByRole("tab", { name: "Evidence" }));
     expect(
-      screen.getByRole("heading", { name: "Qualified evidence references" }),
+      screen.getByRole("heading", { name: "Evidence", level: 2 }),
     ).toBeTruthy();
 
     await user.click(within(tabs).getByRole("tab", { name: "More" }));
     expect(screen.getByRole("heading", { name: "Journal" })).toBeTruthy();
     const operations = screen.getByRole("navigation", { name: "Project operations" });
-    expect(within(operations).getAllByRole("button").map(button => button.textContent)).toEqual(["Work", "Open Programs", "Fleet & Capacity"]);
+    expect(within(operations).getAllByRole("button").map(button => button.textContent)).toEqual(["Work", "Open Programs", "Control Room", "Fleet & Capacity"]);
     expect(
       screen.getByRole("heading", { name: "Resources & systems" }),
     ).toBeTruthy();

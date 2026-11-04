@@ -1,0 +1,53 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_________________________ test_exact_run_is_supported __________________________
+
+    def test_exact_run_is_supported():
+>       req=D.request_for(RUN,ROOT)
+            ^^^^^^^^^^^^^^^^^^^^^^^
+
+integrations/session_bridge/active_run_observation/test_active_observation.py:26:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+run_id = 'mm-os-incident-issuer-custody-preflight-20261013-01a104e6'
+root = '01a104e6-58f8-76d3-8d99-1302a1cca072', support_metadata_only = False
+
+    def request_for(run_id, root, *, support_metadata_only=False):
+        scope = SCOPES.get(run_id)
+        if scope is None or root != scope['root']:
+>           raise ValueError('observation_scope_not_admitted')
+E           ValueError: observation_scope_not_admitted
+
+integrations/session_bridge/active_run_observation/run_observation_delivery.py.base:55: ValueError
+________________________ test_exact_30_name_generation _________________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10ade6b10>
+
+    def test_exact_30_name_generation(monkeypatch):
+        names=R.SOURCE_FILES|{'fabric_operator_client.py','fabric_operator_stop.py','fabric_policy_snapshot.py','pools.yaml','fabric_operator_diagnostics.py','yes'}
+        reader,digest,_=manifest_reader(names);monkeypatch.setattr(R,'ACTIVE_SUPPORT_DIGEST',digest,raising=False)
+>       assert R.support(reader,digest)['verified_code_files']==30
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+
+integrations/session_bridge/active_run_observation/test_active_observation.py:98:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+reader = <test_active_observation.manifest_reader.<locals>.Reader object at 0x10ade3cb0>
+digest = 'd4f013ed6acb1eb069fad6810b04f8d560f6fcf15c0fd39efe3cb9f68ad946cf'
+
+    def support(reader, digest):
+        base = ("lanes", "support-releases", digest)
+        raw, _ = reader.read((*base, "RELEASE.json"), 65536, mode=0o444)
+        data = strict_json(raw)
+        if not isinstance(data, dict) or data.get("schema") != RELEASE_SCHEMA:
+            raise Invalid("release_schema_mismatch")
+        files = data.get("files")
+        if not isinstance(files, dict) or frozenset(files) not in GENERATIONS:
+>           raise Invalid("release_file_set_mismatch")
+E           test_run_observation.Invalid: release_file_set_mismatch
+
+integrations/session_bridge/active_run_observation/run_observation.py.base:337: Invalid
+=========================== short test summary info ============================
+FAILED integrations/session_bridge/active_run_observation/test_active_observation.py::test_exact_run_is_supported
+FAILED integrations/session_bridge/active_run_observation/test_active_observation.py::test_exact_30_name_generation
+2 failed, 23 deselected in 0.07s

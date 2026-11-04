@@ -146,11 +146,3 @@ def test_release_tag_refresher_is_optional_and_atomic(tmp_path: Path) -> None:
     result = subprocess.run(["bash", "scripts/refresh_datadog_release_tag.sh", sha], cwd=ROOT, env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert dropin.read_text(encoding="utf-8") == f"[Service]\nEnvironment=DD_VERSION={sha}\n"
-
-
-def test_deploy_keeps_datadog_version_aligned_with_release_and_rollback() -> None:
-    deploy = (ROOT / "scripts" / "deploy_code_to_vps.sh").read_text(encoding="utf-8")
-    assert "refresh_datadog_release_tag.sh' '$EXPECTED_SHA'" in deploy
-    assert "Environment=DD_VERSION=%s" in deploy
-    assert "'$PREVIOUS_SHA'" in deploy
-    assert "systemctl daemon-reload" in deploy

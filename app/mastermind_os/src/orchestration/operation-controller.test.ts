@@ -2486,3 +2486,40 @@ describe("OperationController", () => {
     });
   });
 });
+describe("project pause uses the incumbent operation owner", () => {
+  const intent: CommandIntent={kind:"project_pause",payload:{work_ref:"WS:ONE",root_job_id:"JOB-1"},targetKey:"WS:ONE"};
+  it.each(["project_pause","project_resume","project_create","project_adopt","direction_accept"] as const)("%s accepts only its committed receipt without selecting or creating a mission", async kind => {
+    const {store,state}=makeStoreWithState(),port=makePort();
+    const result=await new OperationController(buildPort(port),store).begin({...intent,kind});
+    expect(result.status).toBe("accepted");expect(result.reason).toBe("ACCEPTED");
+    expect(port._submit).toHaveBeenCalledTimes(1);expect(state._data.size).toBe(0);
+  });
+  it("a retained launch blocks a new pause without prepare, submit, or pointer replacement", async () => {
+    const {store}=makeStoreWithInitial([["scope-A",BASE_POINTER]]),port=makePort();
+    const result=await new OperationController(buildPort(port),store).begin(intent);
+    expect(result.status).toBe("checking");expect(result.pointer).toEqual(BASE_POINTER);
+    expect(port._prepare).not.toHaveBeenCalled();expect(port._submit).not.toHaveBeenCalled();
+    expect(store.read("scope-A")).toEqual(BASE_POINTER);
+  });
+  it("unknown pause retains the original key for status-only reconciliation", async () => {
+    const {store,state}=makeStoreWithState(),port=makePort({
+      _submit:vi.fn(async pointer=>echoReceipt(pointer,"unknown")),
+      _readOp:vi.fn(async pointer=>echoReceipt(pointer,"unknown")),
+    });
+    const controller=new OperationController(buildPort(port),store);
+    const first=await controller.begin(intent);expect(first.status).toBe("unknown");
+    const pointer=first.pointer!;
+    expect((await controller.recover()).status).toBe("unknown");
+    expect(port._submit).toHaveBeenCalledTimes(1);
+    expect(port._readOp).toHaveBeenCalledWith(pointer,expect.any(AbortSignal));
+    expect(state._clears).toHaveLength(0);expect(store.read("scope-A")).toEqual(pointer);
+  });
+  it.each(["project_pause","project_resume","project_create","project_adopt","direction_accept"] as const)("%s cannot carry a launch selection or erase its hint", async kind => {
+    const {store,state}=makeStoreWithState(),port=makePort({
+      _submit:vi.fn(async pointer=>echoReceipt(pointer,"accepted",{missionSelection:VALID_SELECTION})),
+    });
+    const result=await new OperationController(buildPort(port),store).begin({...intent,kind});
+    expect(result.status).toBe("unknown");expect(result.reason).toBe("SELECTION_NOT_ALLOWED");
+    expect(state._clears).toHaveLength(0);expect(store.read("scope-A")).toEqual(result.pointer);
+  });
+});
