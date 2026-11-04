@@ -18,6 +18,8 @@ import { Projects } from "./projects/Projects";
 import { ProjectWorkspace } from "./projects/ProjectWorkspace";
 import { Inbox } from "./inbox/Inbox";
 import { Knowledge } from "./knowledge/Knowledge";
+import { DiscoveryWorkspace } from "./discovery/DiscoveryWorkspace";
+import { projectDiscovery } from "./discovery/projection";
 import { ProjectWorkDetail, ProjectEvidence, ProjectJournal } from "./workJourney";
 import { ConversationWindow } from "./conversations/ConversationWindow";
 import { HistoricalOriginalAnswers } from "./conversations/HistoricalOriginalAnswers";
@@ -77,6 +79,8 @@ import { type ControlRoomState } from "./control-room";
 import { ControlRoomPanel } from "./ControlRoomPanel";
 import { SessionEstate } from "./session-estate/SessionEstate";
 import { ResourcesSystemsPanel } from "./resources/ResourcesSystemsPanel";
+import { ResourceCapacityRead } from "./resources/ResourceCapacityRead";
+import { selectedCurrentCapacityAttempt } from "./resource-capacity-selection";
 import { SupervisionLedger } from "./supervision/SupervisionLedger";
 import { SupervisionTrace } from "./supervision/SupervisionTrace";
 import { ProjectPlanPanel } from "./planning/ProjectPlanPanel";
@@ -104,6 +108,9 @@ export const navigation = [
   "Inbox",
   "Conversations",
   "Knowledge",
+  "Search",
+  "Sources",
+  "Tools",
   "Meta-CEO",
   "Work",
   "Programs",
@@ -147,13 +154,17 @@ const missionNavigation: readonly View[] = [
   "Connections",
   "Evidence",
 ];
-const advancedNavigation: readonly View[] = ["Meta-CEO", "Work", "Programs", "Control Room", "Session Estate", "Fleet & Capacity", ...missionNavigation];
+const advancedNavigation: readonly View[] = ["Sources", "Tools", "Meta-CEO", "Work", "Programs", "Control Room", "Session Estate", "Fleet & Capacity", ...missionNavigation];
 const advancedLabel = (view: View, locale: "en" | "zh-CN") => locale === "zh-CN" ? navigationLabel(view, locale) :
   view === "Work" ? "Work queue" : view === "Programs" ? "Programs workspace" :
   view === "Control Room" ? "Control Room workspace" : view === "Fleet & Capacity" ? "Fleet & Capacity workspace" : view;
 const projectTabs = ["Conversation", "Overview", "Plan", "Work", "Evidence", "Journal", "More"] as const;
 type ProjectTab = (typeof projectTabs)[number];
 const navigationPaths: Record<View, string> = {
+  Search: "M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14M15 15l6 6",
+  Sources: "M5 3h10l4 4v14H5zM14 3v5h5M8 12h8M8 16h5",
+  Tools: "M8 3h8v5H8zM4 12h5v8H4zM15 12h5v8h-5M12 8v3M6 11h12",
+
   "Session Estate": "M4 4h16v12H4zM8 20h8M12 16v4",
   Today: "M3 10 12 3l9 7v11H3zM9 21v-7h6v7",
   Projects: "M3 6h6l2 2h10v12H3z", Inbox: "M3 5h18v15H3zM3 14h5l2 3h4l2-3h5",
@@ -170,7 +181,7 @@ function NavigationIcon({ view }: { view: View }) {
 }
 function navigationLabel(view: View, locale: "en" | "zh-CN"): string {
   if (locale === "en") return view;
-  const labels: Record<View, string> = { "Session Estate": "会话工作区", Today: "今天", Projects: "项目", Inbox: "收件箱", Conversations: "对话", Knowledge: "知识", "Meta-CEO": "Meta-CEO 办公室", Work: "工作", Programs: "工作流", "Control Room": "控制室", "Fleet & Capacity": "计算资源", "Mission Workspace": "任务工作区", Conversation: "当前对话", Activity: "活动", Connections: "连接", Evidence: "证据" };
+  const labels: Record<View, string> = { Search: "搜索", Sources: "来源", Tools: "工具", "Session Estate": "会话工作区", Today: "今天", Projects: "项目", Inbox: "收件箱", Conversations: "对话", Knowledge: "知识", "Meta-CEO": "Meta-CEO 办公室", Work: "工作", Programs: "工作流", "Control Room": "控制室", "Fleet & Capacity": "计算资源", "Mission Workspace": "任务工作区", Conversation: "当前对话", Activity: "活动", Connections: "连接", Evidence: "证据" };
   return labels[view];
 }
 
@@ -1330,6 +1341,22 @@ export interface AppProps {
 export function App({ locale = "en", theme = "dark", preferencesControl }: AppProps = {}) {
   const [navigationOpen, setNavigationOpen] = useState(false);
   const navigationPane = useRef<HTMLElement>(null);
+  const preferencesPane = useRef<HTMLDivElement>(null);
+  const [hasPreferencesNavigation, setHasPreferencesNavigation] = useState(false);
+  useLayoutEffect(() => {
+    setHasPreferencesNavigation(Boolean(preferencesPane.current?.querySelector("button.display-preferences__toggle")));
+  }, [preferencesControl]);
+  const openDisplayPreferences = () => {
+    if (window.matchMedia?.("(max-width: 959px)").matches) setNavigationOpen(true);
+    const open = () => {
+      const toggle = preferencesPane.current?.querySelector<HTMLButtonElement>("button.display-preferences__toggle");
+      if (!toggle) return;
+      if (toggle.getAttribute("aria-expanded") !== "true") toggle.click();
+      toggle.focus();
+    };
+    if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(open);
+    else queueMicrotask(open);
+  };
   const navigationToggle = useRef<HTMLButtonElement>(null);
   const closeNavigation = () => { setNavigationOpen(false); navigationToggle.current?.focus(); };
   useEffect(() => {
@@ -2276,7 +2303,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     selection?.rootJobId,
   ]);
   useEffect(() => {
-    if (active !== "Control Room" && active !== "Session Estate" && active !== "Fleet & Capacity") return;
+    if (active !== "Control Room" && active !== "Session Estate" && active !== "Fleet & Capacity" && active !== "Sources" && active !== "Tools") return;
     const host = window.MastermindMissionHost;
     const read = host?.readControlRoomState;
     const ownerRevision = authRevision;
@@ -3660,10 +3687,13 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         )}
       />
     ) : null;
-  const quietHeader = active === "Today" || active === "Knowledge" ||
+  const quietHeader = active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
     active === "Projects" && !directRoute && (!projectTab ||
       Boolean(projectWorkRef && (projectTab === "Conversation" || catalogueWorkRef)));
   const projectReadGeneration = JSON.stringify([authRevision, retainedHostGeneration, selectionSeq.current]);
+  const discoveryView = projectDiscovery({projection: office.projection,
+    conversation: observedConversation.projection, controlRoom: currentControlRoom});
+
   const currentConversationPanel = (
       <>
         <ConversationWindow
@@ -3748,6 +3778,32 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     );
   else if (active === "Conversations")
     content = currentConversationPanel;
+  else if (active === "Search" || active === "Sources" || active === "Tools")
+    content = <DiscoveryWorkspace view={discoveryView} projection={office.projection}
+      mode={active} locale={locale} theme={theme}
+      sourceProps={{readResultReferences: retainedResultHost?.readResultReferences,
+        readResult: retainedResultHost?.readResult,
+        hostGeneration: retainedResultHost?.invalidationGeneration?.(),
+        draftPort: {projection: observedConversation.projection, text: observedConversation.draft,
+          revision: observedConversation.draftRevision, insertion: observedConversation.draftInsertion,
+          append: observedConversation.appendSource, undo: observedConversation.undoSource,
+          edit: () => setActive("Conversations")}}}
+      onModeChange={setActive}
+      onOpenProject={office.projection.programs.source.state === "CURRENT" && index.state === "AVAILABLE"
+        ? (target, mode) => {
+            if (mode !== "current" || office.projection.programs.source.state !== "CURRENT" || index.state !== "AVAILABLE") return;
+            const cards = index.programs.filter(card => card.workRef === target.workRef);
+            if (cards.length !== 1 || cards[0].rootState !== "RESOLVED" ||
+                cards[0].rootJobId !== target.rootJobId || cards[0].rootCandidates.length !== 1 ||
+                cards[0].rootCandidates[0] !== target.rootJobId) return;
+            open(target.workRef, target.rootJobId);
+          } : undefined}
+      onOpenConversation={() => setActive("Conversations")}
+      onOpenMetaCeo={() => setActive("Meta-CEO")}
+      onOpenKnowledge={() => setActive("Knowledge")}
+      onOpenPreferences={hasPreferencesNavigation ? openDisplayPreferences : undefined}
+      onRefreshSources={authState?.acquisition && typeof retainedResultHost?.readControlRoomState === "function"
+        ? () => setControlRoomRevision(revision => revision + 1) : undefined}/>
   else if (active === "Knowledge")
     content = <Knowledge projection={office.projection} locale={locale}
       readResultReferences={retainedResultHost?.readResultReferences}
@@ -4025,7 +4081,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     content = (
       <>
       <ResourcesSystemsPanel controlRoom={currentControlRoom} work={workState} locale={locale}
-        onReviewSources={() => setActive("Connections")}/>
+        onReviewSources={() => setActive("Sources")}/>
+      <ResourceCapacityRead host={retainedResultHost} locale={locale}
+        selection={selectedCurrentCapacityAttempt(office.projection, selection,
+          resultState.kind === "READY" ? resultState.selection : null, authRevision)}/>
       <AttendedFabricWorkspace
         key={`fleet:${authRevision}`}
         host={window.MastermindMissionHost}
@@ -4187,6 +4246,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             mastermind<small>EXECUTIVE OS</small>
           </span>
         </div>
+        <button type="button" className="sidebar-search" aria-current={active === "Search" ? "page" : undefined}
+          onClick={() => {setProjectTab(null);setActive("Search");if (navigationOpen) closeNavigation();}}>
+          <NavigationIcon view="Search"/>{locale === "zh-CN" ? "搜索" : "Search"}
+        </button>
         <div className="nav-section">
           <span className="nav-section-label">COMPANY</span>
           <nav aria-label="Company navigation">
@@ -4243,7 +4306,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             ))}
           </nav>
         </div>
-        {preferencesControl}
+        <div ref={preferencesPane}>{preferencesControl}</div>
         <div className="side-note">
           <b>Source-qualified viewer</b>
           <br />

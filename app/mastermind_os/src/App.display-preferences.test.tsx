@@ -50,3 +50,16 @@ it("mounts the ready fixture in real Today and preserves the launch draft on its
   expect(goal.value).toBe("Do not dispatch this fixture");
   expect(screen.getByRole("alert").textContent).toContain("REFUSED");
 });
+
+
+it("opens the actual display owner from Sources without replacing the current view",async()=>{
+  const view=render(<Product/>);
+  fireEvent.click(screen.getByRole("button",{name:"Sources"}));
+  fireEvent.click(await screen.findByRole("button",{name:"Open display preferences"}));
+  await waitFor(()=>expect(screen.getByRole("button",{name:"Display settings"}).getAttribute("aria-expanded")).toBe("true"));
+  expect(document.activeElement).toBe(screen.getByRole("button",{name:"Display settings"}));
+  fireEvent.change(screen.getByLabelText("Theme"),{target:{value:"light"}});
+  expect(view.container.querySelector(".shell")?.getAttribute("data-active-route")).toBe("Sources");
+  expect(view.container.querySelector(".shell")?.getAttribute("data-theme")).toBe("light");
+  expect(screen.getAllByRole("heading",{level:1})).toHaveLength(1);
+});
