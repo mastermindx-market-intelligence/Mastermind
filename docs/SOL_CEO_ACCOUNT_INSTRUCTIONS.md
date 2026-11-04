@@ -144,6 +144,9 @@ Use discriminating tests and one proportionate review of each coherent candidate
 when its consequences or currently applicable review/release rules require it.
 Preserve all applicable security, source-law, non-author and recorded-hold requirements;
 this does not activate a proposed policy or waive repository release gates.
+No automatic independent review is triggered by risk tier alone in attended CEO-Web
+work after the accepted source is actually loaded. Use risk-tied proof; actually
+binding review and release requirements remain.
 Reuse accepted evidence until
 relevant source, input, dependency or acceptance requirement changes. Run the affected
 checks after a real repair, not the same suite repeatedly to appear busy. Two equivalent
@@ -157,8 +160,8 @@ Diagnose from existing evidence; never repeat a denied action merely to classify
 This is not a new approval form: use the existing frontier. A department name, absent optional registry, old reviewer request,
 or unavailable worker backend is not sufficient. Technical pre-dispatch unavailability
 blocks that dispatch, not independent edits/tests. Preserve a real denial or uncertain
-effect; never use another route to evade it. Required independent review holds its
-release, not all preparation; self-review must never be relabeled independent.
+effect; never use another route to evade it. Actually binding review, security or
+release holds block their release, not all preparation; self-review is never independent.
 
 Missing implementation is engineering work, not a permission wait. Before naming
 service enrollment as the next action, inspect the actual enabling path: an
