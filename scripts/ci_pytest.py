@@ -11,11 +11,12 @@ partition is verified to be a total, disjoint cover of that exact set before
 any process starts. The gate therefore executes the same modules whatever
 ``--jobs`` is, and a nonzero exit from any shard fails the whole gate.
 
-Sharding deliberately stays *inside* one job. The branch-protection required
-check for this repository is the single context ``test``; turning the gate
-into a workflow matrix would rename it to ``test (0)``/``test (1)``/... and
-silently make the required check unsatisfiable. Parallelism belongs here,
-where the check name is untouched.
+The default ``--jobs`` command runs concurrent subprocesses inside one job.
+A separately qualified workflow may instead dispatch the same verified
+partition to distinct hosted runners. In that arrangement a fail-closed fan-in
+job named ``test`` must require every matrix member to succeed and must
+reverify the canonical complete plan. The branch-protection context remains
+exactly ``test``; dynamic ``pytest shard N`` contexts alone cannot replace it.
 """
 from __future__ import annotations
 
@@ -24,6 +25,8 @@ import hashlib
 import re
 import subprocess
 import sys
+import threading
+import time
 import tomllib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -192,8 +195,130 @@ def format_plan(plan: Mapping[str, int], *, shards: Sequence[Sequence[str]] | No
     return rendered
 
 
-def pytest_argv(included: Sequence[str], *, python: str | None = None) -> list[str]:
-    return [python or sys.executable, "-m", "pytest", "-q", *included]
+def pytest_argv(
+    included: Sequence[str], *, python: str | None = None, progress: bool = False,
+) -> list[str]:
+    # Observability only: report bounded slowest setup/call/teardown durations
+    # without dropping a test, changing its order, or creating new CI contexts.
+    prefix = [python or sys.executable]
+    if progress:
+        prefix.append("-u")
+    prefix.extend(["-m", "pytest"])
+    if progress:
+        prefix.extend(["-p", "scripts.ci_pytest_timing"])
+    return [*prefix, "--durations=25", "-q", *included]
+
+
+_MEASURED_THREE_JOB_PLACEMENT = {
+    # Keep the protected-master hot-module pins. A previous two-module
+    # capacity-host/walkforward swap overloaded shard 1 with cold setup; do
+    # not repeat that uncompensated swap. In PR #1763 CI 41251754394, shard 0
+    # ended without a completed pytest step or cleanup after ~51 minutes.
+    # Its job log is unavailable, so this is a measured load mitigation, NOT
+    # an assertion that any individual test failed. Last successful CI
+    # 41243150199 measured capacity-host at ~846s in shard 0, while native
+    # Fabric quota (~258s), walkforward (~154s) and deploy provenance (~74s)
+    # ran in shard 1. Move the long capacity module to shard 1 only while
+    # moving ALL three other measured modules back to shard 0. This balances
+    # both runners without dropping tests or changing other SHA-256 placements.
+    "tests/test_capacity_host_artifacts.py": 1,
+    "tests/test_native_fabric_quota_continuity.py": 0,
+    "tests/test_trend_persistence_walkforward.py": 0,
+    "tests/test_deploy_provenance.py": 0,
+    "tests/test_executive_runtime_bounded_acquisition.py": 1,
+    "tests/test_mastermind_window_reader_static_fences.py": 1,
+    # The protected one-runner CI gate measured these further slow modules.
+    "tests/test_market_view.py": 1,
+    "tests/test_product_acceptance_original_selector.py": 1,
+    "tests/test_executive_os_phase1fc.py": 2,
+}
+
+
+_MEASURED_SIX_JOB_PLACEMENT = {
+    # Exact CI_MODULE hosted run 39105226641; 96 slowest reviewed modules.
+    # Changes require new timings and policy review. Hash placement for all others.
+    'tests/research_read_mcp/test_selected_refresh.py': 0,  # 8.2s
+    'tests/test_autonomy_first_stratum.py': 3,  # 10.2s
+    'tests/test_cap_s1_mastermind_operator_canary.py': 1,  # 19.1s
+    'tests/test_capacity_host_artifacts.py': 4,  # 458.5s
+    'tests/test_ceo_submit_armed_composition.py': 0,  # 13.6s
+    'tests/test_company_consultation_host.py': 0,  # 24.8s
+    'tests/test_company_consultation_target_resolution.py': 4,  # 8.0s
+    'tests/test_company_consultation_targeted_carrier.py': 2,  # 9.0s
+    'tests/test_company_inbox_iac1.py': 0,  # 31.6s
+    'tests/test_control_room_remote_install.py': 3,  # 11.4s
+    'tests/test_executive_autonomy_control.py': 1,  # 16.2s
+    'tests/test_executive_backup.py': 5,  # 19.9s
+    'tests/test_executive_codex_sidecar_install.py': 2,  # 44.9s
+    'tests/test_executive_codex_worker.py': 3,  # 9.0s
+    'tests/test_executive_coo_active_review_frontier.py': 3,  # 20.4s
+    'tests/test_executive_coo_review_drain.py': 0,  # 12.1s
+    'tests/test_executive_coo_tick_liveness.py': 3,  # 8.0s
+    'tests/test_executive_dr.py': 3,  # 14.6s
+    'tests/test_executive_finite_guards.py': 1,  # 10.5s
+    'tests/test_executive_identity_review.py': 5,  # 22.6s
+    'tests/test_executive_inbox.py': 1,  # 13.1s
+    'tests/test_executive_mcp.py': 3,  # 8.6s
+    'tests/test_executive_mcp_installed_fabric_composition.py': 3,  # 19.0s
+    'tests/test_executive_mcp_mutation.py': 2,  # 7.9s
+    'tests/test_executive_mcp_web_ceo_v2.py': 0,  # 33.7s
+    'tests/test_executive_os_phase1fc.py': 1,  # 32.4s
+    'tests/test_executive_os_sqlite.py': 0,  # 69.7s
+    'tests/test_executive_release_actuator.py': 2,  # 19.2s
+    'tests/test_executive_release_closure.py': 0,  # 15.0s
+    'tests/test_executive_release_root_start.py': 5,  # 13.1s
+    'tests/test_executive_release_stage_only.py': 3,  # 12.7s
+    'tests/test_executive_runtime_bounded_acquisition.py': 3,  # 23.3s
+    'tests/test_executive_runtime_bounded_role_result.py': 2,  # 76.9s
+    'tests/test_executive_service_control.py': 2,  # 31.3s
+    'tests/test_executive_supervisor.py': 3,  # 48.6s
+    'tests/test_executive_terminal_return.py': 0,  # 9.7s
+    'tests/test_fabric_result_projection.py': 3,  # 14.2s
+    'tests/test_finite_initial_physical_admission.py': 5,  # 17.8s
+    'tests/test_finite_initial_transaction.py': 1,  # 14.6s
+    'tests/test_fresh_sol_eval.py': 2,  # 8.1s
+    'tests/test_liquidity_transmission.py': 2,  # 12.2s
+    'tests/test_market_view.py': 5,  # 57.8s
+    'tests/test_mas115_profile_search_health.py': 2,  # 9.3s
+    'tests/test_mastermind_cortex_contracts.py': 0,  # 20.1s
+    'tests/test_mastermind_steward_app_live_window.py': 5,  # 15.8s
+    'tests/test_mastermind_window_reader_static_fences.py': 1,  # 20.7s
+    'tests/test_mastermind_workspace_repositories.py': 3,  # 7.6s
+    'tests/test_mcp_stdio_boundary.py': 2,  # 10.5s
+    'tests/test_native_capacity_source_closure.py': 2,  # 8.2s
+    'tests/test_native_company_answer_dispatch.py': 3,  # 34.9s
+    'tests/test_native_company_consumption.py': 5,  # 29.2s
+    'tests/test_nonseat_canary.py': 0,  # 9.0s
+    'tests/test_os_public_edge_publication.py': 1,  # 8.0s
+    'tests/test_os_release_assets.py': 0,  # 8.1s
+    'tests/test_product_acceptance_acquisition_mount.py': 5,  # 8.1s
+    'tests/test_product_acceptance_acquisition_service.py': 3,  # 32.0s
+    'tests/test_product_acceptance_full_read_chain.py': 1,  # 11.3s
+    'tests/test_product_acceptance_installed_target.py': 2,  # 15.8s
+    'tests/test_product_acceptance_original_selector.py': 0,  # 80.0s
+    'tests/test_product_acceptance_read_projection.py': 1,  # 28.2s
+    'tests/test_product_acceptance_relay_composition.py': 3,  # 11.2s
+    'tests/test_product_acceptance_request_owner.py': 2,  # 14.2s
+    'tests/test_product_acceptance_ruling_owner.py': 1,  # 23.4s
+    'tests/test_product_acceptance_subject_read.py': 5,  # 9.1s
+    'tests/test_product_acceptance_workspace_read.py': 5,  # 9.4s
+    'tests/test_remote_worker_gateway.py': 1,  # 8.1s
+    'tests/test_response_cache.py': 5,  # 10.1s
+    'tests/test_rotation_tensor.py': 1,  # 9.2s
+    'tests/test_source_continuity_census_budget.py': 1,  # 8.7s
+    'tests/test_trend_persistence_group.py': 2,  # 56.9s
+    'tests/test_trend_persistence_null.py': 3,  # 25.0s
+    'tests/test_trend_persistence_panel.py': 2,  # 23.5s
+    'tests/test_validate_perception.py': 0,  # 12.9s
+    'tests/test_w6c2_consultation_runtime.py': 0,  # 18.6s
+    'tests/test_web_ceo_offline_delivery_canary.py': 3,  # 110.4s
+    'tests/test_worker_browser_b1.py': 0,  # 10.9s
+    'tests/test_worker_execution_contract.py': 1,  # 9.7s
+    'tests/test_workspace_admitted_plan_read.py': 5,  # 23.7s
+    'tests/test_workspace_result_http.py': 0,  # 7.9s
+    'tests/test_workspace_result_service.py': 2,  # 21.4s
+    'tests/workbench_read_mcp/test_observer.py': 2,  # 10.6s
+}
 
 
 def partition_modules(
@@ -214,12 +339,13 @@ def partition_modules(
     same checkout would shard differently on every run and a failure would not
     reproduce.
 
-    Balance is close enough without a committed timing file that could go
-    stale: this repository's module count over four shards lands within a few
-    percent of even, and the shard sizes are printed in the plan line so drift
-    stays visible. (Deliberately written without bare integer literals: the
-    identity guard in tests/test_ceo_submit_armed_composition.py flags any
-    three-digit literal in that range added outside tests/.)
+    For the production three-job gate, the explicitly measured hot modules
+    are pinned to less-loaded shards. Every other path keeps stable hash
+    placement, including when a new test is added. Other job counts retain
+    unmodified hashes. This is placement, not exclusion: verify_partition
+    checks the exact complete test coverage.
+    Shard sizes remain visible in the plan line. (Do not introduce bare
+    three-digit constants outside tests/: the identity guard forbids them.)
     """
 
     if jobs < 1:
@@ -232,7 +358,11 @@ def partition_modules(
     buckets: list[list[str]] = [[] for _ in range(jobs)]
     for path in included:
         digest = hashlib.sha256(path.encode("utf-8")).digest()
-        buckets[int.from_bytes(digest[:8], "big") % jobs].append(path)
+        hashed = int.from_bytes(digest[:8], "big") % jobs
+        target = (_MEASURED_THREE_JOB_PLACEMENT.get(path, hashed) if jobs == 3
+                  else _MEASURED_SIX_JOB_PLACEMENT.get(path, hashed) if jobs == 6
+                  else hashed)
+        buckets[target].append(path)
     shards = tuple(tuple(bucket) for bucket in buckets)
     verify_partition(included, shards)
     return shards
@@ -273,36 +403,50 @@ def run_shards(
     would make the gate's own report unreliable, and the remaining shards'
     failures are exactly what a reviewer needs in one pass.
 
-    Output is captured per shard and replayed whole under a banner rather
-    than streamed live, because interleaving several concurrent pytest
-    streams into one log makes failures unattributable. Each block is
-    printed the moment that shard finishes, so one shard hanging until the
-    job timeout still leaves the others' complete output in the log --
-    which a single serial process could not do.
+    Ordinary output stays grouped under its shard's final banner. Only the
+    timing plugin's module records stream immediately, under a shard label,
+    so a job timeout leaves the unfinished module and prior module timings.
+    These records are diagnostics only; every process exit still governs.
     """
 
-    def _run(index: int) -> tuple[int, int, str]:
-        completed = subprocess.run(
-            pytest_argv(shards[index], python=python),
+    output_lock = threading.Lock()
+
+    def _run(index: int) -> tuple[int, int, str, float]:
+        started = time.monotonic()
+        captured: list[str] = []
+        with subprocess.Popen(
+            pytest_argv(shards[index], python=python, progress=True),
             cwd=root,
-            check=False,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-        )
-        return index, completed.returncode, completed.stdout + completed.stderr
+            bufsize=1,
+        ) as process:
+            assert process.stdout is not None
+            for line in process.stdout:
+                if line.startswith("CI_MODULE "):
+                    with output_lock:
+                        print(f"--- shard {index + 1}/{len(shards)} progress --- "
+                              + line.rstrip("\n"), flush=True)
+                else:
+                    captured.append(line)
+            returncode = process.wait()
+        elapsed = max(0.0, time.monotonic() - started)
+        return index, returncode, "".join(captured), elapsed
 
     codes: dict[int, int] = {}
     with ThreadPoolExecutor(max_workers=len(shards)) as pool:
         futures = [pool.submit(_run, index) for index in range(len(shards))]
         for future in as_completed(futures):
-            index, returncode, output = future.result()
+            index, returncode, output, elapsed = future.result()
             codes[index] = returncode
-            print(
-                f"--- shard {index + 1}/{len(shards)} "
-                f"({len(shards[index])} modules) exit={returncode} ---",
-                flush=True,
-            )
-            print(output, end="" if output.endswith("\n") else "\n", flush=True)
+            with output_lock:
+                print(
+                    f"--- shard {index + 1}/{len(shards)} "
+                    f"({len(shards[index])} modules) exit={returncode} elapsed_s={elapsed:.2f} ---",
+                    flush=True,
+                )
+                print(output, end="" if output.endswith("\n") else "\n", flush=True)
 
     # Lowest shard index wins so the reported code is stable across runs
     # rather than depending on which shard happened to finish first.

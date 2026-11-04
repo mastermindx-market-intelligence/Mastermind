@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import contextlib
 import errno
 import inspect
 import json
@@ -808,6 +809,19 @@ class AgentDialogueService:
             }:
                 raise DialogueServiceError("INTERNAL_ERROR")
             return {"attestation": RELAY_PARENT_ATTESTATION, **result}
+        if operation == "read_bound_parent":
+            values = _exact_mapping(args, {"context", "thread_ts"})
+            if not isinstance(values["thread_ts"], str):
+                raise DialogueServiceError("REQUEST_INVALID")
+            result = self.engine_result(
+                await engine.read_bound_parent(
+                    context=_context_v2(values["context"]),
+                    thread_ts=values["thread_ts"],
+                )
+            )
+            if not isinstance(result, dict) or set(result) != {"thread_ts", "parent"}:
+                raise DialogueServiceError("INTERNAL_ERROR")
+            return {"attestation": RELAY_PARENT_ATTESTATION, **result}
         if operation == "ensure_thread":
             values = _exact_mapping(args, {"context", "created_at"})
             if not isinstance(values["created_at"], str):
@@ -903,6 +917,7 @@ async def call_service(
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     timeout_seconds: float = 30.0,
     before_write: Callable[[], Any] | None = None,
+    commit_fence: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     path = Path(socket_path)
     if (
@@ -928,6 +943,8 @@ async def call_service(
         and args.get("send_protocol") == EXACT_SEND_PROTOCOL
     )
     exact_send_fingerprint = None
+    if commit_fence is not None and (not exact_send or not callable(commit_fence)):
+        raise DialogueServiceError("REQUEST_INVALID")
     if exact_send:
         message = args.get("message")
         exact_send_fingerprint = (
@@ -1042,11 +1059,20 @@ async def call_service(
         commit = _canonical_json(
             {"commit": "COMMIT", "fingerprint": expected_fingerprint}
         )
+        commit_started = False
         try:
-            writer.write(commit)
+            # The host's synchronous fence encloses the final ownership check
+            # and COMMIT handoff without yielding the event loop. Carrier reads
+            # and response waits stay outside any Runtime write transaction.
+            # This is a local COMMIT boundary, not proof of provider execution.
+            with (contextlib.nullcontext() if commit_fence is None else commit_fence()):
+                commit_started = True
+                writer.write(commit)
             await asyncio.wait_for(writer.drain(), timeout=timeout_seconds)
         except Exception:
-            raise DialogueServiceError("SEND_EFFECT_UNKNOWN") from None
+            raise DialogueServiceError(
+                "SEND_EFFECT_UNKNOWN" if commit_started else "SERVICE_UNAVAILABLE"
+            ) from None
         response = await read_frame(effect_code="SEND_EFFECT_UNKNOWN")
         terminal = terminal_response(response, effect_code="SEND_EFFECT_UNKNOWN")
         if terminal is None:

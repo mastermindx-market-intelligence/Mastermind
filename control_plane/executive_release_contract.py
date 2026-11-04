@@ -38,6 +38,8 @@ __all__ = [
     "validate_release_terminal_receipt",
     "validate_release_prestart_reservation",
     "validate_release_prestart_cancellation",
+    "validate_release_publication_intent",
+    "validate_release_recovery_origin",
 ]
 
 _MAX_BYTES = 16 * 1024
@@ -739,7 +741,7 @@ def _validate_rollback(value: Any, outcome: str, before: Mapping[str, Any]) -> N
     )
 
 
-def _validate_terminal_receipt(
+def _validate_legacy_terminal_receipt(
     value: Any,
     status: Mapping[str, Any],
     approval: Mapping[str, Any],
@@ -810,7 +812,7 @@ def _validate_terminal_receipt(
     return v
 
 
-def _validated_status_fields(
+def _validated_legacy_status_fields(
     value: Any, expected_approval: Any, *, validate_receipt: bool
 ) -> tuple[dict[str, Any], ReleaseRecord]:
     # The expected approval is revalidated on every path. A caller-constructed
@@ -939,10 +941,115 @@ def _validated_status_fields(
     # grammar: the canonical Runtime producer owns its derivation, and no
     # durable Event write or maintenance exclusion is proved here.
     if state in _TERMINAL_STATES and validate_receipt:
-        v["terminal_receipt"] = _validate_terminal_receipt(
+        v["terminal_receipt"] = _validate_legacy_terminal_receipt(
             v["terminal_receipt"], v, approval, "terminal_receipt"
         )
     return v, approval
+
+
+_V2_STATUS_SCHEMA = "mastermind.executive_release_terminal_status/v2"
+_V2_RECEIPT_SCHEMA = "mastermind.executive_release_terminal_receipt/v2"
+_V2_START_FIELDS = " before start_deadline_monotonic_ns root_qualification_digest"
+_V2_RECEIPT_FIELDS = " after_actuator_generation publication_intent_digest recovery_origin_digest"
+
+
+def _publication_start_from_status(status):
+    return {
+        "schema": "mastermind.executive_release_publication_start/v1",
+        **{key: status[key] for key in (
+            "operation_key", "request_fingerprint", "root_qualification_digest",
+            "actuator_generation", "started_at_ms", "start_deadline_monotonic_ns",
+            "before")},
+    }
+
+
+def _validate_terminal_receipt(value, status, approval, field):
+    if status["schema"] == _STATUS_SCHEMA:
+        return _validate_legacy_terminal_receipt(value, status, approval, field)
+    receipt = _object(value, _RECEIPT_FIELDS + _V2_RECEIPT_FIELDS,
+                      field, _V2_RECEIPT_SCHEMA)
+    # Keep all legacy approval/content/rollback/timing joins. No schema escape.
+    old = {k: receipt[k] for k in _RECEIPT_FIELDS.split()}
+    old["schema"] = _RECEIPT_SCHEMA
+    _validate_legacy_terminal_receipt(old, status, approval, field)
+    if receipt["outcome"] not in (_SUCCEEDED, _ROLLED_BACK):
+        _fail("outcome", "NO_APPLY_PROOF_UNAVAILABLE")
+    _integer(receipt["after_actuator_generation"], "after_actuator_generation", 1)
+    _equal(receipt["after_actuator_generation"], status["actuator_generation"] +
+           (1 if receipt["outcome"] == _SUCCEEDED else 2), "after_actuator_generation")
+    for key, record_key in (("publication_intent_digest", "publication_intent"),
+                            ("recovery_origin_digest", "recovery_origin")):
+        _digest(receipt[key], key)
+        _equal(receipt[key], _hash(status[record_key]), key)
+    _equal(canonical_release_bytes(receipt["before"]),
+           canonical_release_bytes(status["before"]), "before")
+    if receipt["completed_at_ms"] < status["publication_intent"]["intent_at_ms"]:
+        _fail("completed_at_ms", "ORDER")
+    return receipt
+
+
+def _validated_status_fields(value, expected_approval, *, validate_receipt):
+    # Preserve the closed historical protocol, including old terminal records.
+    if not isinstance(value, Mapping):
+        _fail("status", "OBJECT_REQUIRED")
+    snapshot = _plain(value)
+    canonical_release_bytes(snapshot)
+    if snapshot.get("schema") == _STATUS_SCHEMA:
+        return _validated_legacy_status_fields(snapshot, expected_approval,
+                                               validate_receipt=validate_receipt)
+    state = snapshot.get("state")
+    allowed = ("STARTED", "PUBLICATION_INTENT", "PUBLISHED",
+               "BROKER_RESTART_PENDING", "RECOVERING", _SUCCEEDED, _ROLLED_BACK)
+    _enum(state, "state", allowed)
+    fields = _STATUS_COMMON_FIELDS + _STATUS_RECORDED_FIELDS + _V2_START_FIELDS
+    if state != "STARTED":
+        fields += " publication_intent"
+    recovering = state in ("RECOVERING", _SUCCEEDED, _ROLLED_BACK)
+    if recovering:
+        fields += " recovery_origin"
+    if state in _TERMINAL_STATES:
+        fields += _STATUS_RECEIPT_FIELD
+    status = _object(snapshot, fields, "status", _V2_STATUS_SCHEMA)
+    old_fields = _status_field_set("STARTED" if state == "PUBLICATION_INTENT" else state)
+    old = {k: status[k] for k in old_fields.split()}
+    old["schema"] = _STATUS_SCHEMA
+    if state == "PUBLICATION_INTENT":
+        old["state"] = "STARTED"
+    _, approval = _validated_legacy_status_fields(old, expected_approval,
+                                                  validate_receipt=False)
+    n = _integer(status["actuator_generation"], "actuator_generation", 1, _MAX_INT - 2)
+    _integer(status["start_deadline_monotonic_ns"], "start_deadline_monotonic_ns", 1)
+    _digest(status["root_qualification_digest"], "root_qualification_digest")
+    if status["root_qualification_digest"] == "0" * 64:
+        _fail("root_qualification_digest", "ZERO")
+    before = _validate_installed_identity(status["before"], "before")
+    effect = approval["normalized_requested_effect"]
+    for key, wanted in (
+        ("release_commit", effect["from_release_commit"]),
+        ("release_tree", effect["from_release_tree"]),
+        ("installed_manifest_digest", effect["from_installed_manifest_digest"]),
+        ("configuration_digest", status["preconditions"]["installed_configuration_digest"]),
+        ("broker_source_commit", before["release_commit"]),
+        ("broker_source_tree", before["release_tree"]),
+    ):
+        _equal(before[key], wanted, "before." + key)
+    status["before"] = before
+    generation = {"STARTED": 1, "PUBLICATION_INTENT": 2,
+                  "PUBLISHED": 3, "BROKER_RESTART_PENDING": 4}.get(state)
+    if state != "STARTED":
+        status["publication_intent"] = validate_release_publication_intent(
+            status["publication_intent"], expected_start=_publication_start_from_status(status))
+    if recovering:
+        status["recovery_origin"] = validate_release_recovery_origin(
+            status["recovery_origin"], expected_intent=status["publication_intent"],
+            expected_start=_publication_start_from_status(status))
+        generation = status["recovery_origin"]["from_journal_generation"] + (
+            1 if state == "RECOVERING" else 2)
+    _equal(status["journal_generation"], generation, "journal_generation")
+    if state in _TERMINAL_STATES and validate_receipt:
+        status["terminal_receipt"] = _validate_terminal_receipt(
+            status["terminal_receipt"], status, approval, "terminal_receipt")
+    return status, approval
 
 
 def validate_release_terminal_status(
@@ -1020,6 +1127,29 @@ _CANCELLATION_REASONS = (
     "PRECONDITIONS_CHANGED",
     "TARGET_OBSERVATION_CHANGED",
 )
+_PUBLICATION_START_SCHEMA = "mastermind.executive_release_publication_start/v1"
+_PUBLICATION_START_FIELDS = (
+    "schema operation_key request_fingerprint root_qualification_digest"
+    " actuator_generation started_at_ms start_deadline_monotonic_ns before"
+)
+_PUBLICATION_INTENT_SCHEMA = "mastermind.executive_release_publication_intent/v1"
+_PUBLICATION_INTENT_FIELDS = (
+    "schema operation_key request_fingerprint root_qualification_digest"
+    " start_actuator_generation target_actuator_generation"
+    " rollback_actuator_generation before_digest"
+    " original_deadline_monotonic_ns intent_at_ms intent_monotonic_ns"
+    " intent_journal_generation"
+)
+_RECOVERY_ORIGIN_SCHEMA = "mastermind.executive_release_recovery_origin/v1"
+_RECOVERY_ORIGIN_FIELDS = (
+    "schema operation_key request_fingerprint publication_intent_digest"
+    " from_state from_journal_generation"
+)
+_PUBLICATION_PHASES = {
+    "PUBLICATION_INTENT": 2,
+    "PUBLISHED": 3,
+    "BROKER_RESTART_PENDING": 4,
+}
 _RESERVATION_COMMON_DIGEST_FIELDS = (
     "request_fingerprint approval_evidence_digest"
     " authenticated_principal_digest effective_grant_digest"
@@ -1352,4 +1482,108 @@ def validate_release_prestart_cancellation(
             == reservation["target_observation_digest"]
         ):
             _fail("reason", "PREDICATE")
+    return _freeze(v)
+
+
+def validate_release_publication_intent(
+    value: Any, *, expected_start: Any
+) -> ReleaseRecord:
+    """Validate a detached operation-local plan; never allocate or authorize.
+
+    The supplied context is structural evidence, not publisher custody.
+    """
+    start = _object(
+        expected_start,
+        _PUBLICATION_START_FIELDS,
+        "expected_start",
+        _PUBLICATION_START_SCHEMA,
+    )
+    _request_ref(start["operation_key"])
+    for key in ("request_fingerprint", "root_qualification_digest"):
+        _digest(start[key], key)
+        if start[key] == "0" * 64:
+            _fail(key, "ZERO")
+    start_actuator_generation = _integer(
+        start["actuator_generation"], "actuator_generation", 1
+    )
+    _integer(start["started_at_ms"], "started_at_ms")
+    original_deadline = _integer(
+        start["start_deadline_monotonic_ns"], "start_deadline_monotonic_ns", 1
+    )
+    start["before"] = _validate_installed_identity(start["before"], "before")
+    for key, reference in (("broker_source_commit", "release_commit"),
+                           ("broker_source_tree", "release_tree")):
+        _equal(start["before"][key], start["before"][reference], "before." + key)
+
+    v = _object(value, _PUBLICATION_INTENT_FIELDS, "intent", _PUBLICATION_INTENT_SCHEMA)
+    _equal(v["operation_key"], start["operation_key"], "operation_key")
+    _equal(
+        v["request_fingerprint"], start["request_fingerprint"], "request_fingerprint"
+    )
+    _equal(
+        v["root_qualification_digest"],
+        start["root_qualification_digest"],
+        "root_qualification_digest",
+    )
+    for key in ("request_fingerprint", "root_qualification_digest", "before_digest"):
+        _digest(v[key], key)
+    _equal(v["before_digest"], _hash(start["before"]), "before_digest")
+
+    declared_start_generation = _integer(
+        v["start_actuator_generation"], "start_actuator_generation", 1
+    )
+    target_generation = _integer(
+        v["target_actuator_generation"], "target_actuator_generation", 1
+    )
+    rollback_generation = _integer(
+        v["rollback_actuator_generation"], "rollback_actuator_generation", 1
+    )
+    if (
+        declared_start_generation != start_actuator_generation
+        or target_generation != declared_start_generation + 1
+        or rollback_generation != declared_start_generation + 2
+        or rollback_generation > _MAX_INT
+    ):
+        _fail("start_actuator_generation", "SEQUENCE")
+    _equal(
+        v["original_deadline_monotonic_ns"],
+        original_deadline,
+        "original_deadline_monotonic_ns",
+    )
+    intent_at_ms = _integer(v["intent_at_ms"], "intent_at_ms")
+    _integer(
+        v["intent_monotonic_ns"], "intent_monotonic_ns", 1, original_deadline - 1
+    )
+    if intent_at_ms < start["started_at_ms"]:
+        _fail("intent_at_ms", "ORDER")
+    _integer(v["intent_journal_generation"], "intent_journal_generation", 2, 2)
+    return _freeze(v)
+
+
+def validate_release_recovery_origin(
+    value: Any, *, expected_intent: Any, expected_start: Any
+) -> ReleaseRecord:
+    """Validate the durable publication phase from which recovery began."""
+    intent = validate_release_publication_intent(
+        expected_intent, expected_start=expected_start
+    )
+    v = _object(
+        value, _RECOVERY_ORIGIN_FIELDS, "origin", _RECOVERY_ORIGIN_SCHEMA
+    )
+    _equal(v["operation_key"], intent["operation_key"], "operation_key")
+    _equal(
+        v["request_fingerprint"],
+        intent["request_fingerprint"],
+        "request_fingerprint",
+    )
+    _digest(v["publication_intent_digest"], "publication_intent_digest")
+    _equal(v["publication_intent_digest"], _hash(intent), "publication_intent_digest")
+    from_state = _enum(v["from_state"], "from_state", tuple(_PUBLICATION_PHASES))
+    expected_generation = _PUBLICATION_PHASES[from_state]
+    _integer(
+        v["from_journal_generation"],
+        "from_journal_generation",
+        expected_generation,
+        expected_generation,
+    )
     return _freeze(v)

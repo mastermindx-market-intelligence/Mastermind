@@ -7,6 +7,7 @@ from pathlib import Path
 import traceback
 
 import pytest
+import copy
 
 from control_plane.executive_authority import ReleaseControllerPolicy
 from control_plane.executive_release_contract import canonical_release_bytes
@@ -137,6 +138,69 @@ def _installed(**changes):
     }
     values.update(changes)
     return json.loads(r.compile_installed_evidence(**values))
+
+
+def _physical_evidence(**changes):
+    value = {
+        "actuator_generation": 7,
+        "before": {
+            "release_commit": COMMIT,
+            "release_tree": TREE,
+            "installed_manifest_digest": "d" * 64,
+            "configuration_digest": _installed()["installed_configuration_digest"],
+            "broker_source_commit": COMMIT,
+            "broker_source_tree": TREE,
+            "broker_binary_digest": "f" * 64,
+            "service_generation_digests": {
+                "control": "1" * 64,
+                "worker": "2" * 64,
+                "relay": "3" * 64,
+                "gateway": "4" * 64,
+                "broker": "5" * 64,
+            },
+        },
+        "publication_operation_key": "release-resident-v2-test-001",
+        "predecessor_evidence_digest": "6" * 64,
+    }
+    value.update(copy.deepcopy(changes))
+    return value
+
+
+def _v2_installed_raw(**physical_changes):
+    policy = _policy()
+    control, broker = _configs()
+    configuration_files = [
+        {"path": "config/control.json", "sha256": hashlib.sha256(control).hexdigest()},
+        {"path": "config/authority_map.yml", "sha256": hashlib.sha256(policy._raw).hexdigest()},
+        {"path": "config/privileged-broker.json", "sha256": hashlib.sha256(broker).hexdigest()},
+    ]
+    configuration_digest = hashlib.sha256(canonical_release_bytes({
+        "schema": "mastermind.executive_installed_configuration_set/v1",
+        "files": configuration_files,
+    })).hexdigest()
+    policy = _policy()
+    control, broker = _configs()
+    physical = _physical_evidence(**physical_changes)
+    if "before" not in physical_changes:
+        physical["before"]["configuration_digest"] = configuration_digest
+    return r.compile_installed_evidence(
+        registration=_registration(),
+        release_commit=COMMIT,
+        release_tree=TREE,
+        control_config_bytes=control,
+        broker_config_bytes=broker,
+        authority_map_bytes=policy._raw,
+        python_runtime_provenance_digest=PROVENANCE,
+        provider_attestation_bytes=b'{"accepted":"fixture"}\n',
+        provider_attestation_observed_at=OBSERVED,
+        issuer_binding_receipt=_issuer(policy),
+        issuer_binding_observed_at=OBSERVED,
+        boot_id=BOOT,
+        policy=policy,
+        app_peer_uid=458,
+        physical_evidence=physical,
+        _now_seconds=NOW,
+    )
 
 
 def test_registration_is_exact_canonical_disabled_document():
@@ -342,6 +406,196 @@ def test_installed_evidence_has_exact_digests_ordering_and_disarming():
     }
 
 
+def test_v2_physical_evidence_compiles_exact_canonical_test_document():
+    """Synthetic evidence only; this is test data, not installed state."""
+    raw = _v2_installed_raw()
+    value = json.loads(raw)
+    physical = _physical_evidence()
+    assert value["schema"] == (
+        "mastermind.executive_release_owner_installed_evidence/v2"
+    )
+    assert set(value) == r._EVIDENCE_V2_FIELDS
+    assert value["actuator_generation"] == 7
+    physical["before"]["configuration_digest"] = value["before"]["configuration_digest"]
+    assert value["before"] == physical["before"]
+    assert value["publication_operation_key"] == physical["publication_operation_key"]
+    assert value["predecessor_evidence_digest"] == (
+        physical["predecessor_evidence_digest"]
+    )
+    assert raw == canonical_release_bytes(value) + b"\n"
+    assert all(
+        value["production_disarming"][name] is False
+        for name in value["production_disarming"]
+        if name != "schema"
+    )
+
+
+def test_v2_compile_preserves_supplied_generation_and_rejects_allocation_inputs():
+    raw = _v2_installed_raw(actuator_generation=(1 << 63) - 1)
+    assert json.loads(raw)["actuator_generation"] == (1 << 63) - 1
+    import inspect
+    assert inspect.signature(r.compile_installed_evidence).parameters[
+        "physical_evidence"
+    ].default is None
+
+
+@pytest.mark.parametrize(
+    "generation",
+    [0, True, False, -1, 1 << 63, "7", 7.0],
+)
+def test_v2_generation_is_exact_bounded_integer(generation):
+    with pytest.raises(
+        r.ReleaseOwnerInputError, match="^EVIDENCE_ACTUATOR_GENERATION$"
+    ):
+        _v2_installed_raw(actuator_generation=generation)
+
+
+@pytest.mark.parametrize(
+    "change,code",
+    [
+        ({"extra_v2": 7}, "EVIDENCE_V2_ADDITIONS"),
+        ({}, "EVIDENCE_V2_ADDITIONS"),
+        ({"publication_operation_key": ""}, "EVIDENCE_OPERATION_KEY"),
+        ({"publication_operation_key": True}, "EVIDENCE_OPERATION_KEY"),
+        ({"predecessor_evidence_digest": "0" * 64}, "EVIDENCE_PREDECESSOR"),
+        ({"predecessor_evidence_digest": "A" * 64}, "EVIDENCE_PREDECESSOR"),
+    ],
+)
+def test_v2_refuses_extra_missing_and_invalid_physical_fields(change, code):
+    def apply(document):
+        if "extra_v2" in change:
+            document["extra_v2"] = change["extra_v2"]
+        elif change:
+            document.update(change)
+        if not change:
+            document.pop("predecessor_evidence_digest")
+
+    def changed(**arguments):
+        physical = _physical_evidence()
+        physical["before"]["configuration_digest"] = arguments.pop(
+            "configuration_digest"
+        )
+        apply(physical)
+        return r.compile_installed_evidence(
+            registration=_registration(),
+            release_commit=COMMIT,
+            release_tree=TREE,
+            control_config_bytes=control,
+            broker_config_bytes=broker,
+            authority_map_bytes=policy._raw,
+            python_runtime_provenance_digest=PROVENANCE,
+            provider_attestation_bytes=b'{"accepted":"fixture"}\n',
+            provider_attestation_observed_at=OBSERVED,
+            issuer_binding_receipt=_issuer(policy),
+            issuer_binding_observed_at=OBSERVED,
+            boot_id=BOOT,
+            policy=policy,
+            app_peer_uid=458,
+            physical_evidence=physical,
+            _now_seconds=NOW,
+        )
+
+    policy = _policy()
+    control, broker = _configs()
+    configuration_files = [
+        {"path": "config/control.json", "sha256": hashlib.sha256(control).hexdigest()},
+        {"path": "config/authority_map.yml", "sha256": hashlib.sha256(policy._raw).hexdigest()},
+        {"path": "config/privileged-broker.json", "sha256": hashlib.sha256(broker).hexdigest()},
+    ]
+    aggregate = hashlib.sha256(canonical_release_bytes({
+        "schema": "mastermind.executive_installed_configuration_set/v1",
+        "files": configuration_files,
+    })).hexdigest()
+    with pytest.raises(r.ReleaseOwnerInputError, match=f"^{code}$"):
+        changed(configuration_digest=aggregate)
+
+
+@pytest.mark.parametrize(
+    "field,value,code",
+    [
+        ("release_commit", "9" * 40, "EVIDENCE_BEFORE_RELEASE_MISMATCH"),
+        ("release_tree", "9" * 40, "EVIDENCE_BEFORE_RELEASE_MISMATCH"),
+        ("broker_source_commit", "9" * 40, "EVIDENCE_BEFORE_RELEASE_MISMATCH"),
+        ("broker_source_tree", "9" * 40, "EVIDENCE_BEFORE_RELEASE_MISMATCH"),
+        ("installed_manifest_digest", "0" * 64, "EVIDENCE_BEFORE_DIGEST"),
+        ("broker_binary_digest", "0" * 64, "EVIDENCE_BEFORE_DIGEST"),
+        ("configuration_digest", 7, "EVIDENCE_BEFORE_DIGEST"),
+    ],
+)
+def test_v2_before_field_joins_and_digests_are_exact(field, value, code):
+    before = _physical_evidence()["before"]
+    aggregate = json.loads(_v2_installed_raw())["before"]["configuration_digest"]
+    before["configuration_digest"] = aggregate
+    before[field] = value
+    with pytest.raises(r.ReleaseOwnerInputError, match=f"^{code}$"):
+        _v2_installed_raw(before=before)
+
+
+@pytest.mark.parametrize(
+    "role",
+    ["control", "worker", "relay", "gateway", "broker"],
+)
+def test_v2_rejects_each_nonzero_role_digest_substitute(role):
+    before = _physical_evidence()["before"]
+    before["service_generation_digests"][role] = "0" * 64
+    with pytest.raises(r.ReleaseOwnerInputError, match="^EVIDENCE_SERVICE_DIGEST$"):
+        _v2_installed_raw(before=before)
+
+
+@pytest.mark.parametrize(
+    "mutate,code",
+    [
+        (
+            lambda before: before.update(
+                configuration_digest="aaaaaaaa" + "e" * 56
+            ),
+            "EVIDENCE_CONFIG_JOIN",
+        ),
+        (lambda before: before.pop("gateway"), "EVIDENCE_SERVICE_FIELDS"),
+        (lambda before: before.update(extra="x"), "EVIDENCE_BEFORE_FIELDS"),
+    ],
+)
+def test_v2_rejects_wrong_configuration_and_closed_roles(mutate, code):
+    before = json.loads(_v2_installed_raw())["before"]
+    roles = before["service_generation_digests"]
+    mutate(roles if code == "EVIDENCE_SERVICE_FIELDS" else before)
+    with pytest.raises(r.ReleaseOwnerInputError, match=f"^{code}$"):
+        _v2_installed_raw(before=before)
+
+
+def test_v2_decoder_requires_canonical_bytes_and_returns_deep_detached_mapping():
+    raw = _v2_installed_raw()
+    decoded = r.decode_installed_evidence_v2(raw)
+    decoded["before"]["service_generation_digests"]["worker"] = "changed"
+    decoded["publication_operation_key"] = "changed"
+    assert json.loads(raw)["publication_operation_key"] == (
+        "release-resident-v2-test-001"
+    )
+    assert json.loads(raw)["before"]["service_generation_digests"]["worker"] == "2" * 64
+    for noncanonical in (
+        raw[:-1],
+        canonical_release_bytes(json.loads(raw)),
+        raw + b" ",
+    ):
+        with pytest.raises(r.ReleaseOwnerInputError):
+            r.decode_installed_evidence_v2(noncanonical)
+
+
+def test_v2_decoder_rejects_mixed_v1_and_inherited_shape_drift():
+    v1 = _installed()
+    with pytest.raises(r.ReleaseOwnerInputError, match="^EVIDENCE_V2_FIELDS$"):
+        r.decode_installed_evidence_v2(canonical_release_bytes(v1) + b"\n")
+    mixed = {**v1, **_physical_evidence()}
+    with pytest.raises(r.ReleaseOwnerInputError, match="^EVIDENCE_V2_SCHEMA$"):
+        r.decode_installed_evidence_v2(canonical_release_bytes(mixed) + b"\n")
+    v2 = json.loads(_v2_installed_raw())
+    v2["registration_generation"] = True
+    with pytest.raises(
+        r.ReleaseOwnerInputError, match="^EVIDENCE_REGISTRATION_GENERATION$"
+    ):
+        r.decode_installed_evidence_v2(canonical_release_bytes(v2) + b"\n")
+
+
 @pytest.mark.parametrize("field", ["provider_attestation_bytes", "control_config_bytes", "broker_config_bytes", "authority_map_bytes"])
 def test_installed_evidence_refuses_empty_raw_inputs(field):
     with pytest.raises(r.ReleaseOwnerInputError):
@@ -481,3 +735,24 @@ def test_module_has_no_io_environment_network_or_random_surface():
 def test_canonical_file_bytes_refuses_float_control_and_nonascii_text(value):
     with pytest.raises(r.ReleaseOwnerInputError):
         r.canonical_file_bytes(value)
+
+
+@pytest.mark.parametrize("field,replacement", [
+    ("issuer_binding_owner_installation_id", "22222222-2222-4222-8222-222222222222"),
+    ("issuer_binding_boot_id", "22222222-2222-4222-8222-222222222222"),
+    ("issuer_binding_release_commit", "9" * 40),
+    ("provider_attestation_observed_at", "2026-02-30T00:00:00Z"),
+    ("issuer_binding_observed_at", "2026-09-30T00:00:00+00:00"),
+])
+def test_v2_decoder_rechecks_inherited_identity_and_timestamp(field, replacement):
+    value = json.loads(_v2_installed_raw())
+    value[field] = replacement
+    with pytest.raises(r.ReleaseOwnerInputError):
+        r.decode_installed_evidence_v2(canonical_release_bytes(value) + b"\n")
+
+
+def test_v2_decoder_checks_configuration_join_without_compiler():
+    value = json.loads(_v2_installed_raw())
+    value["before"]["configuration_digest"] = "9" * 64
+    with pytest.raises(r.ReleaseOwnerInputError, match="^EVIDENCE_CONFIG_JOIN$"):
+        r.decode_installed_evidence_v2(canonical_release_bytes(value) + b"\n")

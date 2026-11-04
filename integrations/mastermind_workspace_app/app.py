@@ -1,39 +1,23 @@
-"""integrations.mastermind_workspace_app.app — the fixed authenticated read edge.
+"""Fixed authenticated Workspace reads and explicit Control Room actions.
 
-Two Starlette sibling routes only:
+Existing READ routes retain their bounded projection and release-time
+authorization checks. The four fixed Control Room POST routes additionally
+require the selected operator grant, derive their private principal/expiry
+from the existing A1 JWT owner, and preserve the original action's disposition.
 
-* ``GET /workspace/programs/current`` — the current-programs observation.
-* ``GET /workspace/mission/current?work_ref=WS:...&root_job_id=JOB-...`` —
-  the current mission observation for one named worktree + root job.
-
-Both routes share an identical envelope:
-
-* Authenticate via :data:`integrations.mastermind_executive_app.app._authenticate`,
-  which is the existing A1 ``JwtAuthenticator`` wiring for resource-policy
-  RS256/JWKS bearer verification (the very same code path that
-  ``/v1/tools/executive_state`` uses).
-* Reject any non-empty request body by refusing the first non-empty chunk
-  before the client is ever consulted.
-* Reject unknown or duplicate query parameters, plus all raw-path alias
-  spellings (encoded separators, duplicate slashes), and trailing-slash
-  variants: the same defense profile BSC-E1 applies on its own routes.
-* Verify the principal is the one the installed owner client permits.
-* Send exactly one closed frame to the host-installed client
-  (``config.client.request(frame)``) and translate its closed envelope back
-  to a typed HTTP status without ever leaking internal exception text.
-
-The module holds NO durable state, NO in-memory cache, NO token store, and
-NO Runtime import — the canonical workspace read primitives live behind the
-host-installed client; this file is a closed transport framing only.
+All routes use the same installed client and exact-path fences. This module
+owns transport framing only: no Runtime, durable state, cache or token store.
 """
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import inspect
 import json
 import time
 from collections.abc import Callable, Mapping
 from typing import Any
+from types import MappingProxyType
 from urllib.parse import unquote
 
 from starlette.applications import Starlette
@@ -45,6 +29,8 @@ from integrations.business_mcp_auth.contracts import VerifiedPrincipal
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.mastermind_executive_app.app import _authenticate
 from integrations.mastermind_workspace_app import contract
+from common import workspace_control_room_action_contract as ccr_action
+from control_plane.workspace_owned_task import await_owned
 
 __all__ = ["WorkspaceAppConfig", "create_workspace_app"]
 
@@ -61,11 +47,25 @@ _PROGRAMS_ROUTE = "/workspace/programs/current"
 _WORK_ROUTE = "/workspace/work/current"
 _MISSION_ROUTE = "/workspace/mission/current"
 _MISSION_V3_ROUTE = "/workspace/mission/v3/current"
+_MISSION_V4_ROUTE = "/workspace/mission/v4/current"
 _RESULT_ROUTE = "/workspace/result/current"
+_RESULT_REFERENCES_ROUTE = "/workspace/result-references/current"
+_PLAN_ROUTE = "/workspace/plan/current"
+_ACTIVITY_ROUTE = "/workspace/operator/activity/current"
+_FABRIC_CATALOG_ROUTE = "/workspace/fabric/catalog/current"
+_FABRIC_STATUS_ROUTE = "/workspace/fabric/status/current"
+_ACTIVITY_QUERY_KEYS = frozenset({"work_ref", "root_job_id", "job_id", "attempt_id"})
+_CCR_STATE_ROUTE = "/workspace/control-room/state/current"
+_CCR_DISCOVER_ROUTE = "/workspace/control-room/discover/current"
+_CCR_ACTION_ROUTES = MappingProxyType({
+    operation: "/workspace/control-room/" + operation
+    for operation in ("open", "bind", "unbind", "refresh-builds")
+})
 _MISSION_QUERY_KEYS = frozenset({"work_ref", "root_job_id"})
 _RESULT_QUERY_KEYS = frozenset(
     {"work_ref", "root_job_id", "job_id", "attempt_id", "result_envelope_digest"}
 )
+_RESULT_REFERENCES_QUERY_KEYS = frozenset({"work_ref", "root_job_id"})
 
 
 def _envelope_response(envelope: Mapping[str, Any]) -> JSONResponse:
@@ -321,16 +321,39 @@ def _mission_selection(query: Mapping[str, str]) -> tuple[dict[str, str] | None,
 
 def _dispatch_v2_selection(operation: str, query: Mapping[str, str]) -> dict[str, str] | None:
     """Dispatch the v2 selection validator by frozen operation."""
+    if operation == "mission_v4_original":
+        from common.product_acceptance_acquisition_contract import selection
+        try:
+            if (set(query) != {"work_ref", "root_job_id", "read_mode"}
+                    or query["read_mode"] != "original_owner"):
+                return None
+            return selection({k: query[k] for k in ("work_ref", "root_job_id")})
+        except (TypeError, ValueError):
+            return None
     if operation == "result":
         return _v2_selection(query)
-    if operation == "mission_v3":
+    if operation == "result_references":
         return _mission_v3_selection(query)
+    if operation == "retained_activity":
+        from common import executive_workspace_activity_contract as activity
+        try:
+            return activity.selection(dict(query))
+        except (TypeError, ValueError):
+            return None
+    if operation in ("mission_v3", "admitted_plan"):
+        return _mission_v3_selection(query)
+    if operation == "mission_v4":
+        from common.product_acceptance_read_contract import selection
+        try:
+            return selection(dict(query))
+        except (TypeError, ValueError):
+            return None
     return None
 
 
 @dataclasses.dataclass(frozen=True)
 class WorkspaceAppConfig:
-    """One host-closed configuration bundle for the workspace read app.
+    """One host-closed configuration bundle for the existing Workspace App.
 
     Every field is operator-supplied; none is read from a request.  The
     constructor rigidly enforces the closed binding between the
@@ -343,8 +366,18 @@ class WorkspaceAppConfig:
     now: Callable[[], int] = dataclasses.field(default=lambda: int(time.time()))
     authorize_principal: Callable[[VerifiedPrincipal], bool] | None = None
     client: Any = None
+    authorize_discovery: Callable[[VerifiedPrincipal], bool] | None = None
+    authorize_actions: Mapping[str, Callable[[VerifiedPrincipal], bool]] | None = None
 
     def __post_init__(self) -> None:
+        if self.authorize_discovery is not None and not callable(self.authorize_discovery):
+            raise ValueError("authorize_discovery must be callable or absent")
+        if self.authorize_actions is not None:
+            if (type(self.authorize_actions) is not dict
+                    or set(self.authorize_actions) != ccr_action.OPERATIONS
+                    or any(not callable(value) for value in self.authorize_actions.values())):
+                raise ValueError("authorize_actions must select exactly four callable owners")
+            object.__setattr__(self, "authorize_actions", MappingProxyType(dict(self.authorize_actions)))
         if not isinstance(self.authenticator, JwtAuthenticator):
             raise ValueError("authenticator must be a JwtAuthenticator")
         if self.now is None or not callable(self.now):
@@ -634,6 +667,234 @@ async def mission_current(
     return _envelope_response(envelope)
 
 
+async def control_room_current(
+    request: Request, *, config: WorkspaceAppConfig, operation: str,
+) -> JSONResponse:
+    """Authenticated incumbent CCR READ with a separate Discovery grant."""
+    from common.workspace_control_room_read_contract import (
+        FRAME_SCHEMA as CCR_READ_FRAME_SCHEMA, validate_frame as validate_ccr_read_frame,
+    )
+    if operation not in {"state", "discover"}:
+        return _refuse_json(400, "invalid_input")
+    principal_or_response = await _authenticate(
+        request, config.authenticator, clock=config.now,
+    )
+    if isinstance(principal_or_response, JSONResponse):
+        return _with_no_store(principal_or_response)
+    principal = principal_or_response
+    refused = await _reject_any_body(request)
+    if refused is not None:
+        return refused
+    if request.scope.get("query_string"):
+        return _refuse_json(400, "invalid_input")
+    authorizers = ((config.authorize_principal, config.authorize_discovery)
+                   if operation == "discover" else (config.authorize_principal,))
+    try:
+        stamps = _control_room_permissions(authorizers, principal)
+        frame = validate_ccr_read_frame({
+            "schema": CCR_READ_FRAME_SCHEMA, "operation": operation,
+            "principal": contract.principal_frame(principal),
+        })
+    except Exception:
+        return _refuse_json(403, "access_denied")
+    try:
+        envelope = await config.client.request(frame)
+    except Exception:
+        return _refuse_json(503, "internal_error")
+    try:
+        if _control_room_permissions(authorizers, principal) != stamps:
+            raise ValueError("access_denied")
+        if (config.authorize_principal is not authorizers[0]
+                or (operation == "discover" and config.authorize_discovery is not authorizers[1])):
+            raise ValueError("access_denied")
+        # Permission loaders may block. Expiry is sampled after both gates,
+        # immediately before READ release, never used to rewrite an action.
+        current = config.now()
+        if type(current) is not int or not 0 <= current < principal.expires_at:
+            raise ValueError("access_denied")
+    except Exception:
+        return _refuse_json(403, "access_denied")
+    return _envelope_response(envelope)
+
+
+async def fabric_current(request: Request, *, config: WorkspaceAppConfig, operation: str) -> Response:
+    """Fixed metadata GETs; current entitlement is checked on both boundaries."""
+    from common import executive_workspace_fabric_contract as fabric
+    principal = await _authenticate(request, config.authenticator, clock=config.now)
+    if isinstance(principal, JSONResponse):
+        return _with_no_store(principal)
+    refused = await _reject_any_body(request)
+    if refused is not None:
+        return refused
+    raw_query = request.scope.get("query_string") or b""
+    try:
+        if operation == fabric.CATALOG_OPERATION:
+            if raw_query:
+                raise ValueError("invalid_input")
+            selected = None
+        elif operation == fabric.STATUS_OPERATION:
+            selected = fabric.selection(dict(_decode_query(raw_query)))
+        else:
+            raise ValueError("invalid_input")
+    except (TypeError, ValueError):
+        return _refuse_json(400, "invalid_input")
+    try:
+        authorizer, client = config.authorize_principal, config.client
+        stamps = _control_room_permissions((authorizer,), principal)
+        frame = fabric.validate_frame({"schema": fabric.FRAME_SCHEMA, "operation": operation,
+            "selection": selected, "principal": contract.principal_frame(principal)})
+    except Exception:
+        return _refuse_json(403, "access_denied")
+    try:
+        envelope = await client.request(frame)
+    except Exception:
+        return _refuse_json(503, "source_unavailable")
+    try:
+        if (config.authorize_principal is not authorizer or config.client is not client
+                or _control_room_permissions((authorizer,), principal) != stamps):
+            raise ValueError("access_denied")
+        current = config.now()
+        if type(current) is not int or not 0 <= current < principal.expires_at:
+            raise ValueError("access_denied")
+    except Exception:
+        return _refuse_json(403, "access_denied")
+    if type(envelope) is dict and envelope.get("ok") is False:
+        return _envelope_response(envelope)
+    try:
+        if type(envelope) is not dict or set(envelope) != {"ok", "result"} or envelope["ok"] is not True:
+            raise ValueError("source_unavailable")
+        result = (fabric.validate_catalog(envelope["result"]) if operation == fabric.CATALOG_OPERATION
+            else fabric.status_metadata(envelope["result"], **selected))
+        # Native extra fields are stripped before the public response, even if
+        # an otherwise valid private producer accidentally includes raw fields.
+        raw = contract.bounded_canonical(result, limit=fabric.ceiling(operation))
+    except (TypeError, ValueError, KeyError):
+        return _refuse_json(503, "source_unavailable")
+    return Response(raw, status_code=200, media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
+def _control_room_permissions(authorizers, principal):
+    """Current selected grants on the existing sealed membership owner."""
+    stamps = []
+    for authorize in authorizers:
+        if not callable(authorize) or authorize(principal) is not True:
+            raise ValueError("access_denied")
+        stamp = contract.permission_stamp(authorize, principal)
+        if stamp is None:
+            raise ValueError("access_denied")
+        stamps.append(stamp)
+    return tuple(stamps)
+
+
+def _action_http_response(result):
+    """Expose the qualified action result itself, retaining its disposition."""
+    return Response(
+        ccr_action.canonical(result), status_code=result["status"],
+        media_type="application/json", headers={"Cache-Control": "no-store"},
+    )
+
+
+def _action_refusal(operation, *, code, status):
+    return _action_http_response(ccr_action.refused_result(
+        operation, code=code, status=status,
+    ))
+
+
+async def control_room_action(request: Request, *, config: WorkspaceAppConfig,
+                              operation: str) -> Response:
+    """One fixed action on the existing authenticated App transport.
+
+    Authentication is admission authority. Once the client is invoked, this
+    edge preserves its original effect outcome rather than applying the
+    READ release-time withholding rule to a potentially modifying operation.
+    """
+    if operation not in ccr_action.OPERATIONS:
+        return _refuse_json(400, "invalid_input")
+    principal_or_response = await _authenticate(
+        request, config.authenticator, clock=config.now,
+    )
+    if isinstance(principal_or_response, JSONResponse):
+        return _with_no_store(principal_or_response)
+    principal = principal_or_response
+    if request.scope.get("query_string"):
+        return _action_refusal(operation, code="invalid_input", status=400)
+
+    # Capture both permission and transport selections before streaming.
+    try:
+        client = config.client
+        request_owner = client.request
+        selected = (config.authorize_actions.get(operation)
+                    if config.authorize_actions is not None else None)
+        authorizers = (config.authorize_principal, selected)
+        initial_permission = _control_room_permissions(authorizers, principal)
+    except Exception:
+        return _action_refusal(operation, code="access_denied", status=403)
+
+    content_types = [
+        value for name, value in request.scope.get("headers", ())
+        if name.lower() == b"content-type"
+    ]
+    if (len(content_types) != 1
+            or content_types[0].split(b";", 1)[0].strip().lower() != b"application/json"):
+        return _action_refusal(operation, code="invalid_input", status=400)
+
+    body = bytearray()
+    try:
+        async for chunk in request.stream():
+            if len(body) + len(chunk) > ccr_action.MAX_REQUEST_BYTES:
+                return _action_refusal(operation, code="invalid_input", status=400)
+            body.extend(chunk)
+        payload = ccr_action.decode_payload(bytes(body), operation=operation)
+        frame = ccr_action.validate_frame({
+            "schema": ccr_action.FRAME_SCHEMA, "operation": operation,
+            "principal": contract.principal_frame(principal),
+            "admission_expires_at": principal.expires_at, "payload": payload,
+        })
+    except Exception:
+        return _action_refusal(operation, code="invalid_input", status=400)
+
+    try:
+        if _control_room_permissions(authorizers, principal) != initial_permission:
+            raise ValueError("access_denied")
+        if (config.authorize_principal is not authorizers[0]
+                or config.authorize_actions is None
+                or config.authorize_actions.get(operation) is not authorizers[1]):
+            raise ValueError("access_denied")
+    except Exception:
+        return _action_refusal(operation, code="access_denied", status=403)
+    try:
+        if config.client is not client or client.request != request_owner:
+            raise ValueError("source_unavailable")
+    except Exception:
+        return _action_refusal(operation, code="source_unavailable", status=503)
+    try:
+        instant = config.now()
+        if type(instant) is not int or not 0 <= instant < principal.expires_at:
+            raise ValueError("access_denied")
+    except Exception:
+        return _action_refusal(operation, code="access_denied", status=403)
+
+    # Invocation starts here. No exception after this boundary proves that
+    # the original operation was not dispatched, and there is no retry.
+    try:
+        owned = asyncio.create_task(request_owner(frame))
+        try:
+            envelope = await await_owned(owned)
+        except asyncio.CancelledError:
+            # await_owned retains the same child until terminal. A qualified
+            # completed response survives remembered parent cancellation.
+            if not owned.done() or owned.cancelled():
+                raise
+            envelope = owned.result()
+        if (type(envelope) is not dict or set(envelope) != {"ok", "result"}
+                or envelope["ok"] is not True):
+            raise ValueError("source_unavailable")
+        result = ccr_action.validate_result(envelope["result"], operation=operation)
+    except (Exception, asyncio.CancelledError):
+        result = ccr_action.unknown_result(operation)
+    return _action_http_response(result)
+
+
 def _with_no_store(response: JSONResponse) -> JSONResponse:
     """Attach the canonical ``Cache-Control: no-store`` to an A1 JSONResponse
     in place.  Starlette's :class:`MutableHeaders` supports in-place update,
@@ -692,12 +953,36 @@ async def _dispatch_v2(
         return _refuse_json(403, "access_denied")
 
     try:
-        frame = contract.validate_v2_frame({
-            "schema": contract.FRAME_SCHEMA_V2,
-            "operation": operation,
-            "selection": contract.v2_selection(selection_value, operation),
-            "principal": principal_frame,
-        })
+        if operation == "mission_v4_original":
+            from common import product_acceptance_acquisition_contract as acquisition_contract
+            frame = acquisition_contract.validate_frame({
+                "schema": acquisition_contract.FRAME_SCHEMA, "operation": operation,
+                "selection": selection_value, "principal": principal_frame,
+            })
+        elif operation == "mission_v4":
+            from common import product_acceptance_read_contract as acceptance_contract
+            frame = acceptance_contract.validate_frame({
+                "schema": acceptance_contract.FRAME_SCHEMA, "operation": operation,
+                "selection": selection_value, "principal": principal_frame,
+            })
+        elif operation == "retained_activity":
+            from common import executive_workspace_activity_contract as activity
+            frame = activity.validate_frame({
+                "schema": activity.FRAME_SCHEMA, "operation": activity.OPERATION,
+                "selection": activity.selection(selection_value), "principal": principal_frame,
+            })
+        elif operation == "admitted_plan":
+            frame = contract.validate_v3_frame({
+                "schema": contract.FRAME_SCHEMA_V3, "operation": operation,
+                "selection": contract.v3_selection(selection_value), "principal": principal_frame,
+            })
+        else:
+            frame = contract.validate_v2_frame({
+                "schema": contract.FRAME_SCHEMA_V2,
+                "operation": operation,
+                "selection": contract.v2_selection(selection_value, operation),
+                "principal": principal_frame,
+            })
     except ValueError:
         return _refuse_json(400, "invalid_input")
 
@@ -724,7 +1009,64 @@ async def _dispatch_v2(
             return _refuse_json(403, "access_denied")
     except Exception:
         return _refuse_json(403, "access_denied")
+    if operation in ("admitted_plan", "retained_activity", "result_references") and isinstance(envelope, dict) and envelope.get("ok") is True:
+        body = envelope.get("result")
+        if type(body) is not dict or body.get("selection") != selection_value:
+            return _refuse_json(503, "source_unavailable")
+    if operation == "mission_v4":
+        return _mission_v4_envelope_response(envelope, selection_value)
+    if operation == "mission_v4_original":
+        return _mission_v4_original_envelope_response(envelope, selection_value)
     return response_fn(envelope)
+
+
+def _mission_v4_envelope_response(envelope, selected):
+    from common import product_acceptance_read_contract as acceptance_contract
+    if type(envelope) is dict and envelope.get("ok") is True:
+        try:
+            body = envelope["result"]
+            if (type(body) is not dict or set(body) != {"schema", "mission", "product_acceptance"}
+                    or body["schema"] != acceptance_contract.MISSION_SCHEMA):
+                raise ValueError("source_unavailable")
+            mission = body["mission"]
+            if (type(mission) is not dict or mission.get("schema") != "mastermind.mission_workspace.v3"
+                    or mission["program"]["work_ref"] != selected["work_ref"]
+                    or mission["mission"]["root_job_id"] != selected["root_job_id"]):
+                raise ValueError("source_unavailable")
+            view = acceptance_contract.validate_view(body["product_acceptance"], selected=selected)
+            if view["state"] == "ACCEPTED" and mission["read_state"]["state"] != "CURRENT":
+                raise ValueError("source_unavailable")
+        except (TypeError, ValueError, KeyError):
+            return _refuse_json(503, "source_unavailable")
+    # Same existing Mission ceiling and closed refusal projection.
+    return _v2_envelope_response(envelope, operation="mission_v3")
+
+
+def _mission_v4_original_envelope_response(envelope, selected):
+    from common import product_acceptance_read_contract as acceptance_contract
+    if type(envelope) is dict and envelope.get("ok") is True:
+        try:
+            canonical_selection = acceptance_contract.selection(
+                envelope["result"]["product_acceptance"]["selection"])
+            if {k: canonical_selection[k] for k in ("work_ref", "root_job_id")} != selected:
+                raise ValueError("source_unavailable")
+        except (TypeError, ValueError, KeyError):
+            return _refuse_json(503, "source_unavailable")
+        # The exact key came from the authenticated installed owner response,
+        # never the query. Reuse all original Mission/receipt/body validation.
+        return _mission_v4_envelope_response(envelope, canonical_selection)
+    return _v2_envelope_response(envelope, operation="mission_v3")
+
+
+async def mission_v4_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    # Only the explicit canonical mode key selects acquisition. Encoded aliases,
+    # duplicates and mixed modes still fail the strict decoder before the owner.
+    raw_query = request.scope.get("query_string") or b""
+    if b"read_mode" in {part.partition(b"=")[0] for part in raw_query.split(b"&")}:
+        return await _dispatch_v2(request, config=config, operation="mission_v4_original",
+            required_keys=frozenset({"work_ref", "root_job_id", "read_mode"}), response_fn=None)
+    return await _dispatch_v2(request, config=config, operation="mission_v4",
+        required_keys=frozenset({"work_ref", "root_job_id", "request_message_key"}), response_fn=None)
 
 
 async def mission_v3_current(
@@ -768,23 +1110,129 @@ async def result_current(
     )
 
 
-class _RawPathFence:
-    """ASGI wrapper refusing any HTTP request whose raw path bytes contain an
-    encoded/alternate separator or whose method is not GET, before routing
-    or authentication ever runs.  Mirrors BSC-E1's profile exactly.
-    """
+def _result_references_envelope_response(envelope):
+    """Validate the closed retained-result-reference body before release.
 
-    #: Starlette auto-binds HEAD alongside GET; we explicitly refuse it so
-    #: a non-GET method never reaches authentication, validating the
-    #: closed-method surface the workspace contract requires.
-    _ALLOWED_METHODS = frozenset({"GET"})
-    _KNOWN_ROUTES = (
+    The producer's own closed validator re-checks the seven-key wrapper and
+    its two-field selection, and the whole socket envelope must still fit
+    the frozen 16384-byte ceiling.  A typed producer unavailable body keeps
+    its single legal projection as an HTTP 503 through the shared v2
+    translation; nothing outside the closed body escapes to HTTP.
+    """
+    from control_plane.workspace_result_references import validate_body
+    if type(envelope) is dict and envelope.get("ok") is True:
+        try:
+            if set(envelope) != {"ok", "result"}:
+                raise ValueError("invalid_response")
+            body = envelope["result"]
+            selected = contract.v2_selection(body["selection"], "result_references")
+            validate_body(body, selected)
+            contract.bounded_canonical(envelope, limit=contract.MAX_RESULT_RESPONSE_BYTES - 1)
+        except (TypeError, ValueError, KeyError):
+            return _refuse_json(503, "source_unavailable")
+    return _v2_envelope_response(envelope, operation="result_references")
+
+
+async def result_references_current(
+    request: Request, *, config: WorkspaceAppConfig,
+) -> JSONResponse:
+    """Handle ``GET /workspace/result-references/current``.
+
+    The retained-result navigation selector: the same authenticated v2
+    pipeline as the result route under the closed two-field grammar only.
+    No caller-supplied job, attempt, digest, path or URL field exists; the
+    producer alone derives the actual completed references.
+    """
+    return await _dispatch_v2(
+        request,
+        config=config,
+        operation="result_references",
+        required_keys=_RESULT_REFERENCES_QUERY_KEYS,
+        response_fn=_result_references_envelope_response,
+    )
+
+
+def _plan_envelope_response(envelope):
+    """Bound the entire new response, retaining the producer's closed body."""
+    if type(envelope) is dict and envelope.get("ok") is True:
+        body = envelope.get("result")
+        if (set(envelope) != {"ok", "result"} or type(body) is not dict
+                or set(body) != {"schema", "selection", "availability", "reason_codes", "source_observation", "plan"}
+                or body["schema"] != contract.PLAN_BODY_SCHEMA
+                or body["availability"] not in ("AVAILABLE", "UNAVAILABLE")):
+            return _refuse_json(503, "source_unavailable")
+        try:
+            selected = contract.v3_selection(body["selection"])
+            if body["availability"] == "UNAVAILABLE":
+                reasons = body["reason_codes"]
+                if type(reasons) is not list or len(reasons) != 1 or envelope != contract.plan_unavailable(selected, reasons[0]):
+                    return _refuse_json(503, "source_unavailable")
+            else:
+                if (body["reason_codes"] != [] or type(body["plan"]) is not dict
+                        or body["plan"].get("root_job_id") != selected["root_job_id"]):
+                    return _refuse_json(503, "source_unavailable")
+                contract.validate_available_plan_observation(body["source_observation"], selected)
+            try:
+                contract.bounded_canonical(envelope, limit=contract.MAX_PLAN_RESPONSE_BYTES - 1)
+            except (TypeError, ValueError):
+                envelope = contract.plan_unavailable(selected, "RESPONSE_OVER_BUDGET")
+        except (TypeError, ValueError):
+            return _refuse_json(503, "source_unavailable")
+    return _v2_envelope_response(envelope, operation="admitted_plan")
+
+
+async def plan_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    return await _dispatch_v2(request, config=config, operation="admitted_plan",
+                              required_keys=_MISSION_QUERY_KEYS, response_fn=_plan_envelope_response)
+
+
+def _activity_envelope_response(envelope):
+    """Closed 16KiB App boundary; never echo raw owner or provider fields."""
+    from common import executive_workspace_activity_contract as activity
+    if type(envelope) is dict and envelope.get("ok") is True:
+        try:
+            if set(envelope) != {"ok", "result"}:
+                raise ValueError("invalid_response")
+            body = envelope["result"]
+            selected = activity.selection(body["selection"])
+            activity.validate_result(body, selected)
+            contract.bounded_canonical(envelope, limit=activity.MAX_RESPONSE_BYTES - 1)
+        except (TypeError, ValueError, KeyError):
+            return _refuse_json(503, "source_unavailable")
+    return _v2_envelope_response(envelope, operation="result")
+
+
+async def activity_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    """One original Executive OHF Attempt, not a native machine/Fabric catalog."""
+    return await _dispatch_v2(
+        request, config=config, operation="retained_activity",
+        required_keys=_ACTIVITY_QUERY_KEYS, response_fn=_activity_envelope_response,
+    )
+
+
+class _RawPathFence:
+    """Refuse path aliases and methods outside each fixed route before auth."""
+
+    #: Starlette also binds HEAD for GET routes; the exact map refuses it.
+    _READ_ROUTES = (
         _PROGRAMS_ROUTE,
         _WORK_ROUTE,
         _MISSION_ROUTE,
         _MISSION_V3_ROUTE,
+        _MISSION_V4_ROUTE,
         _RESULT_ROUTE,
+        _RESULT_REFERENCES_ROUTE,
+        _PLAN_ROUTE,
+        _ACTIVITY_ROUTE,
+        _FABRIC_CATALOG_ROUTE,
+        _FABRIC_STATUS_ROUTE,
+        _CCR_STATE_ROUTE,
+        _CCR_DISCOVER_ROUTE,
     )
+    _ROUTE_METHODS = {
+        **{path: "GET" for path in _READ_ROUTES},
+        **{path: "POST" for path in _CCR_ACTION_ROUTES.values()},
+    }
 
     def __init__(self, app: Any) -> None:
         self._app = app
@@ -805,13 +1253,14 @@ class _RawPathFence:
                 return
             method = str(scope.get("method") or "").upper()
             path = scope.get("path") or ""
-            if method not in self._ALLOWED_METHODS and path in self._KNOWN_ROUTES:
+            allowed = self._ROUTE_METHODS.get(path)
+            if allowed is not None and method != allowed:
                 response = JSONResponse(
                     {"ok": False, "status": 405,
                      "error": {"code": "not_found",
                                "message": "method not allowed"}},
                     status_code=405,
-                    headers={"Cache-Control": "no-store", "Content-Type": "application/json", "Allow": "GET"},
+                    headers={"Cache-Control": "no-store", "Content-Type": "application/json", "Allow": allowed},
                 )
                 await response(scope, receive, send)
                 return
@@ -819,7 +1268,7 @@ class _RawPathFence:
 
 
 def create_workspace_app(config: WorkspaceAppConfig) -> Any:
-    """Build the closed, fixed authenticated workspace read app."""
+    """Build the fixed authenticated reads and explicitly granted CCR actions."""
 
     async def programs_endpoint(request: Request) -> JSONResponse:
         return await programs_current(request, config=config)
@@ -833,16 +1282,54 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def mission_v3_endpoint(request: Request) -> JSONResponse:
         return await mission_v3_current(request, config=config)
 
+    async def mission_v4_endpoint(request: Request) -> JSONResponse:
+        return await mission_v4_current(request, config=config)
+
     async def result_endpoint(request: Request) -> JSONResponse:
         return await result_current(request, config=config)
+
+    async def result_references_endpoint(request: Request) -> JSONResponse:
+        return await result_references_current(request, config=config)
+
+    async def plan_endpoint(request: Request) -> JSONResponse:
+        return await plan_current(request, config=config)
+
+    async def activity_endpoint(request: Request) -> JSONResponse:
+        return await activity_current(request, config=config)
+
+    async def fabric_catalog_endpoint(request: Request) -> Response:
+        from common.executive_workspace_fabric_contract import CATALOG_OPERATION
+        return await fabric_current(request, config=config, operation=CATALOG_OPERATION)
+
+    async def fabric_status_endpoint(request: Request) -> Response:
+        from common.executive_workspace_fabric_contract import STATUS_OPERATION
+        return await fabric_current(request, config=config, operation=STATUS_OPERATION)
+
+    async def ccr_state_endpoint(request: Request) -> JSONResponse:
+        return await control_room_current(request, config=config, operation="state")
+
+    async def ccr_discover_endpoint(request: Request) -> JSONResponse:
+        return await control_room_current(request, config=config, operation="discover")
 
     routes = [
         Route(_PROGRAMS_ROUTE, programs_endpoint, methods=["GET"]),
         Route(_WORK_ROUTE, work_endpoint, methods=["GET"]),
         Route(_MISSION_ROUTE, mission_endpoint, methods=["GET"]),
         Route(_MISSION_V3_ROUTE, mission_v3_endpoint, methods=["GET"]),
+        Route(_MISSION_V4_ROUTE, mission_v4_endpoint, methods=["GET"]),
         Route(_RESULT_ROUTE, result_endpoint, methods=["GET"]),
+        Route(_RESULT_REFERENCES_ROUTE, result_references_endpoint, methods=["GET"]),
+        Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
+        Route(_ACTIVITY_ROUTE, activity_endpoint, methods=["GET"]),
+        Route(_FABRIC_CATALOG_ROUTE, fabric_catalog_endpoint, methods=["GET"]),
+        Route(_FABRIC_STATUS_ROUTE, fabric_status_endpoint, methods=["GET"]),
+        Route(_CCR_STATE_ROUTE, ccr_state_endpoint, methods=["GET"]),
+        Route(_CCR_DISCOVER_ROUTE, ccr_discover_endpoint, methods=["GET"]),
     ]
+    for operation, path in _CCR_ACTION_ROUTES.items():
+        async def action_endpoint(request: Request, *, operation=operation) -> Response:
+            return await control_room_action(request, config=config, operation=operation)
+        routes.append(Route(path, action_endpoint, methods=["POST"]))
     application = Starlette(routes=routes)
     # Never silently rewrite a trailing-slash alias onto a different route:
     # an encoded/trailing-slash/raw-path ambiguity must refuse as a plain

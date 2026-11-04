@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import sys
 import threading
 import time
 from typing import Any
@@ -30,15 +31,19 @@ from control_plane.executive_release_contract import (
     validate_precondition_manifest,
     validate_release_prestart_cancellation,
     validate_release_prestart_reservation,
+    validate_release_publication_intent,
+    validate_release_recovery_origin,
 )
 from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
 
 
 JOURNAL_PRODUCTION_ROOT = "/var/db/mastermind-executive/release-actuator/journal"
 
-_SCHEMA = "mastermind.executive_release_actuator_journal/v2"
+_LEGACY_SCHEMA = "mastermind.executive_release_actuator_journal/v2"
+_SCHEMA = "mastermind.executive_release_actuator_journal/v3"
 _STATES = (
     "STARTED",
+    "PUBLICATION_INTENT",
     "PUBLISHED",
     "BROKER_RESTART_PENDING",
     "RECOVERING",
@@ -46,12 +51,13 @@ _STATES = (
     "ROLLED_BACK",
     "FAILED_NOT_APPLIED",
 )
-_TERMINAL_STATES = frozenset(_STATES[4:])
+_TERMINAL_STATES = frozenset({"SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"})
 _NEXT_STATE = {
-    "STARTED": frozenset({"PUBLISHED"}),
-    "PUBLISHED": frozenset({"BROKER_RESTART_PENDING"}),
+    "STARTED": frozenset({"PUBLICATION_INTENT"}),
+    "PUBLICATION_INTENT": frozenset({"PUBLISHED", "RECOVERING"}),
+    "PUBLISHED": frozenset({"BROKER_RESTART_PENDING", "RECOVERING"}),
     "BROKER_RESTART_PENDING": frozenset({"RECOVERING"}),
-    "RECOVERING": _TERMINAL_STATES,
+    "RECOVERING": frozenset({"SUCCEEDED", "ROLLED_BACK"}),
 }
 _IDENTITY_FIELDS = frozenset(
     {
@@ -131,6 +137,36 @@ class ExecutiveReleaseActuatorJournalError(RuntimeError):
 
 def _fail(code: str) -> None:
     raise ExecutiveReleaseActuatorJournalError(code)
+
+
+def _check_request_deadline(deadline_monotonic_ns: int | None, *,
+                            effect_unknown: bool = False) -> None:
+    """A request-local tightening fence, never proof of an absent effect.
+
+    The caller owns the absolute deadline. Expiry cannot retract a syscall or
+    durable bytes; callers must reconcile the canonical journal after a lost
+    result. No deadline state is stored on the reusable journal instance.
+    """
+    if deadline_monotonic_ns is None:
+        return
+    if (type(deadline_monotonic_ns) is not int
+            or not 0 < deadline_monotonic_ns <= (1 << 63) - 1):
+        _fail("INVALID_REQUEST_DEADLINE")
+    if time.monotonic_ns() >= deadline_monotonic_ns:
+        _fail("DEADLINE_EFFECT_UNKNOWN" if effect_unknown else "DEADLINE_EXCEEDED")
+
+
+def _deadline_options(deadline_monotonic_ns: int | None, *,
+                      effect_unknown: bool = False) -> dict[str, int | bool]:
+    # Preserve the exact legacy helper call shape when this opt-in is absent.
+    if deadline_monotonic_ns is None:
+        return {}
+    options: dict[str, int | bool] = {"deadline_monotonic_ns": deadline_monotonic_ns}
+    if effect_unknown:
+        # Read-only classification after known durable staging/link evidence.
+        # This never suppresses an existing integrity or conflict exception.
+        options["deadline_effect_unknown"] = True
+    return options
 
 
 def _exact_mapping(value: Any, fields: frozenset[str], code: str) -> dict[str, Any]:
@@ -217,6 +253,10 @@ def _before_identity(record: Mapping[str, Any]) -> dict[str, Any]:
 
 def _start_identity(record: Mapping[str, Any]) -> dict[str, Any]:
     return {
+        "schema": record["schema"],
+        **({"before": record["before"],
+            "start_deadline_monotonic_ns": record["start_deadline_monotonic_ns"]}
+           if record["schema"] == _SCHEMA else {}),
         **{field: record[field] for field in _IDENTITY_FIELDS},
         "preconditions": record["preconditions"],
         "admission": record["admission"],
@@ -325,13 +365,14 @@ def _validate_terminal(terminal: Any, record: Mapping[str, Any]) -> dict[str, An
     }
 
 
-def _validate_record(value: Any) -> ReleaseRecord:
+def _validate_legacy_record(value: Any) -> ReleaseRecord:
     if not isinstance(value, Mapping):
         _fail("INVALID_RECORD")
     state = value.get("state")
     expected = _RECORD_FIELDS | ({"terminal"} if state in _TERMINAL_STATES else set())
     record = _exact_mapping(value, frozenset(expected), "INVALID_RECORD_FIELDS")
-    if record["schema"] != _SCHEMA or state not in _STATES:
+    if (record["schema"] != _LEGACY_SCHEMA
+            or state not in set(_STATES) - {"PUBLICATION_INTENT"}):
         _fail("INVALID_RECORD")
 
     _operation_key(record["operation_key"])
@@ -410,6 +451,88 @@ def _validate_record(value: Any) -> ReleaseRecord:
         return parse_release_json(raw)
     except ReleaseContractError:
         _fail("INVALID_RECORD")
+
+
+def _publication_context(record: Mapping[str, Any]) -> dict[str, Any]:
+    # Original boot is retained by journal.boot_id == preconditions.boot_id ==
+    # admission.boot_id and the immutable reservation digest. An absolute
+    # deadline on that boot is never authority on a later boot. These detached
+    # structural values do not qualify a publisher or its current boot.
+    return {
+        "schema": "mastermind.executive_release_publication_start/v1",
+        **{k: record[k] for k in (
+            "operation_key", "request_fingerprint", "root_qualification_digest",
+            "actuator_generation", "started_at_ms", "start_deadline_monotonic_ns",
+            "before")},
+    }
+
+
+def _validate_record(value: Any) -> ReleaseRecord:
+    if not isinstance(value, Mapping):
+        _fail("INVALID_RECORD")
+    # One detached canonical snapshot; never rediscriminate a hostile mapping.
+    try:
+        snapshot = parse_release_json(canonical_release_bytes(value)).to_dict()
+    except ReleaseContractError:
+        _fail("INVALID_RECORD")
+    if snapshot.get("schema") == _LEGACY_SCHEMA:
+        return _validate_legacy_record(snapshot)
+    state = snapshot.get("state")
+    if snapshot.get("schema") != _SCHEMA or state not in _STATES:
+        _fail("INVALID_RECORD")
+    if state == "FAILED_NOT_APPLIED":
+        _fail("NO_APPLY_PROOF_UNAVAILABLE")
+    has_intent = state != "STARTED"
+    has_recovery = state in {"RECOVERING", "SUCCEEDED", "ROLLED_BACK"}
+    fields = _RECORD_FIELDS | {"before", "start_deadline_monotonic_ns"}
+    if has_intent:
+        fields |= {"publication_intent"}
+    if has_recovery:
+        fields |= {"recovery_origin"}
+    if state in _TERMINAL_STATES:
+        fields |= {"terminal"}
+    record = _exact_mapping(snapshot, frozenset(fields), "INVALID_RECORD_FIELDS")
+    _integer(record["start_deadline_monotonic_ns"], "INVALID_ORIGINAL_DEADLINE", minimum=1)
+    epoch = _integer(record["actuator_generation"], "INVALID_GENERATION", minimum=1)
+    if epoch > _MAX_INT - 2:
+        _fail("GENERATION_EXHAUSTED")
+    before = _validate_installed_identity(record["before"], "INVALID_BEFORE")
+    if (any(before[k] != v for k, v in _before_identity(record).items())
+            or before["broker_source_commit"] != before["release_commit"]
+            or before["broker_source_tree"] != before["release_tree"]):
+        _fail("INVALID_BEFORE")
+    legacy = {k: record[k] for k in _RECORD_FIELDS}
+    legacy["schema"] = _LEGACY_SCHEMA
+    if state == "PUBLICATION_INTENT":
+        legacy["state"] = "STARTED"
+    if state in _TERMINAL_STATES:
+        terminal = _exact_mapping(record["terminal"],
+            _TERMINAL_FIELDS | {"after_actuator_generation"}, "INVALID_TERMINAL")
+        epoch_after = _integer(terminal["after_actuator_generation"], "INVALID_AFTER_GENERATION", minimum=1)
+        expected_epoch = epoch + (1 if state == "SUCCEEDED" else 2)
+        if epoch_after != expected_epoch:
+            _fail("INVALID_AFTER_GENERATION")
+        if canonical_release_bytes(terminal["before"]) != canonical_release_bytes(before):
+            _fail("BEFORE_MISMATCH")
+        legacy["terminal"] = {k: terminal[k] for k in _TERMINAL_FIELDS}
+    _validate_legacy_record(legacy)
+    expected_generation = {"STARTED": 1, "PUBLICATION_INTENT": 2,
+                           "PUBLISHED": 3, "BROKER_RESTART_PENDING": 4}.get(state)
+    try:
+        if has_intent:
+            intent = validate_release_publication_intent(
+                record["publication_intent"], expected_start=_publication_context(record))
+            if state in _TERMINAL_STATES and record["terminal"]["completed_at_ms"] < intent["intent_at_ms"]:
+                _fail("INVALID_COMPLETED_AT_MS")
+        if has_recovery:
+            origin = validate_release_recovery_origin(record["recovery_origin"],
+                expected_intent=record["publication_intent"], expected_start=_publication_context(record))
+            expected_generation = origin["from_journal_generation"] + (1 if state == "RECOVERING" else 2)
+    except ReleaseContractError:
+        _fail("INVALID_PUBLICATION_METADATA")
+    if record["journal_generation"] != expected_generation:
+        _fail("INVALID_PHASE_GENERATION")
+    return parse_release_json(canonical_release_bytes(record))
 
 
 def _file_identity(info: os.stat_result) -> tuple[Any, ...]:
@@ -627,12 +750,19 @@ class _ExecutiveReleaseActuatorJournal:
         descriptor: int,
         expected_identity: tuple[Any, ...],
         code: str,
+        *, deadline_monotonic_ns: int | None = None,
+        deadline_effect_unknown: bool = False,
     ) -> None:
+        def check():
+            _check_request_deadline(deadline_monotonic_ns, effect_unknown=deadline_effect_unknown)
+        check()
         try:
             path_info = os.stat(
                 name, dir_fd=root_descriptor, follow_symlinks=False
             )
+            check()
             descriptor_info = os.fstat(descriptor)
+            check()
         except OSError:
             _fail(code)
         if (
@@ -641,15 +771,23 @@ class _ExecutiveReleaseActuatorJournal:
         ):
             _fail(code)
 
-    def _acquire_flock(self, descriptor: int, deadline: float) -> None:
+    def _acquire_flock(self, descriptor: int, deadline: float, *,
+                       deadline_monotonic_ns: int | None = None) -> None:
         while True:
+            _check_request_deadline(deadline_monotonic_ns)
             try:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _check_request_deadline(deadline_monotonic_ns)
                 return
             except BlockingIOError:
                 if time.monotonic() >= deadline:
                     _fail("LOCK_TIMEOUT")
-                time.sleep(_LOCK_POLL_SECONDS)
+                remaining = _LOCK_POLL_SECONDS
+                if deadline_monotonic_ns is not None:
+                    _check_request_deadline(deadline_monotonic_ns)
+                    remaining = min(remaining, max(0.0,
+                        (deadline_monotonic_ns - time.monotonic_ns()) / 1e9))
+                time.sleep(remaining)
             except OSError:
                 _fail("LOCK_ACQUIRE")
 
@@ -659,20 +797,29 @@ class _ExecutiveReleaseActuatorJournal:
         operation: Callable[[int, str], ReleaseRecord],
         *,
         create_root: bool,
+        deadline_monotonic_ns: int | None = None,
     ) -> ReleaseRecord:
+        _check_request_deadline(deadline_monotonic_ns)
         deadline = time.monotonic() + self._lock_timeout
+        if deadline_monotonic_ns is not None:
+            deadline = min(deadline, deadline_monotonic_ns / 1e9)
         remaining = max(0.0, deadline - time.monotonic())
         if not _LOCAL_LOCK.acquire(timeout=remaining):
             _fail("LOCK_TIMEOUT")
         root_descriptor = None
         lock_descriptor = None
         try:
+            _check_request_deadline(deadline_monotonic_ns)
             root_descriptor, root_identity = self._open_root(create=create_root)
+            _check_request_deadline(deadline_monotonic_ns)
             lock_name = name[:-5] + ".lock"
             lock_descriptor, lock_identity = self._open_lock(
                 root_descriptor, lock_name
             )
-            self._acquire_flock(lock_descriptor, deadline)
+            _check_request_deadline(deadline_monotonic_ns)
+            self._acquire_flock(lock_descriptor, deadline,
+                                **_deadline_options(deadline_monotonic_ns))
+            _check_request_deadline(deadline_monotonic_ns)
             self._assert_root_path(root_descriptor, root_identity)
             self._assert_file_path(
                 root_descriptor,
@@ -681,7 +828,9 @@ class _ExecutiveReleaseActuatorJournal:
                 lock_identity,
                 "LOCK_REPLACED",
             )
+            _check_request_deadline(deadline_monotonic_ns)
             result = operation(root_descriptor, name)
+            _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
             self._assert_file_path(
                 root_descriptor,
                 lock_name,
@@ -690,17 +839,32 @@ class _ExecutiveReleaseActuatorJournal:
                 "LOCK_REPLACED",
             )
             self._assert_root_path(root_descriptor, root_identity)
-            return result
+            _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
         finally:
+            primary_active = sys.exc_info()[0] is not None
+            cleanup_error = None
             if lock_descriptor is not None:
                 try:
                     fcntl.flock(lock_descriptor, fcntl.LOCK_UN)
                 except OSError:
                     pass
-                os.close(lock_descriptor)
-            if root_descriptor is not None:
-                os.close(root_descriptor)
+            # Attempt both closes and release the process lock even if a close
+            # fails. A cleanup failure cannot replace an earlier integrity or
+            # deadline exception; without a primary error it remains visible.
+            for descriptor in (lock_descriptor, root_descriptor):
+                if descriptor is not None:
+                    try:
+                        os.close(descriptor)
+                    except BaseException as exc:
+                        if cleanup_error is None:
+                            cleanup_error = exc
             _LOCAL_LOCK.release()
+            if cleanup_error is not None and not primary_active:
+                raise cleanup_error
+        # Only successful work reaches this fence. Cleanup must not replace an
+        # already active conflict, integrity failure, or pre-effect expiry.
+        _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
+        return result
 
     def _read_file(
         self,
@@ -709,15 +873,26 @@ class _ExecutiveReleaseActuatorJournal:
         *,
         required: bool,
         expected_links: int = 1,
+        deadline_monotonic_ns: int | None = None,
+        deadline_effect_unknown: bool = False,
     ) -> tuple[bytes, tuple[Any, ...]]:
+        _check_request_deadline(
+            deadline_monotonic_ns, effect_unknown=deadline_effect_unknown
+        )
         try:
             before = os.stat(name, dir_fd=root_descriptor, follow_symlinks=False)
         except FileNotFoundError:
+            _check_request_deadline(
+                deadline_monotonic_ns, effect_unknown=deadline_effect_unknown
+            )
             if required:
                 _fail("NOT_FOUND")
             return b"", ()
         except OSError:
             _fail("RECORD_OPEN")
+        _check_request_deadline(
+            deadline_monotonic_ns, effect_unknown=deadline_effect_unknown
+        )
         if not stat.S_ISREG(before.st_mode):
             _fail("RECORD_METADATA")
         try:
@@ -725,6 +900,9 @@ class _ExecutiveReleaseActuatorJournal:
         except OSError:
             _fail("RECORD_OPEN")
         try:
+            _check_request_deadline(
+                deadline_monotonic_ns, effect_unknown=deadline_effect_unknown
+            )
             opened = os.fstat(descriptor)
             identity = _file_identity(opened)
             if _file_identity(before) != identity:
@@ -737,12 +915,21 @@ class _ExecutiveReleaseActuatorJournal:
                 code="RECORD_METADATA",
                 expected_links=expected_links,
             )
+            _check_request_deadline(
+                deadline_monotonic_ns, effect_unknown=deadline_effect_unknown
+            )
             if opened.st_size > _MAX_RECORD_BYTES:
                 _fail("RECORD_SIZE")
             chunks: list[bytes] = []
             size = 0
             while size <= _MAX_RECORD_BYTES:
+                _check_request_deadline(
+                    deadline_monotonic_ns, effect_unknown=deadline_effect_unknown
+                )
                 chunk = os.read(descriptor, _MAX_RECORD_BYTES + 1 - size)
+                _check_request_deadline(
+                    deadline_monotonic_ns, effect_unknown=deadline_effect_unknown
+                )
                 if not chunk:
                     break
                 chunks.append(chunk)
@@ -761,13 +948,24 @@ class _ExecutiveReleaseActuatorJournal:
                 or _file_identity(path_after) != identity
             ):
                 _fail("RECORD_REPLACED")
-            return raw, identity
+            _check_request_deadline(
+                deadline_monotonic_ns, effect_unknown=deadline_effect_unknown
+            )
         except ExecutiveReleaseActuatorJournalError:
             raise
         except OSError:
             _fail("RECORD_READ")
         finally:
-            os.close(descriptor)
+            primary_active = sys.exc_info()[0] is not None
+            try:
+                os.close(descriptor)
+            except BaseException:
+                if not primary_active:
+                    raise
+        _check_request_deadline(
+            deadline_monotonic_ns, effect_unknown=deadline_effect_unknown
+        )
+        return raw, identity
 
     @staticmethod
     def _decode(raw: bytes) -> ReleaseRecord:
@@ -840,12 +1038,15 @@ class _ExecutiveReleaseActuatorJournal:
         *,
         kind: str,
         required: bool,
+        deadline_monotonic_ns: int | None = None,
+        deadline_effect_unknown: bool = False,
     ) -> tuple[bytes, tuple[Any, ...]]:
         suffix = _RESERVATION_SUFFIX if kind == "reservation" else _CANCELLATION_SUFFIX
         return self._read_file(
             root_descriptor,
             stem + suffix,
             required=required,
+            **_deadline_options(deadline_monotonic_ns, effect_unknown=deadline_effect_unknown),
         )
 
     def _read_prestart_bytes(
@@ -945,13 +1146,16 @@ class _ExecutiveReleaseActuatorJournal:
         approval: ReleaseRecord,
         reservation: ReleaseRecord | None = None,
         admission: Mapping[str, Any] | None = None,
+        deadline_monotonic_ns: int | None = None,
     ) -> tuple[bytes, ReleaseRecord | None]:
         raw, identity = self._read_prestart_snapshot(
             root_descriptor,
             stem,
             kind=kind,
             required=required,
+            **_deadline_options(deadline_monotonic_ns),
         )
+        _check_request_deadline(deadline_monotonic_ns)
         if not identity:
             return b"", None
         record = self._validate_prestart_snapshot(
@@ -962,6 +1166,7 @@ class _ExecutiveReleaseActuatorJournal:
             reservation=reservation,
             admission=admission,
         )
+        _check_request_deadline(deadline_monotonic_ns)
         return raw, record
 
     def _start_evidence_exists(
@@ -1122,17 +1327,22 @@ class _ExecutiveReleaseActuatorJournal:
         )
 
     def read_prestart_reservation(
-        self, operation_key: str, *, approval: Mapping[str, Any]
+        self, operation_key: str, *, approval: Mapping[str, Any],
+        deadline_monotonic_ns: int | None = None
     ) -> ReleaseRecord:
+        _check_request_deadline(deadline_monotonic_ns)
         return self._read_prestart_reservation_snapshot(
-            operation_key, approval=approval
+            operation_key, approval=approval,
+            **_deadline_options(deadline_monotonic_ns)
         )[0]
 
     def _read_prestart_reservation_snapshot(
-        self, operation_key: str, *, approval: Mapping[str, Any]
+        self, operation_key: str, *, approval: Mapping[str, Any],
+        deadline_monotonic_ns: int | None = None
     ) -> tuple[ReleaseRecord, bytes, tuple[Any, ...]]:
         """Read validated reservation content and identity under one lock."""
 
+        _check_request_deadline(deadline_monotonic_ns)
         validated_operation_key = _operation_key(operation_key)
         validated_approval = self._decode_approval(approval)
         stem = _operation_stem(validated_operation_key)
@@ -1140,9 +1350,11 @@ class _ExecutiveReleaseActuatorJournal:
         return self._locked(
             name,
             lambda root, _: self._read_prestart_reservation_snapshot_locked(
-                root, stem, validated_operation_key, validated_approval
+                root, stem, validated_operation_key, validated_approval,
+                **_deadline_options(deadline_monotonic_ns)
             ),
             create_root=False,
+            **_deadline_options(deadline_monotonic_ns),
         )
 
     def _read_prestart_reservation_snapshot_locked(
@@ -1151,16 +1363,20 @@ class _ExecutiveReleaseActuatorJournal:
         stem: str,
         operation_key: str,
         validated_approval: ReleaseRecord,
+        *, deadline_monotonic_ns: int | None = None,
     ) -> tuple[ReleaseRecord, bytes, tuple[Any, ...]]:
         raw, identity = self._read_prestart_snapshot(
-            root_descriptor, stem, kind="reservation", required=True
+            root_descriptor, stem, kind="reservation", required=True,
+            **_deadline_options(deadline_monotonic_ns)
         )
+        _check_request_deadline(deadline_monotonic_ns)
         record = self._validate_prestart_snapshot(
             raw,
             kind="reservation",
             operation_key=operation_key,
             approval=validated_approval,
         )
+        _check_request_deadline(deadline_monotonic_ns)
         return record, raw, identity
 
     def cancel_prestart(
@@ -1448,7 +1664,8 @@ class _ExecutiveReleaseActuatorJournal:
         return journal_record, cancellation_record
 
     def _write_new(
-        self, root_descriptor: int, name: str, raw: bytes
+        self, root_descriptor: int, name: str, raw: bytes,
+        *, deadline_monotonic_ns: int | None = None,
     ) -> tuple[Any, ...]:
         if not 0 < len(raw) <= _MAX_RECORD_BYTES:
             _fail("RECORD_SIZE")
@@ -1457,53 +1674,49 @@ class _ExecutiveReleaseActuatorJournal:
         created_inode = None
         created_identity = None
         complete = False
+
+        def check():
+            _check_request_deadline(deadline_monotonic_ns, effect_unknown=created)
+
+        def bounded(function, *args, **kwargs):
+            check()
+            value = function(*args, **kwargs)
+            check()
+            return value
+
+        check()
         try:
             descriptor = os.open(
                 name,
-                os.O_WRONLY
-                | os.O_CREAT
-                | os.O_EXCL
-                | os.O_NOFOLLOW
-                | os.O_CLOEXEC,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
                 _FILE_MODE,
                 dir_fd=root_descriptor,
             )
             created = True
-            os.fchmod(descriptor, _FILE_MODE)
-            info = os.fstat(descriptor)
+            check()
+            bounded(os.fchmod, descriptor, _FILE_MODE)
+            info = bounded(os.fstat, descriptor)
             created_inode = (info.st_dev, info.st_ino)
-            self._check_descriptor(
-                descriptor,
-                info,
-                directory=False,
-                mode=_FILE_MODE,
-                code="RECORD_METADATA",
-            )
+            bounded(self._check_descriptor, descriptor, info, directory=False,
+                    mode=_FILE_MODE, code="RECORD_METADATA")
             view = memoryview(raw)
             while view:
-                written = os.write(descriptor, view)
+                written = bounded(os.write, descriptor, view)
                 if written <= 0:
                     _fail("RECORD_WRITE")
                 view = view[written:]
-            os.fsync(descriptor)
-            completed_info = os.fstat(descriptor)
-            self._check_descriptor(
-                descriptor,
-                completed_info,
-                directory=False,
-                mode=_FILE_MODE,
-                code="RECORD_METADATA",
-            )
+            bounded(os.fsync, descriptor)
+            completed_info = bounded(os.fstat, descriptor)
+            bounded(self._check_descriptor, descriptor, completed_info,
+                    directory=False, mode=_FILE_MODE, code="RECORD_METADATA")
             created_identity = _file_identity(completed_info)
-            self._assert_file_path(
-                root_descriptor,
-                name,
-                descriptor,
-                created_identity,
-                "RECORD_REPLACED",
-            )
-            self._fsync_directory(root_descriptor)
+            bounded(self._assert_file_path, root_descriptor, name, descriptor,
+                    created_identity, "RECORD_REPLACED",
+                    **_deadline_options(deadline_monotonic_ns, effect_unknown=True))
+            bounded(self._fsync_directory, root_descriptor)
             complete = True
+            # close is required cleanup, even after the final fsync consumes
+            # the endpoint. A completed stage remains reconciliation evidence.
             os.close(descriptor)
             descriptor = None
         except FileExistsError:
@@ -1513,24 +1726,32 @@ class _ExecutiveReleaseActuatorJournal:
         except OSError:
             _fail("RECORD_WRITE")
         finally:
-            if created and not complete and created_inode is not None:
-                try:
-                    observed = os.stat(
-                        name, dir_fd=root_descriptor, follow_symlinks=False
-                    )
-                except OSError:
-                    observed = None
-                if (
-                    observed is not None
-                    and (observed.st_dev, observed.st_ino) == created_inode
-                ):
-                    try:
+            primary_active = sys.exc_info()[0] is not None
+            cleanup_error = None
+            try:
+                if created and not complete:
+                    # Expiry may occur immediately after open/fchmod/fstat.
+                    # This descriptor read is cleanup ownership proof, not a
+                    # renewed operation or permission to start another write.
+                    if created_inode is None and descriptor is not None:
+                        owned = os.fstat(descriptor)
+                        created_inode = (owned.st_dev, owned.st_ino)
+                    observed = os.stat(name, dir_fd=root_descriptor, follow_symlinks=False)
+                    if created_inode is not None and (observed.st_dev, observed.st_ino) == created_inode:
                         os.unlink(name, dir_fd=root_descriptor)
                         self._fsync_directory(root_descriptor)
-                    except OSError:
-                        pass
-            if descriptor is not None:
-                os.close(descriptor)
+            except BaseException as error:
+                cleanup_error = error
+            finally:
+                if descriptor is not None:
+                    try:
+                        os.close(descriptor)
+                    except BaseException as error:
+                        if cleanup_error is None:
+                            cleanup_error = error
+            if cleanup_error is not None and not primary_active:
+                raise cleanup_error
+        check()
         if created_identity is None:
             _fail("RECORD_WRITE")
         return created_identity
@@ -1568,9 +1789,28 @@ class _ExecutiveReleaseActuatorJournal:
         root_qualification_digest: str,
         started_at_ms: int,
         commit_qualifier: Callable[[], int] | None = None,
+        deadline_monotonic_ns: int | None = None,
+        publication_deadline_monotonic_ns: int | None = None,
     ) -> ReleaseRecord:
+        _check_request_deadline(deadline_monotonic_ns)
         if commit_qualifier is not None and not callable(commit_qualifier):
             raise TypeError("commit qualifier must be callable")
+        # Freeze caller inputs before approval/reservation callbacks can mutate
+        # them. Joins must qualify the exact snapshot that will be persisted.
+        preconditions = _validate_contract_record(preconditions, validate_precondition_manifest)
+        admission = _validate_contract_record(admission, validate_admission)
+        identity = dict(_exact_mapping(identity, _IDENTITY_FIELDS, "INVALID_IDENTITY"))
+        validated_approval = self._decode_approval(approval)
+        reservation_bytes, validated_reservation = self._decode_reservation(
+            reservation, validated_approval)
+        prepared_deadline = validated_reservation["prepared_payload"]["expires_monotonic_ns"]
+        original_deadline = (publication_deadline_monotonic_ns
+                             if publication_deadline_monotonic_ns is not None
+                             else min(prepared_deadline, deadline_monotonic_ns)
+                             if deadline_monotonic_ns is not None else prepared_deadline)
+        _integer(original_deadline, "INVALID_ORIGINAL_DEADLINE", minimum=1)
+        if not validated_reservation["reserved_monotonic_ns"] < original_deadline <= prepared_deadline:
+            _fail("INVALID_ORIGINAL_DEADLINE")
         supplied = _exact_mapping(identity, _IDENTITY_FIELDS, "INVALID_IDENTITY")
         candidate = {
             "schema": _SCHEMA,
@@ -1582,14 +1822,11 @@ class _ExecutiveReleaseActuatorJournal:
             "journal_generation": 1,
             "started_at_ms": started_at_ms,
             "root_qualification_digest": root_qualification_digest,
+            "before": validated_reservation["before"],
+            "start_deadline_monotonic_ns": original_deadline,
         }
         validated = _validate_record(candidate)
         raw = canonical_release_bytes(validated)
-        validated_approval = self._decode_approval(approval)
-        reservation_bytes, validated_reservation = self._decode_reservation(
-            reservation,
-            validated_approval,
-        )
         operation_key = validated_reservation["operation_key"]
         if operation_key != validated["operation_key"]:
             _fail("OPERATION_MISMATCH")
@@ -1610,8 +1847,10 @@ class _ExecutiveReleaseActuatorJournal:
                     operation_key=operation_key,
                     required=True,
                     approval=validated_approval,
+                    **_deadline_options(deadline_monotonic_ns),
                 )
             )
+            _check_request_deadline(deadline_monotonic_ns)
             if reservation_bytes != stored_reservation_bytes:
                 _fail("RESERVATION_MISMATCH")
             # 2. The supplied root digest must equal sha256(stored reservation).
@@ -1640,8 +1879,10 @@ class _ExecutiveReleaseActuatorJournal:
                     stem,
                     kind="cancellation",
                     required=False,
+                    **_deadline_options(deadline_monotonic_ns),
                 )
             )
+            _check_request_deadline(deadline_monotonic_ns)
             if cancellation_identity:
                 _fail("RESERVATION_CONFLICT")
             # 6. A composed owner may requalify current authority and time
@@ -1654,6 +1895,7 @@ class _ExecutiveReleaseActuatorJournal:
                     **candidate,
                     "started_at_ms": commit_qualifier(),
                 }
+                _check_request_deadline(deadline_monotonic_ns)
                 locked_validated = _validate_record(locked_candidate)
                 locked_raw = canonical_release_bytes(locked_validated)
                 self._validate_start_reservation_joins(
@@ -1666,18 +1908,21 @@ class _ExecutiveReleaseActuatorJournal:
                     stored_reservation,
                     operation_key,
                 )
+            _check_request_deadline(deadline_monotonic_ns)
             # 7. Delegate exact-replay/recovery to the protected _create_locked.
             return self._create_locked(
                 root_descriptor,
                 record_name,
                 locked_raw,
                 locked_validated,
+                **_deadline_options(deadline_monotonic_ns),
             )
 
         return self._locked(
             name,
             create_with_reservation,
             create_root=True,
+            **_deadline_options(deadline_monotonic_ns),
         )
 
     @staticmethod
@@ -1718,6 +1963,10 @@ class _ExecutiveReleaseActuatorJournal:
         ):
             _fail("RESERVATION_MISMATCH")
         prepared = reservation["prepared_payload"]
+        if start["schema"] == _SCHEMA:
+            if (canonical_release_bytes(start["before"]) != canonical_release_bytes(before)
+                    or not reservation["reserved_monotonic_ns"] < start["start_deadline_monotonic_ns"] <= prepared["expires_monotonic_ns"]):
+                _fail("RESERVATION_MISMATCH")
         if not (
             reservation["reserved_at_ms"]
             <= start["started_at_ms"]
@@ -1768,13 +2017,19 @@ class _ExecutiveReleaseActuatorJournal:
         name: str,
         candidate: bytes,
         candidate_record: ReleaseRecord,
+        *, deadline_monotonic_ns: int | None = None,
     ) -> ReleaseRecord:
+        _check_request_deadline(deadline_monotonic_ns)
         recovered = self._recover_linked_start(
-            root_descriptor, name, candidate, candidate_record["operation_key"]
+            root_descriptor, name, candidate, candidate_record["operation_key"],
+            **_deadline_options(deadline_monotonic_ns)
         )
+        _check_request_deadline(deadline_monotonic_ns, effect_unknown=recovered is not None)
         if recovered is not None:
             return recovered
-        current, _ = self._read_file(root_descriptor, name, required=False)
+        current, _ = self._read_file(root_descriptor, name, required=False,
+                                     **_deadline_options(deadline_monotonic_ns))
+        _check_request_deadline(deadline_monotonic_ns)
         if current:
             existing = self._decode_for_operation(
                 current, candidate_record["operation_key"]
@@ -1784,8 +2039,14 @@ class _ExecutiveReleaseActuatorJournal:
             if _start_identity(existing) == _start_identity(candidate_record):
                 return existing
             _fail("CONFLICT")
-        self._publish_start(root_descriptor, name, candidate)
-        written, _ = self._read_file(root_descriptor, name, required=True)
+        _check_request_deadline(deadline_monotonic_ns)
+        self._publish_start(root_descriptor, name, candidate,
+                            **_deadline_options(deadline_monotonic_ns))
+        _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
+        written, _ = self._read_file(root_descriptor, name, required=True,
+                                     **_deadline_options(deadline_monotonic_ns,
+                                                         effect_unknown=True))
+        _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
         if written != candidate:
             _fail("RECORD_REPLACED")
         return self._decode_for_operation(
@@ -1798,16 +2059,20 @@ class _ExecutiveReleaseActuatorJournal:
         name: str,
         candidate: bytes,
         operation_key: str,
+        *, deadline_monotonic_ns: int | None = None,
     ) -> ReleaseRecord | None:
+        _check_request_deadline(deadline_monotonic_ns)
         staged_name = name[:-5] + ".start"
         try:
             final_info = os.stat(
                 name, dir_fd=root_descriptor, follow_symlinks=False
             )
         except FileNotFoundError:
+            _check_request_deadline(deadline_monotonic_ns)
             return None
         except OSError:
             _fail("RECORD_OPEN")
+        _check_request_deadline(deadline_monotonic_ns)
         if final_info.st_nlink != 2:
             return None
         try:
@@ -1816,6 +2081,7 @@ class _ExecutiveReleaseActuatorJournal:
             )
         except OSError:
             _fail("RECORD_METADATA")
+        _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
         if (
             (final_info.st_dev, final_info.st_ino)
             != (staged_info.st_dev, staged_info.st_ino)
@@ -1823,10 +2089,12 @@ class _ExecutiveReleaseActuatorJournal:
         ):
             _fail("RECORD_METADATA")
         final_raw, final_identity = self._read_file(
-            root_descriptor, name, required=True, expected_links=2
+            root_descriptor, name, required=True, expected_links=2,
+            **_deadline_options(deadline_monotonic_ns, effect_unknown=True)
         )
         staged_raw, staged_identity = self._read_file(
-            root_descriptor, staged_name, required=True, expected_links=2
+            root_descriptor, staged_name, required=True, expected_links=2,
+            **_deadline_options(deadline_monotonic_ns, effect_unknown=True)
         )
         if (
             final_raw != candidate
@@ -1835,42 +2103,67 @@ class _ExecutiveReleaseActuatorJournal:
         ):
             _fail("START_STAGED_CONFLICT")
         self._decode_for_operation(final_raw, operation_key)
+        _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
         self._unlink_owned(
             root_descriptor,
             staged_name,
             staged_identity,
             "START_STAGED_REPLACED",
         )
-        published, _ = self._read_file(root_descriptor, name, required=True)
+        _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
+        published, _ = self._read_file(root_descriptor, name, required=True,
+                                      **_deadline_options(deadline_monotonic_ns, effect_unknown=True))
+        _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
         if published != candidate:
             _fail("RECORD_REPLACED")
         return self._decode_for_operation(published, operation_key)
 
     def _publish_start(
-        self, root_descriptor: int, name: str, candidate: bytes
+        self, root_descriptor: int, name: str, candidate: bytes,
+        *, deadline_monotonic_ns: int | None = None
     ) -> None:
+        _check_request_deadline(deadline_monotonic_ns)
         staged_name = name[:-5] + ".start"
         staged_raw, staged_identity = self._read_file(
-            root_descriptor, staged_name, required=False
+            root_descriptor, staged_name, required=False,
+            **_deadline_options(deadline_monotonic_ns)
         )
+        _check_request_deadline(deadline_monotonic_ns, effect_unknown=bool(staged_identity))
         if staged_raw:
             if staged_raw != candidate:
                 _fail("START_STAGED_CONFLICT")
         else:
+            # A first START must fit its original request endpoint. An exact
+            # durable START/staged-START replay keeps that original authority
+            # deadline even when its new IO-only request has less time left.
+            record = self._decode(candidate)
+            if (record["schema"] == _SCHEMA and deadline_monotonic_ns is not None
+                    and record["start_deadline_monotonic_ns"] > deadline_monotonic_ns):
+                _fail("INVALID_ORIGINAL_DEADLINE")
+            # Bound each data/metadata write inside the shared primitive.
+            # Required cleanup is exempt; completed stages remain evidence.
+            _check_request_deadline(deadline_monotonic_ns)
             created_identity = self._write_new(
-                root_descriptor, staged_name, candidate
+                root_descriptor, staged_name, candidate,
+                **_deadline_options(deadline_monotonic_ns)
             )
+            _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
             staged_raw, staged_identity = self._read_file(
-                root_descriptor, staged_name, required=True
+                root_descriptor, staged_name, required=True,
+                **_deadline_options(deadline_monotonic_ns, effect_unknown=True)
             )
             if staged_raw != candidate or staged_identity != created_identity:
                 _fail("RECORD_REPLACED")
+        _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
         self._decode(candidate)
         staged_again, staged_identity_again = self._read_file(
-            root_descriptor, staged_name, required=True
+            root_descriptor, staged_name, required=True,
+            **_deadline_options(deadline_monotonic_ns, effect_unknown=True)
         )
+        _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
         if staged_again != candidate or staged_identity_again != staged_identity:
             _fail("START_STAGED_REPLACED")
+        _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
         try:
             os.link(
                 staged_name,
@@ -1884,12 +2177,16 @@ class _ExecutiveReleaseActuatorJournal:
         except OSError:
             _fail("RECORD_PUBLISH")
         self._fsync_directory(root_descriptor)
+        _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
         final_linked_raw, final_linked_identity = self._read_file(
-            root_descriptor, name, required=True, expected_links=2
+            root_descriptor, name, required=True, expected_links=2,
+            **_deadline_options(deadline_monotonic_ns, effect_unknown=True)
         )
         staged_linked_raw, staged_linked_identity = self._read_file(
-            root_descriptor, staged_name, required=True, expected_links=2
+            root_descriptor, staged_name, required=True, expected_links=2,
+            **_deadline_options(deadline_monotonic_ns, effect_unknown=True)
         )
+        _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
         if (
             final_linked_raw != candidate
             or staged_linked_raw != candidate
@@ -1897,23 +2194,29 @@ class _ExecutiveReleaseActuatorJournal:
             or staged_linked_identity[:2] != staged_identity[:2]
         ):
             _fail("START_STAGED_REPLACED")
+        _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
         self._unlink_owned(
             root_descriptor,
             staged_name,
             staged_linked_identity,
             "START_STAGED_REPLACED",
         )
+        _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
 
-    def read(self, operation_key: str) -> ReleaseRecord:
+    def read(self, operation_key: str, *,
+             deadline_monotonic_ns: int | None = None) -> ReleaseRecord:
+        _check_request_deadline(deadline_monotonic_ns)
         validated_operation_key = _operation_key(operation_key)
         name = self._name(validated_operation_key)
         return self._locked(
             name,
             lambda root, record_name: self._decode_for_operation(
-                self._read_file(root, record_name, required=True)[0],
+                self._read_file(root, record_name, required=True,
+                                **_deadline_options(deadline_monotonic_ns))[0],
                 validated_operation_key,
             ),
             create_root=False,
+            **_deadline_options(deadline_monotonic_ns),
         )
 
     def advance(
@@ -1929,7 +2232,10 @@ class _ExecutiveReleaseActuatorJournal:
         rollback: Mapping[str, Any] | None = None,
         reservation: Mapping[str, Any] | None = None,
         approval: Mapping[str, Any] | None = None,
+        after_actuator_generation: int | None = None,
+        deadline_monotonic_ns: int | None = None,
     ) -> ReleaseRecord:
+        _check_request_deadline(deadline_monotonic_ns)
         _integer(expected_generation, "INVALID_EXPECTED_GENERATION", minimum=1)
         if type(state) is not str or state not in _STATES:
             _fail("INVALID_STATE")
@@ -1939,6 +2245,7 @@ class _ExecutiveReleaseActuatorJournal:
             before,
             after,
             rollback,
+            after_actuator_generation,
         )
         ancestry_arguments = (reservation, approval)
         if state in _TERMINAL_STATES:
@@ -1949,19 +2256,18 @@ class _ExecutiveReleaseActuatorJournal:
         else:
             if any(value is not None for value in terminal_arguments):
                 _fail("TERMINAL_ARGUMENTS")
-            if any(value is not None for value in ancestry_arguments):
-                _fail("ANCESTRY_ARGUMENTS")
         validated_operation_key = _operation_key(operation_key)
         name = self._name(validated_operation_key)
         supplied_reservation_bytes: bytes | None = None
         validated_approval: ReleaseRecord | None = None
-        if state in _TERMINAL_STATES:
-            # The reservation/approval are validated through the protected
-            # validators; that yields canonical bytes for the reservation.
-            validated_approval = self._decode_approval(approval)
-            supplied_reservation_bytes, _validated_reservation = self._decode_reservation(
-                reservation, validated_approval
-            )
+        if any(value is None for value in ancestry_arguments):
+            _fail("ANCESTRY_ARGUMENTS")
+        # The reservation/approval are validated through the protected
+        # validators; that yields canonical bytes for the reservation.
+        validated_approval = self._decode_approval(approval)
+        supplied_reservation_bytes, _validated_reservation = self._decode_reservation(
+            reservation, validated_approval
+        )
         return self._locked(
             name,
             lambda root, record_name: self._advance_locked(
@@ -1977,8 +2283,11 @@ class _ExecutiveReleaseActuatorJournal:
                 operation_key=validated_operation_key,
                 supplied_reservation_bytes=supplied_reservation_bytes,
                 validated_approval=validated_approval,
+                after_actuator_generation=after_actuator_generation,
+                deadline_monotonic_ns=deadline_monotonic_ns,
             ),
             create_root=False,
+            **_deadline_options(deadline_monotonic_ns),
         )
 
     def _advance_locked(
@@ -1996,13 +2305,25 @@ class _ExecutiveReleaseActuatorJournal:
         operation_key: str,
         supplied_reservation_bytes: bytes | None,
         validated_approval: ReleaseRecord | None,
+        after_actuator_generation: int | None,
+        deadline_monotonic_ns: int | None,
     ) -> ReleaseRecord:
         current_raw, current_identity = self._read_file(
-            root_descriptor, name, required=True
+            root_descriptor, name, required=True,
+            **_deadline_options(deadline_monotonic_ns)
         )
         current = self._decode_for_operation(current_raw, operation_key)
         if current["state"] in _TERMINAL_STATES:
             _fail("TERMINAL_IMMUTABLE")
+        if current["schema"] == _LEGACY_SCHEMA:
+            _fail("LEGACY_RECOVERY_UNAVAILABLE")
+        if state == "FAILED_NOT_APPLIED":
+            _fail("NO_APPLY_PROOF_UNAVAILABLE")
+        if state == "PUBLICATION_INTENT":
+            original_deadline = current["start_deadline_monotonic_ns"]
+            deadline_monotonic_ns = (min(deadline_monotonic_ns, original_deadline)
+                                     if deadline_monotonic_ns is not None else original_deadline)
+        _check_request_deadline(deadline_monotonic_ns)
         if current["journal_generation"] != expected_generation:
             _fail("GENERATION_MISMATCH")
         if state not in _NEXT_STATE[current["state"]]:
@@ -2013,149 +2334,192 @@ class _ExecutiveReleaseActuatorJournal:
         updated = current.to_dict()
         updated["state"] = state
         updated["journal_generation"] += 1
+        if state == "PUBLICATION_INTENT":
+            # No effects occur here. The future privileged publisher must
+            # receive durable intent readback AND separately qualify current
+            # boot/custody/authority before touching a file or service.
+            updated["publication_intent"] = {
+                "schema": "mastermind.executive_release_publication_intent/v1",
+                "operation_key": current["operation_key"],
+                "request_fingerprint": current["request_fingerprint"],
+                "root_qualification_digest": current["root_qualification_digest"],
+                "start_actuator_generation": current["actuator_generation"],
+                "target_actuator_generation": current["actuator_generation"] + 1,
+                "rollback_actuator_generation": current["actuator_generation"] + 2,
+                "before_digest": _hash_record(current["before"]),
+                "original_deadline_monotonic_ns": current["start_deadline_monotonic_ns"],
+                "intent_at_ms": time.time_ns() // 1_000_000,
+                "intent_monotonic_ns": time.monotonic_ns(),
+                "intent_journal_generation": updated["journal_generation"],
+            }
+        if state == "RECOVERING":
+            updated["recovery_origin"] = {
+                "schema": "mastermind.executive_release_recovery_origin/v1",
+                "operation_key": current["operation_key"],
+                "request_fingerprint": current["request_fingerprint"],
+                "publication_intent_digest": _hash_record(current["publication_intent"]),
+                "from_state": current["state"],
+                "from_journal_generation": current["journal_generation"],
+            }
         initial_reservation_bytes: bytes | None = None
         initial_reservation_identity: tuple[Any, ...] | None = None
         initial_reservation: ReleaseRecord | None = None
-        if state in _TERMINAL_STATES:
-            # R9 terminal ancestry: revalidate the immutable reservation
-            # sidecar from inside the operation/process lock before any
-            # replacement journal bytes are written. The supplied approval
-            # has already been validated and the supplied reservation
-            # validated against it; preserve canonical bytes here. Capture
-            # both the canonical bytes and the inode/size/mtime identity so
-            # the final-publication guard below can detect an inode-only
-            # replacement during staging that leaves the canonical bytes
-            # unchanged.
-            stem = _operation_stem(operation_key)
-            stored_reservation_bytes, stored_reservation_identity = (
-                self._read_prestart_snapshot(
-                    root_descriptor,
-                    stem,
-                    kind="reservation",
-                    required=True,
-                )
-            )
-            stored_reservation = self._validate_prestart_snapshot(
-                stored_reservation_bytes,
+        possible_write = False
+        def bounded_io(call, *args, **kwargs):
+            _check_request_deadline(deadline_monotonic_ns, effect_unknown=possible_write)
+            result = call(*args, **kwargs)
+            _check_request_deadline(deadline_monotonic_ns, effect_unknown=possible_write)
+            return result
+        # R9 ancestry retained for every v3 progress record: revalidate the immutable reservation
+        # sidecar from inside the operation/process lock before any
+        # replacement journal bytes are written. The supplied approval
+        # has already been validated and the supplied reservation
+        # validated against it; preserve canonical bytes here. Capture
+        # both the canonical bytes and the inode/size/mtime identity so
+        # the final-publication guard below can detect an inode-only
+        # replacement during staging that leaves the canonical bytes
+        # unchanged.
+        stem = _operation_stem(operation_key)
+        stored_reservation_bytes, stored_reservation_identity = (
+            bounded_io(self._read_prestart_snapshot,
+                root_descriptor,
+                stem,
                 kind="reservation",
-                operation_key=operation_key,
-                approval=validated_approval,
+                required=True,
+                **_deadline_options(deadline_monotonic_ns, effect_unknown=possible_write),
             )
-            if supplied_reservation_bytes != stored_reservation_bytes:
-                _fail("RESERVATION_MISMATCH")
-            # START root_qualification_digest must be the sha256 of the
-            # stored reservation's canonical bytes, not any caller value.
-            expected_root_digest = hashlib.sha256(
-                stored_reservation_bytes
-            ).hexdigest()
-            if current["root_qualification_digest"] != expected_root_digest:
-                _fail("ROOT_QUALIFICATION_MISMATCH")
-            # Repeat the existing immutable joins between the stored
-            # reservation/approval and the START record identity.
-            self._validate_start_reservation_joins(
-                current,
-                stored_reservation,
-                validated_approval,
-            )
-            self._validate_admission_joins(
-                current["admission"],
-                stored_reservation,
-                operation_key,
-            )
-            # The terminal before must byte-equal the reservation's full
-            # 8-field before — not just the first four fields.
-            if (
-                canonical_release_bytes(before)
-                != canonical_release_bytes(stored_reservation["before"])
-            ):
-                _fail("BEFORE_MISMATCH")
-            initial_reservation_bytes = stored_reservation_bytes
-            initial_reservation_identity = stored_reservation_identity
-            initial_reservation = stored_reservation
+        )
+        stored_reservation = self._validate_prestart_snapshot(
+            stored_reservation_bytes,
+            kind="reservation",
+            operation_key=operation_key,
+            approval=validated_approval,
+        )
+        if supplied_reservation_bytes != stored_reservation_bytes:
+            _fail("RESERVATION_MISMATCH")
+        # START root_qualification_digest must be the sha256 of the
+        # stored reservation's canonical bytes, not any caller value.
+        expected_root_digest = hashlib.sha256(
+            stored_reservation_bytes
+        ).hexdigest()
+        if current["root_qualification_digest"] != expected_root_digest:
+            _fail("ROOT_QUALIFICATION_MISMATCH")
+        # Repeat the existing immutable joins between the stored
+        # reservation/approval and the START record identity.
+        self._validate_start_reservation_joins(
+            current,
+            stored_reservation,
+            validated_approval,
+        )
+        self._validate_admission_joins(
+            current["admission"],
+            stored_reservation,
+            operation_key,
+        )
+        # The terminal before must byte-equal the reservation's full
+        # 8-field before — not just the first four fields.
+        if (
+            canonical_release_bytes(before if state in _TERMINAL_STATES else current["before"])
+            != canonical_release_bytes(stored_reservation["before"])
+        ):
+            _fail("BEFORE_MISMATCH")
+        initial_reservation_bytes = stored_reservation_bytes
+        initial_reservation_identity = stored_reservation_identity
+        initial_reservation = stored_reservation
+        if state in _TERMINAL_STATES:
             updated["terminal"] = {
                 "completed_at_ms": completed_at_ms,
                 "postcondition_digest": postcondition_digest,
                 "before": before,
                 "after": after,
                 "rollback": rollback,
+                "after_actuator_generation": after_actuator_generation,
             }
         validated = _validate_record(updated)
         replacement = canonical_release_bytes(validated)
         temporary_name = name[:-5] + ".tmp"
+        _check_request_deadline(deadline_monotonic_ns)
         temporary_identity = self._write_new(
-            root_descriptor, temporary_name, replacement
+            root_descriptor, temporary_name, replacement,
+            **_deadline_options(deadline_monotonic_ns)
         )
+        possible_write = True
         try:
-            temporary_raw, observed_temporary_identity = self._read_file(
-                root_descriptor, temporary_name, required=True
+            _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
+            temporary_raw, observed_temporary_identity = bounded_io(self._read_file,
+                root_descriptor, temporary_name, required=True,
+                **_deadline_options(deadline_monotonic_ns, effect_unknown=True)
             )
             if (
                 temporary_raw != replacement
                 or observed_temporary_identity != temporary_identity
             ):
                 _fail("RECORD_REPLACED")
-            observed_raw, observed_identity = self._read_file(
-                root_descriptor, name, required=True
+            observed_raw, observed_identity = bounded_io(self._read_file,
+                root_descriptor, name, required=True,
+                **_deadline_options(deadline_monotonic_ns, effect_unknown=True)
             )
             if observed_raw != current_raw or observed_identity != current_identity:
                 _fail("RECORD_REPLACED")
-            temporary_again, temporary_identity_again = self._read_file(
-                root_descriptor, temporary_name, required=True
+            temporary_again, temporary_identity_again = bounded_io(self._read_file,
+                root_descriptor, temporary_name, required=True,
+                **_deadline_options(deadline_monotonic_ns, effect_unknown=True)
             )
             if (
                 temporary_again != replacement
                 or temporary_identity_again != temporary_identity
             ):
                 _fail("RECORD_REPLACED")
-            if state in _TERMINAL_STATES:
-                # Final-publication guard: revalidate the reservation
-                # sidecar under the same operation lock immediately before
-                # ``os.replace``. Require exact canonical-bytes equality
-                # with the first under-lock observation and equal
-                # filesystem identity (an inode-only replacement that
-                # happens to keep the canonical bytes equal still leaves
-                # the original reservation unchanged; a byte drift is
-                # unambiguous refusal). Repeat root digest, START/
-                # reservation, admission/reservation, and full-before
-                # joins against the retained original identity. On
-                # refusal the original nonterminal journal stays intact
-                # and the owned temporary inode is the only file the
-                # finally clause unlinks.
-                stem = _operation_stem(operation_key)
-                final_reservation_bytes, final_reservation_identity = (
-                    self._read_prestart_snapshot(
-                        root_descriptor,
-                        stem,
-                        kind="reservation",
-                        required=True,
-                    )
+            # Final-publication guard for every new protocol phase: revalidate the reservation
+            # sidecar under the same operation lock immediately before
+            # ``os.replace``. Require exact canonical-bytes equality
+            # with the first under-lock observation and equal
+            # filesystem identity (an inode-only replacement that
+            # happens to keep the canonical bytes equal still leaves
+            # the original reservation unchanged; a byte drift is
+            # unambiguous refusal). Repeat root digest, START/
+            # reservation, admission/reservation, and full-before
+            # joins against the retained original identity. On
+            # refusal the original nonterminal journal stays intact
+            # and the owned temporary inode is the only file the
+            # finally clause unlinks.
+            stem = _operation_stem(operation_key)
+            final_reservation_bytes, final_reservation_identity = (
+                bounded_io(self._read_prestart_snapshot,
+                    root_descriptor,
+                    stem,
+                    kind="reservation",
+                    required=True,
+                    **_deadline_options(deadline_monotonic_ns, effect_unknown=True),
                 )
-                if (
-                    final_reservation_bytes != initial_reservation_bytes
-                    or final_reservation_identity
-                    != initial_reservation_identity
-                ):
-                    _fail("RESERVATION_REPLACED")
-                expected_root_digest = hashlib.sha256(
-                    initial_reservation_bytes
-                ).hexdigest()
-                if current["root_qualification_digest"] != expected_root_digest:
-                    _fail("ROOT_QUALIFICATION_MISMATCH")
-                self._validate_start_reservation_joins(
-                    current,
-                    initial_reservation,
-                    validated_approval,
-                )
-                self._validate_admission_joins(
-                    current["admission"],
-                    initial_reservation,
-                    operation_key,
-                )
-                if (
-                    canonical_release_bytes(before)
-                    != canonical_release_bytes(initial_reservation["before"])
-                ):
-                    _fail("BEFORE_MISMATCH")
+            )
+            if (
+                final_reservation_bytes != initial_reservation_bytes
+                or final_reservation_identity
+                != initial_reservation_identity
+            ):
+                _fail("RESERVATION_REPLACED")
+            expected_root_digest = hashlib.sha256(
+                initial_reservation_bytes
+            ).hexdigest()
+            if current["root_qualification_digest"] != expected_root_digest:
+                _fail("ROOT_QUALIFICATION_MISMATCH")
+            self._validate_start_reservation_joins(
+                current,
+                initial_reservation,
+                validated_approval,
+            )
+            self._validate_admission_joins(
+                current["admission"],
+                initial_reservation,
+                operation_key,
+            )
+            if (
+                canonical_release_bytes(before if state in _TERMINAL_STATES else current["before"])
+                != canonical_release_bytes(initial_reservation["before"])
+            ):
+                _fail("BEFORE_MISMATCH")
+            _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
             try:
                 os.replace(
                     temporary_name,
@@ -2165,19 +2529,26 @@ class _ExecutiveReleaseActuatorJournal:
                 )
             except OSError:
                 _fail("RECORD_REPLACE")
+            _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
             self._fsync_directory(root_descriptor)
-            final, _ = self._read_file(root_descriptor, name, required=True)
+            _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
+            final, _ = bounded_io(self._read_file, root_descriptor, name, required=True,
+                **_deadline_options(deadline_monotonic_ns, effect_unknown=True))
             if final != replacement:
                 _fail("RECORD_REPLACED")
-            return self._decode_for_operation(final, operation_key)
+            _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
+            result = self._decode_for_operation(final, operation_key)
         finally:
+            primary_active = sys.exc_info()[0] is not None
             if temporary_identity is not None:
-                self._unlink_owned(
-                    root_descriptor,
-                    temporary_name,
-                    temporary_identity,
-                    "TEMP_REPLACED",
-                )
+                try:
+                    self._unlink_owned(root_descriptor, temporary_name,
+                                       temporary_identity, "TEMP_REPLACED")
+                except BaseException:
+                    if not primary_active:
+                        raise
+        _check_request_deadline(deadline_monotonic_ns, effect_unknown=True)
+        return result
 
 
 ExecutiveReleaseActuatorJournal = _ExecutiveReleaseActuatorJournal

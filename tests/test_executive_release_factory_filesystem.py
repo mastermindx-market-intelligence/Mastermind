@@ -149,7 +149,7 @@ def test_exhausted_budget_and_oversized_leaf_refuse(filesystem):
     reader, leaf = filesystem
     with pytest.raises(f.ReleaseConsumerError):
         reader.observe(leaf, maximum=2, mode=0o400)
-    reader.deadline = 0
+    reader.deadline_monotonic_ns = 0
     with pytest.raises(f.ReleaseConsumerError):
         reader.observe(leaf, maximum=100, mode=0o400)
 

@@ -1,0 +1,50 @@
+{
+  "at": "2026-10-14T01:10:45.293240+00:00",
+  "base": "21bd27a920f0f3f3706b0d5dcae3147d8d959494",
+  "checks": [
+    {
+      "cases": 97,
+      "failures": 0,
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/FINITE_ISOLATION_FINAL.xml",
+      "sha256": "c5806bb7ae9e44e3b1ead8e2b35d77c65bad4418ed0eefa338ba73bc06836784"
+    },
+    {
+      "cases": 68,
+      "failures": 0,
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/SECONDARY_DEFINITION_FINAL.xml",
+      "sha256": "af122d80931838f9b57b84733990f1d44b0f7f0e43f5d615c77b21008c730667"
+    },
+    {
+      "cases": 23,
+      "failures": 0,
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/SECONDARY_ENTRY_CORRECTION.xml",
+      "sha256": "ca8da995b02429ad89f3b267e7b019c7aee2777001c48789342e8cd47a347f25"
+    }
+  ],
+  "counts_overlap": true,
+  "current_carrier": "PR1391 foreign two-commit source writer being reconciled; no branch push",
+  "finding_corrections": [
+    "verify held bootstrap bytes and complete manifest content before any release import",
+    "refuse runtime and artifact roots overlapping sealed release in either direction"
+  ],
+  "installed": false,
+  "native_operation_effect": "NOT_SUBMITTED",
+  "original_parent": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "pending_separate_source": [
+    "paid credential target compatibility return",
+    "solehost installer ACL",
+    "solehost named secondary bootstrap"
+  ],
+  "provider_effect": false,
+  "review": "SCOPED_SOURCE_PASS by existing Sol architecture reviewer after two findings corrected",
+  "schema": "mastermind.finite_secondary_source_qualification/v1",
+  "source": {
+    "integrations/session_bridge/bound_launch_capture/owner_assembly.py": "779519c50ae74058be482ba293e2eaa548dfb7e17b00bd25d9351913144bb794",
+    "ops/executive_os/attended_worker_definition.py": "5deb8477ad7339eb8f0a731cd10b6b8e45dcefeb4eecec6cf3d72b0e3268b06f",
+    "scripts/executive_os_phase1c_worker.py": "d961bdc9d32e78195d20ce09e911818117622c7682ce147c7d415c26531acdfc",
+    "tests/test_attended_config_isolation.py": "8edbee2b637e316a03487bf360f0f9d4e92a8a17fd23550542fe623803d5cb14",
+    "tests/test_attended_owner_assembly.py": "fd1d1dd3c463cf542e1fc8715439ff43da90e1adae9201cb3dbd4dbaec80df4d",
+    "tests/test_attended_worker_definition.py": "5412346e4d6857557b6178b9a80a11e37f50c64c385698fa9352837e5f6c724c",
+    "tests/test_fabric_attended_probe_join.py": "132cf9536771161c9a7420e66f294811da1121d2292158be6d75d01c24c7f88a"
+  }
+}

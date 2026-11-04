@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="10" skipped="0" tests="24" time="0.143" timestamp="2026-10-13T15:01:37.220625-07:00" hostname="m2studio"><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_supported_frame_keeps_identity_and_input_bytes[plain]" time="0.006" /><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_supported_frame_keeps_identity_and_input_bytes[full]" time="0.000" /><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_supported_frame_keeps_identity_and_input_bytes[marker]" time="0.000"><failure message="ValueError: artifact_manifest_missing_or_duplicate">style = 'marker'
+
+    @pytest.mark.parametrize('style', ['plain', 'full', 'marker'])
+    def test_supported_frame_keeps_identity_and_input_bytes(style):
+        text = render(manifest(), style)
+        before = text.encode()
+&gt;       assert subject.manifest_from_stdout(text, **SCOPE) == manifest()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+integrations/session_bridge/artifact_manifest_framing/test_manifest_framing.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+stdout = '**FABRIC_ARTIFACTS_V1** `{"schema":"mastermind.fabric_artifact_manifest.v1","request_sha256":"aaaaaaaaaaaaaaaaaaaaaaa...019f0879a915c5/repair.patch","bytes":5,"sha256":"a4895eb44afc336fecbba6e520cd67e178dace0276655d102fceffa8e5f70570"}]}`'
+root = 'test-root', parent = 'test-parent', run_id = 'test-run'
+host = 'ubuntu2'
+
+    def manifest_from_stdout(stdout, *, root, parent, run_id, host):
+        if not isinstance(stdout, str):
+            raise ValueError('artifact_manifest_text')
+        matches = []
+        for line in stdout.splitlines():
+            # Permit only the exact full-line Markdown emphasis wrapper. Preserve
+            # original stdout bytes for all digests and count wrapped/plain duplicates.
+            if line.startswith('**' + RESULT_PREFIX):
+                if not line.endswith('**') or len(line.encode()) &gt; reader.MAX_REQUEST:
+                    raise ValueError('artifact_manifest_wrapper')
+                line = line[2:-2]
+            if line.startswith(RESULT_PREFIX):
+                matches.append(line)
+        if len(matches) != 1 or len(matches[0].encode()) &gt; reader.MAX_REQUEST:
+&gt;           raise ValueError('artifact_manifest_missing_or_duplicate')
+E           ValueError: artifact_manifest_missing_or_duplicate
+
+integrations/session_bridge/artifact_manifest_framing/artifact_production.base.py:265: ValueError</failure></testcase><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_duplicate_across_frames_refuses[plain]" time="0.001"><failure message="Failed: DID NOT RAISE ValueError">other = 'plain'
+
+    @pytest.mark.parametrize('other', ['plain', 'full', 'marker'])
+    def test_duplicate_across_frames_refuses(other):
+&gt;       with pytest.raises(ValueError, match='missing_or_duplicate'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+integrations/session_bridge/artifact_manifest_framing/test_manifest_framing.py:47: Failed</failure></testcase><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_duplicate_across_frames_refuses[full]" time="0.001"><failure message="Failed: DID NOT RAISE ValueError">other = 'full'
+
+    @pytest.mark.parametrize('other', ['plain', 'full', 'marker'])
+    def test_duplicate_across_frames_refuses(other):
+&gt;       with pytest.raises(ValueError, match='missing_or_duplicate'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+integrations/session_bridge/artifact_manifest_framing/test_manifest_framing.py:47: Failed</failure></testcase><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_duplicate_across_frames_refuses[marker]" time="0.000" /><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_malformed_or_ambiguous_frame_refuses[&lt;lambda&gt;0]" time="0.000" /><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_malformed_or_ambiguous_frame_refuses[&lt;lambda&gt;1]" time="0.000" /><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_malformed_or_ambiguous_frame_refuses[&lt;lambda&gt;2]" time="0.001" /><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_malformed_or_ambiguous_frame_refuses[&lt;lambda&gt;3]" time="0.000" /><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_malformed_or_ambiguous_frame_refuses[&lt;lambda&gt;4]" time="0.001" /><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_malformed_or_ambiguous_frame_refuses[&lt;lambda&gt;5]" time="0.000" /><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_wrong_scope_refuses[root]" time="0.001"><failure message="AssertionError: Regex pattern did not match.&#10;  Expected regex: 'artifact_manifest_scope'&#10;  Actual message: 'artifact_manifest_missing_or_duplicate'">field = 'root'
+
+    @pytest.mark.parametrize('field', ['root', 'parent', 'run_id', 'host'])
+    def test_wrong_scope_refuses(field):
+        value = manifest()
+        value[field] = 'other'
+&gt;       with pytest.raises(ValueError, match='artifact_manifest_scope'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'artifact_manifest_scope'
+E         Actual message: 'artifact_manifest_missing_or_duplicate'
+
+integrations/session_bridge/artifact_manifest_framing/test_manifest_framing.py:68: AssertionError</failure></testcase><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_wrong_scope_refuses[parent]" time="0.000"><failure message="AssertionError: Regex pattern did not match.&#10;  Expected regex: 'artifact_manifest_scope'&#10;  Actual message: 'artifact_manifest_missing_or_duplicate'">field = 'parent'
+
+    @pytest.mark.parametrize('field', ['root', 'parent', 'run_id', 'host'])
+    def test_wrong_scope_refuses(field):
+        value = manifest()
+        value[field] = 'other'
+&gt;       with pytest.raises(ValueError, match='artifact_manifest_scope'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'artifact_manifest_scope'
+E         Actual message: 'artifact_manifest_missing_or_duplicate'
+
+integrations/session_bridge/artifact_manifest_framing/test_manifest_framing.py:68: AssertionError</failure></testcase><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_wrong_scope_refuses[run_id]" time="0.000"><failure message="AssertionError: Regex pattern did not match.&#10;  Expected regex: 'artifact_manifest_scope'&#10;  Actual message: 'artifact_manifest_missing_or_duplicate'">field = 'run_id'
+
+    @pytest.mark.parametrize('field', ['root', 'parent', 'run_id', 'host'])
+    def test_wrong_scope_refuses(field):
+        value = manifest()
+        value[field] = 'other'
+&gt;       with pytest.raises(ValueError, match='artifact_manifest_scope'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'artifact_manifest_scope'
+E         Actual message: 'artifact_manifest_missing_or_duplicate'
+
+integrations/session_bridge/artifact_manifest_framing/test_manifest_framing.py:68: AssertionError</failure></testcase><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_wrong_scope_refuses[host]" time="0.000"><failure message="AssertionError: Regex pattern did not match.&#10;  Expected regex: 'artifact_manifest_scope'&#10;  Actual message: 'artifact_manifest_missing_or_duplicate'">field = 'host'
+
+    @pytest.mark.parametrize('field', ['root', 'parent', 'run_id', 'host'])
+    def test_wrong_scope_refuses(field):
+        value = manifest()
+        value[field] = 'other'
+&gt;       with pytest.raises(ValueError, match='artifact_manifest_scope'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'artifact_manifest_scope'
+E         Actual message: 'artifact_manifest_missing_or_duplicate'
+
+integrations/session_bridge/artifact_manifest_framing/test_manifest_framing.py:68: AssertionError</failure></testcase><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_file_constraints_unchanged[change0]" time="0.000" /><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_file_constraints_unchanged[change1]" time="0.000" /><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_file_constraints_unchanged[change2]" time="0.000" /><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_file_constraints_unchanged[change3]" time="0.000" /><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_wrapper_limit_remains_bounded" time="0.000"><failure message="AssertionError: Regex pattern did not match.&#10;  Expected regex: 'artifact_manifest_wrapper'&#10;  Actual message: 'artifact_manifest_missing_or_duplicate'">def test_wrapper_limit_remains_bounded():
+&gt;       with pytest.raises(ValueError, match='artifact_manifest_wrapper'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'artifact_manifest_wrapper'
+E         Actual message: 'artifact_manifest_missing_or_duplicate'
+
+integrations/session_bridge/artifact_manifest_framing/test_manifest_framing.py:86: AssertionError</failure></testcase><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_parser_acceptance_does_not_skip_actual_file_match" time="0.000"><failure message="ValueError: artifact_manifest_missing_or_duplicate">monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x108a97950&gt;
+
+    def test_parser_acceptance_does_not_skip_actual_file_match(monkeypatch):
+        class Owner:
+            def verify(self):
+                pass
+        expected = manifest()
+        monkeypatch.setattr(subject, 'observed_manifest', lambda *a, **kw: expected)
+&gt;       assert subject.verify_completion(SCOPE, Owner(), render(expected), SCOPE['host']) == expected
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+integrations/session_bridge/artifact_manifest_framing/test_manifest_framing.py:96: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+integrations/session_bridge/artifact_manifest_framing/artifact_production.base.py:297: in verify_completion
+    actual = manifest_from_stdout(stdout,root=contract['root'],parent=contract['parent'],run_id=contract['run_id'],host=host)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+stdout = '**FABRIC_ARTIFACTS_V1** `{"schema":"mastermind.fabric_artifact_manifest.v1","request_sha256":"aaaaaaaaaaaaaaaaaaaaaaa...019f0879a915c5/repair.patch","bytes":5,"sha256":"a4895eb44afc336fecbba6e520cd67e178dace0276655d102fceffa8e5f70570"}]}`'
+root = 'test-root', parent = 'test-parent', run_id = 'test-run'
+host = 'ubuntu2'
+
+    def manifest_from_stdout(stdout, *, root, parent, run_id, host):
+        if not isinstance(stdout, str):
+            raise ValueError('artifact_manifest_text')
+        matches = []
+        for line in stdout.splitlines():
+            # Permit only the exact full-line Markdown emphasis wrapper. Preserve
+            # original stdout bytes for all digests and count wrapped/plain duplicates.
+            if line.startswith('**' + RESULT_PREFIX):
+                if not line.endswith('**') or len(line.encode()) &gt; reader.MAX_REQUEST:
+                    raise ValueError('artifact_manifest_wrapper')
+                line = line[2:-2]
+            if line.startswith(RESULT_PREFIX):
+                matches.append(line)
+        if len(matches) != 1 or len(matches[0].encode()) &gt; reader.MAX_REQUEST:
+&gt;           raise ValueError('artifact_manifest_missing_or_duplicate')
+E           ValueError: artifact_manifest_missing_or_duplicate
+
+integrations/session_bridge/artifact_manifest_framing/artifact_production.base.py:265: ValueError</failure></testcase><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_absent_original_completion_seal_still_refuses" time="0.003" /><testcase classname="integrations.session_bridge.artifact_manifest_framing.test_manifest_framing" name="test_new_packet_keeps_exact_line_instruction_and_digest" time="0.000"><failure message="assert 'Do not add emphasis, backticks, code fences or prose to that line.' in 'FABRIC_ARTIFACT_REQUEST_V1 {&quot;body_sha256&quot;:&quot;47d4750df525556f0f579d9d322bb98a0b881ac66f221dc5cc93f2133b9b6ac7&quot;,&quot;names&quot;:...pletion fail even if the model exits0. No descendants, retries or old-worker replay are authorized by this contract.\n'">def test_new_packet_keeps_exact_line_instruction_and_digest():
+        encoded = subject.encode_packet('Bounded task.', root=SCOPE['root'], parent=SCOPE['parent'],
+                                        run_id=SCOPE['run_id'], names=['repair.patch'], support_digest='c' * 64)
+&gt;       assert 'Do not add emphasis, backticks, code fences or prose to that line.' in encoded
+E       assert 'Do not add emphasis, backticks, code fences or prose to that line.' in 'FABRIC_ARTIFACT_REQUEST_V1 {"body_sha256":"47d4750df525556f0f579d9d322bb98a0b881ac66f221dc5cc93f2133b9b6ac7","names":...pletion fail even if the model exits0. No descendants, retries or old-worker replay are authorized by this contract.\n'
+
+integrations/session_bridge/artifact_manifest_framing/test_manifest_framing.py:113: AssertionError</failure></testcase></testsuite></testsuites>

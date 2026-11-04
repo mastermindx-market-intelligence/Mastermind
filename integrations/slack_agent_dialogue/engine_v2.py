@@ -14,6 +14,7 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
+from common.agent_dialogue_contract_v2 import normalize_context_v2
 from common.agent_dialogue_consultation_contract import (
     CONSULTATION_PACKET_DISCRIMINATOR,
     parse_consultation_packet,
@@ -84,39 +85,14 @@ class DialogueContextV2:
         """Normalize through the accepted V2 contracts without transport state."""
 
         try:
-            parent = build_parent_v2(
-                {
-                    "schema": "mastermind.agent_dialogue_parent.v2",
-                    "work_ref": self.work_ref,
-                    "commission_ref": dict(self.commission_ref),
-                    "session_ref": self.session_ref,
-                    "operation_key": self.operation_key,
-                    "watch_mode": self.watch_mode,
-                    "allowed_sol_user_ids": [_CONTEXT_PROBE_SOL],
-                    "created_at": "2000-01-01T00:00:00Z",
-                }
+            return normalize_context_v2(
+                work_ref=self.work_ref, commission_ref=self.commission_ref,
+                session_ref=self.session_ref, operation_key=self.operation_key,
+                watch_mode=self.watch_mode, actor_ref=self.actor_ref,
+                applies_to=self.applies_to,
             )
-            actor = validate_actor_ref(dict(self.actor_ref))
-            applies_to = validate_applies_to_v2(dict(self.applies_to))
         except (DialogueContractError, TypeError, ValueError):
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH") from None
-
-        if actor["kind"] == "worker_attempt":
-            if applies_to["kind"] != "executive_attempt" or any(
-                actor[key] != applies_to[key]
-                for key in ("job_id", "attempt_id", "worker_id")
-            ):
-                raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
-
-        return {
-            "work_ref": parent["work_ref"],
-            "commission_ref": parent["commission_ref"],
-            "session_ref": parent["session_ref"],
-            "operation_key": parent["operation_key"],
-            "watch_mode": parent["watch_mode"],
-            "actor_ref": actor,
-            "applies_to": applies_to,
-        }
 
 
 @dataclass
@@ -350,6 +326,11 @@ def _reply_direction_is_valid(
 
     request_actor = request["actor_ref"]
     reply_actor = reply["actor_ref"]
+    if reply_actor["kind"] == "executive_principal":
+        return (
+            reply_actor["seat"] == "coo"
+            and request_actor["kind"] == "worker_attempt"
+        )
     if (
         reply_actor["kind"] != "executive_surface"
         or reply_actor["seat"] not in {"ceo", "chairman"}
@@ -698,6 +679,23 @@ class DialogueEngineV2:
         if bound.parent_author_user_id != self.policy.relay_bot_user_id:
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
         return bound
+
+    async def read_bound_parent(
+        self, *, context: DialogueContextV2, thread_ts: str
+    ) -> DiscoveredDialogueParent:
+        """Read the exact Relay-owned canonical parent without creating a thread."""
+        match = self._scan_parent(
+            await self._parent_history(), normalized_context=context.normalized()
+        )
+        if match is None:
+            raise DialogueEngineError("THREAD_BINDING_AMBIGUOUS")
+        transport, parent = match
+        if (
+            transport.ts != thread_ts
+            or transport.author_user_id != self.policy.relay_bot_user_id
+        ):
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        return DiscoveredDialogueParent(thread_ts=transport.ts, parent=parent)
 
     @staticmethod
     def _ensure_flight_key(
@@ -1249,8 +1247,9 @@ class DialogueEngineV2:
         )
         validated = self._validate_outbound(message, context=context)
         text = render_message_v2(validated)
+        history = await self._history(thread_ts=thread_ts, context=frozen_context)
         existing = self._find_key(
-            await self._history(thread_ts=thread_ts, context=frozen_context),
+            history,
             message_key=validated["message_key"],
             fingerprint=validated["fingerprint"],
         )
@@ -1260,6 +1259,7 @@ class DialogueEngineV2:
                 message_key=validated["message_key"],
                 fingerprint=validated["fingerprint"],
             )
+        self._validate_new_principal_reply(history, validated)
         return PreparedMessageSend(
             thread_ts=thread_ts,
             context=frozen_context,
@@ -1269,6 +1269,30 @@ class DialogueEngineV2:
             fingerprint=validated["fingerprint"],
             frame_kind=DialogueFrameKind.LIFECYCLE,
         )
+
+    def _validate_new_principal_reply(
+        self, history: ThreadRead, message: Mapping[str, Any],
+    ) -> None:
+        """Use the existing authority owner before a new principal write.
+
+        Worker consumption keeps its own validation. A new principal send must
+        not first publish an invalid option or an already answered disposition.
+        Exact existing-message reconciliation remains read-only and precedes
+        this check. Legacy actor families keep their existing behavior.
+        """
+        if message["actor_ref"]["kind"] != "executive_principal":
+            return
+        if history.mutated_count or history.historical_messages:
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        predecessors = [item.message for item in history.messages
+                        if item.message["message_key"] == message["reply_to_message_key"]]
+        if len(predecessors) != 1 or any(
+            item.message["reply_to_message_key"] == message["reply_to_message_key"]
+            and item.message["message_type"] in SOL_MESSAGE_TYPES
+            for item in history.messages
+        ):
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        _adjudicate_reply_v2(predecessors[0], message, authority_policy=self.authority_policy)
 
     async def prepare_send_consultation_packet(
         self,
@@ -1332,11 +1356,17 @@ class DialogueEngineV2:
             context=prepared.context,
         )
         if prepared.frame_kind is DialogueFrameKind.LIFECYCLE:
-            return self._find_key(
+            existing = self._find_key(
                 classified.lifecycle,
                 message_key=prepared.message_key,
                 fingerprint=prepared.fingerprint,
             )
+            if existing is None:
+                # The prepared body is deeply frozen. Reparse its exact existing
+                # wire text through the canonical contract before adjudication.
+                self._validate_new_principal_reply(
+                    classified.lifecycle, parse_message_frame_v2(prepared.text))
+            return existing
         if enforce_packet_budget:
             self._assert_packet_history_budget(
                 classified,

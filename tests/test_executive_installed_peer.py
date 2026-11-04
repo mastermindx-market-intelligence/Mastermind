@@ -1368,6 +1368,21 @@ def test_complete_composition_binds_only_original_capture(composition, role):
 
 
 @pytest.mark.parametrize('role', ['control', 'gateway'])
+def test_projection_rejoins_use_only_this_qualification_observation(monkeypatch, composition, role):
+    value = composition(role)
+    calls = []
+    def projection(budget, previous=None):
+        calls.append((budget, previous))
+        return value.projection
+    monkeypatch.setattr(m, '_verify_control_projection', projection)
+    m.qualify_installed_peer(value.peer, role=role)
+    assert len(calls) == 3
+    assert calls[0][1] is None
+    assert all(previous is value.projection for _, previous in calls[1:])
+    assert all(budget is calls[0][0] for budget, _ in calls)
+
+
+@pytest.mark.parametrize('role', ['control', 'gateway'])
 @pytest.mark.parametrize('failure', ['pid', 'username', 'group', 'program', 'argv', 'cwd', 'dynamic_path', 'dynamic_status'])
 def test_composition_refuses_identity_mismatch(monkeypatch, composition, role, failure):
     value = composition(role)
@@ -1472,6 +1487,8 @@ class _FakeProcPidInfo:
         self.calls = []
         self.size = 56
         self.unique_id = 113769795
+        self.parent_unique_id = 113769700
+        self.parent_pidversion = 235172800
         self.pidversion = 235172879
         self.error = None
 
@@ -1481,6 +1498,8 @@ class _FakeProcPidInfo:
             raise self.error
         result = ctypes.cast(output, ctypes.POINTER(installed._ProcUniqueIdentifierInfo)).contents
         result.p_uniqueid = self.unique_id
+        result.p_puniqueid = self.parent_unique_id
+        result.p_orig_ppidversion = self.parent_pidversion
         result.p_idversion = self.pidversion
         return self.size
 
@@ -1523,7 +1542,11 @@ def test_process_instance_binds_exact_native_signature_and_clears_errno(process_
                               ctypes.c_void_p, ctypes.c_int]
     assert query.restype is ctypes.c_int
     assert (value.unique_id, value.pidversion) == (query.unique_id, query.pidversion)
-    assert list(value.__dataclass_fields__) == ["unique_id", "pidversion"]
+    assert value.parent_unique_id == query.parent_unique_id
+    assert value.parent_pidversion == query.parent_pidversion
+    assert list(value.__dataclass_fields__) == [
+        "unique_id", "pidversion", "parent_unique_id", "parent_pidversion"
+    ]
     with pytest.raises(AttributeError):
         value.unique_id = 1
     assert "_observe_process_instance" not in installed.__all__
@@ -1609,3 +1632,534 @@ def test_process_instance_nonpositive_identity_refuses(process_instance_api, uni
     query.unique_id, query.pidversion = unique_id, pidversion
     with pytest.raises(peer.PeerIdentityError, match="^SERVICE_PROCESS_IDENTITY_INVALID$"):
         installed._observe_process_instance(123)
+
+
+# Private request deadline support. No host qualification is performed.
+import inspect
+
+class IntSubclass(int):
+    pass
+
+
+def clock(monkeypatch, start=1_000_000_000):
+    now = [start]
+    sleeps = []
+    def sleep(seconds):
+        sleeps.append(seconds)
+        now[0] += round(seconds * 1_000_000_000)
+    monkeypatch.setattr(m, "time", SimpleNamespace(
+        monotonic=lambda: now[0] / 1_000_000_000,
+        monotonic_ns=lambda: now[0], sleep=sleep))
+    return now, sleeps
+
+
+@pytest.mark.parametrize("endpoint", [True, False, 0, -1, 1.5, "2", [], {}, IntSubclass(2)])
+def test_invalid_endpoint_has_no_clock_or_observation(monkeypatch, endpoint):
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid endpoint reached clock or observation")
+    monkeypatch.setattr(m, "time", SimpleNamespace(monotonic=forbidden, monotonic_ns=forbidden))
+    monkeypatch.setattr(m._peer_identity, "_current_capture", forbidden)
+    with pytest.raises((ValueError, m.PeerIdentityError)):
+        m._Budget(25, deadline_monotonic_ns=endpoint)
+    with pytest.raises((ValueError, m.PeerIdentityError)):
+        m._qualify_installed_peer_with_deadline(object(), role="control", deadline_monotonic_ns=endpoint)
+
+
+def test_public_signature_unchanged():
+    assert str(inspect.signature(m.qualify_installed_peer)) == "(peer, *, role)"
+
+
+@pytest.mark.parametrize("explicit_none", [False, True])
+def test_legacy_budget_never_reads_nanosecond_clock(monkeypatch, explicit_none):
+    now = [0.0]
+    monkeypatch.setattr(m, "time", SimpleNamespace(
+        monotonic=lambda: now[0],
+        monotonic_ns=lambda: pytest.fail("legacy budget read new clock")))
+    budget = m._Budget(25, **({"deadline_monotonic_ns": None} if explicit_none else {}))
+    assert budget.check() == 25
+    now[0] = 24.5
+    assert budget.check() == .5
+    now[0] = 25
+    with pytest.raises(m.PeerIdentityError):
+        budget.check()
+
+
+@pytest.mark.parametrize("endpoint,expected", [(3_000_000_000, 2), (100_000_000_000, 25), (10**1000, 25)])
+def test_parent_and_local_cap_min_compose(monkeypatch, endpoint, expected):
+    now, _ = clock(monkeypatch)
+    budget = m._Budget(25, deadline_monotonic_ns=endpoint)
+    assert budget.check() == expected
+    now[0] += 1_000_000_000
+    assert budget.check() == expected - 1
+
+
+def test_one_endpoint_is_never_replenished(monkeypatch):
+    now, _ = clock(monkeypatch)
+    budget = m._Budget(25, deadline_monotonic_ns=4_000_000_000)
+    for remaining in [3, 2, 1]:
+        assert budget.check() == remaining
+        now[0] += 1_000_000_000
+    with pytest.raises(m.PeerIdentityError):
+        budget.check()
+
+
+@pytest.mark.parametrize("offset", [0, -1])
+def test_expired_private_qualification_has_zero_capture(monkeypatch, offset):
+    now, _ = clock(monkeypatch)
+    monkeypatch.setattr(m._peer_identity, "_current_capture", lambda *a: pytest.fail("expired capture"))
+    with pytest.raises(m.PeerIdentityError):
+        m._qualify_installed_peer_with_deadline(object(), role="control", deadline_monotonic_ns=now[0] + offset)
+
+
+def qualification_seams(monkeypatch):
+    import os
+    capture = m._peer_identity._CaptureState(lambda: None, None, object(), os.getpid())
+    monkeypatch.setattr(m._peer_identity, "_current_capture", lambda peer: capture)
+    return object.__new__(m._peer_identity.InstalledServicePeerBinding)
+
+
+def test_late_qualification_never_calls_binding(monkeypatch):
+    now, _ = clock(monkeypatch)
+    qualification_seams(monkeypatch)
+    def qualify(*args):
+        now[0] = 2_000_000_000
+        return object()
+    monkeypatch.setattr(m, "_qualify", qualify)
+    monkeypatch.setattr(m, "_owner_binding", lambda *a: pytest.fail("late binding"))
+    with pytest.raises(m.PeerIdentityError):
+        m._qualify_installed_peer_with_deadline(object(), role="control", deadline_monotonic_ns=2_000_000_000)
+
+
+def test_original_qualification_refusal_survives_expiry(monkeypatch):
+    now, _ = clock(monkeypatch)
+    qualification_seams(monkeypatch)
+    original = m.PeerIdentityError("SERVICE_PEER_IDENTITY_MISMATCH")
+    def qualify(*args):
+        now[0] = 2_000_000_000
+        raise original
+    monkeypatch.setattr(m, "_qualify", qualify)
+    with pytest.raises(m.PeerIdentityError) as failure:
+        m._qualify_installed_peer_with_deadline(object(), role="control", deadline_monotonic_ns=2_000_000_000)
+    assert failure.value is original
+
+
+def test_binding_returning_at_deadline_is_not_exposed(monkeypatch):
+    now, _ = clock(monkeypatch)
+    binding = qualification_seams(monkeypatch)
+    monkeypatch.setattr(m, "_qualify", lambda *a: object())
+    def bind(*args):
+        now[0] = 2_000_000_000
+        return binding
+    monkeypatch.setattr(m, "_owner_binding", bind)
+    with pytest.raises(m.PeerIdentityError):
+        m._qualify_installed_peer_with_deadline(object(), role="control", deadline_monotonic_ns=2_000_000_000)
+
+
+def child_harness(monkeypatch, *, late_stage=None, failure_stage=None, cleanup_ok=True):
+    now, sleeps = clock(monkeypatch)
+    endpoint = 2_000_000_000
+    calls = []
+    blocks = iter([b"ok\n", b""])
+    def step(name):
+        calls.append(name)
+        if name == late_stage or name == failure_stage:
+            now[0] = endpoint
+        if name == failure_stage:
+            raise OSError("private test diagnostic")
+    class Stream:
+        def fileno(self):
+            step("fileno")
+            return 123
+        def close(self):
+            step("close")
+    class Child:
+        stdout = Stream()
+        def poll(self):
+            step("poll")
+            return 0
+        def kill(self):
+            step("kill")
+        def wait(self, *, timeout):
+            step("wait")
+            return 0
+    child = Child()
+    def launch(*args, **kwargs):
+        step("spawn")
+        return child
+    def discard(process):
+        assert process is child
+        step("cleanup")
+        return cleanup_ok
+    class Selector:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            step("selector_close")
+        def register(self, *args):
+            step("register")
+        def select(self, timeout):
+            assert 0 < timeout <= (endpoint - now[0]) / 1_000_000_000
+            step("select")
+            return [object()]
+    def read(*args):
+        step("read")
+        return next(blocks)
+    monkeypatch.setattr(m, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(m, "subprocess", SimpleNamespace(Popen=launch, DEVNULL=-3, PIPE=-1))
+    monkeypatch.setattr(m, "selectors", SimpleNamespace(DefaultSelector=Selector, EVENT_READ=1))
+    monkeypatch.setattr(m, "os", SimpleNamespace(set_blocking=lambda *a: step("nonblock"), read=read))
+    monkeypatch.setattr(m, "_discard_bounded_child", discard)
+    return now, calls, endpoint
+
+
+@pytest.mark.parametrize("stage", ["spawn", "fileno", "nonblock", "register", "select", "read", "selector_close", "poll", "cleanup"])
+def test_late_child_phase_refuses_with_one_cleanup(monkeypatch, stage):
+    now, calls, endpoint = child_harness(monkeypatch, late_stage=stage)
+    budget = m._Budget(25, deadline_monotonic_ns=endpoint)
+    with pytest.raises(m.PeerIdentityError):
+        m._run_bounded(m._SYSCTL_BOOT_ID_ARGV, max_bytes=128, budget=budget)
+    assert calls.count("spawn") == 1
+    assert calls.count("cleanup") == 1
+    if stage == "select":
+        assert "read" not in calls
+
+
+def test_expired_child_budget_does_not_spawn(monkeypatch):
+    now, calls, endpoint = child_harness(monkeypatch)
+    budget = m._Budget(25, deadline_monotonic_ns=endpoint)
+    now[0] = endpoint
+    with pytest.raises(m.PeerIdentityError):
+        m._run_bounded(m._SYSCTL_BOOT_ID_ARGV, max_bytes=128, budget=budget)
+    assert calls == []
+
+
+def test_child_success_retains_closed_command_and_single_cleanup(monkeypatch):
+    now, calls, endpoint = child_harness(monkeypatch)
+    budget = m._Budget(25, deadline_monotonic_ns=endpoint)
+    assert m._run_bounded(m._SYSCTL_BOOT_ID_ARGV, max_bytes=128, budget=budget) == b"ok\n"
+    assert calls.count("spawn") == calls.count("cleanup") == 1
+
+
+@pytest.mark.parametrize("cleanup_ok,code", [(True, "SERVICE_LAUNCHCTL_COMMAND_FAILED"), (False, "SERVICE_LAUNCHCTL_CLEANUP_UNPROVEN")])
+def test_child_original_failure_and_cleanup_precedence(monkeypatch, cleanup_ok, code):
+    now, calls, endpoint = child_harness(monkeypatch, failure_stage="read", cleanup_ok=cleanup_ok)
+    budget = m._Budget(25, deadline_monotonic_ns=endpoint)
+    with pytest.raises(m.PeerIdentityError) as failure:
+        m._run_bounded(m._SYSCTL_BOOT_ID_ARGV, max_bytes=128, budget=budget)
+    assert failure.value.code == code
+    assert calls.count("cleanup") == 1
+
+
+@pytest.mark.parametrize("step_ns,expires", [(1_000_000_000, False), (2_000_000_000, True)])
+def test_repeated_identity_probes_share_one_cumulative_budget(monkeypatch, composition, step_ns, expires):
+    value = composition("control")
+    now, _ = clock(monkeypatch)
+    calls = []
+    old_boot = m._observe_real_boot_id
+    old_launch = m._observe_launchd_service
+    def boot(*, budget):
+        calls.append(("boot", budget))
+        now[0] += step_ns
+        return old_boot()
+    def launch(role, *, budget):
+        calls.append(("launch", budget))
+        now[0] += step_ns
+        return old_launch(role)
+    monkeypatch.setattr(m, "_observe_real_boot_id", boot)
+    monkeypatch.setattr(m, "_observe_launchd_service", launch)
+    if expires:
+        with pytest.raises(m.PeerIdentityError):
+            m._qualify_installed_peer_with_deadline(value.peer, role="control", deadline_monotonic_ns=10_000_000_000)
+        assert [x[0] for x in calls] == ["boot", "launch", "boot", "launch", "boot"]
+    else:
+        binding = m._qualify_installed_peer_with_deadline(value.peer, role="control", deadline_monotonic_ns=10_000_000_000)
+        context = m._peer_identity.require_installed_service_peer(value.peer, binding)
+        assert context.connection_instance is value.peer.connection_instance
+        assert context.service_label == value.launch.service_label
+        assert [x[0] for x in calls] == ["boot", "launch"] * 3
+    assert all(item[1] is calls[0][1] for item in calls)
+
+
+@pytest.mark.parametrize("which", ["capture", "dynamic"])
+def test_slow_synchronous_identity_observation_never_qualifies(monkeypatch, composition, which):
+    value = composition("control")
+    now, _ = clock(monkeypatch)
+    old_boot = m._observe_real_boot_id
+    old_launch = m._observe_launchd_service
+    monkeypatch.setattr(m, "_observe_real_boot_id", lambda *, budget: old_boot())
+    monkeypatch.setattr(m, "_observe_launchd_service", lambda role, *, budget: old_launch(role))
+    owner = m._peer_identity if which == "capture" else m
+    name = "_current_capture" if which == "capture" else "_observe_dynamic_code"
+    old = getattr(owner, name)
+    def slow(*args):
+        result = old(*args)
+        now[0] = 2_000_000_000
+        return result
+    monkeypatch.setattr(owner, name, slow)
+    monkeypatch.setattr(m, "_owner_binding", lambda *a: pytest.fail("late observation reached binding"))
+    with pytest.raises(m.PeerIdentityError):
+        m._qualify_installed_peer_with_deadline(value.peer, role="control", deadline_monotonic_ns=2_000_000_000)
+
+
+@pytest.mark.parametrize("stage", ["spawn", "select", "read", "poll", "cleanup"])
+def test_codesign_child_uses_same_endpoint_and_cleanup(monkeypatch, stage):
+    now, calls, endpoint = child_harness(monkeypatch, late_stage=stage)
+    budget = m._Budget(25, deadline_monotonic_ns=endpoint)
+    with pytest.raises(m.PeerIdentityError):
+        m._run_bounded_readonly(m._CODESIGN_VERIFY_ARGV, budget=budget,
+            max_bytes=128, allow_empty=True, merge_stderr=False)
+    assert calls.count("spawn") == calls.count("cleanup") == 1
+    if stage == "select":
+        assert "read" not in calls
+
+
+@pytest.mark.parametrize("which", ["pid", "program", "argv", "working_directory"])
+def test_private_deadline_preserves_closed_identity_joins(monkeypatch, composition, which):
+    value = composition("control")
+    clock(monkeypatch)
+    old_boot = m._observe_real_boot_id
+    changes = {"pid": value.peer.pid + 1, "program": "/unqualified/python",
+               "argv": value.launch.argv + ("--unqualified",), "working_directory": "/unqualified"}
+    bad = dataclasses.replace(value.launch, **{which: changes[which]})
+    monkeypatch.setattr(m, "_observe_real_boot_id", lambda *, budget: old_boot())
+    monkeypatch.setattr(m, "_observe_launchd_service", lambda role, *, budget: bad)
+    monkeypatch.setattr(m, "_owner_binding", lambda *a: pytest.fail("identity mismatch reached binding"))
+    with pytest.raises(m.PeerIdentityError) as failure:
+        m._qualify_installed_peer_with_deadline(value.peer, role="control", deadline_monotonic_ns=10_000_000_000)
+    assert "MISMATCH" in failure.value.code
+
+
+@pytest.mark.parametrize("change", ["pid", "pidversion"])
+def test_private_deadline_does_not_hide_reused_or_execed_peer(monkeypatch, composition, change):
+    value = composition("control")
+    clock(monkeypatch)
+    kernel = m._peer_identity._observe_socket(value.connection)
+    changed = dataclasses.replace(kernel, **{change: getattr(kernel, change) + 1})
+    monkeypatch.setattr(m._peer_identity, "_observe_socket", lambda connection: changed)
+    monkeypatch.setattr(m, "_qualify", lambda *a: pytest.fail("stale capture reached qualification"))
+    with pytest.raises(m.PeerIdentityError):
+        m._qualify_installed_peer_with_deadline(value.peer, role="control", deadline_monotonic_ns=10_000_000_000)
+
+
+@pytest.mark.parametrize("helper", ["read", "inventory"])
+def test_private_file_refusal_survives_deadline_during_cleanup(monkeypatch, helper):
+    now, _ = clock(monkeypatch)
+    budget = m._Budget(25, deadline_monotonic_ns=2_000_000_000)
+    info = SimpleNamespace(st_mode=stat.S_IFIFO, st_nlink=1, st_size=0)
+    monkeypatch.setattr(m, "_open_trusted", lambda *a, **k: (123, info, info))
+    closed = []
+    def close(fd):
+        closed.append(fd)
+        now[0] = 2_000_000_000
+    monkeypatch.setattr(m, "_close", close)
+    if helper == "read":
+        expected = "SERVICE_OBJECT_TYPE_UNSUPPORTED"
+        call = lambda: m._read_trusted_bytes("/fixed", budget=budget, maximum=100)
+    else:
+        expected = "SERVICE_RUNTIME_BASE_UNQUALIFIED"
+        monkeypatch.setattr(m, "_PYTHON_LINK_INDEX", {})
+        call = lambda: m._inventory_python_base(budget)
+    with pytest.raises(m.PeerIdentityError) as failure:
+        call()
+    assert failure.value.code == expected
+    assert closed == [123]
+
+
+def test_private_reap_sleep_is_clamped_and_late_exit_refuses(monkeypatch):
+    now, sleeps = clock(monkeypatch)
+    budget = m._Budget(25, deadline_monotonic_ns=1_001_000_000)
+    class Child:
+        def poll(self):
+            return None
+    assert m._reap_bounded_exit_code(Child(), 4.0, budget=budget) is None
+    assert sleeps == [.001]
+    class LateExit:
+        def poll(self):
+            now[0] = 2_000_000_000
+            return 0
+    now[0] = 1_000_000_000
+    budget = m._Budget(25, deadline_monotonic_ns=2_000_000_000)
+    assert m._reap_bounded_exit_code(LateExit(), 4.0, budget=budget) is None
+
+
+@pytest.mark.parametrize("observer", ["boot", "launchd"])
+def test_private_observer_refuses_late_parsed_result(monkeypatch, observer):
+    now, _ = clock(monkeypatch)
+    budget = m._Budget(25, deadline_monotonic_ns=2_000_000_000)
+    def run(argv, *, max_bytes, budget):
+        assert budget.caller_deadline == 2_000_000_000
+        if argv == m._SYSCTL_OSRELEASE_ARGV:
+            return b"25.5.0\n"
+        return _launchd_fixture() if observer == "launchd" else b"01234567-89ab-cdef-0123-456789abcdef\n"
+    monkeypatch.setattr(m, "_run_bounded", run)
+    if observer == "launchd":
+        old = m._parse_launchctl_service
+        def parse(*args, **kwargs):
+            result = old(*args, **kwargs)
+            now[0] = 2_000_000_000
+            return result
+        monkeypatch.setattr(m, "_parse_launchctl_service", parse)
+        call = lambda: m._observe_launchd_service("control", budget=budget)
+    else:
+        old = m._bounded_single_line
+        def parse(*args, **kwargs):
+            result = old(*args, **kwargs)
+            now[0] = 2_000_000_000
+            return result
+        monkeypatch.setattr(m, "_bounded_single_line", parse)
+        call = lambda: m._observe_real_boot_id(budget=budget)
+    with pytest.raises(m.PeerIdentityError):
+        call()
+
+
+def test_private_entry_requires_endpoint_even_though_budget_none_is_legacy(monkeypatch):
+    def forbidden():
+        pytest.fail("missing private endpoint read clock")
+    monkeypatch.setattr(m, "time", SimpleNamespace(monotonic=forbidden, monotonic_ns=forbidden))
+    with pytest.raises(m.PeerIdentityError, match="DEADLINE_INVALID"):
+        m._qualify_installed_peer_with_deadline(object(), role="control", deadline_monotonic_ns=None)
+
+
+@pytest.mark.parametrize("uid,expected", [(501, "SERVICE_OBJECT_NOT_ROOT_OWNED"), (0, "SERVICE_QUALIFICATION_BUDGET_EXCEEDED")])
+def test_private_late_metadata_refusal_is_preserved_without_next_open(monkeypatch, uid, expected):
+    now, _ = clock(monkeypatch)
+    budget = m._Budget(25, deadline_monotonic_ns=2_000_000_000)
+    def lstat(path):
+        now[0] = 2_000_000_000
+        return SimpleNamespace(st_uid=uid, st_gid=0, st_mode=stat.S_IFREG | 0o600)
+    monkeypatch.setattr(m, "_lstat", lstat)
+    fake_os = SimpleNamespace(**vars(os))
+    fake_os.open = lambda *a: pytest.fail("late metadata initiated another open")
+    monkeypatch.setattr(m, "os", fake_os)
+    with pytest.raises(m.PeerIdentityError) as failure:
+        m._open_trusted("/fixed", budget=budget)
+    assert failure.value.code == expected
+
+
+# ---------------------------------------------------------------------------
+# I2 — the optional workspace Control Room socket (4-socket admission).
+#
+# The control plist may carry the optional WorkspaceControlRoom socket (added
+# by install.sh when the config carries the unix stanza). The installed
+# peer qualifier admits exactly {3-socket, 4-socket} control plists and
+# refuses every drift on the room entry.
+# ---------------------------------------------------------------------------
+
+import copy as _copy
+import plistlib as _plistlib
+
+
+def _qualified_control_with_room() -> dict:
+    profile = _copy.deepcopy(QUALIFIED_CONTROL_PLIST)
+    profile["Sockets"] = _copy.deepcopy(m._CONTROL_SOCKETS)
+    profile["Sockets"][m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME] = _copy.deepcopy(
+        m._WORKSPACE_CONTROL_ROOM_SOCKET
+    )
+    return profile
+
+
+def _drift_room(profile: dict, *, transform) -> dict:
+    profile = _copy.deepcopy(profile)
+    transform(profile["Sockets"][m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME])
+    return profile
+
+
+def _drift_base_socket(profile: dict, *, transform) -> dict:
+    profile = _copy.deepcopy(profile)
+    transform(profile["Sockets"]["CeoIngress"])
+    return profile
+
+
+def test_three_socket_control_plist_still_matches():
+    parsed = m._load_strict_plist(_plistlib.dumps(QUALIFIED_CONTROL_PLIST), code="PLIST_INVALID")
+    releases = []
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, releases)
+    assert releases == [QUALIFIED_CONTROL_PLIST["WorkingDirectory"].rsplit("/", 1)[1]]
+
+
+def test_four_socket_control_plist_matches_via_template_swap():
+    document = _qualified_control_with_room()
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    releases = []
+    # The guard at the top of _profile_matches swaps the 3-socket template
+    # for the 4-socket one when the room key is present; both templates
+    # admit the same document.
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, releases)
+    assert m._profile_matches(m._CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM, parsed, releases)
+    assert releases == [document["WorkingDirectory"].rsplit("/", 1)[1]]
+
+
+@pytest.mark.parametrize("mutator,description", [
+    (lambda e: e.__setitem__("SockPathMode", 0o660), "room SockPathMode 0o660"),
+    (lambda e: e.__setitem__("SockPathMode", True), "room SockPathMode True (bool)"),
+    (lambda e: e.__setitem__("SockPathGroup", 470), "room SockPathGroup 470"),
+    (lambda e: e.__setitem__("SockPathGroup", 457), "room SockPathGroup 457 (CeoIngress gid)"),
+    (lambda e: e.__setitem__("SockPathOwner", 470), "room SockPathOwner 470"),
+    (lambda e: e.__setitem__("SockPathName", "/var/run/mastermind-executive/control-room.sock"),
+     'room SockPathName "/var/run/mastermind-executive/control-room.sock"'),
+    (lambda e: e.__setitem__("SockFamily", "Unix"), 'room entry with extra key "SockFamily": "Unix"'),
+    (lambda e: e.pop("SockPassive"), "room entry missing SockPassive"),
+])
+def test_room_entry_drift_is_refused(mutator, description):
+    document = _drift_room(_qualified_control_with_room(), transform=mutator)
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, []) is False, description
+    assert m._profile_matches(m._CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM, parsed, []) is False, description
+
+
+def test_extra_socket_alongside_room_is_refused():
+    document = _qualified_control_with_room()
+    document["Sockets"]["Extra"] = {"SockPassive": True, "SockPathMode": 384,
+                                    "SockPathName": "/tmp/x", "SockPathOwner": 450,
+                                    "SockPathGroup": 450, "SockType": "stream"}
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, []) is False
+    assert m._profile_matches(m._CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM, parsed, []) is False
+
+
+def test_base_socket_drift_is_refused_when_room_is_present():
+    # CeoIngress SockPathMode drifted to 384 (== 0o600) while the room entry
+    # is present — the 4-socket admission must not loosen the base sockets.
+    document = _drift_base_socket(_qualified_control_with_room(),
+                                  transform=lambda e: e.__setitem__("SockPathMode", 384))
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, []) is False
+    assert m._profile_matches(m._CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM, parsed, []) is False
+
+
+def test_three_socket_with_stale_room_entry_is_refused():
+    # A 3-socket document with a stray room entry must not be admitted.
+    document = _qualified_control_with_room()
+    document["Sockets"].pop(m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME)
+    # Re-add a stale room entry that drifts: SockPathGroup 470.
+    document["Sockets"][m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME] = _copy.deepcopy(
+        m._WORKSPACE_CONTROL_ROOM_SOCKET)
+    document["Sockets"][m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME]["SockPathGroup"] = 470
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, []) is False
+    assert m._profile_matches(m._CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM, parsed, []) is False
+
+
+def test_template_cross_equality_phase1c_and_installed_peer():
+    from scripts import executive_os_phase1c as phase1c
+    from tests.executive_installed_control_fixture import unix_stanza
+
+    config = {"control_uid": 450, "workspace_control_room": unix_stanza(450)}
+    entry = phase1c.workspace_control_room_launchd_entry(config, control_gid=450)
+    assert entry == m._WORKSPACE_CONTROL_ROOM_SOCKET
+    assert m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME == phase1c._WORKSPACE_CONTROL_ROOM_SOCKET_NAME
+    assert m._WORKSPACE_CONTROL_ROOM_SOCKET["SockPathName"] == phase1c._CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET
+    assert m._WORKSPACE_CONTROL_ROOM_SOCKET["SockPathOwner"] == m._ROLE_TOPOLOGIES["control"].service_uid
+    assert m._WORKSPACE_CONTROL_ROOM_SOCKET["SockPathGroup"] == m._ROLE_TOPOLOGIES["control"].config_gid
+    assert m._WORKSPACE_CONTROL_ROOM_SOCKET["SockPathMode"] == 0o600
+
+
+def test_release_observation_matcher_admits_four_socket_control_plist():
+    from control_plane import executive_release_observation as obs
+    control_spec = next(spec for spec in obs._SPECS if spec.role == "control")
+    document = _qualified_control_with_room()
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    found = []
+    assert obs._profile(control_spec) is m._EXPECTED_PLIST_PROFILES["control"]
+    assert m._profile_matches(obs._profile(control_spec), parsed, found) is True
+    assert found == [document["WorkingDirectory"].rsplit("/", 1)[1]]

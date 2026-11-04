@@ -1,0 +1,126 @@
+--- a/fabric_task.py
++++ b/fabric_task.py
+@@ -559,6 +559,79 @@
+                 pass
+ 
+ 
++def plan_accepted_macro_worktree_release(
++    run_id: str, *, root_id: str, parent_run_id: str, pinned_sha: str,
++) -> dict[str, Any]:
++    """Read-only bridge from original accepted Fabric result to exact host GC.
++
++    The original accepted ledger owns the terminal/result outcome; the
++    original remote_sub log binds THIS run to an explicitly new sparse
++    workspace. Neither fact alone permits Git removal, and this function
++    NEVER launches a remote command or changes checkout state.
++    """
++    rid = validate_run_id(run_id)
++    root = validate_run_id(root_id)
++    parent = validate_run_id(parent_run_id)
++    if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", rid)
++            or not re.fullmatch(r"[0-9a-f]{40}", pinned_sha)):
++        raise FabricTaskError("FABRIC_RECLAIM_INVALID_EXACT_SCOPE")
++    current = inspect_run(rid)
++    if (current.get("state") != "TERMINAL"
++            or current.get("rc") != 0
++            or current.get("signal") != "ok"
++            or current.get("result_available") is not True
++            or current.get("accepted") is not True
++            or current.get("accepted_by") not in ("deterministic", "reviewer")
++            or current.get("acceptance_state") != "ACCEPTED"
++            or current.get("root_id") != root
++            or current.get("parent_run_id") != parent):
++        raise FabricTaskError("FABRIC_RECLAIM_ACCEPTANCE_OR_CUSTODY_UNVERIFIED")
++    log_path, _ = _paths(rid)
++    try:
++        original = _bounded_regular(log_path, MAX_LOG_BYTES)
++        text = original.decode("utf-8", errors="strict")
++    except (OSError, UnicodeError, FabricTaskError) as exc:
++        raise FabricTaskError("FABRIC_RECLAIM_ORIGINAL_LOG_UNVERIFIED") from exc
++    pattern = re.compile(
++        r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z "
++        r"\[remote_sub id=" + re.escape(rid) +
++        r" host=(?P<host>ubuntu[0-3])\] "
++        r"FABRIC_NEW_MACRO_WORKTREE run=" + re.escape(rid) +
++        r" commit=(?P<sha>[0-9a-f]{40}) "
++        r"root=(?P<root>[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}) "
++        r"parent=(?P<parent>[A-Za-z0-9][A-Za-z0-9_.:-]{0,127})$",
++        re.MULTILINE,
++    )
++    markers = [line for line in text.splitlines()
++               if "FABRIC_NEW_MACRO_WORKTREE" in line]
++    matched = list(pattern.finditer(text))
++    if (len(markers) != 1 or len(matched) != 1
++            or matched[0].group("sha") != pinned_sha
++            or matched[0].group("root") != root
++            or matched[0].group("parent") != parent):
++        raise FabricTaskError("FABRIC_RECLAIM_ORIGINAL_LAUNCH_PROOF_UNVERIFIED")
++    # A second bounded owner observation must agree with the initial
++    # acceptance, not merely with the caller's run-id spelling.
++    second = inspect_run(rid)
++    keys = ("state", "rc", "signal", "result_available", "accepted",
++            "accepted_by", "acceptance_state", "root_id", "parent_run_id")
++    if any(second.get(key) != current.get(key) for key in keys):
++        raise FabricTaskError("FABRIC_RECLAIM_ACCEPTANCE_CHANGED")
++    if _bounded_regular(log_path, MAX_LOG_BYTES) != original:
++        raise FabricTaskError("FABRIC_RECLAIM_LAUNCH_LOG_CHANGED")
++    return {
++        "schema": "mastermind.fabric_accepted_sparse_worktree_plan.v1",
++        "state": "HOST_WORKTREE_SOURCE_AND_LIVENESS_PROOF_REQUIRED",
++        "run_id": rid, "original_root": root, "parent_run_id": parent,
++        "host": matched[0].group("host"),
++        "checkout_path": "~/lanes/wt/" + rid,
++        "expected_branch": "lane/" + rid,
++        "source_pinned_sha": pinned_sha,
++        "execution_accepted_by": current["accepted_by"],
++        "cleanup_authorized": False,
++    }
++
++
+ def wait_for(run_id: str, *, timeout: float, interval: float) -> dict[str, Any]:
+     rid = validate_run_id(run_id)
+     if not (0 <= timeout <= 7200 and 0.05 <= interval <= 60):
+@@ -674,6 +747,13 @@
+     p_accept = sub.add_parser("accept")
+     p_accept.add_argument("run_id")
+     p_accept.add_argument("--by", required=True, choices=("deterministic", "reviewer"))
++
++    p_release_plan = sub.add_parser(
++        "reclaim-plan", help="read-only exact accepted sparse worker provenance; no deletion")
++    p_release_plan.add_argument("run_id")
++    p_release_plan.add_argument("--root", required=True)
++    p_release_plan.add_argument("--parent", required=True)
++    p_release_plan.add_argument("--pinned-sha", required=True)
+ 
+     p_cancel = sub.add_parser("cancel")
+     p_cancel.add_argument("run_id")
+@@ -818,6 +898,11 @@
+         if args.cmd == "result":
+             sys.stdout.buffer.write(read_result(args.run_id, max_bytes=args.max_bytes))
+             return 0
++        if args.cmd == "reclaim-plan":
++            _json(plan_accepted_macro_worktree_release(
++                args.run_id, root_id=args.root,
++                parent_run_id=args.parent, pinned_sha=args.pinned_sha))
++            return 0
+         if args.cmd == "accept":
+             rid = validate_run_id(args.run_id)
+             if rid in {prestart_reconcile.RUN_ID, preexec_reconcile.RUN_ID}:
+--- a/remote_sub.sh
++++ b/remote_sub.sh
+@@ -995,6 +995,15 @@
+ if [ -n "$GLM_CAP_REMOTE" ]; then
+   REMOTE_INNER='export GLM_REMOTE_CAPABILITY_FILE="$HOME/lanes/tmp/$KEY.glm-cap.json"; '"$REMOTE_INNER"
+ fi
++if [ -n "$NEW_MACRO_COMMIT" ]; then
++  # Original launch identity only. The host-side physical lease still owns
++  # actual mint; this line is NOT a claim the checkout was created.
++  if [[ ! "$POOL_ORCHESTRATOR_ID" =~ ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$ ]] ||
++     [[ ! "$POOL_PARENT_RUN_ID" =~ ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$ ]]; then
++    RC=78; log "FABRIC_NEW_MACRO_LINEAGE_REFUSED rc=$RC before_launch=1"; exit "$RC"
++  fi
++  log "FABRIC_NEW_MACRO_WORKTREE run=$ID commit=$NEW_MACRO_COMMIT root=$POOL_ORCHESTRATOR_ID parent=$POOL_PARENT_RUN_ID"
++fi
+ log "LAUNCH stdout=$REMOTE_STDOUT rc_file=ext/$REMOTE_RC cwd=$REMOTE_CWD"
+ LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV umask 077 || exit; cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $ROUTING_ENV $OPERATOR_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MIN_FREE_MEM_GB='$MIN_FREE_MEM_GB' LANE_MAX_CPU_TCTL_C='$MAX_CPU_TCTL_C' LANE_MIN_FREE_DISK_GB='$MIN_FREE_DISK_GB' FABRIC_NEW_MACRO_COMMIT='$NEW_MACRO_COMMIT' FABRIC_CPU_SCOPE_QUOTA_PCT='$CPU_SCOPE_QUOTA' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
+ ADMISSION_FILE="$HERE/lanes/${ID}.admission"

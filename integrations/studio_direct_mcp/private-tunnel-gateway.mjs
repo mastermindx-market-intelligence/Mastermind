@@ -122,7 +122,11 @@ export function resolvePrivateTunnelConfig(partial = {}) {
  */
 export async function startPrivateGateway(config = {}) {
   const { config: resolved, auth } = resolvePrivateTunnelConfig(config);
-  const gateway = await startGateway(resolved, auth);
+  // The private resolver keeps account identity in auth. Modern serving also
+  // verifies that binding in the engine; forward the same trusted identity.
+  const gateway = await startGateway({ ...resolved,
+    ...(resolved.modernFabricProtocol === true ? { accountLabel: auth.accountLabel } : {}),
+  }, auth);
   return Object.assign(gateway, {
     accountLabel: auth.accountLabel,
     principal: auth.principal,

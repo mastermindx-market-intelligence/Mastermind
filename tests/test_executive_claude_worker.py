@@ -59,12 +59,14 @@ def _passing_canary() -> dict[str, object]:
     }
 
 
-def _fixture_claude_binary(tmp_path: Path) -> Path:
+def _fixture_claude_binary(
+    tmp_path: Path, *, version: str = _FIXTURE_VERSION
+) -> Path:
     binary = tmp_path / "fixture-claude"
     binary.write_text(
         "#!/bin/sh\n"
         'if [ "$1" = "--version" ]; then\n'
-        f"  printf '{_FIXTURE_VERSION} (Claude Code)\\n'\n"
+        f"  printf '{version} (Claude Code)\\n'\n"
         "  exit 0\n"
         "fi\n"
         'root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
@@ -87,6 +89,7 @@ def _fixture_claude_binary(tmp_path: Path) -> Path:
         '    auth-ready-orgid-secret) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","orgId":"Bearer abcdefghijklmnopqrstuvwxyz"}\\n\'; exit 0 ;;\n'
         '  esac\n'
         'fi\n'
+        'if [ -p "$root/launch-release" ]; then IFS= read -r release < "$root/launch-release"; fi\n'
         'case "$mode" in\n'
         '  success) printf \'{"is_error":false,"model":"claude-opus-4-6","session_id":"fixture-session","usage":{"input_tokens":1,"output_tokens":2},"structured_output":{"outcome":"ok","run_id":"run-1","job_id":"job-1","worker_id":"worker-1","artifacts":[]}}\\n\' ;;\n'
         '  refusal) printf \'{"is_error":true,"subtype":"error","message":"refused"}\\n\' ;;\n'
@@ -725,18 +728,46 @@ def test_foreground_success_returns_common_structured_result(
     "mode",
     ("refusal", "malformed", "model-mismatch", "secret-output"),
 )
+@pytest.mark.parametrize("delay_initial_inspection", (False, True))
 def test_foreground_bad_provider_output_never_succeeds_or_persists_secret(
-    tmp_path: Path, mode: str
+    tmp_path: Path, mode: str, delay_initial_inspection: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     binary = _fixture_claude_binary(tmp_path)
     (tmp_path / "mode").write_text(mode, encoding="utf-8")
-    spec = _workspace_and_spec(tmp_path, run_id=f"run-{mode}")
+    spec = _workspace_and_spec(tmp_path, run_id=f"run-{mode}", timeout_seconds=5)
     adapter = _adapter(tmp_path, binary)
+    if delay_initial_inspection:
+        real_inspect = claude_worker.LocalProcessInspector.inspect
+        first_inspection = True
+
+        def delayed_inspect(self: object, pid: int) -> object:
+            nonlocal first_inspection
+            if first_inspection:
+                first_inspection = False
+                # Exercise a child scheduled before the parent's first identity
+                # read. The FIFO, not this delay, supplies the launch ordering.
+                time.sleep(0.2)
+            return real_inspect(self, pid)
+
+        monkeypatch.setattr(claude_worker.LocalProcessInspector, "inspect", delayed_inspect)
+
+    # These cases qualify output handling after an admitted start. Keep the real
+    # fixture PID alive through identity/attestation, without relaxing the
+    # adapter's separate fail-closed tests for an already-exited process.
+    gate = tmp_path / "launch-release"
+    os.mkfifo(gate, 0o600)
+    gate_fd = os.open(gate, os.O_RDWR | os.O_NONBLOCK)
 
     async def execute() -> CollectionReceipt:
-        return await adapter.collect_result(await adapter.start(spec))
+        ref = await adapter.start(spec)
+        assert os.write(gate_fd, b"release\n") == len(b"release\n")
+        return await adapter.collect_result(ref)
 
-    receipt = asyncio.run(execute())
+    try:
+        receipt = asyncio.run(execute())
+    finally:
+        os.close(gate_fd)
 
     assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
     for path in (
@@ -1218,35 +1249,50 @@ def test_secret_stderr_and_replaced_bound_evidence_never_succeed(
     tmp_path: Path,
 ) -> None:
     binary = _fixture_claude_binary(tmp_path)
-    (tmp_path / "mode").write_text("secret-stderr", encoding="utf-8")
-    adapter = _adapter(tmp_path, binary)
+    # All four negative controls require a live attested child. The fixture's
+    # fixed 0.2s sleep (and immediate secret-stderr exit) cannot ensure /proc
+    # visibility on loaded CI. Reuse the suite's FIFO release barrier; do not
+    # weaken the production identity inspector or relax any invalid-result gate.
+    gate = tmp_path / "launch-release"
+    os.mkfifo(gate, 0o600)
+    gate_fd = os.open(gate, os.O_RDWR | os.O_NONBLOCK)
+    try:
+        (tmp_path / "mode").write_text("secret-stderr", encoding="utf-8")
+        adapter = _adapter(tmp_path, binary)
 
-    async def secret_stderr() -> CollectionReceipt:
-        return await adapter.collect_result(await adapter.start(_workspace_and_spec(tmp_path)))
+        async def secret_stderr() -> CollectionReceipt:
+            ref = await adapter.start(_workspace_and_spec(tmp_path))
+            # Exit only after the real fixture process has been identity-attested.
+            assert os.write(gate_fd, b"release\n") == len(b"release\n")
+            return await adapter.collect_result(ref)
 
-    secret_receipt = asyncio.run(secret_stderr())
-    assert secret_receipt.result.status is WorkerRunStatus.INVALID_RESULT
-    assert "CREDENTIAL-SENTINEL" not in Path(secret_receipt.process_ref.stderr_path).read_text()
+        secret_receipt = asyncio.run(secret_stderr())
+        assert secret_receipt.result.status is WorkerRunStatus.INVALID_RESULT
+        assert "CREDENTIAL-SENTINEL" not in Path(secret_receipt.process_ref.stderr_path).read_text()
 
-    for label in ("stdout_path", "stderr_path", "result_path"):
-        (tmp_path / "mode").write_text("delayed-success", encoding="utf-8")
-        replacing_adapter = _adapter(tmp_path, binary)
-        spec = _workspace_and_spec(
-            tmp_path, run_id=f"run-replace-{label}", timeout_seconds=0.7
-        )
-        victim = tmp_path / f"victim-{label}"
-        victim.write_text("victim-data", encoding="utf-8")
+        for label in ("stdout_path", "stderr_path", "result_path"):
+            (tmp_path / "mode").write_text("delayed-success", encoding="utf-8")
+            replacing_adapter = _adapter(tmp_path, binary)
+            spec = _workspace_and_spec(
+                tmp_path, run_id=f"run-replace-{label}", timeout_seconds=0.7
+            )
+            victim = tmp_path / f"victim-{label}"
+            victim.write_text("victim-data", encoding="utf-8")
 
-        async def replace_then_collect() -> CollectionReceipt:
-            ref = await replacing_adapter.start(spec)
-            target = Path(getattr(ref, label))
-            target.unlink()
-            os.link(victim, target)
-            return await replacing_adapter.collect_result(ref)
+            async def replace_then_collect() -> CollectionReceipt:
+                ref = await replacing_adapter.start(spec)
+                target = Path(getattr(ref, label))
+                target.unlink()
+                os.link(victim, target)
+                # Release only *after* a verified start and path replacement.
+                assert os.write(gate_fd, b"release\n") == len(b"release\n")
+                return await replacing_adapter.collect_result(ref)
 
-        receipt = asyncio.run(replace_then_collect())
-        assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
-        assert victim.read_text(encoding="utf-8") == "victim-data"
+            receipt = asyncio.run(replace_then_collect())
+            assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
+            assert victim.read_text(encoding="utf-8") == "victim-data"
+    finally:
+        os.close(gate_fd)
 
 
 def test_post_parse_git_rejection_leaves_bound_result_empty(tmp_path: Path) -> None:
@@ -2022,6 +2068,7 @@ def test_process_group_census_refuses_empty_error_for_existing_group(
 def test_process_group_census_accepts_darwin_state_flags(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
     real_popen = subprocess.Popen
 
     def flagged_state_popen(
@@ -2038,6 +2085,38 @@ def test_process_group_census_accepts_darwin_state_flags(
         claude_worker._ProcessGroupMember(42, "S"),
         claude_worker._ProcessGroupMember(43, "Z"),
     )
+
+
+@pytest.mark.parametrize("state_token", ["D", "t", "X", "I"])
+def test_process_group_census_accepts_linux_state_codes(
+    monkeypatch: pytest.MonkeyPatch, state_token: str,
+) -> None:
+    """Linux ps state codes are not Darwin's state-code alphabet."""
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    real_popen = subprocess.Popen
+
+    def linux_state_popen(_argv: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        return real_popen(("/usr/bin/printf", f"42 99 {state_token}\n"), **kwargs)
+
+    monkeypatch.setattr(claude_worker.subprocess, "Popen", linux_state_popen)
+    assert claude_worker._process_group_member_pids(99) == (
+        claude_worker._ProcessGroupMember(42, state_token),
+    )
+
+
+@pytest.mark.parametrize("state_token", ["?", "S!", "D+"])
+def test_process_group_census_refuses_invalid_linux_state_column(
+    monkeypatch: pytest.MonkeyPatch, state_token: str,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    real_popen = subprocess.Popen
+
+    def invalid_state_popen(_argv: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        return real_popen(("/usr/bin/printf", f"42 99 {state_token}\n"), **kwargs)
+
+    monkeypatch.setattr(claude_worker.subprocess, "Popen", invalid_state_popen)
+    with pytest.raises(claude_worker.ClaudeProcessIdentityError):
+        claude_worker._process_group_member_pids(99)
 
 
 def test_exited_launch_pid_reuse_never_signals_foreign_group(
@@ -3079,3 +3158,70 @@ def test_post_spawn_principal_mismatch_refuses_and_retains_cleanup_custody(
     assert isinstance(error, claude_worker.ClaudeProcessIdentityError)
     assert observed_pids, "the process was created, so cleanup custody applies"
     assert cleanups, "the refused launch must retain and perform cleanup custody"
+
+
+@pytest.mark.parametrize("selector", [
+    "fable", "Fable", "FABLE", "best", "Best", "BEST",
+    "default", "Default", "DEFAULT", "opusplan", "OpusPlan", "OPUSPLAN",
+    "opus", "Opus", "OPUS", "sonnet", "Sonnet", "SONNET",
+    "haiku", "Haiku", "HAIKU",
+])
+def test_moving_model_selectors_refuse_before_native_observation(tmp_path, selector):
+    observer = _FakeManagedPolicyObserver(
+        exact_model=selector, binary_sha256="a" * 64,
+        binary_version=_FIXTURE_VERSION, generation=_VALID_GENERATION,
+    )
+    # This path deliberately does not exist. An exact-model refusal must occur
+    # before any binary/auth/provider observation, not accidentally at launch.
+    with pytest.raises(ClaudeWorkerContractError, match="exact configured model id"):
+        ClaudeCodeWorkerAdapter(
+            tmp_path / "unprobed-native-binary",
+            allowed_versions=frozenset({_FIXTURE_VERSION}),
+            exact_model=selector, max_turns=1,
+            managed_policy_observer=observer,
+        )
+    assert observer.calls == 0
+
+
+@pytest.mark.parametrize("model,version", [
+    ("claude-fable-5-1", "2.1.257"), ("claude-fable-5-1", "2.1.280"),
+    ("claude-opus-5-5", "2.1.280"), ("claude-opus-5-5", "2.1.281"),
+    ("claude-opus-5-5", "2.2.0"), ("claude-opus-5-5", "3.0.0"),
+])
+def test_exact_fable_and_opus_model_pins_are_not_rewritten(tmp_path, model, version):
+    # Contract fixture only: this does not assert installed CLI support,
+    # account entitlement, served identity, or production route admission.
+    binary = _fixture_claude_binary(tmp_path, version=version)
+    observer = _observer_for(binary)
+    observer.exact_model = model
+    observer.binary_version = version
+    adapter = ClaudeCodeWorkerAdapter(
+        binary, allowed_versions=frozenset({version}),
+        exact_model=model, max_turns=1, managed_policy_observer=observer,
+    )
+    assert adapter.exact_model == model
+    assert observer.calls == 1
+    assert adapter_descriptor("claude-code").implemented is False
+
+
+@pytest.mark.parametrize("model,version,floor", [
+    ("claude-opus-5-5", "2.1.279", "2.1.280"),
+    ("claude-opus-5-5", "2.1.9", "2.1.280"),
+    ("claude-opus-5-5", "2.0.999", "2.1.280"),
+    ("claude-opus-5-5", "1.99.999", "2.1.280"),
+    ("claude-fable-5-1", "2.1.256", "2.1.257"),
+    ("claude-fable-5-1", "2.1.9", "2.1.257"),
+])
+def test_known_model_runtime_floor_refuses_before_policy_observation(tmp_path, model, version, floor):
+    binary = _fixture_claude_binary(tmp_path, version=version)
+    observer = _observer_for(binary)
+    observer.exact_model = model
+    observer.binary_version = version
+    with pytest.raises(ClaudeWorkerContractError) as caught:
+        ClaudeCodeWorkerAdapter(
+            binary, allowed_versions=frozenset({version}), exact_model=model,
+            max_turns=1, managed_policy_observer=observer,
+        )
+    assert "requires Claude Code" in str(caught.value)
+    assert floor in str(caught.value)
+    assert observer.calls == 0

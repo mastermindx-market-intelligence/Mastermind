@@ -25,7 +25,7 @@ REVIEWED_ANCHORS = {
     },
     "compile_installed_evidence": {
         "node_type": "FunctionDef",
-        "ast_sha256": "cf2f1232d0019151af181eaa0ee4cac216680e11b3d96fa648213edd323b89ec",
+        "ast_sha256": "1849b2f75fc6973c8e4cc3222af523a220c4c27b89ef4bcbf44264fede88e25a",
         "sites": (
             (("body", 13, "test", "values", 3, "comparators", 0), "int", 450, "450"),
         ),

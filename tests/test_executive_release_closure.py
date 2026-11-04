@@ -248,6 +248,9 @@ def test_private_history_wire_has_no_renewal_token_or_public_selector(
         canonical_evidence=lane["capability"])
     assert root.approval.to_dict() == approval
     assert len(calls) == 1
+    endpoint = calls[0][1]["deadline_monotonic_ns"]
+    assert type(endpoint) is int
+    assert 0 < endpoint - c.time.monotonic_ns() <= 15_000_000_000
     assert calls[0] == (
         {
             "schema": c.BROKER_SCHEMA,
@@ -258,6 +261,7 @@ def test_private_history_wire_has_no_renewal_token_or_public_selector(
             "socket_path": transport.DEFAULT_SOCKET,
             "timeout_seconds": 15,
             "require_root_peer": True,
+            "deadline_monotonic_ns": endpoint,
         },
     )
 
@@ -615,10 +619,14 @@ def _wire(
             "operation": "read_release_closure",
             "admission_evidence": evidence,
         }
+        endpoint = options["deadline_monotonic_ns"]
+        assert type(endpoint) is int
+        assert 0 < endpoint - c.time.monotonic_ns() <= 15_000_000_000
         assert options == {
             "socket_path": transport.DEFAULT_SOCKET,
             "timeout_seconds": 15,
             "require_root_peer": True,
+            "deadline_monotonic_ns": endpoint,
         }
         calls.append(copy.deepcopy(payload))
         return {
@@ -875,10 +883,14 @@ def fresh_lane(installed, monkeypatch):
         assert (
             not runtime.store._read_connections and not runtime.store._write_connections
         )
+        endpoint = options["deadline_monotonic_ns"]
+        assert type(endpoint) is int
+        assert 0 < endpoint - c.time.monotonic_ns() <= 15_000_000_000
         assert options == {
             "socket_path": transport.DEFAULT_SOCKET,
             "timeout_seconds": 15,
             "require_root_peer": True,
+            "deadline_monotonic_ns": endpoint,
         }
         calls.append(copy.deepcopy(request))
         operation = request["operation"]

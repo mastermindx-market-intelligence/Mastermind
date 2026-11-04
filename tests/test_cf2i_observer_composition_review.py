@@ -169,3 +169,67 @@ def test_cancelled_waiter_does_not_later_observe(tmp_path):
         await asyncio.sleep(0)
         assert calls == []
     asyncio.run(run())
+
+
+def test_capacity_observe_waits_for_valid_assignment_finalize(tmp_path, monkeypatch):
+    import control_plane.broker_assignment_seal as assignment_seal
+    from tests.test_broker_assignment_seal import fixture as seal_fixture
+
+    async def run():
+        broker, adapter, _, spec, call, seal_observations = seal_fixture(
+            tmp_path, monkeypatch
+        )
+        capacity_calls = []
+        projection = {"capacity_fixture": "after-finalize"}
+
+        def observe_capacity():
+            capacity_calls.append(True)
+            return projection
+
+        broker.capacity_observer = observe_capacity
+
+        async def assert_capacity_refused():
+            with pytest.raises(BrokerStateError, match="idle broker"):
+                await call("capacity-observe/v1", {})
+            assert capacity_calls == []
+
+        await call("start", {"launch_spec": spec, "validation_commands": []})
+        adapter.finished.set()
+        await call("collect", {"run_id": spec["run_id"]})
+        await assert_capacity_refused()
+
+        prepared = await call(
+            "assignment-seal-prepare", {"run_id": spec["run_id"]}
+        )
+        await assert_capacity_refused()
+
+        receipt = await call(
+            "assignment-seal-commit",
+            {
+                "run_id": spec["run_id"],
+                "snapshot_sha256": prepared["snapshot_sha256"],
+                "seal": {"inert_control_receipt": True},
+            },
+        )
+        await assert_capacity_refused()
+
+        final = {
+            "run_id": spec["run_id"],
+            "observation_sha256": assignment_seal.digest(receipt),
+            "retention_sha256": assignment_seal.digest(
+                assignment_seal.control_retention_record(receipt)
+            ),
+        }
+        with pytest.raises(BrokerStateError, match="retention"):
+            await call(
+                "assignment-seal-finalize",
+                {**final, "retention_sha256": "0" * 64},
+            )
+        await assert_capacity_refused()
+
+        assert await call("assignment-seal-finalize", final) == final
+        assert await call("capacity-observe/v1", {}) == projection
+        assert capacity_calls == [True]
+        assert len(seal_observations) == 1
+
+    asyncio.run(run())

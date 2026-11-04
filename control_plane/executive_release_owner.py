@@ -85,6 +85,40 @@ _BEFORE_KEYS = frozenset({
 _SERVICE_ROLES = frozenset({"control", "worker", "relay", "gateway", "broker"})
 
 
+# This is the owner START leaf budget. The outer socket peer qualification
+# and factory/peer subprocess waits still require explicit host composition.
+_START_REQUEST_BUDGET_NS = 12_000_000_000
+
+
+def _check_start_deadline(deadline_monotonic_ns):
+    if deadline_monotonic_ns is None:
+        return
+    if (type(deadline_monotonic_ns) is not int
+            or not 0 < deadline_monotonic_ns <= (1 << 63) - 1):
+        raise ReleaseConsumerError("RELEASE_ROOT_JOURNAL_INVALID_REQUEST_DEADLINE")
+    if time.monotonic_ns() >= deadline_monotonic_ns:
+        raise ReleaseConsumerError("RELEASE_ROOT_JOURNAL_DEADLINE_EXCEEDED")
+
+
+def _start_deadline_options(deadline_monotonic_ns):
+    return ({} if deadline_monotonic_ns is None
+            else {"deadline_monotonic_ns": deadline_monotonic_ns})
+
+
+def _before_start_call(deadline_monotonic_ns, operation, *args, **kwargs):
+    """Fence successful observations; never mask their primary exception.
+
+    Callbacks keep their existing signatures. They may physically overrun:
+    this fence refuses a late result, but cannot preempt filesystem/C calls.
+    This helper must not wrap journal create, whose returned record is known
+    durable evidence and whose typed errors own the uncertain write boundary.
+    """
+    _check_start_deadline(deadline_monotonic_ns)
+    result = operation(*args, **kwargs)
+    _check_start_deadline(deadline_monotonic_ns)
+    return result
+
+
 def _state_identity(state):
     if (type(state) is not ReleaseOwnerSnapshot
             or type(state.codec) is not _OwnerReleaseCodec
@@ -133,7 +167,7 @@ def _evidence_digest(reservation):
 
 class ReleaseBrokerOwner:
     """Installed private composition for two closed, non-install operations."""
-    def __init__(self, snapshot: Callable[[str], ReleaseOwnerSnapshot], *,
+    def __init__(self, snapshot: Callable[..., ReleaseOwnerSnapshot], *,
                  history_trust: Callable[[], ReleaseHistoryTrust] | None = None,
                  root_journal: _ExecutiveReleaseActuatorJournal | None = None):
         if not callable(snapshot):
@@ -146,11 +180,13 @@ class ReleaseBrokerOwner:
             raise TypeError("installed root journal required")
         self._root_journal = root_journal
 
-    def _fresh(self, state, transition):
+    def _fresh(self, state, transition, *, deadline_monotonic_ns=None):
         observed = _state_identity(state)
-        fresh = self._snapshot(transition)
+        _check_start_deadline(deadline_monotonic_ns)
+        fresh = self._snapshot(transition, **_start_deadline_options(deadline_monotonic_ns))
         if _state_identity(fresh) != observed:
             raise ReleaseConsumerError("RELEASE_PRECONDITIONS_CHANGED")
+        _check_start_deadline(deadline_monotonic_ns)
         return fresh
 
     def _history(self, approval, principal, connection):
@@ -220,7 +256,7 @@ class ReleaseBrokerOwner:
             raise ReleaseConsumerError("RELEASE_ROOT_JOURNAL_INVALID_RECORD")
         state = journal_record["state"]
         if state not in {
-            "STARTED", "PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING",
+            "STARTED", "PUBLICATION_INTENT", "PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING",
             "SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"}:
             raise ReleaseConsumerError("RELEASE_ROOT_JOURNAL_INVALID_RECORD")
         if journal_record["root_qualification_digest"] != reservation_digest:
@@ -282,6 +318,14 @@ class ReleaseBrokerOwner:
             else dict(journal_admission),
             "admission_digest": _hash(journal_admission),
         }
+        new_protocol = journal_record["schema"] == "mastermind.executive_release_actuator_journal/v3"
+        if new_protocol:
+            status["schema"] = "mastermind.executive_release_terminal_status/v2"
+            for key in ("before", "start_deadline_monotonic_ns", "root_qualification_digest"):
+                status[key] = journal_record[key]
+            for key in ("publication_intent", "recovery_origin"):
+                if key in journal_record:
+                    status[key] = journal_record[key]
         if state in {"SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"}:
             terminal = journal_record["terminal"]
             # terminal.before byte-equals reservation.before, immutable.
@@ -307,6 +351,13 @@ class ReleaseBrokerOwner:
                 "after": dict(terminal["after"]),
                 "rollback": dict(terminal["rollback"]),
             }
+            if new_protocol:
+                status["terminal_receipt"].update({
+                    "schema": "mastermind.executive_release_terminal_receipt/v2",
+                    "after_actuator_generation": terminal["after_actuator_generation"],
+                    "publication_intent_digest": _hash(journal_record["publication_intent"]),
+                    "recovery_origin_digest": _hash(journal_record["recovery_origin"]),
+                })
         try:
             validated_status = contract.validate_release_terminal_status(
                 status, expected_approval=approval)
@@ -315,7 +366,7 @@ class ReleaseBrokerOwner:
                 "RELEASE_ROOT_JOURNAL_INVALID_RECORD") from None
         return validated_status.to_dict()
 
-    def _private_frame(self, raw, connection):
+    def _private_frame(self, raw, connection, *, deadline_monotonic_ns=None):
         if (type(raw) is not dict or raw.get("schema") != BROKER_SCHEMA
                 or raw.get("operation") not in _PRIVATE_OPERATIONS
                 or set(raw) != (_RESERVE_KEYS if raw.get("operation") == "reserve_release_prestart" else _START_KEYS)
@@ -334,26 +385,36 @@ class ReleaseBrokerOwner:
         if (frame.arguments["operation_key"] != raw["arguments"]["operation_key"]
                 or frame.arguments["prepared_token"] != raw["arguments"]["prepared_token"]):
             raise ReleaseConsumerError("RELEASE_BROKER_FRAME_INVALID")
-        _qualify_connection(connection, "control")
+        _before_start_call(
+            deadline_monotonic_ns, _qualify_connection, connection, "control")
         return frame
 
-    def _live_state(self, frame, approval):
+    def _live_state(self, frame, approval, *, deadline_monotonic_ns=None):
         transition = approval["transition_digest"]
-        state = self._snapshot(transition)
+        _check_start_deadline(deadline_monotonic_ns)
+        # Forward the original endpoint to every live snapshot; never retry
+        # an unsupported callback without the endpoint.
+        state = self._snapshot(transition, **_start_deadline_options(deadline_monotonic_ns))
         _state_identity(state)
         effect = contract.validate_normalized_effect(state.effect)
         if _hash(effect) != transition:
             raise ReleaseConsumerError("RELEASE_STAGED_TRANSITION_CHANGED")
         now = time.time_ns() // 1_000_000
-        principal = _current_principal(frame.principal, now)
-        current_grant = authorize_release_transition(
+        principal = _before_start_call(
+            deadline_monotonic_ns, _current_principal, frame.principal, now)
+        current_grant = _before_start_call(
+            deadline_monotonic_ns, authorize_release_transition,
             frame.principal, effect, state.policy, target_ref=state.target_ref, now_ms=now)
-        state = self._fresh(state, transition)
+        state = self._fresh(
+            state, transition, **_start_deadline_options(deadline_monotonic_ns))
         now = time.time_ns() // 1_000_000
-        principal = _current_principal(frame.principal, now)
-        current_grant = authorize_release_transition(
+        principal = _before_start_call(
+            deadline_monotonic_ns, _current_principal, frame.principal, now)
+        current_grant = _before_start_call(
+            deadline_monotonic_ns, authorize_release_transition,
             frame.principal, effect, state.policy, target_ref=state.target_ref, now_ms=now)
-        sealed = state.codec.verify_approval(approval)
+        sealed = _before_start_call(
+            deadline_monotonic_ns, state.codec.verify_approval, approval)
         if (sealed["operation_key"] != frame.arguments["operation_key"]
                 or sealed["principal_projection"] != principal
                 or sealed["owner_installation_id"] != state.owner_installation_id
@@ -363,18 +424,22 @@ class ReleaseBrokerOwner:
                 or sealed["grant"]["policy_generation"] != current_grant["policy_generation"]
                 or not sealed["created_at_ms"] <= now < sealed["expires_at_ms"]):
             raise ReleaseConsumerError("RELEASE_APPROVAL_NOT_CURRENT")
+        _check_start_deadline(deadline_monotonic_ns)
         return state, effect, sealed
 
-    def _private_inputs(self, frame, raw):
+    def _private_inputs(self, frame, raw, *, deadline_monotonic_ns=None):
         if self._root_journal is None:
             raise ReleaseConsumerError("RELEASE_ROOT_JOURNAL_UNAVAILABLE")
+        _check_start_deadline(deadline_monotonic_ns)
         try:
             approval = contract.validate_approval_evidence(raw["approval"])
         except (TypeError, ValueError, contract.ReleaseContractError):
             raise ReleaseConsumerError("RELEASE_APPROVAL_EVIDENCE_INVALID") from None
         if approval["operation_key"] != frame.arguments["operation_key"]:
             raise ReleaseConsumerError("RELEASE_APPROVAL_IDENTITY_MISMATCH")
-        state, effect, sealed = self._live_state(frame, approval)
+        _check_start_deadline(deadline_monotonic_ns)
+        state, effect, sealed = self._live_state(
+            frame, approval, **_start_deadline_options(deadline_monotonic_ns))
         now = time.time_ns() // 1_000_000
         monotonic = time.monotonic_ns()
         try:
@@ -383,6 +448,7 @@ class ReleaseBrokerOwner:
                 monotonic_ns=monotonic, boot_id=state.boot_id)
         except ValueError:
             raise ReleaseConsumerError("RELEASE_TOKEN_INVALID") from None
+        _check_start_deadline(deadline_monotonic_ns)
         expected = {
             "owner_installation_id": state.owner_installation_id,
             "app_generation": state.app_generation,
@@ -422,6 +488,7 @@ class ReleaseBrokerOwner:
                 or not isinstance(state.before["service_generation_digests"], Mapping)
                 or set(state.before["service_generation_digests"]) != _SERVICE_ROLES):
             raise ReleaseConsumerError("RELEASE_ROOT_OWNER_UNAVAILABLE")
+        _check_start_deadline(deadline_monotonic_ns)
         return state, effect, sealed, payload, preconditions
 
     def _preconditions(self, state, sealed):
@@ -537,9 +604,11 @@ class ReleaseBrokerOwner:
         return {"schema": BROKER_SCHEMA, "operation": "reserve_release_prestart", "ok": True,
                 "approval": sealed.to_dict(), "result": {"reservation": stored.to_dict()}}
 
-    def _start_reserved_release(self, raw, connection):
-        frame = self._private_frame(raw, connection)
-        state, effect, sealed, payload, current = self._private_inputs(frame, raw)
+    def _start_reserved_release(self, raw, connection, *, deadline_monotonic_ns=None):
+        _check_start_deadline(deadline_monotonic_ns)
+        options = _start_deadline_options(deadline_monotonic_ns)
+        frame = self._private_frame(raw, connection, **options)
+        state, effect, sealed, payload, current = self._private_inputs(frame, raw, **options)
         qualified_state_identity = _state_identity(state)
         now = time.time_ns() // 1_000_000
         if not payload["issued_at_ms"] <= now < payload["expires_at_ms"]:
@@ -551,15 +620,18 @@ class ReleaseBrokerOwner:
         # Runtime/admission-reader seam. Evidence approval must byte-equal the
         # sealed approval already validated above.
         evidence_approval, evidence_admission, evidence_preconditions = (
-            _validate_evidence(raw["admission_evidence"]))
+            _before_start_call(
+                deadline_monotonic_ns, _validate_evidence, raw["admission_evidence"]))
         if (contract.canonical_release_bytes(evidence_approval)
                 != contract.canonical_release_bytes(sealed)):
             raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_MISMATCH")
+        _check_start_deadline(deadline_monotonic_ns)
         try:
             supplied_reservation = contract.validate_release_prestart_reservation(
                 raw["reservation"], expected_approval=sealed)
         except (TypeError, ValueError, contract.ReleaseContractError):
             raise ReleaseConsumerError("RELEASE_ROOT_START_EVIDENCE_INVALID") from None
+        _check_start_deadline(deadline_monotonic_ns)
         if (contract.canonical_release_bytes(evidence_preconditions)
                 != contract.canonical_release_bytes(supplied_reservation["preconditions"])):
             # Evidence preconditions must match the stored reservation
@@ -567,13 +639,15 @@ class ReleaseBrokerOwner:
             # that does not join to the on-disk PRESTART.
             raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_MISMATCH")
         try:
-            self._root_journal._validate_admission_joins(
+            _before_start_call(
+                deadline_monotonic_ns, self._root_journal._validate_admission_joins,
                 evidence_admission, supplied_reservation,
                 frame.arguments["operation_key"])
         except ExecutiveReleaseActuatorJournalError as exc:
             raise ReleaseConsumerError(
                 "RELEASE_ROOT_JOURNAL_" + exc.code) from None
-        expected_reservation = self._reservation(
+        expected_reservation = _before_start_call(
+            deadline_monotonic_ns, self._reservation,
             state, effect, sealed, payload, current,
             token=frame.arguments["prepared_token"], now=supplied_reservation["reserved_at_ms"],
             monotonic=supplied_reservation["reserved_monotonic_ns"])
@@ -581,12 +655,14 @@ class ReleaseBrokerOwner:
                 != contract.canonical_release_bytes(expected_reservation)
                 or evidence_admission["target_observation_digest"] != state.target_observation_digest):
             raise ReleaseConsumerError("RELEASE_RESERVATION_MISMATCH")
+        _check_start_deadline(deadline_monotonic_ns)
         try:
             reservation = self._root_journal.read_prestart_reservation(
-                frame.arguments["operation_key"], approval=sealed)
+                frame.arguments["operation_key"], approval=sealed, **options)
         except ExecutiveReleaseActuatorJournalError as exc:
             raise ReleaseConsumerError(
                 "RELEASE_ROOT_JOURNAL_" + exc.code) from None
+        _check_start_deadline(deadline_monotonic_ns)
         if contract.canonical_release_bytes(reservation) != contract.canonical_release_bytes(supplied_reservation):
             raise ReleaseConsumerError("RELEASE_RESERVATION_MISMATCH")
         reservation_digest = _evidence_digest(reservation)
@@ -596,14 +672,16 @@ class ReleaseBrokerOwner:
                 or contract.canonical_release_bytes(evidence_preconditions)
                 != contract.canonical_release_bytes(reservation["preconditions"])):
             raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_MISMATCH")
+        _check_start_deadline(deadline_monotonic_ns)
         try:
             existing_start = self._root_journal.read(
-                frame.arguments["operation_key"])
+                frame.arguments["operation_key"], **options)
         except ExecutiveReleaseActuatorJournalError as exc:
             if exc.code != "NOT_FOUND":
                 raise ReleaseConsumerError(
                     "RELEASE_ROOT_JOURNAL_" + exc.code) from None
             existing_start = None
+        _check_start_deadline(deadline_monotonic_ns)
 
         # The journal invokes this only after acquiring the final operation
         # lock and completing every blocking reservation/cancellation read.
@@ -612,8 +690,9 @@ class ReleaseBrokerOwner:
         # lifetime, reservation, admission, and peer identity are all
         # revalidated under the existing final qualifier.
         def qualify_locked_start():
+            _check_start_deadline(deadline_monotonic_ns)
             locked_state, locked_effect, locked_sealed, locked_payload, locked_current = (
-                self._private_inputs(frame, raw)
+                self._private_inputs(frame, raw, **options)
             )
             if _state_identity(locked_state) != qualified_state_identity:
                 raise ReleaseConsumerError("RELEASE_PRECONDITIONS_CHANGED")
@@ -625,7 +704,8 @@ class ReleaseBrokerOwner:
             if not (locked_payload["issued_monotonic_ns"]
                     <= locked_monotonic < locked_payload["expires_monotonic_ns"]):
                 raise ReleaseConsumerError("RELEASE_PREPARED_EXPIRED")
-            expected_reservation = self._reservation(
+            expected_reservation = _before_start_call(
+                deadline_monotonic_ns, self._reservation,
                 locked_state, locked_effect, locked_sealed, locked_payload,
                 locked_current, token=frame.arguments["prepared_token"],
                 now=reservation["reserved_at_ms"],
@@ -638,6 +718,7 @@ class ReleaseBrokerOwner:
             # Every owner snapshot and other potentially blocking validation
             # above has completed. Recheck the serving Control peer at the
             # last possible point before create/replay persists STARTED.
+            _check_start_deadline(deadline_monotonic_ns)
             _qualify_connection(connection, "control")
             final_now = time.time_ns() // 1_000_000
             final_monotonic = time.monotonic_ns()
@@ -647,8 +728,13 @@ class ReleaseBrokerOwner:
             if not (locked_payload["issued_monotonic_ns"]
                     <= final_monotonic < locked_payload["expires_monotonic_ns"]):
                 raise ReleaseConsumerError("RELEASE_PREPARED_EXPIRED")
-            final_principal = _current_principal(frame.principal, final_now)
-            final_grant = authorize_release_transition(
+            # Preserve prepared-lifetime refusal precedence after the peer
+            # observation before applying the additional request deadline.
+            _check_start_deadline(deadline_monotonic_ns)
+            final_principal = _before_start_call(
+                deadline_monotonic_ns, _current_principal, frame.principal, final_now)
+            final_grant = _before_start_call(
+                deadline_monotonic_ns, authorize_release_transition,
                 frame.principal, locked_effect, locked_state.policy,
                 target_ref=locked_state.target_ref, now_ms=final_now)
             if (locked_sealed["principal_projection"] != final_principal
@@ -659,6 +745,7 @@ class ReleaseBrokerOwner:
                     or not locked_sealed["created_at_ms"]
                     <= final_now < locked_sealed["expires_at_ms"]):
                 raise ReleaseConsumerError("RELEASE_APPROVAL_NOT_CURRENT")
+            _check_start_deadline(deadline_monotonic_ns)
             return (final_now if existing_start is None
                     else existing_start["started_at_ms"])
         before = reservation["before"]
@@ -679,6 +766,15 @@ class ReleaseBrokerOwner:
             "target_release_tree": effect["to_release_tree"],
             "boot_id": reservation["preconditions"]["boot_id"],
         }
+        _check_start_deadline(deadline_monotonic_ns)
+        if existing_start is not None and existing_start["schema"] != "mastermind.executive_release_actuator_journal/v3":
+            # Historical v2 is readable only. A repeated client request cannot
+            # reinterpret or rewrite it into the new publication protocol.
+            raise ReleaseConsumerError("RELEASE_LEGACY_EFFECT_UNKNOWN")
+        publication_deadline = (
+            existing_start["start_deadline_monotonic_ns"] if existing_start is not None
+            else min(payload["expires_monotonic_ns"], deadline_monotonic_ns)
+            if deadline_monotonic_ns is not None else payload["expires_monotonic_ns"])
         try:
             start_record = self._root_journal.create(
                 actuator_generation=state.actuator_generation,
@@ -691,10 +787,18 @@ class ReleaseBrokerOwner:
                 started_at_ms=(now if existing_start is None
                                else existing_start["started_at_ms"]),
                 commit_qualifier=qualify_locked_start,
+                publication_deadline_monotonic_ns=publication_deadline,
+                **options,
             )
         except ExecutiveReleaseActuatorJournalError as exc:
             raise ReleaseConsumerError(
                 "RELEASE_ROOT_JOURNAL_" + exc.code) from None
+        # A canonical record returned by create is known durable evidence.
+        # Do not erase it with a late response-time fence. The journal owns
+        # typed DEADLINE_EFFECT_UNKNOWN after a possible write. Other primary
+        # errors remain intact: the caller must reconcile historical state,
+        # never assume no START or retry here with a renewed budget. The outer
+        # broker currently collapses errors; wire propagation is a successor.
         return {"schema": BROKER_SCHEMA, "operation": "start_reserved_release", "ok": True,
                 "approval": sealed.to_dict(),
                 "result": {"reservation": reservation.to_dict(),
@@ -802,7 +906,9 @@ class ReleaseBrokerOwner:
                 return self._reserve_release_prestart(raw, connection)
             if raw.get("operation") == "read_release_closure":
                 return self._read_release_closure(raw, connection)
-            return self._start_reserved_release(raw, connection)
+            deadline_monotonic_ns = time.monotonic_ns() + _START_REQUEST_BUDGET_NS
+            return self._start_reserved_release(
+                raw, connection, deadline_monotonic_ns=deadline_monotonic_ns)
         if type(raw) is not dict or set(raw) != {"schema", "operation", "arguments", "principal", "approval"} or raw["schema"] != BROKER_SCHEMA:
             raise ReleaseConsumerError("RELEASE_BROKER_FRAME_INVALID")
         frame = ingress.validate_frame({key: value for key, value in
