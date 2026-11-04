@@ -1,6 +1,7 @@
 """Synthetic fail-closed tests for one-shot first-party Paper UI clone pruning."""
 import copy
 import json
+from pathlib import Path
 import unittest
 
 from integrations.paper_desktop import native_page_ui as ui_module
@@ -14,6 +15,7 @@ PAGE2 = {"type": "page", "id": "p-3-0", "name": "Page 2", "icon": None}
 
 class FakeClient:
     def __init__(self):
+        self.server = {"name": "paper-desktop", "version": "0.5.16"}
         self.active = CLONE
         self.fail_read_after_delete = False
         self.source_native_drift = False
@@ -24,6 +26,10 @@ class FakeClient:
             CLONE: {"fileName": "Young harmony (copy)", "pages": [copy.deepcopy(PAGE1), copy.deepcopy(PAGE2)]},
         }
         self.calls = []
+
+    def catalog(self):
+        fixture = Path(__file__).parent / "fixtures/paper_desktop/955e92_full_catalog.json"
+        return json.loads(fixture.read_text(encoding="utf-8"))
 
     def call(self, name, arguments):
         self.calls.append((name, copy.deepcopy(arguments)))
@@ -36,6 +42,11 @@ class FakeClient:
                      "createdAt": self.clone_created_at},
                 ]
             })}]}
+        if name == "get_jsx":
+            return {"content": [
+                {"type": "text", "text": "{}"},
+                {"type": "text", "text": "<div>retained</div>"},
+            ]}
         assert name == "get_basic_info", name
         if self.fail_read_after_delete and len(self.files[CLONE]["pages"]) == 1:
             raise OSError("simulated Paper connection interruption after dispatch")
@@ -167,12 +178,13 @@ def scenario():
     return client, clipboard, ui
 
 
-def perform(plan=None, *, client=None, clipboard=None, ui=None, page_id="p-3-0"):
+def perform(plan=None, *, client=None, clipboard=None, ui=None, catalog=None, page_id="p-3-0"):
     if client is None:
         client, clipboard, ui = scenario()
     result = ui_module.prune_one(
         plan or fixture_plan(), page_id, "paper-scratch-ui-20261022",
-        313, 100, 165, client=client, ui=ui,
+        313, 100, 165, client=client,
+        catalog=client.catalog() if catalog is None else catalog, ui=ui,
         clipboard=lambda: clipboard["value"],
         clipboard_set=lambda value: clipboard.__setitem__("value", value))
     return result, client, clipboard, ui
@@ -230,9 +242,138 @@ class NativePageUITests(unittest.TestCase):
         from unittest.mock import patch
         with patch.object(ui_module.bridge, "READ_TOOLS", frozenset({"get_basic_info"})):
             with self.assertRaisesRegex(ui_module.bridge.Refusal, "TOOL_NOT_ALLOWED"):
-                ui_module._reviewed_read(client, "list_resources", {"limit": 200})
+                ui_module._reviewed_read(client, "list_resources", {"limit": 200},
+                                         catalog=client.catalog())
         self.assertEqual(client.calls, [])
 
+
+    def test_tool_scoped_read_refusals_prevent_ui(self):
+        for tool in ("list_resources", "get_jsx"):
+            for change in ("annotations", "required-input"):
+                with self.subTest(tool=tool, change=change):
+                    client, clipboard, ui = scenario()
+                    catalog = client.catalog()
+                    if change == "annotations":
+                        catalog[tool]["annotations"]["readOnlyHint"] = False
+                    else:
+                        schema = catalog[tool]["inputSchema"]
+                        schema["properties"]["unreviewed_required"] = {"type": "string"}
+                        schema.setdefault("required", []).append("unreviewed_required")
+                    self.assertTrue(ui_module.bridge.schema_receipt(
+                        client, catalog)["accepted_for_write"])
+                    self.assertIsNone(ui_module.bridge.compatible_tool_contract(
+                        tool, catalog[tool]))
+                    plan = fixture_plan()
+                    if tool == "get_jsx":
+                        plan["pre_prune_native_jsx"] = [{
+                            "node_id": "node-keep",
+                            "native_jsx_sha256": ui_module.bridge.digest("<div>retained</div>"),
+                        }]
+                        plan["pre_prune_native_jsx_sha256"] = ui_module.bridge.digest(
+                            plan["pre_prune_native_jsx"])
+                    result, *_ = perform(plan, client=client, clipboard=clipboard,
+                                         ui=ui, catalog=catalog)
+                    self.assertEqual(result["state"], "TOOL_SCHEMA_CHANGED")
+                    self.assertFalse(any(name == tool for name, _ in client.calls))
+                    self.assertEqual(ui.calls, [])
+                    self.assertEqual(client.files[SRC]["pages"], [PAGE1, PAGE2])
+                    self.assertEqual(client.files[CLONE]["pages"], [PAGE1, PAGE2])
+
+    def test_compatible_catalog_preserves_selected_jsx_proof(self):
+        client, clipboard, ui = scenario()
+        catalog = client.catalog()
+        self.assertTrue(ui_module.bridge.schema_receipt(
+            client, catalog)["accepted_for_write"])
+        plan = fixture_plan()
+        plan["pre_prune_native_jsx"] = [{
+            "node_id": "node-keep",
+            "native_jsx_sha256": ui_module.bridge.digest("<div>retained</div>"),
+        }]
+        plan["pre_prune_native_jsx_sha256"] = ui_module.bridge.digest(
+            plan["pre_prune_native_jsx"])
+        result, *_ = perform(plan, client=client, clipboard=clipboard,
+                             ui=ui, catalog=catalog)
+        self.assertEqual(result["state"], "CLONE_PAGE_UI_DELETE_VERIFIED")
+        self.assertEqual({args["fileId"] for name, args in client.calls
+                          if name == "get_jsx"}, {SRC, CLONE})
+        self.assertEqual(sum(call[0] == "click" and call[3] == 257
+                             for call in ui.calls), 1)
+
+    def test_unreviewed_arguments_refuse_before_read_dispatch(self):
+        client, _, _ = scenario()
+        catalog = client.catalog()
+        catalog["list_resources"]["inputSchema"]["properties"]["unreviewed"] = {
+            "type": "string"}
+        self.assertIsNotNone(ui_module.bridge.compatible_tool_contract(
+            "list_resources", catalog["list_resources"]))
+        with self.assertRaisesRegex(ui_module.bridge.Refusal,
+                                    "UNREVIEWED_TOOL_ARGUMENTS"):
+            ui_module._reviewed_read(
+                client, "list_resources", {"limit": 200, "unreviewed": "value"},
+                catalog=catalog)
+        self.assertEqual(client.calls, [])
+
+    def test_missing_read_tool_refuses_before_any_ui(self):
+        client, clipboard, ui = scenario()
+        catalog = client.catalog()
+        del catalog["list_resources"]
+        self.assertTrue(ui_module.bridge.schema_receipt(
+            client, catalog)["accepted_for_write"])
+        result, *_ = perform(client=client, clipboard=clipboard, ui=ui, catalog=catalog)
+        self.assertEqual(result["state"], "TOOL_NOT_AVAILABLE")
+        self.assertEqual(client.calls, [])
+        self.assertEqual(ui.calls, [])
+        self.assertEqual(client.files[SRC]["pages"], [PAGE1, PAGE2])
+        self.assertEqual(client.files[CLONE]["pages"], [PAGE1, PAGE2])
+
+    def test_main_threads_observed_catalog_inside_existing_lock(self):
+        from contextlib import contextmanager, redirect_stdout
+        import io
+        import tempfile
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+
+        client, clipboard, ui = scenario()
+        catalog = client.catalog()
+        catalog["list_resources"]["annotations"]["readOnlyHint"] = False
+        lock_held = [False]
+
+        @contextmanager
+        def existing_lock(*, wait_seconds):
+            self.assertEqual(wait_seconds, 30)
+            lock_held[0] = True
+            try:
+                yield
+            finally:
+                lock_held[0] = False
+
+        def observed_catalog():
+            self.assertTrue(lock_held[0])
+            return catalog
+
+        client.initialize = Mock(side_effect=lambda: self.assertTrue(lock_held[0]))
+        client.catalog = Mock(side_effect=observed_catalog)
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "plan.json"
+            plan_path.write_text(json.dumps(fixture_plan()), encoding="utf-8")
+            args = SimpleNamespace(
+                plan=plan_path, page_id="p-3-0", operation_id="paper-scratch-ui-20261022",
+                window_id=313, row_x=100, row_y=165, execute_ui_prune=True)
+            with patch.object(ui_module.argparse.ArgumentParser, "parse_args", return_value=args), \
+                 patch.object(ui_module.bridge, "PaperClient", return_value=client), \
+                 patch.object(ui_module.bridge, "desktop_lock", side_effect=existing_lock), \
+                 patch.object(ui_module, "NativePeekaboo", return_value=ui), \
+                 patch.object(ui_module, "read_clipboard", side_effect=lambda: clipboard["value"]), \
+                 patch.object(ui_module, "write_clipboard", side_effect=lambda value: clipboard.update(value=value)), \
+                 redirect_stdout(output):
+                self.assertEqual(ui_module.main(), 2)
+        self.assertEqual(json.loads(output.getvalue())["state"], "TOOL_SCHEMA_CHANGED")
+        client.initialize.assert_called_once_with()
+        client.catalog.assert_called_once_with()
+        self.assertFalse(lock_held[0])
+        self.assertEqual(client.calls, [])
+        self.assertEqual(ui.calls, [])
 
     def test_page_link_exact_match(self):
         url = "https://app.paper.design/file/" + CLONE + "/p-3-0"
@@ -280,7 +421,7 @@ class NativePageUITests(unittest.TestCase):
         client, clipboard, ui = scenario()
         result = ui_module.prune_one(
             fixture_plan(), "p-3-0", "paper-scratch-ui-20261022",
-            313, 100, 165, client=client, ui=ui,
+            313, 100, 165, client=client, catalog=client.catalog(), ui=ui,
             clipboard=lambda: clipboard["value"],
             clipboard_set=lambda value: None)
         self.assertEqual(result["state"], "UI_CLIPBOARD_MARKER_NOT_SET")
@@ -309,7 +450,7 @@ class NativePageUITests(unittest.TestCase):
 
         result = ui_module.prune_one(
             fixture_plan(), "p-3-0", "paper-scratch-ui-20261022",
-            313, 100, 165, client=client, ui=ui,
+            313, 100, 165, client=client, catalog=client.catalog(), ui=ui,
             clipboard=lambda: clipboard["value"], clipboard_set=set_clipboard)
         self.assertEqual(len(writes), 2)
         self.assertEqual(result["state"], "UI_CLIPBOARD_MARKER_NOT_SET")

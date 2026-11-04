@@ -71,16 +71,18 @@ def _require_distinct_visible_prefixes(pages: list[dict]) -> None:
         prefixes.add(prefix)
 
 
-def _reviewed_read(client, tool: str, arguments: dict) -> dict:
-    """Use the canonical bridge read allowlist inside main's existing mutex.
+def _reviewed_read(client, tool: str, arguments: dict, *, catalog: dict) -> dict:
+    """Reuse canonical per-tool admission inside main's existing mutex.
 
-    bridge.execute acquires the same host-global desktop lock, so calling it
-    recursively inside a locked UI transaction would deadlock. The outer
-    main has already admitted the exact reviewed catalog and server before
-    this function can perform its first read. This is not a second tool gate.
+    main retains the observed catalog and server admission. Its write
+    eligibility does not qualify every read tool: check this exact tool and
+    arguments before dispatch. Calling bridge.execute here would acquire the
+    same desktop lock recursively, so reuse its pure qualifier directly.
     """
     if tool not in bridge.READ_TOOLS:
         raise bridge.Refusal("TOOL_NOT_ALLOWED")
+    bridge.qualify_call_arguments(
+        tool, arguments, catalog, action="read", custom_exact_pin=False)
     response = client.call(tool, arguments)
     if not isinstance(response, dict) or response.get("isError"):
         raise bridge.Refusal("TOOL_ERROR")
@@ -88,11 +90,11 @@ def _reviewed_read(client, tool: str, arguments: dict) -> dict:
 
 
 def _basic(client, file_id: str | None = None,
-           page_id: str | None = None) -> dict:
+           page_id: str | None = None, *, catalog: dict) -> dict:
     args = {"fileId": file_id} if file_id else {}
     if page_id:
         args["pageId"] = page_id
-    raw = _reviewed_read(client, "get_basic_info", args)
+    raw = _reviewed_read(client, "get_basic_info", args, catalog=catalog)
     info = bridge.basic_object(raw)
     if not isinstance(info, dict) or not isinstance(info.get("fileId"), str):
         raise bridge.Refusal("FILE_ID_REQUIRED")
@@ -101,10 +103,10 @@ def _basic(client, file_id: str | None = None,
     return info
 
 
-def _clone_resource_proof(client, source_id: str, clone_id: str) -> None:
+def _clone_resource_proof(client, source_id: str, clone_id: str, *, catalog: dict) -> None:
     # Require Paper's own inventory to establish an actual newer duplicate.
     # A caller-supplied plan is not authority to label an original file a clone.
-    raw = _reviewed_read(client, "list_resources", {"limit": 200})
+    raw = _reviewed_read(client, "list_resources", {"limit": 200}, catalog=catalog)
     candidates = bridge._basic_candidates(raw)
     inventories = [x["resources"] for x in candidates
                    if isinstance(x.get("resources"), list)]
@@ -126,7 +128,7 @@ def _clone_resource_proof(client, source_id: str, clone_id: str) -> None:
         raise bridge.Refusal("NATIVE_CLONE_PROVENANCE_REQUIRED")
 
 
-def _retained_native_proof(plan: dict, client, originals: list[dict]) -> None:
+def _retained_native_proof(plan: dict, client, originals: list[dict], *, catalog: dict) -> None:
     keep_ids = plan["keep_page_ids"]
     expected = plan.get("retained_native_census")
     if (not isinstance(expected, list) or len(expected) != len(keep_ids)
@@ -140,10 +142,10 @@ def _retained_native_proof(plan: dict, client, originals: list[dict]) -> None:
             raise bridge.Refusal("PLAN_PAGE_TARGET_MISMATCH")
         original = guard._read_native_page(
             plan["source_file_id"], pages[pid],
-            page_reader=lambda f, p: _basic(client, f, p))
+            page_reader=lambda f, p: _basic(client, f, p, catalog=catalog))
         clone = guard._read_native_page(
             plan["clone_file_id"], pages[pid],
-            page_reader=lambda f, p: _basic(client, f, p))
+            page_reader=lambda f, p: _basic(client, f, p, catalog=catalog))
         fingerprint = record.get("native_metadata_sha256")
         if (not isinstance(fingerprint, str) or
                 bridge.digest(original) != fingerprint or
@@ -162,7 +164,7 @@ def _retained_native_proof(plan: dict, client, originals: list[dict]) -> None:
             response = _reviewed_read(client, "get_jsx", {
                 "fileId": file_id, "nodeId": native_id,
                 "format": "inline-styles", "includeNodeIds": True,
-            })
+            }, catalog=catalog)
             text_values = [x.get("text") for x in response.get("content", [])
                            if isinstance(x, dict) and x.get("type") == "text"]
             if len(text_values) != 2 or not isinstance(text_values[1], str):
@@ -174,7 +176,7 @@ def _retained_native_proof(plan: dict, client, originals: list[dict]) -> None:
             raise bridge.Refusal("CLONE_JSX_MISMATCH")
 
 
-def _validate_plan_and_current(plan: dict, client, page_id: str) -> tuple[dict, dict, list[dict]]:
+def _validate_plan_and_current(plan: dict, client, page_id: str, *, catalog: dict) -> tuple[dict, dict, list[dict]]:
     if (not isinstance(plan, dict)
             or plan.get("schema") != guard.SCHEMA
             or plan.get("state") != "CLONE_PRUNE_PLAN_READY"):
@@ -183,8 +185,9 @@ def _validate_plan_and_current(plan: dict, client, page_id: str) -> tuple[dict, 
     clone_id = guard._require_file_id(plan.get("clone_file_id"))
     if source_id == clone_id:
         raise bridge.Refusal("SOURCE_EQUALS_CLONE")
-    _clone_resource_proof(client, source_id, clone_id)
-    source, clone = _basic(client, source_id), _basic(client, clone_id)
+    _clone_resource_proof(client, source_id, clone_id, catalog=catalog)
+    source, clone = (_basic(client, source_id, catalog=catalog),
+                     _basic(client, clone_id, catalog=catalog))
     originals = plan.get("original_pages")
     if not isinstance(originals, list) or originals != guard._pages({"pages": originals}):
         raise bridge.Refusal("INVALID_PRUNE_PLAN")
@@ -228,8 +231,8 @@ def _validate_plan_and_current(plan: dict, client, page_id: str) -> tuple[dict, 
     # Two different page IDs can have visually indistinguishable row labels
     # when Paper truncates them. Refuse those clones before the first UI click.
     _require_distinct_visible_prefixes(current)
-    _retained_native_proof(plan, client, originals)
-    foreground = _basic(client)
+    _retained_native_proof(plan, client, originals, catalog=catalog)
+    foreground = _basic(client, catalog=catalog)
     if foreground["fileId"] != clone_id:
         raise bridge.Refusal("CLONE_NOT_FOREGROUND")
     return source, clone, current
@@ -476,7 +479,7 @@ def write_clipboard(value: str) -> None:
 
 def prune_one(plan: dict, page_id: str, operation_id: str,
               window_id: int, row_x: int, row_y: int, *,
-              client, ui, clipboard, clipboard_set) -> dict:
+              client, catalog: dict, ui, clipboard, clipboard_set) -> dict:
     if not isinstance(operation_id, str) or not guard.OPERATION_RE.fullmatch(operation_id):
         raise bridge.Refusal("OPERATION_ID_REQUIRED")
     if not isinstance(window_id, int) or window_id <= 0:
@@ -485,7 +488,7 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
         raise bridge.Refusal("UI_ROW_COORDINATES_INVALID")
     delete_dispatched = False
     try:
-        source, clone, current = _validate_plan_and_current(plan, client, page_id)
+        source, clone, current = _validate_plan_and_current(plan, client, page_id, catalog=catalog)
         with tempfile.TemporaryDirectory(prefix="paper-clone-ui-", dir=str(bridge.state_root())) as tmp:
             private_dir = Path(tmp)
             ui.click(window_id, row_x, row_y, right=True)
@@ -505,7 +508,7 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
             if copied == first_marker:
                 raise bridge.Refusal("STALE_CLIPBOARD")
             _verify_copied_target(copied, plan["clone_file_id"], page_id)
-            _validate_plan_and_current(plan, client, page_id)
+            _validate_plan_and_current(plan, client, page_id, catalog=catalog)
             # First menu identity is not enough: sidebar scrolling or focus
             # changes can make the next right-click target a different page.
             # Copy the link from the *second* menu before re-arming delete.
@@ -525,7 +528,7 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
             if second_link == marker:
                 raise bridge.Refusal("STALE_CLIPBOARD")
             _verify_copied_target(second_link, plan["clone_file_id"], page_id)
-            _validate_plan_and_current(plan, client, page_id)
+            _validate_plan_and_current(plan, client, page_id, catalog=catalog)
 
             # Finish all Paper RPCs BEFORE opening the destructive menu.
             # The final screenshot is compared against two independently
@@ -555,8 +558,8 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
             except bridge.Refusal:
                 # The UI might still have dispatched; compare original objects.
                 pass
-            source_after = _basic(client, plan["source_file_id"])
-            clone_after = _basic(client, plan["clone_file_id"])
+            source_after = _basic(client, plan["source_file_id"], catalog=catalog)
+            clone_after = _basic(client, plan["clone_file_id"], catalog=catalog)
             expected = [p for p in current if p["id"] != page_id]
             if (guard._pages(source_after) != guard._pages(source)
                     or source_after["fileName"] != source["fileName"]
@@ -568,7 +571,7 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
             # Verify retained native structure on BOTH source and clone after
             # the irreversible click. A stable page list/token digest is not
             # evidence that native content stayed intact.
-            _retained_native_proof(plan, client, guard._pages(source))
+            _retained_native_proof(plan, client, guard._pages(source), catalog=catalog)
             return {
                 "schema": SCHEMA,
                 "state": "CLONE_PAGE_UI_DELETE_VERIFIED",
@@ -618,13 +621,14 @@ def main() -> int:
         with bridge.desktop_lock(wait_seconds=30):
             client = bridge.PaperClient()
             client.initialize()
-            schema = bridge.schema_receipt(client, client.catalog())
+            catalog = client.catalog()
+            schema = bridge.schema_receipt(client, catalog)
             if not schema["accepted_for_write"]:
                 raise bridge.Refusal("UPSTREAM_SCHEMA_UNREVIEWED")
             result = prune_one(
                 plan, args.page_id, args.operation_id,
                 args.window_id, args.row_x, args.row_y,
-                client=client, ui=NativePeekaboo(), clipboard=read_clipboard,
+                client=client, catalog=catalog, ui=NativePeekaboo(), clipboard=read_clipboard,
                 clipboard_set=write_clipboard)
         print(json.dumps(result, sort_keys=True))
         return 0 if result["state"] == "CLONE_PAGE_UI_DELETE_VERIFIED" else 2
