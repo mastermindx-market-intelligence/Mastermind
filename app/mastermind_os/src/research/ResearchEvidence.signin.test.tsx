@@ -117,7 +117,7 @@ describe("Research evidence sign-in presentation over the actual private auth ow
   it("does not let a replaced transport's pending completion change the current item view", async () => {
     const old = fixture(), current = fixture(); const r = render(view(old)); await start();
     r.rerender(view(current)); await start(); await authorize(current);
-    await act(async () => { await old.client.signOut(); await flush(); });
+    await act(async () => { old.callback("AUTHORIZATION_DENIED"); await flush(); });
     expect(status()).toBe("This citation contains one complete item from the source.");
     expect(document.querySelector("pre")?.textContent).toBe(payload.text);
     expect(old.fetcher).not.toHaveBeenCalled();
@@ -127,11 +127,25 @@ describe("Research evidence sign-in presentation over the actual private auth ow
   it("does not let an unmounted sign-in rejection change a newly mounted view", async () => {
     const old = fixture(), current = fixture(); const r = render(view(old)); await start();
     r.unmount(); render(view(current)); await start();
-    await act(async () => { await old.client.signOut(); await flush(); });
+    await act(async () => { old.callback("AUTHORIZATION_DENIED"); await flush(); });
     expect(status()).toBe("Loading authorized evidence…");
     expect(signIn().disabled).toBe(true);
     expect(current.popups).toHaveLength(1);
     expect(current.popups[0].closed).toBe(false);
+  });
+
+  it("honors a same-app explicit logout from the replaced owner by withdrawing the current citation", async () => {
+    const old = fixture(), current = fixture(); const r = render(view(old)); await start();
+    r.rerender(view(current)); await start(); await authorize(current);
+    expect(document.querySelector("pre")?.textContent).toBe(payload.text);
+    // Explicit logout is shared by this configured app, even if its initiating
+    // transport is no longer the displayed owner. It is not a stale callback.
+    await act(async () => { await old.client.signOut(); await flush(); });
+    expect(status()).toBe("Sign in to read this evidence item.");
+    expect(document.querySelector("pre")).toBeNull();
+    expect(current.client.research!.available()).toBe(false);
+    expect(old.fetcher).not.toHaveBeenCalled();
+    expect(current.fetcher).toHaveBeenCalledTimes(2);
   });
 
   it("withdraws evidence on generation change and rejects a late evidence response after sign-out", async () => {
