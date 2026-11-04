@@ -36,6 +36,7 @@ from typing import Any
 
 SCHEMA = "mastermind.experiential_native_bridge_release/v1"
 BRIDGE_NAME = "experiential_bridge.py"
+OWNER_MODULES = ("experiential_pin.py", "experiential_transport.py")
 
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 _HEAD_RE = re.compile(r"^diff --git a/(.+) b/(.+)$")
@@ -62,6 +63,48 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _verified_owner_modules(root: Path | None, manifest: dict[str, Any]) -> dict[str, bytes]:
+    """Copy only immutable owner code from a trusted build-time source.
+
+    The package does not invent provider entitlement, credentials, quota,
+    route health or host context. These remain installed host-owner inputs.
+    """
+    if root is None:
+        return {}
+    expected = manifest.get("owner_modules_sha256")
+    if type(expected) is not dict or set(expected) != set(OWNER_MODULES):
+        _refuse("OWNER_MODULE_MANIFEST_MISSING", "exact pin and transport digests required")
+    try:
+        info = root.lstat()
+    except OSError:
+        _refuse("OWNER_MODULE_ROOT_MISSING", "source root is unavailable")
+    if not stat.S_ISDIR(info.st_mode):
+        _refuse("OWNER_MODULE_ROOT_INVALID", "regular source directory required")
+    sealed: dict[str, bytes] = {}
+    for name in OWNER_MODULES:
+        source = root / name
+        try:
+            fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= 2_000_000:
+                    _refuse("OWNER_MODULE_SOURCE_INVALID", name)
+                data = b""
+                while len(data) < info.st_size:
+                    chunk = os.read(fd, info.st_size - len(data))
+                    if not chunk:
+                        _refuse("OWNER_MODULE_SOURCE_CHANGED", name)
+                    data += chunk
+            finally:
+                os.close(fd)
+        except OSError:
+            _refuse("OWNER_MODULE_SOURCE_INVALID", name)
+        if hashlib.sha256(data).hexdigest() != expected[name]:
+            _refuse("OWNER_MODULE_DIGEST_MISMATCH", name)
+        sealed[name] = data
+    return sealed
+
+
 def _load_manifest(path: Path) -> dict[str, Any]:
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
@@ -70,9 +113,15 @@ def _load_manifest(path: Path) -> dict[str, Any]:
     if type(manifest) is not dict or manifest.get("schema") != SCHEMA:
         _refuse("MANIFEST_SCHEMA_REFUSED", f"expected {SCHEMA}")
     for key in ("expected_release_head_sha1", "release_tree_manifest_sha256",
-                "preimages_sha256", "postimages_sha256", "patches_sha256"):
+                "preimages_sha256", "postimages_sha256", "patches_sha256",
+                "owner_modules_sha256"):
         if key not in manifest:
             _refuse("MANIFEST_INCOMPLETE", key)
+    owner_digests = manifest["owner_modules_sha256"]
+    if type(owner_digests) is not dict or set(owner_digests) != set(OWNER_MODULES) \
+            or any(type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None
+                   for value in owner_digests.values()):
+        _refuse("OWNER_MODULE_MANIFEST_INVALID", "two exact 64-hex source digests")
     if not re.fullmatch(r"[0-9a-f]{40}", str(manifest["expected_release_head_sha1"])):
         _refuse("MANIFEST_INVALID_HEAD", "expected_release_head_sha1 must be a 40-hex sha1")
     return manifest
@@ -250,6 +299,7 @@ def compose(
     manifest_path: Path,
     patch_dir: Path,
     verify_only: bool = False,
+    owner_module_root: Path | None = None,
 ) -> dict[str, Any]:
     release_root = release_root.resolve()
     output = output.resolve()
@@ -259,6 +309,7 @@ def compose(
         _refuse("RELEASE_TREE_IDENTITY_REFUSED",
                 f"expected release tree {tree_name}, got {release_root.name}")
     patches = _verify_patch_digests(patch_dir, manifest)
+    owner_modules = _verified_owner_modules(owner_module_root, manifest)
     if output == release_root or output in release_root.parents or release_root in output.parents:
         _refuse("OUTPUT_OVERLAP_REFUSED",
                 "the overlay output must be a disjoint disposable directory")
@@ -269,7 +320,8 @@ def compose(
     if verify_only:
         return {"verified": True, "release_head_status": head_status,
                 "release_tree_manifest_sha256": manifest["release_tree_manifest_sha256"],
-                "patch_count": len(patches)}
+                "patch_count": len(patches),
+                "owner_module_count": len(owner_modules)}
 
     overlay = output
     overlay.mkdir(parents=True, exist_ok=True)
@@ -293,6 +345,14 @@ def compose(
         if not bridge_source.is_file():
             _refuse("BRIDGE_SOURCE_MISSING", str(bridge_source))
         (overlay / BRIDGE_NAME).write_bytes(bridge_source.read_bytes())
+        if owner_modules:
+            module_dir = overlay / "experiential53"
+            module_dir.mkdir(mode=0o700)
+            for name, contents in owner_modules.items():
+                (module_dir / name).write_bytes(contents)
+        # Host-owned experiential_host_context.py is deliberately NOT copied.
+        # The installed owner must supply validated entitlement, cap and
+        # gateway attestation; a source bundle is never runtime admission.
     except CompositionRefused:
         shutil.rmtree(overlay, ignore_errors=True)
         raise
@@ -311,6 +371,9 @@ def compose(
         "postimages_sha256": postimages,
         "patches_sha256": manifest["patches_sha256"],
         "bridge": {BRIDGE_NAME: sha256_file(overlay / BRIDGE_NAME)},
+        "owner_modules": {name: hashlib.sha256(data).hexdigest()
+                          for name, data in owner_modules.items()},
+        "host_context_owner_required": True,
         "overlay_root": str(overlay),
     }
     (overlay / "OVERLAY_MANIFEST.json").write_text(
@@ -328,6 +391,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="release manifest (default: release_manifest.json beside this module)")
     parser.add_argument("--patch-dir", default=None,
                         help="patch directory (default: overlay_patches/ beside this module)")
+    parser.add_argument("--owner-modules-root", default=None,
+                        help="optional exact digest-sealed owner pin+transport source "
+                             "directory; no host credentials or context accepted")
     parser.add_argument("--verify-only", action="store_true",
                         help="verify only; compose nothing")
     args = parser.parse_args(argv)
@@ -338,7 +404,9 @@ def main(argv: list[str] | None = None) -> int:
         receipt = compose(
             release_root=Path(args.release_root), output=Path(args.output),
             manifest_path=manifest_path, patch_dir=patch_dir,
-            verify_only=args.verify_only)
+            verify_only=args.verify_only,
+            owner_module_root=(Path(args.owner_modules_root)
+                               if args.owner_modules_root else None))
     except CompositionRefused as exc:
         print(str(exc), file=sys.stderr)
         return 78

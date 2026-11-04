@@ -60,27 +60,55 @@ tests implements the SAME typed contract and is NOT an admission.
 python3 compose_overlay.py \
   --release-root <path to the verified quota_continuity/source tree> \
   --output <new empty disposable directory>
+# Optional: stage the exact owner-controlled pin+transport source together
+# with the bridge, only if every owner module matches the sealed manifest:
+python3 compose_overlay.py \
+  --release-root <verified release source tree> \
+  --owner-modules-root <trusted source ops/native_fabric/experiential53> \
+  --output <new disposable directory>
 ```
 
-Fail-closed verification order: manifest schema → patch digests → output
-disjointness → expected-head (stale checkout refuses `STALE_RELEASE_HEAD_REFUSED`)
-→ whole-tree content digest (`RELEASE_TREE_MISMATCH`) → per-file preimages
-(`RELEASE_PREIMAGE_MISMATCH`) → strict patch application (exact context, no
-fuzz) → byte-exact postimage change proofs. `--verify-only` writes nothing.
-The composer never writes to the release tree, never touches the installed
-native release, and grants no admission (`OVERLAY_MANIFEST.json` records
-`status: source_candidate_not_installed`, `admission_granted: false`,
-`worker_started: false`).
+Fail-closed verification order: manifest schema, exact patch and owner-module
+digests, output disjointness, expected native source head, whole-release tree
+CAS, per-file preimages, exact-context patch application (no fuzz), and
+byte-exact postimage change proofs. The --verify-only option writes nothing.
 
-## Host adapter seam (owned by others; absent today)
+When --owner-modules-root is provided, the compositor stages ONLY
+experiential53/experiential_pin.py and experiential53/experiential_transport.py
+from the existing owner-reviewed sources, after verifying the SHA-256 of each
+against release_manifest.json. Absent sources, a symlink, an unknown digest or
+modified content fail closed before creating the candidate. Without this
+optional argument, the candidate remains the original bridge-only dry run.
 
-The bridge loads the adapter from `<runtime>/experiential53/` or
-`<runtime>/ops/native_fabric/experiential53/` and requires the host-owned
-context accessor `experiential_host_context.host_owned_context()` to supply
-registry entry, platform-funded entitlement, account, authenticated quota
-readback and the attested gateway route. Missing ⇒ typed
-`EXPERIENTIAL_HOST_ADAPTER_MISSING` / `EXPERIENTIAL_HOST_CONTEXT_UNAVAILABLE`.
-Nothing is manufactured: no quota readback, no entitlement, no token, no model.
+The compositor never reads, creates or copies host account facts, cap
+readbacks, provider keys, gateway bearer tokens or the host-owned
+experiential_host_context.py accessor. Every receipt explicitly records
+host_context_owner_required: true, status: source_candidate_not_installed,
+admission_granted: false and worker_started: false. No effect is admitted.
 
-Tests: `test_experiential_native_bridge.py` (hermetic; 33 passing at
-composition time; run `python3 -m pytest test_experiential_native_bridge.py`).
+## Host adapter seam (owned by installed runtime)
+
+The bridge loads its owner pin and transport from
+<runtime>/experiential53/ or <runtime>/ops/native_fabric/experiential53/ and
+requires an installed owner-provided
+experiential_host_context.host_owned_context() accessor for verified registry,
+platform-funded entitlement, authenticated account B cap and gateway route.
+Missing context is EXPERIENTIAL_HOST_CONTEXT_UNAVAILABLE. The adapter
+cannot invent or infer an account, quota, token or model. The independent
+owner source constants TRANSPORT_INSTALLED=False and ROUTE_QUALIFIED=False
+remain binding until real installed transport and gateway verification.
+
+## Installed runtime compatibility
+
+As of 2026-11-04, installed Ubuntu Fabric fabric_task.py digest 8bedb615...
+differs from the reviewed source preimage 8f28799d..., with drift also in
+remote_sub.sh and slot.py. A disposable test using the current installed
+Linux kit correctly rejects multiple obsolete hunks. DO NOT patch or replace
+the installed kit with the old source tree. Qualify the actual installed
+generation and reconcile new and existing logic through its source/CAS owner
+before any installation. This bundle feature does not clear that hold.
+
+Tests: 52 hermetic cases in test_experiential_native_bridge.py, plus a
+disposable integration run of 212 tests with native pin, billing transport
+and manual picker. A real owner module bundle was also dry-run composed and
+byte-compared. No worker, native install, paid request or provider activation.

@@ -376,6 +376,86 @@ def test_compose_refuses_tampered_patch(tmp_path):
     assert "PATCH_DIGEST_MISMATCH" in proc.stderr
 
 
+def _qualified_owner_source_fixture(tmp_path):
+    owner = tmp_path / "owner_modules"
+    owner.mkdir()
+    for name, data in {
+        "experiential_pin.py": b"POOL = 'experiential'\\nMODEL = 'glm-5.3-uncensored'\\n",
+        "experiential_transport.py": b"import experiential_pin as pin\\n",
+    }.items():
+        (owner / name).write_bytes(data)
+    manifest = json.loads(MANIFEST.read_text())
+    manifest["owner_modules_sha256"] = {
+        name: sha(owner / name) for name in (
+            "experiential_pin.py", "experiential_transport.py")
+    }
+    manifest_file = tmp_path / "owner_manifest.json"
+    manifest_file.write_text(json.dumps(manifest))
+    source = tmp_path / "release_copy" / "source"
+    source.parent.mkdir()
+    shutil.copytree(RELEASE_ROOT, source)
+    return owner, manifest_file, source
+
+
+def _compose_with_owner_modules(tmp_path, *, verify_only=False):
+    owner, manifest, source = _qualified_owner_source_fixture(tmp_path)
+    out = tmp_path / "candidate"
+    args = [sys.executable, str(COMPOSER), "--release-root", str(source),
+            "--output", str(out), "--manifest", str(manifest),
+            "--owner-modules-root", str(owner)]
+    if verify_only:
+        args.append("--verify-only")
+    return owner, out, args
+
+
+def test_source_owner_modules_are_staged_with_exact_digest_only(tmp_path):
+    owner, out, args = _compose_with_owner_modules(tmp_path)
+    proc = subprocess.run(args, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    receipt = json.loads((out / "OVERLAY_MANIFEST.json").read_text())
+    assert receipt["owner_modules"] == {
+        name: sha(owner / name) for name in (
+            "experiential_pin.py", "experiential_transport.py")
+    }
+    for name in receipt["owner_modules"]:
+        assert (out / "experiential53" / name).read_bytes() == (owner / name).read_bytes()
+    assert receipt["host_context_owner_required"] is True
+    assert not (out / "experiential53" / "experiential_host_context.py").exists()
+    assert receipt["admission_granted"] is False
+    assert receipt["worker_started"] is False
+
+
+def test_owner_modules_verify_only_writes_no_overlay(tmp_path):
+    _owner, out, args = _compose_with_owner_modules(tmp_path, verify_only=True)
+    proc = subprocess.run(args, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["owner_module_count"] == 2
+    assert not out.exists()
+
+
+def test_owner_module_tamper_fails_before_overlay_creation(tmp_path):
+    owner, out, args = _compose_with_owner_modules(tmp_path)
+    (owner / "experiential_transport.py").write_bytes(b"unsafe or stale module")
+    proc = subprocess.run(args, capture_output=True, text=True)
+    assert proc.returncode == 78
+    assert "OWNER_MODULE_DIGEST_MISMATCH" in proc.stderr
+    assert not out.exists()
+
+
+def test_owner_module_symlink_fails_before_overlay_creation(tmp_path):
+    owner, out, args = _compose_with_owner_modules(tmp_path)
+    pin = owner / "experiential_pin.py"
+    data = pin.read_bytes()
+    pin.unlink()
+    target = tmp_path / "elsewhere_pin.py"
+    target.write_bytes(data)
+    pin.symlink_to(target)
+    proc = subprocess.run(args, capture_output=True, text=True)
+    assert proc.returncode == 78
+    assert "OWNER_MODULE_SOURCE_INVALID" in proc.stderr
+    assert not out.exists()
+
+
 def test_compose_refuses_output_inside_release(tmp_path):
     proc = subprocess.run(
         [sys.executable, str(COMPOSER), "--release-root", str(RELEASE_ROOT),

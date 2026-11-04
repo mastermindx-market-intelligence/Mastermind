@@ -5,6 +5,10 @@
   "overlay_added_files": {
     "experiential_bridge.py": "sha256 recorded at composition time from the module source"
   },
+  "owner_modules_sha256": {
+    "experiential_pin.py": "8ddb970fa460634a44c4c2db309207be62e07ea02843e4d6776e084e31c5eb06",
+    "experiential_transport.py": "4687529d1f277ecba510c330f69c2b2e4f6ae18a4e8a60167ec019a0dc88b47b"
+  },
   "patches_sha256": {
     "experiential_native_bridge_fabric_task_20261103.patch": "e89f1d8fe290680e3784fc8dc55143b1c3b9f28674e15b11105e14dc773a3572",
     "experiential_native_bridge_remote_sub_20261103.patch": "e5d5ed99cb3cb8c3ae319167f8aa29ce1aeb15d1484705ca97b98aae17c9ed56",
