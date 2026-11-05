@@ -1,13 +1,13 @@
 .mm-new-conversation-outcome { max-width:880px; width:100%; margin-inline:auto; display:grid; gap:var(--sp-7); color:var(--text); min-width:0; }
 .mm-new-conversation-outcome-heading { display:grid; gap:var(--sp-3); justify-items:start; min-width:0; }
-.mm-new-conversation-outcome-heading h1,.mm-new-conversation-outcome-heading p,.mm-new-conversation-outcome-field h2,.mm-new-conversation-outcome-field p { margin:0; }
+.mm-new-conversation-outcome-heading h1,.mm-new-conversation-outcome-heading p,.mm-new-conversation-outcome-field :is(h2,h3),.mm-new-conversation-outcome-field p { margin:0; }
 .mm-new-conversation-outcome-heading h1 { font-family:var(--font-display); font-size:40px; line-height:48px; font-weight:600; letter-spacing:normal; text-transform:none; overflow-wrap:anywhere; }
 .mm-new-conversation-outcome-status { font-size:16px; line-height:24px; color:var(--text); overflow-wrap:anywhere; }
 .mm-new-conversation-outcome-subtitle,.mm-new-conversation-outcome-scope { color:var(--muted); font-size:16px; line-height:24px; overflow-wrap:anywhere; }
 .mm-new-conversation-outcome-panel { padding:var(--sp-5); border:1px solid var(--border); border-radius:var(--r-panel); background:var(--panel); display:grid; gap:var(--sp-4); min-width:0; }
 .mm-new-conversation-outcome-field { display:grid; gap:var(--sp-2); min-width:0; }
 .mm-new-conversation-outcome-label { color:var(--muted); font-size:14px; line-height:20px; }
-.mm-new-conversation-outcome-field h2 { font-family:var(--font-display); font-size:16px; line-height:24px; font-weight:600; color:var(--text); }
+.mm-new-conversation-outcome-field :is(h2,h3) { font-family:var(--font-display); font-size:16px; line-height:24px; font-weight:600; color:var(--text); }
 .mm-new-conversation-outcome-pre { font:16px/24px var(--font-ui); color:var(--text); white-space:pre-wrap; overflow-wrap:anywhere; min-width:0; }
 .mm-new-conversation-outcome-missing { font-size:16px; line-height:24px; color:var(--muted); overflow-wrap:anywhere; }
 .mm-new-conversation-outcome-caption { color:var(--muted); font-size:14px; line-height:20px; overflow-wrap:anywhere; }

@@ -190,16 +190,21 @@ export interface FreshConversationInitialResponseProps {
   originalMessage: string | null;
   caption?: ReactNode;
   continuation?: ReactNode;
+  /** A recorded follow-up stays distinct from the original first response. */
+  responseKind?: "initial" | "followup";
+  headingLevel?: 2 | 3;
 }
-export function FreshConversationInitialResponse({locale,result,originalMessage,caption,continuation}:FreshConversationInitialResponseProps){
+export function FreshConversationInitialResponse({locale,result,originalMessage,caption,continuation,responseKind="initial",headingLevel=2}:FreshConversationInitialResponseProps){
   const text=(en:string,cn:string)=>locale==="zh-CN"?cn:en;
   const summary=envelopeSummary(result);
+  const Heading=headingLevel===3?"h3":"h2";
+  const followup=responseKind==="followup";
   return <div className="mm-new-conversation-outcome-panel" lang={locale}>
     {originalMessage!==null&&<div className="mm-new-conversation-outcome-field">
-      <p className="mm-new-conversation-outcome-label">{text("Your first message","你的首条消息")}</p>
+      <p className="mm-new-conversation-outcome-label">{followup?text("Your message","你的消息"):text("Your first message","你的首条消息")}</p>
       <p className="mm-new-conversation-outcome-pre">{originalMessage}</p></div>}
-    <section className="mm-new-conversation-outcome-field"><h2>{text("Initial response","首条回复")}</h2>
-      {summary!==null?<p className="mm-new-conversation-outcome-pre">{summary}</p>:<p className="mm-new-conversation-outcome-missing">{text("The initial response is not available yet.","暂时还没有可查看的首条回复。")}</p>}
+    <section className="mm-new-conversation-outcome-field"><Heading>{followup?text("Follow-up response","后续回复"):text("Initial response","首条回复")}</Heading>
+      {summary!==null?<p className="mm-new-conversation-outcome-pre">{summary}</p>:<p className="mm-new-conversation-outcome-missing">{followup?text("The follow-up response is not available yet.","暂时还没有可查看的后续回复。"):text("The initial response is not available yet.","暂时还没有可查看的首条回复。")}</p>}
       {caption!=null&&<p className="mm-new-conversation-outcome-caption">{caption}</p>}
     </section>{continuation}
   </div>;

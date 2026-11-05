@@ -389,3 +389,11 @@ it("renders the reusable original result body without fabricating an old operati
  expect(screen.getByText("首条回复")).toBeTruthy();expect(screen.getByText(unitResult.envelope.summary,{normalizer:value=>value})).toBeTruthy();
  expect(screen.getByText("实际调用方提供的说明")).toBeTruthy();expect(screen.queryByText("Operation key")).toBeNull();
 });
+
+it.each(["en","zh-CN"] as const)("labels a genuine caller-selected follow-up body separately in %s",locale=>{
+ render(<FreshConversationInitialResponse locale={locale} result={unitResult} originalMessage={null} responseKind="followup" headingLevel={3}/>);
+ expect(screen.getByRole("heading",{name:locale==="en"?"Follow-up response":"后续回复",level:3})).toBeTruthy();
+ expect(screen.queryByRole("heading",{name:locale==="en"?"Initial response":"首条回复"})).toBeNull();
+ expect(screen.getByText(unitResult.envelope.summary,{normalizer:value=>value}).textContent).toBe(unitResult.envelope.summary);
+ expect(screen.queryByText(locale==="en"?"Your first message":"你的首条消息")).toBeNull();
+});
