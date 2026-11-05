@@ -174,15 +174,23 @@ class FreshConversationOwner:
             raise ConversationRefusal("project_read_refused")
         rows = [row for row in snapshot.document["work"]
                 if type(row) is dict and row.get("work_ref") == work_ref]
+        canonical = None
         if len(rows) != 1:
-            raise ConversationRefusal("project_selection_refused")
+            if rows:
+                raise ConversationRefusal("project_selection_refused")
+            from control_plane.fresh_conversation_membership import read_canonical_membership
+            canonical = read_canonical_membership(reader, raw, work_ref=work_ref, snapshot=snapshot, owner=self,
+                executive_principal=principal, workspace_principal=workspace_principal)
         if (reader.authorize(raw) is not True or permission_stamp(reader.authorize, raw) != stamp
                 or not p.issued_at <= time.time() < p.expires_at):
             raise ConversationRefusal("project_read_refused")
         self._current(principal)
-        return {"publication": snapshot.publication, "instance": snapshot.instance,
+        result = {"publication": snapshot.publication, "instance": snapshot.instance,
             "document_digest": wire.canonical_digest(snapshot.document),
             "permission_stamp": stamp, "work_ref": work_ref}
+        if canonical is not None:
+            result["canonical_membership"] = canonical
+        return result
 
     async def _preview(self, principal, request, workspace_principal):
         args = admission_arguments(principal, request)
@@ -284,13 +292,21 @@ class FreshConversationOwner:
                 raise ConversationRefusal("context_changed")
 
         def current(_envelope=None):
-            operation.require_arguments(args)
-            self._current(principal)
-            if material is not None and self._fresh(principal) != material["binding"]:
-                raise ConversationRefusal("context_changed")
-            if material is not None and self._project(principal, workspace_principal,
-                    request["work_ref"]) != material["project"]:
-                raise ConversationRefusal("context_changed")
+            from contextlib import nullcontext
+            from control_plane.fresh_conversation_membership import _project_validation_phase
+            # Only this synchronous pure validation callback shares a nominal
+            # observation. Its scope exits before the caller inserts/claims,
+            # allocates a workspace, advances a cycle or invokes native I/O.
+            scope = (_project_validation_phase(self, principal, workspace_principal, request["work_ref"])
+                if material is not None and "canonical_membership" in material["project"] else nullcontext())
+            with scope:
+                operation.require_arguments(args)
+                self._current(principal)
+                if material is not None and self._fresh(principal) != material["binding"]:
+                    raise ConversationRefusal("context_changed")
+                if material is not None and self._project(principal, workspace_principal,
+                        request["work_ref"]) != material["project"]:
+                    raise ConversationRefusal("context_changed")
 
         def admitted(root_id, command_id):
             current()
@@ -450,7 +466,7 @@ class FreshConversationOwner:
             workspace = projection(frame["workspace_principal"]) if frame["workspace_principal"] is not None else None
             if not callable(host_current) or host_current() is not None:
                 raise ConversationRefusal()
-            self._current(principal, read_only=operation in {"status", "read", "turn_status", "turn_read"})
+            self._current(principal, read_only=operation in {"status", "read", "turn_status", "turn_read", "consume_status"})
             if operation == "create":
                 if reader is None:
                     raise ConversationRefusal()
@@ -476,14 +492,17 @@ class FreshConversationOwner:
                     async with _observe_private_request_end(live, reader):
                         entered = True
                         value = await self.create(principal, frame["arguments"], workspace_principal=workspace)
-            elif operation in {"consume", "turn", "turn_status", "turn_read"}:
-                from control_plane.fresh_conversation_turn import consume_initial, submit_turn, read_turn
+            elif operation == "consume_status":
+                from control_plane.fresh_conversation_consumption import read_consumption
+                value = read_consumption(self, principal, frame["arguments"])
+            elif operation in {"consume", "turn", "turn_status", "turn_read", "turn_preview"}:
+                from control_plane.fresh_conversation_turn import consume_initial, submit_turn, read_turn, preview_turn
                 arguments = frame["arguments"]
                 reference = arguments.get("reference")
                 if reference is not None:
                     from control_plane.fresh_conversation_reference import resolve_action_reference
                     original = resolve_action_reference(self, principal, reference,
-                        for_write=operation in {"consume", "turn"})
+                        for_write=operation in {"consume", "turn", "turn_preview"})
                     arguments = {**arguments, **original}
                     arguments.pop("reference")
                 if operation in {"consume", "turn"}:
@@ -495,11 +514,13 @@ class FreshConversationOwner:
                     entered = True
                     value = await (consume_initial if operation == "consume" else submit_turn)(
                         self, principal, workspace, arguments, host_current=live_turn_request)
+                elif operation == "turn_preview":
+                    value = await preview_turn(self, principal, workspace, arguments, host_current=host_current)
                 else:
                     value = await read_turn(self, principal, arguments)
                 if reference is not None:
                     value = {**value, "operation_key": None, "reference": reference}
-                value = wire.validate_turn_data(value, frame["arguments"])
+                value = wire.validate_data(value, frame["arguments"])
             elif operation == "preview":
                 value = await self.preview(principal, frame["arguments"], workspace_principal=workspace)
             elif operation == "status":
@@ -509,7 +530,7 @@ class FreshConversationOwner:
             try:
                 if host_current() is not None:
                     raise ConversationRefusal()
-                self._current(principal, read_only=operation in {"status", "read", "turn_status", "turn_read"})
+                self._current(principal, read_only=operation in {"status", "read", "turn_status", "turn_read", "consume_status"})
             except Exception:
                 raise ConversationRefusal("effect_unknown" if entered else "conversation_unavailable",
                     effect="UNKNOWN" if entered else "NONE") from None

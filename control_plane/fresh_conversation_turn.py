@@ -171,6 +171,39 @@ class FreshConversationTurnSource:
         return event, payload
 
 
+def _preview_digest(request, identity, consumption, captured):
+    # Correlation DATA only. Each preview/send independently obtains current
+    # source, project, principal and actual retained writer/ACK qualification.
+    return wire.canonical_digest(dict(
+        request={k: v for k, v in request.items() if k != "preview_digest"},
+        identity=identity, consumption=consumption, writer_digest=captured[1],
+        profile_digest=wire.canonical_digest(captured[2]),
+        project_digest=wire.canonical_digest(captured[3])))
+
+
+async def preview_turn(owner, principal, workspace, request, *, host_current):
+    owner._current(principal)
+    initial, root, identity = await _initial(owner, principal, request)
+    consumption = _consumption(owner, identity)
+    if consumption is None:
+        raise ValueError("CONVERSATION_INITIAL_NOT_CONSUMED")
+    captured = _live(owner, principal, workspace, request, host_current, identity)
+    if captured[0].continuation.done() or any(event.event_type == _REQUEST
+            for event in owner._runtime.events.list_events(job_id=root.job_id)):
+        # A recorded/unknown original is recoverable through status/read only;
+        # preview never reserves, resends or reports that operation ready.
+        raise ValueError("CONVERSATION_TURN_ALREADY_RESERVED")
+    if (_live(owner, principal, workspace, request, host_current, identity) != captured
+            or _consumption(owner, identity) != consumption):
+        raise ValueError("CONVERSATION_CONTEXT_CHANGED")
+    return dict(schema="mastermind.executive.fresh_conversation_turn_preview.v1",
+        work_ref=request["work_ref"], operation_key=request["operation_key"], reference=None,
+        turn_key=request["turn_key"], state="TURN_READY", effect="NONE",
+        initial_consumption=consumption, locator=identity["locator"],
+        preview_digest=_preview_digest(request, identity, consumption, captured),
+        parent_consumed=False, can_send=True)
+
+
 async def submit_turn(owner, principal, workspace, request, *, host_current):
     owner._current(principal)
     owner._project(principal, workspace, request["work_ref"])
@@ -193,6 +226,9 @@ async def submit_turn(owner, principal, workspace, request, *, host_current):
             raise ValueError("CONVERSATION_TURN_CONFLICT")
         return await read_turn(owner, principal, request)
     captured = _live(owner, principal, workspace, request, host_current, identity)
+    if ("preview_digest" in request
+            and request["preview_digest"] != _preview_digest(request, identity, consumption, captured)):
+        raise ValueError("CONVERSATION_TURN_PREVIEW_CHANGED")
     dispatch = captured[0]
     if dispatch.continuation.done():
         raise ValueError("CONVERSATION_TURN_ALREADY_RESERVED")
