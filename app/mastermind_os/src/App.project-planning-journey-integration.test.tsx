@@ -313,6 +313,7 @@ async function openJourney() {
   expect(newProject.hasAttribute("disabled")).toBe(false);
   fireEvent.click(newProject);
   expect(await screen.findByLabelText("Your goal")).toBeTruthy();
+  expect(screen.queryByRole('button',{name:'Back to conversations'})).toBeNull();
 }
 
 async function loadOptionsAndProfile() {
@@ -374,6 +375,17 @@ function expectedPlanningKey(h: Mounted, requestId: string): string {
 }
 
 describe("App project planning journey integration", () => {
+  it('keeps only exact native readiness diagnostic inside closed source details during new-project setup',async()=>{
+    Object.defineProperty(window,'__TAURI_INTERNALS__',{configurable:true,value:{invoke:()=>Promise.reject(Error('inert readiness boundary'))}});
+    try{
+      const h=await mountApp();await openJourney();
+      const diagnostic=await screen.findByText('Native readiness receipt unavailable. No source request was attempted.');
+      expect(diagnostic.closest('details.workspace-qualification')).not.toBeNull();
+      expect(diagnostic.closest('.notice')).toBeNull();
+      expect(h.calls('source_operation_prepare')).toHaveLength(0);
+      expect(h.calls('source_operation_submit')).toHaveLength(0);
+    }finally{delete (window as unknown as Record<string,unknown>).__TAURI_INTERNALS__;}
+  });
   it("mounts the real journey: goal → options → verified preview → publication → observed source → planning → result → explicit keep", async () => {
     const h = await mountApp();
     const requestId = await driveToReadableProject(h);

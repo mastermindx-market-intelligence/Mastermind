@@ -5004,7 +5004,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   else if (active === "Connections") content = <Connections d={d} />;
   else if (active === "Evidence") content = <><Evidence d={d} />{productAcceptancePanel}</>;
   else content = <Conversation locale={locale} />;
-  if (active === "Projects" && conversationNavigation.projectReturn === projectWorkRef)
+  if (active === "Projects" && conversationNavigation.projectReturn !== null &&
+      !projectJourney.shown && !projectJourney.invalidLink &&
+      conversationNavigation.projectReturn === projectWorkRef)
     content = <><button type="button" onClick={() => {conversationNavigation.backToList();setActive("Conversations");}}>{locale === "zh-CN" ? "返回对话" : "Back to conversations"}</button>{content}</>;
   const privateEntryState = authState && !authState.acquisition && !authState.content &&
     (authState.status === "signed_out" || authState.status === "signing_in" ||
@@ -5184,7 +5186,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         ) : null}
         {active !== "Control Room" && active !== "Today" && active !== "Conversations" && !directRoute &&
           !((active === "Inbox" || active === "Projects" && (projectJourney.shown || projectJourney.invalidLink)) && visibleNotice === "Choose a Program with one resolved mission before opening the workspace.") &&
-          !reading.suppressBodyNotice ? (
+          !reading.suppressBodyNotice &&
+          !(active === "Projects" && (projectJourney.shown || projectJourney.invalidLink) && reading.readinessDiagnostic !== null) ? (
           <div className="notice" role="status">{visibleNotice === "Choose a Program with one resolved mission before opening the workspace."
             ? locale === "zh-CN" ? "选择一个项目，查看其工作。" : "Choose a project to view its work."
             : visibleNotice}</div>
