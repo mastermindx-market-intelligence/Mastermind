@@ -26,6 +26,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Sequence
 
+_RELEASE_ROOT = Path(__file__).resolve().parents[2]
+if os.fspath(_RELEASE_ROOT) not in sys.path:
+    sys.path.insert(0, os.fspath(_RELEASE_ROOT))
+
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+
 
 CONTROL_LABEL = "com.mastermind.executive.control"
 WORKER_LABEL = "com.mastermind.executive.worker.codex"
@@ -138,13 +144,10 @@ def _sha256_file(path: Path) -> str:
 
 
 def _has_acl(path: Path) -> bool:
-    if sys.platform != "darwin":
-        return False
-    completed = _run(
-        ["/usr/bin/stat", "-f", "%Sp", path],
-        label="filesystem ACL metadata check",
-    )
-    return "+" in completed.stdout.decode("ascii", errors="strict")
+    try:
+        return has_macos_acl(path)
+    except FilesystemSecurityError as exc:
+        raise RetryError("filesystem ACL metadata check failed") from exc
 
 
 def _clear_acl(path: Path) -> None:

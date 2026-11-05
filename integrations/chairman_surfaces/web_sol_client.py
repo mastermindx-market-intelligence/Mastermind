@@ -112,6 +112,9 @@ def _request(
     issued_at: str,
     expires_at: str,
     nonce: str,
+    operation_id: str | None = None,
+    result_digest: str | None = None,
+    obligation_digest: str | None = None,
 ) -> dict[str, Any]:
     accepted = _accepted_binding(binding)
     request = {
@@ -125,6 +128,14 @@ def _request(
         "expires_at": expires_at,
         "nonce": nonce,
     }
+    if action == wsp.SurfaceAction.TYPED_REENTRY.value:
+        request.update(
+            {
+                "operation_id": operation_id,
+                "result_digest": result_digest,
+                "obligation_digest": obligation_digest,
+            }
+        )
     return wsp.validate_request(request)
 
 
@@ -318,6 +329,8 @@ def _transport_failure_code(
 ) -> str:
     if sent and action == "FOREGROUND":
         return "foreground_effect_unknown"
+    if sent and action == "TYPED_REENTRY":
+        return "typed_reentry_effect_unknown"
     if action == "CENSUS":
         return "census_unavailable"
     if sent:
@@ -406,7 +419,11 @@ def _exchange_web_sol_socket(
 
 
 def _untrusted_receipt_code(action: str, default: str) -> str:
-    return "foreground_effect_unknown" if action == "FOREGROUND" else default
+    if action == "FOREGROUND":
+        return "foreground_effect_unknown"
+    if action == "TYPED_REENTRY":
+        return "typed_reentry_effect_unknown"
+    return default
 
 
 def _invoke(
@@ -417,6 +434,9 @@ def _invoke(
     issued_at: str,
     expires_at: str,
     nonce: str,
+    operation_id: str | None = None,
+    result_digest: str | None = None,
+    obligation_digest: str | None = None,
 ) -> dict[str, Any]:
     request = _request(
         binding,
@@ -425,6 +445,9 @@ def _invoke(
         issued_at=issued_at,
         expires_at=expires_at,
         nonce=nonce,
+        operation_id=operation_id,
+        result_digest=result_digest,
+        obligation_digest=obligation_digest,
     )
     try:
         instance_id = wsi.adapter_instance_id(binding)
@@ -496,6 +519,32 @@ def foreground_via_extension(
         binding,
         action="FOREGROUND",
         operation_key=operation_key,
+        issued_at=issued_at,
+        expires_at=expires_at,
+        nonce=nonce,
+    )
+
+
+def typed_reentry_via_extension(
+    binding: dict[str, Any],
+    *,
+    operation_key: str,
+    operation_id: str,
+    result_digest: str,
+    obligation_digest: str,
+    issued_at: str,
+    expires_at: str,
+    nonce: str,
+) -> dict[str, Any]:
+    """Return one digest-only typed payload to one exact loaded conversation."""
+
+    return _invoke(
+        binding,
+        action="TYPED_REENTRY",
+        operation_key=operation_key,
+        operation_id=operation_id,
+        result_digest=result_digest,
+        obligation_digest=obligation_digest,
         issued_at=issued_at,
         expires_at=expires_at,
         nonce=nonce,

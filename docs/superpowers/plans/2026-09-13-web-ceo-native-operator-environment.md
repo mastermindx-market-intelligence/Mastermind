@@ -6,6 +6,8 @@ Architecture companion: `docs/superpowers/specs/2026-09-13-web-ceo-native-operat
 
 Protected pickup: `9ed16bf0fcc5b47e870350ff2413ff5c8c73b447`; compatible `mastermind.sol_skillpack.v1` 1.0.1 / bootstrap major 1.
 
+**Architecture repair, 2026-11-05:** grounded in protected `766e06f1d4cef93302632c9a0c23a7590fe577f7`, with governing procedure pin `47dc3c36956b28dbcff6d29121401679181c0a80`. The authoring/pickup pin above remains historical. Navigator #859 protected-merged at `5103486e8d8c460c94f1563fec50a1e4dfc08aa3`; this record consumes its existing [owner routing](https://github.com/mastermindx-market-intelligence/Mastermind/blob/766e06f1d4cef93302632c9a0c23a7590fe577f7/plugins/mastermind-navigator/references/owner-routing.json) and [role profiles](https://github.com/mastermindx-market-intelligence/Mastermind/blob/766e06f1d4cef93302632c9a0c23a7590fe577f7/plugins/mastermind-navigator/references/role-profiles.json). The [incumbent attended-command contract](https://github.com/mastermindx-market-intelligence/Mastermind/blob/766e06f1d4cef93302632c9a0c23a7590fe577f7/research/CHATGPT_LONG_RUN_LEADERS_CHAIRMAN_DECISION_MEMO_2026-09-05.md) supplies pre-effect preparation/start/reconciliation. These are source facts, not installation, current serviceability or runtime acceptance.
+
 This plan composes existing programs. It does not seize their source paths, START their workers, install plugins, authenticate accounts, create Executive Jobs, mutate browser profiles, or authorize runtime effects.
 
 ## Outcome
@@ -26,12 +28,14 @@ A fresh Web CEO or native operator receives a small role-specific default toolse
 - Linear: portfolio projection.
 - Code Intelligence Fabric: future governed code discovery/semantic facade.
 
-## Current collision / sequencing facts
+## Historical pickup facts and current integration boundaries
 
-1. `plugins/mastermind-sol/skills/bootstrap-mastermind/SKILL.md` is currently owned by the existing Sol Active-Duty Bootstrap PR #518. Do not edit or recreate that source while the incumbent owner remains active.
-2. Shared plugin marketplace/validator integration is an existing owner seam; independent packages have already demonstrated that racing `.agents/plugins/marketplace.json` / `scripts/validate_mastermind_plugins.py` creates integration conflict. Any Navigator catalog admission must sequence through that owner.
+The September 13 owner observations below are dated inputs. Re-read the incumbent owner only when a later action needs that surface; an old PR/chat is not a permanent approval or waiting gate.
+
+1. At pickup, PR #518 owned `plugins/mastermind-sol/skills/bootstrap-mastermind/SKILL.md`. Before any later edit, establish current source custody and preserve an actual live writer; do not wait on a historical author or recreate the bootstrap.
+2. Shared marketplace/validator integration remains with its existing owner. Navigator is already protected through #859; consume it. Any future shared catalog change needs current scope/custody evidence and must not race `.agents/plugins/marketplace.json` or `scripts/validate_mastermind_plugins.py`.
 3. Workbench Read RS0 source is protected; installation and real approved-seat proof remain separate current work. Do not rebuild the reader.
-4. Workbench Action is the missing attended mutation/command vertical. It must reuse Workbench/Business auth/executor/effect owners rather than enter RS0 paths ad hoc.
+4. Workbench Action was the missing attended mutation/command vertical at authoring. This proposal reuses Workbench/Business auth/executor/effect owners; a later implementation first checks current source and consumes an accepted adapter if present.
 5. Web-Sol authenticated realm provisioning, fleet census and exact-session continuation already have current carriers. Do not create a second browser/profile/session authority.
 6. Desktop Commander managed transport and first-party fleet work remain partially proven. Do not create another remote shell path.
 7. Code Intelligence has its own source/review/evaluation program. Do not ship an alternate search/index plane as an environment shortcut.
@@ -40,13 +44,15 @@ A fresh Web CEO or native operator receives a small role-specific default toolse
 
 **Goal:** every fresh session knows how to locate current truth and choose the right tool before tool fishing.
 
-Source target after current plugin-owner gates clear:
+Consume the protected `mastermind-navigator` package and its existing `owner-routing.json`, `role-profiles.json` and capability-health contract:
 
-- add one `navigate-mastermind-universe` / equivalent routing skill to the existing Sol package or admit the already-created standalone Navigator package through the shared package owner;
-- add a compact canonical surface map and session boot contract;
-- preserve current same-SHA Skillpack gate and authority boundaries;
-- add role profiles for Web CEO, native builder, browser/provider operator and domain specialist;
-- teach explicit distinctions among installed, connected, authenticated, callable, authorized and `PROVEN_LIVE`.
+- use the incumbent surface map and project/session/action binding requirements;
+- project only the bounded boot view needed for the active mission; do not add a catalog or health-policy owner;
+- preserve the same-SHA Skillpack gate and authority boundaries;
+- use `web_ceo_core`, `native_builder_operator` and `browser_provider_operator`, with the existing authorized domain overlays;
+- preserve installed, enabled, authenticated/connected, callable, organizationally authorized and `PROVEN_LIVE` as separate observations.
+
+A role profile controls discovery/exposure. It does not admit execution mode or prove that a READ-capable connection can WRITE/ADMIN, and technical serviceability is not source-writer authority.
 
 Acceptance:
 
@@ -83,7 +89,7 @@ Rules:
 - no new persistence database;
 - every row keeps canonical owner/source/freshness/coverage;
 - missing source is `UNKNOWN`/`UNAVAILABLE`, not zero/clear;
-- packet is bounded and role-filtered;
+- packet is bounded and role-filtered; existing authorization for a bounded source action does not wait for unrelated company-wide health coverage;
 - no transcript, cookie, credential, private argv/env or arbitrary browser content.
 
 Acceptance: a fresh Web CEO can answer “what is happening, what is blocked, where should I look next?” from the packet and then perform only one or two owner-native reads for the active mission.
@@ -138,42 +144,49 @@ Do not create another reader.
 
 Preferred ownership: existing Workbench/Business auth + common executor + source/workspace owners; new sibling package only where the current owner map requires an adapter.
 
+### Mode and current authority
+
+Consume the existing owner's admitted mode, authenticated subject or approved native context, exact current session generation or Executive Job/Attempt/Worker generation, owner-issued target context, current policy/capability generation, expiry/revocation state and selected-project binding.
+
+Attended Web work requires the exact current conversation and RuntimeBinding generation; approved native work requires its native-session owner. Bounded workers retain Executive admission and provider-adapter ownership. A worker cannot fall back to an attended interface. Project OAuth, a role label, same-account presence, a successful read or installed package does not confer modifying authority. Revalidate after asynchronous preparation and immediately before effect.
+
 ### Proposed tool contract
+
+The existing owner supplies reusable target context. That context is not an effect token. Each create, patch or command is prepared separately under the same incumbent effect owner.
 
 `prepare_project_action`
 
-Input: approved `project_ref`, requested capability class, expected source identity when required. Output: opaque action ref, exact target/source/preimage, allowed operations, expiry, host/workspace identity. No mutation.
+Input: current owner-issued context plus the **complete proposed effect**: operation kind, owner-selected target/workspace/source, relevant host/boot identity, bounded patch bytes or reviewed command recipe and arguments, target preconditions, execution limits and expected policy/capability generation. Caller path/hash assertions are mismatch checks only. Output: one unique immutable action reference binding the owner-derived operation identity, owner-issued context and authenticated subject/native principal, admitted mode/session generation, complete payload digest, target/preconditions, bounds and expiry. Preparation changes no project file and launches no process.
 
 `apply_text_patch`
 
-Input: action ref, relative path, expected SHA/absence, bounded patch. One write. Immediate descriptor-based readback and output SHA. Path/root/symlink/identity drift refuses.
+Consume one prepared file effect, including expected hash/absence and exact patch bytes. Any retransmitted payload must match the prepared descriptor. Root/path/symlink/identity/preimage drift refuses before the write; return descriptor-bound readback and output SHA.
 
 `run_project_command`
 
-Input: action ref, reviewed command recipe or closed argv, bounded args. Fixed selected-project cwd; closed environment; bounded time/output/concurrency; physical completion tracked past caller timeout; descendants bounded. Actual exit code preserved, including intentional non-zero test cases.
+Consume one prepared command effect. Use the fixed selected-project cwd, closed environment/recipe and bounded time/output/concurrency/descendants; never export credentials or the ambient environment. Preserve actual exit code and physical completion past caller timeout. Adapt to the incumbent `prepare_attended_command` / `start_attended_command` / `reconcile_attended_command_start` contract; these names do not claim that a deployment exposes the tools.
 
-`read_action_result`
+`read_action_result` and `reconcile_action`
 
-Bounded/paginated outputs and qualified artifacts, all bound to action/source/host identity.
-
-`reconcile_action`
-
-Read-only reconciliation after lost reply. Resolve `NOT_APPLIED | APPLIED | EFFECT_UNKNOWN` from owner-native receipts. Never replay.
+Use the action reference known **before execution**, including when launch response is lost before a process reference is received. Return bounded outputs/artifacts or the original owner-native `NOT_APPLIED | APPLIED | EFFECT_UNKNOWN` state. Same-reference/same-payload duplicate delivery returns the original result or uncertainty; changed payload conflicts without a new effect. Missing history, retention loss, expiry, revocation, cancellation or reconnect never proves absence or authorizes replay. Reuse the existing effect records; no action database, retry plane or queue is added.
 
 ### F0 test journey
 
-On a disposable project/worktree:
+Future implementation acceptance on an approved disposable project/worktree:
 
-1. prepare exact action;
-2. create a file;
-3. read/verify it;
-4. patch it with expected preimage;
-5. run one exit-0 command;
-6. run one intentional exit-7 command and preserve `7` rather than labeling transport failure;
-7. paginate output;
-8. simulate lost caller reply after possible effect and reconcile without duplicate execution;
-9. refuse outside-root, wrong principal, wrong host, stale boot/source, stale preimage, symlink/path swap, unauthorized command, secret/env request and expired action;
-10. close/drain with zero orphan process and clear effect state.
+1. Obtain current owner-issued context and mode/session/project authority.
+2. Prepare create A with expected absence; execute it and verify readback.
+3. Prepare patch B against A's resulting preimage; execute it and verify readback.
+4. Prepare command C and preserve its actual exit 0.
+5. Prepare command D and preserve intentional exit 7.
+6. Paginate each effect's descriptor-bound output.
+7. Lose a launch response before the caller receives a process handle; reconcile the original pre-effect reference without process two.
+8. Exercise same-reference/same-payload duplicate delivery, changed-payload conflict, changed preimage and missing-history refusal.
+9. Refuse outside-root, wrong principal/host, stale boot/source, path swap, unauthorized recipe, secret/env request and expired context.
+10. Refuse same account/project with a different conversation, stale or revoked generation, revocation between prepare/execute, and a worker presented as attended/native.
+11. Close/drain through the existing owner and report actual process/effect settlement.
+
+Each modifying effect has its own immutable reference; this document repair does not execute or claim these canaries.
 
 ### F0 non-goals
 
@@ -203,15 +216,17 @@ Desktop Commander remains a tactical incumbent until parity is accepted. Do not 
 
 **Goal:** Web CEO/operator can use the M2/M1/future minis/PC without choosing machines manually for ordinary portable work.
 
-1. enroll one second authorized host;
-2. show fresh health + eligibility for both;
-3. make an explicit exact-target request;
-4. run a new portable disposable task on host 2;
-5. refuse wrong host, stale boot, source mismatch, missing toolchain and browser/account-bound migration;
-6. integrate existing Capacity reservation/claim before start;
-7. show that two contenders cannot over-admit;
-8. preserve in-flight action identity through disconnect/recovery;
-9. add PC/Windows only after separate filesystem/process qualification.
+1. Enroll a second host only through its existing authorized owner, then observe current host/boot, toolchain, source/workspace and realm facts for both hosts.
+2. Obtain the existing admission decision and hard-feasibility result for a new portable disposable task.
+3. Apply incumbent Capacity selection where applicable; preserve an explicit exact-target constraint.
+4. Obtain the applicable canonical claim/resource commitment before execution.
+5. Prepare this effect for the selected target and perform the final binding/currentness check.
+6. Launch on host 2 through the existing local/MH1 owner only after those preconditions hold.
+7. Consume the original result, reconcile uncertainty and settle the existing commitment.
+8. Prove two contenders cannot over-admit; wrong/stale host, boot, source, toolchain or missing applicable commitment must prevent launch. Preserve in-flight identity through disconnect/recovery and refuse browser/account-bound migration.
+9. Add PC/Windows only after separate filesystem/process qualification.
+
+Harmless observation is separate from launch. This sequence adds no scheduler/reservation service and does not activate an unadmitted physical-resource policy.
 
 No active browser profile, provider home, token file, live Runtime SQLite or Git index is shared across hosts.
 
@@ -243,12 +258,12 @@ Until accepted, Navigator routes to GitHub/source reads and explicitly labels th
 
 **Goal:** all approved apps are reachable without flooding every session.
 
-Maintain one approved catalog but compile role profiles:
+Consume Navigator's one approved profile/overlay contract:
 
 - `web_ceo_core`
-- `native_builder_core`
-- `browser_operator_core`
-- optional domain overlays: `deploy`, `data`, `analytics`, `design`, `knowledge`, `communications`.
+- `native_builder_operator`
+- `browser_provider_operator`
+- existing authorized overlays: `domain_deploy`, `domain_data`, `domain_design`, `domain_comms`.
 
 Each profile records symbolic required apps/capabilities, not secrets or live app IDs in source law. Installation/binding remains with the existing plugin package/deployment owner.
 
@@ -301,7 +316,9 @@ Inject at least:
 
 - Executive connector unavailable;
 - browser realm logged out vs service-worker restart;
-- stale RuntimeBinding;
+- stale RuntimeBinding or revoked session generation between prepare and effect;
+- same project/account with the wrong conversation or worker-to-attended fallback;
+- missing resource commitment or changed target after placement;
 - duplicate-looking conversation;
 - Workbench token expiry/revocation;
 - project source movement;
@@ -319,7 +336,7 @@ Expected behavior is typed degraded/refusal/reconciliation, not hidden fallback 
 Do not compress these states:
 
 1. `SPEC_ONLY`
-2. source protected / `BUILT_NOT_PROVEN`
+2. implementation source protected / `BUILT_NOT_PROVEN` when an implementation exists; protecting these two records alone remains `SPEC_ONLY`
 3. installed in one approved environment
 4. component canary proven
 5. composed Web CEO journey proven
@@ -329,17 +346,17 @@ Do not compress these states:
 
 ## Exact immediate next actions
 
-Parallel, without colliding source:
+Parallel, subject to each existing owner's actual source/effect fences:
 
-1. keep this records-only packet for integration reference;
-2. use the validated standalone Navigator skill in fresh sessions immediately, but do not call it repo-installed/protected;
-3. let #518 finish/release its current bootstrap ownership before any Sol-package integration;
-4. let the shared plugin marketplace/validator owner admit Navigator later rather than racing global package files;
-5. finish Workbench Read real-seat installation/canary through current #536 lineage;
-6. commission Workbench Action F0 only through a fresh current-owner/path/effect census after current Workbench source owners release overlapping seams;
-7. continue existing authenticated realm/Web-Sol/RuntimeBinding carriers instead of creating an auth/browser MCP;
-8. finish managed host/fleet transport before retiring Desktop Commander;
-9. consume CodeIntel only after its accepted facade is available;
-10. then run X0 as one product acceptance journey.
+1. Retain this records-only packet as the repaired architecture contract.
+2. Consume protected Navigator #859 and verify actual installation/availability for the intended session; source protection alone is not fresh-session proof.
+3. Before any bootstrap edit, establish current source custody; #518 is a historical pickup reference, not an old-author waiting gate.
+4. Reuse the admitted Navigator marketplace entry; future shared package changes remain with the current shared owner.
+5. Continue Workbench Read installation/canary through its current owner; #536 names the historical lineage, not a new authorization.
+6. Before Workbench Action F0, check the current source/owner/effect surface and reuse any accepted implementation; preserve its exact mode, per-effect identity and prelaunch commitment contract.
+7. Continue the existing authenticated realm/Web-Sol/RuntimeBinding carriers.
+8. Qualify managed host/fleet parity before retiring the incumbent transport.
+9. Consume CodeIntel only through its accepted facade when available.
+10. Run X0 only after its named component implementations and original effect fences permit the journey.
 
-This plan grants no child START or production effect by itself.
+These records grant no child START or production effect. They do not impose a company-wide boot/transport/install gate on independently authorized bounded source work.

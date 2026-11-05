@@ -7,6 +7,8 @@ import shutil
 import sys
 import threading
 import time
+from collections import Counter
+import dataclasses
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -65,6 +67,8 @@ from scripts.ohf.fixtures import OHF_PROBE_MCP_SERVER
 from scripts.ohf.laboratory import AppServerClient, PrivateRawTurnPage
 from scripts.ohf.redaction import REDACTED
 
+from control_plane.visible_turn_projection import ProjectionError
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _CREATED_ADAPTERS: list[CodexOperatorAdapter] = []
 
@@ -82,12 +86,23 @@ CAP_S1_OPERATION_ID = "mastermind-cap-s1-complete-vertical-20260901-sol-001"
 CAP_S1_HARNESS_VERSION = "ohf-fake-app-server/p0b"
 
 
+def _test_python_binary() -> Path:
+    python = Path(sys.executable).resolve()
+    if sys.platform == "darwin":
+        # Framework bin/python execs a second image; all launch and receipt
+        # fixtures must attest the actual interpreter used by the fake server.
+        image = python.parent.parent / "Resources/Python.app/Contents/MacOS/Python"
+        if image.is_file():
+            return image.resolve()
+    return python
+
+
 def _test_binary_digest() -> str:
     """The exact digest the fake-App-Server harness (the running python
     interpreter) will compute for itself -- every skill-canary harness in
     this module launches that same interpreter, so this is a fixed value."""
 
-    return hashlib.sha256(Path(sys.executable).resolve().read_bytes()).hexdigest()
+    return hashlib.sha256(_test_python_binary().read_bytes()).hexdigest()
 
 
 def _load_cap_s1_generation():
@@ -143,7 +158,7 @@ def _stage_cap_s1_binding(
         profile=profile,
         projection=projection,
         protocol_receipt=build_protocol_attestation_receipt(
-            binary_path=str(Path(sys.executable).resolve()),
+            binary_path=str(_test_python_binary()),
             binary_digest=_test_binary_digest(),
             binary_version=CAP_S1_HARNESS_VERSION,
             stable_inventory_digest="c" * 64,
@@ -193,11 +208,11 @@ class _RecordingSkillsClient:
     def __getattr__(self, name):
         return getattr(self._inner, name)
 
-    def request(self, method, params=None, *, timeout=15.0):
+    def request(self, method, params=None, *, timeout=15.0, **kwargs):
         self.calls.append((method, dict(params or {})))
         if method == "skills/list" and self._skills_list_script:
             return self._skills_list_script.pop(0)
-        return self._inner.request(method, params, timeout=timeout)
+        return self._inner.request(method, params, timeout=timeout, **kwargs)
 
 
 def _recording_client_factory(skills_list_script=None):
@@ -325,7 +340,7 @@ def _make_harness(
     (codex_home / "auth.json").chmod(0o600)
     (skill / "SKILL.md").write_text("# OHF probe\n", encoding="utf-8")
     state_path = codex_home / "fake-state.json"
-    python = Path(sys.executable).resolve()
+    python = _test_python_binary()
     argv = (
         (str(python), str(REPO_ROOT / "tests/fixtures/ohf_p1b_fault_app_server.py"))
         if fault_server
@@ -600,6 +615,274 @@ def test_fake_app_server_end_to_end_through_provider_neutral_orchestrator(
         "graceful_stop_intent",
         "stop_bind",
     ]
+
+
+def test_lc1_gate_held_visible_turn_projection(tmp_path: Path) -> None:
+    gate = tmp_path / "gate"
+    gate.touch()
+    item_gate = tmp_path / "item-notification-gate"
+    item_gate.touch()
+    harness = _make_harness(
+        tmp_path,
+        extra_env={
+            "OHF_FAKE_GATE_MODE": "held",
+            "OHF_FAKE_GATE_PATH": str(gate),
+            "OHF_FAKE_ITEM_GATE_PATH": str(item_gate),
+            "OHF_FAKE_GATE_LOG": str(tmp_path / "gate.log"),
+            "OHF_FAKE_EFFECT_COUNTERS": str(tmp_path / "effects.log"),
+            "OHF_FAKE_TURN_REPLY": "LC1 fixture reply",
+            "OHF_FAKE_VISIBLE_UPDATES": ";".join(
+                (
+                    "LC1 partial one",
+                    "LC1 final one",
+                    "LC1 partial two",
+                    "LC1 final two",
+                )
+            ),
+        },
+    )
+    baseline_harness = _make_harness(tmp_path / "baseline")
+    _, _baseline_observed, baseline_launch = _start(baseline_harness)
+    _, _observed, launch = _start(harness)
+    baseline_adapter = baseline_harness.adapter
+    baseline_generation = baseline_harness.generation
+    turn = TurnRef("turn-lc1", "epoch-1", "gen-1", "attempt-1")
+    baseline_turn = TurnRef("baseline-lc1", "epoch-1", "gen-1", "attempt-1")
+    completed = threading.Event()
+    baseline_completed = threading.Event()
+
+    def baseline_controller() -> None:
+        baseline_adapter.begin_turn(
+            operation_id=_op("baseline-turn"),
+            turn=baseline_turn,
+            generation=baseline_generation,
+            launch=baseline_launch,
+        )
+        baseline_adapter.read_events(
+            EventCursor(
+                "attempt-1",
+                "epoch-1",
+                "gen-1",
+                turn_id=baseline_turn.turn_id,
+            ),
+            timeout_seconds=5,
+        )
+        baseline_completed.set()
+
+    baseline_thread = threading.Thread(target=baseline_controller)
+    baseline_thread.start()
+    baseline_deadline = time.monotonic() + 5
+    while time.monotonic() < baseline_deadline:
+        if baseline_turn.turn_id in baseline_adapter._state(
+            baseline_generation
+        ).turns:
+            break
+        time.sleep(0.01)
+    baseline_thread.join(timeout=5)
+    assert baseline_completed.is_set()
+    baseline_state = baseline_adapter._state(baseline_generation)
+    baseline_terminal = [
+        event for event in baseline_state.events if event.kind == "turn/completed"
+    ]
+    assert len(baseline_terminal) == 1
+    baseline_next_id = baseline_state.client._next_id
+
+    def controller() -> None:
+        harness.adapter.begin_turn(
+            operation_id=_op("lc1-turn"),
+            turn=turn,
+            generation=harness.generation,
+            launch=launch,
+        )
+        harness.adapter.read_events(
+            EventCursor("attempt-1", "epoch-1", "gen-1", turn_id=turn.turn_id),
+            timeout_seconds=5,
+        )
+        completed.set()
+
+    thread = threading.Thread(target=controller)
+    thread.start()
+    deadline = time.monotonic() + 5
+    grant = None
+    while time.monotonic() < deadline:
+        if turn.turn_id in harness.adapter._state(harness.generation).turns:
+            grant = harness.adapter.mint_observer_grant(turn)
+            break
+        time.sleep(0.01)
+    assert grant is not None
+    projection = harness.adapter.visible_turn_projection
+    key = projection.check_grant(grant)
+    assert key is not None
+    item_gate.unlink()
+    turn_deadline = time.monotonic() + 5.0
+    while True:
+        try:
+            nonterminal = projection.read(
+                key, reader_grant=grant, cursor=None, max_items=64
+            )
+        except ProjectionError:
+            if time.monotonic() >= turn_deadline:
+                raise AssertionError(
+                    "visible turn projection was not bound before the "
+                    "terminal gate was held"
+                ) from None
+            time.sleep(0.01)
+            continue
+        native_notifications = harness.adapter._state(
+            harness.generation
+        ).client.drain_notifications()
+        native_visible_notifications = [
+            notification
+            for notification in native_notifications
+            if notification.get("method")
+            in {"item/updated", "item/completed", "turn/completed"}
+        ]
+        native_visible_notifications.sort(
+            key=lambda notification: (
+                notification.get("params", {})
+                .get("item", {})
+                .get("sequence", -1),
+                0 if notification.get("method") == "item/updated" else 1,
+            )
+        )
+        harness.adapter._ingest_turn_notifications(
+            harness.adapter._state(harness.generation),
+            turn,
+            native_visible_notifications,
+        )
+        visible_deadline = time.monotonic() + 5.0
+        while True:
+            nonterminal = projection.read(
+                key, reader_grant=grant, cursor=None, max_items=64
+            )
+            assert nonterminal.terminal is False
+            if [item.text for item in nonterminal.items] == [
+                "LC1 partial one",
+                "LC1 final one",
+                "LC1 partial two",
+                "LC1 final two",
+            ]:
+                break
+            replayed_notifications = harness.adapter._state(
+                harness.generation
+            ).client.drain_notifications()
+            replayed_visible_notifications = [
+                notification
+                for notification in replayed_notifications
+                if notification.get("method")
+                in {"item/updated", "item/completed", "turn/completed"}
+            ]
+            replayed_visible_notifications.sort(
+                key=lambda notification: (
+                    notification.get("params", {})
+                    .get("item", {})
+                    .get("sequence", -1),
+                    0 if notification.get("method") == "item/updated" else 1,
+                )
+            )
+            if replayed_visible_notifications:
+                harness.adapter._ingest_turn_notifications(
+                    harness.adapter._state(harness.generation),
+                    turn,
+                    replayed_visible_notifications,
+                )
+            assert time.monotonic() < visible_deadline, (
+                "visible updates were not published while the terminal gate was held: "
+                f"{[item.text for item in nonterminal.items]}; "
+                f"gate_held={(tmp_path / 'gate').exists()}, "
+                f"controller_alive={thread.is_alive()}"
+            )
+            time.sleep(0.01)
+        break
+    assert [item.text for item in nonterminal.items] == [
+        "LC1 partial one",
+        "LC1 final one",
+        "LC1 partial two",
+        "LC1 final two",
+    ]
+    assert nonterminal.terminal is False
+    gate.unlink()
+    thread.join(timeout=5)
+    assert completed.is_set()
+    terminal_deadline = time.monotonic() + 10.0
+    while True:
+        observed = projection.read(key, reader_grant=grant, cursor=None, max_items=64)
+        if (
+            [item.text for item in observed.items]
+            == [
+                "LC1 partial one",
+                "LC1 final one",
+                "LC1 partial two",
+                "LC1 final two",
+            ]
+            and [item.state for item in observed.items]
+            == [
+                "completed",
+                "completed",
+                "partial",
+                "partial",
+            ]
+            and observed.terminal is True
+        ):
+            break
+        assert time.monotonic() < terminal_deadline, (
+            "terminal visible turn projection did not converge: "
+            f"texts={[item.text for item in observed.items]}; "
+            f"states={[item.state for item in observed.items]}; "
+            f"terminal={observed.terminal}"
+        )
+        time.sleep(0.01)
+    assert [item.text for item in observed.items] == [
+        "LC1 partial one",
+        "LC1 final one",
+        "LC1 partial two",
+        "LC1 final two",
+    ]
+    assert [item.state for item in observed.items] == [
+        "completed",
+        "completed",
+        "partial",
+        "partial",
+    ]
+    assert observed.terminal is True
+    observed_state = harness.adapter._state(harness.generation)
+    observed_terminal = [
+        event for event in observed_state.events if event.kind == "turn/completed"
+    ]
+    assert len(observed_terminal) == 1
+    assert dataclasses.asdict(observed_terminal[0]) == {
+        **dataclasses.asdict(baseline_terminal[0]),
+        "turn_id": turn.turn_id,
+        "provider_event_id": observed_terminal[0].provider_event_id,
+    }
+    assert observed_state.client._next_id == baseline_next_id
+    assert [row for row in (tmp_path / "gate.log").read_text().splitlines() if row] == [
+        f"gate=held turn={key.native_turn_id} terminal=pending gate_path={gate}",
+        f"gate=released turn={key.native_turn_id}",
+    ]
+    effects = Counter(
+        (tmp_path / "effects.log").read_text(encoding="utf-8").splitlines()
+    )
+    assert effects["session_starts"] == 1
+    assert effects["resumes"] == 0
+    assert effects["turn_starts"] == 1
+    assert effects["provider_calls"] > 0
+    assert effects["native_acks"] == 1
+    assert effects["candidate_collections"] == 0
+    assert effects["raw_collections"] == 0
+    assert effects["parent_obligations"] == 0
+    gate_log = Path("/tmp/w7lc1/gate_log.txt")
+    gate_log.parent.mkdir(parents=True, exist_ok=True)
+    gate_log.write_text(
+        "\n".join((tmp_path / "gate.log").read_text().splitlines()) + "\n",
+        encoding="utf-8",
+    )
+    harness.adapter.graceful_stop(
+        harness.generation, operation_id=_op("lc1-stop")
+    )
+    baseline_adapter.graceful_stop(
+        baseline_generation, operation_id=_op("baseline-stop")
+    )
 
 
 def test_native_helper_is_exactly_attested_audited_and_redacted(
@@ -980,7 +1263,7 @@ def test_auth_marker_is_only_statted_and_parent_credentials_are_not_inherited(
 
 
 def test_default_home_and_symlinked_auth_are_refused(tmp_path: Path) -> None:
-    python = Path(sys.executable).resolve()
+    python = _test_python_binary()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     default_home = (Path.home() / ".codex").resolve()
@@ -997,7 +1280,7 @@ def test_default_home_and_symlinked_auth_are_refused(tmp_path: Path) -> None:
 def test_credential_boundary_rejects_hardlinks_modes_and_symlinked_ancestors(
     tmp_path: Path,
 ) -> None:
-    python = Path(sys.executable).resolve()
+    python = _test_python_binary()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     home = tmp_path / "home"
@@ -1163,13 +1446,13 @@ def test_blocked_read_events_and_interrupt_demultiplex_response_and_completion(
     )
     client = harness.adapter._state(harness.generation).client
     entered_wait = threading.Event()
-    original_wait = client.wait_notification
+    original_wait = client.wait_notifications_through
 
     def wait_notification(method: str, *, timeout: float = 15.0):
         entered_wait.set()
         return original_wait(method, timeout=timeout)
 
-    client.wait_notification = wait_notification  # type: ignore[method-assign]
+    client.wait_notifications_through = wait_notification  # type: ignore[method-assign]
     result: dict[str, object] = {}
 
     def read() -> None:
@@ -1533,12 +1816,16 @@ def test_orchestration_principal_observations_bind_exact_launched_process_and_ho
     process = harness.adapter.observe_process_credentials(harness.generation)
     provider_home = harness.adapter.observe_provider_home_identity(harness.generation)
 
-    assert process.process_identity == {
+    expected = {
         "pid": started.process.pid,
         "pgid": started.process.pgid,
         "process_start_identity": started.process.process_start_identity,
         "boot_id": started.process.boot_id,
     }
+    if sys.platform == "darwin":
+        instance = codex_operator_adapter._observe_process_instance(started.process.pid)
+        expected.update(unique_id=instance.unique_id, pidversion=instance.pidversion)
+    assert process.process_identity == expected
     assert process.os_principal_uid == os.getuid()
     assert process.os_principal_name
     assert provider_home.provider_home_identity["path"] == str(
@@ -2265,9 +2552,9 @@ class _NotificationAfterCallClient:
     def __getattr__(self, name):
         return getattr(self._inner, name)
 
-    def request(self, method, params=None, *, timeout=15.0):
+    def request(self, method, params=None, *, timeout=15.0, **kwargs):
         self.calls.append((method, dict(params or {})))
-        result = self._inner.request(method, params, timeout=timeout)
+        result = self._inner.request(method, params, timeout=timeout, **kwargs)
         if method == self._after_method:
             self._count += 1
             if self._count == self._after_call_index:
@@ -2792,3 +3079,75 @@ def test_str_loader_wire_is_byte_identical_with_and_without_binding(
         == bound_wire
         == [{"type": "text", "text": "Reply with the probe acknowledgement."}]
     )
+
+
+
+def test_exec_identity_is_preserved_in_credentials_without_changing_session_wire(harness):
+    from control_plane.executive_process_identity import _ProcessInstanceObservation
+    calls = []
+    def observe(pid):
+        calls.append(pid)
+        return _ProcessInstanceObservation(123456, 7)
+    harness.adapter.process_instance_observer = observe
+    started, _, _ = _start(harness)
+    credentials = harness.adapter.observe_process_credentials(harness.generation)
+    assert len(calls) == 6  # pre/post initialize, both continuity checks, before/after UID read
+    assert set(calls) == {started.process.pid}
+    assert credentials.process_identity["unique_id"] == 123456
+    assert credentials.process_identity["pidversion"] == 7
+    assert not hasattr(started.process, "unique_id")
+
+
+@pytest.mark.parametrize("changed_at,field", [
+    (2, "unique_id"), (3, "unique_id"), (3, "pidversion"),
+])
+def test_exec_drift_during_start_refuses_the_generation(harness, changed_at, field):
+    from control_plane.executive_process_identity import _ProcessInstanceObservation
+    calls = 0
+    def observe(pid):
+        nonlocal calls
+        calls += 1
+        value = _ProcessInstanceObservation(123456, 7)
+        return dataclasses.replace(value, **{field: 123457 if field == "unique_id" else 8}) if calls >= changed_at else value
+    harness.adapter.process_instance_observer = observe
+    with pytest.raises(CodexAdapterError, match="execution identity changed") as caught:
+        _start(harness)
+    assert caught.value.effect_unknown
+    assert harness.adapter._generations == {}
+
+
+@pytest.mark.parametrize("field,value", [("unique_id", 0), ("unique_id", True), ("pidversion", 0), ("pidversion", False)])
+def test_invalid_execution_pair_refuses_start(harness, field, value):
+    from control_plane.executive_process_identity import _ProcessInstanceObservation
+    bad = dataclasses.replace(_ProcessInstanceObservation(123456, 7), **{field: value})
+    harness.adapter.process_instance_observer = lambda pid: bad
+    with pytest.raises(CodexAdapterError, match="not observable"):
+        _start(harness)
+    assert harness.adapter._generations == {}
+
+
+def test_exec_between_start_and_principal_admission_refuses(harness):
+    from control_plane.executive_process_identity import _ProcessInstanceObservation
+    current = _ProcessInstanceObservation(123456, 7)
+    harness.adapter.process_instance_observer = lambda pid: current
+    _start(harness)
+    current = dataclasses.replace(current, pidversion=8)
+    with pytest.raises(CodexAdapterError, match="execution identity changed"):
+        harness.adapter.observe_process_credentials(harness.generation)
+
+
+def test_exec_during_principal_uid_read_refuses(harness, monkeypatch):
+    from control_plane.executive_process_identity import _ProcessInstanceObservation
+    current = _ProcessInstanceObservation(123456, 7)
+    harness.adapter.process_instance_observer = lambda pid: current
+    _start(harness)
+    original = codex_operator_adapter.subprocess.run
+    def run(argv, **kwargs):
+        nonlocal current
+        result = original(argv, **kwargs)
+        if argv[:3] == ["ps", "-o", "uid="]:
+            current = dataclasses.replace(current, pidversion=8)
+        return result
+    monkeypatch.setattr(codex_operator_adapter.subprocess, "run", run)
+    with pytest.raises(CodexAdapterError, match="execution identity changed"):
+        harness.adapter.observe_process_credentials(harness.generation)

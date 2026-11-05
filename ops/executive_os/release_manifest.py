@@ -12,6 +12,12 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+_RELEASE_ROOT = Path(__file__).resolve().parents[2]
+if os.fspath(_RELEASE_ROOT) not in sys.path:
+    sys.path.insert(0, os.fspath(_RELEASE_ROOT))
+
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+
 
 SCHEMA_VERSION = "mastermind.executive_release_manifest/v1"
 MANIFEST_NAME = ".executive-release-manifest.json"
@@ -21,20 +27,15 @@ class ReleaseManifestError(RuntimeError):
     pass
 
 
-def _has_acl(path: Path) -> bool:
-    if sys.platform != "darwin":
-        return False
-    completed = subprocess.run(
-        ["/usr/bin/stat", "-f", "%Sp", os.fspath(path)],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-        timeout=5,
-    )
-    if completed.returncode != 0:
+def _has_acl(path: Path, info: os.stat_result) -> bool:
+    try:
+        return has_macos_acl(
+            path,
+            expected_identity=info,
+            allow_symlink=stat.S_ISLNK(info.st_mode),
+        )
+    except FilesystemSecurityError:
         raise ReleaseManifestError(f"cannot inspect release ACL: {path.name}")
-    return b"+" in completed.stdout
 
 
 def _validate_owned_info(info: os.stat_result, *, label: str) -> None:
@@ -52,7 +53,7 @@ def _release_root(path: Path) -> Path:
     _validate_owned_info(info, label=".")
     if stat.S_IMODE(info.st_mode) & 0o055 != 0o055:
         raise ReleaseManifestError("release root must be traversable by both service UIDs")
-    if _has_acl(lexical):
+    if _has_acl(lexical, info):
         raise ReleaseManifestError("release root has a filesystem ACL")
     return lexical.resolve(strict=True)
 
@@ -78,7 +79,7 @@ def _entries(root: Path) -> list[dict[str, Any]]:
                 continue
             info = path.lstat()
             _validate_owned_info(info, label=relative)
-            if _has_acl(path):
+            if _has_acl(path, info):
                 raise ReleaseManifestError(f"release object has a filesystem ACL: {relative}")
             common = {
                 "path": relative,
@@ -158,7 +159,7 @@ def verify(root: Path, commit_sha: str, tree_sha: str) -> dict[str, Any]:
     if stat.S_IMODE(info.st_mode) & 0o022:
         raise ReleaseManifestError("release manifest is writable by group or other")
     _validate_owned_info(info, label=MANIFEST_NAME)
-    if _has_acl(manifest):
+    if _has_acl(manifest, info):
         raise ReleaseManifestError("release manifest has a filesystem ACL")
     try:
         persisted = json.loads(manifest.read_text(encoding="utf-8"))

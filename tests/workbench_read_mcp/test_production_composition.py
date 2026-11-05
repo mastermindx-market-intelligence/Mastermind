@@ -386,51 +386,129 @@ class CompositionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(validator.is_valid('1' * 41))
 
     async def test_launch_authority_is_qualified_before_serve(self):
-        from scripts.mastermind_workbench_read_server import main
-        # The owner supplies the request authority independently of the bind
-        # address: this also models a tunnel-facing Host unlike loopback:port.
+        from integrations.workbench_read_mcp import service
+        from integrations.workbench_read_mcp.runtime import StableWorkbenchLease
+
+        outer = self
+        client_ref = hashlib.sha256((ISSUER + '\nclient\nread0-client').encode()).hexdigest()
+
+        class BorrowedRuntime:
+            def __init__(self, server):
+                self.server = server
+            def resolve_binding(self, caller, project_ref):
+                return outer.resolve(caller, project_ref)
+            def revoke(self):
+                pass
+            async def aclose(self, *, timeout):
+                return None
+
+        def selected(authority):
+            return service.ServiceConfig(
+                schema=service.SERVICE_SCHEMA,
+                policy_file='/fixture/policy.json',
+                project_root='/fixture/project',
+                audit_directory='/fixture/audit',
+                bind_host='127.0.0.1',
+                bind_port=8765,
+                incoming_authority=authority,
+                max_concurrency=2,
+                io_timeout_seconds=5.0,
+                close_timeout_seconds=5.0,
+                lease=StableWorkbenchLease(
+                    expected_subject_digest=self.subjects['alpha'],
+                    expected_client_ref=client_ref,
+                    resource=RESOURCE,
+                    required_scopes=('workbench.read',),
+                    project_ref='alpha',
+                    context_ref='context-alpha',
+                    owner_ref='owner-alpha',
+                    generation='generation-1',
+                    allowed_paths=('source.txt',),
+                    committed_head='1' * 40,
+                    lease_expires_at_ms=(self.clock + 500) * 1000,
+                ),
+            )
+
         for authority in ('127.0.0.1:8765', 'read0.example:443'):
             services = dataclasses.replace(self.services, allowed_hosts=(authority,))
-            calls = []
-            def serve(app, *, host, port):
-                calls.append((app, host, port))
-            self.assertEqual(main(['--port', '8765'], runtime_services=services,
-                                  serve=serve, incoming_authority=authority), 0)
-            self.assertEqual(len(calls), 1)
-            app, host, port = calls[0]
-            self.assertEqual((host, port), ('127.0.0.1', 8765))
+            runtime = BorrowedRuntime(self.deployment.create_deployment(services))
+            state = service.ServiceState(socket_owned=True)
+            app = service.build_service_app(runtime, selected(authority), state)
             async with app.router.lifespan_context(app):
-                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
-                                             base_url='http://' + authority) as client:
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app), base_url='http://' + authority
+                ) as client:
                     response = await client.post('/mcp', headers={
-                        'Host': authority, 'Accept': 'application/json, text/event-stream',
+                        'Host': authority,
+                        'Accept': 'application/json, text/event-stream',
                         'MCP-Protocol-Version': '2025-03-26',
                         'Authorization': 'Bearer ' + self.token(),
-                    }, json={'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
-                             'params': {'protocolVersion': '2025-03-26', 'capabilities': {},
-                                        'clientInfo': {'name': 'read0-fixture', 'version': '1'}}})
+                    }, json={
+                        'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
+                        'params': {'protocolVersion': '2025-03-26', 'capabilities': {},
+                                   'clientInfo': {'name': 'read0-fixture', 'version': '1'}},
+                    })
             self.assertEqual(response.status_code, 200, response.text)
             self.assertIn('result', response.json())
-        invalid = [(None, ('127.0.0.1:8765',)),
-                   ('127.0.0.1:8765', ('127.0.0.1',)),
-                   ('127.0.0.1', ('127.0.0.1',)),
-                   ('127.0.0.1:*', ('127.0.0.1:8765',)),
-                   ('http://127.0.0.1:8765', ('127.0.0.1:8765',)),
-                   ('127.0.0.1:0', ('127.0.0.1:0',)),
-                   ('127.0.0.1:65536', ('127.0.0.1:65536',)),
-                   ('bad..host:8765', ('bad..host:8765',)),
-                   ('127.0.0.1:8765\n', ('127.0.0.1:8765',)),
-                   ('127.0.0.1:8765', ('127.0.0.1:8765', 'other.example:443'))]
-        for authority, hosts in invalid:
-            calls.clear()
-            services = dataclasses.replace(self.services, allowed_hosts=hosts)
-            with contextlib.redirect_stderr(io.StringIO()) as error:
-                result = main(['--port', '8765'], runtime_services=services,
-                              serve=serve, incoming_authority=authority)
-            self.assertEqual(result, 2, 'unqualified authority reached serve')
-            self.assertEqual(calls, [])
-            self.assertEqual(error.getvalue().strip(), 'DEPLOYMENT_CONFIGURATION_REFUSED')
+
+        services = dataclasses.replace(self.services, allowed_hosts=('read0.example:443',))
+        runtime = BorrowedRuntime(self.deployment.create_deployment(services))
+        state = service.ServiceState(socket_owned=True)
+        app = service.build_service_app(runtime, selected('read0.example:443'), state)
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url='http://read0.example:443'
+            ) as client:
+                refused = await client.post('/mcp', headers={
+                    'Host': 'wrong.example:443',
+                    'Accept': 'application/json, text/event-stream',
+                    'MCP-Protocol-Version': '2025-03-26',
+                    'Authorization': 'Bearer ' + self.token(),
+                }, json={
+                    'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
+                    'params': {'protocolVersion': '2025-03-26', 'capabilities': {},
+                               'clientInfo': {'name': 'read0-fixture', 'version': '1'}},
+                })
+        self.assertNotEqual(refused.status_code, 200)
         self.assertEqual((self.resolves, self.io_calls), (0, 0))
+
+    def test_service_config_rejects_invalid_incoming_authority(self):
+        from integrations.workbench_read_mcp import service
+        base = {
+            'schema': service.SERVICE_SCHEMA,
+            'policy_file': '/fixture/policy.json',
+            'project_root': '/fixture/project',
+            'audit_directory': '/fixture/audit',
+            'bind_host': '127.0.0.1',
+            'bind_port': 8765,
+            'incoming_authority': 'read0.example:443',
+            'max_concurrency': 2,
+            'io_timeout_seconds': 5.0,
+            'close_timeout_seconds': 5.0,
+            'lease': {
+                'expected_subject_digest': 'a' * 64,
+                'expected_client_ref': 'b' * 64,
+                'resource': RESOURCE,
+                'required_scopes': ['workbench.read'],
+                'project_ref': 'project:' + 'a' * 64,
+                'context_ref': 'context:' + 'b' * 64,
+                'owner_ref': 'owner:' + 'c' * 64,
+                'generation': 'generation:' + 'd' * 64,
+                'allowed_paths': ['source.txt'],
+                'committed_head': '1' * 40,
+                'lease_expires_at_ms': (self.clock + 500) * 1000,
+            },
+        }
+        for authority in (None, '127.0.0.1', '127.0.0.1:*',
+                          'http://127.0.0.1:8765', '127.0.0.1:0',
+                          '127.0.0.1:65536', 'bad..host:8765',
+                          '127.0.0.1:8765\n'):
+            value = json.loads(json.dumps(base))
+            value['incoming_authority'] = authority
+            with self.subTest(authority=authority), self.assertRaises(
+                service.ServiceConfigurationError
+            ):
+                service.parse_service_config(value)
 
     async def test_audit_is_real_and_never_contains_credentials_or_roots(self):
         token = self.token()
@@ -442,23 +520,45 @@ class CompositionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(set(event) == {'schema', 'policy_id', 'code', 'accepted'}
                             for event in self.audit.events))
 
-    async def test_launch_requires_valid_policy_and_explicit_owner_callback(self):
-        from scripts.mastermind_workbench_read_server import main
-        import contextlib
-        import io
-        calls = []
-        def serve(app, *, host, port):
-            self.assertTrue(callable(app))
-            calls.append((host, port))
+    async def test_concrete_service_reuses_valid_runtime_server_without_second_composition(self):
+        from integrations.workbench_read_mcp import service
         services = dataclasses.replace(self.services, allowed_hosts=('127.0.0.1:8765',))
-        bad = dataclasses.replace(services,
-                                  policy=dataclasses.replace(self.policy, policy_id='other.policy'))
-        with contextlib.redirect_stderr(io.StringIO()):
-            self.assertEqual(main(['--port', '8765'], runtime_services=bad, serve=serve, incoming_authority='127.0.0.1:8765'), 2)
-            self.assertEqual(main(['--port', '8765'], runtime_services=self.services), 2)
-        self.assertEqual(calls, [])
-        self.assertEqual(main(['--port', '8765'], runtime_services=services, serve=serve, incoming_authority='127.0.0.1:8765'), 0)
-        self.assertEqual(calls, [('127.0.0.1', 8765)])
+        bad = dataclasses.replace(
+            services, policy=dataclasses.replace(self.policy, policy_id='other.policy')
+        )
+        with self.assertRaises(ValueError):
+            self.deployment.create_deployment(bad)
+
+        server = self.deployment.create_deployment(services)
+        class BorrowedRuntime:
+            def __init__(self):
+                self.server = server
+            def resolve_binding(self, caller, project_ref):
+                return self_outer.resolve(caller, project_ref)
+            def revoke(self):
+                pass
+            async def aclose(self, *, timeout):
+                return None
+        self_outer = self
+        config = service.ServiceConfig(
+            schema=service.SERVICE_SCHEMA,
+            policy_file='/fixture/policy.json', project_root='/fixture/project',
+            audit_directory='/fixture/audit', bind_host='127.0.0.1', bind_port=8765,
+            incoming_authority='127.0.0.1:8765', max_concurrency=2,
+            io_timeout_seconds=5.0, close_timeout_seconds=5.0,
+            lease=__import__('integrations.workbench_read_mcp.runtime', fromlist=['StableWorkbenchLease']).StableWorkbenchLease(
+                expected_subject_digest=self.subjects['alpha'],
+                expected_client_ref=hashlib.sha256((ISSUER + '\nclient\nread0-client').encode()).hexdigest(),
+                resource=RESOURCE, required_scopes=('workbench.read',), project_ref='alpha',
+                context_ref='context-alpha', owner_ref='owner-alpha', generation='generation-1',
+                allowed_paths=('source.txt',), committed_head='1' * 40,
+                lease_expires_at_ms=(self.clock + 500) * 1000,
+            ),
+        )
+        with patch.object(self.deployment, 'create_deployment',
+                          side_effect=AssertionError('second deployment forbidden')):
+            wrapped = service.build_service_app(BorrowedRuntime(), config, service.ServiceState())
+        self.assertTrue(callable(wrapped))
         self.assertEqual((self.resolves, self.io_calls), (0, 0))
         for fd in self.fds:
             os.fstat(fd)
@@ -561,7 +661,7 @@ class MutationDiscriminators(unittest.TestCase):
     """
 
     def test_same_assertions_detect_original_and_repair_boundary_bypasses(self):
-        from integrations.workbench_read_mcp import deployment, read_port, app
+        from integrations.workbench_read_mcp import deployment, read_port, app, service
         from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
         original_observer = read_port.observe_file
         original_verify = MastermindTokenVerifier.verify_token
@@ -682,10 +782,12 @@ class MutationDiscriminators(unittest.TestCase):
             controls.append(('length-guard-' + field, method,
                              lambda field=field: without_length(field),
                              'True is not false' if field == 'committed_head' else 'False is not true'))
-        controls.append(('incoming-authority-guard', 'test_launch_authority_is_qualified_before_serve',
-                         lambda: patch.object(deployment, 'validate_incoming_authority',
-                                              lambda services, authority: None),
-                         'unqualified authority reached serve'))
+        controls.append((
+            'incoming-authority-guard',
+            'test_service_config_rejects_invalid_incoming_authority',
+            lambda: patch.object(service, '_incoming_authority', lambda value: value),
+            'ServiceConfigurationError not raised',
+        ))
         for name, method, mutation, assertion in controls:
             with self.subTest(control=name):
                 baseline = unittest.TextTestRunner(stream=io.StringIO()).run(
@@ -698,8 +800,10 @@ class MutationDiscriminators(unittest.TestCase):
                 # Shape checks are outside the changed test's assertion handling.
                 self.assertEqual(mutant.testsRun, 1)
                 self.assertEqual(mutant.errors, [], output.getvalue())
-                self.assertEqual(len(mutant.failures), 1, output.getvalue())
-                self.assertIn(assertion, mutant.failures[0][1])
+                expected_failures = 8 if name == 'incoming-authority-guard' else 1
+                self.assertEqual(len(mutant.failures), expected_failures, output.getvalue())
+                for _, failure in mutant.failures:
+                    self.assertIn(assertion, failure)
                 print(json.dumps({'mutation': name, 'same_test': method, 'baseline': 'PASS',
                                   'mutant': 'INTENDED_ASSERTION_FAILURE',
                                   'failure': mutant.failures[0][1]}, sort_keys=True))

@@ -24,32 +24,33 @@ class DeploymentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '^RUNTIME_SERVICES_REQUIRED$'):
             module.create_deployment(None)
 
-    def test_describe_and_missing_bootstrap_work_without_optional_sdk(self):
+    def test_describe_and_missing_config_work_without_optional_sdk(self):
         script = Path(__file__).resolve().parents[2] / 'scripts/mastermind_workbench_read_server.py'
         described = subprocess.run([sys.executable, '-S', str(script), '--describe'],
                                    capture_output=True, text=True, timeout=10)
         self.assertEqual(described.returncode, 0, described.stderr)
         self.assertEqual(json.loads(described.stdout), {
-            'capability': 'BUILT_NOT_PROVEN', 'mode': 'owner-injected',
-            'tool': 'read_project_file', 'runtime_services': 'required',
+            'capability': 'BUILT_NOT_PROVEN',
+            'mode': 'configured-loopback-service',
+            'tool': 'read_project_file',
+            'config_schema': 'mastermind.workbench_read_service.v1',
+            'installed': False,
         })
-        refused = subprocess.run([sys.executable, '-S', str(script), '--port', '8765'],
+        refused = subprocess.run([sys.executable, '-S', str(script)],
                                  capture_output=True, text=True, timeout=10)
         self.assertEqual(refused.returncode, 2)
-        self.assertEqual(refused.stderr.strip(), 'RUNTIME_SERVICES_REQUIRED')
+        self.assertEqual(refused.stderr.strip(), 'SERVICE_CONFIGURATION_REQUIRED')
         self.assertEqual(refused.stdout, '')
 
-    def test_launcher_rejects_extra_authority_and_nonloopback_bind(self):
+    def test_launcher_rejects_parallel_authority_flags(self):
         deployment(self)
         launcher = importlib.import_module('scripts.mastermind_workbench_read_server')
-        for args in (['--root', '/'], ['--factory', 'evil:main'], ['--host', '0.0.0.0'],
-                     ['--port', '0'], ['--port', '65536']):
+        for args in (['--root', '/'], ['--factory', 'evil:main'],
+                     ['--host', '127.0.0.1'], ['--port', '8765']):
             with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()):
-                try:
-                    result = launcher.main(args)
-                except SystemExit as exc:
-                    result = exc.code
-                self.assertEqual(result, 2)
+                with self.assertRaises(SystemExit) as captured:
+                    launcher.main(args)
+                self.assertEqual(captured.exception.code, 2)
 
     def test_declared_output_schema_is_closed_and_requires_attribution(self):
         module = deployment(self)

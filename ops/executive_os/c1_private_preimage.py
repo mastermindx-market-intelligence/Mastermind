@@ -24,6 +24,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, NoReturn, Sequence
 
+# The production operator invokes this file directly under Python isolated mode
+# (-I -S -B).  Isolated mode intentionally omits the script's repository root
+# from sys.path, so bind imports to this exact checked-out source tree rather
+# than relying on cwd, PYTHONPATH, user site packages, or an installed package.
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPOSITORY_ROOT))
+
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+
 
 SCHEMA = "mastermind.c1_private_preimage/v1"
 STATES = frozenset({"FACTS", "DEGRADED", "REFUSED", "UNSETTLED"})
@@ -82,13 +92,16 @@ RUNTIME_ROOT = "/var/db/mastermind-executive"
 CONTROL_CONFIG = f"{SYSTEM_ROOT}/config/control.json"
 WORKER_CONFIG = f"{SYSTEM_ROOT}/config/worker-codex.json"
 PYTHON_PROVENANCE = f"{SYSTEM_ROOT}/python-runtime.json"
-CODEX_ATTESTATION = f"{SYSTEM_ROOT}/codex-attestation-0.147.0.json"
+CODEX_ATTESTATION = f"{SYSTEM_ROOT}/codex-attestation-0.159.2.json"
 PYTHON_BINARY = "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
-CODEX_BINARY = (
-    "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/"
-    "@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
-)
+CODEX_BINARY = f"{SYSTEM_ROOT}/bin/codex-0.159.2"
 CONTENT_PATHS = (*PLISTS, CONTROL_CONFIG, WORKER_CONFIG, PYTHON_PROVENANCE, CODEX_ATTESTATION)
+SOCKET_METADATA_PATHS = (
+    "/var/run/mastermind-executive/ceo-ingress.sock",
+    "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
+    "/var/run/mastermind-agent-relay/agent-relay.sock",
+    "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
+)
 METADATA_PATHS = (
     f"{SYSTEM_ROOT}/config/sol-state-relay.json",
     f"{SYSTEM_ROOT}/config/sol-state-relay.token",
@@ -105,9 +118,7 @@ METADATA_PATHS = (
     f"{RUNTIME_ROOT}/control/launch-receipts",
     f"{RUNTIME_ROOT}/control/backups",
     f"{RUNTIME_ROOT}/control/dr-receipts",
-    "/var/run/mastermind-executive/ceo-ingress.sock",
-    "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
-    "/var/run/mastermind-agent-relay/agent-relay.sock",
+    *SOCKET_METADATA_PATHS,
 )
 PRINCIPALS = {
     "_mastermind_exec": {
@@ -317,6 +328,8 @@ def project_metadata(path: str, info: os.stat_result) -> dict[str, Any]:
 
 
 def _allowed_command(argv: tuple[str, ...]) -> bool:
+    if argv == ("/usr/bin/true",):
+        return True
     if argv == ("/bin/launchctl", "print-disabled", "system"):
         return True
     if len(argv) == 3 and argv[:2] == ("/bin/launchctl", "print"):
@@ -329,7 +342,7 @@ def _allowed_command(argv: tuple[str, ...]) -> bool:
     ):
         return argv[4].isdigit() and int(argv[4]) > 0
     if len(argv) == 4 and argv[:3] == ("/usr/bin/stat", "-f", "%Sp"):
-        return _is_frozen_path(argv[3])
+        return argv[3] in SOCKET_METADATA_PATHS
     return False
 
 
@@ -592,18 +605,49 @@ class CommandAdapter:
                 facts["cleanup_unknown"] = True
 
 
+def _launchd_service_fields(output: str) -> tuple[str, list[list[str]]]:
+    """Project direct service fields, excluding nested launchd dictionaries."""
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if lines and re.fullmatch(r"system/[^\s{}]+\s*=\s*\{", lines[0]):
+        if lines[-1] != "}":
+            raise PreimageUnsettled("MALFORMED_LAUNCHD")
+        lines = lines[1:-1]
+    depth = 0
+    fields: list[str] = []
+    argument_blocks: list[list[str]] = []
+    arguments: list[str] | None = None
+    for line in lines:
+        if line == "}":
+            if depth == 0:
+                raise PreimageUnsettled("MALFORMED_LAUNCHD")
+            depth -= 1
+            if depth == 0 and arguments is not None:
+                argument_blocks.append(arguments)
+                arguments = None
+            continue
+        if depth == 0:
+            fields.append(line)
+            if re.fullmatch(r"arguments\s*=\s*\{", line):
+                arguments = []
+        elif depth == 1 and arguments is not None:
+            arguments.append(line)
+        if re.fullmatch(r".+?\s*=\s*\{", line):
+            depth += 1
+    if depth != 0:
+        raise PreimageUnsettled("MALFORMED_LAUNCHD")
+    return "\n".join(fields), argument_blocks
+
+
 def parse_launchd_state(
     output: str,
     *,
     expected_program: str | None = None,
     expected_arguments: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    states = re.findall(r"(?m)^\s*state\s*=\s*([a-z]+)\s*$", output)
-    pids = re.findall(r"(?m)^\s*pid\s*=\s*([^\s]+)\s*$", output)
-    programs = re.findall(r"(?m)^\s*program\s*=\s*(\S+)\s*$", output)
-    argument_blocks = re.findall(
-        r"(?ms)^\s*arguments\s*=\s*\{\s*\n(.*?)^\s*\}\s*$", output
-    )
+    service_fields, argument_blocks = _launchd_service_fields(output)
+    states = re.findall(r"(?m)^state\s*=\s*([a-z]+)\s*$", service_fields)
+    pids = re.findall(r"(?m)^pid\s*=\s*([^\s]+)\s*$", service_fields)
+    programs = re.findall(r"(?m)^program\s*=\s*(.+?)\s*$", service_fields)
     if len(states) != 1 or len(pids) > 1:
         raise PreimageUnsettled("MALFORMED_LAUNCHD")
     state_value = states[0]
@@ -627,28 +671,38 @@ def parse_launchd_state(
     if active and expected_arguments is not None:
         if len(argument_blocks) != 1:
             raise PreimageUnsettled("MALFORMED_LAUNCHD")
-        loaded_arguments = [
-            line.strip() for line in argument_blocks[0].splitlines() if line.strip()
-        ]
+        loaded_arguments = argument_blocks[0]
         if not loaded_arguments:
             raise PreimageUnsettled("MALFORMED_LAUNCHD")
         result["arguments_match"] = loaded_arguments == list(expected_arguments)
     return result
 
 
-def parse_disabled_state(output: str) -> dict[str, bool]:
-    matches = re.findall(
-        r'(?m)^\s*"(com\.mastermind\.executive\.[A-Za-z0-9.-]+)"\s*=>\s*(true|false)\s*$',
-        output,
-    )
-    values: dict[str, bool] = {}
-    for label, raw_value in matches:
-        if label not in LABELS or label in values:
-            raise PreimageUnsettled("MALFORMED_LAUNCHD")
-        values[label] = raw_value == "true"
-    if set(values) != set(LABELS):
+def parse_disabled_state(output: str) -> dict[str, bool | None]:
+    lines = output.strip().splitlines()
+    if (
+        len(lines) < 2
+        or re.fullmatch(r"disabled\s+services\s*=\s*\{", lines[0].strip()) is None
+        or lines[-1].strip() != "}"
+    ):
         raise PreimageUnsettled("MALFORMED_LAUNCHD")
-    return values
+    spellings = {"true": True, "disabled": True, "false": False, "enabled": False}
+    values: dict[str, bool] = {}
+    for line in lines[1:-1]:
+        if not line.strip():
+            continue
+        match = re.fullmatch(r'\s*"([^"\r\n]+)"\s*=>\s*(\S+)\s*', line)
+        if match is None:
+            raise PreimageUnsettled("MALFORMED_LAUNCHD")
+        label, raw_value = match.groups()
+        if label not in LABELS:
+            continue
+        if label in values or raw_value not in spellings:
+            raise PreimageUnsettled("MALFORMED_LAUNCHD")
+        values[label] = spellings[raw_value]
+    # An omitted override is not proof that the service is disabled. Preserve
+    # it as unknown so collection can report facts without admitting an install.
+    return {label: values.get(label) for label in LABELS}
 
 
 def parse_process_identity(output: str, *, expected_pid: int) -> dict[str, int]:
@@ -783,9 +837,9 @@ def expected_document_fixture(release_sha: str, tree_sha: str) -> dict[str, dict
             "secret_canary_receipt_path": (
                 f"{RUNTIME_ROOT}/control/canaries/secret-canary.json"
             ),
-            "operator_harness_version": "0.147.0",
+            "operator_harness_version": "0.159.2",
             "operator_harness_binary_digest": (
-                "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
+                "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
             ),
         },
         WORKER_CONFIG: {
@@ -800,7 +854,7 @@ def expected_document_fixture(release_sha: str, tree_sha: str) -> dict[str, dict
             "provider_home": f"{RUNTIME_ROOT}/workers/codex-01/provider-home",
             "codex_binary": CODEX_BINARY,
             "codex_attestation_receipt": CODEX_ATTESTATION,
-            "allowed_codex_versions": ["0.147.0"],
+            "allowed_codex_versions": ["0.159.2"],
             "required_team_identifier": "2DC432GLL2",
             "launchd_socket_name": "WorkerBroker",
         },
@@ -821,9 +875,9 @@ def expected_document_fixture(release_sha: str, tree_sha: str) -> dict[str, dict
         CODEX_ATTESTATION: {
             "schema_version": "mastermind.executive_codex_attestation/v1",
             "path": CODEX_BINARY,
-            "version": "0.147.0",
+            "version": "0.159.2",
             "team_identifier": "2DC432GLL2",
-            "sha256": "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37",
+            "sha256": "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704",
         },
     }
     for label, path in zip(LABELS, PLISTS, strict=True):
@@ -838,20 +892,46 @@ def expected_document_fixture(release_sha: str, tree_sha: str) -> dict[str, dict
 
 
 def evaluate_installation(
-    documents: dict[str, dict[str, Any]], expected_release_sha: str, expected_tree_sha: str
+    documents: dict[str, dict[str, Any]],
+    expected_release_sha: str,
+    expected_tree_sha: str,
+    *,
+    agent_relay_prepared_only: bool = False,
+    sol_state_relay_stale_enrolled: bool = False,
 ) -> dict[str, bool]:
     required = set(expected_document_fixture(expected_release_sha, expected_tree_sha))
     core = required - {"release_manifest"}
-    if frozenset(documents) not in {frozenset(required), frozenset(core)}:
+    agent_plist = PLISTS[LABELS.index("com.mastermind.executive.agent-relay")]
+    accepted_document_sets = {frozenset(required), frozenset(core)}
+    if agent_relay_prepared_only:
+        accepted_document_sets.update(
+            {
+                frozenset(required - {agent_plist}),
+                frozenset(core - {agent_plist}),
+            }
+        )
+    if frozenset(documents) not in accepted_document_sets:
         return {
             "matching_installation": False,
             "coherent_stale_installation": False,
             "effect_unknown": bool(documents),
         }
     manifest = documents.get("release_manifest")
+    sol_state_relay_plist = PLISTS[
+        LABELS.index("com.mastermind.executive.sol-state-relay")
+    ]
+    present_plists = [path for path in PLISTS if path in documents]
+    core_plists = [
+        path
+        for path in present_plists
+        if not (
+            sol_state_relay_stale_enrolled
+            and path == sol_state_relay_plist
+        )
+    ]
     release_values = {
         documents[CONTROL_CONFIG].get("proof_base_sha"),
-        *(documents[path].get("release_sha") for path in PLISTS),
+        *(documents[path].get("release_sha") for path in core_plists),
     }
     if manifest is not None:
         release_values.add(manifest.get("commit_sha"))
@@ -885,11 +965,144 @@ def evaluate_installation(
             "effect_unknown": True,
         }
     matching = installed_sha == expected_release_sha and installed_tree == expected_tree_sha
+    if matching and sol_state_relay_stale_enrolled:
+        return {
+            "matching_installation": False,
+            "coherent_stale_installation": True,
+            "effect_unknown": False,
+        }
     return {
         "matching_installation": matching,
         "coherent_stale_installation": not matching,
         "effect_unknown": False,
     }
+
+
+def _agent_relay_prepared_only(
+    *,
+    metadata: list[dict[str, Any]],
+    principal_facts: dict[str, dict[str, Any]],
+    services: list[dict[str, Any]],
+) -> bool:
+    """Recognize A2's credential-free prepared-only Agent Relay state.
+
+    The host-preparation owner creates the fixed principal and directories,
+    and now establishes an explicit disabled override after proving the Relay
+    unloaded. It creates no plist, config, token or socket and never loads the
+    service. Legacy preparation without an override remains an inert install
+    preimage; enrollment separately requires an explicit disabled override.
+    Neither prepared-only variant is evidence of enrollment readiness.
+    """
+
+    label = "com.mastermind.executive.agent-relay"
+    plist_path = PLISTS[LABELS.index(label)]
+    metadata_by_path = {item.get("path"): item for item in metadata}
+    required_absent = (
+        plist_path,
+        f"{SYSTEM_ROOT}/config/agent-relay.json",
+        f"{SYSTEM_ROOT}/config/agent-relay.token",
+        "/var/run/mastermind-agent-relay/agent-relay.sock",
+        "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
+    )
+    if any(
+        metadata_by_path.get(path, {}).get("exists") is not False
+        for path in required_absent
+    ):
+        return False
+
+    principal_name = SERVICE_OWNERS[label][0]
+    principal = principal_facts.get(principal_name, {})
+    if principal.get("present") is not True or principal.get("matches") is not True:
+        return False
+
+    service = next((item for item in services if item.get("label") == label), None)
+    return bool(
+        service is not None
+        and service.get("active") is False
+        and service.get("loaded") is False
+        and service.get("disabled") is not False
+    )
+
+
+def _sol_state_relay_stale_enrolled(
+    *,
+    metadata: list[dict[str, Any]],
+    principal_facts: dict[str, dict[str, Any]],
+    services: list[dict[str, Any]],
+    documents: dict[str, dict[str, Any]],
+) -> bool:
+    """Recognize one stopped enrolled C1 Relay awaiting release rebind.
+
+    The Executive installer deliberately disables and boots out the SOL_STATE
+    Relay across a core generation replacement without owning its credential,
+    config, or enrollment.  A prior-release Relay is therefore an admitted
+    install preimage only when the core is itself one coherent generation and
+    the enrolled Relay is fully present, exact-metadata, explicitly disabled
+    and unloaded.  This is an install-safety classification only; it never
+    makes the Relay current or eligible for activation.
+    """
+
+    label = "com.mastermind.executive.sol-state-relay"
+    plist_path = PLISTS[LABELS.index(label)]
+    relay_document = documents.get(plist_path)
+    if not isinstance(relay_document, dict):
+        return False
+    relay_sha = relay_document.get("release_sha")
+    if not isinstance(relay_sha, str) or _SHA_RE.fullmatch(relay_sha) is None:
+        return False
+
+    core_release_values = {
+        documents.get(CONTROL_CONFIG, {}).get("proof_base_sha"),
+        *(
+            documents.get(path, {}).get("release_sha")
+            for path in (
+                PLISTS[LABELS.index("com.mastermind.executive.control")],
+                PLISTS[LABELS.index("com.mastermind.executive.worker.codex")],
+                PLISTS[LABELS.index("com.mastermind.executive.backup")],
+            )
+        ),
+    }
+    if (
+        len(core_release_values) != 1
+        or None in core_release_values
+        or any(
+            not isinstance(value, str) or _SHA_RE.fullmatch(value) is None
+            for value in core_release_values
+        )
+    ):
+        return False
+    core_sha = next(iter(core_release_values))
+    if relay_sha == core_sha:
+        return False
+
+    metadata_by_path = {item.get("path"): item for item in metadata}
+    required_files = (
+        plist_path,
+        f"{SYSTEM_ROOT}/config/sol-state-relay.json",
+        f"{SYSTEM_ROOT}/config/sol-state-relay.token",
+    )
+    for path in required_files:
+        item = metadata_by_path.get(path)
+        if (
+            not isinstance(item, dict)
+            or item.get("exists") is not True
+            or _metadata_is_unsafe(item)
+        ):
+            return False
+
+    principal_name = SERVICE_OWNERS[label][0]
+    principal = principal_facts.get(principal_name, {})
+    if principal.get("present") is not True or principal.get("matches") is not True:
+        return False
+
+    service = next((item for item in services if item.get("label") == label), None)
+    return bool(
+        service is not None
+        and service.get("owned") is True
+        and service.get("active") is False
+        and service.get("loaded") is False
+        and service.get("disabled") is True
+    )
 
 
 def _valid_agent_arguments(arguments: list[Any], release_sha: str) -> bool:
@@ -901,7 +1114,7 @@ def _valid_agent_arguments(arguments: list[Any], release_sha: str) -> bool:
         3: "-B",
         4: f"{release}/scripts/slack_agent_dialogue_service.py",
         5: "--socket-path",
-        6: "/var/run/mastermind-agent-relay/agent-relay.sock",
+        6: "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
         7: "--token-file",
         8: f"{SYSTEM_ROOT}/config/agent-relay.token",
         9: "--workspace-id",
@@ -1129,6 +1342,11 @@ def _metadata_contract(path: str) -> dict[str, int | str | None]:
         ),
         "/var/run/mastermind-agent-relay/agent-relay.sock": (457, 457, 0o660),
     }
+    # Old and durable A2 socket identities are the same security contract;
+    # do not introduce a second principal or independent mode constant.
+    socket_contracts["/var/db/mastermind-agent-relay/socket/agent-relay.sock"] = (
+        socket_contracts["/var/run/mastermind-agent-relay/agent-relay.sock"]
+    )
     if path in socket_contracts:
         uid, gid, mode = socket_contracts[path]
         return {
@@ -1308,9 +1526,20 @@ class FilesystemAdapter:
                 info.st_ino,
             ):
                 raise PreimageUnsettled("FILESYSTEM_TORN")
-            if bound.st_uid not in {0, 450, 451, 452, 457} or stat.S_IMODE(
-                bound.st_mode
-            ) & 0o022:
+            # macOS 26.5 installs /private/var/run as root:daemon 0775.
+            # Admit that exact parent only for the frozen metadata-only sockets;
+            # descendants and all content paths retain the strict write guard.
+            macos_runtime_parent = (
+                current == Path("/var/run")
+                and path in SOCKET_METADATA_PATHS
+                and bound.st_uid == 0
+                and bound.st_gid == 1
+                and stat.S_IMODE(bound.st_mode) == 0o775
+            )
+            if not macos_runtime_parent and (
+                bound.st_uid not in {0, 450, 451, 452, 457}
+                or stat.S_IMODE(bound.st_mode) & 0o022
+            ):
                 raise PreimageRefusal("UNSAFE_ANCESTOR")
             identities.append(
                 (
@@ -1555,24 +1784,45 @@ def enforce_content_budget(sizes: Sequence[int]) -> int:
 
 
 def inspect_acl(filesystem: Any, commands: Any, path: str) -> bool:
-    """Inspect the macOS ACL marker while binding it to one stable inode."""
+    """Inspect ACLs on one stable inode without weakening socket handling.
+
+    Regular files/directories keep the descriptor-bound shared ACL observer.
+    Frozen Unix sockets cannot be opened through that file/directory-only
+    observer, so their ACL marker is read through the bounded stat path and
+    still bound to the same pre/post inode identity.
+    """
 
     before = filesystem.metadata(path)
     if not before.get("exists"):
         return False
-    result = commands.run(("/usr/bin/stat", "-f", "%Sp", path))
+
+    if before.get("type") == "socket":
+        if path not in SOCKET_METADATA_PATHS:
+            raise PreimageUnsettled("ACL_UNKNOWN")
+        result = commands.run(("/usr/bin/stat", "-f", "%Sp", path))
+    else:
+        commands.run(("/usr/bin/true",))
+        result = None
+
     after = filesystem.metadata(path)
     if (before.get("device"), before.get("inode")) != (
         after.get("device"),
         after.get("inode"),
     ):
         raise PreimageUnsettled("FILESYSTEM_TORN")
-    marker = result.get("stdout")
-    if not isinstance(marker, str) or re.fullmatch(
-        r"[bcdlps-][rwxStTs-]{9}[ +]?\n?", marker
-    ) is None:
+
+    if before.get("type") == "socket":
+        marker = result.get("stdout") if isinstance(result, dict) else None
+        if not isinstance(marker, str) or re.fullmatch(
+            r"s[rwxStTs-]{9}[ +]?\n?", marker
+        ) is None:
+            raise PreimageUnsettled("ACL_UNKNOWN")
+        return marker.rstrip("\n").endswith("+")
+
+    try:
+        return has_macos_acl(path)
+    except FilesystemSecurityError:
         raise PreimageUnsettled("ACL_UNKNOWN")
-    return marker.rstrip("\n").endswith("+")
 
 
 class PrincipalAdapter:
@@ -1680,7 +1930,6 @@ def _collect_preimage_facts(
             unsafe = True
             reason_codes.add(exc.code)
 
-    installation = evaluate_installation(documents, expected_release_sha, expected_tree_sha)
     principals_match = True
     for name in PRINCIPALS:
         value = principal_facts[name]
@@ -1750,6 +1999,25 @@ def _collect_preimage_facts(
             )
         services.append(service)
 
+    agent_relay_prepared_only = _agent_relay_prepared_only(
+        metadata=metadata,
+        principal_facts=principal_facts,
+        services=services,
+    )
+    sol_state_relay_stale_enrolled = _sol_state_relay_stale_enrolled(
+        metadata=metadata,
+        principal_facts=principal_facts,
+        services=services,
+        documents=documents,
+    )
+    installation = evaluate_installation(
+        documents,
+        expected_release_sha,
+        expected_tree_sha,
+        agent_relay_prepared_only=agent_relay_prepared_only,
+        sol_state_relay_stale_enrolled=sol_state_relay_stale_enrolled,
+    )
+
     release_root_present = next(
         item["exists"] for item in metadata if item["path"] == release_root
     )
@@ -1763,6 +2031,7 @@ def _collect_preimage_facts(
             "/var/run/mastermind-executive/ceo-ingress.sock",
             "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
             "/var/run/mastermind-agent-relay/agent-relay.sock",
+            "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
         }
         for item in metadata
     )
@@ -1774,6 +2043,12 @@ def _collect_preimage_facts(
         or any(
             not service["active"]
             and (service["loaded"] or not service["disabled"])
+            and not (
+                agent_relay_prepared_only
+                and service["label"] == "com.mastermind.executive.agent-relay"
+                and service["loaded"] is False
+                and service["disabled"] is None
+            )
             for service in services
         ),
         "surface_present": bool(present)
@@ -1948,7 +2223,8 @@ def _describe() -> dict[str, Any]:
             "/bin/launchctl print-disabled system",
             "/bin/launchctl print system/<frozen-label>",
             "/bin/ps -o uid=,gid=,pid=,ppid= -p <positive-pid>",
-            "/usr/bin/stat -f %Sp <frozen-path>",
+            "/usr/bin/stat -f %Sp <frozen-socket-path>",
+            "/usr/bin/true",
         ],
         "mutation_count": 0,
     }

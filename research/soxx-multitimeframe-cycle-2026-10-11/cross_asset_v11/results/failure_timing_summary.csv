@@ -1,0 +1,4 @@
+group,known,losses,stops,gap_stops,stop_within_first_1h,stop_within_first_3h,stop_by_old_guard_activation,stop_bands,median_stop_age_market_h
+new_semis,53,48,48,5,14,26,26,"{""after_13h"": 3, ""hour_1_to_3"": 12, ""hour_3_to_6p5"": 9, ""hour_6p5_to_13"": 10, ""within_first_hour"": 14}",2.75
+all_semis,71,59,59,8,14,26,26,"{""after_13h"": 4, ""hour_1_to_3"": 12, ""hour_3_to_6p5"": 13, ""hour_6p5_to_13"": 16, ""within_first_hour"": 14}",4.0
+all_assets,88,68,67,9,14,26,26,"{""after_13h"": 6, ""hour_1_to_3"": 12, ""hour_3_to_6p5"": 18, ""hour_6p5_to_13"": 17, ""within_first_hour"": 14}",5.5

@@ -18,9 +18,11 @@ import tempfile
 import time
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import yaml
+
+from common.redaction import sanitize_external_text
 
 _ROOT = Path(__file__).resolve().parent.parent
 _CFG = _ROOT / "config" / "agents.yml"
@@ -73,6 +75,20 @@ _DELEGATION_AGENT_NAMES = frozenset({
     # Override the built-ins too: an omitted/alternate agent_type must not recover parent writes.
     "default", "explorer", "worker",
 })
+# Result truth for explicitly failed WRITE tools (#538). A failed write may already have partial
+# effects, so the result never claims NOT_APPLIED: it only refuses to be green and keeps the
+# attempted name plus the tool's own error text for reconciliation. ``error`` is a fixed string
+# because provider_waterfall._failure_kind classifies by substring — a quota/auth word from the
+# tool's text or a turn-level error would otherwise authorise resending the prompt to another
+# provider after a write of unknown effect.
+_WRITE_TOOL_LEAVES = frozenset({"submit_book"})
+# An explicit terminal failure remains failed regardless of exit status or later prose.
+# Keep diagnostics separate from the field that authorizes provider failover.
+TURN_FAILURE_ERROR = "codex_terminal_error"
+WRITE_TOOL_FAILURE_ERROR = (
+    "codex reported a failed write tool call; its effect is unknown - reconcile the book "
+    "before any resubmission"
+)
 _MCP_SECRET_FILE_ENV = "MASTERMIND_CODEX_MCP_SECRET_FILE"
 _MCP_BOOK_ENV = "MASTERMIND_CODEX_BOOK"
 _MCP_PYTHON_ENV = "MASTERMIND_CODEX_PYTHON"
@@ -393,12 +409,20 @@ def _compose_prompt(prompt: str, *, system: str | None,
     return "\n".join(sections)
 
 
+def _tool_leaf(name: object) -> str:
+    """Normalize any MCP tool spelling (``mcp__desk__x``, ``desk.x``, ``mcp::china::x``) to ``x``."""
+    return str(name).replace("::", "__").rsplit("__", 1)[-1].rsplit(".", 1)[-1]
+
+
 def _parse_jsonl(raw: str) -> dict[str, Any]:
     text: str | None = None
     thread_id: str | None = None
     usage: dict[str, Any] = {}
     tools: list[str] = []
     errors: list[str] = []
+    safe_errors: list[str] = []
+    failed_write_tools: list[dict[str, Any]] = []
+    turn_failed = False
     for line in raw.splitlines():
         try:
             event = json.loads(line)
@@ -416,11 +440,24 @@ def _parse_jsonl(raw: str) -> dict[str, Any]:
                 name = item.get("tool") or item.get("name")
                 if name:
                     tools.append(str(name))
+                    if item.get("status") == "failed" and _tool_leaf(name) in _WRITE_TOOL_LEAVES:
+                        err = item.get("error")
+                        msg = err.get("message") if isinstance(err, dict) else err
+                        failed_write_tools.append(
+                            {"tool": str(name), "error": sanitize_external_text(msg, limit=0)[:1000] if msg else None}
+                        )
         elif et == "turn.completed":
             usage = event.get("usage") or usage
         elif et in {"turn.failed", "error"}:
+            # A terminal failure is authoritative even without diagnostic text,
+            # and a later completed event cannot erase it.
+            turn_failed = turn_failed or et == "turn.failed"
             msg = event.get("error") or event.get("message")
             if msg:
+                # Keep the existing nonterminal classifier input unchanged. The
+                # separate exported diagnostic sees the COMPLETE message before
+                # either bound; truncating first can hide a credential's shape.
+                safe_errors.append(sanitize_external_text(msg, limit=0)[:500])
                 errors.append(str(msg)[:500])
     return {
         "text": text,
@@ -428,6 +465,9 @@ def _parse_jsonl(raw: str) -> dict[str, Any]:
         "usage": usage if isinstance(usage, dict) else {},
         "tools_used": tools,
         "error": "; ".join(errors)[:1000] or None,
+        "failed_write_tools": failed_write_tools,
+        "turn_failed": turn_failed,
+        "terminal_error_detail": "; ".join(safe_errors)[:1000] or None,
     }
 
 
@@ -440,7 +480,8 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
                  mcp_servers: dict | None = None,
                  log_run: bool = True, book: str | None = None,
                  seat: str | None = None,
-                 record_book: str | None = None) -> dict:
+                 record_book: str | None = None,
+                 before_provider_start: Callable[[], None] | None = None) -> dict:
     """Run one non-interactive Codex turn and return the cli_bridge contract."""
     del add_dirs, resume, log_run, seat, record_book
     selected, effort = resolve_model(role, model)
@@ -598,7 +639,12 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
         # This path is non-secret. Only the local MCP adapter opens the owner-only bundle; the
         # model process and its disabled shell surfaces never receive credential values.
         process_env[_MCP_SECRET_FILE_ENV] = str(secret_file)
+    from brain.cli_bridge import ProviderStartRefused, _require_provider_start
     try:
+        # This is the LAST source-origin veto after argv/MCP/credential/env
+        # preparation and before the existing Codex subprocess effect. It
+        # cannot grant any provider, model, tool or portfolio authority.
+        _require_provider_start(before_provider_start)
         proc = await asyncio.create_subprocess_exec(
             *argv,
             stdin=asyncio.subprocess.PIPE,
@@ -615,6 +661,10 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
             pass
         return {**base, "ok": False, "backend": "codex", "text": None,
                 "error": f"codex timeout after {timeout}s"}
+    except ProviderStartRefused:
+        # A pre-start veto is NOT an auth/quota failure and must not be
+        # swallowed into a result that another backend might retry.
+        raise
     except Exception as exc:
         return {**base, "ok": False, "backend": "codex", "text": None,
                 "error": repr(exc)[:1000]}
@@ -630,16 +680,31 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
     if proc.returncode != 0 and not error:
         error = stderr[-1000:] or f"codex exited {proc.returncode}"
     text = parsed["text"]
+    failed_write_tools = parsed["failed_write_tools"]
+    turn_failed = parsed["turn_failed"]
+    terminal_error_detail = parsed["terminal_error_detail"]
+    if turn_failed and proc.returncode != 0 and not parsed["error"]:
+        # Preserve the prior tail projection, but redact the complete raw stderr
+        # first so a token straddling that boundary cannot survive.
+        terminal_error_detail = sanitize_external_text(stderr, limit=0)[-1000:] or f"codex exited {proc.returncode}"
+    if failed_write_tools:
+        # Fixed string on purpose; see WRITE_TOOL_FAILURE_ERROR. The tool's text stays in
+        # ``failed_write_tools``; a turn-level error is deliberately not merged in here.
+        error = WRITE_TOOL_FAILURE_ERROR
+    elif turn_failed:
+        error = TURN_FAILURE_ERROR
     result = {
         **base,
-        "ok": proc.returncode == 0 and bool(text),
+        "ok": proc.returncode == 0 and bool(text) and not failed_write_tools and not turn_failed,
         "text": text,
         "tools_used": parsed["tools_used"],
+        "failed_write_tools": failed_write_tools,
         "cost_usd": None,
         "session_id": parsed["session_id"],
         "usage": parsed["usage"],
         "backend": "codex",
-        "error": error if (proc.returncode != 0 or not text) else None,
+        "error": error if (proc.returncode != 0 or not text or failed_write_tools or turn_failed) else None,
+        **({"terminal_error_detail": terminal_error_detail} if turn_failed else {}),
         "latency_ms": int((time.monotonic() - started) * 1000),
     }
     if not delegation or not result["ok"]:
@@ -683,14 +748,15 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
         arm=arm,
         mcp_servers=mcp_servers,
         book=book,
+        **({"before_provider_start": before_provider_start}
+           if before_provider_start is not None else {}),
     )
     submitted["research_session_id"] = result.get("session_id")
     submitted["research_tools_used"] = result.get("tools_used") or []
     submitted["delegated_research_completed"] = True
     submit_calls = [
         tool for tool in (submitted.get("tools_used") or [])
-        if str(tool).replace("::", "__").rsplit("__", 1)[-1].rsplit(".", 1)[-1]
-        == "submit_book"
+        if _tool_leaf(tool) == "submit_book"
     ]
     if len(submit_calls) != 1:
         submitted["ok"] = False

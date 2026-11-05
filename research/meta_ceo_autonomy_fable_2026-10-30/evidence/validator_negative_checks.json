@@ -1,0 +1,49 @@
+{
+  "observed_at_utc": "2026-11-05T11:43:35.977530+00:00",
+  "scope": "Static pack-validator negative fixtures only; no product qualification",
+  "result": "PASS",
+  "cases": [
+    {
+      "case": "missing-capability",
+      "exit_code": 1,
+      "detected_errors": [
+        "Original capability denominator differs from 46 stable IDs"
+      ]
+    },
+    {
+      "case": "broken-local-link",
+      "exit_code": 1,
+      "detected_errors": [
+        "Broken local link: README.md -> does-not-exist.md"
+      ]
+    },
+    {
+      "case": "wrong-original-source-sha",
+      "exit_code": 1,
+      "detected_errors": [
+        "Capability projection does not cite the immutable original ledger commit"
+      ]
+    },
+    {
+      "case": "wrong-inline-row-reference",
+      "exit_code": 1,
+      "detected_errors": [
+        "Normalized capability field E6.baseline_evidence does not cite its original ledger row"
+      ]
+    },
+    {
+      "case": "reintroduced-account-identifier",
+      "exit_code": 1,
+      "detected_errors": [
+        "Normalized capability field E6.baseline_evidence still transcribes an account identifier"
+      ]
+    },
+    {
+      "case": "changed-completion-obligation",
+      "exit_code": 1,
+      "detected_errors": [
+        "Acceptance crosswalk missing: MUTATED-original-completion-test"
+      ]
+    }
+  ]
+}

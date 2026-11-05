@@ -1,0 +1,16 @@
+/* Neutral materials in both art directions use the incumbent shell tokens.
+   Dark uses panel/raised luminance; light uses the shell's white/hairline
+   materials. State stays labeled ink; there is no accent edge or new palette. */
+.project-admission {color:var(--text);background:var(--panel);border:1px solid var(--border);border-radius:var(--r-panel);padding:var(--sp-5);min-width:0;overflow-wrap:anywhere;}
+.project-admission h3 {margin:0;font-size:1rem;}
+.project-admission__intro p {color:var(--muted);margin:var(--sp-2) 0 0;}
+.project-admission__actions {display:flex;gap:var(--sp-3);flex-wrap:wrap;}
+.project-admission button {min-height:44px;max-width:100%;font:inherit;white-space:normal;border:1px solid var(--border);border-radius:var(--r-btn);background:var(--raised);color:var(--text);padding:var(--sp-2) var(--sp-4);cursor:pointer;}
+.project-admission button:disabled {cursor:default;opacity:.6;}
+.project-admission button:focus-visible,.project-admission summary:focus-visible {outline:2px solid var(--text);outline-offset:3px;}
+.project-admission__unknown {padding:var(--sp-3);border:1px solid var(--border);border-radius:var(--r-card);background:var(--raised);}
+.project-admission__details {margin-top:var(--sp-3);}
+.project-admission summary {min-height:44px;display:flex;align-items:center;cursor:pointer;}
+.project-admission dl {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:var(--sp-2) var(--sp-3);}
+.project-admission dd {margin:0;min-width:0;}
+@media(max-width:600px) {.project-admission{padding:var(--sp-4);}.project-admission dl{grid-template-columns:minmax(0,1fr);}}
