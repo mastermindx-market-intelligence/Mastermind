@@ -5426,6 +5426,12 @@ class ExecutiveControlService:
                 validate_frame as validate_activity_frame,
                 unavailable as activity_unavailable,
             )
+            from common.executive_workspace_mission_result_contract import (
+                FRAME_SCHEMA as MISSION_RESULT_FRAME_SCHEMA,
+                MAX_COMPOUND_RESPONSE_BYTES,
+                validate_frame as validate_mission_result_frame,
+                unavailable as mission_result_unavailable,
+            )
             from common.workspace_control_room_read_contract import (
                 FRAME_SCHEMA as CCR_READ_FRAME_SCHEMA, validate_frame as validate_ccr_read_frame,
             )
@@ -5539,7 +5545,7 @@ class ExecutiveControlService:
             from common import workspace_resource_capacity_contract as capacity_wire
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
-                    ACTIVITY_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA,
+                    ACTIVITY_FRAME_SCHEMA, MISSION_RESULT_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA,
                     project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
@@ -5645,6 +5651,14 @@ class ExecutiveControlService:
                         await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST),
                                                              response_ceiling=ceiling)
                         return
+                elif parsed.get("schema") == MISSION_RESULT_FRAME_SCHEMA:
+                    ceiling = MAX_COMPOUND_RESPONSE_BYTES
+                    try:
+                        validate_mission_result_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST),
+                                                             response_ceiling=ceiling)
+                        return
                 elif parsed.get("schema") == FRAME_SCHEMA_V2:
                     ceiling = response_ceiling_for(operation)
                 else:
@@ -5728,6 +5742,8 @@ class ExecutiveControlService:
                               if parsed.get("schema") == capacity_wire.FRAME_SCHEMA
                               else activity_unavailable(parsed["selection"], "RESPONSE_OVER_BUDGET")
                               if parsed.get("schema") == ACTIVITY_FRAME_SCHEMA
+                              else mission_result_unavailable(parsed["selection"], "RESPONSE_OVER_BUDGET")
+                              if parsed.get("schema") == MISSION_RESULT_FRAME_SCHEMA
                               else workspace_error("source_unavailable", 503))
                 await self._send_ceo_ingress_response(writer, result, response_ceiling=ceiling)
                 return
