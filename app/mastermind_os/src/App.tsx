@@ -2860,6 +2860,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       const sel = state.missionSelection
         ? normalizeSelection(state.missionSelection)
         : null;
+      // Only this owner-qualified accepted launch releases its Office handoff.
+      // A refusal or unknown effect keeps the frozen context and original hold.
+      setOfficeLaunchHandoff(null);
       if (sel) open(sel.workRef, sel.rootJobId,bindingAtStart.directNative?.isDirectSelection(sel)===true);
     }
     pending.complete({ status: state.status });

@@ -5,6 +5,7 @@ import {
 import { ProgrammeDirection, type ProgrammeDirectionProps } from "../direction/ProgrammeDirection";
 import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceClaim } from "./projection";
 import "./office.css";
+import { ByokRolesPanel } from "./ByokRolesPanel";
 import { registerUnsavedNavigationHold } from "../auth-navigation-guard";
 import { FabricMissionInspector } from "../fabric/FabricMissionInspector";
 import type { ResultSelection } from "../result";
@@ -225,6 +226,8 @@ export function MetaCeoOffice({
       <div><p className="office-eyebrow">{t("Current direction")}</p><span className="office-muted">{t("Source unavailable")}</span></div>
       <p>{t("The adopted direction has not been supplied by its owner.")}</p>
     </section>}
+
+    <ByokRolesPanel locale={locale} />
 
     {unknownEffect && <div className="office-effect-alert" role="alert">
       <strong>EFFECT_UNKNOWN</strong><p>{t("Reconcile the original operation. Resend, failover and target change remain held.")}</p>

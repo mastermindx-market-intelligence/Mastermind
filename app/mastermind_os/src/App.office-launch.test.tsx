@@ -220,6 +220,12 @@ describe("Office direction handoff into the existing launch owner", () => {
     // The submitted launch draft is consumed; the Office direction survives.
     await user.click(await screen.findByRole("button", { name: "Work queue" }));
     expect((await screen.findByLabelText("Goal") as HTMLTextAreaElement).value).toBe("");
+    // The settled Office handoff cannot fence a later independent launch.
+    await user.type(screen.getByLabelText("Goal"), "A new launch after the first receipt.");
+    await user.click(screen.getByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(2));
+    expect(made.prepare.mock.calls[1][0].payload).toHaveProperty(
+      "objective", "A new launch after the first receipt.");
   });
 
   it("keeps the launch goal and the Office direction when the existing owner refuses the launch", async () => {
@@ -305,6 +311,21 @@ describe("Office direction handoff into the existing launch owner", () => {
     expect(screen.queryByLabelText("Goal")).toBeNull();
     expect(made.prepare).not.toHaveBeenCalled();
     expect(made.submit).not.toHaveBeenCalled();
+  });
+
+  it("refuses an Office handoff when the launch workstream cannot be established", async () => {
+    vi.stubEnv("VITE_MM_LAUNCH_CONFIG", "");
+    const made = installHost();
+    const user = userEvent.setup();
+    render(<App />);
+    await openOffice(user);
+    await freezeDirection(user);
+    await user.click(screen.getByRole("button", { name: "Start new work" }));
+    expect(previewRefusal().textContent).toContain("cannot offer a handoff");
+    expect(screen.queryByLabelText("Goal")).toBeNull();
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+    expect((screen.getByLabelText("Direction to Meta-CEO") as HTMLTextAreaElement).value).toBe(DIRECTION);
   });
 
   it("keeps an existing unsent launch goal and refuses to replace it", async () => {

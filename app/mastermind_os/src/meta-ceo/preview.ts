@@ -69,14 +69,15 @@ export interface OfficeLaunchOwnerState {
  * The Office's exact selection and the configured launch must name one
  * workstream. An Office Mission work_ref is never a project or department:
  * it is not mapped onto a launch choice, and it is never guessed from a
- * title. With no exact selection there is nothing to disagree with.
+ * title. A configured workstream is required; an unselected Office can still
+ * begin new work on that explicit configured workstream.
  */
 export function officeLaunchWorkstreamAgrees(
   selectedWorkstream: string | null,
   configuredWorkstream: string | null,
 ): boolean {
-  if (selectedWorkstream === null || configuredWorkstream === null) return true;
-  return selectedWorkstream === configuredWorkstream;
+  if (configuredWorkstream === null) return false;
+  return selectedWorkstream === null || selectedWorkstream === configuredWorkstream;
 }
 
 /**
@@ -95,7 +96,8 @@ export function decideOfficeLaunchHandoff(
   owner: OfficeLaunchOwnerState,
 ): OfficeLaunchOutcome {
   if (!previewIsCurrent(preview, context)) return { status: "REFUSED", reason: "PREVIEW_NOT_CURRENT" };
-  if (!owner.launchAvailable) return { status: "REFUSED", reason: "LAUNCH_OWNER_UNAVAILABLE" };
+  if (!owner.launchAvailable || owner.configuredWorkstream === null)
+    return { status: "REFUSED", reason: "LAUNCH_OWNER_UNAVAILABLE" };
   if (!officeLaunchWorkstreamAgrees(owner.selectedWorkstream, owner.configuredWorkstream))
     return { status: "REFUSED", reason: "WORKSTREAM_MISMATCH" };
   if (owner.commandHeld) return { status: "REFUSED", reason: "LAUNCH_COMMAND_HELD" };
