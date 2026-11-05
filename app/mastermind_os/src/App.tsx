@@ -17,7 +17,7 @@ import { FreshConversationContinuation } from "./conversations/new-conversation/
 import { useFreshConversationTurnDraftState } from "./conversations/new-conversation/useFreshConversationTurnDraftState";
 import { sameConversationOwner } from "./conversations/new-conversation/fresh-conversation-binding";
 import { decodeFreshConversationResult } from "./conversations/new-conversation/fresh-conversation";
-import { freshConversationOriginalSelector, freshConversationTarget } from "./orchestration/fresh-conversation-target";
+import { freshConversationOriginalSelector, freshConversationTarget, parseFreshConversationTarget } from "./orchestration/fresh-conversation-target";
 import {
   canNavigateForAutomaticSignIn, explicitLogoutRecorded, registerUnsavedNavigationHold,
 } from "./auth-navigation-guard";
@@ -270,6 +270,22 @@ function isRetainedOperation(value: unknown): value is OperationPointer {
     typeof pointer.kind === "string" && ["launch", "message", "stop"].includes(pointer.kind) &&
     (pointer.targetKey === null || typeof pointer.targetKey === "string");
 }
+// These closed pointers belong to the existing Fresh owner, never to generic
+// command recovery. Classification is local DATA; malformed hints stay held.
+function isFreshRetainedOperation(value: unknown): value is OperationPointer {
+  try {
+    if (!value || typeof value !== "object" || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return false;
+    const fields = Object.getOwnPropertyDescriptors(value), keys = Reflect.ownKeys(fields);
+    if (keys.length !== 3 || keys.some(key => !["operationKey", "kind", "targetKey"].includes(String(key))) ||
+        Object.values(fields).some(field => !("value" in field))) return false;
+    const kind = fields.kind.value, operationKey = fields.operationKey.value, targetKey = fields.targetKey.value;
+    if (kind === "conversation_create")
+      return freshConversationOriginalSelector({work_ref: targetKey, operation_key: operationKey}) !== null;
+    if (kind !== "conversation_consume" && kind !== "conversation_turn") return false;
+    const pattern = kind === "conversation_consume" ? /^mmos-conversation-consume-[0-9a-f]{40}$/ : /^mmos-conversation-turn-[0-9a-f]{40}$/;
+    return typeof operationKey === "string" && pattern.test(operationKey) && parseFreshConversationTarget(targetKey) !== null;
+  } catch { return false; }
+}
 const SESSION_OPERATION_KEY = /^session-continue-[0-9a-f]{64}$/;
 // SESSION_TARGET_REF belongs to the same closed native-session proof adapter.
 // Only a session message pointer is restored from the session-exclusive
@@ -294,7 +310,7 @@ type ReopenedOperation = {
   authRevision: number;
   selectionSeq: number;
   pointer: OperationPointer | null;
-  reason: "READING" | OperationState["reason"];
+  reason: "READING" | "CONVERSATION_OWNER_UNAVAILABLE" | OperationState["reason"];
 };
 const display = (v: unknown, f = "Not established") =>
   typeof v === "string" && v ? v : f;
@@ -1787,7 +1803,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const freshAttendedBinding = useMemo(() => {
     const host = freshHost, transport = host?.freshConversation, request = transport?.request;
     if (!host || !transport || !request || !freshBinding || !commandBinding?.store) return null;
+    const store = commandBinding.store;
     const current = () => !!freshExecutiveOwner() && window.MastermindMissionHost === host &&
+      host.commandBinding === commandBinding && commandBinding.store === store &&
       host.freshConversation === transport && transport.request === request;
     const send = (operation: "consume" | "consume_status" | "turn_preview" | "turn" | "turn_status" | "turn_read",
       args: unknown, signal: AbortSignal) => current()
@@ -1795,7 +1813,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         : Promise.reject(new Error("FRESH_CONVERSATION_UNAVAILABLE"));
     return createFreshConversationAttendedBinding({owner: () => current() ? freshExecutiveOwner() : null,
       canModify: () => current() && host.auth?.getState().acquisition === true,
-      store: commandBinding.store,
+      store,
       transport: {consume: (args, signal) => send("consume", args, signal),
         consumeStatus: (args, signal) => send("consume_status", args, signal),
         turnPreview: (args, signal) => send("turn_preview", args, signal),
@@ -1995,9 +2013,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   // Automatic OAuth navigation must not tear down an unresolved UI owner.
   useEffect(() => registerUnsavedNavigationHold(() =>
     freshDraftRef.current.hasUnsentDraft() || freshTurnDraftRef.current.hasUnsentDraft() || hasFreshAttendedOriginal() || freshOriginalHeld.current ||
-    projectJourney.hasUnsentDraft() || pendingCommand.current !== null || heldKind !== null || recoverInFlight ||
+    projectJourney.hasUnsentDraft() || !!currentReopened || pendingCommand.current !== null || heldKind !== null || recoverInFlight ||
     (passiveExpiryHold.current && hasUnsentUserText.current)
-  ), [heldKind, recoverInFlight]);
+  ), [heldKind, recoverInFlight, currentReopened]);
 
   useEffect(() => {
     setCommandRefusal(null);
@@ -2114,6 +2132,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     void Promise.resolve().then(() => binding.store.read(ctx.principalScope, abort.signal)).then(value => {
       if (!ownsDiscovery()) return;
       if (value === null) setReopenedOperation(null);
+      else if (isFreshRetainedOperation(value)) {
+        const owner = value.kind === "conversation_create" ? freshBinding : freshAttendedBinding;
+        if (owner?.store === binding.store && sameConversationOwner(ctx, owner.context()))
+          setReopenedOperation(null);
+        else setReopenedOperation({...identity, pointer: value, reason: "CONVERSATION_OWNER_UNAVAILABLE"});
+      }
       else if (isRetainedOperation(value)) setReopenedOperation({ ...identity, pointer: value, reason: "PENDING_POINTER" });
       else setReopenedOperation({ ...identity, pointer: null, reason: "MALFORMED_POINTER" });
     }).catch(() => {
@@ -2121,7 +2145,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     });
     return () => { cancelled = true; abort.abort(); };
   }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation,
-    authRevision, commandSelectionRevision, selection?.workRef, selection?.rootJobId]);
+    authRevision, commandSelectionRevision, selection?.workRef, selection?.rootJobId, freshBinding, freshAttendedBinding]);
   useEffect(() => {
     const revision = ++sessionRecoveryFlight.current;
     setSessionReading(false); setSessionPointer(null); setSessionPointerError(false);
@@ -3387,7 +3411,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         if (current()) { setSessionRecovering(false); setSessionReading(false); }
       });
   };
-  const reopenedOperationControl = currentReopened ? (
+  const reopenedOperationControl = currentReopened?.reason === "CONVERSATION_OWNER_UNAVAILABLE" ? (
+    <section className="card" aria-label={locale === "zh-CN" ? "待核实的对话请求" : "Pending conversation request"}>
+      <h2>{locale === "zh-CN" ? "对话请求待核实" : "Conversation request pending"}</h2>
+      <p>{locale === "zh-CN" ? "请恢复原对话连接后查看该请求的状态。" : "Restore the original conversation connection to check this request."}</p>
+    </section>
+  ) : currentReopened ? (
     <section className="card" aria-label="Retained operation">
       <h2>{currentReopened.pointer ? "Retained operation" : "Operation recovery"}</h2>
       {currentReopened.pointer ? (
@@ -4656,6 +4685,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     if (navigationOpen) closeNavigation();
     freshJourney.start();setActive("Conversations");
   };
+  const freshEntryUnavailableReason = !freshHost?.freshConversation
+    ? (locale === "zh-CN" ? "当前连接无法新建对话。" : "This connection can’t start a new conversation.")
+    : !freshExecutiveOwner()
+      ? (locale === "zh-CN" ? "暂时无法确认新建对话的访问权限。" : "Access to start a conversation couldn’t be confirmed.") : null;
   const conversationListPanel = <ConversationsList model={conversationListModel} locale={locale} theme={theme}
     onNewConversation={freshHost?.freshConversation ? openFreshConversation : undefined}
     query={conversationNavigation.query} onQueryChange={conversationNavigation.changeQuery}
@@ -5343,11 +5376,15 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               mastermind<small>EXECUTIVE OS</small>
             </span>
           </div>
+          <div className="sidebar-new-entry">
           <button type="button" className="sidebar-search sidebar-new-conversation"
+            aria-describedby={freshEntryUnavailableReason ? "new-conversation-unavailable" : undefined}
             disabled={!freshHost?.freshConversation || !freshExecutiveOwner()} onClick={openFreshConversation}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
             {locale === "zh-CN" ? "新建对话" : "New conversation"}
           </button>
+          {freshEntryUnavailableReason ? <p id="new-conversation-unavailable" className="sidebar-new-entry-hint">{freshEntryUnavailableReason}</p> : null}
+          </div>
           <button type="button" className="sidebar-search" aria-current={active === "Search" ? "page" : undefined}
             onClick={() => {setProjectTab(null);setActive("Search");if (navigationOpen) closeNavigation();}}>
             <NavigationIcon view="Search"/>{locale === "zh-CN" ? "搜索" : "Search"}
