@@ -903,6 +903,7 @@ def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]
         if observation is not None:
             status["controller_observation"] = observation
     status.update(_acceptance_projection(rid, status, original_log, **owner))
+    status.update(_terminal_provider_projection(rid, status, original_log, **owner))
     if state == "ACTIVE_OR_WAITING":
         status.update(_active_lineage_projection(rid, original_log, **owner))
     for suffix in (".session-retained.json", ".session-created.json"):
@@ -928,6 +929,81 @@ def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]
         except (OSError, ValueError, AttributeError, FabricTaskError):
             continue
     return status
+
+
+def _terminal_provider_projection(rid: str, status: dict[str, Any], controller_log: bytes,
+                                  *, owner_ext: Path | None = None) -> dict[str, Any]:
+    """Project the existing original turn-limit proof, never authorize replay.
+
+    A Claude SDK catalog notice is not proof of provider model rejection.  The
+    local original process and provider receipts, already owned by the controller,
+    carry the authoritative CLI subtype.  Missing or drifting evidence stays
+    unclassified; no model string or captured prose is interpreted as authority.
+    """
+    if (status.get("state") != "TERMINAL" or type(status.get("rc")) is not int
+            or status["rc"] == 0 or status.get("signal") != "other"):
+        return {}
+    marker = f"PROVIDER_OUTCOME_RECORDED file={rid}.provider.json".encode()
+    if marker not in controller_log:
+        return {}
+    here = HERE if owner_ext is None else Path(owner_ext)
+    if not here.is_absolute() or ".." in here.parts:
+        return {}
+    owner = {} if owner_ext is None else {"owner_ext": here}
+    base = here / "state" / "remote_sub"
+    provider_path = base / f"{rid}.provider.json"
+    process_path = base / f"{rid}.process.jsonl"
+    try:
+        def original_bytes(path: Path, limit: int) -> bytes:
+            before = path.lstat()
+            if (before.st_uid != os.getuid() or before.st_nlink != 1
+                    or before.st_mode & 0o022):
+                raise FabricTaskError("unsafe provider receipt")
+            raw = _bounded_regular(path, limit)
+            after = path.lstat()
+            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns,
+                    before.st_ctime_ns) != (after.st_dev, after.st_ino,
+                                            after.st_size, after.st_mtime_ns,
+                                            after.st_ctime_ns):
+                raise FabricTaskError("provider receipt changed")
+            return raw
+
+        from artifact_reader import strict_json
+        provider_raw = original_bytes(provider_path, 16_384)
+        provider = strict_json(provider_raw)
+        process_raw = original_bytes(process_path, 16_384)
+        process_lines = process_raw.splitlines()
+        if len(process_lines) != 1:
+            return {}
+        process = strict_json(process_lines[0])
+        from provider_outcome import validate_receipt
+        validate_receipt(provider, process, rid)
+        if (status.get("root_id") is not None and provider.get("root_id") != status["root_id"]):
+            return {}
+        if (provider.get("command_rc") != status["rc"]
+                or provider.get("kind") != "turn_limit"
+                or provider.get("cli_subtype") != "error_max_turns"
+                or provider.get("cli_terminal_reason") != "max_turns"):
+            return {}
+        log_path, _ = _paths(rid, **owner)
+        if _bounded_regular(log_path, MAX_LOG_BYTES) != controller_log:
+            return {}
+        # Recheck the original receipts after classification; never project a
+        # mixture of changed receipts or another owner namespace.
+        if (original_bytes(provider_path, 16_384) != provider_raw
+                or original_bytes(process_path, 16_384) != process_raw):
+            return {}
+        return {"terminal_provider_diagnostic": {
+            "kind": "turn_limit",
+            "cli_subtype": "error_max_turns",
+            "source": "validated_original_provider_process_receipt",
+            "replay_authorized": False,
+            "workspace_changes": "NOT_INSPECTED",
+            "recovery_action": "RECONCILE_ORIGINAL_WORKSPACE",
+        }}
+    except (OSError, ValueError, TypeError, KeyError, ImportError,
+            FabricTaskError, RecursionError, AttributeError):
+        return {}
 
 
 def read_result(run_id: str, *, max_bytes: int = DEFAULT_RESULT_BYTES) -> bytes:
@@ -1139,6 +1215,18 @@ def request(
                 remaining = min(remaining, request_remaining_seconds)
             env["POOL_COMMISSION_REMAINING_SECONDS"] = str(remaining)
     observed_root = resolve_request_root(root_id, env)
+    request_complexity = task_complexity if task_complexity is not None else env.get("POOL_TASK_COMPLEXITY", "")
+    if max_turns is not None and request_complexity in {"C2_COMPLEX_BOUNDED", "C3_FRONTIER_JUDGMENT"}:
+        # Advisory only: an intentional caller ceiling remains binding. The
+        # installed wrapper, not this reader, owns the actual effective limit.
+        print("REQUEST_TURN_BUDGET " + json.dumps({
+            "code": "EXPLICIT_COMPLEX_TASK_TURN_CEILING",
+            "requested_max_turns": max_turns,
+            "task_complexity": request_complexity,
+            "effective_max_turns": None,
+            "limit_source": "caller_request",
+            "retry_authorized": False,
+        }, sort_keys=True), file=sys.stderr, flush=True)
     # Freeze the input before route selection. Exhausted capacity or an ended
     # caller must not destroy the only copy of an unfinished commission. These
     # are per-run artifacts, not queued work or permission to resume a process.
@@ -1684,7 +1772,7 @@ def main(argv: list[str] | None = None) -> int:
     p_request.add_argument("--model", dest="requested_model")
     p_request.add_argument("--not-before", help="Strict UTC Z lower bound for this new request; never queues or authorizes retry")
     p_request.add_argument("--max-turns", type=int,
-                           help="Per-request Claude turn ceiling (1..400); only tightens the existing admitted wrapper limit")
+                           help="Intentional per-request Claude turn ceiling (1..400); omit for complex work unless a tighter limit is required; only reduces the existing admitted wrapper limit")
     p_request.add_argument("--quota-fallback", action="store_true",
                            help="Bounded foreground successors for proven initial quota rejection; inspect with status --follow")
 

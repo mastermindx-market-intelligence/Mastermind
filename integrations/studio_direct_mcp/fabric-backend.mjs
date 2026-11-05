@@ -97,7 +97,7 @@ export const FABRIC_TOOLS = Object.freeze([
   tool('fabric_capabilities', 'Read adapter availability and the fixed tool boundary. This does not dispatch, prove provider admission, or identify a ChatGPT user.', {}, [], true),
   tool('fabric_request', 'Submit a new bounded commission to the existing M2 Fabric adapter. The installed owner may use up to three immutable attempts after proven pre-task capacity rejection. Checks the exact origin run ID first. A returned controller PID does not prove worker START. Native placement for complex C2 reviews may require a factual escalation_reason; preview refusals never authorize retry. Never replay an interrupted request or move an existing Executive operation here.', {
     ...identity, parent_id:idSchema, task_class:{type:'string',enum:CLASSES}, task_complexity:{type:'string',enum:COMPLEXITIES},
-    max_turns:{type:'integer',minimum:1,maximum:400,description:'Optional per-request Claude turn ceiling. Only tightens the admitted wrapper limit; not a token, tool-call, dollar or acceptance budget.'},
+    max_turns:{type:'integer',minimum:1,maximum:400,description:'Optional intentional per-request Claude turn ceiling. Omit for complex implementation or audits unless a tighter ceiling is required: this only REDUCES the installed model/complexity budget and can terminate useful work before delivery. It is not a token, tool-call, dollar or acceptance budget, and never authorizes continuation or retry.'},
     work_packet:{type:'string',minLength:1,maxLength:16000,description:'In human-readable brief prose, abbreviate SHA-256 file hashes and git commit IDs to their first ~12 hex characters. Preserve complete values in explicit machine-verification fields, code, or commands requiring exact identity. Packets are forwarded unchanged; no content scanner or secret/key rejection is added.'}, escalation_reason:{type:'string',minLength:1,maxLength:1000},
     subject_pool:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$'},
     pool:{type:'string',enum:MANUAL_POOLS,description:'Optional strict provider-pool pin; omitted means native AUTO. No cross-provider quota continuation. experiential additionally requires the exact model glm-5.3-uncensored and retention_opt_in:true on every request.'},
@@ -658,6 +658,11 @@ export function createFabricFacade(engine, options={}) {
         return response({action:name,run_id:args.run_id,root_id:args.root_id,parent_id:args.parent_id,controller_pid:pid,
           delivery:'CONTROLLER_CREATED',worker_started:null,worker_start_proven:false,
           ...(args.max_turns!==undefined?{requested_max_turns:args.max_turns}:{}),
+          ...(args.max_turns!==undefined && ['C2_COMPLEX_BOUNDED','C3_FRONTIER_JUDGMENT'].includes(args.task_complexity)
+            ? {request_budget_advisory:{code:'EXPLICIT_COMPLEX_TASK_TURN_CEILING',
+              requested_max_turns:args.max_turns,task_complexity:args.task_complexity,
+              effective_max_turns:null,limit_source:'caller_request',retry_authorized:false}}
+            : {}),
           ...(args.pool?{requested_pool:args.pool,requested_model:args.model??'auto',strict_manual_pin:true,
             ...(args.pool===EXPERIENTIAL_POOL?{
               retention_opt_in:true,sensitive_data_opt_in:true,code_exposure_opt_in:true,
