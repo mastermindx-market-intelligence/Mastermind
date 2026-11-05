@@ -10,6 +10,7 @@ Subprocess calls go through _run so tests can mock them.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -20,6 +21,8 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
 
 DIR_MODE = 0o700
@@ -46,6 +49,16 @@ TYPED_GIT_WORKSPACE_CLI_REL = Path(".local/bin/mmx-workspace")
 TYPED_GIT_SOURCE_REPOSITORY_REL = Path("Documents/GitHub/Mastermind")
 TYPED_GIT_BINARY = "/usr/bin/git"
 TYPED_GIT_REMOTE_URL = "https://github.com/mastermindx-market-intelligence/Mastermind.git"
+# Host-owned identities; these match the existing mmx-workspace repository catalog.
+# No caller-supplied path, remote, repository or credential is admitted.
+TYPED_GIT_CLOSED_PROFILES = (
+    ("mastermind", TYPED_GIT_SOURCE_REPOSITORY_REL, TYPED_GIT_REMOTE_URL),
+    ("macro", Path("Documents/Cluade/macro-main"),
+     "https://github.com/mastermindx-market-intelligence/macro.git"),
+    ("terminal", Path("Documents/Cluade/charting-app"),
+     "https://github.com/mastermindx-market-intelligence/mastermind-terminal.git"),
+)
+
 
 # Paper Desktop capability is a gateway-local consumer of the separately reviewed
 # guarded adapter in PR #585. The private gateway never accepts these paths or
@@ -53,11 +66,42 @@ TYPED_GIT_REMOTE_URL = "https://github.com/mastermindx-market-intelligence/Maste
 # Runtime generations are immutable from the perspective of installed seats. A new
 # bridge SHA gets a new directory so one-seat canaries cannot invalidate another
 # seat that still pins the previous bridge bytes.
-PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v10")
+PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v12")
 PAPER_RUNTIME_SCHEMA = "mastermind.paper_runtime.v1"
-PAPER_BRIDGE_SHA256 = "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc"
+PAPER_BRIDGE_SHA256 = "82bc7f2d75aec423711922198b68f317618a83de177bf4934b73d7b418a6ecfb"
 PAPER_COMMAND_TIMEOUT_MS = 70_000
+# Exact existing M1 Chris Admin legacy Paper gateway: no new account or tunnel.
+# These pins are single-use predecessor CAs; any changed installed state requires
+# a new independent review rather than choosing a nearby runtime generation.
+M1_PAPER_V20_ACCOUNT = "chrisadmin"
+M1_PAPER_V5_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v5")
+M1_PAPER_V20_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v20")
+M1_PAPER_V5_BRIDGE_SHA256 = "d3301a1466d46ae081ded963f438c019fabf39c9bccfc8c669f16562a52bf7f6"
+M1_PAPER_V20_BRIDGE_SHA256 = "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced"
+M1_PAPER_V20_MERGE = "e3ee36e297140539e05a0524f3446e086f40c5d1"
+M1_PAPER_V5_MANIFEST_SHA256 = "a97c67c52e334d624f9c3266177ed5a430323fa5310fbd52611942504b4e3457"
+M1_PAPER_V5_CONFIG_SHA256 = "99686765df4296917a6762e379dc34daec7d6750315377d5a043eaa04edc441f"
+M1_PAPER_V5_NONPAPER_SHA256 = "11a66a9b085108e4a645d7b24513b8a392492c17ad1abd09e060bfa978dceb02"
+M1_PAPER_V5_PLIST_SHA256 = "72ab2c78f5a06efe254a47293f36a5770fa95f90311cefd390ea37317d04f677"
+
 PAPER_APP_REL = Path("Applications/Paper.app")
+
+# The accepted immutable v20 target generation. The global selection above
+# intentionally stays v12; this pin only names the staged generation that the
+# one reviewed C2 Personal v12 cohort may select through the dedicated
+# transaction below. runtime_stage.py remains the owner that stages and never
+# rewrites the v20 directory.
+PAPER_RUNTIME_V20_REL = Path(".local/share/mastermind-paper/runtime/v20")
+PAPER_V20_BRIDGE_SHA256 = "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced"
+PAPER_RUNTIME_V10_REL = Path(".local/share/mastermind-paper/runtime/v10")
+PAPER_V10_BRIDGE_SHA256 = "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc"
+FLEET_V20_COHORT_SOURCE_SHA256 = "e4d5bccfec19ee3c88a3c73ed2484f34d119896086d0da9485c0baf5638bc10d"
+# One closed admission set shared by the dispatcher and real lifecycle-lock gate.
+FLEET_V20_ENROLLED_ACCOUNTS = frozenset((
+    "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt3",
+    "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9",
+    "chatgpt4", "mastermind-os-publication",
+))
 
 # Optional read-only fleet-status consumer. It delegates to the installed
 # Studio Direct control owner instead of letting a model compose shell probes.
@@ -76,6 +120,7 @@ RESERVED_ACCOUNT_LABELS = frozenset(
 # Files staged from source directory. gateway.mjs is the engine library.
 STAGE_FILES = (
     "gateway.mjs",
+    "modern-fabric-http.mjs",
     "output-budget.mjs",
     "git-publish.mjs",
     "workspace-access.mjs",
@@ -93,15 +138,266 @@ STAGE_FILES = (
 # immediately preceding v0.1.6 install has every current file except the new
 # read-only fleet-status consumer; earlier generations also predate Paper,
 # output paging, and typed Git.
-LEGACY_STAGE_FILES_V6 = tuple(name for name in STAGE_FILES if name not in {"commission-prepare.mjs", "commission-service.mjs"})
+LEGACY_STAGE_FILES_V7 = tuple(name for name in STAGE_FILES if name != "modern-fabric-http.mjs")
+LEGACY_STAGE_FILES_V6 = tuple(name for name in LEGACY_STAGE_FILES_V7 if name not in {"commission-prepare.mjs", "commission-service.mjs"})
 LEGACY_STAGE_FILES_V5 = tuple(name for name in LEGACY_STAGE_FILES_V6 if name != "workspace-access.mjs")
 LEGACY_STAGE_FILES_V4 = tuple(name for name in LEGACY_STAGE_FILES_V5 if name != "fleet-status.mjs")
 LEGACY_STAGE_FILES_V3 = tuple(name for name in LEGACY_STAGE_FILES_V4 if name != "paper-design.mjs")
 LEGACY_STAGE_FILES_V2 = tuple(name for name in LEGACY_STAGE_FILES_V3 if name != "output-budget.mjs")
 LEGACY_STAGE_FILES_V1 = tuple(name for name in LEGACY_STAGE_FILES_V2 if name != "git-publish.mjs")
+# The approved 2026-10-14 ChatGPT1 Studio 0.1.10 install had exactly this
+# reviewed predecessor generation (see #1333 and the source lineage of #1477).
+# Unlike general historical generations, its two fleet/tailnet modules came
+# from a branch not in current protected STAGE_FILES. Recognize ONLY this
+# exact 12-file set on a V2 manifest. No file, config, binary, plist or
+# dependency hash verification is relaxed, and no repository grant is implied.
+V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR = frozenset((
+    "gateway.mjs", "output-budget.mjs", "git-publish.mjs",
+    "workspace-access.mjs", "paper-design.mjs", "fleet-status.mjs",
+    "fleet-routing.mjs", "private-tunnel-auth.mjs",
+    "private-tunnel-gateway.mjs", "tailnet-gateway.mjs",
+    "package.json", "package-lock.json",
+))
+
+# Exact 0.1.10 ChatGPT1 fleet bundle signed into the existing V2 manifest.
+# This is an owner-bound compatibility update, NOT a generic legacy bundle
+# upgrade or permission grant. Unchanged modules retain their original bytes.
+FLEET_V10_PRESERVED_GIT_BLOBS = {
+    "gateway.mjs": "f87ac012339e82fe46bce5ddc70d1d04183d1b6e",
+    "output-budget.mjs": "6d4680a357dc5780e1b09ae32c9ebc908c94353b",
+    "paper-design.mjs": "82b35d150433f5128b83a089b581873ad5d73daa",
+    "fleet-status.mjs": "ef7ab489ca5134fc6f5d825977ab43a21aab3078",
+    "fleet-routing.mjs": "63c47d73ae7b73a61c95cee1803c549ecd6df9c8",
+    "private-tunnel-auth.mjs": "cd7ec9fc38ae10cefe8e472246aaf9c6221b0281",
+    "private-tunnel-gateway.mjs": "6ea4b75a0ce76995cde4c7f090ad4e28a183f3db",
+    "tailnet-gateway.mjs": "d654200a417d5a4dadfcc4e0f6141ef9adda6a04",
+    "package.json": "e983917ada1a9da715cedd1acce7559f26a2a932",
+    "package-lock.json": "d119580040b0edc59cf0e239922b54a023f899c5",
+}
+# The already-installed C2 Business fleet v0.1.10 predecessor is a DISTINCT
+# 11-file owner, with NO repository-workspace enrollment. Recognizing its
+# exact V2 manifest does not grant a new Git repository or change its live
+# gateway, tenant or tool catalog. A separate closed migration may later
+# upgrade the bounded source generation with explicit original-manifest CAS.
+V2_C2_BUSINESS_FLEET_PREDECESSOR = frozenset((
+    "gateway.mjs", "git-publish.mjs", "output-budget.mjs",
+    "package.json", "package-lock.json", "paper-design.mjs",
+    "fleet-status.mjs", "fleet-routing.mjs", "tailnet-gateway.mjs",
+    "private-tunnel-auth.mjs", "private-tunnel-gateway.mjs",
+))
+
+# Exact 2026-10-21 predecessor seals only. These do not admit later
+# unreconciled installations or authorize a compatibility upgrade.
+V2_FABRIC_DESIGN_TAILNET_FILES = frozenset((
+    "fleet-status.mjs", "gateway.mjs", "git-publish.mjs",
+    "output-budget.mjs", "package-lock.json", "package.json",
+    "paper-design.mjs", "private-tunnel-auth.mjs",
+    "private-tunnel-gateway.mjs", "tailnet-gateway.mjs",
+))
+
+V2_FABRIC_READ_OPERATOR_FILES = V2_FABRIC_DESIGN_TAILNET_FILES | frozenset((
+    "fabric-operator.mjs",
+))
+
+SEALED_V2_FLEET_GATEWAY_PREDECESSORS = {
+    "admin-business": (
+        "68792c832344c61a7f0ca3462d85c85eba0e586877ee68934153c2bc18e55ebd",
+        "5dc83dd6aa840b3d321502045db1c4dcaf6fa9d09d5cca8422d5717c84191b1a",
+        V2_C2_BUSINESS_FLEET_PREDECESSOR,
+    ),
+    "chatgpt3-w570f6f34": (
+        "35246e482e79f3203b3e1cd28e76c77cfbef8681c1157a9a5add4e232a7820e5",
+        "5462b46a30a5d67fbc3dcee368bfe2675eb409b3bacecbeddc70e9a5a3d9a123",
+        V2_C2_BUSINESS_FLEET_PREDECESSOR,
+    ),
+    "chatgpt3-wa2a9e6f9": (
+        "0a248967072622afa375c6e6ab749d025150b7805fe288c2de83da381c66e0b4",
+        "39c6bbe7ddfb69b8ac837be37f7b9fed06f10645967dc1675221dad4b5040879",
+        V2_C2_BUSINESS_FLEET_PREDECESSOR,
+    ),
+    "chatgpt4": (
+        "2252819766e266ac0be6b30c94694b503aad4634d8de184f62611542fb581bd0",
+        "5b7e4ea4b83d1cff6f371dc1ccb3862762222336ba9bb24c0444ad42d3d959c9",
+        V2_C2_BUSINESS_FLEET_PREDECESSOR,
+    ),
+    "fabric-design": (
+        "87de91f4fd0d51571c2350cf4fe53704ad035eba8f095c13b09352732307671c",
+        "0481da04b267ea610a917e78203ac7829c1799a2a83e226502978c6d8bc7d2f9",
+        V2_FABRIC_DESIGN_TAILNET_FILES,
+    ),
+    "fabric-read": (
+        "f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb",
+        "c0fda20241050072ccdecc4cfa5e31d4322a3e0a645404666e7116db372954d3",
+        V2_FABRIC_READ_OPERATOR_FILES,
+    ),
+}
+
+# Exact historical installed C2 Business 0.1.10 generation. All pinned file
+# hashes are provenance checks, NOT a repository access grant. The Gateway
+# target source is the independently reviewed fleet v0.1.10 generation; the
+# Git publisher/workspace layer is pinned to the reviewed #1535 source.
+C2_BUSINESS_V10_ORIGINAL_BLOBS = {
+    "fleet-routing.mjs": "7a1d770bf59d9198f1b29f94f56c2e845c4e1b55",
+    "fleet-status.mjs": "f04630857f75d712f701360f18e84d42ac8ae8ba",
+    "gateway.mjs": "b4fd9aa277403d42e532ed9ecb0a9ff50adb5fe9",
+    "git-publish.mjs": "f187b291cbb21782abfdb460a67b557ef1d29638",
+    "output-budget.mjs": "6d4680a357dc5780e1b09ae32c9ebc908c94353b",
+    "package-lock.json": "d119580040b0edc59cf0e239922b54a023f899c5",
+    "package.json": "e983917ada1a9da715cedd1acce7559f26a2a932",
+    "paper-design.mjs": "82b35d150433f5128b83a089b581873ad5d73daa",
+    "private-tunnel-auth.mjs": "cd7ec9fc38ae10cefe8e472246aaf9c6221b0281",
+    "private-tunnel-gateway.mjs": "6ea4b75a0ce76995cde4c7f090ad4e28a183f3db",
+    "tailnet-gateway.mjs": "d654200a417d5a4dadfcc4e0f6141ef9adda6a04",
+}
+C2_PERSONAL_CURRENT_MANIFEST_SHA256 = "c5744dcc7a96d0bc0b019f3c153e8acc8761320ff11541340df753fb493c5460"
+# Exact live C2 Personal post-#1604 sealed generation. A dedicated stopped-
+# service, manifest-CAS migration changes ONLY the Git command budget.
+# Repository enrollment, Git source, fleet, Paper and all module hashes stay fixed.
+C2_PERSONAL_TIMEOUT_PREDECESSOR_SHA256 = "4bb0b40cbc7849487c0d886b30261f70fd6e1828d1d217643a56e3fa6aea40fb"
+C2_PERSONAL_TIMEOUT_COMMAND_MS = 45000
+C2_PERSONAL_TARGET_PATCH_SHA256 = {
+    "gateway.mjs": "17157fa5f8739dbe17aae767a335e97dd713a978dde9b192feb1b41a7b036b30",
+    "git-publish.mjs": "d8f7f7712129094ce0ffac2eaeb66d15dd3f063a3ade9fa354de7af0d412477a",
+    "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
+}
+C2_BUSINESS_TARGET_PATCH_SHA256 = {
+    "gateway.mjs": "17157fa5f8739dbe17aae767a335e97dd713a978dde9b192feb1b41a7b036b30",
+    "git-publish.mjs": "d8f7f7712129094ce0ffac2eaeb66d15dd3f063a3ade9fa354de7af0d412477a",
+    "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
+}
+
+# Only existing reviewed, closed-profile enrolled fleet-v0.1.10 seats.
+# Other installed gateways differ in bundle/permissions and are NOT eligible.
+FLEET_V10_ENROLLED_ACCOUNTS = frozenset(("chatgpt1", "chatgpt3"))
+
+FLEET_V10_PUBLISHER_PATCH_SHA256 = {
+    "git-publish.mjs": "d8f7f7712129094ce0ffac2eaeb66d15dd3f063a3ade9fa354de7af0d412477a",
+    "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
+}
+# PR #1535's exact, already-installed closed publisher is the ONLY eligible
+# second-stage predecessor. No arbitrary closed publisher may be overwritten.
+FLEET_V10_PREVIOUS_CLOSED_PUBLISHER_SHA256 = "72faf293d9c0a90c45ab442821e26f199f5ea406a091a7aed7ebce3519e55f69"
+
+# Exact sealed index-sync predecessor observed on enrolled fleet seats. Keep
+# this pair independent from both historical targets and the merge target.
+FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256 = {
+    "git-publish.mjs": "d8f7f7712129094ce0ffac2eaeb66d15dd3f063a3ade9fa354de7af0d412477a",
+    "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
+}
+# The merge-capable publisher's previously sealed target is a valid *incoming
+# predecessor* for the narrow rejection-diagnostics update. Do not accept
+# arbitrary live publisher bytes, widen the account allowlist, or change
+# inherited config/credential/manifest requirements.
+FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256 = {
+    "git-publish.mjs": "badd8a554ae8230808d18a1943aa49edb7ced51391ed2cbadb358cd015d62c3a",
+    "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
+}
+FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256 = {
+    "git-publish.mjs": "10574812f428114314a1529df2d969e52b19d2db8d4f971564a98970d93adc67",
+    "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
+}
+
+# Exact sealed C2 predecessor observed for the one-seat Paper v10 -> v12 repair.
+# These are reviewed installation identity pins, never caller-selectable source or runtime paths.
+# The fleet bundle remains installed byte-for-byte; only Paper configuration moves.
+C2_PAPER_ACCOUNT = "chatgpt2-personal"
+C2_PAPER_ORIGINAL_MANIFEST_SHA256 = "10658ddba662cac2c0a321dfdc48b9b009199187e9709f8f7d63a30bf2406337"
+C2_PAPER_MANIFEST_CANONICAL_SHA256 = frozenset((
+    "821e37a4e10011f3335984416edaac92899c6bc27526c0f017b3d75130950d84",
+    "d477cd952b86d76c07a2554a94a1ce5dc8c5e42bda544a5603caf0f54e17c9b7",
+))
+C2_LIFECYCLE_LOCK_NAME = "private-service.lifecycle.lock"
+# These are the two already enrolled restricted Fabric seats, not a caller-selectable
+# account family. Their backends may advance independently of their sealed gateways.
+FABRIC_BACKEND_ACCOUNT = "subagent-fabric-c3"
+FABRIC_BACKEND_MODERN_ACCOUNT = "fabric-c3-570f6f34"
+FABRIC_BACKEND_MODERN_PORT = 45280
+FABRIC_BACKEND_ACCOUNTS = frozenset((FABRIC_BACKEND_ACCOUNT, FABRIC_BACKEND_MODERN_ACCOUNT))
+FABRIC_BACKEND_SOURCE = "integrations/studio_direct_mcp/fabric-backend.mjs"
+FABRIC_BACKEND_RELEASES_REL = Path(".local/share/studio-direct-mcp/releases")
+FABRIC_BACKEND_RELEASE_SCHEMA = "mastermind.fabric_backend_release.v1"
+C2_PAPER_NON_PAPER_CONFIG_SHA256 = "adc1c3367236b8a3a49b30169c2fb0a5dc3e85ecb415ab1b7d4d799fdf075b38"
+C2_PAPER_ORIGINAL_BRIDGE_SHA256 = "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc"
+C2_PAPER_FILES_SHA256 = {
+    "fleet-routing.mjs": "dc98537e5ade635f5c9fa3a89ab99ae9ea57f549d2856832d01f90c1e61c1533",
+    "fleet-status.mjs": "a7ba88b02d7099d99d0e6d1e702b2faee6b7a05e7e6e6a49c86c567184e5c780",
+    "gateway.mjs": "92e7f38f9eb53a5b140d0f3809b3381a4d35cea86bbb2e20229f108792ec30c8",
+    "git-publish.mjs": "9d50cd828e51d0c08a7be0ca7b18c89bfd8fb767a548bb1e4deaddaf185225ae",
+    "output-budget.mjs": "5fb464cdb531adf944561ddda760b77856530bcc08f7ba48ef774d6750f5a071",
+    "package-lock.json": "9a4e7398ddb45f44d6910fc05118bac425397f4b9869f33229da81f76ae262d0",
+    "package.json": "25ab096e21ac6e8c3761ee896e69d175ba628c1fe5751bcfab452c304a4bb634",
+    "paper-design.mjs": "e2162584ceab9941e7bcce51b73120c9a9aeb13c128cd5b217077c005f0f1c7e",
+    "private-tunnel-auth.mjs": "fe8c9e5ba14fd7750fc26bbfe45ed3f77d4b96fa8ff639c6b5efdf653740e1c0",
+    "private-tunnel-gateway.mjs": "fd4eb541590cafc3c92a0b0ac1f7080baa76193704a2219e58b02462ef4d5540",
+    "tailnet-gateway.mjs": "9dd75992ba0b5c658582779ebeb71a06f13ec0a3475aa83d62753e22832b906b",
+}
+C2_PAPER_RUNTIME_IDENTITY = {
+    "host": "127.0.0.1",
+    "port": 45026,
+    "nodeHash": "3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0",
+    "backendHash": "a4145198dc75cd34e7c7452c2054b4cc0d29e199ae1459961a17e4da25a13500",
+    "dependencyTreeHash": "91ce96dc69159edcabb3eee472e6ebafb18450b93a03addd6adf0df6dca47e29",
+}
+
+# Distinct sealed, already-enrolled C2 Business Paper v10 installation. This is
+# an independent per-seat transaction, never permission to rewrite another
+# account's config, fleet modules, workspace grants, or immutable runtime.
+C2_PAPER_BUSINESS_ACCOUNT = "chatgpt2-business"
+C2_PAPER_UPGRADE_ACCOUNTS = frozenset((C2_PAPER_ACCOUNT, C2_PAPER_BUSINESS_ACCOUNT))
+C2_PAPER_BUSINESS_ORIGINAL_MANIFEST_SHA256 = "504c22af839e154bb1a5314134240b9eb7064f043e1003a357922e1103c21b06"
+C2_PAPER_BUSINESS_NON_PAPER_CONFIG_SHA256 = "ed2dc2b9f7f812406c7ef7e9297b3ad5b54c8c15c11903463e61a1d628b0fdf0"
+C2_PAPER_BUSINESS_RUNTIME_IDENTITY = {**C2_PAPER_RUNTIME_IDENTITY, "port": 45028}
+
+# Independently verified C4 installation, observed 2026-10-18. Its eleven module
+# bytes equal C2_PAPER_FILES_SHA256, but its account, manifests, configuration and
+# dependency seal are distinct. This admits only its original and planned Paper
+# configuration; it does not enroll a new workspace or change installed grants.
+C4_PAPER_ACCOUNT = "chatgpt4"
+C4_PAPER_ORIGINAL_MANIFEST_SHA256 = "849e0af6b498408eba843bcbf2c9c500e199c218db06f00db9cb13b54303b071"
+C4_PAPER_MANIFEST_CANONICAL_SHA256 = frozenset((
+    "e0e7865965285af6372fdf27ee70ae27f494b37fe19e1f5af763406295a96ec2",
+    "2252819766e266ac0be6b30c94694b503aad4634d8de184f62611542fb581bd0",
+    # Exact native-pool pin postimage; all other C4 profile fields stay sealed.
+    "e10730454cd343b8774929b9c6d39f5dfbf1c9b7e83bfdc82636b8e54d0437a0",
+    # Exact v20 Paper-only successor of that native-pin postimage, with the
+    # original 11 module seals, plist, port and non-Paper config unchanged.
+    "f46f1aeec2c5b0baa98f7c655723bbdfbb0a4765f87a98aacb29381750382b1e",
+))
+C4_PAPER_NON_PAPER_CONFIG_SHA256 = "94a480d9db9c59e2d76b6d3fdd9f9b1a448bcd77c26fbe30f430f79357e36894"
+C4_PAPER_RUNTIME_IDENTITY = {
+    "host": "127.0.0.1",
+    "port": 45024,
+    "nodeHash": "3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0",
+    "backendHash": "a4145198dc75cd34e7c7452c2054b4cc0d29e199ae1459961a17e4da25a13500",
+    "dependencyTreeHash": "639c904d1d5832baa832eac8519cf2304073d3d72fdacc03fd879281068e6211",
+}
+PAPER_RUNTIME_UPGRADE_ACCOUNTS = C2_PAPER_UPGRADE_ACCOUNTS | frozenset((C4_PAPER_ACCOUNT,))
+
+# Fresh read-only observed C2 Personal M2 cohort, 2026-11-02. This seat already
+# received the reviewed closed-publisher generation and selects exact v12, so
+# the historical v10 -> v12 admission above can never fire for it again. Its
+# one-seat v12 -> v20 selection reuses the identical single-use manifest-CAS
+# transaction with this pinned predecessor. The installed 12-file cohort is the
+# sealed publisher patch plus the unchanged fleet modules; no byte identity is
+# invented here. The node/backend/dependency identity is inherited from the
+# seat's sealed C2 predecessor because the publisher patch changed only module
+# bytes; a live manifest that disagrees refuses closed and requires fresh
+# observation of the exact differing identity fields.
+C2_PAPER_V12_MANIFEST_SHA256 = (
+    "c5cdba867972f547aaefa7dbfc5840467d2961c7f4d346e8de1f1ba575686ef6")
+C2_PAPER_V12_NON_PAPER_CONFIG_SHA256 = (
+    "201288e64eadeb25e16306e737831fb828ce638a54b0e41c16945bd1c737eb08")
+C2_PAPER_V12_FILES_SHA256 = {
+    **{name: digest for name, digest in C2_PAPER_FILES_SHA256.items()
+       if name not in C2_PERSONAL_TARGET_PATCH_SHA256},
+    **C2_PERSONAL_TARGET_PATCH_SHA256,
+}
+
+
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
         frozenset(STAGE_FILES),
+        frozenset(LEGACY_STAGE_FILES_V7),
         frozenset(LEGACY_STAGE_FILES_V6),
         frozenset(LEGACY_STAGE_FILES_V5),
         frozenset(LEGACY_STAGE_FILES_V4),
@@ -168,6 +464,25 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: fh.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _canonical_json_sha256(value: object) -> str:
+    return hashlib.sha256(json.dumps(
+        value, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
+def _sealed_v2_fleet_gateway_predecessor(data: dict, account: str) -> bool:
+    """Recognize only one exact already-installed historical V2 gateway seal."""
+    entry = SEALED_V2_FLEET_GATEWAY_PREDECESSORS.get(account)
+    if (entry is None or not isinstance(data, dict)
+            or data.get("version") != MANIFEST_VERSION
+            or data.get("account") != account):
+        return False
+    files = data.get("files")
+    return (isinstance(files, dict)
+            and frozenset(files) == entry[2]
+            and _canonical_json_sha256(data) == entry[0])
 
 
 def _sha256_hex(value: str) -> bool:
@@ -444,21 +759,414 @@ def _build_runtime_roots(account: str) -> dict:
     }
 
 
-def _typed_git_config(user_root: Path) -> dict:
-    return {
+
+# Exact existing cohort: pin compatibility preserves installed capabilities.
+NATIVE_POOL_PIN_ACCOUNTS = frozenset(('admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt2-personal', 'chatgpt3', 'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4', 'fabric-design', 'fabric-read'))
+NATIVE_POOL_PIN_PREDECESSORS = {'admin-business': {'fleet-routing.mjs': 'dc98537e5ade635f5c9fa3a89ab99ae9ea57f549d2856832d01f90c1e61c1533',
+                    'fleet-status.mjs': 'a7ba88b02d7099d99d0e6d1e702b2faee6b7a05e7e6e6a49c86c567184e5c780',
+                    'gateway.mjs': '92e7f38f9eb53a5b140d0f3809b3381a4d35cea86bbb2e20229f108792ec30c8',
+                    'git-publish.mjs': '9d50cd828e51d0c08a7be0ca7b18c89bfd8fb767a548bb1e4deaddaf185225ae',
+                    'output-budget.mjs': '5fb464cdb531adf944561ddda760b77856530bcc08f7ba48ef774d6750f5a071',
+                    'package-lock.json': '9a4e7398ddb45f44d6910fc05118bac425397f4b9869f33229da81f76ae262d0',
+                    'package.json': '25ab096e21ac6e8c3761ee896e69d175ba628c1fe5751bcfab452c304a4bb634',
+                    'paper-design.mjs': 'e2162584ceab9941e7bcce51b73120c9a9aeb13c128cd5b217077c005f0f1c7e',
+                    'private-tunnel-auth.mjs': 'fe8c9e5ba14fd7750fc26bbfe45ed3f77d4b96fa8ff639c6b5efdf653740e1c0',
+                    'private-tunnel-gateway.mjs': 'fd4eb541590cafc3c92a0b0ac1f7080baa76193704a2219e58b02462ef4d5540',
+                    'tailnet-gateway.mjs': '9dd75992ba0b5c658582779ebeb71a06f13ec0a3475aa83d62753e22832b906b'},
+ 'chatgpt3-w570f6f34': {'fleet-routing.mjs': 'dc98537e5ade635f5c9fa3a89ab99ae9ea57f549d2856832d01f90c1e61c1533',
+                        'fleet-status.mjs': 'a7ba88b02d7099d99d0e6d1e702b2faee6b7a05e7e6e6a49c86c567184e5c780',
+                        'gateway.mjs': '92e7f38f9eb53a5b140d0f3809b3381a4d35cea86bbb2e20229f108792ec30c8',
+                        'git-publish.mjs': '9d50cd828e51d0c08a7be0ca7b18c89bfd8fb767a548bb1e4deaddaf185225ae',
+                        'output-budget.mjs': '5fb464cdb531adf944561ddda760b77856530bcc08f7ba48ef774d6750f5a071',
+                        'package-lock.json': '9a4e7398ddb45f44d6910fc05118bac425397f4b9869f33229da81f76ae262d0',
+                        'package.json': '25ab096e21ac6e8c3761ee896e69d175ba628c1fe5751bcfab452c304a4bb634',
+                        'paper-design.mjs': 'e2162584ceab9941e7bcce51b73120c9a9aeb13c128cd5b217077c005f0f1c7e',
+                        'private-tunnel-auth.mjs': 'fe8c9e5ba14fd7750fc26bbfe45ed3f77d4b96fa8ff639c6b5efdf653740e1c0',
+                        'private-tunnel-gateway.mjs': 'fd4eb541590cafc3c92a0b0ac1f7080baa76193704a2219e58b02462ef4d5540',
+                        'tailnet-gateway.mjs': '9dd75992ba0b5c658582779ebeb71a06f13ec0a3475aa83d62753e22832b906b'},
+ 'chatgpt3-wa2a9e6f9': {'fleet-routing.mjs': 'dc98537e5ade635f5c9fa3a89ab99ae9ea57f549d2856832d01f90c1e61c1533',
+                        'fleet-status.mjs': 'a7ba88b02d7099d99d0e6d1e702b2faee6b7a05e7e6e6a49c86c567184e5c780',
+                        'gateway.mjs': '92e7f38f9eb53a5b140d0f3809b3381a4d35cea86bbb2e20229f108792ec30c8',
+                        'git-publish.mjs': '9d50cd828e51d0c08a7be0ca7b18c89bfd8fb767a548bb1e4deaddaf185225ae',
+                        'output-budget.mjs': '5fb464cdb531adf944561ddda760b77856530bcc08f7ba48ef774d6750f5a071',
+                        'package-lock.json': '9a4e7398ddb45f44d6910fc05118bac425397f4b9869f33229da81f76ae262d0',
+                        'package.json': '25ab096e21ac6e8c3761ee896e69d175ba628c1fe5751bcfab452c304a4bb634',
+                        'paper-design.mjs': 'e2162584ceab9941e7bcce51b73120c9a9aeb13c128cd5b217077c005f0f1c7e',
+                        'private-tunnel-auth.mjs': 'fe8c9e5ba14fd7750fc26bbfe45ed3f77d4b96fa8ff639c6b5efdf653740e1c0',
+                        'private-tunnel-gateway.mjs': 'fd4eb541590cafc3c92a0b0ac1f7080baa76193704a2219e58b02462ef4d5540',
+                        'tailnet-gateway.mjs': '9dd75992ba0b5c658582779ebeb71a06f13ec0a3475aa83d62753e22832b906b'},
+ 'fabric-design': {'fleet-status.mjs': 'a7ba88b02d7099d99d0e6d1e702b2faee6b7a05e7e6e6a49c86c567184e5c780',
+                   'gateway.mjs': '970b47f1c6a15bc3f1175f1043c5dd4a59ad748c2374b586e384bbd6ba40ce5e',
+                   'git-publish.mjs': '9d50cd828e51d0c08a7be0ca7b18c89bfd8fb767a548bb1e4deaddaf185225ae',
+                   'output-budget.mjs': '5fb464cdb531adf944561ddda760b77856530bcc08f7ba48ef774d6750f5a071',
+                   'package-lock.json': '9a4e7398ddb45f44d6910fc05118bac425397f4b9869f33229da81f76ae262d0',
+                   'package.json': '25ab096e21ac6e8c3761ee896e69d175ba628c1fe5751bcfab452c304a4bb634',
+                   'paper-design.mjs': 'e2162584ceab9941e7bcce51b73120c9a9aeb13c128cd5b217077c005f0f1c7e',
+                   'private-tunnel-auth.mjs': 'fe8c9e5ba14fd7750fc26bbfe45ed3f77d4b96fa8ff639c6b5efdf653740e1c0',
+                   'private-tunnel-gateway.mjs': '225b1a592f5486c688efc6f5fc37184877a7e3e8022c2e831858c8989c6cca00',
+                   'tailnet-gateway.mjs': 'bd46b40cfd5f2744f9b07be38ff2656676939707e753f6e846f4a2c578944d25'},
+ 'fabric-read': {'fabric-operator.mjs': '2ed7578ced90da1e17a95faa4df2e43c164ade42e832d307efbb3902aed42a00',
+                 'fleet-status.mjs': 'a7ba88b02d7099d99d0e6d1e702b2faee6b7a05e7e6e6a49c86c567184e5c780',
+                 'gateway.mjs': '2a9038d802cdefeea3af4a3fbe45d2326fb894a42c72f3f4f946603419b93446',
+                 'git-publish.mjs': '9d50cd828e51d0c08a7be0ca7b18c89bfd8fb767a548bb1e4deaddaf185225ae',
+                 'output-budget.mjs': '5fb464cdb531adf944561ddda760b77856530bcc08f7ba48ef774d6750f5a071',
+                 'package-lock.json': '9a4e7398ddb45f44d6910fc05118bac425397f4b9869f33229da81f76ae262d0',
+                 'package.json': '25ab096e21ac6e8c3761ee896e69d175ba628c1fe5751bcfab452c304a4bb634',
+                 'paper-design.mjs': 'e2162584ceab9941e7bcce51b73120c9a9aeb13c128cd5b217077c005f0f1c7e',
+                 'private-tunnel-auth.mjs': 'fe8c9e5ba14fd7750fc26bbfe45ed3f77d4b96fa8ff639c6b5efdf653740e1c0',
+                 'private-tunnel-gateway.mjs': '225b1a592f5486c688efc6f5fc37184877a7e3e8022c2e831858c8989c6cca00',
+                 'tailnet-gateway.mjs': '89a3d1c972a31ab62f19205439d6f09bc24f4d51783ebc2e1bea788bcd9d817c'}}
+
+# Retained sealed Tailnet seats, each with only its original and exact native
+# pool-pin postimage. These are profile selectors, never an argv fallback.
+_NATIVE_POOL_PIN_TAILNET_CANONICAL = {
+    "fabric-design": frozenset((
+        "87de91f4fd0d51571c2350cf4fe53704ad035eba8f095c13b09352732307671c",
+        "b08c021b6c3c9cd9a1acdd57957fbf5e88b6d63daa11b963b7476d993b1a8b46",
+    )),
+    "fabric-read": frozenset((
+        "f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb",
+        "328c25399daf9ab16c994ea30bd4a628ef40483e5f9af89fe34f191ac4f48819",
+    )),
+}
+
+
+def _pin_owner_module():
+    import importlib.util
+    path = Path(__file__).resolve().with_name("private_service_pin.py")
+    spec = importlib.util.spec_from_file_location("_studio_pin_owner", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _pin_enrollment_owner_module():
+    import importlib.util
+    path = Path(__file__).resolve().with_name("private_service_pin_enrollment.py")
+    spec = importlib.util.spec_from_file_location("_studio_pin_enrollment_owner", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def cmd_native_pool_pin_enrollment(args):
+    owner = _pin_enrollment_owner_module()
+    try:
+        value = owner.run(sys.modules[__name__], args)
+    except SystemExit as error:
+        if type(error.code) is str and error.code in {
+            "NATIVE_PIN_ENROLLMENT_" + code for code in owner.REFUSAL_CODES
+        }:
+            raise
+        raise SystemExit("NATIVE_PIN_ENROLLMENT_OWNER_REFUSED") from None
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        raise SystemExit("NATIVE_PIN_ENROLLMENT_OWNER_REFUSED") from None
+    print(json.dumps(value, sort_keys=True))
+    return 0
+
+
+def cmd_native_pool_pin(args):
+    pin = _pin_owner_module()
+    try:
+        value = pin.run(sys.modules[__name__], args)
+    except SystemExit as error:
+        allowed = {"NATIVE_POOL_PIN_" + code for code in pin.REFUSAL_CODES}
+        allowed.update(("NATIVE_POOL_PIN_SUCCESSOR_REFUSED", "NATIVE_POOL_PIN_SUCCESSOR_CHANGED"))
+        if type(error.code) is str and error.code in allowed:
+            raise
+        raise SystemExit("NATIVE_POOL_PIN_OWNER_REFUSED") from None
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        raise SystemExit("NATIVE_POOL_PIN_OWNER_REFUSED") from None
+    print(json.dumps(value, sort_keys=True))
+    return 0
+
+
+@contextmanager
+def _pin_native_context(args):
+    """Use the existing successor verifier and publication lock, never a hash-only claim."""
+    import importlib.util
+    rollout = Path(__file__).resolve().parents[2] / "ops/native_fabric/quota_continuity/rollout"
+    for name in ("native_install.py", "native_generation.py"):
+        source = rollout / name
+        if source.is_symlink() or not source.is_file():
+            raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
+    code = r"""
+import json,sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+import native_install as i
+import native_generation as g
+p,payload=i.read_successor(Path(sys.argv[2]))
+assert p['digest']==sys.argv[3]
+store=Path(p['store']);current=g.current(store);old=p['expected_selection']
+new={'schema':g.POINTER_SCHEMA,'generation':p['target_generation'],'previous':old['generation'],'sequence':old['sequence']+1}
+e=p['entries']['pool']
+if current==old:
+ i._upgrade_entries(p);phase='PREVIOUS'
+elif current==new:
+ i._upgrade_entries(p,complete=True);phase='SELECTED'
+elif (sys.argv[4] in (
+        'admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt3',
+        'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4')
+      and p['digest']=='77c2c136852a783a1e2572c145af7536ee6cd0d7f443daa4c09795c333fd3dc7'
+      and new['generation']=='28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce'
+      and new['sequence']==24
+      and isinstance(current,dict)
+      and current.get('schema')==g.POINTER_SCHEMA
+      and type(current.get('sequence')) is int
+      and current['sequence']>new['sequence']
+      and current.get('previous') not in (None,current.get('generation'))):
+ # Each original seven-seat native pin shares this exact completed immutable
+ # sequence-24 successor. Later native releases do not invalidate historical
+ # ingress, but only these seven enrolled accounts may accept the verified
+ # forward selection. No other pin/generation/account gains admission.
+ g.verify(store,new['generation'])
+ g.verify(store,current['generation'])
+ g.verify(store,current['previous'])
+ i._upgrade_entries(p,complete=True)
+ phase='SELECTED'
+else:raise ValueError('selection_refused')
+# Include the exact selected pointer in both lock-bound proofs. Without it,
+# a sequence-26 -> sequence-27 change could masquerade as identical SELECTED.
+print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_generation'],'expected_selection':old,'pool_target':e['target'],'pool_previous':e['previous'],'pool_bridge':e['bridge'],'store':p['store'],'phase':phase,'selection':current},sort_keys=True))
+"""
+    def proof():
+        try:
+            r = subprocess.run([sys.executable, "-I", "-B", "-c", code, str(rollout),
+                str(args.successor_bundle), args.successor_plan_sha256, args.account],
+                capture_output=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED") from None
+        if r.returncode != 0 or len(r.stdout) > 16384:
+            raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
+        value = _pin_owner_module().decode(r.stdout)
+        if set(value) != {"successor_digest", "target_generation", "expected_selection",
+                "pool_target", "pool_previous", "pool_bridge", "store", "phase", "selection"}:
+            raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
+        return value
+    first = proof()
+    spec = importlib.util.spec_from_file_location("_studio_pin_native_generation", rollout / "native_generation.py")
+    generation = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generation)
+    from contextlib import nullcontext
+    lock = (generation.publication_lock(Path(first["store"]))
+            if args.operation in ("apply", "reconcile") else nullcontext())
+    with lock:
+        checked = proof()
+        if checked != first:
+            raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_CHANGED")
+        yield checked
+
+
+def _pin_reject_generic_restage(account):
+    # The newly recognized cohort receives only preserving lifecycle/pin support.
+    # It does not silently acquire the generic capability-rebuilding upgrade path.
+    if account not in NATIVE_POOL_PIN_ACCOUNTS:
+        return
+    _validate_account_label(account)
+    roots = _build_runtime_roots(account)
+    if os.path.lexists(roots["state"] / "native-pool-pin"):
+        raise SystemExit("NATIVE_POOL_PIN_PROFILE_REQUIRES_PIN_OWNER")
+    if account not in NATIVE_POOL_PIN_PREDECESSORS:
+        return
+    if not os.path.lexists(roots["manifest"]):
+        return
+    prior = _read_manifest(roots["manifest"], account,
+        "com.mastermind.studio-direct-private." + account, required=True)
+    if prior["files"] == NATIVE_POOL_PIN_PREDECESSORS[account]:
+        raise SystemExit("NATIVE_POOL_PIN_PROFILE_REQUIRES_PIN_OWNER")
+
+
+def _pin_require_start(account, roots):
+    if account not in NATIVE_POOL_PIN_ACCOUNTS:
+        return
+    if account in ("chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9") and os.path.lexists(roots["state"] / "native-pool-pin-enrollment"):
+        _pin_enrollment_owner_module().require_start(sys.modules[__name__], account, roots)
+        return
+    _pin_owner_module().require_start(sys.modules[__name__], account, roots)
+
+
+@contextmanager
+def _c2_lifecycle_mutex(account: str):
+    """Serialize enrolled Paper and Fabric mutations on persistent private lock inodes.
+
+    Never unlink this file: replacement would let another invocation lock a new
+    inode while the previous one is still held. Closing the descriptor (including
+    process exit) releases the lock, and CLOEXEC prevents launchctl inheriting it.
+    """
+    if account not in (PAPER_RUNTIME_UPGRADE_ACCOUNTS | FABRIC_BACKEND_ACCOUNTS
+                       | {"chatgpt2-business", M1_PAPER_V20_ACCOUNT, "mastermind-os-publication"}
+                       | NATIVE_POOL_PIN_ACCOUNTS):
+        raise SystemExit("C2 lifecycle mutex cannot select another account")
+    subject = ("Fabric" if account in FABRIC_BACKEND_ACCOUNTS
+               else "M1 Paper" if account == M1_PAPER_V20_ACCOUNT else "C2")
+    lock_path = _build_runtime_roots(account)["state"] / C2_LIFECYCLE_LOCK_NAME
+    _assert_dest_safe(lock_path)
+    current = lock_path.parent
+    home = _user_root()
+    while True:
+        try:
+            info = current.lstat()
+        except OSError as exc:
+            raise SystemExit(f"{subject} lifecycle lock parent is unavailable") from exc
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) & 0o022
+                or (current == lock_path.parent and stat.S_IMODE(info.st_mode) & 0o077)):
+            raise SystemExit(f"{subject} lifecycle lock parent is unsafe")
+        if current == home:
+            break
+        current = current.parent
+    try:
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, FILE_MODE)
+    except OSError as exc:
+        raise SystemExit(f"{subject} lifecycle lock is unavailable") from exc
+    try:
+        def verify_inode():
+            held = os.fstat(fd)
+            _assert_dest_safe(lock_path)
+            named = lock_path.lstat()
+            if (not stat.S_ISREG(held.st_mode) or held.st_uid != os.getuid()
+                    or stat.S_IMODE(held.st_mode) != FILE_MODE or held.st_nlink != 1
+                    or held.st_size != 0 or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino)):
+                raise SystemExit(f"{subject} lifecycle lock inode is unsafe or changed")
+        verify_inode()
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise SystemExit(f"{subject} lifecycle mutation already in progress; refusing concurrent operation") from exc
+        except OSError as exc:
+            raise SystemExit(f"{subject} lifecycle lock could not be acquired") from exc
+        verify_inode()
+        yield
+    finally:
+        os.close(fd)
+
+
+def _c2_lifecycle_serialized(*, readonly_preflight: bool = False):
+    def decorate(function):
+        @wraps(function)
+        def guarded(args):
+            fleet_selection = getattr(args, "fleet_v20", False) is True
+            if fleet_selection and args.account not in FLEET_V20_ENROLLED_ACCOUNTS:
+                # Let the source owner issue the normal typed refusal before
+                # any unrelated account lifecycle lock inode can be created.
+                return function(args)
+            if ((args.account not in PAPER_RUNTIME_UPGRADE_ACCOUNTS and not fleet_selection)
+                    or (readonly_preflight and getattr(args, "preflight_only", False) is True)):
+                return function(args)
+            with _c2_lifecycle_mutex(args.account):
+                return function(args)
+        return guarded
+    return decorate
+
+
+def _fabric_lifecycle_serialized(*, readonly_preflight: bool = False):
+    """Only the two enrolled Fabric seats share their release locks with lifecycle calls."""
+    def decorate(function):
+        @wraps(function)
+        def guarded(args):
+            if (args.account not in FABRIC_BACKEND_ACCOUNTS
+                    or (readonly_preflight and getattr(args, "preflight_only", False) is True)):
+                return function(args)
+            # First-install staging predates a runtime/state directory. There can
+            # be no backend release until that first manifest exists.
+            if (function.__name__ == "cmd_stage"
+                    and not _build_runtime_roots(args.account)["state"].exists()):
+                return function(args)
+            with _c2_lifecycle_mutex(args.account):
+                return function(args)
+        return guarded
+    return decorate
+
+
+def _pin_lifecycle_serialized(function):
+    """Extend only normal lifecycle calls, without changing Paper eligibility gates."""
+    @wraps(function)
+    def guarded(args):
+        covered = PAPER_RUNTIME_UPGRADE_ACCOUNTS | FABRIC_BACKEND_ACCOUNTS
+        if args.account not in NATIVE_POOL_PIN_ACCOUNTS or args.account in covered:
+            return function(args)
+        with _c2_lifecycle_mutex(args.account):
+            return function(args)
+    return guarded
+
+
+def _pin_install_serialized(function):
+    """The existing installer mutates under the same pin/lifecycle lock."""
+    @wraps(function)
+    def guarded(source, node_abs, backend_abs, account, label, host, port, roots, **kwargs):
+        if account not in NATIVE_POOL_PIN_ACCOUNTS or not os.path.lexists(roots["manifest"]):
+            return function(source, node_abs, backend_abs, account, label, host, port, roots, **kwargs)
+        before = _fabric_release_bytes(roots["manifest"])
+        with _c2_lifecycle_mutex(account):
+            if _fabric_release_bytes(roots["manifest"]) != before:
+                raise SystemExit("NATIVE_POOL_PIN_INSTALL_CAS_REFUSED")
+            _pin_reject_generic_restage(account)
+            return function(source, node_abs, backend_abs, account, label, host, port, roots, **kwargs)
+    return guarded
+
+
+def _typed_git_config(user_root: Path, *, closed_repositories: bool = False) -> dict:
+    common = {
         "enabled": True,
         "workspaceCli": str(user_root / TYPED_GIT_WORKSPACE_CLI_REL),
         "gitBinary": TYPED_GIT_BINARY,
-        "sourceRepository": str(user_root / TYPED_GIT_SOURCE_REPOSITORY_REL),
-        "allowedRemoteUrls": [TYPED_GIT_REMOTE_URL],
         "commandTimeoutMs": 15_000,
         "pushTimeoutMs": 60_000,
     }
+    if closed_repositories:
+        return {
+            **common,
+            "repositories": [
+                {
+                    "repository": alias,
+                    "sourceRepository": str(user_root / source),
+                    "allowedRemoteUrls": [remote],
+                }
+                for alias, source, remote in TYPED_GIT_CLOSED_PROFILES
+            ],
+        }
+    return {
+        **common,
+        "sourceRepository": str(user_root / TYPED_GIT_SOURCE_REPOSITORY_REL),
+        "allowedRemoteUrls": [TYPED_GIT_REMOTE_URL],
+    }
 
 
-def _verify_paper_runtime(user_root: Path, *, expected_sha: str | None = None) -> dict:
-    runtime = user_root / PAPER_RUNTIME_REL
-    expected_sha = PAPER_BRIDGE_SHA256 if expected_sha is None else expected_sha
+def _verify_paper_runtime(
+    user_root: Path, *, expected_sha: str | None = None,
+    runtime_rel: Path | None = None, rel: Path | None = None,
+) -> dict:
+    # One owner, two reviewed callers: M1 uses runtime_rel; C2 uses rel.
+    if runtime_rel is not None and rel is not None and runtime_rel != rel:
+        raise SystemExit("Paper runtime conflicting generation selectors")
+    runtime_rel = runtime_rel or rel or PAPER_RUNTIME_REL
+    if runtime_rel not in (PAPER_RUNTIME_REL, M1_PAPER_V5_RUNTIME_REL,
+                           M1_PAPER_V20_RUNTIME_REL, PAPER_RUNTIME_V20_REL,
+                           PAPER_RUNTIME_V10_REL):
+        raise SystemExit("paper runtime generation is not an admitted target")
+    if runtime_rel == M1_PAPER_V5_RUNTIME_REL:
+        fixed_sha = M1_PAPER_V5_BRIDGE_SHA256
+    elif runtime_rel == PAPER_RUNTIME_V10_REL:
+        fixed_sha = PAPER_V10_BRIDGE_SHA256
+    elif runtime_rel in (M1_PAPER_V20_RUNTIME_REL, PAPER_RUNTIME_V20_REL):
+        # These constants are the same approved bridge in source, but individual
+        # hermetic tests deliberately mock their owner's expected bridge bytes.
+        allowed_sha = (M1_PAPER_V20_BRIDGE_SHA256, PAPER_V20_BRIDGE_SHA256)
+        if expected_sha is None:
+            expected_sha = M1_PAPER_V20_BRIDGE_SHA256
+        if expected_sha not in allowed_sha:
+            raise SystemExit("Paper exact runtime bridge SHA mismatch")
+        fixed_sha = expected_sha
+    else:
+        fixed_sha = None
+    if runtime_rel in (M1_PAPER_V5_RUNTIME_REL, PAPER_RUNTIME_V10_REL):
+        if expected_sha not in (None, fixed_sha):
+            raise SystemExit("Paper exact runtime bridge SHA mismatch")
+        expected_sha = fixed_sha
+    elif fixed_sha is None:
+        expected_sha = PAPER_BRIDGE_SHA256 if expected_sha is None else expected_sha
+    runtime = user_root / runtime_rel
     source = runtime / "source"
     bridge = source / "bridge.py"
     receipt_path = runtime / "RUNTIME.json"
@@ -491,7 +1199,7 @@ def _verify_paper_runtime(user_root: Path, *, expected_sha: str | None = None) -
     if (
         not isinstance(receipt, dict)
         or receipt.get("schema") != PAPER_RUNTIME_SCHEMA
-        or receipt.get("generation") != PAPER_RUNTIME_REL.name
+        or receipt.get("generation") != runtime_rel.name
         or receipt.get("bridge_sha256") != expected_sha
         or receipt.get("source_sha256") != expected_sources
         or receipt.get("network_install_performed") is not False
@@ -501,13 +1209,17 @@ def _verify_paper_runtime(user_root: Path, *, expected_sha: str | None = None) -
     return receipt
 
 
-def _paper_design_config(user_root: Path) -> dict:
-    runtime = user_root / PAPER_RUNTIME_REL
+def _paper_design_config(
+    user_root: Path, *,
+    rel: Path | None = None, bridge_sha256: str | None = None,
+) -> dict:
+    runtime = user_root / (PAPER_RUNTIME_REL if rel is None else rel)
+    bridge_sha256 = PAPER_BRIDGE_SHA256 if bridge_sha256 is None else bridge_sha256
     return {
         "enabled": True,
         "pythonPath": str(runtime / "venv" / "bin" / "python"),
         "bridgePath": str(runtime / "source" / "bridge.py"),
-        "bridgeSha256": PAPER_BRIDGE_SHA256,
+        "bridgeSha256": bridge_sha256,
         "appPath": str(user_root / PAPER_APP_REL),
         "commandTimeoutMs": PAPER_COMMAND_TIMEOUT_MS,
     }
@@ -538,7 +1250,13 @@ def _build_config(
     *,
     repository_workspaces: bool = False,
     commission_digest: str | None = None,
+    fabric_only: bool = False,
+    modern_fabric: bool = False,
 ) -> dict:
+    if type(modern_fabric) is not bool or (modern_fabric and (not fabric_only or host != "127.0.0.1")):
+        raise ValueError("modern Fabric requires the closed private Fabric-only profile")
+    if type(fabric_only) is not bool or (fabric_only and (repository_workspaces or commission_digest is not None)):
+        raise ValueError("Fabric-only profile cannot enable unrelated capabilities")
     if type(repository_workspaces) is not bool:
         raise ValueError("repository workspace setting must be boolean")
     # publicUrl is omitted: the private adapter rejects a public origin.
@@ -556,9 +1274,16 @@ def _build_config(
         "requestTimeoutMs": REQUEST_TIMEOUT_MS,
         "idleTimeoutMs": IDLE_TIMEOUT_MS,
         "reclaimIdleGraceMs": 30_000,
-        "gitPublish": _typed_git_config(user_root),
-        "paperDesign": _paper_design_config(user_root),
+        "gitPublish": False if fabric_only else _typed_git_config(
+            user_root, closed_repositories=repository_workspaces),
+        "paperDesign": False if fabric_only else _paper_design_config(user_root),
     }
+    if fabric_only:
+        config["fabricOnly"] = True
+        config["childEnv"]["MMX_FABRIC_SDK_PACKAGE"] = str(state_dir.parent / "package.json")
+    if modern_fabric:
+        config["modernFabricProtocol"] = True
+        config["backendMode"] = "shared-account"
     if repository_workspaces:
         config["repositoryWorkspaces"] = {
             "enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]
@@ -568,9 +1293,11 @@ def _build_config(
                 or type(commission_digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", commission_digest)):
             raise ValueError("commission publication requires closed private workspace profile")
         config["commissionPublication"] = {"enabled": True, "configurationDigest": commission_digest}
-    fleet_status = _fleet_status_config(user_root)
-    if fleet_status is not None:
-        config["fleetStatus"] = fleet_status
+    # An attended Fabric-only channel exposes no unrelated host telemetry.
+    if not fabric_only:
+        fleet_status = _fleet_status_config(user_root)
+        if fleet_status is not None:
+            config["fleetStatus"] = fleet_status
     return config
 
 
@@ -652,7 +1379,31 @@ def _valid_manifest(data, account: str, label: str) -> bool:
         ):
             return False
     files = data.get("files")
-    if not isinstance(files, dict) or frozenset(files) not in KNOWN_MANIFEST_FILESETS:
+    if not isinstance(files, dict):
+        return False
+    fileset = frozenset(files)
+    c2_paper_predecessor = (
+        version == MANIFEST_VERSION and account == C2_PAPER_ACCOUNT
+        and files == C2_PAPER_FILES_SHA256
+        and all(data.get(key) == value for key, value in C2_PAPER_RUNTIME_IDENTITY.items())
+        and _canonical_json_sha256(data) in C2_PAPER_MANIFEST_CANONICAL_SHA256
+    )
+    c4_paper_cohort = (
+        version == MANIFEST_VERSION and account == C4_PAPER_ACCOUNT
+        and files == C2_PAPER_FILES_SHA256
+        and all(data.get(key) == value for key, value in C4_PAPER_RUNTIME_IDENTITY.items())
+        and _canonical_json_sha256(data) in C4_PAPER_MANIFEST_CANONICAL_SHA256
+    )
+    if (fileset not in KNOWN_MANIFEST_FILESETS
+            and not (version == MANIFEST_VERSION and (
+                fileset == V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
+                or (account == "chatgpt2-business"
+                    and fileset == V2_C2_BUSINESS_FLEET_PREDECESSOR)
+            ))
+            and not c2_paper_predecessor and not c4_paper_cohort
+            and not _sealed_v2_fleet_gateway_predecessor(data, account)
+            and not (version == MANIFEST_VERSION and account in NATIVE_POOL_PIN_PREDECESSORS
+                     and files == NATIVE_POOL_PIN_PREDECESSORS[account])):
         return False
     if any(not _sha256_hex(digest) for digest in files.values()):
         return False
@@ -676,16 +1427,56 @@ def _read_manifest(
 ) -> dict | None:
     if manifest_path.is_symlink():
         raise SystemExit("refusing symlink manifest")
-    if not manifest_path.exists():
+    try:
+        fd = os.open(
+            manifest_path,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
+        )
+    except FileNotFoundError:
         if required:
             raise SystemExit("not staged: manifest missing")
         return None
+    except OSError as exc:
+        raise SystemExit("corrupt manifest") from exc
     try:
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        raise SystemExit("corrupt manifest")
+        before = os.fstat(fd)
+        # Match the bounded regular-file contract of the existing tunnel reader.
+        limit = 65536
+        if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= limit:
+            raise SystemExit("corrupt manifest")
+        raw = bytearray()
+        while len(raw) <= limit:
+            part = os.read(fd, min(65536, limit + 1 - len(raw)))
+            if not part:
+                break
+            raw.extend(part)
+        after = os.fstat(fd)
+        named = manifest_path.lstat()
+        identity = lambda info: (
+            info.st_dev, info.st_ino, info.st_mode, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns,
+        )
+        if (len(raw) != before.st_size or len(raw) > limit
+                or identity(before) != identity(after)
+                or identity(after) != identity(named)):
+            raise SystemExit("corrupt manifest")
+        captured = bytes(raw)
+    except OSError as exc:
+        raise SystemExit("corrupt manifest") from exc
+    finally:
+        os.close(fd)
+    try:
+        data = json.loads(captured.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit("corrupt manifest") from exc
     if not _valid_manifest(data, account, label):
         raise SystemExit("corrupt manifest")
+    if _sealed_v2_fleet_gateway_predecessor(data, account):
+        expected_bytes_sha = SEALED_V2_FLEET_GATEWAY_PREDECESSORS[account][1]
+        # Authenticate the same immutable bytes that produced data. A later
+        # pathname replacement must never supply a different accepted seal.
+        if hashlib.sha256(captured).hexdigest() != expected_bytes_sha:
+            raise SystemExit("corrupt manifest")
     return data
 
 
@@ -744,6 +1535,44 @@ def _launchd_inspect(label: str) -> dict | None:
     parsed = _parse_launchd_print(res.stdout)
     if parsed["state"] is None and parsed["pid"] is None:
         return None
+    return parsed
+
+
+def _lifecycle_inspect(account: str, label: str, roots: dict, *,
+                       require_positive: bool = False) -> dict | None:
+    """Enrolled lifecycle owners require positive identity or exact absence.
+
+    Preserve generic C2 Business lifecycle inspection semantics; its dedicated
+    Paper cutover explicitly opts into stricter absence proof.
+    """
+    if (account not in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT)
+            and account not in _NATIVE_POOL_PIN_TAILNET_CANONICAL
+            and account not in FABRIC_BACKEND_ACCOUNTS and not require_positive):
+        return _launchd_inspect(label)
+    subject = "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "C2"
+    target = _launchd_target(label)
+    absent = (f'Bad request.\nCould not find service "{label}" '
+              f'in domain for user gui: {os.getuid()}\n')
+    try:
+        result = _run(["launchctl", "print", target], check=False)
+    except Exception as exc:
+        raise SystemExit(f"{subject} launchctl state is indeterminate; refusing lifecycle effect") from exc
+    if result.returncode == 113 and result.stdout == "" and result.stderr == absent:
+        return None
+    lines = result.stdout.splitlines()
+    # launchctl indents target fields by one tab; nested coalition states use
+    # additional tabs and must not replace the service's own state or identity.
+    fields = {key: [line for line in lines[1:-1] if line.startswith(f"\t{key} = ")]
+              for key in ("path", "state", "pid")}
+    parsed = _parse_launchd_print("\n".join(line for values in fields.values() for line in values))
+    if (result.returncode != 0 or result.stderr != ""
+            or not lines or lines[0] != f"{target} = {{" or lines[-1] != "}"
+            or len(fields["path"]) != 1 or len(fields["state"]) != 1 or len(fields["pid"]) > 1
+            or parsed["path"] != str(roots["plist"])
+            or parsed["state"] not in ("running", "waiting")
+            or (fields["pid"] and (not isinstance(parsed["pid"], int) or parsed["pid"] <= 0))
+            or (parsed["state"] == "running" and parsed["pid"] is None)):
+        raise SystemExit(f"{subject} launchctl state is indeterminate; refusing lifecycle effect")
     return parsed
 
 
@@ -899,6 +1728,7 @@ def _validate_port(port: int) -> None:
         raise SystemExit("--port must be between 1024 and 65535")
 
 
+@_pin_install_serialized
 def _write_install(
     source: Path,
     node_abs: Path,
@@ -914,6 +1744,8 @@ def _write_install(
     dependency_tree_hash: str | None = None,
     repository_workspaces: bool = False,
     commission_digest: str | None = None,
+    fabric_only: bool = False,
+    modern_fabric: bool = False,
 ) -> int:
     user_root = _user_root()
     _ensure_secure_dir(roots["base"])
@@ -939,6 +1771,8 @@ def _write_install(
                 user_root,
                 repository_workspaces=repository_workspaces,
                 commission_digest=commission_digest,
+                fabric_only=fabric_only,
+                modern_fabric=modern_fabric,
             ),
             indent=2,
             sort_keys=True,
@@ -1008,6 +1842,59 @@ def _repository_workspace_setting(args, roots: dict, prior: dict | None) -> bool
     return requested or previous
 
 
+def _fabric_profile_setting(args, roots: dict, prior: dict | None) -> bool:
+    """Retain the manifest-verified restricted profile; never repurpose Studio."""
+    requested = getattr(args, "fabric_only", False)
+    if type(requested) is not bool:
+        raise SystemExit("invalid Fabric profile setting")
+    previous = False
+    if prior is not None:
+        if _sha256_file(roots["config"]) != prior.get("configHash"):
+            raise SystemExit("Fabric profile changed during preflight")
+        config = json.loads(roots["config"].read_text(encoding="utf-8"))
+        if "fabricOnly" in config:
+            if (config["fabricOnly"] is not True or config.get("gitPublish") is not False
+                    or config.get("paperDesign") is not False
+                    or "repositoryWorkspaces" in config or "commissionPublication" in config):
+                raise SystemExit("invalid retained Fabric-only profile")
+            previous = True
+        if requested and not previous:
+            raise SystemExit("create a separate Fabric installation; do not repurpose Studio")
+    enabled = requested or previous
+    if enabled and (getattr(args, "enable_repository_workspaces", False)
+                    or getattr(args, "os_commission_config_sha256", None) is not None):
+        raise SystemExit("Fabric-only profile cannot enable unrelated capabilities")
+    return enabled
+
+
+def _modern_fabric_setting(args, roots: dict, prior: dict | None, fabric_only: bool) -> bool:
+    """Explicit opt-in or verified retention in the same restricted installation."""
+    requested = getattr(args, "modern_fabric_protocol", None)
+    if requested is not None and type(requested) is not bool:
+        raise SystemExit("invalid modern Fabric protocol setting")
+    previous = False
+    if prior is not None:
+        if _sha256_file(roots["config"]) != prior.get("configHash"):
+            raise SystemExit("modern Fabric configuration changed during preflight")
+        config = json.loads(roots["config"].read_text(encoding="utf-8"))
+        value = config.get("modernFabricProtocol", False)
+        if type(value) is not bool:
+            raise SystemExit("invalid retained modern Fabric protocol setting")
+        if value:
+            if (not fabric_only or config.get("fabricOnly") is not True
+                    or config.get("backendMode") != "shared-account"
+                    or config.get("host") != "127.0.0.1"
+                    or config.get("gitPublish") is not False
+                    or config.get("paperDesign") is not False
+                    or any(key in config for key in ("repositoryWorkspaces", "commissionPublication", "fleetStatus", "publicUrl"))):
+                raise SystemExit("invalid retained modern Fabric-only profile")
+            previous = True
+    enabled = previous if requested is None else requested
+    if enabled and not fabric_only:
+        raise SystemExit("modern protocol requires the existing Fabric-only profile")
+    return enabled
+
+
 OS_COMMISSION_CONFIG = Path("/Library/Application Support/MastermindExecutive/config/os-commission-publication.json")
 
 
@@ -1059,8 +1946,10 @@ def _commission_setting(args, roots: dict, prior: dict | None) -> str | None:
     return digest
 
 
+@_fabric_lifecycle_serialized()
 def cmd_stage(args) -> int:
     account = args.account
+    _pin_reject_generic_restage(account)
     _validate_account_label(account)
     label = f"com.mastermind.studio-direct-private.{account}"
     host = "127.0.0.1"
@@ -1079,9 +1968,10 @@ def cmd_stage(args) -> int:
     prior = _preflight_stage(
         source, node_abs, backend_abs, account, label, host, port, roots
     )
-    # The Paper-owned immutable runtime must exist and match before this
-    # lifecycle writes a config/plist that advertises the Paper capability.
-    _verify_paper_runtime(_user_root())
+    fabric_only = _fabric_profile_setting(args, roots, prior)
+    # Paper remains mandatory only for a profile that actually exposes Paper.
+    if not fabric_only:
+        _verify_paper_runtime(_user_root())
     retained_dependency_hash = (
         prior.get("dependencyTreeHash")
         if isinstance(prior, dict) and prior.get("version") == MANIFEST_VERSION
@@ -1094,7 +1984,35 @@ def cmd_stage(args) -> int:
         dependency_tree_hash=retained_dependency_hash,
         repository_workspaces=_repository_workspace_setting(args, roots, prior),
         commission_digest=_commission_setting(args, roots, prior),
+        fabric_only=fabric_only,
+        modern_fabric=_modern_fabric_setting(args, roots, prior, fabric_only),
     )
+
+def _sealed_historical_tailnet_launch_argv(
+    account: str, manifest: dict, roots: dict,
+    expected_argv: list[str], actual_argv: list[str],
+) -> bool:
+    """Allow only the two byte-pinned historical Fabric tailnet launchers.
+
+    The caller has already verified every module hash, the immutable original
+    manifest bytes, the plist SHA256, and the account/label. This helper does
+    not permit re-staging or changing the original launch agent.
+    """
+    if account not in {"fabric-design", "fabric-read"}:
+        return False
+    if not _sealed_v2_fleet_gateway_predecessor(manifest, account):
+        return False
+    if "tailnet-gateway.mjs" not in manifest.get("files", {}):
+        return False
+    if len(expected_argv) != 3 or len(actual_argv) != 3:
+        return False
+    historical_argv = [
+        expected_argv[0],
+        str(roots["base"] / "tailnet-gateway.mjs"),
+        expected_argv[2],
+    ]
+    return actual_argv == historical_argv
+
 
 def _verify_staged_install(
     account: str,
@@ -1162,16 +2080,839 @@ def _verify_staged_install(
         raise SystemExit("plist is not our exact install")
 
     expected_argv = _expected_argv(node, roots["gateway"], roots["config"])
-    if list(plist.get("ProgramArguments") or []) != expected_argv:
+    actual_argv = list(plist.get("ProgramArguments") or [])
+    historical_tailnet = _sealed_historical_tailnet_launch_argv(
+        account, manifest, roots, expected_argv, actual_argv,
+    )
+    if actual_argv != expected_argv and not historical_tailnet:
         raise SystemExit("plist is not our exact install")
-    if Path(expected_argv[1]).name != PRIVATE_GATEWAY_NAME:
+    if (Path(actual_argv[1]).name != PRIVATE_GATEWAY_NAME
+            and not historical_tailnet):
         raise SystemExit("plist is not our exact install")
 
     return manifest
 
 
+def _native_pin_manifest_valid(data, account: str, label: str) -> bool:
+    """Keep the private profile rules and close the two Tailnet state sets."""
+    if not _valid_manifest(data, account, label):
+        return False
+    if account not in _NATIVE_POOL_PIN_TAILNET_CANONICAL:
+        return True
+    return (data["files"] == NATIVE_POOL_PIN_PREDECESSORS[account]
+            and _canonical_json_sha256(data)
+            in _NATIVE_POOL_PIN_TAILNET_CANONICAL[account])
+
+
+def _verify_native_pin_tailnet_install(account: str, label: str, roots: dict) -> dict:
+    """Read the complete existing seal for one exact preserved Tailnet seat.
+
+    The private verifier remains private-only. No argument, path or caller
+    selector can opt an arbitrary profile into this transport. Even stop/seal
+    callers must retain the complete reviewed runtime seal for these states.
+    """
+    manifest = _pin_owner_module().decode(_fabric_release_bytes(roots["manifest"]))
+    if (account not in _NATIVE_POOL_PIN_TAILNET_CANONICAL
+            or not _native_pin_manifest_valid(manifest, account, label)):
+        raise SystemExit("not staged: preserved Tailnet profile differs")
+    for name, expected_hash in manifest["files"].items():
+        if hashlib.sha256(_fabric_release_bytes(roots["base"] / name)).hexdigest() != expected_hash:
+            raise SystemExit("not staged: preserved Tailnet module differs")
+    if hashlib.sha256(_fabric_release_bytes(roots["config"])).hexdigest() != manifest["configHash"]:
+        raise SystemExit("not staged: preserved Tailnet config differs")
+    plist_raw = _fabric_release_bytes(roots["plist"])
+    if hashlib.sha256(plist_raw).hexdigest() != manifest["plistHash"]:
+        raise SystemExit("not staged: preserved Tailnet plist differs")
+    node, backend = Path(manifest["node"]), Path(manifest["backend"])
+    if (_stable_regular_file_hash(node, label="Tailnet node") != manifest["nodeHash"]
+            or _stable_regular_file_hash(backend, label="Tailnet backend") != manifest["backendHash"]
+            or manifest["dependencyTreeHash"] is None
+            or _dependency_tree_hash(roots["node_modules"]) != manifest["dependencyTreeHash"]):
+        raise SystemExit("not staged: preserved Tailnet runtime differs")
+    plist = plistlib.loads(plist_raw)
+    gateway = roots["base"] / "tailnet-gateway.mjs"
+    expected_argv = _expected_argv(node, gateway, roots["config"])
+    if (not isinstance(plist, dict) or plist.get("Label") != label
+            or list(plist.get("ProgramArguments") or []) != expected_argv):
+        raise SystemExit("plist is not the exact preserved Tailnet install")
+    return manifest
+
+
+def _verify_native_pin_install(account: str, label: str, roots: dict, *,
+                               require_runtime_seal: bool = True) -> dict:
+    """Select only the two closed Tailnet owners; preserve private admission."""
+    if account in _NATIVE_POOL_PIN_TAILNET_CANONICAL:
+        return _verify_native_pin_tailnet_install(account, label, roots)
+    if require_runtime_seal:
+        return _verify_staged_install(account, label, roots)
+    return _verify_staged_install(account, label, roots, require_runtime_seal=False)
+
+
+
+def _verify_upgrade_preserves_installed_fleet_capabilities(
+    prior: dict, roots: dict, projected: dict,
+) -> None:
+    """Fail closed before any writes when an enrolled v0.1.10 fleet seat would lose service.
+
+    This is an explicit migration guard, NOT permission to broaden historical
+    filesets or treat an approved old manifest as permission to downgrade it.
+    A separately reviewed compatibility source must retain both fleet modules
+    and every configured fleet route, scheduling cap and fleet-status binding.
+    """
+    if frozenset(prior["files"]) not in (
+        V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR,
+        frozenset(C2_PAPER_FILES_SHA256),
+        V2_C2_BUSINESS_FLEET_PREDECESSOR,
+    ):
+        return
+    required = frozenset(("fleet-routing.mjs", "tailnet-gateway.mjs"))
+    if not required.issubset(STAGE_FILES):
+        raise SystemExit(
+            "refusing upgrade: installed fleet/tailnet capability modules absent "
+            "from target release; reviewed compatibility migration required"
+        )
+    config_path = roots["config"]
+    if config_path.is_symlink() or not config_path.is_file():
+        raise SystemExit("refusing upgrade: existing fleet config unavailable")
+    before_hash = _stable_regular_file_hash(config_path, label="existing config")
+    if before_hash != prior["configHash"]:
+        raise SystemExit("refusing upgrade: existing fleet config hash changed")
+    try:
+        existing = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise SystemExit("refusing upgrade: existing fleet config invalid") from exc
+    if (_stable_regular_file_hash(config_path, label="existing config") != before_hash
+            or not isinstance(existing, dict)):
+        raise SystemExit("refusing upgrade: existing fleet config changed")
+    routes = existing.get("fleetRouting")
+    if (not isinstance(routes, dict) or routes.get("enabled") is not True
+            or not isinstance(routes.get("routes"), list)
+            or len(routes["routes"]) < 1):
+        raise SystemExit("refusing upgrade: historical fleet routes unverified")
+    for key in (
+        "fleetRouting", "maxPerSessionConcurrency", "maxQueuedPerSession",
+        "fleetStatus",
+    ):
+        if existing.get(key) != projected.get(key):
+            raise SystemExit(
+                f"refusing upgrade: fleet capability {key} would change; "
+                "reviewed compatibility migration required"
+            )
+
+
+def _upgrade_fleet_v10_publisher_only(
+    args, source: Path, node_abs: Path, backend_abs: Path,
+    account: str, label: str, port: int, roots: dict,
+) -> int:
+    """Replace only the two reviewed publisher modules on the sealed fleet 0.1.10.
+
+    The canonical private_service installer owns this transaction. Never
+    replace a live gateway with protected-master's different runtime bundle.
+    The administrator supplies the exact observed manifest digest (CAS).
+    """
+    expected = getattr(args, "publisher_expected_manifest_sha256", None)
+    preview = getattr(args, "publisher_preflight_only", False)
+    if (account not in FLEET_V10_ENROLLED_ACCOUNTS or type(preview) is not bool
+            or not _sha256_hex(expected)
+            or getattr(args, "fabric_only", False)
+            or getattr(args, "enable_repository_workspaces", False)
+            or getattr(args, "os_commission_config_sha256", None)):
+        raise SystemExit("fleet publisher compatibility requires an existing enrolled fleet owner and exact manifest CAS")
+    path = roots["manifest"]
+    if _stable_regular_file_hash(path, label="installed manifest") != expected:
+        raise SystemExit("fleet publisher compatibility: installed manifest CAS mismatch")
+    prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    if (prior.get("version") != MANIFEST_VERSION
+            or frozenset(prior["files"]) != V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
+            or not prior.get("dependencyTreeHash")
+            or prior.get("node") != str(node_abs)
+            or prior.get("backend") != str(backend_abs)
+            or prior.get("host") != "127.0.0.1"
+            or prior.get("port") != port):
+        raise SystemExit("fleet publisher compatibility: original sealed identity does not match")
+    for name, expected_blob in FLEET_V10_PRESERVED_GIT_BLOBS.items():
+        candidate = roots["base"] / name
+        _assert_dest_safe(candidate)
+        data = candidate.read_bytes()
+        actual = hashlib.sha1(
+            b"blob " + str(len(data)).encode("ascii") + b"\0" + data
+        ).hexdigest()
+        if actual != expected_blob:
+            raise SystemExit("fleet publisher compatibility: preserved fleet generation changed")
+    config_path = roots["config"]
+    manifest_path = roots["manifest"]
+    for candidate in (config_path, manifest_path):
+        _assert_dest_safe(candidate)
+    old_config_bytes = config_path.read_bytes()
+    old_manifest_bytes = manifest_path.read_bytes()
+    if (hashlib.sha256(old_config_bytes).hexdigest() != prior["configHash"]
+            or hashlib.sha256(old_manifest_bytes).hexdigest() != expected):
+        raise SystemExit("fleet publisher compatibility: verified snapshot changed during preflight")
+    try:
+        old_config = json.loads(old_config_bytes)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise SystemExit("fleet publisher compatibility: original config invalid") from exc
+    user_root = _user_root()
+    if (type(old_config) is not dict
+            or old_config.get("repositoryWorkspaces") != {
+                "enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]}
+            or old_config.get("fleetRouting", {}).get("enabled") is not True
+            or len(old_config["fleetRouting"].get("routes", [])) != 2
+            or old_config.get("maxPerSessionConcurrency") != 8
+            or old_config.get("maxQueuedPerSession") != 16
+            or type(old_config.get("fleetStatus")) is not dict
+            or old_config.get("fabricOnly") is True
+            or "commissionPublication" in old_config
+            or "modernFabricProtocol" in old_config):
+        raise SystemExit("fleet publisher compatibility: original scoped capabilities changed")
+    # Preserve historical legacy/index-sync transition constraints. The
+    # current target admits only two *exact sealed* closed-profile predecessor
+    # pairs: original index-sync and installed merge-capable publisher. The
+    # sealed manifest, not the caller, chooses the transition.
+    original_publisher = old_config.get("gitPublish")
+    expected_closed = _typed_git_config(user_root, closed_repositories=True)
+    patch_hashes = FLEET_V10_PUBLISHER_PATCH_SHA256
+    preserve_config_bytes = False
+    if (original_publisher == expected_closed and any(
+            all(prior["files"].get(name) == digest for name, digest in exact_pair.items())
+            for exact_pair in (
+                FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256,
+                FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256,
+            ))):
+        patch_hashes = FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256
+        preserve_config_bytes = True
+    elif original_publisher == _typed_git_config(user_root):
+        pass  # existing legacy-to-closed upgrade
+    elif (original_publisher == expected_closed
+            and prior["files"].get("git-publish.mjs") ==
+                FLEET_V10_PREVIOUS_CLOSED_PUBLISHER_SHA256
+            and prior["files"].get("workspace-access.mjs") ==
+                FLEET_V10_PUBLISHER_PATCH_SHA256["workspace-access.mjs"]):
+        pass  # exact reviewed closed-to-closed module update
+    else:
+        raise SystemExit("fleet publisher compatibility: unrecognized prior publisher identity")
+    new_config = dict(old_config)
+    new_config["gitPublish"] = expected_closed
+    if ({k: v for k, v in new_config.items() if k != "gitPublish"}
+            != {k: v for k, v in old_config.items() if k != "gitPublish"}):
+        raise SystemExit("fleet publisher compatibility: unrelated config change")
+    config_bytes = (old_config_bytes if preserve_config_bytes else
+                    json.dumps(new_config, indent=2, sort_keys=True).encode("utf-8"))
+    names = tuple(patch_hashes)
+    old_files = {}
+    new_files = {}
+    for name in names:
+        installed = roots["base"] / name
+        incoming = source / name
+        _assert_dest_safe(installed)
+        if incoming.is_symlink() or not incoming.is_file():
+            raise SystemExit("fleet publisher compatibility: source module unavailable")
+        original = installed.read_bytes()
+        modified = incoming.read_bytes()
+        if (hashlib.sha256(original).hexdigest() != prior["files"][name]
+                or hashlib.sha256(modified).hexdigest() != patch_hashes[name]):
+            raise SystemExit("fleet publisher compatibility: source or installed module hash mismatch")
+        old_files[name] = original
+        new_files[name] = modified
+    future = dict(prior)
+    future["files"] = dict(prior["files"])
+    for name in names:
+        future["files"][name] = hashlib.sha256(new_files[name]).hexdigest()
+    future["configHash"] = hashlib.sha256(config_bytes).hexdigest()
+    if not _valid_manifest(future, account, label):
+        raise SystemExit("fleet publisher compatibility: prospective manifest invalid")
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("fleet publisher compatibility: installed state changed during planning")
+    if preview:
+        print(json.dumps({
+            "preflight": True, "effect": "NOT_APPLIED", "account": account,
+            "originalManifestSha256": expected,
+            "publisherModules": list(names),
+            "fleetRoutesPreserved": len(old_config["fleetRouting"]["routes"]),
+            "concurrencyPreserved": [8, 16],
+            "existingBundleRetained": True,
+        }, sort_keys=True))
+        return 0
+    if _launchd_inspect(label) is not None:
+        raise SystemExit("refusing fleet publisher upgrade while service is loaded; stop first")
+    # Reconfirm all observed bytes immediately before the first effect.
+    if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
+            or _stable_regular_file_hash(config_path, label="installed config") != prior["configHash"]
+            or any(_sha256_file(roots["base"] / n) != prior["files"][n] for n in names)):
+        raise SystemExit("fleet publisher compatibility: original installation changed")
+    # All new source was hash-pinned before entry. Manifest is written LAST:
+    # interrupted installation fails the existing manifest/hash gate closed.
+    old_bytes = {**{roots["base"] / n: old_files[n] for n in names},
+                 config_path: old_config_bytes, manifest_path: old_manifest_bytes}
+    planned = {**{roots["base"] / n: new_files[n] for n in names},
+               config_path: config_bytes,
+               manifest_path: json.dumps(future, indent=2, sort_keys=True).encode("utf-8")}
+    committed = False
+    try:
+        for target, payload in planned.items():
+            _atomic_write_bytes(target, payload)
+        committed = True
+        _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    except BaseException as exc:
+        if committed:
+            raise SystemExit(
+                "fleet publisher compatibility: EFFECT_UNKNOWN after manifest commit; "
+                "inspect original service before attempting recovery"
+            ) from exc
+        try:
+            # os.replace may have succeeded even when a later fsync failed.
+            # Thus a return-code ledger cannot prove which files changed.
+            # Reconcile *every* planned path by bytes before safe rollback.
+            if _launchd_inspect(label) is not None:
+                raise RuntimeError("service became loaded during transaction")
+            observed = {target: target.read_bytes() for target in planned}
+            if any(observed[t] not in (old_bytes[t], planned[t]) for t in planned):
+                raise RuntimeError("non-owned concurrent mutation while recovering")
+            for target in reversed(tuple(planned)):
+                if observed[target] != old_bytes[target]:
+                    _atomic_write_bytes(target, old_bytes[target])
+            if (any(target.read_bytes() != old_bytes[target] for target in planned)
+                    or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected):
+                raise RuntimeError("rollback byte identity differs")
+            _verify_staged_install(
+                account, label, roots, require_runtime_seal=True)
+        except BaseException as rollback_exc:
+            raise SystemExit(
+                "fleet publisher compatibility: EFFECT_UNKNOWN during rollback; "
+                "do not restart or replay until original state is reconciled"
+            ) from rollback_exc
+        raise SystemExit("fleet publisher compatibility: NOT_APPLIED; original state restored") from exc
+    print(json.dumps({
+        "publisherFleetCompatibility": True, "account": account, "effect": "APPLIED",
+        "manifestSha256": _sha256_file(manifest_path),
+        "gatewayAndFleetModulesPreserved": True,
+        "repositoryWorkspacesPreserved": True,
+        "serviceStarted": False,
+    }, sort_keys=True))
+    return 0
+
+
+def _upgrade_c2_business_original_fleet_mastermind_only(
+    args, source: Path, node_abs: Path, backend_abs: Path,
+    account: str, label: str, port: int, roots: dict,
+) -> int:
+    """One original installer transaction: C2's exact 11-file -> 12-file source.
+
+    Preserves every configured capability and original Mastermind-only Git
+    boundary. No auto-enrollment of Macro/Terminal, no service restart, and no
+    cross-seat copying of secrets/config. Source bytes are pinned independently
+    of the supplied directory and must be reviewed before any live release.
+    """
+    expected = getattr(args, "publisher_expected_manifest_sha256", None)
+    preview = getattr(args, "publisher_preflight_only", False)
+    if (account not in ("chatgpt2-business", C2_PAPER_ACCOUNT) or type(preview) is not bool
+            or not _sha256_hex(expected)
+            or getattr(args, "enable_repository_workspaces", False) is True
+            or getattr(args, "fabric_only", False) is True
+            or type(getattr(args, "os_commission_config_sha256", None)) is str):
+        raise SystemExit("C2 compatibility requires original Business owner, sealed manifest CAS and no new repository grants")
+    personal = account == C2_PAPER_ACCOUNT
+    if ((getattr(args, "c2_business_fleet_compat", False) is True)
+            == (getattr(args, "c2_personal_closed_publisher", False) is True)):
+        raise SystemExit("C2 compatibility: select one original owner operation")
+    if personal != (getattr(args, "c2_personal_closed_publisher", False) is True):
+        raise SystemExit("C2 compatibility: operation/account mismatch")
+    target_patch = C2_PERSONAL_TARGET_PATCH_SHA256 if personal else C2_BUSINESS_TARGET_PATCH_SHA256
+    manifest_path = roots["manifest"]
+    config_path = roots["config"]
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("C2 compatibility: original manifest CAS mismatch")
+    if personal and expected != C2_PERSONAL_CURRENT_MANIFEST_SHA256:
+        raise SystemExit("C2 compatibility: Personal identity mismatch")
+    prior = _verify_staged_install(
+        account, label, roots, require_runtime_seal=True)
+    if (prior.get("version") != MANIFEST_VERSION
+            or frozenset(prior["files"]) != V2_C2_BUSINESS_FLEET_PREDECESSOR
+            or not prior.get("dependencyTreeHash")
+            or prior.get("node") != str(node_abs)
+            or prior.get("backend") != str(backend_abs)
+            or prior.get("host") != "127.0.0.1"
+            or prior.get("port") != port):
+        raise SystemExit("C2 compatibility: original sealed identity does not match")
+    original_blobs = C2_PAPER_FILES_SHA256 if personal else C2_BUSINESS_V10_ORIGINAL_BLOBS
+    for name, expected_blob in original_blobs.items():
+        installed = roots["base"] / name
+        _assert_dest_safe(installed)
+        raw = installed.read_bytes()
+        observed_blob = hashlib.sha1(
+            b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw
+        ).hexdigest()
+        if (hashlib.sha256(raw).hexdigest() if personal else observed_blob) != expected_blob:
+            raise SystemExit("C2 compatibility: original generation changed")
+    if frozenset(original_blobs) != V2_C2_BUSINESS_FLEET_PREDECESSOR:
+        raise SystemExit("C2 compatibility: pinned predecessor incomplete")
+    if (_stable_regular_file_hash(config_path, label="installed config")
+            != prior["configHash"]):
+        raise SystemExit("C2 compatibility: original config changed")
+    old_config_bytes = config_path.read_bytes()
+    try:
+        old_config = json.loads(old_config_bytes)
+    except (ValueError, UnicodeError) as exc:
+        raise SystemExit("C2 compatibility: original config unreadable") from exc
+    if (type(old_config) is not dict
+            or "repositoryWorkspaces" in old_config
+            or old_config.get("gitPublish") != _typed_git_config(_user_root())
+            or old_config.get("fleetRouting", {}).get("enabled") is not True
+            or len(old_config["fleetRouting"].get("routes", [])) != 2
+            or old_config.get("maxPerSessionConcurrency") != 8
+            or old_config.get("maxQueuedPerSession") != 16
+            or type(old_config.get("fleetStatus")) is not dict
+            or old_config.get("fabricOnly") is True
+            or "commissionPublication" in old_config
+            or "modernFabricProtocol" in old_config):
+        raise SystemExit("C2 compatibility: original Mastermind-only capabilities changed")
+    if (hashlib.sha256(old_config_bytes).hexdigest() != prior["configHash"]
+            or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected):
+        raise SystemExit("C2 compatibility: original snapshot changed")
+    if frozenset(target_patch) != frozenset((
+            "gateway.mjs", "git-publish.mjs", "workspace-access.mjs")):
+        raise SystemExit("C2 compatibility: proposed patch scope invalid")
+    old_modules: dict[str, bytes | None] = {}
+    new_modules: dict[str, bytes] = {}
+    for name, digest in target_patch.items():
+        installed = roots["base"] / name
+        staged = source / name
+        _assert_dest_safe(installed)
+        if staged.is_symlink() or not staged.is_file():
+            raise SystemExit("C2 compatibility: reviewed source module missing")
+        data = staged.read_bytes()
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise SystemExit("C2 compatibility: reviewed source hash mismatch")
+        if name in prior["files"]:
+            original = installed.read_bytes()
+            if hashlib.sha256(original).hexdigest() != prior["files"][name]:
+                raise SystemExit("C2 compatibility: installed module hash mismatch")
+            old_modules[name] = original
+        else:
+            if installed.exists() or installed.is_symlink():
+                raise SystemExit("C2 compatibility: new module already exists")
+            old_modules[name] = None
+        new_modules[name] = data
+    new_config = dict(old_config)
+    if personal:
+        new_config["gitPublish"] = _typed_git_config(_user_root(), closed_repositories=True)
+        new_config["repositoryWorkspaces"] = {"enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]}
+    future = dict(prior)
+    future["files"] = dict(prior["files"])
+    for name, data in new_modules.items():
+        future["files"][name] = hashlib.sha256(data).hexdigest()
+    if personal:
+        future["configHash"] = hashlib.sha256(json.dumps(new_config, indent=2, sort_keys=True).encode()).hexdigest()
+    if (frozenset(future["files"]) != V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
+            or not _valid_manifest(future, account, label)):
+        raise SystemExit("C2 compatibility: proposed 12-file sealed manifest refused")
+    new_manifest_bytes = json.dumps(
+        future, indent=2, sort_keys=True).encode("utf-8")
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("C2 compatibility: original manifest changed during preflight")
+    if preview:
+        print(json.dumps({
+            "preflight": True, "effect": "NOT_APPLIED",
+            "account": account, "originalManifestSha256": expected,
+            "changedModules": sorted(new_modules),
+            "noNewRepositoryGrants": not personal, "closedRepositoriesEnabled": personal,
+            "fleetRoutesPreserved": 2,
+            "concurrencyPreserved": [8, 16],
+            "serviceStarted": False,
+        }, sort_keys=True))
+        return 0
+    if _launchd_inspect(label) is not None:
+        raise SystemExit("refusing C2 compatibility upgrade while service is loaded; stop first")
+    if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
+            or _stable_regular_file_hash(config_path, label="installed config") != prior["configHash"]
+            or any(_sha256_file(roots["base"] / n) != prior["files"][n]
+                   for n in prior["files"])
+            or (roots["base"] / "workspace-access.mjs").exists()):
+        raise SystemExit("C2 compatibility: previous installation changed before write")
+    before = {roots["base"] / n: old_modules[n] for n in new_modules}
+    if personal:
+        before[config_path] = old_config_bytes
+    before[manifest_path] = manifest_path.read_bytes()
+    planned = {roots["base"] / n: new_modules[n] for n in new_modules}
+    if personal:
+        planned[config_path] = json.dumps(new_config, indent=2, sort_keys=True).encode()
+    planned[manifest_path] = new_manifest_bytes
+    committed = False
+    try:
+        for target, payload in planned.items():
+            # A file which was previously absent must still be absent immediately
+            # before the attempted create. Unexpected new files never get clobbered.
+            if before[target] is None and (target.exists() or target.is_symlink()):
+                raise RuntimeError("unexpected third-party new module")
+            _atomic_write_bytes(target, payload)
+        committed = True
+        _verify_staged_install(
+            account, label, roots, require_runtime_seal=True)
+    except BaseException as exc:
+        if committed:
+            raise SystemExit(
+                "C2 compatibility: EFFECT_UNKNOWN after manifest commit; "
+                "inspect original installed state before recovery"
+            ) from exc
+        try:
+            if _launchd_inspect(label) is not None:
+                raise RuntimeError("service became loaded during compatibility transaction")
+            observed = {}
+            for target, new_bytes in planned.items():
+                if target.is_symlink():
+                    raise RuntimeError("unexpected symlink during recovery")
+                observed[target] = target.read_bytes() if target.exists() else None
+                if observed[target] not in (before[target], new_bytes):
+                    raise RuntimeError("concurrent out-of-scope file mutation")
+            for target in reversed(tuple(planned)):
+                if observed[target] == before[target]:
+                    continue
+                if before[target] is None:
+                    # This pathname was absent before our transaction.
+                    target.unlink()
+                    parent_fd = os.open(target.parent, os.O_RDONLY)
+                    try:
+                        os.fsync(parent_fd)
+                    finally:
+                        os.close(parent_fd)
+                else:
+                    _atomic_write_bytes(target, before[target])
+            if (any((t.read_bytes() if t.exists() else None) != before[t]
+                    for t in planned)
+                    or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected):
+                raise RuntimeError("original installation could not be restored")
+            _verify_staged_install(
+                account, label, roots, require_runtime_seal=True)
+        except BaseException as recovery_error:
+            raise SystemExit(
+                "C2 compatibility: EFFECT_UNKNOWN during rollback; "
+                "do not retry or restart without exact effect reconciliation"
+            ) from recovery_error
+        raise SystemExit("C2 compatibility: NOT_APPLIED original state restored") from exc
+    print(json.dumps({
+        "account": account, "effect": "APPLIED",
+        "gatewayCompatibilityInstalled": True,
+        "manifestSha256": _sha256_file(manifest_path),
+        "noNewRepositoryGrants": not personal, "closedRepositoriesEnabled": personal,
+        "fleetModulesPreserved": True,
+        "serviceStarted": False,
+    }, sort_keys=True))
+    return 0
+
+
+def _enroll_c2_business_closed_repositories(
+    args, node_abs: Path, backend_abs: Path, account: str,
+    label: str, port: int, roots: dict,
+) -> int:
+    """One existing-installer CAS grant, only after the reviewed C2 11->12 repair.
+
+    This does not replace a fleet gateway, switch a source/credential, create a
+    repository or execute Git. Only the existing closed profile and its exact
+    manifest hash may change. Caller-selected destinations remain impossible.
+    """
+    expected = getattr(args, "publisher_expected_manifest_sha256", None)
+    preview = getattr(args, "publisher_preflight_only", False)
+    if (account != "chatgpt2-business" or type(preview) is not bool
+            or not _sha256_hex(expected)
+            or getattr(args, "enable_repository_workspaces", False) is not True
+            or getattr(args, "publisher_only_fleet_v10", False) is True
+            or getattr(args, "c2_business_fleet_compat", False) is True
+            or getattr(args, "fabric_only", False) is True
+            or getattr(args, "c2_personal_git_timeout_only", False) is True
+            or getattr(args, "os_commission_config_sha256", None) is not None):
+        raise SystemExit("C2 repository enrollment requires the exact Business profile, explicit opt-in and manifest CAS")
+
+    manifest_path, config_path = roots["manifest"], roots["config"]
+    for target in (manifest_path, config_path):
+        _assert_dest_safe(target)
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("C2 repository enrollment: original manifest CAS mismatch")
+    prior = _verify_staged_install(
+        account, label, roots, require_runtime_seal=True)
+    if (prior.get("version") != MANIFEST_VERSION
+            or not prior.get("dependencyTreeHash")
+            or frozenset(prior["files"]) != V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
+            or frozenset(prior["files"]) !=
+                (frozenset(C2_BUSINESS_V10_ORIGINAL_BLOBS) | {"workspace-access.mjs"})
+            or prior.get("node") != str(node_abs)
+            or prior.get("backend") != str(backend_abs)
+            or prior.get("host") != "127.0.0.1"
+            or prior.get("port") != port):
+        raise SystemExit("C2 repository enrollment: reviewed installed generation does not match")
+
+    # The earlier C2 compatibility transaction pins all original unchanged
+    # modules and exactly three reviewed replacements, including the publisher.
+    # Never grant closed repository access to an unknown source generation.
+    for name in prior["files"]:
+        path = roots["base"] / name
+        _assert_dest_safe(path)
+        reviewed_digest = C2_BUSINESS_TARGET_PATCH_SHA256.get(name)
+        if reviewed_digest is not None:
+            if prior["files"][name] != reviewed_digest or _sha256_file(path) != reviewed_digest:
+                raise SystemExit("C2 repository enrollment: reviewed publisher source changed")
+        else:
+            raw = path.read_bytes()
+            blob = hashlib.sha1(
+                b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw
+            ).hexdigest()
+            if blob != C2_BUSINESS_V10_ORIGINAL_BLOBS[name]:
+                raise SystemExit("C2 repository enrollment: original fleet source changed")
+
+    old_manifest = manifest_path.read_bytes()
+    old_config = config_path.read_bytes()
+    if (hashlib.sha256(old_manifest).hexdigest() != expected
+            or hashlib.sha256(old_config).hexdigest() != prior["configHash"]):
+        raise SystemExit("C2 repository enrollment: original snapshot changed")
+    try:
+        current = json.loads(old_config)
+    except (ValueError, UnicodeError) as exc:
+        raise SystemExit("C2 repository enrollment: original configuration unreadable") from exc
+    user_root = _user_root()
+    if (type(current) is not dict
+            or current.get("accountLabel") != account
+            or current.get("gitPublish") != _typed_git_config(user_root)
+            or "repositoryWorkspaces" in current
+            or current.get("fleetRouting", {}).get("enabled") is not True
+            or len(current["fleetRouting"].get("routes", [])) != 2
+            or current.get("maxPerSessionConcurrency") != 8
+            or current.get("maxQueuedPerSession") != 16
+            or type(current.get("fleetStatus")) is not dict
+            or type(current.get("paperDesign")) is not dict
+            or current.get("fabricOnly") is True
+            or "commissionPublication" in current
+            or "modernFabricProtocol" in current):
+        raise SystemExit("C2 repository enrollment: original Mastermind-only fleet profile changed")
+
+    future_config = dict(current)
+    future_config["gitPublish"] = _typed_git_config(
+        user_root, closed_repositories=True)
+    future_config["repositoryWorkspaces"] = {
+        "enabled": True,
+        "allowedRepositories": ["mastermind", "macro", "terminal"],
+    }
+    preserved = set(current) - {"gitPublish", "repositoryWorkspaces"}
+    if any(future_config[key] != current[key] for key in preserved):
+        raise SystemExit("C2 repository enrollment: unrelated configuration changed")
+    new_config = json.dumps(
+        future_config, indent=2, sort_keys=True).encode("utf-8")
+    future_manifest = dict(prior)
+    future_manifest["configHash"] = hashlib.sha256(new_config).hexdigest()
+    if not _valid_manifest(future_manifest, account, label):
+        raise SystemExit("C2 repository enrollment: proposed sealed manifest refused")
+    new_manifest = json.dumps(
+        future_manifest, indent=2, sort_keys=True).encode("utf-8")
+    target_sha = hashlib.sha256(new_manifest).hexdigest()
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("C2 repository enrollment: manifest changed during preflight")
+    receipt = {
+        "account": account,
+        "originalManifestSha256": expected,
+        "targetManifestSha256": target_sha,
+        "closedRepositories": ["mastermind", "macro", "terminal"],
+        "fleetRoutesPreserved": 2,
+        "concurrencyPreserved": [8, 16],
+        "gatewayAndModuleBytesPreserved": True,
+        "serviceStarted": False,
+    }
+    if preview:
+        print(json.dumps({**receipt, "preflight": True, "effect": "NOT_APPLIED"}, sort_keys=True))
+        return 0
+
+    if _lifecycle_inspect(account, label, roots) is not None:
+        raise SystemExit("refusing C2 repository enrollment while service is loaded; stop first")
+    if (_verify_staged_install(account, label, roots, require_runtime_seal=True) != prior
+            or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected
+            or _stable_regular_file_hash(config_path, label="installed config") != prior["configHash"]):
+        raise SystemExit("C2 repository enrollment: original state changed before write")
+
+    planned = {config_path: new_config, manifest_path: new_manifest}
+    original = {config_path: old_config, manifest_path: old_manifest}
+    committed = False
+    try:
+        _atomic_write_bytes(config_path, new_config)
+        if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
+                or _stable_regular_file_hash(config_path, label="installed config") != future_manifest["configHash"]
+                or _lifecycle_inspect(account, label, roots) is not None):
+            raise RuntimeError("C2 repository enrollment: original state changed before manifest commit")
+        _atomic_write_bytes(manifest_path, new_manifest)
+        committed = True
+        if (_verify_staged_install(account, label, roots, require_runtime_seal=True) != future_manifest
+                or _stable_regular_file_hash(manifest_path, label="installed manifest") != target_sha
+                or _lifecycle_inspect(account, label, roots) is not None):
+            raise RuntimeError("C2 repository enrollment: committed identity mismatch")
+    except BaseException as exc:
+        if committed:
+            raise SystemExit(
+                "C2 repository enrollment: EFFECT_UNKNOWN after manifest commit; "
+                "reconcile exact original install before restart"
+            ) from exc
+        try:
+            if _lifecycle_inspect(account, label, roots) is not None:
+                raise RuntimeError("service became loaded during rollback")
+            for path in planned:
+                _assert_dest_safe(path)
+                observed = path.read_bytes()
+                if observed not in (planned[path], original[path]):
+                    raise RuntimeError("non-owned mutation during recovery")
+                if observed != original[path]:
+                    _atomic_write_bytes(path, original[path])
+            if (any(path.read_bytes() != original[path] for path in planned)
+                    or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected):
+                raise RuntimeError("original state not restored")
+            _verify_staged_install(account, label, roots, require_runtime_seal=True)
+        except BaseException as rollback_error:
+            raise SystemExit(
+                "C2 repository enrollment: EFFECT_UNKNOWN during rollback; "
+                "do not retry or restart without reconciliation"
+            ) from rollback_error
+        raise SystemExit("C2 repository enrollment: NOT_APPLIED original state restored") from exc
+
+    print(json.dumps({**receipt, "preflight": False, "effect": "APPLIED"}, sort_keys=True))
+    return 0
+
+
+def _upgrade_c2_personal_git_timeout_only(
+    args, source: Path, node_abs: Path, backend_abs: Path,
+    account: str, label: str, port: int, roots: dict,
+) -> int:
+    """Change only the bounded Git command timeout on exact sealed C2 Personal.
+
+    Status prechecks can exceed 15s on the 127k-index Macro checkout under M2
+    contention. This is not a repository grant, module upgrade, transport
+    retry or a new publication authority. Manifest/config writes are fenced
+    and the service must be unloaded before any mutation.
+    """
+    expected = getattr(args, "publisher_expected_manifest_sha256", None)
+    preview = getattr(args, "publisher_preflight_only", False)
+    if (account != C2_PAPER_ACCOUNT
+            or getattr(args, "c2_personal_git_timeout_only", False) is not True
+            or type(preview) is not bool or not _sha256_hex(expected)
+            or expected != C2_PERSONAL_TIMEOUT_PREDECESSOR_SHA256
+            or getattr(args, "c2_business_fleet_compat", False) is True
+            or getattr(args, "c2_personal_closed_publisher", False) is True
+            or getattr(args, "c2_business_repository_enrollment", False) is True
+            or getattr(args, "publisher_only_fleet_v10", False) is True
+            or getattr(args, "enable_repository_workspaces", False) is True
+            or getattr(args, "fabric_only", False) is True
+            or type(getattr(args, "os_commission_config_sha256", None)) is str):
+        raise SystemExit("C2 Git timeout: original closed owner and manifest CAS required")
+    manifest_path, config_path = roots["manifest"], roots["config"]
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("C2 Git timeout: installed manifest CAS mismatch")
+    prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    if (prior.get("version") != MANIFEST_VERSION
+            or prior.get("source") != str(source)
+            or prior.get("node") != str(node_abs)
+            or prior.get("backend") != str(backend_abs)
+            or prior.get("host") != "127.0.0.1"
+            or prior.get("port") != port
+            or not prior.get("dependencyTreeHash")
+            or frozenset(prior["files"]) != V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR):
+        raise SystemExit("C2 Git timeout: runtime/source identity mismatch")
+    if any(prior["files"].get(n) != digest
+           for n, digest in C2_PERSONAL_TARGET_PATCH_SHA256.items()):
+        raise SystemExit("C2 Git timeout: reviewed installed modules changed")
+    old_config_bytes, old_manifest_bytes = config_path.read_bytes(), manifest_path.read_bytes()
+    if (hashlib.sha256(old_config_bytes).hexdigest() != prior["configHash"]
+            or hashlib.sha256(old_manifest_bytes).hexdigest() != expected):
+        raise SystemExit("C2 Git timeout: sealed snapshot changed")
+    try:
+        old_config = json.loads(old_config_bytes)
+    except (UnicodeError, ValueError) as exc:
+        raise SystemExit("C2 Git timeout: config not valid JSON") from exc
+    original_git = _typed_git_config(_user_root(), closed_repositories=True)
+    if (type(old_config) is not dict or old_config.get("accountLabel") != account
+            or old_config.get("gitPublish") != original_git
+            or old_config.get("repositoryWorkspaces") != {
+                "enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]}
+            or old_config.get("fleetRouting", {}).get("enabled") is not True
+            or len(old_config["fleetRouting"].get("routes", [])) != 2
+            or old_config.get("maxPerSessionConcurrency") != 8
+            or old_config.get("maxQueuedPerSession") != 16
+            or old_config.get("paperDesign", {}).get("enabled") is not True
+            or old_config.get("fabricOnly") is True
+            or "commissionPublication" in old_config
+            or "modernFabricProtocol" in old_config):
+        raise SystemExit("C2 Git timeout: installed capability identity changed")
+    new_config = dict(old_config)
+    new_git = dict(original_git)
+    new_git["commandTimeoutMs"] = C2_PERSONAL_TIMEOUT_COMMAND_MS
+    new_config["gitPublish"] = new_git
+    if ({k: v for k, v in new_config.items() if k != "gitPublish"}
+            != {k: v for k, v in old_config.items() if k != "gitPublish"}):
+        raise SystemExit("C2 Git timeout: unrelated config change")
+    config_bytes = json.dumps(new_config, indent=2, sort_keys=True).encode("utf-8")
+    future = dict(prior)
+    future["configHash"] = hashlib.sha256(config_bytes).hexdigest()
+    if not _valid_manifest(future, account, label):
+        raise SystemExit("C2 Git timeout: target sealed manifest refused")
+    manifest_bytes = json.dumps(future, indent=2, sort_keys=True).encode("utf-8")
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("C2 Git timeout: manifest moved during planning")
+    if preview:
+        print(json.dumps({
+            "account": account, "effect": "NOT_APPLIED", "preflight": True,
+            "originalManifestSha256": expected,
+            "commandTimeoutBeforeMs": original_git["commandTimeoutMs"],
+            "commandTimeoutAfterMs": C2_PERSONAL_TIMEOUT_COMMAND_MS,
+            "pushTimeoutPreservedMs": original_git["pushTimeoutMs"],
+            "changedFiles": ["config.json", "manifest.json"],
+            "sourceModulesPreserved": True, "fleetAndPaperPreserved": True,
+            "serviceStarted": False,
+        }, sort_keys=True))
+        return 0
+    if _lifecycle_inspect(account, label, roots) is not None:
+        raise SystemExit("C2 Git timeout: service must be stopped")
+    if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
+            or _stable_regular_file_hash(config_path, label="installed config") != prior["configHash"]
+            or _verify_staged_install(account, label, roots, require_runtime_seal=True) != prior):
+        raise SystemExit("C2 Git timeout: original installation changed before mutation")
+    before = {config_path: old_config_bytes, manifest_path: old_manifest_bytes}
+    planned = {config_path: config_bytes, manifest_path: manifest_bytes}
+    committed = False
+    try:
+        for target, payload in planned.items():
+            _atomic_write_bytes(target, payload)
+        committed = True
+        _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    except BaseException as exc:
+        if committed:
+            raise SystemExit("C2 Git timeout: EFFECT_UNKNOWN after manifest commit") from exc
+        try:
+            if _lifecycle_inspect(account, label, roots) is not None:
+                raise RuntimeError("service restarted during config transaction")
+            observed = {}
+            for target in planned:
+                if target.is_symlink():
+                    raise RuntimeError("symlink detected during rollback")
+                observed[target] = target.read_bytes()
+                if observed[target] not in (before[target], planned[target]):
+                    raise RuntimeError("concurrent out-of-scope change during rollback")
+            for target in reversed(tuple(planned)):
+                if observed[target] != before[target]:
+                    _atomic_write_bytes(target, before[target])
+            if (any(target.read_bytes() != before[target] for target in planned)
+                    or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected):
+                raise RuntimeError("original sealed bytes could not be restored")
+            _verify_staged_install(account, label, roots, require_runtime_seal=True)
+        except BaseException as recovery_error:
+            raise SystemExit("C2 Git timeout: EFFECT_UNKNOWN during rollback") from recovery_error
+        raise SystemExit("C2 Git timeout: NOT_APPLIED original state restored") from exc
+    print(json.dumps({
+        "account": account, "effect": "APPLIED",
+        "manifestSha256": _sha256_file(manifest_path),
+        "commandTimeoutMs": C2_PERSONAL_TIMEOUT_COMMAND_MS,
+        "pushTimeoutPreservedMs": original_git["pushTimeoutMs"],
+        "sourceModulesPreserved": True, "fleetAndPaperPreserved": True,
+        "serviceStarted": False,
+    }, sort_keys=True))
+    return 0
+
+
+@_fabric_lifecycle_serialized()
 def cmd_upgrade(args) -> int:
     account = args.account
+    _pin_reject_generic_restage(account)
     _validate_account_label(account)
     label = f"com.mastermind.studio-direct-private.{account}"
     host = "127.0.0.1"
@@ -1181,18 +2922,70 @@ def cmd_upgrade(args) -> int:
     source = Path(args.source)
     if source.is_symlink() or not source.is_dir():
         raise SystemExit(f"source dir invalid: {source}")
-    _check_source_files(source)
+    # C2 fleet predecessor migration is a tightly hash-pinned three-module
+    # compatibility package, NOT the incompatible current STAGE_FILES bundle.
+    if not (
+        getattr(args, "c2_business_fleet_compat", False) is True
+        or getattr(args, "c2_personal_closed_publisher", False) is True
+        or getattr(args, "c2_personal_git_timeout_only", False) is True
+        or getattr(args, "c2_business_repository_enrollment", False) is True
+    ):
+        _check_source_files(source)
     node_abs = _resolve_abs("--node", args.node)
     backend_abs = _resolve_abs("--backend", args.backend)
     port = int(args.port)
     _validate_port(port)
 
     roots = _build_runtime_roots(account)
+    if getattr(args, "c2_personal_git_timeout_only", False) is True:
+        # The C2 Personal timeout migration shares the exact same installed
+        # files/manifest with Paper and publisher writers. Retain the protected
+        # C2 lifecycle mutex for a modifying transaction, not for read-only
+        # preflight. Do not introduce a second lock/owner or a bypass.
+        if (account == C2_PAPER_ACCOUNT
+                and getattr(args, "publisher_preflight_only", False) is False):
+            with _c2_lifecycle_mutex(account):
+                return _upgrade_c2_personal_git_timeout_only(
+                    args, source, node_abs, backend_abs, account, label, port, roots)
+        return _upgrade_c2_personal_git_timeout_only(
+            args, source, node_abs, backend_abs, account, label, port, roots)
+    if (getattr(args, "c2_business_fleet_compat", False) is True
+            or getattr(args, "c2_personal_closed_publisher", False) is True):
+        # Both existing C2 compatibility writers share installation state with
+        # Paper/lifecycle operations. Hold the same inode through recovery too.
+        # Read-only preflight and the helper's exact eligibility stay unchanged.
+        if (account in C2_PAPER_UPGRADE_ACCOUNTS
+                and getattr(args, "publisher_preflight_only", False) is False):
+            with _c2_lifecycle_mutex(account):
+                return _upgrade_c2_business_original_fleet_mastermind_only(
+                    args, source, node_abs, backend_abs, account, label, port, roots)
+        return _upgrade_c2_business_original_fleet_mastermind_only(
+            args, source, node_abs, backend_abs, account, label, port, roots)
+    if getattr(args, "c2_business_repository_enrollment", False) is True:
+        if getattr(args, "publisher_preflight_only", False) is True:
+            return _enroll_c2_business_closed_repositories(
+                args, node_abs, backend_abs, account, label, port, roots)
+        with _c2_lifecycle_mutex(account):
+            return _enroll_c2_business_closed_repositories(
+                args, node_abs, backend_abs, account, label, port, roots)
+    if getattr(args, "publisher_only_fleet_v10", False) is True:
+        return _upgrade_fleet_v10_publisher_only(
+            args, source, node_abs, backend_abs, account, label, port, roots)
+    # Legacy call sites carry mock objects with no new CLI attributes.
+    # Reject only actual explicit option values, not arbitrary Mock values.
+    if (getattr(args, "publisher_preflight_only", False) is True
+            or type(getattr(args, "publisher_expected_manifest_sha256", None)) is str):
+        raise SystemExit("publisher preflight and CAS options require --publisher-only-fleet-v10")
     if _launchd_inspect(label) is not None:
         raise SystemExit("refusing upgrade while service is running; stop first")
     prior = _verify_staged_install(
         account, label, roots, require_runtime_seal=False
     )
+    if _sealed_v2_fleet_gateway_predecessor(prior, account):
+        raise SystemExit(
+            "refusing upgrade: sealed historical fleet modules require an "
+            "independently reviewed capability-preserving migration"
+        )
     if prior.get("version") == MANIFEST_VERSION and prior.get("dependencyTreeHash") is not None:
         _verify_staged_install(account, label, roots, require_runtime_seal=True)
     if (
@@ -1206,26 +2999,906 @@ def cmd_upgrade(args) -> int:
         )
     for path in _stage_dest_files(roots):
         _assert_dest_safe(path)
-    # Upgrade is still pre-effect here. Refuse before replacing any staged
-    # source/config if the Paper generation is missing or no longer exact.
-    _verify_paper_runtime(_user_root())
+    fabric_only = _fabric_profile_setting(args, roots, prior)
+    repository_workspaces = _repository_workspace_setting(args, roots, prior)
+    commission_digest = _commission_setting(args, roots, prior)
+    # Compute the exact target policy BEFORE the first installation write.
+    # Recognizing a sealed historical manifest is not permission to remove
+    # the original fleet routes, tailnet adapter, concurrency or telemetry.
+    if frozenset(prior["files"]) in (
+        V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR,
+        frozenset(C2_PAPER_FILES_SHA256),
+        V2_C2_BUSINESS_FLEET_PREDECESSOR,
+    ):
+        projected = _build_config(
+            account, host, port, node_abs, backend_abs, roots["state"],
+            _user_root(), repository_workspaces=repository_workspaces,
+            commission_digest=commission_digest, fabric_only=fabric_only,
+        )
+        _verify_upgrade_preserves_installed_fleet_capabilities(
+            prior, roots, projected)
+    # Preserve the existing restricted profile; do not silently restore tools.
+    if not fabric_only:
+        _verify_paper_runtime(_user_root())
 
     return _write_install(
         source, node_abs, backend_abs, account, label, host, port, roots,
         result_key="upgraded", previous_source=str(prior.get("source") or ""),
-        repository_workspaces=_repository_workspace_setting(args, roots, prior),
-        commission_digest=_commission_setting(args, roots, prior),
+        repository_workspaces=repository_workspaces,
+        commission_digest=commission_digest,
+        fabric_only=fabric_only,
+        modern_fabric=_modern_fabric_setting(args, roots, prior, fabric_only),
     )
 
 
+def _m1_paper_v20_upgrade(args) -> int:
+    """Exact M1 chrisadmin v5->v20 Paper-only CAS. Never restage or start a service."""
+    account = args.account
+    if account != M1_PAPER_V20_ACCOUNT or getattr(args, "m1_v20", False) is not True:
+        raise SystemExit("M1 Paper v20 requires its exact enrolled account and selector")
+    if args.expected_manifest_sha256 != M1_PAPER_V5_MANIFEST_SHA256:
+        raise SystemExit("M1 Paper v20 predecessor manifest CAS mismatch")
+    label = f"com.mastermind.studio-direct-private.{account}"
+    roots = _build_runtime_roots(account)
+    for path in (roots["config"], roots["manifest"], roots["plist"]):
+        _assert_dest_safe(path)
+    if _stable_regular_file_hash(roots["manifest"], label="M1 manifest") != M1_PAPER_V5_MANIFEST_SHA256:
+        raise SystemExit("M1 Paper v20 actual predecessor manifest changed")
+    if _stable_regular_file_hash(roots["config"], label="M1 config") != M1_PAPER_V5_CONFIG_SHA256:
+        raise SystemExit("M1 Paper v20 actual predecessor config changed")
+    if _stable_regular_file_hash(roots["plist"], label="M1 plist") != M1_PAPER_V5_PLIST_SHA256:
+        raise SystemExit("M1 Paper v20 original service identity changed")
+    prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    user_root = _user_root()
+    _verify_paper_runtime(
+        user_root, runtime_rel=M1_PAPER_V20_RUNTIME_REL,
+        expected_sha=M1_PAPER_V20_BRIDGE_SHA256,
+    )
+    _verify_paper_runtime(
+        user_root, runtime_rel=M1_PAPER_V5_RUNTIME_REL,
+        expected_sha=M1_PAPER_V5_BRIDGE_SHA256,
+    )
+    old_config_bytes = roots["config"].read_bytes()
+    old_manifest_bytes = roots["manifest"].read_bytes()
+    try:
+        old_config = json.loads(old_config_bytes)
+    except (UnicodeError, ValueError) as exc:
+        raise SystemExit("M1 Paper v20 original config invalid") from exc
+    if type(old_config) is not dict:
+        raise SystemExit("M1 Paper v20 original config invalid")
+    old_paper = {
+        "enabled": True,
+        "pythonPath": str(user_root / M1_PAPER_V5_RUNTIME_REL / "venv/bin/python"),
+        "bridgePath": str(user_root / M1_PAPER_V5_RUNTIME_REL / "source/bridge.py"),
+        "bridgeSha256": M1_PAPER_V5_BRIDGE_SHA256,
+        "appPath": str(user_root / PAPER_APP_REL),
+        "commandTimeoutMs": PAPER_COMMAND_TIMEOUT_MS,
+    }
+    if old_config.get("paperDesign") != old_paper:
+        raise SystemExit("M1 Paper v20 original Paper selection differs")
+    nonpaper = {key: value for key, value in old_config.items() if key != "paperDesign"}
+    nonpaper_sha = hashlib.sha256(json.dumps(
+        nonpaper, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    if nonpaper_sha != M1_PAPER_V5_NONPAPER_SHA256:
+        raise SystemExit("M1 Paper v20 unrelated gateway configuration changed")
+    target_paper = {
+        **old_paper,
+        "pythonPath": str(user_root / M1_PAPER_V20_RUNTIME_REL / "venv/bin/python"),
+        "bridgePath": str(user_root / M1_PAPER_V20_RUNTIME_REL / "source/bridge.py"),
+        "bridgeSha256": M1_PAPER_V20_BRIDGE_SHA256,
+    }
+    future_config = {**old_config, "paperDesign": target_paper}
+    config_bytes = json.dumps(future_config, indent=2, sort_keys=True).encode("utf-8")
+    future = {**prior, "configHash": hashlib.sha256(config_bytes).hexdigest()}
+    if not _valid_manifest(future, account, label):
+        raise SystemExit("M1 Paper v20 target manifest invalid")
+    manifest_bytes = json.dumps(future, indent=2, sort_keys=True).encode("utf-8")
+    target_manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+    receipt = {
+        "account": account,
+        "fromGeneration": "v5", "toGeneration": "v20",
+        "protectedSourceRevision": M1_PAPER_V20_MERGE,
+        "originalManifestSha256": M1_PAPER_V5_MANIFEST_SHA256,
+        "targetManifestSha256": target_manifest_sha,
+        "bridgeSha256": M1_PAPER_V20_BRIDGE_SHA256,
+        "nonPaperConfigSha256": nonpaper_sha,
+        "preservedGatewayFiles": len(prior["files"]),
+        "runtimeSealPreserved": True, "sourcePointerPreserved": True,
+        "serviceStarted": False,
+    }
+    if args.preflight_only:
+        print(json.dumps({**receipt, "preflight": True, "effect": "NOT_APPLIED"}, sort_keys=True))
+        return 0
+
+    # The owner must bootout and drain the ORIGINAL service before one apply.
+    # Keep the existing install lifecycle lock, no second lock or runtime plane.
+    with _c2_lifecycle_mutex(account):
+        if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
+            raise SystemExit("M1 Paper v20 refusing selector while original service is loaded")
+        if (_verify_staged_install(account, label, roots, require_runtime_seal=True) != prior
+                or _stable_regular_file_hash(roots["manifest"], label="M1 manifest")
+                != M1_PAPER_V5_MANIFEST_SHA256
+                or _stable_regular_file_hash(roots["config"], label="M1 config")
+                != M1_PAPER_V5_CONFIG_SHA256):
+            raise SystemExit("M1 Paper v20 predecessor changed before selection")
+        _verify_paper_runtime(user_root, runtime_rel=M1_PAPER_V20_RUNTIME_REL)
+        committed = False
+        try:
+            _atomic_write_bytes(roots["config"], config_bytes)
+            if (_stable_regular_file_hash(roots["manifest"], label="M1 manifest")
+                    != M1_PAPER_V5_MANIFEST_SHA256
+                    or _stable_regular_file_hash(roots["config"], label="M1 config")
+                    != future["configHash"]
+                    or _lifecycle_inspect(account, label, roots, require_positive=True) is not None):
+                raise RuntimeError("M1 Paper v20 concurrent change before manifest commit")
+            _atomic_write_bytes(roots["manifest"], manifest_bytes)
+            committed = True
+            if (_verify_staged_install(account, label, roots, require_runtime_seal=True) != future
+                    or _stable_regular_file_hash(roots["manifest"], label="M1 manifest")
+                    != target_manifest_sha):
+                raise RuntimeError("M1 Paper v20 post-commit manifest verification failed")
+            _verify_paper_runtime(user_root, runtime_rel=M1_PAPER_V20_RUNTIME_REL)
+            if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
+                raise RuntimeError("M1 Paper v20 service reappeared during commit")
+        except BaseException as exc:
+            if committed:
+                raise SystemExit("M1 Paper v20 EFFECT_UNKNOWN after manifest commit; reconcile same original owner") from exc
+            # Do not overwrite any concurrent writer on the sole original carrier.
+            restored = ((roots["config"].read_bytes() in (old_config_bytes, config_bytes))
+                        and roots["manifest"].read_bytes() == old_manifest_bytes
+                        and _lifecycle_inspect(account, label, roots, require_positive=True) is None)
+            if not restored:
+                raise SystemExit("M1 Paper v20 EFFECT_UNKNOWN before commit; reconcile original owner") from exc
+            if roots["config"].read_bytes() != old_config_bytes:
+                _atomic_write_bytes(roots["config"], old_config_bytes)
+            _verify_staged_install(account, label, roots, require_runtime_seal=True)
+            raise
+    print(json.dumps({**receipt, "effect": "INSTALLED_NOT_STARTED"}, sort_keys=True))
+    return 0
+
+
+@_c2_lifecycle_serialized(readonly_preflight=True)
+def cmd_paper_runtime_upgrade(args) -> int:
+    """Select a reviewed Paper runtime on an exact qualified fleet without restaging it.
+
+    This dedicated transaction grants no new account, file cohort or capability.
+    It cannot stop/start a service, copy gateway source or select an arbitrary bridge.
+    The original manifest CAS is intentionally single-use; a replay must fresh-read.
+    The exact sealed C2 Personal v12 cohort selects the accepted immutable v20
+    generation through the same transaction; every other admission remains the
+    historical v10 -> v12 selection.
+    """
+    account = args.account
+    _validate_account_label(account)
+    if getattr(args, "m1_v20", False) is True and getattr(args, "fleet_v20", False) is True:
+        raise SystemExit("Paper v20 conflicting cohort selection flags")
+    if getattr(args, "m1_v20", False) is True:
+        return _m1_paper_v20_upgrade(args)
+    if getattr(args, "fleet_v20", False) is True:
+        return _upgrade_paper_frozen_fleet_v20(args)
+    expected = args.expected_manifest_sha256
+    preview = args.preflight_only
+    if account == C2_PAPER_ACCOUNT and expected == C2_PAPER_V12_MANIFEST_SHA256:
+        return _upgrade_paper_c2_personal_v20(args)
+    if account == C2_PAPER_ACCOUNT:
+        original_manifest = C2_PAPER_ORIGINAL_MANIFEST_SHA256
+        non_paper_pin = C2_PAPER_NON_PAPER_CONFIG_SHA256
+        runtime_identity = C2_PAPER_RUNTIME_IDENTITY
+    elif account == C2_PAPER_BUSINESS_ACCOUNT:
+        original_manifest = C2_PAPER_BUSINESS_ORIGINAL_MANIFEST_SHA256
+        non_paper_pin = C2_PAPER_BUSINESS_NON_PAPER_CONFIG_SHA256
+        runtime_identity = C2_PAPER_BUSINESS_RUNTIME_IDENTITY
+    elif account == C4_PAPER_ACCOUNT:
+        original_manifest = C4_PAPER_ORIGINAL_MANIFEST_SHA256
+        non_paper_pin = C4_PAPER_NON_PAPER_CONFIG_SHA256
+        runtime_identity = C4_PAPER_RUNTIME_IDENTITY
+    else:
+        raise SystemExit("paper runtime compatibility requires the exact enrolled Paper account")
+    if type(preview) is not bool:
+        raise SystemExit("paper runtime compatibility preflight flag invalid")
+    if not _sha256_hex(expected):
+        raise SystemExit("paper runtime compatibility requires an exact manifest CAS")
+    if expected != original_manifest:
+        raise SystemExit("paper runtime compatibility: original manifest is not the reviewed predecessor")
+    if PAPER_RUNTIME_REL.name != "v12":
+        raise SystemExit("paper runtime compatibility requires the reviewed v12 target")
+
+    label = f"com.mastermind.studio-direct-private.{account}"
+    roots = _build_runtime_roots(account)
+    config_path, manifest_path = roots["config"], roots["manifest"]
+    for path in (config_path, manifest_path, roots["plist"]):
+        _assert_dest_safe(path)
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("paper runtime compatibility: installed manifest CAS mismatch")
+    prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    if (prior.get("files") != C2_PAPER_FILES_SHA256
+            or any(prior.get(key) != value for key, value in runtime_identity.items())):
+        raise SystemExit("paper runtime compatibility: original sealed identity does not match")
+    for name in prior["files"]:
+        _assert_dest_safe(roots["base"] / name)
+    old_config_bytes, old_manifest_bytes = config_path.read_bytes(), manifest_path.read_bytes()
+    if (hashlib.sha256(old_config_bytes).hexdigest() != prior["configHash"]
+            or hashlib.sha256(old_manifest_bytes).hexdigest() != expected):
+        raise SystemExit("paper runtime compatibility: verified snapshot changed during preflight")
+    try:
+        old_config = json.loads(old_config_bytes)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise SystemExit("paper runtime compatibility: original config invalid") from exc
+    if type(old_config) is not dict:
+        raise SystemExit("paper runtime compatibility: original config invalid")
+    non_paper = {key: value for key, value in old_config.items() if key != "paperDesign"}
+    non_paper_sha = hashlib.sha256(json.dumps(
+        non_paper, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    if non_paper_sha != non_paper_pin:
+        raise SystemExit("paper runtime compatibility: original non-Paper profile changed")
+
+    user_root = _user_root()
+    target_paper = _paper_design_config(user_root)
+    old_runtime = user_root / ".local/share/mastermind-paper/runtime/v10"
+    expected_old_paper = {
+        **target_paper,
+        "pythonPath": str(old_runtime / "venv/bin/python"),
+        "bridgePath": str(old_runtime / "source/bridge.py"),
+        "bridgeSha256": C2_PAPER_ORIGINAL_BRIDGE_SHA256,
+    }
+    if old_config.get("paperDesign") != expected_old_paper:
+        raise SystemExit("paper runtime compatibility: original Paper selection is not exact v10")
+    _verify_paper_runtime(user_root)
+    new_config = {**old_config, "paperDesign": target_paper}
+    config_bytes = json.dumps(new_config, indent=2, sort_keys=True).encode("utf-8")
+    future = {**prior, "configHash": hashlib.sha256(config_bytes).hexdigest()}
+    if not _valid_manifest(future, account, label):
+        raise SystemExit("paper runtime compatibility: prospective manifest invalid")
+    manifest_bytes = json.dumps(future, indent=2, sort_keys=True).encode("utf-8")
+    target_manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+    receipt = {
+        "account": account, "fromGeneration": "v10", "toGeneration": "v12",
+        "originalManifestSha256": expected, "targetManifestSha256": target_manifest_sha,
+        "bridgeSha256": PAPER_BRIDGE_SHA256, "nonPaperConfigSha256": non_paper_sha,
+        "preservedGatewayFiles": len(prior["files"]), "runtimeSealPreserved": True,
+        "sourcePointerPreserved": True, "serviceStarted": False,
+    }
+    return _apply_paper_selection(
+        account=account, label=label, roots=roots, expected=expected, prior=prior,
+        old_config_bytes=old_config_bytes, old_manifest_bytes=old_manifest_bytes,
+        config_bytes=config_bytes, target_manifest_sha=target_manifest_sha,
+        receipt=receipt, preview=preview,
+        runtime_verifier=lambda: _verify_paper_runtime(user_root),
+    )
+
+
+def _upgrade_paper_c2_personal_v20(args) -> int:
+    """Select the accepted immutable v20 runtime on the sealed v12 C2 Personal seat.
+
+    One exact observed cohort, one direction, and the same single-use
+    manifest-CAS transaction as the historical selection. Admission re-derives
+    the installed 12-file cohort from the reviewed closed-publisher patch plus
+    unchanged fleet modules, requires the freshly observed predecessor CAS and
+    non-Paper profile, and verifies both the retained v12 runtime and the
+    staged v20 generation through the existing owners. No runtime path, bridge
+    or file byte is caller-selectable, and nothing is restaged or restarted.
+    """
+    account = args.account
+    expected = args.expected_manifest_sha256
+    preview = args.preflight_only
+    if type(preview) is not bool:
+        raise SystemExit("paper runtime compatibility preflight flag invalid")
+    if not _sha256_hex(expected):
+        raise SystemExit("paper runtime compatibility requires an exact manifest CAS")
+    if PAPER_RUNTIME_REL.name != "v12":
+        raise SystemExit("paper runtime compatibility: v20 selection requires the reviewed v12 predecessor pin")
+
+    label = f"com.mastermind.studio-direct-private.{account}"
+    roots = _build_runtime_roots(account)
+    config_path, manifest_path = roots["config"], roots["manifest"]
+    for path in (config_path, manifest_path, roots["plist"]):
+        _assert_dest_safe(path)
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("paper runtime compatibility: installed manifest CAS mismatch")
+    prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    if (prior.get("files") != C2_PAPER_V12_FILES_SHA256
+            or any(prior.get(key) != value for key, value in C2_PAPER_RUNTIME_IDENTITY.items())):
+        raise SystemExit("paper runtime compatibility: original sealed identity does not match")
+    for name in prior["files"]:
+        _assert_dest_safe(roots["base"] / name)
+    old_config_bytes, old_manifest_bytes = config_path.read_bytes(), manifest_path.read_bytes()
+    if (hashlib.sha256(old_config_bytes).hexdigest() != prior["configHash"]
+            or hashlib.sha256(old_manifest_bytes).hexdigest() != expected):
+        raise SystemExit("paper runtime compatibility: verified snapshot changed during preflight")
+    try:
+        old_config = json.loads(old_config_bytes)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise SystemExit("paper runtime compatibility: original config invalid") from exc
+    if type(old_config) is not dict:
+        raise SystemExit("paper runtime compatibility: original config invalid")
+    non_paper = {key: value for key, value in old_config.items() if key != "paperDesign"}
+    non_paper_sha = hashlib.sha256(json.dumps(
+        non_paper, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    if non_paper_sha != C2_PAPER_V12_NON_PAPER_CONFIG_SHA256:
+        raise SystemExit("paper runtime compatibility: original non-Paper profile changed")
+
+    user_root = _user_root()
+    target_paper = _paper_design_config(
+        user_root, rel=PAPER_RUNTIME_V20_REL, bridge_sha256=PAPER_V20_BRIDGE_SHA256)
+    expected_old_paper = {
+        **target_paper,
+        "pythonPath": str(user_root / PAPER_RUNTIME_REL / "venv/bin/python"),
+        "bridgePath": str(user_root / PAPER_RUNTIME_REL / "source/bridge.py"),
+        "bridgeSha256": PAPER_BRIDGE_SHA256,
+    }
+    if old_config.get("paperDesign") != expected_old_paper:
+        raise SystemExit("paper runtime compatibility: original Paper selection is not exact v12")
+    _verify_paper_runtime(user_root)
+    _verify_paper_runtime(
+        user_root, rel=PAPER_RUNTIME_V20_REL, expected_sha=PAPER_V20_BRIDGE_SHA256)
+    new_config = {**old_config, "paperDesign": target_paper}
+    config_bytes = json.dumps(new_config, indent=2, sort_keys=True).encode("utf-8")
+    future = {**prior, "configHash": hashlib.sha256(config_bytes).hexdigest()}
+    if not _valid_manifest(future, account, label):
+        raise SystemExit("paper runtime compatibility: prospective manifest invalid")
+    manifest_bytes = json.dumps(future, indent=2, sort_keys=True).encode("utf-8")
+    target_manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+    receipt = {
+        "account": account, "fromGeneration": "v12", "toGeneration": "v20",
+        "originalManifestSha256": expected, "targetManifestSha256": target_manifest_sha,
+        "bridgeSha256": PAPER_V20_BRIDGE_SHA256, "nonPaperConfigSha256": non_paper_sha,
+        "preservedGatewayFiles": len(prior["files"]), "runtimeSealPreserved": True,
+        "sourcePointerPreserved": True, "serviceStarted": False,
+    }
+    return _apply_paper_selection(
+        account=account, label=label, roots=roots, expected=expected, prior=prior,
+        old_config_bytes=old_config_bytes, old_manifest_bytes=old_manifest_bytes,
+        config_bytes=config_bytes, target_manifest_sha=target_manifest_sha,
+        receipt=receipt, preview=preview,
+        runtime_verifier=lambda: (
+            _verify_paper_runtime(user_root),
+            _verify_paper_runtime(
+                user_root, rel=PAPER_RUNTIME_V20_REL,
+                expected_sha=PAPER_V20_BRIDGE_SHA256)),
+    )
+
+
+
+def _frozen_paper_fleet_module():
+    """Read the approved eight-cohort pure data file beside this installer."""
+    from types import ModuleType
+    path = Path(__file__).with_name("paper_v20_fleet_cohorts.py")
+    # Reuse the original private-service no-follow, owner/mode and inode-stable
+    # bounded reader. Verify exactly the bytes that will execute: re-opening
+    # the file through a Python loader after a hash check creates a swap race.
+    source_bytes = _fabric_release_bytes(path, limit=64 * 1024)
+    if hashlib.sha256(source_bytes).hexdigest() != FLEET_V20_COHORT_SOURCE_SHA256:
+        raise SystemExit("Paper fleet cohort source hash differs from the reviewed release")
+    module = ModuleType("_private_paper_fleet_v20_cohorts")
+    module.__file__ = str(path)
+    exec(compile(source_bytes, str(path), "exec"), module.__dict__)
+    if (frozenset(module.COHORTS) != FLEET_V20_ENROLLED_ACCOUNTS
+            or module.C4_POST_ENROLLMENT["manifest_sha256"]
+               != "3648a9a8e9711bab7be9fc7a3950f73579ce7d78358a18c15ac7d39adf924a9f"
+            or module.TARGET_BRIDGE_SHA256 != PAPER_V20_BRIDGE_SHA256
+            or module.PREDECESSORS != {
+                "v10": PAPER_V10_BRIDGE_SHA256,
+                "v12": PAPER_BRIDGE_SHA256,
+            }):
+        raise SystemExit("Paper fleet source cohort identity drift")
+    return module
+
+
+def _upgrade_paper_frozen_fleet_v20(args) -> int:
+    """Use the sole original manifest-CAS transaction for eight frozen M2 seats."""
+    account, expected, preview = args.account, args.expected_manifest_sha256, args.preflight_only
+    if type(preview) is not bool or not _sha256_hex(expected):
+        raise SystemExit("Paper fleet requires exact CAS and boolean preflight")
+    cohorts = _frozen_paper_fleet_module()
+    if account not in cohorts.COHORTS:
+        raise SystemExit("Paper fleet account not in reviewed cohort")
+    enrolled_c4 = (
+        account == C4_PAPER_ACCOUNT
+        and expected == cohorts.C4_POST_ENROLLMENT["manifest_sha256"]
+    )
+    if (expected != cohorts.COHORTS[account]["manifest_sha256"]
+            and not enrolled_c4):
+        raise SystemExit("Paper fleet original manifest is not frozen predecessor")
+    label = f"com.mastermind.studio-direct-private.{account}"
+    roots = _build_runtime_roots(account)
+    for path in (roots["config"], roots["manifest"], roots["plist"]):
+        _assert_dest_safe(path)
+    if _stable_regular_file_hash(roots["manifest"], label="fleet manifest") != expected:
+        raise SystemExit("Paper fleet manifest CAS mismatch")
+    prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    old_config_bytes = roots["config"].read_bytes()
+    old_manifest_bytes = roots["manifest"].read_bytes()
+    plist_bytes = roots["plist"].read_bytes()
+    if (hashlib.sha256(old_manifest_bytes).hexdigest() != expected
+            or hashlib.sha256(old_config_bytes).hexdigest() != prior["configHash"]
+            or hashlib.sha256(plist_bytes).hexdigest() != prior["plistHash"]):
+        raise SystemExit("Paper fleet predecessor changed during inspection")
+    if enrolled_c4:
+        # Read-only qualification of the actual accepted enrollment owner and
+        # original native-pool receipt, not a hash-only assertion. It must be
+        # committed and selected before this second Paper-only CAS can begin.
+        _pin_enrollment_owner_module().require_start(
+            sys.modules[__name__], account, roots)
+    home = _user_root()
+    try:
+        plan = cohorts.plan_selection(
+            account, manifest_bytes=old_manifest_bytes, config_bytes=old_config_bytes,
+            plist_bytes=plist_bytes, home=home)
+    except ValueError as exc:
+        raise SystemExit(f"Paper fleet predecessor refused: {exc}") from exc
+    generation = plan["fromGeneration"]
+    if generation not in ("v10", "v12"):
+        raise SystemExit("Paper fleet generation is not admitted")
+    predecessor_rel = PAPER_RUNTIME_V10_REL if generation == "v10" else PAPER_RUNTIME_REL
+    predecessor_sha = cohorts.PREDECESSORS[generation]
+    def verify_runtimes():
+        _verify_paper_runtime(home, runtime_rel=predecessor_rel, expected_sha=predecessor_sha)
+        _verify_paper_runtime(home, runtime_rel=PAPER_RUNTIME_V20_REL,
+                              expected_sha=PAPER_V20_BRIDGE_SHA256)
+    verify_runtimes()
+    future = {**prior, "configHash": hashlib.sha256(plan["configBytes"]).hexdigest()}
+    if (plan["manifest"] != future
+            or not _valid_manifest(future, account, label)
+            or hashlib.sha256(plan["manifestBytes"]).hexdigest() != plan["targetManifestSha256"]):
+        raise SystemExit("Paper fleet prospective manifest is not the reviewed target")
+    receipt = {key:value for key,value in plan.items()
+               if key not in ("configBytes", "manifestBytes", "manifest")}
+    receipt.update(runtimeSealPreserved=True, sourcePointerPreserved=True)
+    return _apply_paper_selection(
+        account=account, label=label, roots=roots, expected=expected, prior=prior,
+        old_config_bytes=old_config_bytes, old_manifest_bytes=old_manifest_bytes,
+        config_bytes=plan["configBytes"], target_manifest_sha=plan["targetManifestSha256"],
+        receipt=receipt, preview=preview, runtime_verifier=verify_runtimes,
+    )
+
+def _apply_paper_selection(
+    *, account: str, label: str, roots: dict, expected: str, prior: dict,
+    old_config_bytes: bytes, old_manifest_bytes: bytes, config_bytes: bytes,
+    target_manifest_sha: str, receipt: dict, preview: bool, runtime_verifier,
+) -> int:
+    """Shared single-use Paper selection transaction behind both admissions.
+
+    Extracted unchanged from the reviewed v10 -> v12 selection so the v20 path
+    inherits its exact planning recheck, loaded-service refusal, commit order,
+    rollback and EFFECT_UNKNOWN semantics. The manifest commits last so fresh
+    integrity checks reject partial file updates; a post-commit failure stays
+    EFFECT_UNKNOWN on this operation and is never replayed or self-repaired.
+    """
+    config_path, manifest_path = roots["config"], roots["manifest"]
+    future = {**prior, "configHash": hashlib.sha256(config_bytes).hexdigest()}
+    manifest_bytes = json.dumps(future, indent=2, sort_keys=True).encode("utf-8")
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("paper runtime compatibility: installed manifest changed during planning")
+    if preview:
+        print(json.dumps({**receipt, "preflight": True, "effect": "NOT_APPLIED"}, sort_keys=True))
+        return 0
+    if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
+        raise SystemExit("refusing Paper runtime upgrade while service is loaded; stop first")
+    # Reconfirm the complete sealed installation and target before the first write.
+    if _verify_staged_install(account, label, roots, require_runtime_seal=True) != prior:
+        raise SystemExit("paper runtime compatibility: original installation changed")
+    runtime_verifier()
+    if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
+            or _stable_regular_file_hash(config_path, label="installed config") != prior["configHash"]):
+        raise SystemExit("paper runtime compatibility: original snapshot CAS mismatch")
+    if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
+        raise SystemExit("refusing Paper runtime upgrade while service is loaded; stop first")
+
+    old_bytes = {config_path: old_config_bytes, manifest_path: old_manifest_bytes}
+    planned = {config_path: config_bytes, manifest_path: manifest_bytes}
+    committed = False
+    try:
+        _atomic_write_bytes(config_path, config_bytes)
+        # Manifest commits last so fresh integrity checks reject partial file updates.
+        if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
+                or _stable_regular_file_hash(config_path, label="installed config") != future["configHash"]
+                or _lifecycle_inspect(account, label, roots, require_positive=True) is not None):
+            raise RuntimeError("installed state changed before manifest commit")
+        _atomic_write_bytes(manifest_path, manifest_bytes)
+        committed = True
+        if (_verify_staged_install(account, label, roots, require_runtime_seal=True) != future
+                or _stable_regular_file_hash(manifest_path, label="installed manifest") != target_manifest_sha):
+            raise RuntimeError("committed installation does not match the planned result")
+        runtime_verifier()
+        if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
+            raise RuntimeError("service became loaded during commit verification")
+    except BaseException as exc:
+        if committed:
+            raise SystemExit(
+                "paper runtime compatibility: EFFECT_UNKNOWN after manifest commit; "
+                "inspect the original service before recovery or restart"
+            ) from exc
+        try:
+            if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
+                raise RuntimeError("service became loaded during transaction")
+            observed = {}
+            for path in planned:
+                _assert_dest_safe(path)
+                digest = _stable_regular_file_hash(path, label="rollback target")
+                observed[path] = path.read_bytes()
+                if hashlib.sha256(observed[path]).hexdigest() != digest:
+                    raise RuntimeError("rollback target changed while reading")
+                if observed[path] not in (old_bytes[path], planned[path]):
+                    raise RuntimeError("non-owned concurrent mutation while recovering")
+            for path in reversed(tuple(planned)):
+                if observed[path] != old_bytes[path]:
+                    if (_lifecycle_inspect(account, label, roots, require_positive=True) is not None
+                            or _stable_regular_file_hash(path, label="rollback target")
+                            != hashlib.sha256(observed[path]).hexdigest()):
+                        raise RuntimeError("rollback target or service changed before restoration")
+                    _atomic_write_bytes(path, old_bytes[path])
+            if (any(path.read_bytes() != old_bytes[path] for path in planned)
+                    or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected):
+                raise RuntimeError("rollback byte identity differs")
+            _verify_staged_install(account, label, roots, require_runtime_seal=True)
+            if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
+                raise RuntimeError("service became loaded during rollback verification")
+        except BaseException as rollback_exc:
+            raise SystemExit(
+                "paper runtime compatibility: EFFECT_UNKNOWN during rollback; "
+                "do not restart or replay until the original state is reconciled"
+            ) from rollback_exc
+        raise SystemExit("paper runtime compatibility: NOT_APPLIED; original state restored") from exc
+    print(json.dumps({**receipt, "preflight": False, "effect": "APPLIED"}, sort_keys=True))
+    return 0
+
+
+def _fabric_release_bytes(path: Path, *, limit: int = 2 * 1024 * 1024) -> bytes:
+    """Read a bounded, owned regular file without following a replacement link."""
+    _assert_dest_safe(path)
+    current = path.parent
+    while True:
+        info = current.lstat()
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_mode & 0o022):
+            raise SystemExit("Fabric release file parent is unsafe")
+        if current == _user_root():
+            break
+        current = current.parent
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    except OSError as exc:
+        raise SystemExit("Fabric release file unavailable") from exc
+    try:
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+                or before.st_nlink != 1 or before.st_mode & 0o022
+                or before.st_size > limit):
+            raise SystemExit("Fabric release file is unsafe or too large")
+        data = bytearray()
+        while len(data) <= limit:
+            part = os.read(fd, min(65536, limit + 1 - len(data)))
+            if not part:
+                break
+            data.extend(part)
+        after = os.fstat(fd)
+        named = path.lstat()
+        identity = lambda x: (x.st_dev, x.st_ino, x.st_mode, x.st_size, x.st_mtime_ns, x.st_ctime_ns)
+        if (len(data) > limit or identity(before) != identity(after)
+                or identity(after) != identity(named)):
+            raise SystemExit("Fabric release file changed while reading")
+        return bytes(data)
+    finally:
+        os.close(fd)
+
+
+def _fabric_release_source(release_commit: str, expected_sha: str) -> tuple[Path, dict]:
+    """Bind the sole backend path to a commit already in observed protected master.
+
+    The operator refreshes the fixed source-admin repository and checks protected
+    merge evidence before invoking this local installer. This does not fetch,
+    change a ref, bypass review, or treat an arbitrary path/hash as a release.
+    """
+    if (not isinstance(release_commit, str)
+            or re.fullmatch(r"[0-9a-f]{40}", release_commit) is None
+            or not _sha256_hex(expected_sha)):
+        raise SystemExit("Fabric release requires an exact commit and backend SHA256")
+    home = _user_root()
+    repo = home / TYPED_GIT_SOURCE_REPOSITORY_REL
+    _assert_no_symlink_ancestors(repo)
+    if not repo.is_dir():
+        raise SystemExit("Fabric release source-admin repository unavailable")
+
+    def git(*argv):
+        try:
+            result = _run([TYPED_GIT_BINARY, "--no-replace-objects", "-C", str(repo),
+                           "--git-dir", str(repo / ".git"), *argv], check=False, timeout=15)
+        except Exception as exc:
+            raise SystemExit("Fabric release Git evidence unavailable") from exc
+        if result.returncode != 0:
+            raise SystemExit("Fabric release Git evidence refused")
+        return result.stdout
+
+    if git("remote", "get-url", "--all", "origin").splitlines() != [TYPED_GIT_REMOTE_URL]:
+        raise SystemExit("Fabric release requires the exact Mastermind origin")
+    observed = git("rev-parse", "--verify", "refs/remotes/origin/master^{commit}").strip()
+    if re.fullmatch(r"[0-9a-f]{40}", observed) is None:
+        raise SystemExit("Fabric release protected-master observation invalid")
+    if git("rev-parse", "--verify", release_commit + "^{commit}").strip() != release_commit:
+        raise SystemExit("Fabric release commit is not exact")
+    git("merge-base", "--is-ancestor", release_commit, observed)
+    tree = git("ls-tree", "--full-tree", release_commit, "--", FABRIC_BACKEND_SOURCE)
+    match = re.fullmatch(r"100(?:644|755) blob ([0-9a-f]{40})\t" + re.escape(FABRIC_BACKEND_SOURCE) + r"\n", tree)
+    if match is None:
+        raise SystemExit("Fabric release backend is not the exact regular Git source")
+    backend = home / FABRIC_BACKEND_RELEASES_REL / ("fabric-c3-" + release_commit) / FABRIC_BACKEND_SOURCE
+    raw = _fabric_release_bytes(backend)
+    blob = hashlib.sha1(b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest()
+    if hashlib.sha256(raw).hexdigest() != expected_sha or blob != match.group(1):
+        raise SystemExit("Fabric release backend differs from the merged source or pinned SHA256")
+    return backend, {"releaseCommit": release_commit, "backendGitBlob": blob,
+                     "backendSha256": expected_sha, "observedProtectedMaster": observed}
+
+
+def _fabric_release_new(path: Path, data: bytes) -> None:
+    """Persist evidence exactly once; interrupted operations are never replayed."""
+    _assert_dest_safe(path)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, FILE_MODE)
+    with os.fdopen(fd, "wb") as stream:
+        os.fchmod(stream.fileno(), FILE_MODE)
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+    _fsync_dir(path.parent)
+
+
+def _fabric_release_json(value: dict) -> bytes:
+    return json.dumps(value, indent=2, sort_keys=True, allow_nan=False).encode("utf-8")
+
+
+def _validate_legacy_fleet_status(config: dict, user_root: Path) -> bool:
+    """Admit only the narrow legacy fleetStatus on an existing restricted profile.
+
+    The legacy sealed config contained fleetStatus but predated the
+    modernFabricProtocol and backendMode selectors. This validator never invokes
+    the launcher. It re-derives the owner-bound helper and requires exact field
+    and type equality with the freshly derived owner configuration; the launcher
+    descriptor bytes are then read through the existing owned, regular-file,
+    no-symlink, no-follow reader and their SHA256 must equal the freshly
+    derived expected['launcherSha256']. A None, missing, or unsafe launcher,
+    wrong field type, ownership/file-type/links/permissions/read/stability or
+    digest error, or any extra/omitted key fails closed. Profile-driven
+    launcher execution is not authorised by this validator; only sealed
+    fleetStatus identity is admitted.
+
+    Profiles without fleetStatus continue to be governed by every other check.
+    """
+    if "fleetStatus" not in config:
+        return True
+    if "modernFabricProtocol" in config or "backendMode" in config:
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus requires absent "
+            "modernFabricProtocol and backendMode selectors"
+        )
+    fleet_status = config["fleetStatus"]
+    required_keys = frozenset(("enabled", "launcherPath", "launcherSha256", "timeoutMs"))
+    if type(fleet_status) is not dict or set(fleet_status) != required_keys:
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus requires exact "
+            "enabled/launcherPath/launcherSha256/timeoutMs keys"
+        )
+    if (fleet_status["enabled"] is not True
+            or type(fleet_status["launcherPath"]) is not str
+            or type(fleet_status["launcherSha256"]) is not str
+            or type(fleet_status["timeoutMs"]) is not int):
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus field types are invalid"
+        )
+    expected = _fleet_status_config(user_root)
+    if expected is None:
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus owner launcher unavailable"
+        )
+    # _fleet_status_config delegates launcher reads to _stable_regular_file_hash,
+    # which does not check st_uid. Read the launcher descriptor via the existing
+    # owned, regular, no-follow, bounded reader so a wrong-owner launcher is
+    # caught before this validator returns. Any ownership, file-type, links,
+    # permissions, read/stability or digest error must refuse the release.
+    launcher_bytes = _fabric_release_bytes(user_root / FLEET_STATUS_LAUNCHER_REL)
+    if hashlib.sha256(launcher_bytes).hexdigest() != expected["launcherSha256"]:
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus owner launcher digest mismatch"
+        )
+    if fleet_status != expected:
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus does not match owner"
+        )
+    return True
+
+
+@_fabric_lifecycle_serialized(readonly_preflight=True)
+def cmd_fabric_backend_release(args) -> int:
+    """Select one merged Fabric backend while preserving the entire sealed seat.
+
+    Preview is read-only. Apply requires its exact plan and the unloaded original
+    service. It changes config args[0] and three manifest fields only; the same
+    private-service owner performs any later explicit start.
+    """
+    account = args.account
+    _validate_account_label(account)
+    if account not in FABRIC_BACKEND_ACCOUNTS or type(args.preflight_only) is not bool:
+        raise SystemExit("Fabric backend release requires an explicitly enrolled restricted c3 account")
+    expected = args.expected_manifest_sha256
+    if not _sha256_hex(expected):
+        raise SystemExit("Fabric backend release requires the original manifest CAS")
+    label = f"com.mastermind.studio-direct-private.{account}"
+    roots = _build_runtime_roots(account)
+    config_path, manifest_path = roots["config"], roots["manifest"]
+    before_manifest = _fabric_release_bytes(manifest_path)
+    if hashlib.sha256(before_manifest).hexdigest() != expected:
+        raise SystemExit("Fabric backend release: original manifest CAS mismatch")
+    prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    before_config = _fabric_release_bytes(config_path)
+    if (hashlib.sha256(before_config).hexdigest() != prior["configHash"]
+            or _fabric_release_bytes(manifest_path) != before_manifest):
+        raise SystemExit("Fabric backend release: sealed snapshot changed")
+    try:
+        old_config = json.loads(before_config)
+    except (ValueError, UnicodeError) as exc:
+        raise SystemExit("Fabric backend release: original config invalid") from exc
+    argv = old_config.get("args") if isinstance(old_config, dict) else None
+    # The live modern seat is one exact enrollment, not permission to migrate
+    # another profile or change its protocol, port, or capability boundary.
+    if account == FABRIC_BACKEND_MODERN_ACCOUNT and (
+            type(old_config) is not dict
+            or old_config.get("modernFabricProtocol") is not True
+            or old_config.get("backendMode") != "shared-account"
+            or type(old_config.get("port")) is not int
+            or old_config["port"] != FABRIC_BACKEND_MODERN_PORT
+            or "fleetStatus" in old_config):
+        raise SystemExit("Fabric backend release: exact enrolled modern profile required")
+    if (type(old_config) is not dict or old_config.get("fabricOnly") is not True
+            or old_config.get("gitPublish") is not False or old_config.get("paperDesign") is not False
+            or any(key in old_config for key in ("repositoryWorkspaces", "commissionPublication", "fleetRouting", "publicUrl"))
+            or not _validate_legacy_fleet_status(old_config, _user_root())
+            or old_config.get("testMode") is not False
+            or old_config.get("accountLabel") != account
+            or old_config.get("command") != prior["node"]
+            or old_config.get("host") != "127.0.0.1" or prior.get("host") != "127.0.0.1"
+            or old_config.get("port") != prior["port"]
+            or old_config.get("stateDir") != str(roots["state"])
+            or type(argv) is not list or not argv or not all(isinstance(x, str) for x in argv)
+            or argv[0] != prior["backend"] or type(old_config.get("childEnv")) is not dict
+            or old_config["childEnv"].get("MMX_FABRIC_SDK_PACKAGE") != str(roots["base"] / "package.json")):
+        raise SystemExit("Fabric backend release: original restricted profile or SDK binding differs")
+    backend, source = _fabric_release_source(args.release_commit, args.backend_sha256)
+    if str(backend) == prior["backend"]:
+        raise SystemExit("Fabric backend release: backend already selected; no replay")
+    new_config = {**old_config, "args": [str(backend), *argv[1:]]}
+    config_bytes = _fabric_release_json(new_config)
+    future = {**prior, "backend": str(backend), "backendHash": args.backend_sha256,
+              "configHash": hashlib.sha256(config_bytes).hexdigest()}
+    if not _valid_manifest(future, account, label):
+        raise SystemExit("Fabric backend release: prospective manifest invalid")
+    manifest_bytes = _fabric_release_json(future)
+    target_manifest = hashlib.sha256(manifest_bytes).hexdigest()
+    plan = {
+        "schema": FABRIC_BACKEND_RELEASE_SCHEMA, "account": account,
+        "originalManifestSha256": expected, "targetManifestSha256": target_manifest,
+        "originalConfigSha256": prior["configHash"], "targetConfigSha256": future["configHash"],
+        "originalBackend": prior["backend"], "originalBackendSha256": prior["backendHash"],
+        "targetBackend": str(backend), "targetBackendSha256": args.backend_sha256,
+        "releaseCommit": source["releaseCommit"], "backendGitBlob": source["backendGitBlob"],
+        "preservedGatewayFiles": len(prior["files"]), "preservedDependencyTreeSha256": prior["dependencyTreeHash"],
+        "preservedPlistSha256": prior["plistHash"], "serviceStarted": False,
+        "changedConfigFields": ["args[0]"], "changedManifestFields": ["backend", "backendHash", "configHash"],
+    }
+    plan_sha = _canonical_json_sha256(plan)
+    evidence_root = roots["state"] / "fabric-backend-releases"
+    transaction = evidence_root / plan_sha
+    if transaction.exists() or transaction.is_symlink():
+        raise SystemExit("Fabric backend release: retained transaction already exists; inspect its exact effect before proceeding")
+    if (_fabric_release_bytes(manifest_path) != before_manifest
+            or _fabric_release_bytes(config_path) != before_config):
+        raise SystemExit("Fabric backend release: original snapshot changed while planning")
+    if args.preflight_only:
+        print(json.dumps({**plan, "planSha256": plan_sha, "preflight": True,
+                          "effect": "NOT_APPLIED", "observedProtectedMaster": source["observedProtectedMaster"]}, sort_keys=True))
+        return 0
+    if not _sha256_hex(args.expected_plan_sha256) or args.expected_plan_sha256 != plan_sha:
+        raise SystemExit("Fabric backend release: exact reviewed preview plan is required")
+    if _lifecycle_inspect(account, label, roots) is not None:
+        raise SystemExit("refusing Fabric backend release while service is loaded; stop first")
+    if (_verify_staged_install(account, label, roots, require_runtime_seal=True) != prior
+            or _fabric_release_bytes(manifest_path) != before_manifest
+            or _fabric_release_bytes(config_path) != before_config):
+        raise SystemExit("Fabric backend release: original runtime changed before write")
+    _fabric_release_source(args.release_commit, args.backend_sha256)
+    if _lifecycle_inspect(account, label, roots) is not None:
+        raise SystemExit("refusing Fabric backend release while service is loaded; stop first")
+    _ensure_secure_dir(evidence_root)
+    _assert_dest_safe(transaction)
+    transaction.mkdir(mode=DIR_MODE)
+    _fsync_dir(evidence_root)
+    _fabric_release_new(transaction / "config.before.json", before_config)
+    _fabric_release_new(transaction / "manifest.before.json", before_manifest)
+    intent_bytes = _fabric_release_json({**plan, "planSha256": plan_sha,
+        "observedProtectedMaster": source["observedProtectedMaster"], "intentRecordedAt": time.time()})
+    _fabric_release_new(transaction / "intent.json", intent_bytes)
+    intent_sha = hashlib.sha256(intent_bytes).hexdigest()
+
+    def record(name, effect, **extra):
+        value = {"schema": FABRIC_BACKEND_RELEASE_SCHEMA, "account": account,
+                 "planSha256": plan_sha, "intentSha256": intent_sha,
+                 "effect": effect, "serviceStarted": False, "recordedAt": time.time(), **extra}
+        _fabric_release_new(transaction / name, _fabric_release_json(value))
+
+    try:
+        if (_fabric_release_bytes(manifest_path) != before_manifest
+                or _fabric_release_bytes(config_path) != before_config
+                or _lifecycle_inspect(account, label, roots) is not None):
+            raise RuntimeError("original state changed after intent persistence")
+        _atomic_write_bytes(config_path, config_bytes)
+        if (_fabric_release_bytes(manifest_path) != before_manifest
+                or _fabric_release_bytes(config_path) != config_bytes
+                or _stable_regular_file_hash(backend, label="Fabric backend") != args.backend_sha256
+                or _lifecycle_inspect(account, label, roots) is not None):
+            raise RuntimeError("original state changed before manifest commit")
+        # The sealed manifest commits last. A partial config update fails all
+        # incumbent start/integrity checks until it is restored or reconciled.
+        _atomic_write_bytes(manifest_path, manifest_bytes)
+        if (_verify_staged_install(account, label, roots, require_runtime_seal=True) != future
+                or _fabric_release_bytes(manifest_path) != manifest_bytes
+                or _fabric_release_bytes(config_path) != config_bytes
+                or _lifecycle_inspect(account, label, roots) is not None):
+            raise RuntimeError("committed runtime differs from the planned selection")
+        record("result.json", "APPLIED", manifestSha256=target_manifest,
+               backendSha256=args.backend_sha256, runtimeSealVerified=True)
+    except BaseException as exc:
+        # Any observed commit or concurrent change requires effect reconciliation.
+        # Never overwrite a manifest which may already have committed successfully.
+        rollback_proven = False
+        try:
+            if (_lifecycle_inspect(account, label, roots) is not None
+                    or _fabric_release_bytes(manifest_path) != before_manifest):
+                raise RuntimeError("manifest committed or service absence is unverified")
+            observed = _fabric_release_bytes(config_path)
+            if observed not in (before_config, config_bytes):
+                raise RuntimeError("non-owned concurrent configuration change")
+            if observed != before_config:
+                if (_fabric_release_bytes(config_path) != observed
+                        or _fabric_release_bytes(manifest_path) != before_manifest
+                        or _lifecycle_inspect(account, label, roots) is not None):
+                    raise RuntimeError("rollback target or service changed before restoration")
+                _atomic_write_bytes(config_path, before_config)
+            if (_fabric_release_bytes(manifest_path) != before_manifest
+                    or _fabric_release_bytes(config_path) != before_config
+                    or _verify_staged_install(account, label, roots, require_runtime_seal=True) != prior
+                    or _lifecycle_inspect(account, label, roots) is not None):
+                raise RuntimeError("original sealed runtime restoration unverified")
+            record("rollback.json", "ROLLED_BACK", originalManifestSha256=expected,
+                   originalConfigSha256=prior["configHash"], runtimeSealVerified=True)
+            record("result.json", "NOT_APPLIED", originalManifestSha256=expected,
+                   originalStateRestored=True)
+            rollback_proven = True
+        except BaseException:
+            try:
+                record("failure.json", "EFFECT_UNKNOWN", retryAllowed=False,
+                       recovery="Inspect retained intent and exact original account before any retry or start")
+            except BaseException:
+                pass
+        if rollback_proven:
+            raise SystemExit("Fabric backend release: NOT_APPLIED; original sealed state restored; evidence retained") from exc
+        raise SystemExit("Fabric backend release: EFFECT_UNKNOWN; inspect retained intent and original account before retry or start") from exc
+    print(json.dumps({**plan, "planSha256": plan_sha, "intentSha256": intent_sha,
+                      "preflight": False, "effect": "APPLIED", "evidenceDirectory": str(transaction)}, sort_keys=True))
+    return 0
+
+
+@_pin_lifecycle_serialized
+@_fabric_lifecycle_serialized()
+@_c2_lifecycle_serialized()
 def cmd_seal_runtime(args) -> int:
     account = args.account
     _validate_account_label(account)
     label = f"com.mastermind.studio-direct-private.{account}"
     roots = _build_runtime_roots(account)
-    if _launchd_inspect(label) is not None:
+    if _lifecycle_inspect(account, label, roots) is not None:
         raise SystemExit("refusing runtime seal while service is loaded; stop first")
-    manifest = _verify_staged_install(
+    manifest = _verify_native_pin_install(
         account, label, roots, require_runtime_seal=False
     )
     if manifest.get("version") != MANIFEST_VERSION:
@@ -1253,15 +3926,19 @@ def cmd_seal_runtime(args) -> int:
     return 0
 
 
+@_pin_lifecycle_serialized
+@_fabric_lifecycle_serialized()
+@_c2_lifecycle_serialized()
 def cmd_start(args) -> int:
     account = args.account
     _validate_account_label(account)
     label = f"com.mastermind.studio-direct-private.{account}"
     roots = _build_runtime_roots(account)
 
-    _verify_staged_install(account, label, roots)
+    _verify_native_pin_install(account, label, roots)
+    _pin_require_start(account, roots)
 
-    info = _launchd_inspect(label)
+    info = _lifecycle_inspect(account, label, roots)
     if info is not None:
         path = info.get("path")
         if path and path != str(roots["plist"]):
@@ -1306,18 +3983,21 @@ def cmd_status(args) -> int:
     return 0
 
 
+@_pin_lifecycle_serialized
+@_fabric_lifecycle_serialized()
+@_c2_lifecycle_serialized()
 def cmd_stop(args) -> int:
     account = args.account
     _validate_account_label(account)
     label = f"com.mastermind.studio-direct-private.{account}"
     roots = _build_runtime_roots(account)
 
-    info = _launchd_inspect(label)
+    info = _lifecycle_inspect(account, label, roots)
     if info is None:
         print(json.dumps({"stopped": True, "already": True, "account": account}))
         return 0
 
-    _verify_staged_install(
+    _verify_native_pin_install(
         account, label, roots, require_runtime_seal=False
     )
 
@@ -1330,8 +4010,31 @@ def cmd_stop(args) -> int:
         return 1
 
     deadline = time.monotonic() + 10
-    while _launchd_inspect(label) is not None:
-        if time.monotonic() >= deadline:
+    strict_account = (account in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT)
+                      or account in FABRIC_BACKEND_ACCOUNTS
+                      or account in _NATIVE_POOL_PIN_TAILNET_CANONICAL)
+    # launchd may transiently report an indeterminate state immediately after a
+    # successful bootout. Continue OBSERVING only, never repeat the bootout.
+    # A strict owner must still see an exact positive ABSENT receipt before
+    # reporting stopped; persistent uncertainty remains EFFECT_UNKNOWN.
+    for poll in range(51):
+        try:
+            remaining = _lifecycle_inspect(account, label, roots)
+        except SystemExit as exc:
+            if not strict_account:
+                raise
+            if time.monotonic() >= deadline or poll == 50:
+                subject = ("Tailnet" if account in _NATIVE_POOL_PIN_TAILNET_CANONICAL
+                           else "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "Paper")
+                raise SystemExit(
+                    f"{subject} stop: EFFECT_UNKNOWN after bootout; "
+                    "service absence is unverified"
+                ) from exc
+            time.sleep(0.2)
+            continue
+        if remaining is None:
+            break
+        if time.monotonic() >= deadline or poll == 50:
             print(json.dumps({"stopped": False, "reason": "still loaded"}))
             return 1
         time.sleep(0.2)
@@ -1344,6 +4047,46 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="private_service")
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    pin = sub.add_parser("native-pool-pin")
+    pin.add_argument("--account", required=True)
+    pin.add_argument("--expected-manifest-sha256", required=True)
+    pin.add_argument("--successor-bundle", required=True)
+    pin.add_argument("--successor-plan-sha256", required=True)
+    pin.add_argument("--expected-plan-sha256")
+    pin.add_argument("--operation", choices=("preview", "apply", "status", "reconcile"), required=True)
+    pin.set_defaults(func=cmd_native_pool_pin)
+
+    enrollment = sub.add_parser("native-pool-pin-enrollment")
+    enrollment.add_argument("--account", choices=("chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9"), required=True)
+    enrollment.add_argument("--expected-manifest-sha256", required=True)
+    enrollment.add_argument("--expected-plan-sha256")
+    enrollment.add_argument("--source", help="exact reviewed payload under the installed owner's home; preview/apply only")
+    enrollment.add_argument("--operation", choices=("preview", "apply", "status", "reconcile"), required=True)
+    enrollment.set_defaults(func=cmd_native_pool_pin_enrollment)
+
+    fabric = sub.add_parser("fabric-backend-release")
+    fabric.add_argument("--account", required=True)
+    fabric.add_argument("--expected-manifest-sha256", required=True)
+    fabric.add_argument("--release-commit", required=True,
+                        help="exact protected merged commit for the fixed Fabric backend release path")
+    fabric.add_argument("--backend-sha256", required=True)
+    fabric.add_argument("--expected-plan-sha256",
+                        help="exact plan digest returned by the reviewed read-only preview; required for apply")
+    fabric.add_argument("--preflight-only", action="store_true")
+    fabric.set_defaults(func=cmd_fabric_backend_release)
+
+    paper = sub.add_parser("paper-runtime-upgrade")
+    paper.add_argument("--account", required=True)
+    paper.add_argument("--expected-manifest-sha256", required=True,
+                       help="CAS pin for the exact reviewed sealed Paper predecessor")
+    paper.add_argument("--preflight-only", action="store_true",
+                       help="read-only Paper selection plan; no service or installation changes")
+    paper.add_argument("--m1-v20", action="store_true",
+                       help="exact reviewed M1 chrisadmin v5-to-v20 Paper-only selector")
+    paper.add_argument("--fleet-v20", action="store_true",
+                       help="only eight frozen M2 original v10/v12 Paper cohorts, exact predecessor CAS")
+    paper.set_defaults(func=cmd_paper_runtime_upgrade)
+
     for name in ("stage", "upgrade"):
         s = sub.add_parser(name)
         s.add_argument("--account", required=True)
@@ -1351,9 +4094,26 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--source", required=True)
         s.add_argument("--node", required=True)
         s.add_argument("--backend", required=True)
+        s.add_argument("--modern-fabric-protocol", action=argparse.BooleanOptionalAction, default=None,
+                       help="opt into stateless MCP for the private Fabric-only shared backend; otherwise preserve verified selection")
+        s.add_argument("--fabric-only", action="store_true", help="new Fabric-only installation; no Git, Paper or repository tools")
         s.add_argument("--os-commission-config-sha256", help="opt into the exact root-sealed OS publication grant")
         s.add_argument("--enable-repository-workspaces", action="store_true",
                        help="enable the closed installed repository-workspace consumer")
+        if name == "upgrade":
+            s.add_argument("--c2-business-fleet-compat", action="store_true",
+                           help="exact hash-pinned C2 11-to-12-file gateway compatibility; no new repo grants")
+            s.add_argument("--c2-personal-closed-publisher", action="store_true")
+            s.add_argument("--c2-business-repository-enrollment", action="store_true",
+                           help="explicit closed Macro/Terminal opt-in after reviewed C2 11-to-12 migration; manifest CAS required")
+            s.add_argument("--c2-personal-git-timeout-only", action="store_true",
+                           help="exact sealed C2 Personal stopped-service Git command budget patch")
+            s.add_argument("--publisher-only-fleet-v10", action="store_true",
+                           help="preserve the exact sealed enrolled fleet v0.1.10 runtime; patch only two publisher modules")
+            s.add_argument("--publisher-expected-manifest-sha256",
+                           help="CAS pin for the original sealed, approved fleet manifest")
+            s.add_argument("--publisher-preflight-only", action="store_true",
+                           help="read-only exact fleet publisher upgrade preflight, even while service is running")
         s.set_defaults(func=globals()[f"cmd_{name}"])
 
     for name in ("seal-runtime", "start", "status", "stop"):

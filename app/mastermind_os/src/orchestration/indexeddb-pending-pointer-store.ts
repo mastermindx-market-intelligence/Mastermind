@@ -1,4 +1,5 @@
 import type { OperationPointer } from "./operation-controller";
+import { parseDirectConsumeTarget } from "../direct-native-result";
 
 export interface DurablePendingPointerStore {
   read(scope: string, signal?: AbortSignal): Promise<OperationPointer | null>;
@@ -31,12 +32,18 @@ export const PENDING_POINTER_ERRORS = {
   CANCELLED: "PENDING_POINTER_CANCELLED",
 } as const;
 
-interface ClosedRecord {
-  readonly v: 1;
-  readonly operationKey: string;
-  readonly kind: "launch";
-  readonly targetKey: string;
-}
+type SourceOperationKind = "project_create" | "project_adopt" | "direction_accept";
+type StoredKind = "launch" | "consume" | "project_pause" | "project_resume" | SourceOperationKind;
+type ClosedRecord = {
+  readonly v: 1; readonly operationKey: string; readonly kind: "launch" | "consume"; readonly targetKey: string;
+} | {
+  readonly v: 2; readonly operationKey: string; readonly kind: "project_pause"; readonly targetKey: string;
+} | {
+  readonly v: 3; readonly operationKey: string; readonly kind: "project_resume"; readonly targetKey: string;
+} | {
+  /** Source operations retain only a candidate/work lookup, never payload or authority. */
+  readonly v: 4; readonly operationKey: string; readonly kind: SourceOperationKind; readonly targetKey: string;
+};
 
 type DurableReservation =
   | { readonly reserved: true }
@@ -45,6 +52,9 @@ type DurableReservation =
 
 const SCOPE_RE = /^[0-9a-f]{64}$/;
 const LAUNCH_KEY_RE = /^mmos-launch-[0-9a-f]{40}$/;
+const CONSUME_KEY_RE = /^mmos-consume-[0-9a-f]{40}$/;
+export const PROJECT_PAUSE_KEY_PREFIX = "mmos-project-pause-";
+const PROJECT_PAUSE_KEY_RE = /^mmos-project-pause-[0-9a-f]{40}$/;
 const TARGET_KEY_RE = /^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$/;
 const POINTER_INPUT_KEYS: ReadonlySet<string> = new Set(["operationKey", "kind", "targetKey"]);
 const RECORD_KEYS: ReadonlyArray<string> = ["v", "operationKey", "kind", "targetKey"];
@@ -72,55 +82,41 @@ function assertScope(scope: string): void {
   }
 }
 
+const KIND_RECORDS = {
+  launch: { v: 1, key: LAUNCH_KEY_RE, consume: false },
+  consume: { v: 1, key: CONSUME_KEY_RE, consume: true },
+  project_pause: { v: 2, key: PROJECT_PAUSE_KEY_RE, consume: false },
+  project_resume: { v: 3, key: /^mmos-project-resume-[0-9a-f]{40}$/, consume: false },
+  project_create: { v: 4, key: /^mmos-project-create-[0-9a-f]{40}$/, consume: false },
+  project_adopt: { v: 4, key: /^mmos-project-adopt-[0-9a-f]{40}$/, consume: false },
+  direction_accept: { v: 4, key: /^mmos-direction-accept-[0-9a-f]{40}$/, consume: false },
+} as const;
+function recordSpec(kind: unknown) {
+  return typeof kind === "string" && Object.hasOwn(KIND_RECORDS, kind)
+    ? KIND_RECORDS[kind as StoredKind] : null;
+}
+function validFields(raw: Record<string, unknown>, spec: NonNullable<ReturnType<typeof recordSpec>>): boolean {
+  if (typeof raw.operationKey !== "string" || !spec.key.test(raw.operationKey)
+      || (spec.v !== 1 && spec.key.exec(raw.operationKey)?.[0] !== raw.operationKey)) return false;
+  return typeof raw.targetKey === "string"
+    && (spec.consume ? parseDirectConsumeTarget(raw.targetKey) !== null : TARGET_KEY_RE.test(raw.targetKey))
+    && (spec.v === 1 || TARGET_KEY_RE.exec(raw.targetKey)?.[0] === raw.targetKey);
+}
 function parsePointer(pointer: unknown): ClosedRecord {
   if (!isPlainObject(pointer)) fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
-  const raw = pointer;
-  const keys = Object.keys(raw);
-  if (keys.length !== POINTER_INPUT_KEYS.size) fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
-  for (const key of keys) {
-    if (!POINTER_INPUT_KEYS.has(key)) fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
-  }
-  if (raw.kind !== "launch") fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
-  if (typeof raw.operationKey !== "string" || !LAUNCH_KEY_RE.test(raw.operationKey)) {
-    fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
-  }
-  if (typeof raw.targetKey !== "string" || !TARGET_KEY_RE.test(raw.targetKey)) {
-    fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
-  }
-  return {
-    v: 1,
-    operationKey: raw.operationKey,
-    kind: "launch",
-    targetKey: raw.targetKey,
-  };
+  const keys = Object.keys(pointer), spec = recordSpec(pointer.kind);
+  if (keys.length !== POINTER_INPUT_KEYS.size || keys.some(key => !POINTER_INPUT_KEYS.has(key))
+      || spec === null || !validFields(pointer, spec)) fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
+  // The closed kind-to-version map above is the sole source of this version.
+  return {v:spec.v,operationKey:pointer.operationKey,kind:pointer.kind,targetKey:pointer.targetKey} as ClosedRecord;
 }
-
 function decodeRecord(value: unknown): OperationPointer {
   if (!isPlainObject(value)) fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-  const raw = value;
-  const keys = Object.keys(raw);
-  if (keys.length !== RECORD_KEYS.length) fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-  for (const key of RECORD_KEYS) {
-    if (!Object.prototype.hasOwnProperty.call(raw, key)) {
-      fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-    }
-  }
-  for (const key of keys) {
-    if (!RECORD_KEYS.includes(key)) fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-  }
-  if (raw.v !== 1) fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-  if (raw.kind !== "launch") fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-  if (typeof raw.operationKey !== "string" || !LAUNCH_KEY_RE.test(raw.operationKey)) {
-    fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-  }
-  if (typeof raw.targetKey !== "string" || !TARGET_KEY_RE.test(raw.targetKey)) {
-    fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-  }
-  return {
-    operationKey: raw.operationKey,
-    kind: "launch",
-    targetKey: raw.targetKey,
-  };
+  const keys = Object.keys(value), spec = recordSpec(value.kind);
+  if (keys.length !== RECORD_KEYS.length || RECORD_KEYS.some(key => !Object.hasOwn(value,key))
+      || keys.some(key => !RECORD_KEYS.includes(key)) || spec === null || value.v !== spec.v
+      || !validFields(value,spec)) fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
+  return {operationKey:value.operationKey as string,kind:value.kind as StoredKind,targetKey:value.targetKey as string};
 }
 
 function canonicalFieldsEqual(a: ClosedRecord, b: OperationPointer): boolean {

@@ -389,7 +389,7 @@ def test_executive_mcp_runtime_lock_includes_dependency_complete_read_stack():
     lock = (root / "requirements" / "executive-mcp-macos-arm64-py312.lock").read_text(encoding="utf-8").lower()
 
     assert "mcp==1.28.1" in direct
-    assert "PyJWT[crypto]==2.13.0" in direct
+    assert "PyJWT[crypto]==2.14.0" in direct
     assert "PyYAML==6.0.3" in direct
     assert "uvicorn[standard]==0.52.4" in direct
     assert "mcp==1.28.1" in lock

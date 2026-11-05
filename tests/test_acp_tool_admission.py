@@ -3,6 +3,7 @@ import asyncio
 import dataclasses
 import hashlib
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,7 @@ from integrations.acp_worker.native import AcpNativeProcessOwner
 from integrations.acp_worker.tool_admission import AcpAdmissionChannel, AcpNativeToolGate, AcpObservedTool
 
 PROBE = '''
-import json, os, socket, sys
+import json, os, socket, sys, hashlib
 sock = socket.socket(fileno=int(os.environ['MMX_ACP_ATTEST_FD']))
 f = sock.makefile('rwb', buffering=0)
 seed = json.loads(f.readline())
@@ -24,6 +25,19 @@ else:
     if mode == 'nonce': message['launch_nonce'] = 'wrong'
     if mode == 'tools': message['admitted_tools'] = []
     if mode == 'extra': message['self_grant'] = 'shell'
+    if mode == 'overlay-spoof':
+        message['attempt_overlay']['env']['MMX_ACP_JOB_ID'] = 'other-job'
+    if seed['schema'] == 'mastermind.acp_tools_ready/v2' and mode != 'legacy-echo':
+        overlay = seed['attempt_overlay']
+        message['attempt_overlay_sha256'] = hashlib.sha256(
+            json.dumps(overlay, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    if mode in ('capture', 'legacy-echo', 'overlay-spoof'):
+        print(json.dumps({'schema':seed['schema'],
+          'attempt':seed.get('attempt_overlay'),
+          'proof_present': 'attempt_overlay_sha256' in message,
+          'ambient_attempt_keys': sorted(k for k in os.environ
+            if k.startswith('MMX_ACP_') and k != 'MMX_ACP_ATTEST_FD'),
+          'inherited_secret': os.environ.get('OPENAI_API_KEY')}), flush=True)
     raw = json.dumps(message)
     if mode == 'duplicate': raw = raw[:-1] + ',"ready":true}'
     f.write(raw.encode() + b'\\n')
@@ -159,3 +173,124 @@ def test_receipt_transport_close_failure_is_shared_and_never_retried(launch, tmp
         finally:
             channel.close_unstarted()
     asyncio.run(run())
+
+def _trusted_attempt_overlay(spec, workspace):
+    """Synthetic equivalent of the installed packet's six-field projection."""
+    return {
+        "cwd": str(workspace),
+        "env": {
+            "MMX_ACP_WORKSPACE_PATH": str(workspace),
+            "MMX_ACP_WORKSPACE_BASE_SHA": spec.expected_base_sha,
+            "MMX_ACP_RUN_ID": spec.run_id,
+            "MMX_ACP_JOB_ID": spec.job_id,
+            "MMX_ACP_WORKER_ID": spec.worker_id,
+            "MMX_ACP_DEADLINE_MS": str(int(time.time() * 1000)
+                                         + int(spec.timeout_seconds * 1000)),
+        },
+    }
+
+
+def _overlay_owner(launch, tmp_path, mode="capture", overlay_change=None):
+    owner, spec, _ = setup(launch, tmp_path, mode)
+    profile = owner.profile
+
+    def overlay(spec, workspace, run_dir):
+        assert workspace == spec.workspace_path.resolve(strict=True)
+        assert run_dir == spec.run_dir.resolve(strict=True)
+        value = _trusted_attempt_overlay(spec, workspace)
+        if overlay_change:
+            overlay_change(value)
+        return value
+
+    return AcpNativeProcessOwner(
+        profile,
+        environment_loader=lambda: {},
+        tool_gate=owner.tool_gate,
+        launch_argv_builder=lambda _spec, _workspace, _run: profile.argv,
+        attempt_overlay_builder=overlay,
+    ), spec
+
+
+def test_v2_child_receives_exact_attempt_on_original_inherited_socket(launch, tmp_path, monkeypatch):
+    owner, spec = _overlay_owner(launch, tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "fixture-must-not-reach-child")
+    monkeypatch.setenv("HOME", str(tmp_path / "outside-home"))
+
+    async def scenario():
+        resources = await owner.open_run(spec)
+        try:
+            observed = json.loads(await asyncio.wait_for(resources.reader.readline(), 2))
+            assert observed["schema"] == "mastermind.acp_tools_ready/v2"
+            assert observed["attempt"]["cwd"] == str(spec.workspace_path.resolve(strict=True))
+            assert observed["attempt"]["env"]["MMX_ACP_JOB_ID"] == spec.job_id
+            assert set(observed["attempt"]["env"]) == {
+                "MMX_ACP_WORKSPACE_PATH", "MMX_ACP_WORKSPACE_BASE_SHA",
+                "MMX_ACP_RUN_ID", "MMX_ACP_JOB_ID", "MMX_ACP_WORKER_ID",
+                "MMX_ACP_DEADLINE_MS",
+            }
+            assert observed["proof_present"] is True
+            assert observed["ambient_attempt_keys"] == []
+            assert observed["inherited_secret"] is None
+            assert "OPENAI_API_KEY" not in observed["attempt"]["env"]
+            receipt = await asyncio.wait_for(resources.prepare_prompt("session-1", spec.model), 2)
+            assert receipt.matches(spec, resources.process_ref, "session-1", spec.model)
+            assert json.loads(await resources.reader.readline()) == {"accepted": True}
+        finally:
+            completion = await resources.finish(None)
+        assert completion.settled and owner._active is None
+        assert not owner._identity_matches(resources.process_ref)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("mode", ("legacy-echo", "overlay-spoof"))
+def test_v2_rejects_legacy_or_forged_child_ack(launch, tmp_path, mode):
+    owner, spec = _overlay_owner(launch, tmp_path, mode)
+    async def scenario():
+        resources = await owner.open_run(spec)
+        try:
+            observed = json.loads(await asyncio.wait_for(resources.reader.readline(), 2))
+            assert observed["schema"] == "mastermind.acp_tools_ready/v2"
+            with pytest.raises(ValueError, match="readiness identity refused"):
+                await asyncio.wait_for(resources.prepare_prompt("session-1", spec.model), 2)
+        finally:
+            completion = await resources.finish("v2 invalid ack")
+        assert await asyncio.wait_for(resources.reader.read(), 2) == b""
+        assert completion.settled and owner._active is None
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("variant", (
+    "foreign_job", "extra_env", "foreign_workspace", "expired", "write_authority",
+))
+def test_v2_refuses_widened_owner_overlay_before_any_process(
+    launch, tmp_path, monkeypatch, variant,
+):
+    def change(value):
+        if variant == "foreign_job":
+            value["env"]["MMX_ACP_JOB_ID"] = "foreign"
+        elif variant == "extra_env":
+            value["env"]["OPENAI_API_KEY"] = "forbidden"
+        elif variant == "foreign_workspace":
+            value["cwd"] = str(tmp_path)
+        elif variant == "expired":
+            value["env"]["MMX_ACP_DEADLINE_MS"] = "1000"
+
+    owner, spec = _overlay_owner(launch, tmp_path, overlay_change=change)
+    if variant == "write_authority":
+        spec = dataclasses.replace(spec, authorities=("READ", "WRITE_BRANCH"))
+    async def forbidden(*args, **kwargs):
+        pytest.fail("foreign ACP Attempt reached native spawn")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", forbidden)
+    with pytest.raises(ValueError, match="ACP Attempt channel"):
+        asyncio.run(owner.open_run(spec))
+    assert owner._active is None
+
+
+def test_attempt_channel_cannot_be_constructed_without_existing_private_gate(launch):
+    profile, spec = launch
+    with pytest.raises(ValueError, match="requires fixed private"):
+        AcpNativeProcessOwner(
+            profile, environment_loader=lambda: {},
+            attempt_overlay_builder=lambda *_: _trusted_attempt_overlay(spec, spec.workspace_path),
+        )

@@ -1,0 +1,247 @@
+--- a/pick.py
++++ b/pick.py
+@@ -482,6 +482,8 @@
+         return ""
+     raw = ROUTING_TOKEN_POOLS.get(raw, raw)
+     stem = raw[len("remote-"):] if raw.startswith("remote-") else raw
++    if stem == "cursor-grok-4.6-high":
++        return "grok"
+     for fam in _POOL_FAMILIES:
+         if stem == fam or stem.startswith(fam + "-"):
+             return fam
+@@ -1286,11 +1288,22 @@
+     return pool
+ 
+ 
++def _cursor_grok_quota_affinity(model: Optional[str], task_class: str,
++                                doc: Optional[Dict[str, Any]] = None) -> bool:
++    return (model == "cursor-grok-4.6-high" and _grok_exhausted()
++            and policy_allows("grok", task_class, doc)[0])
++
++
+ def policy_allows(pool: str, task_class: str,
+-                  doc: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
++                  doc: Optional[Dict[str, Any]] = None,
++                  model: Optional[str] = None) -> Tuple[bool, str]:
+     """Enforce role/class (R20/R23). One-line reason on refuse."""
+     tc = task_class.lower()
+     p = canonical_pool(pool) or pool
++    # Chairman's quota-only exception follows this exact Grok model's class
++    # capability. Composer and ordinary Cursor routes retain R30 unchanged.
++    if p == "cursor" and _cursor_grok_quota_affinity(model, tc, doc):
++        p = "grok"
+     # Hard boundary independent of optional YAML parsing: top-level orchestration
+     # remains seat-only, while bounded domain orchestration is restricted to the
+     # qualified frontier coordinator families. This does not grant recursive spawn
+@@ -1565,7 +1578,7 @@
+             suffix += "+glm_credit_promo"
+         return resolved_model, suffix
+     spec = ((doc or load_pools()).get("pools") or {}).get(pool) or {}
+-    model = spec.get("default_model") or _default_model(pool, task_class)
++    model = (model if pool == "cursor" and model == "cursor-grok-4.6-high" else None) or spec.get("default_model") or _default_model(pool, task_class)
+     if pool == "bailian" and task_class.lower() == "review":
+         model = spec.get("review_model") or "qwen3.8-max"
+     return model, suffix
+@@ -1693,8 +1706,9 @@
+             return False, f"grok at cap {cap}"
+ 
+     if pool == "cursor":
+-        if (is_execute_class(task_class)
+-                or task_class.lower() in LABOR_CLASSES_R30):
++        if ((is_execute_class(task_class)
++                or task_class.lower() in LABOR_CLASSES_R30)
++                and not _cursor_grok_quota_affinity(model, task_class, doc)):
+             return False, "cursor never for labor (R30)"
+         cap = _pool_cap(pool)
+         if _slot_concurrent(pool) >= cap:
+@@ -1828,6 +1842,49 @@
+                 route_key: Optional[str] = None,
+                 required_modes: Optional[List[str]] = None,
+                 required_platforms: Optional[List[str]] = None) -> str:
++    """Select a new request, preserving Grok model affinity on quota exhaustion."""
++    if os.environ.get("POOL_OPERATOR_CHILD_BUDGET", "0") != "0":
++        # Same model is not the same harness capability. The existing operator
++        # grant admits child-launch only on these modes; this can only narrow.
++        if required_modes is None:
++            required_modes = ["glm", "grok"]
++        else:
++            known_modes = {mode for modes in _HOST_POOL_MODES.values() for mode in modes}
++            # Invalid caller input must keep the existing rejection, never be
++            # normalized into validity by this capability intersection.
++            if (type(required_modes) is list and 0 < len(required_modes) <= len(known_modes)
++                    and all(type(mode) is str and mode in known_modes for mode in required_modes)):
++                required_modes = sorted(set(required_modes) & {"glm", "grok"})
++    common = dict(prefer=prefer, host=host, needs=needs, subject_pool=subject_pool,
++                  task_complexity=task_complexity, escalation_reason=escalation_reason,
++                  route_key=route_key, required_modes=required_modes,
++                  required_platforms=required_platforms)
++    affinity = (requested_model == "grok-4.6" and canonical_pool(pool) in (None, "grok")) or (
++        canonical_pool(pool) == "grok" and requested_model is None)
++    if not affinity:
++        return _format_pick_host(task_class, pool=pool, requested_model=requested_model, **common)
++    primary = _format_pick_host(task_class, pool="grok", **common)
++    if primary.startswith("POOL=") or not _grok_exhausted():
++        return primary
++    same = _format_pick_host(task_class, pool="cursor", requested_model="cursor-grok-4.6-high", **common)
++    if same.startswith("POOL="):
++        return same + " AFFINITY=grok-4.6 QUOTA_FAILOVER=grok-weekly-to-cursor-monthly MODEL_CHANGED=false"
++    other = _format_pick_host(task_class, **common)
++    if other.startswith("POOL="):
++        return other + " AFFINITY=grok-4.6 QUOTA_FAILOVER=grok-exhausted MODEL_CHANGED=true"
++    return other
++
++
++def _format_pick_host(task_class: str, prefer: Optional[str] = None,
++                host: Optional[str] = None, pool: Optional[str] = None,
++                needs: Optional[List[str]] = None,
++                subject_pool: Optional[str] = None,
++                task_complexity: str = "",
++                escalation_reason: str = "",
++                requested_model: Optional[str] = None,
++                route_key: Optional[str] = None,
++                required_modes: Optional[List[str]] = None,
++                required_platforms: Optional[List[str]] = None) -> str:
+     """Read-only selection; host name or auto also requires placement eligibility."""
+     if required_modes is not None:
+         known_modes = {mode for adapters in _HOST_POOL_MODES.values() for mode in adapters}
+@@ -1847,7 +1904,7 @@
+     if host is not None:
+         try:
+             glm_candidate_model = _selection_model("glm", task_class, load_pools(), needs,
+-                model=requested_model)[0]
++                model=requested_model if requested_model != "cursor-grok-4.6-high" else None)[0]
+             routes = _eligible_host_routes(
+                 host, glm_model=glm_candidate_model,
+                 **({"route_key": route_key} if route_key is not None else {}),
+@@ -1904,7 +1961,22 @@
+         return f"NONE reason=unknown_task_complexity ({complexity})"
+     # Complexity alone is classification, never permission to upgrade. Only
+     # the existing full-GLM C2 build escalation is admitted by this narrow API.
+-    if explicit_model:
++    native_alias = explicit_model == "cursor-grok-4.6-high"
++    if native_alias:
++        if forced != "cursor":
++            return "NONE reason=exact native alias requires cursor pool"
++        if not _cursor_grok_quota_affinity(explicit_model, tc, doc):
++            return "NONE reason=Cursor Grok alias requires exhausted weekly Grok and eligible Grok task"
++        ok, reason = _subject_ok("grok", tc, subject_pool, doc)
++        if not ok:
++            return f"NONE reason={reason}"
++        if is_execute_class(tc, doc) and floor_demotes(
++                "grok", tc, doc=doc, needs=needs, model="grok-4.6"):
++            return "NONE reason=Grok model quality floor remains binding across products (R22)"
++        # This exact high-effort alias was observed in the authenticated Cursor
++        # catalog. Capability/host, economic, quality and independence gates
++        # below are still required; catalog presence is not worker admission.
++    if explicit_model and not native_alias:
+         models = {str(value).casefold() for value in _glm_models(doc).values()}
+         full = (_glm_models(doc).get("reviewer") or _glm_models(doc).get("operator") or "").casefold()
+         if explicit_model not in models:
+@@ -1935,10 +2007,10 @@
+             return "NONE reason=go_short_capability_only_for_c0_c1"
+         if host_modes is not None and forced not in host_modes:
+             return f"NONE reason=pool {forced} has no eligible mode on requested host"
+-        ok, reason = policy_allows(forced, tc, doc)
++        selected_model = (explicit_model or None) if forced == "glm" or native_alias else None
++        ok, reason = policy_allows(forced, tc, doc, model=selected_model)
+         if not ok:
+             return f"NONE reason={reason}"
+-        selected_model = (explicit_model or None) if forced == "glm" else None
+         ok, reason = _needs_ok(forced, needs, tc, doc, model=selected_model)
+         if not ok:
+             return f"NONE reason={reason}"
+@@ -2064,6 +2136,23 @@
+         b"mastermind-bailian-routine-v1\0" + route_key.encode("ascii")
+     ).digest()[:8], "big") % 10000
+     return value < percent * 100
++
++
++def _cursor_grok_after_quota(tc, *, needs=None, subject_pool=None, host_modes=None,
++                             task_complexity="", escalation_reason=""):
++    """At a Grok candidate's existing position, try its other paid product.
++
++    The forced route rechecks capability, account capacity, both quality floors,
++    reviewer provenance and economics. This is selection before any worker effect.
++    """
++    if not _grok_exhausted():
++        return "NONE reason=weekly Grok not exhausted"
++    same = _format_pick(tc, pool="cursor", requested_model="cursor-grok-4.6-high",
++        needs=needs, subject_pool=subject_pool, host_modes=host_modes,
++        task_complexity=task_complexity, escalation_reason=escalation_reason)
++    if same.startswith("POOL="):
++        return same + " AFFINITY=grok-4.6 QUOTA_FAILOVER=grok-weekly-to-cursor-monthly MODEL_CHANGED=false"
++    return same
+ 
+ 
+ EXECUTOR_PROMOTABLE_R31 = frozenset({"minimax", "glm", "bailian"})
+@@ -2106,6 +2195,12 @@
+         order = ["grok"] + [token for token in order if token != "grok"]
+     for token in order:
+         p = ROUTING_TOKEN_POOLS.get(token, token)
++        if p == "grok":
++            same = _cursor_grok_after_quota(tc, needs=needs, subject_pool=subject_pool,
++                host_modes=host_modes, task_complexity=task_complexity,
++                escalation_reason=escalation_reason)
++            if same.startswith("POOL="):
++                return same
+         if host_modes is not None and p not in host_modes:
+             continue
+         ok, reason = policy_allows(p, tc, doc)
+@@ -2164,6 +2259,7 @@
+     """R28 judgment classes (R31 promotes urgent operator pools); unknown
+     classes retain the scored path."""
+     candidates: List[Tuple[float, str, str]] = []
++    quota_lines = {}
+ 
+     if is_judgment_class(tc, doc):
+         order = _promo_balance_glm(judgment_order(doc), doc, tc, needs=needs)
+@@ -2172,6 +2268,12 @@
+             order = ["grok"] + [token for token in order if token != "grok"]
+         for token in order:
+             p = ROUTING_TOKEN_POOLS.get(token, token)
++            if p == "grok":
++                same = _cursor_grok_after_quota(tc, needs=needs, subject_pool=subject_pool,
++                    host_modes=host_modes, task_complexity=task_complexity,
++                    escalation_reason=escalation_reason)
++                if same.startswith("POOL="):
++                    return same
+             if host_modes is not None and p not in host_modes:
+                 continue
+             ok, reason = policy_allows(p, tc, doc)
+@@ -2204,6 +2306,16 @@
+         return "NONE reason=no_operator_available"
+ 
+     for pool in ("grok", "cursor", "bailian", "minimax"):
++        if pool == "grok":
++            same = _cursor_grok_after_quota(tc, needs=needs, subject_pool=subject_pool,
++                host_modes=host_modes, task_complexity=task_complexity,
++                escalation_reason=escalation_reason)
++            if same.startswith("POOL="):
++                score = _score_pool("grok", tc, prefer)
++                if score >= -900:
++                    quota_lines["grok"] = same
++                    candidates.append((score, "grok", "quota_same_model"))
++                continue
+         if host_modes is not None and pool not in host_modes:
+             continue
+         ok, reason = policy_allows(pool, tc, doc)
+@@ -2245,6 +2357,8 @@
+ 
+     candidates.sort(key=lambda x: (-x[0], x[1]))
+     for _best_score, best_pool, best_reason in candidates:
++        if best_pool in quota_lines:
++            return quota_lines[best_pool]
+         if burn_down_urgent(best_pool, doc):
+             best_reason = f"{best_reason}+burn_down_urgent"
+         line = _emit(best_pool, best_reason, tc, doc, needs=needs, host_modes=host_modes,
+@@ -2306,6 +2420,10 @@
+     executor = str((policy_doc.get("pools") or {}).get(
+         "glm", {}).get("models", {}).get("executor", ""))
+     normalized_model = requested_model.strip().lower()
++    if normalized_mode == "cursor" and normalized_model == "cursor-grok-4.6-high":
++        if not _cursor_grok_quota_affinity(normalized_model, normalized_task, policy_doc):
++            result.update(allowed=False, reason="cursor_grok_quota_affinity_unproven")
++            return result
+     # Live OpenCode Go worker rs_ubuntu3_go_minimax27_20261008a settled
+     # HTTP 400 ModelProtocolUnsupported. Keep this exact model fail-closed
+     # in the existing economic admission path for every task tier.

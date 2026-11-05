@@ -38,7 +38,7 @@ async def authenticate_document(raw, config, *, audit_sink, clock, jwks_cache=No
     from integrations.business_mcp_auth.contracts import load_resource_policy
     from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
     from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
-    from integrations.executive_mcp.schemas import validate_tool_arguments
+    from integrations.executive_mcp.schemas import validate_app_submit_arguments
     from integrations.mastermind_executive_app.gateway import _default_jwks_cache
     from integrations.mastermind_executive_app.os_publication_auth import OsPublicationAuthenticator
     from integrations.mastermind_executive_app.os_transport import _parse_body
@@ -65,7 +65,7 @@ async def authenticate_document(raw, config, *, audit_sink, clock, jwks_cache=No
         body = _parse_body(value["request_body"].encode("utf-8"))
         if set(body) != {"arguments"}:
             raise ValueError("closed request body required")
-        validate_tool_arguments("submit_ceo_intent", body["arguments"])
+        validate_app_submit_arguments(body["arguments"])
         # Validate under the canonical law, but bind the original wire payload.
         # Normalization inserts defaults; the app key deliberately hashes its exact form.
         args = body["arguments"]
