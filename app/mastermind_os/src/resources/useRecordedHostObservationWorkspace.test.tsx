@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { act, renderHook } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import fixture from "./fixtures/recorded-host-observation-owner.json";
