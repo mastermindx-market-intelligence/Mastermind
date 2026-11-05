@@ -15,7 +15,7 @@ ACTION_PATH = "control_plane/workspace_control_room_actions.py"
 HTTP_PATH = "integrations/mastermind_workspace_app/app.py"
 EXPECTED = {
     ACTION_PATH: ((135, 58, 61, "int"),),
-    HTTP_PATH: ((871, 71, 74, 'int'), (882, 71, 74, 'int'), (890, 71, 74, 'int'), (896, 79, 82, 'int'), (905, 71, 74, 'int'), (915, 71, 74, 'int'), (920, 76, 79, 'int'), (926, 71, 74, 'int')),
+    HTTP_PATH: ((875, 71, 74, 'int'), (886, 71, 74, 'int'), (894, 71, 74, 'int'), (900, 79, 82, 'int'), (909, 71, 74, 'int'), (919, 71, 74, 'int'), (924, 76, 79, 'int'), (930, 71, 74, 'int')),
 }
 
 
