@@ -43,7 +43,7 @@ it("unknown then failed fresh read still reaches same-original status with no du
  fireEvent.click(screen.getByRole("button",{name:"Pause this instruction"}));await screen.findByText(/original request outcome is unresolved/);
  expect(p.onControlConsumed).toHaveBeenCalledWith(selection,"1",1);binding.ref.current={...binding.ref.current,data:null,dataGeneration:null};
  view.rerender(<StandingInstructionsPanel {...p} content={null} control={null}/>);
- const recover=screen.getByRole("button",{name:"Check original request"}) as HTMLButtonElement;expect(recover.disabled).toBe(false);fireEvent.click(recover);
+ const recover=screen.getByRole("button",{name:"Check original instruction request"}) as HTMLButtonElement;expect(recover.disabled).toBe(false);fireEvent.click(recover);
  await screen.findByText("Pause request committed. Check current status to confirm the current setting.");
  expect(binding.io.pause).toHaveBeenCalledTimes(1);expect(binding.io.status).toHaveBeenCalledTimes(1);expect(binding.io.status.mock.calls[0]?.[0].command_id).toBe(owner.status.selection.command_id);
  expect(await binding.store.read(owner.current.owner_context.principal_scope)).toBeNull();expect(screen.queryByText("New work from this instruction is paused.")).toBeNull();
@@ -58,7 +58,7 @@ it("parent exact-read consumption prevents a remount from resurrecting pre-Pause
 it("auth/generation departure masks source facts and actions on the same render",()=>{
  const p=props(),view=render(<StandingInstructionsPanel {...p}/>);view.rerender(<StandingInstructionsPanel {...p} canRead={false} sourceGeneration="2"/>);
  expect(screen.queryByText("Review the project carefully.")).toBeNull();expect(screen.queryByText("WS:ONE")).toBeNull();expect((screen.getByRole("button",{name:"Pause this instruction"}) as HTMLButtonElement).disabled).toBe(true);
- expect((screen.getByRole("button",{name:"Check original request"}) as HTMLButtonElement).disabled).toBe(true);
+ expect((screen.getByRole("button",{name:"Check original instruction request"}) as HTMLButtonElement).disabled).toBe(true);
 });
 it("keeps recorded pause source/clock separate from changed current text and real current gate",()=>{
  const p=props(),changed=structuredClone(owner.project_current),gate=structuredClone(owner.paused);changed.instructions[0].revision="f".repeat(64);gate.instruction_revision="f".repeat(64);

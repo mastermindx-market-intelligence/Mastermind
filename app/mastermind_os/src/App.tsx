@@ -21,6 +21,7 @@ import { ProjectWorkspace } from "./projects/ProjectWorkspace";
 import { ProjectConversationAssociation } from "./conversations/ProjectConversationAssociation";
 import { AcceptedDirectionPanel } from "./direction/AcceptedDirectionPanel";
 import { useProjectAdmissionWorkspace } from "./useProjectAdmissionWorkspace";
+import { useProjectDetailsControls } from "./projects/useProjectDetailsControls";
 import { InboxWorkspace } from "./inbox/InboxWorkspace";
 import { Knowledge } from "./knowledge/Knowledge";
 import { knowledgeDraftBinding, type KnowledgeDraftPort } from "./knowledge/KnowledgeDraftCompanion";
@@ -3893,6 +3894,23 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     observedConversation.projection.conversation.source.state === "CURRENT" &&
     observedConversation.projection.context.selection?.workRef === projectWorkRef &&
     observedConversation.projection.context.selection?.rootJobId === selection.rootJobId;
+  const instructionConversationCurrent = !!(projectWorkRef && selection?.workRef === projectWorkRef &&
+    authState?.content === true && projectReaders.canRead() &&
+    observedConversation.projection.conversation.source.state === "CURRENT" &&
+    observedConversation.projection.context.selection?.workRef === projectWorkRef &&
+    observedConversation.projection.context.selection?.rootJobId === selection.rootJobId);
+  const projectDetailsControls = useProjectDetailsControls({
+    selection: projectWorkRef ? {work_ref: projectWorkRef} : null,
+    host: retainedResultHost ?? null, authGeneration: authRevision,
+    sourceGeneration: projectReaders.generation, canRead: projectReaders.canRead,
+    store: commandBinding?.store, locale,
+    onChangeInConversation: instructionConversationCurrent ? source => {
+      if (instructionConversationCurrent && projectReaders.canRead() &&
+          observedConversation.appendSource(source, observedConversation.draftRevision)) {
+        setActive("Conversations");
+      }
+    } : undefined,
+  });
   const recordedDirection = <AcceptedDirectionPanel selection={projectWorkRef ? {work_ref:projectWorkRef} : null}
     read={projectReaders.direction} sourceGeneration={projectReaders.generation} canRead={projectReaders.canRead} locale={locale}
     onChangeDirection={directionConversation ? workRef => {
@@ -4161,7 +4179,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               </details>
             </> : undefined}
             detailsPanel={<>
-              {panel}{recordedDirection}{projectAdmissionPanel}{projectSessionEvidence}{recordedProjectJournal}
+              {panel}{recordedDirection}{projectAdmissionPanel}
+              {projectDetailsControls.instructions}{projectDetailsControls.access}
+              <details className="reason-details"><summary>{locale === "zh-CN" ? "项目历史与来源证据" : "Project history and source evidence"}</summary>
+                {projectSessionEvidence}{recordedProjectJournal}
+              </details>
               {projectConversationActive ? <>
                 <AutonomyPanel selection={selection} read={projectReaders.autonomy}
                   canRead={Boolean(projectReaders.generation) && projectReaders.canRead()}

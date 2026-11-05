@@ -94,7 +94,7 @@ it("uses the incumbent instruction pointer and same-ID status without invoking p
     kind: "instruction_pause", operationKey: instruction.status.selection.command_id,
     targetKey: serializeInstructionAdmissionTarget(instruction.current.selection)!,
   });
-  fireEvent.click(screen.getByRole("button", { name: "Check original request" }));
+  fireEvent.click(screen.getByRole("button", { name: "Check original instruction request" }));
   await screen.findByText("Pause request committed. Check current status to confirm the current setting.");
   expect(e.invoke.mock.calls.filter(([name]) => name === "pause_instruction_admission")).toHaveLength(1);
   expect(e.invoke.mock.calls.filter(([name]) => name === "read_instruction_admission_operation")).toHaveLength(1);
