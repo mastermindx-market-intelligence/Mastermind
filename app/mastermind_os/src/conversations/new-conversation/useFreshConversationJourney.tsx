@@ -24,16 +24,20 @@ export interface FreshConversationJourneyProps {
   onMessageChange:(value:string)=>void;
   /** Pure App lookup selection, synchronously before preview/read await. */
   onOriginalKeySelected:(selection:ConversationRequestSelection)=>void;
+  /** Lookup DATA discovered on App initialization, never authority. The
+   * parent issues this snapshot under its verified current Executive owner.
+   * Read once per actual owner/host scope, after the pending store wins. */
+  originalLookup?:{selection:ConversationRequestSelection;owner:OwnerContext}|null;
   onBack:()=>void;
 }
 type Original=ConversationRequestSelection&{message?:string};
 type Preview={request:ConversationPreviewRequest;data:FreshConversationData;projectTitle:string|null};
 type View={scope:number;phase:"draft"|"preview"|"outcome";preview:Preview|null;original:Original|null;
   projectTitle:string|null;data:FreshConversationData|null;operation:OperationState|null;
-  retained:OperationPointer|null;other:boolean;discovering:boolean;busy:"preview"|"operation"|"read"|null;
+  retained:OperationPointer|null;lookup:boolean;other:boolean;discovering:boolean;busy:"preview"|"operation"|"read"|null;
   opened:boolean;error:"unavailable"|"invalid"|"changed"|null};
 const blank=(scope:number):View=>({scope,phase:"draft",preview:null,original:null,projectTitle:null,data:null,
- operation:null,retained:null,other:false,discovering:true,busy:null,opened:false,error:null});
+ operation:null,retained:null,lookup:false,other:false,discovering:true,busy:null,opened:false,error:null});
 const ownerOf=(binding:FreshConversationBinding|null):OwnerContext|null=>{
  try{const value=binding?.context();return value?{...value}:null;}catch{return null;}
 };
@@ -88,9 +92,12 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
   let valid=true;
   Promise.resolve().then(()=>c.binding.store.read(c.owner.principalScope)).then(pointer=>{
    if(!valid||!live(c))return;
-   const original=selectionOf(pointer);
-   patch({discovering:false,retained:pointer,other:!!pointer&&!original,
-    original,phase:pointer?"outcome":"draft",operation:null});
+   const pending=selectionOf(pointer),supplied=latest.current.originalLookup;
+   const lookup=!pointer&&supplied&&sameConversationOwner(supplied.owner,c.owner)
+    ?validateFreshConversationRequest(supplied.selection,"status"):null;
+   const original=pending??(lookup?{work_ref:lookup.work_ref,operation_key:lookup.operation_key}:null);
+   patch({discovering:false,retained:pointer,lookup:!!lookup,other:!!pointer&&!pending,
+    original,phase:pointer||lookup?"outcome":"draft",operation:null});
   },()=>{if(valid&&live(c))patch({discovering:false,error:"unavailable",other:true});});
   return()=>{valid=false;};
  },[scope]);
@@ -190,12 +197,12 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
  function start(){const v=current.current;
   // A pending original always wins over a new-entry gesture. Back/reopen
   // never prepares, reserves, submits, or replays that operation.
-  if(v.retained||v.busy||v.other){gestureFocus(".mm-new-conversation-outcome h1");patch({phase:"outcome",opened:false});return;}
-  const settled=v.operation?.status==="accepted"||v.operation?.status==="refused";
+  if(v.retained||v.busy||v.other||v.lookup&&!canOpen(v.data)){gestureFocus(".mm-new-conversation-outcome h1");patch({phase:"outcome",opened:false});return;}
+  const settled=v.operation?.status==="accepted"||v.operation?.status==="refused"||v.lookup&&canOpen(v.data);
   gestureFocus("select");
   if(settled){
    if(v.operation?.status==="accepted")latest.current.onMessageChange("");
-   patch({phase:"draft",preview:null,original:null,data:null,operation:null,opened:false,error:null});
+   patch({phase:"draft",preview:null,original:null,data:null,operation:null,lookup:false,opened:false,error:null});
   }else patch({phase:"draft",opened:false});}
  const zh=props.locale==="zh-CN",t=(en:string,cn:string)=>zh?cn:en;
  const ownsDraft=sameConversationOwner(props.draftOwner,actualOwner);
@@ -205,7 +212,8 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
   t("Conversation preview is unavailable here. Your message remains a draft.","此处暂时无法预览对话。消息仍是草稿。")}</p>:null;
  const feedback=<>{view.discovering?<p role="status">{t("Checking for an original request…","正在查找原请求…")}</p>:null}
   {view.retained&&!view.operation?<p role="status">{t("An original conversation request needs a status check. Don’t create it again.","原对话请求需要查询状态。请勿再次创建。")}</p>:null}
-  {view.phase==="outcome"?<p>{t("Going back does not cancel the original request.","返回不会取消原请求。")}</p>:null}
+  {view.lookup&&!view.operation?<p role="status">{t("An original conversation request is selected. Check its status to reopen it.","已选择原对话请求。请查询状态后重新打开。")}</p>:null}
+  {view.phase==="outcome"&&!view.operation?<p>{t("Going back does not cancel the original request.","返回不会取消原请求。")}</p>:null}
   {view.other?<p role="status">{t("Another request needs its existing status controls before a new conversation can be created.","请先通过原有状态控件处理另一条请求，再创建新对话。")}</p>:null}{error}</>;
  const validDraft=!!props.workRef&&projectCurrent(props.workRef)&&!!validateFreshConversationRequest({work_ref:props.workRef,operation_key:"syntax-check",message:props.message},"preview");
  const draft=<NewConversationDraft locale={props.locale} projects={props.projects.filter(item=>projectCurrent(item.workRef))} projectsState={props.projectsState}
@@ -233,5 +241,5 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
     opened={view.opened} busy={!!view.busy||view.discovering||view.other} activity={view.busy==="operation"?"creating":view.busy==="read"?"checking":null} canOpen={canOpen(view.data)&&!view.other&&!!actualOwner}
     onCheck={()=>void check()} onOpen={()=>void check(true)} onBack={back}/></>}
  </div>;
- return {panel,start,hasUnresolvedOriginal:!!view.retained||view.other};
+ return {panel,start,hasUnresolvedOriginal:!!view.retained||view.other||view.lookup&&!canOpen(view.data)};
 }
