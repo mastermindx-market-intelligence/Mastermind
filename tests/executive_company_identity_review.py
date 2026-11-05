@@ -45,7 +45,7 @@ REVIEWED_ANCHORS = {
         # e43df430e5652ffd9aff5114572bccb5438616e615f7edd065239f018493ef96 and
         # previous AST SHA
         # 6735cd4807ae1d203599d8210f141ea9b49b5d3487deaaa169789d6fd4565c72.
-        "source_sha256": "fd1cebd51e07b45599d63985a854bef80fcf5e4b6af06039d440976cf07a2ad7",
+        "source_sha256": "835c619a2a31659bff848b319b175ef63e44430d269d4d7982941ab3e563280b",
         "ast_sha256": "a28a07df30890f0945054f42d6a1434cc41c57838ea3079128c2cf7c2d9d76cc",
         "sites": (
             (("body", 3, "body", 36, "body", 3, "orelse", 0, "body", 2,

@@ -9488,10 +9488,65 @@ class ExecutiveControlService:
             verdict = await self._run_physical(self._canary_loader)
             await self.activate_canary(verdict)
             return {"service_state": self._service_state}
+        if command in {"backup", "verify-backup"}:
+            # DR backup/verify are provider-independent local SQLite
+            # operations (see ``_ModuleBackupBackend`` / ``executive_backup``):
+            # no provider adapter, credential, or canary read is reachable
+            # from this branch. They may therefore run while
+            # ``AWAITING_CANARY`` so RPO does not depend on worker-provider
+            # canary readiness, but neither command ever touches
+            # ``_service_state`` and every other non-READY state (in
+            # particular ``QUARANTINED`` and ``ACTIVATING_CANARY``) still
+            # refuses. Commands below remain behind the READY-only gate.
+            # Both calls keep the current
+            # ``self._run_physical(...)`` owner: the physical effect stays
+            # service-owned, shielded from request cancellation, and drained
+            # on close.
+            if self._service_state not in {"READY", "AWAITING_CANARY"}:
+                raise StateConflict(
+                    f"Executive control service is {self._service_state}; "
+                    "backup and verify-backup require service state READY or "
+                    "AWAITING_CANARY"
+                )
+            if command == "backup":
+                self._exact_args(args, set())
+                if self.config.backup_root is None:
+                    raise ServiceError("backup_root is not configured")
+                self.config.backup_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+                self.config.backup_root.chmod(0o700)
+                return _jsonable(
+                    await self._run_physical(
+                        self._backup_backend.create_online_backup,
+                        runtime.store,
+                        self.config.backup_root,
+                    )
+                )
+            self._exact_args(args, {"name"})
+            database_path = self._backup_path(args["name"])
+            manifest_path = database_path.with_suffix(".manifest.json")
+            if not manifest_path.is_file() or manifest_path.is_symlink():
+                raise ServiceError("backup has no canonical manifest and is not restorable")
+            return _jsonable(
+                await self._run_physical(
+                    self._backup_backend.verify_backup,
+                    database_path,
+                    manifest_path,
+                )
+            )
         if self._service_state != "READY":
+            available = "only status, health, and canary activation are available"
+            if self._service_state == "AWAITING_CANARY":
+                # AWAITING_CANARY additionally admits the provider-independent
+                # local backup/verify routes above.  Every other non-READY
+                # state refuses them, so its refusal text stays unchanged.
+                available = (
+                    "status, health, offline-delivery-observation, canary activation, "
+                    "and local backup/verify-backup are available; "
+                    "worker and lifecycle mutations require READY"
+                )
             raise StateConflict(
                 f"Executive control service is {self._service_state}; "
-                "only status, health, and canary activation are available"
+                f"{available}"
             )
         if command == "workers":
             self._exact_args(args, set())
@@ -9587,32 +9642,6 @@ class ExecutiveControlService:
             self._exact_args(args, {"job_id"})
             job_id = self._id(args["job_id"], "job_id")
             return _jsonable(await self._requeue_proof_job(job_id))
-        if command == "backup":
-            self._exact_args(args, set())
-            if self.config.backup_root is None:
-                raise ServiceError("backup_root is not configured")
-            self.config.backup_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-            self.config.backup_root.chmod(0o700)
-            return _jsonable(
-                await self._run_physical(
-                    self._backup_backend.create_online_backup,
-                    runtime.store,
-                    self.config.backup_root,
-                )
-            )
-        if command == "verify-backup":
-            self._exact_args(args, {"name"})
-            database_path = self._backup_path(args["name"])
-            manifest_path = database_path.with_suffix(".manifest.json")
-            if not manifest_path.is_file() or manifest_path.is_symlink():
-                raise ServiceError("backup has no canonical manifest and is not restorable")
-            return _jsonable(
-                await self._run_physical(
-                    self._backup_backend.verify_backup,
-                    database_path,
-                    manifest_path,
-                )
-            )
         if command == "check-current-worker-login":
             # Closed READY-only Job-bound login-check dispatch (Task 5).
             # Exactly three caller fields; no caller can supply an action,
