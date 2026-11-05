@@ -330,6 +330,54 @@ class ProjectPlanningAppFactory:
         invocation._require_live()
         return value
 
+    def _canonical_project_files(self, workspace, invocation, work_ref):
+        """Private eager DATA capture after the actual current-plan read.
+
+        CREATE-only inputs take their existing exact path. File publication
+        supplies a distinct nominal Event/DATA observation; no browser file
+        body, selector, receipt dictionary or local staged File enters here.
+        """
+        invocation._require_live()
+        data = self._canonical_data()
+        if data is None:
+            return None
+        saved = getattr(invocation, '_planning_data_view', None)
+        identity = (data, dataclasses.asdict(workspace), work_ref, data.context_binding())
+        if saved is None or saved[0] != identity:
+            raise ValueError('project planning file DATA owner differs')
+        view = saved[1]
+        view._owner._validate_view(view)
+        # This private witness was just issued by _canonical_plan's actual
+        # full owner read/postcheck. It is not a caller-provided publication.
+        publication = view._witness.get('source_operation')
+        if publication is None or publication['selection']['action'] != 'add_project_file':
+            return None
+        key = (self, identity, view.code_commit, view.data_commit)
+        prior = getattr(invocation, '_planning_file_material', None)
+        if prior is not None:
+            if prior[0] != key:
+                raise ValueError('project planning original file DATA changed')
+            # Immutable, commit-addressed bytes only. _current still freshly
+            # qualifies the same principal/grants/CODE/default/Event before
+            # every actual admission/effect; no permission truth is cached.
+            return copy.deepcopy(prior[1])
+        from control_plane.project_plan_canonical_basis import capture_current_project_files
+        material = capture_current_project_files(view, work_ref=work_ref).material()
+        # Full CODE postcheck stays inside the ORIGINAL issued view budget.
+        # No replacement view or extended deadline can grandfather this read.
+        from integrations.executive_mcp.installed import _installed_child_env
+        collector = data.collector
+        observed = collector._snapshot_pair(_installed_child_env(code_root=collector._code_root,
+            macro_root=collector._macro_root), deadline=view._operation.read_deadline)
+        if observed[0] != self.service.config.proof_base_sha or observed[1] != view.code_commit:
+            raise ValueError('project planning file CODE changed')
+        view.check()
+        if data.context_binding() != identity[3]:
+            raise ValueError('project planning file DATA owner changed')
+        invocation._require_live()
+        invocation._planning_file_material = (key, copy.deepcopy(material))
+        return material
+
     def _fixed_planning_code(self,invocation):
         """Commit-addressed policy/commission bytes, never live permission truth.
 
@@ -435,12 +483,28 @@ class ProjectPlanningAppFactory:
         initial=self._current(principal,invocation,operation_key,work_ref)
         if publication['principal_scope']!=initial['workspace_scope']:
             raise ValueError('project planning publication belongs to another Workspace principal')
+        workspace=VerifiedPrincipal(**dataclasses.asdict(invocation._project_workspace_principal))
+        file_material=self._canonical_project_files(workspace,invocation,work_ref)
+        has_files=file_material is not None and bool(file_material['files'])
         if initial['project_plan']['source']!={**{key:value for key,value in project_source.items() if key!='request_sha256'},
                 'repository':'mastermindx-market-intelligence/macro'}:
-            raise ValueError('project planning goal and canonical source differ')
+            if (not has_files or initial['project_plan']['source']!=file_material['workspace_source']):
+                raise ValueError('project planning goal and canonical source differ')
+            # Preserve the immutable historical CREATE marker/request, while
+            # independently qualifying the current file-mutated WS postimage.
+            self._canonical_creation(principal,invocation,operation_key,work_ref,project_source)
+        if has_files:
+            initial['project_files']=copy.deepcopy(file_material)
         generation=native.digest(initial)
+        def current_material():
+            current=self._current(principal,invocation,operation_key,work_ref,current_only=True)
+            if has_files:
+                if current['project_plan']['source']!=file_material['workspace_source']:
+                    raise ValueError('project planning original file DATA changed')
+                current['project_files']=copy.deepcopy(file_material)
+            return current
         def current_generation():
-            return native.digest(self._current(principal,invocation,operation_key,work_ref,current_only=True))
+            return native.digest(current_material())
         access=native._issue_access(initial["limits"]["principal_scope"],work_ref,generation,current_generation)
         execution=self.service._direct_native_execution_access(access)
         executive=native._issue_admission(access,initial["source"],initial["binding"],execution_access=execution)
@@ -454,8 +518,15 @@ class ProjectPlanningAppFactory:
         input_owner=planning.ProjectPlanningInput(supervisor)
         if type(private_request) is not bytes or not private_request:
             raise ValueError("project planning explicit private request is absent")
-        payload=native.canonical(dict(schema='mastermind.project_initial_planning_input.v1',
-            request_text=private_request.decode('utf-8'),project_plan=initial['project_plan']))
+        private_input=dict(schema='mastermind.project_initial_planning_input.v1',
+            request_text=private_request.decode('utf-8'),project_plan=initial['project_plan'])
+        if has_files:
+            private_input.update(schema='mastermind.project_initial_planning_input.v2',
+                project_files=copy.deepcopy(file_material))
+        payload=native.canonical(private_input)
+        from control_plane.terminal_original_input_artifacts import MAX_PAYLOAD_BYTES
+        if len(payload)>MAX_PAYLOAD_BYTES:
+            raise ValueError('project planning original private input exceeds its existing bound')
         context=dict(schema=planning.SCHEMA,work_ref=work_ref,source=copy.deepcopy(project_source),
             publication=copy.deepcopy(publication),operation_key=operation_key,stage=stage,
             request_sha256=hashlib.sha256(payload).hexdigest(),executive_authority_sha256=generation,
@@ -472,7 +543,7 @@ class ProjectPlanningAppFactory:
                 raise ValueError("project planning original operation differs; no replacement")
             context["input_artifact_sha256"]=original["input_artifact_sha256"]
         def authority():
-            if self._current(principal,invocation,operation_key,work_ref,current_only=True) != initial:
+            if current_material() != initial:
                 raise ValueError("project planning current source/policy/authority changed")
             return copy.deepcopy(context)
         def publication_guard():
@@ -490,16 +561,44 @@ class ProjectPlanningAppFactory:
             if self._read_code_bracket(invocation,data=self._canonical_data(),view=bracket.view,
                     workspace=workspace,work_ref=work_ref) is not bracket:
                 raise ValueError('original planning observation bracket differs')
-            if self._current(principal,invocation,operation_key,work_ref,current_only=True) != initial:
+            if current_material() != initial:
                 raise ValueError('original planning observation authority/generation changed')
             return invocation,bracket,bracket.capture
+        def canonical_grounding_guard(source):
+            if source is not owner or not has_files:
+                raise ValueError('project planning canonical grounding source differs')
+            invocation._require_live()
+            # Authenticate the issued view BEFORE any currentness acquisition.
+            # A foreign/expired probe cannot renew a view or a permission clock.
+            data=self._canonical_data()
+            if data is None:raise ValueError('project planning canonical grounding owner absent')
+            saved=getattr(invocation,'_planning_data_view',None)
+            workspace=VerifiedPrincipal(**dataclasses.asdict(invocation._project_workspace_principal))
+            identity=(data,dataclasses.asdict(workspace),work_ref,data.context_binding())
+            if saved is None or saved[0]!=identity:
+                raise ValueError('project planning canonical grounding owner differs')
+            from control_plane.project_canonical_data import CanonicalProjectDataView
+            view=saved[1]
+            if type(view) is not CanonicalProjectDataView:
+                raise ValueError('project planning canonical grounding view differs')
+            view._owner._validate_view(view);view._require_work(work_ref);view.check()
+            if (view.code_commit!=file_material['executable_macro_commit']
+                    or view.data_commit!=file_material['canonical_data_commit']):
+                raise ValueError('project planning canonical grounding changed')
+            authority()
+            after=getattr(invocation,'_planning_data_view',None)
+            if after is None or after[0]!=identity or after[1] is not view:
+                raise ValueError('project planning canonical grounding view changed')
+            view.check();invocation._require_live()
+            return view.data_commit
         owner=planning._issue_source(reader=self.reader,executive=execution,context=context,
             authority_guard=authority,input_owner=input_owner,events=self.events,publication_guard=publication_guard,
             canonical_source_reader=(None if not callable(self.app_binding.source_operation_provider_factory) else
                 lambda:self._canonical_creation(principal,invocation,operation_key,work_ref,project_source)),
             read_scope=(None if not callable(self.app_binding.source_operation_provider_factory) else
                 lambda:self.canonical_read_scope(principal=principal,operation_key=operation_key,work_ref=work_ref)),
-            observation_guard=(None if not callable(self.app_binding.source_operation_provider_factory) else observation_guard))
+            observation_guard=(None if not callable(self.app_binding.source_operation_provider_factory) else observation_guard),
+            canonical_grounding_guard=(canonical_grounding_guard if has_files else None))
         return owner,executive
 
     def submit(self, *, principal, operation_key, stage, work_ref, project_source,
@@ -535,7 +634,9 @@ class ProjectPlanningAppFactory:
         if type(supervisor) is not ExecutiveSupervisor:raise ValueError('project planning original Supervisor unavailable')
         payload=planning.ProjectPlanningInput(supervisor).read(context)
         value=json.loads(payload)
-        if type(value) is not dict or set(value)!={'schema','request_text','project_plan'} or value['schema']!='mastermind.project_initial_planning_input.v1':
+        if (type(value) is not dict or not (
+                set(value)=={'schema','request_text','project_plan'} and value['schema']=='mastermind.project_initial_planning_input.v1'
+                or set(value)=={'schema','request_text','project_plan','project_files'} and value['schema']=='mastermind.project_initial_planning_input.v2')):
             raise ValueError('project planning original private envelope differs')
         source,executive=self.prepare(principal=principal,operation_key=operation_key,stage=context['stage'],work_ref=work_ref,
             project_source=context['source'],publication=context['publication'],private_request=value['request_text'].encode('utf-8'),

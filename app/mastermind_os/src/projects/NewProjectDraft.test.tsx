@@ -100,3 +100,15 @@ it("keeps embedded h2 by default and supplies one route h1 on request",()=>{
  expect(screen.getAllByRole("heading",{level:1})).toHaveLength(1);
  expect(screen.getByRole("textbox")).toBe(textarea);expect(change).not.toHaveBeenCalled();
 });
+
+it('keeps goal label and toolbar outside the field and places concise primary before long feedback',()=>{
+ render(<NewProjectDraft locale="en" goal="Exact goal" onGoalChange={vi.fn()}
+  attachmentsControl={<input aria-label="Retained actual chooser" type="file"/>}
+  attachmentsPanel={<p>Actual staged state</p>} primarySummary={<p>Verified supplied profile</p>}
+  startControl={<button>Create through owner</button>} feedbackPanel={<p>Long original result</p>}/>);
+ const textarea=screen.getByRole('textbox'),toolbar=screen.getByLabelText('Retained actual chooser').closest('.mm-new-project-tools')!;
+ expect(textarea.contains(toolbar)).toBe(false);
+ expect(textarea.compareDocumentPosition(toolbar)&Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+ expect(screen.getByRole('button',{name:'Create through owner'}).compareDocumentPosition(screen.getByText('Long original result'))&Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+ expect(screen.getByText('Verified supplied profile').closest('footer')).toBeTruthy();
+});

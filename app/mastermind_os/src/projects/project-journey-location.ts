@@ -32,6 +32,7 @@
  */
 
 import { ORIGINAL_OPERATION_ID_PREFIXES } from "../planning/plan-adoption-status";
+import {parseProjectDraftFileLookup,serializeProjectDraftFileLookup,type ProjectDraftFileLookup} from "./project-draft-file-lookup";
 import type { ProjectJourneySelection } from "./ProjectPlanningJourney";
 
 /** Single constant rejection message for every invalid selection object. */
@@ -47,6 +48,7 @@ export const PROJECT_JOURNEY_CREATE_REQUEST_KEY = "project_create_request";
 export const PROJECT_JOURNEY_WORK_REF_KEY = "project_create_work_ref";
 export const PROJECT_JOURNEY_PLANNING_OPERATION_KEY = "project_planning_operation";
 export const PROJECT_JOURNEY_JOB_KEY = "project_planning_job";
+export const PROJECT_JOURNEY_FILE_KEY = "project_file_original";
 
 /** Exact owned key set, in writer emission order. */
 export const PROJECT_JOURNEY_KEYS = [
@@ -55,6 +57,7 @@ export const PROJECT_JOURNEY_KEYS = [
   PROJECT_JOURNEY_WORK_REF_KEY,
   PROJECT_JOURNEY_PLANNING_OPERATION_KEY,
   PROJECT_JOURNEY_JOB_KEY,
+  PROJECT_JOURNEY_FILE_KEY,
 ] as const;
 
 /** `<prefix>` + this many lowercase hex characters; never minted here. */
@@ -83,6 +86,7 @@ export interface ProjectJourneyReadResult {
   readonly valid: boolean;
   readonly open: boolean;
   readonly selection: ProjectJourneySelection | null;
+  readonly fileLookup?:Readonly<ProjectDraftFileLookup>;
 }
 
 const closedRead = (): ProjectJourneyReadResult => ({
@@ -185,11 +189,17 @@ export function readProjectJourneyLocation(input: string | URL): ProjectJourneyR
   const planningOperationKey = owned.get(PROJECT_JOURNEY_PLANNING_OPERATION_KEY) ?? null;
   const jobId = owned.get(PROJECT_JOURNEY_JOB_KEY) ?? null;
   if (!checkIds(createRequestId, workRef, planningOperationKey, jobId)) return invalidRead();
+  let fileLookup:Readonly<ProjectDraftFileLookup>|undefined;
+  if(owned.has(PROJECT_JOURNEY_FILE_KEY)){
+    if(createRequestId===null||workRef===null)return invalidRead();
+    try{fileLookup=parseProjectDraftFileLookup(owned.get(PROJECT_JOURNEY_FILE_KEY)!,workRef);}catch{return invalidRead();}
+  }
   if (createRequestId === null) return openBlankRead();
   return {
     valid: true,
     open: true,
     selection: { createRequestId, workRef, planningOperationKey, jobId },
+    ...(fileLookup?{fileLookup}:{}),
   };
 }
 
@@ -262,9 +272,15 @@ function checkedSelection(selection: ProjectJourneySelection): ProjectJourneySel
 function journeyUrl(
   input: string | URL,
   selection: ProjectJourneySelection | null,
+  fileLookup?:ProjectDraftFileLookup|null,
 ): { href: string; committed: ProjectJourneySelection | null } {
   const url = toWriteUrl(input);
   const committed = selection === null ? null : checkedSelection(selection);
+  let encodedFile:string|null=null;
+  if(fileLookup!==undefined&&fileLookup!==null){
+    if(!committed?.workRef)throw Error(PROJECT_JOURNEY_SELECTION_INVALID);
+    try{encodedFile=serializeProjectDraftFileLookup(fileLookup,committed.workRef);}catch{throw Error(PROJECT_JOURNEY_SELECTION_INVALID);}
+  }
   const params = new URLSearchParams();
   if (committed !== null) {
     params.set(PROJECT_JOURNEY_FLAG_KEY, PROJECT_JOURNEY_FLAG_VALUE);
@@ -279,6 +295,7 @@ function journeyUrl(
       params.set(PROJECT_JOURNEY_JOB_KEY, committed.jobId);
     }
   }
+  if(encodedFile!==null)params.set(PROJECT_JOURNEY_FILE_KEY,encodedFile);
   const base = `${url.protocol}//${url.host}${url.pathname}`;
   const search = params.toString();
   return { href: search === "" ? base : `${base}?${search}`, committed };
@@ -288,8 +305,9 @@ function journeyUrl(
 export function projectJourneyUrl(
   input: string | URL,
   selection: ProjectJourneySelection | null,
+  fileLookup?:ProjectDraftFileLookup|null,
 ): string {
-  return journeyUrl(input, selection).href;
+  return journeyUrl(input, selection,fileLookup).href;
 }
 
 /**
@@ -303,8 +321,9 @@ export function commitProjectJourneySelection(
   selection: ProjectJourneySelection | null,
   history: Pick<History, "replaceState">,
   onCommitted: (selection: ProjectJourneySelection | null) => void,
+  fileLookup?:ProjectDraftFileLookup|null,
 ): void {
-  const { href, committed } = journeyUrl(input, selection);
+  const { href, committed } = journeyUrl(input, selection,fileLookup);
   history.replaceState(null, "", href);
   onCommitted(committed);
 }

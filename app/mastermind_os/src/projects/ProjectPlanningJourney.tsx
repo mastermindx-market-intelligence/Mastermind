@@ -39,6 +39,7 @@
 import { decodeSourceOperationContext } from "../source-operations/context";
 import { useEffect, useLayoutEffect, useId, useRef, useState, type ReactNode } from "react";
 import { NewProjectDraft } from "./NewProjectDraft";
+import {useProjectDraftFiles,type ProjectDraftFile,type ProjectDraftFileLookup} from "./useProjectDraftFiles";
 import type { MissionHost } from "../host";
 import {
   makePlanningIntent,
@@ -112,6 +113,11 @@ export interface ProjectPlanningJourneyProps {
   onGoalChange: (value: string) => void;
   goalReadOnly?: boolean;
   onGoalFocus?: () => void;
+  /** App-owned ephemeral actual File draft; no body enters URL/storage. */
+  draftFiles?:readonly ProjectDraftFile[];
+  onDraftFilesChange?:(files:readonly ProjectDraftFile[])=>void;
+  originalFileLookup?:ProjectDraftFileLookup|null;
+  onOriginalFileLookupChange?:(value:ProjectDraftFileLookup|null)=>void;
   /** Parent-qualified proposal controls; rendered only for a readable project. */
   proposalControls?: ReactNode;
   /** Parent-qualified compare panel; rendered only for a readable project. */
@@ -942,6 +948,7 @@ type Notice =
   | "PLANNING_UNAVAILABLE_HOST"
   | "PLANNING_UNAVAILABLE_GROUNDING"
   | "PLANNING_UNAVAILABLE_SOURCE"
+  | "PLANNING_FILES_PENDING"
   | "PLANNING_ALREADY_DISPATCHED"
   | "PLANNING_REQUEST_REQUIRED"
   | "PLANNING_READ_UNAVAILABLE"
@@ -951,6 +958,7 @@ type Notice =
 
 /** Every string this module shows, as an exact [English, Chinese] pair. */
 const NOTICE_COPY: Record<Notice, readonly [string, string]> = {
+  PLANNING_FILES_PENDING: ["Add all selected files to the project, or remove unsent files, before initial planning.", "请先将所有所选文件添加到项目，或移除尚未发送的文件，然后再进行初始规划。"],
   AUTH: ["Sign in with acquisition to continue this journey.", "登录并获得访问权后才能继续。"],
   CONTEXT: ["The source identity context is unavailable, so no scope was bound.", "来源身份上下文不可用，因此未绑定范围。"],
   OPTIONS: ["The supplied project options are unavailable right now.", "暂时无法载入提供的项目选项。"],
@@ -1066,6 +1074,13 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
   const [planStage, setPlanStage] = useState<"clarify" | "plan" | null>(null);
   const [planRequest, setPlanRequest] = useState<string | null>(null);
   const [result, setResult] = useState<DirectResult | null>(null);
+
+  const fileDraft=useProjectDraftFiles({locale,host:props.host,store:props.store,
+    isCurrent:()=>callerCurrent()&&live.current.onDraftFilesChange!==undefined&&live.current.onOriginalFileLookupChange!==undefined,
+    interactionBlocked:()=>busyRef.current!==null,workRef:selection?.workRef??null,created:status?.disposition==='accepted'&&status.receipt?.kind==='SOURCE_OBSERVED'&&status.selection.request_id===selection?.createRequestId&&status.owner_context.principal_scope===sourceOwner()?.principalScope,
+    planningStarted:selection?.planningOperationKey!=null,files:props.draftFiles??[],
+    onFilesChange:value=>live.current.onDraftFilesChange?.(value),original:props.originalFileLookup??null,
+    onOriginalChange:value=>live.current.onOriginalFileLookupChange?.(value)});
 
   // Resource-specific controllers share the incumbent atomic store. The UI
   // gesture fence permits one effect at a time; Workspace and Executive scopes
@@ -1214,7 +1229,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
   };
 
   const run = (name: BusyAction, body: (signal: AbortSignal) => Promise<void>) => {
-    if (busyRef.current !== null) return;
+    if (busyRef.current !== null || fileDraft.isBusy()) return;
     const started = new AbortController();
     const ticket = ++sequence.current;
     busyRef.current = name;
@@ -1494,6 +1509,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
     owner: OwnerContext,
     current: ProjectJourneySelection,
   ): { ok: true; intent: CommandIntent; operationKey: string } | { ok: false; reason: Notice } => {
+    if (fileDraft.blocksPlanning()) return {ok:false,reason:"PLANNING_FILES_PENDING"};
     if (current.planningOperationKey !== null) return { ok: false, reason: "PLANNING_ALREADY_DISPATCHED" };
     if (!current.workRef) return { ok: false, reason: "PLANNING_UNAVAILABLE_SOURCE" };
     const observed = record.current.createStatus;
@@ -1507,7 +1523,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
     if (!hex(options.grounding.mastermindSha, HEX40)) return { ok: false, reason: "PLANNING_UNAVAILABLE_GROUNDING" };
     // The planning macro grounding is the actual observed CREATE commit, never
     // the option's expected value and never a derived or fixture value.
-    const commit = source.commit;
+    const commit = fileDraft.currentPlanningCommit() ?? source.commit;
     if (typeof commit !== "string" || !hex(commit, HEX40)) return { ok: false, reason: "PLANNING_UNAVAILABLE_SOURCE" };
     if (source.path !== `${SOURCE_PATH_PREFIX}${current.workRef.slice(3)}.md`) {
       return { ok: false, reason: "PLANNING_UNAVAILABLE_SOURCE" };
@@ -1709,6 +1725,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
 
   const planningBlock: Notice | null = (() => {
     if (!readable) return "PLANNING_UNAVAILABLE_SOURCE";
+    if (fileDraft.blocksPlanning()) return "PLANNING_FILES_PENDING";
     if (!planningAvailable) return "PLANNING_UNAVAILABLE_HOST";
     if (!options?.grounding) return "PLANNING_UNAVAILABLE_GROUNDING";
     if (publication === null || sourceRecord === null) return "PLANNING_UNAVAILABLE_SOURCE";
@@ -1758,7 +1775,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
     return pair("Choose a project profile in Options to continue.", "请在“选项”中选择项目配置后继续。");
   })();
 
-  const disabled = busy !== null;
+  const disabled = busy !== null || fileDraft.isBusy();
 
   const optionsPanel = (
     <div role="group" aria-label={copy(["Project profile", "项目配置"])}>
@@ -1795,13 +1812,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
 
   const feedback = (
     <div>
-      <p role="status">{copy(stateLine)}</p>
-      {notice !== null && <p>{copy(NOTICE_COPY[notice])}</p>}
-      {previewLive !== null && options !== null && (() => {
-        const chosen=options.profiles.find(row=>row.id===previewLive.profileId);
-        return chosen ? <div><h3>{zh?chosen.labelZh:chosen.labelEn}</h3>
-          <p>{zh?chosen.summaryZh:chosen.summaryEn}</p></div> : null;
-      })()}
+
       {previewLive !== null && createDispatched && (
         <p>{copy(["Use the original project request below.", "请使用下方原始项目请求。"])}</p>
       )}
@@ -2007,17 +2018,25 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
       goal={goal}
       goalReadOnly={props.goalReadOnly} onGoalFocus={props.onGoalFocus}
       onGoalChange={onGoalChange}
+      attachmentsControl={fileDraft.control}
+      attachmentsPanel={fileDraft.panel}
+      primarySummary={<><p role="status">{copy(stateLine)}</p>{notice!==null&&<p>{copy(NOTICE_COPY[notice])}</p>}      {previewLive !== null && options !== null && (() => {
+        const chosen=options.profiles.find(row=>row.id===previewLive.profileId);
+        return chosen ? <div><h3>{zh?chosen.labelZh:chosen.labelEn}</h3>
+          <p>{zh?chosen.summaryZh:chosen.summaryEn}</p></div> : null;
+      })()}
+</>}
       optionsPanel={optionsPanel}
       feedbackPanel={feedback}
       startControl={planningRecovery ? <button type="button" className="primary" onClick={checkPlanning} disabled={disabled || !authorized}>
         {copy(["Check original planning request", "查询原始规划请求"])}</button> : observed !== null ? <span>{copy(["Project created.", "项目已创建。"])}</span> :
-        createDispatched ? <span>{copy(["Check project creation above", "请在上方查询项目创建状态"])}</span> :
+        createDispatched ? <span>{copy(["Check project creation below", "请在下方查询项目创建状态"])}</span> :
         previewUnknown ? <button type="button" className="primary" onClick={checkSource} disabled={disabled || !authorized}>{copy(["Check original project request", "查询原始项目请求"])}</button> :
         previewLive !== null ? <button type="button" className="primary" onClick={publish} disabled={disabled}>
           {busy === "publish" ? copy(["Creating project…", "正在创建项目…"]) : copy(["Create project", "创建项目"])}</button> :
         <button type="button" className="primary" onClick={preparePreview} disabled={disabled || !authorized || options === null}>
           {busy === "preview" ? copy(["Preparing…", "准备中…"]) : copy(["Prepare preview", "准备预览"])}</button>}
-      startNote={copy(planningRecovery ? ["Check the original planning request. Do not send it again.", "请查询原始规划请求，不要重新发送。"] : observed !== null ? ["Initial planning is a separate action above.", "初始规划是上方独立的操作。"] :
+      startNote={copy(planningRecovery ? ["Check the original planning request. Do not send it again.", "请查询原始规划请求，不要重新发送。"] : observed !== null ? ["Initial planning is a separate action below.", "初始规划是下方独立的操作。"] :
         createDispatched ? ["The original project request is retained for checking.", "原始项目请求已保留，可供查询。"] :
         previewUnknown ? ["Keep the original request identity while its response is unavailable.", "响应不可用时，请保留原始请求标识。"] :
         previewLive !== null ? ["Creates the project. Planning is a separate step.", "创建项目；规划是独立的后续步骤。"] :

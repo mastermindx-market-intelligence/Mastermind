@@ -149,3 +149,120 @@ def capture_current_plan_basis(view,*,work_ref):
   view.check()
   return CanonicalProjectPlanBasis(_SEAL,view,owner,dict(work_ref=work_ref,workstream=ws,decisions=relevant,base=base),deepcopy(current))
  except (CanonicalDataUnavailable,ValueError,TypeError,KeyError,AttributeError,OSError,UnicodeError,SyntaxError,RecursionError,OverflowError,p._Refusal,p._Unknown):_fail()
+
+
+# Current project-file DATA for initial planning. This stays in the same fixed
+# CODE owner already imported for historical CREATE/canonical-basis joins.
+import json as _file_json
+from common.workspace_project_knowledge_contract import validate_catalogue, validate_source
+from control_plane.terminal_original_input_artifacts import MAX_PAYLOAD_BYTES
+
+_FILE_CONTEXT_SEAL = object()
+
+
+def _file_context_fail():
+    raise ValueError('PROJECT_PLANNING_FILE_CONTEXT_UNAVAILABLE')
+
+
+def _file_context_canonical(value):
+    return _file_json.dumps(value, sort_keys=True, separators=(',', ':'),
+                     ensure_ascii=False, allow_nan=False).encode('utf-8')
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectPlanningFileContext:
+    _seal: object = field(repr=False)
+    _view: CanonicalProjectDataView = field(repr=False)
+    _identity: tuple = field(repr=False)
+    _material: bytes = field(repr=False)
+
+    def check(self):
+        if self._seal is not _FILE_CONTEXT_SEAL or type(self._view) is not CanonicalProjectDataView:
+            _file_context_fail()
+        view = self._view
+        if view._owner._view_identity(view) != self._identity:
+            _file_context_fail()
+        # Actual current principal/grants/default/Event checks and original
+        # expiry remain owned by this SAME view; no replacement is acquired.
+        view.check()
+        if view._owner._view_identity(view) != self._identity:
+            _file_context_fail()
+
+    def material(self):
+        self.check()
+        return _file_json.loads(self._material)
+
+
+def capture_current_project_files(view, *, work_ref):
+    """Eager, bounded, same-view file capture; return only after its postcheck.
+
+    All declared files must be readable and completely listed. An unavailable
+    body or over-budget payload is refused, never omitted from planning.
+    """
+    if type(view) is not CanonicalProjectDataView:
+        _file_context_fail()
+    view._require_work(work_ref)
+    view.check()
+    identity = view._owner._view_identity(view)
+    with view.capture_scope():
+        catalogue = validate_catalogue(view.read_knowledge_catalogue(work_ref=work_ref))
+        if (catalogue['availability'] != 'AVAILABLE'
+                or catalogue['selection'] != {'work_ref': work_ref}
+                or catalogue['source']['commit'] != view.data_commit):
+            _file_context_fail()
+        project = catalogue['project']
+        coverage = project['coverage']['files']
+        if (coverage['state'] != 'COMPLETE' or coverage['omitted'] != 0
+                or coverage['declared'] != len(project['files'])):
+            _file_context_fail()
+        workspace_source = None
+        if project['files']:
+            publication = view.witness()['source_operation']
+            if (publication is None or publication['selection']['action'] != 'add_project_file'
+                    or publication['selection']['work_ref'] != work_ref):
+                _file_context_fail()
+            ws_path = 'agentos/workstreams/WS-' + work_ref[3:] + '.md'
+            ws_images = [source for source in publication['sources'] if source['path'] == ws_path]
+            if (len(ws_images) != 1
+                    or ws_images[0]['content_sha256'] != catalogue['source']['workstream_sha256']):
+                _file_context_fail()
+            # The nominal view independently proved these postimage bytes at
+            # CURRENT N; retain the original Event rather than relabel its clock.
+            workspace_source = dict(repository='mastermindx-market-intelligence/macro',
+                commit=view.data_commit, path=ws_path,
+                content_sha256=catalogue['source']['workstream_sha256'])
+        files = []
+        seen = set()
+        for row in project['files']:
+            if (row['state'] != 'READABLE' or row['repository'] != 'macro'
+                    or row['source_ref'] in seen):
+                _file_context_fail()
+            seen.add(row['source_ref'])
+            source = validate_source(view.read_knowledge_source(work_ref=work_ref,
+                source_ref=row['source_ref'], expected_revision=row['revision']))
+            if (source['availability'] != 'AVAILABLE'
+                    or source['selection'] != {'work_ref': work_ref, 'source_ref': row['source_ref']}):
+                _file_context_fail()
+            pointer, document = source['source'], source['document']
+            if (pointer['repository'] != 'mastermindx-market-intelligence/macro'
+                    or pointer['commit'] != view.data_commit
+                    or pointer['path'] != row['path'] or pointer['revision'] != row['revision']
+                    or pointer['content_sha256'] != row['content_sha256']
+                    or document['content_sha256'] != row['content_sha256']
+                    or document['media_type'] != row['media_type']):
+                _file_context_fail()
+            files.append(dict(source_ref=row['source_ref'], display_name=row['display_name'],
+                source=deepcopy(pointer), media_type=document['media_type'],
+                content_utf8=document['content_utf8']))
+        material = _file_context_canonical(dict(schema='mastermind.project_planning_file_context.v1',
+            authority='UNTRUSTED_PROJECT_DATA', work_ref=work_ref,
+            executable_macro_commit=view.code_commit, canonical_data_commit=view.data_commit,
+            workspace_source=workspace_source, files=files))
+        if len(material) > MAX_PAYLOAD_BYTES:
+            _file_context_fail()
+        if view._owner._view_identity(view) != identity:
+            _file_context_fail()
+    # No eager file DATA or capability escapes an unsuccessful outer postcheck.
+    value = ProjectPlanningFileContext(_FILE_CONTEXT_SEAL, view, identity, material)
+    value.check()
+    return value

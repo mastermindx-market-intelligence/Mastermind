@@ -2320,6 +2320,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         freshDraftRef.current.invalidateAuth(passiveLoss);
         freshTurnDraftRef.current.invalidateAuth(passiveLoss);
         freshAttendedRef.current?.controller.invalidate();
+        projectJourneyRef.current.invalidateFilesAuth(passiveLoss);
         if (!native || !nativeGoalHeld) projectJourneyRef.current.invalidateAuth(passiveLoss);
         office.invalidateAuth(passiveLoss);
         observedConversation.invalidateAuth(passiveLoss);
@@ -4818,7 +4819,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       {projectJourney.invalidLink ? <section className="card"><h1>{locale === "zh-CN" ? "项目设置链接不可用" : "Project setup link unavailable"}</h1>
         <p>{locale === "zh-CN" ? "请使用原始项目设置链接，或明确打开项目设置。" : "Use the original project setup link, or explicitly open project setup."}</p>
         <button type="button" onClick={openProjectJourney}>{locale === "zh-CN" ? "打开项目设置" : "Open project setup"}</button></section>
-      : nativeGoalQuarantined ? null : commandBinding ? <ProjectPlanningJourney key={`project-journey:${authRevision}`} locale={locale}
+      : nativeGoalQuarantined ? null : commandBinding ? <><ProjectPlanningJourney key={`project-journey:${authRevision}`} locale={locale}
         host={window.MastermindMissionHost ?? null} store={commandBinding.store}
         executiveOwner={() => {
           if (!projectJourney.isHostCurrent() || window.MastermindMissionHost?.commandBinding !== commandBinding) return null;
@@ -4829,7 +4830,14 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         onSelection={value => {projectJourney.onSelection(value);void nativeGoal.beforeEdit();}}
         goal={projectJourney.goal} goalReadOnly={native && !nativeGoal.canEdit}
         onGoalFocus={() => {void nativeGoal.beforeEdit();}}
-        onGoalChange={text => {if (nativeGoal.canEdit) projectJourney.onGoalChange(text);}}/>
+        onGoalChange={text => {if (nativeGoal.canEdit) projectJourney.onGoalChange(text);}}
+        draftFiles={projectJourney.draftFiles} onDraftFilesChange={projectJourney.onDraftFilesChange}
+        originalFileLookup={projectJourney.originalFileLookup} onOriginalFileLookupChange={projectJourney.onOriginalFileLookupChange}/>
+      {projectJourney.filesHeld && <section className="card" aria-label={locale==='zh-CN'?'保留的文件草稿':'Held file draft'}>
+        <p>{locale==='zh-CN'?'文件草稿已为原始项目及登录身份保留。':'The file draft is held for its original project and signed-in identity.'}</p>
+        <button type="button" onClick={()=>void projectJourney.checkRetainedFileDraft()}>{locale==='zh-CN'?'查询文件草稿访问状态':'Check file draft access'}</button>
+        <button type="button" onClick={projectJourney.discardRetainedFiles}>{locale==='zh-CN'?'丢弃文件草稿':'Discard file draft'}</button>
+      </section>}</>
       : <section className="card"><h1>{locale === "zh-CN" ? "项目设置暂不可用" : "Project setup unavailable"}</h1>
         <p>{locale === "zh-CN" ? "当前来源未提供项目操作接口。" : "The current source has not supplied the project operation interface."}</p></section>}
       {retainedProjectGoal}

@@ -13,7 +13,7 @@
  * distinct opaque fixture values; no case equates or derives one from the
  * other, and no case makes the App pass by collapsing them.
  */
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IDBFactory } from "fake-indexeddb";
 import { App } from "./App";
@@ -376,9 +376,19 @@ function expectedPlanningKey(h: Mounted, requestId: string): string {
 
 describe("App project planning journey integration", () => {
   it('keeps only exact native readiness diagnostic inside closed source details during new-project setup',async()=>{
-    Object.defineProperty(window,'__TAURI_INTERNALS__',{configurable:true,value:{invoke:()=>Promise.reject(Error('inert readiness boundary'))}});
+    let rejectReadiness!:(reason:Error)=>void;
+    const readinessCommands:string[]=[];
+    Object.defineProperty(window,'__TAURI_INTERNALS__',{configurable:true,value:{invoke:(command:string)=>{
+      readinessCommands.push(command);
+      if(command==='readiness')return new Promise<never>((_resolve,reject)=>{rejectReadiness=reject;});
+      return Promise.reject(Error('inert unsupported native command'));
+    }}});
     try{
       const h=await mountApp();await openJourney();
+      // Observe the one real readiness edge only after this route exists;
+      // unrelated startup Mission notices must not decide test ordering.
+      await waitFor(()=>expect(readinessCommands.filter(command=>command==='readiness')).toHaveLength(1));
+      await act(async()=>{rejectReadiness(Error('inert readiness boundary'));});
       const diagnostic=await screen.findByText('Native readiness receipt unavailable. No source request was attempted.');
       expect(diagnostic.closest('details.workspace-qualification')).not.toBeNull();
       expect(diagnostic.closest('.notice')).toBeNull();

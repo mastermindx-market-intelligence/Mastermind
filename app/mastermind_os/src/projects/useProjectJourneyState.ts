@@ -2,6 +2,8 @@ import { useCallback, useRef, useState } from "react";
 import type { MissionHost } from "../host";
 import { nativeDraftReturnQualified, type NativeDraftOrigin, type NativeDraftRecoveryOwner } from "../auth-recovery/native-draft-owner";
 import { projectGoalDraftScope } from "../auth-recovery/project-goal-scope";
+import type { ProjectDraftFile } from "./useProjectDraftFiles";
+import {decodeProjectDraftFileLookup,type ProjectDraftFileLookup} from "./project-draft-file-lookup";
 import type { ProjectJourneySelection } from "./ProjectPlanningJourney";
 import {
   PROJECT_JOURNEY_FLAG_KEY,
@@ -34,6 +36,14 @@ export interface ProjectJourneyStateApi {
   invalidLink: boolean;
   selection: ProjectJourneySelection | null;
   goal: string;
+  draftFiles: readonly ProjectDraftFile[];
+  originalFileLookup: ProjectDraftFileLookup | null;
+  filesHeld: boolean;
+  onDraftFilesChange: (files:readonly ProjectDraftFile[])=>void;
+  onOriginalFileLookupChange: (value:ProjectDraftFileLookup|null)=>void;
+  invalidateFilesAuth: (preserve:boolean)=>void;
+  checkRetainedFileDraft: ()=>Promise<boolean>;
+  discardRetainedFiles: ()=>void;
   goalBelongsToSelection: boolean;
   retainedGoal: ProjectJourneyRetainedGoal | null;
   isHostCurrent: () => boolean;
@@ -74,7 +84,16 @@ interface RetainedGoalState extends ProjectJourneyRetainedGoal {
   readonly host: ProjectJourneyHost;
 }
 
+interface OwnedFiles {
+  readonly rows:readonly ProjectDraftFile[];
+  readonly actor:JourneyActor;
+  readonly createRequestId:string|null;
+  readonly held:boolean;
+}
+
 interface JourneyState {
+  readonly files?:OwnedFiles|null;
+  readonly fileLookup?:ProjectDraftFileLookup|null;
   readonly shown: boolean;
   readonly invalidLink: boolean;
   /** Detached, reader-validated selection DATA; never evidence of a grant. */
@@ -146,7 +165,7 @@ function initialJourneyState(): JourneyState {
   if (!read.open) {
     return { shown: false, invalidLink: false, selection: null, goal: null, retained: null };
   }
-  return { shown: true, invalidLink: false, selection: read.selection, goal: null, retained: null };
+  return { shown: true, invalidLink: false, selection: read.selection, goal: null, retained: null, fileLookup:read.fileLookup??null };
 }
 
 /** Close the pane. Visible owned text parks in the single retained slot
@@ -195,11 +214,13 @@ function adoptSelection(
       shown: markShown ? true : state.shown,
       invalidLink: false,
       selection: next,
+      fileLookup:state.selection?.createRequestId===next?.createRequestId?state.fileLookup:null,
+      files:state.files&&actorEquals(state.files.actor,actor)&&!state.files.held?{...state.files,createRequestId:nextId}:state.files,
       goal: state.goal === null ? null : { ...state.goal, createRequestId: nextId },
     };
   }
   const parked = parkOwnedGoal(state, actor);
-  return { ...parked, shown: markShown ? true : parked.shown, invalidLink: false, selection: next };
+  return { ...parked, shown: markShown ? true : parked.shown, invalidLink: false, selection: next, fileLookup:null };
 }
 
 /** Commit the armed blank journey URL: origin and path preserved, prior
@@ -271,7 +292,7 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
       // Resume the known original operation; never reset it to a fresh blank.
       commitProjectJourneySelection(window.location.href, current.selection, window.history, (committed) => {
         apply({ ...current, shown: true, invalidLink: false, selection: committed });
-      });
+      }, current.fileLookup);
       return true;
     }
     const retained = current.retained;
@@ -323,7 +344,7 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
     // detached validated copy, and a rejected write suppresses the update.
     commitProjectJourneySelection(window.location.href, value, window.history, (committed) => {
       apply(adoptSelection(stateRef.current, live, committed, false, true));
-    });
+    }, stateRef.current.selection?.createRequestId===value.createRequestId?stateRef.current.fileLookup:null);
   };
 
   const restoreLocation = (): void => {
@@ -339,7 +360,7 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
       apply(closeJourney(current, live, false));
       return;
     }
-    apply(adoptSelection(current, live, read.selection, true, false));
+    apply({...adoptSelection(current, live, read.selection, true, false),fileLookup:read.fileLookup??null});
   };
 
   const returnToRetainedGoal = (): boolean => {
@@ -427,6 +448,7 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
   // Stable for the parent's mount-once auth subscription. This IS the
   // notification, so it is not gated by the currency proof it reports.
   const invalidateAuth = useCallback((preserve: boolean) => {
+    invalidateFilesAuth(preserve);
     const current = stateRef.current;
     if (!preserve) {
       // Explicit sign-in/logout: private text and the retained ref are
@@ -459,9 +481,52 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
     });
   }, [apply]);
 
+  const filesVisible=(value:JourneyState,live:JourneyActor|null)=>!!value.files &&
+    !value.files.held && actorEquals(value.files.actor,live) &&
+    value.files.createRequestId===(value.selection?.createRequestId??null);
+  const onDraftFilesChange=(rows:readonly ProjectDraftFile[])=>{
+    const live=ensureCurrent(),value=stateRef.current;if(!live||!value.shown)return;
+    if(value.files?.rows.length&&!filesVisible(value,live))return;
+    // Actual File/body refs remain ephemeral in this existing parent owner.
+    apply({...value,files:rows.length?{rows:Object.freeze([...rows]),actor:live,
+      createRequestId:value.selection?.createRequestId??null,held:false}:null});
+  };
+  const onOriginalFileLookupChange=(raw:ProjectDraftFileLookup|null)=>{
+    const live=ensureCurrent(),value=stateRef.current;
+    if(!live||!value.selection?.workRef)throw Error('PROJECT_FILE_ORIGINAL_UNAVAILABLE');
+    const lookup=raw===null?null:decodeProjectDraftFileLookup(raw,value.selection.workRef);
+    commitProjectJourneySelection(window.location.href,value.selection,window.history,()=>{
+      if(stateRef.current!==value||!actorEquals(ensureCurrent(),live))throw Error('PROJECT_FILE_ORIGINAL_UNAVAILABLE');
+      apply({...value,fileLookup:lookup});
+    },lookup);
+  };
+  const invalidateFilesAuth=useCallback((preserve:boolean)=>{
+    const value=stateRef.current;if(!value.files)return;
+    if(!preserve){for(const row of value.files.rows)row.privacyOwner.discard(row.origin);apply({...value,files:null});}
+    else apply({...value,files:{...value.files,held:true}});
+  },[apply]);
+  const checkRetainedFileDraft=async()=>{
+    const value=stateRef.current,live=ensureCurrent(),files=value.files;
+    if(!live||!files||files.actor.host!==live.host||files.createRequestId!==(value.selection?.createRequestId??null))return false;
+    const owner=live.host.nativeDraftRecovery;if(!owner)return false;
+    for(const row of files.rows){
+      if(row.privacyOwner!==owner)return false;
+      const outcome=await owner.check(row.origin);
+      if(stateRef.current!==value||!actorEquals(ensureCurrent(),live)||live.host.nativeDraftRecovery!==owner)return false;
+      if(outcome==='CLEARED'){for(const item of files.rows)item.privacyOwner.discard(item.origin);apply({...value,files:null});return false;}
+      if(outcome!=='RETURNABLE'||!nativeDraftReturnQualified(owner,row.origin,'project-file-draft.v1:'+row.requestId))return false;
+    }
+    apply({...value,files:{...files,actor:live,held:false}});return true;
+  };
+  const discardRetainedFiles=()=>{
+    const value=stateRef.current;if(!ensureCurrent()||!value.files)return;
+    for(const row of value.files.rows)row.privacyOwner.discard(row.origin);apply({...value,files:null});
+  };
+
   // Stable for the parent's mount-once unsaved-navigation hold.
   const hasUnsentDraft = useCallback(() => {
     const current = stateRef.current;
+    if(current.files?.rows.length)return true;
     if (goalVisible(current, latestActor.current)) return true;
     const retained = current.retained;
     return retained !== null && retainedExposed(retained, latestActor.current) && retained.text !== "";
@@ -480,6 +545,10 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
     selection: state.selection,
     goal: visible && state.goal !== null ? state.goal.text : "",
     goalBelongsToSelection: visible,
+    draftFiles:filesVisible(state,actor)?state.files!.rows:[],
+    originalFileLookup:state.fileLookup??null,
+    filesHeld:!!state.files?.rows.length&&!filesVisible(state,actor),
+    onDraftFilesChange,onOriginalFileLookupChange,invalidateFilesAuth,checkRetainedFileDraft,discardRetainedFiles,
     retainedGoal,
     isHostCurrent: isCurrent,
     hasUnsentDraft,

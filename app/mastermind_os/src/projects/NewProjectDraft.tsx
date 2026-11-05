@@ -10,6 +10,8 @@ export interface NewProjectDraftProps {
   goalReadOnly?: boolean;
   onGoalFocus?: () => void;
   attachmentsControl?: ReactNode;
+  attachmentsPanel?: ReactNode;
+  primarySummary?: ReactNode;
   optionsPanel?: ReactNode;
   /** The actual creation owner controls admission, pending effects and recovery. */
   startControl?: ReactNode;
@@ -19,7 +21,7 @@ export interface NewProjectDraftProps {
 
 /** Controlled unsent composition. This view neither creates nor addresses a project. */
 export function NewProjectDraft({ locale, goal, onGoalChange, attachmentsControl,
-  optionsPanel, startControl, feedbackPanel, startNote, headingLevel = 2, goalReadOnly = false, onGoalFocus }: NewProjectDraftProps) {
+  optionsPanel, startControl, feedbackPanel, startNote, attachmentsPanel, primarySummary, headingLevel = 2, goalReadOnly = false, onGoalFocus }: NewProjectDraftProps) {
   const zh = locale === "zh-CN";
   const Heading = headingLevel === 1 ? "h1" : "h2";
   const text = (en: string, cn: string) => zh ? cn : en;
@@ -42,7 +44,7 @@ export function NewProjectDraft({ locale, goal, onGoalChange, attachmentsControl
     <div className="mm-new-project-goal">
       <label htmlFor={goalId}>{text("Your goal", "你的目标")}</label>
       <textarea id={goalId} value={goal} readOnly={goalReadOnly} onFocus={onGoalFocus} onChange={event => onGoalChange(event.target.value)}
-        rows={6} />
+        rows={3} />
       <div className="mm-new-project-tools">
         {attachmentsControl ?? <button type="button" disabled>{text("Add files", "添加文件")}</button>}
         <button type="button" ref={optionsButton} disabled={optionsPanel == null}
@@ -51,6 +53,7 @@ export function NewProjectDraft({ locale, goal, onGoalChange, attachmentsControl
       </div>
       {attachmentsControl == null && <p className="mm-new-project-unavailable">{text("File attachments are unavailable.", "暂时无法添加文件。")}</p>}
       {optionsPanel == null && <p className="mm-new-project-unavailable">{text("Project options are unavailable.", "暂时无法设置项目选项。")}</p>}
+      {attachmentsPanel}
     </div>
     {optionsVisible && <section id={optionsId} className="mm-new-project-options"
       aria-label={text("Project options", "项目选项")}
@@ -59,11 +62,12 @@ export function NewProjectDraft({ locale, goal, onGoalChange, attachmentsControl
         <button type="button" onClick={closeOptions}>{text("Close", "关闭")}</button></div>
       {optionsPanel}
     </section>}
-    {feedbackPanel != null && <div className="mm-new-project-feedback">{feedbackPanel}</div>}
     <footer className="mm-new-project-start">
+      {primarySummary != null && <div className="mm-new-project-summary">{primarySummary}</div>}
       <div className="mm-new-project-start-control">{startControl ?? <button type="button" disabled>{text("Start project", "开始项目")}</button>}</div>
       <p>{startNote ?? (startControl != null ? text("Opens your project conversation.", "打开你的项目对话。") :
         text("Your goal is a draft. Project creation is unavailable.", "目标仍是草稿。暂时无法创建项目。"))}</p>
     </footer>
+    {feedbackPanel != null && <div className="mm-new-project-feedback">{feedbackPanel}</div>}
   </section>;
 }

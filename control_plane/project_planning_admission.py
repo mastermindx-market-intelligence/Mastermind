@@ -72,6 +72,15 @@ class _ReadObservationBinding:
     read_scope: object
 
 
+_CANONICAL_GROUNDING_BINDING = object()
+
+@dataclass(frozen=True, slots=True)
+class _CanonicalGroundingBinding:
+    seal: object
+    source: object
+    guard: object
+
+
 @dataclass(frozen=True, slots=True)
 class ProjectPlanningSource:
     """Nominal installed source + distinct incumbent Executive capability.
@@ -91,6 +100,25 @@ class ProjectPlanningSource:
     _canonical_source_reader: object = None
     _read_scope: object = None
     _observation_binding: object = None
+    _canonical_grounding_binding: object = None
+
+    def _grounding_macro_commit(self):
+        import json
+        # Private nominal source composition only. Public/caller DATA never
+        # selects this branch; legacy sources keep their exact CREATE commit.
+        if self._seal is not _SEAL:
+            raise ValueError('project planning grounding owner unavailable')
+        binding = self._canonical_grounding_binding
+        if binding is None:
+            return normalize_context(json.loads(self._material))['source']['commit']
+        if (type(binding) is not _CanonicalGroundingBinding
+                or binding.seal is not _CANONICAL_GROUNDING_BINDING
+                or binding.source is not self or not callable(binding.guard)):
+            raise ValueError('project planning grounding owner unavailable')
+        value = binding.guard(self)
+        if type(value) is not str or re.fullmatch(r'[0-9a-f]{40}', value) is None:
+            raise ValueError('project planning grounding source unavailable')
+        return value
 
     def _read_observation_identity(self):
         binding = self._observation_binding
@@ -154,7 +182,7 @@ class ProjectPlanningSource:
             raise ValueError("project planning authority changed during source observation")
 
 
-def _issue_source(*, reader, executive, context, authority_guard, input_owner, events, publication_guard, canonical_source_reader=None, read_scope=None, observation_guard=None):
+def _issue_source(*, reader, executive, context, authority_guard, input_owner, events, publication_guard, canonical_source_reader=None, read_scope=None, observation_guard=None, canonical_grounding_guard=None):
     """Private host join; publication/Workspace grants cannot call this alone."""
     value = ProjectPlanningSource(_SEAL, reader, executive,
         native.canonical(normalize_context(context)), authority_guard, input_owner,events,publication_guard,canonical_source_reader,read_scope)
@@ -162,6 +190,10 @@ def _issue_source(*, reader, executive, context, authority_guard, input_owner, e
     if observation_guard is not None:
         if not callable(observation_guard):raise ValueError('original planning observation issuer unavailable')
         object.__setattr__(value,'_observation_binding',_ReadObservationBinding(_READ_OBSERVATION_BINDING,value,observation_guard,read_scope))
+    if canonical_grounding_guard is not None:
+        if not callable(canonical_grounding_guard):raise ValueError('project planning grounding owner unavailable')
+        object.__setattr__(value,'_canonical_grounding_binding',_CanonicalGroundingBinding(
+            _CANONICAL_GROUNDING_BINDING,value,canonical_grounding_guard))
     return value
 
 
@@ -268,7 +300,7 @@ def submit_initial_request(runtime, *, source, executive_admission, request, gro
     if (type(request) is not dict or set(request) != {"operation_key", "stage", "request_sha256"}
             or any(request[key] != context[key] for key in request)):
         raise ValueError("project planning original request differs")
-    if grounding.get("macro_sha") != context["source"]["commit"]:
+    if grounding.get("macro_sha") != source._grounding_macro_commit():
         raise ValueError("project planning grounding differs from canonical source")
     admission = compose_admission(source=source, executive_admission=executive_admission)
     intent_id = operation_intent_id(context)
