@@ -56,6 +56,7 @@ from common.commission_ref import (
     normalize_commission_ref,
 )
 
+from control_plane import coo_observation
 from control_plane.executive_authority import (
     AuthorityDenied,
     AuthorityPolicyError,
@@ -123,6 +124,7 @@ WORK_DEPENDENCY_MANIFEST_SCHEMA = "mastermind.work_dependency_manifest/v1"
 _COO_PLAN_ADMISSION_SCHEMA_V1 = "mastermind.coo_plan_admission/v1"
 _COO_PLAN_ADMISSION_SCHEMA_V2 = "mastermind.coo_plan_admission/v2"
 _COO_PLAN_ADMISSION_SCHEMA_V3 = "mastermind.coo_plan_admission/v3"
+_COO_PLAN_ADMISSION_SCHEMA_V4 = "mastermind.coo_plan_admission/v4"
 
 
 _PLANNER_PRODUCER_BINDING_SCHEMA = "mastermind.planner_producer_binding/v1"
@@ -544,6 +546,9 @@ class ExecutiveSchemaUpgradeRequired(PersistenceError):
 
 class StateConflict(RuntimeProofError):
     """The operation conflicts with the current state machine or lease."""
+
+class ObservationUnavailable(StateConflict):
+    """The existing host is disarmed or absent; preserve the admitted root."""
 
 
 class WorkerStatus(str, Enum):
@@ -10076,6 +10081,7 @@ _WORK_DEPENDENCY_REVISION_KEYS = frozenset(
 
 
 WORK_DEPENDENCY_MANIFEST_SCHEMA_V2 = "mastermind.work_dependency_manifest/v2"
+WORK_DEPENDENCY_MANIFEST_SCHEMA_V3 = "mastermind.work_dependency_manifest/v3"
 
 
 def _validate_work_dependency_manifest(
@@ -10100,6 +10106,9 @@ def _validate_work_dependency_manifest(
         "dependency_manifest_digest",
     }
     nested = isinstance(value, Mapping) and value.get("schema_version") == WORK_DEPENDENCY_MANIFEST_SCHEMA_V2
+    observed = isinstance(value, Mapping) and value.get("schema_version") == WORK_DEPENDENCY_MANIFEST_SCHEMA_V3
+    if observed:
+        expected_keys.add("observation")
     if nested:
         expected_keys.add("coordinator_job_id")
     if not isinstance(value, Mapping) or set(value) != expected_keys:
@@ -10109,7 +10118,7 @@ def _validate_work_dependency_manifest(
     revisions = manifest.get("revisions")
     manifest_digest = manifest.get("dependency_manifest_digest")
     if (
-        manifest.get("schema_version") not in {WORK_DEPENDENCY_MANIFEST_SCHEMA, WORK_DEPENDENCY_MANIFEST_SCHEMA_V2}
+        manifest.get("schema_version") not in {WORK_DEPENDENCY_MANIFEST_SCHEMA, WORK_DEPENDENCY_MANIFEST_SCHEMA_V2, WORK_DEPENDENCY_MANIFEST_SCHEMA_V3}
         or (nested and (not coordinator_job_id or manifest.get("coordinator_job_id") != coordinator_job_id))
         or manifest.get("root_job_id") != root_job_id
         or manifest.get("plan_attempt_id") != plan_attempt_id
@@ -10136,6 +10145,14 @@ def _validate_work_dependency_manifest(
         or _DIGEST_RE.fullmatch(manifest_digest) is None
     ):
         raise StateConflict("work dependency manifest identity is invalid")
+
+    if observed and manifest["observation"] is not None:
+        binding = manifest["observation"]
+        if (type(binding) is not dict or set(binding) != {"gate_digest", "event_id", "evidence_digest"}
+                or type(binding.get("event_id")) is not int or binding["event_id"] < 1
+                or any(not isinstance(binding.get(key), str) or _DIGEST_RE.fullmatch(binding[key]) is None
+                       for key in ("gate_digest", "evidence_digest"))):
+            raise StateConflict("work observation binding is invalid")
 
     digest_fields = {
         "current_result_digest",
@@ -10203,6 +10220,101 @@ def _validate_work_dependency_manifest(
     return manifest
 
 
+def _observation_root_creation_id(connection, root_row) -> int:
+    rows = connection.execute(
+        "SELECT event_id,aggregate_type,aggregate_id FROM events "
+        "WHERE event_type='JOB_CREATED' AND job_id=? LIMIT 2", (root_row["job_id"],)
+    ).fetchall()
+    if len(rows) != 1 or rows[0]["aggregate_type"] != "job" or rows[0]["aggregate_id"] != root_row["job_id"]:
+        raise StateConflict("observation root creation is not unique")
+    return int(rows[0]["event_id"])
+
+
+def _require_observation_authority(root_row) -> str:
+    authorities = _strict_canonical_json_loads(
+        str(root_row["requested_authorities_json"]), name="observation root authorities")
+    if not isinstance(authorities, list) or "READ" not in authorities:
+        raise StateConflict("observation root has no READ authority")
+    try:
+        current = ExecutiveAuthorityPolicy.load().authorize(["READ"])
+    except (AuthorityDenied, AuthorityPolicyError) as exc:
+        raise StateConflict("observation READ authority is unavailable") from exc
+    if current.policy_sha256 != root_row["authority_policy_hash"]:
+        raise StateConflict("observation authority policy drifted")
+    return current.policy_sha256
+
+
+def _validated_observation_admission(connection, root_row, admission, step, reservation):
+    spec = step.get("observation_gate")
+    stored = reservation.get("observation")
+    if spec is None:
+        if stored is not None:
+            raise StateConflict("ungated step has observation authority")
+        return None
+    try:
+        return coo_observation.validate_admission(
+            stored, root_job_id=str(root_row["root_job_id"]),
+            plan_attempt_id=str(admission["plan_attempt_id"]),
+            plan_digest=str(admission["plan_digest"]), plan_step_id=str(step["step_id"]),
+            spec=spec, root_creation_event_id=_observation_root_creation_id(connection, root_row),
+            authority_policy_hash=str(root_row["authority_policy_hash"]))
+    except coo_observation.ObservationError as exc:
+        raise StateConflict(str(exc)) from exc
+
+
+def _observation_event_material(connection, root_row, observation):
+    """Read the exact immutable record; current authority is not needed for history."""
+    command = coo_observation.command_id(observation)
+    metadata = connection.execute(
+        "SELECT event_id,aggregate_type,aggregate_id,event_type,actor,job_id,attempt_id,"
+        "worker_id,quota_class,created_at_ms,length(CAST(payload_json AS BLOB)) AS bytes "
+        "FROM events WHERE command_id=? LIMIT 2", (command,)
+    ).fetchall()
+    if not metadata:
+        return None
+    if len(metadata) != 1:
+        raise StateConflict("observation command is not unique")
+    event = metadata[0]
+    if (event["aggregate_type"] != "job" or event["aggregate_id"] != root_row["job_id"]
+            or event["event_type"] != coo_observation.EVENT_TYPE or event["actor"] != "coo"
+            or event["job_id"] != root_row["job_id"]
+            or event["attempt_id"] != observation["plan_attempt_id"]
+            or event["worker_id"] is not None or event["quota_class"] is not None
+            or int(event["bytes"]) > coo_observation.MAX_INPUT_BYTES):
+        raise StateConflict("observation event binding or byte budget is invalid")
+    payload = connection.execute("SELECT payload_json FROM events WHERE event_id=?",
+                                 (event["event_id"],)).fetchone()[0]
+    record = _strict_canonical_json_loads(str(payload), name="COO observation record")
+    try:
+        record = coo_observation.validate_record(record, observation)
+    except coo_observation.ObservationError as exc:
+        raise StateConflict(str(exc)) from exc
+    if record["finished_at_ms"] != event["created_at_ms"]:
+        raise StateConflict("observation event clock drifted")
+    return {"event_id": int(event["event_id"]), "record": record}
+
+
+def _observation_manifest_binding(connection, root_row, admission, step, reservation):
+    observation = _validated_observation_admission(connection, root_row, admission, step, reservation)
+    if observation is None:
+        return None
+    material = _observation_event_material(connection, root_row, observation)
+    if material is None or material["record"]["disposition"] != "MATERIAL":
+        raise StateConflict("observation gate is not satisfied")
+    return {"gate_digest": observation["gate_digest"], "event_id": material["event_id"],
+            "evidence_digest": material["record"]["evidence_digest"]}
+
+
+def _require_current_observation_host(root_row, observation, host) -> None:
+    _require_observation_authority(root_row)
+    if host is None:
+        raise ObservationUnavailable("observation host is not composed or armed")
+    try:
+        host.require_current(admission=observation)
+    except coo_observation.ObservationError as exc:
+        raise StateConflict(str(exc)) from exc
+
+
 def _work_dependency_manifest(
     connection: sqlite3.Connection,
     *,
@@ -10214,8 +10326,8 @@ def _work_dependency_manifest(
     """Derive the canonical accepted-revision snapshot for one V3/V4 work step."""
 
     if (
-        plan_body.get("schema_version") not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
-        or admission.get("schema_version") not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}
+        plan_body.get("schema_version") not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6"}
+        or admission.get("schema_version") not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3, _COO_PLAN_ADMISSION_SCHEMA_V4}
         or admission.get("root_job_id") != root_row["root_job_id"]
         or admission.get("coordinator_job_id", admission.get("root_job_id")) != root_row["job_id"]
         or admission.get("plan_attempt_id") != plan_body.get("plan_attempt_id")
@@ -10251,7 +10363,7 @@ def _work_dependency_manifest(
         for prerequisite in prerequisites
     ]
     manifest: dict[str, Any] = {
-        "schema_version": (WORK_DEPENDENCY_MANIFEST_SCHEMA_V2 if plan_body["schema_version"] == "mastermind.execution_plan/v5" else WORK_DEPENDENCY_MANIFEST_SCHEMA),
+        "schema_version": (WORK_DEPENDENCY_MANIFEST_SCHEMA_V3 if plan_body["schema_version"] == "mastermind.execution_plan/v6" else WORK_DEPENDENCY_MANIFEST_SCHEMA_V2 if plan_body["schema_version"] == "mastermind.execution_plan/v5" else WORK_DEPENDENCY_MANIFEST_SCHEMA),
         "root_job_id": str(root_row["root_job_id"]),
         **({"coordinator_job_id": str(root_row["job_id"])} if plan_body["schema_version"] == "mastermind.execution_plan/v5" else {}),
         "plan_attempt_id": str(admission["plan_attempt_id"]),
@@ -10260,6 +10372,9 @@ def _work_dependency_manifest(
         "prerequisite_step_ids": list(prerequisites),
         "revisions": revisions,
     }
+    if plan_body["schema_version"] == "mastermind.execution_plan/v6":
+        manifest["observation"] = _observation_manifest_binding(
+            connection, root_row, admission, step, reservation)
     manifest["dependency_manifest_digest"] = orchestration_digest(manifest)
     return _validate_work_dependency_manifest(
         manifest,
@@ -10308,7 +10423,7 @@ def _validated_plan_admission(
         not isinstance(admission, dict)
         or set(admission) != keys
         or admission_schema
-        not in {_COO_PLAN_ADMISSION_SCHEMA_V1, _COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}
+        not in {_COO_PLAN_ADMISSION_SCHEMA_V1, _COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3, _COO_PLAN_ADMISSION_SCHEMA_V4}
     ):
         raise StateConflict("COO plan admission is not the closed wire")
     digest_input = dict(admission)
@@ -10424,6 +10539,7 @@ def _validated_plan_admission(
     plan_body = dict(envelope["role_result"])
     _assert_planner_producer_result(connection, plan_attempt, plan_attempt, plan_body)
     expected_admission_schema = (
+        _COO_PLAN_ADMISSION_SCHEMA_V4 if plan_body.get("schema_version") == "mastermind.execution_plan/v6" else
         _COO_PLAN_ADMISSION_SCHEMA_V3 if plan_body.get("schema_version") == "mastermind.execution_plan/v5" else _COO_PLAN_ADMISSION_SCHEMA_V2
         if plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
         else _COO_PLAN_ADMISSION_SCHEMA_V1
@@ -10489,6 +10605,8 @@ def _validated_plan_admission(
                 reserved.get("initial_work_command_id") if isinstance(reserved, dict) else None
             )
             dependency_manifest = None
+        if admission_schema == _COO_PLAN_ADMISSION_SCHEMA_V4:
+            expected_step_keys.add("observation")
         if (
             not isinstance(reserved, dict)
             or set(reserved) != expected_step_keys
@@ -10499,13 +10617,17 @@ def _validated_plan_admission(
             != _step_slots(policy, step, required)
         ):
             raise StateConflict("COO plan admission reservation arithmetic drifted")
+        if admission_schema == _COO_PLAN_ADMISSION_SCHEMA_V4:
+            observation = _validated_observation_admission(connection, root_row, admission, step, reserved)
+            if observation is not None and observation["admitted_at_ms"] > event["created_at_ms"]:
+                raise StateConflict("observation admission predates its canonical plan event")
         if admission_schema == _COO_PLAN_ADMISSION_SCHEMA_V1:
             if member_command_id != expected_member_command:
                 raise StateConflict("COO plan admission member command drifted")
         else:
             if reserved["prerequisite_step_ids"] != prerequisite_step_ids:
                 raise StateConflict("COO plan admission prerequisites drifted")
-            if prerequisite_step_ids:
+            if prerequisite_step_ids or step.get("observation_gate") is not None:
                 if member_job_id is not None or member_command_id is not None:
                     raise StateConflict(
                         "dependent V3 reservation cannot materialize initial work"
@@ -10521,7 +10643,7 @@ def _validated_plan_admission(
         expected_validation_argv = root_validations if expected_validation_ids else []
         if step["validation_ids"] != expected_validation_ids:
             raise StateConflict("typed plan changed the mandatory root validation set")
-        if admission_schema in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3} and prerequisite_step_ids:
+        if admission_schema in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3, _COO_PLAN_ADMISSION_SCHEMA_V4} and (prerequisite_step_ids or step.get("observation_gate") is not None):
             continue
 
         member = connection.execute(
@@ -10576,7 +10698,7 @@ def _validated_plan_admission(
             or member_event["job_id"] != member["job_id"]
         ):
             raise StateConflict("COO plan admission member manifest drifted")
-        if admission_schema in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}:
+        if admission_schema in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3, _COO_PLAN_ADMISSION_SCHEMA_V4}:
             dependency_manifest = _work_dependency_manifest(
                 connection,
                 root_row=root_row,
@@ -11157,9 +11279,9 @@ def _current_orchestration_tree_material_for_dispatch(
         ]
         if not revisions:
             deferred_v3 = bool(
-                admission.get("schema_version") in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}
-                and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
-                and step.get("prerequisite_step_ids")
+                admission.get("schema_version") in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3, _COO_PLAN_ADMISSION_SCHEMA_V4}
+                and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6"}
+                and (step.get("prerequisite_step_ids") or step.get("observation_gate") is not None)
                 and reservation.get("initial_work_job_id") is None
                 and reservation.get("initial_work_command_id") is None
             )
@@ -11470,14 +11592,14 @@ def _validated_job_dependency_manifest(
         name="work dependency JOB_CREATED payload",
     )
 
-    is_v3 = plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
+    is_v3 = plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6"}
     has_manifest = "dependency_manifest" in payload
     has_digest = "dependency_manifest_digest" in payload
     if not is_v3:
         if has_manifest or has_digest:
             raise StateConflict("legacy work unexpectedly carries dependency evidence")
         return None
-    if admission.get("schema_version") not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}:
+    if admission.get("schema_version") not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3, _COO_PLAN_ADMISSION_SCHEMA_V4}:
         raise StateConflict("V3/V4 work dependency admission is not V2")
     if not has_manifest or not has_digest:
         raise StateConflict("V3/V4 work is missing immutable dependency evidence")
@@ -14678,6 +14800,7 @@ class JobRegistry:
         root_job_id: str,
         *,
         command_id: str,
+        observation_host: coo_observation.ObservationHost | None = None,
     ) -> list[Job]:
         """Atomically reserve the sealed plan and create its initial work wave."""
 
@@ -14867,6 +14990,7 @@ class JobRegistry:
             plan_digest = result_digest(plan_body)
             if plan_digest != seal["role_result_digest"]:
                 raise StateConflict("typed plan digest differs from its seal")
+            is_v6 = plan_body["schema_version"] == "mastermind.execution_plan/v6"
             is_v5 = plan_body["schema_version"] == "mastermind.execution_plan/v5"
             if (is_v5 and plan_body.get("coordinator_job_id") != root_token
                     or not is_v5 and root["parent_job_id"] is not None):
@@ -14878,16 +15002,16 @@ class JobRegistry:
             )
             is_v3 = plan_body["schema_version"] in {
                 "mastermind.execution_plan/v3",
-                "mastermind.execution_plan/v4", "mastermind.execution_plan/v5",
+                "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6",
             }
             if plan_body["schema_version"] in {
                 "mastermind.execution_plan/v2",
                 "mastermind.execution_plan/v3",
-                "mastermind.execution_plan/v4", "mastermind.execution_plan/v5",
+                "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6",
             }:
                 requires_placement = plan_body["schema_version"] in {
                     "mastermind.execution_plan/v2",
-                    "mastermind.execution_plan/v3",
+                    "mastermind.execution_plan/v3", "mastermind.execution_plan/v6",
                 }
                 if requires_placement and any(
                     "placement" not in step for step in plan_body["steps"]
@@ -14935,6 +15059,31 @@ class JobRegistry:
             root_validation_ids = [
                 orchestration_digest(argv) for argv in root_validations
             ]
+            observations: dict[str, Any] = {}
+            if is_v6:
+                for step in plan_body["steps"]:
+                    spec = step["observation_gate"]
+                    observations[step["step_id"]] = None
+                    if spec is None:
+                        continue
+                    if observation_host is None:
+                        raise ObservationUnavailable("observation host is not composed or armed")
+                    authority_hash = _require_observation_authority(root)
+                    _assert_workstream_admission_open(
+                        connection, _admission_root_workstream(connection, str(root["root_job_id"])))
+                    definition = _finite_bound_effect(self.store, connection, str(root["job_id"]))
+                    timestamp = _finite_fresh_effect(self.store, connection, str(root["job_id"]))
+                    try:
+                        scope = observation_host.require_scope(root_job_id=str(root["root_job_id"]),
+                                                               source=spec["source"])
+                        observations[step["step_id"]] = coo_observation.make_admission(
+                            root_job_id=str(root["root_job_id"]), plan_attempt_id=str(plan_attempt["attempt_id"]),
+                            plan_digest=plan_digest, plan_step_id=step["step_id"],
+                            root_creation_event_id=_observation_root_creation_id(connection, root),
+                            authority_policy_hash=authority_hash, spec=spec, admitted_at_ms=timestamp,
+                            scope=scope, finite_expiry_ms=None if definition is None else definition["expires_at_ms"])
+                    except coo_observation.ObservationError as exc:
+                        raise StateConflict(str(exc)) from exc
             reservation_steps: list[dict[str, Any]] = []
             for ordinal, step in enumerate(plan_body["steps"]):
                 has_tests = "RUN_TESTS" in step["requested_authorities"]
@@ -14955,6 +15104,7 @@ class JobRegistry:
                             ),
                             "initial_work_job_id": None,
                             "initial_work_command_id": None,
+                            **({"observation": observations[step["step_id"]]} if is_v6 else {}),
                         }
                     )
                     continue
@@ -14995,6 +15145,7 @@ class JobRegistry:
                 )
             admission: dict[str, Any] = {
                 "schema_version": (
+                    _COO_PLAN_ADMISSION_SCHEMA_V4 if is_v6 else
                     _COO_PLAN_ADMISSION_SCHEMA_V3 if is_v5 else _COO_PLAN_ADMISSION_SCHEMA_V2
                     if is_v3
                     else _COO_PLAN_ADMISSION_SCHEMA_V1
@@ -15010,7 +15161,7 @@ class JobRegistry:
             }
             if is_v3:
                 for ordinal, step in enumerate(plan_body["steps"]):
-                    if step["prerequisite_step_ids"]:
+                    if step["prerequisite_step_ids"] or step.get("observation_gate") is not None:
                         continue
                     member_command = f"{command_id}:member:{ordinal}"
                     manifest = _work_dependency_manifest(
@@ -15055,6 +15206,8 @@ class JobRegistry:
                     reservation_steps[ordinal]["initial_work_command_id"] = (
                         member_command
                     )
+            if is_v6:
+                timestamp = _finite_fresh_effect(self.store, connection, str(root["job_id"]))
             admission["reservation_digest"] = orchestration_digest(admission)
             self.store.append_event(
                 connection,
@@ -15070,6 +15223,94 @@ class JobRegistry:
             )
             _validated_plan_admission(connection, root)
         return [self.get_job(job_id) for job_id in created_ids if self.get_job(job_id)]
+
+
+    def advance_cycle_observation(
+        self, root_job_id: str, plan_step_id: str, *,
+        observation_host: coo_observation.ObservationHost | None,
+    ) -> dict[str, Any]:
+        """One timer decision on the incumbent store; no worker or wait loop.
+
+        Exact committed records remain readable after authority drift. Fresh
+        effects recheck the root, finite/workstream fences and trusted host.
+        """
+        with self.store.transaction() as connection:
+            root = connection.execute("SELECT * FROM jobs WHERE job_id=?", (root_job_id,)).fetchone()
+            if root is None:
+                raise StateConflict("observation root does not exist")
+            admission, plan = _validated_plan_admission(connection, root)
+            step = next((item for item in plan["steps"] if item["step_id"] == plan_step_id), None)
+            reserved = next((item for item in admission["steps"]
+                             if item["plan_step_id"] == plan_step_id), None)
+            if admission["schema_version"] != _COO_PLAN_ADMISSION_SCHEMA_V4 or step is None or reserved is None:
+                raise StateConflict("observation requires an admitted V6 step")
+            observation = _validated_observation_admission(connection, root, admission, step, reserved)
+            if observation is None:
+                raise StateConflict("step has no observation gate")
+            material = _observation_event_material(connection, root, observation)
+            command = coo_observation.command_id(observation)
+            if material is not None:
+                return {"disposition": material["record"]["disposition"], "created": False,
+                        "command_id": command, **material}
+            if root["cancel_requested_at_ms"] is not None or root["status"] == JobStatus.CANCELLED.value:
+                return {"disposition": "CANCELLED", "created": False, "command_id": command}
+            _assert_cycle_root_open_for_child_mutation(connection, root)
+            _assert_workstream_admission_open(
+                connection, _admission_root_workstream(connection, str(root["root_job_id"])))
+            _require_current_observation_host(root, observation, observation_host)
+            now = _finite_fresh_effect(self.store, connection, str(root["job_id"]))
+            disposition = coo_observation.timer_disposition(observation, now)
+            if disposition == "PENDING":
+                return {"disposition": disposition, "created": False, "command_id": command,
+                        "due_at_ms": observation["spec"]["source"]["due_at_ms"],
+                        "deadline_at_ms": observation["effective_deadline_at_ms"]}
+            record = coo_observation.make_record(observation, now)
+            self.store.append_event(connection, aggregate_type="job", aggregate_id=root_job_id,
+                event_type=coo_observation.EVENT_TYPE, actor="coo", job_id=root_job_id,
+                attempt_id=admission["plan_attempt_id"], payload=record,
+                command_id=command, timestamp_ms=now)
+            material = _observation_event_material(connection, root, observation)
+            assert material is not None
+            return {"disposition": disposition, "created": True, "command_id": command, **material}
+
+    def read_cycle_observation_input(
+        self, job_id: str, attempt_id: str, *, max_bytes: int = coo_observation.MAX_INPUT_BYTES,
+    ) -> dict[str, Any] | None:
+        """Join actual work creation, its current Attempt and retained gate bytes."""
+        if type(max_bytes) is not int or not 1 <= max_bytes <= coo_observation.MAX_INPUT_BYTES:
+            raise StateConflict("observation input byte budget is invalid")
+        with self.store.read() as connection:
+            job = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if job is None:
+                raise StateConflict("observation input Job does not exist")
+            if job["orchestration_role"] != "work" or job["parent_job_id"] is None:
+                return None
+            manifest = _validated_job_dependency_manifest(connection, job_row=job)
+            if manifest is None or manifest.get("observation") is None:
+                return None
+            attempt = connection.execute("SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
+            if (attempt is None or attempt["job_id"] != job_id
+                    or job["current_attempt_id"] != attempt_id):
+                raise StateConflict("observation input Attempt is not current for this Job")
+            root = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job["parent_job_id"],)).fetchone()
+            admission, plan = _validated_plan_admission(connection, root)
+            step = next(item for item in plan["steps"] if item["step_id"] == job["plan_step_id"])
+            reserved = next(item for item in admission["steps"] if item["plan_step_id"] == job["plan_step_id"])
+            expected = _observation_manifest_binding(connection, root, admission, step, reserved)
+            if expected != manifest["observation"]:
+                raise StateConflict("observation input no longer matches actual work creation")
+            observation = _validated_observation_admission(connection, root, admission, step, reserved)
+            material = _observation_event_material(connection, root, observation)
+            assert material is not None
+            result = {"schema_version": coo_observation.INPUT_SCHEMA,
+                      "root_job_id": str(root["root_job_id"]), "job_id": job_id,
+                      "attempt_id": attempt_id, "plan_attempt_id": admission["plan_attempt_id"],
+                      "plan_digest": admission["plan_digest"], "plan_step_id": job["plan_step_id"],
+                      "dependency_manifest_digest": manifest["dependency_manifest_digest"],
+                      "observation": expected, "evidence": material["record"]}
+            if len(coo_observation.canonical_bytes(result)) > max_bytes:
+                raise StateConflict("observation input exceeds the byte budget")
+            return result
 
 
     def project_cycle_work_dependency_manifest(
@@ -15100,10 +15341,10 @@ class JobRegistry:
                 None,
             )
             if (
-                admission["schema_version"] not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}
-                or plan_body["schema_version"] not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
+                admission["schema_version"] not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3, _COO_PLAN_ADMISSION_SCHEMA_V4}
+                or plan_body["schema_version"] not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6"}
                 or step is None
-                or not step["prerequisite_step_ids"]
+                or not (step["prerequisite_step_ids"] or step.get("observation_gate") is not None)
             ):
                 raise StateConflict("dependency projection requires a deferred V3/V4 step")
             existing = connection.execute(
@@ -15132,6 +15373,7 @@ class JobRegistry:
         *,
         dependency_manifest: Mapping[str, Any],
         command_id: str,
+        observation_host: coo_observation.ObservationHost | None = None,
     ) -> Job:
         """Create/reconcile one dependency-ready reserved V3 work Job."""
 
@@ -15165,11 +15407,11 @@ class JobRegistry:
                 None,
             )
             if (
-                admission["schema_version"] not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}
-                or plan_body["schema_version"] not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
+                admission["schema_version"] not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3, _COO_PLAN_ADMISSION_SCHEMA_V4}
+                or plan_body["schema_version"] not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6"}
                 or step is None
                 or reservation is None
-                or not step["prerequisite_step_ids"]
+                or not (step["prerequisite_step_ids"] or step.get("observation_gate") is not None)
                 or reservation["initial_work_job_id"] is not None
                 or reservation["initial_work_command_id"] is not None
             ):
@@ -15231,6 +15473,9 @@ class JobRegistry:
                 )
                 return _job_from_row(row)
             _assert_cycle_root_open_for_child_mutation(connection, root)
+            if step.get("observation_gate") is not None:
+                observation = _validated_observation_admission(connection, root, admission, step, reservation)
+                _require_current_observation_host(root, observation, observation_host)
             existing_step_rows = connection.execute(
                 """
                 SELECT * FROM jobs

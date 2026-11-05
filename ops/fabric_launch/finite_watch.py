@@ -44,12 +44,16 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import math
+import os
+import selectors
 import re
 import signal
 import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -86,6 +90,8 @@ MAX_COMMAND_TIMEOUT_SECONDS = 10.0
 CANCEL_POLL_SECONDS = 1.0
 REVIEW_PAGE_SIZE = 100
 MAX_REVIEW_PAGES = 10
+MAX_REVIEW_LOGIN_BYTES = 100
+MAX_JSON_DEPTH = 32
 
 FORMAL_REVIEW_STATES = ("APPROVED", "CHANGES_REQUESTED", "DISMISSED")
 HEALTH_STATES = ("READY", "DEGRADED", "UNAVAILABLE", "AUTH_REQUIRED", "DENIED")
@@ -113,7 +119,7 @@ _SOURCE_FIELDS = {
     }), frozenset()),
     "github_review": (frozenset({
         "repository", "pull_request", "expected_head_sha", "after_review_id",
-    }), frozenset()),
+    }), frozenset({"review_baseline"})),
     "service_health": (frozenset({"service"}), frozenset({"expected_state"})),
 }
 
@@ -133,6 +139,43 @@ class _Stale(Exception):
         super().__init__(origin)
         self.observed = observed
         self.origin = origin
+
+
+class _DeadlineExceeded(Exception):
+    pass
+
+
+class _Cancelled(Exception):
+    def __init__(self, code):
+        self.code = code
+
+
+class _Budget:
+    """One absolute clock and latched cancellation across every acquisition."""
+
+    def __init__(self, clock, deadline, cancel, state):
+        self.clock, self.deadline, self.cancel, self.state = clock, deadline, cancel, state
+
+    def check(self):
+        if self.state["triggered"]:
+            raise _Cancelled(self.state.get("code", "CANCELLED_BY_SIGNAL"))
+        if self.cancel is not None and self.cancel():
+            self.state.update(triggered=True, code="CANCELLED_BY_CALLBACK")
+            raise _Cancelled("CANCELLED_BY_CALLBACK")
+        remaining = self.deadline - self.clock()
+        if remaining <= 0:
+            raise _DeadlineExceeded()
+        return remaining
+
+    def read(self, reader, identity, proposed):
+        timeout = min(float(proposed), MAX_COMMAND_TIMEOUT_SECONDS, self.check())
+        try:
+            value = reader(identity, timeout)
+        except Exception:
+            self.check()  # Cancellation/deadline wins a late error, too.
+            raise
+        self.check()      # A late successful response is never an EVENT.
+        return value
 
 
 @dataclass(frozen=True)
@@ -267,6 +310,23 @@ def parse_request(value):
         else:
             params["after_review_id"] = _integer(
                 value["after_review_id"], "AFTER_REVIEW_ID_INVALID", 0, 10 ** 12)
+            if "review_baseline" in value:
+                baseline = value["review_baseline"]
+                if type(baseline) is not list or len(baseline) > REVIEW_PAGE_SIZE * MAX_REVIEW_PAGES:
+                    fail("REVIEW_BASELINE_INVALID")
+                rows, seen = [], set()
+                for row in baseline:
+                    if type(row) is not dict or set(row) != {"id", "state", "commit", "login"}:
+                        fail("REVIEW_BASELINE_INVALID")
+                    try:
+                        normal = _normal_review(row["id"], row["state"], row["commit"], row["login"])
+                    except SourceUnavailable:
+                        fail("REVIEW_BASELINE_INVALID")
+                    if normal["id"] in seen or normal["id"] > params["after_review_id"]:
+                        fail("REVIEW_BASELINE_INVALID")
+                    seen.add(normal["id"])
+                    rows.append(normal)
+                params["review_baseline"] = sorted(rows, key=lambda row: row["id"])
     else:
         service = value["service"]
         if type(service) is not str or service not in observe.ENDPOINTS:
@@ -313,32 +373,94 @@ def _gh_argv(path):
     return ["gh", "api", path, "--method", "GET", "--hostname", "github.com"]
 
 
-def _gh_get_json(path, timeout):
-    """One bounded read. The response text never leaves this function."""
+def _bounded_json(raw):
+    """Strict bounded external JSON, including list-valued GitHub endpoints."""
+    if type(raw) is not bytes or not 0 < len(raw) <= MAX_RESPONSE_BYTES:
+        raise _unavailable("GH_RESPONSE_TOO_LARGE" if raw else "GH_RESPONSE_INVALID")
+
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("duplicate key")
+            result[key] = value
+        return result
+
+    def constant(_value):
+        raise ValueError("nonfinite number")
+
     try:
-        completed = subprocess.run(
-            _gh_argv(path),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            shell=False,
-            timeout=timeout,
-            check=False,
-        )
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs, parse_constant=constant)
+        stack = [(value, 0)]
+        while stack:
+            node, depth = stack.pop()
+            if depth > MAX_JSON_DEPTH:
+                raise ValueError("JSON depth exceeded")
+            if isinstance(node, dict):
+                stack.extend((child, depth + 1) for child in node.values())
+            elif isinstance(node, list):
+                stack.extend((child, depth + 1) for child in node)
+            elif type(node) is float and not math.isfinite(node):
+                raise ValueError("nonfinite number")
+        return value
+    except (UnicodeError, ValueError, RecursionError):
+        raise _unavailable("GH_RESPONSE_INVALID") from None
+
+
+def _gh_get_json(path, timeout, *, check=None):
+    """Stream a bounded GET and always reap its exact child, including overflow."""
+    process = None
+    selector = None
+    deadline = time.monotonic() + float(timeout)
+    data = bytearray()
+
+    def remaining():
+        if check is not None:
+            check()
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise _unavailable("GH_API_TIMEOUT")
+        return left
+
+    try:
+        remaining()
+        process = subprocess.Popen(_gh_argv(path), stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, shell=False, bufsize=0)
+        assert process.stdout is not None
+        os.set_blocking(process.stdout.fileno(), False)
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ)
+        while True:
+            ready = selector.select(min(remaining(), CANCEL_POLL_SECONDS))
+            remaining()
+            if not ready:
+                continue
+            chunk = os.read(process.stdout.fileno(), min(8192, MAX_RESPONSE_BYTES + 1 - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+            if len(data) > MAX_RESPONSE_BYTES:
+                raise _unavailable("GH_RESPONSE_TOO_LARGE")
+        code = process.wait(timeout=remaining())
+        remaining()
+        if code != 0:
+            raise _unavailable("GH_API_FAILED", exit_code=code)
+        return _bounded_json(bytes(data))
     except FileNotFoundError:
-        raise _unavailable("GH_EXECUTABLE_MISSING")
+        raise _unavailable("GH_EXECUTABLE_MISSING") from None
     except subprocess.TimeoutExpired:
-        raise _unavailable("GH_API_TIMEOUT")
+        raise _unavailable("GH_API_TIMEOUT") from None
     except OSError:
-        raise _unavailable("GH_API_UNAVAILABLE")
-    if completed.returncode != 0:
-        raise _unavailable("GH_API_FAILED", exit_code=completed.returncode)
-    if len(completed.stdout) > MAX_RESPONSE_BYTES:
-        raise _unavailable("GH_RESPONSE_TOO_LARGE")
-    try:
-        return json.loads(completed.stdout.decode("utf-8"))
-    except (UnicodeError, ValueError):
-        raise _unavailable("GH_RESPONSE_INVALID")
+        raise _unavailable("GH_API_UNAVAILABLE") from None
+    finally:
+        if selector is not None:
+            selector.close()
+        if process is not None:
+            if process.poll() is None:
+                process.kill()  # Only the process this call actually created.
+            process.wait()     # SIGKILL/reap; no detached reader survives a return.
+            if process.stdout is not None:
+                process.stdout.close()
 
 
 def _read_pull_request_head(spec, gh_get, timeout):
@@ -347,11 +469,12 @@ def _read_pull_request_head(spec, gh_get, timeout):
     value = gh_get(path, timeout)
     if type(value) is not dict:
         raise _unavailable("PULL_REQUEST_RESPONSE_INVALID")
+    if type(value.get("number")) is not int or value["number"] != spec.params["pull_request"]:
+        raise _unavailable("PULL_REQUEST_IDENTITY_MISMATCH")
     base = value.get("base")
-    if type(base) is dict and type(base.get("repo")) is dict:
-        full_name = base["repo"].get("full_name")
-        if type(full_name) is str and full_name.casefold() != spec.params["repository"].casefold():
-            raise _unavailable("PULL_REQUEST_REPOSITORY_MISMATCH")
+    full_name = base.get("repo", {}).get("full_name") if type(base) is dict and type(base.get("repo")) is dict else None
+    if type(full_name) is not str or full_name.casefold() != spec.params["repository"].casefold():
+        raise _unavailable("PULL_REQUEST_REPOSITORY_MISMATCH")
     head = value.get("head")
     if type(head) is not dict:
         raise _unavailable("PULL_REQUEST_RESPONSE_INVALID")
@@ -413,15 +536,17 @@ def _read_workflow_run(spec, gh_get, run_id, timeout):
     value = gh_get("repos/" + repository + "/actions/runs/" + str(run_id), timeout)
     if type(value) is not dict:
         raise invalid("WORKFLOW_RUN_RESPONSE_INVALID")
-    if value.get("id") != run_id:
+    if type(value.get("id")) is not int or value["id"] != run_id:
         raise invalid("WORKFLOW_RUN_IDENTITY_MISMATCH")
-    head_repository = value.get("head_repository")
-    if type(head_repository) is dict:
-        full_name = head_repository.get("full_name")
-        if type(full_name) is not str or full_name.casefold() != repository.casefold():
-            raise invalid("WORKFLOW_RUN_IDENTITY_MISMATCH")
-    elif head_repository is not None:
-        raise invalid("WORKFLOW_RUN_RESPONSE_INVALID")
+    execution_repository = value.get("repository")
+    full_name = execution_repository.get("full_name") if type(execution_repository) is dict else None
+    if type(full_name) is not str or full_name.casefold() != repository.casefold():
+        raise invalid("WORKFLOW_RUN_IDENTITY_MISMATCH")
+    # head_repository may legitimately be a contributor's fork. The execution
+    # repository and exact head are the identities this watch actually binds.
+    attempt = value.get("run_attempt")
+    if type(attempt) is not int or not 1 <= attempt <= 10 ** 6:
+        raise invalid("WORKFLOW_RUN_ATTEMPT_INVALID")
     run_head = value.get("head_sha")
     if type(run_head) is not str or not _HEAD_SHA_RE.match(run_head):
         raise invalid("WORKFLOW_RUN_RESPONSE_INVALID")
@@ -436,6 +561,7 @@ def _read_workflow_run(spec, gh_get, run_id, timeout):
         raise invalid("WORKFLOW_RUN_STATUS_INVALID")
     return {
         "run_id": run_id,
+        "run_attempt": attempt,
         "status": status,
         "conclusion": conclusion if status == "completed" else None,
         "head_sha": run_head,
@@ -451,13 +577,14 @@ def _make_ci_sampler(spec, gh_get):
                 raise _Stale(run["head_sha"], "workflow_run_head")
             runs.append({
                 "run_id": run["run_id"],
+                "run_attempt": run["run_attempt"],
                 "status": run["status"],
                 "conclusion": run["conclusion"],
             })
         return runs
 
     def sample(remaining):
-        timeout = max(1.0, min(MAX_COMMAND_TIMEOUT_SECONDS, float(remaining)))
+        timeout = min(MAX_COMMAND_TIMEOUT_SECONDS, float(remaining))
         try:
             head, runs = _observe_with_head_guard(spec, gh_get, read_runs, timeout)
         except _Stale as stale:
@@ -475,10 +602,22 @@ def _make_ci_sampler(spec, gh_get):
     return sample
 
 
+def _normal_review(review_id, state, commit, login):
+    if (type(review_id) is not int or not 1 <= review_id <= 10 ** 12
+            or type(state) is not str or state not in {
+                *FORMAL_REVIEW_STATES, "COMMENTED", "PENDING",
+            }
+            or type(commit) is not str or not _HEAD_SHA_RE.fullmatch(commit)
+            or type(login) is not str or not login or len(login) > MAX_REVIEW_LOGIN_BYTES
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.\[\]-]*", login)):
+        raise _unavailable("REVIEW_RECORD_INVALID")
+    return {"id": review_id, "state": state, "commit": commit, "login": login}
+
+
 def _read_reviews(spec, gh_get, timeout):
     """Bounded full pagination. Partial coverage fails closed."""
     repository = spec.params["repository"]
-    records = []
+    records = {}
     for page in range(1, MAX_REVIEW_PAGES + 1):
         path = ("repos/" + repository + "/pulls/" + str(spec.params["pull_request"])
                 + "/reviews?per_page=" + str(REVIEW_PAGE_SIZE) + "&page=" + str(page))
@@ -492,31 +631,37 @@ def _read_reviews(spec, gh_get, timeout):
             commit = row.get("commit_id")
             user = row.get("user")
             login = user.get("login") if type(user) is dict else None
-            if type(review_id) is not int or review_id < 0 or type(state) is not str:
-                raise _unavailable("REVIEW_RECORD_INVALID")
-            if commit is not None and (
-                    type(commit) is not str or not _HEAD_SHA_RE.match(commit)):
-                raise _unavailable("REVIEW_RECORD_INVALID")
-            if login is not None and type(login) is not str:
-                raise _unavailable("REVIEW_RECORD_INVALID")
-            records.append({"id": review_id, "state": state,
-                            "commit": commit, "login": login})
+            normal = _normal_review(review_id, state, commit, login)
+            if review_id in records and records[review_id] != normal:
+                raise _unavailable("REVIEW_ID_CONFLICT")
+            records[review_id] = normal
         if len(value) < REVIEW_PAGE_SIZE:
-            return records
+            return [records[key] for key in sorted(records)]
     raise _unavailable("REVIEW_COVERAGE_INCOMPLETE")
 
 
 def _make_review_sampler(spec, gh_get):
+    supplied = spec.params.get("review_baseline")
+    baseline = None if supplied is None else {row["id"]: row for row in supplied}
+
     def sample(remaining):
-        timeout = max(1.0, min(MAX_COMMAND_TIMEOUT_SECONDS, float(remaining)))
+        nonlocal baseline
+        timeout = min(MAX_COMMAND_TIMEOUT_SECONDS, float(remaining))
         try:
             head, records = _observe_with_head_guard(
                 spec, gh_get, lambda t: _read_reviews(spec, gh_get, t), timeout)
         except _Stale as stale:
             return _stale(spec, stale.observed, stale.origin)
         changed = []
+        if baseline is None:
+            # Without an owner baseline, the first complete acquisition is the
+            # reference for existing IDs. A later dismissal keeps that ID.
+            baseline = {row["id"]: row for row in records
+                        if row["id"] <= spec.params["after_review_id"]}
         for record in records:
-            if record["id"] <= spec.params["after_review_id"]:
+            prior = baseline.get(record["id"])
+            if record["id"] <= spec.params["after_review_id"] and (
+                    prior is None or prior == record):
                 continue
             if record["state"] not in FORMAL_REVIEW_STATES:
                 continue
@@ -551,28 +696,95 @@ def _http_health(exc):
     return "UNAVAILABLE"
 
 
-def _default_service_probe(service):
+def _service_evidence_health(service, result):
+    """Require the fixed action's affirmative shape, not a non-error envelope."""
+    if type(result) is not dict:
+        return "UNAVAILABLE"
+    value = result.get("structuredContent")
+    content = result.get("content")
+    parsed = None
+    if type(content) is list and len(content) == 1 and type(content[0]) is dict:
+        row = content[0]
+        if row.get("type") == "text" and type(row.get("text")) is str:
+            try:
+                parsed = _bounded_json(row["text"].encode("utf-8"))
+            except (SourceUnavailable, UnicodeError):
+                parsed = None
+    if value is None:
+        value = parsed
+    explicit = value if type(value) is dict else {}
+    state = next((explicit[key] for key in ("state", "status", "code")
+                  if explicit.get(key) in ("DENIED", "FORBIDDEN", "PERMISSION_DENIED",
+                    "AUTH_REQUIRED", "UNAUTHORIZED", 401, 403)), None)
+    is_error = result.get("isError") is True or "error" in result or "error" in explicit or state is not None
+    if is_error:
+        encoded = json.dumps(result, default=lambda _: "", ensure_ascii=True)[:MAX_RESPONSE_BYTES].lower()
+        if state in ("AUTH_REQUIRED", "UNAUTHORIZED", 401) or re.search(
+                r"unauthorized|authentication required|auth_required", encoded):
+            return "AUTH_REQUIRED"
+        if state in ("DENIED", "FORBIDDEN", "PERMISSION_DENIED", 403) or re.search(
+                r"permission.denied|access.denied|forbidden|not.authorized", encoded):
+            return "DENIED"
+        return "UNAVAILABLE"
+    if type(value) is not dict or (parsed is not None and canonical(parsed) != canonical(value)):
+        return "UNAVAILABLE"
+    if service == "studio-read":
+        if any(type(value.get(key)) is not str or not 0 < len(value[key]) <= 192
+               for key in ("timestamp", "generation", "pingId", "gatewayVersion")):
+            return "UNAVAILABLE"
+        try:
+            stamp = dt.datetime.fromisoformat(value["timestamp"].replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                return "UNAVAILABLE"
+        except ValueError:
+            return "UNAVAILABLE"
+        if any(type(value.get(key)) not in (int, float) or not math.isfinite(value[key]) or value[key] < 0
+               for key in ("monotonicMs", "monotonicDurationMs")):
+            return "UNAVAILABLE"
+        return "READY"
+    hits = value.get("hits")
+    if type(hits) is not list or not 0 < len(hits) <= 100:
+        return "UNAVAILABLE"
+    for hit in hits:
+        if type(hit) is not dict or type(hit.get("url")) is not str:
+            return "UNAVAILABLE"
+        url = urllib.parse.urlsplit(hit["url"])
+        if url.scheme != "https" or url.hostname not in {
+                "developers.openai.com", "platform.openai.com", "help.openai.com", "learn.chatgpt.com"}:
+            return "UNAVAILABLE"
+        if type(hit.get("hierarchy")) is not dict or not any(
+                type(text) is str and text for text in hit["hierarchy"].values()):
+            return "UNAVAILABLE"
+    return "READY"
+
+
+def _default_service_probe(service, timeout, *, check=None):
     """Reuse the existing read-only MCP observation and classify its health."""
     try:
-        probe = observe.ReadOnlyMcpProbe(service)
-        _initialized, tools = probe.observe()
+        probe = observe.ReadOnlyMcpProbe(service, deadline=time.monotonic() + timeout,
+                                       clock=time.monotonic, check=check)
+        initialized, tools = probe.observe()
+        if (type(initialized) is not dict or type(initialized.get("protocolVersion")) is not str
+                or type(initialized.get("capabilities")) is not dict
+                or type(initialized.get("serverInfo")) is not dict
+                or any(type(initialized["serverInfo"].get(key)) is not str
+                       or not initialized["serverInfo"][key] for key in ("name", "version"))):
+            return "UNAVAILABLE"
         names = {row.get("name") for row in tools if type(row) is dict}
         action = "search_openai_docs" if service == "openai-docs" else "studio_ping"
         if action not in names:
             return "DEGRADED"
         arguments = {"query": "skills"} if service == "openai-docs" else {}
         result = probe.call("tools/call", {"name": action, "arguments": arguments}, 3)
+        return _service_evidence_health(service, result)
     except urllib.error.HTTPError as exc:
         return _http_health(exc)
+    except observe.ProbeResponseError as exc:
+        return exc.state
     except urllib.error.URLError:
         return "UNAVAILABLE"
-    except ValueError:
-        return "DEGRADED"
-    except OSError:
+    except (ValueError, OSError, StopIteration, TypeError):
         return "UNAVAILABLE"
-    if type(result) is not dict or result.get("isError") is True:
-        return "DEGRADED"
-    return "READY"
 
 
 def _make_health_sampler(spec, service_probe):
@@ -581,7 +793,7 @@ def _make_health_sampler(spec, service_probe):
     baseline = {"value": None}
 
     def sample(remaining):
-        health = service_probe(service)
+        health = service_probe(service, min(MAX_COMMAND_TIMEOUT_SECONDS, remaining))
         if type(health) is not str or health not in HEALTH_STATES:
             raise _unavailable("SERVICE_HEALTH_INVALID")
         if health in TERMINAL_HEALTH_STATES:
@@ -639,22 +851,17 @@ def _install_sigterm(state):
     return restore
 
 
-def _wait(seconds, sleep, cancel, cancel_state):
+def _wait(seconds, sleep, budget):
     """Wait in short slices so a stop request is noticed promptly.
 
-    Returns False when the wait was cut short by a stop request. No other
-    process is signalled and no lease is touched.
+    Cancellation stays latched even if its callback was a one-shot pulse.
+    No other process is signalled and no lease is touched.
     """
-    remaining = float(seconds)
-    while remaining > 0:
-        if cancel_state["triggered"]:
-            return False
-        if cancel is not None and cancel():
-            return False
-        step = min(remaining, CANCEL_POLL_SECONDS)
-        sleep(step)
-        remaining -= step
-    return True
+    end = min(budget.deadline, budget.clock() + seconds)
+    while budget.clock() < end:
+        remaining = budget.check()
+        sleep(min(end - budget.clock(), remaining, CANCEL_POLL_SECONDS))
+    budget.check()
 
 
 def run_watch(request, *, clock=None, wall=None, sleep=None, gh_get=None,
@@ -663,17 +870,21 @@ def run_watch(request, *, clock=None, wall=None, sleep=None, gh_get=None,
 
     ``clock`` is the monotonic deadline clock, ``wall`` the UTC wall clock,
     ``sleep`` the pause, ``gh_get`` the GitHub reader, ``service_probe`` the
-    service health reader and ``cancel`` a callback that reports a requested
-    stop. Every one of them is injectable so tests never touch the network.
+    service health reader ``(service, remaining_timeout)`` and ``cancel`` a
+    callback that reports a requested stop. Every read gets the current bound;
+    an injected reader must honor it. Tests need no network.
     """
     spec = request if isinstance(request, WatchSpec) else parse_request(request)
     clock = clock or time.monotonic
     wall = wall or (lambda: dt.datetime.now(dt.timezone.utc))
     sleep = sleep or time.sleep
-    gh_get = gh_get or _gh_get_json
-    service_probe = service_probe or _default_service_probe
-
     cancel_state = {"triggered": False}
+    budget = _Budget(clock, clock() + spec.limits.timeout_seconds, cancel, cancel_state)
+    raw_gh_get = gh_get or (lambda path, timeout: _gh_get_json(path, timeout, check=budget.check))
+    raw_service_probe = service_probe or (lambda service, timeout:
+        _default_service_probe(service, timeout, check=budget.check))
+    gh_get = lambda path, timeout: budget.read(raw_gh_get, path, timeout)
+    service_probe = lambda service, timeout: budget.read(raw_service_probe, service, timeout)
     restore = _install_sigterm(cancel_state) if handle_signals else None
     sample_count = 0
     due_at = None
@@ -681,42 +892,41 @@ def run_watch(request, *, clock=None, wall=None, sleep=None, gh_get=None,
     def done(outcome, event, payload):
         return _result(spec, outcome, event, payload, sample_count)
 
-    if spec.source == "timer":
-        due_at = dt.datetime.fromisoformat(spec.params["due_at"])
-        if (due_at - wall()).total_seconds() > spec.limits.timeout_seconds:
-            # The deadline is not inside the admitted finite duration.
-            return done("TIMEOUT", None, {"code": "DEADLINE_OUTSIDE_BUDGET"})
     try:
+        budget.check()
+        if spec.source == "timer":
+            due_at = dt.datetime.fromisoformat(spec.params["due_at"])
+            if (due_at - wall()).total_seconds() > budget.check():
+                return done("TIMEOUT", None, {"code": "DEADLINE_OUTSIDE_BUDGET"})
         sampler = _build_sampler(
             spec, wall=wall, gh_get=gh_get, service_probe=service_probe)
         previous_digest = None
-        deadline = clock() + spec.limits.timeout_seconds
         while True:
-            if cancel is not None and cancel():
-                return done("CANCELLED", None, {"code": "CANCELLED_BY_CALLBACK"})
-            if cancel_state["triggered"]:
-                return done("CANCELLED", None, {"code": "CANCELLED_BY_SIGNAL"})
-            remaining = deadline - clock()
-            if remaining <= 0:
-                return done("TIMEOUT", None, {"code": "DEADLINE_EXCEEDED"})
+            remaining = budget.check()
             sample_count += 1
             try:
                 sample = sampler(remaining)
             except SourceUnavailable as exc:
+                budget.check()
                 return done("SOURCE_UNAVAILABLE", None, exc.signal_payload)
+            budget.check()
             if sample.event is not None:
                 return done("EVENT", sample.event, sample.signal or {})
             if previous_digest is None or sample.digest != previous_digest:
                 previous_digest = sample.digest
             if sample_count >= spec.limits.max_samples:
                 return done("TIMEOUT", None, {"code": "SAMPLE_BUDGET_EXHAUSTED"})
-            delay = min(float(spec.limits.interval_seconds), deadline - clock())
+            delay = min(float(spec.limits.interval_seconds), budget.check())
             if due_at is not None:
                 until_due = (due_at - wall()).total_seconds()
                 if until_due > 0:
                     delay = min(delay, until_due)
             if delay > 0:
-                _wait(delay, sleep, cancel, cancel_state)
+                _wait(delay, sleep, budget)
+    except _Cancelled as exc:
+        return done("CANCELLED", None, {"code": exc.code})
+    except _DeadlineExceeded:
+        return done("TIMEOUT", None, {"code": "DEADLINE_EXCEEDED"})
     except KeyboardInterrupt:
         return done("CANCELLED", None, {"code": "CANCELLED_BY_INTERRUPT"})
     finally:

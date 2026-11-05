@@ -23,7 +23,88 @@ Completion requires source tests, protected release where required, installed-ve
 - Open #2064 at `7f2bd25fb0bc6aa581701b443f100e5f40744658` owns active shared-bootstrap parity changes. Compose additive guidance through the existing source after collision reconciliation; do not overwrite its active branch.
 - Use one managed workspace/branch for this operation. Source changes are not permission to arm an unqualified runtime or duplicate an existing review.
 
-## Task tree
+
+## Implemented and source-qualified frontier
+
+This section supersedes the earlier candidate/proposed statuses below. The original
+mission and DONE_WHEN remain open through installation, real-worker consumption
+and account adoption.
+
+- **Durable timer:** explicit execution-plan V6, retained observation admission,
+  one Runtime event, exact dependency/input join, and ordinary COO materialization
+  are implemented. Pending gates allocate no work Job, Attempt or provider lease.
+  The existing service tick is the only driver; observation arming is default-off
+  and does not silently select a native planner or change installed configuration.
+- **Scheduling/recovery:** current-host absence after material acquisition is
+  temporary; pending timers allow ready siblings; proven pre-claim review capacity
+  misses allow disjoint READ gates; accepted prerequisites do not inherit unrelated
+  review pressure. Existing live/uncertain dispatch fences stay first. The existing
+  root selector rotates after positive observation-wait outcomes, including three
+  or more parked roots, without a new queue or durable cursor.
+- **Finite observer:** all seven initial findings are repaired. One absolute budget
+  spans sequential reads and body acquisition; cancellation is latched and wins
+  over late results; SIGTERM is restored on preflight exits. GitHub output is
+  streamed with a byte ceiling and the exact child is reaped. PR number/base repo,
+  workflow execution repo/head/run attempt and bounded review identities are
+  checked. A supplied semantic review baseline can detect same-ID dismissal on the
+  first sample; otherwise the first complete sample seeds that baseline. Fixed MCP
+  health probes require source-specific affirmative evidence and stop on denial.
+- **Paid repair custody:** the original finite-repair controller 67756 completed
+  its one-hour lease wait with LEASE_REFUSED/rc75 before worker launch. No replacement,
+  lease manipulation or worker acceptance occurred. Parent source repair follows
+  NO_ELIGIBLE_PRE_EFFECT_WORKER on the same carrier. The separate guidance run and
+  lease d7800b64337e remain canonical EFFECT_UNKNOWN and unaccepted.
+- **Source/skills:** additive AGENTS guidance and compact INDEX/COLD_START routes
+  lead to the existing account-neutral workflow recipe. Shared CEO package source
+  is 0.2.2. The current account's existing Fabric plugin was published as 1.0.1,
+  release pluginrel_6aec2201a2bc81919c02cc46b275db26, preserving its app, audience and
+  presentation; exact skill readback passed. This is not fresh-load/all-account proof.
+  The existing Mastermind Sol plugin's editable original release has now been
+  qualified for a minimal account-neutral skill addition; publication is still a
+  separate next action.
+- **Hosted CI repair:** 2b1cc2158b823529356f3f01337bd284d6d3603b failed two reading-budget
+  assertions in workflow 41980469052, job 127089469808. The expanded bootstrap was
+  compacted into short recipe routes, with existing duplicated wording condensed.
+  The protected corpus baseline and all assertions are unchanged; current corpus
+  is 99,985 bytes and all 212 compaction-contract cases pass.
+
+### Source validation receipts
+
+These are overlapping source-test batches, not a summed unique-case count.
+
+| Receipt | Result and scope |
+|---|---|
+| M2 95024 | 109 native plan export/opt-in/helper cases passed |
+| M2 29403 | 97 timer, host recovery, review pressure and existing tick-liveness cases passed |
+| M2 40658 | 545 legacy cases passed before one obsolete V6-unsupported expectation failed; Runtime, ready-frontier, hierarchy, service and supervisor regressions completed |
+| M2 89075 | Final observation, actual Claude adapter and retained planner-producer suites: 121 passed; V6 positive handshake added, unknown V7 remains refused |
+| M2 82068 | Repaired finite observer: 125 passed, including real disposable streaming subprocesses; no network/provider effects in this suite |
+| M2 93113 | Existing MCP-reply/observation transport neighbors: 35 passed |
+| M2 16425 | All 212 reading-budget/procedure contracts passed, unchanged baseline |
+
+C3 source judgment found scheduling defects; principal corrections and
+discriminating source tests resolved them. This is not a formal GitHub approval
+or a mandatory independent-review gate.
+
+### Remaining exact frontier
+
+1. Publish/read back this same implementation carrier and consume required CI for
+   its exact head; no self-merge, bulk auto-merge or invented release receipt.
+2. Run the bounded original-root real Fabric timer -> same-worker tests -> retained
+   result -> parent acceptance canary against that published head, if admitted.
+   The two prior prelaunch/capacity refusals are not blanket provider unavailability
+   and do not authorize replaying either original run.
+3. Publish/read back the existing Sol account plugin's account-neutral guidance;
+   retain each account's own app identity. Verify fresh loading and each account's
+   actual request/START/result path separately when that surface is available.
+4. Production timer/CI-Wake consumer activation remains in #1893 with original
+   call5913 and the prior protected-read denial. Do not replay that denied action.
+   Project-editor/fresh-account ceremony remains in #917; no alternate Browser or
+   account replay. External CI/review/API acquisition as durable V6 gates is not
+   implemented or advertised; finite workers and the existing CI-Wake join are the
+   qualified source paths for those signals.
+
+## Historical task tree and execution evidence
 
 | ID | Dependencies | Outcome / acceptance | Current label |
 |---|---|---|---|

@@ -1,4 +1,4 @@
-"""Offline finite-watch proof: no network, service, model, spawn or write effect."""
+"""Finite-watch proof with inert sources and exact disposable subprocesses."""
 from __future__ import annotations
 
 import datetime as dt
@@ -6,6 +6,9 @@ import importlib
 import json
 import os
 import signal
+import subprocess
+import sys
+from types import SimpleNamespace
 import time
 from pathlib import Path
 
@@ -142,9 +145,12 @@ class FakeGitHub:
             record.setdefault("id", run_id)
             record.setdefault("head_sha", HEAD)
             record.setdefault("head_repository", {"full_name": self.repository})
+            record.setdefault("repository", {"full_name": self.repository})
+            record.setdefault("run_attempt", 1)
             return record
         head = self.pr_heads[0] if len(self.pr_heads) == 1 else self.pr_heads.pop(0)
         return {
+            "number": 2066,
             "base": {"repo": {"full_name": self.repository}},
             "head": {"sha": head, "body": "ghp_SECRETLEAKEDTOKEN"},
         }
@@ -157,6 +163,8 @@ def run_record(run_id, status="completed", conclusion="success", **overrides):
         "conclusion": conclusion,
         "head_sha": HEAD,
         "head_repository": {"full_name": REPOSITORY},
+        "repository": {"full_name": REPOSITORY},
+        "run_attempt": 1,
     }
     record.update(overrides)
     return record
@@ -239,7 +247,7 @@ def test_monotonic_deadline_ends_the_run_before_the_next_sample():
     wall = Wall()
     result = fw.run_watch(
         request, clock=clock.monotonic, wall=wall, sleep=sleeper(clock, wall),
-        service_probe=lambda service: "READY", handle_signals=False)
+        service_probe=lambda service, timeout: "READY", handle_signals=False)
     assert result["outcome"] == "TIMEOUT"
     assert result["signal"]["code"] == "DEADLINE_EXCEEDED"
     assert result["sample_count"] == 1
@@ -342,7 +350,7 @@ def test_unchanged_samples_produce_no_event_and_no_wake():
     calls = {"count": 0}
     nonce = {"value": 0}
 
-    def probe(service):
+    def probe(service, timeout):
         calls["count"] += 1
         nonce["value"] += 1
         return "READY"
@@ -368,7 +376,7 @@ def test_unchanged_samples_produce_no_event_and_no_wake():
 def test_explicit_expected_state_makes_the_transition_material():
     states = ["READY", "READY", "DEGRADED"]
 
-    def probe(service):
+    def probe(service, timeout):
         return states.pop(0) if len(states) > 1 else states[0]
 
     clock = Clock()
@@ -385,7 +393,7 @@ def test_explicit_expected_state_makes_the_transition_material():
 def test_service_health_baseline_is_the_first_observation():
     states = ["DEGRADED", "DEGRADED", "READY"]
 
-    def probe(service):
+    def probe(service, timeout):
         return states.pop(0)
 
     clock = Clock()
@@ -407,7 +415,7 @@ def test_service_health_baseline_is_the_first_observation():
 def test_service_denial_is_explicitly_unavailable_and_not_retried(health, code):
     calls = {"count": 0}
 
-    def probe(service):
+    def probe(service, timeout):
         calls["count"] += 1
         return health
 
@@ -478,7 +486,7 @@ def test_ci_run_for_another_head_is_stale():
 
 @pytest.mark.parametrize("mutate,code", [
     (lambda r: r.update({"id": 99}), "WORKFLOW_RUN_IDENTITY_MISMATCH"),
-    (lambda r: r.update({"head_repository": {"full_name": OTHER_REPOSITORY}}),
+    (lambda r: r.update({"repository": {"full_name": OTHER_REPOSITORY}}),
      "WORKFLOW_RUN_IDENTITY_MISMATCH"),
     (lambda r: r.update({"conclusion": None}), "WORKFLOW_RUN_CONCLUSION_INVALID"),
     (lambda r: r.update({"status": "teleported", "conclusion": None}),
@@ -676,7 +684,7 @@ def test_module_has_no_model_spawn_write_or_import_side_effect(monkeypatch):
     importlib.reload(fw)
     source = Path(fw.__file__).read_text()
     for token in ("shell=True", "--method POST", "os.system", "os.fork",
-                  "multiprocessing", "threading", "subprocess.Popen",
+                  "multiprocessing", "threading",
                   "urlopen", "requests.post"):
         assert token not in source
     argv = fw._gh_argv("repos/owner/repo/pulls/1")
@@ -685,15 +693,14 @@ def test_module_has_no_model_spawn_write_or_import_side_effect(monkeypatch):
     assert "POST" not in " ".join(argv)
 
 
+def _local_reader(monkeypatch, code):
+    # Exercise the real streaming/reap implementation with an inert local child.
+    # No network, credentials or provider process is involved.
+    monkeypatch.setattr(fw, "_gh_argv", lambda path: [sys.executable, "-I", "-S", "-c", code])
+
+
 def test_github_reader_never_returns_response_text(monkeypatch):
-    import subprocess
-
-    class Completed:
-        returncode = 1
-        stdout = b'{"message":"ghp_SECRETLEAKEDTOKEN"}'
-        stderr = b"ghp_SECRETLEAKEDTOKEN"
-
-    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Completed())
+    _local_reader(monkeypatch, "import sys;print('ghp_SECRETLEAKEDTOKEN');sys.exit(1)")
     with pytest.raises(fw.SourceUnavailable) as caught:
         fw._gh_get_json("repos/owner/repo/pulls/1", 1.0)
     assert "ghp_" not in json.dumps(caught.value.signal_payload)
@@ -701,20 +708,246 @@ def test_github_reader_never_returns_response_text(monkeypatch):
 
 
 def test_failed_github_read_never_leaks_stderr_into_the_result(monkeypatch):
-    import subprocess
-
-    class Completed:
-        returncode = 128
-        stdout = b""
-        stderr = b"error: token ghp_SECRETLEAKEDTOKEN"
-
-    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Completed())
+    _local_reader(monkeypatch, "import sys;print('ghp_SECRETLEAKEDTOKEN',file=sys.stderr);sys.exit(128)")
     result = run_ci(ci_request(), FakeGitHub(), gh_get=None)
     assert result["outcome"] == "SOURCE_UNAVAILABLE"
     assert result["signal"]["code"] == "GH_API_FAILED"
     assert result["signal"]["exit_code"] == 128
     assert "ghp_" not in json.dumps(result)
-    assert "ghp_" not in json.dumps(result["signal"])
+
+
+def test_absolute_deadline_is_shared_by_all_ci_reads_and_late_success_is_discarded():
+    clock, wall = Clock(), Wall()
+    github = ci_github()
+    timeouts = []
+
+    def read(path, timeout):
+        timeouts.append(timeout)
+        clock.now += 0.75
+        return github(path, timeout)
+
+    request = ci_request(limits={"timeout_seconds": 2, "interval_seconds": 15, "max_samples": 1})
+    result = run_ci(request, github, clock=clock.monotonic, wall=wall, gh_get=read)
+    assert result["outcome"] == "TIMEOUT" and result["event"] is None
+    assert timeouts == [2.0, 1.25, 0.5]
+    assert len(github.calls) == 3  # No fourth read gets a freshly reset timeout.
+
+
+@pytest.mark.parametrize("after_read", [1, 4])
+def test_cancellation_between_or_after_reads_wins_over_event(after_read):
+    github = ci_github()
+    state = {"pulse": False}
+
+    def read(path, timeout):
+        result = github(path, timeout)
+        if len(github.calls) == after_read:
+            state["pulse"] = True
+        return result
+
+    def cancel():
+        result = state["pulse"]
+        state["pulse"] = False
+        return result
+
+    result = run_ci(ci_request(), github, gh_get=read, cancel=cancel)
+    assert result["outcome"] == "CANCELLED" and result["event"] is None
+    assert len(github.calls) == after_read
+
+
+def test_one_shot_cancellation_during_wait_is_latched():
+    clock, wall = Clock(), Wall()
+    state = {"pulse": False}
+
+    def sleep(seconds):
+        clock.sleep(seconds); wall.advance(seconds)
+        state["pulse"] = True
+
+    def cancel():
+        result = state["pulse"]; state["pulse"] = False
+        return result
+
+    result = fw.run_watch(timer_request(), clock=clock.monotonic, wall=wall,
+        sleep=sleep, cancel=cancel, handle_signals=False)
+    assert result["outcome"] == "CANCELLED" and result["sample_count"] == 1
+
+
+def test_timer_preflight_restores_sigterm_handler():
+    previous = signal.getsignal(signal.SIGTERM)
+    result = fw.run_watch(timer_request(due_in=3600), wall=Wall())
+    assert result["signal"]["code"] == "DEADLINE_OUTSIDE_BUDGET"
+    assert signal.getsignal(signal.SIGTERM) is previous
+
+
+@pytest.mark.parametrize("raw", [b'{"id":1,"id":2}', b'{"x":NaN}', b'{"x":1e999}',
+    b'[' * 34 + b'0' + b']' * 34, b'"\xff"'])
+def test_external_json_is_strict_and_depth_bounded(raw):
+    with pytest.raises(fw.SourceUnavailable, match="GH_RESPONSE_INVALID"):
+        fw._bounded_json(raw)
+
+
+@pytest.mark.parametrize("kind", ["overflow", "timeout"])
+def test_streaming_reader_bounds_output_and_reaps_its_exact_child(monkeypatch, kind):
+    code = ("import os,time;os.write(1,b'x'*300000);time.sleep(10)" if kind == "overflow"
+            else "import time;time.sleep(10)")
+    _local_reader(monkeypatch, code)
+    actual = subprocess.Popen
+    created = []
+
+    def tracked(*args, **kwargs):
+        process = actual(*args, **kwargs); created.append(process)
+        return process
+
+    monkeypatch.setattr(fw.subprocess, "Popen", tracked)
+    started = time.monotonic()
+    with pytest.raises(fw.SourceUnavailable) as caught:
+        fw._gh_get_json("repos/owner/repo/pulls/1", 0.15 if kind == "timeout" else 2.0)
+    assert caught.value.signal_payload["code"] == (
+        "GH_RESPONSE_TOO_LARGE" if kind == "overflow" else "GH_API_TIMEOUT")
+    assert len(created) == 1 and created[0].poll() is not None
+    assert time.monotonic() - started < 3.0
+
+
+def test_fork_head_is_valid_and_run_attempt_is_retained():
+    github = ci_github({"head_repository": {"full_name": "contributor/fork"}, "run_attempt": 2})
+    result = run_ci(ci_request(), github)
+    assert result["event"] == "CI_TERMINAL"
+    assert result["signal"]["runs"][0]["run_attempt"] == 2
+
+
+@pytest.mark.parametrize("value", [None, True, 1.5, 0])
+def test_workflow_attempt_requires_exact_positive_integer(value):
+    github = ci_github({"run_attempt": value})
+    assert run_ci(ci_request(), github)["signal"]["code"] == "WORKFLOW_RUN_ATTEMPT_INVALID"
+
+
+def test_boolean_workflow_id_never_matches_integer_one():
+    github = FakeGitHub(); github.runs = {1: run_record(True)}
+    result = run_ci(ci_request(workflow_run_ids=[1]), github)
+    assert result["signal"]["code"] == "WORKFLOW_RUN_IDENTITY_MISMATCH"
+
+
+@pytest.mark.parametrize("mutate,code", [
+    (lambda v: v.pop("number"), "PULL_REQUEST_IDENTITY_MISMATCH"),
+    (lambda v: v.update(number=2067), "PULL_REQUEST_IDENTITY_MISMATCH"),
+    (lambda v: v.pop("base"), "PULL_REQUEST_REPOSITORY_MISMATCH"),
+])
+def test_pull_request_identity_is_positive_not_optional(mutate, code):
+    github = ci_github()
+
+    def read(path, timeout):
+        value = github(path, timeout)
+        if "/pulls/" in path:
+            mutate(value)
+        return value
+
+    assert run_ci(ci_request(), github, gh_get=read)["signal"]["code"] == code
+    assert len(github.calls) == 1
+
+
+def test_owner_review_baseline_detects_dismissal_of_same_id():
+    github = FakeGitHub(); github.review_pages = {1: [review_record(100, "DISMISSED")]}
+    baseline = [{"id": 100, "state": "APPROVED", "commit": HEAD, "login": "reviewer-a"}]
+    result = run_ci(review_request(review_baseline=baseline), github)
+    assert result["event"] == "REVIEW_CHANGED" and result["sample_count"] == 1
+    assert result["signal"]["reviews"][0]["id"] == 100
+    assert result["signal"]["reviews"][0]["state"] == "DISMISSED"
+
+
+def test_first_sample_baseline_detects_later_same_id_dismissal():
+    clock, wall = Clock(), Wall()
+    github = FakeGitHub(); github.review_pages = {1: [review_record(100, "APPROVED")]}
+
+    def sleep(seconds):
+        clock.sleep(seconds); wall.advance(seconds)
+        github.review_pages = {1: [review_record(100, "DISMISSED")]}
+
+    result = run_ci(review_request(), github, clock=clock.monotonic, wall=wall, sleep=sleep)
+    assert result["event"] == "REVIEW_CHANGED" and result["sample_count"] == 2
+
+
+def test_conflicting_duplicate_review_ids_are_not_synthesized():
+    github = FakeGitHub()
+    github.review_pages = {1: [review_record(101, "APPROVED"), review_record(101, "DISMISSED")]}
+    result = run_ci(review_request(), github)
+    assert result["signal"]["code"] == "REVIEW_ID_CONFLICT" and result["event"] is None
+
+
+@pytest.mark.parametrize("login", [None, "", "x" * 101, "\ud800"])
+def test_review_identity_login_is_bounded(login):
+    github = FakeGitHub(); github.review_pages = {1: [review_record(101, login=login)]}
+    result = run_ci(review_request(), github)
+    assert result["signal"]["code"] == "REVIEW_RECORD_INVALID"
+
+
+def _ping():
+    return {"timestamp": "2026-11-05T00:00:00Z", "generation": "generation-1",
+        "pingId": "ping-1", "gatewayVersion": "1.0.0", "monotonicMs": 100,
+        "monotonicDurationMs": 0.1, "sessionId": None}
+
+
+@pytest.mark.parametrize("result,state", [({}, "UNAVAILABLE"),
+    ({"content": []}, "UNAVAILABLE"), ({"structuredContent": {}}, "UNAVAILABLE"),
+    ({"isError": True, "content": [{"type": "text", "text": "permission denied"}]}, "DENIED"),
+    ({"structuredContent": {"status": "DENIED"}}, "DENIED"),
+    ({"structuredContent": {"status": "AUTH_REQUIRED"}}, "AUTH_REQUIRED"),
+    ({"isError": True, "content": [{"type": "text", "text": "upstream unavailable"}]}, "UNAVAILABLE"),
+])
+def test_health_needs_affirmative_source_evidence(result, state):
+    assert fw._service_evidence_health("studio-read", result) == state
+
+
+def test_health_accepts_exact_ping_and_document_search_shapes():
+    ping = _ping()
+    result = {"structuredContent": ping, "content": [{"type": "text", "text": json.dumps(ping)}]}
+    assert fw._service_evidence_health("studio-read", result) == "READY"
+    result["structuredContent"] = dict(ping, pingId="contradictory")
+    assert fw._service_evidence_health("studio-read", result) == "UNAVAILABLE"
+    hits = {"hits": [{"url": "https://developers.openai.com/plugins/concepts/skills",
+                      "hierarchy": {"lvl0": "Documentation", "lvl1": "Skills"}}]}
+    assert fw._service_evidence_health("openai-docs", {"content": [
+        {"type": "text", "text": json.dumps(hits)}]}) == "READY"
+
+
+@pytest.mark.parametrize("error,state", [
+    ({"code": -32000, "message": "Permission denied"}, "DENIED"),
+    ({"code": -32000, "message": "Authentication required"}, "AUTH_REQUIRED"),
+])
+def test_default_probe_protocol_denial_is_terminal_without_another_sample(monkeypatch, error, state):
+    calls = []
+
+    class Probe:
+        def __init__(self, service, **kwargs):
+            calls.append((service, kwargs))
+
+        def observe(self):
+            raise fw.observe.ProbeResponseError(error)
+
+    monkeypatch.setattr(fw.observe, "ReadOnlyMcpProbe", Probe)
+    result = run_ci(health_request(), FakeGitHub())
+    assert result["signal"]["code"] == "SERVICE_" + state
+    assert len(calls) == 1 and result["sample_count"] == 1
+
+
+def test_mcp_body_stream_uses_one_deadline_and_rechecks_each_chunk():
+    clock = Clock()
+    timeouts = []
+
+    class Response:
+        headers = {}
+        length = None
+        fp = SimpleNamespace(raw=SimpleNamespace(_sock=SimpleNamespace(settimeout=timeouts.append)))
+
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read1(self, maximum):
+            clock.now += 0.4
+            return b" "
+
+    probe = fw.observe.ReadOnlyMcpProbe("studio-read", deadline=1001.0, clock=clock.monotonic)
+    probe.opener = SimpleNamespace(open=lambda *args, **kwargs: Response())
+    with pytest.raises(TimeoutError, match="DEADLINE"):
+        probe.call("tools/list", {}, 2)
+    assert timeouts == pytest.approx([1.0, 0.6, 0.2])
 
 
 # ----------------------------------------------------------------- cli ----

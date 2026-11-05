@@ -1556,6 +1556,7 @@ class ServiceConfig:
     effort: str = "xhigh"
     cost_class: str = "standard"
     coo_autonomy_armed: bool = False
+    coo_observations_armed: bool = False
     # Persistent reviewed host mode: only the actual live assigning request
     # can drive fresh cycles. Open roots never become background work in it.
     coo_foreground_only: bool = False
@@ -1631,6 +1632,10 @@ class ServiceConfig:
                 raise ValueError(f"invalid {field_name}")
         if not isinstance(self.coo_autonomy_armed, bool):
             raise ValueError("coo_autonomy_armed must be boolean")
+        if type(self.coo_observations_armed) is not bool:
+            raise ValueError("coo_observations_armed must be boolean")
+        if self.coo_observations_armed and not self.coo_autonomy_armed:
+            raise ValueError("observations require armed COO autonomy")
         if type(self.coo_foreground_only) is not bool:
             raise ValueError("coo_foreground_only must be boolean")
         if self.coo_foreground_only and (not self.coo_autonomy_armed
@@ -2256,8 +2261,19 @@ class ExecutiveControlService:
         ) = None,
         attended_worker_registration: Callable[[Runtime], Any] | None = None,
         paid_worker_binding_source=None,
+        observation_host=None,
     ) -> None:
         self.config = config
+        from control_plane.coo_observation import TimerObservationHost
+        if observation_host is not None and not config.coo_observations_armed:
+            raise ValueError("observation host requires an armed service composition")
+        if observation_host is not None and any(not callable(getattr(observation_host, name, None))
+                for name in ("require_scope", "require_current")):
+            raise ValueError("observation host requires trusted owner methods")
+        binding = hashlib.sha256(json.dumps({"runtime_root": str(config.runtime_root),
+            "socket_path": str(config.socket_path)}, sort_keys=True).encode()).hexdigest()
+        self._observation_host = ((observation_host or TimerObservationHost("executive-timer:" + binding))
+                                  if config.coo_observations_armed else None)
         if attended_worker_registration is not None and not callable(attended_worker_registration):
             raise ValueError('attended registration requires fixed host composition')
         self._attended_worker_registration = attended_worker_registration
@@ -8277,6 +8293,7 @@ class ExecutiveControlService:
                 # The executor thread may begin after its originating request closes.
                 self._require_foreground_only_source(root_id)
                 return CooCycle(self._require_runtime(), dispatcher=dispatch,
+                    observation_host=(self._observation_host if self.config.coo_observations_armed else None),
                     planner_plan_schema_version=getattr(
                         self.operator_supervisor, "fresh_planner_schema_version", None),
                     before_admission=(require_cycle_admission
@@ -8315,7 +8332,27 @@ class ExecutiveControlService:
         if self.config.coo_foreground_only:
             return None
         runtime = self._require_runtime()
+        last = self._coo_last_outcome
+        # A positive timer wait yields scheduling priority for one bounded
+        # pass. It grants no admission: every candidate below is qualified
+        # afresh. Reusing the existing previous-root cursor also prevents
+        # three parked roots from alternating forever around later work.
+        yield_after = previous_root_id if (
+            previous_root_id is not None
+            and isinstance(last, dict)
+            and last.get("root_job_id") == previous_root_id
+            and last.get("action") == "NO_ACTION"
+            and isinstance(last.get("receipt"), dict)
+            and last["receipt"].get("reason") in {
+                "observation_pending", "observation_unsatisfied",
+            }
+        ) else None
         with runtime.store.read() as connection:
+            if yield_after is not None and connection.execute(
+                "SELECT 1 FROM jobs WHERE root_job_id=? AND status IN ('RUNNING','CHECKPOINTED') LIMIT 1",
+                (yield_after,),
+            ).fetchone() is not None:
+                yield_after = None
             rows = connection.execute(
                 """
                 SELECT job_id FROM jobs
@@ -8330,7 +8367,12 @@ class ExecutiveControlService:
         if len(rows) > _COO_ROOT_SCAN_LIMIT:
             raise ServiceError("bounded COO root scan limit was exceeded")
         first_reconciling_root: str | None = None
+        first_deferred_ready_root: str | None = None
+        passed_yield_root = yield_after is None
         for row in rows:
+            is_yield_root = str(row["job_id"]) == yield_after
+            if is_yield_root:
+                passed_yield_root = True
             root = runtime.jobs.get_job(str(row["job_id"]))
             if root is None:
                 continue
@@ -8382,6 +8424,10 @@ class ExecutiveControlService:
                     first_reconciling_root = root.job_id
                 continue
             if first_reconciling_root is None:
+                if not passed_yield_root or is_yield_root:
+                    if first_deferred_ready_root is None:
+                        first_deferred_ready_root = root.job_id
+                    continue
                 return root.job_id
             # Alternate a bounded opportunity with A's original reconciliation.
             # B can continue after creating its planner child; an idle status
@@ -8390,7 +8436,7 @@ class ExecutiveControlService:
                 return first_reconciling_root
             if prestart_ready or has_existing_child:
                 return root.job_id
-        return first_reconciling_root
+        return first_reconciling_root or first_deferred_ready_root
 
     def _live_bound_coo_root_id(self) -> str | None:
         """Return the one bound COO root owning every live service finisher."""

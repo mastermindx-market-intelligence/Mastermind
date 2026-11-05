@@ -33,6 +33,7 @@ from control_plane.executive_runtime import (
     Job,
     JobStatus,
     OrchestrationDispatchOutcome,
+    ObservationUnavailable,
     Runtime,
     StateConflict,
     WorkerStatus,
@@ -80,6 +81,24 @@ class CooCycleOutcome:
         ).encode("utf-8")
         value["outcome_digest"] = hashlib.sha256(encoded).hexdigest()
         return value
+
+
+@dataclasses.dataclass(frozen=True)
+class _ReviewCapacityPressure:
+    """One proven pre-claim miss; never a second dispatch or durable queue."""
+
+    outcome: CooCycleOutcome
+    target_step_ids: frozenset[str]
+
+    def allows_observation_step(self, step: Mapping[str, Any]) -> bool:
+        return (
+            step.get("observation_gate") is not None
+            and step.get("requested_authorities") == ["READ"]
+            and not step.get("allowed_write_paths")
+            and not step.get("validation_ids")
+            and step.get("step_id") not in self.target_step_ids
+            and self.target_step_ids.isdisjoint(step.get("prerequisite_step_ids", []))
+        )
 
 
 def _job_sort_key(job: Job, ordinals: Mapping[str, int]) -> tuple[int, int, int, str]:
@@ -160,8 +179,10 @@ class CooCycle:
 
     def __init__(self, runtime: Runtime, *, dispatcher: Dispatch | None = None,
                  before_admission: Callable[[str], None] | None = None,
-                 planner_plan_schema_version: str | None = None) -> None:
+                 planner_plan_schema_version: str | None = None,
+                 observation_host=None) -> None:
         self.runtime = runtime
+        self._observation_host = observation_host
         # Validate this preference only if the cycle reaches fresh creation.
         # Existing planner recovery must not consult a new producer default.
         self._planner_plan_schema_version = planner_plan_schema_version
@@ -377,7 +398,7 @@ class CooCycle:
         """Prove same-plan READ review overlap without widening active work."""
         if not active or not targets or plan_body is None or plan_body.get("schema_version") not in {
             "mastermind.execution_plan/v3", "mastermind.execution_plan/v4",
-            "mastermind.execution_plan/v5",
+            "mastermind.execution_plan/v5", "mastermind.execution_plan/v6",
         }:
             return False
         scope = self.runtime.jobs.get_job(root_id)
@@ -428,7 +449,7 @@ class CooCycle:
         ordinals: Mapping[str, int],
         plan_body: Mapping[str, Any] | None,
         policy_sha: str,
-    ) -> CooCycleOutcome | _ReviewDrainReconcileActive | None:
+    ) -> CooCycleOutcome | _ReviewDrainReconcileActive | _ReviewCapacityPressure | None:
         """Prefer existing repair/current review demand without a new queue.
 
         Incumbent and uncertain settlement remains with the existing cycle.
@@ -480,7 +501,7 @@ class CooCycle:
         unavailable = [selected.job_id]
         if not repairs and plan_body is not None and plan_body.get("schema_version") in {
             "mastermind.execution_plan/v3", "mastermind.execution_plan/v4",
-            "mastermind.execution_plan/v5",
+            "mastermind.execution_plan/v5", "mastermind.execution_plan/v6",
         }:
             target = targets[str(selected.reviews_job_id)]
             for candidate in queued:
@@ -502,11 +523,16 @@ class CooCycle:
             # The caller skips materialization before step 7's exact replay.
             return _RECONCILE_ACTIVE_REVIEW
         # Do not retry the unavailable review in the ordinary queued loop.
-        return self._outcome(root_id, "NO_ACTION", None, None, {
+        pressure = self._outcome(root_id, "NO_ACTION", None, None, {
             "reason": "exact_dispatch_unavailable",
             "unavailable_job_ids": unavailable,
             "policy_sha": policy_sha,
         })
+        if (not repairs and plan_body is not None
+                and plan_body.get("schema_version") == "mastermind.execution_plan/v6"):
+            return _ReviewCapacityPressure(pressure,
+                frozenset({str(targets[str(selected.reviews_job_id)].plan_step_id)}))
+        return pressure
 
     def _dispatch_queued(
         self, root_id: str, selected: Job
@@ -1430,6 +1456,7 @@ class CooCycle:
 
         # Drain current quality obligations before fresh discretionary work.
         review_pressure_reconciliation = False
+        review_capacity_pressure = None
         if admission is not None:
             review_outcome = self._drain_current_reviews(
                 root_id, children, current_by_step, ordinals, plan_body,
@@ -1437,16 +1464,58 @@ class CooCycle:
             )
             if review_outcome is _RECONCILE_ACTIVE_REVIEW:
                 review_pressure_reconciliation = True
+            elif isinstance(review_outcome, _ReviewCapacityPressure):
+                review_capacity_pressure = review_outcome
             elif review_outcome is not None:
                 return review_outcome
+
+        # Timers use the same tick/store, never a sleeping worker. Pending
+        # observations do not suppress ready siblings. Uncertain dispatch and
+        # quality obligations above retain their original priority.
+        observation_states: dict[str, dict[str, Any]] = {}
+        if (not review_pressure_reconciliation and admission is not None
+                and plan_body is not None
+                and plan_body["schema_version"] == "mastermind.execution_plan/v6"):
+            active_observation_peers = [job for job in children
+                if job.status in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}]
+            observation_frontier_open = all(
+                self._is_read_only_frontier_work(job)
+                and job.plan_attempt_id == admission["plan_attempt_id"]
+                and job.plan_digest == admission["plan_digest"]
+                and current_by_step.get(str(job.plan_step_id), {}).get("current_job_id") == job.job_id
+                and self._active_attempt_is_current_and_live(job)
+                for job in active_observation_peers)
+            for step in plan_body["steps"]:
+                step_id = str(step["step_id"])
+                if step.get("observation_gate") is None or step_id in current_by_step:
+                    continue
+                if (review_capacity_pressure is not None
+                        and not review_capacity_pressure.allows_observation_step(step)):
+                    continue
+                if not observation_frontier_open:
+                    observation_states[step_id] = {"disposition": "PENDING",
+                        "reason": "incumbent_reconciliation"}
+                    continue
+                self._require_fresh_admission(root_id)
+                try:
+                    observed = self.runtime.jobs.advance_cycle_observation(
+                        root_id, step_id, observation_host=self._observation_host)
+                except StateConflict as exc:
+                    observation_states[step_id] = {"disposition": "UNAVAILABLE",
+                        "reason": "observation_binding_unavailable", "error_type": type(exc).__name__}
+                    continue
+                observation_states[step_id] = observed
+                if observed["created"]:
+                    return self._outcome(root_id, "OBSERVATION_RECORDED", root_id,
+                                         observed["command_id"], observed)
 
         # 4. Materialize one lowest-ordinal missing dependency-ready V3/V4 work Job.
         if (
             not review_pressure_reconciliation
             and admission is not None
             and plan_body is not None
-            and admission.get("schema_version") in {"mastermind.coo_plan_admission/v2", "mastermind.coo_plan_admission/v3"}
-            and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
+            and admission.get("schema_version") in {"mastermind.coo_plan_admission/v2", "mastermind.coo_plan_admission/v3", "mastermind.coo_plan_admission/v4"}
+            and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6"}
         ):
             materialized_steps = {
                 str(job.plan_step_id)
@@ -1457,9 +1526,12 @@ class CooCycle:
             for step in plan_body["steps"]:
                 step_id = str(step["step_id"])
                 if (
-                    not step["prerequisite_step_ids"]
+                    not (step["prerequisite_step_ids"] or step.get("observation_gate") is not None)
                     or step_id in materialized_steps
                 ):
+                    continue
+                if (review_capacity_pressure is not None
+                        and not review_capacity_pressure.allows_observation_step(step)):
                     continue
                 try:
                     manifest = (
@@ -1480,7 +1552,12 @@ class CooCycle:
                         step_id,
                         dependency_manifest=manifest,
                         command_id=command,
+                        observation_host=self._observation_host,
                     )
+                except ObservationUnavailable:
+                    observation_states[step_id] = {"disposition": "UNAVAILABLE",
+                        "reason": "observation_host_unavailable"}
+                    continue
                 except StateConflict as exc:
                     return self._block(
                         root_id, root_id, _classify_invalid(exc)
@@ -1488,6 +1565,11 @@ class CooCycle:
                 return self._outcome(
                     root_id, "WORK_CREATED", job.job_id, command, job
                 )
+
+        if review_capacity_pressure is not None:
+            # This tick already tried this exact review. Never retry it or
+            # fall through to a writer/handoff because its capacity is absent.
+            return review_capacity_pressure.outcome
 
         # 5. Create exactly the sole planner.
         if not children and not admission_events:
@@ -1535,7 +1617,7 @@ class CooCycle:
             active
             and queued
             and plan_body is not None
-            and plan_body["schema_version"] in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
+            and plan_body["schema_version"] in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6"}
             and self._ready_frontier_open(active, queued, current_by_step)
         ):
             for candidate in queued:
@@ -1594,7 +1676,7 @@ class CooCycle:
                 unavailable.append(candidate.job_id)
                 if not (
                     plan_body is not None
-                    and plan_body["schema_version"] in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
+                    and plan_body["schema_version"] in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6"}
                     and all(self._is_read_only_frontier_work(job) for job in queued)
                 ):
                     break
@@ -1620,7 +1702,11 @@ class CooCycle:
                 command = f"coo-cycle:{root_id}:admit-plan:{planner.current_attempt_id}"
                 self._require_fresh_admission(root_id)
                 try:
-                    members = self.runtime.jobs.admit_cycle_plan(root_id, command_id=command)
+                    members = self.runtime.jobs.admit_cycle_plan(root_id, command_id=command,
+                        observation_host=self._observation_host)
+                except ObservationUnavailable:
+                    return self._outcome(root_id, "NO_ACTION", planner.job_id, None,
+                        {"reason": "observation_host_unavailable"})
                 except StateConflict as exc:
                     return self._block(root_id, planner.job_id, _classify_invalid(exc))
                 return self._outcome(
@@ -1663,6 +1749,13 @@ class CooCycle:
                 }
             ]
             if not living:
+                waiting = {step: state for step, state in observation_states.items()
+                           if state["disposition"] != "MATERIAL"}
+                if waiting:
+                    return self._outcome(root_id, "NO_ACTION", None, None,
+                        {"reason": "observation_pending" if all(
+                            state["disposition"] == "PENDING" for state in waiting.values())
+                            else "observation_unsatisfied", "observations": waiting})
                 try:
                     with self.runtime.store.read() as connection:
                         root_row = connection.execute(

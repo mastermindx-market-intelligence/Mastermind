@@ -31,6 +31,7 @@ from control_plane.executive_orchestration_result import (
     PLAN_SCHEMA_V3,
     PLAN_SCHEMA_V4,
     PLAN_SCHEMA_V5,
+    PLAN_SCHEMA_V6,
 )
 from control_plane.executive_runtime import (
     AttemptLease,
@@ -44,7 +45,22 @@ from test_ceo_submit_armed_composition import _raw, _write
 from test_executive_operator_supervisor import _seed_dispatchable_operator_planner
 from test_planner_producer_binding import _VersionedAdapter
 
-EXPLICIT_VERSIONS = (PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5)
+EXPLICIT_VERSIONS = (PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5, PLAN_SCHEMA_V6)
+
+
+class _ObservationPlanAdapter(_VersionedAdapter):
+    """Extend the inert native producer with V6's explicit nullable gate."""
+
+    def _canonical_result(self, turn):
+        raw = super()._canonical_result(turn)
+        if self.returned_version != PLAN_SCHEMA_V6:
+            return raw
+        envelope = json.loads(raw)
+        for step in envelope["role_result"]["steps"]:
+            step["prerequisite_step_ids"] = []
+            step["placement"] = {"provider_realm": "codex", "quota_class": "codex-coo"}
+            step["observation_gate"] = None
+        return json.dumps(envelope, sort_keys=True, separators=(",", ":"))
 
 
 class _InertBrokerClient:
@@ -206,7 +222,7 @@ def test_explicit_native_v1_and_friends_stay_bound_through_a_declared_adapter(
 
     def factory(_attempt, _requested, loader, *, recovery):
         assert recovery is False
-        adapter = _VersionedAdapter(runtime, loader, version)
+        adapter = _ObservationPlanAdapter(runtime, loader, version)
         adapters.append(adapter)
         return adapter
 

@@ -59,9 +59,7 @@ answer. Compare the entire framing/delegation/build/review/repair/integration/
 consumption cycle, actual shared-pool scarcity, delay and useful parallel work.
 Quality and accepted-result cost outrank nominal token or agent-count savings.
 
-Load and apply ACTIVE_EXECUTION Step 2A for direct-work reasons and reassessment:
-`LOWER_TOTAL_OVERHEAD`, `PRINCIPAL_JUDGMENT`, `UNIQUE_APPROVED_ACCESS`,
-`CRITICAL_PATH_SHORTCUT`, `NO_ELIGIBLE_PRE_EFFECT_WORKER`. A pointer is not a read.
+Load and apply ACTIVE_EXECUTION Step 2A for its direct-work reasons and reassessment; a pointer is not a read.
 
 ### Optional layers, conserved root
 
@@ -123,11 +121,7 @@ under their own custody/placement: report actual manual pickup/START, not Execut
 dispatch. Missing Web tools prove no global outage and never permit denied-effect
 replay through another actor/carrier.
 
-Sol normally coordinates analysis, review and integration; Astra adds useful
-frontier judgment. Eligible bounded leaf work defaults to admitted paid Fabric,
-including GLM, Qwen/Bailian and Grok when suitable. Use serviceable Executive ingress
-or the accepted attended stable-handle adapter under its procedure. Native Codex
-children are not substitutes merely because spawn is available/familiar.
+Sol coordinates analysis/review/integration; Astra supplies frontier judgment. Eligible bounded leaves default to admitted paid Fabric, including GLM, Qwen/Bailian and Grok when suitable. Use serviceable Executive ingress or the accepted attended stable-handle adapter under its procedure. Native Codex children are not substitutes because spawn is available/familiar.
 
 A native child requires a genuinely needed reasoning/coordinator role; never
 explicitly select Sol for routine implementation, tests, research or repair labor.
@@ -153,13 +147,7 @@ proves only that path; paid START/result/parent consumption needs Fabric proof.
 
 ## 5. Remain productive after dispatch
 
-Apply ACTIVE_EXECUTION Step 2B for overlap, repair and consumption, and Steps 7A/8
-for continuation/finalization; no second stop machine or Executive/COO authority
-is introduced. Advance substantive independent work and consume useful returns
-promptly, without duplicating assignments to fill time. Preserve exact `EFFECT_UNKNOWN`
-operations/carriers and started modifiers. ACK/CONTINUE/repair/acceptance inside a
-mission does not make standalone polling/relay frontier reasoning. Neither principal
-stops for a plan or packet while useful authorized work remains.
+Apply ACTIVE_EXECUTION Step 2B for overlap/repair/consumption and Steps 7A/8 for continuation/finalization; no second stop machine or Executive/COO authority. Advance independent work, consume returns promptly and never duplicate assignments to fill time. Preserve exact `EFFECT_UNKNOWN` operations/carriers and started modifiers. In-mission ACK/CONTINUE/repair/acceptance does not make standalone polling/relay frontier reasoning. Neither principal stops at a plan/packet while useful authorized work remains.
 
 ## 6. Consume evidence, not worker transcripts
 
@@ -176,41 +164,3 @@ Separate requested profile, observed mode/model and tools. Profiles grant no min
 Sustained delivery continues safe units without per-milestone Continue. Bounded execution uses targeted proof and saves before risky/slow/high-output work, not invented deadlines. Concentrated judgment must be decision-ready, with primary evidence, alternatives, strongest counterargument, uncertainty/falsifiers and discriminating acceptance. A first outline is not completion; research-only scope is not delivery permission, nor finished research shipped product.
 
 ACTIVE_EXECUTION alone defines `CHECKPOINTED_CONTINUATION`. No checkpoint-as-stop or duration-as-quality. Existing fresh-session evaluation retains observed identity and distinguishes context, transport, quota, denial and voluntary stopping; source tests/labels prove no native adoption.
-
-## 9. Parallel fanout, bounded observation and independent consumption
-
-Apply the owners above; this section creates no new owner. READY means that the
-unit has known inputs, source custody, exclusive output paths and checkable
-acceptance. Dispatch independent ready siblings promptly under one conserved root
-and actual immediate parent, subject to real capacity, budget and result-consumption
-capacity. Review is reserved when actually required; Web has no blanket independent
-technical/source-review prerequisite. Freeze shared interfaces before dependents.
-
-Give each worker the complete permitted investigate/build/check/repair loop, a
-numbered repair ceiling, time and budget bounds, exact inputs and a retained return.
-Use a unique run-derived worktree on shared hosts. Packet ceilings express requested
-behavior unless the actual installed adapter enforces them. No event grants scope,
-retry, spend, publication, merge or release authority.
-
-Consume each ready return independently. Delivery, START, terminal return, consumed
-result and acceptance are different facts. Missing/oversized bytes require recovery
-of that original run or artifact, not duplicate execution. An ordinary finite leaf
-needs no invented STOP, heartbeat or disarm. Preserve original unknown effects and
-leases until the incumbent owner reconciles them.
-
-Use a qualified finite deterministic helper for economical short waits on timers,
-CI, review or allowlisted service evidence. It makes no model call per sample but
-still occupies its paid worker. Long waits belong to an admitted observation gate
-in the existing Executive Runtime/COO tick and dependency consumer when that exact
-source is installed and armed; no new daemon, scheduler, queue or state owner.
-Retained Wake obligations alone do not prove consumer START or a Web parent wake.
-Observation events require fresh source/authority checks before action; timeout,
-cancellation and unavailable-source outcomes are not material events or approval.
-
-The account-neutral orchestration skill and recipes live at
-`integrations/studio_direct_mcp/fabric_plugin_source/skills/orchestrate-fabric-workflows/`,
-beside the unchanged low-level `use-subagent-fabric/SKILL.md` contract. Shared source,
-each account's app release, fresh skill load, request/START/result/acceptance and
-real product proof require distinct receipts. Preserve each account's own enrolled
-app binding and grants; do not copy another account's connection identity. The
-bootstrap source route remains usable when the convenience skill is absent.

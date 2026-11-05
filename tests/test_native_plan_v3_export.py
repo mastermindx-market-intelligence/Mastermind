@@ -12,6 +12,7 @@ from control_plane.executive_orchestration_result import (
     PLAN_SCHEMA_V3,
     PLAN_SCHEMA_V4,
     PLAN_SCHEMA_V5,
+    PLAN_SCHEMA_V6,
     OrchestrationResultError,
     RESULT_SCHEMA,
     GOLDEN_ROLE_SCHEMA_DIGESTS,
@@ -116,7 +117,7 @@ def test_v3_explicit_placement_required_and_v4_auto_placement_allowed():
     assert not Draft7Validator(v3).is_valid(_envelope(PLAN_SCHEMA_V4))
 
 
-@pytest.mark.parametrize("value", [None, "", "executive-plan-v2", "executor-plan-v3", "executive-plan-v6", True])
+@pytest.mark.parametrize("value", [None, "", "executive-plan-v2", "executor-plan-v3", "executive-plan-v7", True])
 def test_unknown_native_contract_fails_closed(value):
     with pytest.raises((ValueError, OrchestrationResultError)):
         native_plan_schema(value)
@@ -156,7 +157,7 @@ def test_supervisor_export_matches_selected_native_producer(version):
 
 @pytest.mark.parametrize(
     "version",
-    [PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5],
+    [PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5, PLAN_SCHEMA_V6],
 )
 def test_supervisor_requires_claimed_adapter_factory_for_opt_in(tmp_path, version):
     # Any explicit native version, including V1, is an opt-in that must arrive
@@ -204,7 +205,7 @@ def test_supervisor_omitted_and_explicit_none_are_the_same_legacy_opt_out(tmp_pa
     assert explicit.fresh_planner_schema_version is None
 
 
-@pytest.mark.parametrize("version", [PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5])
+@pytest.mark.parametrize("version", [PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5, PLAN_SCHEMA_V6])
 def test_supervisor_explicit_native_version_is_preferred_for_fresh_planners(tmp_path, version):
     # Explicit opt-in survives the composition; omission never becomes native
     # merely because a claim-aware factory was supplied.
@@ -253,7 +254,7 @@ def test_trusted_control_composition_selects_v3_only_with_claimed_adapter(
 
 @pytest.mark.parametrize(
     "version",
-    [PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5],
+    [PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5, PLAN_SCHEMA_V6],
 )
 def test_trusted_control_refuses_unbound_versioned_producer_before_socket(
     monkeypatch, version

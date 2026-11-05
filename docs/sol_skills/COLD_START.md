@@ -73,21 +73,7 @@ truth to agree with a projection.
 
 ## Step 6 — Check active collision risk
 
-Check owning repo/adjacent portfolio for overlapping paths/authority, live sister work, changed law and superseded instructions. Parallel work requires disjoint authority and paths.
-
-### Prepare independent Fabric work after recovery
-
-For substantial Web orchestration, load same-pin `WEB_CEO_DELEGATION.md` and its
-`orchestrate-fabric-workflows` recipe. After existing children and effects are
-reconciled, promptly dispatch independent ready C0–C2 jobs through the available
-paid Fabric interface within actual grants, capacity and budgets. Preserve one
-original root and each immediate parent; give a tool-capable worker the whole
-bounded wait, fresh-read, authorized repair, test and retained-return outcome.
-Keep C3 judgment and integration with the principal. Consume each completed
-child without an all-sibling barrier. Reuse existing watcher/Executive owners;
-source recipes do not arm a service, survive a process restart or wake an idle
-Web chat. Reserve repair capacity and review capacity only when review is
-actually required. This adds no standing reviewer prerequisite.
+Check owning repo/adjacent portfolio for overlapping paths/authority, live sister work, changed law and superseded instructions. Parallel work requires disjoint authority and paths. For ready paid Fabric fanout, load same-pin `WEB_CEO_DELEGATION.md` and its workflow recipe.
 
 ## Step 7 — Recover any open reciprocal dialogue before creating new work
 

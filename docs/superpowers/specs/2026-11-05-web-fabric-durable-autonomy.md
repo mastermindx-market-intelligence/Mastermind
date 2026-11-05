@@ -1,6 +1,6 @@
 # Web Fabric autonomy through the existing execution owners
 
-Status: source implementation in progress; this document does not attest installation or production acceptance.
+Status: timer, finite observer and CI-Wake source implemented and qualified; installation, real-worker and all-account acceptance remain open.
 Governing source: Mastermind `b9e4c72c101d1f5a4ef6c86e51e8eb1fdc89cf8c`.
 Delivery carrier: [Mastermind #2066](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2066).
 Operation: `web-fabric-durable-autonomy-20261105-c3`.
@@ -51,7 +51,7 @@ Network sampling is deterministic and bounded; a sleeping process is not a model
 6. The principal reads the complete retained result, verifies proportionate evidence and records acceptance using the exact effective/accept run ID. It advances each useful return without waiting for unrelated siblings.
 7. If the foreground session ends, original operation and effect identities remain recoverable through existing source/Agent OS records and the original result path. A resume must reconcile them before creating another effect. No detached chat daemon is implied.
 
-An existing execution plan may sequence steps through accepted predecessor result manifests. At the current schema, a completed work result releases a dependency without a built-in conditional material-event predicate. A downstream worker must revalidate semantic disposition and, when no effect is warranted, return truthful no-action or inconclusive evidence using its admitted result schema. The existing supervisor and COO owner retain lifecycle blocking and failure decisions; do not invent a BLOCKED work-result envelope. Do not encode quiescent timeout as fabricated failure, or claim that generic dependencies suppress every non-material launch.
+An existing execution plan may sequence steps through accepted predecessor result manifests. In legacy plan schemas, a completed work result releases a dependency without a built-in conditional material-event predicate. Explicit V6 timer gates add the material-only observation predicate described below. A downstream worker must revalidate semantic disposition and, when no effect is warranted, return truthful no-action or inconclusive evidence using its admitted result schema. The existing supervisor and COO owner retain lifecycle blocking and failure decisions; do not invent a BLOCKED work-result envelope. Do not encode quiescent timeout as fabricated failure, or claim that generic dependencies suppress every non-material launch.
 
 Dependency manifests establish predecessor identity and readiness, not automatic transfer of the predecessor's report into a worker prompt. The current ordinary supervisor prompt does not project arbitrary predecessor result bytes. A whole bounded worker already holds its observed evidence. A separate sealed-input triage step must receive that evidence through its existing verified immutable commission/input owner; manifest presence alone is not proof of consumption.
 
@@ -204,3 +204,11 @@ expiry; missing READ/current-policy drift or missing/disarmed host; exact replay
 versus conflicting evidence; wrong-root/step/Attempt refusal; actual prompt bytes;
 unchanged legacy schemas and all existing capacity/review/release gates.
 These source proofs are not installed-service or unattended production acceptance.
+
+## Implemented scheduling and network qualification
+
+Missing observation-host composition after an in-time material record is temporary: retain the original event/reservation and resume the same work once the original host returns. A proven pre-claim review-capacity miss permits only disjoint READ-gate progress; uncertain/active review effects retain reconciliation priority. The existing service selector rotates after a positive timer-wait outcome using its current previous-root hint, requalifying all candidates and preserving live/unknown ownership. No new durable cursor or queue is added.
+
+The finite helper accepts optional `review_baseline` rows `{id,state,commit,login}` alongside `after_review_id`, so an owner can detect an existing approval dismissed before the first sample. IDs are exact positive integers; conflicting duplicates refuse. CI binds the workflow execution repository, permits a different fork head repository, and retains `run_attempt`. All sequential GitHub calls and fixed MCP body reads share an absolute deadline; late results are discarded and cancellation wins. Streamed GitHub overflow kills/reaps only the exact read child. Positive Studio ping and official documentation-search shapes are required for READY. Errors retain bounded classification and no response/credential text.
+
+The implementation plan records exact source-test receipts, the CI reading-budget correction and the still-open production/account gates.

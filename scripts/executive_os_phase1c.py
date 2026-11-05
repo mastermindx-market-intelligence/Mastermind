@@ -308,6 +308,7 @@ _CONFIG_OPTIONAL = frozenset(
         "effort",
         "cost_class",
         "coo_autonomy_armed",
+        "coo_observations_armed",
         "coo_foreground_only",
         "ceo_submit_armed",
         "coo_operator_harness_armed",
@@ -384,7 +385,7 @@ class FabricActivationRefused(ServiceError):
 def _native_capacity_staging_only(raw: Mapping[str, Any]) -> bool:
     """A source pin can be prepared only while every execution switch is off."""
     return all(raw.get(key, False) is False for key in (
-        "coo_autonomy_armed", "coo_operator_harness_armed", "coo_foreground_only",
+        "coo_autonomy_armed", "coo_observations_armed", "coo_operator_harness_armed", "coo_foreground_only",
         "ceo_submit_armed", "fabric_bridge_armed"))
 
 
@@ -1321,6 +1322,10 @@ def load_control_config(
         config["coo_autonomy_armed"], bool
     ):
         raise ServiceError("control config coo_autonomy_armed must be boolean")
+    if type(config.get("coo_observations_armed", False)) is not bool:
+        raise ServiceError("control config coo_observations_armed must be boolean")
+    if config.get("coo_observations_armed", False) and config.get("coo_autonomy_armed") is not True:
+        raise ServiceError("observations require armed COO autonomy")
     if type(config.get("coo_foreground_only", False)) is not bool:
         raise ServiceError("control config coo_foreground_only must be boolean")
     if config.get("coo_foreground_only", False) and (
@@ -1862,7 +1867,7 @@ def _service_from_config(
         raise ServiceError("event host requires existing armed App/native Company composition")
     # This is trusted host composition, never a JSON/model-selected factory.
     from control_plane.executive_orchestration_result import (
-        PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
+        PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5, PLAN_SCHEMA_V6,
     )
     # Legacy omission stays legacy: only an explicit version opts this Control
     # host into a native planner producer, and that needs an explicitly supplied
@@ -1871,7 +1876,7 @@ def _service_from_config(
     if plan_schema_version is not None and (
         type(plan_schema_version) is not str
         or plan_schema_version not in {
-            PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
+            PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5, PLAN_SCHEMA_V6,
         }
     ):
         raise ServiceError("trusted planner plan schema is unsupported")
@@ -2038,6 +2043,7 @@ def _service_from_config(
         privileged_readiness_armed=raw.get("privileged_readiness_armed", False),
         privileged_broker_socket_path=raw.get("privileged_broker_socket_path"),
         coo_autonomy_armed=raw.get("coo_autonomy_armed", False),
+        coo_observations_armed=raw.get("coo_observations_armed", False),
         coo_foreground_only=raw.get("coo_foreground_only", False),
         ceo_submit_armed=raw.get("ceo_submit_armed", False),
         coo_operator_harness_armed=raw.get(
