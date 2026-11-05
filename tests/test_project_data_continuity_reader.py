@@ -104,3 +104,30 @@ def test_identical_tree_on_unrelated_history_is_not_continuity(ready):
     old.git(f.env.seed,'commit','-m','Same selected tree but unrelated ancestry')
     old.git(f.env.seed,'push','--force','origin','HEAD:main')
     with pytest.raises(CanonicalDataUnavailable):f.observe()
+
+
+def test_partial_artifact_inventory_cannot_hide_an_omitted_member_change(ready):
+    f=ready;ws=f.env.seed/'agentos/workstreams/WS-DEMO.md'
+    extra=[]
+    for number in range(33):
+        path='research/selected-'+str(number)+('.txt' if number==32 else '.md');extra.append('- '+path)
+        (f.env.seed/path).write_text('Selected artifact '+str(number)+'\n')
+    ws.write_text(ws.read_text().replace('- research/notes.md','\n'.join(extra)))
+    commit(f)
+    # Configure C at the complete declared workstream, whose public reader has
+    # only a partial first32 inventory; N changes only the omitted33rd member.
+    base=old.rev_parse(f.env.seed,'HEAD');old.git(f.env.clone,'fetch','origin','main')
+    old.git(f.env.clone,'checkout','--detach',base)
+    f.publisher._canonical_data.code_commit=base
+    (f.env.seed/'research/selected-32.txt').write_text('Changed unproved omitted bytes.\n');commit(f)
+    with pytest.raises(CanonicalDataUnavailable):f.observe()
+
+
+@pytest.mark.parametrize('entry',['../../private.md','mastermind:research/foreign.md'])
+def test_invalid_or_unsupported_selected_reference_cannot_issue_continuity(ready,entry):
+    f=ready;ws=f.env.seed/'agentos/workstreams/WS-DEMO.md'
+    ws.write_text(ws.read_text().replace('research/notes.md',entry));commit(f)
+    base=old.rev_parse(f.env.seed,'HEAD');old.git(f.env.clone,'fetch','origin','main')
+    old.git(f.env.clone,'checkout','--detach',base);f.publisher._canonical_data.code_commit=base
+    unrelated(f)
+    with pytest.raises(CanonicalDataUnavailable):f.observe()

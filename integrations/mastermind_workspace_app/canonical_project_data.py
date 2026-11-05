@@ -139,9 +139,13 @@ class InstalledCanonicalProjectData:
         readers={'project_knowledge_catalogue':self.collector.read_project_knowledge_catalogue,
                  'project_knowledge_memory':self.collector.read_project_knowledge_memory,
                  'project_knowledge_source':self.collector.read_project_knowledge_source}
-        with self.collector.canonical_project_data_scope(view,work_ref=selection['work_ref']):
-            body=readers[operation](**selection)
-        witness=view.witness()
+        # One pure installed READ capture, inside this view's original budget.
+        # Nested collector/source checks retain live permissions while reusing
+        # immutable C/N facts; full default/config/Event fences bracket capture.
+        with view.capture_scope():
+            with self.collector.canonical_project_data_scope(view,work_ref=selection['work_ref']):
+                body=readers[operation](**selection)
+            witness=view.witness()
         generation=hashlib.sha256(json.dumps({'code':view.code_commit,'data':view.data_commit,
             'closure':witness['reader_closure_sha256'],'scope':view._operation.scope,
             'permission':view._operation.stamp,'event':witness['source_operation']},

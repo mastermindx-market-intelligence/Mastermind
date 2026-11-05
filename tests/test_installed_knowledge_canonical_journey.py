@@ -61,6 +61,26 @@ def test_signed_installed_publication_same_reader_and_second_edit(owner, identit
     from tests.test_executive_mcp_app_composition import Sink
     o=owner
     collector, git_owner = configured(o,identity,tmp_path,monkeypatch)
+    if os.environ.get('MM_KNOWLEDGE_FIRST_USE_TRACE'):
+        import time,traceback
+        from control_plane import project_canonical_data as traced
+        fail=traced._fail
+        def trace_fail():
+            traceback.print_stack(limit=12)
+            return fail()
+        monkeypatch.setattr(traced,'_fail',trace_fail)
+        actual_read=InstalledCanonicalProjectData.read_knowledge
+        def trace_read(self,*args,**kwargs):
+            start=time.monotonic()
+            try:
+                result=actual_read(self,*args,**kwargs)
+                print('ACTUAL_DATA_READ',kwargs.get('operation'),time.monotonic()-start,
+                    None if result is None else result[0].get('availability'),flush=True)
+                return result
+            except Exception:
+                print('ACTUAL_DATA_READ_FAILED',kwargs.get('operation'),time.monotonic()-start,flush=True)
+                traceback.print_exc();raise
+        monkeypatch.setattr(InstalledCanonicalProjectData,'read_knowledge',trace_read)
     async def run():
         auth, token = _authenticator(rsa_key), _workspace_token(rsa_key)
         who=await auth.verify_authorization_header('Bearer '+token,now=NOW)

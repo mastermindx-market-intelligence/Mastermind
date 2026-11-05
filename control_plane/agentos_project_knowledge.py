@@ -926,6 +926,10 @@ def capture_selected_project_data_closure(*, macro_root, code_root, code_commit,
             raise _CaptureFailure("SOURCE_UNAVAILABLE")
         index=_capture_index(macro_root,commit,work_ref,None,remaining,
             code_root=code_root,code_commit=code_commit,immutable_capture=_IMMUTABLE_CAPTURE)
+        if (index['file_coverage']['omitted'] or index['record_coverage']['omitted']
+                or index['record_coverage']['invalid']
+                or any(row['state'] not in ('READABLE','SOURCE_MISSING') for row in index['files'])):
+            raise _CaptureFailure("CONTENT_OVER_BUDGET")
         session=index['session']
         # All passes, including plan continuity, share this one original bound.
         session.deadline=stop
