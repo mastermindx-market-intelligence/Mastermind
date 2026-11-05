@@ -2581,10 +2581,11 @@ def _service_from_config(
                 if service._require_runtime() is not runtime:
                     raise ServiceError("project session source Runtime differs")
                 return ExistingManagedProjectSessionSource(service, creation_source_reader)
-            from integrations.mastermind_workspace_app.project_admission_permissions import project_admission_permissions
+            from integrations.mastermind_workspace_app.project_admission_permissions import project_admission_permissions,instruction_admission_permissions
             workspace_factories["workspace_read_provider_factory"] = workspace_provider_factory(
                 control_room=workspace_control_room, authorize=authorize,
                 project_admission_permissions=project_admission_permissions(policy=policy,load_bindings=workspace_acquisition_loader),
+                instruction_admission_permissions=instruction_admission_permissions(policy=policy,load_bindings=workspace_acquisition_loader),
                 authorize_discovery=authorize_discovery, authorize_actions=authorize_actions,
                 armed={**{key: raw.get(key) if type(raw.get(key)) is bool else None for key in ARM_KEYS}, "source": "control.json"},
                 runtime_identity={"root": None, "db_present": True, "identity": None},
@@ -2593,6 +2594,8 @@ def _service_from_config(
                 # exact Runtime supplied by its App request handler.
                 bounded_runtime=lambda runtime: service._namespace_custody.bound_runtime(runtime),
                 product_acceptance_basis_reader=packet_collector.product_acceptance_basis_reader(
+                    macro_root=Path(raw["ceo_ingress_app_macro_root"])),
+                project_instructions_reader=packet_collector.project_instructions_reader(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),
                 project_plan_reader=packet_collector.project_plan_reader(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),

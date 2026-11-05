@@ -5554,6 +5554,35 @@ class ExecutiveControlService:
                     writer, result, response_ceiling=action_wire.MAX_RESPONSE_BYTES,
                 )
                 return
+            from common import workspace_instruction_admission_contract as instruction_wire
+            if instruction_wire.is_frame(parsed):
+                if not app_peer:
+                    await self._send_ceo_ingress_error(writer,"peer_denied","Instruction controls require the installed App peer")
+                    return
+                try:instruction_request=instruction_wire.decode_frame(raw)
+                except (TypeError,ValueError):
+                    await self._send_ceo_ingress_response(writer,workspace_error("invalid_input",400),response_ceiling=instruction_wire.MAX_RESPONSE_BYTES)
+                    return
+                factory=app_binding.workspace_read_provider_factory
+                def instruction_host_ready():
+                    return (app_binding is self._ceo_ingress_app_binding
+                        and app_binding.workspace_read_provider_factory is factory and callable(factory)
+                        and not self._closing and self._ceo_ingress_ready
+                        and self._service_state in {"READY","AWAITING_CANARY"})
+                delegated=False
+                try:
+                    if not instruction_host_ready():result=instruction_wire.withheld(instruction_request,reason="OWNER_NOT_READY")
+                    else:
+                        from control_plane.workspace_read_service import WorkspaceReadService
+                        provider=factory(self._require_runtime())
+                        if type(provider) is not WorkspaceReadService or not instruction_host_ready():result=instruction_wire.withheld(instruction_request,reason="OWNER_NOT_READY")
+                        else:
+                            delegated=True
+                            result=await provider.handle_frame(instruction_request,action_host_ready=instruction_host_ready)
+                    result=instruction_wire.validate_envelope(result,instruction_request)
+                except Exception:result=instruction_wire.withheld(instruction_request,attempted=delegated)
+                await self._send_ceo_ingress_response(writer,result,response_ceiling=instruction_wire.MAX_RESPONSE_BYTES)
+                return
             from common import workspace_project_admission_wire as admission_wire
             if admission_wire.is_project_admission_frame(parsed):
                 if not app_peer:
@@ -5588,6 +5617,7 @@ class ExecutiveControlService:
                     result = admission_wire.withheld(admission_request, attempted=delegated)
                 await self._send_ceo_ingress_response(writer, result, response_ceiling=admission_wire.MAX_RESPONSE_BYTES)
                 return
+            from common import workspace_project_instructions_contract as instructions_wire
             from common import workspace_project_plan_contract as project_plan_wire
             from common import workspace_project_journal_contract as project_journal_wire
             from common import workspace_project_knowledge_read_contract as knowledge_wire
@@ -5599,12 +5629,18 @@ class ExecutiveControlService:
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
                     ACTIVITY_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA,
-                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA}:
+                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, instructions_wire.FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
                 operation = parsed.get("operation") if isinstance(parsed, dict) else None
-                if parsed.get("schema") in {project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA}:
+                if parsed.get("schema") == instructions_wire.FRAME_SCHEMA:
+                    ceiling = instructions_wire.MAX_RESPONSE_BYTES
+                    try: instructions_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") in {project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA}:
                     ceiling = project_archive_wire.MAX_RESPONSE_BYTES
                     try:
                         project_archive_wire.validate_read_frame(parsed)

@@ -612,6 +612,7 @@ _MACRO_BRIEF_FIXED_CONTENT = frozenset({
     "scripts/agentos_project_archive.py",
     "scripts/agentos_project_plan_contract.py",
     "scripts/project_knowledge_recipes.py",
+    "scripts/agentos_standing_instructions.py",
     "scripts/audit_stranded_work.py",
     "config/mastermind_programs.yml",
     "data/governance/active_builds.json",
@@ -2365,6 +2366,32 @@ class InstalledBootPacketCollector:
             acceptance_request=(work_ref, execution_commission_ref, root_objective),
         )
 
+    def project_instructions_reader(self, *, macro_root: Path):
+        """Issue content-only facade from this same qualified installed owner."""
+        from control_plane.agentos_project_instructions import AgentOsProjectInstructionsReader, _SOURCE_ROOT
+        root = Path(macro_root)
+        if (not root.is_absolute() or type(self) is not InstalledBootPacketCollector
+                or self._macro_root != root.resolve() or self._code_root != _SOURCE_ROOT.resolve()
+                or self._expected_source_sha is None or self._allow_synthetic_fixture):
+            raise ValueError("installed project instructions source is unavailable")
+        reader = AgentOsProjectInstructionsReader(macro_root=root)
+        reader._installed_context_owner = self
+        reader._installed_context_binding = reader._context_binding(self)
+        from control_plane.installed_project_read_binding import _issue_installed_project_read
+        reader._installed_reader_binding = _issue_installed_project_read(reader, owner=self, kind="project_instructions",
+            qualified_owner=lambda owner: type(owner) is InstalledBootPacketCollector)
+        return reader
+
+    def read_project_instructions(self, *, work_ref: str, timeout: float = 15.0):
+        from common.workspace_project_instructions_contract import validate_selection
+        import math
+        validate_selection({"work_ref": work_ref})
+        if (type(timeout) not in (int, float) or not math.isfinite(timeout)
+                or not 0 < timeout <= 15 or self._expected_source_sha is None):
+            raise ValueError("installed project instructions source is unavailable")
+        return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
+            project_instructions_request=work_ref)
+
     def project_plan_reader(self, *, macro_root: Path):
         """Issue a read facade bound to this exact installed source owner."""
         from control_plane.agentos_project_plan import AgentOsProjectPlanReader, _SOURCE_ROOT
@@ -2624,8 +2651,9 @@ class InstalledBootPacketCollector:
                         project_direction_request: str | None = None,
                         project_archive_request: tuple | None = None,
                         project_knowledge_recipe_request: tuple | None = None,
-                        project_knowledge_request: tuple | None = None) -> Any:
-        if sum(x is not None for x in (acceptance_request, project_plan_request, project_journal_request, project_creation_request, project_direction_request, project_archive_request, project_knowledge_recipe_request, project_knowledge_request)) > 1:
+                        project_knowledge_request: tuple | None = None,
+                        project_instructions_request: str | None = None) -> Any:
+        if sum(x is not None for x in (acceptance_request, project_plan_request, project_journal_request, project_creation_request, project_direction_request, project_archive_request, project_knowledge_recipe_request, project_knowledge_request, project_instructions_request)) > 1:
             raise ValueError("ambiguous installed source read")
         bound_data = _CANONICAL_PROJECT_DATA.get()
         data_view = None
@@ -2734,6 +2762,11 @@ class InstalledBootPacketCollector:
             if acceptance_request is not None:
                 argv.extend(["--workstream", acceptance_request[0][3:],
                              "--expected-macro-sha", expected_packet_macro_sha])
+            if project_instructions_request is not None:
+                argv = [os.fspath(self._python), "-I", "-B",
+                    os.fspath(self._code_root / "scripts" / "agentos_project_instructions_entry.py"),
+                    "--macro-root", os.fspath(packet_macro_root), "--expected-macro-sha", pre_macro_sha,
+                    "--work-ref", project_instructions_request, "--timeout", f"{inner_timeout:g}"]
             if project_plan_request is not None:
                 argv = [os.fspath(self._python), "-I", "-B",
                         os.fspath(self._code_root / "scripts" / "agentos_project_plan_entry.py"),
@@ -2791,6 +2824,8 @@ class InstalledBootPacketCollector:
                             65536 if project_direction_request is not None else
                             262144 if acceptance_request is not None or project_plan_request is not None or project_journal_request is not None
                             else ceo_boot_packet.DEFAULT_MAX_OUTPUT_BYTES)
+            if project_instructions_request is not None:
+                output_limit = 32768
             if project_creation_request is not None:
                 output_limit = 4096
             if project_knowledge_request is not None:
@@ -2892,6 +2927,22 @@ class InstalledBootPacketCollector:
                         raise ValueError("knowledge revision changed")
                 except (ValueError, TypeError, KeyError, RecursionError):
                     raise GatewayError("backend_unavailable", "installed project knowledge source unavailable") from None
+            elif project_instructions_request is not None:
+                from common.workspace_project_instructions_contract import validate_body
+                try:
+                    def unique_instruction_object(pairs):
+                        value = {}
+                        for key, item in pairs:
+                            if key in value:
+                                raise ValueError("invalid instruction read")
+                            value[key] = item
+                        return value
+                    packet = validate_body(json.loads(stdout, object_pairs_hook=unique_instruction_object),
+                        {"work_ref": project_instructions_request})
+                    if packet["availability"] == "AVAILABLE" and packet["source"]["commit"] != pre_macro_sha:
+                        raise ValueError("instruction source changed")
+                except (ValueError, TypeError, KeyError, RecursionError):
+                    raise GatewayError("backend_unavailable", "installed project instructions source unavailable") from None
             elif project_journal_request is not None:
                 from common.workspace_project_journal_contract import BODY_SCHEMA, validate_body
                 try:
@@ -3060,7 +3111,7 @@ class InstalledBootPacketCollector:
                 or post_macro_seal != pre_macro_seal
             ):
                 raise GatewayError("backend_unavailable", "installed source changed during boot-packet read")
-            if acceptance_request is None and project_plan_request is None and project_journal_request is None and project_creation_request is None and project_direction_request is None and project_archive_request is None and project_knowledge_recipe_request is None and project_knowledge_request is None:
+            if acceptance_request is None and project_plan_request is None and project_journal_request is None and project_creation_request is None and project_direction_request is None and project_archive_request is None and project_knowledge_recipe_request is None and project_knowledge_request is None and project_instructions_request is None:
                 packet = _project_macro_identity(
                     packet, materialized_root=packet_macro_root, canonical_root=self._macro_root,
                 )

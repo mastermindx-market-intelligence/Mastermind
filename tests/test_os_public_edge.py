@@ -50,6 +50,7 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/workspace/resources/capacity/current",
         "/workspace/project-direction/current",
         "/workspace/project-admission/current",
+        "/workspace/project-instructions/current",
         "/workspace/project-admission/operation",
         "/workspace/projects/archive/current",
         "/workspace/project-knowledge/current",
@@ -57,6 +58,8 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/workspace/project-source/current",
         "/workspace/source-operation/context",
         "/workspace/source-operation/operation",
+        "/workspace/instruction-admission/current",
+        "/workspace/instruction-admission/operation",
     }
     expected_post = {
         "/workspace/control-room/open",
@@ -65,6 +68,7 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/workspace/control-room/refresh-builds",
         "/workspace/project-admission/pause",
         "/workspace/project-admission/resume",
+        "/workspace/instruction-admission/pause",
     }
     assert set(GET_ROUTES) == set(INCUMBENT_GET_ROUTES) | expected_get
     assert set(POST_ROUTES) == set(INCUMBENT_POST_ROUTES) | expected_post
@@ -389,3 +393,11 @@ def test_admission_transition_keeps_exact_predecessor_and_no_partial_upgrade():
     assert (PRE_PROJECT_ADMISSION_GET_ROUTES,POST_ROUTES) not in TRANSITION_ROUTE_PROFILES
     assert '/workspace/project-admission/current' not in POST_ROUTES
     assert '/workspace/project-admission/pause' not in GET_ROUTES
+
+
+def test_instruction_read_profile_preserves_old_exact_profile_and_adds_only_get():
+    from ops.executive_os.os_public_edge import PRE_PROJECT_INSTRUCTIONS_GET_ROUTES,TRANSITION_ROUTE_PROFILES
+    assert GET_ROUTES==PRE_PROJECT_INSTRUCTIONS_GET_ROUTES+('/workspace/project-instructions/current',)
+    assert (PRE_PROJECT_INSTRUCTIONS_GET_ROUTES,POST_ROUTES) in TRANSITION_ROUTE_PROFILES
+    assert '/workspace/project-instructions/current' not in POST_ROUTES
+    assert not any('/workspace/project-instructions/pause' in routes for profile in TRANSITION_ROUTE_PROFILES for routes in profile)

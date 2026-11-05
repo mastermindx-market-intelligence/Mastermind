@@ -38,6 +38,10 @@ class CeoIngressWorkspaceClient:
         self.action_timeout_seconds = action_timeout_seconds
 
     async def request(self, frame):
+        from common import workspace_instruction_admission_contract as instruction_wire
+        if instruction_wire.is_frame(frame):
+            from integrations.mastermind_workspace_app.instruction_admission_client import request_instruction_admission
+            return await request_instruction_admission(self,frame)
         from common import workspace_project_admission_wire as project_admission_wire
         if project_admission_wire.is_project_admission_frame(frame):
             from integrations.mastermind_workspace_app.project_admission_client import request_project_admission
@@ -56,6 +60,7 @@ class CeoIngressWorkspaceClient:
         )
         from common import executive_workspace_fabric_contract as fabric_wire
         timeout = self.timeout_seconds
+        from common import workspace_project_instructions_contract as instructions_wire
         from common import workspace_project_plan_contract as plan_wire
         from common import workspace_project_journal_contract as journal_wire
         from common import workspace_project_knowledge_read_contract as knowledge_wire
@@ -76,6 +81,10 @@ class CeoIngressWorkspaceClient:
             frame = source_wire.validate_frame(frame)
             ceiling = source_wire.MAX_RESPONSE_BYTES
             timeout = self.timeout_seconds if frame["operation"] == "read" else self.action_timeout_seconds
+        elif isinstance(frame, dict) and frame.get("schema") == instructions_wire.FRAME_SCHEMA:
+            instructions_wire.validate_frame(frame)
+            ceiling = instructions_wire.MAX_RESPONSE_BYTES
+            timeout = self.acceptance_timeout_seconds
         elif isinstance(frame, dict) and frame.get("schema") == capacity_wire.FRAME_SCHEMA:
             capacity_wire.validate_frame(frame)
             ceiling = capacity_wire.MAX_RESPONSE_BYTES
