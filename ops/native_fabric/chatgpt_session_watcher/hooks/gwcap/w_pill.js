@@ -1,0 +1,1 @@
+(function(){var b=[...document.querySelectorAll('button[aria-label="Select ChatGPT model"]')].filter(x=>x.offsetWidth>0)[0];var c=[...document.querySelectorAll('[contenteditable=true]')].filter(x=>x.offsetWidth>0)[0];return document.title+' | '+location.pathname+' | pill='+(b?b.innerText.replace(/\n/g,' '):'NONE')+' | draft='+(c?c.innerText.length:'NOC');})()

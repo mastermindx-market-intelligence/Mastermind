@@ -25,10 +25,12 @@ Choose one stable child ID once. `fabric_request` requires:
 
 ```text
 run_id, root_id, parent_id
-task_class: mechanical | fix_build | review | census | audit
+task_class: mechanical | fix_build | review | census | audit | chatgpt_session_watch
 task_complexity: C0_MECHANICAL | C1_ROUTINE_BOUNDED | C2_COMPLEX_BOUNDED | C3_FRONTIER_JUDGMENT
 work_packet: objective, exact inputs, scope/non-goals, acceptance evidence, stop/return condition
 ```
+
+`chatgpt_session_watch` is the MiniMax ChatGPT web session watcher. It runs on m2studio, pins pool `minimax` and model `MiniMax-M2.7`, and stays in observe mode unless that host has `MMX_WATCHER_ALLOW_LIVE=1`. It does not merge, approve, label, enqueue, or mark a pull request Ready.
 
 Classify the child, not its parent's prestige. C3 requires `escalation_reason`. Let the existing router select a qualified economical provider/host; the tool does not accept host/model/account overrides. For review, use an actual author `subject_pool` when applicable, not a guessed provider. Include inputs in the packet or use verified worker-accessible references: Web `/mnt/data` and M2-only paths are not automatically available remotely. Keep packets within 16,000 characters and 32 KiB; avoid unnecessary disclosure or full-history dumps. Authorized work may legitimately involve keys or credentials; the request boundary does not scan, block or redact them.
 

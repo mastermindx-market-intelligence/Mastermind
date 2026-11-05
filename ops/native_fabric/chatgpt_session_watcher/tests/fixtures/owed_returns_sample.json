@@ -1,0 +1,52 @@
+{
+  "sample": [
+    {
+      "task": "portfolio-lrw6-v3-methods-20261024-v1",
+      "account": "Chris-Dot",
+      "window": 1925926595,
+      "tab": 5,
+      "project": "MastermindX",
+      "chat_id": "6adc0a65-d4d0-83e8-9616-918b81b1a1e6",
+      "title": "Write LR W6 Protocol",
+      "slack_channel": "C0CBC6AEAQZ",
+      "thread_ts": "1792799203.942879",
+      "ask_ts": "1792807653.835469",
+      "start_pt": "2026-10-23T19:21:56-07:00",
+      "finished_pt": "2026-10-23T19:25:37-07:00",
+      "artifact": "~/gwcap/lrw6_v3_revision_final.txt",
+      "artifact_sha256": "685bdda8d17ca785b8786003a77820814cd74caab513f493db1e6f82c82f1bb0",
+      "result_ts": "1792811337.203199",
+      "state": "consumed",
+      "note": "Return was 43 min late: no ledger existed, so 7:35 and 7:55 watcher passes never opened this chat."
+    },
+    {
+      "task": "RF-T01-rights-vintage-20261023",
+      "account": "Chris-Dot",
+      "window": 1925926595,
+      "tab": 5,
+      "project": "MastermindX",
+      "chat_id": "6adc47dc-60e8-83ea-b45e-025f0d76d1ea",
+      "title": "Research Yahoo Rights Vintage Feasibility",
+      "mode": "Extra High",
+      "slack_channel": "C0CBC6AEAQZ",
+      "thread_ts": "1792820700.533209",
+      "ask_ts": "1792820700.533209",
+      "pickup_ts": "1792821126.907679",
+      "start_pt": "2026-10-23T22:53:33-07:00",
+      "prompt_file": "~/gwcap/p_rf_t01_rights.txt",
+      "beneficiary": "Codex root 01a1333c-a475-7052-95a8-72a88eb8c17b (no supported return path; Slack thread only)",
+      "state": "consumed",
+      "finished_pt": "2026-10-23T23:20:00-07:00 (observed finished; turn time not read)",
+      "artifact": "~/gwcap/RF-T01-rights-vintage-20261023_final.txt",
+      "artifact_sha256": "e40374599a17a91af99fedd5020a9971a925d978594cd0cbf73c6a51f5d7d482",
+      "artifact_bytes": 1926,
+      "full_transcript": "~/gwcap/RF-T01-rights-vintage-20261023_full_transcript.txt",
+      "full_transcript_sha256": "9b98080feba5c66fee5dca75530142b74d5fc4862390a2bf34bddbebd38c6078",
+      "full_transcript_bytes": 25500,
+      "title_now": "Yahoo Rights Vintage Assessment",
+      "result_ts": "1792822700.737519",
+      "consumed_pt": "2026-10-23T23:18:20-07:00",
+      "result_file_id": "F0CBCT1NZE3"
+    }
+  ]
+}

@@ -979,3 +979,45 @@ test('parent attention: malformed or contradictory claims stay untrusted',()=>{
   assert.throws(()=>api.projectFabricParentRecovery(bad,id.root_id),/FABRIC_PARENT_RECOVERY_STATUS_INVALID/);
  }
 });
+
+test('chatgpt session watcher spawns the minimax observe worker and does not use the remote adapter', async () => {
+  const capEngine = engine([captured('usage: request status result accept')]);
+  const cap = unwrap(await api.createFabricFacade(capEngine, {adapterPath:'/host/fabric_task.py'}).call('fabric_capabilities', {}));
+  assert.equal(cap.registered_workers[0].kind, 'chatgpt_web_session_watcher');
+  assert.equal(cap.registered_workers[0].pool, 'minimax');
+  assert.equal(cap.registered_workers[0].model, 'MiniMax-M2.7');
+  assert.equal(cap.registered_workers[0].default_mode, 'observe');
+  assert.equal(capEngine.calls.length, 1);
+  const absentWatcher = JSON.stringify({
+    schema:'mastermind.fabric_task_status.v1', run_id:'web-fabric-001', root_id:null,
+    state:'NOT_FOUND', result_available:false, accepted:null,
+    worker_kind:'chatgpt_web_session_watcher',
+  });
+  const e = engine([captured(absentWatcher), pending(789)]);
+  const out = unwrap(await api.createFabricFacade(e, {
+    adapterPath:'/host/fabric_task.py', watcherStateDir:'/tmp/mmx-watcher-test',
+  }).call('fabric_request', {
+    ...packet, task_class:'chatgpt_session_watch', task_complexity:'C1_ROUTINE_BOUNDED',
+    work_packet:'OBJECTIVE: one observe cycle. No live sends.',
+  }));
+  assert.equal(out.controller_pid, 789);
+  assert.equal(out.worker_kind, 'chatgpt_web_session_watcher');
+  assert.equal(out.requested_pool, 'minimax');
+  assert.equal(out.requested_model, 'MiniMax-M2.7');
+  assert.equal(out.watcher_default_mode, 'observe');
+  assert.equal(out.worker_start_proven, false);
+  assert.equal(e.calls.length, 2);
+  assert.match(e.calls[0].arguments.command, /'status'/);
+  const spawn = e.calls[1].arguments.command;
+  assert.match(spawn, /chatgpt_session_watcher\/cli\.py/);
+  assert.match(spawn, /'spawn'/);
+  assert.match(spawn, /'--stdin'/);
+  assert.match(spawn, /one observe cycle/);
+  assert.doesNotMatch(spawn, /--quota-fallback/);
+  assert.doesNotMatch(spawn, /remote_sub/);
+  const refused = unwrap(await api.createFabricFacade(engine([]), {adapterPath:'/host/fabric_task.py'}).call('fabric_request', {
+    ...packet, task_class:'chatgpt_session_watch', pool:'grok', model:'grok-4.7',
+  }));
+  assert.equal(refused.error, 'INVALID_ARGUMENT');
+  assert.equal(refused.field, 'pool');
+});

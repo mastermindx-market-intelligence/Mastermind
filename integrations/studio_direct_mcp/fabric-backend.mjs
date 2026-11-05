@@ -6,6 +6,7 @@
  * Deploy behind the existing authenticated/privately enrolled Studio gateway.
  */
 import { createHash, randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -68,7 +69,12 @@ with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
  out.seek(offset); page=out.read(length)
  print(json.dumps({'exit_code':0,'response_bytes':count,'response_sha256':full.hexdigest(),'offset':offset,'page_bytes':len(page),'page_sha256':hashlib.sha256(page).hexdigest(),'page_base64':base64.b64encode(page).decode('ascii')},separators=(',',':')))
 `;
-const CLASSES = ['mechanical', 'fix_build', 'review', 'census', 'audit'];
+const CLASSES = ['mechanical', 'fix_build', 'review', 'census', 'audit', 'chatgpt_session_watch'];
+const WATCHER_REGISTRATION = Object.freeze(JSON.parse(readFileSync(new URL(
+  '../../ops/native_fabric/chatgpt_session_watcher/registration.json', import.meta.url), 'utf8')));
+const DEFAULT_WATCHER = resolve(fileURLToPath(new URL(
+  '../../ops/native_fabric/chatgpt_session_watcher/cli.py', import.meta.url)));
+const DEFAULT_WATCHER_STATE = resolve(homedir(), '.local/share/mastermind/chatgpt-session-watcher');
 // Fixed evidence-basis codes prevent acceptance metadata from becoming a
 // prompt or workflow-control channel. These labels do not prove the checks.
 const ACCEPT_VERIFICATION_CODES = Object.freeze([
@@ -333,8 +339,10 @@ export function projectFabricParentRecovery(s, expectedRoot) {
 }
 
 export function createFabricFacade(engine, options={}) {
-  const cfg={adapterPath:DEFAULT_ADAPTER,python:'python3',workerCwd:'~',quotaFallback:false,...options};
+  const cfg={adapterPath:DEFAULT_ADAPTER,python:'python3',workerCwd:'~',quotaFallback:false,
+    watcherPath:DEFAULT_WATCHER,watcherStateDir:DEFAULT_WATCHER_STATE,...options};
   if(!isAbsolute(cfg.adapterPath) || cfg.adapterPath.includes('\0') || typeof cfg.python!=='string' || !cfg.python || cfg.python.includes('\0') || typeof cfg.workerCwd!=='string' || !cfg.workerCwd || cfg.workerCwd.includes('\0')) throw new TypeError('invalid operator configuration');
+  if(!isAbsolute(cfg.watcherPath) || cfg.watcherPath.includes('\0') || !isAbsolute(cfg.watcherStateDir) || cfg.watcherStateDir.includes('\0')) throw new TypeError('invalid operator configuration');
   // This index only fences returned incumbent process handles. It has no run state,
   // admission, scheduling or retry authority and is never persisted or reconstructed.
   const controllers=new Map();
@@ -435,6 +443,36 @@ export function createFabricFacade(engine, options={}) {
       c+=` <<'${marker}'\n${packet}\n${marker}\n`;
     } else c+='\n';
     return `printf '%s\\n' 'MMX_FABRIC_BEGIN'\n${c}mmx_fabric_rc=$?\nprintf '\\nMMX_FABRIC_EXIT=%s\\n' "$mmx_fabric_rc"`;
+  }
+  function framed(body) {
+    return `printf '%s\\n' 'MMX_FABRIC_BEGIN'\n${body}\nmmx_fabric_rc=$?\nprintf '\\nMMX_FABRIC_EXIT=%s\\n' "$mmx_fabric_rc"`;
+  }
+  function externalCommand(program, argv, packet) {
+    if(!isAbsolute(program)) fail('WATCHER_UNAVAILABLE');
+    let body=[cfg.python, program, ...argv].map(shellQuote).join(' ');
+    if(packet!==undefined) {
+      let marker; do{marker='MMX_FABRIC_PACKET_'+randomBytes(12).toString('hex');}while(String(packet).split('\n').includes(marker));
+      body+=` <<'${marker}'\n${packet}\n${marker}`;
+    }
+    return framed(body);
+  }
+  function captureCommand(program, argv) {
+    if(!isAbsolute(program)) fail('WATCHER_UNAVAILABLE');
+    const body=[cfg.python,'-c',CAPTURE_PROGRAM,cfg.python,program,...argv].map(shellQuote).join(' ');
+    return framed(body);
+  }
+  async function runCapturedProgram(program, argv, timeoutMs=10000) {
+    const raw=await engine.callTool({name:'start_process',arguments:{command:captureCommand(program, argv),timeout_ms:timeoutMs}});
+    let text=engineText(raw), parsed=completedOutput(text); const pid=processPid(text);
+    if(pid) loseControllerBinding(pid);
+    if(!parsed && pid) {
+      const read=await engine.callTool({name:'read_process_output',arguments:{pid,timeout_ms:1000,offset:0,length:200}});
+      text=engineText(read); parsed=completedOutput(text);
+    }
+    if(!parsed || parsed.exit_code!==0) fail('WATCHER_UNAVAILABLE');
+    const decoded=decodeCapturedEnvelope(parsed.stdout,false);
+    if(!decoded || decoded.captureError || decoded.decodeError || decoded.exit_code!==0) fail('WATCHER_UNAVAILABLE');
+    return decoded.stdout;
   }
   async function runShort(argv, timeoutMs=10000, capture=false, page=null) {
     const raw=await engine.callTool({name:'start_process',arguments:{command:command(argv,undefined,capture,page),timeout_ms:timeoutMs}});
@@ -551,7 +589,8 @@ export function createFabricFacade(engine, options={}) {
             selection_preflight:'native_preview_no_reservation',strict_pin_required:true,cross_provider_fallback:false},
           controller_tracking:{max_unresolved:MAX_CONTROLLERS,max_generation_identities:MAX_ATTEMPT_IDENTITIES,scope:'backend_process_generation_only',restart_persistent:false},
           worker_admission:'UNPROBED',worker_start:'UNPROBED',backend:'existing Desktop Commander process owner',
-          tools:FABRIC_TOOLS.map(t=>t.name),caller_identity:'trusted enrolled channel; not individual ChatGPT identity',root_metadata_is_authentication:false});
+          tools:FABRIC_TOOLS.map(t=>t.name),caller_identity:'trusted enrolled channel; not individual ChatGPT identity',root_metadata_is_authentication:false,
+          registered_workers:[WATCHER_REGISTRATION]});
       }
       if(name==='fabric_controller_output') {
         const binding=controllers.get(args.controller_pid);
@@ -562,6 +601,36 @@ export function createFabricFacade(engine, options={}) {
       }
       if(name==='fabric_request') {
         reservation=await reserve(args);
+        if(args.task_class==='chatgpt_session_watch') {
+          if(args.pool && args.pool!=='minimax') fail('INVALID_ARGUMENT',{field:'pool'});
+          if(args.model && !['auto','MiniMax-M2.7','MiniMax-M2.7-highspeed'].includes(args.model)) fail('INVALID_ARGUMENT',{field:'model'});
+          const priorText=await runCapturedProgram(cfg.watcherPath,['status','--run-id',args.run_id,'--state-dir',cfg.watcherStateDir]);
+          let prior; try { prior=JSON.parse(priorText); } catch { fail('WATCHER_UNAVAILABLE'); }
+          if(!prior || typeof prior!=='object' || prior.state!=='NOT_FOUND')
+            fail(prior && prior.state==='EFFECT_UNKNOWN' ? 'EFFECT_UNKNOWN' : 'RUN_EXISTS');
+          const requestKey=reservation.run_id;
+          if(attempted.has(requestKey)) fail('REQUEST_ALREADY_ATTEMPTED');
+          if(attempted.size>=MAX_ATTEMPT_IDENTITIES) fail('GENERATION_TRACKING_CAPACITY');
+          attempted.add(requestKey);
+          reservation.dispatched=true;
+          reservation.workerKind='chatgpt_web_session_watcher';
+          effectStarted=true;
+          const argv=['spawn','--run-id',args.run_id,'--root',args.root_id,'--parent',args.parent_id,'--state-dir',cfg.watcherStateDir,'--stdin'];
+          const raw=await engine.callTool({name:'start_process',arguments:{command:externalCommand(cfg.watcherPath,argv,args.work_packet),timeout_ms:1000}});
+          const text=engineText(raw),pid=processPid(text);
+          if(!pid) fail('EFFECT_UNKNOWN');
+          if(controllers.has(pid)) { loseControllerBinding(pid); fail('CONTROLLER_PID_COLLISION'); }
+          reservation.pid=pid;
+          controllers.set(pid,reservation);
+          const settled=completedOutput(text);
+          const model=args.model && args.model.toLowerCase()!=='auto' ? args.model : 'MiniMax-M2.7';
+          return response({action:name,run_id:args.run_id,root_id:args.root_id,parent_id:args.parent_id,controller_pid:pid,
+            delivery:'CONTROLLER_CREATED',worker_started:null,worker_start_proven:false,
+            worker_kind:'chatgpt_web_session_watcher',requested_pool:'minimax',requested_model:model,strict_manual_pin:true,
+            watcher_default_mode:'observe',
+            adapter_exit_code:settled?.exit_code??null,execution_absence_proven:false,
+            next_observation:'Read this controller output. Live browser effects stay off unless m2studio has MMX_WATCHER_ALLOW_LIVE=1.'});
+        }
         const requestKey=reservation.run_id;
         let requestHelp=null;
         if(args.max_turns!==undefined) {
@@ -664,6 +733,22 @@ export function createFabricFacade(engine, options={}) {
             }:{})}:{}),
           adapter_exit_code:settled?.exit_code??null,execution_absence_proven:false,
           next_observation:'fabric_status with the same run and root; fabric_controller_output with this PID when needed'});
+      }
+      const watcherBinding=reservations.get(args.run_id);
+      if(watcherBinding?.workerKind==='chatgpt_web_session_watcher' && ['fabric_status','fabric_wait','fabric_result','fabric_result_page','fabric_accept'].includes(name)) {
+        if(watcherBinding.root_id!==args.root_id) fail('EFFECT_UNKNOWN');
+        if(name==='fabric_accept' || name==='fabric_result_page') fail('WATCHER_ACCEPT_UNSUPPORTED');
+        const sub=name==='fabric_result' ? 'result' : 'status';
+        const text=await runCapturedProgram(cfg.watcherPath,[sub,'--run-id',args.run_id,'--state-dir',cfg.watcherStateDir]);
+        let body; try { body=JSON.parse(text); } catch { fail('WATCHER_UNAVAILABLE'); }
+        if(name==='fabric_result') {
+          return response({action:name,run_id:args.run_id,effective_run_id:args.run_id,accept_run_id:args.run_id,root_id:args.root_id,
+            adapter_response:text,response_sha256:hash(Buffer.from(text)),response_bytes:Buffer.byteLength(text),
+            accepted:false,worker_kind:watcherBinding.workerKind,
+            digest_scope:'watcher cycle report; not a fabric adapter attestation'});
+        }
+        return response({action:name,run_id:args.run_id,effective_run_id:body.run_id||args.run_id,expected_root_id:args.root_id,status:body,
+          root_verified:body.root_id===args.root_id,execution_absence_proven:false,worker_kind:watcherBinding.workerKind});
       }
       const s=await status(args);
       if(name==='fabric_status') return response({action:name,run_id:args.run_id,effective_run_id:s.run_id,expected_root_id:args.root_id,status:s,parent_recovery:projectFabricParentRecovery(s,args.root_id),root_verified:s.root_id===args.root_id,execution_absence_proven:false});

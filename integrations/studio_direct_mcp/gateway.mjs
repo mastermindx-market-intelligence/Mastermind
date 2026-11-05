@@ -500,7 +500,7 @@ export function fabricRequestLogFields(name, args) {
     };
     if (typeof args.run_id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(args.run_id))
       fields.run_id = args.run_id;
-    if (['mechanical', 'fix_build', 'review', 'census', 'audit'].includes(args.task_class))
+    if (['mechanical', 'fix_build', 'review', 'census', 'audit', 'chatgpt_session_watch'].includes(args.task_class))
       fields.task_class = args.task_class;
     return fields;
   } catch {
