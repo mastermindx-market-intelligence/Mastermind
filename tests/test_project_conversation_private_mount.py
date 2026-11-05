@@ -3,11 +3,13 @@
 Uses the existing disposable service/provider fixture, never an installed host.
 """
 import asyncio
+import ast
 import dataclasses
 import hashlib
 import tempfile
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from control_plane.fresh_conversation import FreshConversationOwner
 from integrations.mastermind_executive_app.gateway import AppPolicies
@@ -15,7 +17,7 @@ from integrations.mastermind_executive_app.gateway import CeoIngressClient
 from integrations.mastermind_executive_app.project_conversation_transport import (
     ProjectConversationReadClient, ProjectConversationTransportApp,
 )
-from integrations.session_bridge.installed import build_runtime_project_conversation_reader
+from integrations.session_bridge.installed import build_runtime_project_conversation_reader, InstalledSessionBridgeClient
 from tests import test_mastermind_executive_app_asgi as auth
 from tests import test_mastermind_os_session_transport as session
 from tests.test_fresh_conversation_http import mounted, post, rsa_key
@@ -85,6 +87,30 @@ def test_signed_project_read_reaches_real_private_sources_and_rejects_revocation
     asyncio.run(run())
 
 
+def test_installed_factory_uses_its_actual_lexical_policy_namespace_and_native_owner(monkeypatch):
+    from integrations.session_bridge import installed
+    from ops.executive_os import a2_agent_relay_enrollment as enrollment
+    source = Path(__file__).parents[1] / 'scripts/executive_os_phase1c.py'
+    function = next(node for node in ast.walk(ast.parse(source.read_text()))
+                    if isinstance(node, ast.FunctionDef) and node.name == 'project_conversation_read_factory')
+    runtime, policies, result = object(), object(), object()
+    bound, received, owner_calls = [], [], []
+    def build(selected, **kwargs):
+        received.append((selected, kwargs))
+        return result
+    monkeypatch.setattr(installed, 'build_runtime_project_conversation_reader', build)
+    monkeypatch.setattr(enrollment, 'w3c_plist_configured', lambda **kwargs: owner_calls.append(kwargs) or True)
+    namespace = {'service': SimpleNamespace(_namespace_custody=SimpleNamespace(bound_runtime=bound.append)),
+        'session_read_policy_loader': lambda: policies, 'relay_readside_socket_path': Path('/no-live-reader.sock'),
+        'session_reference_cursor_key': b'k' * 32, 'config': SimpleNamespace(proof_base_sha='a' * 40)}
+    exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), 'exec'), namespace)
+    assert namespace['project_conversation_read_factory'](runtime) is result
+    assert bound == [runtime]
+    assert received[0][0] is runtime and received[0][1]['authorized_policies'] is policies
+    assert received[0][1]['codex_owner_configured']() is True
+    assert owner_calls == [{'release_sha': 'a' * 40}]
+
+
 def test_installed_v3_factory_registers_all_four_reads_with_incumbent_auth_owner(tmp_path, rsa_key, monkeypatch, settings):
     from integrations.executive_mcp import server as gateway
     from tests.test_executive_mcp_public_audience import FixedMdm, _assets
@@ -96,10 +122,11 @@ def test_installed_v3_factory_registers_all_four_reads_with_incumbent_auth_owner
             authenticator=config.authenticator, authorize_principal=config.authorize_principal,
             fresh_workspace_config=config)
         installed = dataclasses.replace(settings, clock=lambda: int(time.time()), read_from_ceo_ingress=True)
+        bridge = InstalledSessionBridgeClient(installed.ceo_ingress_socket_path)
         app = gateway.build_web_ceo_v3_mcp_app(installed, audit_sink=sink, mdm_reader=FixedMdm(),
-            session_target_projector=lambda *_: [], session_reply_handler=lambda *_: {},
-            session_summon_handler=lambda *_: {}, workspace_app=workspace, os_app=_assets(),
-            os_session_bridge_client=__import__("integrations.session_bridge.installed",fromlist=["InstalledSessionBridgeClient"]).InstalledSessionBridgeClient(installed.ceo_ingress_socket_path),
+            session_target_projector=bridge.targets, session_reply_handler=bridge.send,
+            session_summon_handler=bridge.summon, workspace_app=workspace, os_app=_assets(),
+            os_session_bridge_client=bridge,
             enable_os_executive_transport=True, os_executive_resource=installed.policies.submit.resource)
         try:
             assert type(app.project_conversation_transport) is ProjectConversationTransportApp

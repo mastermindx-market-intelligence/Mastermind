@@ -2,10 +2,12 @@ import { ExecutiveSessionCommandPort, type ExecutiveSessionTransport } from "../
 import type { OperationPointer } from "../orchestration/operation-controller";
 import { decodeSavedConversationPage, type SavedConversationReference, type SavedConversationSearchOwner } from "../discovery/saved-conversations";
 import { decodeProjectConversationHistoryContext, type ProjectConversationHistoryContext } from "./project-conversation-history-context";
+import type { ProjectConversationFixedReadTransport } from './project-conversation-transport';
 
 /** Additive private READ on the incumbent transport. Existing command port
  * source and its mutation/session interfaces remain byte-identical. */
 export type ProjectConversationHistoryTransport = ExecutiveSessionTransport & {
+  projectConversations?: ProjectConversationFixedReadTransport;
   historyContext?(selection: { workRef: string }, signal: AbortSignal): Promise<unknown>;
 };
 export interface ProjectConversationHistoryReaderSelection {

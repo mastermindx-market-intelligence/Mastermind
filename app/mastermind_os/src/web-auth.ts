@@ -10,6 +10,7 @@ import { validSourceOperationContextSelection } from './source-operations/contex
 import {createSourceOperationTransport,SOURCE_OPERATION_CAP} from './source-operations/transport';
 import { normalizeProjectAssociationSelection } from "./conversations/project-association";
 import { projectHistoryArguments } from "./orchestration/project-history-arguments";
+import {projectConversationArguments,PROJECT_CONVERSATION_READ_PATHS} from './conversations/project-conversation-transport';
 import { validResourceCapacitySelection } from "./resources/resource-capacity-read";
 import { isAutonomySelection, AUTONOMY_READ_BODY_SCHEMA } from "./supervision/autonomy-policy";
 import { validJournalSelection } from "./project-journal";
@@ -1120,7 +1121,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     });
   }
   async function executivePost(
-    route: "context" | "submit" | "status" | "session/context" | "session/history-context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction" | `project-planning/${PlanningOperation}` | `conversation/${FreshConversationOperation}`,
+    route: "context" | "submit" | "status" | "session/context" | "session/history-context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction" | `project-planning/${PlanningOperation}` | `conversation/${FreshConversationOperation}` | typeof PROJECT_CONVERSATION_READ_PATHS[keyof typeof PROJECT_CONVERSATION_READ_PATHS],
     arguments_: unknown,
     signal: AbortSignal,
   ) {
@@ -1231,6 +1232,11 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
      * token this reports unavailable and executivePost sends no request.
      */
     executiveSession: {
+      projectConversations: {request: (operation,arguments_,signal) => {
+        const closed=projectConversationArguments(operation,arguments_);
+        return closed ? executivePost(PROJECT_CONVERSATION_READ_PATHS[operation],closed,signal)
+          : Promise.reject(new Error('PROJECT_CONVERSATION_SELECTION_INVALID'));
+      }},
       authGeneration: () => executiveGeneration,
       available: () => configured && executiveResource !== null && valid("executive"),
       subscribe(listener) { executiveListeners.add(listener); return () => { executiveListeners.delete(listener); }; },

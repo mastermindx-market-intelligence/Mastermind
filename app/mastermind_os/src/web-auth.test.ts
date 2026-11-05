@@ -1,3 +1,5 @@
+import projectConversationLegacy from "./fixtures/project-conversation-catalogue-owner.json";
+import projectConversationFresh from "./fixtures/project-fresh-conversation-owner.json";
 // @vitest-environment jsdom
 // @vitest-environment-options {"url":"https://mcp.mastermind-x.com/os/"}
 import { planObservationFixture } from "./planning/plan-observation.fixture";
@@ -1944,6 +1946,25 @@ describe("project history fixed READ",()=>{
         ?"mastermind.executive.read":new URL(e.popup.location).searchParams.get("scope")}));
     await e.login();e.fetcher.mockClear();return e;
   }
+  it("sends four literal conversation READs with exact arguments and READ-only authority",async()=>{
+    const e=await readOnlyHistory(),signal=new AbortController().signal;
+    e.fetcher.mockImplementation(async()=>response({inertTransportResult:true}));
+    const transport=e.client.executiveSession!.projectConversations!;
+    const cases=[
+      ["catalogue","conversations",{work_ref:projectConversationLegacy.catalogue.work_ref}],
+      ["read","conversation-read",projectConversationLegacy.selection],
+      ["fresh_references","fresh-conversations",{work_ref:projectConversationFresh.catalogue.work_ref}],
+      ["fresh_read","fresh-conversation-read",projectConversationFresh.initial_read.reference],
+    ] as const;
+    for(const [operation,path,args] of cases){
+      await transport.request(operation,args,signal);
+      const [url,request]=e.fetcher.mock.calls.at(-1)!;
+      expect(url).toBe(ORIGIN+"/os/executive/session/"+path);
+      expect(JSON.parse(request!.body as string)).toEqual({arguments:args});
+      expect(new Headers(request!.headers).has("x-mastermind-workspace-authorization")).toBe(false);
+    }
+    expect(e.fetcher).toHaveBeenCalledTimes(4);
+  });
   it("sends only the direct work selection with READ-only Executive authority and never widens SEND",async()=>{
     const e=await readOnlyHistory(),signal=new AbortController().signal;
     e.fetcher.mockImplementation(async()=>response({ok:true}));

@@ -64,6 +64,7 @@ import { composeConversationsList, isListedCurrentConversation, isListedConversa
 import { captureConversationListOwner, conversationListOwnerCurrent, type ConversationListOwnerCapture } from "./conversations/conversation-list-owner";
 import { useConversationListNavigation } from "./conversations/useConversationListNavigation";
 import { useProjectConversationHistory } from "./conversations/useProjectConversationHistory";
+import { useProjectConversations } from "./conversations/useProjectConversations";
 import {
   OperationController,
   type OperationKind,
@@ -4176,7 +4177,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   historyReadState.current = {host: retainedResultHost, authRevision, workRef: projectWorkRef,
     owner: catalogueListOwner.current, index, programs: office.projection.programs,
     selectionEpoch: cataloguePresentationSequence.current};
-  const projectConversationHistory = useProjectConversationHistory({host: retainedResultHost,
+  const projectConversationReadScope = {host: retainedResultHost,
     workRef: projectWorkRef, authGeneration: authRevision, hostGeneration: retainedHostGeneration,
     selectionGeneration: JSON.stringify([programIndexEpoch, selectionSeq.current,
       cataloguePresentationSequence.current, office.projection.context.revisions.programs]),
@@ -4188,7 +4189,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         current.owner === catalogueListOwner.current && conversationListOwnerCurrent(current.owner, false) &&
         current.programs.source.state === "CURRENT" && current.index.state === "AVAILABLE" &&
         current.index.programs.filter(card => card.workRef === current.workRef).length === 1;
-    }, locale, theme});
+    }, locale, theme};
+  const projectConversationHistory = useProjectConversationHistory(projectConversationReadScope);
+  const projectConversations = useProjectConversations(projectConversationReadScope);
   const [knowledgeRefresh, setKnowledgeRefresh] = useState(0);
   const knowledgePorts = useMemo(() => {
     const host=retainedResultHost;
@@ -4678,6 +4681,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               {recordedDirection}{projectAdmissionPanel}
               {projectDetailsControls.instructions}{projectDetailsControls.access}
               <details className="reason-details"><summary>{locale === "zh-CN" ? "项目历史与来源证据" : "Project history and source evidence"}</summary>
+              {projectConversations.panel}
               {projectConversationHistory.panel}
                 {projectSessionEvidence}{recordedProjectJournal}
               </details>

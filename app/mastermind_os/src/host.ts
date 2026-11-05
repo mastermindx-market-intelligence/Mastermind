@@ -26,6 +26,7 @@ import { createNativeExecutiveTransport } from "./native-executive-transport";
 import type { MissionDiagnosticSnapshot } from "./diagnostic-state";
 import { createTerminalBriefsNavigationPort, type TerminalBriefsNavigationPort } from "./terminal/terminal-navigation";
 import type { ProjectConversationHistoryTransport, ProjectConversationHistoryReaderFactory } from "./conversations/project-conversation-history-owner";
+import type { ProjectConversationCatalogueReaderFactory } from './conversations/project-conversation-catalogue-factory';
 import type { ProjectPlanningTransport } from "./planning/project-planning-transport";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import {
@@ -234,12 +235,14 @@ export interface MissionHost extends Partial<HostObservationHostMethods>,Partial
   sessionCommandBinding?: unknown;
   /** Pushes the exact selection on every transition and registers the explicit condition provider. */
   session?: {
+    createProjectCatalogueReader?: ProjectConversationCatalogueReaderFactory;
     createProjectHistoryReader?: ProjectConversationHistoryReaderFactory;
     refresh(selection: unknown): Promise<void>;
     setStopCondition(provider: () => unknown): void;
   };
 }
 export interface SessionHostAttachment {
+  readonly createProjectCatalogueReader?: ProjectConversationCatalogueReaderFactory;
   readonly binding: unknown;
   readonly createProjectHistoryReader?: ProjectConversationHistoryReaderFactory;
   refresh(selection: unknown): Promise<void>;
@@ -963,6 +966,7 @@ export function bindMissionHost(
           sessionCommandBinding: session.binding,
           session: {
             ...(session.createProjectHistoryReader ? {createProjectHistoryReader: session.createProjectHistoryReader} : {}),
+            ...(session.createProjectCatalogueReader ? {createProjectCatalogueReader: session.createProjectCatalogueReader} : {}),
             refresh: (selection: unknown) => session.refresh(selection),
             setStopCondition: (provider: () => unknown) => session.setStopCondition(provider),
           },

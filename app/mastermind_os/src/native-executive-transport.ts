@@ -1,4 +1,5 @@
 import {freshConversationArguments} from "./orchestration/fresh-conversation-transport";
+import {projectConversationArguments} from './conversations/project-conversation-transport';
 import { projectHistoryArguments } from "./orchestration/project-history-arguments";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import { decodeSessionContext } from "./orchestration/executive-session-command-port";
@@ -93,7 +94,7 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
   function call(command: "executive_context" | "executive_submit" | "executive_status" |
     "executive_session_context" | "executive_session_reply" | "executive_session_references" |
     "executive_project_session_references" |
-    "executive_project_history_context" | "executive_fresh_conversation" |
+    "executive_project_history_context" | "executive_fresh_conversation" | "executive_project_conversations_read" |
     "executive_direct_native_result" | "executive_direct_native_consume" | "executive_direct_correction" | "executive_project_planning",
     signal: AbortSignal, args?: Record<string, unknown>): Promise<unknown> {
     const started = epoch, boundary = generationAbort.signal;
@@ -186,6 +187,11 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
   // if the backend reports an addressable target. The independent native
   // executive_submit F2 review remains held; this does not modify that route.
   const sessionTransport: ProjectConversationHistoryTransport = {
+    projectConversations: {request: (operation,arguments_,signal) => {
+      const closed=projectConversationArguments(operation,arguments_);
+      return closed ? call('executive_project_conversations_read',signal,{operation,arguments:closed})
+        : Promise.reject(new Error('PROJECT_CONVERSATION_SELECTION_INVALID'));
+    }},
     authGeneration: () => epoch, available: () => available,
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     historyContext: (selection, signal) => {
