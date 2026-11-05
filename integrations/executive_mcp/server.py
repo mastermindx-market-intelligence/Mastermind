@@ -649,7 +649,7 @@ class _ExecutivePathFence:
                 "/workspace/source-operation/context",
                 "/workspace/source-operation/operation",
                 "/workspace/autonomy/current",
-                "/workspace/operator/activity/current", "/workspace/resources/capacity/current",
+                "/workspace/operator/activity/current", "/workspace/resources/capacity/current", "/workspace/resources/host-observation/current",
             ))
             # v2 routes carry a query string; the legacy v1 mission route does too.
             self._query_routes.update((
@@ -670,7 +670,7 @@ class _ExecutivePathFence:
                 "/workspace/source-operation/context",
                 "/workspace/source-operation/operation",
                 "/workspace/autonomy/current",
-                "/workspace/operator/activity/current", "/workspace/resources/capacity/current",
+                "/workspace/operator/activity/current", "/workspace/resources/capacity/current", "/workspace/resources/host-observation/current",
             ))
             self._workspace_routes.update(_WORKSPACE_ADDITIONAL_GET_ROUTES)
             self._query_routes.update(_WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES)
@@ -1555,7 +1555,7 @@ def _build_profile_mcp_app(
                 "/workspace/source-operation/context",
                 "/workspace/source-operation/operation",
                 "/workspace/autonomy/current",
-                             "/workspace/operator/activity/current", "/workspace/resources/capacity/current")
+                             "/workspace/operator/activity/current", "/workspace/resources/capacity/current", "/workspace/resources/host-observation/current")
                              + _WORKSPACE_ADDITIONAL_GET_ROUTES)
         outer_routes.extend(
             Route(path, workspace_app, methods=["POST"])

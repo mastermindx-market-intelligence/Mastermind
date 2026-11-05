@@ -1,3 +1,4 @@
+import {hostObservationHostMethods,hostObservationPublicSelection,type HostObservationRawMethods,type HostObservationHostMethods} from "./resources/host-observation-host";
 import {freshConversationArguments, freshConversationNeedsWorkspace, type FreshConversationTransport} from "./orchestration/fresh-conversation-transport";
 import { createLazyTerminalSharingHost, type TerminalSharingSource } from "./terminal/terminal-sharing-host";
 import {projectAccessHostMethods,projectAccessPublicSelection,type ProjectAccessRawMethods,type ProjectAccessHostMethods} from "./access/project-access-host";
@@ -75,7 +76,7 @@ import {
   type ControlRoomOperation, type ControlRoomActionResult,
 } from "./control-room";
 
-export interface RawClient extends Partial<ProjectAdmissionRawMethods>,Partial<InstructionRawMethods>,Partial<ProjectAccessRawMethods> {
+export interface RawClient extends Partial<HostObservationRawMethods>,Partial<ProjectAdmissionRawMethods>,Partial<InstructionRawMethods>,Partial<ProjectAccessRawMethods> {
   /** Independent Terminal session; workspace grants never confer brief access. */
   readonly terminalSharing?: TerminalSharingSource;
   /** Public fixed navigation only; Terminal owns its user's authentication and access. */
@@ -168,7 +169,7 @@ export interface RawClient extends Partial<ProjectAdmissionRawMethods>,Partial<I
 export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
 }
-export interface MissionHost extends Partial<ProjectAdmissionHostMethods>,Partial<InstructionHostMethods>,Partial<ProjectAccessHostMethods> {
+export interface MissionHost extends Partial<HostObservationHostMethods>,Partial<ProjectAdmissionHostMethods>,Partial<InstructionHostMethods>,Partial<ProjectAccessHostMethods> {
   /** Independent Terminal session; workspace grants never confer brief access. */
   readonly terminalSharing?: TerminalSharingSource;
   readonly projectPlanning?: ProjectPlanningTransport;
@@ -452,6 +453,7 @@ export function bindMissionHost(
         return client.signOut();
       },
     },
+    ...hostObservationHostMethods(client,()=>epoch),
     ...projectAdmissionHostMethods(client,()=>epoch),
     ...instructionHostMethods(client,()=>epoch),
     ...projectAccessHostMethods(client,()=>epoch),
@@ -1075,6 +1077,7 @@ export async function createNativeClient(
       | "read_admitted_plan"
       | "read_retained_activity"
       | "read_resource_capacity"
+      | "read_host_observation"
       | "read_fabric_catalog"
       | "read_fabric_status"
       | "read_result"
@@ -1296,6 +1299,11 @@ export async function createNativeClient(
       if (!validPlanSelection({ work_ref, root_job_id }))
         return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
       return read("read_admitted_plan", signal, { selection: { work_ref, root_job_id } });
+    },
+    readHostObservation: request => {
+      const selection=hostObservationPublicSelection(request);
+      return selection ? read("read_host_observation",request.signal,{selection})
+        : Promise.reject(Error("HOST_OBSERVATION_REQUEST_INVALID"));
     },
     readResourceCapacity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
       const selection = { work_ref, root_job_id, job_id, attempt_id };

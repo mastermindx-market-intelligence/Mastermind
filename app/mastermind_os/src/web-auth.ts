@@ -1,3 +1,4 @@
+import {hostObservationWebMethods} from "./resources/host-observation-web";
 import {freshConversationArguments} from "./orchestration/fresh-conversation-transport";
 import type {FreshConversationOperation} from "./conversations/new-conversation/fresh-conversation";
 import {projectAccessPublicSelection} from "./access/project-access-host";
@@ -1183,6 +1184,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     }
   }
   return {
+    ...hostObservationWebMethods(read),
     research: {
       authGeneration: () => generation,
       available: () => configured && researchResource !== null && valid("research"),
