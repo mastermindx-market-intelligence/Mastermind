@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import importlib.util
+import json
 import os
 from pathlib import Path
 import re
@@ -21,6 +22,7 @@ MODULES = (
     "native_runtime_bindings", "commission_deadline", "provider_outcome",
     "quota_circuit", "model_tier", "pool_status", "lease_broker",
     "go_lease_capability", "go_lease_gateway", "paid_yaml_runtime", "go_application_handler",
+    "fabric_policy_snapshot",
 )
 IDENTITY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _LOADED_MODULES = {}
@@ -113,6 +115,7 @@ class Startup:
     yaml_archive: bytes
     yaml_provenance: bytes
     yaml_check: object
+    policy_snapshot: object
 
 
 def inspect(*, verified_root, verified_metadata):
@@ -186,7 +189,147 @@ def inspect(*, verified_root, verified_metadata):
                 or tuple(identity(path) for path in yaml_sources) != identities):
             raise ValueError("native Go held YAML owner changed")
     return Startup(handler, broker, paths, root.name, yaml_runtime,
-                   yaml_bytes[0], yaml_bytes[1], yaml_check)
+                   yaml_bytes[0], yaml_bytes[1], yaml_check, sys.modules["fabric_policy_snapshot"])
+
+
+SERVICE_SCHEMA = "mastermind.native_go_application_service.v1"
+SERVICE_ENROLLMENT_SCHEMA = "native-go-service-enrollment.v1"
+SERVICE_RECEIPT_SCHEMA = "native-go-service-enrollment-completed.v1"
+SERVICE_CREDENTIAL_REF = "MACRO_FABRIC_APPLICATION_TOKEN"
+SERVICE_SCOPE_FIELDS = frozenset({"principal_id", "caller_host", "native_host", "workload",
+    "credential_ref", "capability_lane", "workload_profile", "account_profile"})
+SERVICE_IDENTITY_FIELDS = frozenset({"dev", "ino", "uid", "gid", "mode", "nlink", "size",
+    "mtime_ns", "ctime_ns"})
+
+
+def application_enrollment_paths(startup):
+    """Fixed names in the original Go and finite installer owners."""
+    store = Path(__file__).absolute().parent.parent.parent
+    return {"binding": startup.paths["go"] / "application-service.json",
+            "intent": store / "bootstrap/.go-service-enrollment-v1.json",
+            "receipt": store / "bootstrap/go-service-enrollment-v1.json"}
+
+
+def application_service_owners(startup):
+    return {key: str(startup.paths[key]) for key in
+            ("go", "db_path", "lock_path", "accounts_path")}
+
+
+def application_file_identity(path):
+    value = Path(path).lstat()
+    return {"dev": value.st_dev, "ino": value.st_ino, "uid": value.st_uid,
+            "gid": value.st_gid, "mode": stat.S_IMODE(value.st_mode),
+            "nlink": value.st_nlink, "size": value.st_size,
+            "mtime_ns": value.st_mtime_ns, "ctime_ns": value.st_ctime_ns}
+
+
+def _service_json(raw):
+    try:
+        def unique(items):
+            result = {}
+            for key, value in items:
+                if key in result:
+                    raise ValueError("duplicate key")
+                result[key] = value
+            return result
+        def constant(_):
+            raise ValueError("nonfinite value")
+        if not 0 < len(raw) <= 65536:
+            raise ValueError("size")
+        value = json.loads(raw, object_pairs_hook=unique, parse_constant=constant)
+        json.dumps(value, allow_nan=False)
+        if type(value) is not dict:
+            raise ValueError("shape")
+        return value
+    except (TypeError, ValueError, OverflowError, RecursionError, UnicodeError):
+        raise ValueError("native application enrollment document refused") from None
+
+
+def _service_private(path):
+    before = application_file_identity(path)
+    raw = _regular(path, mode=0o600)
+    if application_file_identity(path) != before:
+        raise ValueError("native application enrollment identity changed")
+    return raw, before
+
+
+def validate_application_service_document(startup, document):
+    """Parse only stable authentication/profile projection; no grant lookup."""
+    fields = {"schema", "operation_id", "plan_digest", "source_generation", "ingress_digest",
+              "scope", "owners", "credential"}
+    if (type(document) is not dict or set(document) != fields
+            or document["schema"] != SERVICE_SCHEMA
+            or document["owners"] != application_service_owners(startup)):
+        raise ValueError("native application service projection refused")
+    for key in ("plan_digest", "source_generation", "ingress_digest"):
+        if type(document[key]) is not str or re.fullmatch(r"[0-9a-f]{64}", document[key]) is None:
+            raise ValueError("native application service commitment refused")
+    if type(document["operation_id"]) is not str or IDENTITY.fullmatch(document["operation_id"]) is None:
+        raise ValueError("native application service operation refused")
+    scope = document["scope"]
+    if type(scope) is not dict or set(scope) != SERVICE_SCOPE_FIELDS:
+        raise ValueError("native application service scope refused")
+    for key in ("principal_id", "caller_host", "native_host", "workload", "credential_ref"):
+        if type(scope[key]) is not str or IDENTITY.fullmatch(scope[key]) is None:
+            raise ValueError("native application service identity refused")
+    if (scope["capability_lane"] != "admin-orchestrator"
+            or scope["workload_profile"] != "site_interactive"
+            or scope["credential_ref"] != SERVICE_CREDENTIAL_REF
+            or type(scope["account_profile"]) is not str):
+        raise ValueError("native application service mapping refused")
+    profile = Path(scope["account_profile"])
+    if not profile.is_absolute() or ".." in profile.parts:
+        raise ValueError("native application service profile refused")
+    binding = startup.handler.ApplicationServiceBinding(scope["principal_id"], scope["caller_host"],
+        scope["workload"], scope["credential_ref"], document["credential"])
+    return (binding,), scope["native_host"], profile
+
+
+def load_completed_application_startup(startup):
+    """Actual-main-only reader of the original finite enrollment receipt.
+
+    The accounts hash is a publication receipt, not perpetual authentication
+    authority. Grant expiry or later accounts updates cannot erase recovery.
+    """
+    paths = application_enrollment_paths(startup)
+    present = {name: os.path.lexists(path) for name, path in paths.items()}
+    if not any(present.values()):
+        return (), None, None
+    if not all(present.values()):
+        raise ValueError("native application enrollment is incomplete")
+    for directory in (startup.paths["go"], paths["intent"].parent,
+                      paths["intent"].parent.parent):
+        _directory(directory)
+        if stat.S_IMODE(directory.lstat().st_mode) != 0o700:
+            raise ValueError("native application enrollment private owner refused")
+    raw, binding_identity = _service_private(paths["binding"])
+    intent_raw, intent_identity = _service_private(paths["intent"])
+    receipt_raw, receipt_identity = _service_private(paths["receipt"])
+    document, intent, receipt = map(_service_json, (raw, intent_raw, receipt_raw))
+    result = validate_application_service_document(startup, document)
+    intent_fields = {"schema", "operation_id", "plan_digest", "source_generation", "ingress_digest", "bundle"}
+    receipt_fields = {"schema", "operation_id", "plan_digest", "source_generation", "ingress_digest",
+                      "scope", "binding_sha256", "binding_identity", "accounts_sha256", "accounts_identity"}
+    if (set(intent) != intent_fields or intent["schema"] != SERVICE_ENROLLMENT_SCHEMA
+            or set(receipt) != receipt_fields or receipt["schema"] != SERVICE_RECEIPT_SCHEMA
+            or any(intent[key] != document[key] or receipt[key] != document[key]
+                   for key in ("operation_id", "plan_digest", "source_generation", "ingress_digest"))
+            or receipt["scope"] != document["scope"]
+            or receipt["binding_sha256"] != hashlib.sha256(raw).hexdigest()
+            or receipt["binding_identity"] != binding_identity
+            or type(intent["bundle"]) is not str or not Path(intent["bundle"]).is_absolute()
+            or ".." in Path(intent["bundle"]).parts
+            or type(receipt["accounts_sha256"]) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", receipt["accounts_sha256"]) is None
+            or type(receipt["accounts_identity"]) is not dict
+            or set(receipt["accounts_identity"]) != SERVICE_IDENTITY_FIELDS
+            or any(type(v) is not int or v < 0 for v in receipt["accounts_identity"].values())):
+        raise ValueError("native application enrollment receipt refused")
+    if (application_file_identity(paths["binding"]) != binding_identity
+            or application_file_identity(paths["intent"]) != intent_identity
+            or application_file_identity(paths["receipt"]) != receipt_identity):
+        raise ValueError("native application enrollment changed during startup")
+    return result
 
 
 def main(*, verified_root, verified_metadata, application_services=(), application_host=None,
@@ -197,6 +340,12 @@ def main(*, verified_root, verified_metadata, application_services=(), applicati
     state_override = os.environ.get("GO_STATE_DIR")
     if state_override and Path(state_override).absolute() != startup.paths["go"]:
         raise ValueError("native Go state override conflicts with original owner")
+    completed = load_completed_application_startup(startup)
+    if completed[0]:
+        if not application_services and application_host is None and application_account_path is None:
+            application_services, application_host, application_account_path = completed
+        elif (application_services, application_host, Path(application_account_path) if application_account_path is not None else None) != completed:
+            raise ValueError("native Go explicit startup conflicts with completed enrollment")
     if not application_services:
         if application_host is not None or application_account_path is not None:
             raise ValueError("native Go application startup incomplete")
