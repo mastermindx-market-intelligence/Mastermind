@@ -168,6 +168,14 @@ class ServiceRuntime:
                 "child_starts": self.child_starts,
                 "child_running": running,
                 "backend_ready": backend_ready,
+                # A verified pinned local HTTP health response is NOT a
+                # provider-authenticated text turn or a Slack role delivery.
+                # Until an authorized host attaches canonical proof, expose
+                # those capabilities explicitly as unverified at all times.
+                "provider_authenticated": False,
+                "native_model_turn_verified": False,
+                "network_egress_policy_verified": False,
+                "slack_roundtrip_verified": False,
                 "child_pid": self.child_pid,
                 "memory_high_water_kib": 0 if self.memory is None else self.memory.high_water,
                 "loopback": True,
@@ -227,6 +235,12 @@ class ServiceRuntime:
             if any(value in protected_values for value in model_keys.values()):
                 raise RuntimeRefusal("NATIVE_MODEL_KEY_REUSE_REFUSED")
             env.update(model_keys)
+            # The model child may reach external HTTPS only through an
+            # operator-enrolled role-private localhost CONNECT proxy. A
+            # missing or malformed proxy refuses startup before subprocess.
+            # Never copy an ambient shell HTTPS_PROXY to the child.
+            from .egress import native_egress_child_env
+            env.update(native_egress_child_env(self.profile.role, self.secrets.values))
         return env
 
     def _expected_disabled_mcp(self) -> dict[str, tuple[str, ...]] | None:

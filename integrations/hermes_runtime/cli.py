@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import signal
@@ -44,6 +45,10 @@ def main(argv: list[str] | None = None) -> int:
     supervise_p.add_argument("--state", type=Path)
     supervise_p.add_argument("--secrets-file", type=Path)
 
+    canary_p = sub.add_parser("canary", help="Operator-only native canary within installed systemd role cgroup")
+    canary_p.add_argument("--profile", type=Path, required=True)
+    canary_p.add_argument("--hermes-bin", type=Path, required=True)
+
     check_p = sub.add_parser("check-registry", help="Require allowlist == registered tools and empty stderr")
     check_p.add_argument("--profile", type=Path, required=True)
     check_p.add_argument("--tool-list", type=Path, required=True)
@@ -69,6 +74,8 @@ def main(argv: list[str] | None = None) -> int:
             payload = _check(args.profile, args.tool_list, args.stderr)
         elif args.command == "supervise":
             return _supervise(args)
+        elif args.command == "canary":
+            return _canary(args.profile, args.hermes_bin)
         else:
             raise RuntimeRefusal("COMMAND_INVALID")
     except RuntimeRefusal as exc:
@@ -94,6 +101,90 @@ def _check(profile_path: Path, tool_list: Path, stderr_path: Path) -> dict:
     if result["schema"] != REGISTRY_SCHEMA:
         raise RuntimeRefusal("REGISTRY_SCHEMA_MISMATCH")
     return result
+
+
+def _canary(profile_path: Path, hermes_bin: Path) -> int:
+    """Explicit operator trigger, executed only by systemd's ExecReload.
+
+    There is no background poll, shell-facing provider prompt, new account,
+    daemon, state store, automatic retry, Slack send or exposed HTTP path.
+    Source evidence cannot certify vendor authentication or TLS by itself.
+    """
+    from .constants import MANIFEST_SCHEMA, PINNED_UPSTREAM_SHA
+    from .install import assert_checkout_sha
+    from integrations.hermes_harness.native_turn_runner import (
+        assert_role_service_cgroup, run_native_canary,
+    )
+
+    profile = load_profile(profile_path)
+    state = profile.state_dir
+    expected_profile = state / "current" / "profile.yaml"
+    expected_bin = state / "current" / "bin" / "hermes"
+    if (not profile_path.is_absolute() or profile_path != expected_profile
+            or not hermes_bin.is_absolute() or hermes_bin != expected_bin
+            or profile.sha != PINNED_UPSTREAM_SHA):
+        raise RuntimeRefusal("CANARY_NOT_INSTALLED_ROLE")
+    # The local operator must route through the actual unit; no out-of-cgroup
+    # invocation may even read a provider credential.
+    assert_role_service_cgroup(profile.role)
+    current = state / "current"
+    manifest_path = state / "install-manifest.json"
+    receipt_path = current / "install-receipt.json"
+    native_config = profile.hermes_home / "profiles" / profile.role / "config.yaml"
+    if (not current.is_symlink() or manifest_path.is_symlink()
+            or receipt_path.is_symlink() or profile_path.is_symlink()
+            or native_config.is_symlink() or not native_config.is_file()
+            or not manifest_path.is_file() or not receipt_path.is_file()):
+        raise RuntimeRefusal("CANARY_INSTALL_NOT_ATTESTED")
+    try:
+        release = current.readlink()
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        saved_profile = profile_path.read_bytes()
+        saved_native = native_config.read_bytes()
+    except (OSError, ValueError, UnicodeError):
+        raise RuntimeRefusal("CANARY_INSTALL_NOT_ATTESTED") from None
+    if (not 0 < len(saved_profile) <= 64 * 1024
+            or not 0 < len(saved_native) <= 64 * 1024):
+        raise RuntimeRefusal("CANARY_INSTALL_NOT_ATTESTED")
+    if (release.parts[:1] != ("releases",) or len(release.parts) != 2
+            or not release.parts[1].isdigit()
+            or not isinstance(manifest, dict) or not isinstance(receipt, dict)
+            or manifest.get("schema") != MANIFEST_SCHEMA
+            or manifest.get("owns_state_dir") is not True
+            or manifest.get("current_release") != release.parts[1]
+            or manifest.get("state_dir") != str(state)
+            or manifest.get("service_name") != profile.service_name
+            or manifest.get("secrets_file") != str(profile.secrets_file)
+            or manifest.get("sha") != PINNED_UPSTREAM_SHA
+            or receipt.get("upstream_attested") is not True
+            or receipt.get("status") != "RELEASE_WRITTEN"
+            or receipt.get("role") != profile.role
+            or receipt.get("sha") != PINNED_UPSTREAM_SHA
+            or receipt.get("profile_sha256") != hashlib.sha256(saved_profile).hexdigest()
+            or receipt.get("hermes_config_sha256") != hashlib.sha256(saved_native).hexdigest()):
+        raise RuntimeRefusal("CANARY_INSTALL_NOT_ATTESTED")
+    assert_checkout_sha(current / "upstream")
+    secrets = load_secrets(profile.secrets_file)
+    runtime = ServiceRuntime(profile, secrets, hermes_bin)
+    source_env = runtime._model_child_env()
+    from integrations.hermes_models.contract import native_provider
+    spec = native_provider(profile.role, profile.native_provider_id)
+    # The normal serving child currently also receives dashboard identity.
+    # This one-shot text check needs only one model key and the approved
+    # proxy; never forward dashboard Basic Auth or Slack IDs to the canary.
+    canary_keys = {
+        "PATH", "HOME", "HERMES_HOME", "LANG", "HTTPS_PROXY", "NO_PROXY",
+        spec.credential_env,
+    }
+    model_env = {key: value for key, value in source_env.items() if key in canary_keys}
+    receipt = run_native_canary(
+        profile, hermes_bin=hermes_bin, model_child_env=model_env,
+    )
+    # Emit only a redacted bounded observation. A 0 return is not a remote
+    # provider-auth, network-policy or Slack delivery acceptance receipt.
+    print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
+    return 0 if receipt["status"] == "PASS_CHILD_OUTPUT_OBSERVATION_ONLY" else POLICY_EXIT
 
 
 def _supervise(args: argparse.Namespace) -> int:

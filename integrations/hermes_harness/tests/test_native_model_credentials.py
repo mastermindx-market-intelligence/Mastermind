@@ -38,6 +38,7 @@ class NativeCredentialTests(unittest.TestCase):
         choices = {
             "BYTEPLUS_MODELARK_API_KEY": (FAKE_BYTEPLUS,),
             "ZAI_API_KEY": (FAKE_ZAI,),
+            "HERMES_NATIVE_EGRESS_ROLE": ("mmsecretary", "mmmeta"),
             "HERMES_SLACK_BOT_TOKEN": (TOKEN, FAKE_BYTEPLUS, FAKE_ZAI,
                 "distinct-dashboard-only-fixture-123456", "slack-token-fake-not-live",
                 "synthetic-slack-bearer-123456"),
@@ -54,7 +55,7 @@ class NativeCredentialTests(unittest.TestCase):
             canonical.append(name + "=" + next(item for item in choices[name] if item == value) + "\n")
         return "".join(canonical)
 
-    def _runtime(self, role="mmsecretary", extras="", dashboard_case="distinct"):
+    def _runtime(self, role="mmsecretary", extras="", dashboard_case="distinct", include_proxy=True):
         if role not in {"mmsecretary", "mmmeta"}:
             raise ValueError("not a synthetic role")
         examples = {
@@ -64,7 +65,14 @@ class NativeCredentialTests(unittest.TestCase):
         }
         if dashboard_case not in examples:
             raise ValueError("not a synthetic dashboard scenario")
-        content = "HERMES_GATEWAY_TOKEN=" + TOKEN + "\n" + examples[dashboard_case] + self._fixture_extras(extras)
+        if type(include_proxy) is not bool:
+            raise ValueError("invalid synthetic proxy selection")
+        egress = (
+            f"HERMES_NATIVE_EGRESS_ROLE={role}\n"
+            f"HERMES_NATIVE_HTTPS_PROXY=http://{'127.0.0.2' if role == 'mmsecretary' else '127.0.0.3'}:{18651 if role == 'mmsecretary' else 18652}\n"
+            if include_proxy else ""
+        )
+        content = "HERMES_GATEWAY_TOKEN=" + TOKEN + "\n" + examples[dashboard_case] + egress + self._fixture_extras(extras)
         flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(self.secret, flags, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
@@ -106,6 +114,10 @@ class NativeCredentialTests(unittest.TestCase):
         self.assertNotIn(TOKEN, native.values())
         self.assertNotIn(FAKE_ZAI, native.values())
         self.assertEqual(native["HERMES_SLACK_BOT_USER_ID"], "UPROJECTBOT001")
+        self.assertEqual(native["HTTPS_PROXY"], "http://127.0.0.2:18651")
+        self.assertNotIn("HTTP_PROXY", native)
+        self.assertNotIn("ALL_PROXY", native)
+        self.assertNotIn("HERMES_NATIVE_HTTPS_PROXY", native)
 
     def test_meta_ceo_key_is_disjoint_from_secretary(self) -> None:
         rt = self._runtime(role="mmmeta", extras=(
@@ -131,6 +143,13 @@ class NativeCredentialTests(unittest.TestCase):
         with self.assertRaises(RuntimeRefusal) as exc:
             rt._model_child_env()
         self.assertEqual(exc.exception.code, "NATIVE_MODEL_CREDENTIAL_UNAVAILABLE")
+
+    def test_missing_role_private_proxy_refuses_even_if_shell_has_proxy(self) -> None:
+        rt = self._runtime(extras='BYTEPLUS_MODELARK_API_KEY=' + FAKE_BYTEPLUS + '\nHERMES_NATIVE_EGRESS_ROLE=mmsecretary\n', include_proxy=False)
+        with mock.patch.dict(os.environ, {'HTTPS_PROXY': 'http://127.0.0.2:18651'}):
+            with self.assertRaises(RuntimeRefusal) as exc:
+                rt._model_child_env()
+        self.assertEqual(exc.exception.code, 'NATIVE_EGRESS_PROXY_NOT_ENROLLED')
 
     def test_shell_only_key_cannot_bypass_role_private_secret_file(self) -> None:
         # A systemd unit must not depend on the installing operator's shell.
