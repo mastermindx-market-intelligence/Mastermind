@@ -131,6 +131,12 @@ GO_POST_FAILURE_ADDITIONS = {
     "post_failure_observation.py": "2a78630ccaf574da752c77d7b8f821723ccb264b970e2fe38b1976d886ca97a0",
     "post_failure_observation_delivery.py": "0e096d439e71600a20aabd6f29ea94127596ab3c1a4fb31d567194eba145c7f3"
 }
+# Protected PR #2101 adds historical-receipt metadata to this same pair.
+# Retain the earlier exact pair; never admit a mixture of the two generations.
+GO_POST_FAILURE_METADATA_ADDITIONS = {
+    "post_failure_observation.py": "80fc9d95068099fb797c9e7a05981a9650d50ec170935d748d92a8e7bcd04337",
+    "post_failure_observation_delivery.py": "81ab6f7f673e53c53b0e0a0cf4f3f1324642e29563f9213170f2a1ae29a0e4fc",
+}
 
 # The completed-SSH255 observer and its helper are one protected source cohort.
 # Neither half is admitted independently or backdated into the historical102.
@@ -175,10 +181,12 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         if manifest["ext/" + name] != exact:
             raise ValueError("native Go post-failure cohort is not the exact protected source")
         historical["ext/" + name] = original
-    for name, digest in GO_POST_FAILURE_ADDITIONS.items():
-        if current_diagnostics:
-            if manifest["ext/" + name] != digest:
-                raise ValueError("native Go post-failure member differs")
+    if current_diagnostics:
+        additions = {name: manifest["ext/" + name]
+                     for name in GO_POST_FAILURE_ADDITIONS}
+        if additions not in (GO_POST_FAILURE_ADDITIONS, GO_POST_FAILURE_METADATA_ADDITIONS):
+            raise ValueError("native Go post-failure additions are not one exact protected cohort")
+        for name in GO_POST_FAILURE_ADDITIONS:
             del historical["ext/" + name]
     for name, original in GO_BASE_DEPENDENCIES.items():
         if manifest["ext/" + name] != dependency_hashes[name]:
