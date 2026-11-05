@@ -524,6 +524,9 @@ def _read_context(value):
         operation = observation["source_operation"]
         if operation is not None and operation["selection"]["work_ref"] != value["selection"]["work_ref"]:
             _fail("data_observation project mismatch")
+        continuity = observation.get("data_continuity")
+        if continuity is not None and continuity["work_ref"] != value["selection"]["work_ref"]:
+            _fail("data_continuity project mismatch")
         value["data_observation"] = observation
     elif context is not None and value["source"] is not None and value["source"]["commit"] != context["executable_macro_commit"]:
         _fail("legacy source must match CODE when no DATA observation exists")
