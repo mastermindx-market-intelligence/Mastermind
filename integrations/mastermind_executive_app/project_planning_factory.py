@@ -107,6 +107,8 @@ class ProjectPlanningAppFactory:
                 or view._code_root!=collector._macro_root
                 or view._root!=Path(data.identity.binding.worktree)
                 or view._operation.selected_work_ref!=work_ref
+                or view._witness.get('canonical_data_commit')!=view.data_commit
+                or view._witness.get('executable_macro_commit')!=view.code_commit
                 or dataclasses.asdict(view._operation.principal)!=dataclasses.asdict(workspace)
                 or view._owner.events is not data.events
                 or view._owner.publisher._binding!=data.identity.binding):
