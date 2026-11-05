@@ -71,18 +71,20 @@ An attended CEO Web session requests a review **only** for an explicit eligible 
 - Prove the no-review release path with protected CI, native rule readback, approved instructions loaded in real CEO sessions and one genuine PR reaching protected merge without a fabricated reviewer. The automatic-review host remains OFF, so it owes **no production webhook canary** for this waiver. If optional ingress is separately activated later, it must first prove signed FAST/STANDARD => zero Jobs, CRITICAL => one existing authorized Job when admitted, HOLD refusal, manual ingress and rollback. Never claim optional review-host production proof from source tests.
 
 
-## Chairman-directed attended-Web waiver, composed with #2016 CI — source candidate, 2026-11-03
+## Historical accepted #2030 rationale: attended-Web waiver and #2016 CI
 
 A prior 20-PR path-only sample showed that the legacy FAST classifier excluded
 most executable source. That motivated removing blanket attended-Web reviewer
 handoffs across **all** tiers rather than using FAST as a false exemption.
 The accepted #2016 CI qualifier consumes the same risk tiers: FAST selects
-static-only checks; STANDARD preserves executable smoke tests. Therefore this
-source candidate restricts FAST to verified passive files and keeps even tiny
+static-only checks; STANDARD preserves executable smoke tests. That historical
+baseline restricts FAST to verified passive files and keeps even tiny
 ordinary code and test changes at least STANDARD, preserving stronger CRITICAL
 trust-boundary classification. The signed automatic review host is separate
-and default OFF. Only attended-Web review handoffs are waived by this policy;
-source verification, CI, release controls, holds and production proof remain.
+and default OFF. The historical Web-only scope is superseded for native/automatic
+work by the current proportionate-qualification section above. The attended Web
+all-tier waiver remains; source verification, CI, release controls, holds and
+production proof remain.
 The original path sample was diagnostic, not a measured production KPI.
 
 There is no universal reviewer handoff after each patch, commit, fix, test,
