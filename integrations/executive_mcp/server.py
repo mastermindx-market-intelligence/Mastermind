@@ -99,6 +99,7 @@ _OS_FRESH_CONVERSATION_ROUTES = (
     "/os/executive/conversation/status", "/os/executive/conversation/read",
     "/os/executive/conversation/consume", "/os/executive/conversation/turn",
     "/os/executive/conversation/turn/status", "/os/executive/conversation/turn/read",
+    "/os/executive/conversation/consume/status", "/os/executive/conversation/turn/preview",
 )
 
 __all__ = ["build_executive_mcp_app", "build_web_ceo_mcp_app", "build_web_ceo_sessions_mcp_app", "build_web_ceo_v3_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_personal_read_mcp_app", "build_personal_read_tools", "build_mcp_server", "build_tools", "build_web_ceo_tools", "build_web_ceo_sessions_tools", "run_stdio"]

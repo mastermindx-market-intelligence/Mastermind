@@ -95,6 +95,22 @@ PRE_PLAN_PROPOSAL_GET_ROUTES = GET_ROUTES
 PRE_PLAN_PROPOSAL_POST_ROUTES = POST_ROUTES
 PROJECT_PLANNING_POST_ROUTES += ("/os/executive/project-planning/prepare_proposal",)
 POST_ROUTES = PRE_PLAN_PROPOSAL_POST_ROUTES + ("/os/executive/project-planning/prepare_proposal",)
+PRE_CONVERSATION_READ_GET_ROUTES = GET_ROUTES
+PRE_CONVERSATION_READ_POST_ROUTES = POST_ROUTES
+PROJECT_CONVERSATION_READ_POST_ROUTES = (
+    "/os/executive/session/history-context", "/os/executive/session/conversations",
+    "/os/executive/session/conversation-read", "/os/executive/session/fresh-conversations",
+    "/os/executive/session/fresh-conversation-read",
+)
+FRESH_CONVERSATION_POST_ROUTES = (
+    "/os/executive/conversation/preview", "/os/executive/conversation/create",
+    "/os/executive/conversation/status", "/os/executive/conversation/read",
+    "/os/executive/conversation/consume", "/os/executive/conversation/turn",
+    "/os/executive/conversation/turn/status", "/os/executive/conversation/turn/read",
+    "/os/executive/conversation/consume/status", "/os/executive/conversation/turn/preview",
+)
+GET_ROUTES = PRE_CONVERSATION_READ_GET_ROUTES + ("/workspace/resources/host-observation/current",)
+POST_ROUTES = PRE_CONVERSATION_READ_POST_ROUTES + PROJECT_CONVERSATION_READ_POST_ROUTES + FRESH_CONVERSATION_POST_ROUTES
 
 # Preserve exactly the profiles admitted by the two predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
@@ -124,6 +140,7 @@ TRANSITION_ROUTE_PROFILES = (
     (PRE_PROJECT_ACCESS_GET_ROUTES, PRE_JOURNEY_POST_ROUTES),
     (PRE_JOURNEY_GET_ROUTES, PRE_JOURNEY_POST_ROUTES),
     (PRE_PLAN_PROPOSAL_GET_ROUTES, PRE_PLAN_PROPOSAL_POST_ROUTES),
+    (PRE_CONVERSATION_READ_GET_ROUTES, PRE_CONVERSATION_READ_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 

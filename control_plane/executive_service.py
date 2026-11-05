@@ -6058,7 +6058,7 @@ class ExecutiveControlService:
                     from control_plane.fresh_conversation import FreshConversationOwner
                     frame = fresh_wire.validate_private_frame(parsed)
                     modifying = frame["operation"] in fresh_wire.MODIFYING
-                    allowed_states = {"READY", "QUARANTINED"} if frame["operation"] in {"status", "read", "turn_status", "turn_read"} else {"READY"}
+                    allowed_states = {"READY", "QUARANTINED"} if frame["operation"] in {"status", "read", "turn_status", "turn_read", "consume_status"} else {"READY"}
                     factory = app_binding.fresh_conversation_provider_factory
                     runtime = self._require_runtime()
                     if factory is None:
