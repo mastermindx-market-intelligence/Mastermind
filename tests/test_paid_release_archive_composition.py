@@ -43,6 +43,10 @@ def _materialize(root):
 @pytest.fixture(scope="module")
 def archived(tmp_path_factory):
     parent = tmp_path_factory.mktemp("paid-real-release-archive")
+    # Darwin temporary roots inherit group 0 even for a non-root fixture.
+    # Set the fixture owner's actual group before creating archive descendants;
+    # the release qualifier still verifies every member's exact ownership.
+    os.chown(parent, -1, os.getegid())
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT,
                                      text=True).strip()
     tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=ROOT,
