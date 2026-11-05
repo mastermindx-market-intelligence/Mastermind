@@ -2832,6 +2832,17 @@ def _service_from_config(
                     authorized_policies=trusted_policies,
                     reference_cursor_key=session_reference_cursor_key)
             session_factories["session_bridge_provider_factory"] = session_bridge_factory
+            if session_read_policy_loader is not None and installed_profile == WEB_CEO_V3_PROFILE:
+                def fresh_conversation_factory(runtime):
+                    # Same current root-sealed policy/namespace as the installed
+                    # Session owner, never identity or arming supplied by a frame.
+                    service._namespace_custody.bound_runtime(runtime)
+                    current = session_read_policy_loader()
+                    from control_plane.fresh_conversation import FreshConversationOwner
+                    expected = (current.submit.policy_id,
+                        hashlib.sha256(current.submit.issuer.encode("utf-8")).hexdigest(), current.submit.resource)
+                    return FreshConversationOwner(service, expected_policy=expected)
+                session_factories["fresh_conversation_provider_factory"] = fresh_conversation_factory
         if "workspace_read_provider_factory" in workspace_factories and installed_profile == WEB_CEO_V3_PROFILE:
             # Same sealed Workspace collector/membership and existing root-sealed
             # OS policy source; no second OAuth configuration or admission store.

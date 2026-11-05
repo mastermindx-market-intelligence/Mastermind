@@ -2077,6 +2077,8 @@ class CeoIngressAppBinding:
     principal_admission_guard: Callable[[Mapping[str, Any]], None] | None = None
     # Separately selected by the trusted host; existing launchers omit it.
     principal_dialogue_provider_factory: Callable[[Runtime], Any] | None = None
+    # Fixed optional App-peer owner; old positional/default construction stays unchanged.
+    fresh_conversation_provider_factory: Callable[[Runtime], Any] | None = None
 
     def __post_init__(self) -> None:
         if type(self.peer_uid) is not int or self.peer_uid < 0:
@@ -2098,6 +2100,8 @@ class CeoIngressAppBinding:
             raise ValueError("reply events require a host provider")
         if self.project_planning_provider_factory is not None and not callable(self.project_planning_provider_factory):
             raise ValueError("project planning requires an installed host provider")
+        if self.fresh_conversation_provider_factory is not None and not callable(self.fresh_conversation_provider_factory):
+            raise ValueError("fresh conversation requires an installed host provider")
         if self.principal_facts_factory is not None and not callable(self.principal_facts_factory):
             raise ValueError("principal facts require a host provider")
         if type(self.principal_admission_armed) is not bool:
@@ -5962,6 +5966,49 @@ class ExecutiveControlService:
                 # Once entered, transport loss never permits another callback or
                 # subscription mutation. The canonical Runtime CAS owns recovery.
                 await self._send_ceo_ingress_response(writer,{"ok":True,"result":event_result})
+                return
+            from common import fresh_conversation_contract as fresh_wire
+            if isinstance(parsed, Mapping) and parsed.get("schema") == fresh_wire.SCHEMA:
+                if not app_peer:
+                    await self._send_ceo_ingress_error(writer, "peer_denied", "fresh conversation requires installed App peer")
+                    return
+                try:
+                    from control_plane.fresh_conversation import FreshConversationOwner
+                    frame = fresh_wire.validate_private_frame(parsed)
+                    creating = frame["operation"] == "create"
+                    allowed_states = {"READY", "QUARANTINED"} if frame["operation"] in {"status", "read"} else {"READY"}
+                    factory = app_binding.fresh_conversation_provider_factory
+                    runtime = self._require_runtime()
+                    if factory is None:
+                        raise ValueError("fresh conversation provider unavailable")
+                    provider = factory(runtime)
+                    if (type(provider) is not FreshConversationOwner or provider._runtime is not runtime
+                            or provider._service is not self or provider._app is not app_binding):
+                        raise ValueError("fresh conversation provider unavailable")
+                    def require_fresh_host_current():
+                        if (self._closing or not self._ceo_ingress_ready or self._service_state not in allowed_states
+                                or self._ceo_ingress_app_binding is not app_binding or not app_binding.armed
+                                or app_binding.fresh_conversation_provider_factory is not factory
+                                or self._require_runtime() is not runtime
+                                or writer.get_extra_info("socket") is not connection
+                                or _peer_uid(connection) != app_binding.peer_uid
+                                or writer.is_closing() or writer.transport.is_closing()
+                                or (creating and reader.at_eof())):
+                            raise ValueError("fresh conversation host changed")
+                        # This installed factory only checks the namespace/current sealed
+                        # policy and constructs a nominal owner; it performs no effect.
+                        current = factory(runtime)
+                        if (type(current) is not FreshConversationOwner or current._runtime is not runtime
+                                or current._service is not self or current._app is not app_binding
+                                or current._expected_policy != provider._expected_policy):
+                            raise ValueError("fresh conversation policy changed")
+                    require_fresh_host_current()
+                    result = await provider.handle_frame(frame, host_current=require_fresh_host_current,
+                        reader=reader if creating else None)
+                    require_fresh_host_current()
+                    await self._send_ceo_ingress_response(writer, {"ok": True, "result": result})
+                except Exception:
+                    await self._send_ceo_ingress_error(writer, "ingress_unavailable", "fresh conversation owner unavailable")
                 return
             from common.session_bridge_private_contract import (
                 PRIVATE_SCHEMA as SESSION_BRIDGE_PRIVATE_SCHEMA,

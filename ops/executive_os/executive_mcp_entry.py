@@ -518,15 +518,17 @@ def build_optional_apps(raw, source, config_path, sink):
                 policy=policies['workspace'], load_bindings=legacy_workspace_loader, action=operation)[0]
             for operation in OPERATIONS
         }
-        app = create_workspace_app(WorkspaceAppConfig(authenticator=authenticators['workspace'],
+        workspace_config = WorkspaceAppConfig(authenticator=authenticators['workspace'],
             now=lambda: int(time.time()), authorize_principal=gate,
             authorize_discovery=discovery_gate, authorize_actions=action_gates,
             project_admission_load_bindings=workspace_project_bindings_loader,
             source_operation_context=WorkspaceSourceOperationContextFactory(
                 policy=policies['workspace'], load_bindings=workspace_project_bindings_loader),
-            client=CeoIngressWorkspaceClient(raw['ceo_ingress_socket_path'])))
+            client=CeoIngressWorkspaceClient(raw['ceo_ingress_socket_path']))
+        app = create_workspace_app(workspace_config)
         mounts['workspace_app'] = AuditedWorkspaceApp(app, verifiers['workspace'],
-            authenticator=authenticators['workspace'],authorize_principal=gate)
+            authenticator=authenticators['workspace'],authorize_principal=gate,
+            fresh_workspace_config=workspace_config)
     if 'steward' in raw:
         from integrations.mastermind_steward_app.installed import (
             LiveWindowProfilesConfig, build_installed_steward_app_with_profiles)
