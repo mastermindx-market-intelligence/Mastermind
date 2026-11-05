@@ -837,6 +837,7 @@ class EnrolledRetainedReceiptTests(unittest.TestCase):
         roots = svc._build_runtime_roots(account)
         calls = []
         patch(svc, "_pin_enrollment_owner_module", lambda: owner)
+        patch(svc, "_fleet_status_successor_owner_module", lambda: s)
         real_valid = svc._valid_manifest
         patch(svc, "_valid_manifest", lambda d, a, l: (
             real_valid(d, a, l) or self.manifest_shape(d, a, l)))
@@ -999,6 +1000,8 @@ class EnrolledRetainedReceiptTests(unittest.TestCase):
         seen = len(reads)
         fixture["pin_sha"] = s._original_pin(svc, account, roots)
         fixture["enrollment_reads"] = reads[seen:]
+        # Capture the valid CAS while every retained enrollment artifact exists.
+        fixture["successor_plan_sha"] = s.run(svc, fixture["args"])["planSha256"]
         return fixture
 
     def corrupt(self, fixture, kind, action):
@@ -1029,15 +1032,17 @@ class EnrolledRetainedReceiptTests(unittest.TestCase):
 
     def refuses(self, fixture):
         """Preview and apply both refuse before publication or installed writes."""
-        with self.assertRaises(SystemExit):
-            s.run(svc, fixture["args"])
-        self.no_effect(fixture)
+        with self.subTest(operation="preview"):
+            with self.assertRaises(SystemExit):
+                s.run(svc, fixture["args"])
+            self.no_effect(fixture)
         apply_args = SimpleNamespace(
             **{**vars(fixture["args"]), "operation": "apply",
-               "expected_plan_sha256": "0" * 64})
-        with self.assertRaises(SystemExit):
-            s.run(svc, apply_args)
-        self.no_effect(fixture)
+               "expected_plan_sha256": fixture["successor_plan_sha"]})
+        with self.subTest(operation="apply"):
+            with self.assertRaises(SystemExit):
+                s.run(svc, apply_args)
+            self.no_effect(fixture)
 
     def test_valid_retained_receipt_is_authenticated_for_every_enrolled_profile(self):
         for account in self.ENROLLED:
@@ -1075,14 +1080,25 @@ class EnrolledRetainedReceiptTests(unittest.TestCase):
                 shutil.rmtree(fixture["tx"])
                 self.refuses(fixture)
 
+    def test_completed_successor_startup_accepts_intact_receipt(self):
+        for account in self.ENROLLED:
+            with self.subTest(account=account):
+                fixture = self.build(account)
+                apply_args = SimpleNamespace(
+                    **{**vars(fixture["args"]), "operation": "apply",
+                       "expected_plan_sha256": fixture["successor_plan_sha"]})
+                self.assertEqual(s.run(svc, apply_args)["effect"], "APPLIED")
+                self.assertEqual(svc.cmd_start(SimpleNamespace(account=account)), 0)
+                self.assertEqual(sum(call[:2] == ["launchctl", "bootstrap"]
+                                     for call in fixture["calls"]), 1)
+
     def test_completed_successor_startup_refuses_before_service_action(self):
         for account in self.NEWLY_COVERED:
             with self.subTest(account=account):
                 fixture = self.build(account)
-                preview = s.run(svc, fixture["args"])
                 apply_args = SimpleNamespace(
                     **{**vars(fixture["args"]), "operation": "apply",
-                       "expected_plan_sha256": preview["planSha256"]})
+                       "expected_plan_sha256": fixture["successor_plan_sha"]})
                 s.run(svc, apply_args)
                 self.assertTrue((fixture["successor_tx"] / "result.json").exists())
                 (fixture["tx"] / "result.json").unlink()
