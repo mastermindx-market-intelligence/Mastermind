@@ -134,6 +134,7 @@ export function readLaunchRequestPreview(
     const projectRef = ownDataString(source, "projectRef");
     const profileRef = ownDataString(source, "profileRef");
     const alias = ownDataString(source, "frontierModelAlias");
+    const workstreamRef = ownDataString(source, "workstreamRef");
     if (
       goal === null ||
       goal === undefined ||
@@ -141,13 +142,14 @@ export function readLaunchRequestPreview(
       projectRef === undefined ||
       profileRef === null ||
       profileRef === undefined ||
-      alias === null
+      alias === null || workstreamRef === null
     ) {
       return UNAVAILABLE_READ;
     }
     if (!isValidGoal(goal) || !isValidRef(projectRef) || !isValidRef(profileRef)) {
       return UNAVAILABLE_READ;
     }
+    if (workstreamRef !== undefined && !isValidTargetKey(workstreamRef)) return UNAVAILABLE_READ;
     const frontierModelAlias = alias === undefined ? null : alias;
     if (frontierModelAlias !== null && !isValidRef(frontierModelAlias)) {
       return UNAVAILABLE_READ;
@@ -160,6 +162,7 @@ export function readLaunchRequestPreview(
       projectRef,
       profileRef,
     };
+    if (workstreamRef !== undefined) detached.workstreamRef = workstreamRef;
     if (frontierModelAlias !== null) {
       detached.frontierModelAlias = frontierModelAlias;
     }

@@ -1,7 +1,7 @@
 import { bindMissionHost, type RawClient, type SessionHostAttachment } from "./host";
 import { readLaunchBindingConfig } from "./launch-config";
 import type { MissionSelection } from "./mission";
-import type { LaunchBindingConfig } from "./orchestration/executive-launch-command-port";
+import type { LaunchConfiguration } from "./orchestration/executive-launch-command-port";
 import { createIndexedDbPendingPointerStore } from "./orchestration/indexeddb-pending-pointer-store";
 import { createIndexedDbSessionPendingPointerStore } from "./orchestration/indexeddb-session-pending-pointer-store";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
@@ -57,7 +57,7 @@ function executiveObservation(transport: OsExecutiveTransport | undefined): {
  */
 export function composeMissionHost(
   client: RawClient,
-  config: LaunchBindingConfig | null = readLaunchBindingConfig(),
+  config: LaunchConfiguration | null = readLaunchBindingConfig(),
   indexedDB: IDBFactory | undefined = globalThis.indexedDB,
   hostKind: DiagnosticHostKind = "unknown",
 ) {
