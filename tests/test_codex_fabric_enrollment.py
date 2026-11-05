@@ -540,6 +540,140 @@ def _legacy_pending_store(tmp_path: Path):
     return policy, api, KeychainRegistrationStore(api=api)
 
 
+def _legacy_absence_kwargs(policy):
+    return {
+        "observed_attempt_ref": "c" * 64,
+        "observed_redirect_uri": CALLBACK_URL,
+        "observed_policy_digest": policy.policy_digest,
+        "marker_created_at_epoch": 1_790_000_000,
+        "audit_window_start_epoch": 1_789_999_000,
+        "audit_window_end_epoch": 1_790_001_000,
+        "current_inventory_observed_at_epoch": 1_790_000_500,
+        "observed_at_epoch": 1_790_002_000,
+        "current_inventory_complete": True,
+        "audit_window_complete": True,
+        "current_inventory_match_count": 0,
+        "historical_registration_match_count": 0,
+        "historical_deletion_match_count": 0,
+        "audit_total_events": 236,
+        "audit_page_count": 5,
+        "evidence_digest": "a" * 64,
+    }
+
+
+def test_legacy_absence_reconciliation_clears_exact_pending_effect_without_new_dcr(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, _api, store = _legacy_pending_store(tmp_path)
+    observation_digest = enroll.reconcile_legacy_absent_registration(
+        policy,
+        store=store,
+        **_legacy_absence_kwargs(policy),
+    )
+    assert store.load_state() is None
+    assert len(observation_digest) == 64
+
+
+@pytest.mark.parametrize("field,value", [
+    ("observed_attempt_ref", "d" * 64),
+    ("observed_redirect_uri", "http://127.0.0.1:9999/oauth/callback"),
+    ("observed_policy_digest", "f" * 64),
+    ("marker_created_at_epoch", 1_789_998_000),
+    ("audit_window_end_epoch", 1_790_000_030),
+    ("observed_at_epoch", 1_789_999_500),
+    ("current_inventory_complete", False),
+    ("audit_window_complete", False),
+    ("current_inventory_match_count", 1),
+    ("historical_registration_match_count", 1),
+    ("historical_deletion_match_count", 1),
+    ("audit_total_events", 0),
+    ("audit_page_count", 0),
+    ("evidence_digest", "not-a-digest"),
+])
+def test_legacy_absence_reconciliation_refuses_incomplete_or_positive_evidence(
+    tmp_path: Path, field: str, value
+):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, _api, store = _legacy_pending_store(tmp_path)
+    before = store.load_state()
+    kwargs = _legacy_absence_kwargs(policy)
+    kwargs[field] = value
+    with pytest.raises(EnrollmentError):
+        enroll.reconcile_legacy_absent_registration(policy, store=store, **kwargs)
+    assert store.load_state() == before
+
+
+def test_legacy_absence_reconciliation_refuses_audit_gap_before_current_inventory(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, _api, store = _legacy_pending_store(tmp_path)
+    before = store.load_state()
+    kwargs = _legacy_absence_kwargs(policy)
+    kwargs["current_inventory_observed_at_epoch"] = kwargs["audit_window_end_epoch"] + 1
+    with pytest.raises(EnrollmentError):
+        enroll.reconcile_legacy_absent_registration(policy, store=store, **kwargs)
+    assert store.load_state() == before
+
+
+def test_legacy_absence_reconciliation_cleanup_ambiguity_stays_effect_unknown(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, api, store = _legacy_pending_store(tmp_path)
+
+    def ambiguous_delete(_service, _account):
+        raise OSError("unknown keychain delete outcome")
+
+    api.delete = ambiguous_delete
+    with pytest.raises(enroll.EnrollmentEffectUnknown):
+        enroll.reconcile_legacy_absent_registration(
+            policy,
+            store=store,
+            **_legacy_absence_kwargs(policy),
+        )
+
+
+def test_cli_legacy_absence_reconciliation_emits_digest_only_receipt(tmp_path: Path, capsys):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, _api, store = _legacy_pending_store(tmp_path)
+    policy_path = tmp_path / "executive-mcp.json"
+    code = enroll.main(
+        [
+            "--legacy-reconcile-absence",
+            "--reconcile-attempt-ref", "c" * 64,
+            "--reconcile-redirect-uri", CALLBACK_URL,
+            "--reconcile-policy-digest", policy.policy_digest,
+            "--absence-marker-created-at-epoch", "1790000000",
+            "--absence-audit-window-start-epoch", "1789999000",
+            "--absence-audit-window-end-epoch", "1790001000",
+            "--absence-current-inventory-observed-at-epoch", "1790000500",
+            "--reconcile-observed-at-epoch", "1790002000",
+            "--absence-current-inventory-complete",
+            "--absence-audit-window-complete",
+            "--absence-current-inventory-match-count", "0",
+            "--absence-historical-registration-match-count", "0",
+            "--absence-historical-deletion-match-count", "0",
+            "--absence-audit-total-events", "236",
+            "--absence-audit-page-count", "5",
+            "--absence-evidence-digest", "a" * 64,
+        ],
+        policy_path=policy_path,
+        expected_uid=os.getuid(),
+        registration_store=store,
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    payload = json.loads(captured.out)
+    assert payload["state"] == "reconciled_legacy_absent"
+    assert payload["policy_digest"] == policy.policy_digest
+    assert len(payload["observation_digest"]) == 64
+    assert "client_id" not in payload
+    assert "access_token" not in captured.out
+    assert "refresh_token" not in captured.out
+    assert captured.err == ""
+
+
 def test_legacy_reconciliation_accepts_one_exact_tenant_observation_without_dcr(tmp_path: Path):
     import ops.codex_fabric.enroll_executive_mcp as enroll
 
