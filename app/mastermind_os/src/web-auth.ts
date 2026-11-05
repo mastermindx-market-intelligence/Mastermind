@@ -1,6 +1,5 @@
 import {hostObservationWebMethods} from "./resources/host-observation-web";
-import {freshConversationArguments} from "./orchestration/fresh-conversation-transport";
-import type {FreshConversationOperation} from "./conversations/new-conversation/fresh-conversation";
+import {freshConversationArguments,FRESH_CONVERSATION_PATHS} from "./orchestration/fresh-conversation-transport";
 import {projectAccessPublicSelection} from "./access/project-access-host";
 import {instructionPublicRequest,instructionQuery,type InstructionPauseRequest} from "./instructions/instruction-host";
 import { projectAdmissionPublicRequest, projectAdmissionQuery, type ProjectAdmissionPauseRequest, type ProjectAdmissionResumeRequest } from "./admission/project-admission-host";
@@ -1121,13 +1120,13 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     });
   }
   async function executivePost(
-    route: "context" | "submit" | "status" | "session/context" | "session/history-context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction" | `project-planning/${PlanningOperation}` | `conversation/${FreshConversationOperation}` | typeof PROJECT_CONVERSATION_READ_PATHS[keyof typeof PROJECT_CONVERSATION_READ_PATHS],
+    route: "context" | "submit" | "status" | "session/context" | "session/history-context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction" | `project-planning/${PlanningOperation}` | typeof FRESH_CONVERSATION_PATHS[keyof typeof FRESH_CONVERSATION_PATHS] | typeof PROJECT_CONVERSATION_READ_PATHS[keyof typeof PROJECT_CONVERSATION_READ_PATHS],
     arguments_: unknown,
     signal: AbortSignal,
   ) {
     const token = tokens.executive, ticket = executiveGeneration;
     const planning=route.startsWith("project-planning/"), fresh=route.startsWith("conversation/");
-    const dual=planning || route==="conversation/preview" || route==="conversation/create";
+    const dual=planning || route==="conversation/preview" || route==="conversation/create" || route==='conversation/consume' || route==='conversation/turn' || route==='conversation/turn/preview';
     const workspace=dual ? tokens.acquisition : null, workspaceGeneration=generation;
     if (!configured || !executiveResource || !token || !valid("executive"))
       throw new Error("EXECUTIVE_AUTH_REQUIRED");
@@ -1207,7 +1206,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       projectPlanning: { request: (operation,arguments_,signal) =>
         executivePost(`project-planning/${operation}`,planningArguments(operation,arguments_),signal) },
       freshConversation: {request:(operation,arguments_,signal)=>
-        executivePost(`conversation/${operation}`,freshConversationArguments(operation,arguments_),signal)},
+        executivePost(FRESH_CONVERSATION_PATHS[operation],freshConversationArguments(operation,arguments_),signal)},
       directNative: {
         correction: (request,signal)=>executivePost('direct-native/correction',request,signal),
         read: (selection, signal) => {

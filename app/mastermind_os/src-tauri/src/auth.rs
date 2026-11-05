@@ -2381,7 +2381,7 @@ where
             token.expires,
             inner.executive_generation,
             inner.executive_changed.subscribe(),
-            if planning.is_some() || matches!(fresh,Some("preview"|"create"|"consume"|"turn")) {let workspace=inner.token(Resource::Acquisition).ok_or("WORKSPACE_AUTH_REQUIRED")?;
+            if planning.is_some() || matches!(fresh,Some("preview"|"create"|"consume"|"turn"|"turn_preview")) {let workspace=inner.token(Resource::Acquisition).ok_or("WORKSPACE_AUTH_REQUIRED")?;
                 Some((workspace.value.clone(),inner.generation,workspace.expires))} else {None},
         )
     };

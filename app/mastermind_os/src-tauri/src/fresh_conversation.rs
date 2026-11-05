@@ -15,8 +15,8 @@ use serde_json::Value;
 /// Fixed generic rejection reason; carries no request detail.
 pub const REQUEST_INVALID: &str = "REQUEST_INVALID";
 
-/// Exactly the eight `common.wire` route paths, literal only.
-const ROUTES: [(&str, &str); 8] = [
+/// Exactly the ten source-owned route paths, literal only.
+const ROUTES: [(&str, &str); 10] = [
     ("/os/executive/conversation/preview", "preview"),
     ("/os/executive/conversation/create", "create"),
     ("/os/executive/conversation/status", "status"),
@@ -25,6 +25,8 @@ const ROUTES: [(&str, &str); 8] = [
     ("/os/executive/conversation/turn", "turn"),
     ("/os/executive/conversation/turn/status", "turn_status"),
     ("/os/executive/conversation/turn/read", "turn_read"),
+    ("/os/executive/conversation/consume/status", "consume_status"),
+    ("/os/executive/conversation/turn/preview", "turn_preview"),
 ];
 
 /// Route path to operation name; exact literal match only.
@@ -152,7 +154,7 @@ fn reference_valid(value: &Value) -> Result<&str, String> {
 /// Closed fixed-request validation for one operation name. Accepts the exact
 /// per-operation key set and grammar; anything else is `REQUEST_INVALID`.
 pub fn validate(operation: &str, value: &Value) -> Result<(), String> {
-    const OPS: [&str; 8] = [
+    const OPS: [&str; 10] = [
         "preview",
         "create",
         "status",
@@ -161,6 +163,8 @@ pub fn validate(operation: &str, value: &Value) -> Result<(), String> {
         "turn",
         "turn_status",
         "turn_read",
+        "consume_status",
+        "turn_preview",
     ];
     let invalid = || REQUEST_INVALID.to_owned();
     if !OPS.contains(&operation) {
@@ -168,21 +172,21 @@ pub fn validate(operation: &str, value: &Value) -> Result<(), String> {
     }
     let obj = value.as_object().ok_or_else(invalid)?;
     let reference_mode = obj.contains_key("reference");
-    if reference_mode && !matches!(operation, "consume" | "turn" | "turn_status" | "turn_read") {
+    if reference_mode && !matches!(operation, "consume" | "turn" | "turn_status" | "turn_read" | "consume_status" | "turn_preview") {
         return Err(invalid());
     }
     let mut keys: Vec<&str> =
         vec!["work_ref", if reference_mode { "reference" } else { "operation_key" }];
-    if matches!(operation, "preview" | "create" | "turn") {
+    if matches!(operation, "preview" | "create" | "turn" | "turn_preview") {
         keys.push("message");
     }
-    if matches!(operation, "consume" | "turn") {
+    if matches!(operation, "consume" | "turn" | "consume_status" | "turn_preview") {
         keys.push("initial_digest");
     }
-    if matches!(operation, "turn" | "turn_status" | "turn_read") {
+    if matches!(operation, "turn" | "turn_status" | "turn_read" | "turn_preview") {
         keys.push("turn_key");
     }
-    if operation == "create" {
+    if operation == "create" || (operation == "turn" && obj.contains_key("preview_digest")) {
         keys.push("preview_digest");
     }
     if obj.len() != keys.len() || keys.iter().any(|k| !obj.contains_key(*k)) {
@@ -294,6 +298,22 @@ mod tests {
         assert_eq!(err, REQUEST_INVALID, "rejection must be the fixed generic reason");
         let err = validate("status", &Value::Null).expect_err("null request must reject");
         assert_eq!(err, REQUEST_INVALID, "rejection must be the fixed generic reason");
+    }
+
+    #[test]
+    fn recovery_status_and_pure_turn_preflight_keep_distinct_closed_shapes() {
+        let selector=json!({"work_ref":"WS:EXAMPLE","operation_key":"original","initial_digest":hex64('a')});
+        assert_eq!(path("consume_status"),Some("/os/executive/conversation/consume/status"));
+        assert_eq!(operation("/os/executive/conversation/turn/preview"),Some("turn_preview"));
+        assert!(validate("consume_status",&selector).is_ok());
+        let mut mixed=selector.clone();mixed["turn_key"]="new-key".into();
+        assert!(validate("consume_status",&mixed).is_err());
+        let mut preview=selector.clone();preview["turn_key"]="original-turn".into();preview["message"]="Bounded follow-up".into();
+        assert!(validate("turn_preview",&preview).is_ok());
+        preview["preview_digest"]=hex64('b').into();
+        assert!(validate("turn_preview",&preview).is_err());
+        assert!(validate("turn",&preview).is_ok());
+        preview["preview_digest"]="bad".into();assert!(validate("turn",&preview).is_err());
     }
 
     #[test]

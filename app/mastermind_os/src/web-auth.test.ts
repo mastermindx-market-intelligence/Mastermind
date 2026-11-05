@@ -1,3 +1,4 @@
+import freshRecoveryOwner from "./conversations/new-conversation/fixtures/fresh-conversation-recovery-owner.json";
 import projectConversationLegacy from "./fixtures/project-conversation-catalogue-owner.json";
 import projectConversationFresh from "./fixtures/project-fresh-conversation-owner.json";
 // @vitest-environment jsdom
@@ -2013,6 +2014,27 @@ describe("fresh conversation fixed transport",()=>{
    expect(new Headers(options!.headers).has("x-mastermind-workspace-authorization")).toBe(operation==="preview"||operation==="create");
   }
   expect(e.fetcher).toHaveBeenCalledTimes(4);
+ });
+ it("carries all six attended leaves on exact paths with source-owned dual-resource separation",async()=>{
+  const e=setup({executiveResource:resource});await e.login();e.fetcher.mockClear();
+  e.fetcher.mockImplementation(async()=>response({inertTransportResult:true}));
+  const signal=new AbortController().signal,{preview_digest,...preflight}=freshRecoveryOwner.turn_request;
+  const selected={work_ref:preflight.work_ref,reference:preflight.reference,turn_key:preflight.turn_key};
+  for(const [operation,path,request,dual] of [
+    ["consume","consume",freshRecoveryOwner.consume_request,true],
+    ["consume_status","consume/status",freshRecoveryOwner.consume_request,false],
+    ["turn_preview","turn/preview",preflight,true],
+    ["turn","turn",freshRecoveryOwner.turn_request,true],
+    ["turn_status","turn/status",selected,false],
+    ["turn_read","turn/read",selected,false],
+  ] as const){
+   await e.client.executive!.freshConversation!.request(operation,request,signal);
+   const [url,options]=e.fetcher.mock.calls.at(-1)!;
+   expect(url).toBe(ORIGIN+"/os/executive/conversation/"+path);
+   expect(JSON.parse(options!.body as string)).toEqual({arguments:request});
+   expect(new Headers(options!.headers).has("x-mastermind-workspace-authorization")).toBe(dual);
+  }
+  expect(e.fetcher).toHaveBeenCalledTimes(6);
  });
  it("does not relabel a READ-only Executive token as original submit-policy recovery",async()=>{
   const e=setup({executiveResource:resource});

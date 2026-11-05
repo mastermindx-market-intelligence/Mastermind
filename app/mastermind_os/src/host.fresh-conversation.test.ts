@@ -1,3 +1,4 @@
+import recovery from "./conversations/new-conversation/fixtures/fresh-conversation-recovery-owner.json";
 import {expect,it,vi} from "vitest";
 import {bindMissionHost,createNativeClient} from "./host";
 import fixture from "./conversations/new-conversation/fixtures/fresh-conversation-owner.json";
@@ -14,6 +15,8 @@ async function setup(held=false){
   if(command==="executive_auth_status")return {generation:1,available:true};
   if(command!=="executive_fresh_conversation")throw Error("Unlisted inert native edge");
   if(held)return pending;
+  if(args?.operation==="consume_status")return structuredClone(recovery.consume_status);
+  if(args?.operation==="turn_preview")return structuredClone(recovery.turn_preview);
   return args?.operation==="status" ? {...fixture.create,operation:"status"} : fixture[args?.operation as "preview"|"create"|"read"];
  });
  const raw=await createNativeClient(invoke as never,async(name,listener)=>{events.set(name,listener);return()=>{};});
@@ -52,4 +55,15 @@ it("withholds a late original result after actual Executive epoch loss with no r
  e.events.get("mastermind-executive-auth-state")!({payload:{generation:2,available:false}});
  e.finish(fixture.read);await rejected;
  expect(e.invoke.mock.calls.filter(([c])=>c==="executive_fresh_conversation")).toHaveLength(1);
+});
+
+it("keeps lost-Keep status Executive-only while new turn preflight requires live Workspace",async()=>{
+ const e=await setup(),signal=new AbortController().signal;
+ const {preview_digest,...request}=recovery.turn_request;
+ await e.host.freshConversation!.request("turn_preview",request,signal);
+ expect(e.invoke.mock.calls.at(-1)).toEqual(["executive_fresh_conversation",{operation:"turn_preview",arguments:request}]);
+ e.revokeWorkspace();
+ await expect(e.host.freshConversation!.request("turn_preview",request,signal)).rejects.toThrow("FRESH_CONVERSATION_UNAVAILABLE");
+ await expect(e.host.freshConversation!.request("consume_status",recovery.consume_request,signal)).resolves.toEqual(recovery.consume_status);
+ expect(e.invoke.mock.calls.filter(([name])=>name==="executive_fresh_conversation")).toHaveLength(2);
 });
