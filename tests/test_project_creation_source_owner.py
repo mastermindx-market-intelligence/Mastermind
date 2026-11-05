@@ -400,14 +400,30 @@ def test_actual_creation_child_capture_uses_original_git_code_and_programmes(own
 
 
 @pytest.mark.parametrize("no_site", [False, True])
-def test_real_isolated_creation_recipe_entry_closed_output(owner, no_site):
+@pytest.mark.parametrize("installed_runtime", [True, False])
+def test_real_isolated_creation_recipe_entry_closed_output(owner, no_site, installed_runtime, monkeypatch):
     import subprocess
+    from ops.executive_os import capacity_source_contract
+    if not installed_runtime:
+        # Simulate the absent native installation with a real dependency-complete
+        # project interpreter. On this Mac the qualified boot Python supplies
+        # that capability; hosted CI uses its actual project Python. The child
+        # still executes -I and its real captured compiler, with -S as a negative.
+        project_python = (capacity_source_contract.PYTHON_BINARY
+                          if capacity_source_contract.PYTHON_BINARY.is_file()
+                          else Path(sys.executable))
+        monkeypatch.setattr(sys, "executable", str(project_python))
+        monkeypatch.setattr(capacity_source_contract, "PYTHON_BINARY",
+                            owner["env"].clone / "absent-installed-python")
     from ops.executive_os.capacity_source_contract import PYTHON_BINARY
     o = owner
     prepared = o["adapter"].prepare(o["request"], o["who"])
     request = prepared.private_payload()["initial_snapshot"]["compiler_request"]
     commit = o["request"]["expected_macro_sha"]
-    command = [str(PYTHON_BINARY), "-I", "-B"] + (["-S"] if no_site else [])
+    # Native qualification uses the installed boot environment; hosted source
+    # CI uses its dependency-complete project interpreter. Both remain isolated.
+    interpreter = PYTHON_BINARY if PYTHON_BINARY.is_file() else Path(sys.executable)
+    command = [str(interpreter), "-I", "-B"] + (["-S"] if no_site else [])
     command += [str(Path(__file__).parents[1] / "scripts/agentos_project_creation_recipe_entry.py"),
         "--macro-root", str(o["env"].clone), "--expected-macro-sha", commit, "--timeout", "10"]
     raw = json.dumps({"schema": "mastermind.project_creation_recipe_capture_request.v1", "code_commit": commit,

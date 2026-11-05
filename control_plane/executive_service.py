@@ -8445,9 +8445,12 @@ class ExecutiveControlService:
                     runtime.jobs.pending_cycle_dispatch_effect_unknown(root.job_id)
                     is not None
                 )
-            except StateConflict:
-                # A malformed original-root marker also remains a per-root
-                # reconciliation/refusal problem, not independent admission.
+            except StateConflict as exc:
+                # Retain this already-observed refusal for the caller's existing
+                # idempotent diagnostic before independent work can proceed.
+                # The selector stays read-only and original reconciliation wins.
+                if prestart_refusals is not None:
+                    prestart_refusals[root.job_id] = exc
                 unresolved = True
             if unresolved:
                 if first_reconciling_root is None:
