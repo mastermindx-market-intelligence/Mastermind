@@ -447,15 +447,15 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # review; this does not authorize publication, runtime admission or release.
 # No generic numeric exception is added: source/path/site drift exposes all
 # literals again through the existing D8 scanner.
-# The bounded admission probe catches TimeoutExpired and returns a failed
-# read. That handler is six lines above the later sites, so those line
-# numbers moved. The same four literals stay exact whole tokens.
+# Finite-workstream template derivation changes only _gateway_templates.
+# The same four whole Constant tokens, relative AST paths and complete
+# enclosing identity owners remain unchanged; later lines shift by one.
 REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': 'deea6a99f70c0583ffeec82d3b8ef3e80ddcedc9742e4c4e2458abb07e89bbc2',
+    'sha256': '93cb7727512d1922461272e8d0b4a2557fa39d51d9a88e18597401f1731ea83a',
     'sites': ((335, 24, 27, 'int', '501'),
-              (6557, 35, 37, 'int', '80'),
-              (6558, 50, 55, 'int', '0o755'),
-              (7095, 41, 46, 'int', '0o644')),
+              (6556, 35, 37, 'int', '80'),
+              (6557, 50, 55, 'int', '0o755'),
+              (7094, 41, 46, 'int', '0o644')),
 }
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
