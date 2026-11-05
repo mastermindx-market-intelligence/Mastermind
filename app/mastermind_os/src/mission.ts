@@ -1430,6 +1430,10 @@ const CCR = [
   "placement_selection",
   "autonomy",
 ];
+// Canonical CCR observation metadata; deliberately not projected into
+// catalogue rows, permission, launch, create or send capability. Retain the
+// exact legacy shape as well as this one explicitly known additive shape.
+const CCR_WITH_RUNTIME_OBSERVATION = [...CCR, "runtime_capability_status"];
 const WORK = [
   "work_ref",
   "agent_os",
@@ -1503,7 +1507,7 @@ export function programsFromControlRoom(value: unknown): {
     };
   if (
     !obj(value) ||
-    !exact(value, CCR) ||
+    !(exact(value, CCR) || exact(value, CCR_WITH_RUNTIME_OBSERVATION)) ||
     value.schema !== "mastermind.chairman_control_room.v1" ||
     !time(value.generated_at) ||
     !Array.isArray(value.work) ||
