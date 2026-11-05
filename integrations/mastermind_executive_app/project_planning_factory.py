@@ -199,6 +199,28 @@ class ProjectPlanningAppFactory:
         invocation._require_live()
         return value
 
+    def _fixed_planning_code(self,invocation):
+        """Commit-addressed policy/commission bytes, never live permission truth.
+
+        The same foreground invocation cannot rebase its configured source.
+        Current CODE/default/Event/config and grants retain their independent
+        checks; repeated nested SQL guards need not rerun git-show for the same
+        immutable objects. No value survives into another request/invocation.
+        """
+        invocation._require_live()
+        key=(self,self.service.config.proof_source_repository,self.service.config.proof_base_sha)
+        saved=getattr(invocation,'_planning_fixed_code',None)
+        if saved is None:
+            policy=PlanningPolicy.load(key[1],key[2])
+            commission=read_protected_blob(key[1],key[2],COMMISSION_PATH)
+            if not commission or len(commission)>16384:
+                raise ValueError('project planning fixed commission unavailable')
+            saved=(key,policy,commission)
+            invocation._planning_fixed_code=saved
+        elif saved[0]!=key:
+            raise ValueError('project planning configured CODE changed; no rebase')
+        return saved[1],saved[2]
+
     def _current(self,principal,invocation,operation_key,work_ref,*,current_only=False):
         service=self.service
         now=self.clock()
@@ -238,15 +260,12 @@ class ProjectPlanningAppFactory:
         except Exception:
             raise ValueError("project planning existing Executive admission refused") from None
         invocation._require_live()
-        policy=PlanningPolicy.load(service.config.proof_source_repository,service.config.proof_base_sha)
+        policy,commission=self._fixed_planning_code(invocation)
         from control_plane.agentos_project_plan import AgentOsProjectPlanReader
         from common.workspace_project_plan_contract import validate_body
         plan=validate_body(self._canonical_plan(workspace,work_ref,current_only=current_only))
         if plan['availability']!='AVAILABLE' or plan['selection']!={'work_ref':work_ref}:
             raise ValueError('project planning current canonical goal unavailable')
-        commission=read_protected_blob(service.config.proof_source_repository,service.config.proof_base_sha,COMMISSION_PATH)
-        if not commission or len(commission)>16384:
-            raise ValueError("project planning fixed commission unavailable")
         from control_plane.model_router import ModelRouter
         _quota,_registration,recipe=service._paid_subject_review_registration(ModelRouter.load(),direct_native=True)
         binding=native.normalize_binding({key:(service.config.proof_base_sha if key=="base_sha"
