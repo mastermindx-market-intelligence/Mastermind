@@ -6,6 +6,7 @@ import { ProgrammeDirection, type ProgrammeDirectionProps } from "../direction/P
 import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceClaim } from "./projection";
 import "./office.css";
 import { ByokRolesPanel } from "./ByokRolesPanel";
+import type { ByokRoleView } from "./byok-role-view";
 import { registerUnsavedNavigationHold } from "../auth-navigation-guard";
 import { FabricMissionInspector } from "../fabric/FabricMissionInspector";
 import type { ResultSelection } from "../result";
@@ -30,6 +31,10 @@ const officePlanPermission = () => {
 export interface OfficeDraft { text: string; context: ProjectionContext }
 export interface MetaCeoOfficeProps {
   projection: OfficeProjection;
+  /** Current presentation from the existing authenticated BYOK read owner. */
+  byokObservation?: ByokRoleView;
+  canRefreshByok?: boolean;
+  onRefreshByok?: () => void;
   /** Existing canonical Agent OS reader; authored objectives never confer adoption. */
   programmeDirection?: Omit<ProgrammeDirectionProps, "locale">;
   draft: OfficeDraft;
@@ -57,6 +62,7 @@ const OFFICE_ZH = {
   "Continue the exact selected Executive session": "继续当前已验证的 Executive 会话",
   "Native continuation uses the existing Executive owner. Sending confirms only the original operation receipt, not a worker result or acceptance.": "原有 Executive 负责人处理会话继续。发送回执只证明原操作已提交，不代表工作结果或验收。",
   "Current direction": "当前方向",
+  "Refresh configuration": "刷新配置",
   "Source unavailable": "来源不可用",
   "The adopted direction has not been supplied by its owner.": "负责人尚未提供已采纳的方向。",
   "Reconcile the original operation. Resend, failover and target change remain held.": "请核对原操作。重新发送、切换通道和更改目标仍暂停。",
@@ -152,7 +158,8 @@ function SourceBadge({ source }: { source: SourceClaim }) {
 
 export function MetaCeoOffice({
   projection, draft, onDraftChange, nativeContinuation, onInspectWorkerResult, programmeDirection,
-  onStartNewWork, locale = "en",
+  onStartNewWork, byokObservation = { state: "SOURCE_UNBOUND" },
+  canRefreshByok = false, onRefreshByok, locale = "en",
 }: MetaCeoOfficeProps) {
   const t = (en: keyof typeof OFFICE_ZH): string => locale === "zh-CN" ? OFFICE_ZH[en] : en;
   const [sourcesOpen, setSourcesOpen] = useState(false);
@@ -227,7 +234,12 @@ export function MetaCeoOffice({
       <p>{t("The adopted direction has not been supplied by its owner.")}</p>
     </section>}
 
-    <ByokRolesPanel locale={locale} />
+    <ByokRolesPanel locale={locale} observation={byokObservation} />
+    <div className="office-byok-refresh">
+      <button type="button" disabled={!canRefreshByok || !onRefreshByok} onClick={onRefreshByok}>
+        {t("Refresh configuration")}
+      </button>
+    </div>
 
     {unknownEffect && <div className="office-effect-alert" role="alert">
       <strong>EFFECT_UNKNOWN</strong><p>{t("Reconcile the original operation. Resend, failover and target change remain held.")}</p>

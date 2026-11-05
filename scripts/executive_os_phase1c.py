@@ -3230,6 +3230,7 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
     service = _service_from_config(
         raw,
         fabric_worker_binding_source=physical_source if attended_work_placements else None,
+        byok_roles_reader=physical_source.hermes_roles_reader() if physical_source is not None else None,
         paid_worker_binding_source=paid_source,
         attended_work_placements=attended_work_placements,
         fabric_attended_probe_source=(
