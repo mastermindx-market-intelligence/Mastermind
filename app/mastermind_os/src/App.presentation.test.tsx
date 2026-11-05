@@ -28,6 +28,7 @@ describe("explicit shell presentation", () => {
 
   it("changes render inputs without losing the company draft or its focused control", () => {
     const { container, rerender } = render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Meta-CEO" }));
     const field = screen.getByRole("textbox", { name: "Direction to Meta-CEO" }) as HTMLTextAreaElement;
     fireEvent.change(field, { target: { value: "Keep my exact 公司 direction." } });
     field.focus();

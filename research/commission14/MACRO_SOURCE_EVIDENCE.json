@@ -1,0 +1,975 @@
+{
+  "schema": "commission14.macro_source_research_evidence.v1",
+  "purpose": "Bounded read-only research evidence manifest, not a production contract or new control plane.",
+  "repository": "mastermindx-market-intelligence/macro",
+  "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+  "census_observation_date_utc": "2026-10-04",
+  "observation_time_precision": "date_only; no exact retrieval timestamp asserted",
+  "source_count": 41,
+  "source_evidence": [
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "agentos/decisions/DEC-BIOCATALYST-CASH-RUNWAY-OWNED-BY-CAPITAL-STRUCTURE.md",
+      "git_blob_sha": "28423bcb6371ec56368513fb40694f0cfb78212d",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/agentos/decisions/DEC-BIOCATALYST-CASH-RUNWAY-OWNED-BY-CAPITAL-STRUCTURE.md",
+      "key_findings": [
+        {
+          "line_ranges": "8-27",
+          "finding": "FIF owns accounting facts, Capital Structure derived financing-survival/runway; consumer-local computation prohibited. Decision alone authorizes no build."
+        }
+      ],
+      "source_bytes_sha256": "651a2d81059d1d9fcf55afad48059940a0284b0b6488137a8a4d6afb8d404f3d",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "agentos/decisions/DEC-CS-V2-FIRST-KNOWN-AT-IS-CANONICAL-RETENTION-CLOCK.md",
+      "git_blob_sha": "129415ff26910c06f1df8b34c68f0232250ee5e2",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/agentos/decisions/DEC-CS-V2-FIRST-KNOWN-AT-IS-CANONICAL-RETENTION-CLOCK.md",
+      "key_findings": [
+        {
+          "line_ranges": "8-16",
+          "finding": "first_known_at is verified-retention clock of first observation whose generation later becomes canonical, frozen at publication; not Git commit timestamp; parser correction separate."
+        }
+      ],
+      "source_bytes_sha256": "ba6907a08936f44897a56d418249cb28df01f7e545f2af232ff33d7085b2f1a5",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "agentos/decisions/DEC-FIF-3A1-REUSE-MAP.md",
+      "git_blob_sha": "35b3fc837ca0e5fac6691e9963b829b1df37398b",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/agentos/decisions/DEC-FIF-3A1-REUSE-MAP.md",
+      "key_findings": [
+        {
+          "line_ranges": "7-18",
+          "finding": "Binding reuse of Data OS identity, retained filing/parser/Forensics boundary; no new identity mint, request-time SEC or attested-history mutation."
+        }
+      ],
+      "source_bytes_sha256": "60810ebf52703779cc674e7cee47df9039c025d1ad2cb61a1f708a31ca8e83cf",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "agentos/workstreams/WS-CAPITAL-STRUCTURE-INTELLIGENCE-V2.md",
+      "git_blob_sha": "290485d93c825fecaff3dc701237d6e52b31ef80",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/agentos/workstreams/WS-CAPITAL-STRUCTURE-INTELLIGENCE-V2.md",
+      "key_findings": [
+        {
+          "line_ranges": "1-36",
+          "finding": "Existing active owner coo-fable; explicit owned engine, collectors, compilers, contracts, artifacts, API and template paths."
+        },
+        {
+          "line_ranges": "61-80",
+          "finding": "No duplicate consumer-local capital ledger, generic company_event.v1 claim, historical PIT rewrite, second document-term cache or compiled truth root."
+        },
+        {
+          "line_ranges": "110-120;159-196;198-229",
+          "finding": "W1/W2A/W2B historical PROVEN_LIVE records; W2C #6415 and W2D #6424 merged BUILT_NOT_PROVEN; W2 in_progress; W3/W4 held; later waves todo."
+        }
+      ],
+      "source_bytes_sha256": "de32082a6a0135bd59a58cfd7e9b5887384822195dbb84d272d8a81bc4fa980a",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "collectors/corp_bond_holdings.py",
+      "git_blob_sha": "e4d8c41c20009a047e1935f5132e93fec0dee625",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/collectors/corp_bond_holdings.py",
+      "key_findings": [
+        {
+          "line_ranges": "1-20;41-48;103-139;343-354",
+          "finding": "Five-fund SSGA ISIN holdings; coupon/par/market_value/maturity/as_of; keep-FIRST dated snapshot with no historical correction/knowledge envelope."
+        },
+        {
+          "line_ranges": "371-417",
+          "finding": "Missing source date falls back to guessed prior business day with warning; source date guess cannot establish historical eligibility."
+        }
+      ],
+      "source_bytes_sha256": "9fe91aff1ed80cb6938ef96f312aba60b817827bcee312e39737594c9d545f8e",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "collectors/edgar_dilution.py",
+      "git_blob_sha": "9b6bf1c5a1f87ffba54a1d857bac64beb74311f2",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/collectors/edgar_dilution.py",
+      "key_findings": [
+        {
+          "line_ranges": "1-23;41-62;190-233",
+          "finding": "Legacy six-column accession/CIK/ticker/form/filing_date/first_seen event index, S-3 and 424B1-5, 90/7-day sweep; not normalized issuance or contractual refinancing terms."
+        }
+      ],
+      "source_bytes_sha256": "72048fa9c1c1ccd63f164a32901a2f56db5c32cc8f54ec5c47a3c0fe9fd2415f",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "config/identity_seams.yml",
+      "git_blob_sha": "d9de4f2570e94ec80994e0a9c9224c69b253d719",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/config/identity_seams.yml",
+      "key_findings": [
+        {
+          "line_ranges": "37-48",
+          "finding": "Data OS canonical master reader lib/dataos/identity.py and issuer/security/vendor alias/migration artifacts; ISS:/SEC:/listing conventions."
+        },
+        {
+          "line_ranges": "72-99",
+          "finding": "IssuerMaster current-identity only, no historical issuer lineage; shared CIK necessary but insufficient for first-time multi-security grouping, explicit allowlist gate."
+        }
+      ],
+      "source_bytes_sha256": "506e451a1d91fd0e0082d8558dbe83c1bb1c9289465bdc3a9b90ebc3375f6a6e",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "config/mastermind_programs.yml",
+      "git_blob_sha": "6e7a6ff907bb9c9c559365acee0f609604f61c3c",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/config/mastermind_programs.yml",
+      "key_findings": [
+        {
+          "line_ranges": "2341-2374",
+          "finding": "Canonical capital-structure-intelligence program is Capital Structure and Credit Intelligence; Macro owns implementation, context-only; excludes equity selection and portfolio sizing."
+        },
+        {
+          "line_ranges": "3760-3763",
+          "finding": "ccw is alias_of capital-structure-intelligence, not a separately canonical program."
+        }
+      ],
+      "source_bytes_sha256": "268971b99700c149ef0500b8b73545863fbf0a9cda66671c8ed85d9fcba93fcc",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "contracts/capital_structure_document_term_observation.schema.json",
+      "git_blob_sha": "f15a0f4292fa1468ce123a3765074538dd9ff85e",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/contracts/capital_structure_document_term_observation.schema.json",
+      "key_findings": [
+        {
+          "line_ranges": "1-411",
+          "finding": "Existing closed document-term observation/provenance/correction contract; no generic numeric term guesses."
+        }
+      ],
+      "source_bytes_sha256": "7098f3f4e6e17185da1b7c2ee1d79fa5966e0ac3cfb96c0d6385573f0a0bf78c",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "contracts/capital_structure_event.schema.json",
+      "git_blob_sha": "79d3f094e0d32ed60f3649daee6c14863b3cd89f",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/contracts/capital_structure_event.schema.json",
+      "key_findings": [
+        {
+          "line_ranges": "1-198",
+          "finding": "Existing capital_structure.event.v1 filing-event adapter; retain identity/correction/source semantics."
+        }
+      ],
+      "source_bytes_sha256": "db4a7bf377bfa78f5a93b5e79e788c78282a47b8a8b401fbb8cb6cf3ff7c1c5c",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "contracts/capital_structure_instrument_candidate_term.schema.json",
+      "git_blob_sha": "07653bc4f289fcb5eaf812ac7e0120ddf77ec0a1",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/contracts/capital_structure_instrument_candidate_term.schema.json",
+      "key_findings": [
+        {
+          "line_ranges": "1-38;1-235",
+          "finding": "Closed capital_structure.instrument_candidate_term.v1, source term observation/correction/hash/availability/receipt; candidate is not resolved instrument or capacity."
+        }
+      ],
+      "source_bytes_sha256": "139401d9d0f24569363a9ea8198acffa4fd295cab89c150b69827a718a97cd7d",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "contracts/capital_structure_source_manifest.schema.json",
+      "git_blob_sha": "2987edaf724f26539af374d2b15e579bba7c2346",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/contracts/capital_structure_source_manifest.schema.json",
+      "key_findings": [
+        {
+          "line_ranges": "1-193",
+          "finding": "Existing closed retained-source/evidence contract; reuse field semantics and identity/clock commitments."
+        }
+      ],
+      "source_bytes_sha256": "f33dafa1c3436b7ab0e50737403d3d05e8ab770bc58784c854eac14ad3888104",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "data/capital_structure/health.json",
+      "git_blob_sha": "9b0a335bc887387963e3a191d078c7c9bf0d0b0d",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/data/capital_structure/health.json",
+      "key_findings": [
+        {
+          "line_ranges": "1",
+          "finding": "Committed Sep26 receipt: durable-ingestion verdict ok but horizon degraded_discovery; latest expected index Sep25 vs discovered/retained/compiled Sep17; 10600 pending/10060 deferred; covenant 0 observations/0 covered issuers from2999 eligible exhibits."
+        }
+      ],
+      "source_bytes_sha256": "37355a43f02b13d00381887de8d8ce0b57253329953602eeb6ee8be0fb398c33",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "data/capital_structure/telemetry.json",
+      "git_blob_sha": "fd8353f76efa7b9e0cf9e0ce50e8f0023604eeb1",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/data/capital_structure/telemetry.json",
+      "key_findings": [
+        {
+          "line_ranges": "8-25",
+          "finding": "Committed Sep26 compiled output: 43093 source manifests,14007 event versions,1914 edges,9103 review items; all-false authority. Counts not issuer economic-term coverage."
+        }
+      ],
+      "source_bytes_sha256": "59621281ed9861c78823d7fb8eaf7c65cfde1520412bd72aa54427b78f9181de",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "data/corp_bonds/credit_momentum.json",
+      "git_blob_sha": "2ff03020522bc8ba8c8a23796419c946b155ea4b",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/data/corp_bonds/credit_momentum.json",
+      "key_findings": [
+        {
+          "line_ranges": "1-12",
+          "finding": "Committed output as_of Sep10/data_session Sep8; output presence does not prove current live refresh or external consumer."
+        }
+      ],
+      "source_bytes_sha256": "041fef03a7d6a7f67c292eed65cbc44848aa19fe53e370487a5a11e192722190",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "data/corp_bonds/issuer_themes.json",
+      "git_blob_sha": "926e7a2f183657f12a38b2b1c2bfa14a5e1a4a48",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/data/corp_bonds/issuer_themes.json",
+      "key_findings": [
+        {
+          "line_ranges": "1-175",
+          "finding": "Existing issuer/theme registry with equity ticker and prefix/name patterns; current observation map, not proved PIT obligor/master history."
+        }
+      ],
+      "source_bytes_sha256": "a51bef8dabcdca5f69a87355d3baa17f9db9c371d9340d1746b8d80d56642cd3",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "data/corp_bonds/latest.json",
+      "git_blob_sha": "f3c834da17c6221ea28b037591d14d938633b145",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/data/corp_bonds/latest.json",
+      "key_findings": [
+        {
+          "line_ranges": "1-12",
+          "finding": "Committed output as_of Sep10/data_as_of Sep8 and all-false authority; prior generated output, not Oct4 live freshness proof."
+        }
+      ],
+      "source_bytes_sha256": "830aafa789b202895804eab88922dd4ae0839f363873ffc701ce8fa61e3e74be",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "data/corp_bonds/validation.json",
+      "git_blob_sha": "3ba561f15be4d1e8aaadc00da68135c6fd915cd8",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/data/corp_bonds/validation.json",
+      "key_findings": [
+        {
+          "line_ranges": "1-59;294-319",
+          "finding": "Committed overall PASS Sep10; July13 iShares comparison has57-day gap, LQD75% within25bp, nongating HYG55%, HYG p90 error142.67bp. Estimator gate not PIT/transaction/predictive/production proof."
+        }
+      ],
+      "source_bytes_sha256": "b0c9353613c47d3308972a7afe72124659a2c61c60e92009a508b2bb9f29f85e",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "docs/CAPITAL_STRUCTURE_INTELLIGENCE_CONTRACT.md",
+      "git_blob_sha": "e2891571eb4db0b616fd386268547122b36851de",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/docs/CAPITAL_STRUCTURE_INTELLIGENCE_CONTRACT.md",
+      "key_findings": [
+        {
+          "line_ranges": "3-22;49-69",
+          "finding": "Existing shared SEC evidence/issuer-context plane, temporary capital_structure.event.v1 adapter, sole-writer artifact map; canonical source_manifest is JSONL."
+        },
+        {
+          "line_ranges": "94-103;398-435",
+          "finding": "Authenticated Company Facts/share-count code default-off/pre-production, provider harness unprovisioned and never run; deployment is not coverage or activation."
+        },
+        {
+          "line_ranges": "543-567",
+          "finding": "Public availability distinct from canonical system availability; bundle latest first-seen, later parser corrections and immutable source-prefix publication marker."
+        },
+        {
+          "line_ranges": "636-651",
+          "finding": "Consumer context ceiling; downstream consumes owner projection, not raw evidence or a second calculation path."
+        }
+      ],
+      "source_bytes_sha256": "eca06010c66b8a28491c8c03509c420dff8dceca4ac90990720339234dddd714",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "docs/SIGNAL_BUS.md",
+      "git_blob_sha": "db18291d95032cd6d316fbbab705c0f0b3e4ea40",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/docs/SIGNAL_BUS.md",
+      "key_findings": [
+        {
+          "line_ranges": "186-209;232-245",
+          "finding": "Registered Capital Structure and CCW artifact/consumer surfaces; declaration/consumer counts do not establish runtime live proof."
+        }
+      ],
+      "source_bytes_sha256": "450c781eaae17be8facfe8eec58ca00fa6c29d33b9b244abdcefb160e6f21d93",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "engine/capital_need.py",
+      "git_blob_sha": "4f1c5ba80dbc5afc9508cadbaf71b90de09ff693",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/engine/capital_need.py",
+      "key_findings": [
+        {
+          "line_ranges": "56-147;297-369",
+          "finding": "Built context-only validation/composition; future filing/evaluation and optional acquisition/source availability checks; cross-period cover refused."
+        },
+        {
+          "line_ranges": "267-285",
+          "finding": "No refinancing forecast; excludes financing_access, restricted_cash, investor_held_par, valuation, covenant, trade_recommendation. Missing optional availability is not historical knowledge proof."
+        }
+      ],
+      "source_bytes_sha256": "f578b44a51b7293884686f89cf39dcff465f207b41ad6ed412c6f6c3166337d7",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "engine/capital_structure/instrument_candidates.py",
+      "git_blob_sha": "6bcbeeb0f772ddb4e4c1d3309163e21ec17a66af",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/engine/capital_structure/instrument_candidates.py",
+      "key_findings": [
+        {
+          "line_ranges": "1-1232",
+          "finding": "Existing candidate-term projection and trusted source/evidence validation; candidate is not resolved contractual instrument; supports owner reuse."
+        }
+      ],
+      "source_bytes_sha256": "36ab491c91a31c23b413731abf4916da5f3193ee24064116a2c42621f8809c5c",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "engine/cash_runway.py",
+      "git_blob_sha": "922366d61abd3544f7c1613e517ef2a030700289",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/engine/cash_runway.py",
+      "key_findings": [
+        {
+          "line_ranges": "1-31;212-279;493-551",
+          "finding": "Built CIK-only annual-duration cash/FCF/scenario runway with numeric and optional ladder-join guards."
+        },
+        {
+          "line_ranges": "131-161;385-390",
+          "finding": "Latest-period selection pattern does not reconstruct eligible historical known state."
+        }
+      ],
+      "source_bytes_sha256": "c7132eb5be32bf7332394734651749f248fa9977f098f21d85b34590db66ba93",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "engine/corp_credit.py",
+      "git_blob_sha": "56855ee5c44330184e4b7ca7273c64de8915eac2",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/engine/corp_credit.py",
+      "key_findings": [
+        {
+          "line_ranges": "1-30;51-59;671-703",
+          "finding": "Built sponsor-derived YTM/g-spread, issuer/theme/sector/market series and bond panel; authority rank/size/gate/escalate false; backward CMT date join."
+        },
+        {
+          "line_ranges": "757-808;1940-1955;2038",
+          "finding": "Current registry prefix then substring match, first JSON-order match wins; historical identity/obligor lineage not proved."
+        },
+        {
+          "line_ranges": "1158-1213",
+          "finding": "Maturity wall sums sponsor-held par by market/theme/issuer; not issuer total principal outstanding or contractual debt ladder."
+        },
+        {
+          "line_ranges": "2090-2158",
+          "finding": "Derived parquet histories rewritten from current calculation/mapping choices; correction-time historical reproducibility not proved."
+        }
+      ],
+      "source_bytes_sha256": "12cabfe2dcbb310641c998be3c410d3c35579d0b985a3ba500c66607f07e22af",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "engine/covenant_headroom.py",
+      "git_blob_sha": "27405bf8f4b5ef697c4747504e01cd0ecbf48400",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/engine/covenant_headroom.py",
+      "key_findings": [
+        {
+          "line_ranges": "1-38",
+          "finding": "Existing pure CIK-only human_research_only headroom view model; no signal/score authority; source coverage must be measured independently."
+        }
+      ],
+      "source_bytes_sha256": "ab60c4c7b1e864332cbccffaf80c9445deb0b738938b8bbe0045f62983e9de50",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "engine/credit_momentum.py",
+      "git_blob_sha": "ed8a39a2c70dce81da7bfa9b824d1916723133ee",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/engine/credit_momentum.py",
+      "key_findings": [
+        {
+          "line_ranges": "1-47",
+          "finding": "Built display-only velocity/acceleration/momentum; all-false authority, density gates and coverage caveats."
+        },
+        {
+          "line_ranges": "855-940",
+          "finding": "Divergence is theme raw 21d spread direction versus equal-weight last22 equity returns; not residualized issuer incremental information; shown function does not align both terminal dates."
+        }
+      ],
+      "source_bytes_sha256": "e6f3dbdef844d855f62ef038fded578b1567827b31485ad725d5c6bae90abb2a",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "engine/credit_window.py",
+      "git_blob_sha": "9d556b30a3a4c96f1413e609d1f8f69ed5ff68b8",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/engine/credit_window.py",
+      "key_findings": [
+        {
+          "line_ranges": "1-40",
+          "finding": "Display-only never-scored aggregate IG/HY OAS and MOVE issuance context; no issuer identity/par join."
+        }
+      ],
+      "source_bytes_sha256": "1e42154cbf01956821a02834ce2a0103c38c9e07b891b23c51ab13b199b8097e",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "engine/debt_maturity.py",
+      "git_blob_sha": "cb5688451aa025156aed89566f9076729526d27e",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/engine/debt_maturity.py",
+      "key_findings": [
+        {
+          "line_ranges": "1-34;213-255;273-297",
+          "finding": "Built CIK-only six-bucket issuer XBRL debt_maturity.v1 with same-period provenance and explicit absent/unit/conflict states; no score."
+        },
+        {
+          "line_ranges": "135-159;185-190",
+          "finding": "Latest annual period selected without as_of eligibility filtering. Completed synthetic replay selected future filing after historical cutoff; live leakage not proved."
+        }
+      ],
+      "source_bytes_sha256": "b65b53c2e7cb3cac6229b1d5ad48d16825478d757e091b4b2a55797a1e67dd81",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "orch/audits/macro_PR-7514.mm.md",
+      "git_blob_sha": "e8a39372354fd0715ffa7ef9bc95d08e4047d9e7",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/orch/audits/macro_PR-7514.mm.md",
+      "key_findings": [
+        {
+          "line_ranges": "17-21;41-44",
+          "finding": "Historical Sep20 audit: parent debt/covenant capability PARTIAL; debt/cache source exists;200 CIK caches/32 of first40 cash-tag coverage recorded at pinned historical landing; user-page render proof owed."
+        }
+      ],
+      "source_bytes_sha256": "59e7c686cb5b4c450d1b8ce9332e056549fbe5031898632e942c95ba94b8232f",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "orch/audits/macro_PR-7710.mm.md",
+      "git_blob_sha": "8ae8d3bc581bc73af10ab86891abd660960b54b2",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/orch/audits/macro_PR-7710.mm.md",
+      "key_findings": [
+        {
+          "line_ranges": "1-181",
+          "finding": "Historical capital_need/cash runway vertical audit; source landing and claimed verification do not alone establish current consumer/runtime freshness."
+        }
+      ],
+      "source_bytes_sha256": "5800a3ee8c8bbee6dba4c4fed47d4024ba2eaff1d83fff12e872eed2c1dacb5b",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "research/CAPITAL_STRUCTURE_COMPANYFACTS_INTAKE_DOCKET.md",
+      "git_blob_sha": "87d7967968de72d896ffa5bb3ed68f60e9c65a31",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/research/CAPITAL_STRUCTURE_COMPANYFACTS_INTAKE_DOCKET.md",
+      "key_findings": [
+        {
+          "line_ranges": "1-225",
+          "finding": "Existing authenticated acquisition/generation/receipt/head-witness design; current Company Facts endpoint is acquisition evidence, not historical public availability. Read with current default-off/provisioning qualification."
+        }
+      ],
+      "source_bytes_sha256": "e05f99273e093e469aae11fd8b8d05cbca5673fbeb39d70204a1b1efd82c1dd7",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "research/CAPITAL_STRUCTURE_DOCUMENT_TERMS_WAVE2B_FABLE_HANDOFF.md",
+      "git_blob_sha": "f31c1a4a7af197634787bc8177584923434c1b2b",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/research/CAPITAL_STRUCTURE_DOCUMENT_TERMS_WAVE2B_FABLE_HANDOFF.md",
+      "key_findings": [
+        {
+          "line_ranges": "1-131",
+          "finding": "Existing direct fee-table transcription/provenance/PIT-correction spine, not active instruments/capacity/outstanding obligations; current contract reconciles stale source_manifest.parquet path."
+        }
+      ],
+      "source_bytes_sha256": "32bf5c509c47cb30428a3e95dc041184e24c68dba78c6b304dd890e754761a7a",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "research/CAPITAL_STRUCTURE_INTELLIGENCE_V2_MASTERPLAN_2026-08-18.md",
+      "git_blob_sha": "000422bb5a77c9bfd078b00f1d1d836f4d292cd8",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/research/CAPITAL_STRUCTURE_INTELLIGENCE_V2_MASTERPLAN_2026-08-18.md",
+      "key_findings": [
+        {
+          "line_ranges": "462-520",
+          "finding": "Existing clock model and conceptual capital_structure_state.v2 ontology: identity, share_basis, registration, instruments, cash_funding, transactions, uncertainty, change_events. Specification is not completed implementation."
+        },
+        {
+          "line_ranges": "850-856",
+          "finding": "Existing V2 wave boundaries; current workstream carries later held-gate state."
+        }
+      ],
+      "source_bytes_sha256": "ac63f5a6a4777ea8df81aa2d6b8cc08fbe2ed00fcc7b40327d3207c8eaf83443",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "research/CAPITAL_STRUCTURE_ISSUER_STATE_W3_BUILD_DOCKET.md",
+      "git_blob_sha": "c55eba6e10a061171a3411fbd8fdc47b90622a03",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/research/CAPITAL_STRUCTURE_ISSUER_STATE_W3_BUILD_DOCKET.md",
+      "key_findings": [
+        {
+          "line_ranges": "44-78",
+          "finding": "Candidate-term projection exists; resolved instrument relation/resolver states/correction-aware links still required; candidate availability is actual compiler time."
+        },
+        {
+          "line_ranges": "106-158",
+          "finding": "Existing cash/runway/financing history and wider instrument/document stages; no probability or trading authority by construction."
+        },
+        {
+          "line_ranges": "161-193",
+          "finding": "Candidate ledger verifier rebinds source/evidence; upstream external manifest anchoring residual prevents promotion. Older parquet source-manifest prose must be reconciled to current JSONL contract."
+        }
+      ],
+      "source_bytes_sha256": "7dd35a0e5ea20f763f96d1a02ac6ae1221059574b4de05b8268e32ab8b394510",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "research/CORPORATE_CREDIT_WATCH_MASTERPLAN_BY_FABLE.md",
+      "git_blob_sha": "2338d8b64ad19aa58643eb87d657a79daed80592",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/research/CORPORATE_CREDIT_WATCH_MASTERPLAN_BY_FABLE.md",
+      "key_findings": [
+        {
+          "line_ranges": "19-55;64-81;159-214;220-264",
+          "finding": "Existing CCW bounded display-tier charter, data and estimator ownership, matrix-pricing/T+1/index-fund coverage/call/composition/history caveats; source code/artifacts substantiate implemented portions."
+        }
+      ],
+      "source_bytes_sha256": "c2638e0f1a689e853f8fda82975d331a16db68ae440bc57ed036e499d0adcb66",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "research/RESEARCH_VAULT_MASTERPLAN.md",
+      "git_blob_sha": "fd2c3f509c725c4332f7202c645d988b483ad684",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/research/RESEARCH_VAULT_MASTERPLAN.md",
+      "key_findings": [
+        {
+          "line_ranges": "1-19;234-282;333-383;427-454",
+          "finding": "Existing Macro private R2 research PDF/catalog/FTS/API content estate; not market-credit truth repository. Offline extraction studies require separate prereg/promotion; source reports need rights and fact verification."
+        }
+      ],
+      "source_bytes_sha256": "6904a99188c2c6ff3452978f1f6b66bdacd956537667711c4c8a7b36a52ddf99",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "research/financial_intelligence_fabric/FIF_3A1_REUSE_MAP.md",
+      "git_blob_sha": "645d871fc93c37c00b118e0c0f544863dd39d5de",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/research/financial_intelligence_fabric/FIF_3A1_REUSE_MAP.md",
+      "key_findings": [
+        {
+          "line_ranges": "6-18",
+          "finding": "ISS:US-XNAS-AAPL, SEC:US-XNAS-AAPL and source CIK 0000320193 remain distinct; no new issuer registry or entity_id=CIK rule."
+        }
+      ],
+      "source_bytes_sha256": "b778899cce2109f6814e8ef9977f260209fbd044d99151450eb14f77476e7444",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "scripts/build_debt_maturity.py",
+      "git_blob_sha": "8bc3cd8a973ecd162161de4ab9dd139f1ba00430",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/scripts/build_debt_maturity.py",
+      "key_findings": [
+        {
+          "line_ranges": "1-28",
+          "finding": "Bounded separate nine-tag cache producer reuses existing CIK resolvers, not generic authenticated Company Facts store."
+        },
+        {
+          "line_ranges": "246-277",
+          "finding": "Single mutable per-CIK JSON cache with fetched_at and tmp.replace; current cache alone not immutable historical generation/correction selection."
+        }
+      ],
+      "source_bytes_sha256": "79aa47bfdc8d51c83b0a299d5ca45d873267ae17543bb8b379b5dc98570d9ae4",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "tests/test_capital_need.py",
+      "git_blob_sha": "fe711a36f27cde19e7bda4832b111a8056ce5e24",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/tests/test_capital_need.py",
+      "key_findings": [
+        {
+          "line_ranges": "56-84;127-183;502-589",
+          "finding": "Existing adversarial period/stale/future cutoff/optional availability/acquisition separation tests. Source read only; complete test suite not rerun in this census."
+        }
+      ],
+      "source_bytes_sha256": "5ec6dd37e641b120b4921d07a57108d60e7b3b4ff148f5f096479ba33d1f9ae5",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "tests/test_cash_runway.py",
+      "git_blob_sha": "ba6b63379cc0d2ffef3c412f4ad2f1112620a870",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/tests/test_cash_runway.py",
+      "key_findings": [
+        {
+          "line_ranges": "1-1014",
+          "finding": "Existing cash runway/annual duration/wiring/render/guard tests. Source read only; complete suite not rerun."
+        }
+      ],
+      "source_bytes_sha256": "b285174a1d34f8c67daba53830ead0476f9f4e8eb464af5969555fce2b7cfb8d",
+      "source_blob_verified_from_bytes": true
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit_pin": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+      "path": "tests/test_debt_maturity.py",
+      "git_blob_sha": "4cf7e1373588356c2c3c93daddf4aa896cdf2fd9",
+      "permanent_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/tests/test_debt_maturity.py",
+      "key_findings": [
+        {
+          "line_ranges": "1-1824",
+          "finding": "Existing debt ladder/identity/unit/producer/persistence/render tests. Source read only; complete suite not rerun."
+        }
+      ],
+      "source_bytes_sha256": "41bff788ca6249a3d711c969950227444aca3a7368837a0fe0e50c68f551db5d",
+      "source_blob_verified_from_bytes": true
+    }
+  ],
+  "principal_conclusions": [
+    "Extend existing Capital Structure and Credit Intelligence program; ccw is its alias. No new credit workstream, warehouse, issuer identity registry, company event plane or decision snapshot owner.",
+    "Existing CCW supplies evaluated sponsor holdings, YTM/g-spread, issuer/theme/sector series, maturity walls and descriptive credit/equity divergence; new transaction/issuance/refinancing facts require qualified owner extensions.",
+    "Existing debt_maturity/cash_runway/capital_need source must be reused; production coverage, historical eligibility and live consumer proof remain separate.",
+    "Current identity is Data OS ISS:/SEC: with source CIK distinct; current-only issuer mapping does not prove historical obligor/guarantor lineage.",
+    "capital_structure_state.v2 is the existing conceptual owner ontology; candidate terms do not establish resolved instruments or active capital availability.",
+    "No authority promotion, source activation or held-wave release follows from this research census."
+  ],
+  "committed_artifact_observations": {
+    "capital_structure_health": {
+      "path": "data/capital_structure/health.json",
+      "generated_at": "2026-09-26T16:09:17.716300+00:00",
+      "compiler_generated_at": "2026-09-26T15:39:55.163308+00:00",
+      "verdict": "ok",
+      "horizon_state": "degraded_discovery",
+      "watermarks": {
+        "latest_compiled_in_policy_filing_date": "2026-09-17",
+        "latest_completed_sec_index_date": "2026-09-17",
+        "latest_discovered_in_policy_filing_date": "2026-09-17",
+        "latest_discovered_observed_at": "2026-09-19T01:34:59.700373Z",
+        "latest_eligible_retained_filing_date": "2026-09-17",
+        "latest_eligible_retained_retrieved_at": "2026-09-19T01:56:13.752520Z",
+        "latest_expected_realtime_filing_date": "2026-09-25",
+        "latest_expected_sec_index_date": "2026-09-25",
+        "latest_expected_sec_index_status": null,
+        "latest_filings_observed_through": null,
+        "latest_filings_status": null
+      },
+      "backlog": {
+        "deferred_count": 10060,
+        "oldest_pending_first_seen": "2026-08-01T15:35:40.114609Z",
+        "parked": 404,
+        "pending": 10600,
+        "selected_count": 540
+      },
+      "covenant_extraction": {
+        "covered_manifests": 0,
+        "eligible_exhibits": 2999,
+        "issuers_covered": 0,
+        "observations": 0,
+        "state": "uncovered",
+        "unavailable_terms": 0
+      },
+      "qualification": "Committed prior receipt, not independently observed current host/runtime state. Durable advancement and freshness are separate."
+    },
+    "capital_structure_telemetry": {
+      "path": "data/capital_structure/telemetry.json",
+      "as_of": "2026-09-26T15:39:55.163308+00:00",
+      "counts": {
+        "accessions_grouped": 13607,
+        "compile_failures": 0,
+        "event_edges": 1914,
+        "event_versions": 14007,
+        "new_event_versions": 0,
+        "review_queue": 9103,
+        "source_manifests": 43093
+      },
+      "qualification": "Counts measure source/event pipeline, not normalized economic debt term coverage or current live state."
+    },
+    "corp_credit_latest": {
+      "path": "data/corp_bonds/latest.json",
+      "as_of": "2026-09-10",
+      "data_as_of": "2026-09-08",
+      "authority": {
+        "rank": false,
+        "size": false,
+        "gate": false,
+        "escalate": false
+      },
+      "qualification": "Committed output, not Oct4 live freshness or consumer proof."
+    },
+    "credit_momentum": {
+      "path": "data/corp_bonds/credit_momentum.json",
+      "as_of": "2026-09-10",
+      "data_session": "2026-09-08",
+      "authority": {
+        "rank": false,
+        "size": false,
+        "gate": false,
+        "escalate": false
+      },
+      "qualification": "Committed output, not Oct4 live freshness or consumer proof."
+    },
+    "corp_credit_validation": {
+      "path": "data/corp_bonds/validation.json",
+      "as_of": "2026-09-10",
+      "overall": "PASS",
+      "price_convention": "clean",
+      "sample_metadata": {
+        "LQD": {
+          "as_of": "2026-07-13",
+          "n_rows": 3132,
+          "date_gap_days": 57
+        },
+        "HYG": {
+          "as_of": "2026-07-13",
+          "n_rows": 1323,
+          "date_gap_days": 57
+        }
+      },
+      "criterion_b": {
+        "LQD": {
+          "status": "PASS",
+          "n": 20,
+          "n_joined": 1758,
+          "median_bp": 17.29,
+          "p90_bp": 29.73,
+          "share_within_25bp": 0.75,
+          "bins_occupied": 5,
+          "date_gap_days": 57,
+          "gating": true
+        },
+        "HYG": {
+          "status": "PASS",
+          "n": 20,
+          "n_joined": 553,
+          "median_bp": 14.41,
+          "p90_bp": 142.67,
+          "share_within_25bp": 0.55,
+          "bins_occupied": 5,
+          "date_gap_days": 57,
+          "gating": false
+        },
+        "status": "PASS"
+      },
+      "qualification": "Existing estimator gate reports PASS despite57-day comparator date gap; does not establish PIT eligibility, executable/transaction pricing, predictive increment or production acceptance."
+    }
+  },
+  "completed_synthetic_pit_falsifier": {
+    "source_ref": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3",
+    "source_blob_sha": "cb5688451aa025156aed89566f9076729526d27e",
+    "cutoff": "2025-06-01",
+    "synthetic_input": {
+      "cik": 1,
+      "facts": {
+        "us-gaap": {
+          "LongTermDebtMaturitiesRepaymentsOfPrincipalInNextTwelveMonths": {
+            "units": {
+              "USD": [
+                {
+                  "accn": "old",
+                  "end": "2024-12-31",
+                  "filed": "2025-02-01",
+                  "form": "10-K",
+                  "fp": "FY",
+                  "fy": 2024,
+                  "val": 100
+                },
+                {
+                  "accn": "future",
+                  "end": "2025-12-31",
+                  "filed": "2026-02-01",
+                  "form": "10-K",
+                  "fp": "FY",
+                  "fy": 2025,
+                  "val": 999
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "observed_output": {
+      "selected_filed": "2026-02-01",
+      "selected_accn": "future",
+      "y1": 999,
+      "status": "reported"
+    },
+    "limitation": "Pure extractor scope only; not evidence of a live consumer leak. capital_need validates and rejects future-filed input, but cannot recover the old eligible filing from a discarded latest-only result.",
+    "method": "Executed exact-pin local pure-function snapshot once against bounded synthetic input; reproducible scratch script run generated this stored result.",
+    "command": "python /workspace/scratch/7e4ec63be218/macro_debt_maturity_pit_falsifier.py",
+    "source_repository": "mastermindx-market-intelligence/macro",
+    "source_path": "engine/debt_maturity.py",
+    "permanent_source_url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/engine/debt_maturity.py#L135-L190",
+    "call_arguments": {
+      "cik": "1",
+      "as_of": "2025-06-01"
+    },
+    "live_leakage_proved": false,
+    "production_code_or_state_modified": false,
+    "qualified_conclusion": "The pure debt_maturity extractor selects the latest annual filing without an as_of eligibility filter; capital_need rejects future-filed inputs but cannot recover the old eligible filing from discarded latest-only selection."
+  },
+  "current_adjacent_pr_metadata": {
+    "evidence_kind": "mutable_metadata_separate_from_protected_source_pin",
+    "observed_date_utc": "2026-10-04",
+    "pull_requests": [
+      {
+        "number": 7119,
+        "url": "https://github.com/mastermindx-market-intelligence/macro/pull/7119",
+        "title": "[MO-B F09-11] Debt-maturity artifacts survive the night: persist the #6921 cache through to main (MO-DELTA-018 live proof)",
+        "state": "open",
+        "draft": true,
+        "merged": false,
+        "head_sha": "c68d8bd4296df18e35d98b16a7e06f3588c22288",
+        "base_sha": "e86b92eb95d2cb29d65e44dbfa48fd64afadf62a",
+        "merge_commit_sha": null,
+        "created_at": "2026-09-13T18:04:08Z",
+        "updated_at": "2026-09-13T19:03:19Z",
+        "closed_at": null,
+        "merged_at": null
+      },
+      {
+        "number": 8051,
+        "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8051",
+        "title": "[MO-A][RIC-F3] W3: credit_momentum display-only yield_momentum block beside interim_tlt",
+        "state": "closed",
+        "draft": false,
+        "merged": true,
+        "head_sha": "5b753fa8494f5ffb56c2b275b072999292e0d3da",
+        "base_sha": "50549f8e839eff38a86568cbc2beb9d29fe0de81",
+        "merge_commit_sha": "5e0ebcb161b460d63252208f040067c6b922e805",
+        "created_at": "2026-09-27T00:43:36Z",
+        "updated_at": "2026-09-27T06:46:22Z",
+        "closed_at": "2026-09-27T06:46:20Z",
+        "merged_at": "2026-09-27T06:46:20Z"
+      },
+      {
+        "number": 8308,
+        "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8308",
+        "title": "[HOLD-FOR-SOL] feat(prophet): model Cycle funding and original-equity recovery",
+        "state": "open",
+        "draft": true,
+        "merged": false,
+        "head_sha": "446ffd0f1062dd064c0716b576ceba7ce90acf2b",
+        "base_sha": "ff420e6841a2468e4b718340cff240abbef114f1",
+        "merge_commit_sha": "74e11aaf7ef644aeab8155d5dfe3fab5504e0567",
+        "created_at": "2026-10-03T06:07:08Z",
+        "updated_at": "2026-10-03T09:01:14Z",
+        "closed_at": null,
+        "merged_at": null
+      },
+      {
+        "number": 8397,
+        "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8397",
+        "title": "[R25] Bonds: add fail-closed explanation evidence projection",
+        "state": "open",
+        "draft": true,
+        "merged": false,
+        "head_sha": "f6443f34f66c434e2ebfffb37cb3ba568de9f2b6",
+        "base_sha": "0d0c1533368aba1cd5f5d1ca3b14df825f540e91",
+        "merge_commit_sha": "404c03089dc5bc39a68ead7e360e05c71b13c112",
+        "created_at": "2026-10-04T03:00:08Z",
+        "updated_at": "2026-10-04T06:20:39Z",
+        "closed_at": null,
+        "merged_at": null
+      }
+    ],
+    "qualification": "Open PRs are reconciliation inputs, not landed code or acceptance. #8051 was verified merged, not an open collision. #7119 body is historical and cannot establish current source absence."
+  },
+  "owner_compatible_proposed_extensions": [
+    "Historical eligible source-version selection and bound availability around existing pure read models; no replacement arithmetic.",
+    "Qualified Data OS identity seam plus correction-aware source-supported obligor/parent/finance-subsidiary/guarantor links; explicit unresolved/conflicted states.",
+    "Capital Structure retained term/instrument resolver extensions for issuer principal, currency, seniority/security, coupon/floating reference/spread, issue/maturity/refixing and contractual relation facts; distinguish held par.",
+    "FIF accounting fact reuse for observed interest expense/cash interest/restricted cash; Capital Structure transactions/cash_funding scenarios for refinancing/repayment/exchange/proceeds/fees/use.",
+    "CCW source-specific observed market metadata retaining evaluated/trade/quote/new-issue distinction, valuation date, known/retained time, parser/correction generation, rights/cadence/freshness.",
+    "Current owner projection/read seam for read-only inspectable components, explicit unknown/not-economically-material/unsupported states; no new competing issuer_credit_snapshot truth."
+  ],
+  "scope_limitations": [
+    "Read-only bounded source census with exact-pin snapshots; no live host, deployed API, browser, scheduled workflow or external consumer proof was performed.",
+    "Only one deterministic synthetic pure-function PIT replay executed; full repository tests and production financial outcomes not rerun.",
+    "Search was discovery only; no results for issuer_credit/COMMISSION-14 are bounded named-search observations, not universal absence claims.",
+    "Current committed artifact dates are historical observations at the pin and cannot establish Oct4 freshness.",
+    "Existing source code, schema fields, declared consumers and validation PASS cannot individually establish coverage, PIT history, rights or authority acceptance.",
+    "No paid source/license/vendor purchase, TRACE/ratings/CDS activation, deployment, portfolio mutation, remote or host write, external communication or new worker/control-plane creation.",
+    "Owner-compatible extensions are research proposals, not accepted implementation authority; current V2 holds and source/release gates remain binding.",
+    "JSON manifest is research evidence only; it does not replace any production contract, organizational workstream or source clock."
+  ],
+  "materialization_note": "Temporary local source copies are not included in this publication; immutable repository URLs, source blob identifiers and snapshot digests identify the evidence.",
+  "source_byte_verification": {
+    "all_41_blobs_match": true,
+    "materialization_note": "Any single extra terminal LF introduced by local text materialization was removed only when doing so exactly matched the reported Git blob SHA; no source logic changed."
+  }
+}

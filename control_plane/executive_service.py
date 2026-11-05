@@ -194,7 +194,7 @@ class _ForegroundExecution:
     binding: bytes
 
     def __bool__(self):
-        return self.mode in {"ORDINARY_OPERATOR", "ATTENDED_WORK"}
+        return self.mode in {"ORDINARY_OPERATOR", "ATTENDED_WORK", "PAID_WORK"}
 
 
 class ServiceError(RuntimeProofError):
@@ -5497,14 +5497,100 @@ class ExecutiveControlService:
                     writer, result, response_ceiling=action_wire.MAX_RESPONSE_BYTES,
                 )
                 return
+            from common import workspace_project_admission_wire as admission_wire
+            if admission_wire.is_project_admission_frame(parsed):
+                if not app_peer:
+                    await self._send_ceo_ingress_error(writer, "peer_denied", "Project controls require the installed App peer")
+                    return
+                try:
+                    admission_request = admission_wire.decode_frame(raw)
+                except (TypeError, ValueError):
+                    await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                        response_ceiling=admission_wire.MAX_RESPONSE_BYTES)
+                    return
+                factory = app_binding.workspace_read_provider_factory
+                def admission_host_ready():
+                    return (app_binding is self._ceo_ingress_app_binding
+                        and app_binding.workspace_read_provider_factory is factory and callable(factory)
+                        and not self._closing and self._ceo_ingress_ready
+                        and self._service_state in {"READY", "AWAITING_CANARY"})
+                delegated = False
+                try:
+                    if not admission_host_ready():
+                        result = admission_wire.withheld(admission_request, reason="OWNER_NOT_READY")
+                    else:
+                        from control_plane.workspace_read_service import WorkspaceReadService
+                        provider = factory(self._require_runtime())
+                        if type(provider) is not WorkspaceReadService or not admission_host_ready():
+                            result = admission_wire.withheld(admission_request, reason="OWNER_NOT_READY")
+                        else:
+                            delegated = True
+                            result = await provider.handle_frame(admission_request, action_host_ready=admission_host_ready)
+                    result = admission_wire.validate_result(result, admission_request)
+                except Exception:
+                    result = admission_wire.withheld(admission_request, attempted=delegated)
+                await self._send_ceo_ingress_response(writer, result, response_ceiling=admission_wire.MAX_RESPONSE_BYTES)
+                return
+            from common import workspace_project_plan_contract as project_plan_wire
+            from common import workspace_project_journal_contract as project_journal_wire
+            from common import workspace_project_session_contract as project_session_wire
+            from common import workspace_project_direction_contract as project_direction_wire
+            from common import workspace_autonomy_read_contract as autonomy_wire
+            from common import workspace_resource_capacity_contract as capacity_wire
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
-                    ACTIVITY_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA}:
+                    ACTIVITY_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA,
+                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
                 operation = parsed.get("operation") if isinstance(parsed, dict) else None
-                if parsed.get("schema") == fabric_read_wire.FRAME_SCHEMA:
+                if parsed.get("schema") == project_direction_wire.FRAME_SCHEMA:
+                    ceiling = project_direction_wire.MAX_RESPONSE_BYTES
+                    try:
+                        project_direction_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == capacity_wire.FRAME_SCHEMA:
+                    ceiling = capacity_wire.MAX_RESPONSE_BYTES
+                    try:
+                        capacity_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == autonomy_wire.FRAME_SCHEMA:
+                    ceiling = autonomy_wire.MAX_RESPONSE_BYTES
+                    try:
+                        autonomy_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == project_session_wire.FRAME_SCHEMA:
+                    ceiling = project_session_wire.MAX_RESPONSE_BYTES
+                    try:
+                        project_session_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == project_journal_wire.FRAME_SCHEMA:
+                    ceiling = project_journal_wire.MAX_RESPONSE_BYTES
+                    try:
+                        project_journal_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == project_plan_wire.FRAME_SCHEMA:
+                    ceiling = project_plan_wire.MAX_RESPONSE_BYTES
+                    try:
+                        project_plan_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == fabric_read_wire.FRAME_SCHEMA:
                     ceiling = fabric_read_wire.MAX_STATUS_BYTES
                     try:
                         fabric_read_wire.validate_frame(parsed)
@@ -5586,6 +5672,25 @@ class ExecutiveControlService:
                                 result = workspace_error("access_denied", 403)
                         except Exception:
                             result = workspace_error("source_unavailable", 503)
+                elif parsed.get("schema") == capacity_wire.FRAME_SCHEMA:
+                    # Only the *existing installed COO* source may carry a
+                    # separately verified Workspace principal to one original
+                    # Executive Attempt. Generic Workspace login is NOT an
+                    # original OHF run grant. Original installer byte remains
+                    # unchanged by this additional per-request composition.
+                    if (app_binding.principal_admission_armed is not True
+                            or app_binding.principal_facts_factory is None
+                            or factory is None):
+                        result = workspace_error("access_denied", HTTPStatus.FORBIDDEN)
+                    else:
+                        try:
+                            from control_plane.coo_principal_host import CooHostProvider
+                            owner = app_binding.principal_facts_factory(self._require_runtime())
+                            if type(owner) is not CooHostProvider:
+                                raise ValueError("original installed COO source required")
+                            result = await owner.read_workspace_resource_capacity(parsed)
+                        except Exception:
+                            result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
                 elif parsed.get("schema") == ACTIVITY_FRAME_SCHEMA:
                     # Only the *existing installed COO* source may carry a
                     # separately verified Workspace principal to one original
@@ -5619,6 +5724,8 @@ class ExecutiveControlService:
                 except (TypeError, ValueError):
                     result = (plan_unavailable(parsed["selection"], "RESPONSE_OVER_BUDGET")
                               if parsed.get("schema") == FRAME_SCHEMA_V3
+                              else capacity_wire.unavailable(parsed["selection"], "RESPONSE_OVER_BUDGET")
+                              if parsed.get("schema") == capacity_wire.FRAME_SCHEMA
                               else activity_unavailable(parsed["selection"], "RESPONSE_OVER_BUDGET")
                               if parsed.get("schema") == ACTIVITY_FRAME_SCHEMA
                               else workspace_error("source_unavailable", 503))
@@ -6839,6 +6946,22 @@ class ExecutiveControlService:
                     # dispatched=False and is not execution/result success.
 
             return result
+        if parsed.get('operation') in {'correction-inspect','correct'}:
+            from common import direct_native_correction_contract as correction
+            frame=wire.validate_private_frame(parsed)
+            write=frame['operation']=='correct'
+            body={key:value for key,value in frame.items() if key not in {'schema','operation','principal_scope'}}
+            with runtime.store.read() as connection:
+                rows=connection.execute("SELECT payload_json FROM events WHERE event_type='JOB_CREATED' AND job_id=? AND length(CAST(payload_json AS BLOB))<=65536 LIMIT 2",(body['job_id'],)).fetchall()
+                if len(rows)!=1:raise StateConflict('direct correction origin unavailable')
+                intent_id=json.loads(rows[0][0])['provenance']['intent_id']
+            access,_,_=await asyncio.to_thread(self._direct_native_access,principal_scope=frame['principal_scope'],
+                work_ref=body['work_ref'],intent_id=intent_id,app_binding=app_binding)
+            owner=(runtime.request_direct_native_correction if write else runtime.inspect_direct_native_correction)
+            from control_plane.workspace_owned_task import await_owned
+            # Retain an entered write through caller disconnect. Reconciliation
+            # is the exact authenticated inspection, never another dispatch.
+            return await await_owned(asyncio.create_task(asyncio.to_thread(owner,body,access=access)))
         expected={"schema","operation","work_ref","job_id","attempt_id","principal_scope"}
         consume=parsed.get("operation")=="consume"
         if consume: expected|={"result_digest","operation_key"}
@@ -7812,7 +7935,8 @@ class ExecutiveControlService:
         elif not self.config.coo_attended_work_placements and not binding["operator_harness_armed"]:
             mode = "QUEUED_OPERATOR_HARNESS_OFF"
         else:
-            mode = "ATTENDED_WORK" if self.config.coo_attended_work_placements else "ORDINARY_OPERATOR"
+            mode = ("ATTENDED_WORK" if self.config.coo_attended_work_placements else
+                    "PAID_WORK" if self.config.coo_paid_work_placements else "ORDINARY_OPERATOR")
         return _ForegroundExecution(mode, _canonical_json(binding))
 
     def _require_foreground_execution(self, expectation):
@@ -7825,8 +7949,15 @@ class ExecutiveControlService:
                 raise StateConflict("foreground execution is unavailable")
             self._require_current_autonomy()
             self._require_coo_worker_composed()
+            self._require_paid_foreground_placements(binding)
         if self._require_attended_qualification() != qualification:
             raise StateConflict("foreground qualification changed")
+
+    def _require_paid_foreground_placements(self, binding):
+        if self.config.coo_paid_work_placements:
+            from control_plane.paid_fabric_admission import require_registered_paid_placements
+            require_registered_paid_placements(self._require_runtime(),
+                self._paid_worker_binding_source, self.config.coo_paid_work_placements, binding)
 
     def _require_attended_qualification(self):
         from control_plane.fabric_attended_routing import qualification_for
@@ -7955,6 +8086,7 @@ class ExecutiveControlService:
                     "REPAIR_CREATED", "HANDOFF_CREATED", "REQUEUED", "DISPATCHED"}
         for _ in range(128):
             operation.require_root(root_id)
+            self._require_paid_foreground_placements(root_binding)
             outcome = await self._run_coo_cycle(root_id)
             if outcome.root_job_id != root_id:
                 raise StateConflict("foreground cycle returned a foreign root")
@@ -7975,7 +8107,8 @@ class ExecutiveControlService:
                     }
                 if (material is not None and material.job.job_id != root_id
                         and material.job.orchestration_role == "plan"
-                        and not self.config.coo_attended_work_placements):
+                        and not self.config.coo_attended_work_placements
+                        and not self.config.coo_paid_work_placements):
                     # Ordinary Operator bound: the exact validated plan
                     # completion is this call's finite result. No plan
                     # admission, work creation or dispatch may follow here.
@@ -8238,10 +8371,12 @@ class ExecutiveControlService:
                     runtime.jobs.pending_cycle_dispatch_effect_unknown(root.job_id)
                     is not None
                 )
-            except StateConflict:
+            except StateConflict as exc:
                 # A malformed original-root marker also remains a per-root
                 # reconciliation/refusal problem, not independent admission.
                 unresolved = True
+                if prestart_refusals is not None:
+                    prestart_refusals[root.job_id] = exc
             if unresolved:
                 if first_reconciling_root is None:
                     first_reconciling_root = root.job_id

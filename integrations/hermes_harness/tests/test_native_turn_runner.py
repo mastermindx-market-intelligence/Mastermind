@@ -112,7 +112,7 @@ class SyntheticRunnerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="hermes-native-canary-test-")
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.home = self.root / "hermeshome"
         self.home.mkdir()
         self.bin = self.root / "fake-hermes"
@@ -231,6 +231,73 @@ class SyntheticRunnerTests(unittest.TestCase):
         with self.assertRaises(RuntimeRefusal) as cm:
             self._run()
         self.assertEqual(cm.exception.code, "NATIVE_CANARY_PROFILE_UNQUALIFIED")
+
+
+
+
+class ExitedLeaderCleanupTests(unittest.TestCase):
+    def test_exited_leader_group_is_signalled_before_reaping(self):
+        from integrations.hermes_harness.native_turn_runner import _terminate_group
+        import signal
+        proc = mock.Mock()
+        proc.pid = 123456
+        proc.returncode = None
+        proc.poll.return_value = 0
+        with mock.patch("integrations.hermes_harness.native_turn_runner.os.killpg") as kill:
+            _terminate_group(proc)
+        kill.assert_called_once_with(proc.pid, signal.SIGKILL)
+        proc.poll.assert_not_called()
+        proc.wait.assert_called_once_with(timeout=3)
+
+    def test_timeout_and_overflow_terminate_group_after_leader_exit(self):
+        import json
+        import signal
+        import subprocess
+        import sys
+        import time
+        for mode, expected in (("timeout", "NATIVE_CANARY_TIMEOUT"),
+                               ("overflow", "NATIVE_CANARY_OUTPUT_TOO_LARGE")):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory(prefix="hermes-owned-group-") as td:
+                root = Path(td)
+                pidfile = root / "child.json"
+                script = root / "fixture.py"
+                script.write_text(
+                    "import os,json,time,sys\np=os.fork()\n"
+                    "if p==0:\n"
+                    " open(sys.argv[1], 'w').write(json.dumps({'pid':os.getpid(),'pgid':os.getpgrp()}))\n"
+                    " time.sleep(0.25)\n"
+                    " if sys.argv[2]=='overflow':\n  os.write(1,b'x'*70000)\n"
+                    " time.sleep(8)\n os._exit(0)\n"
+                    "time.sleep(0.1)\nos._exit(0)\n", encoding="utf-8")
+                try:
+                    with self.assertRaises(RuntimeRefusal) as cm:
+                        _capture_bounded_child(
+                            [sys.executable, str(script), str(pidfile), mode], b"fixture",
+                            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+                            cwd=root, timeout_seconds=1.1)
+                    self.assertEqual(cm.exception.code, expected)
+                    owned = json.loads(pidfile.read_text())
+                    deadline = time.monotonic() + 2
+                    live = True
+                    while time.monotonic() < deadline:
+                        result = subprocess.run(
+                            ["ps", "-p", str(owned["pid"]), "-o", "stat="],
+                            capture_output=True, text=True, timeout=2)
+                        state = result.stdout.strip()
+                        live = bool(state) and not state.startswith("Z")
+                        if not live:
+                            break
+                        time.sleep(0.02)
+                    self.assertFalse(live, "owned descendant survived bounded capture cleanup")
+                finally:
+                    # Only this test's exact child is cleaned; no host/service PID.
+                    if pidfile.exists():
+                        owned = json.loads(pidfile.read_text())
+                        try:
+                            if os.getpgid(owned["pid"]) == owned["pgid"]:
+                                os.kill(owned["pid"], signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
 
 
 if __name__ == "__main__":

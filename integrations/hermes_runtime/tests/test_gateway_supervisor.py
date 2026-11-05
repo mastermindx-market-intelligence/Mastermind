@@ -5,8 +5,10 @@ import json
 import os
 import stat
 import sys
+import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
@@ -209,15 +211,69 @@ class GatewaySupervisorTests(unittest.TestCase):
         finally:
             runtime.stop()
 
+    def test_profile_fixture_is_private_before_first_write(self) -> None:
+        real_open = os.open
+        opened = []
+
+        def observe_open(path, flags, mode=0o777, **kwargs):
+            fd = real_open(path, flags, mode, **kwargs)
+            if Path(path).name == "profile.yaml":
+                info = os.fstat(fd)
+                opened.append((stat.S_IMODE(info.st_mode), info.st_size))
+            return fd
+
+        previous_umask = os.umask(0)
+        try:
+            with mock.patch.object(os, "open", side_effect=observe_open):
+                with mock.patch.object(ServiceRuntime, "start"):
+                    runtime = self._start()
+        finally:
+            os.umask(previous_umask)
+        profile_path = runtime.profile.state_dir.parent / "profile.yaml"
+        self.assertEqual(opened, [(0o600, 0)])
+        self.assertEqual(stat.S_IMODE(profile_path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(profile_path.parent.stat().st_mode), 0o700)
+        text = profile_path.read_text(encoding="utf-8")
+        self.assertIn(f"secrets_file: {profile_path.parent / 'secrets.env'}\n", text)
+        self.assertNotIn(TOKEN, text)
+        self.assertNotIn("not-a-real-provider-key", text)
+
+    def test_profile_fixture_refuses_existing_file_and_symlink(self) -> None:
+        real_temporary = tempfile.TemporaryDirectory
+        for kind in ("file", "symlink"):
+            with self.subTest(kind=kind):
+                paths = {}
+
+                def occupied_directory(*args, **kwargs):
+                    temporary = real_temporary(*args, **kwargs)
+                    root = Path(temporary.name)
+                    target = root / "keep"
+                    target.write_text("preserve-fixture-target\n", encoding="utf-8")
+                    profile_path = root / "profile.yaml"
+                    if kind == "symlink":
+                        profile_path.symlink_to(target)
+                    else:
+                        profile_path.write_text("preserve-existing-profile\n", encoding="utf-8")
+                    paths.update(target=target, profile=profile_path)
+                    return temporary
+
+                with mock.patch.object(tempfile, "TemporaryDirectory", side_effect=occupied_directory):
+                    with mock.patch.object(ServiceRuntime, "start") as start:
+                        with self.assertRaises(FileExistsError):
+                            self._start()
+                start.assert_not_called()
+                self.assertEqual(paths["target"].read_text(encoding="utf-8"), "preserve-fixture-target\n")
+                if kind == "symlink":
+                    self.assertTrue(paths["profile"].is_symlink())
+                else:
+                    self.assertEqual(paths["profile"].read_text(encoding="utf-8"), "preserve-existing-profile\n")
+
     def _start(self, *, burst: int = 5, stub_mode: str | None = None) -> ServiceRuntime:
         os.chmod(STUB, 0o755)
         os.environ["SENTINEL_SHOULD_NOT_LEAK"] = "1"
-        root = Path("/tmp/hermes-runtime-gateway") / f"{self.id().split('.')[-1]}-{burst}-{stub_mode}"
-        if root.exists():
-            import shutil
-            shutil.rmtree(root)
-        root.mkdir(parents=True)
-        self.addCleanup(lambda: __import__("shutil").rmtree(root, ignore_errors=True))
+        temporary = tempfile.TemporaryDirectory(prefix="hermes-runtime-gateway-")
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
         state = root / "state"
         state.mkdir()
         home = root / "home"
@@ -225,16 +281,15 @@ class GatewaySupervisorTests(unittest.TestCase):
         secrets = root / "secrets.env"
         write_secrets(secrets, extra="ZAI_API_KEY=not-a-real-provider-key\nUNREGISTERED_SECRET=stay-on-disk\n")
         profile_path = root / "profile.yaml"
-        profile_path.write_text(
-            profile_text(
+        fd = os.open(profile_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(profile_text(
                 state=state,
                 secrets=secrets,
                 sha=PINNED_UPSTREAM_SHA,
                 repository=UPSTREAM_REPOSITORY,
                 burst=burst,
-            ),
-            encoding="utf-8",
-        )
+            ))
         profile = load_profile(profile_path, hermes_home=home)
         ready = root / "ready.json"
         extra = {"HERMES_STUB_TOOLS": str(CENSUS), "HERMES_STUB_READY": str(ready),

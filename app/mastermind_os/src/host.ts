@@ -1,9 +1,17 @@
+import { projectAdmissionHostMethods, projectAdmissionPublicRequest, type ProjectAdmissionRawMethods, type ProjectAdmissionHostMethods } from "./admission/project-admission-host";
+import { decodeProjectAssociation, normalizeProjectAssociationSelection, type ProjectAssociationSelection, type ProjectAssociationDocument } from "./conversations/project-association";
+import { decodeResourceCapacityRead, validResourceCapacitySelection, type ResourceCapacityReadSelection, type ResourceCapacityRead } from "./resources/resource-capacity-read";
+import { decodeAutonomyPolicy, isAutonomySelection, type AutonomyRead, type AutonomySelection } from "./supervision/autonomy-policy";
+import { decodeProjectJournal, validJournalSelection, type JournalSelection, type ProjectJournalDocument } from "./project-journal";
+import { decodeAcceptedDirection, validDirectionSelection, type DirectionSelection, type AcceptedDirectionRead } from "./direction/accepted-direction";
+import { decodeProjectPlan, validProjectPlanSelection, type ProjectPlanRead, type ProjectPlanSelection } from "./planning/project-plan";
 import { decodeOriginalAcceptanceBody, guardAcceptanceRead, missionV4Selection, type MissionV4Selection, type ProductAcceptanceOwner } from "./product-acceptance/owner-observation";
 import { decodeBrowserScopedFabricCatalog, type FabricCatalog } from "./fabric/catalog-contract";
 import { attendedSelection, decodeAttendedStatus, type AttendedSelection, type AttendedStatus } from "./fabric/attended-status";
 import { decodeAdmittedPlan, validPlanSelection, type PlanRead, type PlanSelection } from "./planning/admitted-plan";
 import { decodeRetainedActivity, validActivitySelection, type ActivitySelection, type ActivityRead } from "./planning/retained-activity";
 import { createNativeExecutiveTransport } from "./native-executive-transport";
+import { createTerminalBriefsNavigationPort, type TerminalBriefsNavigationPort } from "./terminal/terminal-navigation";
 import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import {
@@ -53,7 +61,9 @@ import {
   type ControlRoomOperation, type ControlRoomActionResult,
 } from "./control-room";
 
-export interface RawClient {
+export interface RawClient extends Partial<ProjectAdmissionRawMethods> {
+  /** Public fixed navigation only; Terminal owns its user's authentication and access. */
+  openTerminalBriefs?(): Promise<unknown>;
   /** Existing authenticated original-owner acquisition; no caller-supplied request key. */
   readOriginalMissionV4?(request: MissionSelection & { signal: AbortSignal }): Promise<unknown>;
   /** Optional private owner publication; never reconstructed from browser input. */
@@ -72,7 +82,13 @@ export interface RawClient {
   signOut(): Promise<unknown>;
   restore?(): Promise<unknown>;
   /** Optional owner-authorized status-only Fabric port. No default browser/machine credential bridge. */
+  readAutonomyPolicy?(request: AutonomySelection & { signal: AbortSignal }): Promise<unknown>;
+  readProjectPlan?(request: ProjectPlanSelection & { signal: AbortSignal }): Promise<unknown>;
+  readProjectSessionAssociation?(request: ProjectAssociationSelection & { signal: AbortSignal }): Promise<unknown>;
+  readProjectJournal?(request: JournalSelection & { signal: AbortSignal }): Promise<unknown>;
+  readProjectDirection?(request: DirectionSelection & { signal: AbortSignal }): Promise<unknown>;
   readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
+  readResourceCapacity?(request: ResourceCapacityReadSelection & { signal: AbortSignal }): Promise<unknown>;
   readRetainedActivity?(request: ActivitySelection & { signal: AbortSignal }): Promise<unknown>;
   readAttendedFabric?(request: AttendedSelection & { signal: AbortSignal }): Promise<unknown>;
   /** Optional authorized recent-run metadata; no source endpoint is implied by this interface. */
@@ -124,7 +140,9 @@ export interface RawClient {
 export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
 }
-export interface MissionHost {
+export interface MissionHost extends Partial<ProjectAdmissionHostMethods> {
+  /** Optional zero-input navigation; no private content or access receipt. */
+  openTerminalBriefs?: TerminalBriefsNavigationPort;
   /** Existing authenticated original-owner acquisition; no caller-supplied request key. */
   readOriginalMissionV4?(request: MissionSelection & { signal: AbortSignal }): Promise<unknown>;
   readonly productAcceptanceOwner?: ProductAcceptanceOwner;
@@ -135,7 +153,13 @@ export interface MissionHost {
   readMissionV3?: (
     request: MissionSelection & { signal: AbortSignal },
   ) => Promise<unknown>;
+  readAutonomyPolicy?: (request: AutonomySelection & { signal: AbortSignal }) => Promise<AutonomyRead>;
+  readProjectPlan?: (request: ProjectPlanSelection & { signal: AbortSignal }) => Promise<ProjectPlanRead>;
+  readProjectSessionAssociation?: (request: ProjectAssociationSelection & { signal: AbortSignal }) => Promise<ProjectAssociationDocument>;
+  readProjectJournal?: (request: JournalSelection & { signal: AbortSignal }) => Promise<ProjectJournalDocument>;
+  readProjectDirection?: (request: DirectionSelection & { signal: AbortSignal }) => Promise<AcceptedDirectionRead>;
   readAdmittedPlan?: (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
+  readResourceCapacity?: (request: ResourceCapacityReadSelection & { signal: AbortSignal }) => Promise<ResourceCapacityRead>;
   readRetainedActivity?: (request: ActivitySelection & { signal: AbortSignal }) => Promise<ActivityRead>;
   readAttendedFabric?: (request: AttendedSelection & { signal: AbortSignal }) => Promise<AttendedStatus>;
   readAttendedFabricCatalog?: (request: { signal: AbortSignal }) => Promise<FabricCatalog>;
@@ -266,6 +290,9 @@ export function bindMissionHost(
   }
   const command = completeOrchestratorCommandBinding(commandBinding);
   return {
+    ...(client.openTerminalBriefs ? {
+      openTerminalBriefs: createTerminalBriefsNavigationPort(() => client.openTerminalBriefs!()),
+    } : {}),
     invalidationGeneration: () => epoch,
     auth: {
       getState: () => client.getState(),
@@ -279,6 +306,90 @@ export function bindMissionHost(
         return client.signOut();
       },
     },
+    ...projectAdmissionHostMethods(client,()=>epoch),
+    ...(client.readAutonomyPolicy && client.invalidationGeneration ? {
+      async readAutonomyPolicy(request: AutonomySelection & { signal: AbortSignal }) {
+        const { signal, ...selected } = request;
+        if (!isAutonomySelection(selected)) throw new Error("AUTONOMY_SELECTION_INVALID");
+        const started = epoch, source = client.invalidationGeneration!();
+        const authorized = () => {
+          const state = client.getState();
+          return !signal.aborted && started === epoch && source === client.invalidationGeneration?.() &&
+            state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("AUTONOMY_READ_UNAUTHORIZED");
+        const raw = await client.readAutonomyPolicy!({ ...selected, signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        return decodeAutonomyPolicy(raw, selected);
+      },
+    } : {}),
+    ...(client.readProjectPlan && client.invalidationGeneration ? {
+      async readProjectPlan(request: ProjectPlanSelection & { signal: AbortSignal }) {
+        const { signal, ...selected } = request;
+        if (!validProjectPlanSelection(selected)) throw new Error("PROJECT_PLAN_SELECTION_INVALID");
+        const started = epoch, source = client.invalidationGeneration!();
+        const authorized = () => {
+          const state = client.getState();
+          return !signal.aborted && started === epoch && source === client.invalidationGeneration?.() &&
+            state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("PROJECT_PLAN_READ_UNAUTHORIZED");
+        const raw = await client.readProjectPlan!({ ...selected, signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        return decodeProjectPlan(raw, selected);
+      },
+    } : {}),
+    ...(client.readProjectSessionAssociation && client.invalidationGeneration ? {
+      async readProjectSessionAssociation(request: ProjectAssociationSelection & { signal: AbortSignal }) {
+        const { signal, ...value } = request;
+        const selected = normalizeProjectAssociationSelection(value);
+        if (!selected) throw new Error("PROJECT_SESSION_SELECTION_INVALID");
+        const started = epoch, source = client.invalidationGeneration!();
+        const authorized = () => { const state = client.getState();
+          return !signal.aborted && started === epoch && source === client.invalidationGeneration?.() &&
+            state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("PROJECT_SESSION_READ_UNAUTHORIZED");
+        const raw = await client.readProjectSessionAssociation!({ ...selected, signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        const body = decodeProjectAssociation(raw, selected);
+        if (!body) throw new Error("PROJECT_SESSION_RESPONSE_INVALID");
+        return body;
+      },
+    } : {}),
+    ...(client.readProjectDirection && client.invalidationGeneration ? {
+      async readProjectDirection(request: DirectionSelection & { signal: AbortSignal }) {
+        const { signal, ...selected } = request;
+        if (!validDirectionSelection(selected)) throw new Error("DIRECTION_SELECTION_INVALID");
+        const started = epoch, source = client.invalidationGeneration!(), reader = client.readProjectDirection!;
+        const authorized = () => {
+          const state = client.getState();
+          return !signal.aborted && Number.isSafeInteger(source) && source >= 0 && started === epoch &&
+            source === client.invalidationGeneration?.() && reader === client.readProjectDirection &&
+            state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("DIRECTION_READ_UNAUTHORIZED");
+        const raw = await reader({ ...selected, signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        return decodeAcceptedDirection(raw, selected);
+      },
+    } : {}),
+    ...(client.readProjectJournal && client.invalidationGeneration ? {
+      async readProjectJournal(request: JournalSelection & { signal: AbortSignal }) {
+        const { signal, ...selected } = request;
+        if (!validJournalSelection(selected)) throw new Error("PROJECT_JOURNAL_SELECTION_INVALID");
+        const started = epoch, source = client.invalidationGeneration!();
+        const authorized = () => {
+          const state = client.getState();
+          return !signal.aborted && started === epoch && source === client.invalidationGeneration?.() &&
+            state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("PROJECT_JOURNAL_READ_UNAUTHORIZED");
+        const raw = await client.readProjectJournal!({ ...selected, signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        return decodeProjectJournal(raw, selected.work_ref);
+      },
+    } : {}),
     ...(client.readAdmittedPlan && client.invalidationGeneration ? {
       async readAdmittedPlan(request: PlanSelection & { signal: AbortSignal }) {
         if (!validPlanSelection({ work_ref: request.work_ref, root_job_id: request.root_job_id })) throw new Error("PLAN_SELECTION_INVALID");
@@ -293,6 +404,23 @@ export function bindMissionHost(
         const raw = await client.readAdmittedPlan!({ ...selected, signal: request.signal });
         if (!authorized()) throw new Error("READ_CANCELLED");
         return decodeAdmittedPlan(raw, selected);
+      },
+    } : {}),
+    ...(client.readResourceCapacity && client.invalidationGeneration ? {
+      async readResourceCapacity(request: ResourceCapacityReadSelection & { signal: AbortSignal }) {
+        const { signal, ...selected } = request;
+        if (!validResourceCapacitySelection(selected)) throw new Error("RESOURCE_CAPACITY_SELECTION_INVALID");
+        const started = epoch, source = client.invalidationGeneration!(), reader = client.readResourceCapacity!;
+        const verify = () => {
+          const state = client.getState();
+          if (signal.aborted || epoch !== started || !Number.isSafeInteger(source) || source !== client.invalidationGeneration?.() || reader !== client.readResourceCapacity)
+            throw new Error("READ_CANCELLED");
+          if (state.status !== "signed_in" || !state.acquisition) throw new Error("RESOURCE_CAPACITY_UNAUTHORIZED");
+        };
+        verify();
+        const raw = await reader.call(client, { ...selected, signal });
+        verify();
+        return decodeResourceCapacityRead(raw, selected);
       },
     } : {}),
     ...(client.readRetainedActivity && client.invalidationGeneration ? {
@@ -655,8 +783,18 @@ export async function createNativeClient(
       | "read_work"
       | "read_mission"
       | "read_mission_v3"
+      | "read_project_admission_control"
+      | "pause_project_admission"
+      | "resume_project_admission"
+      | "read_project_admission_operation"
+      | "read_autonomy_policy"
+      | "read_project_plan"
+      | "read_project_journal"
+      | "read_project_session"
+      | "read_project_direction"
       | "read_admitted_plan"
       | "read_retained_activity"
+      | "read_resource_capacity"
       | "read_fabric_catalog"
       | "read_fabric_status"
       | "read_result"
@@ -705,6 +843,7 @@ export async function createNativeClient(
   return {
     executive: executive.transport,
     executiveSession: executive.sessionTransport,
+    openTerminalBriefs: createTerminalBriefsNavigationPort((command) => invoke(command)),
     getState: () => ({ ...current }),
     invalidationGeneration: () => epoch,
     subscribe(listener) {
@@ -751,10 +890,66 @@ export async function createNativeClient(
         selection: { work_ref, root_job_id },
       });
     },
+    readProjectAdmissionControl: (request) => {
+      const input=projectAdmissionPublicRequest("current",request);
+      if(!input)return Promise.reject(new Error("PROJECT_ADMISSION_REQUEST_INVALID"));
+      return read("read_project_admission_control",request.signal,{selection:input.selection});
+    },
+    pauseProjectAdmission: (request) => {
+      const input=projectAdmissionPublicRequest("pause",request);
+      if(!input)return Promise.reject(new Error("PROJECT_ADMISSION_REQUEST_INVALID"));
+      return read("pause_project_admission",request.signal,{request:input});
+    },
+    resumeProjectAdmission: (request) => {
+      const input=projectAdmissionPublicRequest("resume",request);
+      if(!input)return Promise.reject(new Error("PROJECT_ADMISSION_REQUEST_INVALID"));
+      return read("resume_project_admission",request.signal,{request:input});
+    },
+    readProjectAdmissionOperation: (request) => {
+      const input=projectAdmissionPublicRequest("status",request);
+      if(!input)return Promise.reject(new Error("PROJECT_ADMISSION_REQUEST_INVALID"));
+      return read("read_project_admission_operation",request.signal,{request:input});
+    },
+    readAutonomyPolicy: (request) => {
+      const { signal, ...selected } = request;
+      if (!isAutonomySelection(selected))
+        return Promise.reject(new Error("AUTONOMY_SELECTION_INVALID"));
+      return read("read_autonomy_policy", signal, { selection: selected });
+    },
+    readProjectPlan: (request) => {
+      const { signal, ...selected } = request;
+      if (!validProjectPlanSelection(selected))
+        return Promise.reject(new Error("PROJECT_PLAN_SELECTION_INVALID"));
+      return read("read_project_plan", signal, { selection: selected });
+    },
+    readProjectSessionAssociation: (request) => {
+      const { signal, ...value } = request;
+      const selected = normalizeProjectAssociationSelection(value);
+      if (!selected) return Promise.reject(new Error("PROJECT_SESSION_SELECTION_INVALID"));
+      return read("read_project_session", signal, { selection: { work_ref: selected.workRef, root_job_id: selected.rootJobId } });
+    },
+    readProjectDirection: (request) => {
+      const { signal, ...selected } = request;
+      if (!validDirectionSelection(selected))
+        return Promise.reject(new Error("DIRECTION_SELECTION_INVALID"));
+      return read("read_project_direction", signal, { selection: selected });
+    },
+    readProjectJournal: (request) => {
+      const { signal, ...selected } = request;
+      if (!validJournalSelection(selected))
+        return Promise.reject(new Error("PROJECT_JOURNAL_SELECTION_INVALID"));
+      return read("read_project_journal", signal, { selection: selected });
+    },
     readAdmittedPlan: ({ work_ref, root_job_id, signal }) => {
       if (!validPlanSelection({ work_ref, root_job_id }))
         return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
       return read("read_admitted_plan", signal, { selection: { work_ref, root_job_id } });
+    },
+    readResourceCapacity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
+      const selection = { work_ref, root_job_id, job_id, attempt_id };
+      if (!validResourceCapacitySelection(selection))
+        return Promise.reject(new Error("RESOURCE_CAPACITY_SELECTION_INVALID"));
+      return read("read_resource_capacity", signal, { selection });
     },
     readRetainedActivity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
       const selection = { work_ref, root_job_id, job_id, attempt_id };

@@ -158,3 +158,71 @@ describe("durable IndexedDB pointer transactions", () => {
     expect(db.close).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("project pause closed record compatibility", () => {
+  const pause: OperationPointer = {kind:"project_pause",operationKey:"mmos-project-pause-"+"a".repeat(40),targetKey:"WS:ONE"};
+  it("reopens a v2 pause lookup without changing v1 launch grammar or database version", async () => {
+    const factory=new IDBFactory(),store=createIndexedDbPendingPointerStore(factory);
+    expect(await store.reserve(scope,pause)).toEqual({reserved:true});
+    expect(await raw(factory)).toEqual({v:2,...pause});
+    expect(await createIndexedDbPendingPointerStore(factory).read(scope)).toEqual(pause);
+    expect(await store.clearIfEqual(scope,pause)).toBe(true);
+    expect(await store.reserve(scope,pointer)).toEqual({reserved:true});
+    expect(await raw(factory)).toEqual({v:1,...pointer});
+  });
+  it("cannot replace an unresolved launch with a new pause or vice versa", async () => {
+    const factory=new IDBFactory(),first=createIndexedDbPendingPointerStore(factory),second=createIndexedDbPendingPointerStore(factory);
+    expect(await first.reserve(scope,pointer)).toEqual({reserved:true});
+    expect(await second.reserve(scope,pause)).toEqual({reserved:false,pointer});
+    expect(await raw(factory)).toEqual({v:1,...pointer});
+    expect(await second.clearIfEqual(scope,pause)).toBe(false);
+    expect(await first.clearIfEqual(scope,pointer)).toBe(true);
+    expect(await second.reserve(scope,pause)).toEqual({reserved:true});
+    expect(await first.reserve(scope,pointer)).toEqual({reserved:false,pointer:pause});
+  });
+  it.each([{v:1,...pause},{v:2,...pointer},{v:3,...pause}])("withholds an unsupported version/kind without replacing its stored hint", async record => {
+    const factory=new IDBFactory();await raw(factory,record);const store=createIndexedDbPendingPointerStore(factory);
+    await expect(store.read(scope)).rejects.toThrow(ERR.CORRUPT_RECORD);
+    await expect(store.reserve(scope,pause)).rejects.toThrow(ERR.CORRUPT_RECORD);
+    expect(await raw(factory)).toEqual(record);
+  });
+  it.each([{...pause,operationKey:pause.operationKey+"\n"},{...pause,targetKey:"WS:ONE\n"},{...pause,targetKey:"JOB-1"},{...pause,operationKey:"mmos-launch-"+"a".repeat(40)}])("rejects malformed pause scope/key before any write", async bad => {
+    const factory=new IDBFactory(),store=createIndexedDbPendingPointerStore(factory);
+    await expect(store.reserve(scope,bad)).rejects.toThrow(ERR.INVALID_POINTER);
+    expect(await raw(factory)).toBeUndefined();
+  });
+});
+
+
+describe("closed Resume and source operation lookup versions", () => {
+ const cases = [
+  {kind:"project_resume",v:3,prefix:"mmos-project-resume-"},
+  {kind:"project_create",v:4,prefix:"mmos-project-create-"},
+  {kind:"project_adopt",v:4,prefix:"mmos-project-adopt-"},
+  {kind:"direction_accept",v:4,prefix:"mmos-direction-accept-"},
+ ] as const;
+ it.each(cases)("$kind reopens its exact closed record and retains candidate/work identity only", async item => {
+  const factory=new IDBFactory(),store=createIndexedDbPendingPointerStore(factory);
+  const value:OperationPointer={kind:item.kind,operationKey:item.prefix+"c".repeat(40),targetKey:"WS:SOURCE-CANDIDATE"};
+  expect(await store.reserve(scope,value)).toEqual({reserved:true});
+  expect(await raw(factory)).toEqual({v:item.v,...value});
+  expect(await createIndexedDbPendingPointerStore(factory).read(scope)).toEqual(value);
+  expect(await store.reserve(scope,pointer)).toEqual({reserved:false,pointer:value});
+  expect(await store.clearIfEqual(scope,pointer)).toBe(false);
+ });
+ it.each(cases)("$kind cannot overwrite an unresolved older pointer", async item => {
+  const factory=new IDBFactory(),store=createIndexedDbPendingPointerStore(factory);
+  await store.reserve(scope,pointer);
+  const value:OperationPointer={kind:item.kind,operationKey:item.prefix+"d".repeat(40),targetKey:"WS:SOURCE-CANDIDATE"};
+  expect(await store.reserve(scope,value)).toEqual({reserved:false,pointer});
+  expect(await raw(factory)).toEqual({v:1,...pointer});
+ });
+ it.each(cases)("$kind refuses prefix/version confusion without deleting a retained record", async item => {
+  const factory=new IDBFactory(),store=createIndexedDbPendingPointerStore(factory);
+  const value:OperationPointer={kind:item.kind,operationKey:item.prefix+"e".repeat(40),targetKey:"WS:SOURCE-CANDIDATE"};
+  const record={v:item.v===4?3:4,...value};await raw(factory,record);
+  await expect(store.read(scope)).rejects.toThrow(ERR.CORRUPT_RECORD);
+  await expect(store.reserve(scope,value)).rejects.toThrow(ERR.CORRUPT_RECORD);
+  expect(await raw(factory)).toEqual(record);
+ });
+});

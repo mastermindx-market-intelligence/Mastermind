@@ -3356,7 +3356,10 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
                     return FakeResult(113, "", "unexpected diagnostic")
                 return FakeResult(0, _print_running(str(roots["plist"]), _label_for(args.account)))
             recorder = CmdRecorder(handler=handle)
-            with mock.patch.object(svc, "_run", recorder):
+            # Persistently indeterminate launchd must remain EFFECT_UNKNOWN;
+            # advance only this synthetic clock to the bounded settle deadline.
+            with mock.patch.object(svc, "_run", recorder), \
+                 mock.patch.object(svc.time, "monotonic", side_effect=[100.0, 111.0]):
                 with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN after bootout"):
                     svc.cmd_stop(args)
             self.assertEqual([cmd[1] for cmd in recorder.calls], ["print", "bootout", "print"])
@@ -3565,7 +3568,10 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
                     return FakeResult(113, "", "unexpected diagnostic")
                 return FakeResult(0, _print_running(str(roots["plist"]), _label_for(args.account)))
             recorder = CmdRecorder(handler=handle)
-            with mock.patch.object(svc, "_run", recorder):
+            # Persistently indeterminate launchd must remain EFFECT_UNKNOWN;
+            # advance only this synthetic clock to the bounded settle deadline.
+            with mock.patch.object(svc, "_run", recorder), \
+                 mock.patch.object(svc.time, "monotonic", side_effect=[100.0, 111.0]):
                 with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN after bootout"):
                     svc.cmd_stop(args)
             self.assertEqual([cmd[1] for cmd in recorder.calls], ["print", "bootout", "print"])
@@ -4664,3 +4670,214 @@ class TestC2PersonalGitTimeoutOnly(unittest.TestCase):
                 self.assertEqual(json.loads(payload)["effect"], "NOT_APPLIED")
                 unused.assert_not_called()
             self.assertEqual(original, (roots["manifest"].read_bytes(), roots["config"].read_bytes()))
+
+
+class TestSealedV2FleetGatewayManifestRoster(unittest.TestCase):
+    """Closed historical accounts, with real hashes of inert temporary fixtures."""
+
+    def _manifest(self, account, names):
+        digest = "a" * 64
+        return {
+            "version": 2, "account": account, "label": _label_for(account),
+            "files": {name: digest for name in names},
+            "configHash": digest, "plistHash": digest,
+            "source": "/fixture/not-live", "node": "/fixture/node",
+            "backend": "/fixture/backend", "host": "127.0.0.1",
+            "port": 45020, "nodeHash": digest, "backendHash": digest,
+            "dependencyTreeHash": digest,
+        }
+
+    def _fixture_pin(self, account, manifest):
+        raw = (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        return raw, (
+            svc._canonical_json_sha256(manifest),
+            hashlib.sha256(raw).hexdigest(),
+            svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS[account][2],
+        )
+
+    def test_six_exact_v2_manifest_seals_and_closed_file_cohorts(self):
+        pins = dict(svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS)
+        self.assertEqual(set(pins), {
+            "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9",
+            "chatgpt4", "fabric-design", "fabric-read",
+        })
+        for account, (canonical, raw, names) in pins.items():
+            with self.subTest(account=account):
+                self.assertRegex(canonical, r"^[0-9a-f]{64}$")
+                self.assertRegex(raw, r"^[0-9a-f]{64}$")
+                self.assertNotIn(names, svc.KNOWN_MANIFEST_FILESETS)
+                specimen = self._manifest(account, names)
+                _, fixture_pin = self._fixture_pin(account, specimen)
+                with mock.patch.dict(svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS, {account: fixture_pin}):
+                    self.assertTrue(svc._sealed_v2_fleet_gateway_predecessor(specimen, account))
+                    self.assertTrue(svc._valid_manifest(specimen, account, _label_for(account)))
+                    for changed in (
+                        dict(specimen, files={**specimen["files"], "surprise.mjs": "b" * 64}),
+                        dict(specimen, version=1),
+                        dict(specimen, account="different-seat"),
+                        dict(specimen, configHash="f" * 64),
+                    ):
+                        self.assertFalse(svc._sealed_v2_fleet_gateway_predecessor(changed, account))
+
+    def test_original_manifest_bytes_required_and_no_mutation(self):
+        for account, (_, _, names) in list(svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS.items()):
+            with self.subTest(account=account), tempfile.TemporaryDirectory() as temp:
+                manifest = self._manifest(account, names)
+                raw, fixture_pin = self._fixture_pin(account, manifest)
+                path = Path(temp) / "manifest.json"
+                with mock.patch.dict(svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS, {account: fixture_pin}):
+                    path.write_bytes(raw)
+                    self.assertEqual(svc._read_manifest(path, account, _label_for(account), required=True), manifest)
+                    self.assertEqual(path.read_bytes(), raw)
+                    rewritten = json.dumps(manifest, indent=2).encode()
+                    self.assertEqual(json.loads(rewritten), manifest)
+                    self.assertNotEqual(hashlib.sha256(rewritten).hexdigest(), fixture_pin[1])
+                    path.write_bytes(rewritten)
+                    with self.assertRaisesRegex(SystemExit, "corrupt manifest"):
+                        svc._read_manifest(path, account, _label_for(account), required=True)
+                    self.assertEqual(path.read_bytes(), rewritten)
+
+    def test_unknown_accounts_and_rewritten_seals_refused(self):
+        account = "admin-business"
+        names = svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS[account][2]
+        sample = self._manifest(account, names)
+        _, fixture_pin = self._fixture_pin(account, sample)
+        with mock.patch.dict(svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS, {account: fixture_pin}):
+            for unknown in ("new-owner", "fabric-future", "arbitrary"):
+                with self.subTest(unknown=unknown):
+                    value = dict(sample, account=unknown, label=_label_for(unknown))
+                    self.assertFalse(svc._valid_manifest(value, unknown, _label_for(unknown)))
+            self.assertFalse(svc._valid_manifest(dict(sample, configHash="f" * 64), account, _label_for(account)))
+
+    def test_only_exact_historical_tailnet_argv_is_eligible(self):
+        for account in ("fabric-design", "fabric-read"):
+            with self.subTest(account=account):
+                base = Path("/fixture/private") / account
+                roots = {"base": base}
+                node = "/fixture/node"
+                config = str(base / "config.json")
+                expected = [node, str(base / "private-tunnel-gateway.mjs"), config]
+                historical = [node, str(base / "tailnet-gateway.mjs"), config]
+                names = svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS[account][2]
+                manifest = self._manifest(account, names)
+                _, fixture_pin = self._fixture_pin(account, manifest)
+                helper = svc._sealed_historical_tailnet_launch_argv
+                with mock.patch.dict(svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS, {account: fixture_pin}):
+                    self.assertTrue(helper(account, manifest, roots, expected, historical))
+                    for invalid in (
+                        ["/fixture/other-node", historical[1], historical[2]],
+                        [historical[0], str(base / "other-gateway.mjs"), historical[2]],
+                        [historical[0], historical[1], "/fixture/private/other/config.json"],
+                        historical + ["--unexpected"], historical[:2],
+                    ):
+                        self.assertFalse(helper(account, manifest, roots, expected, invalid))
+                    self.assertFalse(helper("chatgpt4", manifest, roots, expected, historical))
+                    self.assertFalse(helper(account, {"files": {}}, roots, expected, historical))
+                    self.assertFalse(helper(account, dict(manifest, configHash="f" * 64), roots, expected, historical))
+
+    def test_path_swap_between_parse_and_hash_cannot_admit_unsealed_bytes(self):
+        account = "fabric-read"
+        names = svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS[account][2]
+        manifest = self._manifest(account, names)
+        sealed, fixture_pin = self._fixture_pin(account, manifest)
+        unsealed = json.dumps(manifest, indent=2).encode()
+        self.assertNotEqual(hashlib.sha256(unsealed).hexdigest(), fixture_pin[1])
+        self.assertEqual(json.loads(unsealed), json.loads(sealed))
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "manifest.json"
+            path.write_bytes(unsealed)
+            actual_validate = svc._valid_manifest
+            swapped = False
+            def validate_then_swap(data, checked_account, checked_label):
+                nonlocal swapped
+                result = actual_validate(data, checked_account, checked_label)
+                self.assertTrue(result)
+                replacement = path.with_name("replacement.json")
+                replacement.write_bytes(sealed)
+                replacement.replace(path)
+                swapped = True
+                return result
+            with mock.patch.dict(svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS, {account: fixture_pin}):
+                # Both readers reach this same semantic-validation boundary.
+                # The pathname now holds approved A, but captured bytes were B.
+                # Real SHA256(B) must refuse; rereading SHA256(A) wrongly admits.
+                with mock.patch.object(svc, "_valid_manifest", side_effect=validate_then_swap):
+                    with self.assertRaisesRegex(SystemExit, "corrupt manifest"):
+                        svc._read_manifest(path, account, _label_for(account), required=True)
+            self.assertTrue(swapped)
+            self.assertEqual(path.read_bytes(), sealed)
+
+    def test_symlink_replacement_at_open_is_refused(self):
+        account = "fabric-read"
+        names = svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS[account][2]
+        manifest = self._manifest(account, names)
+        raw, fixture_pin = self._fixture_pin(account, manifest)
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "manifest.json"
+            target = Path(temp) / "target.json"
+            path.write_bytes(raw)
+            target.write_bytes(raw)
+            actual_open = os.open
+            def replace_then_open(named, flags, *args, **kwargs):
+                if Path(named) == path:
+                    path.unlink()
+                    path.symlink_to(target)
+                return actual_open(named, flags, *args, **kwargs)
+            with mock.patch.dict(svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS, {account: fixture_pin}):
+                with mock.patch.object(svc.os, "open", side_effect=replace_then_open):
+                    with self.assertRaisesRegex(SystemExit, "manifest"):
+                        svc._read_manifest(path, account, _label_for(account), required=True)
+            self.assertEqual(target.read_bytes(), raw)
+
+    def test_nonregular_manifest_is_refused_without_blocking(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp) / "directory"
+            directory.mkdir()
+            fifo = Path(temp) / "fifo"
+            os.mkfifo(fifo)
+            for path in (directory, fifo):
+                with self.subTest(path=path.name):
+                    with self.assertRaisesRegex(SystemExit, "corrupt manifest"):
+                        svc._read_manifest(path, "fabric-read", _label_for("fabric-read"), required=True)
+
+    def test_oversized_invalid_encoding_and_nonobject_manifests_are_refused(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "manifest.json"
+            for raw in (b"x" * 65537, b"\xff", b"", b"null", b"[]"):
+                with self.subTest(size=len(raw),prefix=raw[:5]):
+                    path.write_bytes(raw)
+                    with self.assertRaisesRegex(SystemExit, "corrupt manifest"):
+                        svc._read_manifest(path, "fabric-read", _label_for("fabric-read"), required=True)
+
+    def test_in_place_manifest_change_during_capture_is_refused(self):
+        account = "fabric-read"
+        names = svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS[account][2]
+        manifest = self._manifest(account, names)
+        raw, fixture_pin = self._fixture_pin(account, manifest)
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "manifest.json"
+            path.write_bytes(raw)
+            actual_read = os.read
+            changed = False
+            def change_after_read(fd, count):
+                nonlocal changed
+                chunk = actual_read(fd, count)
+                if chunk and not changed:
+                    changed = True
+                    path.write_bytes(raw[:-2] + b"]\n")
+                return chunk
+            with mock.patch.dict(svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS, {account: fixture_pin}):
+                with mock.patch.object(svc.os, "read", side_effect=change_after_read):
+                    with self.assertRaisesRegex(SystemExit, "corrupt manifest"):
+                        svc._read_manifest(path, account, _label_for(account), required=True)
+            self.assertTrue(changed)
+
+    def test_missing_and_preexisting_symlink_keep_refusal_semantics(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "manifest.json"
+            self.assertIsNone(svc._read_manifest(path, "fabric-read", _label_for("fabric-read")))
+            with self.assertRaisesRegex(SystemExit, "manifest missing"):
+                svc._read_manifest(path, "fabric-read", _label_for("fabric-read"), required=True)
+            path.symlink_to(Path(temp) / "absent-target")
+            with self.assertRaisesRegex(SystemExit, "symlink manifest"):
+                svc._read_manifest(path, "fabric-read", _label_for("fabric-read"))

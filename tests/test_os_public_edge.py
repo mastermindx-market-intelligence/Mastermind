@@ -43,12 +43,22 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/workspace/mission/v4/current",
         "/workspace/fabric/catalog/current",
         "/workspace/fabric/status/current",
+        "/workspace/project-plan/current",
+        "/workspace/project-journal/current",
+        "/workspace/autonomy/current",
+        "/workspace/project-session/current",
+        "/workspace/resources/capacity/current",
+        "/workspace/project-direction/current",
+        "/workspace/project-admission/current",
+        "/workspace/project-admission/operation",
     }
     expected_post = {
         "/workspace/control-room/open",
         "/workspace/control-room/bind",
         "/workspace/control-room/unbind",
         "/workspace/control-room/refresh-builds",
+        "/workspace/project-admission/pause",
+        "/workspace/project-admission/resume",
     }
     assert set(GET_ROUTES) == set(INCUMBENT_GET_ROUTES) | expected_get
     assert set(POST_ROUTES) == set(INCUMBENT_POST_ROUTES) | expected_post
@@ -294,3 +304,13 @@ def test_real_caddy_adapter_preserves_exact_read_only_edge_routes(tmp_path, noir
     assert len(os_get) == 1
     assert set(os_get[0]["path"]) == set(GET_ROUTES) | set(asset_routes(manifest(noir)))
     assert config["apps"]["http"]["servers"]
+
+
+def test_admission_transition_keeps_exact_predecessor_and_no_partial_upgrade():
+    from ops.executive_os.os_public_edge import PRE_PROJECT_ADMISSION_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES, TRANSITION_ROUTE_PROFILES
+    assert (PRE_PROJECT_ADMISSION_GET_ROUTES,PRE_PROJECT_ADMISSION_POST_ROUTES) in TRANSITION_ROUTE_PROFILES
+    assert (GET_ROUTES,POST_ROUTES) in TRANSITION_ROUTE_PROFILES
+    assert (GET_ROUTES,PRE_PROJECT_ADMISSION_POST_ROUTES) not in TRANSITION_ROUTE_PROFILES
+    assert (PRE_PROJECT_ADMISSION_GET_ROUTES,POST_ROUTES) not in TRANSITION_ROUTE_PROFILES
+    assert '/workspace/project-admission/current' not in POST_ROUTES
+    assert '/workspace/project-admission/pause' not in GET_ROUTES

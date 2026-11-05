@@ -12463,6 +12463,64 @@ def _require_coo_child_workspace_completion(connection, row, *, required=True):
     return value
 
 
+def _admission_workstream_from_provenance(provenance: Mapping[str, Any] | None) -> str | None:
+    """Use only the immutable creation source, never mutable Job constraints."""
+    if provenance is None:
+        return None  # Explicitly unscoped legacy/infrastructure work.
+    if not isinstance(provenance, Mapping):
+        raise StateConflict("WORKSTREAM_ADMISSION_SOURCE_INVALID")
+    if "workstream" not in provenance:
+        if "dialogue_source" in provenance or "dialogue_source_digest" in provenance or "direct_native" in provenance:
+            raise StateConflict("WORKSTREAM_ADMISSION_SOURCE_MISSING")
+        return None
+    from control_plane.workstream_admission_contract import canonical_work_ref
+    try:
+        work_ref = canonical_work_ref(provenance["workstream"])
+    except ValueError:
+        raise StateConflict("WORKSTREAM_ADMISSION_SOURCE_INVALID") from None
+    dialogue = provenance.get("dialogue_source")
+    if dialogue is not None and (not isinstance(dialogue, Mapping) or dialogue.get("work_ref") != work_ref):
+        raise StateConflict("WORKSTREAM_ADMISSION_SOURCE_MISMATCH")
+    return work_ref
+
+
+def _admission_root_workstream(connection: sqlite3.Connection, root_job_id: str) -> str | None:
+    root = connection.execute("SELECT parent_job_id,root_job_id FROM jobs WHERE job_id=?", (root_job_id,)).fetchone()
+    if root is None or root["parent_job_id"] is not None or root["root_job_id"] != root_job_id:
+        raise StateConflict("WORKSTREAM_ADMISSION_ROOT_INVALID")
+    rows = connection.execute("SELECT aggregate_type,aggregate_id,payload_json FROM events WHERE event_type='JOB_CREATED' AND job_id=? LIMIT 2", (root_job_id,)).fetchall()
+    if len(rows) != 1 or rows[0]["aggregate_type"] != "job" or rows[0]["aggregate_id"] != root_job_id:
+        raise StateConflict("WORKSTREAM_ADMISSION_ROOT_SOURCE_MISSING")
+    try:
+        payload = _strict_canonical_json_loads(str(rows[0]["payload_json"]), name="root admission provenance")
+    except PersistenceError:
+        raise StateConflict("WORKSTREAM_ADMISSION_ROOT_SOURCE_INVALID") from None
+    if (type(payload) is not dict or payload.get("root_job_id") != root_job_id
+            or payload.get("parent_job_id") is not None):
+        raise StateConflict("WORKSTREAM_ADMISSION_ROOT_SOURCE_INVALID")
+    return _admission_workstream_from_provenance(payload.get("provenance"))
+
+
+def _workstream_suspension_receipt(row: sqlite3.Row) -> dict[str, Any]:
+    from control_plane.workstream_admission_contract import parse_suspension_event
+    try:
+        return parse_suspension_event({key: row[key] for key in (
+            "event_id", "aggregate_type", "aggregate_id", "event_type", "command_id", "actor", "payload_json", "created_at_ms")})
+    except (ValueError, KeyError, TypeError):
+        raise StateConflict("WORKSTREAM_SUSPENSION_SOURCE_INVALID") from None
+
+
+def _current_workstream_suspension(connection: sqlite3.Connection, work_ref: str) -> dict[str, Any] | None:
+    from control_plane.workstream_admission_state import current_transition
+    receipt = current_transition(connection, work_ref)
+    return receipt if receipt is not None and receipt["state"] == "PAUSED" else None
+
+
+def _assert_workstream_admission_open(connection: sqlite3.Connection, work_ref: str | None) -> None:
+    if work_ref is not None and _current_workstream_suspension(connection, work_ref) is not None:
+        raise StateConflict("WORKSTREAM_ADMISSION_SUSPENDED")
+
+
 def _insert_cycle_child(
     connection: sqlite3.Connection,
     store: RuntimeStore,
@@ -12494,6 +12552,8 @@ def _insert_cycle_child(
     business_impact: str | None = None,
 ) -> sqlite3.Row:
     """Insert one cycle-owned direct child inside its caller's transaction."""
+    store._assert_owned_snapshot_connection(connection)
+    _assert_workstream_admission_open(connection, _admission_root_workstream(connection, str(root_row["root_job_id"])))
 
     nested_plan = plan_schema_version == "mastermind.execution_plan/v5"
     policy = CooCyclePolicy.load(version=2 if nested_plan else 1)
@@ -13738,6 +13798,119 @@ class JobRegistry:
     def __init__(self, store: RuntimeStore) -> None:
         self.store = store
 
+    def admission_workstream_for_root(self, root_job_id: str) -> str | None:
+        """Read the actual root creation association for a qualified App guard."""
+        if type(root_job_id) is not str or re.fullmatch(r"JOB-[0-9]{1,9}", root_job_id) is None:
+            raise StateConflict("WORKSTREAM_ADMISSION_ROOT_INVALID")
+        with self.store.read() as connection:
+            return _admission_root_workstream(connection, root_job_id)
+
+    def read_workstream_admission_suspension(self, work_ref: str) -> dict[str, Any] | None:
+        """Read a committed gate receipt; absence establishes no work eligibility."""
+        from control_plane.workstream_admission_contract import canonical_work_ref
+        try:
+            selected = canonical_work_ref(work_ref)
+        except ValueError:
+            raise StateConflict("WORKSTREAM_SUSPENSION_INVALID") from None
+        with self.store.read() as connection:
+            return _current_workstream_suspension(connection, selected)
+
+    def read_workstream_admission_pause_command(self, work_ref: str, *, command_id: str, actor: str) -> dict[str, Any] | None:
+        """Read only the exact original command receipt, never invoke a pause.
+
+        None means not observed in this snapshot, not proof of no concurrent
+        effect. The returned historical receipt is not a current-state read.
+        """
+        from control_plane.workstream_admission_contract import make_pause_request, request_digest
+        try:
+            expected = request_digest(make_pause_request(work_ref, command_id, actor))
+        except ValueError:
+            raise StateConflict("WORKSTREAM_SUSPENSION_INVALID") from None
+        with self.store.read() as connection:
+            row = connection.execute("SELECT * FROM events WHERE command_id=?", (command_id,)).fetchone()
+            if row is None:
+                return None
+            receipt = _workstream_suspension_receipt(row)
+            if receipt["work_ref"] != work_ref or receipt["request_digest"] != expected:
+                raise StateConflict("WORKSTREAM_SUSPENSION_COMMAND_MISMATCH")
+            return receipt
+
+    def pause_workstream_admission(self, work_ref: str, *, command_id: str, actor: str,
+            _commit_guard: Callable[[], None] | None = None) -> dict[str, Any]:
+        """Commit stop-new-work in the existing Event owner, without cancelling.
+
+        Caller authorization is not derived from ``actor``. No public action
+        port is exposed here. Publish PAUSED only after this transaction commits;
+        identical command reconciliation writes nothing and never resumes work.
+        """
+        from control_plane.workstream_admission_contract import make_pause_request, make_pause_payload, request_digest
+        if _commit_guard is not None and not callable(_commit_guard):
+            raise StateConflict("WORKSTREAM_SUSPENSION_GUARD_INVALID")
+        def recheck() -> None:
+            if _commit_guard is not None:
+                _commit_guard()
+        recheck()
+        try:
+            request = make_pause_request(work_ref, command_id, actor)
+            payload = make_pause_payload(request)
+            expected_digest = request_digest(request)
+        except ValueError:
+            raise StateConflict("WORKSTREAM_SUSPENSION_INVALID") from None
+        def reconcile(connection: sqlite3.Connection) -> dict[str, Any] | None:
+            previous = connection.execute("SELECT * FROM events WHERE command_id=?", (command_id,)).fetchone()
+            if previous is None:
+                return None
+            _current_workstream_suspension(connection, work_ref)
+            receipt = _workstream_suspension_receipt(previous)
+            if receipt["work_ref"] != work_ref or receipt["request_digest"] != expected_digest:
+                raise StateConflict("WORKSTREAM_SUSPENSION_COMMAND_MISMATCH")
+            return receipt
+        # Original-command recovery is an actual read; it takes no writer lock
+        # and does not need a writable Runtime just to observe a committed receipt.
+        with self.store.read() as connection:
+            existing = reconcile(connection)
+        if existing is not None:
+            recheck()
+            return existing
+        with self.store.transaction() as connection:
+            recheck()
+            receipt = reconcile(connection)  # A concurrent identical writer may have won.
+            if receipt is None:
+                # Unknown/corrupt latest state cannot be silently overwritten.
+                _current_workstream_suspension(connection, work_ref)
+                self.store.append_event(connection, aggregate_type="workstream", aggregate_id=work_ref,
+                    event_type="WORKSTREAM_ADMISSION_SUSPENDED", command_id=command_id, actor=actor, payload=payload)
+                row = connection.execute("SELECT * FROM events WHERE command_id=?", (command_id,)).fetchone()
+                if row is None:
+                    raise PersistenceError("workstream suspension receipt disappeared")
+                receipt = _workstream_suspension_receipt(row)
+            recheck()  # A revoked host-owned permission/source bracket rolls back.
+        return receipt
+
+    def read_workstream_admission_transition(self, work_ref: str) -> dict[str, Any] | None:
+        """Current validated pause/resume transition; not a work-readiness claim."""
+        from control_plane.workstream_admission_contract import canonical_work_ref
+        from control_plane.workstream_admission_state import current_transition
+        try:
+            selected = canonical_work_ref(work_ref)
+        except ValueError:
+            raise StateConflict("WORKSTREAM_SUSPENSION_INVALID") from None
+        with self.store.read() as connection:
+            return current_transition(connection, selected)
+
+    def read_workstream_admission_resume_command(self, work_ref: str, *, command_id: str, actor: str) -> dict[str, Any] | None:
+        from control_plane.workstream_admission_state import read_resume_command
+        return read_resume_command(self, work_ref, command_id=command_id, actor=actor)
+
+    def resume_workstream_admission(self, work_ref: str, *, command_id: str, actor: str,
+            expected_pause_event_id: int, expected_pause_receipt_digest: str,
+            _commit_guard: Callable[[], None] | None = None) -> dict[str, Any]:
+        """Reopen only new admission, comparing the exact current pause token."""
+        from control_plane.workstream_admission_state import resume_in_owner
+        return resume_in_owner(self, work_ref, command_id=command_id, actor=actor,
+            expected_pause_event_id=expected_pause_event_id, expected_pause_receipt_digest=expected_pause_receipt_digest,
+            _commit_guard=_commit_guard)
+
     def _create_job_in_transaction(
         self,
         connection: sqlite3.Connection,
@@ -13819,6 +13992,13 @@ class JobRegistry:
             raise StateConflict(
                 "private C2 capability requires exact carrier provenance"
             )
+
+        # The same writer lock orders pause against every normal/root/child
+        # insert, including the private carrier caller. Children inherit only
+        # their actual root's immutable creation source.
+        work_ref = (_admission_workstream_from_provenance(spec.event_provenance)
+            if spec.parent_job_id is None else _admission_root_workstream(connection, str(spec.parent_root_job_id)))
+        _assert_workstream_admission_open(connection, work_ref)
 
         numbers: list[int] = []
         for row in connection.execute("SELECT job_id FROM jobs"):
@@ -17531,138 +17711,148 @@ class JobRegistry:
             or type(expected_fence_generation) is not int or expected_fence_generation < 1
         ):
             raise StateConflict("exact cancellation requires Attempt and fence generation")
-        timestamp = self.store.now_ms()
         with self.store.transaction() as connection:
-            job_row = connection.execute(
-                "SELECT * FROM jobs WHERE job_id=?", (job_id,)
-            ).fetchone()
-            if job_row is None:
-                raise StateConflict(f"job {job_id!r} does not exist")
-            if exact:
-                # Match under the same transaction that requests cancellation;
-                # a pre-read followed by ordinary cancel_job could cancel a
-                # successor Attempt instead of the originating operation.
-                _finite_existing_effect(self.store, connection, job_id)
-                original = connection.execute(
-                    "SELECT * FROM attempts WHERE attempt_id=? AND job_id=?",
-                    (expected_attempt_id, job_id),
-                ).fetchone()
-                if (job_row["current_attempt_id"] != expected_attempt_id
-                        or original is None
-                        or original["fence_generation"] != expected_fence_generation):
-                    raise StateConflict("exact cancellation Attempt or fence changed")
-                if AttemptStatus(original["status"]) in _TERMINAL_ATTEMPT_STATUSES:
-                    return _job_from_row(job_row)  # Terminal wins; no new event/effect.
-            status = JobStatus(job_row["status"])
-            if status == JobStatus.CANCEL_REQUESTED:
-                return _job_from_row(job_row)
+            return self._cancel_job_in_transaction(connection, job_id,
+                expected_attempt_id=expected_attempt_id,
+                expected_fence_generation=expected_fence_generation)
+
+    def _cancel_job_in_transaction(self, connection, job_id, *,
+                                   expected_attempt_id=None, expected_fence_generation=None):
+        # The existing Runtime correction owner reuses this exact transaction.
+        # This private helper performs no access admission on its own.
+        if not connection.in_transaction:
+            raise StateConflict("cancellation requires the existing transaction")
+        exact = expected_attempt_id is not None or expected_fence_generation is not None
+        timestamp = self.store.now_ms()
+        job_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (job_id,)
+        ).fetchone()
+        if job_row is None:
+            raise StateConflict(f"job {job_id!r} does not exist")
+        if exact:
+            # Match under the same transaction that requests cancellation;
+            # a pre-read followed by ordinary cancel_job could cancel a
+            # successor Attempt instead of the originating operation.
             _finite_existing_effect(self.store, connection, job_id)
-            if status == JobStatus.QUEUED:
-                connection.execute(
-                    "UPDATE jobs SET status='CANCELLED',updated_at_ms=?,version=version+1 WHERE job_id=?",
-                    (timestamp, job_id),
-                )
-                event_type = "JOB_CANCELLED"
-                attempt_id = None
-            elif status in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}:
-                attempt_id = str(job_row["current_attempt_id"])
-                attempt_row = connection.execute(
-                    "SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)
-                ).fetchone()
-                if attempt_row is None or attempt_row["lease_token"] is None:
-                    raise StateConflict(f"job {job_id} has no cancellable attempt")
-                AttemptRegistry(self.store)._leased_row(
-                    connection,
-                    attempt_id=attempt_id,
-                    fence_generation=int(attempt_row["fence_generation"]),
-                    lease_token=str(attempt_row["lease_token"]),
-                    timestamp=timestamp,
-                    statuses=_WORKER_MUTABLE_ATTEMPT_STATUSES,
-                )
-                connection.execute(
-                    """
-                    UPDATE attempts SET status='CANCEL_REQUESTED',updated_at_ms=?,version=version+1
-                    WHERE attempt_id=? AND status IN ('CLAIMED','RUNNING','CHECKPOINTED')
-                    """,
-                    (timestamp, attempt_id),
-                )
-                connection.execute(
-                    """
-                    UPDATE jobs SET status='CANCEL_REQUESTED',cancel_requested_at_ms=?,
-                                    updated_at_ms=?,version=version+1
-                    WHERE job_id=?
-                    """,
-                    (timestamp, timestamp, job_id),
-                )
-                event_type = "JOB_CANCEL_REQUESTED"
-            elif status in {
-                JobStatus.RATE_LIMITED,
-                JobStatus.FAILED,
-                JobStatus.LOST,
-            }:
-                attempt_id = str(job_row["current_attempt_id"])
-                attempt_row = connection.execute(
-                    "SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)
-                ).fetchone()
-                if (
-                    attempt_row is None
-                    or AttemptStatus(attempt_row["status"])
-                    not in _TERMINAL_ATTEMPT_STATUSES
-                ):
-                    raise PersistenceError(
-                        f"terminal job {job_id} has no matching terminal attempt"
-                    )
-                quota_row = connection.execute(
-                    """
-                    SELECT held_attempt_id FROM worker_quota_classes
-                    WHERE worker_id=? AND quota_class=?
-                    """,
-                    (attempt_row["worker_id"], attempt_row["quota_class"]),
-                ).fetchone()
-                if quota_row is None or quota_row["held_attempt_id"] not in {
-                    None,
-                    attempt_id,
-                }:
-                    raise PersistenceError(
-                        f"terminal job {job_id} has an inconsistent quota-class hold"
-                    )
-                connection.execute(
-                    """
-                    UPDATE worker_quota_classes
-                    SET held_attempt_id=NULL,updated_at_ms=?,version=version+1
-                    WHERE worker_id=? AND quota_class=? AND held_attempt_id=?
-                    """,
-                    (
-                        timestamp,
-                        attempt_row["worker_id"],
-                        attempt_row["quota_class"],
-                        attempt_id,
-                    ),
-                )
-                connection.execute(
-                    """
-                    UPDATE jobs SET status='CANCELLED',cancel_requested_at_ms=?,
-                                    updated_at_ms=?,version=version+1
-                    WHERE job_id=?
-                    """,
-                    (timestamp, timestamp, job_id),
-                )
-                event_type = "JOB_CANCELLED"
-            else:
-                raise StateConflict(f"job {job_id} cannot cancel from {status.value}")
-            self.store.append_event(
-                connection,
-                aggregate_type="job",
-                aggregate_id=job_id,
-                event_type=event_type,
-                job_id=job_id,
-                attempt_id=attempt_id,
-                payload={"previous_status": status.value},
-                timestamp_ms=timestamp,
+            original = connection.execute(
+                "SELECT * FROM attempts WHERE attempt_id=? AND job_id=?",
+                (expected_attempt_id, job_id),
+            ).fetchone()
+            if (job_row["current_attempt_id"] != expected_attempt_id
+                    or original is None
+                    or original["fence_generation"] != expected_fence_generation):
+                raise StateConflict("exact cancellation Attempt or fence changed")
+            if AttemptStatus(original["status"]) in _TERMINAL_ATTEMPT_STATUSES:
+                return _job_from_row(job_row)  # Terminal wins; no new event/effect.
+        status = JobStatus(job_row["status"])
+        if status == JobStatus.CANCEL_REQUESTED:
+            return _job_from_row(job_row)
+        _finite_existing_effect(self.store, connection, job_id)
+        if status == JobStatus.QUEUED:
+            connection.execute(
+                "UPDATE jobs SET status='CANCELLED',updated_at_ms=?,version=version+1 WHERE job_id=?",
+                (timestamp, job_id),
             )
-        job = self.get_job(job_id)
-        assert job is not None
-        return job
+            event_type = "JOB_CANCELLED"
+            attempt_id = None
+        elif status in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}:
+            attempt_id = str(job_row["current_attempt_id"])
+            attempt_row = connection.execute(
+                "SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)
+            ).fetchone()
+            if attempt_row is None or attempt_row["lease_token"] is None:
+                raise StateConflict(f"job {job_id} has no cancellable attempt")
+            AttemptRegistry(self.store)._leased_row(
+                connection,
+                attempt_id=attempt_id,
+                fence_generation=int(attempt_row["fence_generation"]),
+                lease_token=str(attempt_row["lease_token"]),
+                timestamp=timestamp,
+                statuses=_WORKER_MUTABLE_ATTEMPT_STATUSES,
+            )
+            connection.execute(
+                """
+                UPDATE attempts SET status='CANCEL_REQUESTED',updated_at_ms=?,version=version+1
+                WHERE attempt_id=? AND status IN ('CLAIMED','RUNNING','CHECKPOINTED')
+                """,
+                (timestamp, attempt_id),
+            )
+            connection.execute(
+                """
+                UPDATE jobs SET status='CANCEL_REQUESTED',cancel_requested_at_ms=?,
+                                updated_at_ms=?,version=version+1
+                WHERE job_id=?
+                """,
+                (timestamp, timestamp, job_id),
+            )
+            event_type = "JOB_CANCEL_REQUESTED"
+        elif status in {
+            JobStatus.RATE_LIMITED,
+            JobStatus.FAILED,
+            JobStatus.LOST,
+        }:
+            attempt_id = str(job_row["current_attempt_id"])
+            attempt_row = connection.execute(
+                "SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)
+            ).fetchone()
+            if (
+                attempt_row is None
+                or AttemptStatus(attempt_row["status"])
+                not in _TERMINAL_ATTEMPT_STATUSES
+            ):
+                raise PersistenceError(
+                    f"terminal job {job_id} has no matching terminal attempt"
+                )
+            quota_row = connection.execute(
+                """
+                SELECT held_attempt_id FROM worker_quota_classes
+                WHERE worker_id=? AND quota_class=?
+                """,
+                (attempt_row["worker_id"], attempt_row["quota_class"]),
+            ).fetchone()
+            if quota_row is None or quota_row["held_attempt_id"] not in {
+                None,
+                attempt_id,
+            }:
+                raise PersistenceError(
+                    f"terminal job {job_id} has an inconsistent quota-class hold"
+                )
+            connection.execute(
+                """
+                UPDATE worker_quota_classes
+                SET held_attempt_id=NULL,updated_at_ms=?,version=version+1
+                WHERE worker_id=? AND quota_class=? AND held_attempt_id=?
+                """,
+                (
+                    timestamp,
+                    attempt_row["worker_id"],
+                    attempt_row["quota_class"],
+                    attempt_id,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE jobs SET status='CANCELLED',cancel_requested_at_ms=?,
+                                updated_at_ms=?,version=version+1
+                WHERE job_id=?
+                """,
+                (timestamp, timestamp, job_id),
+            )
+            event_type = "JOB_CANCELLED"
+        else:
+            raise StateConflict(f"job {job_id} cannot cancel from {status.value}")
+        self.store.append_event(
+            connection,
+            aggregate_type="job",
+            aggregate_id=job_id,
+            event_type=event_type,
+            job_id=job_id,
+            attempt_id=attempt_id,
+            payload={"previous_status": status.value},
+            timestamp_ms=timestamp,
+        )
+        row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+        return _job_from_row(row)
 
 
 REMOTE_LAUNCH_IDENTITY_KEY = "remote_launch_identity"
@@ -17720,6 +17910,11 @@ class AttemptRegistry:
         """Own the existing quota/Attempt/Job/claim mutation sequence."""
 
         self.store._assert_owned_snapshot_connection(connection)
+        # A pause cannot revoke an already-issued lease. This gate is only on
+        # fresh Attempt creation, under the original atomic claim transaction.
+        work_ref = _admission_root_workstream(connection, str(job_row["root_job_id"]))
+        if work_ref is not None and _current_workstream_suspension(connection, work_ref) is not None:
+            return None
         unresolved = ReleaseMaintenanceRegistry(self.store).read_unresolved_admission(
             connection
         )
@@ -19991,6 +20186,7 @@ class AttemptRegistry:
         *,
         fence_generation: int,
         lease_token: str,
+        direct_terminal: dict | None = None,
     ) -> Job:
         timestamp = self.store.now_ms()
         with self.store.transaction() as connection:
@@ -20002,22 +20198,31 @@ class AttemptRegistry:
                 timestamp=timestamp,
                 statuses={AttemptStatus.CANCEL_REQUESTED},
             )
+            job_row=connection.execute("SELECT * FROM jobs WHERE job_id=?", (row['job_id'],)).fetchone()
+            direct_admission=_direct_native_provenance(connection,job_row,required=False)
+            terminal_raw=None
+            if direct_admission is not None:
+                from control_plane.direct_native_correction import validate_terminal
+                terminal=validate_terminal(connection,row,direct_terminal)
+                terminal_raw=json.dumps(terminal,sort_keys=True,separators=(",",":"),ensure_ascii=False)
+            elif direct_terminal is not None:
+                raise StateConflict('direct cancellation evidence requires original direct admission')
             self._require_ohf_shutdown_before_legacy_terminal(connection, row)
             _finite_existing_effect(self.store, connection, str(row["job_id"]))
             connection.execute(
                 """
                 UPDATE attempts SET status='CANCELLED',lease_token=NULL,finished_at_ms=?,
-                                    updated_at_ms=?,version=version+1
+                                    updated_at_ms=?,result_json=coalesce(?,result_json),version=version+1
                 WHERE attempt_id=?
                 """,
-                (timestamp, timestamp, attempt_id),
+                (timestamp, timestamp, terminal_raw, attempt_id),
             )
             connection.execute(
                 """
-                UPDATE jobs SET status='CANCELLED',updated_at_ms=?,version=version+1
+                UPDATE jobs SET status='CANCELLED',updated_at_ms=?,result_json=coalesce(?,result_json),version=version+1
                 WHERE job_id=? AND current_attempt_id=? AND status='CANCEL_REQUESTED'
                 """,
-                (timestamp, row["job_id"], attempt_id),
+                (timestamp, terminal_raw, row["job_id"], attempt_id),
             )
             connection.execute(
                 """
@@ -20039,6 +20244,8 @@ class AttemptRegistry:
                 worker_id=str(row["worker_id"]),
                 quota_class=str(row["quota_class"]),
                 timestamp_ms=timestamp,
+                payload=(dict(status='CANCELLED',direct_native_terminal_digest=orchestration_digest(terminal),
+                              admission_digest=orchestration_digest(direct_admission)) if terminal_raw is not None else None),
             )
             job_id = str(row["job_id"])
         job = JobRegistry(self.store).get_job(job_id)
@@ -24109,9 +24316,18 @@ class ResourceBroker:
                     "demands": self._physical_demands(connection, row)} for row in headers]}
 
     def _physical_event(self, connection, reservation, aggregate_id, action, command_fingerprint,
-                        receipt, timestamp, *, original_event_id=None):
+                        receipt, timestamp, *, original_event_id=None, _capacity_capture=None):
         payload = {"action": action, "command_fingerprint": command_fingerprint, "receipt": receipt,
                    "original_event_id": original_event_id}
+        if _capacity_capture is not None:
+            from .physical_capacity_capture_owner import capture_for_event
+            payload["capacity_capture"] = capture_for_event(
+                _capacity_capture, store=self.store, reservation=reservation,
+                action=action, original_event_id=original_event_id, timestamp=timestamp,
+            )
+            if len(_json_dumps(payload).encode("utf-8")) > 65_536:
+                from .executive_physical_resources import PhysicalResourceRefusal
+                raise PhysicalResourceRefusal("CAPACITY_CAPTURE_EVENT_OVER_BUDGET", "capacity capture exceeds original Event budget")
         self.store.append_event(connection, aggregate_type="physical_resource_operation", aggregate_id=aggregate_id,
                                 event_type="PHYSICAL_RESOURCE_" + action.upper(), actor=reservation["owner_id"],
                                 payload=payload, command_id=reservation["command_id"], timestamp_ms=timestamp)
@@ -24149,6 +24365,7 @@ class ResourceBroker:
         evaluation: Mapping[str, Any],
         timestamp: int,
         progress: Callable[[str], None] | None = None,
+        _capacity_capture: object | None = None,
     ) -> dict[str, Any]:
         """One physical reservation persistence implementation.
 
@@ -24238,6 +24455,7 @@ class ResourceBroker:
             command_fingerprint,
             receipt,
             timestamp,
+            _capacity_capture=_capacity_capture,
         )
         if event.sequence != generation:
             raise physical.PhysicalResourceRefusal(
@@ -24471,6 +24689,11 @@ class ResourceBroker:
                         self._physical_guard(request, caller_context, connection, "after_event", epoch)
                         code = refusal.code
                     else:
+                        from .physical_capacity_capture_owner import mint_capacity_capture
+                        capacity_capture = mint_capacity_capture(
+                            self, caller_context, reservation, evaluation,
+                            connection=connection, timestamp=timestamp,
+                        )
                         receipt = self._persist_prevalidated_physical_reservation(
                             connection,
                             reservation,
@@ -24479,6 +24702,7 @@ class ResourceBroker:
                             progress=lambda point: self._physical_guard(
                                 request, caller_context, connection, point, epoch
                             ),
+                            _capacity_capture=capacity_capture,
                         )
                         code = "RESERVED"
                 else:
@@ -24537,7 +24761,7 @@ class ResourceBroker:
                                     raise physical.PhysicalResourceRefusal("OWN_DEMAND_MISMATCH", "exact own reservation rows do not cover BEGIN")
                             # Own-phase identity and pristine charge are proven
                             # above; global pool rows only supply additive capacity.
-                            physical.evaluate_begin(reservation, policy=context["policy"], current_charges=charges,
+                            evaluation = physical.evaluate_begin(reservation, policy=context["policy"], current_charges=charges,
                                                     observations=context["observations"], decision_time_ms=timestamp,
                                                     production=production)
                         planned = []
@@ -24570,7 +24794,15 @@ class ResourceBroker:
                             planned.append({"commitment_id": row["commitment_id"], "allocation_generation": row["allocation_generation"],
                                             "revision": row["revision"] + 1, "phase_key": row["phase_key"], "state": state, "demands": demands})
                         receipt = {"operation_key": reservation["operation_key"], "request_fingerprint": fingerprint, "commitments": planned}
-                        event = self._physical_event(connection, reservation, aggregate_id, action, command_fingerprint, receipt, timestamp)
+                        capacity_capture = None
+                        if action == "begin":
+                            from .physical_capacity_capture_owner import mint_capacity_capture
+                            capacity_capture = mint_capacity_capture(
+                                self, caller_context, reservation, evaluation,
+                                connection=connection, timestamp=timestamp,
+                            )
+                        event = self._physical_event(connection, reservation, aggregate_id, action, command_fingerprint, receipt, timestamp,
+                                                     _capacity_capture=capacity_capture)
                         self._physical_guard(request, caller_context, connection, "after_event", epoch)
                         for row, plan in zip(headers, planned):
                             cursor = connection.execute("""UPDATE physical_resource_commitments SET state=?,revision=revision+1,updated_at_ms=?,
@@ -27149,6 +27381,27 @@ class BoundedRuntimeReadObservation:
             self._failed = True
             raise
 
+    def read_retained_capacity_bounded(
+        self, root_job_id: str, job_id: str, attempt_id: str,
+    ) -> Any:
+        """One current Attempt's original retained claim evidence; no acquisition.
+
+        The authenticated Workspace owner independently qualifies membership,
+        permission and its before/after publication bracket. The finalized SAME
+        receipt remains mandatory; returned source material is not entitlement.
+        """
+        self._select()
+        try:
+            from control_plane.workspace_resource_capacity import acquire_retained_capacity
+            result = acquire_retained_capacity(
+                self._acquisition, self._vm_progress,
+                root_job_id=root_job_id, job_id=job_id, attempt_id=attempt_id,
+            )
+            return dataclasses.replace(result, observation_source_identity=self._identity)
+        except BaseException:
+            self._failed = True
+            raise
+
     def read_retained_operator_activity_bounded(
         self, root_job_id: str, job_id: str, attempt_id: str,
     ) -> Any:
@@ -28433,6 +28686,77 @@ class Runtime:
         return {"principal_scope":admitted["principal_scope"],"receiver_binding_digest":admitted["receiver_binding_digest"],
                 "source_digest":admitted["source_digest"],"admission_digest":orchestration_digest(admitted)}
 
+    def reserve_direct_native_cancel_call(self, attempt_id, *, fence_generation, lease_token):
+        """One original Supervisor adapter call; a retained intent forbids replay."""
+        with self.store.transaction() as connection:
+            attempt=self.attempts._leased_row(connection,attempt_id=attempt_id,
+                fence_generation=fence_generation,lease_token=lease_token,
+                timestamp=self.store.now_ms(),statuses={AttemptStatus.CANCEL_REQUESTED})
+            job=connection.execute("SELECT * FROM jobs WHERE job_id=?",(attempt['job_id'],)).fetchone()
+            _direct_native_provenance(connection,job,required=True)
+            command=f'direct-native-cancel-call:{attempt_id}:{fence_generation}'
+            if connection.execute("SELECT event_id FROM events WHERE command_id=?",(command,)).fetchone() is not None:return False
+            _finite_existing_effect(self.store,connection,attempt['job_id'])
+            self.store.append_event(connection,aggregate_type='attempt',aggregate_id=attempt_id,
+                event_type='DIRECT_NATIVE_CANCEL_CALL_STARTED',job_id=attempt['job_id'],attempt_id=attempt_id,
+                command_id=command,actor='supervisor',payload=dict(fence_generation=fence_generation))
+            return True
+
+    def record_direct_native_cancel_unavailable(self, attempt_id, *, fence_generation, lease_token, unsupported):
+        with self.store.transaction() as connection:
+            attempt=self.attempts._leased_row(connection,attempt_id=attempt_id,
+                fence_generation=fence_generation,lease_token=lease_token,timestamp=self.store.now_ms(),
+                statuses={AttemptStatus.CANCEL_REQUESTED})
+            started=f'direct-native-cancel-call:{attempt_id}:{fence_generation}'
+            if connection.execute("SELECT event_id FROM events WHERE command_id=?",(started,)).fetchone() is None:
+                raise StateConflict('direct cancellation call has no original intent')
+            self.store.append_event(connection,aggregate_type='attempt',aggregate_id=attempt_id,
+                event_type='DIRECT_NATIVE_CANCEL_CALL_UNAVAILABLE',job_id=attempt['job_id'],attempt_id=attempt_id,
+                command_id=started+':unavailable',actor='supervisor',
+                payload=dict(fence_generation=fence_generation,reason='UNSUPPORTED' if unsupported else 'EFFECT_UNKNOWN'))
+
+    def inspect_direct_native_correction(self, selection, *, access):
+        from common import direct_native_result_contract as wire
+        from common import direct_native_correction_contract as correction
+        selected=wire.validate_request(selection)
+        with self.store.read() as connection:
+            self.require_direct_result_access(connection,selected,access)
+            row=connection.execute("SELECT current_attempt_id,status FROM jobs WHERE job_id=?",(selected['job_id'],)).fetchone()
+            if selected['attempt_id'] is None:selected['attempt_id']=row['current_attempt_id']
+            attempt=connection.execute("SELECT job_id,fence_generation FROM attempts WHERE attempt_id=?",(selected['attempt_id'],)).fetchone()
+            if attempt is None or attempt['job_id']!=selected['job_id'] or row['current_attempt_id']!=selected['attempt_id']:
+                raise StateConflict('direct correction has no exact current Attempt')
+            access.check()
+            return correction.validate_response(dict(schema=correction.SCHEMA,selection=selected,
+                fence_generation=attempt['fence_generation'],operation_key=None,status=row['status'],parent_consumed=False))
+
+    def request_direct_native_correction(self, request, *, access):
+        from common import direct_native_correction_contract as correction
+        selected = correction.validate_request(request)
+        selection = {key:selected[key] for key in ('work_ref','job_id','attempt_id')}
+        with self.store.transaction() as connection:
+            identity = self.require_direct_result_access(connection, selection, access)
+            command = 'direct-native-correction:' + orchestration_digest(dict(
+                operation_key=selected['operation_key'], identity=identity))
+            prior = connection.execute("SELECT payload_json FROM events WHERE command_id=?", (command,)).fetchone()
+            if prior is not None:
+                payload = _strict_canonical_json_loads(prior[0], name='direct correction Event')
+                if payload.get('request') != selected or payload.get('identity') != identity:
+                    raise StateConflict('direct correction command identity changed')
+                access.check()
+                return copy.deepcopy(payload['receipt'])
+            job = self.jobs._cancel_job_in_transaction(connection, selected['job_id'],
+                expected_attempt_id=selected['attempt_id'],
+                expected_fence_generation=selected['fence_generation'])
+            receipt = correction.receipt(selected, job.status.value)
+            access.check()
+            self.store.append_event(connection, aggregate_type='job', aggregate_id=job.job_id,
+                event_type='DIRECT_NATIVE_CORRECTION_REQUESTED', job_id=job.job_id,
+                attempt_id=selected['attempt_id'], actor='direct-native-parent', command_id=command,
+                payload=dict(request=selected, identity=identity, receipt=receipt))
+            access.check()
+            return receipt
+
     def require_direct_native_launch_access(self, job_id, attempt_id, access, *, lease):
         if type(access) is not direct_native.DirectNativeExecutionAccess:
             raise StateConflict("direct native final launch requires execution authority")
@@ -28458,6 +28782,19 @@ class Runtime:
             access.check()
 
     def validate_direct_completion(self, connection, selection):
+        job=connection.execute("SELECT * FROM jobs WHERE job_id=?",(selection['job_id'],)).fetchone()
+        if job is not None and job['status']=='CANCELLED':
+            from control_plane.direct_native_correction import validate_terminal
+            attempt=connection.execute("SELECT * FROM attempts WHERE attempt_id=?",(selection['attempt_id'],)).fetchone()
+            if (attempt is None or attempt['status']!='CANCELLED' or attempt['lease_token'] is not None
+                or job['result_json']!=attempt['result_json']):
+                raise StateConflict('direct cancellation is not one settled Attempt')
+            terminal=validate_terminal(connection,attempt,_strict_canonical_json_loads(job['result_json'],name='direct cancelled terminal'))
+            digest=orchestration_digest(terminal)
+            events=connection.execute("SELECT payload_json FROM events WHERE event_type='JOB_CANCELLED' AND job_id=? AND attempt_id=? LIMIT 2",(job['job_id'],attempt['attempt_id'])).fetchall()
+            if len(events)!=1 or json.loads(events[0][0])!=dict(status='CANCELLED',direct_native_terminal_digest=digest,admission_digest=terminal['admission_digest']):
+                raise StateConflict('direct cancellation lost its immutable settlement Event')
+            return dict(payload=copy.deepcopy(terminal['payload']),terminal_digest=digest,terminal_record=terminal)
         job=connection.execute("SELECT * FROM jobs WHERE job_id=?",(selection["job_id"],)).fetchone()
         admitted=_direct_native_provenance(connection,job,required=True)
         attempt=connection.execute("SELECT * FROM attempts WHERE attempt_id=?",(selection["attempt_id"],)).fetchone()
@@ -28488,7 +28825,7 @@ class Runtime:
                 row=connection.execute("SELECT current_attempt_id,status FROM jobs WHERE job_id=?",(selected["job_id"],)).fetchone()
                 if selected["attempt_id"] is None:
                     selected["attempt_id"]=row["current_attempt_id"]
-                if selected["attempt_id"] is None or row["status"] != "COMPLETED":
+                if selected["attempt_id"] is None or row["status"] not in {"COMPLETED","CANCELLED"}:
                     access.check()
                     return wire.unavailable(selected,"NOT_TERMINAL")
                 completion=self.validate_direct_completion(connection,selected)

@@ -28,7 +28,7 @@ _MAX_TEXT_LEN = 700
 _ANSWER_SECRET = re.compile(
     r"(?i)(?:xox[baprs]-[A-Za-z0-9-]+|sk-[A-Za-z0-9_-]{8,}|"
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----|"
-    r"(?:api[_-]?key|password|token|authorization)\s*[:=]\s*\S+)"
+    r"(?:api[_-]?key|password|token|authorization)[\"']?\s*[:=]\s*[\"']?\S+)"
 )
 _SAFE_OPERATION = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:-]{0,95}\Z")
 _SAFE_MESSAGE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}\Z")
@@ -54,6 +54,13 @@ def _message_prompt(message: dict[str, Any], *, role: str) -> str:
     body = message.get("body")
     if not isinstance(summary, str) or not isinstance(body, dict):
         raise ConsumerRefusal("CANONICAL_REQUEST_INVALID")
+    # Inspect canonical text before JSON escaping changes quoted credentials.
+    # CONTINUE's validated body contains instruction/stop_condition strings and
+    # a scope_change boolean. This is a bounded format guard, not a claim to
+    # recognize every possible secret value.
+    source_text = (summary, *(value for value in body.values() if isinstance(value, str)))
+    if any(_ANSWER_SECRET.search(value) for value in source_text):
+        raise ConsumerRefusal("CANONICAL_PROMPT_SECRET_REFUSED")
     # Preserve the validated body as data rather than interpolating its text
     # into any shell argv, connector arguments, or another agent's routing.
     payload = {

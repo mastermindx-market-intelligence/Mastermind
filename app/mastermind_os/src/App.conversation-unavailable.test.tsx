@@ -238,7 +238,7 @@ describe("Conversation unavailable source copy", () => {
       expect(document.querySelector(".shell")?.getAttribute("data-theme")).toBe(
         theme,
       );
-      await user.click(screen.getByRole("button", { name: "Conversation" }));
+      await user.click(screen.getByRole("button", { name: locale === "zh-CN" ? "当前对话" : "Conversation" }));
       expect(await screen.findByText(copy)).toBeTruthy();
       expect(screen.queryByText(other)).toBeNull();
       expect(screen.queryByText(SIGN_IN_ADVICE)).toBeNull();

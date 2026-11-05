@@ -96,6 +96,89 @@ def test_ambiguity_and_unqualified_source_preserve_no_action(change):
     assert project(db,b)['candidate'] is None
 
 
+@pytest.mark.parametrize('bad_id', ['P00.T1','P01.T1','P0.T0','P0.T01','P0.T1.S0','P0.T1.S01',
+    'P0T1','p0.T1','P0.','P0.Tx1','Px.T1','P1.T0','P1.T1.S0','P0.T1.S2.S3'])
+def test_p0_grammar_rejects_leading_zero_and_malformed_ids(bad_id):
+    db=document();db['tasks'][0]['id']=bad_id
+    result=project(db)
+    assert result['state']=='NO_CANDIDATE' and result['reason']=='TASK_IDENTITY_AMBIGUOUS'
+    assert result['candidate'] is None
+    assert result['action_recommendation'] is False and result['effect_eligibility']=='UNOBSERVED'
+
+
+def test_duplicate_p0_identity_stays_ambiguous():
+    db=document();db['tasks'][0]['id']='P0.T1'
+    archived=copy.deepcopy(db['tasks'][0]);archived.update(status='accepted',owner='fixture-owner')
+    db['tasks'].append(archived)
+    result=project(db)
+    assert result['state']=='NO_CANDIDATE' and result['reason']=='TASK_IDENTITY_AMBIGUOUS'
+    assert result['candidate'] is None and result['action_recommendation'] is False
+
+
+def test_archived_p0_history_preserves_unique_ready_p1_candidate():
+    db=document()
+    db['waves'].append({'p':'P0','id':'bootstrap','workstream':WS,'status':'done','source':'agentos'})
+    for task_id in ('P0.T1','P0.T2','P0.T3'):
+        archived=copy.deepcopy(db['tasks'][0])
+        archived.update(id=task_id,wave='bootstrap',status='accepted',owner='fixture-owner')
+        db['tasks'].append(archived)
+    assert [t['id'] for t in db['tasks']]==['P1.T1','P0.T1','P0.T2','P0.T3']
+    result=project(db)
+    assert result['state']=='CANDIDATE' and result['candidate']['task_id']=='P1.T1'
+    assert result['candidate']['workstream']==WS
+    assert result['action_recommendation'] is False and result['effect_eligibility']=='UNOBSERVED'
+
+
+def test_ready_p0_task_and_subtask_qualify_under_existing_conditions():
+    db=document()
+    db['waves'][0].update(p='P0',id='bootstrap')
+    db['tasks'][0].update(id='P0.T4',wave='bootstrap')
+    for task_id in ('P0.T1','P0.T2','P0.T3'):
+        archived=copy.deepcopy(db['tasks'][0])
+        archived.update(id=task_id,wave='bootstrap',status='accepted',owner='fixture-owner')
+        db['tasks'].append(archived)
+    assert project(db)['candidate']['task_id']=='P0.T4'
+    sub=copy.deepcopy(db)
+    sub['tasks'][0].update(id='P0.T1.S2',parent='P0.T1',depends_on=[])
+    result=project(sub)
+    assert result['state']=='CANDIDATE' and result['candidate']['task_id']=='P0.T1.S2'
+    assert result['action_recommendation'] is False and result['effect_eligibility']=='UNOBSERVED'
+
+
+@pytest.mark.parametrize('task_id', ['P0.T1','P0.T10','P0.T3.S2','P0.T12.S7'])
+def test_positive_p0_id_families_still_qualify(task_id):
+    db=document()
+    if task_id.count('.')==2:
+        parent_id=task_id.rsplit('.',1)[0]
+        db['tasks'][0].update(id=task_id,parent=parent_id)
+        parent=copy.deepcopy(db['tasks'][0])
+        parent.update(id=parent_id,status='accepted',owner='fixture-owner')
+        db['tasks'].append(parent)
+    else:
+        db['tasks'][0]['id']=task_id
+    assert project(db)['candidate']['task_id']==task_id
+    assert project(db)['action_recommendation'] is False
+
+
+def test_blocked_accepted_and_in_progress_p0_rows_never_become_candidates():
+    db=document()
+    db['waves'].append({'p':'P0','id':'bootstrap','workstream':WS,'status':'in_progress','source':'agentos'})
+    blocked=copy.deepcopy(db['tasks'][0])
+    blocked.update(id='P0.T1',wave='bootstrap',status='blocked',owner='fixture-owner',reason='EFFECT_UNKNOWN')
+    accepted=copy.deepcopy(db['tasks'][0])
+    accepted.update(id='P0.T2',wave='bootstrap',status='accepted',owner='fixture-owner')
+    db['tasks'] += [blocked,accepted]
+    result=project(db)
+    assert result['state']=='CANDIDATE' and result['candidate']['task_id']=='P1.T1'
+    assert result['action_recommendation'] is False
+    active=copy.deepcopy(db['tasks'][0])
+    active.update(id='P0.T3',wave='bootstrap',status='in_progress',owner='fixture-owner')
+    db['tasks'].append(active)
+    result=project(db)
+    assert result['state']=='NO_CANDIDATE' and result['reason']=='OWNER_ALREADY_STARTED'
+    assert result['candidate'] is None and result['action_recommendation'] is False
+
+
 def test_semantic_identity_stable_across_time_and_raw_bundle_regeneration():
     first=project();b=bundle();b['generated_at']='2026-11-02T12:01:00Z'
     assert project(b=b)['candidate']==first['candidate']
@@ -306,3 +389,119 @@ def test_private_rehearsal_guard_refuses_fetch_and_foreign_repository(tmp_path):
         assert result.returncode == 77, result.stderr
     assert [json.loads(line) for line in log.read_text().splitlines()] == [
         {'command': 'rejected', 'allowed': False}] * 3
+
+
+def big_bundle_reader(padding):
+    def reader(workstream, budget, *, owner_root):
+        b = bundle()
+        b['sections'][1]['items'][0]['excerpt'] = 'latest handoff ' + 'h' * padding
+        raw = json.dumps(b).encode()
+        return raw, {'workstream': workstream, 'execution_authority': False,
+            'bundle_sha256': hashlib.sha256(raw).hexdigest()}
+    return reader
+
+
+def test_canonical_mandatory_body_above_legacy_bound_survives_collect_and_resume(tmp_path):
+    charter = tmp_path / 'charter'; charter.mkdir()
+    (charter / 'TASKS.json').write_text(json.dumps(document()))
+    (charter / 'HANDOFF.md').write_text('existing retained handoff')
+    b = bundle()
+    b['sections'][0]['items'][0]['excerpt'] = 'original objective and waves ' + 'm' * (45 * 1024)
+    b['omitted_due_to_budget'] = [{'path': 'research/OMITTED_PLAN.md', 'tokens': 1000}]
+    b['degraded'] = ['mandatory context exceeds the requested packing budget']
+    b['excluded'] = [{'key': 'WS:UNRELATED', 'reason': 'outside focus'}]
+    raw = json.dumps(b).encode()
+    assert 32 * 1024 < len(raw) <= api.MAX_BUNDLE_BYTES
+    def reader(workstream, budget, *, owner_root):
+        return raw, {'workstream': workstream, 'execution_authority': False,
+            'bundle_sha256': hashlib.sha256(raw).hexdigest()}
+    result = api.collect_context(workspace_root=tmp_path, observed_workspace=tmp_path,
+        owner_session='original-session', observed_session='original-session',
+        workstream=WS, owner='fixture-owner', charter_root=charter, macro_root=tmp_path,
+        reader=reader, now=NOW)
+    assert result['projection']['candidate']['task_id'] == 'P1.T1'
+    assert result['context_bundle'] == b
+    assert result['context_bundle']['omitted_due_to_budget'] == b['omitted_due_to_budget']
+    assert result['context_bundle']['degraded'] == b['degraded']
+    assert [s['id'] for s in result['context_bundle']['sections']] == ['workstream', 'handoff', 'artifacts']
+    out = io.StringIO()
+    assert api.main(['--workspace-root', str(tmp_path), '--charter-root', str(charter),
+        '--macro-root', str(tmp_path), '--workstream', WS, '--owner', 'fixture-owner',
+        '--owner-session', 'original-session'], stdout=out, reader=reader,
+        environ={'CODEX_THREAD_ID': 'original-session'}, cwd=tmp_path, now=NOW) == 0
+    delivered = json.loads(out.getvalue())
+    assert delivered['projection']['candidate']['task_id'] == 'P1.T1'
+    assert delivered['context_bundle'] == b
+    assert 32 * 1024 < len(out.getvalue().encode()) <= api.MAX_CONTEXT_BYTES
+    from integrations.session_bridge import agentos_session_start as hook
+    fresh = document()
+    stamp = datetime.now(timezone.utc).isoformat()
+    fresh['updated'] = stamp; fresh['tasks'][0]['updated'] = stamp
+    (charter / 'TASKS.json').write_text(json.dumps(fresh))
+    output = hook.session_start_context({'hook_event_name': 'SessionStart',
+        'source': 'resume', 'session_id': 'original-session', 'cwd': str(tmp_path)},
+        workspace_root=tmp_path, workstream=WS, owner_root=tmp_path,
+        charter_root=charter, owner='fixture-owner', owner_session='original-session',
+        reader=reader)
+    text = output['hookSpecificOutput']['additionalContext']
+    assert 32 * 1024 < len(text.encode()) <= api.MAX_CONTEXT_BYTES
+    assert json.loads(text)['context_bundle'] == b
+    assert json.loads(text)['projection']['candidate']['task_id'] == 'P1.T1'
+
+
+def test_near_upstream_max_bundle_still_delivers_complete(tmp_path):
+    charter = tmp_path / 'charter'; charter.mkdir()
+    (charter / 'TASKS.json').write_text(json.dumps(document()))
+    (charter / 'HANDOFF.md').write_text('existing retained handoff')
+    reader = big_bundle_reader(api.MAX_BUNDLE_BYTES - 4 * 1024)
+    result = api.collect_context(workspace_root=tmp_path, observed_workspace=tmp_path,
+        owner_session='original-session', observed_session='original-session',
+        workstream=WS, owner='fixture-owner', charter_root=charter, macro_root=tmp_path,
+        reader=reader, now=NOW)
+    raw, _ = reader(WS, 4000, owner_root=tmp_path)
+    assert api.MAX_BUNDLE_BYTES - 8 * 1024 < len(raw) <= api.MAX_BUNDLE_BYTES
+    assert result['projection']['candidate']['task_id'] == 'P1.T1'
+    assert result['context_bundle'] == json.loads(raw)
+    assert len(json.dumps(result, ensure_ascii=False).encode()) <= api.MAX_CONTEXT_BYTES
+
+
+def test_oversize_owner_metadata_fails_closed_under_real_constants(tmp_path):
+    raw = json.dumps(bundle()).encode()
+    noise = 'y' * (api.METADATA_ALLOWANCE_BYTES + 2048)
+    def reader(workstream, budget, *, owner_root):
+        return raw, {'workstream': workstream, 'execution_authority': False,
+            'bundle_sha256': hashlib.sha256(raw).hexdigest(), 'projection_padding': noise}
+    result = api.collect_context(workspace_root=tmp_path, observed_workspace=tmp_path,
+        owner_session='original-session', observed_session='original-session',
+        workstream=WS, owner='fixture-owner', charter_root=tmp_path, macro_root=tmp_path,
+        reader=reader, now=NOW)
+    assert result['projection']['state'] == 'NO_CANDIDATE'
+    assert result['projection']['reason'] == 'CONTEXT_UNAVAILABLE'
+    assert result['projection']['candidate'] is None
+    assert result['projection']['action_recommendation'] is False
+    assert 'context_bundle' not in result
+
+
+def test_final_serialized_bound_still_fails_closed(monkeypatch, tmp_path):
+    monkeypatch.setattr(api, 'METADATA_ALLOWANCE_BYTES', 1 << 20)
+    monkeypatch.setattr(api, 'MAX_CONTEXT_BYTES', 2048)
+    reader = big_bundle_reader(2048)
+    result = api.collect_context(workspace_root=tmp_path, observed_workspace=tmp_path,
+        owner_session='original-session', observed_session='original-session',
+        workstream=WS, owner='fixture-owner', charter_root=tmp_path, macro_root=tmp_path,
+        reader=reader, now=NOW)
+    assert result['projection']['state'] == 'NO_CANDIDATE'
+    assert result['projection']['reason'] == 'CONTEXT_UNAVAILABLE'
+    assert 'context_bundle' not in result
+
+
+def test_final_entrypoint_metadata_counts_toward_allowance():
+    body = {'context_bundle': bundle(), 'entrypoint': 'active_owner_boundary',
+            'padding': ''}
+    metadata = {key: value for key, value in body.items() if key != 'context_bundle'}
+    body['padding'] = 'x' * (api.METADATA_ALLOWANCE_BYTES
+        - len(json.dumps(metadata, sort_keys=True, ensure_ascii=False).encode()) + 1)
+    assert len(json.dumps(body, ensure_ascii=False).encode()) < api.MAX_CONTEXT_BYTES
+    result = json.loads(api.bounded_json(body))
+    assert result['projection']['reason'] == 'CONTEXT_DELIVERY_TOO_LARGE'
+    assert 'context_bundle' not in result
