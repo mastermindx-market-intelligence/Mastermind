@@ -186,6 +186,52 @@ V2_C2_BUSINESS_FLEET_PREDECESSOR = frozenset((
     "private-tunnel-auth.mjs", "private-tunnel-gateway.mjs",
 ))
 
+# Exact 2026-10-21 predecessor seals only. These do not admit later
+# unreconciled installations or authorize a compatibility upgrade.
+V2_FABRIC_DESIGN_TAILNET_FILES = frozenset((
+    "fleet-status.mjs", "gateway.mjs", "git-publish.mjs",
+    "output-budget.mjs", "package-lock.json", "package.json",
+    "paper-design.mjs", "private-tunnel-auth.mjs",
+    "private-tunnel-gateway.mjs", "tailnet-gateway.mjs",
+))
+
+V2_FABRIC_READ_OPERATOR_FILES = V2_FABRIC_DESIGN_TAILNET_FILES | frozenset((
+    "fabric-operator.mjs",
+))
+
+SEALED_V2_FLEET_GATEWAY_PREDECESSORS = {
+    "admin-business": (
+        "68792c832344c61a7f0ca3462d85c85eba0e586877ee68934153c2bc18e55ebd",
+        "5dc83dd6aa840b3d321502045db1c4dcaf6fa9d09d5cca8422d5717c84191b1a",
+        V2_C2_BUSINESS_FLEET_PREDECESSOR,
+    ),
+    "chatgpt3-w570f6f34": (
+        "35246e482e79f3203b3e1cd28e76c77cfbef8681c1157a9a5add4e232a7820e5",
+        "5462b46a30a5d67fbc3dcee368bfe2675eb409b3bacecbeddc70e9a5a3d9a123",
+        V2_C2_BUSINESS_FLEET_PREDECESSOR,
+    ),
+    "chatgpt3-wa2a9e6f9": (
+        "0a248967072622afa375c6e6ab749d025150b7805fe288c2de83da381c66e0b4",
+        "39c6bbe7ddfb69b8ac837be37f7b9fed06f10645967dc1675221dad4b5040879",
+        V2_C2_BUSINESS_FLEET_PREDECESSOR,
+    ),
+    "chatgpt4": (
+        "2252819766e266ac0be6b30c94694b503aad4634d8de184f62611542fb581bd0",
+        "5b7e4ea4b83d1cff6f371dc1ccb3862762222336ba9bb24c0444ad42d3d959c9",
+        V2_C2_BUSINESS_FLEET_PREDECESSOR,
+    ),
+    "fabric-design": (
+        "87de91f4fd0d51571c2350cf4fe53704ad035eba8f095c13b09352732307671c",
+        "0481da04b267ea610a917e78203ac7829c1799a2a83e226502978c6d8bc7d2f9",
+        V2_FABRIC_DESIGN_TAILNET_FILES,
+    ),
+    "fabric-read": (
+        "f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb",
+        "c0fda20241050072ccdecc4cfa5e31d4322a3e0a645404666e7116db372954d3",
+        V2_FABRIC_READ_OPERATOR_FILES,
+    ),
+}
+
 # Exact historical installed C2 Business 0.1.10 generation. All pinned file
 # hashes are provenance checks, NOT a repository access grant. The Gateway
 # target source is the independently reviewed fleet v0.1.10 generation; the
@@ -247,7 +293,7 @@ FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256 = {
     "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
 }
 FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256 = {
-    "git-publish.mjs": "f67119198a0e63c34ae148633402a7ec3ab351ecf7f40a24bdc355b9890f8a2c",
+    "git-publish.mjs": "10574812f428114314a1529df2d969e52b19d2db8d4f971564a98970d93adc67",
     "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
 }
 
@@ -424,6 +470,19 @@ def _canonical_json_sha256(value: object) -> str:
     return hashlib.sha256(json.dumps(
         value, sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")).hexdigest()
+
+
+def _sealed_v2_fleet_gateway_predecessor(data: dict, account: str) -> bool:
+    """Recognize only one exact already-installed historical V2 gateway seal."""
+    entry = SEALED_V2_FLEET_GATEWAY_PREDECESSORS.get(account)
+    if (entry is None or not isinstance(data, dict)
+            or data.get("version") != MANIFEST_VERSION
+            or data.get("account") != account):
+        return False
+    files = data.get("files")
+    return (isinstance(files, dict)
+            and frozenset(files) == entry[2]
+            and _canonical_json_sha256(data) == entry[0])
 
 
 def _sha256_hex(value: str) -> bool:
@@ -1342,6 +1401,7 @@ def _valid_manifest(data, account: str, label: str) -> bool:
                     and fileset == V2_C2_BUSINESS_FLEET_PREDECESSOR)
             ))
             and not c2_paper_predecessor and not c4_paper_cohort
+            and not _sealed_v2_fleet_gateway_predecessor(data, account)
             and not (version == MANIFEST_VERSION and account in NATIVE_POOL_PIN_PREDECESSORS
                      and files == NATIVE_POOL_PIN_PREDECESSORS[account])):
         return False
@@ -1367,16 +1427,56 @@ def _read_manifest(
 ) -> dict | None:
     if manifest_path.is_symlink():
         raise SystemExit("refusing symlink manifest")
-    if not manifest_path.exists():
+    try:
+        fd = os.open(
+            manifest_path,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
+        )
+    except FileNotFoundError:
         if required:
             raise SystemExit("not staged: manifest missing")
         return None
+    except OSError as exc:
+        raise SystemExit("corrupt manifest") from exc
     try:
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        raise SystemExit("corrupt manifest")
+        before = os.fstat(fd)
+        # Match the bounded regular-file contract of the existing tunnel reader.
+        limit = 65536
+        if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= limit:
+            raise SystemExit("corrupt manifest")
+        raw = bytearray()
+        while len(raw) <= limit:
+            part = os.read(fd, min(65536, limit + 1 - len(raw)))
+            if not part:
+                break
+            raw.extend(part)
+        after = os.fstat(fd)
+        named = manifest_path.lstat()
+        identity = lambda info: (
+            info.st_dev, info.st_ino, info.st_mode, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns,
+        )
+        if (len(raw) != before.st_size or len(raw) > limit
+                or identity(before) != identity(after)
+                or identity(after) != identity(named)):
+            raise SystemExit("corrupt manifest")
+        captured = bytes(raw)
+    except OSError as exc:
+        raise SystemExit("corrupt manifest") from exc
+    finally:
+        os.close(fd)
+    try:
+        data = json.loads(captured.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit("corrupt manifest") from exc
     if not _valid_manifest(data, account, label):
         raise SystemExit("corrupt manifest")
+    if _sealed_v2_fleet_gateway_predecessor(data, account):
+        expected_bytes_sha = SEALED_V2_FLEET_GATEWAY_PREDECESSORS[account][1]
+        # Authenticate the same immutable bytes that produced data. A later
+        # pathname replacement must never supply a different accepted seal.
+        if hashlib.sha256(captured).hexdigest() != expected_bytes_sha:
+            raise SystemExit("corrupt manifest")
     return data
 
 
@@ -1888,6 +1988,32 @@ def cmd_stage(args) -> int:
         modern_fabric=_modern_fabric_setting(args, roots, prior, fabric_only),
     )
 
+def _sealed_historical_tailnet_launch_argv(
+    account: str, manifest: dict, roots: dict,
+    expected_argv: list[str], actual_argv: list[str],
+) -> bool:
+    """Allow only the two byte-pinned historical Fabric tailnet launchers.
+
+    The caller has already verified every module hash, the immutable original
+    manifest bytes, the plist SHA256, and the account/label. This helper does
+    not permit re-staging or changing the original launch agent.
+    """
+    if account not in {"fabric-design", "fabric-read"}:
+        return False
+    if not _sealed_v2_fleet_gateway_predecessor(manifest, account):
+        return False
+    if "tailnet-gateway.mjs" not in manifest.get("files", {}):
+        return False
+    if len(expected_argv) != 3 or len(actual_argv) != 3:
+        return False
+    historical_argv = [
+        expected_argv[0],
+        str(roots["base"] / "tailnet-gateway.mjs"),
+        expected_argv[2],
+    ]
+    return actual_argv == historical_argv
+
+
 def _verify_staged_install(
     account: str,
     label: str,
@@ -1954,9 +2080,14 @@ def _verify_staged_install(
         raise SystemExit("plist is not our exact install")
 
     expected_argv = _expected_argv(node, roots["gateway"], roots["config"])
-    if list(plist.get("ProgramArguments") or []) != expected_argv:
+    actual_argv = list(plist.get("ProgramArguments") or [])
+    historical_tailnet = _sealed_historical_tailnet_launch_argv(
+        account, manifest, roots, expected_argv, actual_argv,
+    )
+    if actual_argv != expected_argv and not historical_tailnet:
         raise SystemExit("plist is not our exact install")
-    if Path(expected_argv[1]).name != PRIVATE_GATEWAY_NAME:
+    if (Path(actual_argv[1]).name != PRIVATE_GATEWAY_NAME
+            and not historical_tailnet):
         raise SystemExit("plist is not our exact install")
 
     return manifest
@@ -2850,6 +2981,11 @@ def cmd_upgrade(args) -> int:
     prior = _verify_staged_install(
         account, label, roots, require_runtime_seal=False
     )
+    if _sealed_v2_fleet_gateway_predecessor(prior, account):
+        raise SystemExit(
+            "refusing upgrade: sealed historical fleet modules require an "
+            "independently reviewed capability-preserving migration"
+        )
     if prior.get("version") == MANIFEST_VERSION and prior.get("dependencyTreeHash") is not None:
         _verify_staged_install(account, label, roots, require_runtime_seal=True)
     if (

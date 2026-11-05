@@ -17,6 +17,21 @@ This is a path-disjoint subordinate qualification surface for the existing [Meta
 
 This first canary deliberately permits **no actual Mastermind tools**. Adding an authenticated, narrow **read-only** steward MCP server is a *separate* phase after its exact tool schema, audience, account binding and receiving-service enforcement are tested. Adding `mcp_servers` or allowing `terminal` to circumvent the check is not an implementation shortcut.
 
+### Exact original Steward advertisement size exception (source-only)
+
+The existing `mastermind_secretary_mcp.server.build_tools()` v2 owner
+now serializes six full output schemas to **158,531 bytes**, exceeding the
+Hermes compatibility check's general **128 KiB** untrusted advertisement
+limit. The qualification stage accepts only those **exact** original owner
+bytes, pinned by SHA-256
+`23f13aa028a564889da10285ecdfd648a9a451fa2635d0251fd2340b45821837`.
+The original 128 KiB cap remains for **every** modified or unqualified
+advertisement; even a changed owning `build_tools()` result refuses with
+`OWNER_ADVERTISEMENT_DRIFT`, not an automatic new approved baseline.
+The six-name, read-only annotations, static capability and schema-equality
+checks are still required. This is not permission to widen model-visible
+tools, connect a real server, or accept live company data.
+
 ```sh
 python3 -m pip install 'PyYAML>=6,<7'    # in an already-approved isolated environment
 python3 integrations/hermes_qualification/preflight.py \

@@ -535,3 +535,13 @@ REVIEWED_FILES['integrations/session_bridge/mmtask_restore/preimage/mmtask'] = {
 # Exact unchanged JSON traversal node budget, never an OS identity or grant.
 # Any changed source byte/site returns this numeric token to the ordinary D8 guard.
 REVIEWED_FILES['app/mastermind_os/src/admission/project-admission-command-port.ts'] = {'sha256': 'bc14696fce184ce0d186431f044a79d93c61ca07b8c4eaf718e4ed19b3af2571', 'sites': ((37, 87, 90, 'int', '400'),)}
+
+# PR1917 source review5761933327 at63d184218e8d6a2b7da48f98045a2e67f504f5aa:
+# default HTTPS port in the exact parsed-origin condition, not a UID/GID.
+# Existing full-file SHA + token-span verification binds this one Constant;
+# any source/path/context drift restores the ordinary D8 scanner. This does
+# not change the URL/port policy or the separate reviewed Squid ACL exception.
+REVIEWED_FILES['integrations/hermes_secretary/tab_sweep.py'] = {
+    'sha256': '12d2c8f059f941eb908cc9d7ec3651763f8102832e05435118ce8e1385d5fd46',
+    'sites': ((19, 77, 80, 'int', '443'),),
+}
