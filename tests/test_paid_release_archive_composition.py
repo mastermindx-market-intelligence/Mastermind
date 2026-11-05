@@ -53,6 +53,9 @@ def archived(tmp_path_factory):
                                    text=True).strip()
     root = parent / "system/releases" / commit
     root.mkdir(parents=True, mode=0o755)
+    # Match the real installer's explicit traverse mode, independent of the
+    # caller's private umask; the production seal must still enforce it.
+    root.chmod(0o755)
     archive = parent / "source.tar"
     with archive.open("wb") as handle:
         subprocess.run(["git", "archive", "--format=tar", commit], cwd=ROOT,
