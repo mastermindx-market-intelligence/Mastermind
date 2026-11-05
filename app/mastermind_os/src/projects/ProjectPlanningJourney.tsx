@@ -1725,7 +1725,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
   const stateLine: readonly [string, string] = (() => {
     const pair = (en: string, cn: string): readonly [string, string] => [en, cn];
     if (!authorized) return NOTICE_COPY.AUTH;
-    if (control.status === "submitting") return pair("Working…", "执行中…");
+    if (control.status === "submitting") return pair("Sending request…", "正在发送请求…");
     if (control.status === "checking") return pair("Checking the recorded state…", "正在查询记录的状态…");
     if (control.status === "refused") return pair("The source refused this request.", "来源拒绝了此请求。");
     if (planningRecovery) return pair("Check the original planning request. Do not send it again.", "请查询原始规划请求，不要重新发送。");
