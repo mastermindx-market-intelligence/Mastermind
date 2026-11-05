@@ -624,6 +624,7 @@ class _ExecutivePathFence:
                 "/workspace/mission/v3/current",
                 "/workspace/mission/v4/current",
                 "/workspace/result/current",
+                "/workspace/mission-result/current",
                 "/workspace/result-references/current",
                 "/workspace/plan/current",
                 "/workspace/project-plan/current",
@@ -644,6 +645,7 @@ class _ExecutivePathFence:
                 "/workspace/mission/v3/current",
                 "/workspace/mission/v4/current",
                 "/workspace/result/current",
+                "/workspace/mission-result/current",
                 "/workspace/result-references/current",
                 "/workspace/plan/current",
                 "/workspace/project-plan/current",
@@ -800,11 +802,21 @@ async def _mounted_lifespan(app):
         await await_owned(asyncio.create_task(finish_owner()))
 
 
+_OS_AUTH0_ORIGIN = "https://dev-eo0jf8us5mup7wd5.us.auth0.com"
 _OS_RESPONSE_HEADERS = {
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; "
-        "connect-src 'self' https://dev-eo0jf8us5mup7wd5.us.auth0.com; "
+        f"connect-src 'self' {_OS_AUTH0_ORIGIN}; "
+        f"frame-src 'self' {_OS_AUTH0_ORIGIN}; "
         "img-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'none'",
+}
+# Only the OAuth callback can be framed by the OS origin. The app shell and
+# all other assets remain non-embeddable. Never permit arbitrary ancestors.
+_OS_CALLBACK_RESPONSE_HEADERS = {
+    **_OS_RESPONSE_HEADERS,
+    "Content-Security-Policy": _OS_RESPONSE_HEADERS["Content-Security-Policy"].replace(
+        "frame-ancestors 'none'", "frame-ancestors 'self'"
+    ),
 }
 
 
@@ -872,7 +884,8 @@ class OsStaticApp:
             return
         key = "/os/" if path == "/os/auth/callback" else path
         body, mime = self._assets[key]
-        headers = {**_OS_RESPONSE_HEADERS, "Content-Type": mime}
+        policy_headers = _OS_CALLBACK_RESPONSE_HEADERS if path == "/os/auth/callback" else _OS_RESPONSE_HEADERS
+        headers = {**policy_headers, "Content-Type": mime}
         await Response(body, headers=headers)(scope, receive, send)
 
 
@@ -1460,6 +1473,7 @@ def _build_profile_mcp_app(
                              "/workspace/mission/v3/current",
                              "/workspace/mission/v4/current",
                              "/workspace/result/current",
+                             "/workspace/mission-result/current",
                              "/workspace/result-references/current",
                              "/workspace/plan/current",
                              "/workspace/project-plan/current",

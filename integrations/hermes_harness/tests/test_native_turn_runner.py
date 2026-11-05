@@ -55,15 +55,19 @@ class CgroupAndEnvironmentTests(unittest.TestCase):
     def test_exact_service_cgroup_matches(self):
         assert_role_service_cgroup(
             "mmsecretary",
-            raw="0::/user.slice/user-1000.slice/user@1000.service/app.slice/hermes-runtime-mmsecretary.service\n",
+            raw="0::/system.slice/hermes-runtime-mmsecretary.service\n",
         )
         assert_role_service_cgroup(
             "mmmeta",
-            raw="0::/user.slice/hermes-runtime-mmmeta.service/child.slice\n",
+            raw="0::/system.slice/hermes-runtime-mmmeta.service/child.slice\n",
         )
 
     def test_wrong_or_forged_cgroup_refuses(self):
         bad = [
+            "0::/user.slice/user-1000.slice/user@1000.service/app.slice/hermes-runtime-mmsecretary.service\n",
+            "0::/user.slice/hermes-runtime-mmsecretary.service/child.slice\n",
+            "0::/system.slice/unrelated.service/hermes-runtime-mmsecretary.service\n",
+            "1:name=systemd:/system.slice/hermes-runtime-mmsecretary.service\n",
             "0::/user.slice/hermes-runtime-mmmeta.service\n",
             "0::/user.slice/hermes-runtime-mmsecretary.service-fake\n",
             "0::/unrelated/sol-shell.scope\n",
@@ -86,7 +90,7 @@ class CgroupAndEnvironmentTests(unittest.TestCase):
                 "HERMES_HOME": str(profile.hermes_home),
                 "BYTEPLUS_MODELARK_API_KEY": "synthetic-not-live",
                 "HTTPS_PROXY": "http://127.0.0.2:18651",
-                "NO_PROXY": "127.0.0.1,localhost",
+                "NO_PROXY": "127.0.0.1,localhost,127.0.0.2",
             }
             self.assertEqual(_private_child_environment(profile, env), env)
             for key, value in [
@@ -95,6 +99,7 @@ class CgroupAndEnvironmentTests(unittest.TestCase):
                 ("HTTPS_PROXY", "http://127.0.0.3:18651"),
                 ("HTTPS_PROXY", "http://127.0.0.1:99999"),
                 ("NO_PROXY", "*"),
+                ("NO_PROXY", "127.0.0.1,localhost"),
                 ("HERMES_GATEWAY_TOKEN", "PRIVATE-NOT-LIVE"),
                 ("HERMES_SLACK_BOT_TOKEN", "PRIVATE-NOT-LIVE"),
                 ("HTTP_PROXY", "http://127.0.0.1:1234"),
@@ -127,7 +132,7 @@ class SyntheticRunnerTests(unittest.TestCase):
             "HERMES_HOME": str(self.home),
             "BYTEPLUS_MODELARK_API_KEY": "SOURCE_ONLY_PRIVATE_FIXTURE_KEY",
             "HTTPS_PROXY": "http://127.0.0.2:18651",
-            "NO_PROXY": "127.0.0.1,localhost",
+            "NO_PROXY": "127.0.0.1,localhost,127.0.0.2",
         }
 
     def _write(self, mode="good"):
@@ -165,6 +170,7 @@ class SyntheticRunnerTests(unittest.TestCase):
         self.child_env.pop("BYTEPLUS_MODELARK_API_KEY")
         self.child_env["ZAI_API_KEY"] = "SOURCE_ONLY_META_PROVIDER_FIXTURE"
         self.child_env["HTTPS_PROXY"] = "http://127.0.0.3:18652"
+        self.child_env["NO_PROXY"] = "127.0.0.1,localhost,127.0.0.3"
         self._write()
         receipt = self._run()
         self.assertEqual(receipt["status"], "PASS_CHILD_OUTPUT_OBSERVATION_ONLY")

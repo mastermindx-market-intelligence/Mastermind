@@ -81,6 +81,12 @@ class OperatorReloadTests(unittest.TestCase):
         cgroup = stack.enter_context(mock.patch(
             "integrations.hermes_harness.native_turn_runner.assert_role_service_cgroup"
         ))
+        self.identity = stack.enter_context(mock.patch(
+            "integrations.hermes_runtime.role_isolation.assert_role_credential_isolation"
+        ))
+        self.tcp = stack.enter_context(mock.patch(
+            "integrations.hermes_runtime.tcp_sandbox.enforce_role_tcp_ports"
+        ))
         git = stack.enter_context(mock.patch(
             "integrations.hermes_runtime.install.assert_checkout_sha"
         ))
@@ -140,6 +146,8 @@ class OperatorReloadTests(unittest.TestCase):
             code = cli._canary(self.profile_path, self.hermes)
         self.assertEqual(code, 0)
         cgroup.assert_called_once_with("mmsecretary")
+        self.identity.assert_called_once_with(self.profile)
+        self.tcp.assert_called_once_with(self.profile)
         git.assert_called_once_with(self.state / "current" / "upstream")
         load.assert_called_once_with(self.secrets_file)
         runtime.assert_called_once()
@@ -172,6 +180,22 @@ class OperatorReloadTests(unittest.TestCase):
         load.assert_not_called()
         runtime.assert_not_called()
         canary.assert_not_called()
+
+    def test_identity_and_tcp_refusals_precede_credentials_and_model(self):
+        for stage, code in (("identity", "ROLE_OS_IDENTITY_COLLISION"),
+                            ("tcp", "ROLE_TCP_LANDLOCK_ABI_UNAVAILABLE")):
+            with self.subTest(stage=stage):
+                cgroup, git, load, runtime, canary = self._mocks()
+                getattr(self, stage).side_effect = RuntimeRefusal(code)
+                with self.assertRaises(RuntimeRefusal) as exc:
+                    cli._canary(self.profile_path, self.hermes)
+                self.assertEqual(exc.exception.code, code)
+                if stage == "identity":
+                    self.tcp.assert_not_called()
+                git.assert_not_called()
+                load.assert_not_called()
+                runtime.assert_not_called()
+                canary.assert_not_called()
 
     def test_different_profile_or_binary_path_cannot_invoke(self):
         cgroup, git, load, _, canary = self._mocks()

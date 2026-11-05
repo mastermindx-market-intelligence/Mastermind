@@ -60,6 +60,8 @@ jobs:
   # Ordinary PRs get rapid, bounded feedback while the exact merge-group
   # candidate still executes *all* canonical discovery-first pytest shards.
   # The stable protected status context is still the final job named 'test'.
+  # Heavy work must stop when this same-PR run is superseded/cancelled.
+  # Keep the small final test gate on always() so cancellation cannot look green.
   pr_fast:
     name: PR fast checks
     needs: [pr_scope]

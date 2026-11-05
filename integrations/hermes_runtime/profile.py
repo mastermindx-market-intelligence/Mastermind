@@ -18,6 +18,7 @@ from .constants import (
     UPSTREAM_REPOSITORY,
 )
 from .errors import RuntimeRefusal, refusal
+from .egress import ROLE_PROXY_HOST
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _TOOL = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -227,7 +228,7 @@ def _validate(config: dict[str, Any], *, source_path: Path, hermes_home: Path | 
         issues.add("GATEWAY_INVALID")
     else:
         host = gateway.get("host")
-        if host != LOOPBACK_HOST:
+        if host not in (LOOPBACK_HOST, ROLE_PROXY_HOST.get(role)):
             issues.add("NON_LOOPBACK_BIND_REFUSED")
             host = ""
         if gateway.get("auth") != "required":
