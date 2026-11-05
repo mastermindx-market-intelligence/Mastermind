@@ -2841,7 +2841,7 @@ def _service_from_config(
                     from control_plane.fresh_conversation import FreshConversationOwner
                     expected = (current.submit.policy_id,
                         hashlib.sha256(current.submit.issuer.encode("utf-8")).hexdigest(), current.submit.resource)
-                    return FreshConversationOwner(service, expected_policy=expected)
+                    return FreshConversationOwner(service, expected_policy=expected, authorized_policies=current)
                 session_factories["fresh_conversation_provider_factory"] = fresh_conversation_factory
         if "workspace_read_provider_factory" in workspace_factories and installed_profile == WEB_CEO_V3_PROFILE:
             # Same sealed Workspace collector/membership and existing root-sealed

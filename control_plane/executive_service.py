@@ -5975,8 +5975,8 @@ class ExecutiveControlService:
                 try:
                     from control_plane.fresh_conversation import FreshConversationOwner
                     frame = fresh_wire.validate_private_frame(parsed)
-                    creating = frame["operation"] == "create"
-                    allowed_states = {"READY", "QUARANTINED"} if frame["operation"] in {"status", "read"} else {"READY"}
+                    modifying = frame["operation"] in fresh_wire.MODIFYING
+                    allowed_states = {"READY", "QUARANTINED"} if frame["operation"] in {"status", "read", "turn_status", "turn_read"} else {"READY"}
                     factory = app_binding.fresh_conversation_provider_factory
                     runtime = self._require_runtime()
                     if factory is None:
@@ -5993,18 +5993,19 @@ class ExecutiveControlService:
                                 or writer.get_extra_info("socket") is not connection
                                 or _peer_uid(connection) != app_binding.peer_uid
                                 or writer.is_closing() or writer.transport.is_closing()
-                                or (creating and reader.at_eof())):
+                                or (modifying and reader.at_eof())):
                             raise ValueError("fresh conversation host changed")
                         # This installed factory only checks the namespace/current sealed
                         # policy and constructs a nominal owner; it performs no effect.
                         current = factory(runtime)
                         if (type(current) is not FreshConversationOwner or current._runtime is not runtime
                                 or current._service is not self or current._app is not app_binding
-                                or current._expected_policy != provider._expected_policy):
+                                or current._expected_policy != provider._expected_policy
+                                or current._trusted_read_pair != provider._trusted_read_pair):
                             raise ValueError("fresh conversation policy changed")
                     require_fresh_host_current()
                     result = await provider.handle_frame(frame, host_current=require_fresh_host_current,
-                        reader=reader if creating else None)
+                        reader=reader if modifying else None)
                     require_fresh_host_current()
                     await self._send_ceo_ingress_response(writer, {"ok": True, "result": result})
                 except Exception:

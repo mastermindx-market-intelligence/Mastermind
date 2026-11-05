@@ -97,6 +97,8 @@ _OS_SESSION_EXECUTIVE_ROUTES: tuple[str, ...] = (
 _OS_FRESH_CONVERSATION_ROUTES = (
     "/os/executive/conversation/preview", "/os/executive/conversation/create",
     "/os/executive/conversation/status", "/os/executive/conversation/read",
+    "/os/executive/conversation/consume", "/os/executive/conversation/turn",
+    "/os/executive/conversation/turn/status", "/os/executive/conversation/turn/read",
 )
 
 __all__ = ["build_executive_mcp_app", "build_web_ceo_mcp_app", "build_web_ceo_sessions_mcp_app", "build_web_ceo_v3_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_personal_read_mcp_app", "build_personal_read_tools", "build_mcp_server", "build_tools", "build_web_ceo_tools", "build_web_ceo_sessions_tools", "run_stdio"]
@@ -701,6 +703,9 @@ class _ExecutivePathFence:
             self._routes.update({path: "POST" for path in _OS_SESSION_EXECUTIVE_ROUTES})
         if fresh_conversation_transport is not None:
             self._routes.update({path: "POST" for path in _OS_FRESH_CONVERSATION_ROUTES})
+            # Dual-resource headers do not replace the incumbent public
+            # HTTPS/Host/Origin fence. Admit only these literal paths there.
+            self._public_routes.update(_OS_FRESH_CONVERSATION_ROUTES)
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope.get("type") == "http":
