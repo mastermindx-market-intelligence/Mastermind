@@ -66,11 +66,12 @@ GROK47_MERGED_SOURCE_DIGESTS = {
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
     'remote_sub_exec.py': '9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1',
     'pick.py': '747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132',
-    'remote_sub.sh': '3fbad86bc76c65248302191e0ff2e27eecdb933097244c5b87a03863385452c2',
+    'remote_sub.sh': 'a1e271170778f992cf07c780234620c22d17f6242581311c414e30dd428ade40',
     'remote_sub_helpers.py': '3a4efaefd63244e77cee385d83da0bb4e53b86a0e83a183601f2fa80ec4d602b',
     'sub.sh': '4956942c77421b9d1015889995ebf0419399ea62c16de608765a0795b5fb551f',
     'native_remote.py': '2beef7dd4de1dab2908970bed48cfd3fdfd99da2d99bc8de72a92d2a1b2418b6',
     'fabric_operator_contract.py': 'e6b32fd1547402c1184f826f74c253f34384cb6e32306e55b84449a892d19b5e',
+
 }
 
 EXTRA_PREIMAGES = {
@@ -86,9 +87,9 @@ def sha(raw):
 
 GO_INSTALLED_PREIMAGE = "4a41548a757f763ed5210df96aff6c7148d25d9e192cd3d849e108e1e917d100"
 GO_APPLICATION_DEPENDENCIES = ("lease_broker.py", "go_lease_capability.py", "go_lease_gateway.py")
-# Actual102 closure after protected cb390bfc composition: the B dependencies
-# are unchanged; remote_sub retains the protected BASH_COMPAT/heredoc fix.
-GO_BASE_MANIFEST_SHA256 = "8062512b10fc5c62b030c3ceb398495e63e6abd35b2018c5008b658f40d2251c"
+# Actual102 closure after protected51e9 and application A3 composition: the B dependencies
+# are unchanged; remote_sub retains the protected fast-observation and terminal-replay fixes.
+GO_BASE_MANIFEST_SHA256 = "395b1af90c815125a92c81c8b72ec61065002f4f9e66ad53618794ec790ce429"
 
 
 def stage_external_go_component(root, output, stable_ext, *, staged_manifest=None):
