@@ -28,12 +28,12 @@ Executive owns admission, Jobs, Attempts, workers, plans and effects; Capacity/M
 
 | Node | Dependency | Deliverable and acceptance | Editorial state |
 | --- | --- | --- | --- |
-| P1 | none | Current surface census with exact owner/path/contract, capability evidence and Y7 collision fence | in_progress |
-| P2 | P1 | Smallest source-ready consumer API joining shared visibility and delegated control through existing seams; no new owners | in_progress |
-| P2.1 | P1 | Compact native status/change projection with explicit original-owner scope, bounds, freshness and coverage | in_progress |
-| P2.2 | P1 | Host-authenticated action hooks that preserve original admission and effect reconciliation | in_progress |
-| P2.3 | P1 | Primary canonical Mission v3 projection and composed two-principal signed-HTTP same-root/revocation proof | in_progress |
-| P3 | P2 | Meaningful focused tests, adversarial self-check, hosted CI, published source and Cursor integration contract | proposed |
+| P1 | none | Current surface census with exact owner/path/contract, capability evidence and Y7 collision fence | source_complete; installed capability separately unproven |
+| P2 | P1 | Smallest source-ready consumer API joining shared visibility and delegated control through existing seams; no new owners | source_implemented; host adoption unproven |
+| P2.1 | P1 | Compact native status/change projection with explicit original-owner scope, bounds, freshness and coverage | source_implemented |
+| P2.2 | P1 | Host-authenticated action hooks that preserve original admission and effect reconciliation | source_implemented; real grants unproven |
+| P2.3 | P1 | Primary canonical Mission v3 projection and composed two-principal signed-HTTP same-root/revocation proof | source_verified on original GLM result |
+| P3 | P2 | Meaningful focused tests, adversarial self-check, hosted CI, published source and Cursor integration contract | local tests pass; hosted checks/publication pending |
 | P4 | P3 + incumbent runtime adoption | Real GB1/Secretary 2 shared-team journey and a measured seven-day observation | blocked |
 
 ## Verification and completion ruler
