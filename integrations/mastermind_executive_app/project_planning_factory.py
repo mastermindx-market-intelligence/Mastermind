@@ -54,7 +54,100 @@ class ProjectPlanningAppFactory:
         self.policy_loader=policy_loader
         self.clock=clock
 
-    def _current(self,principal,invocation,operation_key,work_ref):
+    def _canonical_data(self):
+        provider=self.app_binding.source_operation_provider_factory
+        if not callable(provider):return None
+        runtime=self.service._require_runtime();mounted=self.service._require_supervisor()
+        invocation=current_foreground_operation()
+        invocation._require_live()
+        identity=(self,provider,runtime,mounted,self.app_binding)
+        saved=getattr(invocation,'_planning_data_binding',None)
+        if saved is None:
+            binding=provider(runtime,mounted)
+            invocation._planning_data_binding=(identity,binding)
+        else:
+            if saved[0]!=identity:raise ValueError('canonical planning owner changed')
+            binding=saved[1]
+        from control_plane.workspace_source_operation_binding import _current_source_operation
+        def current():
+            current_foreground_operation()._require_live()
+            return self.app_binding is self.service._ceo_ingress_app_binding
+        _current_source_operation(binding,runtime=runtime,supervisor=mounted,host_guard=current)
+        data=binding.owner._canonical_data_source
+        if data is not None and (self.reader._installed_context_owner is not data.collector
+                or self.plan_reader._installed_context_owner is not data.collector):
+            raise ValueError('canonical planning installed source owners differ')
+        return data
+
+    def _canonical_view(self,workspace,work_ref,*,verify_source=True):
+        data=self._canonical_data()
+        if data is None:return None
+        invocation=current_foreground_operation()
+        identity=(data,dataclasses.asdict(workspace),work_ref,data.context_binding())
+        saved=getattr(invocation,'_planning_data_view',None)
+        if saved is None:
+            view=data.view(workspace,work_ref=work_ref)
+            if view is None:raise ValueError('canonical planning DATA permission unavailable')
+            invocation._planning_data_view=(identity,view)
+        else:
+            if saved[0]!=identity:raise ValueError('canonical planning source owner changed')
+            view=saved[1]
+            view._owner._validate_view(view)
+            if verify_source or time.monotonic()>=view._operation.read_deadline:
+                renewed=data.view(workspace,work_ref=work_ref)
+                if renewed is None or (renewed.code_commit,renewed.data_commit)!=(view.code_commit,view.data_commit):
+                    raise ValueError('original planning source changed; no rebase')
+                view=renewed;invocation._planning_data_view=(identity,view)
+        # Nested access/Event fences recheck current grants; the separate
+        # Source.check observation performs the full current Git/seal check.
+        # A later independent read may recapture only the SAME immutable C/N.
+        # It never extends principal expiry, request identity or Job allowance.
+        if not verify_source:
+            view._owner._validate_view(view)
+            view._owner._permission_guard(view._operation)
+            return view
+        from integrations.executive_mcp.installed import _installed_child_env
+        collector=data.collector
+        observed=collector._snapshot_pair(_installed_child_env(code_root=collector._code_root,
+            macro_root=collector._macro_root),deadline=min(time.monotonic()+15,view._operation.read_deadline))
+        if observed[0]!=self.service.config.proof_base_sha or observed[1]!=view.code_commit:
+            raise ValueError('canonical planning CODE changed')
+        view.check()
+        return view
+
+    def _canonical_plan(self,workspace,work_ref,*,current_only=False):
+        view=self._canonical_view(workspace,work_ref,verify_source=not current_only)
+        if view is None:
+            from control_plane.agentos_project_plan import AgentOsProjectPlanReader
+            return AgentOsProjectPlanReader.read(self.plan_reader,work_ref=work_ref)
+        invocation=current_foreground_operation()
+        saved=getattr(invocation,'_planning_plan_body',None)
+        if saved is None:
+            with view.capture_scope():body=view.read_plan(work_ref=work_ref)
+            invocation._planning_plan_body=((view.code_commit,view.data_commit),copy.deepcopy(body))
+        else:
+            if saved[0]!=(view.code_commit,view.data_commit):raise ValueError('canonical planning source changed')
+            body=copy.deepcopy(saved[1])
+        return body
+
+    def _canonical_creation(self,principal,invocation,operation_key,work_ref,source):
+        invocation._require_live()
+        workspace=VerifiedPrincipal(**dataclasses.asdict(invocation._project_workspace_principal))
+        view=self._canonical_view(workspace,work_ref)
+        if view is None:raise ValueError('canonical planning source unavailable')
+        from control_plane.project_plan_canonical_basis import capture_current_plan_basis
+        saved=getattr(invocation,'_planning_creation_source',None)
+        if saved is None:
+            with view.capture_scope():
+                value=capture_current_plan_basis(view,work_ref=work_ref).qualify_creation_source(source)
+            invocation._planning_creation_source=((view.code_commit,view.data_commit),copy.deepcopy(source),copy.deepcopy(value))
+        else:
+            if saved[0]!=(view.code_commit,view.data_commit) or saved[1]!=source:raise ValueError('original CREATE source changed')
+            value=copy.deepcopy(saved[2])
+        invocation._require_live()
+        return value
+
+    def _current(self,principal,invocation,operation_key,work_ref,*,current_only=False):
         service=self.service
         now=self.clock()
         if self.policy_loader is not None and self.policy_loader()!=self.policies:
@@ -69,7 +162,7 @@ class ProjectPlanningAppFactory:
                 or type(now) not in (int,float) or not principal.issued_at <= now < principal.expires_at):
             raise ValueError("project planning verified Executive principal refused")
         if (current_foreground_operation() is not invocation
-                or invocation._project_planning_operation not in {'submit','status','result','consume'}
+                or invocation._project_planning_operation not in {'submit','status','result','consume','prepare_proposal'}
                 or invocation._operation_key!=operation_key or invocation._project_planning_work_ref!=work_ref
                 or dataclasses.asdict(invocation._principal)!=dataclasses.asdict(principal)
                 or self.app_binding is not service._ceo_ingress_app_binding
@@ -96,7 +189,7 @@ class ProjectPlanningAppFactory:
         policy=PlanningPolicy.load(service.config.proof_source_repository,service.config.proof_base_sha)
         from control_plane.agentos_project_plan import AgentOsProjectPlanReader
         from common.workspace_project_plan_contract import validate_body
-        plan=validate_body(AgentOsProjectPlanReader.read(self.plan_reader,work_ref=work_ref))
+        plan=validate_body(self._canonical_plan(workspace,work_ref,current_only=current_only))
         if plan['availability']!='AVAILABLE' or plan['selection']!={'work_ref':work_ref}:
             raise ValueError('project planning current canonical goal unavailable')
         commission=read_protected_blob(service.config.proof_source_repository,service.config.proof_base_sha,COMMISSION_PATH)
@@ -145,7 +238,7 @@ class ProjectPlanningAppFactory:
             raise ValueError('project planning goal and canonical source differ')
         generation=native.digest(initial)
         def current_generation():
-            return native.digest(self._current(principal,invocation,operation_key,work_ref))
+            return native.digest(self._current(principal,invocation,operation_key,work_ref,current_only=True))
         access=native._issue_access(initial["limits"]["principal_scope"],work_ref,generation,current_generation)
         execution=self.service._direct_native_execution_access(access)
         executive=native._issue_admission(access,initial["source"],initial["binding"],execution_access=execution)
@@ -176,14 +269,16 @@ class ProjectPlanningAppFactory:
                 raise ValueError("project planning original operation differs; no replacement")
             context["input_artifact_sha256"]=original["input_artifact_sha256"]
         def authority():
-            if self._current(principal,invocation,operation_key,work_ref) != initial:
+            if self._current(principal,invocation,operation_key,work_ref,current_only=True) != initial:
                 raise ValueError("project planning current source/policy/authority changed")
             return copy.deepcopy(context)
         def publication_guard():
             authority()
             return True
         owner=planning._issue_source(reader=self.reader,executive=execution,context=context,
-            authority_guard=authority,input_owner=input_owner,events=self.events,publication_guard=publication_guard)
+            authority_guard=authority,input_owner=input_owner,events=self.events,publication_guard=publication_guard,
+            canonical_source_reader=(None if not callable(self.app_binding.source_operation_provider_factory) else
+                lambda:self._canonical_creation(principal,invocation,operation_key,work_ref,project_source)))
         return owner,executive
 
     def submit(self, *, principal, operation_key, stage, work_ref, project_source,
@@ -198,7 +293,7 @@ class ProjectPlanningAppFactory:
             grounding=grounding,workspace_root=self.service.config.proof_workspace_root,
             fresh_admission_observer=invocation._bind_admitted_root)
 
-    def qualified_original(self,*,principal,operation_key,work_ref):
+    def qualified_original_source(self,*,principal,operation_key,work_ref):
         """Same-carrier read only. No private input rewrite or new root."""
         invocation=current_foreground_operation()
         if invocation._project_planning_operation=='submit':raise ValueError('original read requires its distinct operation')
@@ -224,7 +319,10 @@ class ProjectPlanningAppFactory:
             project_source=context['source'],publication=context['publication'],private_request=value['request_text'].encode('utf-8'),
             grounding=receipt['grounding'])
         access=planning.requalify_original(runtime,job_id=receipt['job_id'],source=source,executive_admission=executive)
-        return receipt,access
+        return receipt,access,source,executive
+
+    def qualified_original(self,**arguments):
+        return self.qualified_original_source(**arguments)[:2]
 
     def original(self,**arguments):
         return self.qualified_original(**arguments)[0]
@@ -241,7 +339,46 @@ def build_ingress_owner(factory):
         principal=VerifiedPrincipal(**dataclasses.asdict(operation._principal))
         args=frame['arguments']
         operation.require_arguments(args)
-        if frame['operation']=='status':
+        if frame['operation']=='prepare_proposal':
+            original,access,source,executive=factory.qualified_original_source(principal=principal,
+                operation_key=args['operation_key'],work_ref=args['work_ref'])
+            request=args['proposal_request']
+            if request['selection']['job_id']!=original['job_id']:
+                raise ValueError('proposal belongs to another original planning Job')
+            runtime=factory.service._require_runtime()
+            mounted=factory.service._require_supervisor()
+            workspace=VerifiedPrincipal(**dataclasses.asdict(operation._project_workspace_principal))
+            from integrations.mastermind_workspace_app.source_operation_principal import source_principal_scope
+            if source.material()['publication']['principal_scope']!=source_principal_scope(workspace):
+                raise ValueError('proposal Workspace principal differs')
+            provider=factory.app_binding.source_operation_provider_factory
+            if not callable(provider):raise ValueError('proposal source owner unavailable')
+            binding=provider(runtime,mounted)
+            from control_plane.workspace_source_operation_binding import _current_source_operation,prepare_project_plan_proposal
+            def host_current():
+                operation._require_live()
+                factory._current(principal,operation,args['operation_key'],args['work_ref'])
+                return True
+            current=_current_source_operation(binding,runtime=runtime,supervisor=mounted,host_guard=host_current)
+            data=binding.owner._canonical_data_source
+            if data is None:raise ValueError('canonical plan basis unavailable')
+            from control_plane.project_plan_canonical_basis import capture_current_plan_basis
+            from control_plane.project_plan_result_source import capture_completed_planning_result
+            view=data.view(workspace,work_ref=args['work_ref'])
+            if view is None:raise ValueError('canonical plan basis unavailable')
+            with view.capture_scope():
+                basis=capture_current_plan_basis(view,work_ref=args['work_ref'])
+                bound=factory.service._namespace_custody.bound_runtime(runtime)
+                result=capture_completed_planning_result(runtime,result_reader=bound,selection=request['selection'],
+                    source=source,executive_admission=executive)
+                if result.check()['result_digest']!=request['result_digest']:raise ValueError('proposal result differs')
+                current();host_current()
+            # Captures are read/compiler-only. The distinct original source
+            # retention below uses fresh full checks outside that scope.
+            receipt=prepare_project_plan_proposal(binding,request,runtime=runtime,supervisor=mounted,
+                host_guard=host_current,principal=workspace,basis=basis,result=result)
+            current();host_current()
+        elif frame['operation']=='status':
             receipt=factory.original(principal=principal,**args)
         elif frame['operation'] in {'result','consume'}:
             original,access=factory.qualified_original(principal=principal,operation_key=args['operation_key'],work_ref=args['work_ref'])

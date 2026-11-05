@@ -33,6 +33,8 @@ class InstalledWorkspaceSourceOperations:
         self._permissions = WorkspaceSourceOperationContextFactory(policy=policy,load_bindings=load_bindings)
         self._runtime_guard = runtime_guard
         self._compiler = collector.project_knowledge_recipe_reader(macro_root=collector._macro_root)
+        from integrations.mastermind_workspace_app.project_journey_recipes import InstalledProjectJourneyRecipes
+        self._journey = InstalledProjectJourneyRecipes(collector)
 
     def __call__(self, runtime, supervisor):
         if type(runtime) is not Runtime:
@@ -63,7 +65,27 @@ class InstalledWorkspaceSourceOperations:
         owner = ProjectKnowledgeSourceOwner(events=events,private_inputs=private,permission_factory=contexts,
             adapter=ProjectKnowledgeRecipeAdapter(self._compiler),publisher_events=event_adapter,
             publisher_binding=self._git.binding,qualify_publisher=data.qualify_publisher,pr_owner=self._git)
-        service = WorkspaceSourceOperationService(knowledge_owner=owner,host_supervisor=host,
+        from integrations.mastermind_workspace_app.project_journey_recipes import (
+            InstalledProjectCreationRecipeAdapter, InstalledProjectPlanProposalRecipeAdapter)
+        from integrations.mastermind_workspace_app.project_creation_service import ProjectCreationSourceOwner
+        from integrations.mastermind_workspace_app.project_plan_proposal_service import ProjectPlanProposalSourceOwner
+        from integrations.mastermind_workspace_app.source_operation_principal import source_principal_scope
+        create = ProjectCreationSourceOwner(events=events,private_inputs=private,permission_factory=contexts,
+            adapter=InstalledProjectCreationRecipeAdapter(self._journey),publisher_binding=self._git.binding,
+            qualify_publisher=data.qualify_publisher,pr_owner=self._git)
+        def unavailable(*args):
+            raise ValueError('SAME_S19_PREPARATION_REQUIRED')
+        def recipe_qualified(principal,prepared,recipe,phase):
+            return (phase == 'PUBLICATION' and recipe.get('action') == 'publish_project_plan_proposal'
+                and prepared.private_payload()['actor'] == {'principal_id':'workspace:'+source_principal_scope(principal)}
+                and self._runtime_guard(runtime) is True)
+        proposal = ProjectPlanProposalSourceOwner(events=events,private_inputs=private,permission_factory=contexts,
+            adapter=InstalledProjectPlanProposalRecipeAdapter(self._journey),capture_basis=unavailable,
+            capture_result=unavailable,actor_for=lambda principal: {'principal_id':'workspace:'+source_principal_scope(principal)},
+            qualify_recipe=recipe_qualified,publisher_binding=self._git.binding,
+            qualify_publisher=data.qualify_publisher,pr_owner=self._git)
+        service = WorkspaceSourceOperationService(create_owner=create,knowledge_owner=owner,
+            plan_proposal_owner=proposal,journey_recipes=self._journey,host_supervisor=host,
             runtime_guard=lambda: self._runtime_guard(runtime),canonical_data_source=data)
         if self._runtime_guard(runtime) is not True:
             raise PermissionError('SOURCE_OPERATION_UNAVAILABLE')

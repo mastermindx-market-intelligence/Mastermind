@@ -97,6 +97,7 @@ fn main() {
             auth::read_project_archive,
             auth::read_project_archive_page,
             auth::read_source_operation_context,
+            auth::source_operation_options,
             auth::source_operation_prepare,
             auth::source_operation_read,
             auth::source_operation_submit,

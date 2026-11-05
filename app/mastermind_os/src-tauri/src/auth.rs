@@ -1566,7 +1566,10 @@ fn source_operation_target(kind: &str, request: &Value) -> Result<Url> {
     {
         return Err("REQUEST_INVALID".into());
     }
-    if kind == "prepare" {
+    if kind == "options" {
+        source_operation_keys(request,&["action"])?;
+        if request.get("action").and_then(Value::as_str)!=Some("publish_project_proposal") {return Err("REQUEST_INVALID".into());}
+    } else if kind == "prepare" {
         source_operation_keys(request, &["action", "request"])?;
         let inner = request
             .get("request")
@@ -1669,6 +1672,10 @@ fn source_operation_target(kind: &str, request: &Value) -> Result<Url> {
         {
             return Err("REQUEST_INVALID".into());
         }
+    } else if kind == "read" && request.get("action").and_then(Value::as_str)==Some("publish_project_proposal") && request.get("work_ref").is_some_and(Value::is_null) {
+        source_operation_keys(request,&["schema","action","request_id","work_ref"])?;
+        let id=request.get("request_id").and_then(Value::as_str).and_then(|s|s.strip_prefix("mmos-project-create-")).ok_or("REQUEST_INVALID")?;
+        if !source_operation_hex(Some(id),40) || request.get("schema").and_then(Value::as_str)!=Some("mastermind.workspace_source_operation_lookup.v1") {return Err("REQUEST_INVALID".into());}
     } else if kind == "read" || kind == "reconcile" {
         let (action, _, _) = source_operation_identity(request)?;
         if matches!(action, "add_project_file" | "set_project_communication_preference") {
@@ -1693,8 +1700,11 @@ fn source_operation_target(kind: &str, request: &Value) -> Result<Url> {
     let suffix = if kind == "read" { "operation" } else { kind };
     let mut url = Url::parse(&format!("{ORIGIN}/workspace/source-operation/{suffix}"))
         .map_err(|_| "REQUEST_INVALID")?;
+    if kind == "options" {url.query_pairs_mut().append_pair("action","publish_project_proposal");}
     if kind == "read" {
-        let (action, id, work) = source_operation_identity(request)?;
+        let (action,id,work) = if request.get("action").and_then(Value::as_str)==Some("publish_project_proposal") && request.get("work_ref").is_some_and(Value::is_null) {
+            ("publish_project_proposal",request["request_id"].as_str().ok_or("REQUEST_INVALID")?,"null")
+        } else { source_operation_identity(request)? };
         url.query_pairs_mut()
             .append_pair("action", action)
             .append_pair("request_id", id)
@@ -1717,7 +1727,7 @@ async fn source_operation_exchange(app: AppHandle, kind: &str, request: Value) -
     let mut call = state
         .http
         .request(
-            if kind == "read" {
+            if kind == "read" || kind == "options" {
                 reqwest::Method::GET
             } else {
                 reqwest::Method::POST
@@ -1727,7 +1737,7 @@ async fn source_operation_exchange(app: AppHandle, kind: &str, request: Value) -
         .bearer_auth(token)
         .header("Accept", "application/json")
         .header("Cache-Control", "no-store");
-    if kind != "read" {
+    if kind != "read" && kind != "options" {
         call = call.json(&request);
     }
     let response = call.send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
@@ -1739,6 +1749,10 @@ async fn source_operation_exchange(app: AppHandle, kind: &str, request: Value) -
         return Err("AUTHENTICATION_CHANGED".into());
     }
     let value = result?;
+    if kind == "options" {
+        if value.get("schema").and_then(Value::as_str)!=Some("mastermind.project_creation_options.v1") {return Err("RESPONSE_INVALID".into());}
+        return Ok(value);
+    }
     let source = if kind == "prepare" {
         request.get("request").ok_or("REQUEST_INVALID")?
     } else {
@@ -1752,12 +1766,16 @@ async fn source_operation_exchange(app: AppHandle, kind: &str, request: Value) -
     if value.get("schema").and_then(Value::as_str) != Some(schema)
         || value.get("selection").and_then(|v| v.get("action")) != request.get("action")
         || value.get("selection").and_then(|v| v.get("request_id")) != source.get("request_id")
-        || (source.get("work_ref").is_some()
+        || (source.get("work_ref").is_some_and(|v| !v.is_null())
             && value.get("selection").and_then(|v| v.get("work_ref")) != source.get("work_ref"))
     {
         return Err("RESPONSE_INVALID".into());
     }
     Ok(value)
+}
+#[tauri::command]
+pub async fn source_operation_options(app: AppHandle, request: Value) -> Result<Value> {
+    source_operation_exchange(app, "options", request).await
 }
 #[tauri::command]
 pub async fn source_operation_prepare(app: AppHandle, request: Value) -> Result<Value> {

@@ -17,6 +17,9 @@ import pytest
 from control_plane import workspace_project_git_publisher as p
 from control_plane.project_plan_proposal_git import BINDING_SCHEMA,ACTION,LOOKUP_SCHEMA
 from control_plane.project_canonical_data import CanonicalDataUnavailable
+from control_plane.executive_runtime import Runtime
+from control_plane.workspace_source_operations import SourceOperationEvents
+from tests.test_workspace_source_operations import REF
 from control_plane.agentos_project_plan import read_from_macro_owner
 from tests.test_agentos_plan_continuity_capture import repository
 from tests.test_workspace_plan_adoption_git_publisher import old,env,isolated_git_env
@@ -50,17 +53,27 @@ def ready(env,repository):
  lookup=dict(schema=LOOKUP_SCHEMA,action=ACTION,request_id=rid,work_ref=work);scope='9'*64;stamp='a'*64
  images=[dict(path=e['path'],content_sha256=e['content_sha256'],expected_preimage_sha256=e['expected_sha256']) for e in recipe['edits']]
  metadata=dict(schema=BINDING_SCHEMA,selection=lookup,principal_scope=scope,request_sha256=recipe['request_sha256'],recipe_fingerprint_sha256=recipe['recipe_fingerprint_sha256'],permission_binding_digest=stamp,phase='PUBLICATION',publication_binding=dict(expected_commit=base,postimages=images,branch=None))
- state=SimpleNamespace(publish=True,read=True,data=True,read_stamp='b'*64,data_stamp='c'*64,permit=object(),metadata=metadata)
+ runtime=Runtime.at(env.tmp_path/'actual-source-events');events=SourceOperationEvents(runtime.store)
+ events.prepare(lookup,scope,request_sha256=recipe['request_sha256'],recipe_fingerprint_sha256=recipe['recipe_fingerprint_sha256'],
+  original_input=REF,permission_binding_digest=stamp,publication_binding=metadata['publication_binding'],guard=lambda:True)
+ permit=events.claim_phase(lookup,scope,permission_binding_digest=stamp,
+  preview_witness={'original_input':REF,'recipe_fingerprint_sha256':recipe['recipe_fingerprint_sha256']},guard=lambda:True)
+ state=SimpleNamespace(publish=True,read=True,data=True,read_stamp='b'*64,data_stamp='c'*64,permit=permit,metadata=metadata)
  pr=old.InertPullRequestOwner(env.origin)
  binding=p.PublisherBinding(worktree=str(env.clone),expected_origin=str(env.origin),default_branch='main',publisher_identity=old.PUBLISHER_IDENTITY)
  publisher=p.FixedProjectGitPublisher(binding,lambda _:pytest.fail('no CREATE'),lambda _:False,lambda _:pytest.fail('no CREATE stamp'),old.qualify_publisher,pr,principal_scope=lambda _:scope,
-  authorize_plan_proposal=lambda principal,work:state.publish,plan_proposal_permission_stamp=lambda principal,work:stamp,load_plan_proposal_operation=lambda *a:deepcopy(state.metadata),validate_plan_proposal_claim=lambda principal,selection,claim,metadata:claim is state.permit,
-  canonical_data_macro_root=str(env.clone),canonical_data_code_commit=base,authorize_workspace_read=lambda _:state.read,workspace_read_permission_stamp=lambda _:state.read_stamp,authorize_latest_project_data=lambda _:state.data,latest_project_data_permission_stamp=lambda _:state.data_stamp)
+  authorize_plan_proposal=lambda principal,work:state.publish,plan_proposal_permission_stamp=lambda principal,work:stamp,load_plan_proposal_operation=lambda *a:deepcopy(state.metadata),validate_plan_proposal_claim=lambda principal,selection,claim,metadata:events.validate_permit(claim,lookup,scope,guard=lambda:state.publish),
+  canonical_data_macro_root=str(env.clone),canonical_data_code_commit=base,authorize_workspace_read=lambda _:state.read,workspace_read_permission_stamp=lambda _:state.read_stamp,authorize_latest_project_data=lambda _:state.data,latest_project_data_permission_stamp=lambda _:state.data_stamp,canonical_data_events=events)
  def publish():return publisher.publish_plan_proposal(request,recipe,old.AUTHORIZED_PRINCIPAL,claim=state.permit)
- def observe():return publisher.observe_canonical_project_data(old.AUTHORIZED_PRINCIPAL)
+ def observe():return publisher.observe_canonical_project_data(old.AUTHORIZED_PRINCIPAL,work_ref=work)
  def land():
   published=publish();assert published['state']=='PROPOSAL_PUBLISHED',published
   old.git(env.seed,'fetch','origin',published['proposal']['head_branch']);old.git(env.seed,'merge','--ff-only','FETCH_HEAD');old.git(env.seed,'push','origin','main')
+  observed=publisher.reconcile_plan_proposal(lookup,old.AUTHORIZED_PRINCIPAL)
+  assert observed['state']=='SOURCE_PUBLISHED'
+  sources=[dict(repository='macro',commit=observed['source']['commit'],**image) for image in observed['source']['postimages']]
+  events.retain_observation(lookup,scope,phase='PUBLICATION',sources=sources,proposal=None,guard=lambda:state.publish,
+   qualify_observation=lambda value:value['sources']==sources and observed['state']=='SOURCE_PUBLISHED')
   return published
  return SimpleNamespace(**locals())
 
@@ -71,14 +84,18 @@ def test_draft_pr_keeps_configured_reader_then_qualified_default_selection_compa
  assert old.rev_parse(f.env.clone,'HEAD')==f.base
  branch=published['proposal']['head_branch'];old.git(f.env.seed,'fetch','origin',branch);old.git(f.env.seed,'merge','--ff-only','FETCH_HEAD');old.git(f.env.seed,'push','origin','main')
  canonical=old.rev_parse(f.env.seed,'HEAD')
- assert f.publisher.reconcile_plan_proposal(f.lookup,old.AUTHORIZED_PRINCIPAL)['state']=='SOURCE_PUBLISHED'
+ observed=f.publisher.reconcile_plan_proposal(f.lookup,old.AUTHORIZED_PRINCIPAL);assert observed['state']=='SOURCE_PUBLISHED'
+ sources=[dict(repository='macro',commit=observed['source']['commit'],**image) for image in observed['source']['postimages']]
+ f.events.retain_observation(f.lookup,f.scope,phase='PUBLICATION',sources=sources,proposal=None,guard=lambda:f.state.publish,
+  qualify_observation=lambda value:value['sources']==sources)
  # Canonical landing does not mutate the configured revision-bound READ.
  fixed=read_from_macro_owner(macro_root=f.env.clone,expected_macro_sha=f.base,work_ref=f.work,include_continuity=True)
  assert fixed==before and old.rev_parse(f.env.clone,'HEAD')==f.base
  with pytest.raises(CanonicalDataUnavailable):old_view.check()
  view=f.observe();body=view.read_plan(work_ref=f.work);witness=view.witness()
  assert view.data_commit==canonical and view.code_commit==f.base and witness['canonical_data_commit']!=witness['executable_macro_commit']
- assert witness['publication_time'] is None and witness['publication_recorded_at_ms'] is None
+ assert witness['publication_time'] is None and type(witness['publication_recorded_at_ms']) is int
+ assert witness['source_operation']['selection']=={k:f.lookup[k] for k in ('action','request_id','work_ref')}
  assert body['source']['commit']==canonical and body['plan']['objective']==f.repo['ws']['objective']
  assert body['continuity']['adoption']['decision_ref']=='DEC:PLAN-FIRST'
  item=next(i for i in body['continuity']['proposals']['items'] if i['proposal_source']['path']==f.recipe['proposal_path'])
@@ -119,10 +136,10 @@ def test_issued_basis_qualifies_full_dec_set_and_uses_actual_snapshot(ready):
 
 def test_reader_never_loads_helper_from_observed_data_commit(ready,monkeypatch):
  f=ready;f.land();calls=[]
- from control_plane import ceo_boot_packet
- original=ceo_boot_packet.bounded_subprocess_runner
+ from control_plane import agentos_project_plan
+ original=agentos_project_plan.bounded_subprocess_runner
  def observe(argv,**kw):calls.append(argv);return original(argv,**kw)
- monkeypatch.setattr(ceo_boot_packet,'bounded_subprocess_runner',observe)
+ monkeypatch.setattr(agentos_project_plan,'bounded_subprocess_runner',observe)
  view=f.observe();view.read_plan(work_ref=f.work)
  for argv in calls:
   for arg in argv:

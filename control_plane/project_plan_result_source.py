@@ -93,6 +93,22 @@ class QualifiedPlanningResult:
             raise PlanResultUnavailable()
         return json.loads(self._material)
 
+    def require_consumed(self):
+        # A separate explicit original-parent acknowledgment precedes source
+        # preparation. Reading or declaring a PLAN cannot acknowledge a result.
+        observed=self.check()
+        selected=json.loads(self._selection)
+        access=planning.requalify_original(self._runtime,job_id=selected['job_id'],
+            source=self._source,executive_admission=self._admission)
+        response=result_wire.validate_response(Runtime.read_direct_native_result_bounded(
+            self._reader,selected,access=access))
+        if (response['availability']!='AVAILABLE' or response['selection']!=selected
+                or response['result']['result_digest']!=observed['result_digest']
+                or response['consumption']['state']!='CONSUMED'):
+            raise PlanResultUnavailable('ORIGINAL_RESULT_NOT_CONSUMED')
+        self.check()
+        return copy.deepcopy(response['consumption'])
+
     def check(self):
         if self._seal is not _SEAL:
             raise PlanResultUnavailable()

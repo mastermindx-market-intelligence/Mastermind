@@ -53,6 +53,10 @@ def test_actual_s19_terminal_binds_exact_declared_data_and_rechecks_original(tmp
   try:
    evidence=module.capture_completed_planning_result(runtime,result_reader=reader,selection=selection,source=source,executive_admission=executive)
    data=evidence.check();assert data['stage']=='plan' and data['payload']['current_state']==declaration
+   with pytest.raises(module.PlanResultUnavailable,match='ORIGINAL_RESULT_NOT_CONSUMED'):evidence.require_consumed()
+   access=requalify_original(runtime,job_id=selection['job_id'],source=source,executive_admission=executive)
+   acknowledged=runtime.consume_direct_native_result(dict(selection,result_digest=data['result_digest'],operation_key='explicit-parent-consume'),access=access)
+   assert acknowledged['state']=='CONSUMED' and evidence.require_consumed()==acknowledged
    assert data['selection']==selection and len(data['result_digest'])==64
    detached=evidence.material();detached['payload']['current_state']='tampered';assert evidence.material()==data
    assert declaration not in repr(evidence)

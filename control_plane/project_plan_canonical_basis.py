@@ -97,8 +97,10 @@ class CanonicalProjectPlanBasis:
   if (type(source) is not dict or set(source)!={'repository','commit','path','content_sha256','request_sha256'}
       or source['repository']!='macro' or source['path']!=self._snapshot['workstream']['source']['path']):_fail()
   from control_plane.agentos_project_creation_source import read_from_macro_owner
-  observed=read_from_macro_owner(macro_root=self._view._root,expected_macro_sha=self._view.data_commit,
-   record_commit=source['commit'],work_ref=self._snapshot['work_ref'],_canonical_data_view=self._view)
+  try:
+   observed=read_from_macro_owner(macro_root=self._view._root,expected_macro_sha=self._view.data_commit,
+    record_commit=source['commit'],work_ref=self._snapshot['work_ref'],_canonical_data_view=self._view)
+  except (ValueError,TypeError,KeyError,AttributeError,OSError,UnicodeError):_fail()
   if observed!=source:_fail()
   self.check();return deepcopy(observed)
  def proposal_snapshot(self,*,request_id,evidence=()):

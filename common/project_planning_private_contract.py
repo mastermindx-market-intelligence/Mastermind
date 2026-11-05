@@ -17,8 +17,9 @@ PRINCIPAL_FIELDS=frozenset({'policy_id','issuer','issuer_digest','resource','sub
 def arguments(value,operation='submit'):
     base={'operation_key','work_ref'}
     expected=base|({'stage','project_source','publication','private_request','grounding'} if operation=='submit'
+        else {'proposal_request'} if operation=='prepare_proposal'
         else {'attempt_id','result_digest','consumption_operation_key'} if operation=='consume' else set())
-    if operation not in {'submit','status','result','consume'} or type(value) is not dict or set(value)!=expected:
+    if operation not in {'submit','status','result','consume','prepare_proposal'} or type(value) is not dict or set(value)!=expected:
         raise ValueError('invalid_project_planning_request')
     validate_selection({'work_ref':value['work_ref']})
     if type(value['operation_key']) is not str or re.fullmatch('[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}',value['operation_key']) is None:
@@ -43,6 +44,10 @@ def arguments(value,operation='submit'):
         if type(grounding) is not dict or set(grounding)!={'mastermind_sha','macro_sha'} or any(
             type(item) is not str or re.fullmatch('[0-9a-f]{40}',item) is None for item in grounding.values()):
             raise ValueError('invalid_project_planning_grounding')
+    if operation=='prepare_proposal':
+        from common.project_journey_contract import proposal_request
+        proposal=proposal_request(value['proposal_request'])
+        if proposal['work_ref']!=value['work_ref']:raise ValueError('invalid_project_planning_proposal')
     if operation=='consume':
         if (type(value['attempt_id']) is not str or re.fullmatch('[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}',value['attempt_id']) is None
                 or type(value['consumption_operation_key']) is not str

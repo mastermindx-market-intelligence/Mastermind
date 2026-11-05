@@ -75,6 +75,7 @@ class ProjectPlanningSource:
     _input_owner: ProjectPlanningInput
     _events: object
     _publication_guard: object
+    _canonical_source_reader: object = None
 
     def material(self):
         import json
@@ -109,9 +110,10 @@ class ProjectPlanningSource:
         self._input_owner.read(material)
         # Force the nominal facade implementation; caller overrides cannot
         # turn a DTO or filesystem path into installed-source qualification.
-        observed = AgentOsProjectCreationReader.read(self._reader,
+        observed = (AgentOsProjectCreationReader.read(self._reader,
             work_ref=material["work_ref"], record_commit=material["source"]["commit"],
-            expected_current_macro_sha=material["source"]["commit"])
+            expected_current_macro_sha=material["source"]["commit"]) if self._canonical_source_reader is None
+            else _sync(self._canonical_source_reader))
         if observed != material["source"]:
             raise ValueError("project planning canonical source changed")
         self._executive.check()
@@ -119,10 +121,10 @@ class ProjectPlanningSource:
             raise ValueError("project planning authority changed during source observation")
 
 
-def _issue_source(*, reader, executive, context, authority_guard, input_owner, events, publication_guard):
+def _issue_source(*, reader, executive, context, authority_guard, input_owner, events, publication_guard, canonical_source_reader=None):
     """Private host join; publication/Workspace grants cannot call this alone."""
     value = ProjectPlanningSource(_SEAL, reader, executive,
-        native.canonical(normalize_context(context)), authority_guard, input_owner,events,publication_guard)
+        native.canonical(normalize_context(context)), authority_guard, input_owner,events,publication_guard,canonical_source_reader)
     value.check()
     return value
 

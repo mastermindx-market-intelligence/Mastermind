@@ -1281,7 +1281,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         work_ref: selected.work_ref, root_job_id: selected.root_job_id,
       })}`, signal, { cap: 32_768, typedUnavailableSchema: AUTONOMY_READ_BODY_SCHEMA });
     },
-    sourceOperations:createSourceOperationTransport((method,path,body,signal)=>method==='read'
+    sourceOperations:createSourceOperationTransport((method,path,body,signal)=>(method==='read'||method==='options')
       ?read('acquisition',ORIGIN+path,signal,{cap:SOURCE_OPERATION_CAP,typedUnavailableSchema:null})
       :sourcePost(path,body,signal)),
     readSourceOperationContext: (request) => {
