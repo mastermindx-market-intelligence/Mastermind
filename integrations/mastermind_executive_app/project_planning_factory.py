@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 from contextlib import contextmanager
+from pathlib import Path
 import dataclasses
 import hashlib
 import json
@@ -80,7 +81,7 @@ class ProjectPlanningAppFactory:
             raise ValueError('canonical planning installed source owners differ')
         return data
 
-    def _accept_new_canonical_view(self,data,view):
+    def _accept_new_canonical_view(self,data,view,*,workspace,work_ref):
         """Consume only the immediate installed producer's genuine issued proof.
 
         Mode.observe has just completed its full current postcheck. This is not
@@ -104,6 +105,9 @@ class ProjectPlanningAppFactory:
                 or proof.macro_snapshot.head!=view.code_commit
                 or collector._source_root!=self.service.config.proof_source_repository
                 or view._code_root!=collector._macro_root
+                or view._root!=Path(data.identity.binding.worktree)
+                or view._operation.selected_work_ref!=work_ref
+                or dataclasses.asdict(view._operation.principal)!=dataclasses.asdict(workspace)
                 or view._owner.events is not data.events
                 or view._owner.publisher._binding!=data.identity.binding):
             raise ValueError('canonical planning issued CODE proof differs')
@@ -121,7 +125,7 @@ class ProjectPlanningAppFactory:
         if saved is None:
             view=data.view(workspace,work_ref=work_ref)
             if view is None:raise ValueError('canonical planning DATA permission unavailable')
-            view=self._accept_new_canonical_view(data,view)
+            view=self._accept_new_canonical_view(data,view,workspace=workspace,work_ref=work_ref)
             issued=True
             invocation._planning_data_view=(identity,view)
         else:
@@ -152,7 +156,7 @@ class ProjectPlanningAppFactory:
                 view.check()
             if capture is None and (verify_source or time.monotonic()>=view._operation.read_deadline):
                 renewed=data.view(workspace,work_ref=work_ref)
-                if renewed is not None:renewed=self._accept_new_canonical_view(data,renewed)
+                if renewed is not None:renewed=self._accept_new_canonical_view(data,renewed,workspace=workspace,work_ref=work_ref)
                 if renewed is None or (renewed.code_commit,renewed.data_commit)!=(view.code_commit,view.data_commit):
                     raise ValueError('original planning source changed; no rebase')
                 view=renewed;issued=True;invocation._planning_data_view=(identity,view)
