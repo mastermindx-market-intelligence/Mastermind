@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { allEvidence, type EvidenceRef } from "../mission";
 import type { OfficeProjection, SourceState } from "../meta-ceo/projection";
+import { normalizeResultSelection, type ResultSelection } from "../result";
 import { normalizeResultReferencesSelection } from "../result-references";
 import type { MissionHost } from "../host";
 import { KnowledgeSources } from "./KnowledgeSources";
@@ -12,6 +13,8 @@ export interface SourceNavigation {
 }
 export interface KnowledgeProps {
   projection: OfficeProjection;
+  requestedResult?: ResultSelection;
+  onReturnToSearch?: () => void;
   /** Existing source-navigation owner only. This component never resolves a ref
    * into a guessed URL, reads another source, or mutates the original record. */
   onOpenSource?: (source: SourceNavigation) => void;
@@ -30,7 +33,12 @@ export interface KnowledgeProps {
 
 // Presentation copy only. Identifiers, revisions and observed times stay verbatim.
 const KNOWLEDGE_ZH: Record<string, string> = {
+  "Not available here": "此处暂不可用",
+  "Source details": "来源详情",
+  "References from the selected work only. Other records may not appear here.": "仅显示所选工作提供的引用，其他记录可能未列出。",
+  "Saved results aren’t available in this view yet.": "此视图暂时无法查看已保存的结果。",
   "Knowledge": "知识",
+  "Back to search results": "返回搜索结果",
   "Knowledge source": "知识来源",
   "A library that grows with you": "与你一同成长的资料库",
   "Keep what matters.": "留住重要的内容。",
@@ -123,7 +131,7 @@ function fnEpoch(fn: unknown): string {
 }
 
 function KnowledgeBody({ projection, onOpenSource, readResultReferences, readResult,
-  locale = "en", hostGeneration, draftPort }: KnowledgeProps) {
+  locale = "en", hostGeneration, draftPort, requestedResult, onReturnToSearch }: KnowledgeProps) {
   const t = (value: string) => (locale === "zh-CN" ? KNOWLEDGE_ZH[value] ?? value : value);
   const [query, setQuery] = useState("");
   const [readerActive, setReaderActive] = useState(false);
@@ -167,14 +175,16 @@ function KnowledgeBody({ projection, onOpenSource, readResultReferences, readRes
         : "Retained result reading is not available here: no host generation was supplied for this view.";
 
   return <section className={`atelier-knowledge${readerActive ? " knowledge-reader-active" : ""}`} lang={locale} aria-label={t("Knowledge")}>
+    {onReturnToSearch && <button type="button" className="button knowledge-return" onClick={onReturnToSearch}>{t("Back to search results")}</button>}
     <header className="knowledge-heading" aria-hidden={readerActive}><p className="knowledge-eyebrow">{t("A library that grows with you")}</p>
       <h1>{t("Keep what matters.")}<br />{t("Build on what you know.")}</h1>
       <p>{t("Useful work, with its sources and qualification intact.")}</p>
       <div className="knowledge-search"><label htmlFor={searchId}>{t("Search supplied knowledge")}</label>
         <input ref={search} id={searchId} type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder={t("Find an owner, reference or field")} /></div>
     </header>
-    <section className="knowledge-source" aria-label={t("Knowledge source")}><span data-state={source.state}>{source.state}</span>
-      <p>{t("Selected Mission scope")} · {source.coverage}. {t("Company-wide coverage is not established.")}</p></section>
+    <section className="knowledge-source" aria-label={t("Knowledge source")}><span data-state={source.state}>{source.coverage === "NOT_PROJECTED" ? t("Not available here") : source.state}</span>
+      <p>{t("References from the selected work only. Other records may not appear here.")}</p>
+      <details><summary>{t("Source details")}</summary><p>{source.state} · {source.coverage}</p></details></section>
     <div className="knowledge-collections">
       <section><p className="knowledge-eyebrow">{t("01 · Decisions")}</p><h2>{t("The choices shaping the company.")}</h2><p>{t("Owner index unavailable")}</p></section>
       <section><p className="knowledge-eyebrow">{t("02 · Discoveries")}</p><h2>{t("Findings worth returning to.")}</h2><p>{t("Owner index unavailable")}</p></section>
@@ -183,13 +193,13 @@ function KnowledgeBody({ projection, onOpenSource, readResultReferences, readRes
     </div>
     <p className="knowledge-muted">{t("Decision, discovery, handoff and contract indexes are unavailable. Evidence references do not supply their record content.")}</p>
     {normalizedSelection && readResultReferences && readResult && hostGen !== null
-      ? <KnowledgeSources selection={normalizedSelection} authGeneration={context.authGeneration}
+      ? <KnowledgeSources selection={normalizedSelection} requestedResult={requestedResult} authGeneration={context.authGeneration}
         hostGeneration={hostGen} locale={locale} missionState={missionState} context={context} draftPort={draftPort} onReaderChange={setReaderActive}
         readResultReferences={readResultReferences} readResult={readResult} />
       : <section className="knowledge-sources knowledge-sources-empty" aria-label={t("Retained result records")}>
         <p className="knowledge-eyebrow">{t("Retained result records")}</p>
-        <p>{t(sourcesCopy)}</p>
-        <p className="knowledge-muted">{t("This is a missing capability, not a source denial: no owner reported access denial.")}</p>
+        <p>{t("Saved results aren’t available in this view yet.")}</p>
+        <details><summary>{t("Source details")}</summary><p>{t(sourcesCopy)}</p></details>
       </section>}
     <div className="knowledge-layout">
       <section className="knowledge-list" aria-label={t("Supplied knowledge references")}>
@@ -230,7 +240,7 @@ function KnowledgeBody({ projection, onOpenSource, readResultReferences, readRes
           {!canOpen && <p className="knowledge-muted">{t("A qualified source and its existing navigation owner are required to open the original.")}</p>}
         </section> : <section><p className="knowledge-eyebrow">{t("Follow the source")}</p><h2>{t("Useful knowledge.")}<br />{t("Visible provenance.")}</h2>
           <p>{t("Inspect a supplied reference to see its owner, revision, observed time and exact source context.")}</p>
-          <p>{t("Source clocks remain separate. A return remains separate from acceptance.")}</p></section>}
+</section>}
         <p className="knowledge-boundary">{t("Knowledge is not model memory. Search and inspection change presentation only; durable changes return to the canonical owner.")}</p>
       </aside>
     </div>
@@ -247,6 +257,7 @@ export function Knowledge(props: KnowledgeProps) {
   const epoch = JSON.stringify([context.authGeneration, context.selection, context.sessionRef,
     context.bindingGeneration, context.revisions.mission, mission.source.state,
     props.hostGeneration === undefined ? null : props.hostGeneration,
-    fnEpoch(props.readResultReferences), fnEpoch(props.readResult)]);
+    fnEpoch(props.readResultReferences), fnEpoch(props.readResult),
+    props.requestedResult === undefined ? null : normalizeResultSelection(props.requestedResult) ?? "invalid"]);
   return <KnowledgeBody key={epoch} {...props} />;
 }

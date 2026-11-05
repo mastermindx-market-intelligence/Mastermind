@@ -77,6 +77,8 @@ bound to its admitted receiver until lawful reconciliation, never assumed transf
 When writing a handoff, name a safe next action for the current or next valid receiver
 with source/effect checks, not an unreachable original parent as the sole actor.
 
+**Recover old protected-result gates without becoming a ghost-owner messenger.** An "original administrator/result/reviewer/publisher" in a handoff is a provenance/effect identity, not a permanently addressable chat. Current assigned Web, Codex, Claude or Fabric principals identify the existing original operation/carrier, the protected result and any denied read, verify current authority, and own the next lawful recovery step. A successful exit report is not canonical reconciliation; denied privileged reads, live leases and unknown effects remain fenced. Never retry through a second reader/account or restart a held service. Continue independent authorized work; only a genuinely unavailable human credential/control plus exhausted safe lanes qualifies for a whole-mission `EXACT_HUMAN_GATE`. Record evidence in the existing canonical owner and provide an executable successor action, not "wait for original chat."
+
 An architectural owner is not a live session. Data OS and other system names identify
 existing contracts and implementation boundaries, not an approver to find in another
 chat. The current assigned session performs authorized source-contract work itself:
@@ -144,6 +146,9 @@ Use discriminating tests and one proportionate review of each coherent candidate
 when its consequences or currently applicable review/release rules require it.
 Preserve all applicable security, source-law, non-author and recorded-hold requirements;
 this does not activate a proposed policy or waive repository release gates.
+No automatic independent review is triggered by risk tier alone in attended CEO-Web
+work after the accepted source is actually loaded. Use risk-tied proof; actually
+binding review and release requirements remain.
 Reuse accepted evidence until
 relevant source, input, dependency or acceptance requirement changes. Run the affected
 checks after a real repair, not the same suite repeatedly to appear busy. Two equivalent
@@ -157,8 +162,8 @@ Diagnose from existing evidence; never repeat a denied action merely to classify
 This is not a new approval form: use the existing frontier. A department name, absent optional registry, old reviewer request,
 or unavailable worker backend is not sufficient. Technical pre-dispatch unavailability
 blocks that dispatch, not independent edits/tests. Preserve a real denial or uncertain
-effect; never use another route to evade it. Required independent review holds its
-release, not all preparation; self-review must never be relabeled independent.
+effect; never use another route to evade it. Actually binding review, security or
+release holds block their release, not all preparation; self-review is never independent.
 
 Missing implementation is engineering work, not a permission wait. Before naming
 service enrollment as the next action, inspect the actual enabling path: an

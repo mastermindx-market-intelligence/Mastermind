@@ -308,9 +308,12 @@ surface omits it, classify the mismatch as publication/surface drift: `STUDIO_TO
 reads/edits may remain available, but exact-file transition is held until the same Studio
 Direct app's **workspace-approved action snapshot** is current and `paper_prepare` is directly
 surfaced. OpenAI documents that approved MCP apps use a frozen tool/input snapshot and do not
-auto-update when the server changes. On Business, published custom apps currently cannot be
-updated in place; recreate + republish is required. Draft/dev apps must re-scan/recreate their
-tool catalog as applicable, then the caller starts a fresh chat/tool selection. Do not reproduce
+auto-update when the server changes. Business and Enterprise/Edu workspace admins with
+management permission and a valid connection can **Refresh the existing published custom
+MCP app's tool definitions without recreation**, review/publish the changed actions,
+and start a new conversation. Developer-mode connections use Refresh; Plugin Directory
+plugins use continuous tool review/rescan. If Refresh is unavailable for the exact app,
+hold at the workspace admin gate rather than creating a duplicate app or tunnel. Do not reproduce
 prepare with generic Studio `start_process`/filesystem tools, RDC, raw upstream `open_file`,
 shell, or UI automation. This keeps file transition inside the reviewed narrow action instead
 of silently broadening workstation authority.
@@ -725,17 +728,24 @@ Stop at login, app approval, absent host transport, unknown effects or an unprov
 sealed-worker grant. Do not turn synthetic fixtures, downloads, PRs or config
 staging into PROVEN_LIVE. Continue at the first unmet item, retaining this carrier.
 
-## Sources checked 2026-09-13
+## Sources checked through 2026-10-02
 
 - https://paper.design/docs/mcp - endpoint, tools, current-file context, code export, migration.
 - https://paper.design/downloads - desktop distribution.
 - https://paper.design/pricing - Free 100 MCP calls/week; Pro 1M/week,
   $20/editor/month monthly or $16/month billed yearly. No purchase performed.
-- https://help.openai.com/en/articles/12584461 - custom app write/admin/plan gates;
-  Pro custom developer-mode MCP currently documented read/fetch only. Rechecked 2026-09-26:
-  approved MCP apps use a frozen tool/input snapshot; server changes do not auto-update the
-  workspace app. Business published apps currently require recreate + republish to change
-  tools/metadata, while admin action refresh controls differ on Enterprise/Edu.
+- https://help.openai.com/en/articles/12584461 and
+  https://developers.openai.com/plugins/deploy/connect-chatgpt - current MCP app/tool-update
+  lifecycle. Developer-mode MCP connections support an explicit **Refresh** after tool names,
+  descriptions, schemas, annotations, auth, or UI resources change; confirm refreshed metadata
+  and start a new conversation. Published Plugin Directory definitions use continuous review/rescan.
+  Current OpenAI Help Center guidance (updated October 2026) permits Business and
+  Enterprise/Edu admins to **Refresh published custom workspace MCP app tool definitions
+  in place** from workspace settings, with app-management permission and a valid connection.
+  The admin reviews and publishes the update; Enterprise/Edu Action control also
+  supports individual action Refresh. Prefer the existing tunnel/backend and do not
+  turn an older chat's tool text into a file lease or duplicate app. Only a separately
+  verified platform requirement and approved owner transition justify replacement.
 - https://github.com/openai/tunnel-client - private outbound Secure MCP Tunnel, stdio support.
 - https://modelcontextprotocol.io/specification/2025-03-26/basic/transports - HTTP/SSE/session rules.
 - https://pypi.org/project/mcp/1.30.0/ - pinned official SDK maintenance line.

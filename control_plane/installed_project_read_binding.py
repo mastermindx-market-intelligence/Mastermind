@@ -1,4 +1,4 @@
-"""Opaque, process-local composition for the two installed Agent OS readers.
+"""Opaque, process-local composition for the installed Agent OS readers.
 
 The integration owns collector qualification and issuance. Core reads no
 integration module, accepts no serialized grant and creates no reader registry.
@@ -11,7 +11,9 @@ from typing import Callable
 import weakref
 
 _ISSUE_KEY = object()
-_METHODS = {"project_plan": "read_project_plan", "project_journal": "read_project_journal"}
+_METHODS = {"project_plan": "read_project_plan", "project_journal": "read_project_journal",
+            "project_creation_source": "read_project_creation_source",
+            "project_direction": "read_project_direction"}
 _COORDINATES = ("_source_root", "_macro_root", "_code_root", "_python",
                 "_expected_source_sha", "_allow_synthetic_fixture")
 
@@ -82,5 +84,25 @@ def read_installed_project_binding(reader, *, kind, work_ref):
         raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
     value = binding.callback(work_ref=work_ref)
     if not _matches(binding, reader=reader, owner=owner, kind=kind):
+        raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
+    return value
+
+
+def read_installed_project_creation_binding(reader, *, work_ref, record_commit, expected_current_macro_sha=None):
+    """Fixed historical creation read; no arbitrary kwargs or current-root guess."""
+    import re
+    if type(record_commit) is not str or re.fullmatch(r"[0-9a-f]{40}", record_commit) is None:
+        raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
+    binding = reader._installed_reader_binding
+    owner = reader._installed_context_owner
+    if not _matches(binding, reader=reader, owner=owner, kind="project_creation_source"):
+        raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
+    if expected_current_macro_sha is not None and (type(expected_current_macro_sha) is not str or re.fullmatch(r"[0-9a-f]{40}", expected_current_macro_sha) is None):
+        raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
+    kwargs = {"work_ref": work_ref, "record_commit": record_commit}
+    if expected_current_macro_sha is not None:
+        kwargs["expected_current_macro_sha"] = expected_current_macro_sha
+    value = binding.callback(**kwargs)
+    if not _matches(binding, reader=reader, owner=owner, kind="project_creation_source"):
         raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
     return value

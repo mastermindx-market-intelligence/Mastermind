@@ -37,7 +37,7 @@ session spawned with no context beyond this file.
 
 Fable is not a mandatory relay or universal merge approver. Routing, adjudication,
 and merge decisions follow the currently authorized role and operation, not a
-historical session name. Independent review and source/release protections still apply.
+historical session name. Independent review is not mandatory for CEO Web work; protected source/release controls still apply.
 These role descriptions do not themselves grant authority.
 
 ### Durable plan and cold continuation for assigned principals
@@ -186,6 +186,9 @@ Within an assigned nonterminal job, the current session retains responsibility f
 - `EFFECT_UNKNOWN` forbids takeover, retry, receiver rotation, provider failover, or replacement modification until canonical reconciliation.
 - Do not end at "the owner should do it" without an actual handoff or typed gate. A genuine Chairman/admin gate must name the exact external decision or credential boundary.
 - A dead or missing runtime/session is a reconciliation/succession problem for the existing canonical owner; it never grants this session automatic modifying authority.
+- A named "original administrator," publisher, reviewer, host owner, or ChatGPT conversation may identify provenance or the immutable effect/result carrier; it is not permanent staffing. Resolve exact operation/request identity, original authorized carrier, canonical pending result, live writer/lease, prior read/refusal and next lawful action. The currently assigned session owns this recovery triage, not a missing historical chat.
+- If an old operation reportedly exited successfully but its protected result is not canonically reconciled, do not infer PASS from rc0, a Slack report or a historical owner claim. Do not rerun the operation, trigger a second protected read, switch tools/accounts/credentials or activate a held service. An explicit safety/permission denial ends that action; preserve its original carrier and release hold, and advance genuinely independent authorized work.
+- `EXACT_HUMAN_GATE` requires a demonstrated unavailable human credential/control, its exact action and evidence that other useful independent lanes are exhausted. "Ask the original owner/chat" or a conceptual department is not that proof. If useful independent work exists, the mission remains `MORE_WORK_EXISTS`; save the accurate blocker in the existing canonical checkpoint, never in a new owner registry.
 <!-- MMX_RESPONSIBILITY_CONTINUITY_END -->
 
 ### Reciprocal dialogue and watcher invariant
@@ -220,7 +223,7 @@ universal procedure owner. Read it before creating or relying on a temporary wat
 
 ### Session-owned review for every assigned session
 
-Before a PR/source review, load [session-local review policy](docs/SESSION_LOCAL_REVIEW_POLICY.md) from the same protected pin. The **working session** performs the author adversarial pass and, if truly warranted, manages its **own native reviewer subagent**. An exposed Web Pro native child, Codex native child, Claude native child or admitted Fabric child can conduct distinct-context read-only technical review; no separate top-level ChatGPT conversation or third-party account is organizationally required. Do not invent native subagents or START receipts. Only after #2018's risk-tier source is protected and its required host consumer enrolled may FAST/STANDARD self-check + CI skip extra technical reviewers; until then preserve the incumbent independent/formal review requirements.
+Before a PR/source review, load [session-local review policy](docs/SESSION_LOCAL_REVIEW_POLICY.md) from the same protected pin. The **working session** performs the author adversarial pass and, if truly warranted, manages its **own native reviewer subagent**. An exposed Web Pro native child, Codex native child, Claude native child or admitted Fabric child can conduct distinct-context read-only technical review; no separate top-level ChatGPT conversation or third-party account is organizationally required. Do not invent native subagents or START receipts. Once the attended CEO-Web instruction waiver is protected-accepted and loaded, risk tier alone does not require an independent reviewer handoff in that session. This does not depend on #2018 or automatic-review-host enrollment. Signed machine policy and actually binding review, security, approval and release requirements remain separate and unchanged.
 
 Only when a separately commissioned reviewer is actually needed, load [external review routing](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md) and reconcile the existing exact review before any dispatch. Distinguish `SELF_REVIEWED`, `INDEPENDENT_TECHNICAL_REVIEW` by a real child, and formal GitHub `APPROVED` by an authenticated eligible non-author. A native child does not submit formal GitHub approval for the parent. Historical reviewer login is a placement clue, not a chat-wait gate; do not switch GitHub accounts in the same reasoning context to fake independent review. Existing GitHub review ingress/Runtime, author and coauthor conflicts, branch rules, holds, current-head CI, denied/uncertain effects and source/release protections remain authoritative. Never self-approve, self-merge or claim a Project instruction was installed merely because this file was edited.
 

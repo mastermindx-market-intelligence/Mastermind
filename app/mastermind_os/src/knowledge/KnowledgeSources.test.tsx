@@ -293,7 +293,8 @@ describe("Knowledge retained-result source reading", () => {
     render(<Knowledge projection={projectOffice(input(), context)} hostGeneration={HOST_GENERATION} />);
     const body = document.body.textContent ?? "";
     expect(body).toContain("the host result functions were not supplied");
-    expect(body).toContain("not a source denial");
+    expect(body).toContain("Saved results aren’t available in this view yet.");
+    expect(body).not.toContain("ACCESS_DENIED");
     expect(screen.queryByRole("button", { name: "Show retained results" })).toBeNull();
     expect(k.readResultReferences).not.toHaveBeenCalled();
   });

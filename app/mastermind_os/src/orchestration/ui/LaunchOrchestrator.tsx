@@ -285,7 +285,7 @@ export function LaunchOrchestrator({
     <section className={`card launch-orchestrator${presentation === "composer" ? " launch-orchestrator-composer" : ""}`}>
       <div className="section-title">
         <div>
-          <h2>{selectedProfile === "native_research_only" ? (locale === "zh-CN" ? "启动单个原生任务" : "Launch one native task") : (locale === "zh-CN" ? "启动项目" : "Launch Orchestrator")}</h2>
+          <h2>{selectedProfile === "native_research_only" ? (locale === "zh-CN" ? "启动单个原生任务" : "Launch one native task") : (locale === "zh-CN" ? "开始工作" : "Start work")}</h2>
         </div>
       </div>
 

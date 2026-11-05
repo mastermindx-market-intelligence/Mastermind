@@ -47,7 +47,7 @@ class ExecutionPolicyContractTests(unittest.TestCase):
     def test_test_evidence_must_be_relevant_not_repeated_by_habit(self):
         text = self.read('docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md')
         self.assertIn('relevant source, input, dependency or acceptance requirement changes', text)
-        self.assertIn('one proportionate review', text)
+        self.assertIn('No automatic independent review', text)
 
     def test_real_permissions_and_effect_fences_are_preserved(self):
         text = self.read('docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md')

@@ -25,7 +25,7 @@ permissions or override those actual controls.
 
 Fable is not a mandatory relay or universal merge approver. Routing, adjudication,
 and merge decisions follow the currently authorized role and operation, not a
-historical session name. Independent review and source/release protections still apply.
+historical session name. Independent review is not mandatory for CEO Web work; protected source/release controls still apply.
 These role descriptions do not themselves grant authority.
 
 **Source-of-truth order** — higher layer wins on conflict:
@@ -125,6 +125,9 @@ Within an assigned nonterminal job, the current session retains responsibility f
 - `EFFECT_UNKNOWN` forbids takeover, retry, receiver rotation, provider failover, or replacement modification until canonical reconciliation.
 - Do not end at "the owner should do it" without an actual handoff or typed gate. A genuine Chairman/admin gate must name the exact external decision or credential boundary.
 - A dead or missing runtime/session is a reconciliation/succession problem for the existing canonical owner; it never grants this session automatic modifying authority.
+- A named "original administrator," publisher, reviewer, host owner, or ChatGPT conversation may identify provenance or the immutable effect/result carrier; it is not permanent staffing. Resolve exact operation/request identity, original authorized carrier, canonical pending result, live writer/lease, prior read/refusal and next lawful action. The currently assigned session owns this recovery triage, not a missing historical chat.
+- If an old operation reportedly exited successfully but its protected result is not canonically reconciled, do not infer PASS from rc0, a Slack report or a historical owner claim. Do not rerun the operation, trigger a second protected read, switch tools/accounts/credentials or activate a held service. An explicit safety/permission denial ends that action; preserve its original carrier and release hold, and advance genuinely independent authorized work.
+- `EXACT_HUMAN_GATE` requires a demonstrated unavailable human credential/control, its exact action and evidence that other useful independent lanes are exhausted. "Ask the original owner/chat" or a conceptual department is not that proof. If useful independent work exists, the mission remains `MORE_WORK_EXISTS`; save the accurate blocker in the existing canonical checkpoint, never in a new owner registry.
 <!-- MMX_RESPONSIBILITY_CONTINUITY_END -->
 
 ### Reciprocal dialogue and watcher invariant
@@ -159,7 +162,7 @@ universal procedure owner. Read it before creating or relying on a temporary wat
 
 ### Session-owned review — local native child first
 
-For review decisions first load [the session-local policy](docs/SESSION_LOCAL_REVIEW_POLICY.md) at the accepted protected pin. The current Claude/Codex/Web parent may self-check or use a genuinely distinct read-only **native reviewer child within this same session** with real START, immutable source and returned findings; no different top-level chat is required. STANDARD's zero-extra-review rule is conditional on #2018 being protected AND required host enrollment, not this proposed document. A technical child is not authenticated non-author GitHub `APPROVED`; maintain real required approvals, CI, holds and no self-merge.
+For review decisions first load [the session-local policy](docs/SESSION_LOCAL_REVIEW_POLICY.md) at the accepted protected pin. The current Claude/Codex/Web parent may self-check or use a genuinely distinct read-only **native reviewer child within this same session** with real START, immutable source and returned findings; no different top-level chat is required. The attended CEO-Web handoff waiver is an instruction-consumer policy; its adoption does not depend on the separate signed-machine host. Other execution surfaces retain their applicable review requirements. A source candidate or protected merge alone proves neither instruction installation nor host enrollment. A technical child is not authenticated non-author GitHub `APPROVED`; maintain real required approvals, CI, holds and no self-merge.
 
 For a truly required independent external avenue load [the existing session routing procedure](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md), inspect actual admitted Fabric root/parent/effects and preserve the original carrier. On EFFECT_UNKNOWN, active review or explicit denial do not reroute through a Dot, account or provider. One actually eligible Dot may receive a source-bound Slack technical-review assignment; no fictional START or formal GitHub approval inferred from Slack. Existing Executive/GitHub authority remains controlling.
 
