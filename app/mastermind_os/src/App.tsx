@@ -2750,8 +2750,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       active === "Conversations"
         ? observedConversation.projection.conversation.source.state ===
           "CURRENT"
-          ? "Observed owner window for the exact selected Mission; session identity and send authority remain separate."
-          : "Conversation content is shown only from a qualified paired Mission and Current Window observation."
+          ? (locale === "zh-CN" ? "查看所选工作的回复，并保留未发送的笔记。" : "Read replies from the selected work and keep unsent notes.")
+          : (locale === "zh-CN" ? "暂时无法获取所选工作的回复。" : "Replies for the selected work are unavailable right now.")
         : active === "Conversation"
           ? association
             ? "Observed window for this Mission from separately authorized owner observations."
@@ -2809,11 +2809,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     visibleNotice =
       active === "Conversations"
         ? windowPending
-          ? "Reading the paired Mission and current permitted window…"
+          ? (locale === "zh-CN" ? "正在读取所选工作的回复…" : "Reading replies from the selected work…")
           : observedConversation.projection.conversation.source.state ===
               "CURRENT"
-            ? "Observed conversation window for the selected Mission; no recipient or send authority is inferred."
-            : "No qualified observed conversation is currently established."
+            ? (locale === "zh-CN" ? "显示此处已提供的回复，可能不包含完整对话。" : "Showing the supplied replies. This may not include the full conversation.")
+            : (locale === "zh-CN" ? "暂时无法显示所选工作的回复。" : "Replies for the selected work cannot be shown right now.")
         : active === "Conversation"
           ? association
             ? "Observed window for this Mission. Independent owner observations."
@@ -3528,12 +3528,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     <section className="card">
       <div className="section-title">
         <div>
-          <h2>Session Workspace</h2>
+          <h2>{locale === "zh-CN" ? "会话操作" : "Session controls"}</h2>
         </div>
-        <span className="state state-unavailable">UNAVAILABLE</span>
+        <span className="state state-unavailable">{locale === "zh-CN" ? "不可用" : "Unavailable"}</span>
       </div>
       <p className="muted">
-        Session is unavailable for the exact selected mission.
+        {locale === "zh-CN" ? "此处暂时无法向会话发送消息。" : "Sending to a session is unavailable here."}
       </p>
       <details
         className="reason-details"
@@ -3541,7 +3541,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           if ((event.currentTarget as HTMLDetailsElement).open) setDiagnosticTick((n) => n + 1);
         }}
       >
-        <summary>Technical details</summary>
+        <summary>{locale === "zh-CN" ? "技术详情" : "Technical details"}</summary>
         <code>{COMMAND_ROUTE_UNAVAILABLE}</code>
         <TransportDiagnosticFields
           snapshot={missionDiagnostics()}
@@ -4336,7 +4336,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         )}
       />
     ) : null;
-  const quietHeader = (active === "Conversations" && conversationNavigation.view === "list") || active === "Inbox" || active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
+  const quietHeader = active === "Conversations" || active === "Inbox" || active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
     active === "Projects" && !directRoute && (!projectTab ||
       Boolean(projectWorkRef && (projectTab === "Conversation" || catalogueWorkRef)));
   const independentProjectRead =
@@ -4395,6 +4395,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const currentConversationPanel = (
       <>
         <ConversationWindow
+          headingLevel={active === "Conversations" ? 1 : 2}
           locale={locale}
           continuation={active === "Projects" ? undefined : sessionContinuationPanel}
           historicalAnswers={<HistoricalOriginalAnswers
@@ -4427,7 +4428,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             setWindowRevision((n) => n + 1);
           }}
         >
-          Refresh observed window
+          {locale === "zh-CN" ? "刷新回复" : "Refresh replies"}
         </button>
         {active !== "Projects" && ((!signedIn && retainedComposerDrafts.session) || !sessionBinding)
           ? sessionPanel : null}
@@ -5070,7 +5071,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             {!quietHeader && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : headerSummary}</p>}
           </div>
           <div className="facts">
-            {!directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{reading.qualificationLabel} <State value={headerState} /></summary><p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} /> : null}
+            {!directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" ? <State value={headerState} /> : null}</summary>{active === "Conversations" ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} /> : null}
           </div>
         </header>
         {!native && authState && authState.status === "signed_out" &&
@@ -5086,7 +5087,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             }}>{copy.discardAll}</button>
           </section>
         ) : null}
-        {active !== "Control Room" && active !== "Today" && !directRoute &&
+        {active !== "Control Room" && active !== "Today" && active !== "Conversations" && !directRoute &&
           !(active === "Inbox" && visibleNotice === "Choose a Program with one resolved mission before opening the workspace.") &&
           !reading.suppressBodyNotice ? (
           <div className="notice" role="status">{visibleNotice === "Choose a Program with one resolved mission before opening the workspace."
