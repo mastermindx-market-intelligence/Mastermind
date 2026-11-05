@@ -3,7 +3,7 @@
 **Date:** 2026-09-07  
 **Operation:** `google-workspace-edge-pilot-20260907-sol-001`  
 **Sol source-law pin:** `Mastermind@f869cb229bc99de5344e3a83292b9c53e157f879`, `mastermind.sol_skillpack.v1` `1.0.1`  
-**Status:** architecture freeze + external-side pilot setup; implementation not yet accepted
+**Status:** draft architecture/freeze candidate; historical external-side setup only; G1–G6 not built or accepted
 
 ## 1. Outcome
 
@@ -24,9 +24,9 @@ This design extends, and must not supersede:
 - `integrations/__init__.py`: network-facing integrations live under `integrations/`; sealed `control_plane` and `common` must not import third-party integration packages.
 - Agent OS typed waits: `calendar_window` is a legitimate authored wait kind, but calendar evidence never itself grants authority or completion.
 
-## 3. Current live pilot state
+## 3. Historical external-side pilot evidence
 
-Verified and created through the connected Google Workspace account:
+The original 2026-09-07 pilot recorded the following through its connected Google Workspace account. This is historical setup evidence, not a fresh provider readback or proof of an automated Mastermind integration. G1–G6 remain `NOT_BUILT`.
 
 ### Drive
 
@@ -60,15 +60,17 @@ Primary Calendar read access is proven. No dedicated Mastermind secondary calend
 
 ### Sheets
 
-Native Google Sheets read/write capability is available through the Google Drive connector. No standing “Mastermind tracker” Sheet is created by design. Sheets are purpose-specific analytical/collaboration artifacts, never canonical project/runtime/signal state.
+The original pilot confirmed native Google Sheets read/write through the Google Drive connector. The subsequent [source review](https://github.com/mastermindx-market-intelligence/Mastermind/pull/525#pullrequestreview-5133601993) records that a private/unshared `Mastermind Analysis Sandbox — NONCANONICAL` Sheet was created, moved under `00 Internal Review`, written and read back. This is attributed historical setup evidence; no private Google ID or URL is published here, and this correction performs no new provider action.
+
+No standing “Mastermind tracker” was created. The sandbox is an analysis-only artifact, never canonical project tracking, runtime, portfolio or signal state.
 
 ### Permission surface
 
-Google apps currently inherit ChatGPT's `Allow low-risk actions` default. This technical permission is not organizational authority; Mastermind's own authority gates remain controlling.
+At the original setup, Google apps inherited ChatGPT's `Allow low-risk actions` default. This technical permission is not organizational authority; Mastermind's own authority gates remain controlling.
 
-### Current infrastructure blocker
+### Historical infrastructure observations
 
-The Mastermind Executive connector returned an MCP SSE tunnel `404` during this setup, so no Executive Job/intent was created for implementation. The authorized Mac exposed through Remote Desktop Commander was also offline. These failures do not invalidate the completed Google-side setup, but they block claiming an admitted/active implementation worker.
+The original setup observed an Executive connector MCP SSE tunnel `404` and an offline authorized Mac; no Executive Job/intent or implementation worker was established. The subsequent source review records that the Mac later became reachable while Executive transport remained degraded (`404`, then `429`). These are dated observations, not permanent architecture blockers or current capability claims. Recheck the applicable admission and development carrier when implementation is actually commissioned; direct Google setup does not prove admission or worker START.
 
 ## 4. Authority matrix
 
@@ -107,6 +109,8 @@ integrations/google_workspace/
 
 No new persistent integration database is authorized by this design.
 
+`integrations/google_workspace/` must not own or store OAuth access/refresh tokens, service-account secrets, browser/session credentials, or a separate credential registry. Credential custody stays with the existing connected-provider or approved host-native secret owner. Integration code consumes only the authorized provider surface and must not copy credentials into its models, receipts, files, logs or model-visible configuration.
+
 ## 6. Evidence envelope
 
 Every inbound Google object exposed to a Mastermind consumer should carry a closed, source-attributed envelope at minimum:
@@ -142,13 +146,15 @@ operation_key
 provider
 principal
 object_type
-object_id
-requested_effect
-provider_result
-readback_state
+provider_object_ref
+requested_effect (closed action descriptor)
+result_summary (bounded sanitized fields)
+readback_summary (bounded sanitized fields)
 outcome = CONFIRMED | REFUSED | EFFECT_UNKNOWN
 observed_at
 ```
+
+The provider reference contains only an approved opaque object ID or non-secret locator, never an access-bearing URL. Result/readback summaries use closed allowlisted metadata and explicit bounds: outcome, revision identity and confirmation fields only. **Raw provider response/error payloads, message/file/calendar content and access material must not be persisted in the receipt layer or its logs.** Redaction must not turn a failed or incomplete readback into a success. G1 must falsify oversized, unknown-field, raw-content and credential-bearing receipt inputs.
 
 `EFFECT_UNKNOWN` is sticky until the same provider/carrier is reconciled. Never blind-retry via another account, surface, or connector.
 
@@ -193,15 +199,17 @@ No Calendar event can prove Job execution, worker liveness, acceptance, or compl
 
 ## 11. Bounded implementation waves
 
-### G0 — External-side pilot setup — `PROVEN_LIVE`
+### G0 — External-side pilot setup only — `EXTERNAL_SETUP_ONLY`
 
-Completed in the connected account:
+Historical direct-provider setup, not canonical automated integration. G1–G6 remain `NOT_BUILT`:
+
+Completed in the original connected account:
 
 - Drive boundaries created and read back.
 - Six Gmail triage labels created and read back.
 - A bounded Gmail shadow sample was read with zero message mutation and directly improved the taxonomy.
 - Calendar primary connection proven.
-- Sheets capability surface confirmed.
+- Private/unshared noncanonical analysis sandbox Sheet created, moved under Internal Review, written and read back, as recorded in the subsequent source review; no private provider identifiers retained here.
 - No bulk mail mutation, outbound send, Calendar write, Drive share or standing tracker created.
 
 ### G1 — Hermetic contract package — `NOT_BUILT`
@@ -268,7 +276,9 @@ External sharing is a separate actuator action and must never be inferred from a
 
 ## 15. Exact next action
 
-When Executive admission or an eligible development carrier is healthy, commission **G1 only**: the hermetic evidence/actuator contract package under `integrations/google_workspace/` plus focused tests. Do not widen G1 into provider OAuth/client implementation.
+Before commissioning source-modifying **G1**, satisfy the applicable current **Executive admission/service gate AND an eligible development carrier**, together with protected-source grounding and collision checks. A healthy development host does not bypass required admission. Apply current governing law to the actual source/runtime action; this specification grants no new execution permission.
+
+Then commission **G1 only**: the hermetic evidence/actuator contract package under `integrations/google_workspace/` plus focused tests. Do not widen G1 into provider OAuth/client implementation.
 
 G1 returns to Sol for adversarial review before G2. The first provider implementation should be Drive/Sheets read-only because the Workroom architecture already explicitly accepts Drive as optional external evidence navigation.
 
