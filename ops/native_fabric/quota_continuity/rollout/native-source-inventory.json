@@ -30,10 +30,10 @@
       "source": "source/a04_terminal_reconcile.py"
     },
     "ext/artifact_delivery.py": {
-      "bytes": 89656,
+      "bytes": 89975,
       "installed_preimage_sha256": "28af21eba16fa54ee47b29c6848ae5ec0f3d5f6052ac59746e3e35254cf60eea",
-      "sha256": "447ab9d65264f46acfe5662d60e38c1f4db97198afc9113c2717109e298db9c3",
-      "source": "../grok47/overlay/artifact_delivery.py"
+      "sha256": "81749610b8afd7151dbadb4cbcedbef853fc18ad9de9364fd3b2b1d747d535b1",
+      "source": "candidate/artifact_delivery.py"
     },
     "ext/artifact_production.py": {
       "bytes": 20746,
@@ -539,6 +539,18 @@
       "sha256": "494bcc3a0115ba98160139bdc1452a8b8850b966844fcc2634fe0fdeffaa9111",
       "source": "source/pool_status.py"
     },
+    "ext/post_failure_observation.py": {
+      "bytes": 18587,
+      "installed_preimage_sha256": null,
+      "sha256": "2a78630ccaf574da752c77d7b8f821723ccb264b970e2fe38b1976d886ca97a0",
+      "source": "candidate/post_failure_observation.py"
+    },
+    "ext/post_failure_observation_delivery.py": {
+      "bytes": 26735,
+      "installed_preimage_sha256": null,
+      "sha256": "0e096d439e71600a20aabd6f29ea94127596ab3c1a4fb31d567194eba145c7f3",
+      "source": "candidate/post_failure_observation_delivery.py"
+    },
     "ext/provider_outcome.py": {
       "bytes": 30928,
       "installed_preimage_sha256": null,
@@ -588,15 +600,15 @@
       "source": "candidate/remote_sub_helpers.py"
     },
     "ext/run_observation.py": {
-      "bytes": 31286,
+      "bytes": 33331,
       "installed_preimage_sha256": "1151cf3e5a3b4c582935b82c08719b6cb0c271c4327fa0607be9067a2ca4c6d5",
-      "sha256": "0984a7a221e7d79e30e3c0c0a7cb7425e9f762d73f2946df1d28283f36f85809",
+      "sha256": "cbe4b0b4db3783e44d9cc442ab973996e8b5102c178ab61e172bfd0aae7accfb",
       "source": "candidate/run_observation.py"
     },
     "ext/run_observation_delivery.py": {
-      "bytes": 40482,
+      "bytes": 42618,
       "installed_preimage_sha256": "db54aa15630e29535980e0fccb406c3904cc7df92c66d17ec520f40d4fd5447b",
-      "sha256": "eba658de92294a833108c83804c2b237ef9be0356bbc0158ff5709755e8bb147",
+      "sha256": "c18ab07723b42a8dece4c072256ad161384508f65bac44bbb9781948710f675b",
       "source": "candidate/run_observation_delivery.py"
     },
     "ext/slot.py": {
@@ -636,7 +648,7 @@
       "source": "candidate/pool_launcher.sh"
     }
   },
-  "native_code_files": 102,
+  "native_code_files": 104,
   "new_code_files": [
     "capacity_preflight.py",
     "commission_deadline.py",
@@ -662,6 +674,8 @@
     "paid_pyyaml_6_0_3.zip",
     "paid_pyyaml_provenance.json",
     "paid_yaml_runtime.py",
+    "post_failure_observation.py",
+    "post_failure_observation_delivery.py",
     "provider_outcome.py",
     "quota_circuit.py",
     "recovery_artifacts.py"

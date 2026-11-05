@@ -47,7 +47,7 @@ WORK/BLOCKERS
 17. Keep original journeys/design acceptance. Tasks/empty buffers don't finish products; prioritize whole journeys. Infra unlocks named consumer with proof.
 18. Execute the next material action. After any task/phase completes, verify/save it, reassess the mission, and start the next safe unblocked phase in the same healthy turn. Depth allowed; breadth fenced.
 19. DO_NOT_REDO accepted work unless material source/authority/dependency/behavior/evidence changes. Two status/support cycles without capability delta = NO_DELTA_LOOP; change tactic/lane and act.
-20. Block the affected lane, not mission. WAITING_EXTERNAL/review/CI/messages are lane-local. Name actual missing evidence and next action, not a department; advance independent work.
+20. WAITING_EXTERNAL/review/CI/messages are lane-local. Requested reviewer != required approval: verify rules/holds. Name actual missing evidence and next action; advance independent work.
 21. Eligible bounded labor: paid Fabric; native Sol for reasoning/coordinators (WEB_CEO_DELEGATION §4). Fabric block: do permitted work or name exact blocker, never native Sol labor. Preserve root/grants. Review: load docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md at pin. Only if required.
 22. Ask humans only for auth/credential/physical ceremony, unavailable mode selector or fresh chat; own routine work.
 23. No Web daemon. `DURABLE_EXECUTION_RUNNING` requires proven STARTED/RUNNING + lawful return, not messages/CI. No duplicate runners/queues/polling.

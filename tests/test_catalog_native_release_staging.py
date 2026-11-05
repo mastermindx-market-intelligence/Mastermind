@@ -17,7 +17,7 @@ from tests.test_paid_release_archive_composition import _materialize
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = Path("ops/native_fabric/quota_continuity")
 PREIMAGE = "85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e"
-CURRENT_MANIFEST = "08df27e39cfdfa00da9cd0c56ac8b020b3582232d994aa62a68aefec91b9465f"
+CURRENT_MANIFEST = "e18547c06823cc240e923acc6e3358c3a263621e3dc8df01e95196c4b23ba9c6"
 
 
 def test_current_installer_materializes_the_exact_new_catalog_readers(tmp_path):
@@ -43,7 +43,7 @@ def test_current_installer_materializes_the_exact_new_catalog_readers(tmp_path):
         assert (rollout / name).read_bytes() == raw
     manifest = json.loads(before["native-manifest.json"])
     inventory = json.loads(before["native-source-inventory.json"])
-    assert len(manifest) == len(inventory["files"]) == 102
+    assert len(manifest) == len(inventory["files"]) == 104
     for name, digest in manifest.items():
         path = rollout / "native-code-stage" / name
         assert hashlib.sha256(path.read_bytes()).hexdigest() == digest

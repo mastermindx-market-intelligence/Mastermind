@@ -573,14 +573,15 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='08df27e39cfdfa00da9cd0c56ac8b020b3582232d994aa62a68aefec91b9465f'
+    assert hashlib.sha256(current_raw).hexdigest()=='e18547c06823cc240e923acc6e3358c3a263621e3dc8df01e95196c4b23ba9c6'
     current=json.loads(current_raw)
-    assert len(before)==95 and len(current)==102
+    assert len(before)==95 and len(current)==104
     assert set(before)<=set(current)
     added={'ext/host_pull_daemon.sh','ext/host_pull_launchd.plist.template',
         'ext/paid_host_readiness.py','ext/paid_initializer.py',
         'ext/paid_initializer_token_data.py','ext/paid_initializer_nested_data.py',
-        'ext/paid_provider_entry.py'}
+        'ext/paid_provider_entry.py','ext/post_failure_observation.py',
+        'ext/post_failure_observation_delivery.py'}
     # The accepted source union includes the protected review-routing picker,
     # provider/readiness composition and fixed-template launcher transition.
     # Preserve their finite changes without replacing the historical epoch.
@@ -600,13 +601,15 @@ def test_native_initializer_extends_only_exact_preimage_members():
                           'ext/fabric_operator_contract.py','ext/native_remote.py',
                           'ext/oc_free_exec.sh','ext/remote_sub_helpers.py',
                           'ext/slot.py','ext/sub.sh'}
+    recovery_changed={'ext/artifact_delivery.py','ext/run_observation.py',
+                      'ext/run_observation_delivery.py'}
     # Ubuntu4 adds exactly one changed member to this finite source union.
     # Its authentic predecessor remains fixed in the historical release.
     ubuntu4_changed={'ext/fabric_host_qualification.py'}
     assert before['ext/fabric_host_qualification.py']=='1b1b64342c61e90887a6f023dca3e0c75707b57fecaf05227b1a960cb7922899'
-    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|ubuntu4_changed
-    assert sum(before[p]==current[p] for p in before)==68
-    for name in added|changed|diagnostic_changed|long_horizon_changed|ubuntu4_changed:
+    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|recovery_changed|ubuntu4_changed
+    assert sum(before[p]==current[p] for p in before)==65
+    for name in added|changed|diagnostic_changed|long_horizon_changed|recovery_changed|ubuntu4_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
         assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()
     # The paired-upgrade target remains historical; only ordinary generation
