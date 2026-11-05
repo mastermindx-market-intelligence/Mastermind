@@ -573,7 +573,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='693eae34f7bd05759a2a1f6df37c1f83ac8cd9173d562162591ebcce818dd830'
+    assert hashlib.sha256(current_raw).hexdigest()=='148ca2e8eb0806b6017850e945a2e836d319efc06c17361906679703ce6b0ba2'
     current=json.loads(current_raw)
     assert len(before)==95 and len(current)==102
     assert set(before)<=set(current)
@@ -584,7 +584,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     # The accepted source union includes the protected review-routing picker,
     # provider/readiness composition and fixed-template launcher transition.
     # Preserve their finite changes without replacing the historical epoch.
-    changed={'ext/fabric_task.py','ext/glm_host_account_source.py',
+    changed={'ext/fabric_task.py','ext/glm_host_account_source.py','ext/lease_broker.py',
         'ext/host_pull.sh','ext/host_pull_backend.py','ext/paid_glm_model_client.py',
         'ext/paid_host_qualification.py','ext/paid_incumbent_state.py',
         'ext/paid_model_owner.py','ext/pick.py','ext/pool_ledger.py','ext/remote_sub.sh',
@@ -601,7 +601,8 @@ def test_native_initializer_extends_only_exact_preimage_members():
                           'ext/oc_free_exec.sh','ext/remote_sub_helpers.py',
                           'ext/slot.py','ext/sub.sh'}
     assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed
-    assert sum(before[p]==current[p] for p in before)==69
+    # The fair-share repair advances exactly one prior broker member.
+    assert sum(before[p]==current[p] for p in before)==68
     for name in added|changed|diagnostic_changed|long_horizon_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
         assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()

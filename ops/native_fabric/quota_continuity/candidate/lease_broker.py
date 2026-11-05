@@ -874,6 +874,20 @@ class Broker:
         waiters = self._waiters(conn, pool)
         if not waiters:
             return True
+        # A root already at its share cannot borrow while another root has
+        # unsatisfied demand. Such a waiter must not block the eligible roots
+        # behind it: _try_acquire refuses its own turn as lending_blocked.
+        share = self.fair_share(conn, pool, extra=orch)
+        below_share = {
+            w["orchestrator_id"]
+            for w in self._below_share_waiters(conn, pool, "", share)
+        }
+        # A first acquire has not registered a waiter yet. Its entitlement is
+        # the same as on the next wait-loop iteration, without rewriting demand.
+        if len(self._held_by(conn, orch, pool)) < share:
+            below_share.add(orch)
+        if below_share:
+            waiters = [w for w in waiters if w["orchestrator_id"] in below_share]
         my_p = _class_priority(task_class)
         # higher-priority (lower number) waiter from someone else blocks us
         for w in waiters:

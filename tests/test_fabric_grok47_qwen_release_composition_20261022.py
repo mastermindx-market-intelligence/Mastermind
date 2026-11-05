@@ -49,9 +49,11 @@ PROTECTED_QWEN_SOURCE_DIGESTS = {
         "a2847a29abe590cb168c2cd8ae34e0b1c3222b6e92ab4c00f252a342d56e6406",
 }
 
-# Keep the exact historical Qwen map above. Only this reviewed restrictive
-# context-reader join advances; the other three Qwen payloads remain exact.
+# Keep the exact historical Qwen map above. The restrictive context-reader
+# join and fair-share queue repair advance as explicit candidate bytes; the
+# other Qwen payloads remain exact.
 REVIEWED_QWEN_FORWARD_DIGESTS = {
+    "lease_broker.py": "598d9b905b71897275a0617d143f3280bc802fbd6c375bed9848d222564e1488",
     "glm_host_account_source.py": "cf2be3503d31d8b3f5d2098ebab5d6c2e61e46842468db73baf2f7d8f8b70855",
 }
 
@@ -340,7 +342,7 @@ def test_protected_qwen_files_and_exact_context_reader_forward():
     assert not set(PROTECTED_QWEN_SOURCE_DIGESTS) & set(builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS)
     manifest = json.loads((NATIVE / "rollout/native-manifest.json").read_text())
     inventory = json.loads((NATIVE / "rollout/native-source-inventory.json").read_text())
-    assert set(REVIEWED_QWEN_FORWARD_DIGESTS) == {"glm_host_account_source.py"}
+    assert set(REVIEWED_QWEN_FORWARD_DIGESTS) == {"glm_host_account_source.py", "lease_broker.py"}
     for name, original in sorted(PROTECTED_QWEN_SOURCE_DIGESTS.items()):
         expected = REVIEWED_QWEN_FORWARD_DIGESTS.get(name, original)
         assert name in builder.BASE_FILES
