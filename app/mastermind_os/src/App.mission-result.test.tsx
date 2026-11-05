@@ -598,6 +598,33 @@ describe("App compound Mission/Result consumption", () => {
     await expectOfficeHalvesEmpty(user);
   });
 
+  it.each(["host replacement", "silent host-generation drift"] as const)(
+    "settles a still-owned read after %s without an auth event",
+    async (kind) => {
+      const e = setup("queue");
+      const producer = await e.ready();
+      render(<App />);
+      const user = await openProject();
+      await user.click(await screen.findByRole("button", { name: /JOB-004/ }));
+      await waitFor(() => expect(e.queue).toHaveLength(1));
+      const host = window.MastermindMissionHost!;
+      if (kind === "host replacement") {
+        window.MastermindMissionHost = { ...host };
+      } else {
+        const originalGeneration = host.invalidationGeneration!;
+        host.invalidationGeneration = () => originalGeneration() + 1;
+      }
+      await act(async () => {
+        e.queue[0].resolve(new Response(producer.bytes, { headers: { "content-type": "application/json" } }));
+        await flush();
+      });
+      expect(await screen.findByText("READ_CANCELLED")).toBeTruthy();
+      expect(screen.queryByText("Reading the exact selected tuple…")).toBeNull();
+      expect(screen.queryByText("bounded typed fixture result")).toBeNull();
+      await expectOfficeHalvesEmpty(user);
+    },
+  );
+
   it("settles a still-owned cancellation when the raw client method is replaced", async () => {
     const e = setup("queue");
     const producer = await e.ready();
@@ -628,7 +655,7 @@ describe("App compound Mission/Result consumption", () => {
     await expectOfficeHalvesEmpty(user);
   });
 
-  it("keeps a newer pending pair when an older callback is superseded", async () => {
+  it("rejects a crossed newer typed pair without letting an older callback clear its ticket", async () => {
     const e = setup("queue");
     const producer = await e.ready();
     render(<App />);
@@ -650,13 +677,126 @@ describe("App compound Mission/Result consumption", () => {
     expect(screen.getByText("Reading the exact selected tuple…")).toBeTruthy();
     expect(screen.queryByText("READ_CANCELLED")).toBeNull();
     await act(async () => {
+      // JOB-002 was requested; this typed host returns the JOB-004 producer.
+      // No crossed five-field tuple may publish to App or either Office half.
       releaseSecond(producer.decoded);
       await flush();
     });
-    expect(await screen.findByText("bounded typed fixture result")).toBeTruthy();
+    expect(await screen.findByText("MISSION_RESULT_RESPONSE_INVALID")).toBeTruthy();
+    expect(screen.queryByText("bounded typed fixture result")).toBeNull();
     expect(screen.queryByText("Reading the exact selected tuple…")).toBeNull();
     expect(e.calls("/workspace/result/current")).toHaveLength(0);
+    await expectOfficeHalvesEmpty(user);
   });
+
+  it.each(["workRef", "rootJobId", "jobId", "attemptId", "resultEnvelopeDigest"] as const)(
+    "refuses a crossed typed compound selection field: %s",
+    async (field) => {
+      const e = setup("bytes");
+      const producer = await e.ready();
+      window.MastermindMissionHost!.readMissionResult = async () => ({
+        ...producer.decoded,
+        selection: {
+          ...producer.decoded.selection,
+          [field]: `${producer.decoded.selection[field]}-CROSSED`,
+        },
+      });
+      render(<App />);
+      const user = await openProject();
+      await user.click(await screen.findByRole("button", { name: /JOB-004/ }));
+      expect(await screen.findByText("MISSION_RESULT_RESPONSE_INVALID")).toBeTruthy();
+      expect(screen.queryByText("bounded typed fixture result")).toBeNull();
+      expect(e.calls("/workspace/result/current")).toHaveLength(0);
+      await expectOfficeHalvesEmpty(user);
+    },
+  );
+
+  it("rejects a matching outer typed selection wrapping a sibling Job's nested Result", async () => {
+    const e = setup("bytes");
+    const producer = await e.ready();
+    window.MastermindMissionHost!.readMissionResult = async (request) => ({
+      ...producer.decoded,
+      selection: {
+        workRef: request.workRef,
+        rootJobId: request.rootJobId,
+        jobId: request.jobId,
+        attemptId: request.attemptId,
+        resultEnvelopeDigest: request.resultEnvelopeDigest,
+      },
+    });
+    render(<App />);
+    const user = await openProject();
+    await user.click(await screen.findByRole("button", { name: /JOB-002/ }));
+    // Outer selection is the JOB-002 click, but the role Result and its
+    // source observation still belong to JOB-004. Neither may publish.
+    expect(await screen.findByText("MISSION_RESULT_RESPONSE_INVALID")).toBeTruthy();
+    expect(screen.queryByText("bounded typed fixture result")).toBeNull();
+    expect(e.calls("/workspace/result/current")).toHaveLength(0);
+    await expectOfficeHalvesEmpty(user);
+  });
+
+  it.each([
+    ["role-result", "work_ref"],
+    ["role-result", "root_job_id"],
+    ["role-result", "job_id"],
+    ["role-result", "attempt_id"],
+    ["role-result", "result_envelope_digest"],
+    ["source-observation", "work_ref"],
+    ["source-observation", "root_job_id"],
+    ["source-observation", "job_id"],
+    ["source-observation", "attempt_id"],
+    ["source-observation", "result_envelope_digest"],
+  ] as const)("rejects a crossed nested %s field %s", async (layer, field) => {
+    const e = setup("bytes");
+    const producer = await e.ready();
+    const forged = structuredClone(producer.decoded);
+    const target = layer === "role-result"
+      ? forged.roleResult.selection
+      : forged.roleResult.source_observation.selection;
+    target[field] = `${target[field]}-CROSSED`;
+    window.MastermindMissionHost!.readMissionResult = async () => forged;
+    render(<App />);
+    const user = await openProject();
+    await user.click(await screen.findByRole("button", { name: /JOB-004/ }));
+    expect(await screen.findByText("MISSION_RESULT_RESPONSE_INVALID")).toBeTruthy();
+    expect(screen.queryByText("bounded typed fixture result")).toBeNull();
+    await expectOfficeHalvesEmpty(user);
+  });
+
+  it("rejects a crossed nested role-view selector even when both wire selectors match", async () => {
+    const e = setup("bytes");
+    const producer = await e.ready();
+    const forged = structuredClone(producer.decoded);
+    if (!forged.roleResult.result) throw new Error("positive producer role view missing");
+    forged.roleResult.result.selection.job_id = "JOB-002";
+    window.MastermindMissionHost!.readMissionResult = async () => forged;
+    render(<App />);
+    const user = await openProject();
+    await user.click(await screen.findByRole("button", { name: /JOB-004/ }));
+    expect(await screen.findByText("MISSION_RESULT_RESPONSE_INVALID")).toBeTruthy();
+    expect(screen.queryByText("bounded typed fixture result")).toBeNull();
+    await expectOfficeHalvesEmpty(user);
+  });
+
+  it("rejects a crossed typed UNAVAILABLE selection before showing its source reason", async () => {
+    const e = setup("bytes");
+    const producer = await e.ready();
+    window.MastermindMissionHost!.readMissionResult = async () => ({
+      schema: producer.decoded.schema,
+      availability: "UNAVAILABLE" as const,
+      selection: { ...producer.decoded.selection, jobId: "JOB-002" },
+      reasonCodes: ["SOURCE_CHANGED"] as const,
+      mission: null,
+      roleResult: null,
+    });
+    render(<App />);
+    const user = await openProject();
+    await user.click(await screen.findByRole("button", { name: /JOB-004/ }));
+    expect(await screen.findByText("MISSION_RESULT_RESPONSE_INVALID")).toBeTruthy();
+    expect(screen.queryByText("SOURCE_CHANGED")).toBeNull();
+    await expectOfficeHalvesEmpty(user);
+  });
+
 });
 
 async function renderExplicit(kind: ExplicitKind, directory: string) {

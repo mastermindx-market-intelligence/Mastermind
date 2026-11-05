@@ -3501,25 +3501,32 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       setResultState({ kind: "PENDING", selection: valid });
       const controller = new AbortController();
       resultController.current = controller;
-      // A newer ticket, host, generation, selection, or auth epoch owns the
-      // screen. Those callbacks stay silent so they cannot clear that pair.
-      const superseded = () => compoundTicket.current !== ticket
-        || window.MastermindMissionHost !== host
-        || host?.invalidationGeneration?.() !== hostGeneration
+      // A newer ticket, selection, or auth epoch owns the screen. Its
+      // callback must never clear the replacement ticket or Office pair.
+      const newerOwner = () => compoundTicket.current !== ticket
         || liveSelection.current !== selectionAtStart
         || liveAuthRevision.current !== authAtStart;
+      // Host identity/generation can drift without notifying the original
+      // subscription. That is still this ticket's cancellation, not a
+      // reason to strand its card in PENDING.
+      const hostChanged = () => window.MastermindMissionHost !== host
+        || host?.invalidationGeneration?.() !== hostGeneration;
+      const superseded = () => newerOwner() || hostChanged();
       // The mounted typed method can be replaced without changing the raw
       // client or the host object. Raw identity checks do not cover that.
       const typedHeld = () => window.MastermindMissionHost?.readMissionResult === compoundRead;
       const withholdOwned = (reason: string) => {
-        if (superseded()) return;
+        if (newerOwner()) return;
         office.supersedePair();
         compoundRetention.current = null;
         setResultState({ kind: "UNAVAILABLE", selection: valid, reason });
       };
       Promise.resolve()
         .then(() => {
-          if (superseded()) return undefined;
+          if (superseded()) {
+            withholdOwned("READ_CANCELLED");
+            return undefined;
+          }
           if (controller.signal.aborted || !typedHeld()) {
             withholdOwned("READ_CANCELLED");
             return undefined;
@@ -3527,27 +3534,58 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           return compoundRead({ ...valid, signal: controller.signal });
         })
         .then((decoded) => {
-          if (decoded === undefined || superseded()) return;
+          if (decoded === undefined) return;
+          if (superseded()) {
+            withholdOwned("READ_CANCELLED");
+            return;
+          }
           if (!typedHeld()) {
             withholdOwned("READ_CANCELLED");
+            return;
+          }
+          // The host decoder already checks all five selection fields, but
+          // App must fail closed if a replaced typed host returns an otherwise
+          // well-formed pair belonging to a different selected Job/Attempt.
+          if (!decoded.selection
+            || decoded.selection.workRef !== valid.workRef
+            || decoded.selection.rootJobId !== valid.rootJobId
+            || decoded.selection.jobId !== valid.jobId
+            || decoded.selection.attemptId !== valid.attemptId
+            || decoded.selection.resultEnvelopeDigest !== valid.resultEnvelopeDigest) {
+            withholdOwned("MISSION_RESULT_RESPONSE_INVALID");
             return;
           }
           if (decoded.availability !== "AVAILABLE" || !decoded.mission || !decoded.roleResult) {
-            withholdOwned(decoded.reasonCodes[0] ?? "SOURCE_UNAVAILABLE");
+            withholdOwned(decoded.reasonCodes.join(", ") || "SOURCE_UNAVAILABLE");
             return;
           }
-          if (!typedHeld()) {
-            withholdOwned("READ_CANCELLED");
+          // The nested Result and its source observation each carry their own
+          // five-field selector. A substituted typed method could forge a
+          // matching compound selection around a sibling Job's actual Result.
+          const sameWireSelection = (
+            wire: ResultEnvelopeDigestShape["selection"] | null | undefined,
+          ) => !!wire
+            && wire.work_ref === valid.workRef
+            && wire.root_job_id === valid.rootJobId
+            && wire.job_id === valid.jobId
+            && wire.attempt_id === valid.attemptId
+            && wire.result_envelope_digest === valid.resultEnvelopeDigest;
+          const roleView = decoded.roleResult.result;
+          if (!sameWireSelection(decoded.roleResult.selection)
+            || !sameWireSelection(decoded.roleResult.source_observation?.selection)
+            || (roleView !== null && (!roleView?.selection
+              || roleView.selection.root_job_id !== valid.rootJobId
+              || roleView.selection.job_id !== valid.jobId
+              || roleView.selection.attempt_id !== valid.attemptId
+              || roleView.selection.result_envelope_digest !== valid.resultEnvelopeDigest))) {
+            withholdOwned("MISSION_RESULT_RESPONSE_INVALID");
             return;
           }
+          // No async boundary between these fences and the synchronous
+          // Office accept. Post-accept fences could leave a published pair.
           const accepted = office.acceptMissionResult(
             held, decoded.mission, decoded.roleResult, new Date().toISOString(),
           );
-          if (superseded()) return;
-          if (!typedHeld()) {
-            withholdOwned("READ_CANCELLED");
-            return;
-          }
           if (accepted.kind !== "observed") {
             withholdOwned(accepted.reason);
             return;
@@ -3563,7 +3601,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           setResultState({ kind: "READY", selection: valid, document: decoded.roleResult });
         })
         .catch((err: Error) => {
-          if (superseded()) return;
+          if (superseded()) {
+            withholdOwned("READ_CANCELLED");
+            return;
+          }
           withholdOwned(
             err?.message === "MISSION_RESULT_RESPONSE_INVALID"
               ? "MISSION_RESULT_RESPONSE_INVALID"
