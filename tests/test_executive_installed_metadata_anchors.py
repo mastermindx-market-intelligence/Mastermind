@@ -150,3 +150,84 @@ def test_review_f2_flow_plain_scalar_characters_are_not_node_properties(metadata
 def test_review_repairs_preserve_node_and_continuation_refusals(document):
     with pytest.raises(ValueError, match="unsupported"):
         parse(document + PATHS)
+
+
+@pytest.mark.parametrize("quote", ['"', "'"])
+def test_hash_continuation_in_nested_quoted_title_preserves_paths(quote):
+    # Reproduces the installed Programs reader failure without copying the
+    # workstream: the hash begins quoted content, not a YAML comment.
+    metadata = (
+        "waves:\n  - id: s4\n"
+        f"    title: {quote}Stage 5 — regional adoption order\n"
+        f"      #8444 → HK → China (orchestrator).{quote}\n"
+        "    status: in_progress\n"
+    )
+    canonical = yaml.safe_load(metadata + PATHS)
+    assert "#8444" in canonical["waves"][0]["title"]
+    assert parse(metadata + PATHS) == EXPECTED
+
+
+@pytest.mark.parametrize("metadata", [
+    'metadata: "quoted \\"word\\"\n  # artifacts: [hidden]"\n',
+    "metadata: 'single ''word''\n  # repos: [hidden]'\n",
+    'metadata: {note: "quoted\n  # } is content", kept: true}\n',
+    "metadata: {note: 'quoted\n  # ] is content', kept: true}\n",
+])
+def test_hash_continuations_preserve_existing_quote_and_flow_boundaries(metadata):
+    canonical = yaml.safe_load(metadata + PATHS)
+    assert {key: canonical[key] for key in EXPECTED} == EXPECTED
+    assert parse(metadata + PATHS) == EXPECTED
+
+
+def test_structural_comments_are_inert_at_all_supported_boundaries():
+    document = """# artifacts: [hidden]
+anchor: &m retained
+copy: *m
+    # A comment cannot become an alias continuation: \" [ &phantom
+title: \"closed\"
+    # A comment cannot become a quoted continuation: ' ]
+metadata: {
+# A flow comment can be at column zero: } ' \"
+  note: retained,
+    # [ &phantom <<: {repos: [hidden]}
+  kept: true}
+waves:
+  # A metadata comment is not a mapping or sequence: ] \"
+  - title: retained
+repos:
+  # A path-list comment is not an item.
+  - macro
+# owns_paths: [hidden]
+artifacts:
+- research/evidence.md
+    # Trailing path-list comment: \" &phantom
+owns_paths: []
+# Final comment: repos: [hidden]
+"""
+    canonical = yaml.safe_load(document)
+    assert {key: canonical[key] for key in EXPECTED} == EXPECTED
+    assert parse(document) == EXPECTED
+
+
+@pytest.mark.parametrize("metadata", [
+    "anchor: &m retained\nmetadata: *m\n# ignored\n  hidden: value\n",
+    'metadata: "closed"\n# ignored\n  hidden: value\n',
+    "metadata: {note: retained}\n# ignored\n  hidden: value\n",
+    "# anchor: &phantom retained\nmetadata: *phantom\n",
+    'metadata: "unterminated\n  # still quoted\n',
+    "metadata: [\n  # ] cannot close the flow\n",
+])
+def test_comments_cannot_hide_invalid_metadata_or_define_anchors(metadata):
+    with pytest.raises(ValueError, match="unsupported"):
+        parse(metadata + PATHS)
+
+
+@pytest.mark.parametrize("document", [
+    "# Empty YAML document.\n  # Still no root mapping.\n",
+    "artifacts:\n- research/evidence.md\n- # null item is not a comment\n",
+    "artifacts: []\n# separator\nartifacts: [hidden]\n",
+    "artifacts:\n# No list item\nrepos: [macro]\n",
+])
+def test_comments_do_not_relax_root_or_path_list_grammar(document):
+    with pytest.raises(ValueError):
+        parse(document)
