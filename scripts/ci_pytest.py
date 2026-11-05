@@ -223,7 +223,11 @@ def pytest_argv(
         # changes how many interpreters execute the already-selected shard.
         if type(workers) is not int or not 0 < workers <= MAX_SHARD_WORKERS:
             raise PolicyError(f"shard workers must be an int in 1..{MAX_SHARD_WORKERS}")
-        argv.extend(["-n", str(workers), "--dist", "loadfile", "--max-worker-restart", "0"])
+        # The completion guard turns a worker lost during import/collection
+        # (which xdist otherwise reports as "no tests ran", exit 0) into a
+        # failed shard; it registers on the controller only.
+        argv.extend(["-p", "scripts.ci_xdist_guard", "-n", str(workers),
+                     "--dist", "loadfile", "--max-worker-restart", "0"])
     return [*argv, *included]
 
 

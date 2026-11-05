@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -444,11 +445,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.plan_only:
         return 0
     # No hand-written selectors, mutating retry, positive allowlist or shell.
-    completed = subprocess.run(
-        shard_argv,
-        cwd=root,
-        check=False,
-    )
+    if args.workers:
+        # Every xdist worker must collect the identical item list; a
+        # parametrize over a set/dict iterates in hash order, which differs
+        # per interpreter unless the seed is pinned. Workers inherit this.
+        env = dict(os.environ)
+        env.setdefault("PYTHONHASHSEED", "0")
+        completed = subprocess.run(shard_argv, cwd=root, check=False, env=env)
+    else:
+        completed = subprocess.run(
+            shard_argv,
+            cwd=root,
+            check=False,
+        )
     return int(completed.returncode)
 
 

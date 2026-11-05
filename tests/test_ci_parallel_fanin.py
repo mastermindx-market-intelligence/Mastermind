@@ -188,7 +188,7 @@ def test_worker_executes_only_its_exact_canonical_shard_and_preserves_status(
     (workflow / "ci.yml").write_text("fixture", encoding="utf-8")
     recorded: list[tuple[list[str], Path, bool]] = []
 
-    def fake_run(args, *, cwd, check):
+    def fake_run(args, *, cwd, check, env=None):
         recorded.append((args, cwd, check))
         return subprocess.CompletedProcess(args=args, returncode=17)
 
@@ -210,13 +210,20 @@ def test_worker_count_is_an_argv_only_change_to_the_same_exact_shard(
     workflow.mkdir(parents=True)
     (workflow / "ci.yml").write_text("fixture", encoding="utf-8")
     recorded: list[list[str]] = []
+    environments: list[dict[str, str] | None] = []
 
-    def fake_run(args, *, cwd, check):
+    def fake_run(args, *, cwd, check, env=None):
         recorded.append(list(args))
+        environments.append(env)
         return subprocess.CompletedProcess(args=args, returncode=0)
 
     monkeypatch.setattr(fan.subprocess, "run", fake_run)
+    monkeypatch.delenv("PYTHONHASHSEED", raising=False)
     assert fan.main(["--jobs", "6", "--index", "1", "--root", str(tmp_path), "--workers", "4"]) == 0
+    # Workers must collect identical item lists, so the hash seed is pinned
+    # for the parallel child (and inherited by its workers) only.
+    [worker_env] = environments
+    assert worker_env is not None and worker_env["PYTHONHASHSEED"] == "0"
     expected = cip.partition_modules(included, jobs=6)[1]
     serial = cip.pytest_argv(expected, progress=True)
     [parallel] = recorded
@@ -226,6 +233,7 @@ def test_worker_count_is_an_argv_only_change_to_the_same_exact_shard(
     assert parallel[: serial.index("-q") + 1] == serial[: serial.index("-q") + 1]
     assert parallel[-len(expected):] == list(expected) == serial[-len(expected):]
     assert parallel[serial.index("-q") + 1 : -len(expected)] == [
+        "-p", "scripts.ci_xdist_guard",
         "-n", "4", "--dist", "loadfile", "--max-worker-restart", "0",
     ]
     # An out-of-range worker count is a policy error before any execution.

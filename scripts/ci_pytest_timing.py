@@ -405,7 +405,10 @@ class ModuleTiming:
             # report (no live exception object is available here).
             try:
                 if report.failed:
-                    self._h1_failure(report.nodeid, report.when)
+                    self._h1_failure(
+                        report.nodeid, report.when,
+                        crash=getattr(report.longrepr, "reprcrash", None),
+                    )
             except Exception:
                 pass
 
