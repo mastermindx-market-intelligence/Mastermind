@@ -80,6 +80,8 @@ _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 CLAUDE_OPERATOR_PROVIDER = "claude"
 CLAUDE_OPERATOR_HARNESS_KIND = "claude-agent-sdk"
 CLAUDE_OPERATOR_EXECUTION_SURFACE = "claude-agent-sdk"
+CLAUDE_PRINCIPAL_EXECUTION_SURFACE = "claude-code-principal"
+CLAUDE_PRINCIPAL_AUTH_REALM = "oauth-principal-account"
 # Paid model-only sealed-input extension: exactly one reviewed surface/realm/
 # profile tuple (fabric.paid.glm.sealed-input.v1).  The surface joins the
 # sealed-worker fence below, so it can never carry MCP servers, plugins,
@@ -98,10 +100,11 @@ ACP_EXECUTION_SURFACE = "acp-agent"
 ACP_PROVIDER_FREE_AUTH_REALM = "dedicated-worker-no-auth"
 _EXECUTION_SURFACES = frozenset({
     "codex-exec", "codex-app-server", "claude-code", CLAUDE_OPERATOR_EXECUTION_SURFACE,
-    PAID_GLM_EXECUTION_SURFACE, ACP_EXECUTION_SURFACE,
+    PAID_GLM_EXECUTION_SURFACE, ACP_EXECUTION_SURFACE, CLAUDE_PRINCIPAL_EXECUTION_SURFACE,
 })
 _AUTH_REALMS = frozenset({
     "dedicated-worker-account", PAID_GLM_AUTH_REALM, ACP_PROVIDER_FREE_AUTH_REALM,
+    CLAUDE_PRINCIPAL_AUTH_REALM,
 })
 _ADAPTER_EXECUTION_SURFACES = {
     "codex-cli": frozenset({"codex-exec", "codex-app-server"}),
@@ -981,7 +984,9 @@ class ExecutionCapabilityProfile:
     def app_server_config_projection(self) -> dict[str, object]:
         """Security-relevant config expected back from ``config/read``."""
 
-        if self.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE:
+        if self.execution_surface in {
+            CLAUDE_OPERATOR_EXECUTION_SURFACE, CLAUDE_PRINCIPAL_EXECUTION_SURFACE,
+        }:
             raise CapabilityPolicyError("Claude policy cannot use a Codex config projection")
 
         agents: dict[str, object]
@@ -1007,6 +1012,9 @@ class ExecutionCapabilityProfile:
             }
             multi_agent_v2 = {
                 "enabled": True,
+                # Native helpers return through their original parent. Peer
+                # messaging is not a delegation or project-coordination grant.
+                "disable_direct_message": True,
                 "hide_spawn_agent_metadata": helper.hide_spawn_agent_metadata,
                 # V2 counts the root; the public agents setting above counts
                 # only spawned helpers.  Pin both interpretations.
@@ -1106,6 +1114,15 @@ class ExecutionCapabilityProfile:
                 "sandbox": requested["sandbox"],
                 "permissions": {},
             }, launch_provenance={k: requested[k] for k in ("setting_sources", "strict_mcp_config", "skills")})
+        if self.execution_surface == CLAUDE_PRINCIPAL_EXECUTION_SURFACE:
+            return _digest({
+                "execution_surface": self.execution_surface,
+                "auth_realm": self.auth_realm,
+                "mcp_servers": {
+                    grant.config_name: grant.config_projection()
+                    for grant in self.mcp_server_grants
+                },
+            })
         return _digest(self.app_server_config_projection())
 
     def claude_sdk_config_projection(self) -> dict[str, object]:
@@ -1250,6 +1267,7 @@ class ExecutionCapabilityProfile:
                     "features.multi_agent=false",
                     (
                         "features.multi_agent_v2={enabled=true,"
+                        "disable_direct_message=true,"
                         "hide_spawn_agent_metadata=true,"
                         "max_concurrent_threads_per_session="
                         f"{helper.max_concurrent_helpers + 1},"
@@ -2215,6 +2233,31 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} write-capable native helpers remain unavailable"
                 )
+            is_claude_principal = (
+                execution_surface == CLAUDE_PRINCIPAL_EXECUTION_SURFACE
+            )
+            if auth_realm == CLAUDE_PRINCIPAL_AUTH_REALM and not is_claude_principal:
+                raise CapabilityPolicyError(
+                    f"profile {profile_id!r} principal auth realm requires the principal surface"
+                )
+            if is_claude_principal and (
+                auth_realm != CLAUDE_PRINCIPAL_AUTH_REALM
+                or sandbox_policy != "read-only"
+                or approval_policy != "never"
+                or network_policy != "disabled"
+                or write_capable
+                or native_helper_policy is not NativeHelperPolicy.DISABLED
+                or native_helper is not None
+                or skills
+                or skill_grants
+                or resource_ids
+                or plugins
+                or len(resolved_mcp) != 1
+                or resolved_mcp[0].auth_status != "oAuth"
+            ):
+                raise CapabilityPolicyError(
+                    f"profile {profile_id!r} exceeds the closed Claude principal capability shape"
+                )
             normalized = {
                 "profile_id": profile_id,
                 "enabled": enabled,
@@ -2342,6 +2385,8 @@ __all__ = [
     "ACP_PROVIDER_FREE_AUTH_REALM",
     "DEFAULT_CAPABILITY_POLICY_PATH",
     "DEFAULT_CAPABILITY_SOURCE_ROOT",
+    "CLAUDE_PRINCIPAL_AUTH_REALM",
+    "CLAUDE_PRINCIPAL_EXECUTION_SURFACE",
     "CapabilityPolicyError",
     "CompanyConsultationGrantProfile",
     "ExecutionCapabilityProfile",

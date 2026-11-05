@@ -20,6 +20,10 @@ ROOT = Path(__file__).resolve().parents[1]
 START = '<!-- mastermind-ci-observation-liveness-v1 -->'
 END = '<!-- /mastermind-ci-observation-liveness-v1 -->'
 ANCHOR = '<!-- /mastermind-assigned-execution-v1 -->'
+# Exact accepted pre-attended block from protected d107f25c (not arbitrary marker trust).
+PREVIOUS_GUIDANCE_SHA256 = frozenset({
+    'f723c1107590214f61750d00afb9efa35c1f2fc982bff69b2bcc249baaf63298',
+})
 TARGETS = {
     'guard': '.claude/hooks/mastermind_fabric_routing_guard.py',
     'context': '.claude/hooks/mastermind_fabric_context.py',
@@ -36,7 +40,10 @@ def guidance() -> str:
     source = (ROOT / 'docs/sol_skills/ACTIVE_EXECUTION.md').read_text()
     if source.count(START) != 1 or source.count(END) != 1:
         raise ValueError('canonical guidance markers missing or ambiguous')
-    return source[source.index(START):source.index(END) + len(END)]
+    begin, end = source.index(START), source.index(END)
+    if end < begin:
+        raise ValueError('canonical guidance markers are reversed')
+    return source[begin:end + len(END)]
 
 
 def replace_once(source: str, old: str, new: str) -> str:
@@ -56,9 +63,20 @@ def render(kind: str, source: str) -> str:
         return source
     block = guidance()
     if START in source or END in source:
-        if source.count(START) != 1 or source.count(END) != 1 or block not in source:
+        if source.count(START) != 1 or source.count(END) != 1:
             raise ValueError('installed liveness guidance differs; reconcile before applying')
-        return source
+        begin, end = source.index(START), source.index(END)
+        if end < begin:
+            raise ValueError('installed liveness guidance markers are reversed')
+        end += len(END)
+        installed = source[begin:end]
+        if installed == block:
+            return source
+        # Upgrade only an exact protected predecessor. Unknown edits, including
+        # whitespace drift, are not permission to overwrite account instructions.
+        if digest(installed.encode('utf-8')) not in PREVIOUS_GUIDANCE_SHA256:
+            raise ValueError('installed liveness guidance differs; reconcile before applying')
+        return source[:begin] + block + source[end:]
     if source.count(ANCHOR) != 1:
         raise ValueError('assigned execution anchor missing or ambiguous')
     return source.replace(ANCHOR, ANCHOR + '\n\n' + block, 1)

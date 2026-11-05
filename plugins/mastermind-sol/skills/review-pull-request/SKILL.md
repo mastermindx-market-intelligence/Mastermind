@@ -32,6 +32,10 @@ Read `../../references/authority-boundaries.md` before interpreting any app, rec
 6. Falsify false completion: architecture is not implementation; implementation is not installed; installed is not production-proven.
 7. Return `PASS`, `REQUEST_CHANGES`, or `BLOCKED_BY_CURRENT_SOURCE` with file and line or exact evidence.
 
+## Review routing across Web, native sessions and Slack Dots
+
+Before commissioning independent review, read `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md` at the same compatible protected source pin. Its decision table selects an actual admitted Fabric reviewer when eligible or a separately commissioned Dot review via the existing Slack carrier when lawful. Preserve reviewer independence, exact PR head, original operation/effects, no provider/account failover after denial and distinction between technical findings versus formal GitHub non-author review. It is not another GitHub webhook, provider selector or approval mechanism.
+
 ## Independent review route: Cursor Cloud on the existing GitHub PR
 
 When a bounded independent security review is needed, first reconcile any existing

@@ -40,7 +40,12 @@ beforeEach(async () => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); delete window.MastermindMissionHost; });
 
-describe("actual Today owner projection", () => {
+async function renderOffice() {
+  render(<App />);
+  await userEvent.setup().click(screen.getByRole("button", { name: "Meta-CEO" }));
+}
+
+describe("actual Meta-CEO office owner projection", () => {
   it("waits for the native companion's collection before reading the Mission", async () => {
     const e = await ownerFixture(), read = e.host.readProgramsObservation!;
     let release!: () => void;
@@ -50,7 +55,7 @@ describe("actual Today owner projection", () => {
     delete e.host.readPrograms;
     window.MastermindMissionHost = e.host;
     (window as any).__TAURI_INTERNALS__ = { invoke: vi.fn(async () => ({})) };
-    render(<App />);
+    await renderOffice();
     await waitFor(() => expect(release).toBeTypeOf("function"));
     expect(e.invoke.mock.calls.filter(([command]) => command === "read_mission_v3")).toHaveLength(0);
     await act(async () => release());
@@ -62,14 +67,14 @@ describe("actual Today owner projection", () => {
     delete e.host.readPrograms;
     window.MastermindMissionHost = e.host;
     (window as any).__TAURI_INTERNALS__ = { invoke: vi.fn(async () => ({})) };
-    render(<App />);
+    await renderOffice();
     await waitFor(() => expect(screen.getByRole("region", { name: "Meta-CEO answer" }).textContent).toContain("Private owner project"));
     expect(e.invoke.mock.calls.filter(([command]) => command === "read_programs")).toHaveLength(1);
     await userEvent.setup().click(screen.getByRole("button", { name: "Review sources" }));
     expect(screen.getByRole("complementary", { name: "Source evidence" }).textContent).toContain("programs-owner-observation:v1:");
   });
   it("renders Atelier from the existing owner reads and preserves every legacy route", async () => {
-    const e = await ownerFixture(); window.MastermindMissionHost = e.host; render(<App />);
+    const e = await ownerFixture(); window.MastermindMissionHost = e.host; await renderOffice();
     const answer = await screen.findByRole("region", { name: "Meta-CEO answer" });
     await waitFor(() => expect(answer.textContent).toContain("Read the exact owner return."));
     expect(answer.textContent).toContain("Private owner project");
@@ -81,7 +86,7 @@ describe("actual Today owner projection", () => {
     expect(screen.getAllByRole("main")).toHaveLength(1);
   });
   it("withdraws the real Office answer, sources and draft in the first auth commit", async () => {
-    const e = await ownerFixture(); window.MastermindMissionHost = e.host; render(<App />);
+    const e = await ownerFixture(); window.MastermindMissionHost = e.host; await renderOffice();
     await waitFor(() => expect(screen.getByRole("region", { name: "Meta-CEO answer" }).textContent).toContain("Private owner project"));
     await userEvent.setup().type(screen.getByRole("textbox", { name: "Direction to Meta-CEO" }), "Private unsent direction");
     await userEvent.setup().click(screen.getByRole("button", { name: "Review sources" }));
@@ -94,22 +99,24 @@ describe("actual Today owner projection", () => {
     } finally { await act(async () => { e.settle(); for (let n = 0; n < 20; n++) await Promise.resolve(); }); }
   });
   it("keeps an unsent direction through legacy navigation without a second read", async () => {
-    const e = await ownerFixture(); window.MastermindMissionHost = e.host; render(<App />);
+    const e = await ownerFixture(); window.MastermindMissionHost = e.host; await renderOffice();
     await waitFor(() => expect(within(screen.getByRole("region", { name: "Meta-CEO answer" })).getByText("Read the exact owner return.")).toBeTruthy());
     const user = userEvent.setup(); await user.type(screen.getByRole("textbox", { name: "Direction to Meta-CEO" }), "Keep this thought");
     await user.click(screen.getByRole("button", { name: "Evidence" }));
     await user.click(screen.getByRole("button", { name: "Today" }));
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Direction to Meta-CEO" }).value).toBe("Keep this thought");
     expect(e.invoke.mock.calls.filter(([command]) => command === "read_programs")).toHaveLength(1);
   });
   it("keeps the Programs receipt and draft when reopening the same exact project", async () => {
-    const e = await ownerFixture(); window.MastermindMissionHost = e.host; render(<App />);
+    const e = await ownerFixture(); window.MastermindMissionHost = e.host; await renderOffice();
     await waitFor(() => expect(screen.getByRole("region", { name: "Meta-CEO answer" }).textContent).toContain("Private owner project"));
     const user = userEvent.setup();
     await user.type(screen.getByRole("textbox", { name: "Direction to Meta-CEO" }), "Same project thought");
     await navigateCompanyOperation(user, "Programs");
     await user.click(await screen.findByRole("button", { name: /Current project source/ }));
     await user.click(screen.getByRole("button", { name: "Today" }));
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     await user.click(screen.getByRole("button", { name: "Review sources" }));
     expect(screen.getByRole("complementary", { name: "Source evidence" }).textContent).toContain("programs-owner-observation:v1:");
     expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Direction to Meta-CEO" }).value).toBe("Same project thought");

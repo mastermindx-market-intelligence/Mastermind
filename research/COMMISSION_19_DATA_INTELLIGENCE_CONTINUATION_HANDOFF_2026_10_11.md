@@ -48,7 +48,7 @@ This file is the resumable program state. A cold stranger resumes from the LAST 
   - Fabric admission: `mastermind-executive` MCP requires OAuth the session cannot start → DARK_OR_DISCONNECTED for this seat. `mmx-cimd-probe` ECONNREFUSED. Public MCP gateway not probed this session.
   - Linear: `linear-server` MCP requires OAuth → MAS-263 link/status = human-gated projection write; no `linear` CLI on host.
   - External pool (`~/.local/bin/pool status`, 2026-10-11T08:13:07Z, host m2studio, schema `mastermind.provider_capacity.v1`): glm 24 cap / 24 remaining; minimax 7/7; grok 11 cap / 9 remaining (2 active); cursor 11/11; bailian 9/9; go 9/9; ocfree 3/3; codex-native 1/1; claude-native 0 cap. Status read only; **no lane has been run**. Usage shape: `pool run <glm|minimax|grok|cursor|qwen|glm-codex|minimax-codex|go-codex|go-claude|oc-free> "<prompt>" [cwd] [model]`.
-  - GitHub: `gh auth status` → logged in (account `mastermindxryan`, scopes gist/read:org/repo/workflow). No PR existed for this branch before this operation (`gh pr list --head <branch> --state all` → `[]`); no open PR mentions `commission_19` (`gh pr list --search "commission_19 in:title,body"` → empty).
+  - GitHub: `gh auth status` → logged in (account login removed in r22, scopes gist/read:org/repo/workflow). No PR existed for this branch before this operation (`gh pr list --head <branch> --state all` → `[]`); no open PR mentions `commission_19` (`gh pr list --search "commission_19 in:title,body"` → empty).
 - **F6 Composer / incumbents (from Macro `origin/main` and packet S06/S07, not rerun).** `app/integrated_answer.py` default-off nine-leg route merged via #8596 (head `9ee3015938b3`, merge `55e8cf84`); financial leg returns absent for non-AAPL with fixed historical parameters; capital structure held; basket labels/membership fixed absent (packet F01). Source-clock normalization assigns UTC to naive timestamps and midnight-UTC to date-only strings (packet F03); relative freshness test compares legs to the page max clock, not request time (packet F04). EXP-1 raw-capture consumer merged (#8337) with normalized baseline deliberately null (packet F06). These are reused, not rebuilt.
 - **F7 I1 spec Hxx table (Macro `origin/main:research/product_intelligence_local_delivery/I1_INTEGRATED_ANSWER_COMPOSITION_SPEC_2026-10-06.md` lines 11–14, 16–27).** H01 (MAS-268, financial query kernel) ACCEPTED via `DEC:FIF-3A3-ACCEPTED-GOLDEN-QUERY-ON-MAIN`; H04 (MAS-271) BUILT_NOT_ACCEPTED (`engine/expectation_state.py`; E0 path absent on main; K3E held off main at authoring — superseded in part by #8337 merge, see F6); H05 (MAS-272) ABSENT (W4/W6 todo); H06 labelled "MAS-273, FIF publication / private-default seam" BUILT_NOT_ACCEPTED (default-off snapshots). I0 freeze list item 10: "MAS ↔ macro acceptance map — GAP (Linear IDs not in macro tree)".
 - **F8 Live MAS-273 scope ≠ I1 H06.** Packet `ISSUE_CROSSWALK.json` row 10 (observed 2026-10-11): MAS-273 = "Typed macro release / expectations bundle" (Backlog); packet S09 confirms. I1's H06 label binds MAS-273 to FIF private-default publication. This is the planning/acceptance defect WP02 repairs (§4, D3). It is not a production defect.
@@ -1198,3 +1198,669 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
    - MERGED: Mastermind #1898 (`7e7beb3f`) and #1246 (`840377bc8bda`), with master push CI green on both. Neither has production proof beyond its land check.
    - PROVEN_OUTCOME: the clock refutation (live reads), the U2, U5 and V2 judgments, and the independent reviews.
    - No W15 build has reached PRODUCTION_PROOF.
+
+#### r18 cycle 2026-11-01 00:19Z (seat dd5239a9, Opus 5.5) — wave 15 continued: r17 landed after an independent review, and its three notes are corrected here by name; the sweeper merged Macro #10297 (Agent OS records) and #10259 (the WP26 zero-stock guard); the #8125 note is posted and U6 waits on a natural render; #10284's runner-flake red was released by one re-run of its failed jobs; #9569 is parked behind an inherited red that the sweeper will never re-sync
+
+**Review of r17**
+- Lane W (`c19-w15-w-review-r17-20261031`, glm-5.3, ubuntu0) was a fresh, non-authoring reviewer of Mastermind #1901 at head `b23ad4d8` (r17, lines 1055–1200).
+- Items W1–W8 all PASS. Verdict: APPROVE_WITH_NOTES, with three notes. The seat ruled all three non-blocking, so #1901 merged at the reviewed head. The notes are corrected below.
+
+**Corrections to r17 (§7.5)**
+1. **Line 1094.** "A5 governs J ≥ E" should read "A5 would govern J ≥ E once it merges before E". A5 (Macro #10302) was unmerged when r17 was written. r17 lines 1082, 1139–1141 and 1172 already state that it is conditional.
+2. **Lines 794, 825 and 853.** These carry "EDGAR clock gap" forward from r12, r13 and r14.
+   - They name the item only; they do not state A2's premise.
+   - r17 line 1142 closes the item, so these three lines are history, superseded by 1142, and not current OPEN items.
+   - They were missing from r17's §7.5 list and are added to it here.
+3. **Line 1199.** "PROVEN_OUTCOME: … the U2, U5 and V2 judgments" means the seat's judgments of those returns. It does not mean U2's design was validated: r17 line 1121 marks U2's design SUPERSEDED IN SUBSTANCE (D23).
+
+**FACTS — merges**
+- **Mastermind #1901 (ledger r17)** merged 2026-10-31T14:34:47Z as `aefeaf619fc4`, confirmed by GraphQL readback (`merged`, `mergeCommit`). The master push runs on it passed: CI 41210792809 and CodeQL 41210789639. #1243 pointer: comment 6544826736. The review worktree was removed after the merge.
+- **Macro #10297** (Agent OS: the 10-31 seat takeover, the W15 wave and `DSC:EDGAR-SUBMISSIONS-ACCEPTANCE-DATETIME-IS-TRUE-UTC`) merged 2026-10-31T23:45:06Z as `9ab25923f554`. This closes r16's Agent OS item.
+- **Macro #10259** (WP26 zero-stock guard, D14) merged 2026-10-31T23:50:55Z as `8afb5dbf90bd`.
+- Both Macro PRs were merged by the sweeper identity; the seat merged neither. Readback by GraphQL at 2026-11-01T00:02Z.
+
+**FACTS — why green Macro PRs sat unmerged** (sweeper run log, `merge-on-green` run 41214647799, and `scripts/merge_on_green.py` on main)
+- Main commit `97623101eb79` changed the CI check definitions, and the sweeper then marked every older green "proof stale". Two more changes followed: `92881169bb88` (cited by the 22:33Z sweep) and `fa06210782d5` (Macro #10248, 23:20Z; cited by the 23:39Z sweep).
+- For a stale-proof PR the sweeper merges main into the head, labels it `merge-refresh-in-flight` and lets fresh CI decide. PR CI has 8 global slots; the 22:33Z sweep logged 0 free, so older PRs wait.
+- `ci-authority/codex/merge-queue-pilot` FAILURE is a standing inactive context. It makes a PR UNSTABLE, not BLOCKED, and is not the hold.
+- This is the sweeper working as designed. The seat does not update Macro branches by hand or touch their labels.
+
+**FACTS — #9569 is parked**
+- Head `d558d0e7` is a pure base sync onto main `d467c360`; the PR's own diff is unchanged. CI run 41209506106 failed:
+  - `ci-pack-0`, step "validate and run legacy CI pack", 14:22:19–15:35:31Z;
+  - `ci-gate`, step "enforce semantic verdict", downstream of ci-pack-0.
+- **Cause: inherited from main, not #9569's diff.** The sweeper's refusal comment (Macro #9569 comment 6545483067) names one failing test, `tests/test_fif_a34_pack_proof_ledger.py::test_a34_ledger_is_fresh`. It compares the committed FIF A34 ledger with a fresh build.
+  - Main at `d467c360` carried a stale A34 ledger (PK09 gold calibration tests went from 41 to 45). Main fixed it at `d9471d0e` (Macro #10314, 15:29Z), and `merge-base --is-ancestor` shows `d9471d0e` is not in #9569's head.
+  - #9569's own files (`app/integrated_answer.py`, `tests/test_integrated_answer_v0.py`) touch none of the ledger's inputs. It is not a disk-fill. There is nothing in its diff to repair, and a re-run of the same tree would fail the same test.
+- **Why the sweeper will not re-sync it** (`merge-on-green` run 41248484800, 22:34:39Z):
+  - The semantic gate treats a failure as inherited only when it can reproduce it on the exact base. For #9569 that check did not settle ("exact-base runner budget expired; original timed_out outcome; descendant settlement unknown").
+  - So it filed the failure `classification=unknown; outcome=failed` and labeled the PR `merge-blocked`.
+  - Every later sweep stops at "an earlier semantic step did not pass; no new marker (already labeled …)". The base-inherited-red refresh (`merge_on_green.py` around line 7006) is never reached for a semantically failed head.
+  - Only a head move clears that label, and nothing in the sweeper will move this head.
+- If the red recurs at a head that contains `d9471d0e`, it is a new finding.
+
+**FACTS — #10284: a runner flake, released by one re-run**
+- Head `b09990de` was a sweeper base sync onto main `83a77d85` (own diff unchanged). CI run 41251141302 failed in `ci-pack-0` ("validate and run legacy CI pack", 23:14–23:28Z), with `ci-gate` failing downstream. Refusal comment 6550587421 (23:28:59Z).
+- **Cause: runner infrastructure.**
+  - All 8 semantic units read `classification=unknown; outcome=infrastructure_blocked; failure signature=None`.
+  - One unit carries the root cause: phase `browser_setup`, outcome `timed_out`, an apt `update` child that never settled. Installation and browser are both `never_started` (`scripts/ci_browser_native_setup.py`).
+  - After that unsettled timeout, `run_ci_pack.py` (around line 5535) marks every later job in the pack "original command settlement unknown; no reuse, restoration or replay permitted". That withholds in-pack restoration and base replay; it does not forbid a fresh run.
+  - #10284's own files (`scripts/c19_wp31_evaluate.py`, `scripts/c19_wp31_production.py`, `tests/test_c19_wp31_production.py`) do not touch browser setup.
+- **Why the sweeper could not excuse it.** `scripts/ci_authority_paths.py` counts `scripts/**`, `.github/ci/**` and `.github/workflows/**` (among others) as CI authority paths. So #10284 records `authority_changed=true`, and `merge_on_green.py:1742` refuses to let candidate-era classification excuse an authority-changing PR's red. The checks must be physically green. The sweeper labeled it `merge-blocked`.
+- **Release path.** `merge_on_green.py` does not skip `merge-blocked` PRs: when the checks are clean and no recorded hold exists, it clears the stale label at the merge stage (around line 7350). Its refusal text says "re-run the failed job". For a runner flake that is the documented path. For #9569 it is not, because #9569's tree carries main's stale ledger.
+- **Pre-re-run checks (23:46Z).** Job ci-pack-0 (124685310053, hosted runner, `ubuntu-latest`), 825 log lines:
+  - zero hits for `No space left`, `ENOSPC` or `Errno 28`, so it is not a disk-fill;
+  - the step "unrun-brain-gateway — install Brain browser" ran 23:18:28.62Z to 23:28:28.62Z and was killed at exactly its 10-minute budget;
+  - the unit's own test groups had passed just before (390 passed, then 38 passed);
+  - the other 12 ci-packs passed on separate runners.
+- **Act.** Run 41251141302 had concluded, so nothing was in flight. The seat ran `gh run rerun 41251141302 --failed` (rc=0, 23:47:06Z), re-running ci-pack-0 and ci-gate on the same head.
+- **Outcome.** Attempt 2 concluded `success` at 23:57:44Z. The sweeper removed `merge-blocked` (labels now `merge-on-green` only) and at 23:58:45Z merged main into the head, giving `75419f58`. Own diff unchanged. Fresh CI at `75419f58` decides the merge. Rung: CI, not MERGED.
+
+**FACTS — #10273 and #10302**
+- **#10273.** At 22:28Z the sweeper merged main `4da475ea` into it (head `e84e06de` → `04fc616f`). Main had edited `.github/ci/legacy-jobs.yml`, which #10273 also edits, so that file's blob changed. #10273's own +/- lines in it hash `b6370c086034` at both heads, and its test file blob (`ca2d0e75`) is unchanged. Own diff unchanged, so no re-review. A later sweep re-synced it again; the 00:02Z read shows head `8dc309a2` with no red.
+- **#10302 (A5).** At 23:45:15Z the sweeper merged main into it (head `99397073`, label `merge-refresh-in-flight`). Own diff unchanged. Fresh CI decides the merge. Deadline unchanged: before 2026-11-16T00:00Z.
+- **Exposure.** By path, #10302 (`scripts/c19_wp31_*.py`) and #10273 (`.github/ci/legacy-jobs.yml`) are authority-changing too, so a runner flake on their fresh CI would park them the way it parked #10284. #9569 is not authority-changing by path; its block is semantic.
+
+**FACTS — watching**
+- One aggregate watcher (`$P/watch_macro_agg.sh`) replaces r17's per-PR watchers. It reads every open C19 Macro PR in one GraphQL call every 15 minutes, with a 12 h bound. It exits on MERGED, CLOSED, a red not already recorded at that head, or a change in a PR's own diff.
+- **Fingerprint repair.** It first fingerprinted each PR's files by path:blob. That gave a false own-diff change on #10273 (22:28Z, above), because main's edit changed the blob while the PR's lines stayed the same. It now hashes each file's +/- patch lines from the PR files API, with a blob fallback when no patch is returned. An empty or failed read logs and retries; it no longer counts as a change.
+- After the two merges it covers #10302, #10284, #10273 and #9569, with #9569's red at `d558d0e7` recorded as known.
+- A second fetch-only watcher (`$P/watch_u6_proof.sh`, every 30 minutes, 12 h bound) waits for the U6 render (below).
+
+**FACTS — #10259 follow-ups**
+- **#8125 note** (D14: "a note goes on #8125 at merge"): posted as Macro #8125 comment 6550932577. It is source-linked and asks for no action. The draft keeps its lease on `scripts/build_commodities.py`, which #10259 did not touch.
+- **U6 production proof: PENDING; rung MERGED.**
+  - *Surface.* The oil supply context reaches production in `site/commodities.html`: `build_commodities._oil_supply_read` (:434), then `vm["supply"]` (:532), then `_decision_workspace` (:1739–1741), then `commodity_decision_workspace._physical_view`, then `source_dependencies.crude_stocks`.
+  - `data/commodity/latest.json` and `complex_latest.json` do not carry it; both were last committed 2026-10-21.
+  - *Positive control.* The last pre-merge render (engine-render, `c7c025a93cd0`, 2026-10-31T23:22:51Z) has one `crude_stocks` block with `state: "available"` and `observation_at` 2026-10-23. So the extractor finds the field.
+  - *Proof condition.* The first `site/commodities.html` commit on main that descends from `8afb5dbf` still reads `available`, not `invalid_zero_stock` or `invalid_negative_stock` (`engine/commodity_supply_context.py:433`).
+  - Producers: engine-render, commodity-sentinel (cron every 30 minutes, best-effort), closing-bell, and daily.yml. No workflow is dispatched to manufacture the render.
+
+**W15 lanes, continued**
+
+| Lane | Scope | Route | Verdict |
+|---|---|---|---|
+| W | independent review of Mastermind #1901 (r17) at `b23ad4d8` | glm-5.3, ubuntu0 (`c19-w15-w-review-r17-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (W1–W8 PASS). Three notes corrected in this section |
+
+**DECIDED**
+- **D25. #9569 is PARKED. The seat does not release it by hand.**
+  - The seat's standing constraints bar updating a Macro branch by hand and removing `merge-blocked`. A hand update would also start CI outside the sweeper's 8-slot accounting.
+  - Release needs someone with authority over the branch (`sol/mi-composer-n5-global-scope-20261017`) to merge main at or after `d9471d0e` into it. The seat asked the Chairman once, in its 2026-10-31 23Z report, and does not ask again.
+  - U3 waits on it. Nothing else does.
+- **D26. A runner-flake red on an authority-changing C19 PR is released by one re-run of the failed jobs, on the same concluded run.**
+  - Preconditions: the run has concluded (nothing in flight), the log shows no disk-fill, and the failing step lies outside the PR's own files.
+  - A second equivalent failure bans a third re-run (L.4); diagnose the failing path instead.
+  - Applied once, to #10284 (above). It applies equally to #10302 and #10273 if their fresh CI flakes.
+  - It never applies to a semantic red like #9569's: re-running an unchanged tree re-reads the same stale input.
+- **D27. U6 is proven on `site/commodities.html`, by the first render that descends from `8afb5dbf`, and only by a natural render.**
+  - Proof: `source_dependencies.crude_stocks.state` reads `available`, matched against the pre-merge positive control.
+  - If it reads `invalid_zero_stock` or `invalid_negative_stock`, that is a scoped finding to the commodity owner, not a revert. The guard is doing its job on a store that reports zero or negative stock.
+  - daily.yml is never dispatched for this.
+- **D28. A base sync that leaves a PR's patch-line fingerprint unchanged needs no re-review.** An accepted review holds until the PR's own +/- lines change (check once). The fingerprint is the watcher's, above.
+- **Retraction (§7.5).** The seat earlier said that the sweeper's next base sync onto main at or after `d9471d0e` should clear #9569's red. That is wrong: the sweeper never re-syncs a semantically failed head (FACTS, #9569).
+
+**UPGRADE PLAN**, deltas from r17:
+- U6's proof surface and proof condition are now fixed (D27).
+- U1(a) and Read 2b wait on #10284's merge; U3 waits on #9569 (D25).
+- U2, U4, U5 and U7 are unchanged.
+
+**OPEN** (owner → next action)
+- **Macro #10284 (G)**, sweeper → merge on concluded green at `75419f58`. Seat → land-check against fresh main, re-read the universe headers, then Read 2b (one evaluator run, counts only, D17), then consider U1(a).
+- **Macro #10302 (A5)**, sweeper → merge on concluded green before 2026-11-16T00:00Z. Seat → land-check, then a #1243 post. If it is still unmerged on 2026-11-13, the seat writes a successor amendment with a later E for fresh independent review. It does not merge by hand. A runner flake gets D26.
+- **Macro #10273**, sweeper → merge on concluded green. Seat → land-check.
+- **Macro #9569**, branch owner or Chairman → merge main ≥ `d9471d0e` into the branch (D25). Seat → none until the head moves; then the watcher reads the new CI.
+- **U6**, seat → when the first post-`8afb5dbf` render lands, read `crude_stocks.state` and record PRODUCTION_PROOF or a scoped finding (D27).
+- **Findings routed in r17** stand unchanged: the pg_profile UTC-date edge, the Atom `<updated>` clock, the ubuntu1 thermal-admission mismatch, and the WP31 docstring debt.
+- **Unchanged from r17:**
+  - the r16 owner findings;
+  - WP32 P3 free-tier 403 (human step);
+  - cold-compose 524 and `x-consumed-receipts`;
+  - P4–P7;
+  - the K1 Q2/Q3 residuals;
+  - WP18 UI;
+  - G10/G11;
+  - Linear MAS-263 and Executive OAuth (human /mcp).
+
+**NEXT**
+1. Carry this r18 through a fresh non-authoring review and the Mastermind merge queue, then post a pointer on #1243.
+2. The aggregate watcher owns the waits on #10302, #10284, #10273 and #9569; the U6 watcher owns the render wait. Land-check each merge against fresh main.
+3. Read 2b after #10284 lands. U6 proof at the first post-fix render.
+4. Seat end state for this cycle: DURABLE_EXECUTION_RUNNING.
+   - MERGED: Mastermind #1901 (`aefeaf61`, master push CI green), Macro #10297 (`9ab25923`) and #10259 (`8afb5dbf`). None has production proof beyond its land check; U6 is pending.
+   - PROVEN_OUTCOME: the #10284 flake diagnosis and its released re-run, the #9569 classification, and lane W's independent review.
+   - No W15 build has reached PRODUCTION_PROOF.
+
+#### r19 cycle 2026-11-01 03:55Z (seat dd5239a9, Opus 5.5) — wave 15 continued: r18 landed after an independent review, and its three notes are corrected here by name; the sweeper merged A5 (#10302), G (#10284) and the U5 pins (#10273), each land-checked; Read 2b ran once as a monitoring read (eligible 0 → 2, revisions reader clean), so U1(a) is parked by its own gate; the first render the U6 watcher caught was built from pre-fix code, so D27 is corrected and U6 still waits; #9569 stays parked
+
+**Review of r18**
+- Lane X (`c19-w15-x-review-r18-20261101`, glm-5.3, ubuntu1) was a fresh, non-authoring reviewer of Mastermind #1903 at head `4db0fa1a` (r18, lines 1202–1331).
+- Items X1–X8 all PASS. Verdict: APPROVE_WITH_NOTES, with three notes. The seat spot-checked the lines the return cites (1094, 1237, 1265, 1268, 1288, 1300, 1311, 1330); every quote matched.
+- The seat ruled all three notes non-blocking, so #1903 merged at the reviewed head. They are corrected below. The lane tree was removed after acceptance.
+
+**Corrections to r18 (§7.5)**
+1. **Line 1330.** "the #9569 classification" means the seat's diagnosis that #9569's red is inherited from main. The sweeper itself filed the failure `classification=unknown` (line 1237). Read it as "the seat's #9569 inherited-red diagnosis".
+2. **Lines 1265 and 1268.** Both watchers had a 12 h bound, and r18 gave no re-arm rule. What actually happened to each is in FACTS — watching, below. The rule from here is D31.
+3. **Line 1288.** The branch name `sol/mi-composer-n5-global-scope-20261017` is a custody clue, not a live receiver. The actor stays "branch owner or Chairman" (line 1311), and the ask was made once. Nothing else changes.
+4. **D27 (lines 1295–1298), the seat's own error.** "The first render that descends from `8afb5dbf`" was read by the seat's first U6 watcher as the render commit's ancestry. That is wrong; see FACTS — U6 and the corrected D27 below.
+
+**FACTS — merges**
+- **Mastermind #1903 (ledger r18)** merged 2026-11-01T02:12:54Z as `c0d038a1a8c2` through the merge queue. It was enqueued at 00:56:02Z with `--match-head-commit 4db0fa1a`; GraphQL readback showed `AWAITING_CHECKS`, position 3, and no auto-merge request.
+  - Land-check: the ledger blob `0bddc427` is identical at the reviewed head and at the merge.
+  - Runs on the merge passed: merge_group CI 41261378100, push CI 41264248725 and "Push on master" 41264248156. #1243 pointer: comment 6552214303.
+- **Macro #10302 (A5)** merged 2026-11-01T00:34:19Z as `e814af877a8b`.
+  - Land-check: the five paths (the prereg, `scripts/c19_wp31_{evaluate,runner,sources}.py` and `tests/test_c19_wp31_sources.py`) have identical blobs at the reviewed head and at the merge. The patch-line fingerprint did not change across the base syncs (D28).
+  - It landed before E (2026-11-16T00:00Z, prereg line 414). So A5 is in force, and the 2026-11-13 successor trigger (r18 line 1309) is moot.
+  - Macro main `integration-baseline` passed on `e814af87` (run 41257326781, 00:54:47Z).
+- **Macro #10284 (G)** merged 2026-11-01T01:37:12Z as `9b71392ed8a8`. Land-check: its three paths have identical blobs at the reviewed head and on main.
+- **Macro #10273 (U5, WP28 CS-leg pins)** merged 2026-11-01T03:19:08Z as `1937fd756eb2`.
+  - Land-check: `tests/test_c19_wp28_cs_leg_qualification.py` has blob `ca2d0e75` at the reviewed head `e84e06de`, the final head `7614f5a8` and the merge.
+  - `.github/ci/legacy-jobs.yml` changed blob because main edited the same file. Its own +/- lines are identical reviewed vs landed: hash `dd92617b832b7d29` for both merge-base `91b936c4` → `e84e06de` and parent `49b6910d` → `1937fd75`. That hash comes from local `git diff`, a different method from the watcher's API fingerprint, so it does not match r18's `b6370c086034`.
+  - Macro main `integration-baseline` passed on `1937fd75` (run 41268694420, 03:39:57Z). Main `ci` (run 41269222548) was still in progress at 03:44Z.
+- The sweeper merged all three Macro PRs; the seat merged none. Rung: MERGED for each. A5 and G first ran in Read 2b (below); that is a research read, not production proof.
+
+**FACTS — Read 2b (D17; one §5 monitoring read, counts only)**
+- **Tree.** The seat's WP31 read tree, sparse (`data/` excluded except `data/trial_ledger.jsonl`), moved from `1627e6d4` to Macro main `1e2eeeb01f06`. G `9b71392e`, A5 `e814af87` and PREREG_COMMIT `8e195093` are all ancestors.
+  - Since read 2, main changed seven WP31 files (+406/-45).
+  - Preflight: `tests/test_c19_wp31*.py` 233 passed (219 at read 2), Python 3.14.7.
+- **Headers.** Universe headers were re-read at 02:00:15Z (submissions: form, filing date, acceptance time and items only). No new release episode since read 2; the one new 8-K carried a non-release item only.
+- **Run.** Launched once at 02:00:28Z with read 2's command, writing `read2b.*` and `report_2b.json` to the durable WP31 directory. It ended rc=0 at 03:38:32Z (98 min), with empty stderr.
+- **Printed counts.**
+  - `episode_count=245`, `label_pending=1`, `exhibit_failures=245` (the known pre-2015 header-404 class, line 838), `eligible=2`, verdict `MONITORING`, look `monitoring`.
+  - Adapters: companyfacts 5 requests / 0 unavailable; index_headers 501; k_inputs 245 / 0 unavailable; submissions 10 / 0 shards missing / 0 unavailable.
+  - Revisions reader: attempts 1, transient failures 0, final failures 0.
+  - No `not_evaluable_detail` line. G prints one per NOT_EVALUABLE reason pair, so no episode was NOT_EVALUABLE.
+- **Reading.** Read 2 lost both live episodes to `pit_unrecoverable` after three reader attempts. At read 2b the reader succeeded on its first attempt and eligible went 0 → 2. That is consistent with H-T (a transient reader failure, line 881). It is not proof: one clean read is one observation.
+- **`study_stopped`** is not printed, so it is derived from source (`scripts/c19_wp31_stats.py` at `1e2eeeb0`):
+  - `classify_look` (lines 519–547): 2 eligible is far below the §5 minimum, no earlier read stopped the study, and there is no look 2, so rule (4) makes this read `monitoring`.
+  - The monitoring branch (lines 783–794) with no earlier stopped read returns `MONITORING` / `monitoring_descriptive_only` and `study_stopped=False`. That matches the printed verdict.
+- **Records.**
+  - The seat appended `{"read":"2b","look":"monitoring","study_stopped":false,…}` to `prior_reads.json` by hand at 03:40:30Z (4 entries, validated by `json.load`); the evaluator does not append.
+  - `exposure.jsonl` gained no row (its mtime is still read 2's end). That is expected: `gates.record_label_read` is first-read-wins per (issuer, q), and no new episode existed.
+  - No look was spent.
+
+**FACTS — U6: the first caught render does not count**
+- The first U6 watcher (`bo5apdrid`) exited at 01:37Z with `EVENT: u6_render` on render commit `ba66934345d4` (01:20:26Z, scope `all`). Its `crude_stocks.state` read `available`. **This is not production proof.**
+  - The render commit's message says `from=7f38ee6f42c0`. render.yml defines `from=` as the main SHA the run actually rendered.
+  - `merge-base --is-ancestor 8afb5dbf 7f38ee6f` is false, so pre-fix code built the page.
+  - The render commit descends from the fix only because the publish step pushes it on top of main. The watcher tested the render commit's ancestry, not the rendered tree's: the seat's error.
+- The pre-fix render `c7c025a93cd0` and `ba66934345d4` carry byte-identical `crude_stocks` blocks (`available`, the same observation time).
+- The engine diff (`engine/commodity_supply_context.py`, +8/-2) explains why. It adds a `zero_stock` branch and splits out `negative_stock`, so on valid data the old and new code emit the same block.
+- **D27, corrected.** "The first render that descends from `8afb5dbf`" means a render whose `from=` SHA descends from `8afb5dbf`.
+  - `available` on such a render proves that the fixed code is in production and that the valid path did not regress.
+  - It does not show the zero or negative refusal live. Those branches are proven by #10259's tests in CI only. No invalid data is made, and daily.yml is not dispatched, to exercise them.
+- **The replacement watcher** (`bmov4z8yb`, `$P/watch_u6_proof2.sh`, every 30 minutes, 12 h bound from about 01:40Z) keys on three things: `from=` ancestry, a scope of `all` or one that includes `markets`, and the render commit touching `site/commodities.html`.
+  - Dry run at 01:39Z: the negative control printed "`ba66934345d4` from=`7f38ee6f42c0` predates fix". The positive control, pointed at an older fix SHA (`063cc2fe`), hit `b4a4333cdd87`.
+  - Samples up to 03:41Z found no qualifying render.
+
+**FACTS — watching** (correction 2)
+- **Aggregate watcher** (`$P/watch_macro_agg.sh`), in order:
+  - `bxqp7qgpm` exited on `10302:MERGED`;
+  - `bue7khi8s` was re-armed at about 00:36Z over #10284, #10273 and #9569, and exited on `10284:MERGED`;
+  - `bz7xingxl` was re-armed at about 01:58Z over #10273 and #9569, and exited on `10273:MERGED` at 03:28Z, with no own-diff change across its run;
+  - `b0vrmdkvw` was re-armed at about 03:30Z over #9569 alone, with `ACK_RED=9569:d558d0e7`, a 60-minute interval and a 12 h bound.
+  - The script now takes `INTERVAL` (default 900 s). It does not read `mergeable`, so a conflict shows only at a seat read.
+- **U6 watcher.** `bo5apdrid` exited on the false positive above; `bmov4z8yb` replaced it.
+- **#1903 queue watcher.** `bsz3imkbt` exited on MERGED at 02:14Z.
+- **Housekeeping.** The r18 SSD worktree is clean at `4db0fa1a`, but `git worktree remove` refuses it: the external-storage policy locks it ("removable volume protection"). It is left in place; the seat does not override a storage-protection lock.
+
+**W15 lanes, continued**
+
+| Lane | Scope | Route | Verdict |
+|---|---|---|---|
+| X | independent review of Mastermind #1903 (r18) at `4db0fa1a` | glm-5.3, ubuntu1 (`c19-w15-x-review-r18-20261101`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (X1–X8 PASS). Three notes corrected in this section |
+
+**DECIDED**
+- **D29. Read 2b is recorded as a monitoring read, with `study_stopped=false` derived from source** (FACTS, above). No look was spent. The next evaluator run needs a new release episode in the universe headers. It is again one run, counts only, and it is never run in CI.
+- **D30. U1(a) is PARKED by its own gate.**
+  - The gate was frozen in the seat's spec before Read 2b printed:
+    - final failures ≥ 1 → build;
+    - final 0 and transient ≥ 1 → record, and park unless a later read repeats it;
+    - transient 0 → park.
+  - Read 2b printed attempts 1, transient 0, final 0. Nothing is built and no lane is commissioned.
+  - It re-opens only if a later read prints final failures ≥ 1, or transient failures on two reads.
+  - U1 (b) and (c) stay proposals for the event-workspace publisher's owner.
+- **D31. A watcher whose wait is still open is re-armed in the same cycle that it exits or reaches its bound, and each ledger cycle names the live handle.**
+  - A parked wait uses the 60-minute Class-M cadence.
+  - A watcher that keys on a derived fact (here, `from=` ancestry) gets a negative and a positive control before it is trusted.
+- **D27 is corrected as stated in FACTS — U6.** The rest of D27 stands: a natural render only, and a scoped finding (not a revert) if the state reads `invalid_zero_stock` or `invalid_negative_stock`.
+
+**UPGRADE PLAN**, deltas from r18:
+- **U1.** G has landed (#10284). (a) is PARKED (D30). (b) and (c) are unchanged, as proposals to the event-workspace publisher's owner.
+- **U5.** The pins have landed (#10273). Wiring the leg still waits for the #1258 F4 / CS-V2 W4+W6 release.
+- **U6.** The proof condition is corrected (D27, corrected). Still pending.
+- **U3 and U4** wait on #9569 (D25).
+- U2 and U7 are unchanged.
+
+**OPEN** (owner → next action)
+- **U6**, seat → when `bmov4z8yb` reports a qualifying render, read `crude_stocks.state` and record a scoped PRODUCTION_PROOF or a scoped finding (D27, corrected). If the watcher reaches its bound with the wait still open, re-arm it (D31).
+- **Macro #9569**, branch owner or Chairman → merge main ≥ `d9471d0e` into the branch (D25). Seat → none until the head moves; `b0vrmdkvw` reads it hourly.
+- **WP31**, seat → re-read the universe headers at a natural boundary. One evaluator run (D29) only when a new release episode exists.
+- **Macro main `ci` on `1937fd75`**, seat → read once at the next boundary. A red that touches #10273's files is a finding against that merge.
+- **Findings routed in r17** stand unchanged: the pg_profile UTC-date edge, the Atom `<updated>` clock, the ubuntu1 thermal-admission mismatch, and the WP31 docstring debt.
+- **Unchanged from r18:**
+  - the r16 owner findings;
+  - WP32 P3 free-tier 403 (human step);
+  - cold-compose 524 and `x-consumed-receipts`;
+  - P4–P7;
+  - the K1 Q2/Q3 residuals;
+  - WP18 UI;
+  - G10/G11;
+  - Linear MAS-263 and Executive OAuth (human /mcp).
+
+**NEXT**
+1. Carry this r19 through a fresh non-authoring review and the Mastermind merge queue, then post a pointer on #1243.
+2. `bmov4z8yb` owns the U6 render wait; `b0vrmdkvw` owns the #9569 wait. Both are re-armed under D31.
+3. U6 proof at the first render whose `from=` descends from `8afb5dbf`. A WP31 read only on a new release episode.
+4. Seat end state for this cycle: DURABLE_EXECUTION_RUNNING.
+   - MERGED: Mastermind #1903 (`c0d038a1`, push CI green), Macro #10302 (`e814af87`), #10284 (`9b71392e`) and #10273 (`1937fd75`). Macro main `integration-baseline` is green on `e814af87` and `1937fd75`.
+   - PROVEN_OUTCOME: Read 2b's counts and its `study_stopped` derivation, U1(a)'s gate decision, the U6 false-positive diagnosis, and lane X's independent review.
+   - No W15 build has reached PRODUCTION_PROOF.
+
+#### r20 cycle 2026-11-01 16:00Z (seat dd5239a9, Opus 5.5) — wave 15 continued: r19 landed after an independent review, and its three notes are corrected here by name; U6 reached a scoped PRODUCTION_PROOF; a U7 sweep found the composer flag ON in production and closed E3, D4 and (C) from source; the cold-compose 524 (F) was censused, ruled and built as Macro #10365, which is green in CI and held by the merge sweeper behind main's red integration-baseline; no page consumes the integrated-answer route; #9569 stays parked
+
+**Review of r19**
+- Lane Y (`c19-w15-y-review-r19-20261101`, glm-5.3, ubuntu1) was a fresh, non-authoring reviewer of Mastermind #1906 at head `e4db7732` (r19, lines 1333–1457).
+- Items Y1–Y8 all PASS. Verdict: APPROVE_WITH_NOTES, with three notes. The lane ran the numstat itself (+126/-0). The seat spot-checked lines 873, 1309, 1349, 1365, 1374, 1413, 1417, 1420 and 1422; every quote matched.
+- The seat ruled all three notes non-blocking, so #1906 merged at the reviewed head. They are corrected below. The lane tree was removed after acceptance.
+
+**Corrections (§7.5)**
+1. **r18 line 1309 vs r19 line 1349.** r18's seat action for #10302 was "land-check, then a #1243 post". That post was not a separate comment: it is the A5 bullet of the r18 pointer, comment 6552214303 (merge time, E date, blob land-check, integration-baseline). r19 cited 6552214303 only under #1903. It also discharges line 1309's post, so no A5 pointer is owed.
+2. **r19 line 1420 (D30), and row 2 at line 1417.** Read "transient failures on two reads" as "transient failures ≥ 1 on two reads after Read 2b". Read 2's `transient_failures=2` (line 873) predates the gate and does not count.
+3. **r19 lines 1351, 1356–1357, 1364 and 1373.** Those bare paths (`scripts/c19_wp31_*.py`, `tests/…`, `.github/ci/legacy-jobs.yml`) are in the Macro repo, not Mastermind. From r20 on, the first Macro path in each cycle is tagged "Macro".
+4. **r12 lines 744–746.** They were written as if the flag-off 404 path were served. The flag is ON (FACTS — U7 sweep), and Macro `app/main.py:136-182` `_NoStoreAPI` already stamps no-store on every `/api/*` response. Item (C) is closed with no build.
+5. **Lane E's "E3 STILL_OPEN"** (`$P/out/E.txt` lines 50–76, r16) is superseded: E3 is closed from source (below).
+6. **The consumed-receipts header was misnamed `x-consumed-receipts`** at r14 lines 808, 818 (D7(b)) and 824, r15 line 852, r16 line 1040, r17 line 1186, r18 line 1317 and r19 line 1443. That name appears nowhere in Macro `app/`, `engine/`, `scripts/` or `tests/`. The real header is `X-Integrated-Answer-Consumed-Receipts` (Macro `app/integrated_answer.py:37`, set at `:959-969`). It has been in place since Macro `e30ffa1f5055` (#8943, 2026-10-13), before r14. Macro `tests/test_c19_wp32_correction.py:97` asserts it at the origin. Whether it reaches a browser through the edge is still unproven: r14's recorded header list does not name it, and r14 may not have looked for it. The production read below settles it by header name only, never its value.
+7. **Macro #10391's first evidence was incomplete** (this cycle, before any merge). The seat's local checks and lane AC2's APPROVE both missed that a new `scope: exclusive` job must also enter `CURATED_EXCLUSIVE` in Macro `tests/test_ci_pack.py`; neither ran that file. CI ci-pack-0 caught it. Fixed in `948b72ba` and sent to a delta re-review (FACTS — r17 routed findings). Lesson: run `tests/test_ci_pack.py` whenever a legacy job is added.
+
+**FACTS — merges**
+- **Mastermind #1906 (ledger r19)** merged 2026-11-01T05:03:19Z as `554d0fc91b72` through the merge queue (enqueued once at 04:28:17Z; GraphQL readback: position 2, no auto-merge request).
+  - Land-check: the ledger blob `2eeee0db` is identical at the reviewed head and at the merge.
+  - Runs on the merge passed: merge_group CI 41273241692, Mastermind OS 41273241744, "Push on master" 41275410710 and push CI 41275411126 (05:46:59Z). #1243 pointer: comment 6553709492.
+- **Macro #10365 is not merged. It is green, and the sweeper's circuit breaker is holding it.**
+  - A bounded read at about 15:30Z showed:
+    - state OPEN, head `07d8e8a3`, MERGEABLE, `merge-on-green` set, auto-merge off;
+    - checks: 21 SUCCESS, 4 SKIPPED, and 1 FAILURE, which is the known non-blocking pilot.
+  - The merge-on-green sweeper (run 41321449040, 15:29Z) logged that main's integration-baseline is red: failure at `887167793155`, run 41318848852. It left #10365 "armed behind the circuit breaker", along with the other baseline-blocked PRs (86 in all, #10365 included). It also reported that a semantic-main proof was already in progress.
+  - The failing baseline step is "hosted-runner packing and merge-train contracts". It runs Macro `tests/test_ci_pack.py`, `test_merge_on_green.py`, `test_runner_policy.py`, `test_ci_canary_tools.py` and `test_ci_canary_workflows.py` (Macro `.github/workflows/integration-baseline.yml:196-197`).
+  - The commit it failed on is #10318 (help scorecard links). Neither C19 PR is on main, so C19 did not cause it.
+  - Repairing main belongs to whoever owns main-red repair. The seat cancels nothing, re-runs nothing and updates no branch. `b5ql157yl` owns the wait.
+  - **The failing test, and its repair.** The seat read one failed log, from main's integration-baseline run 41320661465 (step started 15:23:52Z). In that step, 1 failed and 1,000 passed. The failure is Macro `tests/test_ci_pack.py::test_exclusive_curation_narrows_ordinary_code_prs` (`:6760`): two packing probes went over their job ceilings. A `templates/index.html` change scopes 137 jobs against a ceiling of 136; a free-content `.py` change scopes 138 against 136.
+    - Macro #10412 (head `a24cdcc3f62b`, labels `merge-on-green` and `main-red-repair`) is an armed repair by another owner. It raises exactly those two ceilings, 136 → 137 and 136 → 138.
+    - Its body attributes the red to #10294's tier-gate split, red since `b114f35c` (10:37Z). That makes the earlier "red at `887167793155` (#10318)" the commit the sweeper last cited, not necessarily the first red. The seat checked the failing test and the counts, but not that attribution.
+    - C19 does not duplicate, review or merge #10412.
+
+**FACTS — U6: scoped PRODUCTION_PROOF (D27, corrected)**
+- Render `f0e1e3ff4282` ("site re-render 2026-11-01 (scope=all, from=49b6910dec50)", 05:14:26Z). Its `from=` SHA `49b6910d` descends from the fix `8afb5dbf`; the render touches `site/commodities.html`; it is on Macro main with no later render.
+- `crude_stocks.state` reads `available`. Rung: PRODUCTION_PROOF that the fixed code is live and the valid path did not regress.
+- The zero and negative branches are proven by #10259's CI tests only. Production has no such input, and none is manufactured.
+- Watcher `bmov4z8yb` exited on this event. The wait is closed, so D31 needs no re-arm.
+
+**FACTS — U7 sweep of absent-owner items** (seat, about 04:30–04:50Z, Macro main `f3b17d9e`)
+- **The composer flag is ON in production.** One unauthenticated GET at 04:47:06Z to `/api/integrated-answer/v1/AAPL` returned 401 with `cache-control: private, no-store` and `vary: Authorization`. Macro `app/integrated_answer.py` runs `Depends(_require_enabled)` before `require_site_full_user`, so 401 rather than 404 means the flag is set. This re-confirms r10 line 341 (flag ON since Macro #8811). C19 never sets or unsets it.
+- **E3 (r16 lines 1026–1046): CLOSED from source.** One receipt-index read per composition, and the consumed `snapshot_id` is recorded. It can be reproduced with Macro `app/forensics.py:540` `_load_receipt_index(snapshot_id=…)`.
+- **D4 (r16 lines 914–924): CLOSED for the live path.** The only caller passes `date.today()` over a cache of already-published facts. Any replay must use `extract_maturity_ladder_as_of`.
+- **(C): CLOSED, no build** (correction 4).
+- **(F), the cold 524 (r14 D7: 524 after 30.6 s at EdgeOne): the live gap.** With the flag ON, an entitled caller can hit it. It became seat work.
+- **The pg_profile UTC-date edge and the Atom `<updated>` clock** (r17 lines 1179–1180) are ruled by the seat in this cycle under U7 (FACTS — r17 routed findings, below). They carry no letters here; (A), (B) and (C) in D32 name the cold-compose candidates.
+- **(E) pytest-9.2-safe tests and the rwe-shadow timeout:** outside C19; they stay routed as r16 lines 1033–1034 record. Master `554d0fc9` still pins `pytest>=8,<9.2` and rwe-shadow `timeout-minutes: 45`, and no open PR addresses either. The Chairman started the five test repairs and the bound widening as a separate task (task_e33a690b) in its own session. It runs independently of C19, and the seat does not duplicate it. The timeout raise stays with the RWE shadow owner.
+
+**FACTS — r17 routed findings** (seat, about 08:10Z, Macro `07d8e8a3`)
+- **Atom `<updated>` clock: CLOSED from source.**
+  - Macro `engine/institutional_census/sec_sources.py:1119-1121` takes `accepted_at` from `atom:updated`, through `normalize_timestamp` (`:463`). That function attaches America/New_York to a 14-digit SGML value and otherwise requires ISO with an offset.
+  - Both ingestion paths compare it with the filing's own acceptance record and refuse on any disagreement.
+    - `parse_filing_package` (`:1769`) raises `filing acceptance timestamp mismatch` when the header's `<ACCEPTANCE-DATETIME>` and the Atom value differ (`:1891-1902`). It compares ISO strings, so the same instant written with a different offset also refuses: a loud false refusal, never a silent wrong value.
+    - Macro `engine/institutional_census/rolling.py:578-603` (`_normalize_accepted_at`) converts both to UTC and raises `acceptance mismatch` when they differ.
+  - The only unchecked use is the scan stop (`sec_sources.py:1308-1316`). It only decides when paging stops, and a later `<updated>` only lengthens the scan.
+  - So whether `<updated>` equals the acceptance instant cannot put a wrong value in the store.
+  - Bounds:
+    - The Atom value stands alone when the filing record carries no acceptance time (rolling `:600`; one-element set at `:1891`).
+    - No test asserts either refusal: 0 hits for both messages in Macro `tests/` at `07d8e8a3`.
+    - Whether live filings trip the refusal would show in the production host's rolling receipt (`data/institutional_13f/receipts/rolling_latest.json`). That file is not on main and was not read.
+  - **Hardening: Macro #10391** (seat, base main `b3832ee2`; first head `05bb78ec6ed1`, current head `948b72ba9750`; tests and CI enrolment only, no source change).
+    - Both suites that could hold the proof, `tests/test_institutional_13f_sec_sources.py` and `tests/test_institutional_13f_rolling.py`, were grandfathered dark: they were rows of `config/unrun_test_baseline.json`, so no workflow ran them.
+    - The PR adds three tests:
+      - a sec_sources package test: a 1-second Atom drift is refused;
+      - a rolling run-path test: the drifted accession fails at stage `filing_fetch_parse`, and 0 filings are published;
+      - a direct `_normalize_accepted_at` test: the same instant in UTC is admitted, and 1 second off is refused.
+    - It also enrols both suites in a new `gate: code`, `scope: exclusive` job, `institutional-13f-ingestion-contracts`. Its `paths:` is the measured closure, 12 paths, plus 4 ancestor package inits. It removes the two baseline rows.
+    - Mutation positive controls (§7.1): with the sec_sources raise removed, 2 tests go red. With the rolling raise removed, 1 goes red. Locally 53 pass.
+    - The run-path finding: the submission's `accepted_at` is drawn from the same set as the Atom value, so the rolling check is independent only while the sec_sources guard holds. The sec_sources guard carries the refusal.
+    - Seven other 13F census suites stay dark: aggregate, catalog, r2_conformance, reconciliation, research_bench, storage and workflows. They are out of scope and routed as an open finding.
+    - The PR touches `.github/ci/`, which invalidates every open Macro PR's green. Its `merge-on-green` label therefore waits for #10365 to merge.
+    - Review: fresh GLM lane `c19-w15-ac2-review-censusguard-20261101` (glm-5.3, ubuntu1) returned APPROVE with AC1–AC6 all PASS. The seat checked the return against the tree: advisory note 1 is refuted (the identical pip line appears in 11 jobs), note 2 is closed (the job key occurs once), and gap 3 is closed (the gate filter is at `run_ci_pack.py:1815-1826`). Accepted in comment 6555846893. The first launch, `c19-w15-ac-review-…`, was refused rc=75 (host temperature).
+    - **CI then failed that head (correction 7).** Run 41290412627, shard ci-pack-0: `tests/test_ci_pack.py::test_the_curated_exclusive_set_is_actually_declared` reported `['institutional-13f-ingestion-contracts']` (1 failed, 844 passed, 1 skipped). Every `scope: exclusive` job must also be listed in that file's `CURATED_EXCLUSIVE` set (definition `:4390`, assertion `:5122`).
+    - Fix: commit `948b72ba` adds the entry with a sibling-style comment (1 file, +5/-0). The test passes locally. At `05bb78ec` the five packing suites ran locally: 1 failed (this test), 998 passed, 2 skipped. On the same run, ci-pack-11, which runs the new job, passed. Shard ci-pack-6 (`dashboard-render-contract` 15-minute timeout, `no-module-leak` "infrastructure unknown") is outside this diff; nothing was re-run by hand. The PR body carries the correction.
+    - Seat search for the class of miss: `git grep` of four sibling exclusive keys over the tree (excluding `data/`). The only enforced places naming them are Macro `.github/ci/legacy-jobs.yml` and `tests/test_ci_pack.py`, and the new job is in both. Other hits are agentos handoffs, `research/` evidence and `docs/` receipts.
+    - Delta re-review: fresh lane AC3 (`c19-w15-ac3-rereview-censusguard-20261101`, glm-5.3, ubuntu1) at `948b72ba`, asked for the delta and for any other registry a new job must enter.
+      - Verdict: APPROVE_WITH_NOTES, AD1–AD5 all PASS, no MUST item. Its two notes are not defects. First, Macro `scripts/run_ci_pack.py:410-447` `OBSERVED_COMMAND_SECONDS` has no measured weight for the new job, so packing uses the fallback heuristic, by design (`:347-348`). Second, the merge must ride this head's CI, not the local single-test run.
+      - The lane had no shell, so its registry search read the CI control-plane consumers in full. The seat checked its cited lines (`CURATED_EXCLUSIVE` `:4390`–`:5106`, element `:5105`, assertion `:5119-5122`; yml `:48008`, `:48016-48017`; `run_ci_pack.py:1882` derives the curated set from the manifest). The seat then closed the gap with `git grep -l` for three sibling exclusive keys over the tree (excluding `data/` and `site/`). Only `.github/ci/legacy-jobs.yml` and `tests/test_ci_pack.py` enforce them; the new job is in both.
+      - Accepted in comment 6560298969. The lane tree was removed.
+      - Rung: ACCEPTANCE of the delta review. CI at `948b72ba` is not yet concluded, the PR is not labelled, and it is not merged.
+- **pg_profile UTC-date edge: ruled, no build now (D34).**
+  - Reach: `acceptance_clock.date()` occurs only at Macro `engine/company_intelligence/pg_profile.py:2492` and `:2554` in `engine/company_intelligence/`; the same search counts both, as a positive control. The registry admits one issuer, P&G (`pg_private_registry`, `:99`).
+  - The edge bites only on an acceptance between 20:00 and midnight New York time (19:00 under EST), when the UTC date is already the next day.
+    - The scope test then admits the quarter that ended that same New York day. A release naming its period refuses with `document_period_not_admitted` (r17 line 1101).
+    - `asof` takes the next day's date.
+
+**FACTS — cold compose (F)**
+- **Census.** Lane Z (`c19-w15-z-census-coldcompose-20261101`, glm-5.3-flash, census C1) at Macro `f3b17d9e`.
+  - The seat spot-checked its key citations, and every quote matched. Accepted with two notes: one read went a hop past the limit (disclosed), and production env values are not in source.
+  - Findings: the legs ran strictly in sequence in the request thread, with no overall or per-leg deadline. No warmer fills any leg cache. The cold k3e bundle is cached per git rev (7 git subprocesses plus two parquet decodes). Chips are cached per UTC day. publication_seam makes 4 R2 GETs per request. event_workspace does DNS on every request plus up to 3 sequential 8 s GETs. theme_tape and company_theme_exposure re-parse JSON on every request. Every leg degrades on error.
+- **Production facts** at the ruling (Macro `c3f5994b`):
+  - `fif_financial_dataset_mode=production`, so lane Z's golden-AAPL re-parse candidate does not apply in production (singleton at `app/forensics.py:1001–1006`).
+  - The served process (`ab29a89e`) lagged its checkout by 44 commits.
+  - The composer keyed the k3e bundle on the checkout's `git rev-parse HEAD`, so every checkout move threw away the bundle without a restart.
+- **Consumer fact.** No page calls the route. Macro `site/`, `templates/`, `app/`, `engine/` and `scripts/` contain no caller of `/api/integrated-answer/v1` other than the route itself. Org code search (bounded by GitHub's index, which misses large files) finds only docs and tests. So the 524 reaches a direct API caller, not a rendered page. I1 §8 Q6 (who consumes the route) is still open.
+- **Base sync.** At 2026-11-01T07:45:34Z the head moved from `7bdd3b4fb26c` to `07d8e8a3a7dc`, a main merge with parents `7bdd3b4f` and main `c133b698`. The PR carried `merge-refresh-in-flight`, so this was the sweeper's base sync (inferred from the label). The own diff `c133b698..07d8e8a3` is the same three files, +328/-10. The patch-line fingerprint is `bdca0e087a4077fe` at both heads, and the three blobs are identical (`9536508e63d8`, `efaeb6f2da19`, `e9214f34c66d`). D28 applies: no re-review. No comment followed the acceptance.
+- **Build: Macro #10365** (reviewed head `7bdd3b4fb26c`, merge base `044d1cc6`; three files):
+  - Macro `app/integrated_answer.py`: of the nine legs, two (`basket_labels`, `theme_membership_file`) are fixed absent with no I/O. The seven reading legs run on one module-level pool (28 workers), each in a copy of the request's context, under `COMPOSE_DEADLINE_SECONDS = 20.0`. A leg not done at the deadline comes back `_leg_fixed_absent(…, "compose_deadline_exceeded")` (receipt NO_REF). A queued leg is cancelled; a running one finishes on its own inner bounds and still warms its cache. Page order is unchanged, and a done leg's exception re-raises as before.
+  - Macro `scripts/query_k3e_expectation_surface.py`: `rebind_frozen_source` reuses the bundle when both input blob ids are unchanged at the new revision. It returns exactly what `load_frozen_source(REPO, new_rev)` would, and raises the same refusals on git failure. It sits after `main`, so the line citations in Macro `scripts/c19_wp31_sources.py` (`:48` → `:150-155`, `:553` → `:81`) stay exact.
+  - Macro `tests/test_integrated_answer_clock.py` (already enrolled, so `.github/ci/legacy-jobs.yml` is untouched) gains nine tests: blob-keyed reuse, reload on a moved blob, refusal parity, rebind declines a bundle missing an input, the deadline answers with the leg absent, a saturated pool never runs cancelled legs, concurrency keeps page order, a leg exception propagates, and legs see the request's contextvars.
+  - Seat tests on a sparse tree: 293 passed, 2 failed. The two failures (`test_real_golden_h01_aapl`, `test_stale_vs_page_stamp`) come from the missing `data/`. A sequential-legs control fails the same two the same way.
+- **Custody (L.7).** Guarded mints still refuse (the ubuntu1 donor config), so the build went to the seat. The ownership census at 05:25Z covered 860 open Macro PRs; for the 70 with large or null file lists it used REST.
+  - Only #9569 (seat-adopted, PARKED; no hunk overlap) and draft #8899 (last updated 2026-10-12; no live writer) touch the composer.
+  - No open PR touches the k3e script or engine.
+- **Review.** Lane AB (`c19-w15-ab-review-coldcompose-20261101`, glm-5.3, ubuntu1) was a fresh, non-authoring reviewer of #10365 at `7bdd3b4f` against `044d1cc6`.
+  - Items AB1–AB9 all PASS. Verdict: APPROVE_WITH_NOTES. The lane had no shell (quarantine hook), so it read files directly and named its bounds.
+  - The seat checked the cited lines at the head (script `:166-193`, composer `:162-171`, `:316-342`, `:844-866`) and closed the lane's gaps with `git grep` at the head:
+    - the diff is exactly three files, and main `f2a7fe74` has not touched them since the merge base;
+    - the only line citations of the k3e script are Macro `scripts/c19_wp31_sources.py:48` and `:553`;
+    - no `site/` or `templates/` file names the route, out of 24,927 files, with a positive control;
+    - the only ContextVar on a leg path is the reader's `_read_deadline` (`:120`), which is set and reset by token.
+  - All five notes were ruled non-blocking with no code change, and none produces a wrong output on a reachable path:
+    1. `KeyError` on a bundle without `"inputs"`. Unreachable.
+    2. The docstring line "refuses as that loader does" is not exhaustive. Unreachable.
+    3. **Behaviour change:** an erroring compose now fails at the 20 s deadline rather than immediately.
+    4. An abandoned running k3e leg can hold a worker for up to about 12 minutes; the response stays bounded.
+    5. Low flake risk from the 0.2 s test deadline.
+  - Acceptance comment 6554300908; `merge-on-green` applied. `ci-authority/codex/merge-queue-pilot` ("context rejected") fails on every Macro PR, including the merged #10284 and #10273, so it is not a blocker. The lane tree was removed.
+- **Deploy.** Macro `app/deploy/update.sh:1446` restarts macro-api on any `app/.*\.py` change, so the new composer and the new script load together. An old composer with the new script is harmless (the new function is unused).
+  - The served commit is read from Macro `app/main.py:203` `/api/health` (keys `status`, `commit`, `checkout`).
+  - At about 08:05Z it read `commit=ab29a89eb4b` and `checkout=820f33b539c` (main's tip), 71 commits apart. The head copy of the `MACRO_API_RESTART_TRIGGER` grep (`:1446`) matched 0 of the 4,855 paths changed between them, so no restart was owed and the lag is lawful. Bound: this used the head's regex, not necessarily the running copy, and only its main grep (not the extra greps at `:1453` and `:1457`, nor the `API_UNIT_UPDATED`, fence-marker and `API_DEPS_UPDATED` branches).
+  - The same grep matches `app/integrated_answer.py` and `scripts/query_k3e_expectation_surface.py` but not the test file. So the first `update.sh` run after #10365 merges should restart macro-api.
+  - Not run yet. #10365 has not merged, so the served-commit check waits for the merge (OPEN, (F)).
+- **Production read (F)**, by r14's method (lines 806–808), with status, timing, header names, body key names and byte length only. No body value, no header value. The bearer was used only inside a same-origin fetch and never recorded. Claude in Chrome was not connected this cycle, so the reads ran in the desktop app's built-in browser, on its existing signed-in session.
+  - **Before the merge (positive control).** At 08:20:52Z, `/api/health` read `commit=ab29a89eb4b`, `checkout=021af584204`. One entitled GET to `/api/integrated-answer/v1/AAPL` returned 524 after 30 364 ms (r14: 30.6 s). The body was empty (0 bytes), and the header names were `content-length`, `date`, `eo-log-uuid`, `server`. So the cold 524 still reproduced on the day of the fix. The request was not refused at the entitlement check: a refusal returns at once, not at the edge budget (inferred).
+  - **After the merge:** not run. It waits for the merge, and runs once, by the same method, against the before-merge control above.
+
+**FACTS — watching**
+- `bmov4z8yb` (U6) exited on the qualifying render. Its wait is closed.
+- `b0vrmdkvw` (#9569, hourly, `ACK_RED=9569:d558d0e7`, 12 h bound from about 03:30Z) reached `BOUND_12H` after 15:30Z. All 12 reads (04:29Z–15:30Z) were identical: `#9569 OPEN d558d0e7 red=[ci-pack-0,ci-gate] red-acked`. It was re-armed at about 15:31Z as `bfrdeplx9` (same script, interval and acknowledged red; D31).
+- `betb2wazn` (#1906 queue) exited on MERGED.
+- `b5ql157yl` (#10365) was armed at 08:23Z. The session's PR binding reports the checks, but every monitor switch is off, so no CI event would wake the seat. The watcher runs the same aggregate script every 900 s, seeded at head `07d8e8a3`. It exits on MERGED or CLOSED, on a concluded red other than the pilot, on an own-diff change, or at its 12 h bound.
+- AC3 (#10391 delta re-review) was admitted at 15:46Z (lease `glm-frontier`). It returned with sentinel `C19-W15-AC3-DONE`, and the seat consumed it (accepted above).
+- `bwttr0j3k` (#10391) was armed at about 16:00Z, after one bounded read at 15:59:48Z (OPEN, `948b72ba`, MERGEABLE, no labels; 13 checks passed, 4 skipped, 9 running including ci-pack-0, and only the pilot failed). It uses the same aggregate script every 900 s, seeded at `948b72ba`. It exits on MERGED or CLOSED, on a concluded red other than the pilot, on an own-diff change, or at its 12 h bound. A green conclusion is read at #10365's merge boundary, which is when the label becomes eligible.
+- **r19 line 1438 is closed.** Macro main `ci` run 41269222548 on `1937fd75` concluded success at 04:18Z. It gates nothing of C19's.
+
+**W15 lanes, continued**
+
+| Lane | Scope | Route | Verdict |
+|---|---|---|---|
+| Y | independent review of Mastermind #1906 (r19) at `e4db7732` | glm-5.3, ubuntu1 (`c19-w15-y-review-r19-20261101`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (Y1–Y8 PASS). Three notes corrected in this section |
+| Z | read-only census of cold-compose I/O, caches, warmers and sequencing at Macro `f3b17d9e` | glm-5.3-flash, census C1, ubuntu1 (`c19-w15-z-census-coldcompose-20261101`) | ACCEPT with two notes |
+| AB | independent review of Macro #10365 at `7bdd3b4f` | glm-5.3, ubuntu1 (`c19-w15-ab-review-coldcompose-20261101`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (AB1–AB9 PASS). Five notes, none blocking |
+| AC2 | independent review of Macro #10391 at `05bb78ec` | glm-5.3, ubuntu1 (`c19-w15-ac2-review-censusguard-20261101`; first id `…-ac-…` refused rc=75) | ACCEPT AS INDEPENDENT REVIEW, APPROVE (AC1–AC6 PASS). It missed the `CURATED_EXCLUSIVE` entry, as the seat did (correction 7) |
+| AC3 | delta re-review of Macro #10391 at `948b72ba`, plus a search for any other registry a new job must enter | glm-5.3, ubuntu1 (`c19-w15-ac3-rereview-censusguard-20261101`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (AD1–AD5 PASS). Two notes, neither a defect. The seat's grep closed the lane's no-shell gap. Comment 6560298969 |
+
+**DECIDED**
+- **D32. The cold-compose fix is (C) blob-keyed k3e reuse plus (A) a 20 s compose deadline over concurrent legs. (B) startup pre-warm is deferred.**
+  - The baseline was rejected (§4.2): raising EdgeOne's origin budget is a CDN setting outside the seat's grant, and it only makes a caller wait longer.
+  - A bounded module-level pool was chosen over a per-request pool. Abandoned threads would otherwise escape the anyio thread cap that bounds this route.
+  - Named residual of (B): the first compose after a restart, or the first chip read of a UTC day, may return the earnings leg absent once. The abandoned build warms the cache, so the next compose gets it.
+- **D33. The integrated-answer composer's absent-owner items are seat work under U7.** Custody is recorded with the ownership census above. U5's lane rule against editing the composer bound U5 only.
+- **D34. The pg_profile UTC-date edge is held by the seat, with a ready spec and a trigger, and is not built now.**
+  - Why not now: one admitted issuer; P&G files its earnings release before the US open (unverified); and a release that names its period fails closed. A Macro PR, review and CI would buy no change to any reachable output today.
+  - Spec: take the New York date, `acceptance_clock.astimezone(ZoneInfo("America/New_York")).date()`, at `:2492` and `:2554`.
+  - Discriminating test: add a row to the parametrized test at Macro `tests/test_pg_economic_source_selection.py:136`. Acceptance `2026-10-01T01:30:00Z` (21:30 EDT on 2026-09-30) must admit the quarter ending 2026-06-30, with `asof` 2026-09-30. The current code admits the quarter ending 2026-09-30.
+  - Trigger: a second issuer joins this preparation path, or an evening acceptance is observed. The owner is the C19 seat (U7), not an absent owner.
+
+**UPGRADE PLAN**, deltas from r19:
+- **U6.** PROVEN (scoped). Closed.
+- **U7.** E3, D4 and (C) are closed. (F) is at CI (green) in Macro #10365: not merged, not live. (B) pre-warm is a deferred follow-up behind #10365.
+- U1 (a) parked (D30), (b)/(c) proposals; U3 and U4 wait on #9569 (D25); U5's leg wiring waits on the #1258 F4 / CS-V2 W4+W6 release; U2 unchanged.
+
+**OPEN** (owner → next action)
+- **(F)**, seat → after the sweeper merges #10365 (once main's integration-baseline is green again): read the merge back, land-check the three blobs, check the merge CI, run the served-commit check, then one production read of (F) against the 08:20Z control.
+- **Macro #9569**, branch owner or Chairman → merge main ≥ `d9471d0e` into the branch (D25). Seat → none until the head moves; `bfrdeplx9` reads it hourly and is re-armed at its bound (D31).
+- **WP31**, seat → re-read the universe headers at a natural boundary, not before 2026-11-02. One evaluator run (D29) only on a new release episode.
+- **I1 §8 Q6** (route consumer) → open; the program has no page that calls the route.
+- **pg_profile UTC-date edge**, seat → build to D34's spec when its trigger fires.
+- **Atom-guard hardening (Macro #10391)**, seat → once #10365 has merged and CI at `948b72ba` has concluded green, add `merge-on-green`. Then read back the merge and land-check it.
+- **Main's integration-baseline red**, main-red owner (#10412) → C19 has no action. The seat reads #10365's state through `b5ql157yl` only.
+- **Seven dark 13F census suites** (aggregate, catalog, r2_conformance, reconciliation, research_bench, storage, workflows) → open finding. Enrolment follows the same pattern as #10391. Each needs its own measured closure and a passing run first. Flagged to the Chairman as separate task task_a5897a2e; it starts after #10391 merges.
+- **Unchanged from r19:** the r16 owner findings; two of the r17 routed findings (the ubuntu1 thermal-admission mismatch and the WP31 docstring debt; the Atom clock is closed and the pg edge is D34); WP32 P3 free-tier 403 (human step); P4–P7; the K1 Q2/Q3 residuals; WP18 UI; G10/G11; Linear MAS-263 and Executive OAuth (human /mcp).
+
+**NEXT**
+1. Carry this r20 through a fresh non-authoring review and the Mastermind merge queue, then post a pointer on #1243.
+2. `b5ql157yl` owns the #10365 wait. On MERGED, run the (F) steps under OPEN and record the result in r21.
+3. `bfrdeplx9` owns the #9569 wait (D31).
+4. Seat end state for this cycle: BLOCKED-EXTERNAL on main's integration-baseline for #10365. C19 neither caused it nor owns its repair; Macro #10412 is the armed repair. #10391's delta review is accepted; it waits on its own CI and then on #10365's merge.
+   - MERGED: Mastermind #1906 (`554d0fc9`, push CI green).
+   - PROVEN_OUTCOME: U6 (scoped PRODUCTION_PROOF), the U7 closures of E3, D4 and (C), lane Z's census, lane AB's review.
+
+#### r21 cycle 2026-11-02 04:10Z (seat dd5239a9, Opus 5.5) — wave 15 continued: r20 landed after an independent review, and its five notes are corrected here by name; main's red is repaired, but Macro #10365 (F) is still not merged, because the sweeper's freshness rule has staled its proof on two refresh generations; the seat ruled against a hand merge (D35) and puts the override to the Chairman once; #10391 stays unlabelled; the WP31 header re-read stays open after a seat timing error
+
+**Review of r20**
+- Lane AA (`c19-w15-aa-review-r20-20261101`, glm-5.3, ubuntu1) was a fresh, non-authoring reviewer of Mastermind #1914 at head `19478a9d` (r20, lines 1459–1639).
+- Items AA1–AA8 all PASS. Verdict: APPROVE_WITH_NOTES, no MUST item. The seat spot-checked the collision (1502, 1606) and the omission (1619, 1639 against 1508, 1631), and accepted. Corrected below. The lane tree was removed after acceptance.
+- #1914 merged 2026-11-01T17:31:44Z as `1f1b30d1352d` through the merge queue (entered 16:49:51Z). Land-check: the ledger blob `b8b17b3d` at the merge is identical to the reviewed head. Master CI on the merge concluded at 18:15Z with 14 of 14 check runs successful. #1243 pointer: comment 6561428675.
+
+**Legend (r20's item letters, correction 2):** (C) is the flag-off 404 absent-owner item, closed. (E) is the pytest-9.2-safe tests and the rwe-shadow timeout, outside C19. (F) is the cold 524 on the integrated-answer route.
+
+**Corrections (§7.5)**
+1. **r20 lines 1502, 1619 and 1639 vs line 1606: one letter, two things.** There, (C) is the flag-off 404 item; in D32, (A), (B) and (C) are the cold-compose candidates. From r21 on, D32's parts are **D32-A** the 20 s deadline, **D32-B** the startup pre-warm and **D32-C** the blob-keyed k3e reuse. Line 1619's "(B) pre-warm" is D32-B.
+2. **r20 line 1504 implies an established lettering.** None existed: (C), (E) and (F) were first minted in r20. The legend above defines them.
+3. **r20 line 1459, "closed E3, D4 and (C) from source".** (C) rests on source (`_NoStoreAPI`, line 1470) plus one production 401 read of the flag (line 1499), not on source alone.
+4. **r20 lines 1619 and 1639 omit the Atom `<updated>` clock closure** recorded at 1508 and 1631. It is closed from source and belongs in both lists. U7 and PROVEN_OUTCOME below list it.
+5. **r20 line 1610 (D33), "U5's lane rule against editing the composer".** No rule has that label. The protections on record are the composer routings ("no C19 lane edits them" at line 433, "no lane may touch" at line 745) and U5's leg-wiring hold (line 1429). D33's conclusion stands on those.
+6. **Pointer 6561428675 said AA had four notes.** It has five: four in AA8 and NOTE 2 under AA6. The comment stays as posted; this is the correction.
+7. **r20's "held behind main's red" is superseded** (lines 1623, 1629 and 1637, and the same line in the pointer). The repair, Macro #10412, merged 2026-11-01T19:00:44Z (head `bf36904e`). Main's integration-baseline concluded success at `aa825d1b` (19:38Z) and `203462b4` (19:55Z). The breaker no longer explains the wait (FACTS, below).
+8. **r20 line 1628, #10391's label condition.** CI at `948b72ba` concluded red (run 41322561281: 1 failed, 844 passed, 1 skipped in ci-pack-0), and the one failure is the main-red test #10412 repaired, with the same 137/138 probes. That head cannot turn green without a base sync, and only the sweeper syncs, after labelling. The condition is now: #10365 merged and main's integration-baseline green. The sweeper's sync then gives a fresh run, and it merges only on green.
+9. **Watcher handles at r20 lines 1624, 1629, 1635 and 1636.** `b5ql157yl` is replaced by `bvr333dyy`, and `bfrdeplx9` by `b16aua885` (FACTS — watching).
+10. **The seat's first reading of the #10365 wait was incomplete** (seat notes, 2026-11-01 20:27Z; not in r20). It read the wait as CI-slot backlog after a check-definition change staled every green. That was true of one sweep. The main cause is proof starvation (below).
+
+**FACTS — Macro #10365: proof starvation**
+- **State.** OPEN, armed, MERGEABLE. Head history: `07d8e8a3` → `e9a7b944` (by 22:27Z) → `4146ca96` (00:39Z). The own-diff fingerprint is unchanged, so D28 applies and review 6554300908 stands. CI at `4146ca96` ran 00:39Z–01:51Z (72 minutes): 21 success, 4 skipped, and 1 failure, the known non-blocking pilot. Rung: CI. Not merged, not live.
+- **Why it has not merged.** Sweep 41383331001 (2026-11-02T03:34:46Z), verbatim on #10365: "checks are clean but the proof is stale — main touched scripts/**, scripts/*.py, tests/** since the proof was computed — inside this pull request's tested surface." The refresh was then deferred: 18 indexed PR CI runs against a cap of 8. Two refresh generations have now ended stale on arrival, so L.4 asks for a changed tactic rather than a third identical wait. The change is D35 and the separate sweeper task under OPEN.
+- **Measured** (first-parent main log, busy period from 2026-10-31T06:05Z, 45.2 h). 156 commits hit this surface (Macro `tests/`, `scripts/`, `.github/ci/`, excluding skip-ci and bakes), or 3.45 per hour. A 75-minute window was free of hits in 8 of 528 positions (1.5%); a 90-minute window in 4 of 525 (0.8%). A Poisson check at 72 minutes gives 1.6%. The matcher undercounts the real surface.
+- **Calibration.** 1.5% per refresh holds while main is busy; it is not "never". A 29-hour gap on 2026-10-30 shows quiet spells happen, and one would clear this wait. That gap also inflated the seat's earlier "50.8% quiet windows" and hour-of-day figures, which are RETRACTED; neither was published on a carrier.
+- **Design gap.** Macro `scripts/merge_on_green.py` (main `e4009c94`, lines ~434–440) records a 2026-08-06 measurement: 35-minute windows, worst PR about 2.9 re-prove cycles, median about 1.5. Here it is 72 minutes and about 67 expected cycles while busy. The freshness rule itself is the operator's ruling after the #4583 failure (`:88-118`, "nothing merges" on a stale surface). The seat found no waiver or override label in that file.
+- **Fresh check of the merge against main** (`75c68c5f`, local commit `fddf1281`, never pushed; proof base `07e7d7ab`).
+  - 23 main commits since the base. None touches #10365's three files, the merge-tree is clean, and no `.github/ci/` file changed.
+  - Main's code changes are Macro `engine/cycles.py`, specialist packs pk01, pk02 and pk05, `scripts/build_vector.py`, `scripts/fif_q0_label_conformance.py` and templates. No main-changed test or file mentions `integrated_answer`, `query_k3e` or `k3e_expectation`, so there is no pinned guard of the #4583 kind.
+  - Specialist packs' non-test importers do not include the query path. `engine.cycles` has many engine importers, so its reach into the compose legs is not excluded by this search.
+  - Tests on the merge (seven files, including `test_cycles` and `test_ci_pack`): 420 passed, 2 failed, 2 skipped. The two are Macro `tests/test_integrated_answer_v0.py::test_real_golden_h01_aapl` and `::test_stale_vs_page_stamp`, the same two as line 1559 (missing `data/` in a sparse tree). Both fail at the same lines with the same assertions on bare main `75c68c5f`, so #10365 did not cause them.
+  - Bound: this is the seat's sparse-tree check, not the sweeper's refreshed proof, and it grants nothing.
+- **Merge practice, a sample and not a census.** Of the last 100 merged Macro PRs, 96 merged under the login #10365 is authored under and 4 under another. 12 of the 96 had no `merge-on-green` labeled event at all (13 with #10319); 7 sampled were authored and merged by the same login. Macro `docs/agent_guides/CLAUDE_WORKSPACE_COMPLETION.md:14-15` says the session merges and the sweeper is a backstop, and the sweeper's lines 2785–2791 record #7958 "disarmed and merged by hand" (an empty-surface case, since fixed). The Chairman's standing text says "never self-merge". No Mastermind document defines that term, and Macro's own use (`CLAUDE.md:114`, "No child self-merge") concerns a child merging under a prose handoff.
+- **Urgency.** No page consumes the route (line 1553), so the 524 reaches direct API callers only.
+
+**FACTS — WP31 header re-read: a seat error, and no look spent**
+- Universe headers were re-read at 2026-11-02T03:52:50Z (submissions: form, filing date, acceptance time and items only). No new release episode.
+- The seat ran this early. Line 1625 says "not before 2026-11-02" and the seat had decided to wait for that date in New York, but the read ran when only the UTC date had turned (22:52 on Sunday in New York). It says nothing about Monday's filings. No evaluator run followed, and the item stays OPEN.
+
+**FACTS — watching**
+- `b5ql157yl` (#10365) reached `BOUND_12H` at 20:26Z, red-free. `bvr333dyy` replaced it (same script, 900 s). It absorbs base syncs and has read `4146ca96`, `red=[]` through 03:57Z. Its bound is about 08:27Z.
+- `bwttr0j3k` (#10391) exited at 16:20Z on the inherited red. `bzl34mkpx` replaced it (900 s, `ACK_RED=10391:948b72ba`). Its bound is about 04:21Z.
+- `bfrdeplx9` (#9569) was replaced at its bound by `b16aua885` (hourly, `ACK_RED=9569:d558d0e7`, D31), re-armed at 03:35Z.
+- `b0p03urtv` (master CI on `1f1b30d1`) exited on its 18:15Z conclusion. Its wait is closed.
+
+**W15 lanes, continued**
+
+| Lane | Scope | Route | Verdict |
+|---|---|---|---|
+| AA | independent review of Mastermind #1914 (r20) at `19478a9d` | glm-5.3, ubuntu1 (`c19-w15-aa-review-r20-20261101`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (AA1–AA8 PASS). Five notes corrected in this section |
+
+**DECIDED**
+- **D35. No hand merge of Macro #10365. It stays armed, and the override goes to the Chairman once, with the default "keep waiting".**
+  - The contradiction, surfaced as the Executive contract requires: Macro's completion doc and its practice let a session merge its own PR, and the Chairman's standing text says never self-merge. A direct `gh pr merge` here would be the author's login merging its own PR onto an unprotected main (the branch API reads `protected: false`), with no queue or bot between.
+  - The seat has done this before, so that practice includes its own acts. This session ran `gh pr merge` on Macro #10074 on 2026-10-31 (D18, lines 976–980), after the 2026-10-24 ruling that states the standing text, and on Macro #8781 on 2026-10-11, before that ruling. Both merged under the login that authored them. #10074's code came from predecessor seat 7ab343c8 and had an independent review. D18 cited #7132 and #7337 as its path and did not weigh the standing text; it should have. This ledger records more hand merges by the seat lineage through 2026-10-18 (lines 24, 35, 677, 696, 720). The Chairman's question carries these acts with it.
+  - Macro's doc, #7958, the sampled practice and those merges are lower layers. Finding code or practice that does X is not authority to do X.
+  - The freshness rule is the operator's chosen control. Disarming to step past it is a route around it, and a lane merging for the seat would be evasion.
+  - Urgency is low (FACTS, above).
+  - O.14 still binds: the seat keeps the outcome, and the sweeper owns only the interval. Report the rung as CI.
+  - Only if the Chairman authorizes it: re-fetch; a same-act disarm comment naming the session and intent (Macro `CLAUDE.md`, "Disarming is never silent"); `gh pr merge --squash --match-head-commit`; readback; integration-baseline watch; revert if red; land-check; served read. A yes covers #10365 only. #10391 stays on its label-and-sweeper path (OPEN, below) unless the Chairman's answer names it too.
+
+**UPGRADE PLAN**, deltas from r20:
+- **U7.** E3, D4, (C) and the Atom `<updated>` clock are closed. The pg_profile edge is held (D34). (F) is at CI (green at `4146ca96`) in Macro #10365: not merged, not live. D32-B is a deferred follow-up behind #10365.
+- U1 (a) parked (D30), (b)/(c) proposals; U3 and U4 wait on #9569 (D25); U5's leg wiring waits on the #1258 F4 / CS-V2 W4+W6 release; U2 unchanged; U6 closed.
+
+**OPEN** (owner → next action)
+- **(F)**, seat → after #10365 merges: read the merge back, land-check the three blobs (`9536508e63d8`, `efaeb6f2da19`, `e9214f34c66d`), check the merge CI, run the served-commit check, then one production read against the 08:20Z control (line 1583).
+- **D35's question**, Chairman → authorize a hand merge of #10365, or leave the default. Asked once, not re-asked.
+- **Sweeper proof starvation**, separate task → flagged as task chip `task_8cbbaca6` (census first; keeps the #4583 protection; strict up-to-date is already rejected; fresh non-authoring review). The seat does not edit the sweeper.
+- **Atom-guard hardening (Macro #10391)**, seat → add `merge-on-green` once #10365 has merged and main's integration-baseline is green (correction 8). Its `.github/ci/` change re-stales every armed green when it lands, and the same starvation will apply to it.
+- **Macro #9569**, branch owner or Chairman → merge main ≥ `d9471d0e` into the branch (D25). Seat → none until the head moves; `b16aua885` reads it hourly (D31).
+- **WP31**, seat → re-read the universe headers at a natural boundary on or after New York Monday 2026-11-02, once that day's filing window has opened. One evaluator run (D29) only on a new release episode.
+- **Seven dark 13F census suites**, separate task `task_a5897a2e` → starts after #10391 merges.
+- **Unchanged from r20:** I1 §8 Q6 (route consumer); the pg_profile edge (D34); the r16 owner findings; two of the r17 routed findings (the ubuntu1 thermal-admission mismatch and the WP31 docstring debt); WP32 P3 free-tier 403 (human step); P4–P7; the K1 Q2/Q3 residuals; WP18 UI; G10/G11; Linear MAS-263 and Executive OAuth (human /mcp).
+
+**NEXT**
+1. Carry this r21 through a fresh non-authoring review and the Mastermind merge queue, then post a pointer on #1243.
+2. `bvr333dyy` owns the #10365 wait, and `bzl34mkpx` the #10391 wait. Each is re-armed at its bound. On MERGED, run the (F) steps under OPEN and record the result in r22.
+3. `b16aua885` owns the #9569 wait (D31).
+4. Seat end state for this cycle: BLOCKED-EXTERNAL on the sweeper's freshness proof for #10365 (D35). The Chairman's question is open, with its default in force.
+   - MERGED: Mastermind #1914 (`1f1b30d1`, master CI green).
+   - PROVEN_OUTCOME: lane AA's review; the fresh-merge check above, as bounded; the closures of E3, D4, (C) and the Atom `<updated>` clock (r20).
+
+#### r22 cycle 2026-11-03 00:35Z (seat dd5239a9, Opus 5.5 then Fable 5.1 from 21:30Z) — wave 15 continued: r21 landed after a review caught one false sentence in D35 and a narrow re-review passed its repair; the merge queue removed r21 twice on a CI shard timeout, the seat parked it (D36) and re-queued it once when master moved to six shards; from 12:18Z #10365 was held by a real content conflict, not the freshness rule (retracted by name); the seat resolved it, a fresh lane re-reviewed it, and it is re-armed at `e55d37ba`; #10391's conflict was resolved with its own diff unchanged; one personal login is removed from line 1220
+
+**Review of r21**
+- Lane AE (`c19-w15-ae-review-r21-20261102`, glm-5.3, ubuntu1) was refused at admission: rc=75, host temperature at its limit. It never started, and its run id is spent.
+- Lane AE2 (`c19-w15-ae2-review-r21-20261102`, glm-5.3, ubuntu2) was a fresh, non-authoring reviewer of Mastermind #1926 at `54e59faa`. Verdict: REQUEST_CHANGES.
+  - Required change: D35 said "The seat's earlier merges went through the Mastermind queue or the sweeper, so they are no precedent." That was false against D18 (line 978), because the seat itself merged Macro #10074 on 2026-10-31.
+  - Non-blocking note 1: the tail of line 1700 could be read as extending a Chairman yes to #10391.
+  - Non-blocking note 2: the first path citation at line 1665 lacked its Macro tag.
+  - The seat repaired all three in `645854cc` (lines 1694–1701 at that head).
+- Lane AF (`c19-w15-af-rereview-r21-20261102`, glm-5.3, ubuntu2) was a fresh, narrow re-review of the repair at `645854cc`. Verdict: APPROVE_WITH_NOTES, with AF1–AF6 PASS. The seat accepted it with no text change: a push restarts CI and needs another review, and no note changes the Chairman's decision.
+- AF's notes:
+  1. On "this session" at line 1696, see slip 2 below.
+  2. The list at line 1696 is not exhaustive (correction 4).
+  3. `protected: false` at line 1695 is public metadata, outside the guarded classes. No change.
+- AF slips, checked against the artifact:
+  1. AF counted `self-merge` hits at lines 1674, 1695 and 1696. The file has 1674 and 1695 only. No effect.
+  2. AF dated this session from 2026-10-31, citing line 860. Lines 4 and 62 name dd5239a9 as the original principal in the opening wave, so "This session … on Macro #8781 on 2026-10-11" stands.
+  3. AF listed line 654 among the lineage's hand merges. Line 654 records #9577's squash merge and does not say it was by hand.
+- #1926 landing: the merge queue removed it twice, the seat parked it (D36), and the seat re-queued it once at 21:07:54Z (FACTS, below). MERGED 2026-11-02T21:31:05Z as `04ca04c7` through the merge queue. Land-check: the ledger blob at the merge, `0807ad1f`, equals the reviewed head's. The merge-group run 41525561874 passed all six shards, and that run is the proof for this tree. The post-merge push run 41529056577 on master concluded CANCELLED at 21:41Z: `ci.yml` cancels an in-progress run of the same ref when a newer push arrives (`cancel-in-progress: true`), and #1935 (`ab93f3ed`) landed behind #1926. Its `test` gate then reported failure by design ("a skipped/cancelled/failed matrix must not turn into a green required gate"). No test failed, nothing was re-run, and master's live proof moved to `ab93f3ed`'s run. #1243 pointer: comment 6589086446 (21:37:29Z).
+
+**Corrections (§7.5)**
+1. **Line 1220 (r18) names the sweeper by a personal login.** That breaks this ledger's own rule against logins (AF, item AF4). r22 replaces the login in place with "the sweeper identity", and the line's meaning is unchanged. A search of the file at `645854cc` found that login on line 1220 only. Git history keeps the old text. Lane AH (below) found a second login of a different shape at line 51 (r1): the account name in a `gh auth status` readback. r22 replaces it in place the same way; the line's meaning is unchanged.
+2. **RETRACTED: "the sweeper's freshness rule" as the cause of #10365's wait after 12:18Z on 11-02.**
+   - r21's FACTS (lines 1663–1675) were true when written: sweep 41383331001 ran at 03:34Z.
+   - From 12:18Z they were not. Macro main #10543 (`554cdd64`) changed `_leg_capital_structure()` to `_leg_capital_structure(ticker, composed_at)`. That was a real content conflict with #10365's `_read_legs` list, and the sweeper labelled #10365 `merge-blocked`.
+   - The seat told the Chairman "freshness rule" at 15:35Z and 16:22Z. Both statements are retracted.
+   - Macro #10554 only staled the greens. Another session attributed the block to #10554, and that attribution is also wrong.
+   - The seat's error: its watcher read state, head and red checks only, never `mergeable` or labels, so it logged "OPEN red=[]" through the conflict. The fix is under FACTS — watching.
+3. **D35's premise (lines 1694–1701).** From 12:18Z the blocker was the conflict, not the freshness rule. The question itself, whether the seat may merge #10365 by hand, is unchanged. It is not re-asked, and its default is still in force.
+4. **The list at line 1696, "(lines 24, 35, 677, 696, 720)", is not exhaustive** (AF note 2). Lines 28, 31, 34, 277–279 and 480 also record merges by hand in the seat lineage. All are on or before 2026-10-18, before the 2026-10-24 ruling. Line 654 is not one of them (AF slip 3).
+5. **Line 799 instructs the #9636 path and never records the outcome** (AF GAPS).
+   - GitHub, read 2026-11-02T04:48Z: MERGED 2026-10-19T07:50:21Z. The author and merged-by are the same login.
+   - That does not show which path merged it. Line 1220 records the sweeper merging under that same login, and line 1674 finds 96 of 100 merges under it.
+   - Either path was before the ruling.
+6. **The watcher handles at lines 1682–1685 and 1719 are replaced** (FACTS — watching).
+7. **(F)'s rung at lines 1663 and 1704, "CI (green at `4146ca96`)", is superseded.** The head is now `e55d37ba` (FACTS, below): accepted and armed, CI not yet concluded.
+
+**FACTS — Mastermind #1926 (r21): two queue removals, a park, one re-enqueue**
+- **First enqueue: 05:31:33Z. Removed: 06:21:32Z** (failed_checks).
+  - Merge-group run 41394560154: `pytest shard 1` hit its 45-minute step limit at 06:18:07Z, about 97% through. No test failed, and shards 0 and 2 passed. The PR changes one markdown file.
+  - This is the same mechanism as #1766's removal (run 41372818702).
+  - Shard 1 took 38m25s, 33m15s and 44m35s in other runs. `tests/test_capacity_host_artifacts.py` alone took 847–1030 s across five runs.
+- **Second enqueue: 06:30:24Z, position 4, after the gate. Removed: 07:48:11Z** (failed_checks).
+  - Run 41400360629: shard 1 timed out at 07:28:24Z, at about 97–99%. No test failed.
+  - Comparison with a passing shard 1 in the same window (#1925, run 41399412692, 40m10s): reported module seconds summed to 2480 vs 2187 (+13%), spread across modules. That points to a slower runner, not to the PR.
+  - Merge-group CI since 11-02 01:30Z: 3 of 11 completed runs failed, all on this timeout. Each removal also rebuilds the merge groups queued behind it.
+- **Parked under D36.** Carrier pointer: comment 6572074113 (08:00:06Z).
+- **Not the re-enqueue condition: master `6595f251b` (#1930).** It added one fast preflight step to every shard. It did not change shard 1's limit or balance.
+- **The condition: master `22c08067ed` (#1616, 20:21:31Z).** It moved CI from three to six pytest shards with measured balancing, under the same 45-minute limit. That met D36's condition.
+  - Gate at 21:07Z: OPEN, head `645854cc`, CLEAN, rollup SUCCESS, out of the queue, no auto-merge. Master's merge-group run passed with all six shards.
+  - One enqueue: QUEUED, position 1, 21:07:54Z. AWAITING_CHECKS at position 1 through 21:29Z; MERGED 21:31:05Z as `04ca04c7`. Watcher `by8ys94d8` exited on the EVENT at 21:36Z.
+- **Seat slip, no effect.** The first re-enqueue gate compared jq's sorted keys in the wrong order and refused. Nothing was enqueued.
+
+**FACTS — Macro #10365: a real conflict, resolved and re-reviewed**
+- **The resolution** (correction 2). Seat merge commit `e55d37ba` has parents `4146ca96` (the old head) and `1a959399` (main).
+  - The `_read_legs` entry now passes `(ticker, composed_at)`.
+  - Two test stubs now take `(*_a, **_k)`. Before that fix, the clock suite gave 2 failed and 16 passed.
+- **The own diff changed.** Its fingerprint went from `bdca0e087a4077fe` to `a270d4ab1470e980` (4 changed `+`/`-` lines).
+  - Under D28 that needs a fresh non-authoring re-review and a new acceptance comment.
+  - The seat disarmed in comment 6586995612, in the same act as the push. `merge-blocked` stays for the sweeper.
+  - The merge-tree against Macro main `ef6a39c1` is clean. No main commit since `53081e58` touches the three files or Macro `app/capital_structure.py`.
+- **The re-review.** Lane AG (ubuntu1) was refused at admission (rc=75). Lane AG2 (`c19-w15-ag2-rereview-coldcompose-20261102`, glm-5.3, ubuntu0) returned APPROVE_WITH_NOTES, with AG1–AG6 all PASS. It checked:
+  - the resolution;
+  - thread safety: the six module caches are read and written only under `_LOCK`, and no path takes it while holding it;
+  - the deadline;
+  - the tests.
+- **Seat checks and acceptance.** The seat spot-checked the cited lines. At `e55d37ba` the four integrated-answer suites gave 61 passed and 2 failed. The two failures are the same two `data/`-dependent tests as line 1672. Accepted in comment 6587510737, and `merge-on-green` re-added.
+- **AG2 notes.** They make no text change in #10365, because a changed diff would need another review and another CI cycle.
+  1. Macro `app/integrated_answer.py:984`, "a running one ends on its own inner bounds", overstates the capital-structure leg. That leg has no explicit inner timeout; its bound is finite local disk and CPU work.
+  2. `test_legs_see_the_request_context` would also pass under sequential composition. `test_legs_run_concurrently_and_keep_page_order` is the test that pins concurrency.
+  3. Pre-existing on main: in Macro `tests/test_integrated_answer_clock.py`, the docstring (:10–12) and the unreferenced `DEFECT_D1_REASON` (:56–60) are stale.
+- **Land-check blobs at `e55d37ba`** (replacing r21's OPEN list):
+  - `app/integrated_answer.py` `401cb5e6f154`
+  - `scripts/query_k3e_expectation_surface.py` `efaeb6f2da19` (unchanged)
+  - `tests/test_integrated_answer_clock.py` `bef5783e419a`
+- **CI at `e55d37ba`.** The PR run started at 19:59Z on 11-02 and had not concluded at 00:20Z on 11-03; no check is red, and the PR is MERGEABLE with both labels. The sweeper merges only on a fresh green. Rung: ACCEPTED and ARMED, below CI.
+
+**FACTS — Macro #10391: a conflict resolved with the own diff unchanged**
+- It was CONFLICTING against main `ef6a39c1` in Macro `tests/test_ci_pack.py` only: an add/add at the end of `CURATED_EXCLUSIVE`.
+- Seat merge `58c943cb` keeps all three entries. The own-diff fingerprint `740a753173ef506b` is unchanged, so no re-review is owed.
+- At the merge, the CI-pack suite and the two 13F suites gave 289 passed and 2 skipped. Pushed; MERGEABLE.
+- No label until #10365 merges and main's integration-baseline is green (r21 correction 8).
+- r21 line 1658 says "only the sweeper syncs, after labelling". That sentence is about a base sync that turns a stale green head fresh, which the seat never does by hand. It does not cover a content conflict: the sweeper never resolves one, so the author must, on its own branch, and the merge still belongs to the sweeper. `e55d37ba` (#10365) and `58c943cb` (#10391) are conflict resolutions of that kind, each followed by D28's own-diff check. Both sentences stand.
+
+**FACTS — WP31 header re-read: a new release episode**
+- Universe headers were re-read at 2026-11-02T22:39Z (submissions: form, filing date, acceptance time and items only; no document or value read). The 03:52Z read's `hdr2b.py` was re-used with one change: the user agent is read from `config.yml` without PyYAML, which this host's Python lacks.
+- One issuer has a new 8-K with items 2.02 and 9.01, accepted after the New York close. That is a new release episode under D29. The issuer and date are not named here (prereg §3.3 discipline); the submissions headers are the record. The other four issuers have no new 8-K, 10-Q or 10-K since 10-30.
+- **Read 3** (the one evaluator run under D29) was launched by hand at 22:45:47Z from the Read 2b tree at Macro `1e2eeeb0`, clean, whose WP31 scripts, prereg and `data/trial_ledger.jsonl` are byte-equal to Macro main's, with the same interpreter and arguments as Read 2b. Counts only; never in CI.
+- **Read 3 result:** rc=0, 22:45:47Z to 00:26:53Z (101 min; Read 2b took 98). Counts from stdout only: `episode_count=246` (Read 2b: 245, so the new episode was minted), `label_pending=0`, `report.eligible=0` (Read 2b: 2), `report.verdict=MONITORING`, `report.look=monitoring`. No look was spent. The seat appended `{"read":"3","look":"monitoring","study_stopped":false,…}` to `prior_reads.json` by hand (5 entries, validated by `json.load`), as for 2b.
+- **Adapter counts that changed from Read 2b:** `companyfacts_unavailable=5` of 5 requests (2b: 0); `revisions_reader_attempts=3`, `transient_failures=2`, `final_failures=1` (2b: 1/0/0); `not_evaluable_detail.pit_unrecoverable.chain_unreadable=3` (2b: none). The two episodes eligible in 2b are not evaluable in 3 for that reason. One status-only probe of the companyfacts endpoint for a non-universe issuer at 00:31Z answered 200. The cause of the in-run unavailability is not established, and the seat has not read the report body. This goes to the WP31 source owners as a finding (OPEN); the seat changes `c19_wp31_*` only through a §10 amendment with a fresh review.
+
+**FACTS — watching**
+- **#10365.** `bvr333dyy` → `bqo2ml9b3` (re-armed at its bound, 08:28Z). `bqo2ml9b3` ended on an own-diff EVENT at 19:58Z, which was the seat's push.
+- **#10391.** `bzl34mkpx` → `bu97m2me7` → `b0f6ia4a8` (stopped 20:19Z).
+- **#10365 and #10391 together.** Both are now on `bknyctzjp` (`watch_macro_agg2.sh`, 900 s, 12 h bound). It fires on CONFLICTING, any label change, red, a head or own-diff change, or a merge.
+- **#9569.** `b16aua885` → `bhmf62n1h` (hourly).
+- **#1926.** `bu54wlaq8` → `b70bmcpdr` → queue watcher `bhz7xguuz` (EVENT 07:55Z) → shard watcher `b52gp5w9n` → `bahskh4yo` (EVENT 21:05Z; condition consumed) → queue watcher `by8ys94d8` (EVENT MERGED, 21:36Z) → master-CI watcher `bd4dvegui` on `04ca04c7` (600 s, 3 h bound; EVENT 21:48Z on the cancelled push run described above; done, nothing waits on it).
+
+**W15 lanes, continued**
+
+| Lane | Scope | Route | Verdict |
+|---|---|---|---|
+| AE | independent review of Mastermind #1926 (r21) | glm-5.3, ubuntu1 (`c19-w15-ae-review-r21-20261102`) | refused at admission (rc=75), never started |
+| AE2 | independent review of Mastermind #1926 at `54e59faa` | glm-5.3, ubuntu2 (`c19-w15-ae2-review-r21-20261102`) | REQUEST_CHANGES (one false sentence in D35, two notes); all repaired at `645854cc` |
+| AF | narrow re-review of the repair at `645854cc` | glm-5.3, ubuntu2 (`c19-w15-af-rereview-r21-20261102`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (AF1–AF6 PASS); notes and slips above |
+| AG | re-review of Macro #10365 at `e55d37ba` | glm-5.3, ubuntu1 (`c19-w15-ag-rereview-coldcompose-20261102`) | refused at admission (rc=75), never started |
+| AG2 | re-review of Macro #10365 at `e55d37ba` | glm-5.3, ubuntu0 (`c19-w15-ag2-rereview-coldcompose-20261102`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (AG1–AG6 PASS); comment 6587510737 |
+| AH | independent review of Mastermind #1974 (this r22) at `f996e6f0` | glm-5.3, ubuntu0 (`c19-w15-ah-review-r22-20261103`) | APPROVE_WITH_NOTES (AH1–AH3, AH5–AH8 PASS; AH4 one citation off by one). Five notes: the 1703→1704 citation, the line-51 login, `bd4dvegui`'s closure, r21 line 1658's "only the sweeper syncs" against this cycle's seat conflict resolutions, and the unnamed verifier at the task_a5897a2e item. All five are repaired in the commit after `f996e6f0`; a narrow re-review covers the repair before the queue |
+
+**DECIDED**
+- **D36. Park rule for Mastermind #1926 after two equivalent removals (L.4, count 2).**
+  - No third enqueue under unchanged conditions. Re-timing is not a changed tactic: hosted runners are independent VMs, and the slowdown was per runner.
+  - Condition: master changes shard 1's limit or balance (the `ci.yml` shard steps, `scripts/ci_parallel_shard.py` or `scripts/ci_pytest.py`). Then exactly one enqueue, under the usual gate.
+  - #1616 met the condition, and the one enqueue was spent at 21:07:54Z.
+  - On a further removal, the seat diagnoses first. There is no fourth enqueue.
+  - The seat does not edit CI.
+
+**UPGRADE PLAN**, deltas from r21:
+- **U7.** (F) is in Macro #10365 at `e55d37ba`: re-reviewed and re-armed; rung ARMED, CI pending. Follow-up after it merges: AG2 note 1, a one-line comment fix. D32-B is still a deferred follow-up.
+- Everything else is unchanged from r21.
+
+**OPEN** (owner → next action)
+- **(F)**, seat → after #10365 merges, in this order:
+  1. Read the merge back.
+  2. Land-check the three blobs above.
+  3. Check the merge CI.
+  4. Run the served-commit check.
+  5. Make one production read against the 08:20Z control (line 1583).
+- **D35's question**, Chairman → unchanged (correction 3). It was asked once and is not re-asked.
+- **Atom-guard hardening (Macro #10391)**, seat → once #10365 has merged and main's integration-baseline is green, post the arming comment, then add `merge-on-green`.
+- **Sweeper proof starvation**, separate task `task_8cbbaca6` → the Chairman started it in its own session at ~21:25Z on 11-02. It owns the sweeper; the seat does not edit it.
+- **Macro #9569**, branch owner or Chairman → unchanged (D25). `bhmf62n1h` reads it hourly (D31).
+- **WP31**, seat → Read 3 is done (FACTS). Next: re-read the universe headers at a natural boundary; one evaluator run (D29) only on a further new release episode. The label for the new episode matures under prereg §3.3.
+- **WP31 reader finding**, WP31 source owners → Read 3's `companyfacts_unavailable=5/5`, `revisions_reader_final_failures=1` and three `chain_unreadable` episodes (FACTS). Diagnose from the adapters' own logs, not from the report body. The seat does not edit `c19_wp31_*` outside a §10 amendment.
+- **Seven dark 13F census suites**, separate task `task_a5897a2e` → the Chairman started it in its own session at ~21:25Z on 11-02, before #10391 merged. r21 sequenced it after #10391 because both touch Macro `tests/test_ci_pack.py` (`CURATED_EXCLUSIVE`) and `.github/ci/`. Whichever lands second re-conflicts on those files (O.1). The seat keeps #10391's own diff fixed; if that task lands first, #10391 gets a third conflict resolution with its own diff unchanged, re-tested, and no re-review. The seat verifies that: before the push, the own-diff fingerprint must equal `740a753173ef506b` (FACTS — #10391); if it differs, D28 applies and a fresh re-review is owed.
+- **Unchanged from r21:** everything in r21's "Unchanged from r20" line.
+
+**NEXT**
+1. Carry this r22 through a fresh non-authoring review and the Mastermind merge queue, then post a pointer on #1243. Lane AH reviewed `f996e6f0` (table above); its notes are repaired here, and a narrow re-review of the repair precedes the queue entry.
+2. `bknyctzjp` owns the #10365 and #10391 waits. On MERGED, run the (F) steps under OPEN and record the result in r23.
+3. `bhmf62n1h` owns the #9569 wait (D31).
+4. Seat end state for this cycle: r21 MERGED and pointed; #10365 ACCEPTED and ARMED at `e55d37ba`, CI pending; #10391 MERGEABLE, unlabelled by rule; WP31 Read 3 done, no look spent; D35 and #9569 unchanged. Watchers: `bknyctzjp` (#10365, #10391), `bhmf62n1h` (#9569).

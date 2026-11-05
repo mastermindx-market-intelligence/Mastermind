@@ -14,6 +14,14 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from tests.test_executive_persistent_origin import filesystem
+
+
+@pytest.fixture(autouse=True)
+def _current_data_anchor_fixture(filesystem):
+    """Explicit raw Root/Darwin facts; real held anchor predicates execute."""
+    yield filesystem
+
 from ops.executive_os import acceptance_maintenance as m
 from ops.executive_os import prepare_control_successor as producer
 from tests import test_executive_acceptance_v5_to_v7 as fixtures
@@ -111,7 +119,7 @@ def test_installed_preparation_refuses_before_target_or_marker(tmp_path,monkeypa
     if fault in {'config','privileged','macro','socket','arms'}:
         value=dict(f.config)
         key,change={'config':('cost_class','foreign'), 'privileged':('privileged_readiness_armed',False),
-                    'macro':('ceo_ingress_app_macro_root','/foreign/macro'),
+                    'macro':('ceo_ingress_app_macro_root','foreign/macro'),
                     'socket':('terminal_return_socket_path','/foreign/relay.sock'),
                     'arms':('coo_autonomy_armed',True)}[fault]
         value[key]=change;_rewrite(m.SYSTEM_ROOT/'config/control.json',(json.dumps(value,sort_keys=True,indent=2)+'\n').encode())

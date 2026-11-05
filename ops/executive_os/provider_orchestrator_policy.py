@@ -61,10 +61,22 @@ BACKUP_SUFFIX = ".mastermind-orchestrator-backup"
 ROLE_PACKAGE = "mastermind-fabric-orchestration"
 CLAUDE_FABRIC_SKILL_PACKAGE = "mastermind-claude-fabric-delegation"
 # Git blob digest of the separately reviewed local Skill source; not a runtime grant.
-CLAUDE_FABRIC_SKILL_BLOB_SHA = "41d9b46459138bfef4537ab6a32fa7cd3a0559d8"
+CLAUDE_FABRIC_SKILL_BLOB_SHA = "3f9d0bbad57de0174b715f4186dc2d0be5ca58b7"
+# Keep the fixed bound explicit; this reviewed guide includes the upstream
+# read-only parent-recovery diagnostic and one short review-routing pointer.
+CLAUDE_FABRIC_SKILL_MAX_BYTES = 9216
+# Only the two exact prior protected Claude skill blobs may be upgraded.
+CLAUDE_FABRIC_PREVIOUS_BLOB_SHAS = frozenset({
+    "41d9b46459138bfef4537ab6a32fa7cd3a0559d8",
+    "a4a29ba025db0e50f084179b248501fd27327bfb",
+})
 CODEX_FABRIC_SKILL_PACKAGE = "mastermind-fabric-delegate"
 CODEX_FABRIC_PRIOR_BLOB_SHA = "7fb137a1d2b2a0f4244897d3a71b1f17a70c0a73"
-CODEX_FABRIC_SKILL_BLOB_SHA = "b2a24eaada6c2996513eed32ea6a8fa283175015"
+# Exact former canonical Codex source: installed on M2 before this review update.
+CODEX_FABRIC_PREVIOUS_BLOB_SHA = "b2a24eaada6c2996513eed32ea6a8fa283175015"
+# Exact installed guide before the new Macro cwd clarification.
+CODEX_FABRIC_CWD_PREVIOUS_BLOB_SHA = "1ae788e373c93546ac4990e7ab48c1fa539561e9"
+CODEX_FABRIC_SKILL_BLOB_SHA = "21480522be625525f1569fbc0b1dec09d0f06160"
 CODEX_FABRIC_LEGACY_SHA256 = "4700ec891fc040df4d0e4a351ede5acc5cd89eebd5b19bb06e659656033d0b9c"
 CODEX_FABRIC_ENTRY_BEGIN = "<!-- mastermind-codex-fabric-entrypoint-v1 -->"
 CODEX_FABRIC_ENTRY_END = "<!-- /mastermind-codex-fabric-entrypoint-v1 -->"
@@ -658,7 +670,7 @@ def _canonical_claude_fabric_skill() -> bytes:
     _preflight_destination(path, source_root)
     payload = _regular_bytes(path)
     blob = hashlib.sha1(b"blob " + str(len(payload)).encode("ascii") + b"\0" + payload).hexdigest()
-    if not 0 < len(payload) <= 8192 or blob != CLAUDE_FABRIC_SKILL_BLOB_SHA:
+    if not 0 < len(payload) <= CLAUDE_FABRIC_SKILL_MAX_BYTES or blob != CLAUDE_FABRIC_SKILL_BLOB_SHA:
         raise OrchestratorPolicyError("Claude Fabric Skill source digest mismatch")
     return payload
 
@@ -1107,12 +1119,23 @@ def apply_claude_fabric_entrypoint(home: Path) -> dict[str, object]:
     for key in ("claude_doc", "claude_fabric_skill"):
         _preflight_destination(paths[key], resolved)
     skill = _canonical_claude_fabric_skill()
+    existing_skill = _regular_bytes(paths["claude_fabric_skill"], missing=b"")
+    if existing_skill and existing_skill != skill:
+        old_blob = hashlib.sha1(b"blob " + str(len(existing_skill)).encode("ascii")
+                                 + bytes((0,)) + existing_skill).hexdigest()
+        if old_blob not in CLAUDE_FABRIC_PREVIOUS_BLOB_SHAS:
+            raise OrchestratorPolicyError("Claude Fabric installed Skill changed; refusing replacement")
     original_doc = _regular_bytes(paths["claude_doc"], missing=b"")
     new_doc = _render_claude_fabric_entry_doc(original_doc)
     modified: list[str] = []
     # Install skill before publishing the doc pointer; no identity/credential changes.
     try:
         for key, payload in (("claude_fabric_skill", skill), ("claude_doc", new_doc)):
+            # Re-read the same actual home before replacing either existing file.
+            observed = _regular_bytes(paths[key], missing=b"")
+            original = existing_skill if key == "claude_fabric_skill" else original_doc
+            if observed != original:
+                raise OrchestratorPolicyError("Claude Fabric install source drift; reconcile current home")
             if _atomic_write(paths[key], payload):
                 modified.append(str(paths[key]))
     except OrchestratorPolicyError as exc:
@@ -1198,7 +1221,9 @@ def apply_codex_fabric_entrypoint(home: Path) -> dict[str, object]:
     if (existing and existing != candidate
             and _sha256(existing) != CODEX_FABRIC_LEGACY_SHA256
             and hashlib.sha1(b"blob " + str(len(existing)).encode("ascii")
-                             + bytes((0,)) + existing).hexdigest() != CODEX_FABRIC_PRIOR_BLOB_SHA):
+                             + bytes((0,)) + existing).hexdigest() not in (
+                                 CODEX_FABRIC_PRIOR_BLOB_SHA, CODEX_FABRIC_PREVIOUS_BLOB_SHA,
+                                 CODEX_FABRIC_CWD_PREVIOUS_BLOB_SHA)):
         raise OrchestratorPolicyError("Codex Fabric installed Skill changed; refusing replacement")
     original_doc = _regular_bytes(paths["codex_doc"], missing=b"")
     updated_doc = _render_codex_fabric_entry_doc(original_doc)
