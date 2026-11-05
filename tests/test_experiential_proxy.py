@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import asyncio
-from functools import wraps
+from functools import partial, wraps
 import json
 import time
 
 import httpx
 import pytest
 
+from ops.native_fabric.experiential_proxy import gateway as gateway_module
 from ops.native_fabric.experiential_proxy.gateway import (
     QueueFull,
     QueueExpired,
@@ -466,7 +467,20 @@ async def test_cancelled_queued_asgi_task_leaves_no_waiter_or_upstream_send(tmp_
 
 
 @run_async_test
-async def test_local_status_requires_token_and_reports_no_credentials(tmp_path):
+async def test_local_status_requires_token_and_reports_no_credentials(tmp_path, monkeypatch):
+    # /statusz projects the durable admission window, and this fixture's 70ms
+    # window runs on real wall-clock time: a loaded host can legitimately spend
+    # longer than one window between the admitted /v1/models call and the status
+    # read (scheduler jitter, or this gateway's own durable SQLite commit), so
+    # the credential-projection assertions below would fail on host speed alone.
+    # Drive admission time explicitly like the restart test: the reservation is
+    # then in-window by construction while /statusz auth, the loopback guard and
+    # the queue deadline stay on their real clocks.
+    fake_time = [1000.0]
+    monkeypatch.setattr(
+        gateway_module, "SlidingWindowAdmissions",
+        partial(gateway_module.SlidingWindowAdmissions, clock=lambda: fake_time[0]),
+    )
     app = create_app(settings(tmp_path), transport=httpx.MockTransport(
         lambda req: streamed_json({"ok": True})
     ))
