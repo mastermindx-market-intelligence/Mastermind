@@ -66,7 +66,8 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import date
+import re
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -166,7 +167,9 @@ def _age_days(asof_str: str | None, ref: "date | None" = None) -> int | None:
     if not asof_str:
         return None
     try:
-        asof_date = date.fromisoformat(str(asof_str)[:10])
+        asof_date = _ref_date(asof_str)
+        if asof_date is None:
+            return None
         return ((ref or date.today()) - asof_date).days
     except Exception:  # noqa: BLE001
         return None
@@ -175,14 +178,21 @@ def _age_days(asof_str: str | None, ref: "date | None" = None) -> int | None:
 def _ref_date(asof: str | None) -> "date | None":
     """The reference date for every freshness read, from the caller's decision boundary.
 
-    ``None`` (unparseable or absent ``asof``) means "no bound" — every downstream read falls back
-    to the wall clock, i.e. exactly the pre-asof behaviour."""
-    if not asof:
+    Only ``None`` means unbounded. A supplied ISO calendar date or timestamp must validate
+    completely; malformed input raises instead of selecting current evidence. Timestamps use
+    their stated calendar day, without guessing a timezone or an observation instant."""
+    if asof is None:
         return None
+    if not isinstance(asof, str) or not re.fullmatch(
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}(?:[T ][0-9]{2}:[0-9]{2}"
+        r"(?::[0-9]{2}(?:\.[0-9]+)?)?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])?)?", asof
+    ):
+        raise ValueError("invalid_asof: expected a complete ISO date or timestamp")
     try:
-        return date.fromisoformat(str(asof)[:10])
-    except Exception:  # noqa: BLE001
-        return None
+        return (date.fromisoformat(asof) if len(asof) == 10
+                else datetime.fromisoformat(asof.replace("Z", "+00:00")).date())
+    except ValueError as exc:
+        raise ValueError("invalid_asof: invalid calendar date or timestamp") from exc
 
 
 def _num(v: Any) -> float | None:
@@ -348,6 +358,11 @@ def availability(asof: str | None = None) -> dict:
     rec = {"available": False, "reason": None, "artifact_asof": None,
            "asof": asof, "age_days": None}
     try:
+        ref = _ref_date(asof)
+    except ValueError:
+        rec["reason"] = "invalid_asof"
+        return rec
+    try:
         if not feed_enabled():
             rec["reason"] = "flag_off"
             return rec
@@ -357,7 +372,6 @@ def availability(asof: str | None = None) -> dict:
             return rec
         art_asof = raw.get("asof")
         rec["artifact_asof"] = art_asof
-        ref = _ref_date(asof)
         age = _age_days(art_asof, ref)
         rec["age_days"] = age
         if age is None:
@@ -438,7 +452,9 @@ def plans(asof: str | None = None) -> list[dict]:
             if not _is_equity_ticker(str(p.get("asset") or "").upper().strip()):
                 continue
             norm = _normalize(p, _ref_date(asof))
-            if norm is not None:
+            if norm is not None and not (
+                asof is not None and (norm["age_days"] is None or norm["age_days"] < 0)
+            ):
                 out.append(norm)
         return out
     except Exception as e:  # noqa: BLE001 — fail-open

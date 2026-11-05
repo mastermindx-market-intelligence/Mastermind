@@ -23,8 +23,11 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import date, datetime
 from pathlib import Path
 from typing import Callable
+
+from portfolio.prophet_feed import _ref_date
 
 log = logging.getLogger(__name__)
 
@@ -58,11 +61,15 @@ def _board_admissible(board: dict, asof: str | None) -> bool:
     """
     if asof is None:
         return True
-    board_asof = str((board or {}).get("as_of") or "")[:10]
-    if not board_asof:
-        log.debug("risk_sizing: standout board has no as_of — inadmissible at asof=%s", asof)
+    try:
+        bound = _ref_date(asof)
+        board_asof = _ref_date(board.get("as_of")) if isinstance(board, dict) else None
+    except ValueError:
         return False
-    if board_asof > str(asof)[:10]:
+    if board_asof is None:
+        log.debug("risk_sizing: standout board has no valid as_of — inadmissible at asof=%s", asof)
+        return False
+    if board_asof > bound:
         log.debug("risk_sizing: standout board as_of=%s post-dates asof=%s — inert",
                   board_asof, asof)
         return False
@@ -107,7 +114,11 @@ def _board(asof: str | None) -> tuple[dict, dict]:
     if asof is None:
         _ensure()
         return _CACHE.get("mult") or {}, _CACHE.get("regime") or {}
-    key = str(asof)[:10]
+    try:
+        key = _ref_date(asof).isoformat()
+    except ValueError:
+        log.debug("risk_sizing: invalid_asof — no board/cache admission")
+        return {}, {}
     if key not in _ASOF_CACHE:
         _ASOF_CACHE[key] = _index(key)
     return _ASOF_CACHE[key]
@@ -169,14 +180,23 @@ def _slice_at(series, asof: str | None):
 
     This is the one source in the sizing chain with genuine point-in-time evidence: the store hands
     back a DATE-INDEXED series, so slicing it is a truthful restatement of what was observable,
-    not a guess. Mirrors the existing bot/phase2 idiom (``series[series.index <= asof]``). A series
-    with no usable index degrades to the untouched series rather than raising."""
+    not a guess. Every index value must prove a calendar date; an unusable index or comparison
+    returns None, never the original unbounded series. Integers are not epoch-date evidence."""
     if series is None or asof is None:
         return series
     try:
-        return series[series.index <= str(asof)[:10]]
-    except Exception:  # noqa: BLE001 — an unindexable series is left alone, never fabricated
-        return series
+        bound = _ref_date(asof)
+        mask = []
+        for value in series.index:
+            if isinstance(value, (date, datetime)):
+                value = value.isoformat()
+            day = _ref_date(value)
+            if day is None:
+                return None
+            mask.append(day <= bound)
+        return series[mask]
+    except Exception:  # noqa: BLE001 — unproven bounded observations are unavailable
+        return None
 
 
 def _realized_vol(series, lookback: int = 60, asof: str | None = None) -> float | None:

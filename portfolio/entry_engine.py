@@ -299,10 +299,10 @@ def assess(ticker: str, *, series=None, stockdata: dict | None = None,
     only explicit adverse verdicts as park-worthy). Never raises. ``_use_defaults=False`` keeps the
     call fully offline (tests) even where an injected input is None.
 
-    ``as_of`` is a LABEL stamped into the report. ``pit_asof`` is a BINDING point-in-time boundary:
-    when given, the default Prophet plan is read bounded at it, so a historical assessment cannot
-    pick up a plan state computed after the decision. They are separate because the live run stamps
-    an ``as_of`` without wanting a bound (see ``portfolio.conviction.build``)."""
+    ``as_of`` is a LABEL stamped into the report. ``pit_asof`` bounds only the default Prophet
+    plan; the other current-data defaults remain unbounded. This parameter does not certify a
+    historical assessment. A complete historical conviction.build request is refused; live use
+    retains its labelled current-data contract."""
     t = (ticker or "").upper().strip()
     notes: list[str] = []
     sources: list[str] = []

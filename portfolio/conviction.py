@@ -15,7 +15,7 @@ from pathlib import Path
 
 import bot  # noqa: F401
 
-from portfolio import lenses
+from portfolio import lenses, prophet_feed
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +52,16 @@ class _SizedBook(list):
     data_health: dict | None = None
 
 
+class HistoricalDecisionUnavailable(RuntimeError):
+    """A valid boundary cannot certify this engine's current-only decision inputs."""
+
+    reason = "historical_decision_unsupported"
+
+    def __init__(self, asof: str):
+        self.asof = asof
+        super().__init__(f"{self.reason}: asof={asof}")
+
+
 def _load(rel: str):
     p = _V / rel
     try:
@@ -82,14 +92,18 @@ def _load(rel: str):
 # date (the Prophet emit is stamped 2026-09-16 while the regime date is 2026-09-15). Guessing from
 # the wall clock would silently make live sources inert. So `live=True` (what phase2 passes) means
 # "use current evidence, `asof` is a label" and nothing below changes; the default `live=False`
-# means `asof` BINDS and every rule here applies.
+# means a supplied `asof` BINDS. The partial helpers below honor that boundary, but build()
+# refuses a whole historical decision because its other current-only consumers cannot prove it.
 
 def _artifact_asof(d: dict | None) -> str | None:
     """The date a self-dating artifact says it represents (`as_of` or `asof`), or None."""
     if not isinstance(d, dict):
         return None
-    v = d.get("as_of") or d.get("asof")
-    return str(v)[:10] if v else None
+    try:
+        parsed = prophet_feed._ref_date(d.get("as_of", d.get("asof")))
+        return parsed.isoformat() if parsed is not None else None
+    except ValueError:
+        return None
 
 
 def _snapshot_ok(d: dict | None, asof: str | None, what: str) -> bool:
@@ -99,11 +113,15 @@ def _snapshot_ok(d: dict | None, asof: str | None, what: str) -> bool:
     history."""
     if asof is None:
         return True
+    try:
+        bound = prophet_feed._ref_date(asof)
+    except ValueError:
+        return False
     art = _artifact_asof(d)
     if not art:
         log.debug("conviction: %s has no as_of — inadmissible at asof=%s", what, asof)
         return False
-    if art > str(asof)[:10]:
+    if art > bound.isoformat():
         log.debug("conviction: %s as_of=%s post-dates asof=%s — inert", what, art, asof)
         return False
     return True
@@ -126,9 +144,8 @@ def _bound(fn, asof: str | None):
 
 
 def _information_time(asof: str | None, pit: str | None) -> dict:
-    """The build's honest information-time record: what the decision boundary was, whether it BOUND,
-    and which sources it admitted or refused. Rides out on `data_health` so a historical build that
-    produced a smaller book can say WHY instead of looking like a quiet disagreement. Never raises.
+    """Partial-source admissibility diagnostics, also attached to live build data_health.
+    This does not certify a whole historical decision; build() refuses that request. Never raises.
 
     `asof` is the label the build was given; `pit` is the boundary that actually bound (None on a
     live build, where every source is admitted exactly as before). Shape: ``{asof, bounded,
@@ -138,12 +155,20 @@ def _information_time(asof: str | None, pit: str | None) -> dict:
                  "now_state_admissible": _now_state_ok(pit), "sources": {}}
     def _snap(name: str, rel: str) -> None:
         try:
+            try:
+                prophet_feed._ref_date(pit)
+            except ValueError:
+                rec["sources"][name] = {"admitted": False, "artifact_asof": None,
+                                        "reason": "invalid_asof"}
+                return
             d = _load(rel) or {}
             art = _artifact_asof(d)
             ok = _snapshot_ok(d, pit, name)
             rec["sources"][name] = {
                 "admitted": ok, "artifact_asof": art,
-                "reason": None if ok else ("no_as_of" if not art else "post_dates_asof"),
+                "reason": (None if ok else "post_dates_asof" if art else
+                           "no_as_of" if d.get("as_of", d.get("asof")) is None else
+                           "artifact_asof_unparseable"),
             }
         except Exception:  # noqa: BLE001 — the record is diagnostic; never break a build
             rec["sources"][name] = {"admitted": None, "artifact_asof": None, "reason": "error"}
@@ -151,7 +176,6 @@ def _information_time(asof: str | None, pit: str | None) -> dict:
         _snap("us_standouts", "site/factordata/us_standouts.json")
         _snap("baskets", "site/basketdata/baskets.json")
         try:
-            from portfolio import prophet_feed
             rec["sources"]["prophet"] = prophet_feed.availability(pit)
         except Exception:  # noqa: BLE001
             rec["sources"]["prophet"] = {"available": None, "reason": "error"}
@@ -617,12 +641,11 @@ def build(budget: float, name_cap: float = 0.08,
     appears. `extra_candidates` (additive, optional) carries watchlist promotions back into the
     pool.
 
-    `asof` is the DECISION BOUNDARY and, by default, it BINDS — it is no longer merely a stamp on
-    the W8 entry/context reports. Every upstream source is then admitted only if it can be shown to
-    represent a state at or before it, and the realized-vol window in `risk_sizing.apply` is
-    truncated at it, so replaying the same historical decision returns the same book (or the same
-    explicit inert sources) however much later the replay runs. See the INFORMATION TIME block at
-    the top of this module.
+    A supplied `asof` with `live=False` is validated, then raises
+    HistoricalDecisionUnavailable before any current-source read. Candidate, Prophet and sizing
+    helpers have partial temporal bounds, but lenses, entry/context and other consumers do not
+    supply a complete historical decision contract. No successful empty book substitutes for it.
+    Malformed supplied boundaries raise ValueError; only None selects the unbounded path.
 
     `live=True` declares the opposite contract: `asof` is a LABEL for the trading day being decided
     and the build should use the best CURRENT evidence. That is what the daily run passes, and it
@@ -631,6 +654,9 @@ def build(budget: float, name_cap: float = 0.08,
     must read (the Macro lanes publish on different cadences), so any wall-clock guess would
     silently make the live Prophet feed and standout board inert.
     """
+    if not live and asof is not None:
+        boundary = prophet_feed._ref_date(asof)
+        raise HistoricalDecisionUnavailable(boundary.isoformat())
     held = {h.upper() for h in (held or set())}
     _w8 = _entry_gate_enabled()
     passed = []

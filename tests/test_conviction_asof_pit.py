@@ -1,33 +1,11 @@
-"""POINT-IN-TIME honesty for a historical ``conviction.build(asof=...)`` — the split-clock guard.
+"""Partial source bounds, explicit whole-decision refusal, and live compatibility.
 
-THE DEFECT THESE PIN
---------------------
-``build(..., asof=...)`` advertises a historical decision boundary, but every upstream data read
-was wired to "now": ``candidates()`` is zero-arg (so ``prophet_feed.candidate_tickers()`` reads the
-CURRENT artifact and measures staleness against ``date.today()``), and ``risk_sizing.apply`` had no
-``asof`` at all (latest standout board + a realized-vol window taken from the END of whatever price
-series exists today). So the same historical build returned different books depending on WHEN the
-replay ran.
-
-THE CONTRACT THEY ENFORCE
--------------------------
-A historical build may consume only information legitimately available at its ``asof``:
-
-  * PRICE SERIES (date-addressable -> true point-in-time): sliced strictly at ``<= asof``.
-  * PROPHET INDEX + MACRO STANDOUT BOARD (a single CURRENT-ONLY file that self-dates): consumable
-    only when the artifact's own ``asof``/``as_of`` is ``<= asof``; a later artifact is INERT with
-    an explicit unavailable reason. It is NEVER re-interpreted plan-by-plan into a pseudo-history —
-    a plan's phase/action/conviction is recomputed at the index's own asof, so filtering by
-    ``_signal_date`` would import post-boundary judgment about a pre-boundary plan.
-  * ``live=True`` (what ``bot/phase2`` passes) declares the opposite contract — ``asof`` is a LABEL
-    and the build uses current evidence — and is byte-identical to the pre-asof behaviour. It has to
-    be DECLARED: the live run supplies an ``asof`` too, and that ``asof`` is routinely older than the
-    artifacts it must read (the Macro lanes publish on different cadences: regime 2026-09-15 vs the
-    Prophet emit 2026-09-16), so any wall-clock guess would silently kill live sources.
-
-These drive the REAL ``conviction.build`` → ``candidates()`` → ``prophet_feed`` → ``risk_sizing``
-chain. Only the ARTIFACTS on disk, the price store, and the wall clock are substituted — the
-substituted things ARE the variables under test. No method-level stub short-circuits the chain.
+The original PIT fixture disables entry/context and substitutes a PASS lenses result. It tests
+component clocks and current-build mechanics, not a complete historical decision. Bounded
+candidate/Prophet/sizing tests below call those actual owners directly. Whole-build tests instead
+require typed refusal before any current read; a successful empty book is not acceptable.
+Only None is unbounded. Valid dates/timestamps use calendar-day semantics, and malformed evidence
+cannot become current evidence. Live=True remains an explicitly labelled current-source build.
 """
 from __future__ import annotations
 
@@ -110,8 +88,8 @@ def pit(tmp_path, monkeypatch):
     """Quiesce every candidate source EXCEPT the one under test, and point all three modules at an
     empty tmp vendor root. Returns the root so a test can write the artifact it is probing.
 
-    Only leaf DATA SOURCES are neutralized — ``candidates()``, ``prophet_feed.candidate_tickers()``,
-    ``build()`` and ``risk_sizing.apply()`` all run for real."""
+    Entry/context is disabled and lenses is a PASS stub for LIVE mechanical controls only.
+    Bounded component tests call their real owner; this fixture cannot certify historical builds."""
     root = tmp_path / "vendor" / "macro"
     (root / "site").mkdir(parents=True, exist_ok=True)
 
@@ -156,19 +134,20 @@ def _freeze_today(monkeypatch, iso: str) -> None:
 
 
 def _book(**kw):
-    """Run a real build and return {ticker: weight}. Bound (point-in-time) unless ``live=True``."""
+    """Run the real live/unbounded build with the explicit mechanical fixture above."""
     sized, _rej = conviction.build(0.30, name_cap=0.08, held=set(), **kw)
     return {p["ticker"]: p["weight"] for p in sized}
 
 
-def _infotime(**kw):
-    """The build's own information-time record (the honest 'what was I allowed to see')."""
-    sized, _rej = conviction.build(0.30, name_cap=0.08, held=set(), **kw)
-    return (sized.data_health or {}).get("information_time") or {}
+def _component_weights(tickers, *, asof):
+    """Exercise real sizing on explicit synthetic positions, not a historical decision."""
+    positions = [{"ticker": t, "weight": 0.04} for t in tickers]
+    result = risk_sizing.apply(positions, 0.30, name_cap=0.08, asof=asof)
+    return {p["ticker"]: p["weight"] for p in result}
 
 
 # ── 1. a LATER Prophet artifact must not enter a historical candidate set ────────────────────────
-def test_future_prophet_artifact_cannot_seed_a_historical_build(pit, monkeypatch):
+def test_future_prophet_artifact_cannot_seed_bounded_candidates(pit, monkeypatch):
     """Discriminator 1: a July decision reading a SEPTEMBER artifact must land exactly where a July
     decision reading NO artifact lands — i.e. the later file contributed nothing at all.
 
@@ -178,12 +157,12 @@ def test_future_prophet_artifact_cannot_seed_a_historical_build(pit, monkeypatch
     _freeze_today(monkeypatch, "2026-09-18")
 
     prophet_feed._reset_cache()
-    no_artifact = _book(asof=ASOF)                        # nothing on disk at all
+    no_artifact = conviction.candidates(ASOF)              # nothing on disk at all
 
     _write_prophet(pit, asof="2026-09-16", plans=[_plan("AAAA", signal_date="2026-07-15"),
                                                   _plan("BBBB", signal_date="2026-09-11")])
     prophet_feed._reset_cache()
-    with_future = _book(asof=ASOF)
+    with_future = conviction.candidates(ASOF)
 
     assert "BBBB" not in with_future, (
         "a plan signed 2026-09-11 entered a 2026-07-20 decision — future Prophet artifact leaked "
@@ -193,27 +172,26 @@ def test_future_prophet_artifact_cannot_seed_a_historical_build(pit, monkeypatch
         f"{with_future}")
 
 
-def test_admissible_prophet_artifact_still_seeds_the_same_historical_build(pit, monkeypatch):
+def test_admissible_prophet_artifact_still_seeds_bounded_candidates(pit, monkeypatch):
     """The mirror of the guard: a PRE-boundary artifact must still be consumed, so the refusal is a
     boundary rule and not a blanket disabling of Prophet under ``asof``."""
     _freeze_today(monkeypatch, "2026-09-18")
     _write_prophet(pit, asof="2026-07-19", plans=[_plan("AAAA", signal_date="2026-07-15")])
     prophet_feed._reset_cache()
-    assert "AAAA" in _book(asof=ASOF), (
+    assert "AAAA" in conviction.candidates(ASOF), (
         "an artifact dated the day BEFORE the decision was refused — the boundary rule has become "
         "a blanket refusal")
 
 
-def test_build_reports_why_a_source_was_refused(pit, monkeypatch):
-    """The refusal is EXPLICIT, not silent: a smaller historical book must be explainable from the
-    build's own data_health record."""
+def test_partial_source_diagnostics_report_refusal(pit, monkeypatch):
+    """Component unavailability is explicit; it is not a successful historical build."""
     _freeze_today(monkeypatch, "2026-09-18")
     _write_prophet(pit, asof="2026-09-16", plans=[_plan("BBBB", signal_date="2026-09-11")])
     _write_standouts(pit, as_of="2026-09-14", rows=[("ZZZZ", 1.6)])
     prophet_feed._reset_cache()
     risk_sizing.reset_cache()
 
-    rec = _infotime(asof=ASOF)
+    rec = conviction._information_time(ASOF, ASOF)
     assert rec.get("bounded") is True and rec.get("asof") == ASOF
     assert rec["sources"]["prophet"]["reason"] == "future_artifact", rec["sources"]["prophet"]
     assert rec["sources"]["us_standouts"] == {
@@ -232,7 +210,7 @@ def test_future_prophet_artifact_is_inert_not_silently_partial(pit, monkeypatch)
         _plan("BBBB", signal_date="2026-09-11"),
     ])
     prophet_feed._reset_cache()
-    assert _book(asof=ASOF) == {}, (
+    assert conviction.candidates(ASOF) == [], (
         "an artifact dated after the decision boundary was mined for 'old enough' plans; the plan "
         "STATE in that file is recomputed at the index asof, so no plan in it is point-in-time")
 
@@ -245,11 +223,11 @@ def test_prophet_staleness_is_measured_against_asof_not_wall_clock(pit, monkeypa
 
     _freeze_today(monkeypatch, "2026-07-20")              # replayed the next morning
     prophet_feed._reset_cache()
-    same_day = _book(asof=ASOF)
+    same_day = conviction.candidates(ASOF)
 
     _freeze_today(monkeypatch, "2026-09-18")              # replayed two months later
     prophet_feed._reset_cache()
-    much_later = _book(asof=ASOF)
+    much_later = conviction.candidates(ASOF)
 
     assert same_day == much_later, (
         f"the same historical decision changed with the wall clock: {same_day} (replayed "
@@ -266,7 +244,7 @@ def test_plan_age_cut_is_measured_against_asof_not_wall_clock(pit, monkeypatch):
     for wall in ("2026-07-20", "2026-09-18", "2027-01-05"):
         _freeze_today(monkeypatch, wall)
         prophet_feed._reset_cache()
-        assert "AAAA" in _book(asof=ASOF), (
+        assert "AAAA" in conviction.candidates(ASOF), (
             f"plan aged out of a 2026-07-20 decision when replayed on {wall} — the age cut is "
             "keyed on the wall clock, not the decision boundary")
 
@@ -299,11 +277,11 @@ def test_inverse_vol_sizing_ignores_post_asof_price_observations(pit, monkeypatc
                 "WILD": _series(start, wild + tail_flat_wild)}.get(t)
 
     monkeypatch.setattr(risk_sizing, "_default_price_series", _pit_only)
-    truncated = _book(asof=ASOF)
+    truncated = _component_weights(["CALM", "WILD"], asof=ASOF)
 
     monkeypatch.setattr(risk_sizing, "_default_price_series", _with_future)
     risk_sizing.reset_cache()
-    extended = _book(asof=ASOF)
+    extended = _component_weights(["CALM", "WILD"], asof=ASOF)
 
     assert truncated, "fixture did not produce a sized book — the discriminator would be vacuous"
     assert truncated == extended, (
@@ -351,23 +329,23 @@ def test_latest_standout_board_cannot_masquerade_as_historical_evidence(pit, mon
     prophet_feed._reset_cache()
     risk_sizing.reset_cache()
     monkeypatch.setattr(risk_sizing, "_default_price_series", lambda t: None)
-    no_board = _book(asof=ASOF)                            # no board on disk at all
+    no_board = _component_weights(["AAAA", "CCCC"], asof=ASOF)
 
     # the nightly emit: different membership, different multipliers, different gross dial — all of
     # it published AFTER the decision being replayed
     _write_standouts(pit, as_of="2026-09-14", rows=[("AAAA", 0.4), ("ZZZZ", 1.6)], gross_mult=0.5)
     prophet_feed._reset_cache()
     risk_sizing.reset_cache()
-    with_future = _book(asof=ASOF)
+    with_future = _component_weights(["AAAA", "CCCC"], asof=ASOF)
 
-    assert "ZZZZ" not in with_future, (
+    assert "ZZZZ" not in conviction.candidates(ASOF), (
         f"a name off the SEPTEMBER buy board entered a July decision (book={with_future})")
     assert with_future == no_board, (
         f"the latest standout board silently re-sized a historical book: {no_board} -> "
         f"{with_future}")
 
 
-def test_admissible_standout_board_still_sizes_a_historical_build(pit, monkeypatch):
+def test_admissible_standout_board_still_sizes_bounded_positions(pit, monkeypatch):
     """Mirror: a board dated BEFORE the decision must still apply its multipliers, so the guard is
     a boundary rule rather than a blanket disabling of the board lens."""
     _freeze_today(monkeypatch, "2026-09-18")
@@ -377,31 +355,39 @@ def test_admissible_standout_board_still_sizes_a_historical_build(pit, monkeypat
     prophet_feed._reset_cache()
     risk_sizing.reset_cache()
     monkeypatch.setattr(risk_sizing, "_default_price_series", lambda t: None)
-    book = _book(asof=ASOF)
+    book = _component_weights(["AAAA", "CCCC"], asof=ASOF)
     assert book.get("AAAA", 0) > book.get("CCCC", 0), (
         f"a pre-boundary board stopped re-weighting the book: {book}")
 
 
 # ── 5. the whole-chain determinism property ─────────────────────────────────────────────────────
-def test_historical_build_is_reproducible_across_wall_clock_and_current_store(pit, monkeypatch):
-    """The acceptance property, end to end: replay the SAME historical decision after the wall
-    clock moved AND every current artifact was replaced. Same result, or the same explicit
-    unavailable result — never a silently different book."""
-    _write_prophet(pit, asof="2026-07-19", plans=[_plan("AAAA", signal_date="2026-07-15")])
-    _write_standouts(pit, as_of="2026-07-19", rows=[("AAAA", 1.2)])
-    _freeze_today(monkeypatch, "2026-07-20")
-    prophet_feed._reset_cache()
-    risk_sizing.reset_cache()
-    monkeypatch.setattr(risk_sizing, "_default_price_series", lambda t: None)
-    first = _book(asof=ASOF)
+def test_bounded_build_refusal_survives_current_store_and_clock_changes(pit, monkeypatch):
+    """Later risk/stockdata/price evidence cannot produce a labelled historical decision."""
+    reads = []
 
-    for wall in ("2026-09-18", "2026-12-01", "2027-06-30"):
+    def forbidden(*args, **kwargs):
+        reads.append((args, kwargs))
+        raise AssertionError("current evidence was read before historical refusal")
+
+    monkeypatch.setenv("MASTERMIND_ENTRY_GATE", "1")
+    monkeypatch.setattr(conviction, "candidates", forbidden)
+    monkeypatch.setattr(lenses, "full", forbidden)
+    monkeypatch.setattr(conviction, "_load", forbidden)
+    monkeypatch.setattr(risk_sizing, "_default_price_series", forbidden)
+    for wall, state, last in (("2026-07-20", "normal", 100),
+                              ("2026-09-18", "risk_off", 10),
+                              ("2027-06-30", "normal", 500)):
         _freeze_today(monkeypatch, wall)
-        prophet_feed._reset_cache()
-        risk_sizing.reset_cache()
-        assert _book(asof=ASOF) == first, (
-            f"the same historical decision, same store, produced a different book when replayed "
-            f"on {wall}")
+        for rel, data in (("data/regime/latest.json", {"risk_radar": {"state": state}}),
+                          ("site/stockdata/HELD.json", {"last": last})):
+            p = pit / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(data))
+        with pytest.raises(RuntimeError, match="historical_decision_unsupported") as exc:
+            conviction.build(0.30, asof=ASOF, held={"HELD"}, extra_candidates=["PROMOTED"])
+        assert exc.value.reason == "historical_decision_unsupported"
+        assert exc.value.asof == ASOF
+    assert reads == []
 
 
 # ── 6. the declared LIVE contract is byte-identical to the pre-asof behaviour ────────────────────
@@ -425,11 +411,10 @@ def test_live_contract_still_consumes_current_evidence(pit, monkeypatch):
         "the live daily run lost its Prophet candidate because the regime date it labels the book "
         f"with is older than the nightly emit (book={live})")
 
-    # and the same call WITHOUT the declaration is point-in-time: the later Prophet emit is refused
-    # while the standout board (2026-09-14, genuinely pre-boundary) is still admitted.
+    # Partial-source diagnostics retain their boundary meaning; they cannot certify a whole build.
     prophet_feed._reset_cache()
     risk_sizing.reset_cache()
-    rec = _infotime(asof="2026-09-15")
+    rec = conviction._information_time("2026-09-15", "2026-09-15")
     assert rec["sources"]["prophet"]["reason"] == "future_artifact", rec["sources"]["prophet"]
     assert rec["sources"]["us_standouts"]["admitted"] is True, rec["sources"]["us_standouts"]
 
@@ -471,3 +456,182 @@ def test_live_build_reports_every_source_as_admitted(pit, monkeypatch):
     assert rec["sources"]["us_standouts"]["admitted"] is True, rec["sources"]["us_standouts"]
     assert rec["sources"]["prophet"]["available"] is True, rec["sources"]["prophet"]
     assert rec["sources"]["thesis_ledger"]["reason"] is None, rec["sources"]["thesis_ledger"]
+
+
+@pytest.mark.parametrize("gate", ["0", "1"])
+@pytest.mark.parametrize("bound", [ASOF, date.today().isoformat(), "2026-07-20T23:59:00+05:30"])
+@pytest.mark.parametrize("names", [False, True])
+def test_bounded_build_never_returns_successful_empty_targets(monkeypatch, gate, bound, names):
+    reads = []
+
+    def forbidden(*args, **kwargs):
+        reads.append((args, kwargs))
+        raise AssertionError("bounded build reached a current consumer")
+
+    monkeypatch.setenv("MASTERMIND_ENTRY_GATE", gate)
+    monkeypatch.setattr(conviction, "candidates", forbidden)
+    monkeypatch.setattr(conviction, "_entry_gate_enabled", forbidden)
+    monkeypatch.setattr(lenses, "full", forbidden)
+    with pytest.raises(RuntimeError, match="historical_decision_unsupported") as exc:
+        conviction.build(0.30, asof=bound, held={"HELD"} if names else set(),
+                         extra_candidates=["PROMOTED"] if names else [])
+    assert exc.value.reason == "historical_decision_unsupported"
+    assert exc.value.asof == bound[:10]
+    assert reads == []
+
+
+_BAD_OFFSETS = ["2026-07-20T12:00:00+00:99", "2026-07-20T12:00:00-01:60",
+                "2026-07-20T12:00:00+24:00"]
+_BAD_BOUNDS = ["", "0", 0, 20260720, False, "2026-02-30", "2026-07-20junk",
+               "2026-07-20T25:00:00", " 2026-07-20", "2026-07-20\n"] + _BAD_OFFSETS
+
+
+@pytest.mark.parametrize("bound", _BAD_BOUNDS)
+def test_invalid_build_boundary_is_not_unbounded(monkeypatch, bound):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("invalid boundary reached current reads")
+
+    monkeypatch.setattr(conviction, "_entry_gate_enabled", forbidden)
+    monkeypatch.setattr(conviction, "candidates", forbidden)
+    with pytest.raises(ValueError, match="invalid_asof"):
+        conviction.build(0.30, asof=bound)
+
+
+@pytest.mark.parametrize("bound", _BAD_BOUNDS)
+def test_invalid_bound_cannot_use_current_artifact_or_primed_board_cache(pit, monkeypatch, bound):
+    _freeze_today(monkeypatch, ASOF)
+    _write_prophet(pit, asof=ASOF, plans=[_plan("AAAA", signal_date=ASOF)])
+    _write_standouts(pit, as_of=ASOF, rows=[("AAAA", 1.6)])
+    assert risk_sizing.vol_mult("AAAA", ASOF) == 1.6  # prime the valid-date cache
+    assert prophet_feed.plan_for("AAAA", ASOF) is not None
+    assert prophet_feed.availability(bound)["reason"] == "invalid_asof"
+    assert prophet_feed.candidate_tickers(bound) == []
+    assert prophet_feed.plan_for("AAAA", bound) is None
+    assert conviction._us_standouts(asof=bound) == []
+    assert risk_sizing.vol_mult("AAAA", bound) == 1.0
+    assert risk_sizing.on_board("AAAA", bound) is False
+    # None, in contrast to invalid supplied values, retains the actual live/current path.
+    assert prophet_feed.plan_for("AAAA", None) is not None
+    assert risk_sizing.vol_mult("AAAA", None) == 1.6
+
+
+@pytest.mark.parametrize("stamp", [None, "", "0", 0, "2026-02-30", "2026-07-19garbage"] + _BAD_OFFSETS)
+def test_unprovable_snapshot_dates_are_unavailable(pit, monkeypatch, stamp):
+    _freeze_today(monkeypatch, ASOF)
+    _write_prophet(pit, asof=stamp, plans=[_plan("AAAA", signal_date=ASOF)])
+    _write_standouts(pit, as_of=stamp, rows=[("AAAA", 1.6)])
+    assert prophet_feed.availability(ASOF)["reason"] == "artifact_asof_unparseable"
+    assert conviction.candidates(ASOF) == []
+    assert risk_sizing.vol_mult("AAAA", ASOF) == 1.0
+    rec = conviction._information_time(ASOF, ASOF)
+    assert rec["sources"]["us_standouts"]["reason"] == (
+        "no_as_of" if stamp is None else "artifact_asof_unparseable")
+
+
+@pytest.mark.parametrize("stamp", ["2026-07-19", ASOF, "2026-07-20T23:59:59Z",
+                                    "2026-07-20 12:34:56.123+05:30"])
+def test_valid_calendar_dates_and_timestamps_admit_partial_sources(pit, monkeypatch, stamp):
+    _freeze_today(monkeypatch, "2027-01-01")
+    _write_prophet(pit, asof=stamp, plans=[_plan("AAAA", signal_date=stamp)])
+    _write_standouts(pit, as_of=stamp, rows=[("AAAA", 1.6)])
+    assert prophet_feed.availability(ASOF)["available"] is True
+    assert prophet_feed.plan_for("AAAA", ASOF) is not None
+    assert "AAAA" in conviction.candidates(ASOF)
+    assert risk_sizing.vol_mult("AAAA", ASOF) == 1.6
+
+
+@pytest.mark.parametrize("stamp", [None, "", "0", 0, "2026-02-30", "2026-07-19junk",
+                                    "2026-07-21"] + _BAD_OFFSETS)
+def test_bounded_plan_geometry_requires_a_provable_signal_date(pit, monkeypatch, stamp):
+    _freeze_today(monkeypatch, ASOF)
+    plan = _plan("AAAA", signal_date=ASOF)
+    plan["_signal_date"] = stamp
+    _write_prophet(pit, asof=ASOF, plans=[plan])
+    assert prophet_feed.availability(ASOF)["available"] is True
+    assert prophet_feed.plans(ASOF) == []
+    assert prophet_feed.plan_for("AAAA", ASOF) is None
+    # The original current-plan geometry contract is preserved, including unknown age.
+    assert prophet_feed.plan_for("AAAA") is not None
+
+
+@pytest.mark.parametrize("kind", ["numeric", "malformed", "nat", "mixed"])
+def test_unprovable_price_index_never_falls_back_to_full_series(kind):
+    s = _series("2026-03-02", [100.0 + 8.0 * (-1) ** i for i in range(101)])
+    if kind == "numeric":
+        s.index = range(len(s))
+    elif kind == "malformed":
+        s.index = ["2026-07-19junk"] * len(s)
+    elif kind == "nat":
+        s.index = pd.DatetimeIndex([pd.NaT] * len(s))
+    else:
+        s.index = [*s.index[:-1], 0]
+    assert risk_sizing._slice_at(s, ASOF) is None
+    assert risk_sizing._realized_vol(s, asof=ASOF) is None
+    assert risk_sizing._slice_at(s, None) is s
+    assert risk_sizing._realized_vol(s) is not None
+
+
+def test_unusable_index_and_selection_are_unavailable():
+    class BrokenIndex:
+        def __iter__(self):
+            raise TypeError("index cannot prove dates")
+
+    class Series:
+        index = BrokenIndex()
+
+    assert risk_sizing._slice_at(Series(), ASOF) is None
+
+    class BrokenSelection:
+        index = [ASOF]
+
+        def __getitem__(self, key):
+            raise TypeError("selection unavailable")
+
+    assert risk_sizing._slice_at(BrokenSelection(), ASOF) is None
+
+
+def test_dated_price_slice_preserves_calendar_day_and_rejects_bad_bound():
+    s = pd.Series([100.0, 101.0, 102.0], index=pd.DatetimeIndex([
+        "2026-07-19T23:00:00+02:00", "2026-07-20T23:00:00+02:00", "2026-07-21T00:00:00+02:00"]))
+    assert list(risk_sizing._slice_at(s, ASOF)) == [100.0, 101.0]
+    for bound in _BAD_BOUNDS:
+        assert risk_sizing._slice_at(s, bound) is None
+
+
+def test_actual_flagship_wrapper_cannot_queue_targets_after_failure():
+    """Execute the actual wrapper AST with inert injected imports/run, never the portfolio engine."""
+    import ast
+    import builtins
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    path = Path(__file__).resolve().parents[1] / "bot" / "phase2.py"
+    source = ast.parse(path.read_text())
+    fn = next(n for n in source.body if isinstance(n, ast.FunctionDef) and n.name == "run_flagship")
+    for archived in (False, True):
+        calls = []
+
+        def failed_run(**kwargs):
+            calls.append("run")
+            raise RuntimeError("historical_decision_unsupported")
+
+        def forbidden_pending(*args, **kwargs):
+            calls.append("pending_target")
+            raise AssertionError("target read after failed decision")
+
+        fixture = SimpleNamespace(
+            registry=SimpleNamespace(is_archived=lambda name: archived,
+                                     archived_run_result=lambda *args: {"archived": True}),
+            paper_account=SimpleNamespace(load_pending_target=forbidden_pending),
+        )
+
+        def injected_import(name, *args, **kwargs):
+            assert name == "portfolio", name
+            return fixture
+
+        scope = {"run": failed_run, "__builtins__": {**vars(builtins), "__import__": injected_import}}
+        exec(compile(ast.Module(body=[fn], type_ignores=[]), str(path), "exec"), scope)
+        result = scope["run_flagship"](asof=ASOF)
+        assert result["decided"] is False and result["queued_for_open"] is False
+        assert result["brain"]["ok"] is False and result["holdings"] == 0
+        assert calls == ([] if archived else ["run"])
