@@ -1,0 +1,462 @@
+{
+  "catalog": {
+    "captured_tools": 24,
+    "file": "research/evidence/claude_browser_mcp_tools_0_0_79.json",
+    "sha256": "3f4e905e70b558402d8e6c5876e00fd183e41c974f64dedebac2ae3d6134d4a7",
+    "source": "Microsoft Playwright MCP @playwright/mcp 0.0.79 tools/list; Apache-2.0 dependency"
+  },
+  "historical_unsafe_witness": {
+    "parent_consumed": true,
+    "raw_receipt_ref": "/Volumes/Mastermind/agent-evidence/claude-browser-fleet-client-20260915-sol-001/native-child-ceiling-r1.json",
+    "raw_receipt_sha256": "6316d88a645d1b24276caf99090e861f6f6ee075487e19fb902d371007ca46b2",
+    "source_sha256": "6e5e6dc6e10400d3ba7f57a5129e1c945020e6229c6372c7f5594dded3f4ab81",
+    "status": "FAIL",
+    "submission_present": true
+  },
+  "limits": [
+    "Local deterministic model-protocol fixture, not native Anthropic account admission.",
+    "Catalog snapshot is replay input, not live enrollment.",
+    "No production B1 resource, full UID sweep or browser-egress-firewall proof.",
+    "No Desktop, fleet transport, credential use/save or real provider-surface acceptance."
+  ],
+  "native_cases": [
+    {
+      "browser_tool_results_consumed": 7,
+      "case": "direct",
+      "cli_version": "2.1.259 (Claude Code)",
+      "exit_code": 0,
+      "image_receipts": [
+        {
+          "bytes": 21781,
+          "media_type": "image/png",
+          "sha256": "7dcbb05a7cc01d284b19d2f85f4d15d74448afda0f97bdc24d14845094b45a6f"
+        }
+      ],
+      "native_subagent_stats": {
+        "by_type": {},
+        "completed": 0,
+        "failed": 0,
+        "killed": {
+          "parent": 0,
+          "system": 0,
+          "user": 0
+        },
+        "max_depth": 0,
+        "refused": {
+          "budget": 0,
+          "concurrency_limit": 0,
+          "depth_limit": 0
+        },
+        "requested": {
+          "background": 0,
+          "foreground": 0,
+          "unset": 0
+        },
+        "spawned": 0,
+        "spawned_by_subagents": 0,
+        "started_in_background": 0
+      },
+      "observed_toolsets": {
+        "leaf": [],
+        "parent": [
+          [
+            "mcp__fixtureBrowser__browser_click",
+            "mcp__fixtureBrowser__browser_close",
+            "mcp__fixtureBrowser__browser_fill_form",
+            "mcp__fixtureBrowser__browser_navigate",
+            "mcp__fixtureBrowser__browser_snapshot",
+            "mcp__fixtureBrowser__browser_take_screenshot",
+            "mcp__fixtureBrowser__browser_wait_for"
+          ]
+        ]
+      },
+      "owned_process_group_absent": true,
+      "parent_consumed": false,
+      "projected_denied_tools": [
+        "mcp__fixtureBrowser__browser_console_messages",
+        "mcp__fixtureBrowser__browser_drag",
+        "mcp__fixtureBrowser__browser_drop",
+        "mcp__fixtureBrowser__browser_evaluate",
+        "mcp__fixtureBrowser__browser_file_upload",
+        "mcp__fixtureBrowser__browser_find",
+        "mcp__fixtureBrowser__browser_handle_dialog",
+        "mcp__fixtureBrowser__browser_hover",
+        "mcp__fixtureBrowser__browser_navigate_back",
+        "mcp__fixtureBrowser__browser_network_request",
+        "mcp__fixtureBrowser__browser_network_requests",
+        "mcp__fixtureBrowser__browser_press_key",
+        "mcp__fixtureBrowser__browser_resize",
+        "mcp__fixtureBrowser__browser_run_code_unsafe",
+        "mcp__fixtureBrowser__browser_select_option",
+        "mcp__fixtureBrowser__browser_tabs",
+        "mcp__fixtureBrowser__browser_type"
+      ],
+      "raw_receipt_ref": "/Volumes/Mastermind/agent-evidence/claude-browser-fleet-client-20260915-sol-001/release-direct-01.json",
+      "raw_receipt_sha256": "336a53c7adf9241ec836d9dabaf8afe346d3fcb996f32e01561a362f0ed2d802",
+      "sdk_version": null,
+      "snapshot_consumed": true,
+      "source_projection_sha256": "27303edb5d1c65c47be5aa1af5b3b4d1bb8b03de7aed42517bfaa00a156852d1",
+      "source_sha256": "0443b2862f6673631a2eae4dc00f0ecb5a97902ea8518846cb22199de4cfce1d",
+      "status": "PASS",
+      "submission": {
+        "body_keydown_count": 0,
+        "char_count": 936,
+        "input_event_count": 49,
+        "tab_count": 0,
+        "text_integrity": true,
+        "text_sha256": "0c8227706057fb07034ec91e7765fc192b35eb96abfdc52e07f0928c8a701e66"
+      },
+      "timed_out": false,
+      "tool_catalog_sha256": "3f4e905e70b558402d8e6c5876e00fd183e41c974f64dedebac2ae3d6134d4a7"
+    },
+    {
+      "browser_tool_results_consumed": 7,
+      "case": "scoped-child",
+      "cli_version": "2.1.259 (Claude Code)",
+      "exit_code": 0,
+      "image_receipts": [
+        {
+          "bytes": 22315,
+          "media_type": "image/png",
+          "sha256": "d2439b14f71480192812eea3b023b422e5a1e3816ba3868b34355c1dd9d00a51"
+        }
+      ],
+      "native_subagent_stats": {
+        "by_type": {
+          "browser-tester": 1
+        },
+        "completed": 1,
+        "failed": 0,
+        "killed": {
+          "parent": 0,
+          "system": 0,
+          "user": 0
+        },
+        "max_depth": 1,
+        "refused": {
+          "budget": 0,
+          "concurrency_limit": 0,
+          "depth_limit": 0
+        },
+        "requested": {
+          "background": 0,
+          "foreground": 0,
+          "unset": 1
+        },
+        "spawned": 1,
+        "spawned_by_subagents": 0,
+        "started_in_background": 0
+      },
+      "observed_toolsets": {
+        "leaf": [
+          [
+            "mcp__fixtureBrowser__browser_close",
+            "mcp__fixtureBrowser__browser_fill_form",
+            "mcp__fixtureBrowser__browser_navigate",
+            "mcp__fixtureBrowser__browser_take_screenshot",
+            "mcp__fixtureBrowser__browser_snapshot",
+            "mcp__fixtureBrowser__browser_click",
+            "mcp__fixtureBrowser__browser_wait_for"
+          ]
+        ],
+        "parent": [
+          [
+            "Agent"
+          ]
+        ]
+      },
+      "owned_process_group_absent": true,
+      "parent_consumed": true,
+      "projected_denied_tools": [
+        "mcp__fixtureBrowser__browser_console_messages",
+        "mcp__fixtureBrowser__browser_drag",
+        "mcp__fixtureBrowser__browser_drop",
+        "mcp__fixtureBrowser__browser_evaluate",
+        "mcp__fixtureBrowser__browser_file_upload",
+        "mcp__fixtureBrowser__browser_find",
+        "mcp__fixtureBrowser__browser_handle_dialog",
+        "mcp__fixtureBrowser__browser_hover",
+        "mcp__fixtureBrowser__browser_navigate_back",
+        "mcp__fixtureBrowser__browser_network_request",
+        "mcp__fixtureBrowser__browser_network_requests",
+        "mcp__fixtureBrowser__browser_press_key",
+        "mcp__fixtureBrowser__browser_resize",
+        "mcp__fixtureBrowser__browser_run_code_unsafe",
+        "mcp__fixtureBrowser__browser_select_option",
+        "mcp__fixtureBrowser__browser_tabs",
+        "mcp__fixtureBrowser__browser_type"
+      ],
+      "raw_receipt_ref": "/Volumes/Mastermind/agent-evidence/claude-browser-fleet-client-20260915-sol-001/release-scoped-child-01.json",
+      "raw_receipt_sha256": "202c7d3cd1132e30dc815f658849058163faba8ab454c9b30550aecdc65f87a5",
+      "sdk_version": null,
+      "snapshot_consumed": true,
+      "source_projection_sha256": "27303edb5d1c65c47be5aa1af5b3b4d1bb8b03de7aed42517bfaa00a156852d1",
+      "source_sha256": "0443b2862f6673631a2eae4dc00f0ecb5a97902ea8518846cb22199de4cfce1d",
+      "status": "PASS",
+      "submission": {
+        "body_keydown_count": 0,
+        "char_count": 936,
+        "input_event_count": 49,
+        "tab_count": 0,
+        "text_integrity": true,
+        "text_sha256": "68b9e381464c47f2358e00be502e5ea2de0a773efe664e85bd274535c883c332"
+      },
+      "timed_out": false,
+      "tool_catalog_sha256": "3f4e905e70b558402d8e6c5876e00fd183e41c974f64dedebac2ae3d6134d4a7"
+    },
+    {
+      "browser_tool_results_consumed": 7,
+      "case": "sdk",
+      "cli_version": "2.1.259 (Claude Code)",
+      "exit_code": 0,
+      "image_receipts": [
+        {
+          "bytes": 22231,
+          "media_type": "image/png",
+          "sha256": "d586eab4674ee61c5f25e67220150d3fcbe524247fd28238118772f8a58a0e42"
+        }
+      ],
+      "native_subagent_stats": null,
+      "observed_toolsets": {
+        "leaf": [],
+        "parent": [
+          [
+            "mcp__fixtureBrowser__browser_click",
+            "mcp__fixtureBrowser__browser_close",
+            "mcp__fixtureBrowser__browser_fill_form",
+            "mcp__fixtureBrowser__browser_navigate",
+            "mcp__fixtureBrowser__browser_snapshot",
+            "mcp__fixtureBrowser__browser_take_screenshot",
+            "mcp__fixtureBrowser__browser_wait_for"
+          ]
+        ]
+      },
+      "owned_process_group_absent": true,
+      "parent_consumed": false,
+      "projected_denied_tools": [
+        "mcp__fixtureBrowser__browser_console_messages",
+        "mcp__fixtureBrowser__browser_drag",
+        "mcp__fixtureBrowser__browser_drop",
+        "mcp__fixtureBrowser__browser_evaluate",
+        "mcp__fixtureBrowser__browser_file_upload",
+        "mcp__fixtureBrowser__browser_find",
+        "mcp__fixtureBrowser__browser_handle_dialog",
+        "mcp__fixtureBrowser__browser_hover",
+        "mcp__fixtureBrowser__browser_navigate_back",
+        "mcp__fixtureBrowser__browser_network_request",
+        "mcp__fixtureBrowser__browser_network_requests",
+        "mcp__fixtureBrowser__browser_press_key",
+        "mcp__fixtureBrowser__browser_resize",
+        "mcp__fixtureBrowser__browser_run_code_unsafe",
+        "mcp__fixtureBrowser__browser_select_option",
+        "mcp__fixtureBrowser__browser_tabs",
+        "mcp__fixtureBrowser__browser_type"
+      ],
+      "raw_receipt_ref": "/Volumes/Mastermind/agent-evidence/claude-browser-fleet-client-20260915-sol-001/release-sdk-01.json",
+      "raw_receipt_sha256": "3f5a70095099859440529ae9dfa6e95e260c4d3d0fa817b4059faf9d88cc51a5",
+      "sdk_version": "0.2.153",
+      "snapshot_consumed": true,
+      "source_projection_sha256": "27303edb5d1c65c47be5aa1af5b3b4d1bb8b03de7aed42517bfaa00a156852d1",
+      "source_sha256": "0443b2862f6673631a2eae4dc00f0ecb5a97902ea8518846cb22199de4cfce1d",
+      "status": "PASS",
+      "submission": {
+        "body_keydown_count": 0,
+        "char_count": 936,
+        "input_event_count": 49,
+        "tab_count": 0,
+        "text_integrity": true,
+        "text_sha256": "7b33816d7841cf2cf5484f86900934bedafa551660cace5d8160038b8610ccf7"
+      },
+      "timed_out": false,
+      "tool_catalog_sha256": "3f4e905e70b558402d8e6c5876e00fd183e41c974f64dedebac2ae3d6134d4a7"
+    },
+    {
+      "browser_tool_results_consumed": 2,
+      "case": "denied",
+      "cli_version": "2.1.259 (Claude Code)",
+      "exit_code": 0,
+      "image_receipts": [],
+      "native_subagent_stats": {
+        "by_type": {},
+        "completed": 0,
+        "failed": 0,
+        "killed": {
+          "parent": 0,
+          "system": 0,
+          "user": 0
+        },
+        "max_depth": 0,
+        "refused": {
+          "budget": 0,
+          "concurrency_limit": 0,
+          "depth_limit": 0
+        },
+        "requested": {
+          "background": 0,
+          "foreground": 0,
+          "unset": 0
+        },
+        "spawned": 0,
+        "spawned_by_subagents": 0,
+        "started_in_background": 0
+      },
+      "observed_toolsets": {
+        "leaf": [],
+        "parent": [
+          [
+            "mcp__fixtureBrowser__browser_click",
+            "mcp__fixtureBrowser__browser_close",
+            "mcp__fixtureBrowser__browser_navigate",
+            "mcp__fixtureBrowser__browser_snapshot",
+            "mcp__fixtureBrowser__browser_take_screenshot",
+            "mcp__fixtureBrowser__browser_wait_for"
+          ]
+        ]
+      },
+      "owned_process_group_absent": true,
+      "parent_consumed": false,
+      "projected_denied_tools": [
+        "mcp__fixtureBrowser__browser_console_messages",
+        "mcp__fixtureBrowser__browser_drag",
+        "mcp__fixtureBrowser__browser_drop",
+        "mcp__fixtureBrowser__browser_evaluate",
+        "mcp__fixtureBrowser__browser_file_upload",
+        "mcp__fixtureBrowser__browser_find",
+        "mcp__fixtureBrowser__browser_handle_dialog",
+        "mcp__fixtureBrowser__browser_hover",
+        "mcp__fixtureBrowser__browser_navigate_back",
+        "mcp__fixtureBrowser__browser_network_request",
+        "mcp__fixtureBrowser__browser_network_requests",
+        "mcp__fixtureBrowser__browser_press_key",
+        "mcp__fixtureBrowser__browser_resize",
+        "mcp__fixtureBrowser__browser_run_code_unsafe",
+        "mcp__fixtureBrowser__browser_select_option",
+        "mcp__fixtureBrowser__browser_tabs",
+        "mcp__fixtureBrowser__browser_type"
+      ],
+      "raw_receipt_ref": "/Volumes/Mastermind/agent-evidence/claude-browser-fleet-client-20260915-sol-001/release-denied-01.json",
+      "raw_receipt_sha256": "08078253aca0e77e513ad3cbb922c09ee1f4b0d85d9140ce1bfdec55764e3bc8",
+      "sdk_version": null,
+      "snapshot_consumed": false,
+      "source_projection_sha256": "27303edb5d1c65c47be5aa1af5b3b4d1bb8b03de7aed42517bfaa00a156852d1",
+      "source_sha256": "0443b2862f6673631a2eae4dc00f0ecb5a97902ea8518846cb22199de4cfce1d",
+      "status": "PASS",
+      "submission": null,
+      "timed_out": false,
+      "tool_catalog_sha256": "3f4e905e70b558402d8e6c5876e00fd183e41c974f64dedebac2ae3d6134d4a7"
+    },
+    {
+      "browser_tool_results_consumed": 2,
+      "case": "child-generated-deny",
+      "cli_version": "2.1.259 (Claude Code)",
+      "exit_code": 0,
+      "image_receipts": [],
+      "native_subagent_stats": {
+        "by_type": {
+          "browser-tester": 1
+        },
+        "completed": 1,
+        "failed": 0,
+        "killed": {
+          "parent": 0,
+          "system": 0,
+          "user": 0
+        },
+        "max_depth": 1,
+        "refused": {
+          "budget": 0,
+          "concurrency_limit": 0,
+          "depth_limit": 0
+        },
+        "requested": {
+          "background": 0,
+          "foreground": 0,
+          "unset": 1
+        },
+        "spawned": 1,
+        "spawned_by_subagents": 0,
+        "started_in_background": 0
+      },
+      "observed_toolsets": {
+        "leaf": [
+          [
+            "mcp__fixtureBrowser__browser_close",
+            "mcp__fixtureBrowser__browser_navigate",
+            "mcp__fixtureBrowser__browser_take_screenshot",
+            "mcp__fixtureBrowser__browser_snapshot",
+            "mcp__fixtureBrowser__browser_click",
+            "mcp__fixtureBrowser__browser_wait_for"
+          ]
+        ],
+        "parent": [
+          [
+            "Agent"
+          ]
+        ]
+      },
+      "owned_process_group_absent": true,
+      "parent_consumed": true,
+      "projected_denied_tools": [
+        "mcp__fixtureBrowser__browser_console_messages",
+        "mcp__fixtureBrowser__browser_drag",
+        "mcp__fixtureBrowser__browser_drop",
+        "mcp__fixtureBrowser__browser_evaluate",
+        "mcp__fixtureBrowser__browser_file_upload",
+        "mcp__fixtureBrowser__browser_fill_form",
+        "mcp__fixtureBrowser__browser_find",
+        "mcp__fixtureBrowser__browser_handle_dialog",
+        "mcp__fixtureBrowser__browser_hover",
+        "mcp__fixtureBrowser__browser_navigate_back",
+        "mcp__fixtureBrowser__browser_network_request",
+        "mcp__fixtureBrowser__browser_network_requests",
+        "mcp__fixtureBrowser__browser_press_key",
+        "mcp__fixtureBrowser__browser_resize",
+        "mcp__fixtureBrowser__browser_run_code_unsafe",
+        "mcp__fixtureBrowser__browser_select_option",
+        "mcp__fixtureBrowser__browser_tabs",
+        "mcp__fixtureBrowser__browser_type"
+      ],
+      "raw_receipt_ref": "/Volumes/Mastermind/agent-evidence/claude-browser-fleet-client-20260915-sol-001/release-child-generated-deny-01.json",
+      "raw_receipt_sha256": "aef320433e99778082649ac7f9fc884fc4657391bed62e7d08779bdd7afe0a8c",
+      "sdk_version": null,
+      "snapshot_consumed": false,
+      "source_projection_sha256": "27303edb5d1c65c47be5aa1af5b3b4d1bb8b03de7aed42517bfaa00a156852d1",
+      "source_sha256": "0443b2862f6673631a2eae4dc00f0ecb5a97902ea8518846cb22199de4cfce1d",
+      "status": "PASS",
+      "submission": null,
+      "timed_out": false,
+      "tool_catalog_sha256": "3f4e905e70b558402d8e6c5876e00fd183e41c974f64dedebac2ae3d6134d4a7"
+    }
+  ],
+  "operation": "claude-browser-fleet-client-20260915-sol-001",
+  "procedure_sha": "f590c068880dbb848bda90b80b73dbcb6688d6fc",
+  "production_proof": false,
+  "real_account_authentication": false,
+  "real_model_inference": false,
+  "recorded_at_utc": "2026-09-16T05:00:19.129302+00:00",
+  "schema": "mastermind.claude_browser_client_evidence.v1",
+  "source_hashes": {
+    "control_plane/claude_mcp_client_projection.py": "27303edb5d1c65c47be5aa1af5b3b4d1bb8b03de7aed42517bfaa00a156852d1",
+    "tests/claude_browser_native_conformance.py": "0443b2862f6673631a2eae4dc00f0ecb5a97902ea8518846cb22199de4cfce1d",
+    "tests/test_claude_browser_native_conformance.py": "7741ae479aa2d2f58f1e417db143911c9c4cecc09d6d1a7556454bf1ad87b089",
+    "tests/test_claude_mcp_client_projection.py": "42231a88bd8e07b33aca4343acbc7a939726f33a72e31867e62227a02ade1f92"
+  },
+  "unit_tests": {
+    "command": [
+      "python3",
+      "-m",
+      "pytest",
+      "-o",
+      "addopts=",
+      "-q",
+      "-p",
+      "no:cacheprovider",
+      "tests/test_claude_mcp_client_projection.py",
+      "tests/test_claude_browser_native_conformance.py",
+      "tests/test_executive_agent_capabilities.py",
+      "--tb=short"
+    ],
+    "failed": 0,
+    "passed": 90
+  }
+}

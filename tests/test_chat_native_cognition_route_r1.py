@@ -102,11 +102,17 @@ def test_pro_mode_requires_a_complete_receipt() -> None:
 
 
 def test_pro_receipt_rejects_a_four_minute_handoff() -> None:
+    # The forbidden handoff class is named explicitly: the refusal must not come
+    # only from a short estimate, because a four-minute estimate is honest and
+    # valid for real substantive work.
     with pytest.raises(
         RoutingPolicyError,
         match="PRO_MODE_REFUSED / USE_NON_PRO_MODE",
-    ):
+    ) as excinfo:
         _pro_receipt(task_class="handoff", expected_duration_minutes=4)
+
+    assert "HANDOFF" in str(excinfo.value)
+    assert "duration" not in str(excinfo.value).lower()
 
 
 @pytest.mark.parametrize("duration", [True, False, None, "11", 1.0, 80.0, 80.5])

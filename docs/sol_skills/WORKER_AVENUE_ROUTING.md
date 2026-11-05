@@ -93,6 +93,9 @@ Current model/account allowances and remaining capacity remain facts supplied by
 owners; this receipt neither reserves quota nor proves model availability. No quota constants,
 new capacity store, or provider entitlement are introduced here.
 
+The 1-1440 range is the typed automated Pro-mode routing-receipt validation bound; attended mode
+stays separately governed and no attended turn manufactures this receipt.
+
 Missing, stale, out-of-range, or ineligible receipts fail closed:
 
 ```text
@@ -393,3 +396,11 @@ Fable, Grok or another surface is exempt because it historically emitted or expe
 > eligible session is assignment. Exact-session continuation stays exact; after START, runtime changes
 > require canonical reconciliation. Prefer Terra and CTO Sol when sufficient. Fable is for the hardest
 > principal-level problems, not the default.**
+
+## 10. Source-linked cross-account recovery and Project instruction delivery
+
+An archived original PR author, historical named ChatGPT account or system-name "owner" is a custody clue, not a living execution owner. After actual Chairman assignment, the **current eligible receiver owns the next authorized executable action**: discover current source, check the true writer/lease and original pending effects, do the permitted work, and save evidence. A real active writer or `EFFECT_UNKNOWN` still fences that action. An explicit safety/permission denial is never authorization to retry on another host, account, model or connector. Do not require the Chairman to locate or resurrect an archived chat.
+
+`HANDOFF_SOURCE_LINK_V1` is a transport discipline, not a new approval, runtime state or queue. Store the complete implementation/recovery packet in the already-owning **reviewed GitHub source**. Deliver a small scoped Slack message to the actual eligible receiver naming its task, exact link, original effect/lease fence and return location. Distinguish DELIVERED from actual PICKUP_ACK, START and verified result; neither a message nor a checked-in PR is implementation proof. Keep same-child follow-ups in its existing thread, never spawn duplicate reviewer/worker carriers simply because the first delivery has not been consumed.
+
+For ChatGPT Web Project instructions, the **actual authorized Project owner/editor** installs accepted protected-source text into each *distinct* eligible Project, without duplicating edits for every member or overwriting newer valid existing rules. Check Project ID, editor permission, live browser/tab writer, character and UTF-8 byte limits, saved-settings readback and per-account fresh-chat behavioral proof. If the host is human-active or an editor restriction applies, do not steal focus, bypass it, or claim installation; preserve the exact missing step while independently safe work continues. A source-only PR, Slack transport or paraphrase is never evidence that Web settings were saved.

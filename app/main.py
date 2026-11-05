@@ -48,6 +48,26 @@ def _resolve_deployed_git_sha(root: Path | None = None) -> str | None:
         return None
     return git_sha if _FULL_GIT_SHA.fullmatch(git_sha) else None
 
+
+_MANUAL_BRAIN_RESPONSE_FIELDS = (
+    "asof", "inaugural", "trading_day", "decided", "holdings",
+    "executed", "skipped_unpriceable", "nav", "brain",
+    "target_status", "decision_effective",
+)
+
+
+def _manual_brain_response(result: object, status: str, extra: dict | None) -> dict:
+    """Return a bounded manual-run receipt without assuming the runner returned a mapping."""
+    safe_extra = extra if isinstance(extra, dict) else {}
+    if isinstance(result, dict):
+        out = {key: result.get(key) for key in _MANUAL_BRAIN_RESPONSE_FIELDS}
+    else:
+        out = {"target_status": None, "decision_effective": False}
+    out["run_status"] = str(status)
+    out["run_reason"] = safe_extra.get("reason")
+    return out
+
+
 try:
     from fastapi import FastAPI, HTTPException
 except ImportError:  # FastAPI is optional until Phase 1
@@ -373,6 +393,7 @@ if FastAPI is not None:
         The Brain call is long; by default this starts it in the background and returns
         immediately. Pass ?wait=true to block until it finishes (returns the run summary)."""
         from control_plane import run_ledger, locks
+        from app.scheduler import _brain_job_outcome
         from bot import autonomous
         if wait:
             import asyncio as _aio
@@ -384,10 +405,9 @@ if FastAPI is not None:
             try:
                 with lock:
                     out = await _aio.to_thread(autonomous.run_autonomous, force=force)
-                run_ledger.end_run(handle, "ok")
-                return {k: out.get(k) for k in
-                        ("asof", "inaugural", "trading_day", "decided", "holdings",
-                         "executed", "skipped_unpriceable", "nav", "brain")}
+                _status, _severity, _extra = _brain_job_outcome(out)
+                run_ledger.end_run(handle, _status, severity=_severity, extra=_extra)
+                return _manual_brain_response(out, _status, _extra)
             except Exception:
                 run_ledger.end_run(handle, "error")
                 raise
@@ -400,8 +420,9 @@ if FastAPI is not None:
                 return
             try:
                 with lock:
-                    autonomous.run_autonomous(force=force)
-                run_ledger.end_run(handle, "ok")
+                    out = autonomous.run_autonomous(force=force)
+                _status, _severity, _extra = _brain_job_outcome(out)
+                run_ledger.end_run(handle, _status, severity=_severity, extra=_extra)
             except Exception as exc:
                 run_ledger.end_run(handle, "error")
                 raise
@@ -461,6 +482,7 @@ if FastAPI is not None:
 
         Long call; by default starts in the background and returns immediately. ?wait=true blocks."""
         from control_plane import run_ledger, locks
+        from app.scheduler import _brain_job_outcome
         from bot import china
         if wait:
             import asyncio as _aio
@@ -472,10 +494,9 @@ if FastAPI is not None:
             try:
                 with lock:
                     out = await _aio.to_thread(china.run_china, force=force)
-                run_ledger.end_run(handle, "ok")
-                return {k: out.get(k) for k in
-                        ("asof", "inaugural", "trading_day", "decided", "holdings",
-                         "executed", "skipped_unpriceable", "nav", "brain")}
+                _status, _severity, _extra = _brain_job_outcome(out)
+                run_ledger.end_run(handle, _status, severity=_severity, extra=_extra)
+                return _manual_brain_response(out, _status, _extra)
             except Exception:
                 run_ledger.end_run(handle, "error")
                 raise
@@ -488,8 +509,9 @@ if FastAPI is not None:
                 return
             try:
                 with lock:
-                    china.run_china(force=force)
-                run_ledger.end_run(handle, "ok")
+                    out = china.run_china(force=force)
+                _status, _severity, _extra = _brain_job_outcome(out)
+                run_ledger.end_run(handle, _status, severity=_severity, extra=_extra)
             except Exception:
                 run_ledger.end_run(handle, "error")
                 raise
@@ -504,6 +526,7 @@ if FastAPI is not None:
 
         Long call; by default starts in the background and returns immediately. ?wait=true blocks."""
         from control_plane import run_ledger, locks
+        from app.scheduler import _brain_job_outcome
         from bot import hk
         if wait:
             import asyncio as _aio
@@ -515,10 +538,9 @@ if FastAPI is not None:
             try:
                 with lock:
                     out = await _aio.to_thread(hk.run_hk, force=force)
-                run_ledger.end_run(handle, "ok")
-                return {k: out.get(k) for k in
-                        ("asof", "inaugural", "trading_day", "decided", "holdings",
-                         "executed", "skipped_unpriceable", "nav", "brain")}
+                _status, _severity, _extra = _brain_job_outcome(out)
+                run_ledger.end_run(handle, _status, severity=_severity, extra=_extra)
+                return _manual_brain_response(out, _status, _extra)
             except Exception:
                 run_ledger.end_run(handle, "error")
                 raise
@@ -531,8 +553,9 @@ if FastAPI is not None:
                 return
             try:
                 with lock:
-                    hk.run_hk(force=force)
-                run_ledger.end_run(handle, "ok")
+                    out = hk.run_hk(force=force)
+                _status, _severity, _extra = _brain_job_outcome(out)
+                run_ledger.end_run(handle, _status, severity=_severity, extra=_extra)
             except Exception:
                 run_ledger.end_run(handle, "error")
                 raise

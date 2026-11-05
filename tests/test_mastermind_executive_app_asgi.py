@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import json
 import os
 import shutil
@@ -48,6 +49,7 @@ from integrations.business_mcp_auth.contracts import (
 )
 from integrations.executive_mcp import schemas as mcp_schemas
 from integrations.mastermind_executive_app.admission import STATUS_ACCEPTED, STATUS_CONFLICT
+from integrations.mastermind_executive_app import app as app_module
 from integrations.mastermind_executive_app.app import AppSettings, create_app
 from integrations.mastermind_executive_app.gateway import AppPolicies, READ_SCOPE, SUBMIT_SCOPE
 
@@ -59,6 +61,8 @@ NOW = 1_800_000_000
 KID = "e1-test-kid"
 ISSUER = "https://issuer.mastermind.example.test"
 RESOURCE = "https://executive-app.mastermind.example.test/mcp"
+METADATA_PATH = "/mcp/.well-known/oauth-protected-resource"
+METADATA_URL = RESOURCE + "/.well-known/oauth-protected-resource"
 SUBJECT = "chairman-opaque-e1"
 
 
@@ -214,7 +218,10 @@ def _client(
     settings = AppSettings(
         policies=policies,
         mastermind_root=mastermind_root,
-        macro_root_flag=None,
+        # The reused read gateway consults os.environ independently of
+        # AppSettings.environ. An explicit absent root prevents ambient
+        # Macro discovery without replacing the real read path.
+        macro_root_flag=str(mastermind_root / "__absent_test_macro__"),
         environ={},
         ceo_ingress_socket_path=ceo_ingress_socket_path,
         jwks_cache=_FakeJwksCache(rsa_key),
@@ -222,6 +229,53 @@ def _client(
     )
     app = create_app(settings)
     return TestClient(app, raise_server_exceptions=False), settings
+
+
+def test_read_only_app_constructs_no_ingress_or_admission_surface(
+    rsa_key, tmp_path, monkeypatch
+):
+    """The E1 direct app is structurally incapable of constructing writers."""
+
+    def forbidden_writer(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("read-only E1 must not construct a writer")
+
+    monkeypatch.setattr(app_module, "CeoIngressClient", forbidden_writer)
+    monkeypatch.setattr(app_module, "AdmissionRequest", forbidden_writer)
+    settings = AppSettings(
+        policies=AppPolicies(read=_read_policy(), submit=_submit_policy()),
+        mastermind_root=tmp_path / "mastermind",
+        macro_root_flag=str(tmp_path / "macro"),
+        runtime_root=tmp_path / "runtime",
+        environ={},
+        ceo_ingress_socket_path=None,
+        read_only=True,
+        jwks_cache=_FakeJwksCache(rsa_key),
+        clock=lambda: NOW,
+    )
+
+    app = create_app(settings)
+    paths = {route.path for route in app._app.routes}
+
+    assert "/v1/tools/submit_ceo_intent" not in paths
+    assert "/v1/tools/submit_ceo_intent/reconcile" not in paths
+    assert "/v1/tools/{tool_name}" in paths
+
+
+def test_read_only_app_requires_an_explicit_macro_root(rsa_key, tmp_path):
+    """Removing the explicit Macro root must refuse direct E1 construction."""
+
+    with pytest.raises(ValueError, match="macro_root_flag"):
+        AppSettings(
+            policies=AppPolicies(read=_read_policy(), submit=_submit_policy()),
+            mastermind_root=tmp_path / "mastermind",
+            macro_root_flag=None,
+            runtime_root=tmp_path / "runtime",
+            environ={},
+            ceo_ingress_socket_path=None,
+            read_only=True,
+            jwks_cache=_FakeJwksCache(rsa_key),
+            clock=lambda: NOW,
+        )
 
 
 # ===========================================================================
@@ -278,6 +332,77 @@ def test_wrong_resource_audience_refuses(rsa_key, tmp_path):
     )
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "resource_refused"
+
+
+def test_configured_exact_resource_variant_accepts_but_foreign_resource_refuses(
+    rsa_key,
+):
+    alternate_resource = "https://executive-app-c1.mastermind.example.test/mcp"
+    cache = _FakeJwksCache(rsa_key)
+    primary = app_module.JwtAuthenticator(
+        policy=_read_policy(), jwks_cache=cache
+    )
+    alternate = app_module.JwtAuthenticator(
+        policy=_read_policy(resource=alternate_resource), jwks_cache=cache
+    )
+    token = _read_token(rsa_key, aud=alternate_resource)
+    principal = asyncio.run(
+        app_module._verify_exact_resource_set(
+            (primary, alternate), f"Bearer {token}", now=NOW
+        )
+    )
+    assert principal.resource == alternate_resource
+
+    foreign = _read_token(
+        rsa_key, aud="https://executive-app-foreign.mastermind.example.test/mcp"
+    )
+    with pytest.raises(app_module.AuthError) as exc_info:
+        asyncio.run(
+            app_module._verify_exact_resource_set(
+                (primary, alternate), f"Bearer {foreign}", now=NOW
+            )
+        )
+    assert exc_info.value.code.value == "resource_refused"
+
+
+def test_app_settings_resource_variant_may_change_only_exact_resource(
+    rsa_key, tmp_path
+):
+    alternate_resource = "https://executive-app-c1.mastermind.example.test/mcp"
+    primary = AppPolicies(read=_read_policy(), submit=_submit_policy())
+    alternate = AppPolicies(
+        read=_read_policy(resource=alternate_resource),
+        submit=_submit_policy(resource=alternate_resource),
+    )
+    settings = AppSettings(
+        policies=primary,
+        additional_policies=(alternate,),
+        mastermind_root=tmp_path,
+        macro_root_flag=None,
+        environ={},
+        ceo_ingress_socket_path="/tmp/never-used-e1.sock",
+        jwks_cache=_FakeJwksCache(rsa_key),
+        clock=lambda: NOW,
+    )
+    assert settings.additional_policies == (alternate,)
+
+    widened = AppPolicies(
+        read=dataclasses.replace(
+            alternate.read, max_token_lifetime_seconds=800
+        ),
+        submit=alternate.submit,
+    )
+    with pytest.raises(ValueError, match="may differ only by resource"):
+        AppSettings(
+            policies=primary,
+            additional_policies=(widened,),
+            mastermind_root=tmp_path,
+            macro_root_flag=None,
+            environ={},
+            ceo_ingress_socket_path="/tmp/never-used-e1.sock",
+            jwks_cache=_FakeJwksCache(rsa_key),
+            clock=lambda: NOW,
+        )
 
 
 def test_wrong_algorithm_none_refuses(rsa_key, tmp_path):
@@ -411,8 +536,236 @@ def test_generic_verifier_cannot_widen_host(rsa_key, tmp_path):
 
 
 # ===========================================================================
-# 2. HTTP framing adversarial states
+# 2. protected-resource metadata + HTTP framing adversarial states
 # ===========================================================================
+
+
+def test_metadata_get_serves_the_exact_public_read_policy_projection(rsa_key, tmp_path):
+    """A missing public GET route, a copied projection, or authentication
+    requirement would make this externally observable RFC 9728 contract fail.
+    """
+
+    client, settings = _client(rsa_key, mastermind_root=tmp_path)
+    response = client.get(METADATA_PATH)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "resource": RESOURCE,
+        "authorization_servers": [ISSUER],
+        "scopes_supported": [READ_SCOPE],
+    }
+    assert settings.jwks_cache.calls == []
+
+
+def test_missing_tool_authentication_challenge_points_to_the_served_metadata_route(rsa_key, tmp_path):
+    """A challenge that points at an unserved or different route strands the
+    OAuth client before it can authenticate an otherwise unchanged tool call.
+    """
+
+    client, _ = _client(rsa_key, mastermind_root=tmp_path)
+    tool_response = client.post("/v1/tools/executive_state", json={"arguments": {}})
+    metadata_response = client.get(METADATA_PATH)
+
+    assert tool_response.status_code == 401
+    assert f'resource_metadata="{METADATA_URL}"' in tool_response.headers["WWW-Authenticate"]
+    assert metadata_response.status_code == 200
+
+
+def test_metadata_route_never_proxies_authorization_server_discovery(rsa_key, tmp_path):
+    """Registering an IdP discovery alias here would turn this resource server
+    into an authorization-server proxy and widen the public attack surface.
+    """
+
+    client, _ = _client(rsa_key, mastermind_root=tmp_path)
+    response = client.get("/mcp/.well-known/oauth-authorization-server")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "expected_status"),
+    [
+        ("GET", METADATA_PATH + "/", 404),
+        ("GET", METADATA_PATH + "?unexpected=1", 404),
+        ("GET", METADATA_PATH + "%2Fother", 400),
+        ("GET", METADATA_PATH + "%5Cother", 400),
+        ("GET", METADATA_PATH.replace("/mcp/", "/mcp//"), 400),
+        ("POST", METADATA_PATH, 404),
+        ("HEAD", METADATA_PATH, 404),
+        ("OPTIONS", METADATA_PATH, 404),
+    ],
+)
+def test_metadata_near_matches_and_non_get_requests_never_alias_the_public_document(
+    rsa_key, tmp_path, method, path, expected_status
+):
+    """A route normalizer, query-tolerant handler, or accidental HEAD/POST
+    registration would widen the one intended public configuration document.
+    """
+
+    client, _ = _client(rsa_key, mastermind_root=tmp_path)
+    response = client.request(method, path, follow_redirects=False)
+
+    assert response.status_code == expected_status
+
+
+@pytest.mark.parametrize(
+    "submit_overrides",
+    [
+        {"resource": "https://other-resource.mastermind.example.test/mcp"},
+        {"resource_metadata_url": "https://executive-app.mastermind.example.test/other-metadata"},
+        {
+            "issuer": "https://other-issuer.mastermind.example.test",
+            "authorization_servers": ["https://other-issuer.mastermind.example.test"],
+            "jwks_uri": "https://other-issuer.mastermind.example.test/.well-known/jwks.json",
+        },
+    ],
+)
+def test_create_app_refuses_read_submit_policy_identity_drift(rsa_key, tmp_path, submit_overrides):
+    """Two policy instances that identify different resources or authorization
+    realms must not construct one incoherent app generation.
+    """
+
+    policies = AppPolicies(
+        read=_read_policy(),
+        submit=_submit_policy(**submit_overrides),
+    )
+    settings = AppSettings(
+        policies=policies,
+        mastermind_root=tmp_path,
+        macro_root_flag=None,
+        environ={},
+        ceo_ingress_socket_path="/tmp/never-used-e1.sock",
+        jwks_cache=_FakeJwksCache(rsa_key),
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(ValueError, match="same resource identity"):
+        create_app(settings)
+
+
+@pytest.mark.parametrize(
+    "metadata_url",
+    [
+        RESOURCE + "/.well-known%2foauth-protected-resource",
+        RESOURCE + "/.well-known%5coauth-protected-resource",
+        RESOURCE + "/.well-known/oauth-protected-%41resource",
+        RESOURCE + "//.well-known/oauth-protected-resource",
+        RESOURCE + "/./.well-known/oauth-protected-resource",
+        RESOURCE + "/../v1/tools/executive_state",
+    ],
+)
+def test_create_app_refuses_valid_a1_metadata_paths_the_raw_route_fence_cannot_serve(
+    rsa_key, tmp_path, metadata_url
+):
+    """A1 preserves these URL spellings, but Starlette normalizes them while
+    this edge intentionally refuses encoded separators and duplicate slashes.
+    Construction must not advertise an exact metadata URL it cannot serve.
+    """
+
+    policies = AppPolicies(
+        read=_read_policy(resource_metadata_url=metadata_url),
+        submit=_submit_policy(resource_metadata_url=metadata_url),
+    )
+    settings = AppSettings(
+        policies=policies,
+        mastermind_root=tmp_path,
+        macro_root_flag=None,
+        environ={},
+        ceo_ingress_socket_path="/tmp/never-used-e1.sock",
+        jwks_cache=_FakeJwksCache(rsa_key),
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(ValueError, match="not safely serveable"):
+        create_app(settings)
+
+
+@pytest.mark.parametrize(
+    "metadata_path",
+    [
+        "/v1/tools",
+        "/v1/tools/executive_state",
+        "/v1/tools/submit_ceo_intent/reconcile",
+    ],
+)
+def test_create_app_refuses_metadata_paths_that_shadow_the_tool_namespace(
+    rsa_key, tmp_path, metadata_path
+):
+    """The public metadata fence runs before Starlette routing. A metadata
+    path inside the tool namespace would otherwise turn a legitimate tool
+    POST into a fixed 404 before authentication or admission can run.
+    """
+
+    metadata_url = "https://executive-app.mastermind.example.test" + metadata_path
+    policies = AppPolicies(
+        read=_read_policy(resource_metadata_url=metadata_url),
+        submit=_submit_policy(resource_metadata_url=metadata_url),
+    )
+    settings = AppSettings(
+        policies=policies,
+        mastermind_root=tmp_path,
+        macro_root_flag=None,
+        environ={},
+        ceo_ingress_socket_path="/tmp/never-used-e1.sock",
+        jwks_cache=_FakeJwksCache(rsa_key),
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(ValueError, match="reserved tool namespace"):
+        create_app(settings)
+
+
+def test_metadata_url_without_a_path_serves_the_http_root_exactly(rsa_key, tmp_path):
+    """An authority-only HTTPS URL has the HTTP request path `/`; rejecting
+    it would make one otherwise safe, validated URL form unservable.
+    """
+
+    metadata_url = "https://executive-app.mastermind.example.test"
+    policies = AppPolicies(
+        read=_read_policy(resource_metadata_url=metadata_url),
+        submit=_submit_policy(resource_metadata_url=metadata_url),
+    )
+    settings = AppSettings(
+        policies=policies,
+        mastermind_root=tmp_path,
+        macro_root_flag=None,
+        environ={},
+        ceo_ingress_socket_path="/tmp/never-used-e1.sock",
+        jwks_cache=_FakeJwksCache(rsa_key),
+        clock=lambda: NOW,
+    )
+    client = TestClient(create_app(settings), raise_server_exceptions=False)
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.json()["resource"] == RESOURCE
+
+
+def test_create_app_revalidates_a_forged_policy_before_registering_metadata(rsa_key, tmp_path):
+    """A frozen dataclass can be forged with object.__setattr__; accepting it
+    would let a stale challenge and public metadata disagree at runtime.
+    """
+
+    forged_read = dataclasses.replace(_read_policy())
+    object.__setattr__(
+        forged_read,
+        "resource_metadata_url",
+        RESOURCE + "/not-a-valid metadata path",
+    )
+    policies = AppPolicies(read=forged_read, submit=_submit_policy())
+    settings = AppSettings(
+        policies=policies,
+        mastermind_root=tmp_path,
+        macro_root_flag=None,
+        environ={},
+        ceo_ingress_socket_path="/tmp/never-used-e1.sock",
+        jwks_cache=_FakeJwksCache(rsa_key),
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(ValueError, match="metadata policy refused"):
+        create_app(settings)
 
 
 def test_unknown_tool_name_refuses_404(rsa_key, tmp_path):
@@ -520,7 +873,7 @@ def test_oversized_body_refuses_413(rsa_key, tmp_path):
 # ===========================================================================
 
 
-def test_authenticated_read_call_reaches_the_existing_gateway(rsa_key, tmp_path):
+def test_authenticated_read_call_reaches_the_existing_gateway(rsa_key, tmp_path, monkeypatch):
     # A real (throwaway) git repo so ExecutiveMcpGateway's boot-packet read
     # has a real HEAD sha to report, exercising the ACTUAL reused read path
     # rather than a fake.
@@ -531,6 +884,14 @@ def test_authenticated_read_call_reaches_the_existing_gateway(rsa_key, tmp_path)
     subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
     subprocess.run(["git", "-C", str(tmp_path), "commit", "-q", "-m", "fixture"], check=True)
 
+    # A usable ambient Macro checkout must not escape this read fixture's
+    # explicit Macro selection, even though the reader consults os.environ.
+    ambient_macro = tmp_path / "ambient-macro"
+    (ambient_macro / "scripts").mkdir(parents=True)
+    (ambient_macro / "scripts" / "agentos.py").write_text('print("{}")\n')
+    (ambient_macro / "agentos").mkdir()
+    monkeypatch.setenv(ceo_boot_packet.ENV_MACRO_ROOT, str(ambient_macro))
+
     client, _ = _client(rsa_key, mastermind_root=tmp_path)
     token = _read_token(rsa_key)
     response = client.post(
@@ -538,9 +899,11 @@ def test_authenticated_read_call_reaches_the_existing_gateway(rsa_key, tmp_path)
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["ok"] is True
+    assert body["ok"] is True, body
     assert body["tool"] == "executive_state"
     assert body["schema"] == mcp_schemas.RESULT_SCHEMA
+
+    assert body["data"]["macro"] == {"root": None, "sha": None, "resolved_via": None}
 
 
 def test_all_five_tools_present_with_frozen_schema_digest():
@@ -975,5 +1338,5 @@ def test_two_independent_app_instances_behave_identically(rsa_key, tmp_path):
     )
     assert response_one.status_code == response_two.status_code == 200
     # Neither instance's success depends on having seen the other's request.
-    assert response_one.json()["ok"] is True
-    assert response_two.json()["ok"] is True
+    assert response_one.json()["ok"] is True, response_one.json()
+    assert response_two.json()["ok"] is True, response_two.json()

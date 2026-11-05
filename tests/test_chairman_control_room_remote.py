@@ -184,6 +184,92 @@ def test_remote_projection_rejects_adversarial_canonical_documents(canonical_doc
     assert exc.value.code == code
 
 
+_PATH_ROOT_CASES = (
+    "failed at root=/Volumes/Mastermind/private.db",
+    "https://status.example.invalid/public/research",
+    "ratio 1/2 remains public",
+)
+_ACCEPTED_PATH_ROOT_CODES = ("sensitive_value", None, None)
+_ACCEPTED_SANITIZED_DEGRADED = (
+    "executive_inbox_detail_redacted",
+    "https://status.example.invalid/public/research",
+    "ratio 1/2 remains public",
+)
+
+
+def _degraded_projection_codes(canonical_doc):
+    codes = []
+    for value in _PATH_ROOT_CASES:
+        document = copy.deepcopy(canonical_doc)
+        document["degraded"].append(value)
+        try:
+            _project(document)
+        except remote.RemoteProjectionError as exc:
+            codes.append(exc.code)
+        else:
+            codes.append(None)
+    return tuple(codes)
+
+
+def _sanitized_path_root_cases():
+    document = {"degraded": list(_PATH_ROOT_CASES)}
+    sanitized = remote._sanitize_collected_degraded(
+        document,
+        source="executive_inbox",
+    )
+    assert document["degraded"] == list(_PATH_ROOT_CASES)
+    return tuple(sanitized["degraded"])
+
+
+def _assert_accepted_path_root_contract(canonical_doc):
+    assert (
+        _degraded_projection_codes(canonical_doc) == _ACCEPTED_PATH_ROOT_CODES
+    ), "accepted path-root codes"
+    assert (
+        _sanitized_path_root_cases() == _ACCEPTED_SANITIZED_DEGRADED
+    ), "accepted sanitizer categories"
+
+
+def test_remote_path_root_classifier_rejects_volumes_without_overmatching(
+    canonical_doc,
+):
+    _assert_accepted_path_root_contract(canonical_doc)
+
+
+@pytest.mark.parametrize(
+    ("pattern", "expected_codes", "expected_sanitized"),
+    [
+        (
+            r"/(?:Users|opt|home|var|private|etc|root|run|srv|tmp|usr)(?:/|$)",
+            (None, None, None),
+            _PATH_ROOT_CASES,
+        ),
+        (
+            r"/(?:[^/]+)(?:/|$)",
+            ("sensitive_value", "sensitive_value", "sensitive_value"),
+            (
+                "executive_inbox_detail_redacted",
+                "executive_inbox_detail_redacted",
+                "executive_inbox_detail_redacted",
+            ),
+        ),
+    ],
+    ids=("missing-volumes-root", "generic-slash-overmatch"),
+)
+def test_remote_path_root_classifier_mutants_fail_the_same_accepted_contract(
+    monkeypatch,
+    canonical_doc,
+    pattern,
+    expected_codes,
+    expected_sanitized,
+):
+    monkeypatch.setattr(remote, "_PATH_RE", remote.re.compile(pattern))
+    assert _degraded_projection_codes(canonical_doc) == expected_codes
+    assert _sanitized_path_root_cases() == expected_sanitized
+    with pytest.raises(AssertionError, match="accepted path-root codes"):
+        _assert_accepted_path_root_contract(canonical_doc)
+
+
 def test_remote_projection_rejects_bad_freshness_and_identity(canonical_doc):
     with pytest.raises(remote.RemoteProjectionError) as exc:
         remote.project_remote_document(

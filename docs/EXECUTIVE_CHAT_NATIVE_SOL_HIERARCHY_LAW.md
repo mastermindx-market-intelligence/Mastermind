@@ -91,6 +91,9 @@ Current model/account allowances and remaining capacity remain facts supplied by
 owners; this receipt neither reserves quota nor proves model availability. No quota constants,
 new capacity store, or provider entitlement are introduced here.
 
+The 1-1440 range is the typed automated Pro-mode receipt validation bound for this routing law.
+Human-attended mode stays separately governed, and no attended turn manufactures this receipt.
+
 Pro mode is categorically refused for handoffs; `ACK / PICKUP_ACK / START / CONTINUE / STOP`
 lifecycle or routing packets; status checks; monitoring / watchers / polling; message relay;
 routing / placement / foregrounding; mechanical edits or tests; simple reviews; and other routine
