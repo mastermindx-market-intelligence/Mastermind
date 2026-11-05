@@ -1,0 +1,278 @@
+{
+  "operation_id": "adaptive-agent-economics-20260926-sol-001",
+  "protected_source_sha": "fda6ed3911cdda24eb63b2ccbe1b174121cf404f",
+  "status": "BUILT_NOT_PROVEN",
+  "mission_complete": false,
+  "scope": "F1 source explanation and shared engineering instructions only",
+  "red": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -o addopts= -q -p no:cacheprovider tests/test_adaptive_agent_economics.py --tb=short",
+    "result": "16 failed: missing method, CLI flags and instruction behavior",
+    "exit_code": 1
+  },
+  "green": [
+    {
+      "files": [
+        "tests/test_adaptive_agent_economics.py",
+        "tests/test_executive_model_router.py",
+        "tests/test_capacity_economics_projection.py"
+      ],
+      "passed": 50,
+      "exit_code": 0
+    },
+    {
+      "files": [
+        "tests/test_web_ceo_role_adaptive_delegation.py",
+        "tests/test_sol_skillpack_active_execution.py",
+        "tests/test_pro_continuity_reliability.py",
+        "tests/test_web_ceo_skills.py"
+      ],
+      "passed": 146,
+      "exit_code": 0
+    }
+  ],
+  "test_environment": {
+    "python": "Python 3.14.7",
+    "prefix": "PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
+    "pytest_flags": "-o addopts= -q -p no:cacheprovider --tb=short"
+  },
+  "repair_note": "One new test expected exit 1; existing CLI error contract returns 2. Corrected test after actual failure and source inspection; error handling unchanged.",
+  "real_source_cli": {
+    "exit_code": 0,
+    "runtime_created": false,
+    "projection": {
+      "aliases": [
+        {
+          "admission_cost_class": "small",
+          "configured": true,
+          "effort": "xhigh",
+          "execution_profile_id": "operator.appserver.readonly.docs-mcp.native-helper.v1",
+          "measured_cost": null,
+          "missing_capabilities": [
+            "code"
+          ],
+          "model": "gpt-5.6-sol",
+          "model_alias": "coo.operator.readonly",
+          "provider_alias": "codex",
+          "source_disposition": "MISSING_REQUIRED_CAPABILITIES",
+          "source_tier": null,
+          "source_worker_eligible": true
+        },
+        {
+          "admission_cost_class": "small",
+          "configured": true,
+          "effort": "xhigh",
+          "execution_profile_id": "sealed.worker.write.no-extensions.v1",
+          "measured_cost": null,
+          "missing_capabilities": [],
+          "model": "gpt-5.6-sol",
+          "model_alias": "coo.sealed",
+          "provider_alias": "codex",
+          "source_disposition": "NOT_IN_TASK_ROUTE",
+          "source_tier": null,
+          "source_worker_eligible": true
+        },
+        {
+          "admission_cost_class": "small",
+          "configured": true,
+          "effort": "high",
+          "execution_profile_id": "sealed.worker.write.no-extensions.v1",
+          "measured_cost": null,
+          "missing_capabilities": [],
+          "model": "gpt-5.6-luna",
+          "model_alias": "fast.engineering",
+          "provider_alias": "codex",
+          "source_disposition": "FIRST_LAWFUL_TIER",
+          "source_tier": "implementation.routine.primary",
+          "source_worker_eligible": true
+        },
+        {
+          "admission_cost_class": "small",
+          "configured": true,
+          "effort": "medium",
+          "execution_profile_id": "sealed.worker.readonly.no-extensions.v1",
+          "measured_cost": null,
+          "missing_capabilities": [
+            "code"
+          ],
+          "model": "gpt-5.6-luna",
+          "model_alias": "fast.research",
+          "provider_alias": "codex",
+          "source_disposition": "MISSING_REQUIRED_CAPABILITIES",
+          "source_tier": null,
+          "source_worker_eligible": true
+        },
+        {
+          "admission_cost_class": "frontier",
+          "configured": true,
+          "effort": "xhigh",
+          "execution_profile_id": "operator.appserver.readonly.v1",
+          "measured_cost": null,
+          "missing_capabilities": [
+            "code"
+          ],
+          "model": "gpt-5.6-sol",
+          "model_alias": "frontier.orchestrator",
+          "provider_alias": "codex",
+          "source_disposition": "NOT_WORKER_ELIGIBLE",
+          "source_tier": null,
+          "source_worker_eligible": false
+        },
+        {
+          "admission_cost_class": null,
+          "configured": false,
+          "effort": null,
+          "execution_profile_id": null,
+          "measured_cost": null,
+          "missing_capabilities": null,
+          "model": null,
+          "model_alias": "glm.flash",
+          "provider_alias": null,
+          "source_disposition": "NOT_CONFIGURED",
+          "source_tier": null,
+          "source_worker_eligible": null
+        },
+        {
+          "admission_cost_class": "default",
+          "configured": true,
+          "effort": "high",
+          "execution_profile_id": "sealed.worker.write.no-extensions.v1",
+          "measured_cost": null,
+          "missing_capabilities": [],
+          "model": "gpt-5.6-terra",
+          "model_alias": "standard.engineering",
+          "provider_alias": "codex",
+          "source_disposition": "FIRST_LAWFUL_TIER",
+          "source_tier": "implementation.routine.primary",
+          "source_worker_eligible": true
+        },
+        {
+          "admission_cost_class": "default",
+          "configured": true,
+          "effort": "high",
+          "execution_profile_id": "sealed.worker.readonly.no-extensions.v1",
+          "measured_cost": null,
+          "missing_capabilities": [
+            "code"
+          ],
+          "model": "gpt-5.6-terra",
+          "model_alias": "standard.research",
+          "provider_alias": "codex",
+          "source_disposition": "MISSING_REQUIRED_CAPABILITIES",
+          "source_tier": null,
+          "source_worker_eligible": true
+        },
+        {
+          "admission_cost_class": "default",
+          "configured": true,
+          "effort": "high",
+          "execution_profile_id": "sealed.worker.readonly.no-extensions.v1",
+          "measured_cost": null,
+          "missing_capabilities": [],
+          "model": "gpt-5.6-terra",
+          "model_alias": "standard.review",
+          "provider_alias": "codex",
+          "source_disposition": "NOT_IN_TASK_ROUTE",
+          "source_tier": null,
+          "source_worker_eligible": true
+        }
+      ],
+      "authority": "NONE_SOURCE_PREVIEW_ONLY",
+      "claim_time_revalidation_required": true,
+      "decision": {
+        "ambiguity": "low",
+        "capability_policy_digest": "daac5b9a290156b2b96bf562ed69ffd79d93ba753d3017799bef303aac2b38ed",
+        "capability_policy_version": "2026-09-18.browser-b1-runtime-r2",
+        "chat_reasoning_mode": null,
+        "cognition_route": null,
+        "excluded_worker_ids": [],
+        "execution_profile_digest": "bf4cf0fdd6b4a63def2b9410c0831cde1adfd0877689532c52c608d18477daa0",
+        "execution_profile_id": "sealed.worker.write.no-extensions.v1",
+        "metered_cognition_receipt": null,
+        "mode": "worker",
+        "policy_version": "2026-08-24.stage4",
+        "preferred_model_aliases": [
+          "fast.engineering",
+          "standard.engineering"
+        ],
+        "pro_mode_receipt": null,
+        "reason_codes": [
+          "bounded_implementation",
+          "risk_routine",
+          "economical_worker_first"
+        ],
+        "required_capabilities": [
+          "code"
+        ],
+        "risk": "routine",
+        "suitability_tiers": [
+          {
+            "model_aliases": [
+              "fast.engineering",
+              "standard.engineering"
+            ],
+            "tier_id": "implementation.routine.primary"
+          }
+        ],
+        "task_kind": "implementation",
+        "worker_eligible": true
+      },
+      "economic_comparison": "NOT_PERFORMED",
+      "live_admission": false,
+      "providers": [
+        {
+          "autonomous_allowed_in_source": true,
+          "enabled_in_source": true,
+          "live_readiness": "NOT_OBSERVED",
+          "provider_alias": "codex"
+        },
+        {
+          "autonomous_allowed_in_source": false,
+          "enabled_in_source": false,
+          "live_readiness": "NOT_OBSERVED",
+          "provider_alias": "glm"
+        },
+        {
+          "autonomous_allowed_in_source": false,
+          "enabled_in_source": false,
+          "live_readiness": "NOT_OBSERVED",
+          "provider_alias": "qwen"
+        },
+        {
+          "autonomous_allowed_in_source": false,
+          "enabled_in_source": false,
+          "live_readiness": "NOT_OBSERVED",
+          "provider_alias": "xai"
+        }
+      ],
+      "runtime_observation": "NOT_PERFORMED",
+      "schema": "mastermind.model_route_explanation/v1",
+      "selected_worker": null,
+      "source_policy_version": "2026-08-24.stage4"
+    }
+  },
+  "sha256": {
+    "AGENTS.md": "a47f3f5d15943ff7e4c30ed43c062d16398d1cdcb36b6924f7d0a650c4387761",
+    "CLAUDE.md": "ccf04a9f2b63241be4abeb255dc938cac313d772d120861baed109c86fde7c1f",
+    "control_plane/model_router.py": "82250fa51219e87301161996172f8dcf73f4bb69ff00352d42fdb928d1c215c5",
+    "scripts/executive_os_phase1b.py": "65d08188abdb791987329547d50101e94c6048c17b27d91c383b8b9a2a13d85f",
+    "docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md": "d379d2d1a860f1579f004fd97a7d9ac37a309532b0c50afb267315f40b9cf2f9",
+    "docs/sol_skills/WEB_CEO_DELEGATION.md": "a4c65b8be6f19f8f9c5018d779286382e3eb7e6df051b9a2cf5e97c5e0daeca6",
+    "tests/test_adaptive_agent_economics.py": "c7d21d7ecd8c8a06c3612541d901c05ef2c1bdc514acf16a1e76744ee59c5cbf",
+    "docs/superpowers/specs/2026-09-26-adaptive-agent-economics.md": "e955e77b35f67c4bd7d57b7296a8ebfad2154c47733c55ef076f675b08ff4d17",
+    "docs/superpowers/plans/2026-09-26-adaptive-agent-economics.md": "c4a48747aa157be8c98029d30f15051e26417ede163bd0330e2eae9d58f68423"
+  },
+  "not_proven": [
+    "independent review",
+    "full hosted CI",
+    "installed policy adoption",
+    "fresh-session behavior",
+    "actual economical worker execution",
+    "parent consumption",
+    "cost savings"
+  ],
+  "unchanged_holds": [
+    "#1013/#981/#633/#1000 native coordinator release gates",
+    "#633 historical uncertain authentication effect"
+  ],
+  "production_effects": []
+}

@@ -573,7 +573,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='611f636891523e145f8f73bf5bd812c928e293bf184602a1df63e753a05f0d91'
+    assert hashlib.sha256(current_raw).hexdigest()=='169ed18d327b0eeb84edc1707eaaf92a6de27000405c58d6ce5109b0fb551830'
     current=json.loads(current_raw)
     assert len(before)==95 and len(current)==104
     assert set(before)<=set(current)
@@ -585,7 +585,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     # The accepted source union includes the protected review-routing picker,
     # provider/readiness composition and fixed-template launcher transition.
     # Preserve their finite changes without replacing the historical epoch.
-    changed={'ext/fabric_task.py','ext/glm_host_account_source.py',
+    changed={'ext/fabric_task.py','ext/glm_host_account_source.py','ext/lease_broker.py',
         'ext/host_pull.sh','ext/host_pull_backend.py','ext/paid_glm_model_client.py',
         'ext/paid_host_qualification.py','ext/paid_incumbent_state.py',
         'ext/paid_model_owner.py','ext/pick.py','ext/pool_ledger.py','ext/remote_sub.sh',
@@ -604,7 +604,8 @@ def test_native_initializer_extends_only_exact_preimage_members():
     recovery_changed={'ext/artifact_delivery.py','ext/run_observation.py',
                       'ext/run_observation_delivery.py'}
     assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|recovery_changed
-    assert sum(before[p]==current[p] for p in before)==66
+    # The fair-share repair advances exactly one prior broker member.
+    assert sum(before[p]==current[p] for p in before)==65
     for name in added|changed|diagnostic_changed|long_horizon_changed|recovery_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
         assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()

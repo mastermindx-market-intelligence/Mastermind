@@ -1,0 +1,23 @@
+/* Dark: neutral panel/raised luminance. Light: white research cards with
+   hairlines and the incumbent soft shadow. Shared geometry, no accent edge. */
+.standing-instructions{width:100%;max-width:880px;min-width:0;color:var(--text);overflow-wrap:anywhere;}
+.standing-instructions header{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--sp-6);margin-bottom:var(--sp-6);}
+.standing-instructions h3,.standing-instructions h4{margin:0;font-size:1.1rem;}
+.standing-instructions header p,.standing-instructions__muted{color:var(--muted);}
+.standing-instructions__list{list-style:none;padding:0;margin:0 0 var(--sp-6);display:grid;gap:var(--sp-4);}
+.standing-instructions__card{background:var(--panel);border:1px solid var(--border);border-radius:var(--r-card);padding:var(--sp-6);min-width:0;}
+.standing-instructions__card[data-selected="true"]{background:var(--raised);}
+.standing-instructions__text{white-space:pre-wrap;}
+.standing-instructions button{min-height:44px;max-width:100%;font:inherit;white-space:normal;border:1px solid var(--control-border);border-radius:var(--r-btn);padding:var(--sp-2) var(--sp-4);background:var(--raised);color:var(--text);cursor:pointer;}
+.standing-instructions button:disabled{opacity:.6;cursor:default;}
+.standing-instructions button:focus-visible,.standing-instructions summary:focus-visible{outline:2px solid var(--focus);outline-offset:3px;}
+.standing-instructions__actions{display:flex;gap:var(--sp-3);flex-wrap:wrap;margin-bottom:var(--sp-3);}
+.standing-instructions__notice{background:var(--raised);border:1px solid var(--border);border-radius:var(--r-card);padding:var(--sp-4);}
+.standing-instructions summary{display:flex;align-items:center;min-height:44px;cursor:pointer;}
+.standing-instructions dl{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:var(--sp-2) var(--sp-4);}
+.standing-instructions dd{margin:0;min-width:0;}
+.shell[data-theme="light"] .standing-instructions__card{background:var(--panel);box-shadow:0 4px 16px color-mix(in srgb,var(--mx-light-text) 8%,transparent);}
+.shell[data-theme="light"] .standing-instructions__card[data-selected="true"]{background:var(--raised);box-shadow:none;}
+@media(max-width:600px){.standing-instructions header{flex-direction:column;gap:var(--sp-4);}.standing-instructions__card{padding:var(--sp-5);}.standing-instructions dl{grid-template-columns:minmax(0,1fr);}}
+
+.standing-instructions:lang(zh-CN){letter-spacing:normal;text-transform:none;}

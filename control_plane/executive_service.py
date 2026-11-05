@@ -2065,6 +2065,7 @@ class CeoIngressAppBinding:
     content_provider_factory: Callable[[Runtime], Any] | None = None
     steward_provider_factory: Callable[[Runtime], Any] | None = None
     workspace_read_provider_factory: Callable[[Runtime], Any] | None = None
+    source_operation_provider_factory: Callable[[Runtime, Any], Any] | None = None
     session_bridge_provider_factory: Callable[[Runtime], Any] | None = None
     reply_event_provider_factory: Callable[[Runtime], Any] | None = None
     read_schema: str = CEO_APP_READ_SCHEMA
@@ -2083,6 +2084,8 @@ class CeoIngressAppBinding:
             raise ValueError("App admission arming must be boolean")
         if not callable(getattr(self.grounding_provider, "observe", None)):
             raise ValueError("App binding requires a grounding provider")
+        if self.source_operation_provider_factory is not None and not callable(self.source_operation_provider_factory):
+            raise ValueError("source operations require a fixed host provider")
         if self.read_schema not in CEO_APP_READ_TOOLS_BY_SCHEMA:
             raise ValueError("App binding read schema is not an admitted profile")
         if (
@@ -3335,6 +3338,19 @@ class ExecutiveControlService:
             if mode & 0o007:
                 raise ServiceError("launchd control socket must not be world-accessible")
 
+    def _ceo_ingress_stream_ceiling(self):
+        """Allocate the larger frame only for a configured source App owner.
+
+        Each decoded protocol retains its own old ceiling. UID selection and
+        its exact source schema precede any use of the larger source budget.
+        """
+        from control_plane import executive_release_ingress as release_ingress
+        from common.workspace_source_operation_wire import MAX_REQUEST_BYTES as SOURCE_BYTES
+        binding = self._ceo_ingress_app_binding
+        return (max(release_ingress.MAX_FRAME_BYTES, SOURCE_BYTES)
+                if binding is not None and callable(binding.source_operation_provider_factory)
+                else release_ingress.MAX_FRAME_BYTES)
+
     def _grant_app_socket_access(self) -> None:
         """One named-user ACL; C1 ownership, modes and groups stay intact.
 
@@ -3389,7 +3405,7 @@ class ExecutiveControlService:
             self._ceo_ingress_server = await asyncio.start_unix_server(
                 self._handle_ceo_ingress_connection,
                 path=str(self._ceo_ingress_socket_path),
-                limit=release_ingress.MAX_FRAME_BYTES + 1,
+                limit=self._ceo_ingress_stream_ceiling() + 1,
                 start_serving=start_serving,
             )
             self._ceo_ingress_socket_path.chmod(0o600)
@@ -3404,7 +3420,7 @@ class ExecutiveControlService:
             self._ceo_ingress_server = await asyncio.start_unix_server(
                 self._handle_ceo_ingress_connection,
                 sock=activated,
-                limit=release_ingress.MAX_FRAME_BYTES + 1,
+                limit=self._ceo_ingress_stream_ceiling() + 1,
                 start_serving=start_serving,
                 **activated_options,
             )
@@ -5290,7 +5306,8 @@ class ExecutiveControlService:
             # unreachable here and is intentionally omitted (verified by
             # grepping both except clauses above: neither falls through).
             from control_plane import executive_release_ingress as release_ingress
-            if len(raw) > release_ingress.MAX_FRAME_BYTES:
+            frame_ceiling = (self._ceo_ingress_stream_ceiling() if app_peer else release_ingress.MAX_FRAME_BYTES)
+            if len(raw) > frame_ceiling:
                 await self._send_ceo_ingress_error(
                     writer, "request_too_large", "request exceeds byte limit"
                 )
@@ -5314,12 +5331,20 @@ class ExecutiveControlService:
                 )
                 return
             is_release = isinstance(parsed, dict) and parsed.get("schema") == release_ingress.FRAME_SCHEMA
+            if is_release and len(raw) > release_ingress.MAX_FRAME_BYTES:
+                await self._send_ceo_ingress_error(writer, "request_too_large", "release request exceeds byte limit")
+                return
             is_principal_dialogue = (isinstance(parsed, dict)
                 and parsed.get("schema") == principal_app_protocol.APP_REQUEST_SCHEMA)
             selected_principal_dialogue = (is_principal_dialogue and app_peer
                 and callable(app_binding.principal_dialogue_provider_factory))
-            request_ceiling = (principal_app_protocol.MAX_REQUEST_BYTES
-                if selected_principal_dialogue else ceo_ingress.MAX_REQUEST_BYTES)
+            from common import workspace_source_operation_wire as source_operation_wire
+            is_source_operation = (type(parsed) is dict
+                and parsed.get("schema") == source_operation_wire.FRAME_SCHEMA)
+            selected_source_operation = (is_source_operation and app_peer
+                and callable(app_binding.source_operation_provider_factory))
+            request_ceiling = (source_operation_wire.MAX_REQUEST_BYTES if selected_source_operation else
+                principal_app_protocol.MAX_REQUEST_BYTES if selected_principal_dialogue else ceo_ingress.MAX_REQUEST_BYTES)
             if not is_release and len(raw) > request_ceiling:
                 await self._send_ceo_ingress_error(writer, "request_too_large", "request exceeds byte limit")
                 return
@@ -5437,6 +5462,38 @@ class ExecutiveControlService:
             )
             from common import workspace_control_room_action_contract as action_wire
             from common import executive_workspace_fabric_contract as fabric_read_wire
+            if is_source_operation:
+                if not selected_source_operation:
+                    await self._send_ceo_ingress_error(writer, "peer_denied", "source operations require the installed App peer")
+                    return
+                factory = app_binding.source_operation_provider_factory
+                def source_host_ready():
+                    return (app_binding is self._ceo_ingress_app_binding
+                        and app_binding.source_operation_provider_factory is factory
+                        and callable(factory) and not self._closing and self._ceo_ingress_ready
+                        and self._service_state in {"READY", "AWAITING_CANARY"})
+                try:
+                    frame = source_operation_wire.decode_frame(raw)
+                    if not source_host_ready():
+                        raise PermissionError()
+                    runtime = self._require_runtime()
+                    supervisor = self._require_supervisor()
+                    binding = factory(runtime, supervisor)
+                    from control_plane.workspace_source_operation_binding import invoke_source_operation
+                    result = await self._run_physical(lambda: invoke_source_operation(binding, frame,
+                        runtime=runtime, supervisor=supervisor, host_guard=source_host_ready))
+                    response = {"ok": True, "result": result}
+                except PermissionError:
+                    response = workspace_error("access_denied", 403)
+                except ValueError:
+                    response = workspace_error("source_unavailable", 503)
+                except Exception:
+                    # An original phase may already be attempted. Transport
+                    # failure cannot manufacture a NOT_DISPATCHED receipt.
+                    response = workspace_error("source_unavailable", 503)
+                await self._send_ceo_ingress_response(writer, response,
+                    response_ceiling=source_operation_wire.MAX_RESPONSE_BYTES)
+                return
             if type(parsed) is dict and parsed.get("schema") == action_wire.FRAME_SCHEMA:
                 if not app_peer:
                     await self._send_ceo_ingress_error(
@@ -5503,6 +5560,35 @@ class ExecutiveControlService:
                     writer, result, response_ceiling=action_wire.MAX_RESPONSE_BYTES,
                 )
                 return
+            from common import workspace_instruction_admission_contract as instruction_wire
+            if instruction_wire.is_frame(parsed):
+                if not app_peer:
+                    await self._send_ceo_ingress_error(writer,"peer_denied","Instruction controls require the installed App peer")
+                    return
+                try:instruction_request=instruction_wire.decode_frame(raw)
+                except (TypeError,ValueError):
+                    await self._send_ceo_ingress_response(writer,workspace_error("invalid_input",400),response_ceiling=instruction_wire.MAX_RESPONSE_BYTES)
+                    return
+                factory=app_binding.workspace_read_provider_factory
+                def instruction_host_ready():
+                    return (app_binding is self._ceo_ingress_app_binding
+                        and app_binding.workspace_read_provider_factory is factory and callable(factory)
+                        and not self._closing and self._ceo_ingress_ready
+                        and self._service_state in {"READY","AWAITING_CANARY"})
+                delegated=False
+                try:
+                    if not instruction_host_ready():result=instruction_wire.withheld(instruction_request,reason="OWNER_NOT_READY")
+                    else:
+                        from control_plane.workspace_read_service import WorkspaceReadService
+                        provider=factory(self._require_runtime())
+                        if type(provider) is not WorkspaceReadService or not instruction_host_ready():result=instruction_wire.withheld(instruction_request,reason="OWNER_NOT_READY")
+                        else:
+                            delegated=True
+                            result=await provider.handle_frame(instruction_request,action_host_ready=instruction_host_ready)
+                    result=instruction_wire.validate_envelope(result,instruction_request)
+                except Exception:result=instruction_wire.withheld(instruction_request,attempted=delegated)
+                await self._send_ceo_ingress_response(writer,result,response_ceiling=instruction_wire.MAX_RESPONSE_BYTES)
+                return
             from common import workspace_project_admission_wire as admission_wire
             if admission_wire.is_project_admission_frame(parsed):
                 if not app_peer:
@@ -5537,17 +5623,20 @@ class ExecutiveControlService:
                     result = admission_wire.withheld(admission_request, attempted=delegated)
                 await self._send_ceo_ingress_response(writer, result, response_ceiling=admission_wire.MAX_RESPONSE_BYTES)
                 return
+            from common import workspace_project_instructions_contract as instructions_wire
             from common import workspace_project_plan_contract as project_plan_wire
             from common import workspace_project_journal_contract as project_journal_wire
+            from common import workspace_project_knowledge_read_contract as knowledge_wire
             from common import workspace_project_session_contract as project_session_wire
             from common import workspace_project_direction_contract as project_direction_wire
+            from common import workspace_project_archive_contract as project_archive_wire
             from common import workspace_autonomy_read_contract as autonomy_wire
             from common import workspace_resource_capacity_contract as capacity_wire
             from common import workspace_byok_read_contract as byok_wire
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
                     ACTIVITY_FRAME_SCHEMA, MISSION_RESULT_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA,
-                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, byok_wire.FRAME_SCHEMA}:
+                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, instructions_wire.FRAME_SCHEMA, byok_wire.FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
@@ -5558,6 +5647,19 @@ class ExecutiveControlService:
                         byok_wire.validate_frame(parsed)
                     except (TypeError, ValueError):
                         await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == instructions_wire.FRAME_SCHEMA:
+                    ceiling = instructions_wire.MAX_RESPONSE_BYTES
+                    try: instructions_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") in {project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA}:
+                    ceiling = project_archive_wire.MAX_RESPONSE_BYTES
+                    try:
+                        project_archive_wire.validate_read_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400), response_ceiling=ceiling)
                         return
                 elif parsed.get("schema") == project_direction_wire.FRAME_SCHEMA:
                     ceiling = project_direction_wire.MAX_RESPONSE_BYTES
@@ -5592,6 +5694,14 @@ class ExecutiveControlService:
                     ceiling = project_journal_wire.MAX_RESPONSE_BYTES
                     try:
                         project_journal_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == knowledge_wire.FRAME_SCHEMA:
+                    ceiling = knowledge_wire.MAX_RESPONSE_BYTES
+                    try:
+                        knowledge_wire.validate_frame(parsed)
                     except (TypeError, ValueError):
                         await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
                                                              response_ceiling=ceiling)
@@ -8419,11 +8529,12 @@ class ExecutiveControlService:
                     is not None
                 )
             except StateConflict as exc:
-                # A malformed original-root marker also remains a per-root
-                # reconciliation/refusal problem, not independent admission.
-                unresolved = True
+                # Retain this already-observed refusal for the caller's existing
+                # idempotent diagnostic before independent work can proceed.
+                # The selector stays read-only and original reconciliation wins.
                 if prestart_refusals is not None:
                     prestart_refusals[root.job_id] = exc
+                unresolved = True
             if unresolved:
                 if first_reconciling_root is None:
                     first_reconciling_root = root.job_id

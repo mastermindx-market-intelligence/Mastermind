@@ -32,29 +32,18 @@ REVIEWED_ANCHORS = {
         "node_type": "AsyncFunctionDef",
         # Existing section-sign/em-dash prose needs an exact full-source pin
         # in addition to the method AST; all three literal lines are ASCII.
-        # Qualified session/direction/capacity READ and admission additions change the enclosing ingress AST.
+        # Qualified Knowledge/Archive READ additions change the enclosing ingress AST.
         # The original CCR branch and listener remain structurally unchanged.
-        # 2026-11-05 Mission-result composition re-pin (attended parent source
-        # review under the current Chairman waiver, NOT an independent/formal
-        # review of this postimage): the method body gains one statement before
-        # the pinned branch, so only the enclosing body index moves (35 -> 36);
-        # the three pinned status operands keep their exact spelling, values and
-        # relative AST paths, and their source lines shift by the same +14.
-        # The new MISSION_RESULT read branch uses the existing HTTPStatus
-        # convention for its own invalid_input refusal. Previous source SHA
-        # e43df430e5652ffd9aff5114572bccb5438616e615f7edd065239f018493ef96 and
-        # previous AST SHA
-        # 6735cd4807ae1d203599d8210f141ea9b49b5d3487deaaa169789d6fd4565c72.
-        "source_sha256": 'a8ee823c8e2e1d690aa1b9f8eed4ca44d762a581121dbf3f7d450cbe2615e776',
-        "ast_sha256": 'db683f2685ca763a2011cbae6f4a8a75d2807cc05708ea654cb195b9a1789c35',
-        "sites": ((('body', 3, 'body', 37, 'body', 3, 'orelse', 0, 'body', 2, 'body', 0, 'value', 'args', 1),
+        "source_sha256": 'b82f61a07a8191e5935fbf64dab5cdb1d1238eae309812fa41fbf59f6d04c2aa',
+        "ast_sha256": '83aef0bdc6356c12bab0fcce640c7d0a7dcbd91a313a3f99d7ad6d0e1da0997a',
+        "sites": ((('body', 3, 'body', 48, 'body', 3, 'orelse', 0, 'body', 2, 'body', 0, 'value', 'args', 1),
   'int',
   403,
   '403'),
  (('body',
    3,
    'body',
-   37,
+   48,
    'body',
    3,
    'orelse',
@@ -76,7 +65,7 @@ REVIEWED_ANCHORS = {
  (('body',
    3,
    'body',
-   37,
+   48,
    'body',
    3,
    'orelse',
@@ -102,3 +91,6 @@ REVIEWED_ANCHORS = {
 # The same three original Fabric HTTP operands are retained at mapped exact sites.
 # Parent checked this postimage under the Chairman waiver; no independent approval claim.
 # Protected #695 backup composition changes the full source only; the BYOK ingress AST and exact status sites are unchanged.
+
+# Parent reviewed the BYOK + protected Workspace composition at 49c2e1d.
+# The exact 136-node Fabric response branch and original three operands are unchanged.

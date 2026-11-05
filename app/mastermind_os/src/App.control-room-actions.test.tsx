@@ -11,18 +11,18 @@ import { ControlRoomActionTransportError } from "./control-room";
 const firstHandle = "55555555-5555-4555-8555-555555555555";
 function signed() {
   let value: AuthState = { status: "signed_in", acquisition: true, content: true, reason: null };
-  let notify = (_next: AuthState) => {};
+  const listeners = new Set<(next: AuthState) => void>();
   return {
     auth: {
       getState: () => value,
       subscribe: (listener: (next: AuthState) => void) => {
-        notify = listener; return () => { notify = () => {}; };
+        listeners.add(listener); return () => { listeners.delete(listener); };
       },
       signIn: vi.fn(async () => {}), signOut: vi.fn(async () => {}),
     },
     leave() {
       value = { ...value, status: "signed_out", acquisition: false, content: false };
-      notify(value);
+      for (const listener of listeners) listener(value);
     },
   };
 }
@@ -113,4 +113,22 @@ describe("mounted Control Room actions use the existing authenticated Host", () 
     await act(async () => owner.leave());
     await waitFor(() => expect(screen.queryByRole("button", { name: `Open Cursor agent binding ${firstHandle}` })).toBeNull());
   });
+});
+
+it('joins the selected Estate row to the incumbent exact-binding Open owner and withdraws it on logout',async()=>{
+  const owner=signed(),user=userEvent.setup();
+  const open=vi.fn(async()=>({schema:'mastermind.workspace_control_room_action_result.v1' as const,
+    operation:'open' as const,status:200,disposition:'OWNER_RETURNED' as const,outcome:{ok:true,verified:false}}));
+  window.MastermindMissionHost={auth:owner.auth,readControlRoomState:vi.fn(async()=>source()),openControlRoomSurface:open};
+  render(<App/>);
+  await user.click(screen.getByRole('button',{name:'Session Estate'}));
+  const row=await screen.findByTestId('session-estate-row-'+firstHandle);
+  await user.click(within(row).getByRole('button',{name:/Inspect/}));
+  const button=screen.getByRole('button',{name:'Open session'});
+  expect(open).not.toHaveBeenCalled();await user.click(button);
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(open).toHaveBeenCalledWith({payload:{binding_id:firstHandle},signal:expect.any(AbortSignal)});
+  await act(async()=>owner.leave());
+  await waitFor(()=>expect(screen.queryByRole('button',{name:'Open session'})).toBeNull());
+  expect(open).toHaveBeenCalledTimes(1);
 });

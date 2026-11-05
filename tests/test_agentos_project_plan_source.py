@@ -7,8 +7,8 @@ import zlib
 
 import pytest
 
-from control_plane.agentos_project_plan import (AgentOsProjectPlanReader,
-    ProjectPlanSourceUnavailable, read_from_macro_owner)
+from control_plane.agentos_project_plan import (_HISTORY_BATCH_BYTES,
+    AgentOsProjectPlanReader, ProjectPlanSourceUnavailable, read_from_macro_owner)
 
 SHA = "a" * 40
 WORK = "WS:ONE"
@@ -36,6 +36,10 @@ next_action: Qualify the source.
 ---
 Private body must not become public plan content.
 """
+BLOB = RECORD.encode("utf-8")
+# Commit selectors and blob identities are distinct source facts.
+REV = "c" * 40
+BLOB_OID = hashlib.sha1(b"blob " + str(len(BLOB)).encode() + b"\0" + BLOB).hexdigest()
 
 
 @pytest.fixture
@@ -57,9 +61,12 @@ def source_git():
         elif command == ["show", SHA + ":scripts/agentos.py"]:
             text = source.decode()
         elif command == ["log", "--max-count=8", "--format=%H%x00%cI%x00", SHA, "--", PATH]:
-            text = "c" * 40 + "\x00" + "2026-11-03T00:00:00Z" + "\x00\n"
-        elif command == ["show", "c" * 40 + ":" + PATH]:
-            text = RECORD
+            text = REV + "\x00" + "2026-11-03T00:00:00Z" + "\x00\n"
+        elif command == ["cat-file", "--batch"]:
+            request = (REV + ":" + PATH + "\n").encode("utf-8")
+            if limits.get("input_bytes") != request:
+                pytest.fail("Unexpected history batch request: " + repr(limits.get("input_bytes")))
+            text = BLOB_OID + " blob " + str(len(BLOB)) + "\n" + RECORD + "\n"
         else:
             pytest.fail("Unexpected source operation: " + repr(command))
         return dict(code=0, stdout=text, timed_out=False, limit_exceeded=False, invalid_utf8=False)
@@ -81,9 +88,13 @@ def test_actual_macro_parser_and_validator_produce_real_fields(source_git):
     assert "Private body" not in json.dumps(value)
     assert value["source"]["content_sha256"] == hashlib.sha256(RECORD.encode()).hexdigest()
     assert value["plan"]["version_history"]["kind"] == "GIT_RECORD_REVISIONS"
-    assert value["plan"]["version_history"]["revisions"][0]["commit"] == "c" * 40
+    assert value["plan"]["version_history"]["revisions"][0]["commit"] == REV
+    assert value["plan"]["version_history"]["revisions"][0]["committed_at"] == "2026-11-03T00:00:00Z"
+    assert value["plan"]["version_history"]["revisions"][0]["content_sha256"] == hashlib.sha256(BLOB).hexdigest()
     assert all(0 < limits["timeout"] <= 10 for _, limits in calls)
-    assert all(limits["max_bytes"] <= 1048576 for _, limits in calls)
+    # Only the one request-local history batch may exceed the per-read bound.
+    assert all(limits["max_bytes"] <= 1048576 for _, limits in calls if limits.get("input_bytes") is None)
+    assert [limits["max_bytes"] for _, limits in calls if limits.get("input_bytes") is not None] == [_HISTORY_BATCH_BYTES]
 
 
 @pytest.mark.parametrize("failure,expected", [
@@ -124,6 +135,22 @@ def test_missing_history_retains_available_actual_plan_content(source_git):
     def runner(argv, **limits):
         if argv[5] == "log":
             return dict(code=1, stdout="", timed_out=False, limit_exceeded=False, invalid_utf8=False)
+        return original(argv, **limits)
+    value = read(runner)
+    assert value["availability"] == "AVAILABLE"
+    assert value["plan"]["objective"] == "Deliver the real owner content."
+    assert value["plan"]["version_history"] == {"state": "UNAVAILABLE", "reason": "SOURCE_UNAVAILABLE"}
+
+
+def test_failed_history_batch_retains_available_actual_plan_content(source_git):
+    original, calls = source_git
+    def runner(argv, **limits):
+        if argv[5] == "cat-file":
+            request = (REV + ":" + PATH + "\n").encode("utf-8")
+            assert limits.get("input_bytes") == request
+            text = BLOB_OID + " blob " + str(len(BLOB)) + "\n" + RECORD + "\n"
+            return dict(code=0, stdout=text, timed_out=False,
+                limit_exceeded=False, invalid_utf8=True)
         return original(argv, **limits)
     value = read(runner)
     assert value["availability"] == "AVAILABLE"

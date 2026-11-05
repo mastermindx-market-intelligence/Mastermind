@@ -497,9 +497,11 @@ class WorkspaceReadService:
                  product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                  product_acceptance_owner_guard=None, product_acceptance_read=None,
                  product_acceptance_observe=None, activity_membership=None,
-                 project_plan_reader=None, project_journal_reader=None, project_session_source=None, project_direction_reader=None,
+                 project_plan_reader=None, project_journal_reader=None, project_session_source=None, project_instructions_reader=None, project_direction_reader=None, project_archive_reader=None,
+                 project_knowledge_catalogue_reader=None, project_knowledge_memory_reader=None, project_knowledge_source_reader=None,
+                 canonical_project_data=None,
                  control_room_presenter=None,
-                 control_room_actions=None, project_admission_permissions=None,
+                 control_room_actions=None, project_admission_permissions=None, instruction_admission_permissions=None,
                  byok_roles_reader=None):
         from control_plane.workspace_project_permission_binding import ProjectAdmissionPermissions
         if project_admission_permissions is not None:
@@ -507,6 +509,12 @@ class WorkspaceReadService:
                 raise ValueError("nominal installed project permission source required")
             project_admission_permissions.check()
         self._project_admission_permissions = project_admission_permissions
+        from control_plane.workspace_instruction_permission_binding import InstructionAdmissionPermissions
+        if instruction_admission_permissions is not None:
+            if type(instruction_admission_permissions) is not InstructionAdmissionPermissions:
+                raise ValueError("nominal installed instruction permission source required")
+            instruction_admission_permissions.check()
+        self._instruction_admission_permissions = instruction_admission_permissions
         self.cache = cache
         self.runtime = runtime
         self.authorize = authorize
@@ -580,17 +588,45 @@ class WorkspaceReadService:
             if type(project_plan_reader) is not AgentOsProjectPlanReader:
                 raise ValueError("exact installed Agent OS plan reader required")
         self._project_plan_reader = project_plan_reader
+        if project_instructions_reader is not None:
+            from control_plane.agentos_project_instructions import AgentOsProjectInstructionsReader
+            if type(project_instructions_reader) is not AgentOsProjectInstructionsReader:
+                raise ValueError("exact installed Agent OS instruction reader required")
+        self._project_instructions_reader = project_instructions_reader
 
         if project_journal_reader is not None:
             from control_plane.agentos_project_journal import AgentOsProjectJournalReader
             if type(project_journal_reader) is not AgentOsProjectJournalReader:
                 raise ValueError("exact installed Agent OS journal reader required")
         self._project_journal_reader = project_journal_reader
+        self._project_archive_reader = project_archive_reader
+        self._archive_read_adapter = None
+        if project_archive_reader is not None:
+            from control_plane.workspace_project_archive_read import ProjectArchiveReadAdapter
+            self._archive_read_adapter = ProjectArchiveReadAdapter(workspace=self, reader=project_archive_reader)
         self._project_direction_reader = project_direction_reader
         self._direction_read_adapter = None
         if project_direction_reader is not None:
             from control_plane.workspace_project_direction_read import ProjectDirectionReadAdapter
             self._direction_read_adapter = ProjectDirectionReadAdapter(workspace=self, reader=project_direction_reader)
+        from control_plane.installed_project_knowledge_readers import (
+            AgentOsProjectKnowledgeCatalogueReader, AgentOsProjectKnowledgeMemoryReader,
+            AgentOsProjectKnowledgeSourceReader)
+        for reader, reader_type in (
+                (project_knowledge_catalogue_reader, AgentOsProjectKnowledgeCatalogueReader),
+                (project_knowledge_memory_reader, AgentOsProjectKnowledgeMemoryReader),
+                (project_knowledge_source_reader, AgentOsProjectKnowledgeSourceReader)):
+            if reader is not None and type(reader) is not reader_type:
+                raise ValueError("installed project knowledge reader required")
+        self._project_knowledge_catalogue_reader = project_knowledge_catalogue_reader
+        self._project_knowledge_memory_reader = project_knowledge_memory_reader
+        self._project_knowledge_source_reader = project_knowledge_source_reader
+        if canonical_project_data is not None:
+            from control_plane.installed_canonical_project_data_binding import _ProjectDataReadBinding
+            if type(canonical_project_data) is not _ProjectDataReadBinding or canonical_project_data.store is not runtime.store:
+                raise ValueError("installed canonical project DATA binding required")
+        self._canonical_project_data = canonical_project_data
+
         if project_session_source is not None:
             from control_plane.workspace_managed_project_session_source import ExistingManagedProjectSessionSource
             if type(project_session_source) is not ExistingManagedProjectSessionSource:
@@ -635,6 +671,52 @@ class WorkspaceReadService:
         try:
             if (self.authorize(frame["principal"]) is not True
                     or permission_stamp(self.authorize, frame["principal"]) != stamp):
+                return error("access_denied", 403)
+        except Exception: return error("access_denied", 403)
+        return result
+
+    def _read_project_instructions(self, selected):
+        from common import workspace_project_instructions_contract as wire
+        selected = wire.validate_selection(selected)
+        work_ref = selected["work_ref"]
+        before = self.cache.snapshot()
+        def member(snapshot):
+            if not _qualified(snapshot): raise ValueError("source_unavailable")
+            if len([row for row in snapshot.document["work"] if row.get("work_ref") == work_ref]) != 1:
+                raise LookupError("selection_not_found")
+        member(before)
+        reader = self._project_instructions_reader
+        if reader is None: return wire.unavailable(work_ref, "OWNER_NOT_READY")
+        from control_plane.agentos_project_instructions import AgentOsProjectInstructionsReader
+        if type(reader) is not AgentOsProjectInstructionsReader:
+            return wire.unavailable(work_ref,"OWNER_NOT_READY")
+        body = wire.validate_body(AgentOsProjectInstructionsReader.read(reader,work_ref=work_ref), selected)
+        after = self.cache.snapshot()
+        member(after)
+        if (self._project_instructions_reader is not reader or before.owner is not after.owner
+                or before.instance != after.instance or before.publication != after.publication
+                or digest(before.document) != digest(after.document)
+                or _plan_validity_identity(before.validity) != _plan_validity_identity(after.validity)):
+            return wire.unavailable(work_ref, "SOURCE_CHANGED")
+        if body["availability"] == "AVAILABLE" and before.document.get("sources", {}).get("macro_sha") != body["source"]["commit"]:
+            return wire.unavailable(work_ref, "SOURCE_CHANGED")
+        bounded_canonical({"ok": True, "result": body}, limit=wire.MAX_RESPONSE_BYTES - 1)
+        return body
+
+    async def _handle_project_instructions_frame(self, frame):
+        from common import workspace_project_instructions_contract as wire
+        try: wire.validate_frame(frame)
+        except (TypeError, ValueError): return error("invalid_input", 400)
+        try:
+            if self.authorize(frame["principal"]) is not True: return error("access_denied", 403)
+            stamp = permission_stamp(self.authorize, frame["principal"])
+        except Exception: return error("access_denied", 403)
+        task = asyncio.create_task(asyncio.to_thread(self._read_project_instructions, frame["selection"]))
+        try: result = {"ok": True, "result": await await_owned(task)}
+        except LookupError: result = error("selection_not_found", 404)
+        except Exception: result = {"ok": True, "result": wire.unavailable(frame["selection"]["work_ref"])}
+        try:
+            if (self.authorize(frame["principal"]) is not True or permission_stamp(self.authorize, frame["principal"]) != stamp):
                 return error("access_denied", 403)
         except Exception: return error("access_denied", 403)
         return result
@@ -751,6 +833,78 @@ class WorkspaceReadService:
                 return error("access_denied", 403)
         except Exception:
             return error("access_denied", 403)
+        return result
+
+    def _read_project_knowledge(self, operation, selected, principal):
+        from common import workspace_project_knowledge_read_contract as wire
+        selected = wire.selection(selected, operation=operation)
+        before = self.cache.snapshot()
+        work_ref = selected["work_ref"]
+        def member(snapshot):
+            if not _qualified(snapshot): raise ValueError("source_unavailable")
+            rows = [row for row in snapshot.document["work"] if row.get("work_ref") == work_ref]
+            if len(rows) != 1: raise LookupError("selection_not_found")
+        member(before)
+        readers = {
+            "project_knowledge_catalogue": self._project_knowledge_catalogue_reader,
+            "project_knowledge_memory": self._project_knowledge_memory_reader,
+            "project_knowledge_source": self._project_knowledge_source_reader,
+        }
+        reader = readers[operation]
+        if reader is None: return wire.unavailable(selected, operation=operation)
+        data = None
+        if self._canonical_project_data is not None:
+            from control_plane.installed_canonical_project_data_binding import read_installed_project_data
+            data = read_installed_project_data(self._canonical_project_data,principal,operation=operation,selection=selected)
+        body = wire.validate_body(reader.read(**selected) if data is None else data[0], operation=operation)
+        expected = {key: item for key, item in selected.items() if key != "expected_revision"}
+        if body["selection"] != expected:
+            return wire.unavailable(selected, operation=operation, reason="SOURCE_CHANGED")
+        after = self.cache.snapshot()
+        member(after)
+        if (before.owner is not after.owner or before.instance != after.instance
+                or before.publication != after.publication
+                or digest(before.document) != digest(after.document)
+                or _plan_validity_identity(before.validity) != _plan_validity_identity(after.validity)):
+            return wire.unavailable(selected, operation=operation, reason="SOURCE_CHANGED")
+        if body.get("source") is not None:
+            source = body["source"]
+            expected_code = before.document.get("sources", {}).get("macro_sha")
+            if data is not None:
+                data[1].check()
+                if expected_code != data[1].code_commit:
+                    return wire.unavailable(selected, operation=operation, reason="SOURCE_CHANGED")
+            if ((expected_code if data is None else data[1].data_commit) != source["commit"]
+                    or (operation == "project_knowledge_source"
+                        and source["revision"] != selected["expected_revision"])):
+                return wire.unavailable(selected, operation=operation, reason="SOURCE_CHANGED")
+        if data is not None:
+            data[1].check()
+        bounded_canonical({"ok": True, "result": body}, limit=wire.MAX_RESPONSE_BYTES)
+        return body
+
+    async def _handle_project_knowledge_frame(self, frame):
+        from common import workspace_project_knowledge_read_contract as wire
+        try:
+            frame = wire.validate_frame(frame)
+        except (TypeError, ValueError): return error("invalid_input", 400)
+        try:
+            if self.authorize(frame["principal"]) is not True: return error("access_denied", int(HTTPStatus.FORBIDDEN))
+            stamp = permission_stamp(self.authorize, frame["principal"])
+        except Exception: return error("access_denied", int(HTTPStatus.FORBIDDEN))
+        task = asyncio.create_task(asyncio.to_thread(self._read_project_knowledge,
+            frame["operation"], frame["selection"], frame["principal"]))
+        try:
+            body = await await_owned(task)
+            result = {"ok": True, "result": body}
+        except LookupError: result = error("selection_not_found", 404)
+        except Exception:
+            result = {"ok": True, "result": wire.unavailable(frame["selection"], operation=frame["operation"])}
+        try:
+            if (self.authorize(frame["principal"]) is not True
+                    or permission_stamp(self.authorize, frame["principal"]) != stamp):
+                return error("access_denied", int(HTTPStatus.FORBIDDEN))
+        except Exception: return error("access_denied", int(HTTPStatus.FORBIDDEN))
         return result
 
     async def _handle_original_acceptance_frame(self, frame):
@@ -1914,12 +2068,32 @@ class WorkspaceReadService:
         from common import workspace_byok_read_contract as byok_wire
         if type(frame) is dict and frame.get("schema") == byok_wire.FRAME_SCHEMA:
             return await self._handle_byok_frame(frame)
+        from common.workspace_project_archive_contract import FRAME_SCHEMA as ARCHIVE_FRAME_SCHEMA, PAGE_FRAME_SCHEMA as ARCHIVE_PAGE_FRAME_SCHEMA
+        if type(frame) is dict and frame.get("schema") in {ARCHIVE_FRAME_SCHEMA, ARCHIVE_PAGE_FRAME_SCHEMA}:
+            from control_plane.workspace_project_archive_read import ProjectArchiveReadAdapter
+            adapter = self._archive_read_adapter or ProjectArchiveReadAdapter(workspace=self, reader=None)
+            return await adapter.handle_frame(frame)
         from common.executive_workspace_mission_result_contract import FRAME_SCHEMA as MISSION_RESULT_FRAME_SCHEMA
         from common.workspace_project_direction_contract import FRAME_SCHEMA as DIRECTION_FRAME_SCHEMA
         if type(frame) is dict and frame.get("schema") == DIRECTION_FRAME_SCHEMA:
             from control_plane.workspace_project_direction_read import ProjectDirectionReadAdapter
             adapter = self._direction_read_adapter or ProjectDirectionReadAdapter(workspace=self, reader=None)
             return await adapter.handle_frame(frame)
+        from common import workspace_instruction_admission_contract as instruction_wire
+        if instruction_wire.is_frame(frame):
+            try:checked=instruction_wire.validate_frame(frame)
+            except (TypeError,ValueError):return error("invalid_input",400)
+            permissions=self._instruction_admission_permissions
+            if permissions is None:return instruction_wire.withheld(checked,reason="OWNER_NOT_READY")
+            from control_plane.workspace_instruction_admission import read_instruction_admission_control,instruction_admission_request
+            def ready():
+                return (self._instruction_admission_permissions is permissions
+                    and callable(action_host_ready) and action_host_ready() is True)
+            def owned():
+                options=dict(permissions=permissions,host_ready=ready)
+                mode=instruction_wire.SCHEMAS[checked['schema']]
+                return read_instruction_admission_control(self,checked,**options) if mode=='current' else instruction_admission_request(self,checked,status=mode=='status',**options)
+            return await await_owned(asyncio.create_task(asyncio.to_thread(owned)))
         from common import workspace_project_admission_wire as admission_wire
         if admission_wire.is_project_admission_frame(frame):
             try:
@@ -1951,6 +2125,12 @@ class WorkspaceReadService:
         from common.workspace_project_session_contract import FRAME_SCHEMA as PROJECT_SESSION_FRAME_SCHEMA
         if isinstance(frame, dict) and frame.get("schema") == PROJECT_SESSION_FRAME_SCHEMA:
             return await self._handle_project_session_frame(frame)
+        from common.workspace_project_knowledge_read_contract import FRAME_SCHEMA as PROJECT_KNOWLEDGE_FRAME_SCHEMA
+        if type(frame) is dict and frame.get("schema") == PROJECT_KNOWLEDGE_FRAME_SCHEMA:
+            return await self._handle_project_knowledge_frame(frame)
+        from common.workspace_project_instructions_contract import FRAME_SCHEMA as PROJECT_INSTRUCTIONS_FRAME_SCHEMA
+        if frame.get("schema") == PROJECT_INSTRUCTIONS_FRAME_SCHEMA:
+            return await self._handle_project_instructions_frame(frame)
         from common.workspace_project_journal_contract import FRAME_SCHEMA as PROJECT_JOURNAL_FRAME_SCHEMA
         if type(frame) is dict and frame.get("schema") == PROJECT_JOURNAL_FRAME_SCHEMA:
             return await self._handle_project_journal_frame(frame)
@@ -2189,9 +2369,11 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                                product_acceptance_owner_guard=None, product_acceptance_read=None,
                                product_acceptance_observe=None, activity_membership=None,
-                               project_plan_reader=None, project_journal_reader=None, project_session_source_factory=None, project_direction_reader=None,
+                               project_plan_reader=None, project_journal_reader=None, project_session_source_factory=None, project_instructions_reader=None, project_direction_reader=None, project_archive_reader=None,
+                               project_knowledge_catalogue_reader=None, project_knowledge_memory_reader=None, project_knowledge_source_reader=None,
+                               canonical_project_data_factory=None,
                                cross_plane_context=None, cross_plane_enrollment=None,
-                               project_admission_permissions=None, byok_roles_reader=None):
+                               project_admission_permissions=None, instruction_admission_permissions=None, byok_roles_reader=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
 
     Installers pass this to CeoIngressAppBinding.workspace_read_provider_factory.
@@ -2253,10 +2435,17 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     product_acceptance_owner_guard=product_acceptance_owner_guard,
                                     product_acceptance_read=product_acceptance_read,
                                     product_acceptance_observe=product_acceptance_observe,
+                                    project_instructions_reader=project_instructions_reader,
                                     project_plan_reader=project_plan_reader,
                                     project_journal_reader=project_journal_reader,
+                                    project_knowledge_catalogue_reader=project_knowledge_catalogue_reader,
+                                    project_knowledge_memory_reader=project_knowledge_memory_reader,
+                                    project_knowledge_source_reader=project_knowledge_source_reader,
+                                    canonical_project_data=(None if canonical_project_data_factory is None else canonical_project_data_factory(runtime)),
                                     project_session_source=session_source,
                                     project_direction_reader=project_direction_reader,
+                                    project_archive_reader=project_archive_reader,
                                     activity_membership=activity_membership,
-                                    project_admission_permissions=project_admission_permissions)
+                                    project_admission_permissions=project_admission_permissions,
+                                    instruction_admission_permissions=instruction_admission_permissions)
     return provide

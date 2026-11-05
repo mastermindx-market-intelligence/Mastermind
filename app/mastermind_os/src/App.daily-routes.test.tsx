@@ -128,6 +128,7 @@ describe("owner-backed daily routes in App", () => {
       (await screen.findAllByText("Private reserved decision")).length,
     ).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "Knowledge" }));
+    await user.click(screen.getByRole("button", { name: "Retained task sources" }));
     expect(
       screen.getByRole("region", { name: "Knowledge source" }).textContent,
     ).toContain("CURRENT");

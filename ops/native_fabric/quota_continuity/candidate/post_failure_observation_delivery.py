@@ -231,7 +231,8 @@ def snapshot(run, *, invocation_id):
   'launch_binding_sha256':delivery.digest(reader.canonical(binding)),
   'terminal_log_sha256':delivery.digest(log),'prior_receipt_sha256':scope['prior_receipt_sha256'],
   'request_record_sha256':delivery.digest(request_raw),'request_launch_sha256':delivery.digest(launch_raw),
-  'invocation_id':invocation_id}
+  'invocation_id':invocation_id,'receipt_metadata_only':True,
+  'expected_process_sha256':model.RECEIPT_DIGESTS[run]}
  model.validate_request(request)
  sources={name:delivery.digest(delivery.local_file(here/name,65536)) for name in
           ('run_observation.py','post_failure_observation.py','artifact_reader.py')}
@@ -304,7 +305,8 @@ def validate_response(raw, request):
   'recorded_completion','earlier_absence_is_not_final_absence','permission_refusal_observed','pid_probe_performed',
   'stream_content_read','execution_replayed','effect_state_changed','lease_released',
   'export_authorized','outcome_accepted','original_report_sha256'}
- if type(report) is not dict or set(report) != expected or report['schema'] != model.SCHEMA or report['run_id'] != request['run_id'] or report['state'] != 'UNKNOWN':
+ if request.get('receipt_metadata_only'):expected|={'receipt_detail','recorded_predicates','marker_detail'}
+ if type(report) is not dict or set(report) != expected or report['schema'] != model.SCHEMA or report['run_id'] != request['run_id'] or report['state'] not in (('UNKNOWN','RECORDED_TERMINAL_FAILURE') if request.get('receipt_metadata_only') else ('UNKNOWN',)):
   raise ValueError('post_failure_response_shape')
  for key in ('pid_probe_performed','stream_content_read','execution_replayed','effect_state_changed','lease_released','export_authorized','outcome_accepted','original_hold_binding_proven'):
   if report[key] is not False: raise ValueError('post_failure_authority_injection')
@@ -341,6 +343,12 @@ def validate_response(raw, request):
    raise ValueError('post_failure_original_record_digest')
  if report['final_process_receipt_observed'] != (record is not None):
   raise ValueError('post_failure_record_projection_mismatch')
+ if request.get('receipt_metadata_only'):
+  model.validate_detail(request,report['receipt_detail']);model.validate_marker(request,report['marker_detail'])
+  d=report['receipt_detail'];state=model.recorded_state(report,d)
+  if (reader.canonical(report['recorded_predicates'])!=reader.canonical(model.recorded_predicates(d)) or report['state']!=state
+      or d is not None and not model.detail_matches_record(d,record)):
+   raise ValueError('recorded_predicate_or_binding_injection')
  entries=bundle['files'];contract=bundle['original_contract']
  scope={k:contract[k] for k in ('root','parent','run_id')}
  directory='/tmp/fabric-'+hashlib.sha256(reader.canonical(scope)).hexdigest()[:40]
@@ -377,7 +385,9 @@ def validate_response(raw, request):
     raise ValueError('post_failure_file_diagnostic_shape')
    normalized.append(item);stopped=status=='UNAVAILABLE'
   else:raise ValueError('post_failure_file_status')
- if len(entries)<len(paths) and not stopped:raise ValueError('post_failure_partial_response_unexplained')
+ if request.get('receipt_metadata_only'):
+  if entries:raise ValueError('metadata_only_artifact_read_refused')
+ elif len(entries)<len(paths) and not stopped:raise ValueError('post_failure_partial_response_unexplained')
  return {'report':report,'files':normalized,'snapshot_state':'PARTIAL_UNSETTLED','source_adoption_allowed':False}
 
 
@@ -406,8 +416,8 @@ def observe(request, destination):
      item['status']='RETAINED_UNSETTLED';item['snapshot_only']=True
      item['source_adoption_allowed']=False
     receipt['files'].append(item)
-   unchanged();chain.verify();receipt['state']='PARTIAL_UNSETTLED'
-   receipt['local_preservation_created']=True
+   unchanged();chain.verify();receipt['state']='METADATA_OBSERVED' if request.get('receipt_metadata_only') else 'PARTIAL_UNSETTLED'
+   receipt['local_preservation_created']=bool(receipt['files']) if request.get('receipt_metadata_only') else True
   except (OSError,ValueError,TypeError,KeyError,UnicodeError,RecursionError,sqlite3.Error,subprocess.SubprocessError) as exc:
    receipt['state']='UNAVAILABLE';receipt['diagnostic_code']=('LOCAL_OS_PERMISSION_REFUSED' if isinstance(exc,OSError) and exc.errno in (1,13) else 'POST_FAILURE_READ_UNCONFIRMED')
   receipt['observed_at_epoch']=time.time()

@@ -294,9 +294,9 @@
       "source": "candidate/lane_runtime.py"
     },
     "ext/lease_broker.py": {
-      "bytes": 73321,
+      "bytes": 74098,
       "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
-      "sha256": "a2847a29abe590cb168c2cd8ae34e0b1c3222b6e92ab4c00f252a342d56e6406",
+      "sha256": "598d9b905b71897275a0617d143f3280bc802fbd6c375bed9848d222564e1488",
       "source": "candidate/lease_broker.py"
     },
     "ext/linux_process_identity.py": {
@@ -540,15 +540,15 @@
       "source": "source/pool_status.py"
     },
     "ext/post_failure_observation.py": {
-      "bytes": 18587,
+      "bytes": 32849,
       "installed_preimage_sha256": null,
-      "sha256": "2a78630ccaf574da752c77d7b8f821723ccb264b970e2fe38b1976d886ca97a0",
+      "sha256": "80fc9d95068099fb797c9e7a05981a9650d50ec170935d748d92a8e7bcd04337",
       "source": "candidate/post_failure_observation.py"
     },
     "ext/post_failure_observation_delivery.py": {
-      "bytes": 26735,
+      "bytes": 27751,
       "installed_preimage_sha256": null,
-      "sha256": "0e096d439e71600a20aabd6f29ea94127596ab3c1a4fb31d567194eba145c7f3",
+      "sha256": "81ab6f7f673e53c53b0e0a0cf4f3f1324642e29563f9213170f2a1ae29a0e4fc",
       "source": "candidate/post_failure_observation_delivery.py"
     },
     "ext/provider_outcome.py": {

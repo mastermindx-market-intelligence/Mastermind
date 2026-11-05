@@ -800,7 +800,11 @@ describe("installed authentication and permitted content", () => {
       content: false,
     });
     render(<App />);
-    expect(screen.getByText("Sign-in setup pending")).toBeTruthy();
+    // The accepted private-entry composition names the unconfigured host with
+    // the canonical entry copy and disables its sign-in control.
+    expect(
+      screen.getByText("Sign-in is not configured for this app."),
+    ).toBeTruthy();
     expect(
       (screen.getByRole("button", { name: "Sign in" }) as HTMLButtonElement)
         .disabled,
@@ -1627,12 +1631,17 @@ describe("actual unconfigured web owner lifecycle", () => {
     expect(
       screen.getByRole("button", { name: "Sign in" }).hasAttribute("disabled"),
     ).toBe(true);
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "Programs workspace" }));
-    expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "Programs workspace" }),
-    );
+    // The unconfigured owner lands on private entry: the workspace navigation
+    // (and its Programs workspace control) is not mounted, so no read can start.
+    expect(
+      screen.getByText("Sign-in is not configured for this app."),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Programs workspace" }),
+    ).toBeNull();
+    await act(async () => {
+      for (let i = 0; i < 16; i++) await Promise.resolve();
+    });
     expect(calls).toBe(0);
   });
 });
@@ -2264,8 +2273,9 @@ describe("App command composition", () => {
       content: false,
     });
     render(<App />);
-    await navigateCompanyOperation(user, "Work");
-    expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
+    // Private entry owns the signed-out shell: no workspace route (and no
+    // command surface) is mounted, so nothing can dispatch.
+    expect(screen.getByText("Sign in to your workspace.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
     expect(signedOut.prepare).not.toHaveBeenCalled();
     expect(signedOut.submit).not.toHaveBeenCalled();
