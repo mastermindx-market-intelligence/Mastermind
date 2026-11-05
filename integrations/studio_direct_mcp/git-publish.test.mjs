@@ -1565,3 +1565,123 @@ test('publication recovery: incomplete or torn terminal receipt never creates su
     assert.equal(read.publication_recovery.retry_allowed,false);
   } finally { await f.cleanup(); }
 });
+
+
+test('publication recovery: PREPARED does not attribute an identical remote push by another writer', async () => {
+  const f = await fixture();
+  try {
+    const {createPublicationRecovery} = await import('./git-publish-recovery.mjs');
+    const actionRef = (await import('node:crypto')).createHash('sha256')
+      .update('mastermind.studio_git_push_current_branch.v1\0')
+      .update(f.operationId).update('\0').update(f.branch).update('\0').update(f.head)
+      .digest('hex');
+    const journal = await createPublicationRecovery({
+      git:(cwd,args)=>git(cwd,...args), workspacePath:f.workspace,
+      operationId:f.operationId, branch:f.branch, ref:'refs/heads/'+f.branch,
+      remoteUrl:f.remote,
+    });
+    const held = await journal.begin({actionRef,intendedHead:f.head,expectedRemote:null});
+    assert.equal(held.record.stage,'PREPARED');
+    // Separate fixture-side publisher creates precisely the intended remote tip.
+    // This is NOT the operation with the held PREPARED receipt.
+    await git(f.workspace,'push','origin',f.head+':refs/heads/'+f.branch);
+    const status = await createGitPublisher(f.config).status({operation_id:f.operationId,action_ref:actionRef});
+    assert.equal(status.remote_head_sha,f.head);
+    assert.equal(status.publication_recovery.outcome,'UNKNOWN');
+    assert.equal(status.publication_recovery.reason,'WRITER_MAY_STILL_DISPATCH');
+    assert.equal(status.publication_recovery.retry_allowed,false);
+  } finally {await f.cleanup();}
+});
+
+test('publication recovery: DISPATCHING action can be reconciled after a later valid descendant tip', async () => {
+  const f = await fixture();
+  try {
+    const {createPublicationRecovery} = await import('./git-publish-recovery.mjs');
+    const actionRef = (await import('node:crypto')).createHash('sha256')
+      .update('mastermind.studio_git_push_current_branch.v1\0')
+      .update(f.operationId).update('\0').update(f.branch).update('\0').update(f.head)
+      .digest('hex');
+    const journal = await createPublicationRecovery({
+      git:(cwd,args)=>git(cwd,...args), workspacePath:f.workspace,
+      operationId:f.operationId, branch:f.branch, ref:'refs/heads/'+f.branch,
+      remoteUrl:f.remote,
+    });
+    const prepared = await journal.begin({actionRef,intendedHead:f.head,expectedRemote:null});
+    await journal.markDispatching(prepared.record);
+    await git(f.workspace,'push','origin',f.head+':refs/heads/'+f.branch);
+    await writeFile(path.join(f.workspace,'proof.txt'),'subsequent valid change\n');
+    await git(f.workspace,'add','proof.txt');
+    await git(f.workspace,'commit','-m','test: newer publisher');
+    const newer=(await git(f.workspace,'rev-parse','HEAD')).stdout.trim();
+    await git(f.workspace,'push','origin',newer+':refs/heads/'+f.branch);
+    const status=await createGitPublisher(f.config).status({operation_id:f.operationId,action_ref:actionRef});
+    assert.equal(status.remote_head_sha,newer);
+    assert.equal(status.publication_recovery.outcome,'APPLIED');
+    assert.equal(status.publication_recovery.reason,'INTENDED_HEAD_IS_REMOTE_ANCESTOR');
+    assert.equal(status.publication_recovery.retry_allowed,false);
+  } finally {await f.cleanup();}
+});
+
+test('publication recovery: unrelated remote branch advance is CONFLICT, not proven absence or retry clearance', async () => {
+  const f = await fixture();
+  try {
+    const {createPublicationRecovery} = await import('./git-publish-recovery.mjs');
+    const actionRef = (await import('node:crypto')).createHash('sha256')
+      .update('mastermind.studio_git_push_current_branch.v1\0')
+      .update(f.operationId).update('\0').update(f.branch).update('\0').update(f.head)
+      .digest('hex');
+    const journal = await createPublicationRecovery({
+      git:(cwd,args)=>git(cwd,...args), workspacePath:f.workspace,
+      operationId:f.operationId, branch:f.branch, ref:'refs/heads/'+f.branch,
+      remoteUrl:f.remote,
+    });
+    await journal.markDispatching((await journal.begin({
+      actionRef,intendedHead:f.head,expectedRemote:null,
+    })).record);
+    // An unparented commit models a different legitimate writer's branch tip.
+    const tree=(await git(f.workspace,'rev-parse','HEAD^{tree}')).stdout.trim();
+    const unparented=(await git(f.workspace,'commit-tree',tree,'-m','test: separate writer')).stdout.trim();
+    await git(f.workspace,'push','origin',unparented+':refs/heads/'+f.branch);
+    const status=await createGitPublisher(f.config).status({operation_id:f.operationId,action_ref:actionRef});
+    assert.equal(status.publication_recovery.outcome,'CONFLICT');
+    assert.equal(status.publication_recovery.reason,'REMOTE_DIVERGED_TARGET_NOT_ANCESTOR');
+    assert.equal(status.publication_recovery.retry_allowed,false);
+    let pushes=0;
+    const attempted=createGitPublisher(f.config,{execFile:async(file,args,options)=>{
+      if(file===GIT&&gitCommand(args)==='push')pushes++;
+      return execFile(file,args,options);
+    }});
+    const held=await attempted.push({operation_id:f.operationId,expected_head_sha:f.head});
+    assert.equal(held.code,'UNRECONCILED_OR_DENIED_PUBLICATION');
+    assert.equal(pushes,0);
+  } finally {await f.cleanup();}
+});
+
+test('publication recovery: wrong operation and wrong origin never match a retained action', async () => {
+  const f = await fixture();
+  try {
+    const {createPublicationRecovery} = await import('./git-publish-recovery.mjs');
+    const actionRef = (await import('node:crypto')).createHash('sha256')
+      .update('mastermind.studio_git_push_current_branch.v1\0')
+      .update(f.operationId).update('\0').update(f.branch).update('\0').update(f.head)
+      .digest('hex');
+    const args={
+      git:(cwd,args)=>git(cwd,...args), workspacePath:f.workspace,
+      operationId:f.operationId, branch:f.branch, ref:'refs/heads/'+f.branch,
+      remoteUrl:f.remote,
+    };
+    const journal=await createPublicationRecovery(args);
+    const prepared=await journal.begin({actionRef,intendedHead:f.head,expectedRemote:null});
+    assert.equal(prepared.record.stage,'PREPARED');
+    const wrongOperation=await createPublicationRecovery({...args,operationId:'other-operation'});
+    assert.equal((await wrongOperation.status(actionRef,null)).outcome,'UNKNOWN');
+    assert.equal((await wrongOperation.status(actionRef,null)).reason,'NO_MATCHING_OR_LEGACY_RECEIPT');
+    const wrongOrigin=await createPublicationRecovery({...args,remoteUrl:path.join(f.root,'forbidden.git')});
+    const state=await wrongOrigin.status(actionRef,null);
+    assert.equal(state.outcome,'UNKNOWN');
+    assert.equal(state.reason,'INVALID_OR_TORN_RECEIPT');
+    assert.equal(state.retry_allowed,false);
+    const wrongBranch=await createPublicationRecovery({...args,branch:'sol/web-foreign'});
+    assert.equal((await wrongBranch.status(actionRef,null)).reason,'NO_MATCHING_OR_LEGACY_RECEIPT');
+  } finally {await f.cleanup();}
+});
