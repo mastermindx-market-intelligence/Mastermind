@@ -590,7 +590,14 @@ def _quote_provenance(tickers: list[str]) -> dict[str, dict[str, Any]]:
     return out
 
 
-_PERSISTED_MARK_MAX_AGE_DAYS = 30
+def _dashboard_mark_max_age_days() -> int | None:
+    """Canonical dashboard carry horizon from portfolio.marks; None means reject carry."""
+    try:
+        from portfolio import marks
+        value = int(marks._stale_max_days())
+    except Exception:  # noqa: BLE001 -- no local fallback policy
+        return None
+    return value if value >= 0 else None
 
 
 def _date_part(value: Any) -> date | None:
@@ -636,8 +643,9 @@ def _persisted_book_quotes(
     """Last valid per-position marks for the dashboard's *display-only* fallback.
 
     This is deliberately separate from every fill/rebalance price path.  It reads only the book's
-    persisted account and published portfolio snapshot, rejects future-dated or >30-calendar-day
-    marks, and returns the book's BASE-currency price with explicit provenance.  The published
+    persisted account and published portfolio snapshot, rejects future-dated marks or carries beyond
+    the canonical portfolio.marks horizon, and returns the book's BASE-currency price with explicit
+    provenance.  The published
     snapshot wins ties because it also records whether the strategy published after the cash market
     had closed.  Legacy account ``current_price`` fields without an as-of are never trusted on their
     own; an existing close snapshot can still attest the same holding during the upgrade cutover.
@@ -646,6 +654,9 @@ def _persisted_book_quotes(
     if not wanted:
         return {}
     target_date = _date_part(asof) or date.today()
+    max_age_days = _dashboard_mark_max_age_days()
+    if max_age_days is None:
+        return {}
     base = _portfolio_dir(portfolio_id)
     snapshot = _read_json_object(base / "latest.json")
     if portfolio_id == "self_directed":
@@ -714,7 +725,7 @@ def _persisted_book_quotes(
         eligible = []
         for mark_date, priority, px, meta in rows:
             age_days = (target_date - mark_date).days
-            if age_days < 0 or age_days > _PERSISTED_MARK_MAX_AGE_DAYS:
+            if age_days < 0 or age_days > max_age_days:
                 continue
             eligible.append((mark_date, priority, px, meta, age_days))
         if not eligible:
@@ -748,13 +759,16 @@ def _select_dashboard_quote(
     """
     if current and current.get("source") == "yahoo_intraday":
         return current
+    max_age_days = _dashboard_mark_max_age_days()
+    if max_age_days is None:
+        return None
     target_date = _date_part(asof) or date.today()
     if current:
         current_date = _date_part(current.get("as_of"))
         current_age = (target_date - current_date).days if current_date is not None else None
         current_is_bounded = (
             current_age is not None
-            and 0 <= current_age <= _PERSISTED_MARK_MAX_AGE_DAYS
+            and 0 <= current_age <= max_age_days
         )
         if not current_is_bounded:
             current = None
@@ -1221,7 +1235,8 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                 },
             }
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})
-    except Exception as exc:  # noqa: BLE001 — live preview must degrade, never sink the dashboard
+    except Exception as exc:  # noqa: BLE001 — degrade without claiming the book is empty
+        _log.warning("live marks read failed for %s: %s", pid, type(exc).__name__)
         return JSONResponse({
             "schema_version": "live_marks.v1",
             "portfolio": pid,
@@ -1231,9 +1246,29 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
             "poll_after_seconds": 60 if session["is_open"] else session["poll_after_seconds"],
             "positions": [],
             "performance": {},
-            "pricing": {"priced_positions": 0, "total_positions": 0, "complete": False},
-            "error": str(exc),
+            "pricing": {"priced_positions": None, "total_positions": None, "complete": False},
+            "error": "live_marks_unavailable",
         }, headers={"Cache-Control": "no-store"})
+
+
+def _risk_unavailable_payload(portfolio: str, *, archived: bool = False) -> dict[str, Any]:
+    """Closed, evidence-unknown risk contract; never claims zero breaches or caveats."""
+    payload: dict[str, Any] = {
+        "portfolio_id": portfolio,
+        "safety_score": None,
+        "grade": "—",
+        "verdict": "Safety report unavailable.",
+        "metrics": None,
+        "subscores": None,
+        "breaches": None,
+        "caveats": None,
+        "report_status": "unavailable",
+        "error": "archived_risk_unavailable" if archived else "risk_unavailable",
+        "note": "Archived safety snapshot unavailable." if archived else "Safety report unavailable.",
+    }
+    if archived:
+        payload.update({"archived": True, "lifecycle": "archived", "snapshot_only": True})
+    return payload
 
 
 @router.get("/api/risk")
@@ -1250,11 +1285,7 @@ def api_risk(portfolio: str = _PRODUCT_DEFAULT_ID, recompute: bool = False) -> J
         if _portfolio_registry.is_archived(portfolio):
             rep = safety.load_safety(portfolio)
             if rep is None:
-                rep = {
-                    "portfolio_id": portfolio, "safety_score": None, "grade": "—",
-                    "verdict": "Archived safety snapshot unavailable.", "metrics": {},
-                    "subscores": {}, "breaches": [], "caveats": [],
-                }
+                return JSONResponse(_risk_unavailable_payload(portfolio, archived=True))
             rep = {**rep, "portfolio_id": portfolio, "archived": True,
                    "lifecycle": "archived", "snapshot_only": True}
             return JSONResponse(rep)
@@ -1270,11 +1301,8 @@ def api_risk(portfolio: str = _PRODUCT_DEFAULT_ID, recompute: bool = False) -> J
                 pass
         return JSONResponse(rep)
     except Exception as exc:
-        return JSONResponse({
-            "portfolio_id": portfolio, "safety_score": None, "grade": "—",
-            "verdict": "Safety report unavailable.", "metrics": {}, "subscores": {},
-            "breaches": [], "caveats": [], "note": f"Safety unavailable: {exc}",
-        })
+        _log.warning("risk report read failed for %s: %s", portfolio, type(exc).__name__)
+        return JSONResponse(_risk_unavailable_payload(portfolio))
 
 
 @router.get("/api/portfolio")
@@ -2383,8 +2411,17 @@ def api_trades(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
             "snapshot_status": account_status,
         })
     except Exception as exc:
-        return JSONResponse({"open": [], "closed": [], "history": [],
-                             "pending": [], "market": {}, "error": str(exc)})
+        _log.warning("trade history read failed for %s: %s", portfolio, type(exc).__name__)
+        return JSONResponse({
+            "portfolio": portfolio,
+            "open": None,
+            "closed": None,
+            "history": None,
+            "pending": None,
+            "market": None,
+            "snapshot_status": "unavailable",
+            "error": "trades_unavailable",
+        })
 
 
 # ---------------------------------------------------------------------------
