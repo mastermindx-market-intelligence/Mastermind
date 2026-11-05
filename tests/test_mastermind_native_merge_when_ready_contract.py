@@ -93,7 +93,7 @@ def test_removing_a_binding_native_release_gate_fails_closed(required: str) -> N
     assert required in " ".join(release.split())
     # Match original whitespace/newline wrapping; a literal replacement would
     # silently miss long phrases and falsely report a negative regression.
-    pattern = r"\\s+".join(map(re.escape, required.split()))
+    pattern = r"\s+".join(map(re.escape, required.split()))
     damaged, count = re.subn(pattern, "", release, count=1)
     assert count == 1, required
     with pytest.raises(AssertionError):
