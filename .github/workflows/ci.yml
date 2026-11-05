@@ -368,8 +368,10 @@ jobs:
           brain_composition_root="$(mktemp -d "${RUNNER_TEMP}/brain-production-composition.XXXXXX")"
           trap 'rm -rf "$brain_composition_root" "$GITHUB_WORKSPACE/.ci-production-macro"' EXIT
           git archive HEAD brain bot common app control_plane portfolio \
+            scripts/translate_all.py \
             tests/integration/test_production_inference_composition.py \
             tests/integration/test_fabric_inference_composition.py \
+            tests/integration/test_fabric_translation_composition.py \
             tests/integration/test_fabric_chat_inference_composition.py \
             tests/integration/test_fabric_chat_buffered_delivery.py \
             tests/integration/test_fabric_text_native_application.py \
@@ -391,6 +393,8 @@ jobs:
             -p test_fabric_chat_buffered_delivery.py -v
           PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
             -p test_fabric_text_native_application.py -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_translation_composition.py -v
           python -m pip install --disable-pip-version-check playwright==1.62.0
           python -m playwright install --with-deps chromium
           PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
