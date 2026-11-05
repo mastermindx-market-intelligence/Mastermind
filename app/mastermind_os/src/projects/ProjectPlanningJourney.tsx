@@ -1743,15 +1743,15 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
       if (observedJobId !== null) {
         return pair("Planning request accepted.", "规划请求已接受。");
       }
-      return pair("The project source record exists.", "项目来源记录已存在。");
+      return pair("Project created.", "项目已创建。");
     }
     if (proposal !== null) {
-      return pair("The source publication is still pending. This is not a project yet.", "来源发布仍在进行中。这还不是项目。");
+      return pair("Project creation is still pending. Check the original request.", "项目仍在创建中。请查询原始请求。");
     }
     if (previewLive !== null) {
-      return pair("Preview verified. Publishing records the source record.", "预览已核对。发布将记录来源记录。");
+      return pair("Preview ready. Create this project to continue.", "预览已准备好。创建项目后继续。");
     }
-    if (previewUnknown && selection !== null) return pair("Check the original source request before continuing.", "继续前请查询原始来源请求。");
+    if (previewUnknown && selection !== null) return pair("Check the original project request before continuing.", "继续前请查询原始项目请求。");
     if (options !== null) return pair("Choose a project profile.", "请选择项目配置。");
     return pair("Choose a project profile in Options to continue.", "请在“选项”中选择项目配置后继续。");
   })();
@@ -1801,20 +1801,20 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
           <p>{zh?chosen.summaryZh:chosen.summaryEn}</p></div> : null;
       })()}
       {previewLive !== null && createDispatched && (
-        <p>{copy(["The prepared preview was already offered for publication.", "已准备的预览已提交发布。"])}</p>
+        <p>{copy(["Use the original project request below.", "请使用下方原始项目请求。"])}</p>
       )}
       <p>
         {selection !== null && (
           <>
             {" "}
             {!previewUnknown && <button type="button" onClick={checkSource} disabled={disabled}>
-              {busy === "source-read" ? copy(["Checking…", "查询中…"]) : copy(["Check source status", "查询来源状态"])}
+              {busy === "source-read" ? copy(["Checking…", "查询中…"]) : copy(["Check original project request", "查询原始项目请求"])}
             </button>}
             {createPending !== null && (
               <>
                 {" "}
                 <button type="button" onClick={checkPublication} disabled={disabled || !createReconcilable}>
-                  {busy === "publication" ? copy(["Checking…", "查询中…"]) : copy(["Check publication", "查询发布"])}
+                  {busy === "publication" ? copy(["Checking…", "查询中…"]) : copy(["Check project creation", "查询项目创建状态"])}
                 </button>
               </>
             )}
@@ -1826,7 +1826,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
           <h3>{copy(["Initial planning", "初始规划"])}</h3>
           {planningRecovery && previewUnknown && <p>
             <button type="button" onClick={checkSource} disabled={disabled || !authorized}>
-              {copy(["Check source status", "查询来源状态"])}</button>
+              {copy(["Check original project request", "查询原始项目请求"])}</button>
           </p>}
           {selection?.planningOperationKey != null ? (
             <p>{copy(["Use the original planning request below.", "请使用下方原始规划请求。"] )}</p>
@@ -1923,7 +1923,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
         </section>
       )}
       {authorized && result !== null && result.selection.work_ref === selection?.workRef && result.selection.job_id === observedJobId && result.result === null && <p>{copy(NOTICE_COPY.RESULT_UNAVAILABLE)}</p>}
-      {proposal !== null && <p>{copy(["A source proposal was observed. It is not a project yet.", "已观测到来源提案。这还不是项目。"])}</p>}
+      {proposal !== null && <p>{copy(["Project creation is still pending. Check the original request.", "项目仍在创建中。请查询原始请求。"])}</p>}
       {readable && (proposalControls !== undefined || comparePanel !== undefined) && (
         <>
           {proposalControls}
@@ -2007,18 +2007,18 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
       optionsPanel={optionsPanel}
       feedbackPanel={feedback}
       startControl={planningRecovery ? <button type="button" className="primary" onClick={checkPlanning} disabled={disabled || !authorized}>
-        {copy(["Check original planning request", "查询原始规划请求"])}</button> : observed !== null ? <span>{copy(["Project source recorded", "项目来源已记录"])}</span> :
-        createDispatched ? <span>{copy(["Check the original publication above", "请在上方查询原始发布"])}</span> :
-        previewUnknown ? <button type="button" className="primary" onClick={checkSource} disabled={disabled || !authorized}>{copy(["Check source status", "查询来源状态"])}</button> :
+        {copy(["Check original planning request", "查询原始规划请求"])}</button> : observed !== null ? <span>{copy(["Project created.", "项目已创建。"])}</span> :
+        createDispatched ? <span>{copy(["Check project creation above", "请在上方查询项目创建状态"])}</span> :
+        previewUnknown ? <button type="button" className="primary" onClick={checkSource} disabled={disabled || !authorized}>{copy(["Check original project request", "查询原始项目请求"])}</button> :
         previewLive !== null ? <button type="button" className="primary" onClick={publish} disabled={disabled}>
-          {busy === "publish" ? copy(["Publishing…", "发布中…"]) : copy(["Publish project", "发布项目"])}</button> :
+          {busy === "publish" ? copy(["Creating project…", "正在创建项目…"]) : copy(["Create project", "创建项目"])}</button> :
         <button type="button" className="primary" onClick={preparePreview} disabled={disabled || !authorized || options === null}>
           {busy === "preview" ? copy(["Preparing…", "准备中…"]) : copy(["Prepare preview", "准备预览"])}</button>}
       startNote={copy(planningRecovery ? ["Check the original planning request. Do not send it again.", "请查询原始规划请求，不要重新发送。"] : observed !== null ? ["Initial planning is a separate action above.", "初始规划是上方独立的操作。"] :
-        createDispatched ? ["The original source publication is retained for checking.", "原始来源发布已保留，可供查询。"] :
+        createDispatched ? ["The original project request is retained for checking.", "原始项目请求已保留，可供查询。"] :
         previewUnknown ? ["Keep the original request identity while its response is unavailable.", "响应不可用时，请保留原始请求标识。"] :
-        previewLive !== null ? ["Publishing records this project in the company source. It does not open a conversation.", "发布将在公司来源中记录该项目，不会打开对话。"] :
-        ["Choose the supplied profile and verify a preview before publishing.", "请选择提供的配置，并在发布前核对预览。"]) }
+        previewLive !== null ? ["Creates the project. Planning is a separate step.", "创建项目；规划是独立的后续步骤。"] :
+        ["Choose the supplied profile and check a preview before creating the project.", "请选择提供的配置，并在创建项目前核对预览。"]) }
     />
   );
 }

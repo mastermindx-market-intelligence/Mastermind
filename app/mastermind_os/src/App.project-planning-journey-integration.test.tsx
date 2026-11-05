@@ -326,7 +326,7 @@ async function loadOptionsAndProfile() {
 
 async function preparePreview() {
   fireEvent.click(screen.getByRole("button", { name: "Prepare preview" }));
-  await screen.findByRole("button", { name: "Publish project" });
+  await screen.findByRole("button", { name: "Create project" });
 }
 
 async function driveToReadableProject(h: Mounted): Promise<string> {
@@ -339,8 +339,8 @@ async function driveToReadableProject(h: Mounted): Promise<string> {
   };
   const requestId = prepareInput.request.request.request_id;
   h.responses.status = statusDocument(requestId, "SOURCE_OBSERVED");
-  fireEvent.click(screen.getByRole("button", { name: "Publish project" }));
-  await screen.findByText("The project source record exists.");
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findAllByText("Project created.");
   return requestId;
 }
 
@@ -412,7 +412,7 @@ describe("App project planning journey integration", () => {
     expect(submitFrame).toMatchObject({
       action: "publish_project_proposal", request_id: requestId, work_ref: WORK_REF,
     });
-    await screen.findByText("The project source record exists.");
+    await screen.findAllByText("Project created.");
 
     // The setup URL keeps the original journey identities and is never
     // overwritten by a default Mission selection (no root_job_id param).
@@ -492,13 +492,13 @@ describe("App project planning journey integration", () => {
     // The restored selection is not current data: nothing is re-prepared or
     // re-published, and the explicit source check is the only offer.
     expect(await screen.findByLabelText("Your goal")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Publish project" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create project" })).toBeNull();
     expect(h.calls("source_operation_prepare")).toHaveLength(1);
     expect(h.calls("source_operation_submit")).toHaveLength(1);
 
     // The explicit source check reads the ORIGINAL operation on its original
     // request identity; no new request id is minted.
-    fireEvent.click(screen.getByRole("button", { name: "Check source status" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check original project request" }));
     await waitFor(() => expect(h.calls("source_operation_read")).toHaveLength(1));
     const lookup = (h.calls("source_operation_read")[0][1] as {
       request: { schema: string; action: string; request_id: string; work_ref: unknown };
@@ -514,7 +514,7 @@ describe("App project planning journey integration", () => {
     await waitFor(() => {
       const text = document.body.textContent ?? "";
       expect(
-        text.includes("The project source record exists.") ||
+        text.includes("Project created.") ||
           text.includes("Planning request accepted."),
       ).toBe(true);
     });

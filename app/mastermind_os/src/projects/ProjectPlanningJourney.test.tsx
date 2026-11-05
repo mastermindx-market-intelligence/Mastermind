@@ -514,7 +514,7 @@ async function loadOptionsAndProfile() {
 
 async function preparePreview() {
   fireEvent.click(screen.getByRole("button", { name: "Prepare preview" }));
-  await waitFor(() => screen.getByRole("button", { name: "Publish project" }));
+  await waitFor(() => screen.getByRole("button", { name: "Create project" }));
 }
 
 async function runToReadableProject(): Promise<{ requestId: string; planningKey: string }> {
@@ -523,8 +523,8 @@ async function runToReadableProject(): Promise<{ requestId: string; planningKey:
   await preparePreview();
   const requestId = (h.calls.prepare.mock.calls[0][0] as { request: { request_id: string } }).request.request_id;
   h.responses.status = statusDocument(requestId, "SOURCE_OBSERVED");
-  fireEvent.click(screen.getByRole("button", { name: "Publish project" }));
-  await waitFor(() => expect(screen.getByText("The project source record exists.")).toBeTruthy());
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await waitFor(() => expect(screen.getAllByText("Project created.")).toBeTruthy());
   fireEvent.click(screen.getByRole("radio", { name: "Plan" }));
   fireEvent.click(screen.getByRole("button", { name: "Send initial planning request" }));
   await waitFor(() => expect(h.selections.at(-1)?.jobId).toBe(JOB));
@@ -543,7 +543,7 @@ describe("ProjectPlanningJourney", () => {
     harnessRef = h;
     expect(screen.getByLabelText("Your goal")).toBeTruthy();
     expect((screen.getByLabelText("Your goal") as HTMLTextAreaElement).value).toBe(GOAL);
-    expect(screen.queryByRole("button", { name: "Publish project" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create project" })).toBeNull();
     expect(screen.queryByText("Initial planning")).toBeNull();
     expect(h.calls.options).not.toHaveBeenCalled();
     expect(h.calls.context).not.toHaveBeenCalled();
@@ -587,7 +587,7 @@ describe("ProjectPlanningJourney", () => {
       jobId: null,
     });
     await waitFor(() =>
-      expect(screen.getByText("Preview verified. Publishing records the source record.")).toBeTruthy(),
+      expect(screen.getByText("Preview ready. Create this project to continue.")).toBeTruthy(),
     );
 
     // Publishing reserves a durable pending hint BEFORE the source submit.
@@ -596,7 +596,7 @@ describe("ProjectPlanningJourney", () => {
     // test does not demand which controller topology placed it there, only
     // that it exists once with safe identifiers and is not duplicated.
     h.responses.status = statusDocument(String(prepareFrame.request.request_id), "PROPOSAL_OBSERVED");
-    fireEvent.click(screen.getByRole("button", { name: "Publish project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     await waitFor(() => expect(h.calls.submit).toHaveBeenCalledTimes(1));
     const submitFrame = h.calls.submit.mock.calls[0][0] as {
       action: string;
@@ -626,13 +626,13 @@ describe("ProjectPlanningJourney", () => {
     const otherScope = placedScope === WS_SCOPE ? EXEC_SCOPE : WS_SCOPE;
     expect(h.store.has(otherScope)).toBe(false);
     await waitFor(() =>
-      expect(screen.getByText("A source proposal was observed. It is not a project yet.")).toBeTruthy(),
+      expect(screen.getByText("Project creation is still pending. Check the original request.")).toBeTruthy(),
     );
     expect(h.selections.at(-1)?.workRef).toBeNull();
 
     // Explicit publication check: reconcile only, on the same original hint.
     h.responses.status = statusDocument(submitFrame.request_id, "SOURCE_OBSERVED");
-    fireEvent.click(screen.getByRole("button", { name: "Check publication" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check project creation" }));
     await waitFor(() => expect(h.calls.reconcile).toHaveBeenCalledTimes(1));
     expect(h.calls.reconcile.mock.calls[0][0]).toEqual({
       schema: "mastermind.workspace_source_operation_lookup.v1",
@@ -640,7 +640,7 @@ describe("ProjectPlanningJourney", () => {
       request_id: submitFrame.request_id,
       work_ref: WORK_REF,
     });
-    await waitFor(() => expect(screen.getByText("The project source record exists.")).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText("Project created.")).toBeTruthy());
     expect(h.store.size).toBe(0);
     expect(h.selections.at(-1)).toEqual({
       createRequestId: submitFrame.request_id,
@@ -799,12 +799,12 @@ describe("ProjectPlanningJourney", () => {
     const minted = h.selections.at(-1) as ProjectJourneySelection;
     expect(minted.createRequestId).toMatch(/^mmos-project-create-[0-9a-f]{40}$/);
     expect(minted.workRef).toBeNull();
-    expect(screen.queryByRole("button", { name: "Publish project" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create project" })).toBeNull();
 
     // Status reopen reads the original operation with a null work reference
     // and never prepares the same draft again.
     h.responses.status = statusDocument(minted.createRequestId, "SOURCE_OBSERVED");
-    fireEvent.click(screen.getByRole("button", { name: "Check source status" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check original project request" }));
     await waitFor(() => expect(h.calls.read).toHaveBeenCalledTimes(1));
     expect(h.calls.prepare).toHaveBeenCalledTimes(1);
     expect(h.calls.read.mock.calls[0][0]).toEqual({
@@ -813,7 +813,7 @@ describe("ProjectPlanningJourney", () => {
       request_id: minted.createRequestId,
       work_ref: null,
     });
-    await waitFor(() => expect(screen.getByText("The project source record exists.")).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText("Project created.")).toBeTruthy());
     expect(h.selections.at(-1)).toMatchObject({
       createRequestId: minted.createRequestId,
       workRef: WORK_REF,
@@ -835,7 +835,7 @@ describe("ProjectPlanningJourney", () => {
     // Hold the submit open, move the auth epoch, then deliver the receipt.
     const pending = deferred(statusDocument(requestId, "SOURCE_OBSERVED"));
     h.responses.status = pending;
-    fireEvent.click(screen.getByRole("button", { name: "Publish project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     await waitFor(() => expect(h.calls.submit).toHaveBeenCalledTimes(1));
     expect(storedPointer(h.store)).not.toBeNull();
     const hintScope = storedPointer(h.store)!.scope;
@@ -845,7 +845,7 @@ describe("ProjectPlanningJourney", () => {
     await waitFor(() => expect(screen.getByText("idle EPOCH_CHANGED")).toBeTruthy());
     // The late receipt never moved the selection and never claimed a project.
     expect(h.selections.at(-1)?.workRef).toBeNull();
-    expect(screen.queryByText("The project source record exists.")).toBeNull();
+    expect(screen.queryByText("Project created.")).toBeNull();
     // The original hint is still durably held for a later recover.
     expect(h.store.get(hintScope)).not.toBeUndefined();
 
@@ -855,20 +855,20 @@ describe("ProjectPlanningJourney", () => {
     h.owner.current = { principalScope: EXEC_SCOPE_B, generation: "3" };
     h.generation.current = 13;
     h.responses.status = statusDocument(requestId, "SOURCE_OBSERVED");
-    fireEvent.click(screen.getByRole("button", { name: "Check source status" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check original project request" }));
     await waitFor(() => expect(h.calls.context.mock.calls.length).toBeGreaterThanOrEqual(2));
     await waitFor(() =>
       expect(screen.getByText("The source status read is unavailable right now.")).toBeTruthy(),
     );
     expect(h.selections.at(-1)?.workRef).toBeNull();
-    expect(screen.queryByText("The project source record exists.")).toBeNull();
+    expect(screen.queryByText("Project created.")).toBeNull();
     expect(h.store.get(hintScope)).not.toBeUndefined();
 
     // The original executive returns on a third generation and resolves it.
     h.owner.current = { principalScope: EXEC_SCOPE, generation: "4" };
     h.generation.current = 14;
-    fireEvent.click(screen.getByRole("button", { name: "Check source status" }));
-    await waitFor(() => expect(screen.getByText("The project source record exists.")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Check original project request" }));
+    await waitFor(() => expect(screen.getAllByText("Project created.")).toBeTruthy());
     expect(h.selections.at(-1)).toMatchObject({ createRequestId: requestId, workRef: WORK_REF });
     expect(h.store.size).toBe(0);
   });
@@ -889,19 +889,19 @@ describe("ProjectPlanningJourney", () => {
     await waitFor(() =>
       expect(screen.getByText("The source preview could not be verified, so nothing was offered.")).toBeTruthy(),
     );
-    expect(screen.queryByRole("button", { name: "Publish project" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create project" })).toBeNull();
     const minted = h.selections.at(-1) as ProjectJourneySelection;
 
     // A status describing another original request is never this operation.
     h.responses.prepare = null;
     h.responses.status = statusDocument("mmos-project-create-" + "f".repeat(40), "SOURCE_OBSERVED");
-    fireEvent.click(screen.getByRole("button", { name: "Check source status" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check original project request" }));
     await waitFor(() => expect(h.calls.read).toHaveBeenCalledTimes(1));
     await waitFor(() =>
       expect(screen.getByText("The source status read is unavailable right now.")).toBeTruthy(),
     );
     expect(h.selections.at(-1)).toEqual(minted);
-    expect(screen.queryByText("The project source record exists.")).toBeNull();
+    expect(screen.queryByText("Project created.")).toBeNull();
     expect(h.store.size).toBe(0);
   });
 
@@ -961,8 +961,8 @@ describe("ProjectPlanningJourney", () => {
     await preparePreview();
     const requestId = (h.calls.prepare.mock.calls[0][0] as { request: { request_id: string } }).request.request_id;
     h.responses.status = statusDocument(requestId, "SOURCE_OBSERVED");
-    fireEvent.click(screen.getByRole("button", { name: "Publish project" }));
-    await waitFor(() => expect(screen.getByText("The project source record exists.")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    await waitFor(() => expect(screen.getAllByText("Project created.")).toBeTruthy());
     fireEvent.click(screen.getByRole("radio", { name: "Plan" }));
 
     // Hold the planning submit reply open so it is lost across the unmount.
@@ -1008,7 +1008,7 @@ describe("ProjectPlanningJourney", () => {
     // recovered job keeps the honest admission-only line. Then read the
     // result of the ORIGINAL admission key.
     h.responses.status = statusDocument(requestId, "SOURCE_OBSERVED");
-    fireEvent.click(screen.getByRole("button", { name: "Check source status" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check original project request" }));
     await waitFor(() => screen.getByRole("button", { name: "Read planning result" }));
     expect(screen.getByText("Planning request accepted.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Read planning result" }));
@@ -1036,10 +1036,10 @@ describe("ProjectPlanningJourney", () => {
     fireEvent.click(radio);
     fireEvent.click(screen.getByRole("button", { name: "准备预览" }));
     await waitFor(() => expect(h.calls.prepare).toHaveBeenCalledTimes(1));
-    await waitFor(() => screen.getByRole("button", { name: "发布项目" }));
-    expect(screen.getByText("预览已核对。发布将记录来源记录。")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Publish project" })).toBeNull();
-    expect(screen.getByText("发布将在公司来源中记录该项目，不会打开对话。")).toBeTruthy();
+    await waitFor(() => screen.getByRole("button", { name: "创建项目" }));
+    expect(screen.getByText("预览已准备好。创建项目后继续。")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Create project" })).toBeNull();
+    expect(screen.getByText("创建项目；规划是独立的后续步骤。")).toBeTruthy();
   });
 });
 
@@ -1056,7 +1056,7 @@ it.each(["en", "zh-CN"] as const)("uses canonical installed profile labels and i
   const label=locale==="en"?"Mastermind OS delivery":"Mastermind OS 交付";
   const radio=await screen.findByRole("radio",{name:label});fireEvent.click(radio);
   fireEvent.click(screen.getByRole("button",{name:locale==="en"?"Prepare preview":"准备预览"}));
-  await screen.findByRole("button",{name:locale==="en"?"Publish project":"发布项目"});
+  await screen.findByRole("button",{name:locale==="en"?"Create project":"创建项目"});
   expect(h.calls.prepare.mock.calls[0][0]).toEqual(sourceIssued.samples[2].request);
   expect(h.calls.prepare.mock.calls[0][0].request.profile_sha256).toBe(options.profiles![0].revision);
   expect(h.calls.submit).not.toHaveBeenCalled();
