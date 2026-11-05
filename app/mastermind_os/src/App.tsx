@@ -4353,9 +4353,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const [projectSearchSelected, setProjectSearchSelected] = useState(true);
   const [requestedProjectFile, setRequestedProjectFile] = useState<KnowledgeLibraryProps["requestedFile"]>();
   const [savedConversationNavigation, setSavedConversationNavigation] = useState<SavedConversationNavigation | null>(null);
-  const projectHistoryOwner = sessionBinding?.port.projectHistory;
+  const legacyProjectHistoryOwner = sessionBinding?.port.projectHistory;
   const hasProjectLibrary = Boolean(retainedResultHost?.readProjectKnowledgeCatalogue);
-  const hasProjectSearch = Boolean(retainedResultHost?.projectFilesSearch || projectHistoryOwner);
+  const hasProjectSearch = Boolean(retainedResultHost?.projectFilesSearch || retainedResultHost?.session?.createProjectHistoryReader || legacyProjectHistoryOwner);
   const catalogueWorkRef = catalogueProject?.authRevision === authRevision &&
     catalogueProject.epoch === programIndexEpoch ? catalogueProject.workRef : null;
   const requestedProjectWorkRef = catalogueProject ? catalogueWorkRef : selection?.workRef ?? null;
@@ -4383,6 +4383,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         current.index.programs.filter(card => card.workRef === current.workRef).length === 1;
     }, locale, theme};
   const projectConversationHistory = useProjectConversationHistory(projectConversationReadScope);
+  // A project READ has no current native-session target requirement. Older
+  // hosts keep their existing selected-session source only when this factory
+  // is absent; a denied/unqualified new owner never falls back to it.
+  const projectHistoryOwner = retainedResultHost?.session?.createProjectHistoryReader
+    ? projectConversationHistory.history?.owner : legacyProjectHistoryOwner;
   const projectConversations = useProjectConversations({...projectConversationReadScope,
     renderFreshContinuation: source => <FreshConversationContinuation locale={locale}
       active={active === "Projects"} binding={freshAttendedBinding} host={freshHost} authGeneration={authRevision}
@@ -4430,7 +4435,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       : <ProjectKnowledgeEditor key={currentKnowledgeEditor.requestId} mode="preference"
           sourceContext={currentKnowledgeEditor.context} requestId={currentKnowledgeEditor.requestId}
           authGeneration={authRevision} hostGeneration={archiveHostGeneration} locale={locale}
-          initialValue={currentKnowledgeEditor.memory?.value??""} expectedPreferenceRevision={currentKnowledgeEditor.memory?.revision??null}
+          initialValue={currentKnowledgeEditor.memory?.value??""} expectedPreferenceRevision={currentKnowledgeEditor.memory?.source.contentSha256??null}
           current={knowledgePublication.currentSource} phase={knowledgePublication.phase}
           onSubmitPreference={knowledgePublication.prepare} onClose={()=>setKnowledgeEditor(null)}
           onCheckOriginal={knowledgePublication.checkOriginal}/>)}
@@ -5512,7 +5517,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         {hasProjectSearch && <section hidden={active !== "Search" || !projectSearchSelected || Boolean(savedConversationNavigation)} aria-hidden={active !== "Search" || !projectSearchSelected || Boolean(savedConversationNavigation)}>
           <ProjectSearchWorkspace workRef={projectWorkRef} authGeneration={authRevision}
             hostGeneration={archiveHostGeneration} locale={locale} theme={theme}
-            sessionHistory={projectHistoryOwner} projectFiles={retainedResultHost?.projectFilesSearch}
+            sessionHistory={projectHistoryOwner} savedHistory={projectConversationHistory.history}
+            projectFiles={retainedResultHost?.projectFilesSearch}
             onOpenFile={match => {
               if (!projectWorkRef || archiveHostGeneration === null || !projectReaders.canRead()) return;
               setRequestedProjectFile(Object.freeze({match, workRef: projectWorkRef, authGeneration: authRevision, hostGeneration: archiveHostGeneration}));

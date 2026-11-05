@@ -19,6 +19,7 @@
 
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -37,6 +38,7 @@ import type {
   ProjectFileSearchResult,
 } from './project-file-search';
 import './project-search.css';
+import type {createProjectConversationHistoryOwner} from '../conversations/project-conversation-history-owner';
 
 export type ProjectSearchLocale = 'en' | 'zh-CN';
 export type ProjectSearchTheme = 'dark' | 'light';
@@ -50,6 +52,8 @@ export interface ProjectSearchWorkspaceProps {
   locale?: ProjectSearchLocale;
   theme?: ProjectSearchTheme;
   sessionHistory?: SavedConversationSearchOwner;
+  /** Actual target-independent project READ owner; refresh is explicit only. */
+  savedHistory?: ReturnType<typeof createProjectConversationHistoryOwner>;
   projectFiles?: ProjectFileSearchOwner;
   onOpenSaved?: (match: SavedConversationMatch, page: SavedSourcePageWitness) => void;
   onOpenFile?: (match: ProjectFileMatch) => void;
@@ -463,7 +467,8 @@ export function ProjectSearchWorkspace(props: ProjectSearchWorkspaceProps) {
     hostGeneration,
     locale = 'en',
     theme = 'dark',
-    sessionHistory,
+    sessionHistory: legacySessionHistory,
+    savedHistory,
     projectFiles,
     onOpenSaved,
     onOpenFile,
@@ -471,6 +476,10 @@ export function ProjectSearchWorkspace(props: ProjectSearchWorkspaceProps) {
 
   const strings = STRINGS[locale === 'zh-CN' ? 'zh-CN' : 'en'];
 
+  const sessionHistory=savedHistory?.owner ?? legacySessionHistory;
+  const [,sourceChanged]=useState(0);
+  const [preparing,setPreparing]=useState(false);
+  useEffect(()=>savedHistory?.subscribe(()=>sourceChanged(value=>value+1)),[savedHistory]);
   const savedContext = readOwnerContext(sessionHistory);
   const filesContext = readOwnerContext(projectFiles,false);
 
@@ -518,6 +527,11 @@ export function ProjectSearchWorkspace(props: ProjectSearchWorkspaceProps) {
         {strings.title}
       </h1>
       <p className="project-search__scope">{strings.scopeNote}</p>
+      {savedHistory && <button type="button" disabled={!identityReady || preparing} onClick={()=>{
+        if(!identityReady || preparing)return;
+        setPreparing(true);
+        void savedHistory.refresh().catch(()=>{}).finally(()=>setPreparing(false));
+      }}>{preparing ? locale==='zh-CN'?'正在读取…':'Reading…' : locale==='zh-CN'?'读取已保存回复的搜索来源':'Read saved reply search source'}</button>}
       <ProjectSearchBody
         key={bodyKey}
         bodyKey={bodyKey}
