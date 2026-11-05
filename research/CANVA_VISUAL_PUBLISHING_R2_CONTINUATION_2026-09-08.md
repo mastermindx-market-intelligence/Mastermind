@@ -8,11 +8,11 @@ Continue the existing Mastermind visual-publishing program without creating a du
 
 > canonical research → structured evidence package → accepted premium visual primitive → deterministic population → actual rendered inspection → explicit approval → controlled publication
 
-Repository: `mastermindx-market-intelligence/Mastermind`  
-Carrier: branch `sol/canva-publishing-r0-20260907`, PR #524  
-Pre-write PR head re-read in this continuation: `17a001ad022cf3f03ff07f206d799adf862ecf73`  
-Target report: `SMR — Bottom Architecture & Re-rating Map — 2026-09-07`, Canva design `DAHUgqi_7FA`  
-Reference visual system: `DAHUgpyrDas`  
+Repository: `mastermindx-market-intelligence/Mastermind`\
+Carrier: branch `sol/canva-publishing-r0-20260907`, PR #524\
+Pre-write PR head re-read in this continuation: `17a001ad022cf3f03ff07f206d799adf862ecf73`\
+Target report: `SMR — Bottom Architecture & Re-rating Map — 2026-09-07`, Canva design `DAHUgqi_7FA`\
+Reference visual system: `DAHUgpyrDas`\
 Reference institutional report design: `DAHUgnfEC4E`
 
 Protected procedure was loaded atomically from protected `master` at exact commit `fc29e14a0d9ee41105264a5abc1d182daee7abbf`: `INDEX.md`, `COLD_START.md`, `RECONCILE_STATE.md`, `REVIEW_RETURN.md` and `CLOSEOUT.md`; schema `mastermind.sol_skillpack.v1`, version `1.0.1`, minimum bootstrap major `1`.
@@ -122,13 +122,13 @@ This file supplements `CANVA_VISUAL_PUBLISHING_R1_QA_2026-09-07.md`; it does not
 
 The following narrow clauses are superseded:
 
-1. **R1 §7, page 6 dates**  
-   Old apply instruction: `17 Jul 2026`, `29 Jul 2026`, `4 Sep 2026 close`.  
-   Correct apply instruction: `17 Jul 2026`, `30 Jul 2026`, `4 Sep 2026 close` for the three displayed selected-positive-session/current-close cards.  
+1. **R1 §7, page 6 dates**\
+   Old apply instruction: `17 Jul 2026`, `29 Jul 2026`, `4 Sep 2026 close`.\
+   Correct apply instruction: `17 Jul 2026`, `30 Jul 2026`, `4 Sep 2026 close` for the three displayed selected-positive-session/current-close cards.\
    Keep `29 Jul 2026 / $7.59` only where the page explicitly describes the July **closing low**. Never attach `+13.31%` to 29 Jul.
 
-2. **R1 §7, page 3 label precision**  
-   Replace compact label `Net / H1 2026` with `ATM net proceeds / H1 2026`, subject to native reflow.  
+2. **R1 §7, page 3 label precision**\
+   Replace compact label `Net / H1 2026` with `ATM net proceeds / H1 2026`, subject to native reflow.\
    In prose, replace `ATM issuance added 89.7M shares and $984.5M net cash` with `The completed H1 2026 ATM sold 89.7M shares and generated $984.5M in net proceeds.`
 
 All other R1 repair copy remains candidate apply content unless fresh saved-state/source reconciliation exposes a conflict.
@@ -215,5 +215,5 @@ What it does not make true: that Canva content changed, that the report is visua
 
 Independent read-only work may continue on market-data rights and source-link clearance. It must not be represented as saved-design progress or publication acceptance.
 
-Dialogue edge: `NOT_WATCHER_ENABLED`.  
+Dialogue edge: `NOT_WATCHER_ENABLED`.\
 Watcher state: `NOT_APPLICABLE`.

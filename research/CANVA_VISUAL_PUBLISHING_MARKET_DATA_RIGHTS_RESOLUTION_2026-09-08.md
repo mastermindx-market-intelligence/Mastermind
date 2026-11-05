@@ -1,6 +1,6 @@
 # Canva Visual Publishing — SMR market-data source and rights resolution
 
-Date: 2026-09-08  
+Date: 2026-09-08\
 Status: **report-scoped evidence resolution / Canva artifact still `HOLD`**
 
 This file supplements, and narrowly supersedes part of:
@@ -17,10 +17,10 @@ The user outcome remains:
 
 > canonical research → structured evidence package → accepted premium visual primitive → deterministic population → actual rendered inspection → explicit approval → controlled publication
 
-Repository: `mastermindx-market-intelligence/Mastermind`  
-Carrier: branch `sol/canva-publishing-r0-20260907`, PR #524  
-Pre-write PR head re-read: `6f1421ce4167a45d6ba07c39831c2251eb80a603`  
-Target Canva design: `DAHUgqi_7FA`  
+Repository: `mastermindx-market-intelligence/Mastermind`\
+Carrier: branch `sol/canva-publishing-r0-20260907`, PR #524\
+Pre-write PR head re-read: `6f1421ce4167a45d6ba07c39831c2251eb80a603`\
+Target Canva design: `DAHUgqi_7FA`\
 Report: `SMR — Bottom Architecture & Re-rating Map — 2026-09-07`
 
 Protected Sol procedure for this continuation was loaded atomically from protected Mastermind `master` at `fc29e14a0d9ee41105264a5abc1d182daee7abbf`.
@@ -257,5 +257,5 @@ Primary next action remains unchanged at the product seam:
 9. inventory and clear every non-first-party visual asset;
 10. obtain separate publication approval for the exact saved revision and channel.
 
-Dialogue edge: `NOT_WATCHER_ENABLED`.  
+Dialogue edge: `NOT_WATCHER_ENABLED`.\
 Watcher state: `NOT_APPLICABLE`.

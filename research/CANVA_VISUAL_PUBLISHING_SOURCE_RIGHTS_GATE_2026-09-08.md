@@ -1,6 +1,6 @@
 # Canva Visual Publishing — source-rights gate and publication boundary
 
-Date: 2026-09-08  
+Date: 2026-09-08\
 Status: **records-only / publication `RIGHTS_BLOCKED`**
 
 This checkpoint supplements:
@@ -17,10 +17,10 @@ The user outcome remains:
 
 > canonical research → structured evidence package → accepted premium visual primitive → deterministic population → actual rendered inspection → explicit approval → controlled publication
 
-Repository: `mastermindx-market-intelligence/Mastermind`  
-Carrier: branch `sol/canva-publishing-r0-20260907`, PR #524  
-Pre-write exact PR head: `e3c11fdea8cbcd9d8a7fa6e26d08de3b76944fe0`  
-Target Canva design: `DAHUgqi_7FA`  
+Repository: `mastermindx-market-intelligence/Mastermind`\
+Carrier: branch `sol/canva-publishing-r0-20260907`, PR #524\
+Pre-write exact PR head: `e3c11fdea8cbcd9d8a7fa6e26d08de3b76944fe0`\
+Target Canva design: `DAHUgqi_7FA`\
 Report: `SMR — Bottom Architecture & Re-rating Map — 2026-09-07`
 
 Protected Sol procedure was loaded atomically from protected Mastermind `master` at `fc29e14a0d9ee41105264a5abc1d182daee7abbf` before the continuation modified this carrier.
@@ -183,5 +183,5 @@ The report may progress to an access-controlled internal repair preview once Can
 
 **Independent rights continuation:** route the SMR price fields through the canonical Market Data owner and require an artifact-level source envelope with provider entitlement and exact external/digital-media distribution scope. Until that receipt exists, preserve the internal-only draft label and fail closed on every export/publication channel.
 
-Dialogue edge: `NOT_WATCHER_ENABLED`.  
+Dialogue edge: `NOT_WATCHER_ENABLED`.\
 Watcher state: `NOT_APPLICABLE`.
