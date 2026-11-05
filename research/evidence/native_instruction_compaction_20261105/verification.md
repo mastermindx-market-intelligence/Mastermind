@@ -70,3 +70,63 @@ behavior cases in docs/runbooks/native-instruction-compaction.md. Keep installed
 loaded and behavior-proven evidence separate. No automatic/background completion
 is implied by this record. Preserve existing native host controls and the original
 unknown/refused effects. Mission complete: false.
+
+## Audit return consumed and fenced-example repair qualified
+
+This section supersedes the initial candidate's current qualification/counts, not
+its historical test receipts. The original read-only Fabric audit completed rc0
+with the exact root/parent and a 7,900-byte retained result, response SHA-256
+`da7214641796c31109c994c61f8435a373d29df1dbc6e8e4b5e559df41740674`.
+The full retained response was read through the existing result pager. It is a
+bounded independent source audit of the protected baseline, not an independent
+review or formal GitHub approval of this new implementation.
+
+The audit identified a concrete defect: the existing projector can treat a
+marker pair inside a fenced Markdown example as an installed managed block.
+Parent independently reproduced this on both the protected projector and the
+first additive renderer using a synthetic document, not installed host files.
+Eight failing assertions were established by eight new fence scenarios (including
+positive controls), then the renderer was repaired to refuse selection inside
+backtick/tilde fences, including unclosed fences, short/different closers and
+info-text false closers. A real block after a properly closed fence and fenced
+content inside a managed body still work. The supplier-owned projector itself
+was NOT changed concurrently; its exact finding was surfaced in the original
+source-coordination thread for the actual #2064 writer.
+
+Updated native brief adds explicit existing-installer and BOOTSTRAP_KERNEL
+pointers while shrinking to **8,101 bytes / 134 lines**, **66.31%** below the
+24,048-byte source brief. No automatic imports, extra bootstrap gate or live
+instruction edit was added.
+
+Final focused qualification: **102 tests PASS**, zero failures/skips:
+47 compaction/source/writer tests, 12 existing projection, 28 discovery audit,
+15 audit-check. Original process30093 exited0, 14.64 seconds. **Nine** syntax-valid
+destructive mutants were caught, including deletion of the fence guard and
+accepting a shorter closing fence. Source bytes remained unchanged during the
+campaign. The same **47 tests PASS** with current #2064 supplier at
+`698b665957b590b1e8c0062a85f91e80a5674e0f`, installer blob
+`a4669c7b32748645ac7a6a5f7c7124964324f46b`; apply() AST is unchanged. This is isolated
+composition, not adoption of the supplier's unmerged policy.
+
+| Repaired source | UTF-8 bytes | SHA-256 |
+|---|---:|---|
+| docs/NATIVE_EXECUTION_BRIEF.md | 8101 | 879076942a3b81bac1a146a0812ce0d4e62ef219021a0bd95dfa785615d2a994 |
+| scripts/native_instruction_compaction.py | 9336 | 998d66fa31aaf95ad57f923142828989356615069ec3572a8a118e833913f638 |
+| tests/test_native_instruction_compaction.py | 17856 | 3643ee5334a46537af7643a5953856ef3ab708538bad1b0741dd6540e5c12ce7 |
+
+Audit acceptance: the first acceptance call's max_bytes=4096 was smaller than
+its 7900-byte result and returned RESULT_TOO_LARGE. Same-owner status was read
+back as terminal NOT_ACCEPTED. One bounded payload-size correction on the same
+run/root/digest succeeded; canonical readback is ACCEPTED/VALIDATED_OUTCOME,
+accepted_by=reviewer. No worker retry, provider change or duplicate operation.
+This parent adjudication accepts the scoped audit result only; it does not claim
+atomic cryptographic attestation, independent review of the final diff or native
+GitHub APPROVED. No watcher was created; the leaf assignment is terminal.
+
+Source release was paused by making #2075 Draft during the real repair, not by
+waiting for an invented reviewer. Secretary's existing thread
+https://mastermindxgroup.slack.com/archives/C0CBC6AEAQZ/p1793860171608229 has a genuine
+PICKUP_ACK for source-only coordination and the repair update; ACK is not START,
+a queue receipt or installation. Parent retains source custody. The denied live
+host read remains untouched and excluded from that commission. Native installation
+and fresh task behavior remain unproved. Mission complete: false.

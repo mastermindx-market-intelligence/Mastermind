@@ -117,3 +117,7 @@ Source qualification for N1-N3: research/evidence/native_instruction_compaction_
 This accepts implementation evidence only, not protected policy, default-consumer
 selection, installed files or N4 fresh native behavior. The exact on-host refusal
 and original Fabric return remain on their existing carriers.
+
+N1-N3 follow-up: original audit result accepted after parent verification; fenced-example
+data-loss ambiguity repaired on the same source carrier. Updated proof: 102 focused
+tests, 9 caught mutants and 47 current-supplier composition tests. N4 remains unproved.

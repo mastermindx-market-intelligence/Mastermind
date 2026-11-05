@@ -18,8 +18,8 @@ Do not install either source over a live or uncertain instruction writer.
 
 ## What changes and what does not
 
-The core brief is 8,162 UTF-8 bytes / 134 lines at initial qualification, versus
-24,048 bytes in the same-pin canonical full account brief: 66.06% fewer source
+The core brief is 8,101 UTF-8 bytes / 134 lines after the fenced-example repair, versus
+24,048 bytes in the same-pin canonical full account brief: 66.31% fewer source
 bytes. This is not a measured reduction in total model context or elapsed time.
 Repository, ancestor, plugin, hook and retained host-specific instructions may
 still load. A Markdown import that loads the old text is not a context saving.
@@ -29,7 +29,9 @@ Historical blocks are preserved unless explicitly selected by eligible marker
 AND exact reviewed whole-block SHA-256. Marker eligibility is not deletion
 permission. Unknown content, storage controls, native consent, Parall isolation
 and continuity/adapter instructions have no generic retirement path. Malformed,
-quoted, nested, duplicate, changed or unreviewed selected blocks are refused.
+quoted, fenced-example, nested, duplicate, changed or unreviewed selected blocks
+are refused. Ordinary Markdown backtick/tilde fences are conservatively tracked;
+a shorter or differently typed closer cannot expose a quoted marker for deletion.
 An absent selected historical block is idempotent, not permission to delete
 something else. UTF-8 byte counts, before/after identities and diagnostics are
 returned without changing any file or claiming native loading.

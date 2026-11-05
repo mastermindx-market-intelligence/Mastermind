@@ -130,6 +130,45 @@ class CompactionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Nested'):
             self.plan(self.text + old, retirements={self.marker: C.digest(old)})
 
+    def test_fenced_main_example_is_not_an_installed_block(self):
+        for fence in ['```', '~~~~', '   ```markdown']:
+            text = fence + '\n' + self.old + '\n```\n'
+            with self.subTest(fence=fence), self.assertRaisesRegex(ValueError, 'fenced'):
+                self.plan(text)
+
+    def test_fenced_retirement_example_is_not_deleted(self):
+        text = self.text + '\n```markdown\n' + self.retired + '\n```\n'
+        with self.assertRaisesRegex(ValueError, 'fenced'):
+            self.plan(text, retirements={self.marker: C.digest(self.retired)})
+
+    def test_unclosed_fence_before_main_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'fenced'):
+            self.plan('~~~markdown\nExample\n' + self.old)
+
+    def test_shorter_closer_does_not_end_long_fence(self):
+        with self.assertRaisesRegex(ValueError, 'fenced'):
+            self.plan('````markdown\n```\n' + self.old + '\n````\n')
+
+    def test_other_fence_kind_does_not_end_open_fence(self):
+        with self.assertRaisesRegex(ValueError, 'fenced'):
+            self.plan('~~~markdown\n```\n' + self.old + '\n~~~\n')
+
+    def test_closer_with_info_text_does_not_end_fence(self):
+        with self.assertRaisesRegex(ValueError, 'fenced'):
+            self.plan('```markdown\n```not-a-close\n' + self.old + '\n```\n')
+
+    def test_closed_fence_before_real_block_is_preserved(self):
+        for prefix in ['```md\nExample\n```\n', '~~~\nExample\n~~~~\n',
+                       '   ````md\n```\n   ````\n']:
+            with self.subTest(prefix=prefix):
+                result = self.plan(prefix + self.text)
+                self.assertTrue(result['text'].startswith(prefix + 'User prefix.\n'))
+
+    def test_fenced_main_body_without_markers_remains_supported(self):
+        old = block(C.MARKER, 'Example:\n```bash\necho sample\n```\nDone.')
+        result = self.plan(old + '\nTail\n', reviewed_managed_sha256=[C.digest(old)])
+        self.assertTrue(result['text'].endswith('\nTail\n'))
+
     def test_crlf_unknown_content_is_byte_preserved(self):
         text = 'User\r\n' + self.old.replace('\n', '\r\n') + '\r\nTail\r\n'
         reviewed = self.old.replace('\n', '\r\n')

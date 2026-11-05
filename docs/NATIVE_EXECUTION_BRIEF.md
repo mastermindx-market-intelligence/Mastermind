@@ -1,16 +1,15 @@
 # Mastermind: assigned execution
 
-For assigned Codex/Claude engineering, operations and principal work.
-The portfolio-analysis invocation remains read-only, paper-only and separate:
-model prose never sizes or executes trades. This brief grants no tool, account,
-runtime, credential, deployment or spending permission.
+Assigned native engineering/operations only. Portfolio analysis remains read-only
+and paper-only; model prose never sizes or executes trades. This brief grants no
+tool, account, runtime, credential, deployment or spending permission.
 
 ## Start from the assignment, not the history
 
 Current direct Chairman assignment defines scope. Recover DONE_WHEN, source,
-accepted results, live writers and uncertain effects from the existing checkpoint. A historical author, department or archived chat is
-not a required approver. Assume responsibility for the next permitted action;
-do not transfer a live lease or STARTed effect by inference.
+accepted results, live writers and uncertain effects from the existing checkpoint.
+An old author, department or chat is not an approver. Own the next permitted action;
+never infer transfer of a live lease or STARTed effect.
 
 For governed work without a compatible pin, read protected Mastermind
 `docs/sol_skills/INDEX.md` and its applicable mandatory companions at one commit.
@@ -27,12 +26,11 @@ reversible repair under actual grants. Do not ask for a second approval, design
 signoff, Slack claim, ACK-of-ACK or original-owner reply. Plan only enough to
 resolve the next uncertainty. Use the existing isolated workspace; never clean, reset or overwrite foreign work.
 
-Implement the smallest complete useful slice, inspect the diff, run affected
-checks, publish a truthful candidate, and use its actual protected release path.
-Reuse unchanged accepted evidence; repair and rerun the checks a real change
-invalidates. Missing implementation is engineering work, not an enrollment wait.
-Keep the original customer journey, data meaning, design and acceptance.
-Plans, empty task buffers, green CI, merges and installs are not product completion.
+Implement a complete useful slice, inspect its diff, run affected checks, publish
+a truthful candidate and use its actual protected release path. Reuse unchanged
+accepted evidence; rerun what a real change invalidates. Missing implementation
+is engineering work, not an enrollment wait. Preserve the customer journey, data,
+design and acceptance; a plan, empty buffer, green CI or merge is not completion.
 
 After each verified phase, save the material delta and start the next safe ready
 phase in the same healthy turn. A checkpoint is a save, not a stop. One blocked
@@ -68,13 +66,11 @@ Use the shallowest useful graph; extra management layers are optional. Conserve
 the actual root, immediate parent, scope and admitted child/depth/budget limits.
 A native session ID or caller-supplied root is not runtime authentication.
 
-Use the existing enrolled adapter and its skill; never invent a parent, provider
-route, raw SSH fallback, queue or credential path. Optional Executive/Wake gaps
-do not disable an admitted foreground adapter. Native Agent/Task
-or spawn_agent is not silently equivalent to paid Fabric labor. A real native
-capability exception needs its actual grants and task fit. Where no eligible
-worker has started, use a permitted direct-work exception or name the exact gap;
-do not duplicate an active, denied or uncertain operation.
+Use the enrolled adapter/skill; invent no parent, route, raw SSH fallback, queue
+or credential path. Optional Executive/Wake gaps do not disable admitted foreground
+work. Native Agent/Task or spawn_agent is not paid Fabric labor; native exceptions
+need real grants and task fit. If no eligible worker started, use a permitted
+direct-work exception or name the gap. Never duplicate active, denied or uncertain work.
 
 A controller, request, ACK or QUEUED receipt is not worker START. Consume retained
 results, verify the decisive evidence, and return acceptance through the existing
@@ -112,7 +108,11 @@ Reuse the existing multi-phase task tree and handoff; save/read back material
 changes, not every tool call. Use source-linked
 handoffs; retain DO_NOT_REDO and current effects. Delivery is not pickup.
 
-Read the applicable existing owner before the action, not all owners by default:
+Instruction updates use only `scripts/project_execution_brief.py`: preview, exact
+preimage, private backup and readback; a write does not reload a session. Project
+bootstrap remains `docs/sol_skills/BOOTSTRAP_KERNEL.md`.
+
+Read the applicable owner before its action, not all owners by default:
 - Recovery/continuation: `docs/sol_skills/ACTIVE_EXECUTION.md`,
   `SESSION_RELIABILITY.md` and `RECONCILE_STATE.md` in that same directory.
 - Multi-phase plans: `docs/CEO_PROJECT_PLAN_CONTINUITY.md`.

@@ -46,6 +46,26 @@ def _checked_text(value: str, name: str) -> None:
         raise ValueError(f'{name} exceeds the bounded input size')
 
 
+def _inside_fence(text: str, position: int) -> bool:
+    """Conservatively recognize ordinary Markdown fences before a marker.
+
+    Same-character closing fences must be at least as long as the opener and
+    carry no info text. This is a refusal check, not a Markdown renderer; an
+    ambiguous unclosed fence preserves the input by rejecting its selection.
+    """
+    opened: tuple[str, int] | None = None
+    for line in text[:position].splitlines():
+        match = re.fullmatch(r' {0,3}(`{3,}|~{3,})(.*)', line)
+        if match is None:
+            continue
+        fence, tail = match.groups()
+        if opened is None:
+            opened = (fence[0], len(fence))
+        elif fence[0] == opened[0] and len(fence) >= opened[1] and not tail.strip():
+            opened = None
+    return opened is not None
+
+
 def _span(text: str, marker: str) -> tuple[int, int] | None:
     start, end = f'<!-- {marker} -->', f'<!-- /{marker} -->'
     a_count, b_count = text.count(start), text.count(end)
@@ -64,6 +84,8 @@ def _span(text: str, marker: str) -> tuple[int, int] | None:
             line_end = len(text)
         if text[line_start:line_end].rstrip('\r') != literal:
             raise ValueError(f'Managed marker is not a standalone line: {marker}')
+        if _inside_fence(text, position):
+            raise ValueError(f'Managed marker is inside a fenced example: {marker}')
     body = text[a + len(start):b]
     if '<!--' in body:
         raise ValueError(f'Nested/comment-bearing managed block: {marker}')
