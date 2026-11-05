@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import {act,cleanup,renderHook} from '@testing-library/react';
 import {afterEach,expect,it} from 'vitest';
+import {projectGoalDraftScope} from '../auth-recovery/project-goal-scope';
 import {createNativeDraftRecoveryOwner} from '../auth-recovery/native-draft-owner';
 import {useProjectJourneyState} from './useProjectJourneyState';
 import {commitProjectJourneySelection,projectJourneyUrl,readProjectJourneyLocation} from './project-journey-location';
@@ -65,4 +66,14 @@ it('keeps absent File URL exact and rejects File without selection without any r
  const read=readProjectJourneyLocation(url);expect(Object.keys(read)).toEqual(['valid','open','selection']);
  let called=false;expect(()=>commitProjectJourneySelection(url,null,{replaceState:()=>{called=true;}},()=>{},lookup)).toThrow();expect(called).toBe(false);
  expect(serializeProjectDraftFileLookup(lookup,work)).not.toContain('content_utf8');
+});
+
+it('same-original native goal return retains only safe File lookup; File body still requires its own original proof',async()=>{
+ const h=await setup();act(()=>h.result.current.onDraftFilesChange([h.row]));act(()=>h.result.current.onSelection(selection));act(()=>h.result.current.onGoalChange('private goal'));act(()=>h.result.current.onOriginalFileLookupChange(lookup));
+ const owner=h.host!.nativeDraftRecovery!,goalOrigin=await owner.capture(projectGoalDraftScope(selection)!);await owner.check(goalOrigin!);
+ h.expire();act(()=>h.result.current.invalidateAuth(true));h.signIn();h.bump();h.rerender();await owner.check(goalOrigin!);
+ let returned=false;act(()=>{returned=h.result.current.returnToNativeRetainedGoal(goalOrigin!,owner);});expect(returned).toBe(true);
+ expect(readProjectJourneyLocation(location.href).fileLookup).toEqual(lookup);expect(h.result.current.draftFiles).toEqual([]);expect(h.result.current.filesHeld).toBe(true);
+ let files=false;await act(async()=>{files=await h.result.current.checkRetainedFileDraft();});expect(files).toBe(true);expect(h.result.current.draftFiles[0].file).toBe(h.row.file);
+ const foreign={...selection,createRequestId:'mmos-project-create-'+'c'.repeat(40)};history.replaceState(null,'',projectJourneyUrl(location.href,foreign));act(()=>h.result.current.restoreLocation());expect(h.result.current.originalFileLookup).toBeNull();expect(h.result.current.draftFiles).toEqual([]);
 });
