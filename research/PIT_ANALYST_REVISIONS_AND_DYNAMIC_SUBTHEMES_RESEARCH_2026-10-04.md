@@ -15,6 +15,14 @@
 
 > **Major correction to the first version of this study:** the original recommendation was directionally right about point-in-time expectations, but it substantially overestimated how much greenfield architecture was needed. The deep census found an already-established Expectation Market Dynamics program, an accepted physical owner for prospective EPS/revenue observations, bitemporal/correction contracts, a vendor bake-off, a frozen evaluation preregistration, a mature theme-graph owner with local-theme identity, and existing research/outcome infrastructure. The new plan is therefore **upgrade-first and integration-first**, not warehouse-first.
 
+## Historical EXP-1 custody correction — November 5
+
+This corrects the October 4 census using the earlier [October 3 owner-attributed receipt](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1185#issuecomment-5968275309), not a new empirical run or current deployment verification. That receipt reports an accepted **partial raw EXP-1 consumer**, 75 local tests and ten paired-Git-blob CLI cases, under operation `information-to-price-exp1-20261003-sol-001` and branch `claude/ssd-information-to-price-exp1-20261003-b4cff810e30514df`. Those are attributed owner results, not tests performed by this correction.
+
+The incumbent paths are `engine/k3e_expectation_surface.py`, `scripts/query_k3e_expectation_surface.py`, `tests/test_k3e_expectation_surface.py` and `research/alpha_intelligence/expectation_market_dynamics/handoffs/EXP_1.md`. At that checkpoint, packaging/commit/push/PR and source-dependent release were still owed. Absence from the protected census tree did not prove that EXP-1 was unbuilt across the estate.
+
+The broader normalized surface remained **PARTIAL**: `normalized_baseline.value` was always null. Preserve that limitation and existing source/identity/basis/rights/release gates; do not infer normalized economic, portfolio or trading authority. Reconcile the actual incumbent custody and current #8312/#8309 frontier before any continuation. Do not start a second EXP-1 writer, create the hypothetical nested `engine/k3e/expectation_surface.py`, or repeat unchanged accepted raw-consumer work. The remaining fields/tests below are a gap checklist against that incumbent, not a fresh-build commission.
+
 ---
 
 # A. Executive conclusion — what changed after the census
@@ -44,7 +52,7 @@ Therefore the revised capability thesis is:
 
 The P0 capability is no longer a new canonical warehouse. It is a **thin, deterministic, owner-preserving expectation read model over the existing K3E/SRC-A1 source plane**, but only after the incumbent SRC-A1 proof lane is reconciled.
 
-The next implementation owner must first inspect the outcome of Macro PR #8312. If its proof is accepted and protected, the first genuinely new slice is `EXP-1`: a read-only expectation surface over the existing `data/revisions/expectation_observations.parquet` / `expectation_attempts.parquet` source-owner records. If #8312 is rejected or remains unproven, the first slice is **repair/prove the existing SRC-A1 owner**, not create another store.
+The next implementation owner must first reconcile Macro PR #8312 and the incumbent EXP-1 custody above. If source proof is accepted and protected, continue the existing partial raw consumer from its actual packaging/release frontier and implement only confirmed residual gaps over `data/revisions/expectation_observations.parquet` / `expectation_attempts.parquet`. If #8312 is rejected or remains unproven, **repair/prove the existing SRC-A1 owner** while preserving the accepted raw-consumer work; do not create another store or EXP-1 writer.
 
 For themes, the next action is **not** to create `theme_membership_v1`. GMI already owns this territory. Mastermind should wait for/reuse the accepted GMI D2/W3B/W3C contracts and consume `theme_state/v1` / Company Theme Exposure through existing projections. Open GMI PRs must be reconciled rather than duplicated.
 
@@ -69,7 +77,7 @@ Delete as new-build tasks:
 The residual gaps are narrower and more valuable:
 
 1. **accepted production proof of the existing prospective expectation source**;
-2. **a deterministic expectation read model (`EXP-1`)** over that source;
+2. **completion and qualification of the incumbent partial `EXP-1` read model**, especially its unqualified normalized surface;
 3. **mature historical institutional PIT expectations** if current prospective history is insufficient for the intended empirical questions;
 4. **analyst-level contributor history/identity** only if a sample proves incremental value over PIT consensus;
 5. **cross-source correction/vintage validation** for any institutional source;
@@ -294,7 +302,7 @@ The current repository identity is `mastermindx-market-intelligence/executive-dr
 | New source receipt contract/store | Existing attempt receipts + evidence foundation + owner provenance | **DELETE-AS-DUPLICATE** | Reuse `expectation_attempts.parquet`, K1 evidence contracts, owner-native receipts. |
 | New temporal vocabulary | Data OS + K3E already define clocks | **GENERALIZE** | Map source-specific fields to existing temporal law; do not mint a rival vocabulary. |
 | New correction lineage model | SRC-A1 already has append/supersede lineage | **KEEP / EXTEND ONLY** | Add vendor-specific correction generation only where institutional samples require it. |
-| New revision breadth/magnitude/dispersion engine | Much already exists | **EXTEND** | Reuse `engine/theme_revisions.py`, existing revision fields, and later `EXP-1`; add only features not already emitted. |
+| New revision breadth/magnitude/dispersion engine | Much already exists | **EXTEND** | Reuse `engine/theme_revisions.py`, existing revision fields, and incumbent `EXP-1`; add only features not already emitted. |
 | New recommendation revision feature | Already exists | **KEEP** | `engine/analyst_revisions.py`. Treat separately from EPS/revenue revisions. |
 | New theme-membership contract | GMI already owns | **DELETE-AS-DUPLICATE** | Reuse `engine/theme_graph/*`, local-theme identities, membership evidence, `theme_state/v1`. |
 | New dynamic-subtheme graph | Already exists | **DELETE-AS-DUPLICATE** | GMI Theme Graph. |
@@ -320,7 +328,7 @@ collectors/equity_revisions.py
   └─ expectation_attempts.parquet               [SRC-A1 attempts / nulls / failures / rate limits]
           │
           ├─ engine/theme_revisions.py           [existing theme breadth/drift/accel]
-          └─ K3E EXP-1                           [missing deterministic expectation read model]
+          └─ K3E EXP-1                           [incumbent raw consumer PARTIAL; normalized gap]
                  │
                  ├─ protected Mastermind held-risk / lenses / signal_history
                  ├─ later V3 Decision Snapshot consumer, when separately built
@@ -359,9 +367,9 @@ The current source is built but not accepted as production-proven on protected/m
 
 ## E2. Deterministic expectation read model
 
-K3E's `EXP-1` remains the clean residual capability: a cutoff-safe, rights-aware, missing-aware, source-owner-derived expectation surface.
+K3E's incumbent `EXP-1` has an owner-reported accepted partial raw consumer. The residual capability is completion and qualification of that same cutoff-safe, rights-aware, missing-aware surface; normalized output remains unqualified.
 
-This should answer, for a security/metric/horizon/cutoff:
+Check the existing consumer for these answers before adding any missing security/metric/horizon/cutoff behavior:
 
 - latest lawful observation;
 - prior lawful observation;
@@ -449,11 +457,11 @@ Do not replace:
 
 Do not create a parallel `estimate_observation_v1` store in Mastermind.
 
-## G2. Add only a derived EXP-1 contract
+## G2. Reconcile and extend the incumbent derived EXP-1 contract
 
-The smallest genuinely new contract is a **read-model result**, not another source truth.
+Any necessary contract extension remains a **read-model result**, not another source truth. Reuse the accepted raw-consumer contract before proposing a new field or version.
 
-Suggested shape, subject to the K3E owner:
+Descriptive gap checklist, with actual schema/name owned by K3E:
 
 `k3e.expectation_surface/v1`
 
@@ -521,7 +529,7 @@ Never substitute estimate date, fiscal period, provider observation time or inge
 - price/rotation/breadth measurement;
 - trend persistence research harness.
 
-## New only inside EXP-1 or later institutional extension
+## Residual outputs inside incumbent EXP-1 or a later institutional extension
 
 Candidate deterministic outputs:
 
@@ -684,7 +692,7 @@ For group/theme persistence:
 
 1. Reconcile Macro PR #8312 and the incumbent SRC-A1 proof state.
 2. Reconcile direct overlapping research PR #8402; adopt useful findings only after accepted merge/review.
-3. If SRC-A1 is accepted, build **EXP-1 only** as a read-only deterministic expectation surface.
+3. If SRC-A1 is accepted, continue **the incumbent partial EXP-1 only**, preserving accepted raw behavior and filling confirmed gaps.
 4. Bind EXP-1 to existing identity/event/financial/price owners; no new stores.
 5. Add research-only Mastermind consumption through existing decision-history/validation owners, not portfolio authority.
 
@@ -732,7 +740,7 @@ For group/theme persistence:
 
 ```text
 OLD: build estimate contracts
-NEW: reuse SRC-A1; build only EXP-1 derived read model
+NEW: reuse SRC-A1; continue the incumbent partial EXP-1 derived read model
 
 OLD: build source receipts
 NEW: reuse expectation_attempts + evidence foundation
@@ -772,7 +780,7 @@ No migration may destroy the legacy `latest.parquet` / `history.parquet` semanti
 
 ## Commission: K3E expectation source reconciliation and minimal EXP-1 read model
 
-**Purpose:** create the highest-value missing capability with the minimum new surface area.
+**Purpose:** complete the highest-value confirmed gap in the incumbent consumer with the minimum new surface area.
 
 ### Authority
 
@@ -800,7 +808,7 @@ Read current protected Mastermind + current Macro + current Terminal.
 
 Inspect at minimum:
 
-- Macro PR #8312;
+- Macro PR #8312 and the detailed #8309 EXP-1 continuation/registered custody;
 - Macro PR #8402;
 - GMI PRs #8417, #8432, #8435 or their accepted successors;
 - `CURRENT_CAPABILITY_LEDGER.md`;
@@ -828,11 +836,11 @@ If not accepted, repair/prove only the failed invariant in the incumbent owner.
 
 **Safety:** no new store, cadence expansion, universe expansion or manual source replay merely to manufacture proof.
 
-### Phase 2 — minimal EXP-1
+### Phase 2 — reconcile and complete incumbent EXP-1
 
-Only after Phase 1 passes.
+Only new promotion/extension after Phase 1 passes; preserve the already reported raw-consumer work and its actual custody.
 
-Implement a pure/read-only `k3e.expectation_surface/v1` (exact final name owned by K3E) over existing source artifacts.
+Recover the existing flat module, query CLI, tests and EXP_1 handoff listed above. Continue packaging/release and confirmed residual pure/read-only behavior over existing source artifacts. `k3e.expectation_surface/v1` is the descriptive contract target, with its actual final name owned by K3E; do not create a parallel module or replace the incumbent contract from this proposal.
 
 It may compute only deterministic, cutoff-safe, rights-aware descriptive fields.
 
@@ -894,9 +902,9 @@ A later separate adapter commission may consume accepted GMI `theme_state/v1` / 
 
 ### Smallest first implementation slice
 
-**If #8312 is accepted:** implement EXP-1 read-only cutoff-safe expectation surface over existing SRC-A1 records, with one research consumer and zero portfolio effect.
+**If #8312 is accepted:** continue the incumbent partial EXP-1 from its reconciled packaging/release frontier, fill only confirmed cutoff-safe read-model gaps, and qualify one research consumer with zero portfolio effect.
 
-**If #8312 is not accepted:** repair/prove the incumbent SRC-A1 source only. Do not start EXP-1 and do not create any replacement source.
+**If #8312 is not accepted:** repair/prove the incumbent SRC-A1 source only. Preserve existing partial raw EXP-1 work without promoting unqualified output; start no second EXP-1 and create no replacement source.
 
 ---
 

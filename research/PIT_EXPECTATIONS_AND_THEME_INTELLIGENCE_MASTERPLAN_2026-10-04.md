@@ -8,6 +8,14 @@
 **Relevant Macro census pin:** `b0ba2f79c25ac7892c48b24f14a167781e16247b`; current master recheck `80fd8a1b993afe6109d289cb6916809dde70c830` changed only unrelated Entry Radar files.  
 **Terminal census pin:** `601db3352044535e327a7700221db062f5eca053`.
 
+## Historical EXP-1 custody correction — November 5
+
+This corrects the October 4 census using the earlier [October 3 owner-attributed receipt](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1185#issuecomment-5968275309), not a new empirical run or current deployment verification. That receipt reports an accepted **partial raw EXP-1 consumer**, 75 local tests and ten paired-Git-blob CLI cases, under operation `information-to-price-exp1-20261003-sol-001` and branch `claude/ssd-information-to-price-exp1-20261003-b4cff810e30514df`. Those are attributed owner results, not tests performed by this correction.
+
+The incumbent paths are `engine/k3e_expectation_surface.py`, `scripts/query_k3e_expectation_surface.py`, `tests/test_k3e_expectation_surface.py` and `research/alpha_intelligence/expectation_market_dynamics/handoffs/EXP_1.md`. At that checkpoint, packaging/commit/push/PR and source-dependent release were still owed. Absence from the protected census tree did not prove that EXP-1 was unbuilt across the estate.
+
+The broader normalized surface remained **PARTIAL**: `normalized_baseline.value` was always null. Preserve that limitation and existing source/identity/basis/rights/release gates; do not infer normalized economic, portfolio or trading authority. Reconcile the actual incumbent custody and current #8312/#8309 frontier before any continuation. Do not start a second EXP-1 writer, create the hypothetical nested `engine/k3e/expectation_surface.py`, or repeat unchanged accepted raw-consumer work. The remaining fields/tests below are a gap checklist against that incumbent, not a fresh-build commission.
+
 ---
 
 # 0. Masterplan decision
@@ -34,7 +42,7 @@ The expectation lane is the only lane eligible for the first implementation slic
 | Prospective revision history | `history.parquet` | EXISTING, short history | **KEEP / DO NOT BACKFILL** |
 | Theme revision breadth/accel | `engine/theme_revisions.py` | BUILT | **EXTEND, do not rebuild** |
 | Recommendation revision momentum | `engine/analyst_revisions.py` | BUILT | **KEEP separate family** |
-| Expectation read model | K3E `EXP-1` | NOT_BUILT | **BUILD after source proof** |
+| Expectation read model | Incumbent K3E `EXP-1`, flat module/CLI/tests named above | OWNER-REPORTED ACCEPTED RAW PARTIAL; normalized baseline null; packaging/release owed at checkpoint | **RECONCILE / CONTINUE after source proof; do not rebuild** |
 | Market-response read model | K3E `MKT-1` | NOT_BUILT | **DEFER behind EXP-1** |
 | Coupling/lag/disagreement | K3E `CPL-1` | NOT_BUILT | **DEFER** |
 | Vendor research | K3E `VEND-0` | COMPLETE: SAMPLE_REQUIRED / PROBE_FURTHER | **DO NOT REPEAT** |
@@ -222,19 +230,19 @@ Source artifacts are append/supersede only. No destructive rewrite. A failed pro
 
 ### Gate
 
-Phase 1 must be accepted `PROVEN_LIVE`.
+Phase 1 must be accepted `PROVEN_LIVE` before new promotion/extension. Retain the incumbent raw-consumer work and its attributed acceptance evidence during source-gate reconciliation.
 
 ### Goal
 
-Create the smallest missing consumer-facing read model without creating another truth store.
+Continue the existing partial raw consumer from its actual packaging/release frontier and implement only owner-confirmed missing behavior. Do not create a second read model or truth store.
 
 ### Extend exact existing owner
 
-Preferred owner remains K3E Expectation Market Dynamics.
+The owner remains the registered K3E EXP-1 operation/branch and flat module, query CLI, tests and handoff named in the custody correction above. Reconcile that existing source before any modifier is started.
 
-### Proposed contract
+### Incumbent contract gap checklist
 
-Final naming belongs to K3E, but the semantic target is:
+Retain the accepted raw-consumer schema; any amendment/final naming belongs to K3E. The descriptive target remains:
 
 `k3e.expectation_surface/v1`
 
@@ -307,7 +315,7 @@ No:
 
 ### Rollback
 
-Remove the derived read-model consumer/adapter. No source migration is required because source truth was never moved.
+Revert only a newly authorized extension/adapter against its exact preimage; do not delete or reset the accepted incumbent raw consumer. No source migration is required because source truth was never moved.
 
 ---
 
@@ -619,13 +627,13 @@ The first slice is conditional on incumbent proof state.
 
 ## Case A — SRC-A1 already accepted
 
-**Implement only:**
+**Continue only the reconciled incumbent:**
 
-> A pure, read-only, cutoff-safe K3E expectation surface over existing SRC-A1 observations/attempts, plus one research-only consumer.
+> Package/release the existing partial raw EXP-1 and fill confirmed pure, read-only, cutoff-safe gaps over SRC-A1 observations/attempts, plus one research-only consumer. Preserve the null normalized baseline until its separate qualification.
 
 ### Allowed files
 
-The exact owner must choose final paths after collision census, but changes should stay inside the incumbent K3E/revisions owner and one bounded research adapter.
+Use the incumbent flat module `engine/k3e_expectation_surface.py`, its existing query CLI/tests/handoff, and at most one bounded research adapter after collision/custody reconciliation. Additional paths require an actual owner-confirmed gap; do not create the hypothetical nested duplicate module.
 
 ### Must not touch
 
@@ -648,9 +656,9 @@ The exact owner must choose final paths after collision census, but changes shou
 
 ## Case B — SRC-A1 not accepted
 
-**Implement no EXP-1.**
+**Start no second EXP-1 and do not promote unqualified output.**
 
-Repair/prove only the exact incumbent source invariant. Stop after accepted source proof.
+Repair/prove only the exact incumbent source invariant while preserving the accepted partial raw consumer and its original custody. Stop this source-proof phase after its acceptance; subsequent work resumes the existing consumer.
 
 ---
 
@@ -660,7 +668,7 @@ This masterplan is complete only when all of the following are true:
 
 1. no duplicate source/identity/theme/outcome/evaluation plane was created;
 2. the expectation source is accepted or explicitly rejected;
-3. EXP-1 exists only if the source is proven;
+3. any EXP-1 promotion/extension is source-qualified, while the existing partial raw consumer and its truthful historical custody are preserved;
 4. research evidence is PIT-reconstructable;
 5. incremental value has a preregistered OOS result;
 6. vendor expansion, if any, is justified by measured residual need;
