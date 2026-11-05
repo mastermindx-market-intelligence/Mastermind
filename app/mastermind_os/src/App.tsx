@@ -21,7 +21,7 @@ import { ProjectWorkspace } from "./projects/ProjectWorkspace";
 import { ProjectConversationAssociation } from "./conversations/ProjectConversationAssociation";
 import { AcceptedDirectionPanel } from "./direction/AcceptedDirectionPanel";
 import { useProjectAdmissionWorkspace } from "./useProjectAdmissionWorkspace";
-import { Inbox } from "./inbox/Inbox";
+import { InboxWorkspace } from "./inbox/InboxWorkspace";
 import { Knowledge } from "./knowledge/Knowledge";
 import { knowledgeDraftBinding, type KnowledgeDraftPort } from "./knowledge/KnowledgeDraftCompanion";
 import type { ProjectSourceDraftPort } from "./knowledge/library/project-source-draft";
@@ -2657,7 +2657,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               ? "A global current permitted window. No relationship to the selected Mission is proven."
               : "No Mission-linked conversation is currently established."
           : active === "Inbox"
-            ? "Owner-defined attention for the selected Mission; company-wide attention is not inferred."
+            ? locale === "zh-CN"
+              ? "Terminal 请求与任务负责人上下文分别跟随各自来源；全公司覆盖尚未建立。"
+              : "Terminal requests and Mission owner context follow their own sources. Company-wide coverage is not established."
             : active === "Knowledge"
               ? "Supplied Mission references retain exact provenance; canonical record content is not reconstructed."
               : active === "Projects"
@@ -3972,7 +3974,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         )}
       />
     ) : null;
-  const quietHeader = active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
+  const quietHeader = active === "Inbox" || active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
     active === "Projects" && !directRoute && (!projectTab ||
       Boolean(projectWorkRef && (projectTab === "Conversation" || catalogueWorkRef)));
   const projectReadGeneration = JSON.stringify([authRevision, retainedHostGeneration, selectionSeq.current]);
@@ -4052,7 +4054,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     );
   else if (active === "Inbox")
     content = (
-      <Inbox
+      <InboxWorkspace
+        locale={locale}
+        terminalHost={window.MastermindMissionHost?.terminalSharing}
         projection={office.projection}
         onNavigateMission={
           office.projection.mission.source.state === "CURRENT"
@@ -4687,7 +4691,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             }}>{copy.discardAll}</button>
           </section>
         ) : null}
-        {active !== "Control Room" && active !== "Today" && !directRoute ? (
+        {active !== "Control Room" && active !== "Today" && !directRoute &&
+          !(active === "Inbox" && visibleNotice === "Choose a Program with one resolved mission before opening the workspace.") ? (
           <div className="notice" role="status">{visibleNotice === "Choose a Program with one resolved mission before opening the workspace."
             ? locale === "zh-CN" ? "选择一个项目，查看其工作。" : "Choose a project to view its work."
             : visibleNotice}</div>
