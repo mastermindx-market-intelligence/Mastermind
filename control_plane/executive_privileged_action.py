@@ -41,6 +41,11 @@ SERVICE_ACTION_VERBS = {
     "executive.services.start_readside": "start-readside",
     "executive.services.stop_readside": "stop-readside",
 }
+PAID_SERVICE_ACTION_VERBS = {
+    "executive.services.start_paid": "start-paid",
+    "executive.services.stop_paid": "stop-paid",
+}
+PAID_SERVICE_ACTIONS = frozenset(PAID_SERVICE_ACTION_VERBS)
 SERVICE_ACTIONS = frozenset(SERVICE_ACTION_VERBS)
 WORKER_AUTH_ACTIONS = frozenset(
     {
@@ -55,8 +60,9 @@ HOST_POLICY_ACTIONS = frozenset(
         "executive.host.prepare_secondary_power_policy",
     }
 )
-PRIVILEGED_ACTIONS = SERVICE_ACTIONS | WORKER_AUTH_ACTIONS | HOST_POLICY_ACTIONS
+PRIVILEGED_ACTIONS = SERVICE_ACTIONS | PAID_SERVICE_ACTIONS | WORKER_AUTH_ACTIONS | HOST_POLICY_ACTIONS
 ACTION_EFFECT_CLASS = {
+    **{action:"SERVICE_CONTROL" for action in PAID_SERVICE_ACTIONS},
     "executive.services.start": "SERVICE_CONTROL",
     "executive.services.stop": "SERVICE_CONTROL",
     "executive.services.restart": "SERVICE_CONTROL",
@@ -273,7 +279,13 @@ def validate_request(raw: Mapping[str, Any]) -> ValidatedPrivilegedAction:
     if not isinstance(args, Mapping):
         raise PrivilegedActionError("arguments must be a mapping")
 
-    if action in SERVICE_ACTIONS:
+    if action in PAID_SERVICE_ACTIONS:
+        _require_exact_keys(args,frozenset({"expected_definition_sha256"}),"arguments")
+        value=args["expected_definition_sha256"]
+        if type(value) is not str or re.fullmatch(r'[0-9a-f]{64}',value) is None:
+            raise PrivilegedActionError("paid definition digest invalid")
+        validated_args=(("expected_definition_sha256",value),)
+    elif action in SERVICE_ACTIONS:
         if args:
             raise PrivilegedActionError("service action arguments must be empty")
         validated_args: tuple[tuple[str, str], ...] = ()
@@ -324,6 +336,10 @@ def validate_status_request(raw: Mapping[str, Any]) -> PrivilegedActionStatusReq
 def build_argv(request: ValidatedPrivilegedAction, release_root: str | Path) -> tuple[str, ...]:
     root = Path(release_root)
     args = request.args_dict()
+    if request.action in PAID_SERVICE_ACTIONS:
+        # An internal original-owner action. No standalone root CLI can mint
+        # its held in-process lifecycle context from an argv or receipt.
+        raise PrivilegedActionError("paid lifecycle is an internal broker action without argv")
     if request.action in SERVICE_ACTIONS:
         verb = SERVICE_ACTION_VERBS[request.action]
         return (

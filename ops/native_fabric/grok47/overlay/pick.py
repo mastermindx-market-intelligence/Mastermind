@@ -1870,7 +1870,13 @@ def format_pick(task_class: str, prefer: Optional[str] = None,
     if not affinity:
         return _format_pick_host(task_class, pool=pool, requested_model=requested_model, **common)
     primary = _format_pick_host(task_class, pool="grok", requested_model=requested_model, **common)
-    if primary.startswith("POOL=") or not _grok_exhausted():
+    # A caller's exact Grok Build version is a model-identity constraint,
+    # not a transferable quality/affinity hint. Cursor's similarly named
+    # model and all other pools are distinct; never substitute for an explicit
+    # requested_model, even when the weekly Grok pool is exhausted. The
+    # existing monthly Cursor failover remains for *unpinned* Grok affinity.
+    if (primary.startswith("POOL=") or not _grok_exhausted()
+            or requested_model in ("grok-4.6", "grok-4.7")):
         return primary
     same = _format_pick_host(task_class, pool="cursor", requested_model="cursor-grok-4.6-high", **common)
     if same.startswith("POOL="):

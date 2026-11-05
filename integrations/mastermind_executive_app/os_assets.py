@@ -1,4 +1,4 @@
-"""Closed asset layouts for the sealed legacy and Noir OS releases.
+"""Closed asset layouts for the sealed legacy, Noir and rich-client OS releases.
 
 This contract admits names and MIME types only. The installed launcher remains
 the owner of file custody, byte limits, content hashes and immutable loading.
@@ -21,27 +21,47 @@ _LICENSES = (
     "licenses/fonts/Manrope-OFL.txt",
     "licenses/fonts/Manrope-FONTLOG.txt",
 )
+
+
+_RICH_CLIENT = (
+    (r"assets/SourceMarkdown-[A-Za-z0-9_-]+\.js", "text/javascript; charset=utf-8"),
+    (r"assets/SourceMarkdown-[A-Za-z0-9_-]+\.css", "text/css; charset=utf-8"),
+)
 _THIRD_PARTY_NOTICES = (
     "third-party/deepseek-client-dependency-NOTICES.txt",
     "third-party/deepseek-harness-LICENSE.txt",
 )
 
+# Single closed topology source for both packaging and later staged publication.
+# Each profile contains index.html plus its required asset patterns/notices.
+OS_ASSET_PROFILE_FILE_COUNTS = (
+    1 + len(_BASE),
+    1 + len(_BASE) + len(_NOIR) + len(_LICENSES),
+    1 + len(_BASE) + len(_NOIR) + len(_LICENSES) + len(_THIRD_PARTY_NOTICES),
+    1 + len(_BASE) + len(_NOIR) + len(_LICENSES) + len(_THIRD_PARTY_NOTICES) + len(_RICH_CLIENT),
+)
+
 
 def os_asset_mimes(names) -> dict[str, str]:
-    """Exactly legacy three, Noir nine, or Noir eleven including both notices."""
+    """Exactly legacy3, Noir9, licensed Noir11, or rich Noir13.
+
+    There is no wildcard asset directory, arbitrary chunk name, optional partial
+    profile or caller-supplied MIME. File custody and bytes stay with the launcher.
+    """
     names = tuple(names)
     if (any(type(name) is not str for name in names)
-            or len(names) not in (3, 9, 11) or len(set(names)) != len(names)):
+            or len(names) not in OS_ASSET_PROFILE_FILE_COUNTS or len(set(names)) != len(names)):
         raise ValueError("fixed OS asset set required")
     expected = {"index.html": "text/html; charset=utf-8"}
-    for pattern, mime in _BASE + (_NOIR if len(names) in (9, 11) else ()):
+    patterns = _BASE + (_NOIR if len(names) in (9, 11, 13) else ()) + (_RICH_CLIENT if len(names) == 13 else ())
+    for pattern, mime in patterns:
         matches = [name for name in names if re.fullmatch(pattern, name)]
         if len(matches) != 1:
             raise ValueError("fixed OS asset set required")
         expected[matches[0]] = mime
-    if len(names) in (9, 11):
+    if len(names) in (9, 11, 13):
         expected.update({name: "text/plain; charset=utf-8" for name in _LICENSES})
-    if len(names) == 11:
+    if len(names) in (11, 13):
         expected.update({name: "text/plain; charset=utf-8" for name in _THIRD_PARTY_NOTICES})
     if set(names) != set(expected):
         raise ValueError("fixed OS asset set required")

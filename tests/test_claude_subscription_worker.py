@@ -8,6 +8,7 @@ import json
 import os
 import stat
 import subprocess
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -440,6 +441,32 @@ def test_turn_refuses_catalog_canary_and_autonomous_blockers(tmp_path: Path):
         )
 
 
+def test_byteplus_canary_rejects_even_hermetic_owner_sealed_positive_facts():
+    """Test-only HMAC facts do not override actual BytePlus SPEC_ONLY policy.
+
+    Keys/enrollment are test-injected by the existing fixture; no provider
+    account, worker principal or live Capacity source is touched.
+    """
+    byteplus_id = "byteplus-coding-plan-personal.claude-code-anthropic"
+    profiles = json.loads(DEFAULT_PROFILES_PATH.read_text(encoding="utf-8"))
+    bindings = load_bindings(profiles_document=profiles)
+    receipt = issue_provider_realm_enrollment_receipt(
+        binding_id=byteplus_id,
+        bindings_document=bindings,
+        profiles_document=profiles,
+        generation=_REALM_GENERATION,
+    )
+    assert receipt.binding_id == byteplus_id
+    assert receipt.enrollment_state == "enrolled"  # fixture only, not runtime
+    with pytest.raises(CanaryAdmissionError, match="SPEC_ONLY"):
+        seal_subscription_canary_admission(
+            capacity_fact=_capacity_fact(),
+            realm_receipt=receipt,
+            bindings_document=bindings,
+            profiles_document=profiles,
+        )
+
+
 def test_seal_refuses_raw_boolean_activation_inputs():
     for key in (
         "adapter_implemented",
@@ -684,7 +711,13 @@ def test_adapter_refuses_missing_capacity_or_realm_proof_and_changed_catalog(tmp
     bindings, profiles = _documents()
     admission = _owner_seal(bindings=bindings, profiles=profiles)
     changed = json.loads(json.dumps(bindings))
-    changed["verified_at"] = "2026-09-13T23:59:59Z"
+    # A digest-drift test must supply a *valid* profile-fresh review timestamp.
+    # A stale one is now rejected earlier by the BytePlus review provenance
+    # guard, so it cannot exercise the intended canary digest mismatch.
+    reviewed = datetime.strptime(bindings["verified_at"], "%Y-%m-%dT%H:%M:%SZ")
+    changed["verified_at"] = (reviewed + timedelta(seconds=1)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
     with pytest.raises((CanaryAdmissionError, ClaudeSubscriptionWorkerError), match="catalog digest"):
         ClaudeSubscriptionWorkerAdapter(
             binary,

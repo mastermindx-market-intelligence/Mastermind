@@ -11,6 +11,10 @@ source, test, and maintenance actions follow the current assignment and applicab
 under the Executive contract below. This distinction does not grant runtime, credential,
 trading, or source-write authority and never promotes research into trade execution.
 
+## Standing commercial data rights
+
+Apply [the Chairman's October 23 commercial-data-rights ruling](docs/COMMERCIAL_DATA_RIGHTS.md) for the Research Factory Yahoo/yfinance route, Massive/Polygon, Tiingo and ThetaData options. The commercial rights and approval gate is settled as `APPROVED_BY_CHAIRMAN_ATTESTATION`; no session may require repeated approval or contract/public-terms re-proof.
+
 ## Executive contract
 
 How this organization decides, and what a worker session may and may not do. This
@@ -33,8 +37,23 @@ session spawned with no context beyond this file.
 
 Fable is not a mandatory relay or universal merge approver. Routing, adjudication,
 and merge decisions follow the currently authorized role and operation, not a
-historical session name. Independent review and source/release protections still apply.
+historical session name. Independent review is not mandatory for CEO Web work; protected source/release controls still apply.
 These role descriptions do not themselves grant authority.
+
+### Durable plan and cold continuation for assigned principals
+
+For a **multi-phase** Chairman-assigned CEO/Meta-CEO project, follow the protected
+`docs/CEO_PROJECT_PLAN_CONTINUITY.md` at the same Skillpack/source pin. Recover the
+Agent OS workstream waves and latest dated handoff as the pinned plan, and the
+versioned GitHub master plan as the task tree only. If no task tree exists, create
+and read back one with stable task/subtask IDs, dependencies and acceptance evidence
+**before major delegation or implementation**. The next action stays on the workstream
+and handoff.
+At material changes and risky chat boundaries, persist the affected nodes and Agent OS
+checkpoint through their existing writers, verify exact revisions, and keep the active
+worker/lease/effect boundary. Do not create a new plan database, claim source custody
+from a dead chat, or stop merely because a save succeeded. This applies to assigned
+principals, not bounded worker tasks; it grants no GitHub/Executive write permission.
 
 ### Assigned Codex/Claude Meta-CEO: paid Fabric delegation first
 
@@ -51,9 +70,13 @@ Before substantial independently checkable C0/C1/C2 implementation, tests,
 research and repair, evaluate paid Subagent Fabric delegation. An enrolled
 Codex seat should use its **existing** `mastermind-fabric-delegate` skill and
 `fabric_task.py` adapter with the verified current `CODEX_THREAD_ID` root,
-stable child ID and original parent. Claude uses its already authorized
-Executive/Fabric path; native Agent/Task or Codex spawn_agent workers are not
-silently equivalent to paid Fabric. No separate broker, new queue, raw SSH
+stable child ID and original parent. An assigned M2 Claude principal should
+load `skills/mastermind-claude-fabric-delegation/SKILL.md` (also installed in
+`~/.claude/skills/mastermind-claude-fabric-delegation/SKILL.md`) for the exact
+existing CLI/MCP child workflow and verified-root checks, never guess a parent.
+A spawned admitted operator receives its distinct `fabric_operator_scope` /
+`fabric_child_*` instructions through the existing launch packet. Native
+Agent/Task or Codex spawn_agent workers are not silently equivalent to paid Fabric. No separate broker, new queue, raw SSH
 fallback, model downgrade or inherited frontier worker is authorized here.
 Existing Executive/Capacity grants and provider/host controls stay controlling.
 
@@ -150,6 +173,24 @@ tests through existing interfaces; separate source readiness, human-only enrollm
 a bounded admitted canary and production release. Do not remove refusal guards or
 invent an admission receipt to make a dormant path appear live.
 
+### Responsibility continuity — no imaginary owners
+
+<!-- MMX_RESPONSIBILITY_CONTINUITY_BEGIN -->
+Within an assigned nonterminal job, the current session retains responsibility for the next step until it either executes that step, completes a concrete handoff/continuation to a proven exact receiver, records `WAITING_CAPACITY`, enters a lawful `PRESTART_REBIND`, returns `RUNTIME_BINDING_RECONCILIATION_REQUIRED` or `EFFECT_UNKNOWN`, or reaches a genuine Chairman/admin gate.
+
+- A component, service, repository, team, role, provider account, browser tab, or historical session is not a live assignee. `FACT_OWNER`/`CAPABILITY_OWNER` identifies where truth or implementation lives; it does not prove a current executor.
+- Before deferring because a capability is unavailable, inspect the actual current tool/connector/host surface once when it can materially answer the question. If the bounded action is inside current scope and this session is already authorized and capable, perform it instead of naming a conceptual owner.
+- Tool access is capability, not modification authority. Saying "I take ownership" does not create action-target or source-writer authority.
+- If another exact live action target or source writer is proven current, continue that target; do not steal the write. Perform the required delivery/continuation edge or return the exact transport/binding blocker.
+- With no receiver assignment edge before START and no effect, use existing placement / `WAITING_CAPACITY` / lawful `PRESTART_REBIND`; never invent an assignee.
+- `EFFECT_UNKNOWN` forbids takeover, retry, receiver rotation, provider failover, or replacement modification until canonical reconciliation.
+- Do not end at "the owner should do it" without an actual handoff or typed gate. A genuine Chairman/admin gate must name the exact external decision or credential boundary.
+- A dead or missing runtime/session is a reconciliation/succession problem for the existing canonical owner; it never grants this session automatic modifying authority.
+- A named "original administrator," publisher, reviewer, host owner, or ChatGPT conversation may identify provenance or the immutable effect/result carrier; it is not permanent staffing. Resolve exact operation/request identity, original authorized carrier, canonical pending result, live writer/lease, prior read/refusal and next lawful action. The currently assigned session owns this recovery triage, not a missing historical chat.
+- If an old operation reportedly exited successfully but its protected result is not canonically reconciled, do not infer PASS from rc0, a Slack report or a historical owner claim. Do not rerun the operation, trigger a second protected read, switch tools/accounts/credentials or activate a held service. An explicit safety/permission denial ends that action; preserve its original carrier and release hold, and advance genuinely independent authorized work.
+- `EXACT_HUMAN_GATE` requires a demonstrated unavailable human credential/control, its exact action and evidence that other useful independent lanes are exhausted. "Ask the original owner/chat" or a conceptual department is not that proof. If useful independent work exists, the mission remains `MORE_WORK_EXISTS`; save the accurate blocker in the existing canonical checkpoint, never in a new owner registry.
+<!-- MMX_RESPONSIBILITY_CONTINUITY_END -->
+
 ### Reciprocal dialogue and watcher invariant
 
 For any watcher-enabled Sol↔worker/COO loop, `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` is the
@@ -179,6 +220,17 @@ universal procedure owner. Read it before creating or relying on a temporary wat
 - **Slack delivery is not target consumption**, and neither delivery nor a historical native task ID
   proves ACK, START, execution, or reusable capacity. Preserve those states separately until the
   accepted RuntimeBinding/Wake path proves them.
+
+### Session-owned review for every assigned session
+
+Before a PR/source review, load [session-local review policy](docs/SESSION_LOCAL_REVIEW_POLICY.md) from the same protected pin. The **working session** performs the author adversarial pass and, if truly warranted, manages its **own native reviewer subagent**. An exposed Web Pro native child, Codex native child, Claude native child or admitted Fabric child can conduct distinct-context read-only technical review; no separate top-level ChatGPT conversation or third-party account is organizationally required. Do not invent native subagents or START receipts. Once the attended CEO-Web instruction waiver is protected-accepted and loaded, risk tier alone does not require an independent reviewer handoff in that session. This does not depend on #2018 or automatic-review-host enrollment. Signed machine policy and actually binding review, security, approval and release requirements remain separate and unchanged.
+
+Only when a separately commissioned reviewer is actually needed, load [external review routing](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md) and reconcile the existing exact review before any dispatch. Distinguish `SELF_REVIEWED`, `INDEPENDENT_TECHNICAL_REVIEW` by a real child, and formal GitHub `APPROVED` by an authenticated eligible non-author. A native child does not submit formal GitHub approval for the parent. Historical reviewer login is a placement clue, not a chat-wait gate; do not switch GitHub accounts in the same reasoning context to fake independent review. Existing GitHub review ingress/Runtime, author and coauthor conflicts, branch rules, holds, current-head CI, denied/uncertain effects and source/release protections remain authoritative. Never self-approve, self-merge or claim a Project instruction was installed merely because this file was edited.
+
+
+**Finish the actual PR, not its draft.** The assigned session owns the same original branch/PR through source repair, hosted CI failure diagnosis, Ready when reviewable, genuinely required review, authorized protected merge/queue, merge-SHA readback and owed installed/user-path proof. A PR, Draft, comment or checkpoint is NOT delivery. Do not stop because CI is pending, wait for an archived reviewer chat, or open a replacement PR to escape the original. Continue safe steps in the same turn; keep unresolved holds, non-author approvals, source/effect custody and no self-merge intact. See [finish-to-release contract](docs/SESSION_LOCAL_REVIEW_POLICY.md#finish-to-release-ownership-a-pr-is-an-intermediate-artifact).
+
+A historically named GitHub reviewer login is a **placement preference, not an owner wait**, unless an actual current exact-seat instruction or repository rule binds it. The active assigned principal checks the review's exact PR/head, connected authenticated login, commit/author/coauthor independence and existing review/effect state under `docs/sol_skills/REVIEW_RETURN.md`; it may request a different eligible **genuinely independent** reviewer through GitHub's existing review path. Switching the same reasoning session between two GitHub accounts is not independent substantive review. No impersonation, author self-review, duplicate/denied-effect reroute, self-approval or self-merge. Keep executing other permitted work while the real review is pending.
 
 ## Agent OS — the organizational knowledge plane
 

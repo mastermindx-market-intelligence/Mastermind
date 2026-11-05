@@ -19,23 +19,56 @@
       "enabled": false,
       "autonomous_allowed": false
     },
+    "anthropic_api": {
+      "adapter_id": "anthropic-api-principal",
+      "enabled": false,
+      "autonomous_allowed": false
+    },
     "qwen": {
       "adapter_id": "openai-compatible",
       "enabled": false,
       "autonomous_allowed": false
     },
     "glm": {
-      "adapter_id": "openai-compatible",
-      "enabled": false,
-      "autonomous_allowed": false
+      "adapter_id": "canonical-paid-fabric",
+      "enabled": true,
+      "autonomous_allowed": true
     },
     "xai": {
       "adapter_id": "openai-compatible",
       "enabled": false,
       "autonomous_allowed": false
+    },
+    "byteplus": {
+      "adapter_id": "attended-fabric",
+      "enabled": false,
+      "autonomous_allowed": false
+    },
+    "experiential": {
+      "adapter_id": "codex-cli",
+      "enabled": false,
+      "autonomous_allowed": false
     }
   },
   "model_aliases": {
+    "experiential.flash.candidate": {
+      "provider_alias": "experiential",
+      "execution_profile_id": "sealed.worker.write.no-extensions.v1",
+      "model": "deepseek-v4.1-flash",
+      "effort": "medium",
+      "cost_class": "default",
+      "capabilities": ["code", "tests"],
+      "worker_eligible": false
+    },
+    "byteplus.attended": {
+      "provider_alias": "byteplus",
+      "execution_profile_id": "fabric.attended.claude.bounded.v1",
+      "model": "glm-5.3-flash",
+      "effort": "medium",
+      "cost_class": "small",
+      "capabilities": ["research"],
+      "worker_eligible": false
+    },
     "minimax.attended": {
       "provider_alias": "minimax",
       "execution_profile_id": "fabric.attended.claude.bounded.v1",
@@ -45,6 +78,15 @@
       "capabilities": [
         "research"
       ],
+      "worker_eligible": false
+    },
+    "fable.api.principal": {
+      "provider_alias": "anthropic_api",
+      "execution_profile_id": "operator.appserver.readonly.v1",
+      "model": "claude-fable-5-1",
+      "effort": "high",
+      "cost_class": "frontier",
+      "capabilities": ["planning", "judgment", "escalation"],
       "worker_eligible": false
     },
     "coo.sealed": {
@@ -126,6 +168,15 @@
       "effort": "high",
       "cost_class": "default",
       "capabilities": ["code", "research", "review", "tests"],
+      "worker_eligible": true
+    },
+    "glm.paid.sealed-input": {
+      "provider_alias": "glm",
+      "execution_profile_id": "fabric.paid.glm.sealed-input.v1",
+      "model": "glm-5.3-flash",
+      "effort": "medium",
+      "cost_class": "small",
+      "capabilities": ["research"],
       "worker_eligible": true
     }
   },

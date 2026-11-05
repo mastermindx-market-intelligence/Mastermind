@@ -3,7 +3,9 @@
 The authoritative VPS uses ``waterfall``: Codex (ChatGPT-managed auth, Sol
 xhigh) first, then Macro Dashboard's shared Claude OAuth pool.  Direct
 ``codex``/``cli`` modes remain available for diagnostics and local use, with
-``api`` as the metered Anthropic Messages API fallback.
+``api`` as the metered Anthropic Messages API fallback. Explicit
+``production_mode`` delegates no-tools completions to Macro's Shared AI
+Provider Control production API modes; it does not reserve Fabric capacity.
 
 Every mode is exclusive: a configured shared-waterfall outage never falls through to a
 separate metered credential.  ``call_model()`` returns (text|None, degraded_reason|None) — the same contract as
@@ -30,7 +32,9 @@ TIERS = {
 def backend() -> str:
     """Configured LLM backend. Env override > agents.yml > shared waterfall."""
     env = os.environ.get("BOT_LLM_BACKEND")
-    if env in ("waterfall", "codex", "cli", "api"):
+    if env is not None:
+        # An explicit unknown/empty backend fails closed in the dispatcher.
+        # Never turn a misspelled new backend into the legacy waterfall.
         return env
     try:
         return cli_bridge._cfg().get("backend", "waterfall")
@@ -60,6 +64,9 @@ def available() -> bool:
         return cli_bridge.available()
     if selected == "api":
         return api_available()
+    if selected == "production_mode":
+        from brain import production_inference
+        return production_inference.available()
     return False
 
 
@@ -71,6 +78,13 @@ def call_model(system: str, user: str, *, role: str = "pm", max_tokens: int = 15
     backend — seat names the ledger seat (default = role), record_book overrides the
     _ROLE_BOOK default book. Attribution-only; never changes routing or behaviour."""
     selected = backend()
+
+    if selected == "production_mode":
+        from brain import production_inference
+        return production_inference.call_model(
+            system, user, role=role, max_tokens=max_tokens,
+            seat=seat, record_book=record_book,
+        )
 
     if selected == "waterfall":
         if not cli_bridge.available():
