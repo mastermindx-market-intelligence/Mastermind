@@ -8,8 +8,12 @@ release and a real consumer canary.
 
 CEOs/orchestrators recover accepted work after conversation loss across multi-phase/
 dependent deliverables, children, consequential revisions and continuation. Trivial
-answers need no artifact. Explore safely; save before substantial execution/delegation
-without planning delays. Protected `docs/sol_skills/INDEX.md`, responsibility/grants/
+answers and bounded one-phase repairs need no new plan. For multi-phase work, reuse
+the existing task tree and capture known outcomes, dependencies and the next useful
+step. Elaborate it when that improves execution; an exhaustive tree, another plan
+approval or a cross-repository projection is not a prerequisite for ordinary assigned
+source work. Save before substantial execution/delegation without planning delays.
+Protected `docs/sol_skills/INDEX.md`, responsibility/grants/
 effect fences govern. No lifecycle, project/task registry, queue, memory, lease,
 admission, GitHub permission or Slack/Linear writer is created.
 
@@ -71,17 +75,24 @@ No new approval, mandatory management layer or scheduler.
    Search first; reuse accepted IDs.
 2. Reconcile relevant workers/dialogues/custody/effects. Plans/names grant nothing;
    missing chats clear no live writer, STARTed Job or `EFFECT_UNKNOWN`.
-3. Define intent, persona/machine job, outcome/value/quality, constraints/dependencies,
-   `DONE_WHEN`, real proof, held non-goals; include journey, engineering/performance,
-   mobile/responsive, accessibility, review, falsifiers.
+3. Record the outcome, `DONE_WHEN`, relevant constraints/dependencies and acceptance
+   evidence. Include journey, performance, mobile, accessibility, review or falsifiers
+   only where the assignment changes or depends on them; unrelated proof is not a gate.
 4. Specify useful phases/tasks/substeps, dependency/input/output/handoff contracts;
    unknowns provisional, mechanical details unoverplanned.
 5. Persist via eligible writer/carrier in owning GitHub repo: exact path/revision,
    committed-byte readback. Lawful WS writer adds repo-relative `artifacts`/latest
    handoff path. No SHA-as-path, invented WS or new-chat duplicate plan.
-6. Missing GitHub/Agent OS writer: evidence `PLAN_NOT_ORG_LINKED`/
-   `NOT_CANONICALLY_PERSISTED` precisely. Draft = durable source, not accepted org state;
-   chat unsaved. Only independent safe work continues.
+6. Separate persistence from organizational adoption. An exact committed plan or
+   checkpoint on the existing branch/PR is durable source even while the PR is open;
+   it is not protected law, an accepted Agent OS decision or runtime admission.
+   Missing Agent OS linkage is `PLAN_NOT_ORG_LINKED`, not a reason to stop already
+   assigned editing/testing with verified source custody or await a separate planning PR merge.
+   Use `NOT_CANONICALLY_PERSISTED` only for material facts with no verified durable
+   record. Preserve the last saved revision, continue safe independent work and save
+   at the next coherent boundary; do not invent another approval or retry loop.
+   Actions actually requiring an adopted plan, live writer or runtime grant retain
+   those specific gates.
 
 
 ## B. Master-plan record: compact header, arbitrarily deep tasks
@@ -131,7 +142,8 @@ tasks/affected verification. Expected-revision checks protect live/newer reviewe
 Agent OS writer amends **same day's** latest
 `agentos/handoffs/<WS-KEY>-<YYYY-MM-DD>.md` (date, then full stem).
 `DSC:SUFFIXED-HANDOFF-IS-INVISIBLE`: no suffixed sibling/`latest` pointer. Require
-committed readback, not pending PR. `agentos.handoff.v1` validation:
+committed-byte readback: a pending PR can preserve source, but is not protected or
+organizational acceptance. `agentos.handoff.v1` validation:
 - `model`: only `fable`, `opus`, `sonnet`, `haiku`, `codex`, `local`, `sol`.
   Codex/Astra: `codex`/`sol`, never `grok`/`astra`/`chatgpt`. No fit: report gap, retain prior record.
 - B's ended-because enum; `unverified` (empty valid), `command` per verified item,
@@ -159,8 +171,10 @@ no lease. Report phase/`DO_NOT_REDO`/gates/exact authorized action/`DONE_WHEN`; 
 stale planning through its owner before reliance. Check before execution; never
 replay closed work/private reasoning.
 
-Apply A.6 persistence failures to dependent work only; drafts/messages are not canonical
-saves. Automatic succession/semantic pickup/RuntimeBinding transfer need production-
+Apply A.6 persistence failures to dependent work only. A verified committed draft is
+recoverable source; an unsaved message or proposed edit is not. Neither is an adopted
+organizational decision or runtime grant. Automatic succession/semantic pickup and
+RuntimeBinding transfer need production-
 proven Web-Sol rotation chain/fencing; no arbitrary browser control.
 
 
@@ -196,3 +210,4 @@ CI/checkmarks/instructions do not suffice.
 
 Reuse `WS:EXECUTIVE-ECOSYSTEM-COMPLETION`/`WS:ORCHESTRATOR-PROJECT-CONTINUITY`
 W0/W1/W2. Estate/source holds and Fable/Astra/Project Workroom roles still control.
+
