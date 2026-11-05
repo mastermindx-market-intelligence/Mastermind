@@ -108,6 +108,7 @@ RECEIPT_SCHEMA_DIRECT = "mastermind.ceo_direct_native_receipt.v1"
 RECEIPT_SCHEMA_SERVICE = "mastermind.executive_service_intent_receipt.v1"
 RECEIPT_SCHEMA_PRINCIPAL = "mastermind.executive_principal_intent_receipt.v1"
 _DIALOGUE_SOURCE_UNSET = object()
+_FRONTIER_SELECTION_UNSET = object()
 
 #: Namespace for the durable event ``command_id``.  The prefix keeps CEO intent
 #: ids from colliding with the runtime's own ``uuid4().hex`` command ids, which
@@ -148,7 +149,7 @@ _REQUIRED_KEYS = frozenset(
 )
 _OPTIONAL_KEYS = frozenset({"workstream"})
 _V2_REQUIRED_KEYS = _REQUIRED_KEYS | frozenset({"intent_kind", "business_impact"})
-_V2_OPTIONAL_KEYS = _OPTIONAL_KEYS
+_V2_OPTIONAL_KEYS = _OPTIONAL_KEYS | frozenset({'frontier_model_alias'})
 _PRINCIPAL_IDENTITY_KEYS = frozenset({
     "seat", "principal_binding_digest", "mission_authority_ref",
     "authority_generation_digest", "workstream",
@@ -800,6 +801,12 @@ def validate_intent(payload: Any) -> dict[str, Any]:
             )
         intent["intent_kind"] = intent_kind
         intent["business_impact"] = impact
+        if "frontier_model_alias" in raw:
+            from control_plane.frontier_selection import validate_alias, FrontierSelectionError
+            try:
+                intent["frontier_model_alias"] = validate_alias(raw["frontier_model_alias"])
+            except FrontierSelectionError as exc:
+                raise CeoIntentError(str(exc)) from exc
     if schema == INTENT_SCHEMA_SERVICE:
         # Closed values first, then the read-only ceiling.  Every refusal here is
         # service-schema-only: v1/v2 validation above is untouched.
@@ -1030,7 +1037,9 @@ def _receipt_from_event(
     *,
     intent_id: str,
     fingerprint: str | None,
+    requested_frontier_alias: Any = _FRONTIER_SELECTION_UNSET,
     dialogue_source: Any = _DIALOGUE_SOURCE_UNSET,
+    frontier_selection: Any = _FRONTIER_SELECTION_UNSET,
 ) -> dict[str, Any]:
     """Reconcile an already-accepted intent into the receipt it first produced."""
 
@@ -1047,6 +1056,26 @@ def _receipt_from_event(
     # record before treating it as a CEO intent so a malformed or foreign event
     # under this prefix is a legible refusal, never a receipt for an objective
     # the CEO never sent.
+    from control_plane.frontier_selection import (
+        FrontierSelectionError, selection_from_provenance, validate_selection,
+    )
+    try:
+        durable_selection = selection_from_provenance(provenance)
+    except FrontierSelectionError as exc:
+        raise CeoIntentError("durable frontier selection is invalid") from exc
+    if frontier_selection is not _FRONTIER_SELECTION_UNSET:
+        try:
+            expected_selection = (
+                None if frontier_selection is None else validate_selection(
+                    frontier_selection, requested_alias=provenance.get("frontier_model_alias"))
+            )
+        except FrontierSelectionError as exc:
+            raise CeoIntentConflict("immutable frontier selection conflicts") from exc
+        if expected_selection != durable_selection:
+            raise CeoIntentConflict("immutable frontier selection conflicts")
+    if (requested_frontier_alias is not _FRONTIER_SELECTION_UNSET
+            and requested_frontier_alias != provenance.get("frontier_model_alias")):
+        raise CeoIntentConflict("durable frontier selection differs from requested alias")
     provenance_schema = provenance.get("schema")
     if provenance_schema not in {
         INTENT_SCHEMA,
@@ -1257,6 +1286,7 @@ def submit_intent(
     workspace_root: "Path | str | None" = None,
     execution_binding: "dict[str, Any] | None" = None,
     dialogue_source: Any = _DIALOGUE_SOURCE_UNSET,
+    frontier_selection: Any = _FRONTIER_SELECTION_UNSET,
     require_dialogue_source: bool = False,
     principal_context: Any = None,
     principal_request_ref: str | None = None,
@@ -1358,7 +1388,9 @@ def submit_intent(
             existing,
             intent_id=intent_id,
             fingerprint=fingerprint,
+            requested_frontier_alias=intent.get("frontier_model_alias"),
             dialogue_source=dialogue_source,
+            frontier_selection=frontier_selection,
         )
     effective_dialogue_source = (
         None if dialogue_source is _DIALOGUE_SOURCE_UNSET else dialogue_source
@@ -1366,6 +1398,9 @@ def submit_intent(
     if require_dialogue_source and effective_dialogue_source is None:
         raise CeoIntentError("trusted host dialogue source is unavailable")
 
+    effective_selection = (
+        None if frontier_selection is _FRONTIER_SELECTION_UNSET else frontier_selection
+    )
     contract = intent["execution_contract"]
     try:
         if intent["schema"] == INTENT_SCHEMA_V2:
@@ -1376,8 +1411,11 @@ def submit_intent(
                 workspace_root=workspace_root,
                 execution_binding=execution_binding,
                 dialogue_source=effective_dialogue_source,
+                frontier_selection=effective_selection,
             )
         else:
+            if effective_selection is not None:
+                raise StateConflict("frontier selection requires a strict v2 intent")
             if execution_binding is not None:
                 raise StateConflict("v1 CEO intent cannot carry a host execution binding")
             if effective_dialogue_source is not None:
@@ -1447,7 +1485,9 @@ def submit_intent(
                 settled,
                 intent_id=intent_id,
                 fingerprint=fingerprint,
+                requested_frontier_alias=intent.get("frontier_model_alias"),
                 dialogue_source=dialogue_source,
+                frontier_selection=frontier_selection,
             )
         raise CeoIntentError(str(exc)) from exc
 

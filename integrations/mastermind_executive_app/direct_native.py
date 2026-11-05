@@ -28,6 +28,13 @@ class DirectNativeResultClient:
             raise ValueError("qualified dedicated Executive socket required")
         self.socket_path, self.client = path, client
 
+    async def correction(self, body, *, principal_scope, write=False):
+        from common import direct_native_correction_contract as correction
+        request=correction.validate_request(body) if write else contract.validate_request(body)
+        frame=dict(request,schema=contract.PRIVATE_SCHEMA,
+            operation='correct' if write else 'correction-inspect',principal_scope=contract.hex_digest(principal_scope))
+        return await self.client.send_frame(self.socket_path,frame)
+
     async def request(self, body, *, principal_scope, consume=False):
         arguments = contract.validate_request(body, consume=consume)
         contract.hex_digest(principal_scope)
@@ -96,3 +103,33 @@ async def dispatch_direct_native(owner, scope, body, principal, *, consume):
     except (contract.DirectResultContractError, TypeError, KeyError):
         return unavailable("EFFECT_UNKNOWN" if consume else "SOURCE_UNAVAILABLE", HTTPStatus.ACCEPTED if consume else HTTPStatus.SERVICE_UNAVAILABLE)
     return JSONResponse(value, headers=_OS_HTTP_HEADERS)
+
+
+async def dispatch_direct_correction(owner,scope,body,principal):
+    from common import direct_native_correction_contract as correction
+    from integrations.mastermind_executive_app.os_transport import OsExecutiveTransportApp,principal_scope,_OS_HTTP_HEADERS
+    if type(owner) is not OsExecutiveTransportApp:raise TypeError('actual OS owner required')
+    if type(body) is not dict or body.get('operation') not in {'inspect','request'}:
+        return JSONResponse({'error':{'code':'invalid_input'}},status_code=400,headers=_OS_HTTP_HEADERS)
+    write=body['operation']=='request'
+    try:
+        arguments={key:value for key,value in body.items() if key!='operation'}
+        arguments=correction.validate_request(arguments) if write else contract.validate_request(arguments)
+        if type(principal) is not VerifiedPrincipal or not await owner._still_current(scope,principal):
+            raise ValueError('authority unavailable')
+        if write and 'mastermind.executive.intent.submit' not in principal.scopes:raise ValueError('send scope unavailable')
+        client=owner._direct_result_client
+        if type(client) is not DirectNativeResultClient:raise ValueError('client unavailable')
+    except Exception:
+        return JSONResponse({'error':{'code':'authority_unavailable'}},status_code=403,headers=_OS_HTTP_HEADERS)
+    def unknown():
+        return JSONResponse({'error':{'code':'effect_unknown' if write else 'source_unavailable'}},status_code=202 if write else 503,headers=_OS_HTTP_HEADERS)
+    try:
+        response=await client.correction(arguments,principal_scope=principal_scope(principal),write=write)
+        if not await owner._still_current(scope,principal):return unknown()
+        if response.transport!=TRANSPORT_SENT_OK or response.ok is not True:return unknown()
+        result=correction.validate_response(response.result)
+        if any(result['selection'][key]!=arguments[key] for key in contract.SELECTION_KEYS if arguments[key] is not None):return unknown()
+        if write and (result['operation_key']!=arguments['operation_key'] or result['fence_generation']!=arguments['fence_generation']):return unknown()
+        return JSONResponse(result,headers=_OS_HTTP_HEADERS)
+    except Exception:return unknown()

@@ -34,7 +34,7 @@ def test_watcher_action_loop_is_canonical_and_action_oriented() -> None:
     for phrase in required:
         assert phrase in normalized, f"missing watcher action-loop law: {phrase}"
 
-    assert "notification-only watcher" in index
+    assert "not notification-only stalls" in index
     assert "detect -> verify mission pin -> adjudicate -> act -> report" in kernel.lower()
 
 

@@ -34,6 +34,19 @@ SECRET_PATTERNS = [
     re.compile(r'\bAKIA[A-Z0-9]{16}\b'),
     re.compile(r'\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b'),
 ]
+# The immutable original this pack extracts; the projection may cite it, never replace it.
+ORIGINAL_LEDGER_COMMIT = 'bb85b429f2ffffd38408080ce4df7d6378c34100'
+ORIGINAL_LEDGER_PATH = 'research/EXECUTIVE_ECOSYSTEM_COMPLETION_CAPABILITY_LEDGER_2026-10-17.md'
+# The three capability fields whose copied narrative clause named a host account
+# identifier. Value: (field, original ledger line).
+NORMALIZED_CAPABILITY_FIELDS = {'E6': ('baseline_evidence', 99),
+                                 'F1': ('capability', 111),
+                                 'F3': ('baseline_evidence', 113)}
+LEDGER_ROW_CITATION = 'original ledger row '
+NOT_TRANSCRIBED_MARKER = 'not transcribed here'
+# An account identifier is an underscore-prefixed token. The pattern is literal-free so
+# this validator never carries the identifier it forbids.
+ACCOUNT_IDENTIFIER = re.compile(r'(?<![\w])_[A-Za-z][A-Za-z0-9_]*')
 
 
 def validate(root: Path) -> tuple[dict, dict]:
@@ -82,7 +95,8 @@ def validate(root: Path) -> tuple[dict, dict]:
         require(bool(SHA40.fullmatch(str(r.get('source_commit', '')))),
                 f'Invalid workstream source SHA: {r.get("key")}')
 
-    caps = load('evidence/original_46_capabilities.json').get('capabilities', [])
+    caps_doc = load('evidence/original_46_capabilities.json')
+    caps = caps_doc.get('capabilities', [])
     stats['original_capabilities'] = len(caps)
     require(len(caps) == 46 and {r.get('id') for r in caps} == EXPECTED_IDS,
             'Original capability denominator differs from 46 stable IDs')
@@ -90,6 +104,43 @@ def validate(root: Path) -> tuple[dict, dict]:
     ids = re.findall(r'^\| ([EFGACH][0-9]+) \|', census, re.MULTILINE)
     require(len(ids) == 46 and set(ids) == EXPECTED_IDS,
             'Census does not cover exactly the 46 original IDs')
+
+    # Projection provenance: a dated extraction of one immutable original.
+    require(caps_doc.get('source_commit') == ORIGINAL_LEDGER_COMMIT,
+            'Capability projection does not cite the immutable original ledger commit')
+    require(caps_doc.get('source_path') == ORIGINAL_LEDGER_PATH,
+            'Capability projection does not cite the immutable original ledger path')
+    projection = caps_doc.get('projection')
+    require(isinstance(projection, dict),
+            'Capability projection declares no projection metadata')
+    projection = projection if isinstance(projection, dict) else {}
+    declared: dict[tuple, dict] = {}
+    for entry in projection.get('normalized_fields') or []:
+        if not isinstance(entry, dict):
+            errors.append('Capability projection declares a malformed normalized-field entry')
+            continue
+        key = (entry.get('id'), entry.get('field'))
+        require(key not in declared, f'Duplicate normalized capability field: {key}')
+        declared[key] = entry
+    stats['normalized_capability_fields'] = len(declared)
+    require(set(declared) == {(rid, field) for rid, (field, _) in NORMALIZED_CAPABILITY_FIELDS.items()},
+            'Normalized capability field set differs from the declared three-field projection')
+    records = {r.get('id'): r for r in caps}
+    for (rid, field), entry in declared.items():
+        value = (records.get(rid) or {}).get(field)
+        require(entry.get('original_ledger_line') == NORMALIZED_CAPABILITY_FIELDS.get(rid, (None, None))[1],
+                f'Normalized capability field {rid}.{field} cites the wrong original ledger line')
+        require(isinstance(value, str) and LEDGER_ROW_CITATION + rid in value,
+                f'Normalized capability field {rid}.{field} does not cite its original ledger row')
+        require(isinstance(value, str) and NOT_TRANSCRIBED_MARKER in value,
+                f'Normalized capability field {rid}.{field} does not state that the identifier is not transcribed here')
+        require(not (isinstance(value, str) and ACCOUNT_IDENTIFIER.search(value)),
+                f'Normalized capability field {rid}.{field} still transcribes an account identifier')
+    for record in caps:
+        for key, value in record.items():
+            if isinstance(value, str) and LEDGER_ROW_CITATION in value:
+                require((record.get('id'), key) in declared,
+                        f'Capability {record.get("id")}.{key} cites an original ledger row without a declared projection entry')
 
     tests = load('evidence/original_r2_obligations.json').get('obligations', [])
     stats['original_r2_obligations'] = len(tests)

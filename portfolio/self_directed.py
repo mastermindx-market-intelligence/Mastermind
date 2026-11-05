@@ -31,6 +31,7 @@ import json
 import logging
 import math
 import os
+import stat
 from collections import defaultdict, deque
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -52,8 +53,62 @@ _STARTING_NAV = 1_000_000.0
 # persistence helpers
 # ---------------------------------------------------------------------------
 
-def _ensure_dir() -> None:
-    _DATA.mkdir(parents=True, exist_ok=True)
+def _check_book_dir(data_dir: Path) -> tuple[str | None, OSError | None]:
+    """Classify a book's data directory WITHOUT creating it (E14 ruling b/c).
+
+    Returns (None, None) for an existing directory, else (problem, exc) with problem one of
+    ``data_dir_missing``, ``data_dir_not_directory``, ``data_dir_unreadable:<ExcName>``.
+    """
+    try:
+        st = os.stat(data_dir)
+    except FileNotFoundError as exc:
+        return "data_dir_missing", exc
+    except OSError as exc:
+        return f"data_dir_unreadable:{type(exc).__name__}", exc
+    if not stat.S_ISDIR(st.st_mode):
+        return "data_dir_not_directory", None
+    return None, None
+
+
+def _classify_account_path(account_path: Path) -> tuple[str, str | None, OSError | None]:
+    """Classify account.json by stat only (E14 ruling a/b): ("absent"|"present"|"invalid", problem, exc).
+
+    ``absent`` ONLY when the book directory exists and ``os.lstat`` raises FileNotFoundError.
+    A dangling symlink is ``invalid``/``dangling_symlink``; any other stat failure is
+    ``invalid``/``unreadable:<ExcName>``; a directory problem is ``invalid``/``data_dir_*``.
+    """
+    problem, exc = _check_book_dir(account_path.parent)
+    if problem:
+        return "invalid", problem, exc
+    try:
+        os.lstat(account_path)
+    except FileNotFoundError:
+        return "absent", None, None
+    except OSError as exc:
+        return "invalid", f"unreadable:{type(exc).__name__}", exc
+    try:
+        os.stat(account_path)
+    except FileNotFoundError as exc:
+        return "invalid", "dangling_symlink", exc
+    except OSError as exc:
+        return "invalid", f"unreadable:{type(exc).__name__}", exc
+    return "present", None, None
+
+
+def _require_book_dir(*, step: str = "require_book_dir") -> Path:
+    """Return the book's existing data dir; fail closed (typed, no write) if it is not usable."""
+    problem, exc = _check_book_dir(_DATA)
+    if problem:
+        _raise_path_invalid(_DATA, [problem], cause=exc, step=step)
+    return _DATA
+
+
+def bootstrap_book_dir() -> Path:
+    """EXPLICIT first-ever book creation (E14 ruling c): the book dir and the published-snapshot
+    dir, each one level, never parents.  Not reachable from a GET, the scheduler or a sweep."""
+    _DATA.mkdir(exist_ok=True)
+    _PUBLISHED_PATH.parent.mkdir(exist_ok=True)
+    return _DATA
 
 
 def _now_iso() -> str:
@@ -156,13 +211,21 @@ def account_file_status(*, path: str | Path | None = None) -> dict[str, Any]:
 
     NEVER writes, quarantines, alerts or raises.  ``path`` overrides the module's account path
     (resolved at call time).  Returns ``{status, path, sha256, size, problems}`` with status
-    MISSING | VALID | INVALID; problems is ``["unreadable:<ExcName>"]``, ``["unparseable"]`` or
-    the :func:`validate_account_state` codes.
+    MISSING | VALID | INVALID; problems is ``["unreadable:<ExcName>"]``, ``["unparseable"]``,
+    a path-level code (``dangling_symlink``, ``data_dir_missing``, ``data_dir_not_directory``,
+    ``data_dir_unreadable:<ExcName>``) or the :func:`validate_account_state` codes.
     """
     account_path = Path(path) if path is not None else _ACCOUNT_PATH
-    if not account_path.exists():
+    try:
+        kind, problem, _exc = _classify_account_path(account_path)
+    except Exception as exc:  # noqa: BLE001 — classification must never raise
+        kind, problem = "invalid", f"unreadable:{type(exc).__name__}"
+    if kind == "absent":
         return {"status": "MISSING", "path": str(account_path), "sha256": None,
                 "size": None, "problems": []}
+    if kind == "invalid":
+        return {"status": "INVALID", "path": str(account_path), "sha256": None,
+                "size": None, "problems": [problem]}
     try:
         raw_bytes = account_path.read_bytes()
     except Exception as exc:  # noqa: BLE001 — classification must never raise
@@ -180,7 +243,6 @@ def account_file_status(*, path: str | Path | None = None) -> dict[str, Any]:
 
 def _atomic_write_bytes(path: Path, payload: bytes) -> None:
     """Durably replace one runtime-state file without exposing a partial JSON document."""
-    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     try:
         with tmp.open("wb") as fh:
@@ -286,6 +348,78 @@ def _raise_invalid_account(path: Path, raw_bytes: Optional[bytes], problems: lis
     raise error
 
 
+def _raise_path_invalid(
+    path: Path,
+    problems: list[str],
+    *,
+    cause: Exception | None = None,
+    step: str = "load_account",
+) -> NoReturn:
+    """Fail closed on a path-level problem (dangling symlink, missing/unusable book dir).
+
+    Writes NOTHING: no quarantine copy, no ledger row, no directory.  Emits one best-effort
+    HARD_STOP run_event and one log line, then raises SelfDirectedAccountInvalid.
+    """
+    record: dict[str, Any] = {
+        "event": "account_state_invalid",
+        "book": "self_directed",
+        "path_name": path.name,
+        "source_sha256": None,
+        "size": None,
+        "problems": list(problems),
+        "quarantine_file": None,
+        "status": "path_invalid",
+        "detected_at": datetime.now(timezone.utc).isoformat(),
+        "recoverable": True,
+    }
+    try:
+        from control_plane import run_events  # lazy: keeps this module import-light
+        run_events.append({
+            "kind": "account_state_invalid",
+            "job": "self_directed",
+            "book": "self_directed",
+            "step": step,
+            "status": "error",
+            "severity": "HARD_STOP",
+            "actor": "deterministic_engine",
+            "extra": {
+                "problems": record["problems"],
+                "quarantine_file": None,
+                "quarantine_status": "path_invalid",
+                "source_sha256": None,
+                "recoverable": True,
+            },
+        })
+    except Exception as exc:  # noqa: BLE001 — event logging never re-enables an invalid book
+        record["event_log_error"] = repr(exc)[:300]
+    logging.getLogger(__name__).error(
+        "self_directed account_path_invalid path=%s problems=%s",
+        path.name, record["problems"],
+    )
+    error = SelfDirectedAccountInvalid(
+        f"self-directed account state invalid: {problems}",
+        problems=list(problems), record=record,
+    )
+    if cause is not None:
+        raise error from cause
+    raise error
+
+
+def _raise_for_path_problem(
+    account_path: Path,
+    problem: str | None,
+    exc: OSError | None,
+) -> NoReturn:
+    """Route one path-classification problem to its fail-closed raise (E14).
+
+    ``unreadable:*`` keeps the E13 quarantine path (best-effort copy + one ledger row + one
+    event); every other problem (dangling symlink, unusable book dir) writes NOTHING."""
+    problem = problem or "unreadable:Unknown"
+    if problem.startswith("unreadable:"):
+        _raise_invalid_account(account_path, None, [problem], cause=exc)
+    _raise_path_invalid(account_path, [problem], cause=exc)
+
+
 def _load_account() -> dict[str, Any]:
     """Load account state — fail-closed (E13).
 
@@ -294,13 +428,27 @@ def _load_account() -> dict[str, Any]:
     raises :class:`SelfDirectedAccountInvalid`.  It is NEVER replaced by a fresh book: the old
     any-corruption fallback handed back a fabricated $1M all-cash book and the next save
     silently overwrote the user's real paper positions with it.
+
+    E14: the classification is stat-based — a file that cannot be stat'ed (dangling symlink,
+    unreadable path) is INVALID, never absent, and a missing book data directory fails closed
+    with ``data_dir_missing`` instead of seeding a fresh book.
     """
-    if not _ACCOUNT_PATH.exists():
+    kind, problem, exc = _classify_account_path(_ACCOUNT_PATH)
+    if kind == "absent":
         return _fresh_account()
+    if kind == "invalid":
+        _raise_for_path_problem(_ACCOUNT_PATH, problem, exc)
     try:
         raw_bytes = _ACCOUNT_PATH.read_bytes()
-    except FileNotFoundError:
-        return _fresh_account()
+    except FileNotFoundError as read_exc:
+        # Re-classify: the file may have vanished between the stat and the read.
+        kind, problem, exc = _classify_account_path(_ACCOUNT_PATH)
+        if kind == "absent":
+            return _fresh_account()
+        if kind == "invalid":
+            _raise_for_path_problem(_ACCOUNT_PATH, problem, exc)
+        _raise_invalid_account(_ACCOUNT_PATH, None, ["unreadable:FileNotFoundError"],
+                               cause=read_exc)
     except Exception as exc:
         _raise_invalid_account(_ACCOUNT_PATH, None,
                                [f"unreadable:{type(exc).__name__}"], cause=exc)
@@ -321,8 +469,10 @@ def _save_account(state: dict[str, Any]) -> None:
             f"self-directed account state invalid: {state_problems}",
             problems=state_problems, record=None,
         )
-    _ensure_dir()
-    if _ACCOUNT_PATH.exists():
+    kind, problem, exc = _classify_account_path(_ACCOUNT_PATH)
+    if kind == "invalid":
+        _raise_for_path_problem(_ACCOUNT_PATH, problem, exc)
+    if kind == "present":
         # Nothing may overwrite an INVALID book (E13): saving a fresh/valid state over it would
         # silently reset the user's live paper book.  Quarantine the invalid bytes, then fail
         # closed — a human repairs the file directly.
@@ -339,7 +489,7 @@ def _save_account(state: dict[str, Any]) -> None:
 
 
 def _append_fill(fill: dict) -> None:
-    _ensure_dir()
+    _require_book_dir()
     with _FILLS_PATH.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(fill, default=str) + "\n")
 
@@ -373,7 +523,7 @@ def _load_pending() -> list[dict]:
 
 
 def _save_pending(orders: list[dict]) -> None:
-    _ensure_dir()
+    _require_book_dir()
     _PENDING_PATH.write_text(json.dumps(orders, indent=2, default=str))
 
 
@@ -388,7 +538,7 @@ def _load_theses() -> dict[str, dict]:
 
 
 def _save_theses(theses: dict[str, dict]) -> None:
-    _ensure_dir()
+    _require_book_dir()
     _THESES_PATH.write_text(json.dumps(theses, indent=2, default=str, ensure_ascii=False))
 
 
@@ -774,7 +924,8 @@ def publish(*, prices: dict[str, float] | None = None, asof: str | None = None) 
                  "mechanically constrain the books it measures."),
     }
     try:
-        _PUBLISHED_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if _check_book_dir(_PUBLISHED_PATH.parent)[0] is not None:
+            return None   # E14: never create the published dir from a scheduler path
         _PUBLISHED_PATH.write_text(json.dumps(doc, indent=2, default=str))
         return doc
     except Exception:  # noqa: BLE001
@@ -837,7 +988,7 @@ def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
            "invested": round(invested, 2),
            "spy_nav": round(spy_nav, 2) if spy_nav is not None else None}
     try:
-        _ensure_dir()
+        _require_book_dir()
         rows: list[dict] = []
         if _NAV_PATH.exists():
             for line in _NAV_PATH.read_text().splitlines():

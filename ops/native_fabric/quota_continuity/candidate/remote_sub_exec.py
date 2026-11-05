@@ -36,6 +36,29 @@ from lane_runtime import (
 )
 
 
+
+def _slot_child_timeout_env(child_env: dict[str, str], outer_timeout: float) -> dict[str, str]:
+    """Preserve a stricter slot limit while passing the original outer fuse.
+
+    Called after the existing commissioner/lease clock has narrowed the
+    outer process timeout. Slot remains the sole nested timeout monitor.
+    This is an environment contract, not a second clock or lease.
+    """
+    deadline = parse_bounded_seconds(
+        outer_timeout, default=7200.0, minimum=1.0, maximum=14400.0,
+        key="SLOT_CHILD_TIMEOUT_SECONDS",
+    )
+    for key in ("SLOT_CHILD_TIMEOUT_SECONDS", "POOL_CHILD_TIMEOUT_SECONDS"):
+        raw = child_env.get(key)
+        if raw is not None and str(raw).strip():
+            deadline = min(deadline, parse_bounded_seconds(
+                raw, default=7200.0, minimum=1.0, maximum=14400.0,
+                key=key,
+            ))
+    result = dict(child_env)
+    result["SLOT_CHILD_TIMEOUT_SECONDS"] = str(deadline)
+    return result
+
 def _fail(message: str, code: int) -> int:
     print(message, file=sys.stderr, flush=True)
     return code
@@ -697,7 +720,7 @@ def _bound_lane_packet(key, mode, packet_path, cwd, here, env):
     return layout, packet
 
 
-def _canonical_model_command(here, packet_path, key, mode, model, env):
+def _canonical_model_command(here, packet_path, key, mode, model, env, *, context=None, timeout=1):
     """Closed trusted program selection; an environment flag grants nothing.
 
     The actual model client and controller gateway verify the signed capsule
@@ -717,26 +740,33 @@ def _canonical_model_command(here, packet_path, key, mode, model, env):
     if (not lanes.is_absolute() or capsule != lanes / 'tmp' / (key + '.glm-cap.json')
             or packet_path != lanes / 'tmp' / (key + '.txt')):
         raise ValueError('CANONICAL_PAID_INPUT_REFUSED')
-    client = here / 'paid_glm_model_client.py'
-    if not client.is_file() or client.is_symlink():
-        raise ValueError('CANONICAL_PAID_CLIENT_REFUSED')
-    return [sys.executable, '-I', '-S', '-B', str(client), str(packet_path), str(capsule), model]
+    from paid_provider_entry import require_executor_context,model_command
+    import secrets
+    context=require_executor_context(context)
+    request=context.request(key,model,packet_path,env,timeout,secrets.token_hex(32))
+    return model_command(here,request,context._owner.expected),request
 
 
-def _execute(argv: list[str], state: dict) -> int:
+def _execute(argv: list[str], state: dict, *, _canonical_context=None) -> int:
     if len(argv) != 6:
         return _fail(
             "usage: remote_sub_exec.py <key> <mode> <packet> <cwd> <model>", 2
         )
     _, key, mode, packet, cwd, model = argv
+    if os.environ.get('FABRIC_CANONICAL_PAID_MODE') is not None:
+        try:
+            from paid_provider_entry import require_executor_context
+            require_executor_context(_canonical_context)
+        except (ImportError,ValueError,OSError):
+            return _fail('CANONICAL_PAID_CONTEXT_REFUSED before_admission=1',78)
     # The controller sends a duration immediately before this transport's
     # launch, never its monotonic clock. Anchor in this host's own clock at
     # executor entry so admission/preparation cannot refresh the worker fuse.
     commission_budget = os.environ.get('REMOTE_SUB_COMMISSION_BUDGET_SECONDS')
     if commission_budget is not None:
         if (mode not in {'glm', 'glm-codex', 'minimax', 'minimax-codex', 'qwen'}
-                or not re.fullmatch(r'[1-9][0-9]{0,3}', commission_budget)
-                or int(commission_budget) > 7200):
+                or not re.fullmatch(r'[1-9][0-9]{0,4}', commission_budget)
+                or int(commission_budget) > 14400):
             return _fail('REMOTE_SUB_COMMISSION_BUDGET_INVALID', 78)
         state['commission_deadline_ns'] = narrow_deadline_ns(
             None, int(commission_budget), now_ns=state['entered_monotonic_ns'])
@@ -785,7 +815,7 @@ def _execute(argv: list[str], state: dict) -> int:
             os.environ.get("REMOTE_SUB_CHILD_TIMEOUT"),
             default=7000.0,
             minimum=0.05,
-            maximum=7200.0,
+            maximum=14400.0,
             key="REMOTE_SUB_CHILD_TIMEOUT",
         )
     except LaneRuntimeConfigError as exc:
@@ -839,8 +869,11 @@ def _execute(argv: list[str], state: dict) -> int:
     if mode in native_remote.MODES:
         command = native_remote.command(mode, model, prompt, cwd, packet_path=packet_path.resolve())
     canonical_command = None
+    canonical_request = None
     try:
-        canonical_command = _canonical_model_command(here, packet_path, key, mode, model, os.environ)
+        canonical = _canonical_model_command(here, packet_path, key, mode, model, os.environ,
+                                              context=_canonical_context,timeout=timeout)
+        if canonical is not None:canonical_command,canonical_request=canonical
     except (ValueError, OSError):
         lease.release()
         return _fail('CANONICAL_PAID_PREFLIGHT_REFUSED before_worker=1', 78)
@@ -873,7 +906,8 @@ def _execute(argv: list[str], state: dict) -> int:
             return _fail("native_remote_lease_expired", 78)
     if canonical_command is not None:
         child_env = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8',
-                     'PYTHONDONTWRITEBYTECODE': '1'}
+                     'PYTHONDONTWRITEBYTECODE': '1',
+                     'HOME':canonical_request['initializer_commitment']['account']['home']}
     receipt = lanes_dir / f"{key}.process.jsonl"
     diagnostic_reader = None
     if child_env.get('FABRIC_OPERATOR_CAPABILITY'):
@@ -955,6 +989,15 @@ def _execute(argv: list[str], state: dict) -> int:
                         timeout = min(timeout, require_remaining(state['commission_deadline_ns'], minimum_seconds=0.05))
                     except CommissionDeadlineExpired:
                         return _fail('REMOTE_SUB_COMMISSION_TIME_EXHAUSTED before_worker=1 stage=launch', 75)
+                # The provider child may enter slot.py under sub.sh. Pass the
+                # *narrowed* existing owner timeout, never the nominal 4h
+                # complexity profile. Without this slot silently defaults to
+                # 7200s and kills a qualified 4h child prematurely.
+                if canonical_command is None and mode in ("glm", "minimax", "qwen"):
+                    try:
+                        child_env = _slot_child_timeout_env(child_env, timeout)
+                    except LaneRuntimeConfigError:
+                        return _fail("REMOTE_SUB_SLOT_TIMEOUT_REFUSED before_worker=1", 78)
                 state["started"] = True
                 result = run_owned_process(
                     command,
@@ -968,7 +1011,8 @@ def _execute(argv: list[str], state: dict) -> int:
                     receipt_diagnostics=diagnostic_reader,
                     launch_observer=(None if canonical_command is None else
                         __import__('paid_model_owner').launch_observer(
-                            here, packet_path, key, model, receipt)),
+                            here, packet_path, key, model, receipt,
+                            entry_request=canonical_request)),
                 )
             except OwnedProcessStartError as exc:
                 state["started"] = False
@@ -1085,14 +1129,15 @@ def _execute(argv: list[str], state: dict) -> int:
     return int(result.returncode)
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str], *, _canonical_context=None) -> int:
     state = {"started": False, "entered_monotonic_ns": time.monotonic_ns()}
     if len(argv) == 6 and argv[2] in native_remote.MODES:
         state["timing"] = {"remote_exec_entered_at": time.time()}
     is_go = len(argv) == 6 and argv[2] == "go-codex"
     rc = 78
     try:
-        rc = _execute(argv, state)
+        rc = (_execute(argv,state) if _canonical_context is None else
+              _execute(argv,state,_canonical_context=_canonical_context))
         return rc
     except BaseException as exc:
         if isinstance(exc, SystemExit) and isinstance(exc.code, int):

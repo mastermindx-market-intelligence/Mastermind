@@ -98,6 +98,7 @@ The exact next product action is to choose one real consumer journey from the ex
 - All 30 original R2 test names in the acceptance crosswalk.
 - Exact-head check metadata and candidate inventory status.
 - Local Markdown links, required files and selected unsafe publication patterns.
+- The immutable original ledger the capability projection cites, and its three declared field-level normalizations (E6 `baseline_evidence` original ledger row line 99, F1 `capability` line 111, F3 `baseline_evidence` line 113) whose clauses now name the role and cite the original row instead of repeating a host account identifier, so the projection is not a byte-exact transcription of those three fields and is still not a ledger.
 
 Its result is recorded in `evidence/validation_receipt.json` with a content manifest. It is a static artifact-quality test, **not** a model/harness benchmark, live-system test, independent review, security certification or authorization. External URLs were researched selectively; the validator does not assert that every external link remains reachable forever.
 

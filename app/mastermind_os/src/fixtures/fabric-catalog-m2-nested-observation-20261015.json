@@ -1,0 +1,103 @@
+{
+  "schema": "mastermind.attended_fabric_catalog.v1",
+  "availability": "PARTIAL",
+  "observed_at": "2026-10-15T05:08:49.039Z",
+  "source": {
+    "owner": "ATTENDED_FABRIC",
+    "observation_kind": "CONTROLLER_STATUS_SNAPSHOT",
+    "revision": null,
+    "scope": "EXACT_RUN_SET",
+    "atomic": false,
+    "time_basis": "LOCAL_READ"
+  },
+  "coverage": {
+    "returned_count": 4,
+    "candidate_count": null,
+    "omitted_count": null,
+    "scan_complete": false,
+    "status_complete": true
+  },
+  "items": [
+    {
+      "run_id": "fabric-grok-operator-return-01a11e90-v1",
+      "controller_modified_at": null,
+      "status": {
+        "schema": "mastermind.fabric_task_status.v1",
+        "run_id": "fabric-grok-operator-return-01a11e90-v1",
+        "root_id": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+        "parent_run_id": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+        "state": "TERMINAL",
+        "rc": 0,
+        "signal": "ok",
+        "result_available": true,
+        "result_bytes": 4651,
+        "accepted": true,
+        "accepted_by": "reviewer",
+        "acceptance_state": "ACCEPTED",
+        "acceptance_reason": "VALIDATED_OUTCOME"
+      },
+      "reason_code": null
+    },
+    {
+      "run_id": "fabric-grok-operator-onboarding-leaf-01a11e90-v1",
+      "controller_modified_at": null,
+      "status": {
+        "schema": "mastermind.fabric_task_status.v1",
+        "run_id": "fabric-grok-operator-onboarding-leaf-01a11e90-v1",
+        "root_id": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+        "parent_run_id": "fabric-grok-operator-return-01a11e90-v1",
+        "state": "TERMINAL",
+        "rc": 0,
+        "signal": "ok",
+        "result_available": true,
+        "result_bytes": 1684,
+        "accepted": true,
+        "accepted_by": "reviewer",
+        "acceptance_state": "ACCEPTED",
+        "acceptance_reason": "VALIDATED_OUTCOME"
+      },
+      "reason_code": null
+    },
+    {
+      "run_id": "iw2-o3-screen-contract-20261013-01a13701",
+      "controller_modified_at": null,
+      "status": {
+        "schema": "mastermind.fabric_task_status.v1",
+        "run_id": "iw2-o3-screen-contract-20261013-01a13701",
+        "root_id": "01a104c8-6e11-7e52-93c1-6b8dbc45bb9c",
+        "parent_run_id": "01a13701-c4f4-7b22-b891-5dc3469aa246",
+        "state": "TERMINAL",
+        "rc": 0,
+        "signal": "ok",
+        "result_available": true,
+        "result_bytes": 16489,
+        "accepted": true,
+        "accepted_by": "reviewer",
+        "acceptance_state": "ACCEPTED",
+        "acceptance_reason": "VALIDATED_OUTCOME"
+      },
+      "reason_code": null
+    },
+    {
+      "run_id": "o3iw2-unverified-audit-01",
+      "controller_modified_at": null,
+      "status": {
+        "schema": "mastermind.fabric_task_status.v1",
+        "run_id": "o3iw2-unverified-audit-01",
+        "root_id": "01a104c8-6e11-7e52-93c1-6b8dbc45bb9c",
+        "parent_run_id": "iw2-o3-screen-contract-20261013-01a13701",
+        "state": "TERMINAL",
+        "rc": 0,
+        "signal": "ok",
+        "result_available": true,
+        "result_bytes": 4820,
+        "accepted": true,
+        "accepted_by": "reviewer",
+        "acceptance_state": "ACCEPTED",
+        "acceptance_reason": "VALIDATED_OUTCOME"
+      },
+      "reason_code": null
+    }
+  ],
+  "reason_codes": []
+}

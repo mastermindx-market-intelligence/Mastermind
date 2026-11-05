@@ -1,7 +1,7 @@
 import type { LaunchBindingConfig } from "./orchestration/executive-launch-command-port";
 
 declare global { interface ImportMetaEnv { readonly VITE_MM_LAUNCH_CONFIG?: string; } }
-const rootKeys = new Set(["v", "workstream", "priority", "projects", "profiles", "attemptLimit", "allowedWritePaths", "validation"]);
+const rootKeys = new Set(["v", "workstream", "priority", "projects", "profiles", "attemptLimit", "allowedWritePaths", "validation", "frontierModels"]);
 const validationKeys = new Set(["pytest_targets", "compileall_paths", "git_diff_check"]);
 const object = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 const string = (x: unknown, max = 256): x is string => typeof x === "string" && x.length > 0 && x.length <= max && !/[\u0000-\u001f\u007f]/.test(x);
@@ -17,6 +17,13 @@ function choices(x: unknown, profile: boolean): x is Array<{ ref: string; label:
       (profile ? ["research_only", "bounded_code_change", "native_research_only"].includes(c.ref) : /^[a-z][a-z0-9._-]{1,63}$/.test(c.ref))) &&
     new Set(x.map((c) => c.ref)).size === x.length;
 }
+function frontierChoices(x: unknown): boolean {
+  return Array.isArray(x) && x.length > 0 && x.length <= 16 &&
+    x.every((c) => object(c) && Object.keys(c).every((key) => ["ref", "label", "unavailableReason"].includes(key)) &&
+      string(c.label, 120) && string(c.ref, 64) && /^[a-z0-9][a-z0-9._-]{0,63}$/.test(c.ref) &&
+      (c.unavailableReason === undefined || string(c.unavailableReason, 256))) &&
+    new Set(x.map((c) => c.ref)).size === x.length;
+}
 /** Public operator build manifest, never selected from URL, UI, or a tool reply. */
 export function decodeLaunchBindingConfig(raw: unknown): LaunchBindingConfig | null {
   if (typeof raw !== "string" || raw.length > 16_384) return null;
@@ -26,6 +33,7 @@ export function decodeLaunchBindingConfig(raw: unknown): LaunchBindingConfig | n
       !string(parsed.workstream, 72) || !/^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$/.test(parsed.workstream) ||
       !Number.isInteger(parsed.priority) || Number(parsed.priority) < -100 || Number(parsed.priority) > 100 ||
       !choices(parsed.projects, false) || !choices(parsed.profiles, true)) return null;
+  if (parsed.frontierModels !== undefined && !frontierChoices(parsed.frontierModels)) return null;
   if (parsed.attemptLimit !== undefined && ![1, 2, 3].includes(Number(parsed.attemptLimit))) return null;
   if (parsed.attemptLimit !== undefined && typeof parsed.attemptLimit !== "number") return null;
   if (parsed.allowedWritePaths !== undefined && !paths(parsed.allowedWritePaths)) return null;
