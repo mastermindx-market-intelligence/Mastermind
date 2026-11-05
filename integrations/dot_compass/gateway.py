@@ -93,7 +93,7 @@ def _check_data(value: Any, *, depth: int = 0) -> Any:
         if len(value) > 96: raise DotRefusal("output_too_large")
         out = {}
         for k,v in value.items():
-            if type(k) is not str or len(k)>128 or k.lower() in _FORBIDDEN_KEYS or any(p.search(k) for p in _SECRET_PATTERNS):
+            if type(k) is not str or len(k)>128 or k.lower() in _FORBIDDEN_KEYS or _HOST_PATHS.search(k) or any(p.search(k) for p in _SECRET_PATTERNS):
                 raise DotRefusal("unsafe_owner_evidence")
             out[k] = _check_data(v, depth=depth+1)
         return out
@@ -169,7 +169,7 @@ class DotReadGateway:
             raise
         except Exception as exc:
             raise DotRefusal("authority_refused") from exc
-        if type(grant) is not PrincipalBinding or not grant.authorized or scope not in grant.scopes:
+        if type(grant) is not PrincipalBinding or grant.authorized is not True or scope not in grant.scopes:
             raise DotRefusal("authority_refused")
         for ident in (grant.subject_ref, grant.client_ref, grant.resource_ref, grant.policy_generation):
             if type(ident) is not str or REF_PATTERN.fullmatch(ident) is None:

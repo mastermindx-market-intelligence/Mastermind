@@ -65,6 +65,97 @@ class DotTest(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(res['ok'])
             self.assertEqual(res['error']['code'], 'unsafe_owner_evidence')
 
+    async def test_host_path_keys_top_level_and_nested_refused(self):
+        keys = (
+            '/private/var/db/company',
+            '/Users/Operator/private',
+            'diagnostic at /Volumes/Mastermind/private',
+            r'C:\Users\Operator\secret.txt',
+            r'captured at C:\Windows\System32\config',
+            r'(C:\Program Files\Private)',
+        )
+        for key in keys:
+            for shape in ('top', 'nested', 'list'):
+                with self.subTest(key=key, shape=shape):
+                    entry = {key: 'bounded observation'}
+                    data = (entry if shape == 'top' else
+                            {'nested': entry} if shape == 'nested' else
+                            {'items': [entry]})
+                    result = await self.make(port=lambda _, value=data: company(value)).call(
+                        'dot_company_snapshot', {}, principal=object())
+                    self.assertFalse(result['ok'])
+                    self.assertIsNone(result['data'])
+                    self.assertEqual(result['error']['code'], 'unsafe_owner_evidence')
+                    self.assertNotIn(key, json.dumps(result))
+
+    async def test_safe_public_path_keys_remain_available(self):
+        data = {'/docs/guide': 'public', 'nested': {'/docs/api': 2},
+                'items': [{'issuer': 'SK-Hynix', 'available': True}]}
+        result = await self.make(port=lambda _: company(data)).call(
+            'dot_company_snapshot', {}, principal=object())
+        self.assertTrue(result['ok'], result['error'])
+        self.assertEqual(result['data']['data'], data)
+
+    async def test_malformed_pre_read_authorization_never_calls_owner(self):
+        malformed = ('false', 'true', 1, 1.0, [True], {'authorized': True},
+                     None, False, 0, 0.0, '')
+        for value in malformed:
+            with self.subTest(value=value, type=type(value).__name__):
+                owner_calls = []
+                auth_calls = []
+                async def authorize(principal, scope):
+                    auth_calls.append(scope)
+                    return dataclasses.replace(grant(scope), authorized=value)
+                def owner(args):
+                    owner_calls.append(args)
+                    return company()
+                result = await self.make(port=owner, auth=authorize).call(
+                    'dot_company_snapshot', {}, principal=object())
+                self.assertFalse(result['ok'])
+                self.assertIsNone(result['data'])
+                self.assertEqual(result['error']['code'], 'authority_refused')
+                self.assertEqual(owner_calls, [])
+                self.assertEqual(auth_calls, ['mastermind.executive.read'])
+
+    async def test_malformed_post_read_authorization_withholds_owner_data(self):
+        malformed = ('false', 'true', 1, 1.0, [True], {'authorized': True},
+                     None, False, 0, 0.0, '')
+        for value in malformed:
+            with self.subTest(value=value, type=type(value).__name__):
+                owner_calls = []
+                auth_calls = []
+                async def authorize(principal, scope):
+                    auth_calls.append(scope)
+                    return dataclasses.replace(
+                        grant(scope), authorized=True if len(auth_calls) == 1 else value)
+                def owner(args):
+                    owner_calls.append(args)
+                    return company({'observation': 'withhold-this-owner-value'})
+                result = await self.make(port=owner, auth=authorize).call(
+                    'dot_company_snapshot', {}, principal=object())
+                self.assertFalse(result['ok'])
+                self.assertIsNone(result['data'])
+                self.assertEqual(result['error']['code'], 'authority_refused')
+                self.assertEqual(owner_calls, [{}])
+                self.assertEqual(auth_calls, ['mastermind.executive.read'] * 2)
+                self.assertNotIn('withhold-this-owner-value', json.dumps(result))
+
+    async def test_boolean_true_authorization_reads_once_and_rechecks(self):
+        owner_calls = []
+        auth_calls = []
+        async def authorize(principal, scope):
+            auth_calls.append(scope)
+            return grant(scope)
+        def owner(args):
+            owner_calls.append(args)
+            return company({'observation': 'safe'})
+        result = await self.make(port=owner, auth=authorize).call(
+            'dot_company_snapshot', {}, principal=object())
+        self.assertTrue(result['ok'], result['error'])
+        self.assertEqual(result['data']['data'], {'observation': 'safe'})
+        self.assertEqual(owner_calls, [{}])
+        self.assertEqual(auth_calls, ['mastermind.executive.read'] * 2)
+
     async def test_market_company_name_is_not_mistaken_for_api_secret(self):
         g = DotReadGateway(
             profile='market',
