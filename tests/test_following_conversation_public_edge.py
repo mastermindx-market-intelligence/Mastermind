@@ -14,7 +14,7 @@ def test_fixed_consumer_routes_reach_renderer_without_widening_incumbent_caps():
     assert set(edge.PROJECT_CONVERSATION_READ_POST_ROUTES) == set(ROUTES) | {'/os/executive/session/history-context'}
     assert '/os/executive/session/history-context' in _OS_SESSION_EXECUTIVE_ROUTES
     assert edge.POST_ROUTES == edge.PRE_CONVERSATION_READ_POST_ROUTES + edge.PROJECT_CONVERSATION_READ_POST_ROUTES + edge.FRESH_CONVERSATION_POST_ROUTES
-    assert edge.GET_ROUTES == edge.PRE_CONVERSATION_READ_GET_ROUTES + ('/workspace/resources/host-observation/current', '/workspace/mission-result/current')
+    assert edge.GET_ROUTES == edge.PRE_CONVERSATION_READ_GET_ROUTES + ('/workspace/resources/host-observation/current', '/workspace/mission-result/current', '/workspace/native-draft-identity/current')
     text = edge.render(manifest(), 49152)
     assert 'path ' + ' '.join(edge.POST_ROUTES) + '\n' in text
     assert 'path ' + ' '.join(edge.GET_ROUTES) + ' ' in text
@@ -28,6 +28,7 @@ def test_fixed_consumer_routes_reach_renderer_without_widening_incumbent_caps():
     (edge.PRE_CONVERSATION_READ_GET_ROUTES, edge.PRE_CONVERSATION_READ_POST_ROUTES),
     (edge.MISSION_RESULT_GET_ROUTES, edge.PRE_MISSION_RESULT_POST_ROUTES),
     (edge.PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES, edge.PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES),
+    (edge.PRE_NATIVE_DRAFT_GET_ROUTES, edge.PRE_NATIVE_DRAFT_POST_ROUTES),
     (edge.GET_ROUTES, edge.POST_ROUTES),
 ])
 def test_whole_predecessor_and_current_profiles_transition_without_mutating_input(fixed, posts):
@@ -69,5 +70,8 @@ def test_mission_result_firstcut_and_following_profiles_are_exact():
     assert edge.MISSION_RESULT_GET_ROUTES == edge.PRE_MISSION_RESULT_GET_ROUTES + ('/workspace/mission-result/current',)
     assert (edge.MISSION_RESULT_GET_ROUTES, edge.PRE_MISSION_RESULT_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
     assert (edge.PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES, edge.PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
-    assert edge.GET_ROUTES == edge.PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES + ('/workspace/mission-result/current',)
+    assert (edge.PRE_NATIVE_DRAFT_GET_ROUTES, edge.PRE_NATIVE_DRAFT_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
+    assert edge.PRE_NATIVE_DRAFT_GET_ROUTES == edge.PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES + ('/workspace/mission-result/current',)
+    assert edge.PRE_NATIVE_DRAFT_POST_ROUTES == edge.PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES
+    assert edge.GET_ROUTES == edge.PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES + ('/workspace/mission-result/current', '/workspace/native-draft-identity/current')
     assert edge.POST_ROUTES == edge.PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES
