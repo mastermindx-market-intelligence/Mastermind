@@ -29,9 +29,11 @@ short_socket_root=auth.short_socket_root
 # Execute the current composed controller (source recovery def1/7ab included).
 # Its accepted instruction_pause addition changes only the two closed kind lists;
 # the actual original Launch submit/GET recovery below must remain unchanged.
+# mission.ts includes the accepted optional CCR observation key; no Launch
+# action or permission is derived from that ignored observation metadata.
 EXTRA_PINS={
  'orchestration/operation-controller.ts':'5c49a7d571f700bb231784fbbbe8ba9af83f313756b299ac43f891094f23dd03',
- 'mission.ts':'20bf1a35c5be760c8418930972ad9adaab23bbde36a3e8b88a2caa72b42b67bb',
+ 'mission.ts':'e6beede84b865f7d317c7120211a6ccccf296f88433bdf04614edbc4ee74d7be',
  'workspace-contract.ts':'14992cfc81dbc577cf50ba7198285b21652bb25eb5cc6c0efc53954e33ef11b1',
 }
 
