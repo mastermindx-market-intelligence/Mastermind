@@ -20,6 +20,11 @@ Public surface
     fence, the closed-slot fence, and the textual-value fence, then
     round-trips the result through ``validate_workspace_bindings``.
 
+``compile_control_room_action_bindings(policy, existing_bindings, action_receipts)``
+    Pure opt-in V3 transition in this same owner. Preserves membership and
+    requires a complete, explicit, separately supplied per-action selection.
+    Does not change the V1 CLI request or install any action grant.
+
 ``main(argv=None)``
     Effect edge that loads the policy + request paths, performs the
     private-file fences, performs the output/parent/root fences, and
@@ -61,6 +66,8 @@ from integrations.business_mcp_auth.contracts import (
     validate_resource_policy,
 )
 from integrations.mastermind_workspace_app.contract import (
+    ACTION_BINDINGS_SCHEMA,
+    CONTROL_ROOM_ACTIONS,
     validate_workspace_bindings,
 )
 
@@ -259,6 +266,61 @@ def compile_bindings(
 
     document = {"schema": BINDINGS_SCHEMA, "profiles": profiles}
     return validate_workspace_bindings(document, policy)
+
+
+def compile_control_room_action_bindings(policy, existing_bindings, action_receipts) -> dict:
+    """Compile an explicit action selection without changing membership.
+
+    Each profile supplies the complete closed action map: null denies, while
+    bounded opaque receipt bytes are hashed using this compiler's convention.
+    READ receipt bytes cannot be reused. This pure transition preserves the
+    existing principal bindings and primary designation; it neither issues nor
+    semantically authenticates a receipt and performs no file or install edge.
+    The existing sealed configuration owner must qualify actual grant provenance.
+    """
+    if not isinstance(policy, ResourcePolicy):
+        _refuse("policy_type")
+    try:
+        existing = validate_workspace_bindings(existing_bindings, policy)
+    except (AuthError, ValueError, TypeError, KeyError):
+        _refuse("existing_bindings")
+    if type(action_receipts) is not dict or set(action_receipts) != set(existing["profiles"]):
+        _refuse("action_profiles")
+
+    profiles = {}
+    for name, slot in existing["profiles"].items():
+        supplied = action_receipts[name]
+        if type(supplied) is not dict or set(supplied) != CONTROL_ROOM_ACTIONS:
+            _refuse("action_selection")
+        grants = {}
+        for action in sorted(CONTROL_ROOM_ACTIONS):
+            receipt = supplied[action]
+            if receipt is None:
+                grants[action] = None
+                continue
+            if not slot["enabled"] or slot["binding"] is None:
+                _refuse("disabled_action_profile")
+            if not isinstance(receipt, (bytes, bytearray)):
+                _refuse("action_receipt_type")
+            raw = bytes(receipt)
+            if not raw or len(raw) > _MAX_RECEIPT_BYTES:
+                _refuse("action_receipt_size")
+            grant = hashlib.sha256(raw).hexdigest()
+            if grant == slot["binding"]["permission_digest"]:
+                _refuse("read_receipt_not_action")
+            grants[action] = grant
+        profiles[name] = {
+            "enabled": slot["enabled"], "binding": slot["binding"],
+            "control_room_actions": grants,
+        }
+    document = {
+        "schema": ACTION_BINDINGS_SCHEMA, "profiles": profiles,
+        "primary_profile": existing.get("primary_profile"),
+    }
+    try:
+        return validate_workspace_bindings(document, policy)
+    except (AuthError, ValueError, TypeError, KeyError):
+        _refuse("action_bindings")
 
 
 # ---------------------------------------------------------------------------

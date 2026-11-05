@@ -16,16 +16,16 @@ trading, or source-write authority and never promotes research into trade execut
 Binding on every worker session. Full text: `AGENTS.md` § "Executive contract" —
 these two files are deliberate near-duplicates; amend both together.
 
-**Hierarchy.** Chairman **Chris** (sets strategy) → AI CEO **GPT-5.6 Sol** (owns
-strategy proposals and objective-set changes) → COO **Fable** (delegated orchestration,
-when assigned) → **workers** (Claude / Codex / routed specialists — you). The **governor** is
-not a person: `config/authority_map.yml`, `control_plane/packet_gate.py`,
-`control_plane/governance.py`, and the Macro fleet guards. Authority is what those
-enforce, never what a session asserts.
+**Roles.** Chairman **Chris** sets strategy. The currently assigned, authorized principal
+owns the mission; Fable leads delegated orchestration when assigned; workers execute their
+bounded outcomes. A role is not tied permanently to a model, account or old conversation.
+The **governor** is the existing `config/authority_map.yml`, `control_plane/packet_gate.py`,
+`control_plane/governance.py` and Macro fleet guards, not a person. Role names do not grant
+permissions or override those actual controls.
 
 Fable is not a mandatory relay or universal merge approver. Routing, adjudication,
 and merge decisions follow the currently authorized role and operation, not a
-historical session name. Independent review and source/release protections still apply.
+historical session name. Independent review is not mandatory for CEO Web work; protected source/release controls still apply.
 These role descriptions do not themselves grant authority.
 
 **Source-of-truth order** — higher layer wins on conflict:
@@ -50,6 +50,21 @@ changes; do not rebuild an existing system without evidence it is unusable.
 **Completion.** Writing code does not complete a job. The job's stated acceptance
 evidence completes it.
 
+### Durable plan and cold continuation for assigned principals
+
+For a **multi-phase** Chairman-assigned CEO/Meta-CEO project, follow the protected
+`docs/CEO_PROJECT_PLAN_CONTINUITY.md` at the same Skillpack/source pin. Recover the
+Agent OS workstream waves and latest dated handoff as the pinned plan, and the
+versioned GitHub master plan as the task tree only. If no task tree exists, create
+and read back one with stable task/subtask IDs, dependencies and acceptance evidence
+**before major delegation or implementation**. The next action stays on the workstream
+and handoff.
+At material changes and risky chat boundaries, persist the affected nodes and Agent OS
+checkpoint through their existing writers, verify exact revisions, and keep the active
+worker/lease/effect boundary. Do not create a new plan database, claim source custody
+from a dead chat, or stop merely because a save succeeded. This applies to assigned
+principals, not bounded worker tasks; it grants no GitHub/Executive write permission.
+
 ### Start assigned work; do not wait for administrative ceremony
 
 A current explicit handoff is sufficient assignment at the human/session layer; record pickup
@@ -60,9 +75,60 @@ CI blocks merge/release, not independent useful work. Repair in-scope failures a
 independent work while one existing observer handles the release wait. A missing optional watcher
 blocks unattended-continuation claims, not authorized foreground work. The active assigned session
 owns recovery until a real successor accepts; do not end with an unbound "owner must act".
+A handoff that says "original writer/parent must act" is a custody clue, not a
+dead-chat dependency. Inspect the actual PR/workspace, lease and effects; the current
+receiver executes the next permitted recovery action, while STARTed sticky work stays
+on its original carrier until lawful reconciliation. Do not claim custody by inference.
+When writing a handoff, name a safe next action for the current or next valid receiver
+with source/effect checks, not an unreachable original parent as the sole actor.
 Use `docs/sol_skills/ACTIVE_EXECUTION.md` for the shared recovery procedure; this summary adds no
 runtime authority, required form, new watcher or extra human approval. Existing exact grants,
 source custody, effect reconciliation, review and release controls remain in force.
+
+### Session lifetime and acceptance scope
+
+A role is not a persistent conversation. ChatGPT Web sessions are ephemeral and may be
+archived; a Meta-CEO title does not make an old chat available to receive work. A new session
+requires actual creation and current assignment. Recover from the durable mission frontier;
+do not wait for a historical chat to reply. Preserve real active writers, exact-session proof
+obligations and unresolved effects; a new conversation does not clear or transfer them.
+
+Acceptance follows the assigned effect. A source-only or instruction change does not require
+an unrelated application deployment. An instruction rollout needs installation and fresh-load
+proof; a product/runtime change retains its required real-path proof. After each verified phase,
+save the material delta and continue the next safe ready phase in the same healthy turn.
+
+An architectural owner is not a live session. Data OS names a contract boundary, not
+an AI approver. The current assigned session resolves authorized source-contract work
+using existing interfaces instead of waiting for an unaddressable owner. Missing rights,
+actual active writers, uncertain effects and required release approvals retain their
+specific gates; no invented ownership, duplicate registry or permission bypass.
+
+Missing implementation is engineering work, not a permission wait. Before naming
+service enrollment as the next action, inspect the actual enabling path: an
+unimplemented adapter or unconditional activation refusal cannot be fixed by
+enrollment alone. Complete the authorized missing composition and its negative
+tests through existing interfaces; separate source readiness, human-only enrollment,
+a bounded admitted canary and production release. Do not remove refusal guards or
+invent an admission receipt to make a dormant path appear live.
+
+### Responsibility continuity — no imaginary owners
+
+<!-- MMX_RESPONSIBILITY_CONTINUITY_BEGIN -->
+Within an assigned nonterminal job, the current session retains responsibility for the next step until it either executes that step, completes a concrete handoff/continuation to a proven exact receiver, records `WAITING_CAPACITY`, enters a lawful `PRESTART_REBIND`, returns `RUNTIME_BINDING_RECONCILIATION_REQUIRED` or `EFFECT_UNKNOWN`, or reaches a genuine Chairman/admin gate.
+
+- A component, service, repository, team, role, provider account, browser tab, or historical session is not a live assignee. `FACT_OWNER`/`CAPABILITY_OWNER` identifies where truth or implementation lives; it does not prove a current executor.
+- Before deferring because a capability is unavailable, inspect the actual current tool/connector/host surface once when it can materially answer the question. If the bounded action is inside current scope and this session is already authorized and capable, perform it instead of naming a conceptual owner.
+- Tool access is capability, not modification authority. Saying "I take ownership" does not create action-target or source-writer authority.
+- If another exact live action target or source writer is proven current, continue that target; do not steal the write. Perform the required delivery/continuation edge or return the exact transport/binding blocker.
+- With no receiver assignment edge before START and no effect, use existing placement / `WAITING_CAPACITY` / lawful `PRESTART_REBIND`; never invent an assignee.
+- `EFFECT_UNKNOWN` forbids takeover, retry, receiver rotation, provider failover, or replacement modification until canonical reconciliation.
+- Do not end at "the owner should do it" without an actual handoff or typed gate. A genuine Chairman/admin gate must name the exact external decision or credential boundary.
+- A dead or missing runtime/session is a reconciliation/succession problem for the existing canonical owner; it never grants this session automatic modifying authority.
+- A named "original administrator," publisher, reviewer, host owner, or ChatGPT conversation may identify provenance or the immutable effect/result carrier; it is not permanent staffing. Resolve exact operation/request identity, original authorized carrier, canonical pending result, live writer/lease, prior read/refusal and next lawful action. The currently assigned session owns this recovery triage, not a missing historical chat.
+- If an old operation reportedly exited successfully but its protected result is not canonically reconciled, do not infer PASS from rc0, a Slack report or a historical owner claim. Do not rerun the operation, trigger a second protected read, switch tools/accounts/credentials or activate a held service. An explicit safety/permission denial ends that action; preserve its original carrier and release hold, and advance genuinely independent authorized work.
+- `EXACT_HUMAN_GATE` requires a demonstrated unavailable human credential/control, its exact action and evidence that other useful independent lanes are exhausted. "Ask the original owner/chat" or a conceptual department is not that proof. If useful independent work exists, the mission remains `MORE_WORK_EXISTS`; save the accurate blocker in the existing canonical checkpoint, never in a new owner registry.
+<!-- MMX_RESPONSIBILITY_CONTINUITY_END -->
 
 ### Reciprocal dialogue and watcher invariant
 
@@ -93,6 +159,14 @@ universal procedure owner. Read it before creating or relying on a temporary wat
 - **Slack delivery is not target consumption**, and neither delivery nor a historical native task ID
   proves ACK, START, execution, or reusable capacity. Preserve those states separately until the
   accepted RuntimeBinding/Wake path proves them.
+
+### Session-owned review — local native child first
+
+For review decisions first load [the session-local policy](docs/SESSION_LOCAL_REVIEW_POLICY.md) at the accepted protected pin. The current Claude/Codex/Web parent may self-check or use a genuinely distinct read-only **native reviewer child within this same session** with real START, immutable source and returned findings; no different top-level chat is required. The attended CEO-Web handoff waiver is an instruction-consumer policy; its adoption does not depend on the separate signed-machine host. Other execution surfaces retain their applicable review requirements. A source candidate or protected merge alone proves neither instruction installation nor host enrollment. A technical child is not authenticated non-author GitHub `APPROVED`; maintain real required approvals, CI, holds and no self-merge.
+
+For a truly required independent external avenue load [the existing session routing procedure](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md), inspect actual admitted Fabric root/parent/effects and preserve the original carrier. On EFFECT_UNKNOWN, active review or explicit denial do not reroute through a Dot, account or provider. One actually eligible Dot may receive a source-bound Slack technical-review assignment; no fictional START or formal GitHub approval inferred from Slack. Existing Executive/GitHub authority remains controlling.
+
+A historically named GitHub reviewer login is a **placement preference, not an owner wait**, unless an actual current exact-seat instruction or repository rule binds it. The active assigned principal checks the review's exact PR/head, connected authenticated login, commit/author/coauthor independence and existing review/effect state under `docs/sol_skills/REVIEW_RETURN.md`; it may request a different eligible **genuinely independent** reviewer through GitHub's existing review path. Switching the same reasoning session between two GitHub accounts is not independent substantive review. No impersonation, author self-review, duplicate/denied-effect reroute, self-approval or self-merge. Keep executing other permitted work while the real review is pending.
 
 ## Agent OS — the organizational knowledge plane
 
@@ -138,11 +212,19 @@ Agenda remains the sole priority queue; the boot packet ignores legacy
   bottleneck-migration view, and the D1–D6 failure-mode detectors.
 - **Honesty, not alpha.** Never claim to "know more than the market." Be blunt, no moralizing.
 
-## Model-tier policy (delegate to subagents)
-Per `config/agents.yml` and our in-house Claude Code policy:
-- **Opus** (`deep-reasoner`) — deepest synthesis / PM judgment. Use sparingly.
-- **Sonnet** (`narrative-analyst`, `quant-coder`) — per-theme/name analysis, code-grounded questions.
-- **Haiku** (`signal-scout`) — high-volume extraction / labeling / search.
+## Model and delegation policy
 
-Bias toward delegating non-Opus subtasks to Sonnet/Haiku subagents — quality first, then
-token efficiency.
+Use the existing admitted routing for this assignment. Portfolio model tiers in
+`config/agents.yml` describe application reasoning; they are not permission to spawn
+Claude-native children. Observe the host's actual native-model, capacity and tool grants.
+Prefer economical qualified Fabric workers for separable work. For an **assigned M2
+Claude orchestrator**, first read the dedicated, executable invocation guidance
+in `skills/mastermind-claude-fabric-delegation/SKILL.md` (user-home installation:
+`~/.claude/skills/mastermind-claude-fabric-delegation/SKILL.md`). It names the
+incumbent M2 `fabric_task.py` adapter and actual tool sequence; a file or role
+alone cannot authenticate a root or grant admission. A Fabric-spawned operator
+with an admitted per-run capability receives its own `fabric_operator_scope` /
+`fabric_child_*` recipe automatically in the launch packet. Ordinary leaves do
+not delegate. When no eligible route is available before effects begin,
+continue permitted direct work rather than inventing a new queue, forcing a
+forbidden native model, or waiting for a historical principal.

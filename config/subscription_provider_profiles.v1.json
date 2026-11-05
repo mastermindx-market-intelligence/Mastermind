@@ -1,6 +1,6 @@
 {
   "schema": "mastermind.subscription_provider_profiles/v1",
-  "verified_at": "2026-09-27T03:17:36Z",
+  "verified_at": "2026-10-22T11:20:00Z",
   "profiles": {
     "glm-coding-plan": {
       "provider": "glm",
@@ -86,6 +86,38 @@
         "unattended_background_allowed": false,
         "production_backend_allowed": false,
         "payg_recommended_for_production": true
+      }
+    },
+    "byteplus-coding-plan-personal": {
+      "provider": "byteplus",
+      "product": "coding_plan_personal",
+      "protocol": "anthropic",
+      "base_url": "https://ark.ap-southeast.bytepluses.com/api/coding",
+      "models": {
+        "routine": "glm-5.3-flash",
+        "hard": "dola-seed-2.0-pro",
+        "fast": "dola-seed-2.0-lite",
+        "subagent": "glm-5.3-flash",
+        "backend_coding": "deepseek-v4.1-flash",
+        "frontend_visual": "dola-seed-2.0-code",
+        "adversarial_review": "deepseek-v4-pro"
+      },
+      "default_model_class": "routine",
+      "supported_tool_only": true,
+      "credential_binding": "adapter_private_provider_realm",
+      "quota_profile": {
+        "provider": "byteplus",
+        "product": "coding_plan_personal",
+        "tier": null
+      },
+      "autonomous_allowed": false,
+      "activation_gate": "provider_realm_enrolled_and_capacity_known",
+      "usage_policy": {
+        "supported_harness_required": true,
+        "interactive_only": true,
+        "unattended_background_allowed": false,
+        "production_backend_allowed": false,
+        "single_user_only": true
       }
     }
   }

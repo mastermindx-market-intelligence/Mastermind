@@ -94,3 +94,9 @@ data/*.log
 research/evidence/ohf_p0/**
 !research/evidence/ohf_p0/.gitkeep
 !research/evidence/.gitkeep
+
+
+# Live Fabric provider/lease broker state: never stage these machine-owned outputs.
+# These exact runtime paths are not part of a source release or its preimage.
+/ops/native_fabric/quota_continuity/source/broker/leases.sqlite*
+/ops/native_fabric/quota_continuity/source/quota_cache.json

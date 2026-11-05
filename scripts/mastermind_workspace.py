@@ -253,9 +253,11 @@ def installation_repository_bindings(
 _STORAGE_POLICY_FIELDS = frozenset(
     {"version", "mount_point", "volume_uuid", "root", "min_free_bytes"}
 )
-_STORAGE_POLICY_METADATA_FIELDS = frozenset({"_why"})
+_STORAGE_POLICY_METADATA_FIELDS = frozenset({"_why", "_pool_note", "overflow_volumes"})
 _STORAGE_POLICY_MAX_BYTES = 16 * 1024
 _STORAGE_POLICY_MAX_RATIONALE_BYTES = 8 * 1024
+_STORAGE_POLICY_MAX_OVERFLOW_VOLUMES = 8
+_STORAGE_OVERFLOW_FIELDS = frozenset({"mount_point", "volume_uuid", "root", "min_free_bytes"})
 
 
 def _unique_policy_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -310,14 +312,35 @@ def _read_storage_policy(path: Path) -> tuple[dict[str, object], str]:
             or not set(data).issubset(_STORAGE_POLICY_FIELDS | _STORAGE_POLICY_METADATA_FIELDS)
         ):
             raise ValueError("policy fields are not closed")
-        if "_why" in data:
-            rationale = data["_why"]
+        for note_key in ("_why", "_pool_note"):
+            if note_key not in data:
+                continue
+            rationale = data[note_key]
             if (
                 type(rationale) is not str
                 or not rationale
                 or len(rationale.encode("utf-8")) > _STORAGE_POLICY_MAX_RATIONALE_BYTES
             ):
                 raise ValueError("policy rationale metadata is invalid")
+        if "overflow_volumes" in data:
+            # The existing SSD helper owns pool selection. This CLI remains bound
+            # to the enrolled primary root; validated pool metadata grants no fallback.
+            overflow = data["overflow_volumes"]
+            if type(overflow) is not list or len(overflow) > _STORAGE_POLICY_MAX_OVERFLOW_VOLUMES:
+                raise ValueError("overflow volume metadata is invalid")
+            for member in overflow:
+                if type(member) is not dict or set(member) != _STORAGE_OVERFLOW_FIELDS:
+                    raise ValueError("overflow volume fields are not closed")
+                for key in ("mount_point", "root"):
+                    value = member[key]
+                    if type(value) is not str or "\x00" in value or not Path(value).is_absolute():
+                        raise ValueError("invalid overflow storage path")
+                identity = member["volume_uuid"]
+                if type(identity) is not str or str(uuid.UUID(identity)).lower() != identity.lower():
+                    raise ValueError("invalid overflow volume identity")
+                minimum = member["min_free_bytes"]
+                if type(minimum) is not int or not 0 <= minimum < 2**63:
+                    raise ValueError("invalid overflow storage floor")
         if type(data["version"]) is not int or data["version"] != 1:
             raise ValueError("unsupported policy version")
         minimum = data["min_free_bytes"]
@@ -629,8 +652,14 @@ def main(argv: list[str] | None = None) -> int:
                         or _repository_git(source, "rev-parse", "--verify", args.base_sha + "^{commit}") != args.base_sha):
                     raise WorkspaceError("REPOSITORY_BASE_INVALID: expected an available exact commit")
             # The enrolled policy names the host root, not a repository subroot.
-            if not _storage_status(host_root)["admission_allowed"]:
-                raise WorkspaceError("STORAGE_LOW_SPACE: available storage is below the host reserve")
+            # Storage policy and volume identity are ALWAYS observed: only the
+            # creation reserve may be waived, and only for an existing operation
+            # workspace that is re-used without any new allocation.
+            storage = _storage_status(host_root)
+            if not storage["admission_allowed"]:
+                requested_path = _workspace_path(root, args.lane, args.operation_id)
+                if not requested_path.exists():
+                    raise WorkspaceError("STORAGE_LOW_SPACE: available storage is below the host reserve")
             # Storage observation may block: re-observe the source at the effect boundary.
             if _selected_repository(alias, explicit=selected is not None) != source:
                 raise WorkspaceError("REPOSITORY_SOURCE_CHANGED: selected repository changed")
@@ -648,8 +677,13 @@ def main(argv: list[str] | None = None) -> int:
                 repository=selected,
             )
         if args.action == "status":
+            # The Git publisher calls this on every source-status/commit precheck.
+            # Verify the exact .git <-> common/worktrees registration and managed
+            # lock without enumerating unrelated worktrees. Release still uses
+            # the existing full-fleet identity/custody checks.
             receipt = inspect_linked_worktree(
                 source, root, destination, expected_operation_id=args.operation_id,
+                status_direct_registration=True,
             )
             return _emit("status", receipt, effect="NOT_APPLIED", repository=selected)
         receipt = release_linked_worktree(
