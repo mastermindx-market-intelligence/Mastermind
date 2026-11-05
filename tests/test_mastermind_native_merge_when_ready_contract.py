@@ -91,8 +91,11 @@ def test_qualified_mastermind_ready_pr_enrolls_before_ci_concludes() -> None:
 def test_removing_a_binding_native_release_gate_fails_closed(required: str) -> None:
     release, _ = _sections(DELIVERY.read_text(encoding="utf-8"))
     assert required in " ".join(release.split())
-    damaged = release.replace(required, "", 1)
-    assert damaged != release
+    # Match original whitespace/newline wrapping; a literal replacement would
+    # silently miss long phrases and falsely report a negative regression.
+    pattern = r"\\s+".join(map(re.escape, required.split()))
+    damaged, count = re.subn(pattern, "", release, count=1)
+    assert count == 1, required
     with pytest.raises(AssertionError):
         _assert_release_contract(damaged)
 
