@@ -25,7 +25,7 @@ const fails=(value:unknown,expected:{workRef?:string;canonicalDataCommit?:string
 function source(path:string,commit:string=COMMIT,content=SHA2):Record<string,unknown>{
  return {repository:'macro',commit,path,content_sha256:content};
 }
-function operation(action:string,request:string,work:string,sources:unknown[],selectionPatch:Record<string,unknown>={}):Record<string,unknown>{
+function operation(action:string,request:string,work:string,sources:unknown,selectionPatch:Record<string,unknown>={}):Record<string,unknown>{
  return {selection:{action,request_id:request,work_ref:work,...selectionPatch},principal_scope:PRINCIPAL,
   request_sha256:SHA3,recipe_fingerprint_sha256:SHA4,event_id:11,receipt_sha256:SHA5,recorded_at_ms:MS,sources};
 }
@@ -207,7 +207,7 @@ describe('original two-source actions, continuity, clock and knowledge law prese
  it('keeps Knowledge two-source behavior unchanged',()=>{
   expect(knowledgeReadKeys({a:1,code_context:{},data_observation:{}},['a'])).toEqual(['a','code_context','data_observation']);
   expect(knowledgeReadKeys({a:1},['a'])).toEqual(['a']);
-  const codeContext={schema:'mastermind.project_knowledge_code_context.v1',work_ref:WSREF,executable_macro_commit:CODE,reader_source_commit:CODE};
+  const codeContext={schema:'mastermind.project_knowledge_code_context.v1' as const,work_ref:WSREF,executable_macro_commit:CODE,reader_source_commit:CODE};
   expect(validateProjectKnowledgeCodeContext(codeContext,WSREF).executable_macro_commit).toBe(CODE);
   expect(()=>validateProjectKnowledgeCodeContext(codeContext,'WS:BETA')).toThrow(INVALID);
   const withData=validateKnowledgeReadMetadata({code_context:codeContext,source:{commit:DATA},
