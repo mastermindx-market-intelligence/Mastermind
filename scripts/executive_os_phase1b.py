@@ -18,6 +18,7 @@ from control_plane.executive_runtime import Runtime, RuntimeProofError
 from control_plane.model_router import (
     ModelRouter,
     RoutingPolicyError,
+    TaskFit,
     WorkRequest,
 )
 
@@ -52,6 +53,31 @@ def _command_argv(value: str) -> list[str]:
             "validation command must be a non-empty JSON array of non-empty strings"
         )
     return command
+
+
+def _add_task_fit_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--task-complexity", choices=("C0", "C1", "C2", "C3"))
+    parser.add_argument("--task-topology", choices=(
+        "principal", "coordinator", "worker", "subagent", "reviewer"))
+    parser.add_argument("--frontier-witness-kind")
+    parser.add_argument("--frontier-witness")
+
+
+def _task_fit(args: argparse.Namespace) -> TaskFit | None:
+    if args.task_complexity is None:
+        if (
+            args.task_topology is not None or args.frontier_witness_kind is not None
+            or args.frontier_witness is not None
+            or (args.command == "route" and args.business_impact is not None)
+        ):
+            raise RoutingPolicyError("task fit fields require --task-complexity")
+        return None
+    return TaskFit(
+        args.task_complexity, business_impact=args.business_impact or "routine",
+        topology=args.task_topology or "worker",
+        frontier_witness_kind=args.frontier_witness_kind,
+        frontier_witness=args.frontier_witness,
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -184,6 +210,7 @@ def _parser() -> argparse.ArgumentParser:
     create.add_argument("--ambiguity", default="low")
     create.add_argument("--exclude-worker-id", action="append", default=[])
     create.add_argument("--routing-policy", type=Path)
+    _add_task_fit_flags(create)
 
     route = sub.add_parser(
         "route",
@@ -198,6 +225,8 @@ def _parser() -> argparse.ArgumentParser:
     route.add_argument("--capability", action="append", default=[])
     route.add_argument("--exclude-worker-id", action="append", default=[])
     route.add_argument("--routing-policy", type=Path)
+    route.add_argument("--business-impact", choices=("routine", "material", "critical"))
+    _add_task_fit_flags(route)
 
     sub.add_parser("workers", help="List durable worker identities and quota classes.")
     sub.add_parser("jobs", help="List durable jobs.")
@@ -248,6 +277,9 @@ def _supervisor(args: argparse.Namespace, runtime: Runtime):
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        fit = _task_fit(args) if args.command in {"route", "create-job"} else None
+        if args.command == "create-job" and fit is not None and not args.task_kind:
+            raise RoutingPolicyError("calibrated create-job requires --task-kind")
         if args.command == "route":
             decision = ModelRouter.load(args.routing_policy).route(
                 WorkRequest(
@@ -256,6 +288,7 @@ def main(argv: list[str] | None = None) -> int:
                     ambiguity=args.ambiguity,
                     required_capabilities=tuple(args.capability),
                     excluded_worker_ids=tuple(args.exclude_worker_id),
+                    task_fit=fit,
                 )
             )
             _print(decision.to_dict())
@@ -365,6 +398,7 @@ def main(argv: list[str] | None = None) -> int:
                         ambiguity=args.ambiguity,
                         required_capabilities=tuple(args.capability),
                         excluded_worker_ids=tuple(args.exclude_worker_id),
+                        task_fit=fit,
                     )
                 )
                 constraints = decision.job_constraints()
@@ -397,7 +431,9 @@ def main(argv: list[str] | None = None) -> int:
                     owner_seat=args.owner_seat,
                     escalation_target=args.escalation_target,
                     business_impact=args.business_impact,
-                    review_required=args.review_required,
+                    review_required=(args.review_required or (
+                        bool(args.task_kind) and decision.requires_independent_review
+                    )),
                     reviews_job_id=args.reviews_job_id,
                 )
             )

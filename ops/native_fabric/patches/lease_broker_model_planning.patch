@@ -1,0 +1,84 @@
+--- a/lease_broker.py
++++ b/lease_broker.py
+@@ -949,0 +950,3 @@
++        *,
++        pool: Optional[str] = None,
++        model: str = "",
+@@ -950,0 +954,15 @@
++        # A plan is a non-binding concurrency preview, never a quota/claim grant.
++        # Keep the existing broker, lock, fairness and lease lifecycle unchanged.
++        if isinstance(need, bool) or not isinstance(need, int) or need < 0:
++            raise ValueError("need must be a non-negative integer")
++        if not isinstance(model, str) or len(model) > 128:
++            raise ValueError("model must be a bounded string")
++        model = model.strip().lower()
++        if model and not pool:
++            raise ValueError("model-specific planning requires a pool")
++        if pool is not None:
++            if not isinstance(pool, str) or not pool.strip():
++                raise ValueError("pool must be a non-empty string")
++            pool = self.provider_name(pool)
++            if pool not in (self.load_accounts_doc().get("providers") or {}):
++                raise ValueError("unknown pool")
+@@ -963,2 +981,4 @@
+-                for name in (doc.get("providers") or {}):
+-                    out.append(self._plan_pool(conn, name, task_class, need, orchestrator_id))
++                names = [pool] if pool else list(doc.get("providers") or {})
++                for name in names:
++                    out.append(self._plan_pool(
++                        conn, name, task_class, need, orchestrator_id, model=model))
+@@ -1003,0 +1024 @@
++        model: str = "",
+@@ -1013,0 +1035,18 @@
++        model_limit_state = "NOT_REQUESTED"
++        if model:
++            model_free = 0
++            model_limit_state = "APPLIED" if pool == "glm" else "ACCOUNT_ONLY"
++            for account in self.grantable_accounts(pool):
++                name = str(account["name"])
++                account_free = max(0, int(account["_eff_cap"]) - self._account_held(conn, pool, name))
++                model_cap = self.account_model_cap(pool, account, model)
++                if pool == "glm" and model_cap is None:
++                    # Unknown is not unlimited. Resolve model/account policy
++                    # before offering a specific GLM model's concurrency.
++                    model_limit_state = "UNKNOWN"
++                    break
++                if model_cap is not None:
++                    account_free = min(account_free, max(
++                        0, model_cap - self._account_model_held(conn, pool, name, model)))
++                model_free += account_free
++            free = 0 if model_limit_state == "UNKNOWN" else min(free, model_free)
+@@ -1053,0 +1093,8 @@
++            "model": model or None,
++            "model_limit_state": model_limit_state,
++            "model_capacity_checked": model_limit_state == "APPLIED",
++            "quota_capacity_checked": False,
++            "selection_is_commitment": False,
++            "claim_time_revalidation_required": True,
++            "wait_est_basis": "lease_ttl_hint_not_completion_or_quota_reset",
++            "future_capacity_guaranteed": False,
+@@ -1275 +1322,3 @@
+-            f"window_remaining={r['window_remaining']}"
++            f"window_remaining={r['window_remaining']} "
++            f"model={r.get('model') or '-'} model_limit_state={r.get('model_limit_state', 'NOT_REQUESTED')} "
++            "selection_is_commitment=false quota_capacity_checked=false"
+@@ -1307,0 +1357,3 @@
++    pp.add_argument("--pool", default=None)
++    pp.add_argument("--model", default="")
++    pp.add_argument("--json", action="store_true")
+@@ -1312,0 +1365,7 @@
++    if args.cmd == "plan":
++        if args.need < 0:
++            p.error("plan --need must be non-negative")
++        if args.model.strip() and not args.pool:
++            p.error("plan --model requires --pool")
++        if len(args.model) > 128:
++            p.error("plan --model must be bounded")
+@@ -1347,2 +1406,5 @@
+-        rows = br.plan(tc, args.need, oid)
+-        _print_plan(rows)
++        rows = br.plan(tc, args.need, oid, pool=args.pool, model=args.model)
++        if args.json:
++            print(json.dumps(rows, sort_keys=True))
++        else:
++            _print_plan(rows)
