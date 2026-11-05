@@ -424,7 +424,13 @@ class CeoIngressClient:
         direct_frame = direct_result_frame or direct_submit_frame
         from common import project_planning_private_contract as planning_wire
         planning_frame=isinstance(frame,Mapping) and frame.get('schema')==planning_wire.SCHEMA
-        strict_response=direct_frame or planning_frame
+        from common import fresh_conversation_contract as fresh_wire
+        fresh_frame=isinstance(frame,Mapping) and frame.get("schema")==fresh_wire.SCHEMA
+        if fresh_frame:
+            try: frame=fresh_wire.validate_private_frame(dict(frame))
+            except (ValueError,TypeError):
+                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail="conversation frame invalid")
+        strict_response=direct_frame or planning_frame or fresh_frame
         if planning_frame:
             try: frame=planning_wire.frame(dict(frame))
             except (ValueError,TypeError):
