@@ -65,11 +65,12 @@ GROK47_MERGED_SOURCE_DIGESTS = {
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
     'remote_sub_exec.py': 'f365bf7c10eb5b7fcf77aa61141329d5f14e2b1e92f98f88382d3e617b67bcda',
     'pick.py': '747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132',
-    'remote_sub.sh': '3fbad86bc76c65248302191e0ff2e27eecdb933097244c5b87a03863385452c2',
+    'remote_sub.sh': 'a1e271170778f992cf07c780234620c22d17f6242581311c414e30dd428ade40',
     'remote_sub_helpers.py': '3a4efaefd63244e77cee385d83da0bb4e53b86a0e83a183601f2fa80ec4d602b',
     'sub.sh': '4956942c77421b9d1015889995ebf0419399ea62c16de608765a0795b5fb551f',
     'native_remote.py': '82e9f94fc0148367a4237cccbf44410240f6f897276dd9a37fc8357c6e55f4df',
     'fabric_operator_contract.py': 'e6b32fd1547402c1184f826f74c253f34384cb6e32306e55b84449a892d19b5e',
+
 }
 
 EXTRA_PREIMAGES = {

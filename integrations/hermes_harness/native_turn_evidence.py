@@ -84,21 +84,14 @@ def _decode_lines(stdout: bytes) -> list[dict[str, Any]]:
     return events
 
 
-def observe_native_turn(
-    *, role: str, expected_model: str, challenge_marker: str,
-    stdout: bytes, stderr: bytes, process_exit_code: int,
-) -> dict[str, Any]:
-    """Validate native CLI output; no fake local health/model success.
-
-    The receipt intentionally excludes the prompt, response, raw stderr,
-    tool payloads, credentials, host paths and bearer tokens. Even PASS is
-    only a structured process observation, not a provider or network proof.
-    """
+def _inspect_native_protocol(
+    *, role: str, expected_model: str, stdout: bytes, stderr: bytes,
+    process_exit_code: int,
+) -> tuple[set[str], list[dict[str, Any]], dict[str, Any]]:
+    """Shared strict decoder; model text never creates identity or authority."""
     issues: set[str] = set()
     if role not in ROLE_MODELS or expected_model not in ROLE_MODELS.get(role, ()):
         issues.add("ROLE_MODEL_NOT_QUALIFIED")
-    if not isinstance(challenge_marker, str) or not _MARKER.fullmatch(challenge_marker):
-        issues.add("CHALLENGE_INVALID")
     if type(process_exit_code) is not int or process_exit_code != 0:
         issues.add("PROCESS_FAILED")
     events: list[dict[str, Any]] = []
@@ -129,9 +122,6 @@ def observe_native_turn(
         if type(final.get("exit_code")) is not int or final.get("exit_code") != 0 or final.get("error") or final.get("replay_gap"):
             issues.add("RESULT_NOT_COMPLETE")
         answer = final.get("text")
-        if (not isinstance(answer, str) or len(answer) > MAX_ANSWER_CHARS
-                or answer.strip() != challenge_marker):
-            issues.add("CHALLENGE_NOT_SATISFIED")
         if (all(ev.get("type") == "text" and isinstance(ev.get("text"), str)
                 for ev in events[1:-1]) and len(events) > 2
                 and isinstance(answer, str)
@@ -151,6 +141,55 @@ def observe_native_turn(
               or not _STDERR_SESSION.fullmatch(stderr.decode("utf-8", "replace"))
               or _STDERR_SESSION.fullmatch(stderr.decode("utf-8", "replace")).group(1) != session):
             issues.add("SESSION_STDERR_MISMATCH")
+    return issues, events, final
+
+
+def read_native_text(
+    *, role: str, expected_model: str, stdout: bytes, stderr: bytes,
+    process_exit_code: int,
+) -> str:
+    """Return only a complete bounded text result; no tools or partial stream.
+
+    This observes a subprocess protocol, not authenticated provider billing,
+    TLS, an installed host or permission to send this text anywhere.
+    """
+    issues, _events, final = _inspect_native_protocol(
+        role=role, expected_model=expected_model, stdout=stdout, stderr=stderr,
+        process_exit_code=process_exit_code,
+    )
+    answer = final.get("text")
+    if (issues or type(answer) is not str or not answer.strip()
+            or len(answer) > 700
+            or any(ord(ch) < 32 and ch not in "\n\t" for ch in answer)):
+        raise ObservationRefusal("NATIVE_TEXT_OUTPUT_UNQUALIFIED")
+    try:
+        answer.encode("utf-8", "strict")
+    except UnicodeError:
+        raise ObservationRefusal("NATIVE_TEXT_OUTPUT_UNQUALIFIED") from None
+    return answer
+
+
+def observe_native_turn(
+    *, role: str, expected_model: str, challenge_marker: str,
+    stdout: bytes, stderr: bytes, process_exit_code: int,
+) -> dict[str, Any]:
+    """Validate native CLI output; no fake local health/model success.
+
+    The receipt intentionally excludes the prompt, response, raw stderr,
+    tool payloads, credentials, host paths and bearer tokens. Even PASS is
+    only a structured process observation, not a provider or network proof.
+    """
+    issues, events, final = _inspect_native_protocol(
+        role=role, expected_model=expected_model, stdout=stdout, stderr=stderr,
+        process_exit_code=process_exit_code,
+    )
+    if not isinstance(challenge_marker, str) or not _MARKER.fullmatch(challenge_marker):
+        issues.add("CHALLENGE_INVALID")
+    if events:
+        answer = final.get("text")
+        if (not isinstance(answer, str) or len(answer) > MAX_ANSWER_CHARS
+                or answer.strip() != challenge_marker):
+            issues.add("CHALLENGE_NOT_SATISFIED")
     receipt: dict[str, Any] = {
         "schema": SCHEMA,
         "status": "PASS_CHILD_OUTPUT_OBSERVATION_ONLY" if not issues else "BLOCKED",
