@@ -447,15 +447,15 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # review; this does not authorize publication, runtime admission or release.
 # No generic numeric exception is added: source/path/site drift exposes all
 # literals again through the existing D8 scanner.
-# The bounded admission probe catches TimeoutExpired and returns a failed
-# read. That handler is six lines above the later sites, so those line
-# numbers moved. The same four literals stay exact whole tokens.
+# Finite-workstream template derivation changes only _gateway_templates.
+# The same four whole Constant tokens, relative AST paths and complete
+# enclosing identity owners remain unchanged; later lines shift by one.
 REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': 'deea6a99f70c0583ffeec82d3b8ef3e80ddcedc9742e4c4e2458abb07e89bbc2',
+    'sha256': '93cb7727512d1922461272e8d0b4a2557fa39d51d9a88e18597401f1731ea83a',
     'sites': ((335, 24, 27, 'int', '501'),
-              (6557, 35, 37, 'int', '80'),
-              (6558, 50, 55, 'int', '0o755'),
-              (7095, 41, 46, 'int', '0o644')),
+              (6556, 35, 37, 'int', '80'),
+              (6557, 50, 55, 'int', '0o755'),
+              (7094, 41, 46, 'int', '0o644')),
 }
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
@@ -561,4 +561,23 @@ REVIEWED_FILES['integrations/hermes_secretary/tab_sweep.py'] = {
 REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/post_failure_observation.py'] = {
     'sha256': '2a78630ccaf574da752c77d7b8f821723ccb264b970e2fe38b1976d886ca97a0',
     'sites': ((293, 79, 84, 'int', '0o700'),),
+}
+
+
+# PR1890 attended parent classification under the current Chairman source waiver:
+# two CSS dimensions and five graph coordinates, never identities or grants.
+# Each complete token is on an ASCII physical line. Exact final HTML bytes and
+# seven spans only; every source/context/path change restores ordinary D8.
+# This pin is not independent/formal review or a CodeQL finding disposition.
+REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/account_network_interactive.html'] = {
+    'sha256': '62492c23f2d6a21d389268e51823f6b2f130e2e47a64f17bcfc38e886e9cc3d8',
+    'sites': (
+        (8, 77, 80, 'int', '680'),
+        (37, 17, 20, 'int', '900'),
+        (70, 45, 48, 'int', '495'),
+        (70, 51, 54, 'int', '535'),
+        (72, 45, 48, 'int', '720'),
+        (74, 10, 13, 'int', '922'),
+        (79, 56, 59, 'int', '800'),
+    ),
 }

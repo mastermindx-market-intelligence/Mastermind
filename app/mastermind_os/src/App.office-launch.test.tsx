@@ -13,6 +13,8 @@ import type {
   PendingPointerStore,
 } from "./orchestration/operation-controller";
 import type { OrchestratorCommandBinding } from "./orchestration/host-command-bindings";
+import { createExecutiveLaunchBinding, type LaunchConfiguration } from "./orchestration/executive-launch-command-port";
+import { decodeLaunchBindingConfig } from "./launch-config";
 
 const invoke = vi.fn().mockResolvedValue({
   version: "0.1.0",
@@ -33,6 +35,8 @@ const MANIFEST = {
 };
 
 function installHost(options: {
+  launchConfig?: LaunchConfiguration;
+  selection?: { workRef: string; rootJobId: string };
   ctx?: OwnerContext | null;
   projects?: { ref: string; label: string }[];
   profiles?: { ref: string; label: string }[];
@@ -58,7 +62,10 @@ function installHost(options: {
       return true;
     },
   };
-  const prepare = vi.fn((intent: CommandIntent): OperationPointer => ({
+  const actual = options.launchConfig ? createExecutiveLaunchBinding(options.launchConfig,
+    { callTool: async () => { throw new Error("Unexpected transport"); } },
+    { context: () => ctx, store, getSession: () => null, subscribe: () => () => {} }) : null;
+  const prepare = vi.fn((intent: CommandIntent): OperationPointer => actual ? actual.port.prepare(intent) : ({
     operationKey: `op-${prepare.mock.calls.length + 1}`,
     kind: intent.kind,
     targetKey: intent.targetKey,
@@ -74,7 +81,7 @@ function installHost(options: {
   const binding: OrchestratorCommandBinding = {
     port: { context: () => ctx, prepare, submit, readOperation },
     store,
-    getView: () => ({
+    getView: () => actual ? actual.getView() : ({
       projects: options.projects ?? [{ ref: "alpha-project", label: "Alpha project" }],
       profiles: options.profiles ?? [{ ref: "research_only", label: "Research only" }],
       session: null,
@@ -82,7 +89,7 @@ function installHost(options: {
     subscribe: () => () => {},
     // The existing owner maps the launch form onto its own payload. It never
     // carries a session reference and never derives one from the form.
-    makeLaunchIntent: form => ({
+    makeLaunchIntent: form => actual ? actual.makeLaunchIntent(form) : ({
       kind: "launch",
       targetKey: "WS:ALPHA",
       payload: {
@@ -99,8 +106,24 @@ function installHost(options: {
     makeStopIntent: () => null,
   };
   window.MastermindMissionHost = {
-    selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
-    readPrograms: async () => controlRoomFixture(),
+    selection: options.selection ?? { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
+    readPrograms: async () => {
+      const document = controlRoomFixture();
+      if (options.selection) {
+        const { workRef, rootJobId } = options.selection;
+        const work = document.work[0], responsibility = document.autonomy.responsibilities[0];
+        work.work_ref = workRef; work.agent_os.workstream = workRef.slice(3);
+        work.executive.jobs[0].workstream = workRef; work.executive.jobs[0].job_id = rootJobId;
+        for (const binding of work.bindings) binding.work_ref = workRef;
+        responsibility.responsibility_ref = workRef; responsibility.root_job_id = rootJobId;
+        responsibility.root_job_candidates = [rootJobId];
+        responsibility.dispatch.responsibility_ref = workRef;
+        responsibility.dispatch.root_job_id = rootJobId;
+        responsibility.dispatch.evidence.responsibility_ref = workRef;
+        responsibility.dispatch.evidence.root_job_id = rootJobId;
+      }
+      return document;
+    },
     readMission: async ({ workRef, rootJobId }) => missionFixture(workRef, rootJobId),
     commandBinding: binding,
     auth: {
@@ -306,7 +329,8 @@ describe("Office direction handoff into the existing launch owner", () => {
     await user.click(screen.getByRole("button", { name: "Start new work" }));
     expect(previewRefusal()).toHaveProperty(
       "textContent",
-      expect.stringContaining("another workstream"),
+      // An exact lookup with no enrollment cannot offer a launch handoff.
+      expect.stringContaining("cannot offer a handoff"),
     );
     expect(screen.queryByLabelText("Goal")).toBeNull();
     expect(made.prepare).not.toHaveBeenCalled();
@@ -442,5 +466,75 @@ it("keeps the Office direction and the frozen preview text out of the session na
     const pointer = await made.store.read("owner-a");
     expect(pointer?.targetKey).toBe("WS:ALPHA");
     expect(JSON.stringify(pointer)).not.toContain("session");
+  });
+});
+
+
+const EEC = "WS:EXECUTIVE-ECOSYSTEM-COMPLETION";
+const CCR = "WS:CHAIRMAN-CONTROL-ROOM";
+function multiManifest(includeOffice = true) {
+  const { v: _v, ...leaf } = MANIFEST;
+  return { v: 2, defaultWorkstream: EEC, bindings: [
+    { ...leaf, label: "Executive Ecosystem", workstream: EEC, attemptLimit: 1,
+      profiles: [...leaf.profiles, { ref: "native_research_only", label: "Native research only" }] },
+    ...(includeOffice ? [{ ...leaf, label: "Meta-CEO Office", workstream: CCR, attemptLimit: 1 }] : []),
+  ] };
+}
+function installMultiHost(includeOffice = true) {
+  const manifest = multiManifest(includeOffice);
+  vi.stubEnv("VITE_MM_LAUNCH_CONFIG", JSON.stringify(manifest));
+  return installHost({ launchConfig: decodeLaunchBindingConfig(JSON.stringify(manifest))!,
+    selection: { workRef: CCR, rootJobId: "JOB-OFFICE" } });
+}
+
+describe("Office uses its exact enrolled workstream through the existing owner", () => {
+  it("opens and launches CCR while preserving the default Ecosystem enrollment", async () => {
+    const made = installMultiHost();
+    const originalBinding = window.MastermindMissionHost!.commandBinding;
+    const user = userEvent.setup();
+    render(<App />);
+    await openOffice(user);
+    await freezeDirection(user);
+    await user.click(screen.getByRole("button", { name: "Start new work" }));
+    const selector = await screen.findByLabelText("Workstream") as HTMLSelectElement;
+    expect(selector.value).toBe(CCR);
+    expect(selector.disabled).toBe(true);
+    expect([...selector.options].map(option => option.value)).toEqual([EEC, CCR]);
+    expect(made.prepare).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /^Launch$/ }));
+    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+    expect(made.prepare.mock.calls[0][0]).toMatchObject({
+      targetKey: CCR, payload: { workstream: CCR, objective: DIRECTION,
+        department: "alpha-project", execution_profile: "research_only", attempt_limit: 1 } });
+    expect(window.MastermindMissionHost!.commandBinding).toBe(originalBinding);
+  });
+
+  it("keeps an unenrolled Office direction without falling back to Ecosystem", async () => {
+    const made = installMultiHost(false);
+    const user = userEvent.setup();
+    render(<App />);
+    await openOffice(user);
+    await freezeDirection(user);
+    await user.click(screen.getByRole("button", { name: "Start new work" }));
+    expect(previewRefusal().textContent).toContain("cannot offer a handoff");
+    expect(screen.queryByLabelText("Goal")).toBeNull();
+    expect((screen.getByLabelText("Direction to Meta-CEO") as HTMLTextAreaElement).value).toBe(DIRECTION);
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+  });
+
+  it("retains the selected workstream with its unsent goal across view changes", async () => {
+    const made = installMultiHost();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Work queue" }));
+    await user.selectOptions(await screen.findByLabelText("Workstream"), CCR);
+    await user.type(screen.getByLabelText("Goal"), DIRECTION);
+    await openOffice(user);
+    await user.click(screen.getByRole("button", { name: "Work queue" }));
+    expect((await screen.findByLabelText("Goal") as HTMLTextAreaElement).value).toBe(DIRECTION);
+    expect((screen.getByLabelText("Workstream") as HTMLSelectElement).value).toBe(CCR);
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
   });
 });

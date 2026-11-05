@@ -81,15 +81,23 @@ class RuntimeStageTests(unittest.TestCase):
         with self.assertRaisesRegex(stage.Refusal, "GENERATION_UNSUPPORTED"):
             stage.stage("v7", root=self.root, _source_dir=self.source)
 
-    def test_current_v21_reviewed_hash_matches_source_and_preserves_history(self):
+    def test_current_v22_reviewed_hash_matches_source_and_preserves_history(self):
         bridge = ROOT / "integrations" / "paper_desktop" / "bridge.py"
         current = load_local(
             "paper_runtime_stage_current_source_pin",
             ROOT / "integrations" / "paper_desktop" / "runtime_stage.py",
         )
         self.assertEqual(
-            current.REVIEWED_GENERATIONS["v21"]["bridge.py"],
+            current.REVIEWED_GENERATIONS["v22"]["bridge.py"],
             current._sha256(bridge.read_bytes()),
+        )
+        self.assertEqual(
+            current.REVIEWED_GENERATIONS["v21"]["bridge.py"],
+            "dfbf0b11c49a595610d1ac0e663d95f7291b500cb84d31ef8169bc3b909a2eaa",
+        )
+        self.assertEqual(
+            current.REVIEWED_GENERATIONS["v12"]["bridge.py"],
+            "82bc7f2d75aec423711922198b68f317618a83de177bf4934b73d7b418a6ecfb",
         )
         self.assertEqual(
             current.REVIEWED_GENERATIONS["v20"]["bridge.py"],
