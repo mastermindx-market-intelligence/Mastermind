@@ -367,7 +367,20 @@ def _verify_original_before_upgrade(
             or len(expected_bundle_digest) != 64
             or any(c not in "0123456789abcdef" for c in expected_bundle_digest)):
         raise Refusal("CONTROL_BUNDLE_CAS_REQUIRED")
-    original = verify(control_root=control_root, launcher=launcher)
+    # This caller already holds the original exclusive bundle lock. Calling
+    # verify() here would try a second nonreentrant shared lock (BUSY). Read
+    # the original manifest and reseal every originally declared module in
+    # place, both before staging and immediately before the first replacement.
+    # The precommit pass deliberately does not treat this install's OWN stage
+    # directory as a foreign installed generation.
+    original = _read_manifest(manifest_path)
+    if (original["launcher"] != str(launcher)
+            or original["launcherHash"] != _sha256(launcher)):
+        raise Refusal("CONTROL_BUNDLE_MISMATCH")
+    for name, digest in original["files"].items():
+        path = _require_regular(_member_path(control_root, name), private=True)
+        if _sha256(path) != digest:
+            raise Refusal("CONTROL_BUNDLE_MISMATCH")
     if original["bundleDigest"] != expected_bundle_digest:
         raise Refusal("CONTROL_BUNDLE_CAS_MISMATCH")
     # Bind the full original manifest bytes (including advisory source pointer)

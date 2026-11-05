@@ -83,7 +83,8 @@ class BundleTests(unittest.TestCase):
             control_root=self.control, launcher=self.launcher)["files"]), set(old))
         self.assertFalse((self.control / ".control-bundle.lock").exists())
         installed = bundle.install(
-            source=self.source, control_root=self.control, launcher=self.launcher)
+            source=self.source, control_root=self.control, launcher=self.launcher,
+            expected_bundle_digest=value["bundleDigest"])
         self.assertEqual(installed["state"], "CONTROL_BUNDLE_INSTALLED")
         self.assertEqual(set(installed["files"]), set(bundle.CONTROL_FILES))
         self.assertEqual(set(bundle.verify(

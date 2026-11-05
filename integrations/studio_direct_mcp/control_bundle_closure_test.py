@@ -71,7 +71,12 @@ class InstalledClosureTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def _install(self):
-        return bundle.install(source=HERE, control_root=self.control, launcher=self.launcher)
+        # The fixture acts as the release operator: supply the exact observed
+        # installed generation CAS on upgrades, never a generic force/retry.
+        manifest = self.control / "manifest.json"
+        prior = json.loads(manifest.read_text())["bundleDigest"] if manifest.exists() else None
+        return bundle.install(source=HERE, control_root=self.control,
+                              launcher=self.launcher, expected_bundle_digest=prior)
 
     def _child(self, code, *args, loader=LOAD, timeout=15, home=None):
         return subprocess.run(
