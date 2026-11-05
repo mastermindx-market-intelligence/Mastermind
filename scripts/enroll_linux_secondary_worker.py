@@ -117,10 +117,13 @@ class Args:
     source_repo: Path
     expected_sha: str
     expected_tree: str
-    codex_source_binary: Path
-    codex_version: str
-    codex_sha256: str
+    codex_source_binary: Path | None = None
+    codex_version: str | None = None
+    codex_sha256: str | None = None
     hermes_runtime: dict[str, Any] | None = None
+    component: str = "secondary-worker"
+    gateway_config_file: Path | None = None
+    gateway_config_sha256: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -140,9 +143,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-repo", type=Path, required=True)
     parser.add_argument("--expected-sha", required=True)
     parser.add_argument("--expected-tree", required=True)
-    parser.add_argument("--codex-source-binary", type=Path, required=True)
-    parser.add_argument("--codex-version", required=True)
-    parser.add_argument("--codex-sha256", required=True)
+    parser.add_argument("--component", choices=("secondary-worker", "hermes-host-observation"),
+                        default="secondary-worker")
+    parser.add_argument("--codex-source-binary", type=Path)
+    parser.add_argument("--codex-version")
+    parser.add_argument("--codex-sha256")
+    parser.add_argument("--gateway-config-file", type=Path,
+                        help="Root-staged observation input, root:gateway 0440 in a protected 0750 directory")
+    parser.add_argument("--gateway-config-sha256", help="SHA-256 of the exact input bytes")
     parser.add_argument(
         "--hermes-runtime-json",
         help=("Optional approved Hermes runtime installation input as one JSON "
@@ -503,27 +511,31 @@ def _classify_one(
 
 
 def classify_identity_plan(
-    state: Mapping[str, Mapping[str, Any]], identities: ServiceIdentities
+    state: Mapping[str, Mapping[str, Any]], identities: ServiceIdentities, *, gateway_only: bool = False
 ) -> dict[str, str]:
-    return {
+    plan = {
         "control": _classify_one(
             state, name=identities.control_user, group=identities.control_group,
             uid=identities.control_uid, gid=identities.control_gid, home=CONTROL_HOME,
         ),
-        "worker": _classify_one(
+    }
+    if not gateway_only:
+        plan["worker"] = _classify_one(
             state, name=identities.worker_user, group=identities.worker_group,
             uid=identities.worker_uid, gid=identities.worker_gid, home=WORKER_HOME,
-        ),
-    }
+        )
+    return plan
 
 
-def ensure_service_identities(identities: ServiceIdentities) -> None:
-    plan = classify_identity_plan(read_identity_state(), identities)
+def ensure_service_identities(identities: ServiceIdentities, *, gateway_only: bool = False) -> None:
+    plan = classify_identity_plan(read_identity_state(), identities, gateway_only=gateway_only)
     specs = (
         ("control", identities.control_group, identities.control_gid, identities.control_user, identities.control_uid, CONTROL_HOME),
         ("worker", identities.worker_group, identities.worker_gid, identities.worker_user, identities.worker_uid, WORKER_HOME),
     )
     for key, group, gid, user, uid, home in specs:
+        if key not in plan:
+            continue
         if plan[key] == "verify":
             continue
         if plan[key] == "create":
@@ -546,7 +558,7 @@ def ensure_service_identities(identities: ServiceIdentities) -> None:
                 user,
             ]
         )
-    classify_identity_plan(read_identity_state(), identities)
+    classify_identity_plan(read_identity_state(), identities, gateway_only=gateway_only)
 
 
 def assert_central_control_absent() -> None:
@@ -631,22 +643,28 @@ def _mkdir(path: Path, uid: int, gid: int, mode: int) -> None:
         raise EnrollmentError(f"directory_metadata_invalid:{path}")
 
 
-def ensure_directories(identities: ServiceIdentities) -> None:
+def ensure_directories(identities: ServiceIdentities, *, gateway_only: bool = False) -> None:
     _mkdir(STATE_ROOT, 0, 0, _MODE_ROOT_TRAVERSE)
     _mkdir(STATE_ROOT / "control", 0, 0, _MODE_ROOT_TRAVERSE)
     _mkdir(CONTROL_HOME, identities.control_uid, identities.control_gid, _MODE_OWNER_RWX)
-    _mkdir(STATE_ROOT / "workers", 0, 0, _MODE_ROOT_TRAVERSE)
-    _mkdir(STATE_ROOT / "workers/codex-01", 0, 0, _MODE_ROOT_TRAVERSE)
-    _mkdir(WORKER_HOME, identities.worker_uid, identities.worker_gid, _MODE_OWNER_RWX)
-    _mkdir(WORKSPACE_ROOT, identities.worker_uid, identities.worker_gid, _MODE_OWNER_RWX)
-    _mkdir(RUN_ROOT, identities.worker_uid, identities.worker_gid, _MODE_OWNER_RWX)
-    _mkdir(WORKER_STATE, identities.worker_uid, identities.worker_gid, _MODE_OWNER_RWX)
+    if not gateway_only:
+        _mkdir(STATE_ROOT / "workers", 0, 0, _MODE_ROOT_TRAVERSE)
+        _mkdir(STATE_ROOT / "workers/codex-01", 0, 0, _MODE_ROOT_TRAVERSE)
+        _mkdir(WORKER_HOME, identities.worker_uid, identities.worker_gid, _MODE_OWNER_RWX)
+        _mkdir(WORKSPACE_ROOT, identities.worker_uid, identities.worker_gid, _MODE_OWNER_RWX)
+        _mkdir(RUN_ROOT, identities.worker_uid, identities.worker_gid, _MODE_OWNER_RWX)
+        _mkdir(WORKER_STATE, identities.worker_uid, identities.worker_gid, _MODE_OWNER_RWX)
     _mkdir(CONFIG_ROOT, 0, 0, _MODE_ROOT_DIR)
+    if gateway_only:
+        from ops.executive_os.remote_worker_gateway_service import LINUX_HOST_OBSERVATION_ROOT
+        _mkdir(LINUX_HOST_OBSERVATION_ROOT, 0, identities.control_gid, 0o750)
     _mkdir(INSTALL_ROOT, 0, 0, _MODE_ROOT_DIR)
     _mkdir(RELEASES_ROOT, 0, 0, _MODE_ROOT_DIR)
-    _mkdir(BIN_ROOT, 0, 0, _MODE_ROOT_DIR)
+    if not gateway_only:
+        _mkdir(BIN_ROOT, 0, 0, _MODE_ROOT_DIR)
     _mkdir(LOG_ROOT, 0, 0, _MODE_ROOT_TRAVERSE)
-    _mkdir(WORKER_LOG_ROOT, identities.worker_uid, identities.worker_gid, _MODE_OWNER_RWX)
+    if not gateway_only:
+        _mkdir(WORKER_LOG_ROOT, identities.worker_uid, identities.worker_gid, _MODE_OWNER_RWX)
     _mkdir(GATEWAY_LOG_ROOT, identities.control_uid, identities.control_gid, _MODE_OWNER_RWX)
 
 
@@ -962,7 +980,8 @@ def expected_hermes_role_units(release_commit: str,
 
 
 def render_systemd_units(
-    *, release_root: Path, codex_binary: Path, identities: ServiceIdentities
+    *, release_root: Path, codex_binary: Path | None, identities: ServiceIdentities,
+    gateway_only: bool = False,
 ) -> dict[str, str]:
     template_root = release_root / "ops/executive_os"
     replacements = {
@@ -998,6 +1017,10 @@ def render_systemd_units(
             "mastermind-executive-remote-worker-gateway.service.template"
         ),
     }
+    if gateway_only:
+        from ops.executive_os.remote_worker_gateway_service import LINUX_HOST_OBSERVATION_CONFIG
+        replacements["__GATEWAY_CONFIG__"] = os.fspath(LINUX_HOST_OBSERVATION_CONFIG)
+        sources = {name: source for name, source in sources.items() if "gateway" in name}
     rendered: dict[str, str] = {}
     for destination, source in sources.items():
         text = (template_root / source).read_text(encoding="utf-8")
@@ -1054,10 +1077,10 @@ def _write_root_unit(path: Path, data: bytes) -> None:
 
 
 def install_inert_units(
-    release_root: Path, codex_binary: Path, identities: ServiceIdentities
+    release_root: Path, codex_binary: Path | None, identities: ServiceIdentities, *, gateway_only: bool = False
 ) -> tuple[str, ...]:
     rendered = render_systemd_units(
-        release_root=release_root, codex_binary=codex_binary, identities=identities
+        release_root=release_root, codex_binary=codex_binary, identities=identities, gateway_only=gateway_only
     )
     with tempfile.TemporaryDirectory(prefix="mastermind-systemd-verify.") as temporary:
         verify_paths: list[str] = []
@@ -1071,8 +1094,106 @@ def install_inert_units(
     return tuple(sorted(rendered))
 
 
+def _observation_input(args: Args, identities: ServiceIdentities):
+    from ops.executive_os import remote_worker_gateway_service as gateway
+    if (args.gateway_config_file is None or type(args.gateway_config_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", args.gateway_config_sha256) is None):
+        raise EnrollmentError("host_observation_input_required")
+    try:
+        path = gateway._safe_absolute(args.gateway_config_file, code="GATEWAY_CONFIG_INVALID")
+        gateway._trusted_observation_ancestors(path.parent)
+        raw = gateway._secure_regular_file(
+            path, root=path.parent, expected_owner_uid=0, expected_group_gid=identities.control_gid,
+            max_bytes=gateway.MAX_CONFIG_BYTES, read_bytes=True,
+        )
+        if hashlib.sha256(raw).hexdigest() != args.gateway_config_sha256:
+            raise EnrollmentError("host_observation_input_changed")
+        config = gateway.decode_host_observation_gateway_config(raw, expected_group_gid=identities.control_gid)
+        if config.hermes_role_metadata_read.implementation_sha != args.expected_sha:
+            raise EnrollmentError("host_observation_release_pin_mismatch")
+        return raw, config
+    except (OSError, ValueError, TypeError) as exc:
+        raise EnrollmentError("host_observation_input_unqualified") from exc
+
+
+def _observation_config_adoption(raw: bytes, identities: ServiceIdentities) -> bool:
+    from ops.executive_os import remote_worker_gateway_service as gateway
+    path = gateway.LINUX_HOST_OBSERVATION_CONFIG
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    try:
+        actual = gateway._secure_regular_file(
+            path, root=gateway.LINUX_HOST_OBSERVATION_ROOT, expected_owner_uid=0,
+            expected_group_gid=identities.control_gid, max_bytes=gateway.MAX_CONFIG_BYTES, read_bytes=True,
+        )
+        if actual != raw:
+            raise EnrollmentError("host_observation_config_conflict")
+        gateway.load_remote_worker_gateway_config(path, expected_group_gid=identities.control_gid)
+        return True
+    except (OSError, ValueError, TypeError) as exc:
+        raise EnrollmentError("host_observation_config_conflict") from exc
+
+
+def _install_observation_config(raw: bytes, identities: ServiceIdentities) -> str:
+    from ops.executive_os import remote_worker_gateway_service as gateway
+    path = gateway.LINUX_HOST_OBSERVATION_CONFIG
+    if not _observation_config_adoption(raw, identities):
+        # The fixed destination is never replaced. An interruption is reconciled
+        # by inspecting this same file; partial or different content conflicts.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        try:
+            _write_all(fd, raw)
+            os.fchown(fd, 0, identities.control_gid)
+            os.fchmod(fd, 0o440)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        parent_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+    if not _observation_config_adoption(raw, identities):
+        raise EnrollmentError("host_observation_config_unproven")
+    config = gateway.load_remote_worker_gateway_config(path, expected_group_gid=identities.control_gid)
+    return gateway.remote_worker_gateway_config_digest(config)
+
+
+def _apply_host_observation(args: Args, identity, identities: ServiceIdentities) -> dict[str, Any]:
+    if (args.hermes_runtime is None or any(value is not None for value in
+            (args.codex_source_binary, args.codex_version, args.codex_sha256))):
+        raise EnrollmentError("host_observation_component_inputs_invalid")
+    raw, _ = _observation_input(args, identities)
+    _observation_config_adoption(raw, identities)
+    expected_units = expected_hermes_role_units(args.expected_sha, args.hermes_runtime)
+    _assert_release_input_adoption(args.source_repo, args.expected_sha, args.expected_tree, args.hermes_runtime)
+    classify_identity_plan(read_identity_state(), identities, gateway_only=True)
+    ensure_service_identities(identities, gateway_only=True)
+    ensure_directories(identities, gateway_only=True)
+    release = install_release(args.source_repo, args.expected_sha, args.expected_tree,
+                              hermes_runtime=args.hermes_runtime)
+    current_raw, _ = _observation_input(args, identities)
+    if current_raw != raw:
+        raise EnrollmentError("host_observation_input_changed")
+    digest = _install_observation_config(raw, identities)
+    units = install_inert_units(release, None, identities, gateway_only=True)
+    assert_central_control_absent()
+    return {
+        "schema": "mastermind.linux_secondary_worker_enrollment/v1",
+        "component": "hermes-host-observation",
+        "outcome": "HOST_OBSERVATION_INSTALLED_INERT",
+        "release_sha": identity["commit"], "release_tree": identity["tree"],
+        "gateway_config_sha256": args.gateway_config_sha256,
+        "gateway_config_canonical_sha256": digest,
+        "units_installed_inert": list(units), "services_activated": False,
+        "hermes_role_units_expected": expected_units,
+    }
+
+
 def apply_enrollment(args: Args) -> dict[str, Any]:
-    if args.hermes_runtime is not None:
+    if args.hermes_runtime is not None or args.component == "hermes-host-observation":
         _require_hermes_source_checkout(args.source_repo)
     if platform.system() != "Linux":
         raise EnrollmentError("linux_required")
@@ -1082,6 +1203,13 @@ def apply_enrollment(args: Args) -> dict[str, Any]:
     verify_root_source_custody(args.source_repo)
     identity = verify_source_identity(args.source_repo, args.expected_sha, args.expected_tree)
     identities = load_canonical_identities(args.source_repo)
+    if args.component == "hermes-host-observation":
+        return _apply_host_observation(args, identity, identities)
+    if (args.component != "secondary-worker" or args.codex_source_binary is None
+            or type(args.codex_version) is not str or _VERSION.fullmatch(args.codex_version) is None
+            or type(args.codex_sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", args.codex_sha256) is None
+            or args.gateway_config_file is not None or args.gateway_config_sha256 is not None):
+        raise EnrollmentError("secondary_worker_component_inputs_invalid")
     source_info = inspect_codex_source(args.codex_source_binary)
     if source_info["sha256"] != args.codex_sha256:
         raise EnrollmentError("codex_source_digest_not_accepted")
@@ -1121,11 +1249,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     if _HEX40.fullmatch(ns.expected_sha) is None or _HEX40.fullmatch(ns.expected_tree) is None:
         sys.stderr.write("invalid source identity\n")
         return 64
-    if _VERSION.fullmatch(ns.codex_version) is None:
-        sys.stderr.write("invalid Codex version\n")
-        return 64
-    if re.fullmatch(r"[0-9a-f]{64}", ns.codex_sha256) is None:
-        sys.stderr.write("invalid Codex digest\n")
+    if ns.component == "secondary-worker":
+        if (ns.codex_source_binary is None or type(ns.codex_version) is not str
+                or _VERSION.fullmatch(ns.codex_version) is None
+                or type(ns.codex_sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", ns.codex_sha256) is None
+                or ns.gateway_config_file is not None or ns.gateway_config_sha256 is not None):
+            sys.stderr.write("invalid secondary Worker component inputs\n")
+            return 64
+    elif (ns.gateway_config_file is None or type(ns.gateway_config_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", ns.gateway_config_sha256) is None
+            or any(value is not None for value in (ns.codex_source_binary, ns.codex_version, ns.codex_sha256))):
+        sys.stderr.write("invalid host observation component inputs\n")
         return 64
     try:
         hermes_runtime = decode_hermes_runtime(
@@ -1141,6 +1275,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         codex_version=ns.codex_version,
         codex_sha256=ns.codex_sha256,
         hermes_runtime=hermes_runtime,
+        component=ns.component,
+        gateway_config_file=ns.gateway_config_file,
+        gateway_config_sha256=ns.gateway_config_sha256,
     )
     try:
         receipt = apply_enrollment(args)

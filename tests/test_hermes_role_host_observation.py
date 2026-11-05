@@ -25,8 +25,10 @@ from ops.executive_os import hermes_role_metadata_observer as observer
 from ops.executive_os import remote_worker_gateway_service as service
 from ops.executive_os.remote_worker_gateway import RemoteWorkerGateway
 from ops.executive_os.remote_worker_gateway_config import HermesRoleMetadataReadBinding
+from ops.executive_os.remote_worker_gateway_config import HostObservationGatewayConfig
 from tests.test_remote_worker_gateway import (
     _cert_sha256, _close_gateway, _gateway_fixture, _openssl_available,
+    _certificate_fixture, _client_context, _exchange,
 )
 from tests.test_remote_worker_gateway_service import _fixture, _load, _write
 from tests.test_remote_worker_transport import HOST_REF, IDENTITY
@@ -410,6 +412,59 @@ async def test_real_mtls_host_family_isolated_and_existing_worker_path_preserved
         assert await worker.request("status", {"run_id": "ATT-001"}) == {"worker": "ATT-001"}
     finally:
         await _close_gateway(fixture)
+
+
+@pytest.mark.skipif(not _openssl_available(), reason="openssl unavailable")
+async def test_observation_only_real_mtls_has_no_broker_or_worker(tmp_path, monkeypatch):
+    from ops.executive_os import remote_worker_gateway as gateway_module
+    def forbidden(*args, **kwargs): pytest.fail('observation constructed or contacted a broker')
+    monkeypatch.setattr(gateway_module, 'WorkerBrokerClient', forbidden)
+    monkeypatch.setattr(asyncio, 'start_unix_server', forbidden)
+    ca_key, ca, _ = _certificate_fixture(tmp_path, name='read-ca', common_name='Read CA', san='DNS:ca.invalid', ca=True)
+    server_key, server_cert, _ = _certificate_fixture(
+        tmp_path, name='read-server', common_name='localhost', san='IP:127.0.0.1,DNS:localhost',
+        issuer_key=ca_key, issuer_cert=ca)
+    client_key, client_cert, _ = _certificate_fixture(
+        tmp_path, name='read-client', common_name='control', san='DNS:control.invalid',
+        issuer_key=ca_key, issuer_cert=ca)
+    config = HostObservationGatewayConfig(
+        schema='mastermind.remote_worker_gateway_config/v2', profile='hermes-role-metadata-read',
+        host_ref=HOST_REF, listen_host='127.0.0.1', listen_port=0,
+        certificate_path=server_cert, key_path=server_key, ca_path=ca,
+        expected_control_fingerprint=_cert_sha256(client_cert),
+        hermes_role_metadata_read=HermesRoleMetadataReadBinding(IMPLEMENTATION))
+    gateway = RemoteWorkerGateway(config)
+    assert gateway._broker_client is None
+    gateway.broker_call = forbidden
+    read_pair = AsyncMock(return_value=_observation(now_ms=time.time_ns() // 1_000_000))
+    gateway._host_observer = SimpleNamespace(read_pair=read_pair)
+    server = await gateway.start_server()
+    endpoint = server.sockets[0].getsockname()[:2]
+    binding = transport.BrokerTransportBinding(
+        endpoint=endpoint, ca_path=ca, client_cert_path=client_cert, client_key_path=client_key,
+        expected_server_fingerprint=_cert_sha256(server_cert))
+    context = _client_context(ca=ca, cert=client_cert, key=client_key)
+    try:
+        assert (await _client(binding).read_hermes_roles())['state'] == 'OBSERVED'
+        assert read_pair.await_count == 1
+        operations = transport._ATTEMPT_RUN_OPERATIONS | {
+            'capacity-observe/v1', 'ohf-identity', 'ohf-materialization-status', 'future-operation'}
+        for operation in operations:
+            request = transport.build_request(IDENTITY, operation, {})
+            response = await _exchange(endpoint, context, request)
+            assert response['outcome'] == 'refused' and response['broker_response'] is None
+            with pytest.raises(ValueError, match='no broker capability'):
+                await gateway._dispatch_authenticated(request)
+            with pytest.raises(ValueError, match='no broker capability'):
+                await gateway._call_broker(operation, {})
+        wrong_server = dataclasses.replace(binding, expected_server_fingerprint='0' * 64)
+        assert (await _client(wrong_server).read_hermes_roles())['state'] == 'UNAVAILABLE'
+        gateway.config = dataclasses.replace(config, expected_control_fingerprint='0' * 64)
+        assert (await _client(binding).read_hermes_roles())['state'] == 'UNAVAILABLE'
+        assert read_pair.await_count == 1
+    finally:
+        server.close()
+        await server.wait_closed()
 
 @pytest.mark.parametrize("indices", [(0,), (0, 1)])
 def test_positive_host_pair_rejects_every_v1_downgrade(indices):
