@@ -331,6 +331,8 @@ jobs:
           application_transport_source="$(mktemp -d "${RUNNER_TEMP}/application-transport-source.XXXXXX")"
           trap 'rm -rf "$application_transport_source"' EXIT
           git archive --format=tar HEAD | tar -x -C "$application_transport_source"
+          # The isolated root has no DAC override; expose only this public archive.
+          chmod 0755 "$application_transport_source"
           docker build --file tests/application_tunnel_ci/Dockerfile \
             --tag mastermind-application-transport:${{ github.sha }} tests/application_tunnel_ci
           docker run --rm --network=none --cap-drop=ALL \
