@@ -178,8 +178,24 @@ class RuntimeProjectConversationsReader:
             if any(records[i][0].event_id >= records[i+1][0].event_id for i in range(len(records)-1)):
                 _refused()
             turns = []
-            reader = NativeReplyReader(self._original, socket_path=self._original.socket_path,
-                service_call=self._original.service_call, projected_principal=True)
+            async def guarded_call(path, payload):
+                self._current(principal, identity, guard)
+                if path != self._source[0] or payload.get("operation") != "read_thread":
+                    _refused()
+                result = await self._source[1](path, payload)
+                self._current(principal, identity, guard)
+                return result
+
+            # A fixed READ facet reuses the genuine Runtime, original policy
+            # pair and existing resolver implementation. Its IPC callback is
+            # guarded around EVERY await (including resolver-internal reads),
+            # rather than checking only after a multi-read reply operation.
+            # No public frame supplies these bindings or this policy pairing.
+            read_owner = RuntimeSessionReturn(self._runtime, fabric=self._original.fabric,
+                codex=self._original.codex, socket_path=self._source[0], service_call=guarded_call)
+            read_owner._trusted_read_pair = self._source[2]
+            reader = NativeReplyReader(read_owner, socket_path=self._source[0],
+                service_call=guarded_call, projected_principal=True)
             async with asyncio.timeout(8):
                 for event, value, row in records:
                     self._current(principal, identity, guard)
@@ -188,7 +204,7 @@ class RuntimeProjectConversationsReader:
                     try:
                         reply = await reader(principal, {"read_ref": row["read_ref"]})
                         self._current(principal, identity, guard)
-                        carrier = await self._original.service_call(self._original.socket_path, {
+                        carrier = await guarded_call(self._source[0], {
                             "version": CONTROL_VERSION_V2, "operation": "read_thread",
                             "args": {"context": value["context"], "thread_ts": value["thread_ts"]}})
                         if type(carrier) is not dict or carrier.get("ok") is not True:

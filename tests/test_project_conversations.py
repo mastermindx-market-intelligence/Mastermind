@@ -151,8 +151,19 @@ def test_cross_native_turn_manifest_cannot_manufacture_conversation(setup):
 
 def test_current_permission_withdrawal_during_read_withholds_entire_body(setup):
     s=setup;populate(s);chosen=selection(catalogue(s));current=[True]
+    s.service.calls.clear()
     s.service.on_read=lambda:current.__setitem__(0,False)
     with pytest.raises(BridgeError):asyncio.run(reader(s).read(s.projection,chosen,guard=lambda:current[0]))
+    assert len(s.service.calls)==1  # Not a later post-hoc refusal after more reads.
+
+
+def test_private_source_replacement_during_read_cannot_retarget_later_ipc(setup):
+    s=setup;populate(s);chosen=selection(catalogue(s));original_reader=reader(s)
+    s.service.calls.clear();foreign=[]
+    async def other(*args,**kwargs):foreign.append(args);raise AssertionError("must not call replaced source")
+    s.service.on_read=lambda:setattr(s.owner,"service_call",other)
+    with pytest.raises(BridgeError):asyncio.run(original_reader.read(s.projection,chosen,guard=lambda:True))
+    assert len(s.service.calls)==1 and not foreign
 
 
 def test_expired_read_principal_and_absent_host_guard_do_no_carrier_io(setup):
