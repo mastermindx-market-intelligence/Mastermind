@@ -290,7 +290,7 @@ jobs:
           import unittest
           suite = unittest.TestSuite()
           for pattern in (
-              "test_application_turn_*.py", "test_quota_continuity.py",
+              "test_application_turn_*.py", "test_go_application_*.py", "test_quota_continuity.py",
               "test_broker_prelease_deadline.py", "test_slot_release_custody.py",
               "test_qwen_account_eligibility.py", "test_qwen_429_account_priority.py",
           ):

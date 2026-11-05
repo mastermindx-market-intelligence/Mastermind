@@ -1558,7 +1558,8 @@ class Broker:
                 lock.close()
             _ACQUIRE_DEADLINE_NS.reset(token)
 
-    def _application_grant(self, principal_id, caller_host, workload, pool, model):
+    def _application_grant(self, principal_id, caller_host, workload, pool, model,
+                           expected_credential_ref=None):
         document = _read_application_accounts(self.accounts_path)
         now = _application_time(self.now())
         matches = [g for g in document["application_grants"]
@@ -1569,6 +1570,12 @@ class Broker:
         if len(matches) != 1:
             raise ApplicationAdmissionError("grant_unavailable" if not matches else "grant_ambiguous")
         grant = matches[0]
+        # The HTTP owner supplies the reference of the service credential it
+        # actually authenticated. Compare inside the same admission transaction;
+        # a separate precheck could race a valid grant replacement.
+        if (expected_credential_ref is not None
+                and grant["credential_ref"] != expected_credential_ref):
+            raise ApplicationAdmissionError("credential_ref_mismatch")
         digest = hashlib.sha256(_application_json(grant).encode()).hexdigest()
         return document, grant, digest
 
@@ -1600,10 +1607,13 @@ class Broker:
                     "lease_id", "created_at", "expires_at", "max_steps", "state")}}
 
     def begin_application_turn(self, *, principal_id, caller_host, workload, turn_id,
-                               pool, model, deadline_ns=None, transport_accounts=None):
+                               pool, model, deadline_ns=None, transport_accounts=None,
+                               expected_credential_ref=None):
         for value in (principal_id, caller_host, workload, turn_id):
             _application_id(value)
         _application_model(model)
+        if expected_credential_ref is not None:
+            _application_id(expected_credential_ref)
         if pool != "go":
             raise ApplicationAdmissionError("unsupported_application_pool")
         if transport_accounts is not None:
@@ -1622,7 +1632,8 @@ class Broker:
                 recovered = self._application_binding(conn, prior)
                 if recovered["disposition"] != "existing":
                     return recovered
-            document, grant, digest = self._application_grant(principal_id, caller_host, workload, pool, model)
+            document, grant, digest = self._application_grant(
+                principal_id, caller_host, workload, pool, model, expected_credential_ref)
             if prior is not None:
                 if prior["grant_digest"] != digest:
                     raise ApplicationAdmissionError("grant_changed")

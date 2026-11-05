@@ -84,6 +84,71 @@ def sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
+GO_INSTALLED_PREIMAGE = "4a41548a757f763ed5210df96aff6c7148d25d9e192cd3d849e108e1e917d100"
+GO_APPLICATION_DEPENDENCIES = ("lease_broker.py", "go_lease_capability.py", "go_lease_gateway.py")
+
+
+def stage_external_go_component(root, output, stable_ext, *, staged_manifest=None):
+    """One closed external-owner bundle; never installs or changes a generation.
+
+    The original nested handler and state owner remain separate from the flat
+    native stage. C's existing generation/installer must explicitly consume and
+    qualify this component before any installed path can change.
+    """
+    root, output = Path(root), Path(output)
+    if (not isinstance(stable_ext, str) or not Path(stable_ext).is_absolute()
+            or ".." in Path(stable_ext).parts):
+        raise ValueError("external Go stable owner path invalid")
+    sources = {"source-go_shim.py": root / "source/go_shim.py",
+               "go_shim.py": root / "candidate/go_shim.py"}
+    raw = {}
+    for name, path in sources.items():
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("external Go source must be an explicit regular file")
+        raw[name] = path.read_bytes()
+    if sha(raw["source-go_shim.py"]) != GO_INSTALLED_PREIMAGE:
+        raise ValueError("external Go installed preimage mismatch")
+    dependencies = {}
+    for name in GO_APPLICATION_DEPENDENCIES:
+        path = root / "candidate" / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("external Go application dependency unavailable")
+        data = path.read_bytes()
+        dependencies[name] = {"sha256": sha(data), "bytes": len(data), "source": "candidate/" + name}
+    staged_dependencies = None
+    if staged_manifest is not None:
+        staged_dependencies = {}
+        for name, dependency in dependencies.items():
+            relative = "ext/" + name
+            staged = output / "native-code-stage" / relative
+            expected = staged_manifest.get(relative)
+            if (not isinstance(expected, str) or expected != dependency["sha256"]
+                    or staged.is_symlink() or not staged.is_file()
+                    or sha(staged.read_bytes()) != expected):
+                raise ValueError("external Go dependency differs from captured native stage")
+            staged_dependencies[name] = expected
+    record = {"schema": "native-external-go-component.v1", "component": "go_application_handler",
+        "destination_relative_to_stable_ext": "go_shim/go_shim.py", "stable_ext": stable_ext,
+        "installed_preimage_sha256": GO_INSTALLED_PREIMAGE,
+        "candidate_sha256": sha(raw["go_shim.py"]), "candidate_bytes": len(raw["go_shim.py"]),
+        "candidate_source": "candidate/go_shim.py", "dependencies": dependencies,
+        "native_stage_dependencies": staged_dependencies,
+        "preimage_source_ref": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6646945527",
+        "installation_state": "HELD_REQUIRES_PROTECTED_RELEASE_AND_EXISTING_OWNER_INSTALLATION"}
+    bundle = output / "external-go-component"
+    if bundle.is_symlink() or bundle.exists() and not bundle.is_dir():
+        raise ValueError("external Go bundle directory invalid")
+    for name in (*raw, "component.json"):
+        path = bundle / name
+        if path.is_symlink() or path.exists() and not path.is_file():
+            raise ValueError("external Go bundle member invalid")
+    bundle.mkdir(parents=True, exist_ok=True)
+    for name, data in raw.items():
+        (bundle / name).write_bytes(data)
+    (bundle / "component.json").write_text(json.dumps(record, sort_keys=True, indent=2) + "\n")
+    return record
+
+
 def main():
     draft = Path(__file__).resolve().parent
     root = draft.parent
@@ -180,6 +245,7 @@ def main():
         "deployment_rule": "Modified bytes must come from protected merged source; rebuild after any source change."}
     for name, value in (("native-manifest.json", manifest), ("native-source-inventory.json", record)):
         (output / name).write_text(json.dumps(value, sort_keys=True, indent=2) + "\n")
+    stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
     print(json.dumps({"native_files": len(manifest), "total_bytes": sum(v["bytes"] for v in files.values()),
         "manifest_sha256": sha((output / "native-manifest.json").read_bytes()),
         "source_inventory_sha256": sha((output / "native-source-inventory.json").read_bytes())}))

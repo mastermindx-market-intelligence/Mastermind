@@ -168,7 +168,8 @@ class GoLeaseGateway:
             raise LeaseGatewayError("application turn unavailable")
         return dict(zip((column[0] for column in cursor.description), row))
 
-    def begin_application(self, request, *, principal_id, host, deadline_ns=None):
+    def begin_application(self, request, *, principal_id, host, deadline_ns=None,
+                          expected_credential_ref=None):
         """Internal authenticated service context; never caller-supplied identity."""
         try:
             broker = self._application_owner()
@@ -177,7 +178,8 @@ class GoLeaseGateway:
                 raise LeaseGatewayError("application admission refused")
             result = broker.begin_application_turn(principal_id=principal_id, caller_host=host,
                 workload=request["workload"], turn_id=request["turn_id"], pool=request["pool"],
-                model=request["model"], deadline_ns=deadline_ns, transport_accounts=self._accounts)
+                model=request["model"], deadline_ns=deadline_ns, transport_accounts=self._accounts,
+                expected_credential_ref=expected_credential_ref)
             if not result["ok"] or result["disposition"] not in {"admitted", "existing"}:
                 return result
             connection = self._connection()
@@ -288,5 +290,18 @@ class GoLeaseGateway:
     def mark_application_unknown(self, dispatch_id, *, reason):
         return self._application_owner().mark_application_request_unknown(dispatch_id=dispatch_id, reason=reason)
 
-    def close_application_turn(self, *, principal_id, turn_id):
-        return self._application_owner().close_application_turn(principal_id=principal_id, turn_id=turn_id)
+    def close_application_turn(self, *, principal_id, turn_id, expected_host=None,
+                               expected_workload=None):
+        broker = self._application_owner()
+        if expected_host is not None or expected_workload is not None:
+            connection = self._connection()
+            try:
+                turn = self._application_turn_lookup(connection, principal_id, turn_id)
+                if (turn["caller_host"] != expected_host
+                        or turn["workload"] != expected_workload):
+                    raise LeaseGatewayError("application close scope refused")
+            finally:
+                connection.close()
+        # Turn scope is immutable in the same owner database; this is not an
+        # eligibility recheck that could block original uncertain settlement.
+        return broker.close_application_turn(principal_id=principal_id, turn_id=turn_id)
