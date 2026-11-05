@@ -94,7 +94,14 @@ tasks need no new plan.
 
 ### `WEB_CEO_DELEGATION.md`
 Mandatory companion to `ACTIVE_EXECUTION.md` for substantial Web CEO principal-duty,
-economics, packets, capacity routing or evidence/continuity work. No provider/account/credential/host/model-setting/reasoning-mode selection or lifecycle/admission/retry/transfer/effect/production authority.
+economics, parallel paid Fabric packets, bounded observation/continuation, capacity
+routing or evidence/continuity work. For practical fan-out, timer, CI/review and
+service-observation recipes, load the same-pin
+`integrations/studio_direct_mcp/fabric_plugin_source/skills/orchestrate-fabric-workflows/SKILL.md`.
+Discover the actual account's Fabric tools and source availability; a skill is not
+worker admission, helper installation or an idle Web-session wake mechanism.
+No provider/account/credential/host/model-setting/reasoning-mode selection or
+lifecycle/admission/retry/transfer/effect/production authority.
 
 ### `REVIEW_RETURN.md`
 Use when a worker/Fable/Claude/Codex/Grok session returns code, a PR, research or a claimed

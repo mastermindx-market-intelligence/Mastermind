@@ -67,7 +67,7 @@ Fabric run commissions (all stable originals; no duplicate retries):
 |---|---|---|
 | `client-inventory-20261105-c3-01` | Source client/tool/package census | terminal rc0; complete retained response 10,528 bytes; manual parent review; accepted digest `ebc4da744af83611f84263782f70bfa236b73a5d6e8e17319dd4f48068c9ddea` |
 | `inventory-20261105-c3-01` | Existing CI/Wake/consumer owner census | terminal rc0; complete retained response 6,372 bytes; manual parent review; accepted digest `19e5b0becdb045b27cfc45d15c7c99bafca8f8e7c09760eacff46fd314da044c` |
-| `wake-join-20261105-c3-01` | Validated CI continuation persistence through existing Wake ledger | terminal rc0; report received, promised patch retrieval outstanding; not accepted |
+| `wake-join-20261105-c3-01` | Validated CI continuation persistence through existing Wake ledger | terminal rc0; exact patch retrieved and tested; accepted retained response `70e66fa1b53c959af6317da9508cb005abc436daee003d985587df962c7c6ef7` after C3 integration corrections |
 | `finite-watch-20261105-c3-01` | Executable finite timer/CI/review/health observation + focused tests | terminal rc0; complete patch integrated as candidate, 86 focused tests pass; substantive source findings require repair; not accepted |
 | `guidance-20261105-c3-01` | Source AGENTS/delegation and account-neutral operating skill | original controller 34220; observed existing provider lease wait; no worker START yet |
 
@@ -110,3 +110,31 @@ return remains unaccepted until the exact artifact is retrieved, reviewed, and
 verified in the parent workspace. Its reported initial workspace collision was
 recovered by the worker in a unique isolated worktree; future packets require a
 run-derived unique worktree and no sibling workspace reuse.
+
+## Wake persistence integration proof
+
+The original terminal worker's 39,430-byte artifact was retrieved from its named
+Ubuntu3 path through the already configured host connection; SHA256
+`a269d9eada99ed7b5857ae4997a526f02e6a980b97f010a0fb0c721b65e52b3b`
+matched the retained report. The incumbent artifact exporter only accepts
+`/tmp/DIR/FILE`, while this worker returned `/tmp/FILE`; no export attempt was
+refused, no exporter configuration was changed, and no worker was relaunched.
+The original 32 tests passed in the parent workspace. C3 integration moved pure
+record construction outside the uncertain-write boundary, made trusted-caller
+provenance explicit, and added row-present response-loss, coherent correlation
+collision and timestamp replay cases. The 34-test intermediate plus 75 neighboring
+owner tests passed (109 total); final focused coverage has 36 cases, with the one
+incorrect assertion about the owner's error wording corrected and re-passed.
+No host/runtime/service configuration or production database was touched.
+
+`persist_candidate_continuation` is a private trusted-host composition. It
+validates canonical projection consistency, not account/root/grant authenticity.
+The existing host must establish binding provenance before calling it. Its
+receipt reports what this call did; it does not describe a prior obligation's
+current dispatch/ack state. Same canonical observer decision means the same
+source digest, not arbitrary later snapshots describing broadly similar CI.
+
+Finite-observer repair commission `web-fabric-autonomy-finite-repair-20261105-c3-02`
+uses the same original root/parent and exact candidate `adb8de6fc78104ced88cd217030a193a63219438`.
+Controller 67756 is reserved on Ubuntu3 and was observed waiting for existing
+MiniMax capacity. No worker START, reroute, duplicate or acceptance is claimed.
