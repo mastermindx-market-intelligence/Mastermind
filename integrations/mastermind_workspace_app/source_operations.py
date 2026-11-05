@@ -17,15 +17,17 @@ from integrations.mastermind_workspace_app.source_operation_principal import bin
 
 
 class WorkspaceSourceOperationService:
-    def __init__(self, *, create_owner=None, knowledge_owner=None, plan_proposal_owner=None, journey_recipes=None, host_supervisor=None, runtime_guard=None, canonical_data_source=None):
+    def __init__(self, *, create_owner=None, knowledge_owner=None, plan_proposal_owner=None, adoption_owner=None, journey_recipes=None, host_supervisor=None, runtime_guard=None, canonical_data_source=None):
         from integrations.mastermind_workspace_app.project_plan_proposal_service import ProjectPlanProposalSourceOwner
+        from integrations.mastermind_workspace_app.project_plan_adoption_service import ProjectPlanAdoptionSourceOwner
         from integrations.mastermind_workspace_app.project_journey_recipes import InstalledProjectJourneyRecipes
         if ((plan_proposal_owner is not None and type(plan_proposal_owner) is not ProjectPlanProposalSourceOwner)
+                or (adoption_owner is not None and type(adoption_owner) is not ProjectPlanAdoptionSourceOwner)
                 or (journey_recipes is not None and type(journey_recipes) is not InstalledProjectJourneyRecipes)):
             raise ValueError("actual project journey owner required")
         if ((create_owner is not None and type(create_owner) is not ProjectCreationSourceOwner)
                 or (knowledge_owner is not None and type(knowledge_owner) is not ProjectKnowledgeSourceOwner)
-                or (create_owner is None and knowledge_owner is None and plan_proposal_owner is None)):
+                or (create_owner is None and knowledge_owner is None and plan_proposal_owner is None and adoption_owner is None)):
             raise ValueError("actual source action owner required")
         if runtime_guard is not None and not callable(runtime_guard):
             raise ValueError("actual installed Runtime guard required")
@@ -37,7 +39,8 @@ class WorkspaceSourceOperationService:
         self._canonical_data_source = canonical_data_source
         self._create, self._knowledge = create_owner, knowledge_owner
         self._proposal, self._journey_recipes = plan_proposal_owner, journey_recipes
-        owners = [owner for owner in (create_owner, knowledge_owner, plan_proposal_owner) if owner is not None]
+        self._adoption = adoption_owner
+        owners = [owner for owner in (create_owner, knowledge_owner, plan_proposal_owner, adoption_owner) if owner is not None]
         self._store, self._supervisor = owners[0]._events.store, owners[0]._private.supervisor
         if any(owner._events.store is not self._store or owner._private.supervisor is not self._supervisor
                for owner in owners):
@@ -76,11 +79,13 @@ class WorkspaceSourceOperationService:
             owner = self._proposal
             if operation == "prepare":
                 raise ValueError("SAME_S19_PREPARATION_REQUIRED")
+        elif value["action"] == "ADOPT_PLAN":
+            owner = self._adoption
         elif value["action"] in {"add_project_file", "set_project_communication_preference"}:
             owner = self._knowledge
         else:
             owner = None
-        if owner is None or operation == "advance":
+        if owner is None or (operation == "advance" and owner is not self._adoption):
             raise ValueError("SOURCE_OPERATION_OWNER_UNAVAILABLE")
         needs_data = operation == "prepare"
         if operation == "submit" and type(owner) is ProjectKnowledgeSourceOwner:
@@ -105,6 +110,8 @@ class WorkspaceSourceOperationService:
                 lookup = {"schema": "mastermind.workspace_source_operation_lookup.v1",
                           **{k: value[k] for k in ("action", "request_id", "work_ref")}}
                 result = owner.submit(lookup=lookup, preview_witness=value["preview_witness"], principal=principal)
+            elif operation == "advance":
+                result = owner.advance(value, principal)
             else:
                 raise ValueError("SOURCE_OPERATION_OWNER_UNAVAILABLE")
         if operation != "prepare":
@@ -128,6 +135,12 @@ class WorkspaceSourceOperationService:
                 return common + ((owner._adapter._recipes.context,) if type(owner._adapter) is InstalledProjectCreationRecipeAdapter else (owner._adapter._compile_proposal,))
             if owner is self._proposal:
                 return common + (owner._basis,owner._result,owner._actor,owner._qualify_recipe)
+            if owner is self._adoption:
+                from integrations.mastermind_workspace_app.installed_plan_adoption import InstalledPlanAdoptionRecipeAdapter
+                if type(owner._adapter) is not InstalledPlanAdoptionRecipeAdapter:
+                    raise ValueError("actual installed plan adoption adapter required")
+                return common + (owner._capture,owner._actor,owner._qualify_recipe,
+                                 owner.advance,owner._adapter._recipes.context)
             return common + (owner._publisher_events, owner._adapter._compiler,
                              owner._adapter._compiler._installed_reader_binding,
                              owner._adapter._compiler._installed_context_owner,
@@ -136,7 +149,7 @@ class WorkspaceSourceOperationService:
         host = None if type(self._supervisor) is not MixedExecutionOwnerSupervisor else (
             self._supervisor.primary, tuple(self._supervisor.owners.items()), self._supervisor.runtime)
         return (self._store, self._supervisor, self._runtime_guard,
-                None if self._canonical_data_source is None else self._canonical_data_source.context_binding(), host, context(self._create), context(self._knowledge), context(self._proposal), self._journey_recipes)
+                None if self._canonical_data_source is None else self._canonical_data_source.context_binding(), host, context(self._create), context(self._knowledge), context(self._proposal), context(self._adoption), self._journey_recipes)
 
     def installed_binding(self):
         """Private installed factory composition; construction grants nothing."""

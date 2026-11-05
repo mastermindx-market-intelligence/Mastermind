@@ -70,10 +70,14 @@ class InstalledWorkspaceSourceOperations:
         create = ProjectCreationSourceOwner(events=events,private_inputs=private,permission_factory=contexts,
             adapter=InstalledProjectCreationRecipeAdapter(self._journey),publisher_binding=self._git.binding,
             qualify_publisher=data.qualify_publisher,pr_owner=self._git)
-        # The first coherent journey exposes CREATE and initial planning only.
-        # PLAN preparation is a following independently qualified source cut;
-        # no installed proposal owner is issued by this factory yet.
+        from integrations.mastermind_workspace_app.installed_project_plan_proposal import build_installed_project_plan_proposal
+        proposal = build_installed_project_plan_proposal(events=events,private_inputs=private,
+            contexts=contexts,journey=self._journey,data=data,git_identity=self._git)
+        from integrations.mastermind_workspace_app.installed_plan_adoption import build_plan_adoption_owner
+        adoption = build_plan_adoption_owner(collector=self._collector,data=data,
+            events=events,private_inputs=private,contexts=contexts,git_identity=self._git)
         service = WorkspaceSourceOperationService(create_owner=create,knowledge_owner=owner,
+            plan_proposal_owner=proposal,adoption_owner=adoption,
             journey_recipes=self._journey,host_supervisor=host,
             runtime_guard=lambda: self._runtime_guard(runtime),canonical_data_source=data)
         if self._runtime_guard(runtime) is not True:
