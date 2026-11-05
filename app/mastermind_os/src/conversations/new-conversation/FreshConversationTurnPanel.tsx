@@ -23,6 +23,9 @@ export interface FreshConversationTurnPanelProps {
   onMessageChange: (value: string) => void;
   /** Parent hold on the draft input; this view never grants itself permission. */
   readOnly: boolean;
+  /** Native before-edit lookup hold: readonly but still focusable. */
+  messageReadOnly?:boolean;
+  onMessageFocus?:()=>void;
   /** Real guarded action nodes from the owner; this view never synthesizes one. */
   keepControl?: ReactNode;
   sendControl?: ReactNode;
@@ -117,7 +120,7 @@ function sourceRows(zh: boolean, operationState: OperationState | null,
  * decoded window and every guarded action; this component renders the handed
  * state, forwards exact draft text and never mints or infers a permission. */
 export function FreshConversationTurnPanel({ locale, data, operationState, activity, message,
-  onMessageChange, readOnly, keepControl, sendControl, checkControl, feedback, originalTurnMessage, initialConsumption = null, responsePending = false }: FreshConversationTurnPanelProps) {
+  onMessageChange, readOnly, keepControl, sendControl, checkControl, feedback, originalTurnMessage, initialConsumption = null, responsePending = false, messageReadOnly = false, onMessageFocus }: FreshConversationTurnPanelProps) {
   const inputId=useId();
   const zh = locale === "zh-CN";
   const text = (en: string, cn: string) => zh ? cn : en;
@@ -149,7 +152,7 @@ export function FreshConversationTurnPanel({ locale, data, operationState, activ
         {text("Your next message", "下一条消息")}
       </label>
       <textarea id={inputId} className="mm-fresh-conversation-turn-input"
-        value={message} disabled={inputHeld} rows={4}
+        value={message} disabled={inputHeld} readOnly={messageReadOnly} onFocus={onMessageFocus} rows={4}
         onChange={event => onMessageChange(event.target.value)} />
       <p className="mm-fresh-conversation-turn-hint">
         {text("This view supports one follow-up message.", "此视图仅支持一条后续消息。")}

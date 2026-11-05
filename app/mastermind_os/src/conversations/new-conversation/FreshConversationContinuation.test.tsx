@@ -79,3 +79,11 @@ it("masks a refused foreign-original turn draft without transplanting its text",
   expect((screen.getByRole("button",{name:"Keep first response"}) as HTMLButtonElement).disabled).toBe(true);
   expect(draft.message).toBe("Private previous original");for(const fn of Object.values(h.transport))expect(fn).not.toHaveBeenCalled();
 });
+it("reports only the genuine after-commit current read and retires it on revocation/unmount",async()=>{
+ const h=setup(),onReadCurrent=vi.fn();
+ const view=render(<FreshConversationContinuation {...h.props} entry={{kind:'initial',read:h.initial}} onReadCurrent={onReadCurrent}/>);
+ expect(onReadCurrent).toHaveBeenLastCalledWith(h.initial);
+ h.setCurrent(false);view.rerender(<FreshConversationContinuation {...h.props} entry={{kind:'initial',read:h.initial}} onReadCurrent={onReadCurrent}/>);
+ expect(onReadCurrent).toHaveBeenLastCalledWith(null);view.unmount();expect(onReadCurrent).toHaveBeenLastCalledWith(null);
+ for(const method of Object.values(h.transport))expect(method).not.toHaveBeenCalled();
+});

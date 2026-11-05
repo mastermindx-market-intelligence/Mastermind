@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 // Actual A4E6 raw frames, incumbent port/controller, named inert owner/store.
-import {useState} from "react";
+import {useState,useLayoutEffect} from "react";
+import type {MissionHost} from "../../host";
+import {useFreshConversationTurnDraftState} from "./useFreshConversationTurnDraftState";
 import {afterEach,beforeEach,expect,it,vi} from "vitest";
-import {cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
+import {act,cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
 import type {OperationPointer,OwnerContext,PendingPointerStore} from "../../orchestration/operation-controller";
 import {createFreshConversationAttendedBinding,type FreshConversationOriginalRead} from "./fresh-conversation-attended-binding";
 import {useFreshConversationContinuation,type FreshConversationContinuationProps} from "./useFreshConversationContinuation";
@@ -178,4 +180,47 @@ it("accepted turn with unavailable reply stays on original Check, without anothe
   expect(screen.queryByText("Continuing is unavailable here right now. Your message remains a draft.")).toBeNull();
   fireEvent.click(screen.getByRole("button",{name:"Check original request"}));await screen.findByText("Follow-up response recorded");
   expect(h.transport.turn).toHaveBeenCalledTimes(1);expect(h.transport.turnRead).toHaveBeenCalledTimes(2);
+});
+it("a temporary before-edit hold preserves the actual Keep receipt and unsent text",async()=>{
+  const h=setup();const mounted=render(<Harness config={h.props}/>);await keepAndRecover(h);
+  mounted.rerender(<Harness config={{...h.props,readOnly:true}}/>);
+  expect(screen.getByText("First response kept")).toBeTruthy();expect((screen.getByRole("textbox",{name:"Your next message"}) as HTMLTextAreaElement).disabled).toBe(true);
+  expect(screen.queryByRole("button",{name:"Review message"})).toBeNull();
+  mounted.rerender(<Harness config={h.props}/>);
+  expect(screen.getByText("First response kept")).toBeTruthy();expect((screen.getByRole("textbox",{name:"Your next message"}) as HTMLTextAreaElement).value).toBe(fixture.turn_request.message);
+  expect(h.transport.consume).toHaveBeenCalledTimes(1);
+});
+
+it("the real ephemeral owner settles recorded sent text, preserves displayed original, and permits another original after Back",async()=>{
+  const h=setup();const owner=h.props.draftOwner!;
+  const host={invalidationGeneration:()=>1,auth:{getState:()=>({status:"signed_in" as const,reason:null,acquisition:true,content:true}),subscribe:()=>()=>{},signIn:async()=>{},signOut:async()=>{}},freshConversation:{request:async()=>{throw Error("inert host: no direct transport");}}};
+  window.MastermindMissionHost=host as MissionHost;h.props.host=host;
+  const ownerProps={host,authRevision:1,currentAuthRevision:()=>1,getExecutiveOwner:()=>owner};
+  let draftApi:ReturnType<typeof useFreshConversationTurnDraftState>;
+  function Coupled(){
+    const draft=useFreshConversationTurnDraftState(ownerProps);draftApi=draft;
+    const [shown,setShown]=useState(true);
+    useLayoutEffect(()=>{draft.selectOriginal(h.read.selection);},[]);
+    return <>{shown?<><OwnedPanel draft={draft}/><button onClick={()=>setShown(false)}>Back from attended view</button></>:<p>Back at the list</p>}<output>{draft.hasUnsentDraft()?"Unsent text remains":"No unsent text"}</output></>;
+  }
+  function OwnedPanel({draft}:{draft:ReturnType<typeof useFreshConversationTurnDraftState>}){
+    const v=useFreshConversationContinuation({...h.props,message:draft.message,draftOwner:draft.draftOwner,onMessageChange:draft.onMessageChange,draftSubmission:draft});return v.panel;
+  }
+  const mounted=render(<Coupled/>);await keepAndRecover(h);
+  fireEvent.change(screen.getByRole('textbox',{name:'Your next message'}),{target:{value:fixture.turn_request.message}});
+  await screen.findByText('Unsent text remains');fireEvent.click(screen.getByRole('button',{name:'Review message'}));await screen.findByRole('heading',{name:'Review message'});
+  fireEvent.click(screen.getByRole('button',{name:'Send message'}));await screen.findByText('Follow-up response recorded');await screen.findByText('No unsent text');
+  expect(screen.getByText(fixture.turn_request.message)).toBeTruthy();expect(draftApi!.message).toBe('');
+  fireEvent.click(screen.getByRole('button',{name:'Back from attended view'}));await screen.findByText('Back at the list');
+  let changed=false;act(()=>{changed=draftApi!.selectOriginal({work_ref:'WS:OTHER',operation_key:'mmos-conversation-create-'+'f'.repeat(40)});});
+  expect(changed).toBe(true);expect(h.transport.turn).toHaveBeenCalledTimes(1);mounted.unmount();delete window.MastermindMissionHost;
+});
+it("native before-edit readonly remains focusable, rejects changes, and does not block Keep",async()=>{
+ const h=setup(),focus=vi.fn();const mounted=render(<Harness config={{...h.props,messageReadOnly:true,onMessageFocus:focus}}/>);
+ await keepAndRecover(h);const input=screen.getByRole('textbox',{name:'Your next message'}) as HTMLTextAreaElement;
+ expect(input.disabled).toBe(false);expect(input.readOnly).toBe(true);fireEvent.focus(input);expect(focus).toHaveBeenCalledTimes(1);
+ fireEvent.change(input,{target:{value:'Must not enter while checking'}});expect(input.value).toBe(fixture.turn_request.message);
+ expect((screen.getByRole('button',{name:'Review message'}) as HTMLButtonElement).disabled).toBe(true);
+ mounted.rerender(<Harness config={h.props}/>);expect((screen.getByRole('textbox',{name:'Your next message'}) as HTMLTextAreaElement).readOnly).toBe(false);
+ expect(h.transport.consume).toHaveBeenCalledTimes(1);
 });

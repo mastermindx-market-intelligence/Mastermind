@@ -2,12 +2,16 @@ import {useCallback,useRef,useState} from "react";
 import type {OwnerContext} from "../../orchestration/operation-controller";
 import {freshConversationTarget,parseFreshConversationTarget,type FreshConversationOriginalSelector} from "../../orchestration/fresh-conversation-target";
 import type {FreshConversationDraftStateProps} from "./useFreshConversationDraftState";
+import {decodeFreshConversationTurnResult,validateFreshConversationTurnRequest} from "./fresh-conversation-turn";
 
 type Props=FreshConversationDraftStateProps;
 type Actor={host:NonNullable<Props["host"]>;epoch:number;generation:number;owner:OwnerContext;
   auth:unknown;getState:unknown;generationMethod:unknown;transport:unknown;request:unknown;
   ownerGetter:Props["getExecutiveOwner"];epochGetter:Props["currentAuthRevision"]};
-type Record={actor:Actor;selection:FreshConversationOriginalSelector;target:string;text:string;held:boolean};
+/** Opaque local text association, never an operation receipt or authority. */
+export type FreshConversationTurnDraftCapture=Readonly<object>;
+type Submission={token:FreshConversationTurnDraftCapture;key:string;text:string;author:Actor};
+type Record={actor:Actor;selection:FreshConversationOriginalSelector;target:string;text:string;held:boolean;submission:Submission|null};
 export interface FreshConversationTurnDraftState {
   readonly selection:FreshConversationOriginalSelector|null;
   readonly message:string;
@@ -17,6 +21,11 @@ export interface FreshConversationTurnDraftState {
   hasUnsentDraft:()=>boolean;
   invalidateAuth:(preserve:boolean)=>void;
   discard:()=>void;
+  readonly submittedTurnKey:string|null;
+  captureSubmission:(turnKey:string,expectedMessage:string)=>FreshConversationTurnDraftCapture|null;
+  submissionFor:(turnKey:string)=>FreshConversationTurnDraftCapture|null;
+  /** Only a qualified original turn_read frame for the captured key can settle text. */
+  settleSubmission:(capture:FreshConversationTurnDraftCapture,rawTurnRead:unknown)=>boolean;
 }
 function capture(p:Props):Actor|null {
   try{
@@ -64,11 +73,11 @@ export function useFreshConversationTurnDraftState(props:Props):FreshConversatio
     if(old?.held)return false;
     if(old&&same(old.actor,actor)&&old.target===selected.target)return true;
     if(old?.text.length)return false;
-    update({...selected,actor,text:"",held:false});return true;
+    update({...selected,actor,text:"",held:false,submission:null});return true;
   };
   const onMessageChange=(message:string)=>{
     const old=visible();if(typeof message!=="string"||!old||old.target!==renderedTarget||!same(old.actor,actor))return;
-    update({...old,text:message});
+    if(message!==old.text)update({...old,text:message,submission:null});
   };
   const discard=()=>{
     const old=visible();if(!old||old.target!==renderedTarget||!same(old.actor,actor))return;
@@ -84,7 +93,31 @@ export function useFreshConversationTurnDraftState(props:Props):FreshConversatio
     // Quarantine alone never restores or exposes a body. S35's genuine native
     // boundary + E-author + exact original/facet closure is a separate join.
   },[]);
+  const submissionFor=(turnKey:string)=>{
+    const value=visible(),submission=value?.submission;
+    return submission&&submission.key===turnKey&&submission.text===value!.text&&
+      submission.author.host===value!.actor.host&&submission.author.owner.principalScope===value!.actor.owner.principalScope?submission.token:null;
+  };
+  const captureSubmission=(turnKey:string,expectedMessage:string)=>{
+    const value=visible();
+    if(!value||value.target!==renderedTarget||!same(value.actor,actor)||value.text!==expectedMessage||!value.text.length||
+      !/^mmos-conversation-turn-[0-9a-f]{40}$/.test(turnKey))return null;
+    const existing=submissionFor(turnKey);if(existing)return existing;
+    const token=Object.freeze({});
+    record.current={...value,submission:{token,key:turnKey,text:value.text,author:value.actor}};
+    return token;
+  };
+  const settleSubmission=(token:FreshConversationTurnDraftCapture,rawTurnRead:unknown)=>{
+    const value=visible(),submission=value?.submission;
+    if(!value||!submission||submission.token!==token||submissionFor(submission.key)!==token)return false;
+    const request=validateFreshConversationTurnRequest({...value.selection,turn_key:submission.key},"turn_read");
+    const decoded=request?decodeFreshConversationTurnResult(rawTurnRead,"turn_read",request):null;
+    if(!decoded?.ok||decoded.data.state!=="RECORDED"||decoded.data.effect!=="COMMITTED"||!decoded.data.result||
+      record.current!==value||visible()!==value||submissionFor(submission.key)!==token)return false;
+    update({...value,text:"",submission:null});return true;
+  };
   return {get selection(){return visible()?.selection??null;},get message(){return visible()?.text??"";},
     get draftOwner(){const value=visible();return value?{...value.actor.owner}:null;},
-    selectOriginal,onMessageChange,hasUnsentDraft,invalidateAuth,discard};
+    get submittedTurnKey(){const value=visible();return value?.submission&&submissionFor(value.submission.key)?value.submission.key:null;},
+    selectOriginal,onMessageChange,hasUnsentDraft,invalidateAuth,discard,captureSubmission,submissionFor,settleSubmission};
 }

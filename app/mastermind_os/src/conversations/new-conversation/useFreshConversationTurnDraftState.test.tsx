@@ -68,3 +68,24 @@ it("quarantines preserved text without nominal/automatic restore; explicit withd
   rerender(h.props);act(()=>{expect(result.current.selectOriginal(key)).toBe(false);});expect(result.current.message).toBe("");
   act(()=>result.current.invalidateAuth(false));act(()=>{expect(result.current.selectOriginal(key)).toBe(true);});expect(result.current.message).toBe("");
 });
+it("settles only its captured unchanged message from the exact recorded original turn_read, then permits another original",()=>{
+ const h=setup(),{result}=renderHook(()=>useFreshConversationTurnDraftState(h.props));
+ act(()=>result.current.selectOriginal(ref));act(()=>result.current.onMessageChange(fixture.turn_request.message));
+ let token:object|null=null;act(()=>{token=result.current.captureSubmission(fixture.turn_request.turn_key,fixture.turn_request.message);});
+ expect(token).not.toBeNull();expect(result.current.hasUnsentDraft()).toBe(true);
+ act(()=>{expect(result.current.settleSubmission(token!,fixture.lost_consume)).toBe(false);
+  expect(result.current.settleSubmission(token!,{...fixture.turn_read,data:{...fixture.turn_read.data,turn_key:'mmos-conversation-turn-'+'f'.repeat(40)}})).toBe(false);});expect(result.current.message).toBe(fixture.turn_request.message);
+ act(()=>{expect(result.current.settleSubmission(token!,fixture.turn_read)).toBe(true);});
+ expect(result.current.message).toBe('');expect(result.current.hasUnsentDraft()).toBe(false);expect(result.current.submittedTurnKey).toBeNull();
+ act(()=>{expect(result.current.selectOriginal(key)).toBe(true);});expect(result.current.selection).toEqual(key);
+});
+it("never settles newer text, another key, or a same-text edit made after capture",()=>{
+ const h=setup(),{result}=renderHook(()=>useFreshConversationTurnDraftState(h.props));
+ act(()=>result.current.selectOriginal(ref));act(()=>result.current.onMessageChange(fixture.turn_request.message));
+ let token:object|null=null;act(()=>{token=result.current.captureSubmission(fixture.turn_request.turn_key,fixture.turn_request.message);});
+ expect(result.current.submissionFor('mmos-conversation-turn-'+'f'.repeat(40))).toBeNull();
+ act(()=>result.current.onMessageChange('Newer unsent edit'));act(()=>{expect(result.current.settleSubmission(token!,fixture.turn_read)).toBe(false);});
+ expect(result.current.message).toBe('Newer unsent edit');
+ act(()=>result.current.onMessageChange(fixture.turn_request.message));act(()=>{expect(result.current.settleSubmission(token!,fixture.turn_read)).toBe(false);});
+ expect(result.current.message).toBe(fixture.turn_request.message);expect(h.request).not.toHaveBeenCalled();
+});

@@ -16,10 +16,13 @@ export interface FreshConversationContinuationProps extends Omit<HookProps,"read
   draftOwner?:OwnerContext|null;
   onMessageChange?:(message:string)=>void;
   /** Existing App-lifetime owner. Association happens after commit only. */
-  turnDraft?:Pick<FreshConversationTurnDraftState,"selection"|"message"|"draftOwner"|"selectOriginal"|"onMessageChange">;
+  turnDraft?:Pick<FreshConversationTurnDraftState,"selection"|"message"|"draftOwner"|"selectOriginal"|"onMessageChange">&
+    Partial<Pick<FreshConversationTurnDraftState,"captureSubmission"|"submissionFor"|"settleSubmission"|"submittedTurnKey">>;
   /** Stable, owner-guarded caller callback into its incumbent UI hold. False
    * withdraws this view's report; it never clears a durable original pointer. */
   onUnresolvedChange:(held:boolean)=>void;
+  /** After-commit notification of the actual issued witness; never a new read. */
+  onReadCurrent?:(read:FreshConversationOriginalRead|null)=>void;
 }
 
 /** Stable adapter around already issued reads. It does not mint a read ticket,
@@ -39,6 +42,11 @@ export function FreshConversationContinuation(props:FreshConversationContinuatio
   const selection=entry.kind==="initial"?entry.read.selection:
     {work_ref:entry.window.reference.work_ref,reference:entry.window.reference};
   const sourceReadOnly=entry.kind==="reference"&&(entry.window.state!=="RETAINED"||!entry.window.epoch||entry.window.turns.length>0);
+  const readIsCurrent=props.active&&read?.current()===true;
+  useLayoutEffect(()=>{
+    props.onReadCurrent?.(props.active&&read?.current()===true?read:null);
+    return()=>{props.onReadCurrent?.(null);};
+  },[props.onReadCurrent,read,props.active,readIsCurrent]);
   useLayoutEffect(()=>{
     if(props.active&&!props.readOnly&&!sourceReadOnly&&read?.current()===true)props.turnDraft?.selectOriginal(read.selection);
   });
@@ -46,6 +54,9 @@ export function FreshConversationContinuation(props:FreshConversationContinuatio
     freshConversationTarget(props.turnDraft.selection)===freshConversationTarget(read.selection);
   const associated=matchesDraft();
   const view=useFreshConversationContinuation({...props,read,selection,
+    draftSubmission:associated&&props.turnDraft?.captureSubmission&&props.turnDraft.submissionFor&&props.turnDraft.settleSubmission
+      ?{captureSubmission:props.turnDraft.captureSubmission,submissionFor:props.turnDraft.submissionFor,
+        settleSubmission:props.turnDraft.settleSubmission,get submittedTurnKey(){return props.turnDraft?.submittedTurnKey??null;}}:props.draftSubmission,
     message:props.turnDraft?(associated?props.turnDraft.message:""):props.message??"",
     draftOwner:props.turnDraft?(associated?props.turnDraft.draftOwner:null):props.draftOwner??null,
     onMessageChange:message=>{if(props.turnDraft){if(matchesDraft())props.turnDraft.onMessageChange(message);}else props.onMessageChange?.(message);},
