@@ -2079,6 +2079,7 @@ class CeoIngressAppBinding:
     principal_dialogue_provider_factory: Callable[[Runtime], Any] | None = None
     # Fixed optional App-peer owner; old positional/default construction stays unchanged.
     fresh_conversation_provider_factory: Callable[[Runtime], Any] | None = None
+    project_conversation_read_provider_factory: Callable[[Runtime], Any] | None = None
 
     def __post_init__(self) -> None:
         if type(self.peer_uid) is not int or self.peer_uid < 0:
@@ -2102,6 +2103,8 @@ class CeoIngressAppBinding:
             raise ValueError("project planning requires an installed host provider")
         if self.fresh_conversation_provider_factory is not None and not callable(self.fresh_conversation_provider_factory):
             raise ValueError("fresh conversation requires an installed host provider")
+        if self.project_conversation_read_provider_factory is not None and not callable(self.project_conversation_read_provider_factory):
+            raise ValueError("project conversations require an installed read provider")
         if self.principal_facts_factory is not None and not callable(self.principal_facts_factory):
             raise ValueError("principal facts require a host provider")
         if type(self.principal_admission_armed) is not bool:
@@ -5986,6 +5989,65 @@ class ExecutiveControlService:
                 # Once entered, transport loss never permits another callback or
                 # subscription mutation. The canonical Runtime CAS owns recovery.
                 await self._send_ceo_ingress_response(writer,{"ok":True,"result":event_result})
+                return
+            from common import project_conversation_read_contract as conversation_read_wire
+            if isinstance(parsed, Mapping) and parsed.get("schema") == conversation_read_wire.SCHEMA:
+                if not app_peer:
+                    await self._send_ceo_ingress_error(writer, "peer_denied", "project conversations require installed App peer")
+                    return
+                try:
+                    from integrations.session_bridge.installed import _principal
+                    from integrations.session_bridge.project_conversations import RuntimeProjectConversationsReader
+                    from control_plane.fresh_conversation import FreshConversationOwner
+                    frame = conversation_read_wire.frame(parsed)
+                    principal = _principal(frame["principal"])
+                    runtime = self._require_runtime()
+                    factory = app_binding.project_conversation_read_provider_factory
+                    fresh_factory = app_binding.fresh_conversation_provider_factory
+                    fresh_read = frame["operation"] in {"fresh_references", "fresh_read"}
+                    selected_factory = fresh_factory if fresh_read else factory
+                    if selected_factory is None:
+                        raise ValueError("read provider unavailable")
+                    provider = selected_factory(runtime)
+                    expected_type = FreshConversationOwner if fresh_read else RuntimeProjectConversationsReader
+                    if type(provider) is not expected_type or provider._runtime is not runtime:
+                        raise ValueError("read provider unavailable")
+                    source_stamp = ((provider._expected_policy, provider._trusted_read_pair) if fresh_read
+                                    else provider._source)
+                    def require_conversation_read_current():
+                        if (self._closing or not self._ceo_ingress_ready
+                                or self._service_state not in {"READY", "QUARANTINED"}
+                                or self._ceo_ingress_app_binding is not app_binding or not app_binding.armed
+                                or app_binding.project_conversation_read_provider_factory is not factory
+                                or app_binding.fresh_conversation_provider_factory is not fresh_factory
+                                or self._require_runtime() is not runtime
+                                or writer.get_extra_info("socket") is not connection
+                                or _peer_uid(connection) != app_binding.peer_uid
+                                or writer.is_closing() or writer.transport.is_closing()):
+                            raise ValueError("project conversation host changed")
+                        current = selected_factory(runtime)
+                        stamp = ((current._expected_policy, current._trusted_read_pair) if fresh_read
+                                 else current._source)
+                        if type(current) is not expected_type or current._runtime is not runtime or stamp != source_stamp:
+                            raise ValueError("project conversation source changed")
+                        if fresh_read and (current._service is not self or current._app is not app_binding):
+                            raise ValueError("fresh read owner changed")
+                        return True
+                    require_conversation_read_current()
+                    arguments = frame["arguments"]
+                    if frame["operation"] == "catalogue":
+                        result = provider.catalogue(principal, arguments, guard=require_conversation_read_current)
+                    elif frame["operation"] == "read":
+                        result = await provider.read(principal, arguments, guard=require_conversation_read_current)
+                    elif frame["operation"] == "fresh_references":
+                        result = provider.project_references(principal, arguments)
+                    else:
+                        result = provider.read_reference(principal, arguments)
+                    require_conversation_read_current()
+                    await self._send_ceo_ingress_response(writer, {"ok": True, "result": result},
+                        response_ceiling=conversation_read_wire.MAX_RESPONSE_BYTES)
+                except Exception:
+                    await self._send_ceo_ingress_error(writer, "ingress_unavailable", "project conversation reader unavailable")
                 return
             from common import fresh_conversation_contract as fresh_wire
             if isinstance(parsed, Mapping) and parsed.get("schema") == fresh_wire.SCHEMA:

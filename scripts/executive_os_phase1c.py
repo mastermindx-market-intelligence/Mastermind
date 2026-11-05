@@ -2833,6 +2833,15 @@ def _service_from_config(
                     reference_cursor_key=session_reference_cursor_key)
             session_factories["session_bridge_provider_factory"] = session_bridge_factory
             if session_read_policy_loader is not None and installed_profile == WEB_CEO_V3_PROFILE:
+                def project_conversation_read_factory(runtime):
+                    service._namespace_custody.bound_runtime(runtime)
+                    from integrations.session_bridge.installed import build_runtime_project_conversation_reader
+                    return build_runtime_project_conversation_reader(runtime,
+                        dialogue_socket_path=relay_readside_socket_path,
+                        codex_owner_configured=codex_owner_configured,
+                        authorized_policies=session_read_policy_loader(),
+                        reference_cursor_key=session_reference_cursor_key)
+                session_factories["project_conversation_read_provider_factory"] = project_conversation_read_factory
                 def fresh_conversation_factory(runtime):
                     # Same current root-sealed policy/namespace as the installed
                     # Session owner, never identity or arming supplied by a frame.

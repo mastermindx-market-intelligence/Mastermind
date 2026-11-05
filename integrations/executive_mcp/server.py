@@ -618,7 +618,8 @@ class _ExecutivePathFence:
     """Literal, query-free routes for the private stateless HTTP transport."""
 
     def __init__(self, app: Any, metadata_path: str, *, workspace_app=None, content_app=None, os_app=None,
-                 os_executive_transport=None, os_session_transport=None, fresh_conversation_transport=None, reconcile_route: bool = True):
+                 os_executive_transport=None, os_session_transport=None, fresh_conversation_transport=None,
+                 project_conversation_transport=None, reconcile_route: bool = True):
         self._app = app
         self._routes = {metadata_path: "GET", "/mcp": "POST"}
         if reconcile_route:
@@ -706,6 +707,10 @@ class _ExecutivePathFence:
             # Dual-resource headers do not replace the incumbent public
             # HTTPS/Host/Origin fence. Admit only these literal paths there.
             self._public_routes.update(_OS_FRESH_CONVERSATION_ROUTES)
+        if project_conversation_transport is not None:
+            from integrations.mastermind_executive_app.project_conversation_transport import ROUTES
+            self._routes.update({path: "POST" for path in ROUTES})
+            self._public_routes.update(ROUTES)
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope.get("type") == "http":
@@ -1162,6 +1167,7 @@ def _build_profile_mcp_app(
     os_transport_handler = None
     os_session_transport_handler = None
     fresh_conversation_handler = None
+    project_conversation_handler = None
     if enable_os_executive_transport:
         from integrations.mastermind_executive_app.os_transport import OsExecutiveTransportApp
         from integrations.mastermind_executive_app.direct_native import DirectNativeResultClient
@@ -1227,6 +1233,14 @@ def _build_profile_mcp_app(
                 submit_authenticator=submit_authenticators[os_pair_index],
                 clock=configured.clock,
             )
+        if os_session_transport_handler is not None:
+            from integrations.mastermind_executive_app.project_conversation_transport import (
+                ProjectConversationReadClient, ProjectConversationTransportApp,
+            )
+            project_conversation_handler = ProjectConversationTransportApp(
+                ProjectConversationReadClient(configured.ceo_ingress_socket_path,
+                    client=CeoIngressClient(connect_timeout=configured.connect_timeout, read_timeout=configured.read_timeout)),
+                auth_owner=os_session_transport_handler)
         if type(workspace_app) is AuditedWorkspaceApp and workspace_app._fresh_workspace_config is not None:
             from integrations.mastermind_executive_app.fresh_conversation_transport import (
                 FreshConversationTransportApp, InstalledFreshConversationClient,
@@ -1576,6 +1590,10 @@ def _build_profile_mcp_app(
     if fresh_conversation_handler is not None:
         for route_path in _OS_FRESH_CONVERSATION_ROUTES:
             outer_routes.append(Route(route_path, fresh_conversation_handler, methods=["POST"]))
+    if project_conversation_handler is not None:
+        from integrations.mastermind_executive_app.project_conversation_transport import ROUTES
+        for route_path in ROUTES:
+            outer_routes.append(Route(route_path, project_conversation_handler, methods=["POST"]))
     outer_app = Starlette(routes=outer_routes, lifespan=lifespan)
     outer_app.router.redirect_slashes = False
     #: Public, read-only view of the OS Executive transport handler (or None
@@ -1589,10 +1607,12 @@ def _build_profile_mcp_app(
                                       os_executive_transport=os_transport_handler,
                                       os_session_transport=os_session_transport_handler,
                                       fresh_conversation_transport=fresh_conversation_handler,
+                                      project_conversation_transport=project_conversation_handler,
                                       reconcile_route=not public_mode))
     guard.os_transport = os_transport_handler
     guard.os_session_transport = os_session_transport_handler
     guard.fresh_conversation_transport = fresh_conversation_handler
+    guard.project_conversation_transport = project_conversation_handler
     return guard
 
 
