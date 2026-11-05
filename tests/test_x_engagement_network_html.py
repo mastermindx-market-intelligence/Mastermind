@@ -156,7 +156,7 @@ process.stdout.write(JSON.stringify(result));
 def _renderer(action, *, cases=None, html=None):
     source = HTML.read_text(encoding="utf-8") if html is None else html
     scripts = re.findall(
-        r"<script\b([^>]*)>([\s\S]*?)</script\s*>", source,
+        r"<script\b([^>]*)>([\s\S]*?)</script\b[^>]*>", source,
         flags=re.IGNORECASE,
     )
     payloads = [body for attrs, body in scripts if 'id="payload"' in attrs]
@@ -183,6 +183,18 @@ def test_original_payload_and_graph_are_preserved():
     assert (result["edges"], result["sources"], result["names"]) == (181, 77, 98)
     assert result["groups"] == [61, 22, 7, 5, 3]
     assert len(result["positions"]) == 98
+
+
+
+@pytest.mark.parametrize("closing_tag", [
+    "</SCRIPT>", "</script >", "</script\t\n bar>", "</script/>",
+])
+def test_renderer_executes_the_same_shipped_scripts_with_html_end_tag_variants(closing_tag):
+    source = HTML.read_text(encoding="utf-8")
+    variant = source.replace("</script>", closing_tag)
+    assert variant != source
+    assert _renderer("stats", html=variant) == _renderer("stats")
+    assert _renderer("original", html=variant) == _renderer("original")
 
 
 def test_all_original_source_urls_remain_actionable():
