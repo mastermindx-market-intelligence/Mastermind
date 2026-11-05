@@ -27,7 +27,10 @@ _HEX = re.compile(r"[0-9a-f]{64}\Z")
 def validate_request(value, *, operation):
     if type(operation) is not str or operation not in {"preview", "create", "status", "read", "consume", "turn", "turn_status", "turn_read"}:
         raise ValueError("invalid operation")
-    keys = {"work_ref", "operation_key"}
+    reference_mode = "reference" in value if type(value) is dict else False
+    if reference_mode and operation not in {"consume", "turn", "turn_status", "turn_read"}:
+        raise ValueError("unexpected reference")
+    keys = {"work_ref", "reference" if reference_mode else "operation_key"}
     if operation in {"preview", "create", "turn"}:
         keys.add("message")
     if operation in {"consume", "turn"}:
@@ -39,8 +42,12 @@ def validate_request(value, *, operation):
     if type(value) is not dict or set(value) != keys:
         raise ValueError("invalid request")
     if (type(value["work_ref"]) is not str or not _WORK.fullmatch(value["work_ref"])
-            or type(value["operation_key"]) is not str or not _KEY.fullmatch(value["operation_key"])):
+            or (not reference_mode and (type(value["operation_key"]) is not str or not _KEY.fullmatch(value["operation_key"])))):
         raise ValueError("invalid selector")
+    if reference_mode:
+        validate_reference(value["reference"])
+        if value["reference"]["work_ref"] != value["work_ref"]:
+            raise ValueError("foreign work reference")
     if "turn_key" in keys and (type(value["turn_key"]) is not str or not _KEY.fullmatch(value["turn_key"])):
         raise ValueError("invalid turn key")
     if "initial_digest" in keys and (type(value["initial_digest"]) is not str or not _HEX.fullmatch(value["initial_digest"])):
@@ -135,11 +142,13 @@ def validate_data(value, request):
 
 
 def validate_turn_data(value, request):
-    keys = {"schema", "work_ref", "operation_key", "turn_key", "state", "effect",
+    keys = {"schema", "work_ref", "operation_key", "reference", "turn_key", "state", "effect",
         "initial_consumption", "locator", "result", "parent_consumed", "can_send"}
     if (type(value) is not dict or set(value) != keys
             or value["schema"] != "mastermind.executive.fresh_conversation_turn_data.v1"
-            or any(value[key] != request[key] for key in ("work_ref", "operation_key"))
+            or value["work_ref"] != request["work_ref"]
+            or value["operation_key"] != request.get("operation_key")
+            or value["reference"] != request.get("reference")
             or value["turn_key"] != request.get("turn_key")
             or value["state"] not in {"CONSUMED", "ABSENT", "RECONCILIATION_REQUIRED", "RECORDED"}
             or value["effect"] not in {"NONE", "COMMITTED", "UNKNOWN"}
@@ -156,7 +165,9 @@ def validate_turn_data(value, request):
     locator = value["locator"]
     if (type(locator) is not dict or set(locator) != {"work_ref", "root_job_id", "job_id", "attempt_id"}
             or locator["work_ref"] != request["work_ref"]
-            or any(type(locator[key]) is not str or not locator[key] for key in ("root_job_id", "job_id", "attempt_id"))):
+            or type(locator["root_job_id"]) is not str or not locator["root_job_id"]
+            or any((type(locator[key]) is not str or not locator[key])
+                and not (value["state"] == "ABSENT" and locator[key] is None) for key in ("job_id", "attempt_id"))):
         raise ValueError("invalid original locator")
     if value["state"] == "RECORDED":
         result = value["result"]
@@ -168,4 +179,16 @@ def validate_turn_data(value, request):
         raise ValueError("unexpected turn result")
     if value["state"] == "CONSUMED" and consumption is None:
         raise ValueError("missing consumption")
+    return dict(value)
+
+
+def validate_reference(value):
+    keys = {"schema", "work_ref", "root_job_id", "root_event_id", "root_event_sha256", "principal_scope_sha256"}
+    if (type(value) is not dict or set(value) != keys or value["schema"] != "mastermind.fresh_conversation_reference.v1"
+            or type(value["work_ref"]) is not str or not _WORK.fullmatch(value["work_ref"])
+            or type(value["root_job_id"]) is not str or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value["root_job_id"])
+            or type(value["root_event_id"]) is not int or value["root_event_id"] < 1
+            or any(type(value[key]) is not str or not _HEX.fullmatch(value[key])
+                for key in ("root_event_sha256", "principal_scope_sha256"))):
+        raise ValueError("invalid conversation reference")
     return dict(value)

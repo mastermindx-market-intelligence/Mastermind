@@ -38,6 +38,7 @@ class FreshConversationCreationSource:
     _operation: ForegroundOperation
     _material: bytes
     _guard: object
+    _public_operation_key: str
 
     def __post_init__(self):
         from control_plane.fresh_conversation import FreshConversationOwner
@@ -65,7 +66,18 @@ class FreshConversationCreationSource:
             raise ValueError("FRESH_CONVERSATION_SOURCE_CHANGED")
         if self._guard() is not None:
             raise ValueError("FRESH_CONVERSATION_SOURCE_CHANGED")
+        from control_plane.fresh_conversation import scoped_operation_key
+        from control_plane import ceo_intent, ceo_request
+        key = self._public_operation_key
+        if (type(key) is not str or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,95}", key)
+                or ceo_intent.command_id_for(ceo_request.automated_intent_id(
+                    ceo_request.app_request_ref(scoped_operation_key(operation._principal, key)))) != material["command_id"]):
+            raise ValueError("FRESH_CONVERSATION_ORIGINAL_KEY_CHANGED")
         operation._require_live()
+
+    def public_operation_key(self):
+        self.check()
+        return self._public_operation_key
 
     def check_intent(self, intent):
         from control_plane.ceo_intent import intent_fingerprint, INTENT_SCHEMA_V2
@@ -78,10 +90,10 @@ class FreshConversationCreationSource:
             raise ValueError("FRESH_CONVERSATION_SOURCE_MISMATCH")
 
 
-def _issue_creation_source(issuer, operation, material, guard):
+def _issue_creation_source(issuer, operation, material, guard, *, public_operation_key):
     material = validate_restriction(material)
     source = FreshConversationCreationSource(_SEAL, issuer, operation,
-        json.dumps(material, sort_keys=True, separators=(",", ":")).encode(), guard)
+        json.dumps(material, sort_keys=True, separators=(",", ":")).encode(), guard, public_operation_key)
     if getattr(operation, "_fresh_conversation_creation_source", None) is not None:
         raise ValueError("FRESH_CONVERSATION_SOURCE_ALREADY_ISSUED")
     operation._fresh_conversation_creation_source = (source, canonical_digest(material))

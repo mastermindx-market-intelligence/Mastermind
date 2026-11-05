@@ -117,7 +117,7 @@ def _response(request, state, *, consumption, locator, effect="NONE", result=Non
         work_ref=request["work_ref"], operation_key=request["operation_key"],
         turn_key=request.get("turn_key"), state=state, effect=effect,
         initial_consumption=consumption, locator=locator, result=result,
-        parent_consumed=False, can_send=can_send)
+        parent_consumed=False, can_send=can_send, reference=None)
 
 
 async def consume_initial(owner, principal, workspace, request, *, host_current):

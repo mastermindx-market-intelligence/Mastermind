@@ -67,6 +67,7 @@ async def mounted(tmp_path, rsa_key, monkeypatch):
     assert verified is not None
     principal = neutral_principal_projection(**dataclasses.asdict(verified))
     service, runtime, owner, principal, request, adapters = case(tmp_path, principal)
+    service._fixture_fresh_owner = owner
     backend = owner._app.workspace_read_provider_factory(runtime)
     wp = workspace_auth._workspace_policy(policy_id="workspace-test",
         allowed_subject_digests=list(ep.allowed_subject_digests))

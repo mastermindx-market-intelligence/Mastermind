@@ -28,11 +28,41 @@ def test_signed_consumed_parent_second_turn_original_read_and_no_replay(tmp_path
         monkeypatch.setattr(module,"read_turn",traced_read)
         try:
             _, preview = await post(app, "preview", request, token, wt)
+            from common.executive_workspace_contract import FRAME_SCHEMA,FRAME_SCHEMA_V2,PRINCIPAL_KEYS
+            backend=service._ceo_ingress_app_binding.workspace_read_provider_factory(runtime)
+            workspace_principal={key:calls[-1]["workspace_principal"][key] for key in PRINCIPAL_KEYS}
+            before_programs=runtime.events.list_events()
+            programs=await backend.handle_frame(dict(schema=FRAME_SCHEMA,operation="programs",selection=None,principal=workspace_principal))
+            assert programs["ok"] and runtime.events.list_events()==before_programs
             _, created = await post(app, "create", {**request,"preview_digest":preview["data"]["preview"]["digest"]}, token, wt)
             assert created["ok"] and created["data"]["state"] == "CREATED", created
-            selected = {key:request[key] for key in ("work_ref","operation_key")}
-            _, initial = await post(app,"read",selected,token)
-            initial_digest = initial["data"]["result"]["digest"]
+            from control_plane.fresh_conversation import FreshConversationOwner
+            from control_plane.principal_projection import neutral_principal_projection
+            raw=calls[-1]["principal"]
+            principal=neutral_principal_projection(**{**raw,"scopes":tuple(raw["scopes"])})
+            expected=(principal.policy_id,principal.issuer_digest,principal.resource)
+            from integrations.mastermind_executive_app.gateway import AppPolicies
+            from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
+            from tests import test_mastermind_executive_app_asgi as auth
+            import time
+            policies=AppPolicies(auth._read_policy(),auth._submit_policy())
+            read_auth=JwtAuthenticator(policy=policies.read,jwks_cache=auth._FakeJwksCache(rsa_key))
+            now=int(time.time());read_token=auth._read_token(rsa_key,iat=now-1,nbf=now-1,exp=now+600)
+            actual_read_principal=await read_auth.verify_token(read_token,now=now)
+            read_principal=neutral_principal_projection(**dataclasses.asdict(actual_read_principal))
+            reader=FreshConversationOwner(service,expected_policy=expected,authorized_policies=policies)
+            before_readers=runtime.events.list_events()
+            mission=await backend.handle_frame(dict(schema=FRAME_SCHEMA_V2,operation="mission_v3",
+                selection={key:created["data"]["locator"][key] for key in ("work_ref","root_job_id")},principal=workspace_principal))
+            assert mission["ok"]
+            # Simulate a fresh client/owner after persisted creation. Neither
+            # catalogue/Open nor the following public actions use the old key.
+            catalogue=reader.project_references(read_principal,{"work_ref":request["work_ref"]})
+            reference=catalogue["entries"][0]["reference"]
+            initial=FreshConversationOwner(service,expected_policy=expected,authorized_policies=policies).read_reference(read_principal,reference)
+            assert runtime.events.list_events()==before_readers
+            selected = dict(work_ref=request["work_ref"],reference=reference)
+            initial_digest = initial["initial_result"]["digest"]
             before = runtime.events.get_event_by_command_id("orchestration-result-seal:"+created["data"]["locator"]["attempt_id"])
             consume_request = {**selected,"initial_digest":initial_digest}
             _, consumed = await post(app,"consume",consume_request,token,wt)
@@ -57,11 +87,18 @@ def test_signed_consumed_parent_second_turn_original_read_and_no_replay(tmp_path
             assert runtime.events.list_events() == events and adapters[0].begin_turn_calls == 2
             _, status = await post(app,"turn_status",turn_selected,token)
             assert status["ok"] and status["data"]["result"] == second["data"]["result"]
+            task=service._dispatch_tasks.get(created["data"]["locator"]["job_id"])
+            if task is not None:await asyncio.wait_for(asyncio.shield(task),5)
+            archived=FreshConversationOwner(service,expected_policy=expected,authorized_policies=policies).read_reference(read_principal,reference)
+            assert archived["epoch"] is None and archived["state"]=="SETTLED"
+            assert archived["initial_result"]["digest"]==initial_digest
+            assert archived["turns"][0]["result"]==second["data"]["result"]
+            assert "operation_key" not in consume_request and second["data"]["operation_key"] is None
             path = os.environ.get("S34_TURN_FIXTURE_OUTPUT")
             if path:
                 with Path(path).open("x",encoding="utf-8") as stream:
-                    json.dump(dict(schema="mastermind.s34.attended_turn_fixture.v1", request=request,
-                        preview=preview,create=created,initial_read=initial,consume_request=consume_request,
+                    json.dump(dict(schema="mastermind.s34.attended_turn_fixture.v1", source_revision=os.environ["S34_SOURCE_REVISION"], request=request,
+                        preview=preview,programs=programs,create=created,mission=mission,catalogue=catalogue,initial_read=initial,archived_read=archived,consume_request=consume_request,
                         consume=consumed,turn_request=turn_request,turn=second,turn_read=read,
                         duplicate=repeated,status=status,actual_counts=dict(jobs=2,attempts=1,starts=1,turns=2),
                         seams=["fixture company authority/catalogue/host readiness", "actual RS256 resource verifiers",
