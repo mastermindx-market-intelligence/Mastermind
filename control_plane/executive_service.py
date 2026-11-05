@@ -7896,17 +7896,21 @@ class ExecutiveControlService:
             await self._signal_native_continuation()
             # Wake owns delivery and persisted ACK; no polling or provider retry.
             read_ref = await asyncio.wait_for(dispatch.continuation, timeout=_NATIVE_CONTINUATION_WAIT_SECONDS)
-            root = self._require_runtime().jobs.get_job(dispatch.retained.job.root_job_id)
-            if root is None:
-                raise StateConflict("native continuation lost its exact root")
-            self._native_return_source(root)  # Fresh installed read/execute admission.
-            await self._run_owned_coroutine(supervisor.run_native_continuation(
-                dispatch.retained, source=dispatch.source, read_ref=read_ref))
-            committed_reply = await dispatch.source.require_committed_native_reply(read_ref=read_ref)
-            # Notification is a separate post-COMMIT effect, not a native-Job
-            # terminalization prerequisite. Retain it under existing service
-            # physical-task custody; its Runtime reservation survives restart.
-            self._schedule_native_reply_events(read_ref, committed_reply)
+            from control_plane.fresh_conversation_turn import FreshConversationTurnSource, execute_attended_turn
+            if type(read_ref) is FreshConversationTurnSource:
+                await self._run_owned_coroutine(execute_attended_turn(self, dispatch, read_ref))
+            else:
+                root = self._require_runtime().jobs.get_job(dispatch.retained.job.root_job_id)
+                if root is None:
+                    raise StateConflict("native continuation lost its exact root")
+                self._native_return_source(root)  # Fresh installed read/execute admission.
+                await self._run_owned_coroutine(supervisor.run_native_continuation(
+                    dispatch.retained, source=dispatch.source, read_ref=read_ref))
+                committed_reply = await dispatch.source.require_committed_native_reply(read_ref=read_ref)
+                # Notification is a separate post-COMMIT effect, not a native-Job
+                # terminalization prerequisite. Retain it under existing service
+                # physical-task custody; its Runtime reservation survives restart.
+                self._schedule_native_reply_events(read_ref, committed_reply)
             await self._run_owned_coroutine(supervisor.finish_retained_native_job(dispatch.retained))
             await self._project_terminal_return(dispatch.job_id,
                 expected_attempt_id=lease.attempt.attempt_id)

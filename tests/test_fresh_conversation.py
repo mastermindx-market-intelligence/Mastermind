@@ -66,8 +66,21 @@ def case(tmp_path, principal=None):
                 raise OSError("inert provider start return lost")
             return observation
         def begin_turn(self, **kwargs):
-            if self._fresh_effect_guard is not None: self._fresh_effect_guard()
+            from control_plane.operator_harness_wire import to_wire
+            hook = getattr(service, "_fixture_before_turn_io", None)
+            if hook: hook(kwargs)
+            # Exercise the actual RemoteAdapter payload-bound prewrite selector,
+            # while the native provider/process remains the declared inert seam.
+            payload = {key: to_wire(kwargs[key]) for key in ("operation_id", "turn", "generation", "launch")}
+            options = self._fresh_write_options("ohf-begin-turn", payload)
+            if options: options["before_write"]("ohf-begin-turn", payload)
             return super().begin_turn(**kwargs)
+        def _canonical_result(self, turn):
+            value = json.loads(super()._canonical_result(turn))
+            if self.begin_turn_calls > 1:
+                value["summary"] = "Inert native follow-up answer."
+            from control_plane.executive_orchestration_result import canonical_bytes
+            return canonical_bytes(value).decode("utf-8")
     def factory(loader):
         adapter = InertNativeAdapter(runtime, loader)
         adapters.append(adapter)

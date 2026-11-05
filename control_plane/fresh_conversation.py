@@ -430,7 +430,7 @@ class FreshConversationOwner:
             workspace = projection(frame["workspace_principal"]) if frame["workspace_principal"] is not None else None
             if not callable(host_current) or host_current() is not None:
                 raise ConversationRefusal()
-            self._current(principal, read_only=operation in {"status", "read"})
+            self._current(principal, read_only=operation in {"status", "read", "turn_status", "turn_read"})
             if operation == "create":
                 if reader is None:
                     raise ConversationRefusal()
@@ -456,6 +456,20 @@ class FreshConversationOwner:
                     async with _observe_private_request_end(live, reader):
                         entered = True
                         value = await self.create(principal, frame["arguments"], workspace_principal=workspace)
+            elif operation in {"consume", "turn", "turn_status", "turn_read"}:
+                from control_plane.fresh_conversation_turn import consume_initial, submit_turn, read_turn
+                if operation in {"consume", "turn"}:
+                    def live_turn_request():
+                        if reader is None or reader.at_eof() or host_current() is not None:
+                            raise ConversationRefusal("request_closed")
+                        self._current(principal)
+                    live_turn_request()
+                    entered = True
+                    value = await (consume_initial if operation == "consume" else submit_turn)(
+                        self, principal, workspace, frame["arguments"], host_current=live_turn_request)
+                else:
+                    value = await read_turn(self, principal, frame["arguments"])
+                value = wire.validate_turn_data(value, frame["arguments"])
             elif operation == "preview":
                 value = await self.preview(principal, frame["arguments"], workspace_principal=workspace)
             elif operation == "status":
@@ -465,7 +479,7 @@ class FreshConversationOwner:
             try:
                 if host_current() is not None:
                     raise ConversationRefusal()
-                self._current(principal, read_only=operation in {"status", "read"})
+                self._current(principal, read_only=operation in {"status", "read", "turn_status", "turn_read"})
             except Exception:
                 raise ConversationRefusal("effect_unknown" if entered else "conversation_unavailable",
                     effect="UNKNOWN" if entered else "NONE") from None

@@ -12,7 +12,11 @@ SCHEMA = "mastermind.executive.fresh_conversation.v1"
 RESULT_SCHEMA = "mastermind.executive.fresh_conversation_result.v1"
 DATA_SCHEMA = "mastermind.executive.fresh_conversation_data.v1"
 ROUTES = {f"/os/executive/conversation/{operation}": operation
-          for operation in ("preview", "create", "status", "read")}
+          for operation in ("preview", "create", "status", "read", "consume", "turn")}
+ROUTES.update({"/os/executive/conversation/turn/status": "turn_status",
+    "/os/executive/conversation/turn/read": "turn_read"})
+MODIFYING = frozenset({"create", "consume", "turn"})
+DUAL_RESOURCE = MODIFYING | {"preview"}
 PRINCIPAL_FIELDS = frozenset({"policy_id", "issuer", "issuer_digest", "resource", "subject_digest",
     "client_ref", "scopes", "issued_at", "expires_at", "jti_digest"})
 _WORK = re.compile(r"WS:[A-Za-z0-9][A-Za-z0-9._-]{0,68}\Z")
@@ -21,11 +25,15 @@ _HEX = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def validate_request(value, *, operation):
-    if type(operation) is not str or operation not in {"preview", "create", "status", "read"}:
+    if type(operation) is not str or operation not in {"preview", "create", "status", "read", "consume", "turn", "turn_status", "turn_read"}:
         raise ValueError("invalid operation")
     keys = {"work_ref", "operation_key"}
-    if operation in {"preview", "create"}:
+    if operation in {"preview", "create", "turn"}:
         keys.add("message")
+    if operation in {"consume", "turn"}:
+        keys.add("initial_digest")
+    if operation in {"turn", "turn_status", "turn_read"}:
+        keys.add("turn_key")
     if operation == "create":
         keys.add("preview_digest")
     if type(value) is not dict or set(value) != keys:
@@ -33,6 +41,10 @@ def validate_request(value, *, operation):
     if (type(value["work_ref"]) is not str or not _WORK.fullmatch(value["work_ref"])
             or type(value["operation_key"]) is not str or not _KEY.fullmatch(value["operation_key"])):
         raise ValueError("invalid selector")
+    if "turn_key" in keys and (type(value["turn_key"]) is not str or not _KEY.fullmatch(value["turn_key"])):
+        raise ValueError("invalid turn key")
+    if "initial_digest" in keys and (type(value["initial_digest"]) is not str or not _HEX.fullmatch(value["initial_digest"])):
+        raise ValueError("invalid initial digest")
     if "message" in keys:
         message = value["message"]
         if (type(message) is not str or not message.strip() or len(message) > 700
@@ -83,7 +95,7 @@ def validate_private_frame(value):
         return {**raw, "scopes": list(raw["scopes"])}
     p = principal(value["principal"])
     workspace = value["workspace_principal"]
-    if operation in {"preview", "create"}:
+    if operation in DUAL_RESOURCE:
         workspace = principal(workspace)
     elif workspace is not None:
         raise ValueError("unexpected read principal")
@@ -91,6 +103,8 @@ def validate_private_frame(value):
 
 
 def validate_data(value, request):
+    if type(value) is dict and value.get("schema") == "mastermind.executive.fresh_conversation_turn_data.v1":
+        return validate_turn_data(value, request)
     keys = {"schema", "operation_key", "work_ref", "state", "effect", "parent_consumed",
         "preview", "locator", "session", "result", "can_send"}
     if (type(value) is not dict or set(value) != keys or value["schema"] != DATA_SCHEMA
@@ -117,4 +131,41 @@ def validate_data(value, request):
                 or type(result["envelope"]) is not dict or canonical_digest(result["envelope"]) != result["digest"]
                 or len(json.dumps(result["envelope"], ensure_ascii=False).encode("utf-8")) > 16384):
             raise ValueError("invalid result")
+    return dict(value)
+
+
+def validate_turn_data(value, request):
+    keys = {"schema", "work_ref", "operation_key", "turn_key", "state", "effect",
+        "initial_consumption", "locator", "result", "parent_consumed", "can_send"}
+    if (type(value) is not dict or set(value) != keys
+            or value["schema"] != "mastermind.executive.fresh_conversation_turn_data.v1"
+            or any(value[key] != request[key] for key in ("work_ref", "operation_key"))
+            or value["turn_key"] != request.get("turn_key")
+            or value["state"] not in {"CONSUMED", "ABSENT", "RECONCILIATION_REQUIRED", "RECORDED"}
+            or value["effect"] not in {"NONE", "COMMITTED", "UNKNOWN"}
+            or value["parent_consumed"] is not False or type(value["can_send"]) is not bool
+            or (value["can_send"] is True and value["state"] != "CONSUMED")):
+        raise ValueError("invalid turn data")
+    consumption = value["initial_consumption"]
+    if consumption is not None and (type(consumption) is not dict
+            or set(consumption) != {"state", "event_id", "event_sha256", "initial_digest"}
+            or consumption["state"] != "CONSUMED" or type(consumption["event_id"]) is not int
+            or consumption["event_id"] < 1 or any(type(consumption[key]) is not str
+                or not _HEX.fullmatch(consumption[key]) for key in ("event_sha256", "initial_digest"))):
+        raise ValueError("invalid consumption")
+    locator = value["locator"]
+    if (type(locator) is not dict or set(locator) != {"work_ref", "root_job_id", "job_id", "attempt_id"}
+            or locator["work_ref"] != request["work_ref"]
+            or any(type(locator[key]) is not str or not locator[key] for key in ("root_job_id", "job_id", "attempt_id"))):
+        raise ValueError("invalid original locator")
+    if value["state"] == "RECORDED":
+        result = value["result"]
+        if (consumption is None or type(result) is not dict or set(result) != {"digest", "envelope"}
+                or type(result["envelope"]) is not dict or canonical_digest(result["envelope"]) != result["digest"]
+                or len(json.dumps(result["envelope"], ensure_ascii=False).encode()) > 16384):
+            raise ValueError("invalid turn result")
+    elif value["result"] is not None:
+        raise ValueError("unexpected turn result")
+    if value["state"] == "CONSUMED" and consumption is None:
+        raise ValueError("missing consumption")
     return dict(value)

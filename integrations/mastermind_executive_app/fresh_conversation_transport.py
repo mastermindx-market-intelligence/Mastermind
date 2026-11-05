@@ -38,7 +38,7 @@ class InstalledFreshConversationClient:
 
     async def request(self, frame):
         frame = wire.validate_private_frame(frame)
-        if frame["operation"] == "create":
+        if frame["operation"] in wire.MODIFYING:
             # Incumbent transport and upstream attendance source; no new
             # framing flag or caller field may request a duplex lifetime.
             return await self.client._send_frame(self.socket_path, frame,
@@ -113,7 +113,7 @@ class FreshConversationTransportApp:
                 response = refused("authentication_required", 401)
             else:
                 workspace = workspace_token = stamp = None
-                if operation in {"preview", "create"}:
+                if operation in wire.DUAL_RESOURCE:
                     workspace_token = self._token(scope, b"x-mastermind-workspace-authorization")
                     workspace = await self._workspace_principal(workspace_token)
                     if workspace is None or any(getattr(workspace, key) != getattr(executive, key)
@@ -152,8 +152,8 @@ class FreshConversationTransportApp:
                 if result.transport == TRANSPORT_NOT_SENT:
                     response = refused("conversation_unavailable", 503)
                 elif result.transport != TRANSPORT_SENT_OK or result.ok is not True:
-                    response = refused("effect_unknown" if operation == "create" else "conversation_unavailable",
-                        202 if operation == "create" else 503)
+                    response = refused("effect_unknown" if operation in wire.MODIFYING else "conversation_unavailable",
+                        202 if operation in wire.MODIFYING else 503)
                 else:
                     value = result.result
                     if (type(value) is not dict or set(value) != {"schema", "operation", "ok", "data", "error"}
@@ -165,19 +165,19 @@ class FreshConversationTransportApp:
                             raise ValueError("foreign result")
                         wire.validate_data(value["data"], arguments)
                         if ((operation == "preview") != (value["data"]["state"] == "PREVIEW_READY")
-                                or (operation != "create" and value["data"]["effect"] != "NONE")):
+                                or (operation in {"preview", "status", "read"} and value["data"]["effect"] != "NONE")):
                             raise ValueError("foreign operation result")
                         response = JSONResponse(value, headers=_OS_HTTP_HEADERS)
                     else:
                         unknown = type(value["error"]) is dict and value["error"].get("code") == "effect_unknown"
                         response = refused("effect_unknown" if unknown else "refused", 202 if unknown else 403)
         except PermissionError:
-            response = refused("effect_unknown" if entered and operation == "create" else "authentication_required",
-                202 if entered and operation == "create" else 403)
+            response = refused("effect_unknown" if entered and operation in wire.MODIFYING else "authentication_required",
+                202 if entered and operation in wire.MODIFYING else 403)
         except (TypeError, ValueError, _InvalidBody, _ReceiveTimeout):
-            response = refused("effect_unknown" if entered and operation == "create" else "invalid_input",
-                202 if entered and operation == "create" else 400)
+            response = refused("effect_unknown" if entered and operation in wire.MODIFYING else "invalid_input",
+                202 if entered and operation in wire.MODIFYING else 400)
         except Exception:
-            response = refused("effect_unknown" if entered and operation == "create" else "conversation_unavailable",
-                202 if entered and operation == "create" else 503)
+            response = refused("effect_unknown" if entered and operation in wire.MODIFYING else "conversation_unavailable",
+                202 if entered and operation in wire.MODIFYING else 503)
         await response(scope, receive, send)
