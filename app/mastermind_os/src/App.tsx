@@ -16,6 +16,7 @@ import {
   type DirectionPreview, type OfficeLaunchOutcome,
 } from "./meta-ceo/preview";
 import { readLaunchBindingConfig } from "./launch-config";
+import { resolveLaunchBinding } from "./orchestration/executive-launch-command-port";
 import { Today } from "./today/Today";
 import { AttendedFabricWorkspace } from "./fabric/AttendedFabricWorkspace";
 import { qualifyWorkerResultRef } from "./fabric/mission-worker-result";
@@ -1499,6 +1500,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     // carries a sessionRef and never owns a command.
     [officeLaunchHandoff, setOfficeLaunchHandoff] = useState<{
       preview: DirectionPreview;
+      workstreamRef: string;
       binding: OrchestratorCommandBinding;
       principalScope: string;
       generation: string;
@@ -1516,7 +1518,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     passiveExpiryHold = useRef(false),
     // App already owns presentation state. These text-only snapshots survive
     // an unmount during passive expiry, never a new principal or sign-out.
-    [retainedComposerDrafts, setRetainedComposerDrafts] = useState({ launch: "", session: "" }),
+    [retainedComposerDrafts, setRetainedComposerDrafts] = useState({ launch: "", session: "", launchWorkstream: "" }),
     retainedComposerRef = useRef(retainedComposerDrafts),
     retainedComposerScope = useRef<string | null>(null),
     previousLiveComposerScope = useRef<string | null>(null),
@@ -1576,7 +1578,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   // The currently authenticated command scope is checked below, after the
   // qualified host identity has been read. Off-view Office text is inspected
   // independently of whether its component is mounted.
-  const updateRetainedComposer = (kind: "launch" | "session", text: string) => {
+  const updateRetainedComposer = (kind: "launch" | "session" | "launchWorkstream", text: string) => {
     const next = { ...retainedComposerRef.current, [kind]: text };
     retainedComposerRef.current = next;
     setRetainedComposerDrafts(next);
@@ -1639,12 +1641,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   // selection/owner epoch, even when a mounted leaf is later replaced.
   const presentedComposerDrafts = liveComposerScope &&
     retainedComposerScope.current === liveComposerScope
-      ? retainedComposerDrafts : { launch: "", session: "" };
+      ? retainedComposerDrafts : { launch: "", session: "", launchWorkstream: "" };
   useEffect(() => {
     if (!signedIn || !liveComposerScope) return;
     if (previousLiveComposerScope.current !== null &&
         previousLiveComposerScope.current !== liveComposerScope) {
-      const blank = { launch: "", session: "" };
+      const blank = { launch: "", session: "", launchWorkstream: "" };
       retainedComposerRef.current = blank;
       retainedComposerScope.current = null;
       setRetainedComposerDrafts(blank);
@@ -2057,7 +2059,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                  explicitLogoutRecorded())
           passiveExpiryHold.current = false;
         if (!passiveLoss) {
-          const blank = { launch: "", session: "" };
+          const blank = { launch: "", session: "", launchWorkstream: "" };
           retainedComposerRef.current = blank;
           retainedComposerScope.current = null;
           setRetainedComposerDrafts(blank);
@@ -3182,7 +3184,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       window.MastermindMissionHost?.commandBinding);
     const liveAuth = window.MastermindMissionHost?.auth?.getState();
     const liveOwner = liveBinding ? readOwnerContext(liveBinding.port) : null;
-    const launchAvailable = canLaunch && !!commandView &&
+    const frozenWorkstream = preview.context.selection?.workRef;
+    const config = readLaunchBindingConfig();
+    const enrolled = config && frozenWorkstream ? resolveLaunchBinding(config, frozenWorkstream) : null;
+    const launchAvailable = canLaunch && !!commandView && !!enrolled &&
       liveBinding === commandBinding &&
       liveAuth?.status === "signed_in" && !!liveOwner &&
       liveOwner.principalScope === ownerContext?.principalScope &&
@@ -3193,7 +3198,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       officeLaunchHandoff.preview.draft === preview.draft &&
       previewIsCurrent(officeLaunchHandoff.preview, office.projection.context);
     const outcome = decideOfficeLaunchHandoff(preview, office.projection.context, {
-      configuredWorkstream: readLaunchBindingConfig()?.workstream ?? null,
+      configuredWorkstream: enrolled?.workstream ?? null,
       selectedWorkstream: office.projection.context.selection?.workRef ?? null,
       launchAvailable,
       retainedGoal: retainedComposerDrafts.launch,
@@ -3204,9 +3209,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     if (alreadyOpen) return outcome;
     retainedComposerScope.current = liveComposerScope;
     updateRetainedComposer("launch", preview.draft);
+    updateRetainedComposer("launchWorkstream", frozenWorkstream!);
     setLaunchDraftDismissed(false);
     setOfficeLaunchHandoff({
       preview,
+      workstreamRef: frozenWorkstream!,
       binding: liveBinding!,
       principalScope: liveOwner!.principalScope,
       generation: liveOwner!.generation,
@@ -3252,6 +3259,22 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             ownerContext?.principalScope,
             ownerContext?.generation,
           ])}
+          workstreams={commandView.workstreams}
+          defaultWorkstream={commandView.defaultWorkstream}
+          workstreamRef={officeLaunchHandoff?.workstreamRef || presentedComposerDrafts.launchWorkstream || undefined}
+          lockWorkstream={officeLaunchHandoff !== null}
+          onWorkstreamChange={workstream => {
+            const liveBinding = completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
+            const liveOwner = liveBinding ? readOwnerContext(liveBinding.port) : null;
+            if (!officeLaunchHandoff && authRevisionRef.current === authRevision &&
+                window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
+                liveBinding === commandBinding &&
+                liveOwner?.principalScope === ownerContext?.principalScope &&
+                liveOwner?.generation === ownerContext?.generation) {
+              retainedComposerScope.current = liveComposerScope;
+              updateRetainedComposer("launchWorkstream", workstream);
+            }
+          }}
           projects={commandView.projects}
           profiles={commandView.profiles}
           frontierModels={commandView.frontierModels}
@@ -3268,6 +3291,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             {
               retainedComposerScope.current = liveComposerScope;
               updateRetainedComposer("launch", text);
+              if (!retainedComposerRef.current.launchWorkstream && commandView.defaultWorkstream)
+                updateRetainedComposer("launchWorkstream", commandView.defaultWorkstream);
             }
           }}
           unavailableReason={
@@ -3298,9 +3323,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             // and leaves the Office draft and the launch goal untouched.
             if (officeLaunchHandoff) {
               const liveOwner = readOwnerContext(binding.port);
+              const config = readLaunchBindingConfig();
+              const enrolled = config ? resolveLaunchBinding(config, officeLaunchHandoff.workstreamRef) : null;
               const workstreamAgrees = officeLaunchWorkstreamAgrees(
-                office.projection.context.selection?.workRef ?? null,
-                readLaunchBindingConfig()?.workstream ?? null);
+                officeLaunchHandoff.preview.context.selection?.workRef ?? null,
+                enrolled?.workstream ?? null) && form.workstreamRef === officeLaunchHandoff.workstreamRef;
               if (!previewIsCurrent(officeLaunchHandoff.preview, office.projection.context) ||
                   binding !== officeLaunchHandoff.binding ||
                   liveOwner?.principalScope !== officeLaunchHandoff.principalScope ||
@@ -3324,6 +3351,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               }
             }
             const intent = launchIntentFromBinding(binding, form);
+            if (officeLaunchHandoff && (!intent ||
+                intent.targetKey !== officeLaunchHandoff.workstreamRef ||
+                intent.payload.workstream !== officeLaunchHandoff.workstreamRef)) {
+              onComplete({ status: "refused" });
+              return;
+            }
             beginCommand("launch", intent, onComplete);
           }}
           onCancel={() => {

@@ -98,9 +98,9 @@ describe("Office launch handoff decision is inert and refuses rather than replac
       .toEqual({ status: "REFUSED", reason: "WORKSTREAM_MISMATCH" });
     expect(officeLaunchWorkstreamAgrees("WS:BETA", "WS:ALPHA")).toBe(false);
     expect(officeLaunchWorkstreamAgrees("WS:ALPHA", "WS:ALPHA")).toBe(true);
-    // An unselected Office may use the explicit configured workstream.
+    // An unselected Office cannot borrow the normal launcher default.
     // Missing configuration cannot establish a match.
-    expect(officeLaunchWorkstreamAgrees(null, "WS:ALPHA")).toBe(true);
+    expect(officeLaunchWorkstreamAgrees(null, "WS:ALPHA")).toBe(false);
     expect(officeLaunchWorkstreamAgrees("WS:ALPHA", null)).toBe(false);
     expect(officeLaunchWorkstreamAgrees(null, null)).toBe(false);
     expect(decideOfficeLaunchHandoff(preview, context, { ...owner, configuredWorkstream: null }))

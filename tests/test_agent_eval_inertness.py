@@ -706,6 +706,10 @@ ALLOWED_PATHS = frozenset(
         "evidence/CHAIRMAN_C2_RULING_AND_SELF_REVIEW.md",
         "scripts/agent_eval/harness_convergence.py",
         "tests/test_agent_eval_harness_convergence.py",
+        # Pro-turn conformance extension, Chairman-authorized 2026-09-17,
+        # operation pro-turn-conformance-corpus-20260917-sol-001.
+        "docs/superpowers/plans/2026-09-17-pro-turn-conformance-corpus.md",
+        "tests/test_agent_eval_pro_turn_corpus.py",
     }
 )
 
@@ -715,13 +719,13 @@ ALLOWED_PATHS = frozenset(
 # to this fence only by explicit principal authorization, never by the
 # wave's own worker unilaterally widening its own gate. C0's corpus tree
 # (``corpus/agent_eval/``) grows case-by-case across this and future
-# C0-lineage waves without renaming any script or test, so it is the one
-# path allowed as a PREFIX rather than an ever-growing enumerated file
-# list -- every other wave's surface (R0's own paths above, and C0's three
-# new exact files above) stays exact-path-only. A future wave widening
-# this ratchet further still needs its own explicit principal
-# authorization and its own operation-key citation, exactly like this one.
-ALLOWED_PATH_PREFIXES = frozenset({"corpus/agent_eval/"})
+# C0-lineage waves without renaming any script or test, so it established
+# the bounded corpus-prefix mechanism rather than an ever-growing file list.
+# The Chairman-authorized Pro-turn extension (2026-09-17, operation
+# pro-turn-conformance-corpus-20260917-sol-001) adds the second corpus prefix
+# while reusing the same filename/type guard below. Any further widening
+# still needs explicit principal authorization and its own operation citation.
+ALLOWED_PATH_PREFIXES = frozenset({"corpus/agent_eval/", "corpus/agent_eval_pro_turns/"})
 
 # NB-8 repair: a prefix in ALLOWED_PATH_PREFIXES is NOT a blanket allowance
 # for any file type dropped under that tree -- admission is further
@@ -780,7 +784,19 @@ def _changed_path_is_allowed(path: str) -> bool:
 #: ratchet-added to ALLOWED_PATHS -- it is still refused by the strict
 #: allowlist check below (ratchet discipline is unchanged), it is simply
 #: no longer misclassified as "foreign."
-PROGRAM_SURFACE_PREFIXES = frozenset({"scripts/agent_eval/", "corpus/agent_eval/", "tests/test_agent_eval_"})
+#:
+#: Applicability repair, 2026-11-05 (root/parent
+#: mastermind-queue-clearance-20261104-c1, commission
+#: pr798-corpus-applicability-repair-20261105-c1, original PR #798): the
+#: Pro-turn corpus prefix admitted by ALLOWED_PATH_PREFIXES above is ALSO
+#: program surface. Without this entry a delta whose only paths were under
+#: ``corpus/agent_eval_pro_turns/`` was classified "not applicable", so BOTH
+#: real fence entry points skipped before the allowlist check and the
+#: forbidden-surface check were ever applied to that corpus -- a standalone
+#: new-prefix delta escaped both fences. Membership here does not widen the
+#: allowlist: the filename/type guard, the strict allowlist check and the
+#: forbidden-surface rule are all unchanged.
+PROGRAM_SURFACE_PREFIXES = frozenset({"scripts/agent_eval/", "corpus/agent_eval/", "corpus/agent_eval_pro_turns/", "tests/test_agent_eval_"})
 
 #: DERIVED from ALLOWED_PATHS (never hand-duplicated) for the small number
 #: of program files that don't fall under any prefix above: the top-level
@@ -1302,3 +1318,183 @@ def test_ordinary_branch_conservatively_includes_inherited_queue_delta(
         "scripts/agent_eval/store.py",
     }
     assert {"scripts/agent_eval/store.py"} <= changed
+
+
+# ---------------------------------------------------------------------------
+# 4d. Pro-turn corpus prefix: narrow ratchet + applicability regressions
+# ---------------------------------------------------------------------------
+#
+# Commission pr798-corpus-applicability-repair-20261105-c1 (root/parent
+# mastermind-queue-clearance-20261104-c1), original PR #798.
+#
+# The original #798 ratchet admitted the ``corpus/agent_eval_pro_turns/``
+# prefix through ALLOWED_PATH_PREFIXES (with the corpus law's own
+# filename/type guard) but never made that prefix PROGRAM SURFACE. A delta
+# whose only paths were under the new prefix was therefore classified
+# "not applicable" and BOTH real fence entry points skipped before they
+# evaluated it -- so neither the allowlist rule nor the forbidden-surface
+# rule was ever applied to that corpus. The original helper-only negative
+# control below (a direct ``_changed_path_is_allowed`` call) cannot see
+# that defect: it never reaches the real fences.
+#
+# The regressions below therefore drive the REAL fence entry points against
+# REAL temporary Git repositories whose delta contains ONLY the new prefix,
+# so no already-recognized companion path can mask applicability, and they
+# call the REAL ``compute_pr_diff_paths``. Nothing about changed paths, the
+# classifier, the skip decision or an assertion is stubbed. An unexpected
+# skip is converted into an assertion failure: a fence that skipped would
+# otherwise be indistinguishable from a genuine pass.
+#
+# The pre-existing standalone-prefix regression in case (d) above covers the
+# three original PROGRAM_SURFACE_PREFIXES entries; this section adds the
+# Pro-turn prefix under the same "each prefix tested alone" discipline.
+
+
+def test_pro_turn_conformance_surface_ratchet_is_narrow():
+    assert _changed_path_is_allowed("docs/superpowers/plans/2026-09-17-pro-turn-conformance-corpus.md")
+    assert _changed_path_is_allowed("tests/test_agent_eval_pro_turn_corpus.py")
+    assert _changed_path_is_allowed("corpus/agent_eval_pro_turns/README.md")
+    assert _changed_path_is_allowed("corpus/agent_eval_pro_turns/scenarios/carrier_protocol_compliance/healthy_chunk/v1/scenario.json")
+    assert _changed_path_is_allowed("corpus/agent_eval_pro_turns/scenarios/carrier_protocol_compliance/healthy_chunk/v1/fixtures/input.json")
+    assert not _changed_path_is_allowed("corpus/agent_eval_pro_turns/scenarios/carrier_protocol_compliance/healthy_chunk/v1/payload.py")
+
+
+_PRO_TURN_PREFIX = "corpus/agent_eval_pro_turns/"
+
+
+def _standalone_prefix_delta_repo(
+    tmp_path: Path, name: str, files: list[tuple[str, str]],
+) -> Path:
+    """A real Git repository whose ONLY delta is ``files``.
+
+    The base commit holds a single unrelated file and ``origin/master``
+    points at it, so the effective PR delta is exactly the new files. No
+    already-recognized companion path is present: applicability can never
+    be masked by a second, separately allowlisted file.
+    """
+    repo = tmp_path / name
+    _git_init(repo)
+    _git_commit_file(repo, "README.md", "base\n", "base commit")
+    _run_git(["update-ref", "refs/remotes/origin/master", "master"], repo)
+    _run_git(["checkout", "-q", "-b", "feature"], repo)
+    for relative_path, content in files:
+        _git_commit_file(repo, relative_path, content, "NEW file under the Pro-turn corpus prefix")
+    return repo
+
+
+def _real_fence_outcome(fence_test) -> str:
+    """Run a REAL fence entry point; return "PASS" or its failure message.
+
+    A skip is converted into an assertion failure: the real fences skip
+    when the delta is classified "not applicable", and such a skip must
+    never be reported as a pass (nor accepted as a RED).
+    """
+    try:
+        fence_test()
+    except pytest.skip.Exception as exc:
+        raise AssertionError(
+            "real fence entry point SKIPPED instead of enforcing the changed-path rule: "
+            f"{exc}"
+        ) from exc
+    except AssertionError as exc:
+        return f"FAIL: {exc}"
+    return "PASS"
+
+
+def _bind_root_to_private_fixture(monkeypatch, repo: Path) -> None:
+    """Bind the fence's ROOT to a private fixture repository.
+
+    This is the same binding the existing #2071 native-queue tests use; it
+    does not stub the diff, the classifier, the skip decision or any
+    assertion.
+    """
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", repo)
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+
+
+def test_pro_turn_prefix_only_delta_reaches_both_real_fences(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """A delta of ONLY valid new-prefix corpus files must REACH both real
+    fence entry points and pass them.
+
+    Before the applicability repair this delta was classified "not
+    applicable" and both fences skipped -- the corpus was never policed.
+    """
+    files = [
+        (f"{_PRO_TURN_PREFIX}README.md", "pro-turn corpus\n"),
+        (f"{_PRO_TURN_PREFIX}scenarios/carrier_protocol_compliance/healthy_chunk/v1/scenario.json", "{}\n"),
+        (f"{_PRO_TURN_PREFIX}scenarios/carrier_protocol_compliance/healthy_chunk/v1/fixtures/input.json", "{}\n"),
+    ]
+    repo = _standalone_prefix_delta_repo(tmp_path, "pro_turn_prefix_only", files)
+    _bind_root_to_private_fixture(monkeypatch, repo)
+
+    changed = compute_pr_diff_paths(repo)
+    assert changed == {relative_path for relative_path, _ in files}
+    # The applicability boundary: a delta made only of program-surface
+    # paths must be fenced, not skipped as foreign.
+    assert _fence_not_applicable_reason(changed) is None
+    assert _real_fence_outcome(test_changed_paths_are_within_the_allowed_r0_surface) == "PASS"
+    assert _real_fence_outcome(test_no_control_plane_config_dependency_or_workflow_file_touched) == "PASS"
+
+
+def test_pro_turn_prefix_only_disallowed_payload_fails_the_real_allowlist_fence(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """A new-prefix delta whose only file is a disallowed type must REACH
+    the real allowlist fence and be refused by it.
+
+    The corpus law's own filename/type guard still refuses ``payload.py``:
+    membership in PROGRAM_SURFACE_PREFIXES classifies the delta as
+    in-program, it does not widen the allowlist.
+    """
+    payload = f"{_PRO_TURN_PREFIX}scenarios/carrier_protocol_compliance/healthy_chunk/v1/payload.py"
+    repo = _standalone_prefix_delta_repo(tmp_path, "pro_turn_payload_only", [(payload, "x = 1\n")])
+    _bind_root_to_private_fixture(monkeypatch, repo)
+
+    changed = compute_pr_diff_paths(repo)
+    assert changed == {payload}
+    assert _fence_not_applicable_reason(changed) is None
+    outcome = _real_fence_outcome(test_changed_paths_are_within_the_allowed_r0_surface)
+    assert outcome.startswith("FAIL"), outcome
+    assert "outside the allowed R0 surface" in outcome
+
+
+@pytest.mark.parametrize(
+    "forbidden_path",
+    [
+        "control_plane/bypass.py",
+        "config/agent_eval.yaml",
+        ".github/workflows/agent-eval.yml",
+        "requirements.txt",
+    ],
+    ids=["control_plane", "config", "workflow", "dependency"],
+)
+def test_pro_turn_prefix_plus_forbidden_path_fails_the_real_forbidden_fence(
+    tmp_path: Path, monkeypatch, forbidden_path: str,
+) -> None:
+    """A new-prefix corpus delta carrying one forbidden control-plane /
+    config / workflow / dependency path must REACH the real forbidden
+    fence and be refused by it -- and by the allowlist fence too.
+
+    The corpus path alone (without the classifier repair) was classified
+    "not applicable", so this mixed delta escaped BOTH fences.
+    """
+    files = [
+        (f"{_PRO_TURN_PREFIX}README.md", "pro-turn corpus\n"),
+        (forbidden_path, "forbidden surface\n"),
+    ]
+    repo = _standalone_prefix_delta_repo(
+        tmp_path, "pro_turn_forbidden_" + forbidden_path.replace("/", "_"), files,
+    )
+    _bind_root_to_private_fixture(monkeypatch, repo)
+
+    changed = compute_pr_diff_paths(repo)
+    assert changed == {relative_path for relative_path, _ in files}
+    assert _fence_not_applicable_reason(changed) is None
+    allowlist_outcome = _real_fence_outcome(test_changed_paths_are_within_the_allowed_r0_surface)
+    assert allowlist_outcome.startswith("FAIL"), allowlist_outcome
+    assert "outside the allowed R0 surface" in allowlist_outcome
+    forbidden_outcome = _real_fence_outcome(test_no_control_plane_config_dependency_or_workflow_file_touched)
+    assert forbidden_outcome.startswith("FAIL"), forbidden_outcome
+    assert "unexpected control-plane/config/workflow change" in forbidden_outcome

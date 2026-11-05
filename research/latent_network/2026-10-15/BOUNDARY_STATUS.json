@@ -1,0 +1,24 @@
+{
+  "recorded_at": "2026-10-15T10:41:49.262360+00:00",
+  "experiment": "LP-NETWORK-08",
+  "scope": "Independent network study; no earlier unpublished experiment included",
+  "run_process": 11443,
+  "last_confirmed_execution": "Both5/21-session model loops reached the2026 final annual fit; final aggregate not verified",
+  "aggregate_result_read": {
+    "tool": "Studio_Direct.start_process",
+    "requested_object": "private/run01/results.json in this independent research directory",
+    "platform_response": "This tool call was blocked by OpenAI because we could not determine the safety status of the request.",
+    "dispatch": "Blocked before a tool PID or response; no read effect confirmed",
+    "status": "UNVERIFIED; do not invent scores, gate verdict, successful completion or failure",
+    "retry_or_alternate_read": false
+  },
+  "method_review": {
+    "run_id": "lp-network08-method-review",
+    "original_root": "latent-pressure-research-20261014-chatgpt4-001",
+    "last_verified": "TERMINAL_RC0_RETURN_CONSUMED",
+    "quality_acceptance": "ADJUDICATED_NOT_ACCEPTED_AS_AN_UNQUALIFIED_VERDICT",
+    "adjudication": "REVIEW_ADJUDICATION.json"
+  },
+  "previous_work": "Earlier unpublished industry/shock worktree and restricted operations untouched; no duplicate shock experiment or oldresultpublication",
+  "publication_scope": "Only new protocol/source/tests/method references and explicit execution boundary; no uninspected outputs or source data"
+}

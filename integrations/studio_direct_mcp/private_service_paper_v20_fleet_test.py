@@ -156,6 +156,58 @@ def test_apply_all_eight_uses_real_lock_and_preserves_non_paper(seat, capsys):
         MODULE.cmd_paper_runtime_upgrade(args())
 
 
+def test_new_workspace_successor_full_dispatch_readonly_and_apply(seat, monkeypatch, capsys):
+    """Exercise the real v20 command; a pure cohort planner test misses dispatcher gates."""
+    make_args, config, manifest_path, plist, state, manifest, nonpaper, pin = seat
+    account = make_args().account
+    successors = {"admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9"}
+    if account not in successors:
+        pytest.skip("not a newer twelve-file successor")
+
+    # The base fixture represents the sealed original predecessor. Advance its
+    # manifest only, preserving config, plist and all original identity fields,
+    # exactly as the separate Git/Workspace publisher did in production.
+    manifest["files"].update({
+        f"workspace-fixture-{i:02d}.mjs": "a" * 64 for i in range(11)
+    })
+    assert len(manifest["files"]) == 12
+    manifest_path.write_bytes(as_bytes(manifest))
+    newer_pin = {**pin, "manifest_sha256": digest(manifest_path.read_bytes()),
+                 "file_count": len(manifest["files"])}
+    module = MODULE._frozen_paper_fleet_module()
+    monkeypatch.setattr(module, "WORKSPACE_12FILE_SUCCESSORS",
+                        {**module.WORKSPACE_12FILE_SUCCESSORS, account: newer_pin})
+
+    # Valid source+header+live fixture: PREVIEW has no effect, not even a lock file.
+    preview = make_args(True)
+    preview.expected_manifest_sha256 = newer_pin["manifest_sha256"]
+    original = (config.read_bytes(), manifest_path.read_bytes(), plist.read_bytes())
+    assert MODULE.cmd_paper_runtime_upgrade(preview) == 0
+    readback = json.loads(capsys.readouterr().out)
+    assert readback["effect"] == "NOT_APPLIED"
+    assert readback["originalManifestSha256"] == newer_pin["manifest_sha256"]
+    assert readback["preservedGatewayFiles"] == 12
+    assert original == (config.read_bytes(), manifest_path.read_bytes(), plist.read_bytes())
+    assert not (state / MODULE.C2_LIFECYCLE_LOCK_NAME).exists()
+
+    # Same original transaction, now on an exact newer predecessor.
+    apply = make_args()
+    apply.expected_manifest_sha256 = newer_pin["manifest_sha256"]
+    assert MODULE.cmd_paper_runtime_upgrade(apply) == 0
+    accepted = json.loads(capsys.readouterr().out)
+    assert accepted["effect"] == "APPLIED"
+    assert accepted["preservedGatewayFiles"] == 12
+    assert accepted["fromGeneration"] == "v10"
+    assert accepted["toGeneration"] == "v20"
+    installed = json.loads(config.read_bytes())
+    assert {k: v for k, v in installed.items() if k != "paperDesign"} == nonpaper
+    assert "/runtime/v20/" in installed["paperDesign"]["bridgePath"]
+    assert json.loads(manifest_path.read_bytes())["files"] == manifest["files"]
+    assert plist.read_bytes() == original[2]
+    with pytest.raises(SystemExit, match="CAS mismatch"):
+        MODULE.cmd_paper_runtime_upgrade(apply)
+
+
 def test_unknown_seat_real_mutex_refuses_without_widening():
     with pytest.raises(SystemExit, match="cannot select another account"):
         with MODULE._c2_lifecycle_mutex("unreviewed-paper-seat"):

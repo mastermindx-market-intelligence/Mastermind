@@ -13,6 +13,9 @@ Wants=network-online.target
 Type=simple
 User=proxy
 Group=proxy
+# Fixed root-owned one-shot prerequisite; refusal (78) skips this startup.
+# The + applies only here. Squid retains the restrictions below.
+ExecCondition=+/usr/bin/python3 -I -S /usr/local/libexec/mastermind-hermes-loopback.py ensure
 ExecStartPre=/usr/sbin/squid -k parse -f /etc/squid/hermes-byok.conf
 ExecStart=/usr/sbin/squid -N -f /etc/squid/hermes-byok.conf
 Restart=on-failure

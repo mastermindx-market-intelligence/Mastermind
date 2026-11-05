@@ -46,14 +46,14 @@ MANIFEST_PROJECTION={
 OBJECTIVE=('Assess launch-readiness from supplied exact release evidence. Two independent read-only '
     'analyses cover auth/admission/launch and return/recovery/effect preservation. Review only the '
     'auth/admission/launch analysis; the original parent reconciles both and labels the second unreviewed.')
-# Exact joined #1315 + protected H2 source pins: any reviewed input drift refuses.
+# Exact joined paid producer plus finite-workstream source; any input drift refuses.
 SOURCE_PINS={
     'app/mastermind_os/src/orchestration/operation-key.ts':
         'de1b4f7bf74030b6c71b956440801760452f17049d13fa423a9fac6aeec2562f',
     'app/mastermind_os/src/orchestration/executive-launch-command-port.ts':
-        'df1e3158fb84d0558d5b14c15a17b74dffcc5c32bb70106a9651aec3197fd5bd',
+        '27dc6e7e7f8a36a8af9f5beab0911d528059d1fbc1186c24ebfdea726c4a017e',
     'app/mastermind_os/src/launch-config.ts':
-        '00d1943314b17052a4d33626b5a6c9dcd4cddb09569aee146abc8cff4ca5ecf2',
+        '5a24a817790848228af05fa437bd8bdbbaa5ce12cc0feaeca6e20abb9e9e512e',
 }
 
 
