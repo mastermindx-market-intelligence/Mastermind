@@ -1429,3 +1429,139 @@ test('merge readback rejects a commit with the wrong parent before updating the 
     assert.equal((await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim(), f.head);
   } finally { await f.cleanup(); }
 });
+
+
+test('publication recovery: pre-existing unjournaled action remains UNKNOWN and never becomes retry authority', async () => {
+  const f = await fixture();
+  try {
+    const sha = (await import('node:crypto')).createHash('sha256')
+      .update('mastermind.studio_git_push_current_branch.v1\0')
+      .update(f.operationId).update('\0').update(f.branch).update('\0').update(f.head)
+      .digest('hex');
+    const publisher = createGitPublisher(f.config);
+    const observed = await publisher.status({operation_id:f.operationId, action_ref:sha});
+    assert.equal(observed.publication_recovery.outcome, 'UNKNOWN');
+    assert.equal(observed.publication_recovery.reason, 'NO_MATCHING_OR_LEGACY_RECEIPT');
+    assert.equal(observed.publication_recovery.retry_allowed, false);
+    assert.equal(await refsAt(f.remote), '');
+  } finally { await f.cleanup(); }
+});
+
+test('publication recovery: successful exact ref is journaled, survives a new publisher instance, and never republishes', async () => {
+  const f = await fixture();
+  try {
+    const writer = createGitPublisher(f.config);
+    const out = await writer.push({operation_id:f.operationId, expected_head_sha:f.head});
+    assert.equal(out.effect_state, 'APPLIED');
+    assert.equal(out.receipt_recorded, true);
+    const restart = createGitPublisher(f.config);
+    const status = await restart.status({operation_id:f.operationId, action_ref:out.action_ref});
+    assert.equal(status.publication_recovery.outcome, 'APPLIED');
+    assert.equal(status.publication_recovery.stage, 'TERMINAL');
+    assert.equal(status.publication_recovery.reason, 'REMOTE_EXACT_AFTER_PUSH');
+    let pushes = 0;
+    const replay = createGitPublisher(f.config, {execFile:async (file,args,options)=>{
+      if (file===GIT && gitCommand(args)==='push') pushes++;
+      return execFile(file,args,options);
+    }});
+    const result = await replay.push({operation_id:f.operationId, expected_head_sha:f.head});
+    assert.equal(result.code, 'ALREADY_APPLIED');
+    assert.equal(pushes, 0);
+  } finally { await f.cleanup(); }
+});
+
+test('publication recovery: lost reply after remote update is proven APPLIED on the original destination', async () => {
+  const f = await fixture();
+  try {
+    let injected = false;
+    const writer = createGitPublisher(f.config, {execFile:async (file,args,options)=>{
+      if (file===GIT && gitCommand(args)==='push' && !injected) {
+        injected = true;
+        await execFile(file,args,options);
+        const err = new Error('simulated lost response after external effect');
+        err.code = 'SIMULATED_LOSS';
+        throw err;
+      }
+      return execFile(file,args,options);
+    }});
+    const out = await writer.push({operation_id:f.operationId, expected_head_sha:f.head});
+    assert.equal(injected,true);
+    assert.equal(out.code, 'APPLIED_AFTER_AMBIGUOUS_PUSH_RETURN');
+    assert.equal(out.receipt_recorded,true);
+    const restart = createGitPublisher(f.config);
+    assert.equal((await restart.status({operation_id:f.operationId,action_ref:out.action_ref}))
+      .publication_recovery.outcome,'APPLIED');
+    assert.equal(await refsAt(f.remote), 'refs/heads/' + f.branch + ' ' + f.head);
+  } finally { await f.cleanup(); }
+});
+
+test('publication recovery: ambiguous dispatch is retained and blocks unchanged retry after restart', async () => {
+  const f = await fixture();
+  try {
+    let originalPushes = 0;
+    const writer = createGitPublisher(f.config, {execFile:async (file,args,options)=>{
+      if (file===GIT && gitCommand(args)==='push') {
+        originalPushes++;
+        throw Object.assign(new Error('lost dispatch'), {code:'SIMULATED_LOSS'});
+      }
+      return execFile(file,args,options);
+    }});
+    const out = await writer.push({operation_id:f.operationId, expected_head_sha:f.head});
+    assert.equal(out.effect_state,'EFFECT_UNKNOWN');
+    assert.equal(originalPushes,1);
+    const recovery = await createGitPublisher(f.config).status({operation_id:f.operationId,action_ref:out.action_ref});
+    assert.equal(recovery.publication_recovery.outcome,'UNKNOWN');
+    assert.equal(recovery.publication_recovery.stage,'DISPATCHING');
+    let replayCount = 0;
+    const newProcess = createGitPublisher(f.config, {execFile:async (file,args,options)=>{
+      if (file===GIT && gitCommand(args)==='push') replayCount++;
+      return execFile(file,args,options);
+    }});
+    const second = await newProcess.push({operation_id:f.operationId, expected_head_sha:f.head});
+    assert.equal(second.status,'REFUSED');
+    assert.equal(second.retry_allowed,false);
+    assert.equal(second.code,'UNRECONCILED_OR_DENIED_PUBLICATION');
+    assert.equal(replayCount,0);
+    assert.equal(await refsAt(f.remote),'');
+  } finally { await f.cleanup(); }
+});
+
+test('publication recovery: prepared-before-dispatch evidence stays held while an original writer could continue', async () => {
+  const f = await fixture();
+  try {
+    const digest = (await import('node:crypto')).createHash('sha256')
+      .update('mastermind.studio_git_push_current_branch.v1\0')
+      .update(f.operationId).update('\0').update(f.branch).update('\0').update(f.head)
+      .digest('hex');
+    const {createPublicationRecovery} = await import('./git-publish-recovery.mjs');
+    const recovery = await createPublicationRecovery({
+      git:(cwd,args)=>git(cwd,...args), workspacePath:f.workspace,
+      operationId:f.operationId, branch:f.branch, ref:'refs/heads/'+f.branch,
+      remoteUrl:f.remote,
+    });
+    const before = await recovery.begin({actionRef:digest,intendedHead:f.head,expectedRemote:null});
+    assert.equal(before.record.stage,'PREPARED');
+    const read = await createGitPublisher(f.config).status({operation_id:f.operationId,action_ref:digest});
+    assert.equal(read.publication_recovery.outcome,'UNKNOWN');
+    assert.equal(read.publication_recovery.reason,'WRITER_MAY_STILL_DISPATCH');
+    const refusal = await createGitPublisher(f.config).push({operation_id:f.operationId,expected_head_sha:f.head});
+    assert.equal(refusal.status,'REFUSED');
+    assert.equal(await refsAt(f.remote),'');
+  } finally { await f.cleanup(); }
+});
+
+test('publication recovery: incomplete or torn terminal receipt never creates success or retry clearance', async () => {
+  const f = await fixture();
+  try {
+    const out = await createGitPublisher(f.config).push({operation_id:f.operationId,expected_head_sha:f.head});
+    assert.equal(out.effect_state,'APPLIED');
+    const digest = (await import('node:crypto')).createHash('sha256')
+      .update(f.operationId+'\0'+f.branch).digest('hex');
+    const file = path.join(f.workspace,'.git','mastermind-studio-publication-receipts',digest,out.action_ref+'.json');
+    await writeFile(file,'{"schema":"torn"}\n');
+    const read = await createGitPublisher(f.config).status({operation_id:f.operationId,action_ref:out.action_ref});
+    assert.equal(read.publication_recovery.outcome,'UNKNOWN');
+    assert.equal(read.publication_recovery.reason,'INVALID_OR_TORN_RECEIPT');
+    assert.equal(read.publication_recovery.retry_allowed,false);
+  } finally { await f.cleanup(); }
+});
