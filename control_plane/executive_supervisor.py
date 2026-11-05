@@ -34,8 +34,11 @@ import urllib.request
 from enum import Enum
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from control_plane.terminal_original_input_artifacts import TerminalOriginalInputReference
 
 from control_plane.worker_execution_contract import (
     CleanupPolicy,
@@ -1622,6 +1625,98 @@ class ExecutiveSupervisor:
     def _run_dir(self, attempt_id: str) -> Path:
         return self.runs_root / attempt_id
 
+    def lookup_terminal_original_input(self, *, command_id: str, issuer_scope_sha256: str):
+        """Private same-command lookup only; no public input-ref authority."""
+        from control_plane.terminal_original_input_artifacts import TerminalInputError, TerminalOriginalInputArtifacts
+        if (type(command_id) is not str or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", command_id) is None
+                or type(issuer_scope_sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", issuer_scope_sha256) is None):
+            raise TerminalInputError("TERMINAL_INPUT_INVALID")
+        if self.runtime.store.find_event_by_command_id(command_id) is not None:
+            return None  # existing original command reconciles before artifact access
+        try:
+            self.runs_root.lstat()
+        except FileNotFoundError:
+            return None
+        return TerminalOriginalInputArtifacts(self.runs_root).lookup_original(
+            command_id=command_id, issuer_scope_sha256=issuer_scope_sha256)
+
+    def prepare_terminal_original_input(
+        self,
+        *,
+        command_id: str,
+        issuer_scope_sha256: str,
+        fingerprint_sha256: str,
+        payload: bytes,
+    ) -> TerminalOriginalInputReference | None:
+        """Prepare private source input before a NEW original Job insertion.
+
+        This is a private controller composition seam, not an ingress tool,
+        authority issuer, or source validator. The authenticated command owner
+        supplies its actual issuer scope and already validated typed producer
+        input; credentials must never enter the payload. An existing command
+        returns None BEFORE filesystem preparation so the caller must reconcile
+        that original operation through the existing sink, without retrofitting
+        resource input. A prepared reference proves custody only.
+
+        The original command owner must bind the returned immutable digest in
+        its Job insertion, and preserve its original carrier if that insertion
+        has an ambiguous outcome. This helper never inserts or dispatches a Job.
+        """
+        from control_plane.terminal_original_input_artifacts import (
+            TerminalInputError,
+            TerminalOriginalInputArtifacts,
+        )
+
+        if (
+            type(command_id) is not str
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", command_id) is None
+            or type(issuer_scope_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", issuer_scope_sha256) is None
+            or type(fingerprint_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", fingerprint_sha256) is None
+            or type(payload) is not bytes
+            or not 0 < len(payload) <= 256 * 1024
+        ):
+            raise TerminalInputError("TERMINAL_INPUT_INVALID")
+        if self.runtime.store.find_event_by_command_id(command_id) is not None:
+            return None
+
+        # runs_root already belongs to this Supervisor. This is the minimal
+        # new pre-Job allocator; incumbent _write_schema allocates after claim.
+        # Never create arbitrary ancestors or repair an unexpected directory.
+        try:
+            if not self.runs_root.exists():
+                flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+                descriptor = os.open(self.runs_root.parent, flags)
+                try:
+                    parent = os.fstat(descriptor)
+                    if (
+                        not stat.S_ISDIR(parent.st_mode)
+                        or parent.st_uid != os.geteuid()
+                        or stat.S_IMODE(parent.st_mode) & 0o022
+                    ):
+                        raise TerminalInputError("TERMINAL_INPUT_UNAVAILABLE")
+                    try:
+                        os.mkdir(self.runs_root.name, mode=0o700, dir_fd=descriptor)
+                    except FileExistsError:
+                        pass  # The immutable artifact owner checks the winner.
+                    os.fsync(descriptor)
+                    current = self.runs_root.parent.lstat()
+                    if (current.st_dev, current.st_ino) != (parent.st_dev, parent.st_ino):
+                        raise TerminalInputError("TERMINAL_INPUT_UNAVAILABLE")
+                finally:
+                    os.close(descriptor)
+            return TerminalOriginalInputArtifacts(self.runs_root).prepare(
+                command_id=command_id,
+                issuer_scope_sha256=issuer_scope_sha256,
+                fingerprint_sha256=fingerprint_sha256,
+                payload=payload,
+            )
+        except TerminalInputError:
+            raise
+        except Exception:
+            raise TerminalInputError("TERMINAL_INPUT_UNAVAILABLE") from None
+
     @staticmethod
     def _isolation_manifest(
         roots: Sequence[Path], *, workspace: Path, run_dir: Path
@@ -2173,7 +2268,10 @@ class ExecutiveSupervisor:
             isolation_denied_paths=isolation_denied,
             isolation_manifest=isolation_manifest,
             isolation_manifest_sha256=isolation_manifest_sha256,
-            forbidden_paths=(self.runtime.store.path,),
+            forbidden_paths=(
+                self.runtime.store.path,
+                self.runs_root / "terminal-original-input",
+            ),
             expected_worker_uid=self.worker_uid,
             expected_worker_gid=self.worker_gid,
             shared_run_gid=self.shared_run_gid,

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import {act, cleanup, fireEvent, render, screen, waitFor} from "@testing-library/react";
+import {act, cleanup, fireEvent, render, screen, waitFor, within} from "@testing-library/react";
 import {afterEach,beforeEach,expect,it,vi} from "vitest";
 import {IDBFactory} from "fake-indexeddb";
 import {App} from "./App";
@@ -95,7 +95,7 @@ it("keeps a lost Pause in the Workspace scope and recovers the same command on a
   expect(e.invoke.mock.calls.filter(([name])=>name==="read_project_admission_operation")).toHaveLength(0);
   fireEvent.click(screen.getByRole("button",{name:"Check pause status"}));await screen.findByText(/original request outcome is unresolved/);
   expect(await e.store.read(workspaceScope)).toEqual(pointer);
-  e.observe();fireEvent.click(screen.getByRole("button",{name:"Check original request"}));await screen.findByText(/Request committed/);
+  e.observe();fireEvent.click(within(screen.getByRole("region",{name:"New work"})).getByRole("button",{name:"Check original project request"}));await screen.findByText(/Request committed/);
   expect(e.invoke.mock.calls.filter(([name])=>name==="pause_project_admission")).toHaveLength(1);
   expect(e.invoke.mock.calls.filter(([name])=>name==="read_project_admission_operation")).toHaveLength(2);
   expect(e.launch.readOperation).not.toHaveBeenCalled();expect(e.launch.prepare).not.toHaveBeenCalled();

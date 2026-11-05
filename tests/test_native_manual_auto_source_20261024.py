@@ -23,7 +23,8 @@ PATCH = ROOT / "ops/native_fabric/patches/native_generation_manual_preview_20261
 FIXTURE = ROOT / "ops/native_fabric/qualification/native_manual_preview_fixture.py"
 HISTORICAL_TASK = ROOT / "research/proposals/fabric_refusal_diagnostics_20261102/fabric_task.py.base"
 PRE_LONG_HORIZON_TASK_SHA = "ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88"
-CURRENT_TASK_SHA = "7888f71c5e19d3a52c995d0537e383ace07100de719119a51c1d439b98c49a83"
+PRE_POLL255_TASK_SHA = "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b"
+CURRENT_TASK_SHA = "a812bdb36e10b71532f519b81bcd42d9fa49d3682bb7f384f3d18811e005ba6e"
 SOURCE = {
     "ext/fabric_task.py": ("fabric_task.py", "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b"),
     "ext/pick.py": ("pick.py", "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee"),
@@ -137,11 +138,53 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
             current = _inverse_judgment(_preobserver_picker())
         elif relative == "ext/fabric_task.py":
             assert sha(source) == CURRENT_TASK_SHA
-            # Current source is bound to this release's complete manifest.
-            # F1 still exercises its separately SHA-sealed historical task;
-            # later diagnostics must not be inverted into historical runtime.
-            manifest = json.loads((built / "native-manifest.json").read_bytes())
-            assert manifest[relative] == CURRENT_TASK_SHA
+            assert json.loads((built / "native-manifest.json").read_bytes())[relative] == CURRENT_TASK_SHA
+            # Restore the exact pre-poll-qualifier epoch first. The historical
+            # manual-auto fixture and every subsequent inverse stay immutable.
+            latest = source.read_bytes()
+            # Reverse ONLY the newly composed GLM2090 diagnostic additions to
+            # retain the exact earlier poll255/historical inverse proof.
+            diagnostic_call = b'    status.update(_terminal_provider_projection(rid, status, original_log, **owner))\n'
+            assert latest.count(diagnostic_call) == 1
+            latest = latest.replace(diagnostic_call, b'', 1)
+            diagnostic_start = b'\n\ndef _terminal_provider_projection('
+            diagnostic_end = b'\n\ndef read_result('
+            assert latest.count(diagnostic_start) == latest.count(diagnostic_end) == 1
+            lo = latest.index(diagnostic_start)
+            hi = latest.index(diagnostic_end, lo)
+            latest = latest[:lo] + latest[hi:]
+            advisory_start = b'    request_complexity = task_complexity if task_complexity is not None else env.get("POOL_TASK_COMPLEXITY", "")\n'
+            advisory_end = b'    # Freeze the input before route selection.'
+            assert latest.count(advisory_start) == latest.count(advisory_end) == 1
+            lo = latest.index(advisory_start)
+            hi = latest.index(advisory_end, lo)
+            latest = latest[:lo] + latest[hi:]
+            help_new = b'Intentional per-request Claude turn ceiling (1..400); omit for complex work unless a tighter limit is required; only reduces the existing admitted wrapper limit'
+            help_old = b'Per-request Claude turn ceiling (1..400); only tightens the existing admitted wrapper limit'
+            assert latest.count(help_new) == 1
+            latest = latest.replace(help_new, help_old, 1)
+            assert hashlib.sha256(latest).hexdigest() == 'baae8bb99ef6ccda1162dd486a10c8e713bcf4e731ba9160c5e9d1d9bdd1e7d8'
+            start = b'# These reviewed wrapper bytes classify normal SSH255 as controller uncertainty\n'
+            end = b'def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]:\n'
+            hook = (b'    if state == "EFFECT_UNKNOWN" and _qualify_completed_poll255(rid, original_log, **owner):\n'
+                    b'        state, rc, signal = "TERMINAL", 0, "ok"\n\n')
+            assert latest.count(start) == latest.count(end) == latest.count(hook) == 1
+            first, last = latest.index(start), latest.index(end)
+            assert first < last
+            pre_poll = (latest[:first] + latest[last:]).replace(hook, b'', 1)
+            assert hashlib.sha256(pre_poll).hexdigest() == PRE_POLL255_TASK_SHA
+            # Only the two finite budget constants differ at this boundary.
+            assert pre_poll.count(b'request_remaining_seconds <= 14400') == 1
+            assert pre_poll.count(b'time.monotonic_ns() + 14400 * 1_000_000_000') == 1
+            precursor = pre_poll.replace(
+                b'request_remaining_seconds <= 14400',
+                b'request_remaining_seconds <= 7200', 1,
+            ).replace(
+                b'time.monotonic_ns() + 14400 * 1_000_000_000',
+                b'time.monotonic_ns() + 7200 * 1_000_000_000', 1,
+            )
+            assert precursor != pre_poll
+            assert hashlib.sha256(precursor).hexdigest() == PRE_LONG_HORIZON_TASK_SHA
             assert sha(HISTORICAL_TASK) == AFTER[relative]
             current = HISTORICAL_TASK.read_bytes()
         else:

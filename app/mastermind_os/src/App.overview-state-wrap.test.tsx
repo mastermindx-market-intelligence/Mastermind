@@ -16,8 +16,11 @@ const selector = 'main .grid > .card > dl .state';
 function cssAtWidth(width: number) {
   const sheet = postcss.parse(css);
   // Model only this stylesheet's max-width media conditions, not browser layout.
+  // The short-drawer rule carries a max-height conjunction that touches only
+  // navigation-drawer selectors, never the badge selectors asserted below, so
+  // the width term alone decides inclusion; any other condition still throws.
   sheet.walkAtRules('media', rule => {
-    const match = rule.params.match(/^\(max-width:\s*(\d+)px\)$/);
+    const match = rule.params.match(/^\(max-width:\s*(\d+)px\)(?: and \(max-height:\s*(\d+)px\))?$/);
     if (!match) throw new Error(`Unsupported media condition: ${rule.params}`);
     if (width <= Number(match[1])) rule.replaceWith(...rule.nodes!);
     else rule.remove();

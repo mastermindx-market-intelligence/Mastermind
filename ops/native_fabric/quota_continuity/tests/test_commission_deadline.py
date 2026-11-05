@@ -142,7 +142,12 @@ elif name == 'ssh':
         if case == 'launch_timeout': time.sleep(10); raise SystemExit(0)
         raise SystemExit(0)
     if '__REMOTE_SUB_PENDING__' in command:
-        record('poll'); print('0' if case == 'plain_ok' else '75'); raise SystemExit(0)
+        record('poll')
+        if case in ('poll_255_then_ok', 'poll_255_pending') and count('poll') == 1:
+            raise SystemExit(255)
+        if case == 'poll_255_pending':
+            print('__REMOTE_SUB_PENDING__'); raise SystemExit(0)
+        print('0' if case in ('plain_ok', 'poll_255_then_ok') else '75'); raise SystemExit(0)
     if 'tail -c 4096' in command:
         record('admission_read')
         if case == 'admission_expiry': time.sleep(35)
@@ -363,6 +368,30 @@ class ControllerDeadline(unittest.TestCase):
         receipts=[json.loads(line) for line in receipt.read_text().splitlines()] if receipt.exists() else []
         return dict(returncode=proc.returncode,stdout=stdout,stderr=stderr,events=events,
                     elapsed=time.monotonic()-started,budget=budget,origin=origin,receipts=receipts)
+
+    def test_normal_ssh_poll255_keeps_actual_receipt_and_allows_original_completion(self):
+        result = self.run_controller('poll_255_then_ok', budget=30, harness_timeout=40)
+        polls = [row for row in result['receipts'] if row['label'] == 'commission-poll']
+        self.assertEqual([row['returncode'] for row in polls], [255, 0], result)
+        self.assertTrue(all(row['cleanup']['reason'] == 'normal_completion' for row in polls))
+        self.assertEqual(sum(row['stage'] == 'launch' for row in result['events']), 1)
+        self.assertIn('POLL_TRANSPORT_FAILED rc=1 poll=1', result['stderr'])
+        self.assertIn('DONE rc=0 signal=ok', result['stderr'])
+        self.assertNotIn('CONTROLLER_PROCESS_UNPROVEN', result['stderr'])
+        self.assertNotIn('LEASE_PRESERVED effect_unknown=1', result['stderr'])
+        self.assertEqual(result['returncode'], 0, result)
+
+    def test_normal_poll255_without_remote_completion_remains_uncertain(self):
+        # Allow the real setup/custody phases to reach the first poll. The
+        # original finite controller deadline must still retain the live effect.
+        result = self.run_controller('poll_255_pending', budget=30, harness_timeout=45)
+        polls = [row for row in result['receipts'] if row['label'] == 'commission-poll']
+        self.assertTrue(polls, result)
+        self.assertEqual(polls[0]['returncode'], 255, result)
+        self.assertIn('POLL_TRANSPORT_FAILED rc=1 poll=1', result['stderr'])
+        self.assertNotIn('DONE rc=0 signal=ok', result['stderr'])
+        self.assertIn('LEASE_PRESERVED effect_unknown=1', result['stderr'])
+        self.assertEqual(sum(row['stage'] == 'launch' for row in result['events']), 1)
 
     def test_real_bash_passes_origin_and_bounds_capacity_wait(self):
         result=self.run_controller('deny')

@@ -12554,6 +12554,9 @@ def _insert_cycle_child(
     """Insert one cycle-owned direct child inside its caller's transaction."""
     store._assert_owned_snapshot_connection(connection)
     _assert_workstream_admission_open(connection, _admission_root_workstream(connection, str(root_row["root_job_id"])))
+    from control_plane.instruction_admission_state import root_is_suspended
+    if root_is_suspended(connection, str(root_row["root_job_id"])):
+        raise StateConflict("INSTRUCTION_ADMISSION_SUSPENDED")
 
     nested_plan = plan_schema_version == "mastermind.execution_plan/v5"
     policy = CooCyclePolicy.load(version=2 if nested_plan else 1)
@@ -13798,6 +13801,20 @@ class JobRegistry:
     def __init__(self, store: RuntimeStore) -> None:
         self.store = store
 
+    def read_instruction_admission_suspension(self, work_ref: str, instruction_ref: str):
+        from control_plane.instruction_admission_state import current_pause
+        with self.store.read() as connection:
+            return current_pause(connection, work_ref, instruction_ref)
+
+    def read_instruction_admission_pause_command(self, work_ref: str, instruction_ref: str, *, command_id: str, actor: str):
+        from control_plane.instruction_admission_state import read_pause_command
+        return read_pause_command(self, work_ref, instruction_ref, command_id=command_id, actor=actor)
+
+    def pause_instruction_admission(self, binding, *, command_id: str, actor: str, _commit_guard):
+        """Pause only new work bound to one stable instruction, never a lease."""
+        from control_plane.instruction_admission_state import pause_in_owner
+        return pause_in_owner(self, binding, command_id=command_id, actor=actor, _commit_guard=_commit_guard)
+
     def admission_workstream_for_root(self, root_job_id: str) -> str | None:
         """Read the actual root creation association for a qualified App guard."""
         if type(root_job_id) is not str or re.fullmatch(r"JOB-[0-9]{1,9}", root_job_id) is None:
@@ -13917,6 +13934,7 @@ class JobRegistry:
         *,
         spec: _JobCreationSpec,
         _c2_capability: object | None = None,
+        _instruction_source: object | None = None,
     ) -> Job:
         """Own the existing Job insert plus immutable creation receipt.
 
@@ -13993,12 +14011,36 @@ class JobRegistry:
                 "private C2 capability requires exact carrier provenance"
             )
 
+        # Only the private nominal capture may label a NEW instruction root.
+        # Public provenance and private carrier inputs cannot manufacture it.
+        provenance = spec.event_provenance
+        instruction_fields = isinstance(provenance, Mapping) and any(key in provenance for key in ("instruction_source", "instruction_source_digest"))
+        if _instruction_source is not None or instruction_fields:
+            from control_plane.instruction_work_source import InstructionWorkSource
+            if (type(_instruction_source) is not InstructionWorkSource or spec.parent_job_id is not None
+                    or _c2_capability is not None or not instruction_fields):
+                raise StateConflict("INSTRUCTION_ADMISSION_SOURCE_REQUIRED")
+            from common.executive_workspace_contract import canonical as instruction_canonical
+            material = _instruction_source.material()
+            if (provenance.get("instruction_source") != material
+                    or provenance.get("instruction_source_digest") != hashlib.sha256(instruction_canonical(material)).hexdigest()
+                    or provenance.get("workstream") != material["work_ref"]):
+                raise StateConflict("INSTRUCTION_ADMISSION_SOURCE_MISMATCH")
+
         # The same writer lock orders pause against every normal/root/child
         # insert, including the private carrier caller. Children inherit only
         # their actual root's immutable creation source.
         work_ref = (_admission_workstream_from_provenance(spec.event_provenance)
             if spec.parent_job_id is None else _admission_root_workstream(connection, str(spec.parent_root_job_id)))
         _assert_workstream_admission_open(connection, work_ref)
+        from control_plane.instruction_admission_state import current_pause, root_is_suspended
+        if spec.parent_job_id is not None:
+            if root_is_suspended(connection, str(spec.parent_root_job_id)):
+                raise StateConflict("INSTRUCTION_ADMISSION_SUSPENDED")
+        elif _instruction_source is not None:
+            if current_pause(connection, material["work_ref"], material["instruction_ref"]) is not None:
+                raise StateConflict("INSTRUCTION_ADMISSION_SUSPENDED")
+            _instruction_source.check()
 
         numbers: list[int] = []
         for row in connection.execute("SELECT job_id FROM jobs"):
@@ -14138,6 +14180,11 @@ class JobRegistry:
             event_payload["provenance"] = dict(spec.event_provenance)
             if "direct_native" in spec.event_provenance:
                 event_payload["direct_workspace"]=dict(worktree=spec.worktree,branch=spec.branch,base_sha=spec.constraints["base_sha"])
+        if _instruction_source is not None:
+            # This owner-only creation field distinguishes NEW qualified roots
+            # from arbitrary historical provenance; no legacy Job is backfilled.
+            event_payload["instruction_admission"] = {"schema": "mastermind.instruction_driven_root.v1",
+                "source": material, "source_digest": hashlib.sha256(instruction_canonical(material)).hexdigest()}
         self.store.append_event(
             connection,
             aggregate_type="job",
@@ -14153,6 +14200,8 @@ class JobRegistry:
         ).fetchone()
         if row is None:  # pragma: no cover - same-transaction invariant
             raise PersistenceError("created Job disappeared inside its transaction")
+        if _instruction_source is not None:
+            _instruction_source.check()
         return _job_from_row(row)
 
     def create_v2_orchestration_root(
@@ -14165,6 +14214,8 @@ class JobRegistry:
         execution_binding: dict[str, Any] | None = None,
         dialogue_source: Mapping[str, Any] | None = None,
         frontier_selection: Mapping[str, Any] | None = None,
+        _instruction_source: object | None = None,
+        _instruction_admission_guard: Callable[[], None] | None = None,
     ) -> Job:
         """The sole strict v2 intent -> Phase 1F-C aggregation-root boundary.
 
@@ -14182,6 +14233,8 @@ class JobRegistry:
         )
 
         normalized = validate_intent(intent)
+        if (_instruction_source is None) != (_instruction_admission_guard is None):
+            raise StateConflict("instruction-driven root requires its current host admission guard")
         if normalized.get("schema") != INTENT_SCHEMA_V2:
             raise StateConflict(
                 "only strict mastermind.ceo_intent.v2 may create a COO root"
@@ -14262,6 +14315,8 @@ class JobRegistry:
                 "source_digest": fingerprint,
             },
             _v2_root_capability=_V2_ROOT_CREATION_CAPABILITY,
+            **({"_instruction_source": _instruction_source,
+                "_principal_commit_guard": _instruction_admission_guard} if _instruction_source is not None else {}),
         )
 
     def create_principal_orchestration_root(
@@ -14273,6 +14328,7 @@ class JobRegistry:
         execution_binding: Mapping[str, Any] | None = None,
         dialogue_source: Mapping[str, Any] | None = None,
         require_dialogue_source: bool = False,
+        _instruction_source: object | None = None,
     ) -> Job:
         """Create one source-only COO-principal aggregation root.
 
@@ -14410,6 +14466,9 @@ class JobRegistry:
                 "source_digest": bundle_digest,
             },
             _v2_root_capability=_V2_ROOT_CREATION_CAPABILITY,
+            **({"_instruction_source": _instruction_source,
+                "_principal_commit_guard": lambda: principal_admission_guard(normalized)}
+               if _instruction_source is not None else {}),
         )
 
     def create_cycle_planner(
@@ -16453,6 +16512,7 @@ class JobRegistry:
         _principal_commit_guard: Callable[[], None] | None = None,
         _planner_plan_schema_version: str | None = None,
         _direct_native_admission: direct_native.DirectNativeAdmission | None = None,
+        _instruction_source: object | None = None,
     ) -> Job:
         """Insert one QUEUED Job and its ``JOB_CREATED`` receipt in one transaction.
 
@@ -16468,6 +16528,24 @@ class JobRegistry:
         that must record who asked and on what grounding.  It changes no job
         column and confers no authority.
         """
+        instruction_fields = isinstance(provenance, Mapping) and any(key in provenance for key in ("instruction_source", "instruction_source_digest"))
+        if instruction_fields:
+            raise StateConflict("INSTRUCTION_ADMISSION_SOURCE_REQUIRED")
+        if _instruction_source is not None:
+            from control_plane.instruction_work_source import InstructionWorkSource
+            from common.executive_workspace_contract import canonical as instruction_canonical
+            if (type(_instruction_source) is not InstructionWorkSource or parent_job_id is not None
+                    or _principal_commit_guard is None or _direct_native_admission is not None):
+                raise StateConflict("INSTRUCTION_ADMISSION_SOURCE_REQUIRED")
+            material = _instruction_source.material()
+            if not isinstance(provenance, Mapping) or provenance.get("workstream") != material["work_ref"]:
+                raise StateConflict("INSTRUCTION_ADMISSION_SOURCE_MISMATCH")
+            grounding = provenance.get("grounding")
+            if grounding is not None and (not isinstance(grounding, Mapping)
+                    or grounding.get("macro_sha") != material["source"]["commit"]):
+                raise StateConflict("INSTRUCTION_ADMISSION_SOURCE_MISMATCH")
+            provenance = {**provenance, "instruction_source": material,
+                "instruction_source_digest": hashlib.sha256(instruction_canonical(material)).hexdigest()}
         if _direct_native_admission is not None:
             if type(_direct_native_admission) is not direct_native.DirectNativeAdmission:
                 raise StateConflict("direct native admission has no owner capability")
@@ -16992,6 +17070,7 @@ class JobRegistry:
                     timestamp_ms=timestamp,
                     planner_plan_schema_version=_planner_plan_schema_version,
                 ),
+                **({"_instruction_source": _instruction_source} if _instruction_source is not None else {}),
             )
             # Refusal rolls back both the Job and its JOB_CREATED event.
             recheck_principal()
@@ -17914,6 +17993,9 @@ class AttemptRegistry:
         # fresh Attempt creation, under the original atomic claim transaction.
         work_ref = _admission_root_workstream(connection, str(job_row["root_job_id"]))
         if work_ref is not None and _current_workstream_suspension(connection, work_ref) is not None:
+            return None
+        from control_plane.instruction_admission_state import root_is_suspended
+        if root_is_suspended(connection, str(job_row["root_job_id"])):
             return None
         unresolved = ReleaseMaintenanceRegistry(self.store).read_unresolved_admission(
             connection
@@ -26489,6 +26571,190 @@ def _read_role_result_bounded(
         vm_guard.deactivate()
 
 
+def _accounted_root_snapshot(loader: _BoundedRoleResultLoader, root_token: str) -> BoundedRuntimeRootSnapshot:
+    """One root page through the shared role-result loader.
+
+    The fixed root ceilings stay 17 Jobs, 20 Attempts per Job and 340 Attempts.
+    Every statement, including the size-check aggregate, is charged to ``loader``.
+    """
+
+    row = loader.execute(
+        "SELECT job_id,parent_job_id,root_job_id,depth FROM jobs WHERE job_id=?",
+        (root_token,),
+    ).fetchone()
+    if (
+        row is None
+        or row["job_id"] != root_token
+        or row["parent_job_id"] is not None
+        or row["root_job_id"] != root_token
+        or int(row["depth"]) != 0
+    ):
+        raise StateConflict("bounded acquisition root_job_id is not an existing root Job")
+    page_limit = 1 + BOUNDED_RUNTIME_ROOT_MAX_CHILDREN
+    rows = loader.execute(
+        "SELECT * FROM jobs WHERE (root_job_id=?) ORDER BY depth,created_at_ms,job_id LIMIT ?",
+        (root_token, page_limit + 1),
+    ).fetchall()
+    jobs_truncated = len(rows) > page_limit
+    page_rows = rows[:page_limit]
+    if not page_rows or str(page_rows[0]["job_id"]) != root_token:
+        raise PersistenceError("bounded Runtime root membership is invalid")
+    jobs = tuple(_job_from_row(item) for item in page_rows)
+    attempts: list[Attempt] = []
+    truncated_attempt_jobs: list[str] = []
+    for job in jobs:
+        attempt_rows = loader.execute(
+            "SELECT * FROM attempts WHERE (job_id=?) ORDER BY job_id,attempt_number LIMIT ?",
+            (job.job_id, BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS + 1),
+        ).fetchall()
+        if len(attempt_rows) > BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS:
+            truncated_attempt_jobs.append(job.job_id)
+            attempt_rows = attempt_rows[:BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS]
+        attempts.extend(_attempt_from_row(item) for item in attempt_rows)
+    if len(attempts) > BOUNDED_RUNTIME_ROOT_MAX_ATTEMPTS_TOTAL:
+        raise PersistenceError("bounded Runtime attempt budget exceeded")
+    attempts_tuple = tuple(attempts)
+    truncated_tuple = tuple(truncated_attempt_jobs)
+    payload = {
+        "schema_version": BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA,
+        "root_job_id": root_token,
+        "jobs": [job.to_dict() for job in jobs],
+        "attempts": [attempt.to_dict() for attempt in attempts_tuple],
+        "jobs_truncated": jobs_truncated,
+        "attempts_truncated_job_ids": list(truncated_tuple),
+    }
+    return BoundedRuntimeRootSnapshot(
+        schema_version=BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA,
+        root_job_id=root_token,
+        jobs=jobs,
+        attempts=attempts_tuple,
+        jobs_truncated=jobs_truncated,
+        attempts_truncated_job_ids=truncated_tuple,
+        snapshot_digest=_bounded_runtime_snapshot_digest(payload),
+    )
+
+
+def _accounted_creation_event(observation: "BoundedRuntimeReadObservation", loader: _BoundedRoleResultLoader) -> Event:
+    """Charge the strict-root creation point read to the shared loader.
+
+    The retained connection alone is not accounting. This is selection work,
+    not observation setup. The validated Event is cached so a later point
+    read inside the same observation does not query again.
+    """
+
+    retained = [
+        (command_id, recorded)
+        for command_id, recorded in observation._commands.items()
+    ]
+    if len(retained) != 1:
+        raise RuntimeReadUnavailable("retained root creation command is not exact")
+    command_id, (job_id, digest, source_digest, creator) = retained[0]
+    rows = loader.execute(
+        "SELECT * FROM events WHERE command_id=?",
+        (command_id,),
+    ).fetchall()
+    if len(rows) != 1:
+        raise RuntimeReadUnavailable("retained root creation event cardinality is not exact")
+    event = _event_from_row(rows[0])
+    payload = event.payload
+    provenance = payload.get("provenance") if isinstance(payload, Mapping) else None
+    common = (
+        event.event_type == "JOB_CREATED"
+        and event.command_id == command_id
+        and event.job_id == event.aggregate_id == job_id
+        and event.aggregate_type == "job"
+        and isinstance(payload, Mapping)
+        and isinstance(provenance, Mapping)
+        and payload.get("orchestration_role") == "aggregation"
+        and payload.get("orchestration_provenance_digest") == digest
+    )
+    if not common:
+        raise RuntimeReadUnavailable("creation Event identity disagrees with included Job")
+    if creator == CEO_ORCHESTRATION_ROOT_CREATOR:
+        valid_creator = (
+            provenance.get("schema") == "mastermind.ceo_intent.v2"
+            and "ceo-intent:" + str(provenance.get("intent_id")) == command_id
+            and provenance.get("fingerprint") == source_digest
+        )
+    elif creator == PRINCIPAL_ORCHESTRATION_ROOT_CREATOR:
+        valid_creator = (
+            provenance.get("schema") == "mastermind.executive_principal_orchestration.v1"
+            and "ceo-intent:" + str(provenance.get("intent_id")) == command_id
+            and provenance.get("action_kind") == "governed_orchestration"
+            and provenance.get("actor") == "coo-principal"
+            and provenance.get("seat") == "coo"
+            and provenance.get("bundle_digest") == source_digest
+        )
+    else:
+        valid_creator = False
+    if not valid_creator:
+        raise RuntimeReadUnavailable("creation Event source disagrees with included Job")
+    observation._events[command_id] = event
+    return event
+
+
+@dataclasses.dataclass(frozen=True)
+class BoundedRootRoleResult:
+    """Root snapshot and one selected role result from a single selection."""
+
+    root: BoundedRuntimeRootSnapshot
+    role_result: BoundedRoleResultSnapshot
+    creation_event: Event
+    observation_source_identity: str | None = None
+
+
+def _read_root_role_result_bounded(
+    observation: "BoundedRuntimeReadObservation",
+    acquisition: BoundedRuntimeAcquisition,
+    vm_guard: _RuntimeReadProgressGuard,
+    *,
+    root_job_id: str,
+    job_id: str,
+    expected_attempt_id: str,
+    expected_result_envelope_digest: str,
+) -> BoundedRootRoleResult:
+    """Root, role result and creation event on one loader and one VM budget."""
+
+    root_token = _bounded_acquisition_identifier(root_job_id, name="root")
+    job_token = _bounded_acquisition_identifier(job_id, name="Job")
+    attempt_token = _bounded_acquisition_identifier(expected_attempt_id, name="Attempt")
+    digest_token = expected_result_envelope_digest
+    if type(digest_token) is not str or _DIGEST_RE.fullmatch(digest_token) is None:
+        raise StateConflict("bounded role-result read requires the canonical envelope digest")
+    acquisition._require_open()
+    loader = _BoundedRoleResultLoader(acquisition._connection)
+    vm_guard.activate()
+    try:
+        root = _accounted_root_snapshot(loader, root_token)
+        observation._remember(root.jobs)
+        role_result = _bounded_role_result_material(
+            loader,
+            root_token=root_token,
+            job_token=job_token,
+            attempt_token=attempt_token,
+            digest_token=digest_token,
+        )
+        creation_event = _accounted_creation_event(observation, loader)
+        if creation_event.job_id != root_token:
+            raise RuntimeReadUnavailable("retained creation event is not the selected root")
+        if not any(job.job_id == job_token and job.root_job_id == root_token for job in root.jobs):
+            raise StateConflict("selected role result is outside the retained root scope")
+        if not any(
+            attempt.attempt_id == attempt_token and attempt.job_id == job_token
+            for attempt in root.attempts
+        ):
+            raise StateConflict("selected attempt is outside the retained root scope")
+        return BoundedRootRoleResult(
+            root=root, role_result=role_result, creation_event=creation_event,
+        )
+    except sqlite3.OperationalError as exc:
+        if vm_guard.tripped:
+            raise RuntimeRoleResultOverBudget() from exc
+        raise
+    finally:
+        vm_guard.deactivate()
+
+
 def _read_product_acceptance_subject_bounded(
     acquisition: BoundedRuntimeAcquisition,
     vm_guard: _RuntimeReadProgressGuard,
@@ -27456,6 +27722,44 @@ class BoundedRuntimeReadObservation:
             )
             return dataclasses.replace(
                 result, observation_source_identity=self._identity
+            )
+        except BaseException:
+            self._failed = True
+            raise
+
+    def read_root_role_result_bounded(
+        self,
+        root_job_id: str,
+        job_id: str,
+        *,
+        expected_attempt_id: str,
+        expected_result_envelope_digest: str,
+    ) -> BoundedRootRoleResult:
+        """Select one root and one role result under the shared selection budgets.
+
+        This consumes the one-selection allowance exactly once. Root-page,
+        role-result and creation-event statements share one loader and one VM
+        budget; neither counter is reset between those phases. No receipt is
+        minted here. A second selection still poisons the observation.
+        """
+
+        self._select()
+        try:
+            result = _read_root_role_result_bounded(
+                self,
+                self._acquisition,
+                self._vm_progress,
+                root_job_id=root_job_id,
+                job_id=job_id,
+                expected_attempt_id=expected_attempt_id,
+                expected_result_envelope_digest=expected_result_envelope_digest,
+            )
+            return dataclasses.replace(
+                result,
+                observation_source_identity=self._identity,
+                role_result=dataclasses.replace(
+                    result.role_result, observation_source_identity=self._identity,
+                ),
             )
         except BaseException:
             self._failed = True

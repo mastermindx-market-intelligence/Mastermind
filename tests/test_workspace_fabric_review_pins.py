@@ -22,17 +22,13 @@ METHOD = next(node for node in OWNER.body
               and node.name == "_handle_ceo_ingress_connection")
 BLOCK = "".join(SOURCE.splitlines(keepends=True)[METHOD.lineno - 1:METHOD.end_lineno])
 FRAGMENT = "class ExecutiveControlService:\n" + BLOCK + "\n"
-STATUS_SITES = (
-    (5659, 66, 69, "int"),
-    (5672, 74, 77, "int"),
-    (5674, 75, 78, "int"),
-)
+STATUS_SITES = ((5783, 66, 69, 'int'), (5796, 74, 77, 'int'), (5798, 75, 78, 'int'))
+
 BACKEND_SITES = (
     (120, 73, 76, "int"),
     (310, 78, 81, "int"),
     (405, 83, 86, "int"),
 )
-
 
 def _assert_catalog_refused(source):
     spans = reviewed_literal_spans(SERVICE_PATH, source)
