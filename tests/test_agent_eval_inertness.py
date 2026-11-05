@@ -24,6 +24,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -817,6 +818,60 @@ def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], capture_output=True, text=True, cwd=str(cwd), timeout=30)
 
 
+def _queue_single_pr_parent(repo_dir: Path, head: str, parent_shas: list[str]) -> str | None:
+    """Use only an authenticated, single-appended-PR merge-group commit boundary.
+
+    GitHub's queue can include earlier queued PRs in the *parent*. For the
+    squash/linear candidate whose commit names the current PR, the parent-to-
+    head diff is the candidate's complete appended change, not all earlier
+    pending PRs. An unqualified or multi-PR-shaped candidate FAILS CLOSED.
+    """
+    if os.environ.get("GITHUB_EVENT_NAME") != "merge_group" or repo_dir.resolve() != ROOT.resolve():
+        # Synthetic local Git tests and other caller-supplied repos must not
+        # inherit the runner's real merge-group event. Test-of-test fixtures
+        # explicitly bind their own isolated ROOT to qualify this path.
+        return None
+    if len(parent_shas) != 1:
+        raise AssertionError("merge-group single-PR fence needs exactly one parent")
+    source = os.environ.get("GITHUB_EVENT_PATH")
+    if not source:
+        raise AssertionError("merge-group event payload is unavailable")
+    try:
+        event = json.loads(Path(source).read_text(encoding="utf-8"))
+        if not isinstance(event, dict):
+            raise ValueError("merge-group event must be an object")
+        group = event["merge_group"]
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError) as exc:
+        raise AssertionError("merge-group event payload unreadable/invalid") from exc
+    if event.get("action") != "checks_requested" or not isinstance(group, dict):
+        raise AssertionError("unexpected merge-group action or payload")
+    actual = _run_git(["rev-parse", head], repo_dir)
+    if actual.returncode or not re.fullmatch(r"[0-9a-f]{40}", actual.stdout.strip()):
+        raise AssertionError("cannot resolve merge-group source HEAD")
+    resolved_head = actual.stdout.strip()
+    ref = group.get("head_ref")
+    match = re.fullmatch(
+        r"refs/heads/gh-readonly-queue/master/pr-([1-9][0-9]*)-([0-9a-f]{40})",
+        ref if isinstance(ref, str) else "",
+    )
+    if not match:
+        raise AssertionError("merge-group ref is not a single PR queue ref")
+    number, predecessor = match.groups()
+    if (group.get("head_sha") != resolved_head
+            or os.environ.get("GITHUB_SHA") != resolved_head
+            or os.environ.get("GITHUB_REF") != ref
+            or group.get("base_ref") != "refs/heads/master"
+            or group.get("base_sha") != parent_shas[0]
+            or predecessor != parent_shas[0]):
+        raise AssertionError("merge-group event/head/ref/predecessor identity drift")
+    subject = _run_git(["show", "-s", "--format=%s", head], repo_dir)
+    if subject.returncode:
+        raise AssertionError("cannot read merge-group candidate subject")
+    if re.findall(r"\(#([1-9][0-9]*)\)", subject.stdout) != [number]:
+        raise AssertionError("merge-group candidate is not one attributable PR commit")
+    return parent_shas[0]
+
+
 def compute_pr_diff_paths(repo_dir: Path, *, head: str = "HEAD", upstream: str = "origin/master") -> set[str]:
     """The effective PR delta, merge-ref-safe -- never a pinned base SHA.
 
@@ -833,10 +888,14 @@ def compute_pr_diff_paths(repo_dir: Path, *, head: str = "HEAD", upstream: str =
     (``HEAD^1..HEAD``) -- under a hosted merge-ref checkout, parent 1 is the
     base branch tip at merge time and parent 2 is this PR's own tip, so this
     diff is exactly the PR's own changes regardless of how far the base has
-    moved. Otherwise (an ordinary linear branch head, e.g. local dev) the
-    delta is ``merge-base(upstream, head)..head``, which still finds
-    whatever the branch itself changed since it forked, no matter how far
-    upstream has since moved -- never a hardcoded commit.
+    moved. An authenticated GitHub merge_group may instead use a *linear*
+    single-PR squash commit on top of an earlier queued candidate, even when
+    that predecessor has not reached origin/master. The exact native event,
+    head/ref/first-parent relationship and sole PR-number commit marker must
+    agree before the fence uses the candidate's own parent. Other linear
+    heads (ordinary local/PR development) retain the original conservative
+    ``merge-base(upstream, head)..head`` behavior. An unknown queue identity
+    raises instead of silently passing or blaming other pending PRs.
     """
     parents_result = _run_git(["rev-list", "--parents", "-n", "1", head], repo_dir)
     if parents_result.returncode != 0:
@@ -846,10 +905,18 @@ def compute_pr_diff_paths(repo_dir: Path, *, head: str = "HEAD", upstream: str =
     if len(parent_shas) >= 2:
         base_ref = f"{head}^1"
     else:
-        merge_base_result = _run_git(["merge-base", upstream, head], repo_dir)
-        if merge_base_result.returncode != 0:
-            raise AssertionError(f"git merge-base failed: {merge_base_result.stderr}")
-        base_ref = merge_base_result.stdout.strip()
+        # A queue's linear squash commit can have a *preceding queued PR*
+        # as its sole parent. merge-base(origin/master, HEAD) would falsely
+        # attribute all that predecessor's changes to the appended EVAL PR.
+        # Only the native, exact-identity, single-PR event permits HEAD^1.
+        queue_parent = _queue_single_pr_parent(repo_dir, head, parent_shas)
+        if queue_parent is not None:
+            base_ref = queue_parent
+        else:
+            merge_base_result = _run_git(["merge-base", upstream, head], repo_dir)
+            if merge_base_result.returncode != 0:
+                raise AssertionError(f"git merge-base failed: {merge_base_result.stderr}")
+            base_ref = merge_base_result.stdout.strip()
     diff_result = _run_git(["diff", "--name-only", base_ref, head], repo_dir)
     if diff_result.returncode != 0:
         raise AssertionError(f"git diff failed: {diff_result.stderr}")
@@ -1078,3 +1145,160 @@ def test_fence_scoping_unratcheted_program_adjacent_file_still_fails(tmp_path: P
     assert _fence_not_applicable_reason(changed) is None
     unexpected = {path for path in changed if not _changed_path_is_allowed(path)}
     assert unexpected == {adjacent_path}  # FAIL: not yet ratchet-authorized
+
+
+# ---------------------------------------------------------------------------
+# 4c. Native GitHub merge-group appended-PR range: incident #1939
+# ---------------------------------------------------------------------------
+#
+# Earlier queued PRs are part of a native queue candidate's FIRST PARENT.
+# A one-parent squash commit appended on that parent is not an ordinary local
+# branch. Scope only that proven appended PR; do not make arbitrary HEAD^
+# selection available to ordinary PRs or caller-supplied repositories.
+
+def _synthetic_r0_queue(
+    tmp_path: Path, monkeypatch, *,
+    candidate_subject: str = "fix(eval-r0): safe store open (#1939)",
+    forbidden: bool = False,
+) -> tuple[Path, Path, str, str]:
+    repo = tmp_path / "native_queue"
+    _git_init(repo)
+    base = _git_commit_file(repo, "README.md", "initial\n", "accepted base")
+    _run_git(["update-ref", "refs/remotes/origin/master", base], repo)
+    predecessor = _git_commit_file(
+        repo, ".github/workflows/hermes-harness.yml",
+        "name: prior queue workflow\n", "feat(hermes): preceding queue candidate (#1850)",
+    )
+    # The queue ref's SHA suffix is its previous candidate, not original
+    # protected master. At the historical failure this predecessor had not
+    # yet reached origin/master.
+    ref = f"refs/heads/gh-readonly-queue/master/pr-1939-{predecessor}"
+    assert _run_git(["checkout", "-q", "-b", ref.removeprefix("refs/heads/")], repo).returncode == 0
+    changed = repo / "scripts/agent_eval/store.py"
+    changed.parent.mkdir(parents=True, exist_ok=True)
+    changed.write_text("create_root = False\n", encoding="utf-8")
+    assert _run_git(["add", "scripts/agent_eval/store.py"], repo).returncode == 0
+    if forbidden:
+        outside = repo / "control_plane/bypass.py"
+        outside.parent.mkdir(parents=True, exist_ok=True)
+        outside.write_text("EVAL fence must reject this\n", encoding="utf-8")
+        assert _run_git(["add", "control_plane/bypass.py"], repo).returncode == 0
+    commit = _run_git(["commit", "-q", "-m", candidate_subject], repo)
+    assert commit.returncode == 0, commit.stderr
+    head = _run_git(["rev-parse", "HEAD"], repo).stdout.strip()
+    event = {
+        "action": "checks_requested",
+        "merge_group": {
+            "head_ref": ref,
+            "head_sha": head,
+            "base_ref": "refs/heads/master",
+            "base_sha": predecessor,
+        },
+    }
+    event_path = tmp_path / "native-queue-event.json"
+    event_path.write_text(json.dumps(event), encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", repo)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "merge_group")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_SHA", head)
+    monkeypatch.setenv("GITHUB_REF", ref)
+    return repo, event_path, head, predecessor
+
+
+def test_native_queue_1939_excludes_predecessor_hermes_and_keeps_store_fence(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    repo, _, head, predecessor = _synthetic_r0_queue(tmp_path, monkeypatch)
+    assert len(_run_git(["rev-list", "--parents", "-n", "1", head], repo).stdout.split()) == 2
+    # The *old* branch-style merge-base comparison reproduces 41931657412.
+    first_base = _run_git(["merge-base", "origin/master", head], repo).stdout.strip()
+    old_paths = _run_git(["diff", "--name-only", first_base, head], repo).stdout.splitlines()
+    assert ".github/workflows/hermes-harness.yml" in old_paths
+    assert predecessor != first_base
+
+    changed = compute_pr_diff_paths(repo)
+    assert changed == {"scripts/agent_eval/store.py"}
+    assert _fence_not_applicable_reason(changed) is None
+    assert not {name for name in changed if not _changed_path_is_allowed(name)}
+    assert not {name for name in changed if name.startswith(("control_plane/", ".github/workflows/", "config/"))}
+
+
+def test_native_queue_r0_mixed_forbidden_candidate_still_fails(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    repo, _, _, _ = _synthetic_r0_queue(tmp_path, monkeypatch, forbidden=True)
+    changed = compute_pr_diff_paths(repo)
+    assert changed == {"scripts/agent_eval/store.py", "control_plane/bypass.py"}
+    assert _fence_not_applicable_reason(changed) is None
+    with pytest.raises(AssertionError, match="outside the allowed R0 surface"):
+        test_changed_paths_are_within_the_allowed_r0_surface()
+    with pytest.raises(AssertionError, match="unexpected control-plane/config"):
+        test_no_control_plane_config_dependency_or_workflow_file_touched()
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "missing_event", "bad_action", "wrong_head_sha", "wrong_base_sha",
+        "wrong_ref", "wrong_env_sha", "wrong_env_ref",
+        "wrong_subject", "multiple_pr_markers",
+    ],
+)
+def test_native_queue_missing_or_ambiguous_identity_fails_closed(
+    tmp_path: Path, monkeypatch, fault: str,
+) -> None:
+    subject = (
+        "unattributed queue candidate"
+        if fault == "wrong_subject" else
+        "merge (#1939) (#2001)"
+        if fault == "multiple_pr_markers" else
+        "fix(eval-r0): safe store open (#1939)"
+    )
+    repo, event_path, _, _ = _synthetic_r0_queue(
+        tmp_path, monkeypatch, candidate_subject=subject,
+    )
+    event = json.loads(event_path.read_text())
+    if fault == "missing_event":
+        monkeypatch.delenv("GITHUB_EVENT_PATH")
+    elif fault == "bad_action":
+        event["action"] = "destroyed"
+    elif fault == "wrong_head_sha":
+        event["merge_group"]["head_sha"] = "0" * 40
+    elif fault == "wrong_base_sha":
+        event["merge_group"]["base_sha"] = "0" * 40
+    elif fault == "wrong_ref":
+        event["merge_group"]["head_ref"] = "refs/heads/feature"
+    elif fault == "wrong_env_sha":
+        monkeypatch.setenv("GITHUB_SHA", "0" * 40)
+    elif fault == "wrong_env_ref":
+        monkeypatch.setenv("GITHUB_REF", "refs/heads/feature")
+    event_path.write_text(json.dumps(event), encoding="utf-8")
+    with pytest.raises(AssertionError, match="merge-group"):
+        compute_pr_diff_paths(repo)
+
+
+def test_native_queue_identity_not_inherited_by_unrelated_synthetic_repo(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    repo, _, _, _ = _synthetic_r0_queue(tmp_path, monkeypatch)
+    # Another test's local Git fixture must NOT inherit a real Actions queue
+    # event just because all tests run under GITHUB_EVENT_NAME=merge_group.
+    unrelated = tmp_path / "other_git_repo"
+    _git_init(unrelated)
+    base = _git_commit_file(unrelated, "README.md", "base\n", "base")
+    _run_git(["update-ref", "refs/remotes/origin/master", base], unrelated)
+    _git_commit_file(unrelated, "docs/unrelated.md", "unrelated\n", "ordinary branch")
+    assert compute_pr_diff_paths(unrelated) == {"docs/unrelated.md"}
+
+
+def test_ordinary_branch_conservatively_includes_inherited_queue_delta(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    repo, _, _, _ = _synthetic_r0_queue(tmp_path, monkeypatch)
+    monkeypatch.delenv("GITHUB_EVENT_NAME")
+    changed = compute_pr_diff_paths(repo)
+    assert changed == {
+        ".github/workflows/hermes-harness.yml",
+        "scripts/agent_eval/store.py",
+    }
+    assert {"scripts/agent_eval/store.py"} <= changed
