@@ -1,7 +1,7 @@
 --- a/remote_sub.sh
 +++ b/remote_sub.sh
 @@ -309,6 +309,23 @@
- 
+
  if [ -z "$LOCAL_OUT" ]; then
    LOCAL_OUT="$HERE/lanes/${ID}.remote.stdout"
 +fi
@@ -22,12 +22,12 @@
 +    exit "$RC"
 +  fi
  fi
- 
+
  # The optional success contract must validate newly collected bytes, never
 @@ -1116,10 +1133,52 @@
  done
  WORKER_RC="$RC"
- 
+
 -mkdir -p "$(dirname "$LOCAL_OUT")" 2>/dev/null || true
 +# Only successful, observed new-Macro workers take the canonical-first path.
 +# rsync never targets a fixed canonical filename: stage a private unique name
@@ -84,8 +84,8 @@
 +++ b/remote_sub_helpers.py
 @@ -285,6 +285,304 @@
      print(json.dumps(result, sort_keys=True))
- 
- 
+
+
 +
 +def _verify_macro_publication(dirfd, name, verified_fd, expected_bytes,
 +                              expected_digest, expected_links):
