@@ -113,11 +113,12 @@ Type=simple
 User={runtime_user}
 Group={runtime_group}
 WorkingDirectory={state}
-ExecStart={exe} -m integrations.hermes_runtime supervise --profile {state}/current/profile.yaml --hermes-bin {state}/current/bin/hermes
+ExecStart={exe} -P -m integrations.hermes_runtime supervise --profile {state}/current/profile.yaml --hermes-bin {state}/current/bin/hermes
 # Operator-only provider-charged canary: requires separate authorization.
-ExecReload={exe} -m integrations.hermes_runtime canary --profile {state}/current/profile.yaml --hermes-bin {state}/current/bin/hermes
+ExecReload={exe} -P -m integrations.hermes_runtime canary --profile {state}/current/profile.yaml --hermes-bin {state}/current/bin/hermes
 Environment=PYTHONPATH={root}
 Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONNOUSERSITE=1
 Restart=on-failure
 RestartSec={seconds}
 RestartPreventExitStatus={CONFIG_EXIT}

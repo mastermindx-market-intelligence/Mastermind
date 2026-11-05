@@ -21,6 +21,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from integrations.session_bridge.native_reply import NativeReplyWriter
+from integrations.hermes_runtime.errors import NativeTurnEffectUnknown
 
 ROLES = frozenset(("mmsecretary", "mmmeta"))
 _MAX_PROMPT_BYTES = 8192
@@ -28,7 +29,7 @@ _MAX_TEXT_LEN = 700
 _ANSWER_SECRET = re.compile(
     r"(?i)(?:xox[baprs]-[A-Za-z0-9-]+|sk-[A-Za-z0-9_-]{8,}|"
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----|"
-    r"(?:api[_-]?key|password|token|authorization)\s*[:=]\s*\S+)"
+    r"(?:api[_-]?key|password|token|authorization)[\"']?\s*[:=]\s*[\"']?\S+)"
 )
 _SAFE_OPERATION = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:-]{0,95}\Z")
 _SAFE_MESSAGE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}\Z")
@@ -54,6 +55,13 @@ def _message_prompt(message: dict[str, Any], *, role: str) -> str:
     body = message.get("body")
     if not isinstance(summary, str) or not isinstance(body, dict):
         raise ConsumerRefusal("CANONICAL_REQUEST_INVALID")
+    # Inspect canonical text before JSON escaping changes quoted credentials.
+    # CONTINUE's validated body contains instruction/stop_condition strings and
+    # a scope_change boolean. This is a bounded format guard, not a claim to
+    # recognize every possible secret value.
+    source_text = (summary, *(value for value in body.values() if isinstance(value, str)))
+    if any(_ANSWER_SECRET.search(value) for value in source_text):
+        raise ConsumerRefusal("CANONICAL_PROMPT_SECRET_REFUSED")
     # Preserve the validated body as data rather than interpolating its text
     # into any shell argv, connector arguments, or another agent's routing.
     payload = {
@@ -174,6 +182,10 @@ class HermesCanonicalTurnConsumer:
         prompt = _message_prompt(request, role=self.role)
         try:
             answer = await _await_if_needed(self.infer_text(prompt))
+        except NativeTurnEffectUnknown:
+            # The existing parent must reconcile the possible paid turn;
+            # do not downgrade uncertainty into an ordinary retryable error.
+            raise ConsumerRefusal("MODEL_TURN_EFFECT_UNKNOWN") from None
         except Exception:
             # Provider errors can contain bearer values. Never forward them.
             raise ConsumerRefusal("MODEL_TURN_FAILED") from None
@@ -208,3 +220,19 @@ class HermesCanonicalTurnConsumer:
             "role_bot_slack_delivery_verified": False,
             "source_composition_only": True,
         }
+
+
+def compose_native_text_consumer(*, runtime, native_session_id: str,
+                                 reply_writer: NativeReplyWriter, current_role):
+    """Bind native inference to an ALREADY authenticated current reply writer.
+
+    This factory registers no target and changes no Runtime admission. Current
+    installed native-return ownership remains Codex-only; standalone Hermes
+    identity/Slack ingress must be admitted by that existing owner separately.
+    """
+    from integrations.hermes_harness.native_text import NativeTextInference
+    infer = NativeTextInference(runtime)
+    return HermesCanonicalTurnConsumer(
+        role=runtime.profile.role, native_session_id=native_session_id,
+        reply_writer=reply_writer, current_role=current_role, infer_text=infer,
+    )

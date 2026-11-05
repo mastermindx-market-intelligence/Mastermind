@@ -19,6 +19,7 @@ from integrations.hermes_runtime.constants import PINNED_UPSTREAM_SHA
 from integrations.hermes_runtime.errors import RuntimeRefusal
 from integrations.hermes_runtime.egress import native_egress_child_env
 from integrations.hermes_runtime.secrets import load_secrets
+from integrations.hermes_secretary.roster import load_roster_config
 
 SCHEMA = "mastermind.hermes_harness.doctor.v1"
 # Primary native model keys originate in the role-private secrets file.
@@ -102,8 +103,17 @@ def doctor(
     manager = _systemd_user_manager() if systemd_user is None else systemd_user
     if not manager:
         missing.append("grant:ubuntu1_systemd_user_manager")
-    missing.extend(_agent_identity_gaps(root, roster_path=roster_path))
-    incumbent_ids = _incumbent_peer_user_ids(roster_path)
+    # One canonical snapshot qualifies both role rows and incumbent peers.
+    # Missing/malformed identity evidence is a core gap, never an empty roster.
+    try:
+        roster_config = load_roster_config(roster_path)
+    except (OSError, ValueError, UnicodeError):
+        missing.append("config:hermes_agents:invalid")
+        roster_config = None
+    incumbent_ids = frozenset()
+    if roster_config is not None:
+        missing.extend(_agent_identity_gaps(root, roster_config=roster_config))
+        incumbent_ids = _incumbent_peer_user_ids(roster_config)
     for role, secrets in role_private.items():
         if secrets.values.get("HERMES_SLACK_BOT_USER_ID", "") in incumbent_ids:
             missing.append(f"isolation:incumbent_peer_user_id:{role}")
@@ -178,21 +188,9 @@ def format_doctor(report: Mapping[str, object]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _incumbent_peer_user_ids(roster_path: Path | None) -> frozenset[str]:
-    """Known live peer identities from the same canonical roster, never values in output."""
-    path = roster_path or (Path(__file__).resolve().parents[1] / "hermes_secretary" / "roster.json")
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, UnicodeError):
-        return frozenset()
-    if not isinstance(data, dict) or not isinstance(data.get("peers"), list):
-        return frozenset()
-    return frozenset(
-        peer["user_id"] for peer in data["peers"]
-        if isinstance(peer, dict)
-        and isinstance(peer.get("user_id"), str)
-        and peer["user_id"].startswith("U")
-    )
+def _incumbent_peer_user_ids(roster_config: Mapping[str, object]) -> frozenset[str]:
+    """Peer identities from the already validated canonical roster snapshot."""
+    return frozenset(peer["user_id"] for peer in roster_config["peers"])
 
 
 def _native_primary_present(home: Path, role: str) -> bool:
@@ -244,24 +242,11 @@ def _gateway_file_ok(path: Path) -> bool:
     return True
 
 
-def _agent_identity_gaps(home: Path, *, roster_path: Path | None = None) -> list[str]:
-    """Per-agent Slack bot id and token. Names only; file bodies stay out."""
+def _agent_identity_gaps(home: Path, *, roster_config: Mapping[str, object]) -> list[str]:
+    """Inspect per-agent private files after canonical roster validation."""
 
-    path = roster_path or (Path(__file__).resolve().parents[1] / "hermes_secretary" / "roster.json")
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return [
-            "credential:hermes-metaceo:HERMES_SLACK_BOT_TOKEN",
-            "credential:hermes-secretary:HERMES_SLACK_BOT_TOKEN",
-            "id:hermes-metaceo:HERMES_SLACK_BOT_USER_ID",
-            "id:hermes-secretary:HERMES_SLACK_BOT_USER_ID",
-        ]
-    rows = data.get("hermes_agents") if isinstance(data, dict) else None
-    if not isinstance(rows, list):
-        return ["config:hermes_agents:invalid"]
     gaps: list[str] = []
-    for row in rows:
+    for row in roster_config["hermes_agents"]:
         if not isinstance(row, dict):
             continue
         name = row.get("name")

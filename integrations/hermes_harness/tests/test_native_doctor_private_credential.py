@@ -186,5 +186,67 @@ class NativeDoctorCredentialTests(unittest.TestCase):
             self._key_file("modelark")
 
 
+    def test_core_configuration_refuses_invalid_canonical_roster(self):
+        import copy
+        import json
+        from integrations.hermes_secretary.roster import CONFIG_PATH, load_roster_config
+        self.test_core_text_configuration_can_qualify_without_optional_grants()
+        original = json.loads(CONFIG_PATH.read_text())
+        cases = (
+            ("missing_peers", lambda value: value.pop("peers")),
+            ("empty_peers", lambda value: value.update(peers=[])),
+            ("malformed_peers", lambda value: value.update(peers=[{}])),
+            ("empty_agents", lambda value: value.update(hermes_agents=[])),
+            ("malformed_agents", lambda value: value.update(hermes_agents=[{}])),
+        )
+        for label, mutate in cases:
+            with self.subTest(case=label):
+                data = copy.deepcopy(original)
+                mutate(data)
+                path = self.home / (label + ".json")
+                path.write_text(json.dumps(data), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    load_roster_config(path)
+                report = doctor(environ={}, home=self.home, systemd_user=True,
+                                upstream_attested=True, roster_path=path)
+                self.assertEqual(report["core_text_status"], "CONFIG_MISSING")
+                self.assertIn("config:hermes_agents:invalid", report["core_text_missing"])
+                self.assertFalse(report["provider_authenticated"])
+                self.assertFalse(report["slack_roundtrip_verified"])
+                self.assertNotIn("U0BTCHX8HMF", str(report))
+
+    def test_unreadable_or_invalid_json_roster_cannot_qualify_core_cli(self):
+        import contextlib
+        import io
+        from unittest import mock
+        from integrations.hermes_harness.cli import main
+        self.test_core_text_configuration_can_qualify_without_optional_grants()
+        missing = self.home / "not-present.json"
+        invalid = self.home / "malformed.json"
+        invalid.write_text('{"SYNTHETIC_PRIVATE_SENTINEL":', encoding="utf-8")
+        for path in (missing, invalid):
+            with self.subTest(case=path.name):
+                report = doctor(environ={}, home=self.home, systemd_user=True,
+                                upstream_attested=True, roster_path=path)
+                self.assertEqual(report["core_text_status"], "CONFIG_MISSING")
+                self.assertIn("config:hermes_agents:invalid", report["core_text_missing"])
+                self.assertNotIn("SYNTHETIC_PRIVATE_SENTINEL", str(report))
+                with mock.patch("integrations.hermes_harness.cli.doctor", return_value=report):
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        self.assertEqual(main(["doctor", "--core-text-config-only", "--json"]), 2)
+
+    def test_role_and_incumbent_checks_share_one_canonical_roster_read(self):
+        from unittest import mock
+        from integrations.hermes_secretary.roster import load_roster_config
+        self.test_core_text_configuration_can_qualify_without_optional_grants()
+        with mock.patch("integrations.hermes_harness.doctor.load_roster_config",
+                        wraps=load_roster_config) as read:
+            result = self._doctor()
+        self.assertEqual(read.call_count, 1)
+        self.assertEqual(result["core_text_status"], "CONFIG_READY_NOT_LIVE_PROVEN")
+        self.assertEqual(result["core_text_missing"], [])
+
+
+
 if __name__ == "__main__":
     unittest.main()

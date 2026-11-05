@@ -45,7 +45,7 @@ def compose(settings, *, foreign_reference=False, reader_enabled=True):
             return SimpleNamespace(transport=TRANSPORT_SENT_OK, ok=True,
                                    result=await provider.handle_frame(frame))
     client = InstalledSessionBridgeClient(
-        "/private/tmp/paired-mcp-fixture-not-listening.sock", client=PrivatePeer())
+        settings.ceo_ingress_socket_path, client=PrivatePeer())
     reference_client = InstalledSessionBridgeClient(
         "/private/tmp/foreign-paired-fixture-not-listening.sock", client=PrivatePeer()
     ) if foreign_reference else client

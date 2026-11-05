@@ -1159,6 +1159,34 @@ def test_linked_workspace_shares_git_store_and_reuses_exact_operation(tmp_path: 
     assert reused.reused is True
 
 
+def test_linked_workspace_hydration_has_a_finite_large_repo_budget(
+    tmp_path: Path, monkeypatch,
+):
+    """Only new worktree hydration needs extra time for a large sparse index.
+
+    An observed Macro checkout with >100k tracked paths exceeded the normal
+    60s git read-tree budget; other Git operations retain their 60s bound.
+    """
+    source, base_sha = _repository(tmp_path)
+    original_run = executive_workspace._run
+    observed: list[int] = []
+
+    def capture(argv, *, cwd, env, **kwargs):
+        if list(argv) == ["git", "read-tree", "-mu", "HEAD"]:
+            observed.append(kwargs.get("timeout_seconds", 60))
+        return original_run(argv, cwd=cwd, env=env, **kwargs)
+
+    monkeypatch.setattr(executive_workspace, "_run", capture)
+    receipt = executive_workspace.prepare_linked_worktree(
+        source, tmp_path / "agent-workspaces",
+        operation_id="hydration-budget-001", lane="web",
+        base_sha=base_sha, branch="sol/hydration-budget-001",
+    )
+    assert observed == [240], f"hydration timeout drift: {observed}"
+    assert Path(receipt.workspace_path).is_dir()
+    assert _git(Path(receipt.workspace_path), "status", "--porcelain=v1") == ""
+
+
 def test_linked_workspace_release_removes_clean_base_but_keeps_branch(tmp_path: Path):
     source, base_sha = _repository(tmp_path)
     root = tmp_path / "agent-workspaces"

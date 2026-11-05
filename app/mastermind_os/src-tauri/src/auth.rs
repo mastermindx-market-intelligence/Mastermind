@@ -18,10 +18,15 @@ const CALLBACK: &str = "com.mastermind.os://oauth/callback";
 const ORIGIN: &str = "https://mcp.mastermind-x.com";
 const TRANSACTION_TTL: Duration = Duration::from_secs(300);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+// Source preparation <=120s followed by the existing <=300s foreground owner.
+// This is only a transport ceiling, never execution or retry authority.
+const EXECUTIVE_FOREGROUND_TIMEOUT: Duration = Duration::from_secs(430);
 const MAX_RESPONSE: usize = 2_000_000;
 const EXECUTIVE_SCOPE: &str = "mastermind.executive.read mastermind.executive.intent.submit";
 const EXECUTIVE_REQUEST_CAP: usize = 65_536;
 const EXECUTIVE_RESPONSE_CAP: usize = 262_144;
+const DIRECT_NATIVE_REQUEST_CAP: usize = 4096;
+const DIRECT_NATIVE_RESPONSE_CAP: usize = 24_576;
 const MAX_SAFE_GENERATION: u64 = (1_u64 << 53) - 1;
 
 fn executive_resource(value: &str) -> Option<String> {
@@ -88,6 +93,7 @@ struct Inner {
     client_id: Option<String>,
     executive_resource: Option<String>,
     executive_generation: u64,
+    executive_changed: tokio::sync::watch::Sender<()>,
     executive: Option<Token>,
     generation: u64,
     pending: Option<Pending>,
@@ -109,6 +115,7 @@ impl Inner {
             client_id,
             executive_resource: resource.and_then(executive_resource),
             executive_generation: 0,
+            executive_changed: tokio::sync::watch::channel(()).0,
             executive: None,
             generation: 0,
             pending: None,
@@ -153,6 +160,9 @@ impl Inner {
     }
     // Overflow permanently disables this optional capability; generations never wrap/reuse.
     fn advance_executive(&mut self) -> bool {
+        // Wake a pending foreground transport so its actual HTTP request is
+        // dropped on logout/renewal. The generation remains the authority.
+        self.executive_changed.send_replace(());
         match self.executive_generation.checked_add(1).filter(|n| *n <= MAX_SAFE_GENERATION) {
             Some(next) => { self.executive_generation = next; true }
             None => { self.executive = None; self.executive_resource = None; false }
@@ -990,6 +1000,401 @@ pub async fn read_mission(app: AppHandle, selection: MissionSelection) -> Result
     )
     .await
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectPlanSelection {
+    work_ref: String,
+}
+impl ProjectPlanSelection {
+    fn validate(&self) -> Result<()> {
+        let work = self.work_ref.strip_prefix("WS:").ok_or("SELECTION_INVALID")?;
+        if !(2..=64).contains(&work.len()) || work.split('-').any(|part|
+            part.is_empty() || !part.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())) {
+            return Err("SELECTION_INVALID".into());
+        }
+        Ok(())
+    }
+}
+const PROJECT_PLAN_PATH: &str = "/workspace/project-plan/current";
+const PROJECT_PLAN_SCHEMA: &str = "mastermind.workspace_project_plan.v1";
+const PROJECT_PLAN_SCHEMA_V2: &str = "mastermind.workspace_project_plan.v2";
+const PROJECT_PLAN_RESPONSE_CAP: usize = 131_072;
+fn project_plan_target(selection: &ProjectPlanSelection) -> Result<Url> {
+    selection.validate()?;
+    let mut url = Url::parse(&format!("{ORIGIN}{PROJECT_PLAN_PATH}")).map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut().append_pair("work_ref", &selection.work_ref);
+    Ok(url)
+}
+fn project_plan_header_matches(value: &Value, selection: &ProjectPlanSelection) -> bool {
+    matches!(value.get("schema").and_then(Value::as_str),
+        Some(PROJECT_PLAN_SCHEMA) | Some(PROJECT_PLAN_SCHEMA_V2))
+        && value.get("selection").and_then(|s| s.get("work_ref")).and_then(Value::as_str) == Some(selection.work_ref.as_str())
+}
+#[tauri::command]
+pub async fn read_project_plan(app: AppHandle, selection: ProjectPlanSelection) -> Result<Value> {
+    let url = project_plan_target(&selection)?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, PROJECT_PLAN_RESPONSE_CAP).await
+            .and_then(|value| typed_unavailable(value, PROJECT_PLAN_SCHEMA, false))
+    } else {
+        bounded_json(response, PROJECT_PLAN_RESPONSE_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if !project_plan_header_matches(&value, &selection) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // The existing host performs the sole full closed-body decode before display.
+    Ok(value)
+}
+
+const PROJECT_DIRECTION_PATH: &str = "/workspace/project-direction/current";
+const PROJECT_DIRECTION_SCHEMA: &str = "mastermind.workspace_project_direction.v1";
+const PROJECT_DIRECTION_RESPONSE_CAP: usize = 65_536;
+fn project_direction_target(selection: &ProjectPlanSelection) -> Result<Url> {
+    selection.validate()?;
+    let mut url = Url::parse(&format!("{ORIGIN}{PROJECT_DIRECTION_PATH}")).map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut().append_pair("work_ref", &selection.work_ref);
+    Ok(url)
+}
+fn project_direction_header_matches(value: &Value, selection: &ProjectPlanSelection) -> bool {
+    value.get("schema").and_then(Value::as_str) == Some(PROJECT_DIRECTION_SCHEMA)
+        && value.get("selection").and_then(|s| s.get("work_ref")).and_then(Value::as_str) == Some(selection.work_ref.as_str())
+}
+#[tauri::command]
+pub async fn read_project_direction(app: AppHandle, selection: ProjectPlanSelection) -> Result<Value> {
+    let url = project_direction_target(&selection)?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, PROJECT_DIRECTION_RESPONSE_CAP).await
+            .and_then(|value| typed_unavailable(value, PROJECT_DIRECTION_SCHEMA, false))
+    } else {
+        bounded_json(response, PROJECT_DIRECTION_RESPONSE_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if !project_direction_header_matches(&value, &selection) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // Full closed-body validation remains in the existing host decode boundary.
+    Ok(value)
+}
+
+const PROJECT_JOURNAL_PATH: &str = "/workspace/project-journal/current";
+const PROJECT_JOURNAL_SCHEMA: &str = "mastermind.workspace_project_journal.v1";
+const PROJECT_JOURNAL_RESPONSE_CAP: usize = 131_072;
+fn project_journal_target(selection: &ProjectPlanSelection) -> Result<Url> {
+    selection.validate()?;
+    let mut url = Url::parse(&format!("{ORIGIN}{PROJECT_JOURNAL_PATH}")).map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut().append_pair("work_ref", &selection.work_ref);
+    Ok(url)
+}
+#[tauri::command]
+pub async fn read_project_journal(app: AppHandle, selection: ProjectPlanSelection) -> Result<Value> {
+    let url = project_journal_target(&selection)?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, PROJECT_JOURNAL_RESPONSE_CAP).await
+            .and_then(|value| typed_unavailable(value, PROJECT_JOURNAL_SCHEMA, false))
+    } else {
+        bounded_json(response, PROJECT_JOURNAL_RESPONSE_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(PROJECT_JOURNAL_SCHEMA)
+        || value.get("selection").and_then(|s| s.get("work_ref")).and_then(Value::as_str) != Some(selection.work_ref.as_str()) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // The existing host performs the sole full closed-body decode before display.
+    Ok(value)
+}
+
+
+// Project admission uses a dedicated fixed action/status surface. These selectors
+// carry no principal, grant, path or mutation authority from the webview.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectAdmissionSelection {
+    work_ref: String,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "admission_optional_root")]
+    root_job_id: Option<String>,
+}
+fn admission_optional_root<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Option<String>, D::Error> {
+    String::deserialize(d).map(Some)
+}
+impl ProjectAdmissionSelection {
+    fn validate(&self) -> Result<()> {
+        ProjectPlanSelection { work_ref: self.work_ref.clone() }.validate()?;
+        if let Some(root) = &self.root_job_id { validate_workspace_pair(&self.work_ref, root)?; }
+        Ok(())
+    }
+}
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectAdmissionPauseRequest { selection: ProjectAdmissionSelection, command_id: String }
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectAdmissionPauseToken { event_id: u64, receipt_digest: String }
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectAdmissionResumeRequest {
+    selection: ProjectAdmissionSelection, command_id: String, pause_token: ProjectAdmissionPauseToken,
+}
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectAdmissionStatusRequest { selection: ProjectAdmissionSelection, command_id: String, kind: String }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ProjectAdmissionMode { Current, Pause, Resume, PauseStatus, ResumeStatus }
+fn project_admission_command(command: &str, resume: bool) -> Result<()> {
+    let prefix = if resume { "mmos-project-resume-" } else { "mmos-project-pause-" };
+    if !command.strip_prefix(prefix).is_some_and(|suffix| lowercase_hex(suffix, 40)) {
+        return Err("REQUEST_INVALID".into());
+    }
+    Ok(())
+}
+fn project_admission_target(mode: ProjectAdmissionMode, selection: &ProjectAdmissionSelection, command: Option<&str>) -> Result<Url> {
+    selection.validate()?;
+    let path = match mode {
+        ProjectAdmissionMode::Current => "current", ProjectAdmissionMode::Pause => "pause",
+        ProjectAdmissionMode::Resume => "resume", _ => "operation",
+    };
+    let mut url = Url::parse(&format!("{ORIGIN}/workspace/project-admission/{path}")).map_err(|_| "REQUEST_INVALID")?;
+    if mode == ProjectAdmissionMode::Current || matches!(mode, ProjectAdmissionMode::PauseStatus | ProjectAdmissionMode::ResumeStatus) {
+        url.query_pairs_mut().append_pair("work_ref", &selection.work_ref);
+        if let Some(root) = &selection.root_job_id { url.query_pairs_mut().append_pair("root_job_id", root); }
+    }
+    if mode != ProjectAdmissionMode::Current {
+        let command = command.ok_or("REQUEST_INVALID")?;
+        let resume = matches!(mode, ProjectAdmissionMode::Resume | ProjectAdmissionMode::ResumeStatus);
+        project_admission_command(command, resume)?;
+        if matches!(mode, ProjectAdmissionMode::PauseStatus | ProjectAdmissionMode::ResumeStatus) {
+            url.query_pairs_mut().append_pair("command_id", command)
+                .append_pair("kind", if resume { "project_resume" } else { "project_pause" });
+        }
+    } else if command.is_some() { return Err("REQUEST_INVALID".into()); }
+    Ok(url)
+}
+fn project_admission_header_matches(value: &Value, mode: ProjectAdmissionMode, selection: &ProjectAdmissionSelection, command: Option<&str>) -> bool {
+    let schema = match mode {
+        ProjectAdmissionMode::Current => "mastermind.workspace_project_admission_control.v1",
+        ProjectAdmissionMode::Pause => "mastermind.workspace_project_admission_action_result.v1",
+        ProjectAdmissionMode::Resume => "mastermind.workspace_project_resumption_action_result.v1",
+        ProjectAdmissionMode::PauseStatus => "mastermind.workspace_project_admission_status_result.v1",
+        ProjectAdmissionMode::ResumeStatus => "mastermind.workspace_project_resumption_status_result.v1",
+    };
+    let Ok(mut expected) = serde_json::to_value(selection) else { return false; };
+    if let Some(command) = command { expected["command_id"] = Value::String(command.into()); }
+    value.get("schema").and_then(Value::as_str) == Some(schema) && value.get("selection") == Some(&expected)
+}
+async fn project_admission_exchange(app: AppHandle, mode: ProjectAdmissionMode, selection: ProjectAdmissionSelection, command: Option<String>, body: Option<Value>) -> Result<Value> {
+    let url = project_admission_target(mode, &selection, command.as_deref())?;
+    let action = matches!(mode, ProjectAdmissionMode::Pause | ProjectAdmissionMode::Resume);
+    if action != body.is_some() { return Err("REQUEST_INVALID".into()); }
+    let encoded = body.map(|body| serde_json::to_vec(&body).map_err(|_| "REQUEST_INVALID".to_owned())).transpose()?;
+    if encoded.as_ref().is_some_and(|v| v.len() > 16_384) { return Err("REQUEST_BOUND".into()); }
+    let state = app.state::<NativeAuth>();
+    let before = state.lock()?.generation;
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    // Authentication may change while token acquisition awaits; no action may
+    // cross that identity change, even if the replacement user is signed in.
+    if before != generation || !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let mut request = if let Some(bytes) = encoded {
+        state.http.post(url).header("Content-Type", "application/json").body(bytes)
+    } else { state.http.get(url) };
+    request = request.bearer_auth(token).header("Accept", "application/json")
+        .header("Cache-Control", "no-store").timeout(Duration::from_secs(60));
+    let response = request.send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, 32_768).await
+    } else { bounded_json(response, 32_768).await };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) { return Err("AUTHENTICATION_CHANGED".into()); }
+    let value = result?;
+    if !project_admission_header_matches(&value, mode, &selection, command.as_deref()) { return Err("RESPONSE_INVALID".into()); }
+    // The typed host decodes the full current document; the incumbent finite
+    // port decodes every action/status receipt before controller publication.
+    Ok(value)
+}
+#[tauri::command]
+pub async fn read_project_admission_control(app: AppHandle, selection: ProjectAdmissionSelection) -> Result<Value> {
+    project_admission_exchange(app, ProjectAdmissionMode::Current, selection, None, None).await
+}
+#[tauri::command]
+pub async fn pause_project_admission(app: AppHandle, request: ProjectAdmissionPauseRequest) -> Result<Value> {
+    project_admission_command(&request.command_id, false)?;
+    let body = serde_json::to_value(&request).map_err(|_| "REQUEST_INVALID")?;
+    project_admission_exchange(app, ProjectAdmissionMode::Pause, request.selection, Some(request.command_id), Some(body)).await
+}
+#[tauri::command]
+pub async fn resume_project_admission(app: AppHandle, request: ProjectAdmissionResumeRequest) -> Result<Value> {
+    project_admission_command(&request.command_id, true)?;
+    if request.pause_token.event_id == 0 || request.pause_token.event_id > MAX_SAFE_GENERATION
+        || !lowercase_hex(&request.pause_token.receipt_digest, 64) { return Err("REQUEST_INVALID".into()); }
+    let body = serde_json::to_value(&request).map_err(|_| "REQUEST_INVALID")?;
+    project_admission_exchange(app, ProjectAdmissionMode::Resume, request.selection, Some(request.command_id), Some(body)).await
+}
+#[tauri::command]
+pub async fn read_project_admission_operation(app: AppHandle, request: ProjectAdmissionStatusRequest) -> Result<Value> {
+    let mode = match request.kind.as_str() { "project_pause" => ProjectAdmissionMode::PauseStatus,
+        "project_resume" => ProjectAdmissionMode::ResumeStatus, _ => return Err("REQUEST_INVALID".into()) };
+    project_admission_exchange(app, mode, request.selection, Some(request.command_id), None).await
+}
+
+
+#[cfg(test)]
+mod project_admission_transport_tests {
+    use super::*;
+    fn selection() -> ProjectAdmissionSelection { ProjectAdmissionSelection { work_ref: "WS:PROJECT-ONE".into(), root_job_id: None } }
+    #[test]
+    fn fixed_targets_and_exact_original_namespaces() {
+        let selection = selection();
+        let pause = format!("mmos-project-pause-{}", "a".repeat(40));
+        let resume = format!("mmos-project-resume-{}", "b".repeat(40));
+        let current = project_admission_target(ProjectAdmissionMode::Current, &selection, None).unwrap();
+        assert_eq!(current.as_str(), "https://mcp.mastermind-x.com/workspace/project-admission/current?work_ref=WS%3APROJECT-ONE");
+        let status = project_admission_target(ProjectAdmissionMode::ResumeStatus, &selection, Some(&resume)).unwrap();
+        assert_eq!(status.path(), "/workspace/project-admission/operation");
+        assert!(status.query_pairs().any(|(k,v)| k == "kind" && v == "project_resume"));
+        let mutation = project_admission_target(ProjectAdmissionMode::Pause, &selection, Some(&pause)).unwrap();
+        assert_eq!(mutation.path(), "/workspace/project-admission/pause"); assert_eq!(mutation.query(), None);
+        assert!(project_admission_target(ProjectAdmissionMode::Pause, &selection, Some(&resume)).is_err());
+        assert!(project_admission_target(ProjectAdmissionMode::ResumeStatus, &selection, Some(&pause)).is_err());
+        assert!(project_admission_target(ProjectAdmissionMode::Current, &selection, Some(&pause)).is_err());
+        for command in [pause.clone()+"\n", pause.to_uppercase(), "mmos-project-pause-a".into()] { assert!(project_admission_command(&command, false).is_err()); }
+    }
+    #[test]
+    fn closed_selectors_and_requests_reject_private_or_foreign_fields() {
+        for bad in [serde_json::json!({"work_ref":"WS:PROJECT-ONE","root_job_id":null}),
+            serde_json::json!({"work_ref":"WS:PROJECT-ONE","principal":"caller"}),
+            serde_json::json!({"work_ref":"WS:PROJECT-ONE","root_job_id":1})] {
+            assert!(serde_json::from_value::<ProjectAdmissionSelection>(bad).is_err());
+        }
+        for bad in ["WS:x", "WS:PROJECT--ONE", "WS:PROJECT_ONE", "WS:PROJECT-ONE\n"] {
+            let selected = ProjectAdmissionSelection { work_ref:bad.into(), root_job_id:None };
+            assert!(project_admission_target(ProjectAdmissionMode::Current,&selected,None).is_err());
+        }
+        let mut selected=selection();
+        for root in ["JOB-0", "JOB-0001", "JOB-999999999"] { selected.root_job_id=Some(root.into()); assert!(selected.validate().is_ok()); }
+        for root in ["JOB-", "JOB-1000000000", "JOB-1\n", "JOB-other"] { selected.root_job_id=Some(root.into()); assert!(selected.validate().is_err()); }
+        let pause = serde_json::json!({"selection":{"work_ref":"WS:PROJECT-ONE"},"command_id":format!("mmos-project-pause-{}","a".repeat(40))});
+        assert!(serde_json::from_value::<ProjectAdmissionPauseRequest>(pause.clone()).is_ok());
+        for field in ["url","actor","permission_digest","pause_token","kind"] { let mut v=pause.clone(); v[field]=Value::String("private".into()); assert!(serde_json::from_value::<ProjectAdmissionPauseRequest>(v).is_err()); }
+        assert!(serde_json::from_value::<ProjectAdmissionPauseToken>(serde_json::json!({"event_id":1,"receipt_digest":"a".repeat(64),"extra":true})).is_err());
+    }
+    #[test]
+    fn response_header_withholds_other_originals_and_scope() {
+        let selection=selection(); let command=format!("mmos-project-pause-{}","a".repeat(40));
+        let mut value=serde_json::json!({"schema":"mastermind.workspace_project_admission_status_result.v1","selection":{"work_ref":"WS:PROJECT-ONE","command_id":command}});
+        assert!(project_admission_header_matches(&value,ProjectAdmissionMode::PauseStatus,&selection,Some(&command)));
+        assert!(!project_admission_header_matches(&value,ProjectAdmissionMode::ResumeStatus,&selection,Some(&command)));
+        value["selection"]["root_job_id"]=Value::String("JOB-1".into());
+        assert!(!project_admission_header_matches(&value,ProjectAdmissionMode::PauseStatus,&selection,Some(&command)));
+        value["selection"].as_object_mut().unwrap().remove("root_job_id");
+        value["selection"]["command_id"]=Value::String(format!("mmos-project-pause-{}","b".repeat(40)));
+        assert!(!project_admission_header_matches(&value,ProjectAdmissionMode::PauseStatus,&selection,Some(&command)));
+    }
+}
+
+const PROJECT_SESSION_PATH: &str = "/workspace/project-session/current";
+const PROJECT_SESSION_SCHEMA: &str = "mastermind.workspace_project_session_association.v1";
+const PROJECT_SESSION_RESPONSE_CAP: usize = 16_384;
+fn project_session_target(selection: &MissionSelection) -> Result<Url> {
+    selection.validate()?;
+    let key = selection.work_ref.strip_prefix("WS:").ok_or("SELECTION_INVALID")?;
+    let root = selection.root_job_id.strip_prefix("JOB-").ok_or("SELECTION_INVALID")?;
+    if !(2..=64).contains(&key.len()) || key.starts_with('-') || key.ends_with('-') || key.contains("--")
+        || !key.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'-')
+        || root.is_empty() || root.len() > 9 || !root.bytes().all(|b| b.is_ascii_digit()) {
+        return Err("SELECTION_INVALID".into());
+    }
+    let mut url = Url::parse(&format!("{ORIGIN}{PROJECT_SESSION_PATH}")).map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut().append_pair("work_ref", &selection.work_ref).append_pair("root_job_id", &selection.root_job_id);
+    Ok(url)
+}
+#[tauri::command]
+pub async fn read_project_session(app: AppHandle, selection: MissionSelection) -> Result<Value> {
+    let url = project_session_target(&selection)?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, PROJECT_SESSION_RESPONSE_CAP).await
+            .and_then(|value| typed_unavailable(value, PROJECT_SESSION_SCHEMA, false))
+    } else {
+        bounded_json(response, PROJECT_SESSION_RESPONSE_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(PROJECT_SESSION_SCHEMA)
+        || value.get("selection").and_then(|s| s.get("work_ref")).and_then(Value::as_str) != Some(selection.work_ref.as_str())
+        || value.get("selection").and_then(|s| s.get("root_job_id")).and_then(Value::as_str) != Some(selection.root_job_id.as_str()) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // The existing host performs the sole full closed-body decode before display.
+    Ok(value)
+}
+
+const AUTONOMY_POLICY_PATH: &str = "/workspace/autonomy/current";
+const AUTONOMY_POLICY_SCHEMA: &str = "mastermind.workspace_autonomy_read_result.v1";
+const AUTONOMY_POLICY_RESPONSE_CAP: usize = 32_768;
+fn autonomy_policy_target(selection: &MissionSelection) -> Result<Url> {
+    validate_workspace_pair(&selection.work_ref, &selection.root_job_id)?;
+    let mut url = Url::parse(&format!("{ORIGIN}{AUTONOMY_POLICY_PATH}")).map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut().append_pair("work_ref", &selection.work_ref)
+        .append_pair("root_job_id", &selection.root_job_id);
+    Ok(url)
+}
+#[tauri::command]
+pub async fn read_autonomy_policy(app: AppHandle, selection: MissionSelection) -> Result<Value> {
+    let url = autonomy_policy_target(&selection)?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, AUTONOMY_POLICY_RESPONSE_CAP).await
+            .and_then(|value| typed_unavailable(value, AUTONOMY_POLICY_SCHEMA, false))
+    } else {
+        bounded_json(response, AUTONOMY_POLICY_RESPONSE_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(AUTONOMY_POLICY_SCHEMA)
+        || value.get("selection").and_then(|s| s.get("work_ref")).and_then(Value::as_str) != Some(selection.work_ref.as_str())
+        || value.get("selection").and_then(|s| s.get("root_job_id")).and_then(Value::as_str) != Some(selection.root_job_id.as_str()) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // Full closed-body validation remains in the existing host before display.
+    Ok(value)
+}
+
 #[tauri::command]
 pub async fn read_admitted_plan(app: AppHandle, selection: MissionSelection) -> Result<Value> {
     // Original Workspace selection grammar is narrower than legacy Mission selection.
@@ -1103,6 +1508,46 @@ impl RetainedActivitySelection {
         Ok(())
     }
 }
+const RESOURCE_CAPACITY_PATH: &str = "/workspace/resources/capacity/current";
+const RESOURCE_CAPACITY_SCHEMA: &str = "mastermind.workspace_resource_capacity_result.v1";
+const RESOURCE_CAPACITY_CAP: usize = 16_384;
+
+/// Same fixed public Workspace acquisition bearer and owner-issued generation
+/// fence as admitted plan; never pass private keys, native Fabric run IDs or
+/// raw Event rows into the webview. A 503 must keep the closed typed schema.
+#[tauri::command]
+pub async fn read_resource_capacity(app: AppHandle, selection: RetainedActivitySelection) -> Result<Value> {
+    selection.validate()?;
+    let mut url = Url::parse(&format!("{ORIGIN}{RESOURCE_CAPACITY_PATH}"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut()
+        .append_pair("work_ref", &selection.work_ref)
+        .append_pair("root_job_id", &selection.root_job_id)
+        .append_pair("job_id", &selection.job_id)
+        .append_pair("attempt_id", &selection.attempt_id);
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, RESOURCE_CAPACITY_CAP).await
+            .and_then(|value| typed_unavailable(value, RESOURCE_CAPACITY_SCHEMA, false))
+    } else {
+        bounded_json(response, RESOURCE_CAPACITY_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(RESOURCE_CAPACITY_SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // The existing host's strict DTO decoder removes unrecognized fields.
+    Ok(value)
+}
+
 const RETAINED_ACTIVITY_PATH: &str = "/workspace/operator/activity/current";
 const RETAINED_ACTIVITY_SCHEMA: &str = "mastermind.workspace_retained_activity.v1";
 const RETAINED_ACTIVITY_CAP: usize = 16_384;
@@ -1323,6 +1768,60 @@ fn executive_body(body: &Value) -> Result<Vec<u8>> {
     }
     Ok(serialized)
 }
+fn direct_native_arguments(arguments: Value, consume: bool) -> Result<Value> {
+    let object = arguments.as_object().ok_or("DIRECT_SELECTION_INVALID")?;
+    let keys: &[&str] = if consume {
+        &["work_ref", "job_id", "attempt_id", "result_digest", "operation_key"]
+    } else { &["work_ref", "job_id", "attempt_id"] };
+    if object.len() != keys.len() || keys.iter().any(|key| !object.contains_key(*key)) {
+        return Err("DIRECT_SELECTION_INVALID".into());
+    }
+    let id = |value: &Value| value.as_str().is_some_and(|value| {
+        !value.is_empty() && value.len() <= 128
+            && value.as_bytes()[0].is_ascii_alphanumeric()
+            && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))
+    });
+    if !object["work_ref"].as_str().is_some_and(|value| !value.is_empty()
+        && value.trim() == value && value.chars().count() <= 512
+        && !value.chars().any(char::is_control))
+        || !id(&object["job_id"])
+        || !(id(&object["attempt_id"]) || (!consume && object["attempt_id"].is_null())) {
+        return Err("DIRECT_SELECTION_INVALID".into());
+    }
+    if consume && (!id(&object["operation_key"])
+        || !object["result_digest"].as_str().is_some_and(|value| value.len() == 64
+            && value.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))) {
+        return Err("DIRECT_SELECTION_INVALID".into());
+    }
+    if executive_body(&arguments)?.len() > DIRECT_NATIVE_REQUEST_CAP {
+        return Err("REQUEST_BOUND".into());
+    }
+    Ok(arguments)
+}
+fn direct_native_correction_arguments(arguments: Value) -> Result<Value> {
+    let object = arguments.as_object().ok_or("DIRECT_SELECTION_INVALID")?;
+    let request = match object.get("operation").and_then(Value::as_str) {
+        Some("inspect") => false, Some("request") => true,
+        _ => return Err("DIRECT_SELECTION_INVALID".into()),
+    };
+    let keys: &[&str] = if request {
+        &["operation", "work_ref", "job_id", "attempt_id", "fence_generation", "operation_key"]
+    } else { &["operation", "work_ref", "job_id", "attempt_id"] };
+    if object.len() != keys.len() || keys.iter().any(|key| !object.contains_key(*key)) {
+        return Err("DIRECT_SELECTION_INVALID".into());
+    }
+    direct_native_arguments(serde_json::json!({"work_ref":object["work_ref"],
+        "job_id":object["job_id"], "attempt_id":object["attempt_id"]}), false)?;
+    if request && (object["attempt_id"].is_null()
+        || !object["fence_generation"].as_u64().is_some_and(|value| value > 0 && value <= MAX_SAFE_GENERATION)
+        || !object["operation_key"].as_str().is_some_and(|value| !value.is_empty() && value.len() <= 128
+            && value.as_bytes()[0].is_ascii_alphanumeric()
+            && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte)))) {
+        return Err("DIRECT_SELECTION_INVALID".into());
+    }
+    if executive_body(&arguments)?.len() > DIRECT_NATIVE_REQUEST_CAP { return Err("REQUEST_BOUND".into()); }
+    Ok(arguments)
+}
 async fn executive_post(app: AppHandle, path: &'static str, body: Value) -> Result<Value> {
     let state = app.state::<NativeAuth>();
     executive_post_with_dispatch(&state, path, body, reqwest::RequestBuilder::send).await
@@ -1339,7 +1838,18 @@ where
     D: FnOnce(reqwest::RequestBuilder) -> F,
     F: std::future::Future<Output = std::result::Result<reqwest::Response, reqwest::Error>>,
 {
-    let (token, token_expires, generation) = {
+    let foreground_research = path == "/os/executive/submit"
+        && body.get("arguments").and_then(|v| v.get("execution_profile"))
+            .and_then(Value::as_str) == Some("research_only");
+    // Validate the closed selectors at the shared boundary before dispatch,
+    // including callers other than the public command wrappers.
+    match path {
+        "/os/executive/direct-native/result" => { direct_native_arguments(body.clone(), false)?; }
+        "/os/executive/direct-native/consume" => { direct_native_arguments(body.clone(), true)?; }
+        "/os/executive/direct-native/correction" => { direct_native_correction_arguments(body.clone())?; }
+        _ => {}
+    }
+    let (token, token_expires, generation, changed) = {
         let inner = state.lock()?;
         let token = inner.token(Resource::Executive).ok_or("EXECUTIVE_AUTH_REQUIRED")?;
         match path {
@@ -1347,8 +1857,14 @@ where
             | "/os/executive/status"
             | "/os/executive/session/context"
             | "/os/executive/session/reply"
-            | "/os/executive/session/references" => {}
-            "/os/executive/submit" => {
+            | "/os/executive/session/references"
+            | "/os/executive/direct-native/result" => {}
+            "/os/executive/direct-native/correction" => {
+                if body.get("operation").and_then(Value::as_str) == Some("request") && !token.executive_send {
+                    return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into());
+                }
+            }
+            "/os/executive/submit" | "/os/executive/direct-native/consume" => {
                 if !token.executive_send {
                     return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into());
                 }
@@ -1359,14 +1875,18 @@ where
             token.value.clone(),
             token.expires,
             inner.executive_generation,
+            inner.executive_changed.subscribe(),
         )
     };
     let serialized = executive_body(&body)?;
+    let direct = matches!(path, "/os/executive/direct-native/result" | "/os/executive/direct-native/consume"
+        | "/os/executive/direct-native/correction");
+    if direct && serialized.len() > DIRECT_NATIVE_REQUEST_CAP { return Err("REQUEST_BOUND".into()); }
     let url = Url::parse(&format!("{ORIGIN}{path}")).map_err(|_| "REQUEST_INVALID".to_owned())?;
     if url.origin().ascii_serialization() != ORIGIN {
         return Err("REQUEST_INVALID".into());
     }
-    let request = state
+    let mut request = state
         .http
         .post(url)
         .bearer_auth(token)
@@ -1374,26 +1894,58 @@ where
         .header("Cache-Control", "no-store")
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(serialized);
-    let response = dispatch(request)
-        .await
-        .map_err(|_| "EXECUTIVE_TRANSPORT_UNAVAILABLE".to_owned())?;
-    { executive_guard(&mut *state.lock()?, generation, token_expires)?; }
-    let status = response.status();
-    let result = if status.is_success() {
-        read_json_body(response, EXECUTIVE_RESPONSE_CAP).await
-    } else {
-        Err(match status.as_u16() {
-            401 => "EXECUTIVE_AUTH_REQUIRED",
-            403 => "EXECUTIVE_ACCESS_REFUSED",
-            _ => "EXECUTIVE_TRANSPORT_UNAVAILABLE",
-        }
-        .into())
-    };
-    {
-        let mut inner = state.lock()?;
-        executive_guard(&mut inner, generation, token_expires)?;
+    if foreground_research {
+        request = request.timeout(EXECUTIVE_FOREGROUND_TIMEOUT);
     }
-    result
+    let exchange = async {
+        let response = dispatch(request)
+            .await
+            .map_err(|_| "EXECUTIVE_TRANSPORT_UNAVAILABLE".to_owned())?;
+        { executive_guard(&mut *state.lock()?, generation, token_expires)?; }
+        let status = response.status();
+        let result = if status.is_success() {
+            read_json_body(response, if direct { DIRECT_NATIVE_RESPONSE_CAP } else { EXECUTIVE_RESPONSE_CAP }).await
+        } else if direct && [401, 403, 409, 503].contains(&status.as_u16()) {
+            let value = read_json_body(response, DIRECT_NATIVE_RESPONSE_CAP).await?;
+            if value.get("schema").and_then(Value::as_str) == Some("mastermind.direct_native_result_response.v1")
+                && value.get("availability").and_then(Value::as_str) == Some("UNAVAILABLE") {
+                Ok(value)
+            } else { Err("EXECUTIVE_TRANSPORT_UNAVAILABLE".into()) }
+        } else {
+            Err(match status.as_u16() {
+                401 => "EXECUTIVE_AUTH_REQUIRED",
+                403 => "EXECUTIVE_ACCESS_REFUSED",
+                _ => "EXECUTIVE_TRANSPORT_UNAVAILABLE",
+            }.into())
+        };
+        { executive_guard(&mut *state.lock()?, generation, token_expires)?; }
+        result
+    };
+    if foreground_research || direct {
+        executive_foreground_exchange(state, generation, token_expires, changed, exchange).await
+    } else {
+        exchange.await
+    }
+}
+
+async fn executive_foreground_exchange<T, F>(
+    state: &NativeAuth, generation: u64, expires: Instant,
+    mut changed: tokio::sync::watch::Receiver<()>, exchange: F,
+) -> Result<T>
+where F: std::future::Future<Output = Result<T>> {
+    use std::{future::Future, task::Poll};
+    let mut exchange = std::pin::pin!(exchange);
+    let mut expiry = std::pin::pin!(tokio::time::sleep_until(expires.into()));
+    let mut notification = std::pin::pin!(changed.changed());
+    std::future::poll_fn(|cx| {
+        if notification.as_mut().poll(cx).is_ready() || expiry.as_mut().poll(cx).is_ready() {
+            return Poll::Ready(Err("EXECUTIVE_AUTH_CHANGED".into()));
+        }
+        if let Err(error) = state.lock().and_then(|mut inner| executive_guard(&mut inner, generation, expires)) {
+            return Poll::Ready(Err(error));
+        }
+        exchange.as_mut().poll(cx)
+    }).await
 }
 #[tauri::command]
 pub fn executive_auth_status(state: tauri::State<'_, NativeAuth>) -> Result<ExecutiveAuthStatus> {
@@ -1431,6 +1983,28 @@ pub async fn executive_status(app: AppHandle, intent_id: String) -> Result<Value
     if result.is_err() {
         emit(&app);
     }
+    result
+}
+
+#[tauri::command]
+pub async fn executive_direct_native_result(app: AppHandle, arguments: Value) -> Result<Value> {
+    let arguments = direct_native_arguments(arguments, false)?;
+    let result = executive_post(app.clone(), "/os/executive/direct-native/result", arguments).await;
+    if result.is_err() { emit(&app); }
+    result
+}
+#[tauri::command]
+pub async fn executive_direct_native_consume(app: AppHandle, arguments: Value) -> Result<Value> {
+    let arguments = direct_native_arguments(arguments, true)?;
+    let result = executive_post(app.clone(), "/os/executive/direct-native/consume", arguments).await;
+    if result.is_err() { emit(&app); }
+    result
+}
+#[tauri::command]
+pub async fn executive_direct_correction(app: AppHandle, arguments: Value) -> Result<Value> {
+    let arguments = direct_native_correction_arguments(arguments)?;
+    let result = executive_post(app.clone(), "/os/executive/direct-native/correction", arguments).await;
+    if result.is_err() { emit(&app); }
     result
 }
 
@@ -1518,6 +2092,70 @@ mod tests {
         assert!(valid_original_operation_key(&format!("session-continue-{}", "a".repeat(64))));
         assert!(!valid_original_operation_key(&format!("session-continue-{}", "A".repeat(64))));
         assert!(!valid_original_operation_key("session-continue-invalid"));
+    }
+    #[test]
+    fn autonomy_policy_read_is_one_fixed_selected_root_acquisition_target() {
+        let selected: MissionSelection = serde_json::from_value(serde_json::json!({"work_ref":"WS:ONE","root_job_id":"JOB-1"})).unwrap();
+        let url = autonomy_policy_target(&selected).unwrap();
+        assert_eq!(url.origin().ascii_serialization(), ORIGIN);
+        assert_eq!(url.path(), "/workspace/autonomy/current");
+        assert_eq!(url.query_pairs().collect::<Vec<_>>(), vec![("work_ref".into(),"WS:ONE".into()),("root_job_id".into(),"JOB-1".into())]);
+        assert_eq!(AUTONOMY_POLICY_RESPONSE_CAP, 32_768);
+        for value in [
+            serde_json::json!({"work_ref":"WS:ONE","root_job_id":"JOB-1","path":"/private"}),
+            serde_json::json!({"work_ref":"WS:ONE","root_job_id":"JOB-1","account":"foreign"}),
+            serde_json::json!({"work_ref":"WS:ONE"}),
+        ] { assert!(serde_json::from_value::<MissionSelection>(value).is_err()); }
+        for (work, root) in [("WS:ONE\n","JOB-1"),("WS:ONE","JOB-1\n"),("WS:lower","JOB-1"),("WS:ONE","JOB-latest")] {
+            assert!(autonomy_policy_target(&MissionSelection {work_ref:work.into(),root_job_id:root.into()}).is_err());
+        }
+    }
+    #[test]
+    fn project_plan_read_is_one_fixed_rootless_acquisition_target() {
+        let selection: ProjectPlanSelection = serde_json::from_value(serde_json::json!({"work_ref": "WS:PLAN-ONE"})).unwrap();
+        let url = project_plan_target(&selection).unwrap();
+        assert_eq!(url.path(), "/workspace/project-plan/current");
+        assert_eq!(url.origin().ascii_serialization(), ORIGIN);
+        assert_eq!(url.query_pairs().collect::<Vec<_>>(), vec![("work_ref".into(), "WS:PLAN-ONE".into())]);
+        assert_eq!(PROJECT_PLAN_RESPONSE_CAP, 131_072);
+        for key in ["root_job_id", "path", "commit", "resource", "operation"] {
+            let mut value = serde_json::json!({"work_ref": "WS:PLAN-ONE"});
+            value[key] = serde_json::json!("foreign");
+            assert!(serde_json::from_value::<ProjectPlanSelection>(value).is_err());
+        }
+        for work in ["WS:A", "WS:plan", "WS:PLAN\n", "WS:PLAN/../../private", "WS:PLAN--ONE", "WS:-PLAN", "WS:PLAN-", "JOB-1", "WS:計画"] {
+            assert!(project_plan_target(&ProjectPlanSelection { work_ref: work.into() }).is_err());
+        }
+    }
+    #[test]
+    fn project_plan_header_retains_v1_and_accepts_only_bound_v2() {
+        let selection = ProjectPlanSelection { work_ref: "WS:PLAN-TEST".into() };
+        for schema in [PROJECT_PLAN_SCHEMA, PROJECT_PLAN_SCHEMA_V2] {
+            assert!(project_plan_header_matches(&serde_json::json!({"schema": schema,
+                "selection": {"work_ref": "WS:PLAN-TEST"}}), &selection));
+        }
+        for value in [serde_json::json!({"schema": PROJECT_PLAN_SCHEMA_V2, "selection": {"work_ref": "WS:OTHER"}}),
+            serde_json::json!({"schema": "mastermind.workspace_project_plan.v3", "selection": {"work_ref": "WS:PLAN-TEST"}}),
+            serde_json::json!({"schema": PROJECT_PLAN_SCHEMA_V2})] {
+            assert!(!project_plan_header_matches(&value, &selection));
+        }
+    }
+    #[test]
+    fn project_journal_read_is_one_fixed_rootless_acquisition_target() {
+        let selection: ProjectPlanSelection = serde_json::from_value(serde_json::json!({"work_ref": "WS:PLAN-ONE"})).unwrap();
+        let url = project_journal_target(&selection).unwrap();
+        assert_eq!(url.path(), "/workspace/project-journal/current");
+        assert_eq!(url.origin().ascii_serialization(), ORIGIN);
+        assert_eq!(url.query_pairs().collect::<Vec<_>>(), vec![("work_ref".into(), "WS:PLAN-ONE".into())]);
+        assert_eq!(PROJECT_JOURNAL_RESPONSE_CAP, 131_072);
+        for key in ["root_job_id", "path", "commit", "resource", "operation"] {
+            let mut value = serde_json::json!({"work_ref": "WS:PLAN-ONE"});
+            value[key] = serde_json::json!("foreign");
+            assert!(serde_json::from_value::<ProjectPlanSelection>(value).is_err());
+        }
+        for work in ["WS:A", "WS:plan", "WS:PLAN\n", "WS:PLAN/../../private", "WS:PLAN--ONE", "WS:-PLAN", "WS:PLAN-", "JOB-1", "WS:計画"] {
+            assert!(project_journal_target(&ProjectPlanSelection { work_ref: work.into() }).is_err());
+        }
     }
     fn inner() -> Inner {
         Inner::new(Some("public-client"))
@@ -2020,6 +2658,307 @@ mod tests {
             .into()
     }
 
+    #[test]
+    fn native_direct_selection_is_closed_and_consumption_is_explicit() {
+        let read = serde_json::json!({"work_ref":"WS:H2", "job_id":"JOB-1", "attempt_id":null});
+        assert_eq!(direct_native_arguments(read.clone(), false).unwrap(), read);
+        assert!(direct_native_arguments(read.clone(), true).is_err());
+        let consume = serde_json::json!({"work_ref":"WS:H2", "job_id":"JOB-1", "attempt_id":"ATTEMPT-1",
+            "result_digest":"a".repeat(64), "operation_key":"ack-original"});
+        assert_eq!(direct_native_arguments(consume.clone(), true).unwrap(), consume);
+        assert!(direct_native_arguments(consume.clone(), false).is_err());
+        for (field, value) in [("job_id", serde_json::json!("../foreign")),
+            ("work_ref", serde_json::json!("WS:H2\n")), ("attempt_id", Value::Null),
+            ("result_digest", serde_json::json!("A".repeat(64))),
+            ("operation_key", serde_json::json!("bad/key"))] {
+            let mut changed = consume.clone(); changed[field] = value;
+            assert!(direct_native_arguments(changed, true).is_err());
+        }
+        let mut injected = read; injected["operation"] = "consume".into();
+        assert!(direct_native_arguments(injected, false).is_err());
+    }
+
+    #[test]
+    fn native_direct_transport_preserves_flat_body_and_requires_send_for_consumption() {
+        for (path, consume) in [("/os/executive/direct-native/result", false),
+            ("/os/executive/direct-native/consume", true)] {
+            for send in [false, true] {
+                let state = native_executive_state(if send { EXECUTIVE_SCOPE } else { "mastermind.executive.read" });
+                let mut body = serde_json::json!({"work_ref":"WS:H2", "job_id":"JOB-1", "attempt_id":"ATTEMPT-1"});
+                if consume { body["result_digest"] = "a".repeat(64).into(); body["operation_key"] = "ack-original".into(); }
+                let body = direct_native_arguments(body, consume).unwrap();
+                let calls = std::cell::Cell::new(0);
+                let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state, path,
+                    body.clone(), |builder| {
+                        calls.set(calls.get() + 1);
+                        let request = builder.build().unwrap();
+                        assert_eq!(request.url().as_str(), format!("{ORIGIN}{path}"));
+                        assert_eq!(serde_json::from_slice::<Value>(request.body().unwrap().as_bytes().unwrap()).unwrap(), body);
+                        assert_eq!(request.method(), reqwest::Method::POST);
+                        async { Ok(native_fixture_response()) }
+                    }));
+                if consume && !send {
+                    assert_eq!(calls.get(), 0);
+                    assert_eq!(result.unwrap_err(), "EXECUTIVE_SEND_SCOPE_REQUIRED");
+                } else { assert_eq!(calls.get(), 1); assert!(result.is_ok()); }
+            }
+        }
+    }
+
+    #[test]
+    fn native_direct_typed_unavailable_is_bounded_and_schema_specific() {
+        let state = native_executive_state("mastermind.executive.read");
+        for (status, response, accepted) in [
+            (503, serde_json::json!({"schema":"mastermind.direct_native_result_response.v1", "availability":"UNAVAILABLE"}), true),
+            (503, serde_json::json!({"schema":"foreign", "availability":"UNAVAILABLE"}), false),
+            (503, serde_json::json!({"schema":"mastermind.direct_native_result_response.v1", "availability":"AVAILABLE"}), false),
+            (200, serde_json::json!({"oversized":"x".repeat(DIRECT_NATIVE_RESPONSE_CAP)}), false),
+        ] {
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state,
+                "/os/executive/direct-native/result", native_direct_request(false), |_| async {
+                    Ok(tauri::http::Response::builder().status(status).header("Content-Type", "application/json")
+                        .body(response.to_string()).unwrap().into())
+                }));
+            assert_eq!(result.is_ok(), accepted);
+        }
+    }
+
+    #[test]
+    fn native_direct_correction_inspect_cannot_smuggle_a_request() {
+        let inspect = serde_json::json!({"operation":"inspect", "work_ref":"WS:H2",
+            "job_id":"JOB-1", "attempt_id":null});
+        assert!(direct_native_correction_arguments(inspect.clone()).is_ok());
+        for (field, value) in [("fence_generation", serde_json::json!(1)),
+            ("operation_key", serde_json::json!("cancel-original")), ("request", serde_json::json!(true))] {
+            let mut changed = inspect.clone(); changed[field] = value;
+            assert!(direct_native_correction_arguments(changed).is_err());
+        }
+        let request = serde_json::json!({"operation":"request", "work_ref":"WS:H2", "job_id":"JOB-1",
+            "attempt_id":"ATTEMPT-1", "fence_generation":1, "operation_key":"cancel-original"});
+        assert!(direct_native_correction_arguments(request.clone()).is_ok());
+        for (field, value) in [("fence_generation", serde_json::json!(0)),
+            ("fence_generation", serde_json::json!(1.5)), ("attempt_id", Value::Null),
+            ("operation", serde_json::json!("consume")), ("operation_key", serde_json::json!("../foreign"))] {
+            let mut changed = request.clone(); changed[field] = value;
+            assert!(direct_native_correction_arguments(changed).is_err());
+        }
+    }
+
+    #[test]
+    fn native_direct_correction_actual_scope_gate_preserves_unknown_without_retry() {
+        for operation in ["inspect", "request"] {
+            for send in [false, true] {
+                let state = native_executive_state(if send { EXECUTIVE_SCOPE } else { "mastermind.executive.read" });
+                let mut body = serde_json::json!({"operation":operation,"work_ref":"WS:H2",
+                    "job_id":"JOB-1","attempt_id":"ATTEMPT-1"});
+                if operation == "request" { body["fence_generation"] = 1.into(); body["operation_key"] = "cancel-original".into(); }
+                let calls = std::cell::Cell::new(0);
+                let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state,
+                    "/os/executive/direct-native/correction", body.clone(), |builder| {
+                        calls.set(calls.get() + 1);
+                        let request = builder.build().unwrap();
+                        assert_eq!(serde_json::from_slice::<Value>(request.body().unwrap().as_bytes().unwrap()).unwrap(), body);
+                        async { Ok(tauri::http::Response::builder().status(202).header("Content-Type", "application/json")
+                            .body(r#"{"error":{"code":"effect_unknown"}}"#.to_owned()).unwrap().into()) }
+                    }));
+                if operation == "request" && !send {
+                    assert_eq!(calls.get(), 0); assert_eq!(result.unwrap_err(), "EXECUTIVE_SEND_SCOPE_REQUIRED");
+                } else {
+                    assert_eq!(calls.get(), 1);
+                    assert_eq!(result.unwrap(), serde_json::json!({"error":{"code":"effect_unknown"}}));
+                }
+            }
+        }
+    }
+
+    fn native_direct_request(consume: bool) -> Value {
+        let mut body = serde_json::json!({
+            "work_ref": "WS:NATIVE-H2", "job_id": "JOB-original", "attempt_id": "ATT-original",
+        });
+        if consume {
+            body["result_digest"] = Value::String("d".repeat(64));
+            body["operation_key"] = Value::String("mmos-consume-original".into());
+        }
+        body
+    }
+
+    #[test]
+    fn native_direct_result_closed_selectors_refuse_before_dispatch() {
+        let state = native_executive_state(EXECUTIVE_SCOPE);
+        for consume in [false, true] {
+            let path = if consume { "/os/executive/direct-native/consume" } else { "/os/executive/direct-native/result" };
+            let mut bad = vec![Value::Null, serde_json::json!({})];
+            for (key, value) in [
+                ("job_id", serde_json::json!("JOB-original/other")),
+                ("attempt_id", serde_json::json!(42)),
+                ("work_ref", serde_json::json!("WS:NATIVE-H2\n")),
+                ("work_ref", serde_json::json!("x".repeat(513))),
+                ("resource", serde_json::json!("https://caller.invalid")),
+            ] {
+                let mut body = native_direct_request(consume);
+                body[key] = value;
+                bad.push(body);
+            }
+            if consume {
+                for (key, value) in [
+                    ("attempt_id", Value::Null),
+                    ("result_digest", Value::String("A".repeat(64))),
+                    ("operation_key", Value::String("caller/path".into())),
+                ] {
+                    let mut body = native_direct_request(true);
+                    body[key] = value;
+                    bad.push(body);
+                }
+            }
+            for body in bad {
+                let calls = std::cell::Cell::new(0);
+                let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+                    &state, path, body, |_| {
+                        calls.set(calls.get() + 1);
+                        std::future::ready(Ok(native_fixture_response()))
+                    }));
+                assert_eq!(result.unwrap_err(), "DIRECT_SELECTION_INVALID");
+                assert_eq!(calls.get(), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn native_direct_result_and_consume_keep_exact_grant_and_fixed_request() {
+        for scope in ["mastermind.executive.read", EXECUTIVE_SCOPE] {
+            for consume in [false, true] {
+                let state = native_executive_state(scope);
+                let path = if consume { "/os/executive/direct-native/consume" } else { "/os/executive/direct-native/result" };
+                let mut body = native_direct_request(consume);
+                if !consume { body["attempt_id"] = Value::Null; }
+                let calls = std::cell::Cell::new(0);
+                let expected = body.clone();
+                let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+                    &state, path, body, |builder| {
+                        calls.set(calls.get() + 1);
+                        let request = builder.build().unwrap();
+                        assert_eq!(request.method(), reqwest::Method::POST);
+                        assert_eq!(request.url().as_str(), format!("{ORIGIN}{path}"));
+                        assert_eq!(request.headers()["authorization"], "Bearer fixture-native-executive");
+                        assert_eq!(serde_json::from_slice::<Value>(request.body().unwrap().as_bytes().unwrap()).unwrap(), expected);
+                        assert!(request.timeout().is_none(), "direct reads/consumes inherited the research foreground deadline");
+                        std::future::ready(Ok(native_fixture_response()))
+                    }));
+                if consume && scope != EXECUTIVE_SCOPE {
+                    assert_eq!(calls.get(), 0);
+                    assert_eq!(result.unwrap_err(), "EXECUTIVE_SEND_SCOPE_REQUIRED");
+                } else {
+                    assert_eq!(calls.get(), 1);
+                    assert!(result.is_ok());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn native_direct_result_and_consume_cancel_old_generation_without_replay() {
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+        struct PendingDrop(Arc<AtomicBool>);
+        impl Drop for PendingDrop {
+            fn drop(&mut self) { self.0.store(true, Ordering::SeqCst); }
+        }
+        for consume in [false, true] {
+            let state = native_executive_state(EXECUTIVE_SCOPE);
+            let path = if consume { "/os/executive/direct-native/consume" } else { "/os/executive/direct-native/result" };
+            let calls = std::cell::Cell::new(0);
+            let dropped = Arc::new(AtomicBool::new(false));
+            let sentinel = PendingDrop(dropped.clone());
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+                &state, path, native_direct_request(consume), |_| async {
+                    calls.set(calls.get() + 1);
+                    let _pending = sentinel;
+                    state.lock().unwrap().clear_executive();
+                    std::future::pending::<std::result::Result<reqwest::Response, reqwest::Error>>().await
+                }));
+            assert_eq!(result.unwrap_err(), "EXECUTIVE_AUTH_CHANGED");
+            assert_eq!(calls.get(), 1);
+            assert!(dropped.load(Ordering::SeqCst));
+        }
+    }
+
+    #[test]
+    fn native_direct_correction_drops_pending_http_on_drift_or_expiry_without_replay() {
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+        struct PendingDrop(Arc<AtomicBool>);
+        impl Drop for PendingDrop {
+            fn drop(&mut self) { self.0.store(true, Ordering::SeqCst); }
+        }
+        for operation in ["inspect", "request"] {
+            for expiry in [false, true] {
+                let state = native_executive_state(EXECUTIVE_SCOPE);
+                let mut body = native_direct_request(false);
+                body["operation"] = serde_json::json!(operation);
+                if operation == "request" {
+                    body["fence_generation"] = serde_json::json!(1);
+                    body["operation_key"] = serde_json::json!("original-correction");
+                }
+                let calls = std::cell::Cell::new(0);
+                let dropped = Arc::new(AtomicBool::new(false));
+                let sentinel = PendingDrop(dropped.clone());
+                let result = tauri::async_runtime::block_on(async {
+                    if expiry {
+                        state.lock().unwrap().executive.as_mut().unwrap().expires =
+                            Instant::now() + Duration::from_millis(20);
+                    }
+                    executive_post_with_dispatch(&state, "/os/executive/direct-native/correction", body, |_| async {
+                        calls.set(calls.get() + 1);
+                        let _pending = sentinel;
+                        if !expiry { state.lock().unwrap().clear_executive(); }
+                        std::future::pending::<std::result::Result<reqwest::Response, reqwest::Error>>().await
+                    }).await
+                });
+                assert_eq!(result.unwrap_err(), "EXECUTIVE_AUTH_CHANGED");
+                assert_eq!(calls.get(), 1);
+                assert!(dropped.load(Ordering::SeqCst), "pending correction HTTP survived auth boundary");
+            }
+        }
+    }
+
+    #[test]
+    fn native_direct_result_and_consume_missing_or_expired_grant_never_dispatch() {
+        for consume in [false, true] {
+            for expired in [false, true] {
+                let state = native_executive_state(EXECUTIVE_SCOPE);
+                {
+                    let mut inner = state.lock().unwrap();
+                    if expired { inner.executive.as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1); }
+                    else { inner.executive = None; }
+                }
+                let path = if consume { "/os/executive/direct-native/consume" } else { "/os/executive/direct-native/result" };
+                let calls = std::cell::Cell::new(0);
+                let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+                    &state, path, native_direct_request(consume), |_| {
+                        calls.set(calls.get() + 1);
+                        std::future::ready(Ok(native_fixture_response()))
+                    }));
+                assert_eq!(result.unwrap_err(), "EXECUTIVE_AUTH_REQUIRED");
+                assert_eq!(calls.get(), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn native_direct_result_response_budget_is_bounded_before_webview_release() {
+        for consume in [false, true] {
+            let state = native_executive_state(EXECUTIVE_SCOPE);
+            let path = if consume { "/os/executive/direct-native/consume" } else { "/os/executive/direct-native/result" };
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+                &state, path, native_direct_request(consume), |_| {
+                    let response = tauri::http::Response::builder().status(200)
+                        .header("Content-Type", "application/json")
+                        .body(serde_json::to_string(&serde_json::json!({"oversized": "x".repeat(DIRECT_NATIVE_RESPONSE_CAP)})).unwrap())
+                        .unwrap().into();
+                    std::future::ready(Ok(response))
+                }));
+            assert_eq!(result.unwrap_err(), "RESPONSE_BOUND");
+        }
+    }
+
     fn native_post_spy(state: &NativeAuth, path: &'static str) -> (Result<Value>, usize) {
         let calls = std::cell::Cell::new(0);
         let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
@@ -2032,6 +2971,62 @@ mod tests {
             },
         ));
         (result, calls.get())
+    }
+
+    #[test]
+    fn native_research_foreground_deadline_does_not_change_other_submits() {
+        for profile in ["research_only", "native_research_only", "bounded_code_change"] {
+            let state = native_executive_state(EXECUTIVE_SCOPE);
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+                &state, "/os/executive/submit",
+                serde_json::json!({"arguments":{"execution_profile":profile}}), |builder| {
+                    let request = builder.build().unwrap();
+                    assert_eq!(request.timeout().copied(),
+                        if profile == "research_only" { Some(EXECUTIVE_FOREGROUND_TIMEOUT) } else { None });
+                    std::future::ready(Ok(native_fixture_response()))
+                }));
+            assert!(result.is_ok());
+        }
+    }
+
+    #[test]
+    fn native_research_foreground_drops_pending_transport_on_auth_change() {
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+        struct PendingDrop(Arc<AtomicBool>);
+        impl Drop for PendingDrop {
+            fn drop(&mut self) { self.0.store(true, Ordering::SeqCst); }
+        }
+        let state = native_executive_state(EXECUTIVE_SCOPE);
+        let dropped = Arc::new(AtomicBool::new(false));
+        let sentinel = PendingDrop(dropped.clone());
+        let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+            &state, "/os/executive/submit",
+            serde_json::json!({"arguments":{"execution_profile":"research_only"}}), |_| async {
+                let _pending = sentinel;
+                state.lock().unwrap().clear_executive();
+                std::future::pending::<std::result::Result<reqwest::Response, reqwest::Error>>().await
+            }));
+        assert_eq!(result.unwrap_err(), "EXECUTIVE_AUTH_CHANGED");
+        assert!(dropped.load(Ordering::SeqCst), "pending HTTP owner survived auth invalidation");
+    }
+
+    #[test]
+    fn native_research_foreground_ends_at_original_token_expiry() {
+        let state = native_executive_state(EXECUTIVE_SCOPE);
+        let dispatched = std::cell::Cell::new(false);
+        let result = tauri::async_runtime::block_on(async {
+            // Start the short-lived token inside the running owner, rather
+            // than spending its lifetime initializing the async runtime.
+            state.lock().unwrap().executive.as_mut().unwrap().expires =
+                Instant::now() + Duration::from_millis(20);
+            executive_post_with_dispatch(&state, "/os/executive/submit",
+                serde_json::json!({"arguments":{"execution_profile":"research_only"}}), |_| {
+                    dispatched.set(true);
+                    std::future::pending::<std::result::Result<reqwest::Response, reqwest::Error>>()
+                }).await
+        });
+        assert!(dispatched.get(), "token expired before the foreground dispatch began");
+        assert_eq!(result.unwrap_err(), "EXECUTIVE_AUTH_CHANGED");
     }
 
     #[test]
@@ -2310,5 +3305,94 @@ mod retained_activity_selection_tests {
             "access_token":"a-valid-synthetic-access-token","expires_in":3600,
             "token_type":"Bearer","scope":"mastermind.executive.read offline_access"
         }), Resource::Executive).is_err());
+    }
+}
+
+#[cfg(test)]
+mod resource_capacity_read_tests {
+    use super::*;
+    fn selection() -> RetainedActivitySelection {
+        RetainedActivitySelection { work_ref: "WS:ONE".into(), root_job_id: "JOB-1".into(), job_id: "JOB-2".into(), attempt_id: format!("ATT-{}", "a".repeat(32)) }
+    }
+    #[test]
+    fn resource_capacity_read_is_only_fixed_historical_acquisition() {
+        assert!(selection().validate().is_ok());
+        assert_eq!(RESOURCE_CAPACITY_PATH, "/workspace/resources/capacity/current");
+        assert_eq!(RESOURCE_CAPACITY_SCHEMA, "mastermind.workspace_resource_capacity_result.v1");
+        assert_eq!(RESOURCE_CAPACITY_CAP, 16_384);
+    }
+    #[test]
+    fn resource_capacity_read_rejects_unknown_host_clock_and_path_fields() {
+        for key in ["host_ref", "clock", "path"] {
+            let mut value = serde_json::json!({"work_ref":"WS:ONE","root_job_id":"JOB-1","job_id":"JOB-2","attempt_id":format!("ATT-{}","a".repeat(32))});
+            value[key] = Value::String("supplied".into());
+            assert!(serde_json::from_value::<RetainedActivitySelection>(value).is_err());
+        }
+    }
+    #[test]
+    fn resource_capacity_read_requires_a_distinct_job_and_exact_attempt() {
+        let mut value=selection(); value.job_id=value.root_job_id.clone(); assert!(value.validate().is_err());
+        let mut value=selection(); value.attempt_id="../private".into(); assert!(value.validate().is_err());
+    }
+}
+
+#[cfg(test)]
+mod project_session_read_tests {
+    use super::*;
+    #[test]
+    fn project_session_read_uses_only_fixed_pair_and_acquisition_body() {
+        let selection = MissionSelection { work_ref: "WS:TEST-PROJECT".into(), root_job_id: "JOB-123".into() };
+        let url = project_session_target(&selection).unwrap();
+        assert_eq!(url.path(), "/workspace/project-session/current");
+        assert_eq!(url.query_pairs().map(|(key, value)| (key.into_owned(), value.into_owned())).collect::<Vec<_>>(), vec![("work_ref".to_string(), "WS:TEST-PROJECT".to_string()), ("root_job_id".to_string(), "JOB-123".to_string())]);
+        assert_eq!(PROJECT_SESSION_SCHEMA, "mastermind.workspace_project_session_association.v1");
+        assert_eq!(PROJECT_SESSION_RESPONSE_CAP, 16_384);
+    }
+    #[test]
+    fn project_session_read_refuses_caller_session_or_noncanonical_root_selectors() {
+        let extra = serde_json::json!({"work_ref":"WS:TEST","root_job_id":"JOB-1","provider_session_id":"client"});
+        assert!(serde_json::from_value::<MissionSelection>(extra).is_err());
+        for (work,root) in [("WS:lower", "JOB-1"), ("WS:--TEST", "JOB-1"), ("WS:TEST", "JOB-private"), ("WS:TEST", "JOB-1234567890")] {
+            assert!(project_session_target(&MissionSelection { work_ref: work.into(), root_job_id: root.into() }).is_err());
+        }
+    }
+}
+
+#[cfg(test)]
+mod project_direction_read_tests {
+    use super::*;
+
+    #[test]
+    fn project_direction_is_one_fixed_rootless_read_target() {
+        let selected = ProjectPlanSelection { work_ref: "WS:DIRECTION-TEST".into() };
+        let url = project_direction_target(&selected).unwrap();
+        assert_eq!(url.origin().ascii_serialization(), ORIGIN);
+        assert_eq!(url.path(), "/workspace/project-direction/current");
+        assert_eq!(url.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect::<Vec<_>>(),
+            vec![("work_ref".to_owned(), "WS:DIRECTION-TEST".to_owned())]);
+        assert_eq!(PROJECT_DIRECTION_RESPONSE_CAP, 65_536);
+    }
+
+    #[test]
+    fn project_direction_refuses_paths_foreign_roots_and_extra_selectors() {
+        for work in ["../private", "WS:lower", "WS:AA/BB", "JOB-1", "WS:A", "WS:AA--BB"] {
+            assert!(project_direction_target(&ProjectPlanSelection { work_ref: work.into() }).is_err());
+        }
+        for extra in ["path", "root_job_id", "commit", "history_revision"] {
+            let mut raw = serde_json::json!({"work_ref": "WS:DIRECTION-TEST"});
+            raw[extra] = serde_json::json!("caller-selected");
+            assert!(serde_json::from_value::<ProjectPlanSelection>(raw).is_err());
+        }
+    }
+
+    #[test]
+    fn project_direction_response_header_stays_bound_to_exact_scope_and_schema() {
+        let selected = ProjectPlanSelection { work_ref: "WS:DIRECTION-TEST".into() };
+        assert!(project_direction_header_matches(&serde_json::json!({"schema": PROJECT_DIRECTION_SCHEMA,
+            "selection": {"work_ref": "WS:DIRECTION-TEST"}}), &selected));
+        assert!(!project_direction_header_matches(&serde_json::json!({"schema": PROJECT_PLAN_SCHEMA,
+            "selection": {"work_ref": "WS:DIRECTION-TEST"}}), &selected));
+        assert!(!project_direction_header_matches(&serde_json::json!({"schema": PROJECT_DIRECTION_SCHEMA,
+            "selection": {"work_ref": "WS:OTHER"}}), &selected));
     }
 }

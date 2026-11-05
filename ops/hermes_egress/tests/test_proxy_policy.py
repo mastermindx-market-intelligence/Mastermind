@@ -17,6 +17,21 @@ UNIT = ROOT / "ops" / "hermes_egress" / "hermes-egress.service"
 RUNBOOK = ROOT / "ops" / "hermes_egress" / "README.md"
 
 
+def _require_exact_hostname_acls(config: str) -> None:
+    """Pin actual Squid syntax; this is not a substitute DNS/proxy evaluator.
+
+    Without -n, dstdomain may turn a numeric target into a matching PTR name.
+    The no-lookup flag is independently required for each exact vendor ACL.
+    """
+    active = [line.split("#", 1)[0].strip() for line in config.splitlines()]
+    domain_acls = [line.split() for line in active
+                   if line.startswith("acl ") and "dstdomain" in line.split()]
+    assert domain_acls == [
+        ["acl", "secretary_vendor", "dstdomain", "-n", "ark.ap-southeast.bytepluses.com"],
+        ["acl", "meta_vendor", "dstdomain", "-n", "api.z.ai"],
+    ], "both vendor ACLs must use exact hostname-only dstdomain -n"
+
+
 class FixedRoleProxyPolicy(unittest.TestCase):
     def setUp(self):
         self.conf = CONF.read_text(encoding="utf-8")
@@ -106,6 +121,27 @@ class FixedRoleProxyPolicy(unittest.TestCase):
         self.assertIn("any other non-gateway loopback listener", runbook)
         self.assertIn("PTR record", runbook)
         self.assertIn("do not stop it without its owner's authorization", runbook)
+
+    def test_both_vendor_acls_disable_reverse_dns(self):
+        _require_exact_hostname_acls(self.conf)
+
+    def test_hostname_only_guard_rejects_each_role_lookup_or_domain_relaxation(self):
+        _require_exact_hostname_acls(self.conf)
+        for role, host in (
+            ("secretary_vendor", "ark.ap-southeast.bytepluses.com"),
+            ("meta_vendor", "api.z.ai"),
+        ):
+            expected = f"acl {role} dstdomain -n {host}"
+            for replacement in (
+                f"acl {role} dstdomain {host}",
+                f"acl {role} dstdomain -n .{host}",
+                expected + " unapproved.invalid",
+            ):
+                with self.subTest(role=role, replacement=replacement):
+                    damaged = self.conf.replace(expected, replacement, 1)
+                    self.assertNotEqual(damaged, self.conf)
+                    with self.assertRaises(AssertionError):
+                        _require_exact_hostname_acls(damaged)
 
     def test_internal_destinations_rejected_before_either_allow(self):
         forbidden = next(x for x in self.active if x.startswith("acl forbidden_dst dst "))

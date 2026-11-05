@@ -32,6 +32,7 @@
   "coo_autonomy_armed": false,
   "coo_principal_armed": false,
   "ceo_submit_armed": false,
+  "coo_foreground_only": false,
   "coo_operator_harness_armed": false,
   "coo_default_quota_class": "codex-coo-default",
   "coo_model_alias": "coo.sealed",

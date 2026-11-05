@@ -802,14 +802,14 @@ def request(
     if request_capacity_preflight is True:
         env["POOL_CAPACITY_PREFLIGHT"]="1"
     if request_remaining_seconds is not None:
-        if type(request_remaining_seconds) is not int or not 1 <= request_remaining_seconds <= 7200:
+        if type(request_remaining_seconds) is not int or not 1 <= request_remaining_seconds <= 14400:
             raise FabricTaskError("REQUEST_REMAINING_TIME_INVALID")
         env["POOL_COMMISSION_REMAINING_SECONDS"] = str(request_remaining_seconds)
     if request_deadline_ns is not None:
         from commission_deadline import (DEADLINE_ENV, CommissionDeadlineExpired,
                                          require_remaining, validate_deadline_ns)
         request_deadline_ns = validate_deadline_ns(request_deadline_ns)
-        if request_deadline_ns > time.monotonic_ns() + 7200 * 1_000_000_000:
+        if request_deadline_ns > time.monotonic_ns() + 14400 * 1_000_000_000:
             raise FabricTaskError("REQUEST_DEADLINE_INVALID")
         env[DEADLINE_ENV] = str(request_deadline_ns)
     def check_deadline():
@@ -852,6 +852,7 @@ def request(
         **({"max_turns": max_turns} if max_turns is not None else {}),
     })
     packet, stdin_bytes = retained_packet, None
+    selection_key, selection_facts, selection_line = object(), None, None
     try:
         check_deadline()
         # An explicit NEW worktree request is not permission to adopt an existing
@@ -892,7 +893,8 @@ def request(
                 requested_model=requested_model, route_key=rid,
                 **({"required_modes": sorted(artifact_production.MODES),
                     "required_platforms": ["linux"]} if artifact_names else
-                   {"required_platforms": ["linux"]} if (new_macro_worktree is not None or cpu_scope_percent is not None) else {}),
+                   {"required_modes": sorted({"glm", "glm-codex", "minimax", "qwen"}),
+                    "required_platforms": ["linux"]} if (new_macro_worktree is not None or cpu_scope_percent is not None) else {}),
             )
             if max_turns is not None:
                 # Only these admitted remote wrappers enforce the existing Claude
@@ -900,9 +902,20 @@ def request(
                 route_options["required_modes"] = sorted(
                     set(route_options.get("required_modes", ("glm", "minimax")))
                     & {"glm", "minimax"})
-            route = _parse_route(
-                _route_with_deadline(task_class, route_options, request_deadline_ns, env, state_dir, rid)
-                if request_deadline_ns is not None else pick.format_pick(task_class, **route_options))
+            if request_deadline_ns is not None:
+                selection_line = _route_with_deadline(
+                    task_class, route_options, request_deadline_ns, env, state_dir, rid)
+            else:
+                selection_request_sha = None
+                try:
+                    selection_request_sha = provider_outcome.digest(
+                        provider_outcome.regular_bytes(request_file, 32768))
+                except Exception:
+                    pass  # Optional diagnostics cannot prevent the original pick.
+                selection_line, selection_facts = pick.observed_format_pick(
+                    task_class, observation_key=selection_key,
+                    request_sha256=selection_request_sha, **route_options)
+            route = _parse_route(selection_line)
         if strict_manual_pin:
             _enforce_manual_route(route, pool, requested_model)
         check_deadline()
@@ -1049,11 +1062,19 @@ def request(
         launch = state_dir / f"{rid}.request-launch.json"
         if not any(p.exists() or p.is_symlink() for p in (*_paths(rid), launch)):
             try:
+                refused_request_sha = provider_outcome.digest(
+                    provider_outcome.regular_bytes(request_file, 32768))
+                try:
+                    selection_diagnostics = pick.consume_selection_refusal(
+                        selection_facts, selection_key, refused_request_sha, selection_line)
+                except Exception:
+                    selection_diagnostics = None
                 provider_outcome.write_new(state_dir / f"{rid}.request-refused.json", {
                     "schema": "mastermind.fabric_request_refusal.v1", "run_id": rid,
                     "root_id": observed_root, "parent_run_id": parent_run_id,
-                    "request_sha256": provider_outcome.digest(
-                        provider_outcome.regular_bytes(request_file, 32768)),
+                    "request_sha256": refused_request_sha,
+                    **({"selection_diagnostics": selection_diagnostics}
+                       if selection_diagnostics is not None else {}),
                     "reason": "prelaunch_" + type(exc).__name__,
                     **({"eligible_at": exc.eligible_at} if hasattr(exc, "eligible_at") else {}),
                     "launch_attempted": False, "created_at": time.time(),
@@ -1363,6 +1384,11 @@ def main(argv: list[str] | None = None) -> int:
         for name in (("binding", "destination") if command == "collect" else ("collection", "receipt-sha256")):
             collect_parser.add_argument("--"+name, required=True)
 
+    p_diag = sub.add_parser("provider-diagnostics", help="Explicit original-owner safe diagnostic projection; no raw capture or acceptance")
+    p_diag.add_argument("run_id")
+    for name in ("root", "parent", "binding", "destination"):
+        p_diag.add_argument("--"+name, required=True)
+
     p_status = sub.add_parser("status")
     p_status.add_argument("run_id")
     p_status.add_argument("--follow", action="store_true")
@@ -1458,6 +1484,15 @@ def main(argv: list[str] | None = None) -> int:
     p_completed.add_argument("--apply", action="store_true")
 
     args = parser.parse_args(argv)
+    if args.cmd == "provider-diagnostics":
+        import original_delivery_collector as collector
+        try:
+            result=collector.collect_provider_diagnostics(args.binding,run_id=args.run_id,root=args.root,parent=args.parent,destination=args.destination)
+            print(json.dumps(result,sort_keys=True))
+            return 0
+        except Exception:
+            print('{"state":"UNAVAILABLE","reason":"diagnostic_unavailable"}')
+            return 76
     if args.cmd in {"collect", "collection-result"}:
         command = ["/bin/bash", str(HERE/"remote_sub.sh"), "--collect-existing", args.run_id,
                    "--root", args.root, "--parent", args.parent]

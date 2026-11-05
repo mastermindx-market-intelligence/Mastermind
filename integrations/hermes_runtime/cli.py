@@ -49,6 +49,10 @@ def main(argv: list[str] | None = None) -> int:
     canary_p.add_argument("--profile", type=Path, required=True)
     canary_p.add_argument("--hermes-bin", type=Path, required=True)
 
+    text_p = sub.add_parser("text-turn", help="Host-invoked one text turn inside the installed role unit; stdin only")
+    text_p.add_argument("--profile", type=Path, required=True)
+    text_p.add_argument("--hermes-bin", type=Path, required=True)
+
     check_p = sub.add_parser("check-registry", help="Require allowlist == registered tools and empty stderr")
     check_p.add_argument("--profile", type=Path, required=True)
     check_p.add_argument("--tool-list", type=Path, required=True)
@@ -76,6 +80,8 @@ def main(argv: list[str] | None = None) -> int:
             return _supervise(args)
         elif args.command == "canary":
             return _canary(args.profile, args.hermes_bin)
+        elif args.command == "text-turn":
+            return _text_turn(args.profile, args.hermes_bin)
         else:
             raise RuntimeRefusal("COMMAND_INVALID")
     except RuntimeRefusal as exc:
@@ -103,20 +109,19 @@ def _check(profile_path: Path, tool_list: Path, stderr_path: Path) -> dict:
     return result
 
 
-def _canary(profile_path: Path, hermes_bin: Path) -> int:
-    """Explicit operator trigger, executed only by systemd's ExecReload.
+def _prepare_installed_native(profile_path: Path, hermes_bin: Path, *, expected_role: str | None = None):
+    """One existing attestation/secret owner shared by canary and text helper.
 
-    There is no background poll, shell-facing provider prompt, new account,
-    daemon, state store, automatic retry, Slack send or exposed HTTP path.
-    Source evidence cannot certify vendor authentication or TLS by itself.
+    Caller is a fresh single-threaded process in the original role system unit.
+    This function installs no service or identity and invokes no model.
     """
     from .constants import MANIFEST_SCHEMA, PINNED_UPSTREAM_SHA
     from .install import assert_checkout_sha
-    from integrations.hermes_harness.native_turn_runner import (
-        assert_role_service_cgroup, run_native_canary,
-    )
+    from integrations.hermes_harness.native_turn_runner import assert_role_service_cgroup
 
     profile = load_profile(profile_path)
+    if expected_role is not None and profile.role != expected_role:
+        raise RuntimeRefusal("NATIVE_TEXT_ROLE_MISMATCH")
     state = profile.state_dir
     expected_profile = state / "current" / "profile.yaml"
     expected_bin = state / "current" / "bin" / "hermes"
@@ -184,13 +189,49 @@ def _canary(profile_path: Path, hermes_bin: Path) -> int:
         spec.credential_env,
     }
     model_env = {key: value for key, value in source_env.items() if key in canary_keys}
-    receipt = run_native_canary(
-        profile, hermes_bin=hermes_bin, model_child_env=model_env,
-    )
-    # Emit only a redacted bounded observation. A 0 return is not a remote
-    # provider-auth, network-policy or Slack delivery acceptance receipt.
+    return profile, model_env
+
+
+def _canary(profile_path: Path, hermes_bin: Path) -> int:
+    from integrations.hermes_harness.native_turn_runner import run_native_canary
+    profile, model_env = _prepare_installed_native(profile_path, hermes_bin)
+    receipt = run_native_canary(profile, hermes_bin=hermes_bin, model_child_env=model_env)
     print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
     return 0 if receipt["status"] == "PASS_CHILD_OUTPUT_OBSERVATION_ONLY" else POLICY_EXIT
+
+
+def _text_turn(profile_path: Path, hermes_bin: Path) -> int:
+    """Private stdout pipe to the existing host consumer, never a Slack sender.
+
+    Explicit invocation can spend provider credits. Install/status/health do
+    not invoke it. All admission, budget and current native-writer authority
+    remain with the existing authenticated parent; this is not a public API.
+    """
+    from integrations.hermes_harness.native_text import (
+        MAX_PROMPT_BYTES, canonical_text_prompt, execute_prepared_text, text_result,
+    )
+    from .errors import NativeTurnEffectUnknown
+    try:
+        raw = sys.stdin.buffer.read(MAX_PROMPT_BYTES + 1)
+        if not raw or len(raw) > MAX_PROMPT_BYTES:
+            raise RuntimeRefusal("NATIVE_TEXT_PROMPT_INVALID")
+        role, prompt = canonical_text_prompt(raw.decode("utf-8", "strict"))
+        profile, model_env = _prepare_installed_native(profile_path, hermes_bin, expected_role=role)
+    except (RuntimeRefusal, OSError, UnicodeError, ValueError):
+        print(json.dumps(text_result("REFUSED"), sort_keys=True))
+        return 2
+    try:
+        answer = execute_prepared_text(profile, hermes_bin=hermes_bin, model_env=model_env, prompt=prompt)
+    except NativeTurnEffectUnknown:
+        print(json.dumps(text_result("EFFECT_UNKNOWN"), sort_keys=True))
+        return 3
+    except RuntimeRefusal:
+        # Prepared-prompt/env validation refused before native invocation.
+        print(json.dumps(text_result("REFUSED"), sort_keys=True))
+        return 2
+    print(json.dumps(text_result("TEXT_READY", text=answer), sort_keys=True))
+    return 0
+
 
 
 def _supervise(args: argparse.Namespace) -> int:

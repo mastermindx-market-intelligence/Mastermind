@@ -27,13 +27,22 @@ const MAX_ATTEMPT_IDENTITIES = 8192;
 const MAX_RETENTION_CANDIDATES = 4;
 // Capture and hash the actual adapter stdout on M2, before a process transport can
 // normalize text or paginate it. This is a fixed program; no caller code is used.
-const CAPTURE_PROGRAM = `import base64,hashlib,json,subprocess,sys,tempfile
+const CAPTURE_PROGRAM = `import base64,hashlib,json,re,subprocess,sys,tempfile
 with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
  p=subprocess.run(sys.argv[1:],stdout=out,stderr=err)
  out.seek(0); data=out.read(131073)
  if len(data)>131072:
   print(json.dumps({'capture_error':'RESULT_RESPONSE_TOO_LARGE'}));sys.exit(0)
- print(json.dumps({'exit_code':p.returncode,'stdout_base64':base64.b64encode(data).decode('ascii'),'stdout_bytes':len(data),'stdout_sha256':hashlib.sha256(data).hexdigest()},separators=(',',':')))
+ reply={'exit_code':p.returncode,'stdout_base64':base64.b64encode(data).decode('ascii'),'stdout_bytes':len(data),'stdout_sha256':hashlib.sha256(data).hexdigest()}
+ # Native read-only preview emits rc=75 and a policy refusal on stderr.
+ # Never include raw stderr or any worker/request/result stderr in MCP.
+ if p.returncode and len(sys.argv)>3 and sys.argv[3]=='preview' and not data:
+  err.seek(0); line=err.read(128)
+  match=re.fullmatch(rb'NONE reason=([a-z][a-z0-9_]{0,79})\\r?\\n?',line)
+  if match: reply['native_reason']=match.group(1).decode('ascii')
+  elif re.fullmatch(rb'NONE reason=pool (?:grok|glm|minimax|bailian|cursor|ocfree|go) has no eligible mode on requested host\\r?\\n?',line):
+    reply['native_reason']='no_eligible_host'
+ print(json.dumps(reply,separators=(',',':')))
 `;
 // Capture the *incumbent adapter's* bounded response into an ephemeral local file,
 // hash and UTF-8 validate every byte, and return only one small page. No direct
@@ -67,6 +76,12 @@ const ACCEPT_VERIFICATION_CODES = Object.freeze([
   'manual_result_review', 'independent_review_evidence'
 ]);
 const COMPLEXITIES = ['C0_MECHANICAL', 'C1_ROUTINE_BOUNDED', 'C2_COMPLEX_BOUNDED', 'C3_FRONTIER_JUDGMENT'];
+const MANUAL_POOLS = ['grok', 'glm', 'minimax', 'bailian', 'cursor', 'ocfree', 'go', 'experiential'];
+// Experiential uncensored pool: the exact slug is mandatory (never
+// glm-5.3-flash-uncensored, auto or omitted) and the provider retains prompts
+// and responses, so every request needs an explicit caller opt-in first.
+const EXPERIENTIAL_POOL = 'experiential';
+const EXPERIENTIAL_MODEL = 'glm-5.3-uncensored';
 const DEFAULT_ADAPTER = resolve(homedir(), '.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/fabric_task.py');
 const idSchema = { type: 'string', pattern: ID_PATTERN, minLength: 1, maxLength: 128 };
 const identity = { run_id: idSchema, root_id: idSchema };
@@ -80,13 +95,16 @@ function tool(name, description, properties, required, readOnly) {
 }
 export const FABRIC_TOOLS = Object.freeze([
   tool('fabric_capabilities', 'Read adapter availability and the fixed tool boundary. This does not dispatch, prove provider admission, or identify a ChatGPT user.', {}, [], true),
-  tool('fabric_request', 'Submit a new bounded commission to the existing M2 Fabric adapter. The installed owner may use up to three immutable attempts after proven pre-task capacity rejection. Checks the exact origin run ID first. A returned controller PID does not prove worker START. Never replay an interrupted request or move an existing Executive operation here.', {
+  tool('fabric_request', 'Submit a new bounded commission to the existing M2 Fabric adapter. The installed owner may use up to three immutable attempts after proven pre-task capacity rejection. Checks the exact origin run ID first. A returned controller PID does not prove worker START. Native placement for complex C2 reviews may require a factual escalation_reason; preview refusals never authorize retry. Never replay an interrupted request or move an existing Executive operation here.', {
     ...identity, parent_id:idSchema, task_class:{type:'string',enum:CLASSES}, task_complexity:{type:'string',enum:COMPLEXITIES},
     max_turns:{type:'integer',minimum:1,maximum:400,description:'Optional per-request Claude turn ceiling. Only tightens the admitted wrapper limit; not a token, tool-call, dollar or acceptance budget.'},
-    work_packet:{type:'string',minLength:1,maxLength:16000}, escalation_reason:{type:'string',minLength:1,maxLength:1000},
+    work_packet:{type:'string',minLength:1,maxLength:16000,description:'In human-readable brief prose, abbreviate SHA-256 file hashes and git commit IDs to their first ~12 hex characters. Preserve complete values in explicit machine-verification fields, code, or commands requiring exact identity. Packets are forwarded unchanged; no content scanner or secret/key rejection is added.'}, escalation_reason:{type:'string',minLength:1,maxLength:1000},
     subject_pool:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$'},
-    pool:{type:'string',enum:['grok','glm','minimax','bailian','cursor','ocfree','go'],description:'Optional strict provider-pool pin; omitted means native AUTO. No cross-provider quota continuation.'},
-    model:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$',description:'Optional exact qualified model inside pool. Use auto to let the pinned pool choose its admitted model.'},
+    pool:{type:'string',enum:MANUAL_POOLS,description:'Optional strict provider-pool pin; omitted means native AUTO. No cross-provider quota continuation. experiential additionally requires the exact model glm-5.3-uncensored and retention_opt_in:true on every request.'},
+    model:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$',description:'Optional exact qualified model inside pool. Use auto to let the pinned pool choose its admitted model. pool experiential accepts only the exact glm-5.3-uncensored; auto and every other slug are refused before dispatch.'},
+    retention_opt_in:{type:'boolean',description:'Experiential uncensored retains prompts and responses, including after storage settings are disabled. Required true for every explicit experiential manual request.'},
+    sensitive_data_opt_in:{type:'boolean',description:'Explicit approval for submitting this request to an external prompt-retaining provider. Required true for experiential only; not passed to the provider.'},
+    code_exposure_opt_in:{type:'boolean',description:'Explicit permission for potential proprietary code exposure by the worker to the retaining provider. Required true for experiential, even when the immediate packet is public, and independently rechecked by the native owner.'},
   }, ['run_id','root_id','parent_id','task_class','task_complexity','work_packet'], false),
   tool('fabric_status', 'Read the requested commission and its actual successor through fabric_task.py. Earlier failed attempts remain visible. NOT_FOUND after a lost request is not proof of no effect or permission to retry. Root metadata is not authentication.', identity, ['run_id','root_id'], true),
   tool('fabric_wait', 'Use the incumbent adapter bounded wait for this run, at most ten seconds. Creates no watcher, retry loop, cancellation or background wake.', {...identity,timeout_seconds:{type:'integer',minimum:0,maximum:10,default:5}}, ['run_id','root_id'], true),
@@ -134,6 +152,24 @@ function validate(name, args) {
     // Refuse incompatible manual pools before reserving a run or controller.
     if (args.pool && args.max_turns!==undefined && !['glm','minimax'].includes(args.pool))
       fail('INVALID_ARGUMENT',{field:'max_turns'});
+    // Experiential uncensored retention gate, enforced before reserving a run
+    // or touching the native adapter: exact-model pin plus explicit per-request
+    // opt-in for the prompt+response-retaining provider, scoped to this pool.
+    if (args.pool===EXPERIENTIAL_POOL) {
+      if (args.model!==EXPERIENTIAL_MODEL) fail('INVALID_ARGUMENT',{field:'model'});
+      if (args.retention_opt_in!==true) fail('INVALID_ARGUMENT',{field:'retention_opt_in'});
+      if (args.sensitive_data_opt_in!==true) fail('INVALID_ARGUMENT',{field:'sensitive_data_opt_in'});
+      // Treat the worker's potential code access as proprietary by default:
+      // never let the caller assert public-data-only to bypass code consent.
+      if (args.code_exposure_opt_in!==true) fail('INVALID_ARGUMENT',{field:'code_exposure_opt_in'});
+      // The native experiential53 source contract currently admits bounded labor only.
+      // Avoid misleading positive previews for reviewer/audit classes it cannot run.
+      if (!['mechanical','fix_build'].includes(args.task_class))
+        fail('INVALID_ARGUMENT',{field:'task_class'});
+    } else {
+      for(const field of ['retention_opt_in','sensitive_data_opt_in','code_exposure_opt_in'])
+        if(args[field]!==undefined) fail('INVALID_ARGUMENT',{field});
+    }
   }
 }
 function response(value, isError=false) {
@@ -163,12 +199,14 @@ function completedOutput(text) {
   if (!match) return null;
   return {stdout:text.slice(start,finish),exit_code:Number(match[1])};
 }
-function decodeCapturedEnvelope(envelopeText) {
+function decodeCapturedEnvelope(envelopeText, allowPreviewReason=false) {
   // Validate ONE complete capture envelope produced by the fixed CAPTURE_PROGRAM
   // wrapper. The envelope carries the original child adapter exit code and the
   // exact verified stdout bytes (base64 + byte count + sha256 + canonical
-  // base64 round-trip + strict UTF-8). Returns null on any malformed,
-  // truncated, oversized or mismatched framing. capture_error is surfaced via
+  // base64 round-trip + strict UTF-8). A bounded native stderr reason is
+  // admitted only for explicit read-only preview with nonzero exit and empty stdout.
+  // Returns null on malformed, truncated, oversized or mismatched framing.
+  // capture_error is surfaced via
   // the sole fixed captureError variant; strict UTF-8 retains its existing
   // result diagnostic. No transport-selected error code is reflected.
   let envelope;
@@ -179,7 +217,11 @@ function decodeCapturedEnvelope(envelopeText) {
         || envelope.capture_error !== 'RESULT_RESPONSE_TOO_LARGE') return null;
     return { captureError: 'RESULT_RESPONSE_TOO_LARGE' };
   }
-  if (Object.keys(envelope).length !== 4
+  const hasReason=Object.hasOwn(envelope,'native_reason');
+  if (Object.keys(envelope).length !== (hasReason?5:4)
+      || (hasReason && (!allowPreviewReason || envelope.exit_code===0
+          || envelope.stdout_bytes!==0 || typeof envelope.native_reason!=='string'
+          || !/^[a-z][a-z0-9_]{0,79}$/.test(envelope.native_reason)))
       || !Number.isSafeInteger(envelope.exit_code)
       || envelope.exit_code < -255 || envelope.exit_code > 255
       || typeof envelope.stdout_base64 !== 'string'
@@ -193,7 +235,8 @@ function decodeCapturedEnvelope(envelopeText) {
   let stdoutText;
   try { stdoutText = new TextDecoder('utf-8', {fatal: true}).decode(bytes); } catch { return {decodeError: 'RESULT_NOT_UTF8'}; }
   return { exit_code: envelope.exit_code, stdout: stdoutText,
-           stdout_sha256: envelope.stdout_sha256, stdout_bytes: envelope.stdout_bytes };
+           stdout_sha256: envelope.stdout_sha256, stdout_bytes: envelope.stdout_bytes,
+           ...(hasReason?{native_reason:envelope.native_reason}:{}) };
 }
 function statusJSON(result, runId, follow=false) {
   if (result.exit_code!==0) fail('ADAPTER_OBSERVATION_UNAVAILABLE',{adapter_exit_code:result.exit_code});
@@ -412,13 +455,15 @@ export function createFabricFacade(engine, options={}) {
   // capabilities/help). Reuses the fixed CAPTURE_PROGRAM and validates ONE
   // complete capture envelope. Outer wrapper success is required; the
   // returned exit_code is the ORIGINAL child adapter exit code and the
-  // stdout is the exact verified bytes (no reserialization, no stderr use).
+  // stdout is the exact verified bytes. Native preview-only, nonzero-exit
+  // stderr may supply one validated, low-entropy reason token; never raw stderr.
   async function runCapturedShort(argv, timeoutMs=10000) {
     const parsed=await runShort(argv,timeoutMs,true);
     if(parsed.exit_code!==0) fail('CAPTURE_INVALID');
-    const decoded=decodeCapturedEnvelope(parsed.stdout);
+    const decoded=decodeCapturedEnvelope(parsed.stdout,argv[0]==='preview');
     if(!decoded || decoded.captureError || decoded.decodeError) fail('CAPTURE_INVALID');
-    return {exit_code:decoded.exit_code,stdout:decoded.stdout};
+    return {exit_code:decoded.exit_code,stdout:decoded.stdout,
+      ...(decoded.native_reason?{native_reason:decoded.native_reason}:{})};
   }
   async function continuityAvailable(requestHelp=null) {
     if(!cfg.quotaFallback) return false;
@@ -526,6 +571,15 @@ export function createFabricFacade(engine, options={}) {
         if(args.pool) {
           requestHelp ??= await runCapturedShort(['request','--help']);
           if(requestHelp.exit_code!==0 || !requestHelp.stdout.includes('--strict-manual-pin')) fail('MANUAL_ROUTE_UNAVAILABLE');
+          // The native request entrypoint must independently own and attest the
+          // retention, sensitive-disclosure, and conservative code-exposure gates.
+          // Old adapters never receive this request, even if preview claims a route.
+          if(args.pool===EXPERIENTIAL_POOL && ![
+            '--experiential-retention-acknowledged',
+            '--experiential-sensitive-data-opt-in',
+            '--experiential-proprietary-code',
+            '--experiential-code-exposure-opt-in',
+          ].every(flag=>requestHelp.stdout.includes(flag))) fail('MANUAL_ROUTE_UNAVAILABLE');
         }
         if(cfg.quotaFallback && !args.pool && !await continuityAvailable(requestHelp)) fail('ADAPTER_CONTINUITY_UNAVAILABLE');
         const s=await status(args,false);
@@ -541,9 +595,23 @@ export function createFabricFacade(engine, options={}) {
           let route;
           try {
             const preview=await runCapturedShort(previewArgs);
-            if(preview.exit_code!==0) fail('MANUAL_ROUTE_UNAVAILABLE');
+            if(preview.exit_code!==0) {
+              // Keep native policy refusal distinct from unavailable/invalid
+              // transport. Only a closed, low-entropy reason token is exposed.
+              // This is diagnosis, never permission to replay the same run.
+              const reason=preview.native_reason ?? /^NONE reason=([a-z][a-z0-9_]{0,79})\r?\n?$/.exec(preview.stdout)?.[1];
+              if(reason) fail('MANUAL_ROUTE_PREFLIGHT_REFUSED',{
+                native_reason:reason,
+                ...(reason==='bounded_complexity_requires_escalation'
+                  ?{required_field:'escalation_reason'}:{})
+              });
+              fail('MANUAL_ROUTE_UNAVAILABLE');
+            }
             route=JSON.parse(preview.stdout);
-          } catch(error) { fail('MANUAL_ROUTE_UNAVAILABLE'); }
+          } catch(error) {
+            if(error instanceof Refusal && error.code==='MANUAL_ROUTE_PREFLIGHT_REFUSED') throw error;
+            fail('MANUAL_ROUTE_UNAVAILABLE');
+          }
           if(route?.state!=='PREVIEW_ONLY' || route.reserved!==false
             || route.strict_pin_enforced_at_request!==true
             || route.selection_rechecked_at_request!==true
@@ -552,10 +620,22 @@ export function createFabricFacade(engine, options={}) {
             || (args.max_turns!==undefined && !['glm','minimax'].includes(route.mode))
             || (args.model && args.model.toLowerCase()!=='auto' && route.model.toLowerCase()!==args.model.toLowerCase()))
             fail('MANUAL_ROUTE_UNAVAILABLE');
+          // The experiential slug is checked exactly, not case-insensitively:
+          // the native recheck must witness the identical uncensored model.
+          if(args.pool===EXPERIENTIAL_POOL && (
+            route.model!==EXPERIENTIAL_MODEL || route.mode!==EXPERIENTIAL_POOL
+            || typeof route.host!=='string' || !/^[A-Za-z0-9_.:-]+$/.test(route.host)
+          )) fail('MANUAL_ROUTE_UNAVAILABLE');
         }
         const argv=['request','--id',args.run_id,'--class',args.task_class,'--task-complexity',args.task_complexity,'--cwd',cfg.workerCwd,'--root',args.root_id,'--parent',args.parent_id,'--stdin'];
         if(cfg.quotaFallback && !args.pool) argv.push('--quota-fallback');
         if(args.pool) argv.push('--pool',args.pool,'--strict-manual-pin');
+        if(args.pool===EXPERIENTIAL_POOL) argv.push(
+          '--experiential-retention-acknowledged',
+          '--experiential-sensitive-data-opt-in',
+          '--experiential-proprietary-code',
+          '--experiential-code-exposure-opt-in',
+        );
         if(args.model && args.model.toLowerCase()!=='auto') argv.push('--model',args.model);
         if(args.max_turns!==undefined) argv.push('--max-turns',String(args.max_turns));
         if(args.escalation_reason) argv.push('--escalation-reason',args.escalation_reason);
@@ -578,7 +658,10 @@ export function createFabricFacade(engine, options={}) {
         return response({action:name,run_id:args.run_id,root_id:args.root_id,parent_id:args.parent_id,controller_pid:pid,
           delivery:'CONTROLLER_CREATED',worker_started:null,worker_start_proven:false,
           ...(args.max_turns!==undefined?{requested_max_turns:args.max_turns}:{}),
-          ...(args.pool?{requested_pool:args.pool,requested_model:args.model??'auto',strict_manual_pin:true}:{}),
+          ...(args.pool?{requested_pool:args.pool,requested_model:args.model??'auto',strict_manual_pin:true,
+            ...(args.pool===EXPERIENTIAL_POOL?{
+              retention_opt_in:true,sensitive_data_opt_in:true,code_exposure_opt_in:true,
+            }:{})}:{}),
           adapter_exit_code:settled?.exit_code??null,execution_absence_proven:false,
           next_observation:'fabric_status with the same run and root; fabric_controller_output with this PID when needed'});
       }

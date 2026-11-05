@@ -142,5 +142,16 @@ class TurnEvidenceTests(unittest.TestCase):
                          "PASS_CHILD_OUTPUT_OBSERVATION_ONLY")
 
 
+
+    def test_init_session_must_match_terminal_session(self):
+        for invalid in (None, "", "different-session", True, [SESSION]):
+            with self.subTest(invalid=invalid):
+                events = sample_events()
+                events[0]["session_id"] = invalid
+                result = execute(events)
+                self.assertEqual(result["status"], "BLOCKED")
+                self.assertIn("INIT_SESSION_IDENTITY_MISMATCH", result["issue_codes"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -98,7 +98,12 @@ def _private_child_environment(profile: RuntimeProfile, env: Mapping[str, str]) 
 
 
 def _terminate_group(proc: subprocess.Popen[bytes]) -> None:
-    if proc.poll() is None:
+    # Error cleanup in _capture_bounded_child precedes its only wait(). Do not
+    # poll here: polling can reap an exited leader and lose its retained group
+    # identity while descendants still own the capture pipes. returncode=None
+    # means this Popen has not reaped the leader; signal its original group first.
+    # A successful wait has already reaped it and must not signal a reusable PID.
+    if proc.returncode is None:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except (OSError, ProcessLookupError):
@@ -111,11 +116,12 @@ def _terminate_group(proc: subprocess.Popen[bytes]) -> None:
 
 def _capture_bounded_child(
     argv: list[str], prompt: bytes, *, env: Mapping[str, str],
-    cwd: Path, timeout_seconds: float,
+    cwd: Path, timeout_seconds: float, max_prompt_bytes: int = 512,
 ) -> tuple[int, bytes, bytes]:
     """Capture pipes with hard byte ceilings; never buffer unlimited child output."""
     if (not 1 <= timeout_seconds <= MAX_CANARY_SECONDS
-            or len(prompt) > 512 or not prompt):
+            or type(max_prompt_bytes) is not int or max_prompt_bytes not in {512, 8192}
+            or type(prompt) is not bytes or len(prompt) > max_prompt_bytes or not prompt):
         raise RuntimeRefusal("NATIVE_CANARY_ARGUMENTS_INVALID")
     proc: subprocess.Popen[bytes] | None = None
     captured: dict[str, bytearray] = {"stdout": bytearray(), "stderr": bytearray()}
@@ -126,12 +132,13 @@ def _capture_bounded_child(
             close_fds=True, start_new_session=True,
         )
         assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
-        # The canary prompt is always <512 bytes (well within a pipe's
-        # atomic write size); no shell and no argv secret/prompt.
-        proc.stdin.write(prompt)
-        proc.stdin.close()
+        # Stream stdin under the SAME deadline as output. Larger canonical
+        # text prompts must not deadlock when a child never drains its pipe.
         deadline = time.monotonic() + timeout_seconds
+        sent = 0
+        os.set_blocking(proc.stdin.fileno(), False)
         with selectors.DefaultSelector() as selector:
+            selector.register(proc.stdin, selectors.EVENT_WRITE, "stdin")
             selector.register(proc.stdout, selectors.EVENT_READ, "stdout")
             selector.register(proc.stderr, selectors.EVENT_READ, "stderr")
             while selector.get_map():
@@ -140,6 +147,18 @@ def _capture_bounded_child(
                     raise RuntimeRefusal("NATIVE_CANARY_TIMEOUT")
                 for key, _ in selector.select(timeout=min(remaining, 0.2)):
                     label = key.data
+                    if label == "stdin":
+                        try:
+                            count = os.write(key.fileobj.fileno(), prompt[sent:sent + 4096])
+                        except BlockingIOError:
+                            continue
+                        if count <= 0:
+                            raise RuntimeRefusal("NATIVE_CANARY_PROCESS_UNAVAILABLE")
+                        sent += count
+                        if sent == len(prompt):
+                            selector.unregister(key.fileobj)
+                            proc.stdin.close()
+                        continue
                     chunk = os.read(key.fileobj.fileno(), 4096)
                     if not chunk:
                         selector.unregister(key.fileobj)

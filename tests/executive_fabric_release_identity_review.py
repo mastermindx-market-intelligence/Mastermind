@@ -64,7 +64,7 @@ REVIEWED_FILES = {
                                                                                              90,
                                                                                              'int',
                                                                                              '0o700'))},
- 'ops/executive_os/acceptance.py': {'sha256': '6bb540de6bafd49b08ae0eb085c5e9dd6ddd67e9c9de92549850f6809d09672b',
+ 'ops/executive_os/acceptance.py': {'sha256': '7a99d1029197cbb877cb968f0f9cbcb3abc257fb10d75406a20f8da884069b94',
                                     # Re-pinned for argv redaction + newline flattening in the
                                     # failure artifact: _redact_failure_text extracted from
                                     # _redact_failure_stream, argv_text now redacted and
@@ -77,27 +77,30 @@ REVIEWED_FILES = {
                                     # principal/UID literals shifted by +3 lines from the new
                                     # _FAILURE_CONTROL_CHARS_RE definition; no new literal added.
                                     # Re-pinned 2026-10-19 (PR 1637 hardening): write-once _write_bytes; sites unchanged.
-                                    'sites': ((887, 59, 62, 'int', '454'),
-                                              (887, 64, 67, 'int', '455'),
-                                              (887, 69, 72, 'int', '456'),
-                                              (888, 23, 26, 'int', '450'),
-                                              (888, 45, 48, 'int', '450'),
-                                              (889, 49, 52, 'int', '400'),
-                                              (889, 64, 67, 'int', '500'),
-                                              (896, 28, 53, 'str', 'r"_mastermind_[a-z0-9_]+"'),
-                                              (904, 39, 64, 'str', 'r"_mastermind_[a-z0-9_]+"'),
-                                              (965, 44, 47, 'int', '454'),
-                                              (965, 49, 52, 'int', '455'),
-                                              (965, 54, 57, 'int', '456'),
-                                              (966, 44, 47, 'int', '454'),
-                                              (966, 49, 52, 'int', '455'),
-                                              (966, 54, 57, 'int', '456'),
-                                              (1087, 56, 59, 'int', '400'),
-                                              (1087, 85, 88, 'int', '500'),
-                                              (1088, 85, 88, 'int', '453'),
-                                              (1088, 90, 93, 'int', '454'),
-                                              (1088, 95, 98, 'int', '455'),
-                                              (1088, 100, 103, 'int', '456'))},
+                                    # PR2010 phase timing: Root-reviewed postimage; the same
+                                    # 21 whole-token sites and enclosing function ASTs are
+                                    # unchanged, shifted +10 lines. Full-file drift still refuses.
+                                    'sites': ((897, 59, 62, 'int', '454'),
+                                              (897, 64, 67, 'int', '455'),
+                                              (897, 69, 72, 'int', '456'),
+                                              (898, 23, 26, 'int', '450'),
+                                              (898, 45, 48, 'int', '450'),
+                                              (899, 49, 52, 'int', '400'),
+                                              (899, 64, 67, 'int', '500'),
+                                              (906, 28, 53, 'str', 'r"_mastermind_[a-z0-9_]+"'),
+                                              (914, 39, 64, 'str', 'r"_mastermind_[a-z0-9_]+"'),
+                                              (975, 44, 47, 'int', '454'),
+                                              (975, 49, 52, 'int', '455'),
+                                              (975, 54, 57, 'int', '456'),
+                                              (976, 44, 47, 'int', '454'),
+                                              (976, 49, 52, 'int', '455'),
+                                              (976, 54, 57, 'int', '456'),
+                                              (1097, 56, 59, 'int', '400'),
+                                              (1097, 85, 88, 'int', '500'),
+                                              (1098, 85, 88, 'int', '453'),
+                                              (1098, 90, 93, 'int', '454'),
+                                              (1098, 95, 98, 'int', '455'),
+                                              (1098, 100, 103, 'int', '456'))},
  'ops/executive_os/attended_worker_definition.py': {'sha256': '267ca3fceea48d2c3a1e8a4aaefbf8a90bd595d0c324f1a503826e9604ead92d',
  'sites': ((255, 31, 51, 'str', "'_mastermind_worker'"), (351, 95, 100, 'int', '0o660'))},
  'ops/executive_os/bootstrap-host.sh': {'sha256': '805279ecceb16965ded44f94ab62aa882090accf45edf8a2e7ab86487bca04ce',
@@ -494,19 +497,10 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # 2026-11-03 catalog composition adds fixed metadata GETs before that handler;
 # its AST is still identical and all eight sites move by 58 lines. Previous
 # source SHA de6f82cd7861cd79d90bc058c2753f5912a20e47c4ff992201962d8abdc78f31.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {
-    'sha256': '624b6a49ac97eea32adfa0691e85f5d0c7dcdb784b00f5192b1c227dbce8e5eb',
-    'sites': (
-        (820, 71, 74, 'int', '400'),
-        (831, 71, 74, 'int', '403'),
-        (839, 71, 74, 'int', '400'),
-        (845, 79, 82, 'int', '400'),
-        (854, 71, 74, 'int', '400'),
-        (864, 71, 74, 'int', '403'),
-        (869, 76, 79, 'int', '503'),
-        (875, 71, 74, 'int', '403'),
-    ),
-}
+# Journal source-only read composition: exact unchanged action-handler AST and
+# original eight complete literal tokens; new GET registration is reviewed separately.
+# Composed READ source: original eight whole action tokens and action AST unchanged.
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '5f6e043f3f8f525670f51c7f27a9e6ea7f17e7508489e13f661ea69007e840ff', 'sites': ((857, 71, 74, 'int', '400'), (868, 71, 74, 'int', '403'), (876, 71, 74, 'int', '400'), (882, 79, 82, 'int', '400'), (891, 71, 74, 'int', '400'), (901, 71, 74, 'int', '403'), (906, 76, 79, 'int', '503'), (912, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -536,4 +530,18 @@ REVIEWED_FILES['integrations/session_bridge/mmtask_restore/payload/mmtask'] = {
 REVIEWED_FILES['integrations/session_bridge/mmtask_restore/preimage/mmtask'] = {
     'sha256': '9567ecad658e50b149a14f4c0cd0c7b42d15ad546b0508e2153619f14d0eb336',
     'sites': ((556, 93, 96, 'int', '400'),),
+}
+
+# Exact unchanged JSON traversal node budget, never an OS identity or grant.
+# Any changed source byte/site returns this numeric token to the ordinary D8 guard.
+REVIEWED_FILES['app/mastermind_os/src/admission/project-admission-command-port.ts'] = {'sha256': 'bc14696fce184ce0d186431f044a79d93c61ca07b8c4eaf718e4ed19b3af2571', 'sites': ((37, 87, 90, 'int', '400'),)}
+
+# PR1917 source review5761933327 at63d184218e8d6a2b7da48f98045a2e67f504f5aa:
+# default HTTPS port in the exact parsed-origin condition, not a UID/GID.
+# Existing full-file SHA + token-span verification binds this one Constant;
+# any source/path/context drift restores the ordinary D8 scanner. This does
+# not change the URL/port policy or the separate reviewed Squid ACL exception.
+REVIEWED_FILES['integrations/hermes_secretary/tab_sweep.py'] = {
+    'sha256': '12d2c8f059f941eb908cc9d7ec3651763f8102832e05435118ce8e1385d5fd46',
+    'sites': ((19, 77, 80, 'int', '443'),),
 }

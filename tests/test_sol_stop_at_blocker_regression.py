@@ -26,8 +26,8 @@ def _has_protective_contract(text: str) -> bool:
     return all(
         clause in text
         for clause in (
-            "next\nconcrete executable action",
-            "does not exhaust the\ncommission",
+            "next concrete executable action",
+            "does not exhaust the commission",
             "pre-effect *technical* refusal",
             "same original operation",
             "relevant recovery evidence",
