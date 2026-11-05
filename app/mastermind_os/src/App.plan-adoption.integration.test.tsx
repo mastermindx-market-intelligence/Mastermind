@@ -92,6 +92,7 @@ async function adopt(){
  await screen.findByText(/original adoption outcome is not known yet/);
 }
 it('actual App Details uses the same inspection through Review/Adopt/Check/Advance and explicit current Plan Compare',async()=>{
+ const consoleErrors=vi.spyOn(console,'error'); // Observe; preserve normal reporting.
  const e=await setup();await prepare();
  const reads=calls(e,'read_project_plan').length;
  expect(reads).toBe(1);
@@ -118,6 +119,8 @@ it('actual App Details uses the same inspection through Review/Adopt/Check/Advan
  await screen.findAllByText('DEC:PLAN-ADOPTION-'+'9'.repeat(40));
  expect(screen.getByText('Compared against the recorded predecessor plan.')).toBeTruthy();
  expect(calls(e,'read_project_plan')).toHaveLength(reads+1);
+ expect(consoleErrors.mock.calls.filter(args=>args.some(value=>
+  typeof value==='string'&&value.includes('same key')))).toHaveLength(0);
 });
 it('actual App reopen automatically reads only the original pointer and explicit Check reconciles without another submission',async()=>{
  const e=await setup();await adopt();
