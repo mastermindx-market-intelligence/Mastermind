@@ -164,7 +164,15 @@ def build_profile(snapshot):
         _url(repository.get("html_url"), web, "repository.html_url")
         _url(run.get("url"), f"{api}/actions/runs/{run_id}", "run.url")
         _url(run.get("html_url"), f"{web}/actions/runs/{run_id}", "run.html_url")
-        _url(run.get("jobs_url"), f"{api}/actions/runs/{run_id}/jobs", "run.jobs_url")
+        jobs_url = f"{api}/actions/runs/{run_id}/jobs"
+        # GitHub's attempt-specific run endpoint emits an attempt-qualified
+        # jobs_url. Accept only that SAME validated attempt, never a foreign
+        # attempt, a query-string variant, or rewritten captured evidence.
+        if run_attempt is not None:
+            attempt_jobs_url = f"{api}/actions/runs/{run_id}/attempts/{run_attempt}/jobs"
+            if run.get("jobs_url") == attempt_jobs_url:
+                jobs_url = attempt_jobs_url
+        _url(run.get("jobs_url"), jobs_url, "run.jobs_url")
     created_at = _parse_ts(run.get("created_at"), "run.created_at")
     observed_at = _parse_ts(snapshot.get("observed_at"), "observed_at")
     if created_at is not None and observed_at is not None and observed_at < created_at:

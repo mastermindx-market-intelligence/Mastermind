@@ -6,7 +6,7 @@ Original host qualification root: `ubuntu4-fabric-hardening-20261023`.
 Current assigned source operation: `ubuntu4-fabric-integration-20261103-c3`.
 Original procedure/source base: `d47cdb5652096e038a8bfb24e431ebe48ccf7ff2`.
 Current recovery pin is recorded below. Updated: 2026-11-05; task-tree revision is the containing Git commit.
-Organizational linking of this new source artifact is pending: PLAN_NOT_ORG_LINKED.
+The existing Agent OS handoff links this task tree in proposed Macro PR #10661; protected organizational adoption remains separate.
 
 ## Objective and completion
 
@@ -16,7 +16,57 @@ settled lease, original-parent acceptance, narrow automatic-mode promotion and a
 routed task. Repository-work parity additionally requires the receiving host's own qualified Macro
 donor and a successful exact-commit sparse worktree job. Source changes alone do not establish this.
 
-## Current completion frontier — 2026-11-05
+## Current completion frontier — 2026-11-05 post-reboot
+
+The Chairman rebooted Ubuntu4 and confirmed automatic desktop login. The original
+RDC device and M2 SSH alias are reachable again. The existing parent accepted
+**bounded recovery evidence for proceeding toward one controlled qualification**:
+[full host evidence and ruling](https://github.com/mastermindx-market-intelligence/Mastermind/issues/539#issuecomment-6654302362).
+This does not diagnose the earlier incident or establish permanent hardware health.
+
+Installed libc6 2.39-0ubuntu8.9 libmvec bytes are stable and match the exact-version
+archive authenticated against Ubuntu package metadata. Fresh in-memory extraction
+matches the installed library. The old extracted diagnostic copy differs and remains
+preserved as unreliable historical evidence. All three Macro donor pack checksums
+match; full Git fsck passes; donor HEAD remains
+`4a2291747fd2d8d364a3838e1ed2263636bc64a6`. No new kernel process/storage fault appeared
+during ordinary checks. The prior memtester result remains UNKNOWN, and neither it
+nor the denied direct-I/O diagnostic was replayed.
+
+Canonical `pool refresh ubuntu4` now succeeds. Every physical gate passes: two free
+lanes, load 0.02, 864.5 GiB free disk, 13 GiB available memory, CPU 36C, NVMe critical
+headroom 63C, and zero observed memory/I/O pressure. The sole failed placement gate
+is `automatic-qualification=explicit-canary-only`. All seven mode holds remain.
+
+Selected native sequence 30/generation
+`9691fff17648c82b09152ba285d620abf0fd12d10a9530a7abae0cd1ab96238b` already supports
+Ubuntu4 MiniMax first-worker qualification. Ubuntu4 Grok and sparse repository source
+in this PR are not yet installed. Existing enrollment coordination continues in its
+original Secretary thread; parent retains source integration and first-worker dispatch.
+No accepted current MiniMax owner-readiness receipt has arrived. Codex and Claude
+first-party status report no login; those statuses do not establish MiniMax readiness.
+The official Grok device-login flow has been initiated on Ubuntu4 and is awaiting
+its real account authorization; no credential value or device code belongs in source.
+
+The original branch now composes protected
+`d753bd6e9ef3e5a5435ba5649e448b1610185f6e`, preserving the accepted #2023 adaptive
+same-run observer. The 102-member rebuilt closure verifies in full:
+
+- Controller: `0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c`.
+- Manifest: `abbf5173b43b61144b0b77568d72884f28847f40d842a0d2697bd0c40c0990c3`.
+- Inventory: `659fccd12936a53b000e98ca4dc2dcb98dd95d87f9c03b695eb1979193dcdc12`.
+
+The preceding published head `61562fa130c7d405f3872499beed72726659bb66` passed five
+hosted pytest shards. Its sixth shard failed only the unrelated local-status fixture
+whose 70 ms admission window can expire before its status assertion. The original
+bounded paid repair child `u4-ci-status-clock-repair-20261105-c3-b` is retained on its
+single carrier. All 106 focused composition tests pass with zero failures, errors or skips,
+including the observer, Ubuntu4 request/qualification/reclaim and historical-release
+fixtures. Shell syntax and the scoped diff check pass. The CI child's exact findings
+remain pending before final hosted qualification. No CI rerun, approval, protected merge,
+native selection, Ubuntu4 provider START or hold promotion is claimed here.
+
+## Historical pre-reboot recovery frontier — 2026-11-05
 
 Current recovery uses protected Mastermind `f374289eb74587eaa755f5bc8e5a3252d00850e0`
 and the same original operation/PR #2008. The earlier physical-readiness and donor
@@ -43,7 +93,7 @@ qualified supported route; do not expand a mode allowlist as a substitute for a
 proved adapter. Source, hardware, enrollment, native release, first-worker acceptance,
 normal placement and repository/session acceptance remain distinct gates.
 
-## Current source qualification — 2026-11-05
+## Pre-reboot source qualification — 2026-11-05
 
 This candidate integrates original PR head `3aa5f98a1cd8a6c5e5deb9692235fdd59ccdaeea`
 with protected `f374289eb74587eaa755f5bc8e5a3252d00850e0` in the original managed
@@ -88,8 +138,8 @@ No native deployment, provider enrollment, host promotion or real Ubuntu4 task i
 
 | ID | Dependency | Objective and evidence | Editorial state |
 |---|---|---|---|
-| U4.1 | none | Recover current host integrity and reachability, then verify fresh physical gates and installed tools; later corruption/crash evidence invalidates prior readiness for new admission. | blocked |
-| U4.2 | none for source work | Admit Ubuntu4 to the two sparse Macro host-name guards, preserve all admission/lifecycle fences, integrate current protected source and qualify exact closure/tests. Live use still depends on U4.1. | source integration under qualification |
+| U4.1 | none | Post-reboot trusted library/package comparison, full donor integrity, ordinary process health and canonical physical gates pass. Preserve earlier incident uncertainty and observe qualification. | scoped recovery accepted |
+| U4.2 | none for source work | Admit Ubuntu4 to the two sparse Macro host-name guards, preserve all admission/lifecycle fences, integrate current protected source and qualify exact closure/tests. Live use still depends on U4.1. | protected observer composition under qualification |
 | U4.3 | U4.1 | Existing credential owner completes real Ubuntu4 provider enrollment and current-key canary through accepted owners. No secret transfer or fabricated receipts. | blocked |
 | U4.4 | U4.1, U4.3, accepted native source | One distinct supported Grok or MiniMax qualification through the existing native qualifier; verify lease, START, result, settlement and same-parent acceptance. | blocked |
 | U4.5 | U4.4 | Original registry owner removes only the accepted provider mode from the qualification hold with exact-preimage fencing; normal routing succeeds. | blocked |
@@ -135,10 +185,13 @@ and helper negative tests; current native manifest and staged-source closure.
 ## Execution and review
 
 The current assigned session owns recovery and source integration in the original operation.
-Paid Fabric can supply bounded audit evidence; the Web-session waiver does not impose an
+Paid Fabric can supply bounded evidence; the Web-session waiver does not impose an
 additional independent technical-review prerequisite. Current GitHub rules, source custody,
-required checks and binding release holds still apply. Preserve the existing Draft PR and
-review request; do not self-approve, self-merge or change Ready/merge controls.
+required checks and binding release holds still apply. A stable qualified candidate can
+become Ready under the delivery owner; preserve the existing review request and the
+actual independent release-actor fence. Never self-approve, self-merge or use an
+alternate account to manufacture independence. The native queue alone does not prove
+that an independent approval gate is enforced.
 
 Use the existing runtime and registry owners for live effects, retaining original run, root,
 parent and lease custody. An archived writer is not an approver. This file records source

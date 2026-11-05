@@ -83,3 +83,41 @@ remaining obligations are in the existing research/evidence/delivery_turnaround_
 execution_receipts.md and #917. No new checkpoint store, runtime, watcher, reviewer,
 installer, source branch or task registry was created. Other selected customer outcomes
 and Macro10181/10381 effects remain with their existing owners and are not recreated.
+
+## P2.C2 native instruction compaction - November 5, 2026
+
+Current Chairman assignment: take ownership of the diagnosed Codex/Claude instruction
+failure and complete the repair, installation and fresh-consumer verification. This
+extends P2.C2 under #917, not the unrelated product/release lanes. Procedure pin:
+`cb390bfc5a4b85a59a1005bfd3824305a5a4bfee`; operation
+`native-instruction-compaction-20261105-web-001`.
+
+Observed M2 global instruction inputs: Codex 60,052 bytes, Claude 43,951 bytes.
+Protected #2064 is an active upstream supplier for review/release-policy changes;
+its source writer and files are not taken over by this lane. This lane reduces
+instruction duplication and preserves currently binding semantics; an unmerged
+upstream policy is not installed law. No new scheduler, startup gate, policy
+registry, retry service or authority owner is introduced.
+
+| ID | Outcome | Dependency | Acceptance / falsifier | Label |
+|---|---|---|---|---|
+| P2.C2.N1 | A concise source-owned native brief and explicit on-demand procedure map | Current same-pin policy and exact installed inputs | Necessary consent, unknown-effect, custody, release and original-outcome obligations survive; no universal full-document preload or new review gate | implementation_complete |
+| P2.C2.N2 | Deterministic diagnosis of oversized/conflicting installed layers | Existing instruction audit; N1 | Exact source hashes, duplicate/retired-block and byte evidence; no model claim that static inspection proves loading | implementation_complete |
+| P2.C2.N3 | Controlled compaction through the existing instruction projection writer | N1/N2; accepted supplier integration if needed; actual target preimages | Preview, private backup, exact-preimage/readback, preservation of unknown host text, idempotence, expired exception retirement only from observed condition | implementation_complete |
+| P2.C2.N4 | Intended Codex/Claude consumers use the repaired instructions | N3; legitimate native authentication/consent | Fresh assigned sessions execute ordinary work, continue safe work during CI, recover without ghost owners, and retain real denial/uncertainty fences; installation alone does not pass | proposed |
+
+Native files and repository entrypoints are separate surfaces. Preserve the actual
+8-host/16-file historical rollout without calling it this revision's installation.
+Use existing source/installation receipts and parent #917 for cross-lane results.
+No hidden reasoning, credentials, native trust tokens, mutable production state or
+private transcripts enter source evidence. Measure byte reduction directly; do not
+claim faster model generation or elapsed-time improvement without a controlled run.
+
+Source qualification for N1-N3: research/evidence/native_instruction_compaction_20261105/verification.md.
+This accepts implementation evidence only, not protected policy, default-consumer
+selection, installed files or N4 fresh native behavior. The exact on-host refusal
+and original Fabric return remain on their existing carriers.
+
+N1-N3 follow-up: original audit result accepted after parent verification; fenced-example
+data-loss ambiguity repaired on the same source carrier. Updated proof: 102 focused
+tests, 9 caught mutants and 47 current-supplier composition tests. N4 remains unproved.
