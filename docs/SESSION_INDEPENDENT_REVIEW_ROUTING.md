@@ -10,9 +10,8 @@ An attended ChatGPT Web, Codex, Claude, Grok or eligible other seat can request 
 
 Ordinary reversible FAST/STANDARD source work in Web, native Codex/Claude and admitted
 workers uses author self-check, affected tests and normal protected automation. Do not
-open this routing procedure as a mandatory per-PR stage. Consequential native/automated
-security/auth/permission, irreversible data or exactly-once work needs one distinct
-technical review of that risk; use an eligible native child or admitted Fabric reviewer.
+open this routing procedure as a mandatory per-PR stage. Consequential native/automated changes mean the CRITICAL row in REVIEW_RISK_POLICY.md:
+auth/security/permissions, source authority, review/release automation, privileged CI, financial execution, irreversible data and exactly-once. They need one distinct technical review of that risk; use an eligible native child or admitted Fabric reviewer.
 The attended CEO-Web all-tier self-review waiver remains: a CRITICAL label alone does
 not create a reviewer handoff. Explicitly assigned reviews and actually enforced native
 GitHub/CODEOWNERS/security requirements remain binding. Source text does not prove

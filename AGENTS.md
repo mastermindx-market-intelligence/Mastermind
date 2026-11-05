@@ -230,8 +230,8 @@ review, formal approval, outside chat or non-author release/arming operator aris
 internal process. The assigned session may request automated release of its own qualified
 change. Preserve actual required CI, native GitHub/CODEOWNERS protections and specific holds.
 
-Consequential native/automated security/auth/permission, irreversible data or exactly-once
-changes use one genuinely distinct read-only native/Fabric technical reviewer; consume its
+Consequential native/automated changes mean the CRITICAL row in REVIEW_RISK_POLICY.md:
+auth/security/permissions, source authority, review/release automation, privileged CI, financial execution, irreversible data and exactly-once. These changes use one genuinely distinct read-only native/Fabric technical reviewer; consume its
 real exact-head result and adjudicate findings here. Review a repair's affected delta only.
 The existing attended CEO-Web all-tier self-review waiver remains; a CRITICAL label alone
 adds no reviewer handoff. No review-host enrollment or different top-level chat is needed.

@@ -43,7 +43,7 @@ def test_live_account_owner_and_exact_safety_fences_are_in_installed_fence():
         "Current assigned receiver owns recovery",
         "Archived chats/PR authors aren't live owners",
         "Handoffs name an executable successor action",
-        "Native consequential changes: one distinct review",
+        "Native CRITICAL tier: one distinct review",
         "never native Sol labor",
         "First explicit safety/permission denial",
         "EFFECT_UNKNOWN",

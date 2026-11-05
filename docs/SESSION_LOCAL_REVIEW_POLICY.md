@@ -8,9 +8,8 @@ work has zero blanket independent technical reviewers and zero additional formal
 non-author approvals across Web, native Codex/Claude and admitted workers. No separate
 release/arming actor, outside chat, Secretary or new receipt stage is required.
 
-**Scope:** Consequential native/automated security/auth/permission, irreversible data
-and exactly-once changes receive **one** distinct native/Fabric technical review of
-that risk. The protected-accepted and actually loaded attended CEO-Web all-tier waiver
+**Scope:** Consequential native/automated changes mean the CRITICAL row in REVIEW_RISK_POLICY.md:
+auth/security/permissions, source authority, review/release automation, privileged CI, financial execution, irreversible data and exactly-once. They receive **one** distinct native/Fabric technical review of that risk. The protected-accepted and actually loaded attended CEO-Web all-tier waiver
 remains: FAST/STANDARD/CRITICAL alone require no independent reviewer handoff there.
 Explicit review requests, native rules, CODEOWNERS, separately binding security
 requirements, recorded holds and release controls remain binding. Review-host enrollment
@@ -21,7 +20,7 @@ its separate machine enforcement; its host remains OFF unless separately authori
 
 1. Read repository, PR, immutable head, paths, actual risk, original outcome, live writers, existing review/effect identity, native merge rules and holds. The shared classifier preserves risk and CI coverage; signed AUTOMATIC requirements are FAST0/0, STANDARD0/0 and CRITICAL1/0, separate from attended CEO Web review obligations. The signed host remains default OFF until separately installed and accepted.
 2. **Attended CEO Web FAST / STANDARD / CRITICAL:** self-review the exact diff, run focused regression and mandatory hosted CI, and provide proportionate security and real-path proof. **Zero blanket independent technical reviewers and zero additional formal non-author approvals arise solely from this internal attended-session policy, across all three tiers.** Do not wait for #2018 or a signed host deployment to conduct permitted source work. Report author self-check as SELF_REVIEWED, never as proof of a separate reviewer. An actual native GitHub/CODEOWNERS non-author approval, recorded security/release hold or explicitly authorized independent assignment remains separately binding.
-3. **When a separate technical review is actually required:** consequential native/automated changes need one reviewer, with finding repairs reviewed only for the affected delta. Use an already authorized and genuinely distinct native child or admitted Fabric reviewer if available, or the existing lawful manual avenue. Verify exact source/head, isolated read-only context, actual launch/return, parent adjudication and original effect custody. CRITICAL classification by itself does **not** require one or two native children, another top-level account or a new Fabric commission. Genuine stronger security evidence is still owed.
+3. **When a separate technical review is actually required:** consequential native/automated changes need one reviewer, with finding repairs reviewed only for the affected delta. Use an already authorized and genuinely distinct native child or admitted Fabric reviewer if available, or the existing lawful manual avenue. Verify exact source/head, isolated read-only context, actual launch/return, parent adjudication and original effect custody. Native/automatic CRITICAL requires one distinct read-only technical reviewer; the attended CEO-Web all-tier waiver remains. Do not add a second reviewer, another account or a new review carrier by habit. Reuse an existing qualifying review instead of a new Fabric commission. Genuine stronger security evidence is still owed.
 4. **HOLD:** incomplete source, existing conflicting reviewer or writer, uncertain effect, explicit permission denial or actual mandatory native approval holds that action. Do not manufacture an exemption, send a duplicate request or route a denied operation through another tool/account. Continue genuinely independent permitted work.
 
 ## Session-local review avenues (discover, do not assume)

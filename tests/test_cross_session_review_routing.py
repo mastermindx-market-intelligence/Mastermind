@@ -130,7 +130,7 @@ def test_session_local_review_all_tiers_preserves_actual_native_gates():
     for required in (
         "Attended CEO Web FAST / STANDARD / CRITICAL",
         "Zero blanket independent technical reviewers",
-        "CRITICAL classification by itself does",
+        "Native/automatic CRITICAL requires one distinct read-only technical reviewer",
         "signed AUTOMATIC GitHub/Executive",
         "native GitHub/CODEOWNERS",
         "SELF_REVIEWED",

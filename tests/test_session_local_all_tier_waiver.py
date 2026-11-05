@@ -20,7 +20,7 @@ def test_attended_web_waiver_is_all_three_tiers_without_host_dependency():
         "Zero blanket independent technical reviewers",
         "zero additional formal non-author approvals",
         "Do not wait for #2018 or a signed host deployment",
-        "CRITICAL classification by itself does **not** require",
+        "Native/automatic CRITICAL requires one distinct read-only technical reviewer",
         "SELF_REVIEWED",
         "proportionate security and real-path proof",
     )
@@ -93,3 +93,22 @@ def test_signed_machine_risk_status_separates_merged_waiver_from_unverified_inst
     assert "AUTOMATIC" in status and "OFF" in status
     for term in ("FAST", "STANDARD", "CRITICAL", "CODEOWNERS"):
         assert term in risk
+
+
+def test_native_critical_review_covers_full_canonical_risk_signals():
+    signals = ("auth/security/permissions", "source authority", "review/release automation",
+               "privileged CI", "financial execution", "irreversible data", "exactly-once")
+    for file in ("AGENTS.md", "CLAUDE.md", "docs/DELIVERY_WORKFLOW.md",
+                 "docs/REVIEW_RISK_POLICY.md", "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md",
+                 "docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md", "docs/SESSION_LOCAL_REVIEW_POLICY.md"):
+        source = " ".join((ROOT / file).read_text(encoding="utf-8").split())
+        assert "CRITICAL row" in source, file
+        for signal in signals:
+            assert signal in source, (file, signal)
+    source = policy()
+    assert "CRITICAL classification by itself does **not** require one or two native children" not in source
+    assert "Native/automatic CRITICAL requires one distinct read-only technical reviewer" in source
+    assert "the attended CEO-Web all-tier waiver remains" in source
+    assert "Do not add a second reviewer, another account or a new review carrier by habit" in source
+    kernel = (ROOT / "docs/sol_skills/BOOTSTRAP_KERNEL.md").read_text(encoding="utf-8")
+    assert "Native CRITICAL tier: one distinct review; Web 5A applies" in kernel

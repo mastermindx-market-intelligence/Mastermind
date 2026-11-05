@@ -43,9 +43,8 @@ automation. No independent technical review, formal approval, separate release o
 new task form or handoff is required by internal habit. Small changes should finish in
 one healthy turn when checks and tools permit. Required hosted checks still gate merge.
 
-Consequential security/auth/permission, irreversible data and exactly-once changes in
-native or automated work receive **one** distinct native/Fabric technical review of the
-relevant risk. Repair findings and review only the affected delta. The existing attended
+Consequential native/automated changes mean the CRITICAL row in REVIEW_RISK_POLICY.md:
+auth/security/permissions, source authority, review/release automation, privileged CI, financial execution, irreversible data and exactly-once. They receive **one** distinct native/Fabric technical review of the relevant risk. Repair findings and review only the affected delta. The existing attended
 CEO-Web all-tier self-review waiver remains: a CRITICAL label alone adds no reviewer
 handoff there. Stronger consequences still need stronger tests and real-path evidence.
 An explicit current assignment or actually enforced repository/security requirement can

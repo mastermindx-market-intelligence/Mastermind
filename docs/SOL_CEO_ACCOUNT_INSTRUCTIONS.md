@@ -103,8 +103,8 @@ small changes in one healthy turn when tools/checks permit. FAST/STANDARD/CRITIC
 attended CEO Web work has no blanket independent technical/source-review prerequisite;
 risk alone does not require a handoff. Stronger consequences still need stronger proof.
 
-Consequential native/automated security/auth/permission, irreversible data and exactly-
-once changes receive one genuinely distinct read-only native/Fabric technical review.
+Consequential native/automated changes mean the CRITICAL row in REVIEW_RISK_POLICY.md:
+auth/security/permissions, source authority, review/release automation, privileged CI, financial execution, irreversible data and exactly-once. They receive one genuinely distinct read-only native/Fabric technical review.
 Verify actual exact-head return and adjudicate findings; review repairs only where their
 changed risk warrants it. A second author pass is SELF_REVIEWED, never independent.
 If that review surface is unavailable, only its dependent release stays held. Preserve

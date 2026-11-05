@@ -98,8 +98,10 @@ def project(text: str, brief: str, profile: str) -> str:
             block = re.sub(
                 obsolete,
                 'Review and release follow the current session-local policy: '
-                'ordinary self-check and protected automation; never impersonate '
-                'approval or bypass actual protections.',
+                'ordinary self-check and protected automation; native/automatic '
+                'CRITICAL requires one distinct technical review; attended Web '
+                'all-tier waiver remains; no self-merge outside the protected '
+                'controller; never impersonate approval or bypass actual protections.',
                 block,
             )
             text = text[:a] + block + text[b:]

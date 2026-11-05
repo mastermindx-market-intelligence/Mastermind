@@ -8,9 +8,8 @@
 
 Ordinary reversible FAST/STANDARD source changes use session self-check, affected tests
 and normal protected release automation, with **zero** independent technical reviews
-and **zero** additional formal approvals. Consequential native/automated security/auth/
-permission, irreversible data and exactly-once changes need **one** distinct native/Fabric
-technical review. Review finding repairs only for the affected delta, without a second
+and **zero** additional formal approvals. Consequential native/automated changes mean the full CRITICAL row below:
+auth/security/permissions, source authority, review/release automation, privileged CI, financial execution, irreversible data and exactly-once. They need **one** distinct native/Fabric technical review. Review finding repairs only for the affected delta, without a second
 release operator. The attended CEO-Web all-tier self-review waiver remains: a tier label
 alone does not require an independent reviewer there. Preserve stronger tests and required
 real-path proof for stronger consequences.

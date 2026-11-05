@@ -114,6 +114,9 @@ class ProjectionTests(unittest.TestCase):
                 f'<!-- /{marker} -->', 1)[0]
             self.assertNotIn(obsolete, managed)
             self.assertIn('ordinary self-check and protected automation', managed)
+            self.assertIn('native/automatic CRITICAL requires one distinct technical review', managed)
+            self.assertIn('attended Web all-tier waiver remains', managed)
+            self.assertIn('no self-merge outside the protected controller', managed)
             self.assertIn('Leadership and EFFECT_UNKNOWN stay.', managed)
             self.assertIn('No purchases or paid credits.', managed)
             self.assertIn(f'Personal quotation: {obsolete}', new)
