@@ -107,7 +107,7 @@ PAPER_RUNTIME_V20_REL = Path(".local/share/mastermind-paper/runtime/v20")
 PAPER_V20_BRIDGE_SHA256 = "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced"
 PAPER_RUNTIME_V10_REL = Path(".local/share/mastermind-paper/runtime/v10")
 PAPER_V10_BRIDGE_SHA256 = "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc"
-FLEET_V20_COHORT_SOURCE_SHA256 = "e4d5bccfec19ee3c88a3c73ed2484f34d119896086d0da9485c0baf5638bc10d"
+FLEET_V20_COHORT_SOURCE_SHA256 = "101c958e389ab4077edf54be70e6e894cedf3bba77e2daa9ab291361b192ca8a"
 # One closed admission set shared by the dispatcher and real lifecycle-lock gate.
 FLEET_V20_ENROLLED_ACCOUNTS = frozenset((
     "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt3",
@@ -3615,6 +3615,12 @@ def _frozen_paper_fleet_module():
     module.__file__ = str(path)
     exec(compile(source_bytes, str(path), "exec"), module.__dict__)
     if (frozenset(module.COHORTS) != FLEET_V20_ENROLLED_ACCOUNTS
+            or frozenset(module.WORKSPACE_12FILE_SUCCESSORS)
+               != frozenset((
+                   "admin-business",
+                   "chatgpt3-w570f6f34",
+                   "chatgpt3-wa2a9e6f9",
+               ))
             or module.C4_POST_ENROLLMENT["manifest_sha256"]
                != "3648a9a8e9711bab7be9fc7a3950f73579ce7d78358a18c15ac7d39adf924a9f"
             or module.TARGET_BRIDGE_SHA256 != PAPER_V20_BRIDGE_SHA256
@@ -3638,8 +3644,13 @@ def _upgrade_paper_frozen_fleet_v20(args) -> int:
         account == C4_PAPER_ACCOUNT
         and expected == cohorts.C4_POST_ENROLLMENT["manifest_sha256"]
     )
+    workspace_successor = (
+        account in cohorts.WORKSPACE_12FILE_SUCCESSORS
+        and expected ==
+            cohorts.WORKSPACE_12FILE_SUCCESSORS[account]["manifest_sha256"]
+    )
     if (expected != cohorts.COHORTS[account]["manifest_sha256"]
-            and not enrolled_c4):
+            and not enrolled_c4 and not workspace_successor):
         raise SystemExit("Paper fleet original manifest is not frozen predecessor")
     label = f"com.mastermind.studio-direct-private.{account}"
     roots = _build_runtime_roots(account)

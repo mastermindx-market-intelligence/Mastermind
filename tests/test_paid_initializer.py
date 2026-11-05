@@ -573,14 +573,15 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='ec69b010e00fd8e942a5828c447ac66623bf7dd99c2db88833e573006aea33f3'
+    assert hashlib.sha256(current_raw).hexdigest()=='84100241653b76f88eb7a6b83c5442dc154170edb9864819064741d6dfc6989d'
     current=json.loads(current_raw)
-    assert len(before)==95 and len(current)==102
+    assert len(before)==95 and len(current)==104
     assert set(before)<=set(current)
     added={'ext/host_pull_daemon.sh','ext/host_pull_launchd.plist.template',
         'ext/paid_host_readiness.py','ext/paid_initializer.py',
         'ext/paid_initializer_token_data.py','ext/paid_initializer_nested_data.py',
-        'ext/paid_provider_entry.py'}
+        'ext/paid_provider_entry.py','ext/post_failure_observation.py',
+        'ext/post_failure_observation_delivery.py'}
     # The accepted source union includes the protected review-routing picker,
     # provider/readiness composition and fixed-template launcher transition.
     # Preserve their finite changes without replacing the historical epoch.
@@ -600,10 +601,12 @@ def test_native_initializer_extends_only_exact_preimage_members():
                           'ext/fabric_operator_contract.py','ext/native_remote.py',
                           'ext/oc_free_exec.sh','ext/remote_sub_helpers.py',
                           'ext/slot.py','ext/sub.sh'}
-    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed
+    recovery_changed={'ext/artifact_delivery.py','ext/run_observation.py',
+                      'ext/run_observation_delivery.py'}
+    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|recovery_changed
     # The fair-share repair advances exactly one prior broker member.
-    assert sum(before[p]==current[p] for p in before)==68
-    for name in added|changed|diagnostic_changed|long_horizon_changed:
+    assert sum(before[p]==current[p] for p in before)==65
+    for name in added|changed|diagnostic_changed|long_horizon_changed|recovery_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
         assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()
     # The paired-upgrade target remains historical; only ordinary generation
