@@ -3899,14 +3899,19 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     observedConversation.projection.conversation.source.state === "CURRENT" &&
     observedConversation.projection.context.selection?.workRef === projectWorkRef &&
     observedConversation.projection.context.selection?.rootJobId === selection.rootJobId);
+  const instructionDraftOwner = projectDraftOwner.current;
+  const instructionDraftWitness = instructionConversationCurrent ? projectDraftMethods.readWitness() : null;
   const projectDetailsControls = useProjectDetailsControls({
     selection: projectWorkRef ? {work_ref: projectWorkRef} : null,
     host: retainedResultHost ?? null, authGeneration: authRevision,
     sourceGeneration: projectReaders.generation, canRead: projectReaders.canRead,
     store: commandBinding?.store, locale,
-    onChangeInConversation: instructionConversationCurrent ? source => {
-      if (instructionConversationCurrent && projectReaders.canRead() &&
-          observedConversation.appendSource(source, observedConversation.draftRevision)) {
+    onChangeInConversation: instructionDraftWitness ? source => {
+      const current = projectDraftMethods.readWitness();
+      if (projectDraftOwner.current === instructionDraftOwner && current &&
+          current.workRef === projectWorkRef && current.workRef === instructionDraftWitness.workRef &&
+          current.binding === instructionDraftWitness.binding && current.revision === instructionDraftWitness.revision &&
+          projectDraftMethods.append(source, instructionDraftWitness.revision)) {
         setActive("Conversations");
       }
     } : undefined,
