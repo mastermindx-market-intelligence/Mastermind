@@ -29,9 +29,10 @@ Executive owns admission, Jobs, Attempts, workers, plans and effects; Capacity/M
 | Node | Dependency | Deliverable and acceptance | Editorial state |
 | --- | --- | --- | --- |
 | P1 | none | Current surface census with exact owner/path/contract, capability evidence and Y7 collision fence | in_progress |
-| P2 | P1 | Smallest source-ready consumer API joining shared visibility and delegated control through existing seams; no new owners | proposed |
-| P2.1 | P1 | Compact status/change/result projection with explicit scope, bounds, freshness and coverage | proposed |
-| P2.2 | P1 | Host-authenticated action hooks that preserve original admission and effect reconciliation | proposed |
+| P2 | P1 | Smallest source-ready consumer API joining shared visibility and delegated control through existing seams; no new owners | in_progress |
+| P2.1 | P1 | Compact native status/change projection with explicit original-owner scope, bounds, freshness and coverage | in_progress |
+| P2.2 | P1 | Host-authenticated action hooks that preserve original admission and effect reconciliation | in_progress |
+| P2.3 | P1 | Primary canonical Mission v3 projection and composed two-principal signed-HTTP same-root/revocation proof | in_progress |
 | P3 | P2 | Meaningful focused tests, adversarial self-check, hosted CI, published source and Cursor integration contract | proposed |
 | P4 | P3 + incumbent runtime adoption | Real GB1/Secretary 2 shared-team journey and a measured seven-day observation | blocked |
 
@@ -40,6 +41,12 @@ Executive owns admission, Jobs, Attempts, workers, plans and effects; Capacity/M
 Tests must distinguish unauthorized/foreign roots, cross-principal control, missing or stale data, superseded attempts, interrupted/unknown dispatch, restart, result truncation, output bounds, unchanged event suppression, and original-parent consumption. A synthetic callback proves only that callback contract. A source PR/green CI cannot prove installation, live role enrollment, background execution or team availability.
 
 Full completion requires both actual roles to observe the same team; one permitted create and steer action admitted by existing owners; a useful result consumed by the exact decision owner; no duplicate execution after response loss or restart; observable economical routing within approved budgets; and measured endurance/token usage. Preserve all unproven requirements in the cumulative issue checkpoint.
+
+## Source architecture decision
+
+The canonical Mission v3 API is the primary shared team read. Its existing Workspace member owner can enroll distinct principals; the reader brackets each member's permission and the selected canonical root. The native paid-run catalog is supplementary, always partial and restricted to the original COO. Do not introduce an observer registry or share credentials to bypass that distinction. The exact routes, source census, control limits, return/expiry constraints and Cursor/Y7 seams are in [GROK_SECRETARY_TEAM_INTEGRATION.md](GROK_SECRETARY_TEAM_INTEGRATION.md).
+
+The Python consumer will validate only the public Mission subset it projects; producer-input validators are not a complete HTTP decoder. Preserve source currentness, omitted/unjoined partitions and result-index availability. One host-bound ruling obligation is the current steering contract, not arbitrary control of every child. Current native/Mission metadata does not expose the complete host/pool/model placement tuple requested by GB1; an authorized existing placement receipt remains an explicit integration requirement.
 
 ## Initial evidence and integration gaps
 
