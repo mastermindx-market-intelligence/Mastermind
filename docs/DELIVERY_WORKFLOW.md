@@ -120,9 +120,12 @@ adds no manual review. See [session review policy](SESSION_LOCAL_REVIEW_POLICY.m
 
    ```bash
    gh pr merge <PR> --repo mastermindx-market-intelligence/Mastermind \
-     --auto --squash --delete-branch \
+     --auto --squash \
      --match-head-commit <CURRENT_40_HEX_HEAD>
    ```
+
+   Branch cleanup remains queue/repository-owned after merge; the native CLI
+   does not support `--delete-branch` during queue enrollment.
 
    Reconcile the actual returned request: pending conditions may create an
    auto-merge request; satisfied conditions may enter the existing protected
