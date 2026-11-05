@@ -32,14 +32,77 @@ from control_plane.executive_dialogue_observation import (
     TerminalObservationFacts,
     TerminalProjectionReceiptFacts,
     parse_observation_request,
+    parse_delayed_ack_request,
+    parse_source_reconcile_request,
     parse_wake_request,
     reduce_dialogue_observation,
     read_canonical_terminal_wake,
     wake_response_bytes,
+    source_reconcile_response_bytes,
+    delayed_ack_response_bytes,
 )
 from control_plane.session_targets import WakeRoute
 from control_plane.executive_runtime import Runtime, StateConflict
 from control_plane.wake_events import mint_obligation
+from control_plane.dialogue_source_resolution import (
+    DialogueSourceObservation,
+    DialogueSourceMessage,
+    DialogueSourceResolutionError,
+    DialogueSourceSnapshot,
+    attention_source_ref,
+)
+
+
+def _physical_observation() -> DialogueSourceObservation:
+    return DialogueSourceObservation(
+        workspace_id="T0BRD2AQXQV",
+        channel_id="C0BSBM78V1N",
+        thread_ts="1788000000.123456",
+        predecessor_message_key="asd-result-00000001",
+        predecessor_message_fingerprint="a" * 64,
+    )
+
+
+def test_delayed_ack_protocol_is_conditionally_closed() -> None:
+    source = _physical_observation()
+    pending = json.loads(source_reconcile_response_bytes(
+        state="ACK_REQUIRED", reason="DELIVERED_ACK_PENDING",
+        source_observation=source,
+    ))
+    assert set(pending) == {"schema", "state", "reason", "source_observation"}
+    assert pending["source_observation"] == source.to_dict()
+    with pytest.raises(DialogueObservationProtocolError):
+        source_reconcile_response_bytes(
+            state="ACK_REQUIRED", reason="DELIVERED_ACK_PENDING"
+        )
+    with pytest.raises(DialogueObservationProtocolError):
+        source_reconcile_response_bytes(
+            state="RECORDED", reason="SOURCE_ALREADY_RESOLVED",
+            source_observation=source,
+        )
+
+    parent = valid_parent()
+    wire = json.dumps({
+        "schema": "mastermind.dialogue_delayed_ack_request/v1",
+        "operation": "RECONCILE_WAKE_ACK",
+        "parent": parent,
+        "source_observation": source.to_dict(),
+    }, sort_keys=True, separators=(",", ":")).encode()
+    parsed = parse_delayed_ack_request(wire)
+    assert parsed.parent == parent
+    assert parsed.source_observation == source
+    for key in source.to_dict():
+        changed = json.loads(wire)
+        changed["source_observation"][key] = None
+        with pytest.raises(DialogueObservationProtocolError):
+            parse_delayed_ack_request(json.dumps(changed).encode())
+    response = json.loads(delayed_ack_response_bytes(
+        state="RECORDED", reason="ACK_RECORDED"
+    ))
+    assert response == {
+        "schema": "mastermind.dialogue_delayed_ack_response/v1",
+        "state": "RECORDED", "reason": "ACK_RECORDED",
+    }
 from control_plane.wake_ledger import (
     LedgerPhase,
     WAKE_AGGREGATE_TYPE,
@@ -60,6 +123,28 @@ def _request(parent: dict | None = None) -> bytes:
             "schema": REQUEST_SCHEMA,
             "request_id": "observation-request-001",
             "parent": parent or valid_parent(),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def _source_reconcile_request() -> bytes:
+    parent = valid_parent()
+    return json.dumps(
+        {
+            "schema": "mastermind.dialogue_source_reconcile_request/v1",
+            "operation": "RECONCILE_DIALOGUE_SOURCES",
+            "parent": parent,
+            "snapshot": {
+                "workspace_id": "T0BRD2AQXQV",
+                "channel_id": "C0BSBM78V1N",
+                "thread_ts": "1788000000.123456",
+                "parent_fingerprint": parent["fingerprint"],
+                "operation_key": parent["operation_key"],
+                "messages": [],
+                "complete": True,
+            },
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -245,6 +330,127 @@ def test_strict_request_reuses_canonical_v2_parent_parser() -> None:
         legacy[forbidden_key] = forbidden_value
         with pytest.raises(DialogueObservationProtocolError, match="REQUEST_REFUSED"):
             parse_observation_request(json.dumps(legacy).encode("utf-8"))
+
+
+def test_source_reconcile_frame_is_strict_bounded_and_closed() -> None:
+    raw = _source_reconcile_request()
+    parsed = parse_source_reconcile_request(raw)
+    assert parsed.snapshot.messages == ()
+
+    duplicate = raw.decode("utf-8").replace(
+        '"operation":"RECONCILE_DIALOGUE_SOURCES"',
+        '"operation":"RECONCILE_DIALOGUE_SOURCES",'
+        '"operation":"RECONCILE_DIALOGUE_SOURCES"',
+        1,
+    ).encode("utf-8")
+    nonfinite = raw.replace(b'"messages":[]', b'"messages":[],"poison":NaN')
+    extra = json.loads(raw)
+    extra["authority"] = "caller"
+    hostile = (
+        duplicate,
+        nonfinite,
+        json.dumps(extra).encode("utf-8"),
+        raw + b" " * (64 * 1024),
+    )
+    for payload in hostile:
+        with pytest.raises(DialogueObservationProtocolError, match="REQUEST_REFUSED"):
+            parse_source_reconcile_request(payload)
+
+    message = DialogueSourceMessage.create({"message_key": "source-00"})
+    with pytest.raises(DialogueSourceResolutionError, match="edge bound"):
+        DialogueSourceSnapshot(
+            workspace_id="T0BRD2AQXQV",
+            channel_id="C0BSBM78V1N",
+            thread_ts="1788000000.123456",
+            parent_fingerprint=valid_parent()["fingerprint"],
+            operation_key=valid_parent()["operation_key"],
+            messages=tuple(message for _ in range(65)),
+        )
+
+
+def test_raw_v2_wake_request_preserves_physical_source_proposal() -> None:
+    """The upgraded wire carries accepted physical source facts without authority flags."""
+
+    base = json.loads(_wake_request(SUBMIT_WAKE))
+    predecessor_key = "asd-progress-001"
+    canonical_attention = attention_source_ref(
+        parent_fingerprint=base["parent"]["fingerprint"],
+        message_key=predecessor_key,
+        target_seat="ceo",
+    )
+    attention = mint_obligation(
+        wake_kind="dialogue_turn_pending",
+        source_kind="agent_dialogue_attention",
+        source_ref=canonical_attention,
+        declared_target_seat="ceo",
+        job_id=base["candidate"]["job_id"],
+        attempt_id=base["candidate"]["attempt_id"],
+        root_job_id=base["candidate"]["root_job_id"],
+        source_workstream=base["parent"]["work_ref"],
+        source_created_at="2026-09-03T01:00:00Z",
+        emitted_at="2026-09-03T01:00:01Z",
+    )
+    base["obligation"] = attention.to_dict()
+    base["route"] = dataclasses.replace(
+        WakeRoute(**{k: v for k, v in base["route"].items() if k != "delivery_allowed"}),
+        obligation_id=attention.obligation_id,
+    ).to_dict()
+    raw = {
+        "schema": "mastermind.dialogue_wake_request/v2",
+        "operation": SUBMIT_WAKE,
+        "parent": base["parent"],
+        "source_observation": {
+            "workspace_id": "T0BRD2AQXQV",
+            "channel_id": "C0BSBM78V1N",
+            "thread_ts": "1788000000.123456",
+            "predecessor_message_key": predecessor_key,
+            "predecessor_message_fingerprint": "a" * 64,
+        },
+        "candidate": base["candidate"],
+        "attention_obligation": base["obligation"],
+        "route": base["route"],
+    }
+
+    parsed = parse_wake_request(
+        json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
+    )
+
+    assert parsed.operation == SUBMIT_WAKE
+    assert parsed.source_observation is not None
+    assert parsed.source_observation.workspace_id == "T0BRD2AQXQV"
+    assert parsed.source_observation.thread_ts == "1788000000.123456"
+    assert parsed.obligation.source_ref != base["obligation"]["source_ref"]
+    assert parsed.physical_source.logical_source_ref == parsed.obligation.source_ref
+
+
+def test_raw_v2_refuses_candidate_and_parent_correlation_contradictions() -> None:
+    base = json.loads(_wake_request(SUBMIT_WAKE))
+    predecessor_key = "asd-progress-001"
+    contradictory = mint_obligation(
+        wake_kind="dialogue_turn_pending", source_kind="agent_dialogue_attention",
+        source_ref=attention_source_ref(
+            parent_fingerprint=base["parent"]["fingerprint"],
+            message_key=predecessor_key, target_seat="ceo",
+        ),
+        declared_target_seat="ceo", job_id="JOB-999",
+        attempt_id=base["candidate"]["attempt_id"],
+        root_job_id=base["candidate"]["root_job_id"],
+        source_workstream="WS:OTHER", emitted_at="2026-09-03T01:00:01Z",
+    )
+    base["obligation"] = contradictory.to_dict()
+    base["route"]["obligation_id"] = contradictory.obligation_id
+    raw = {
+        "schema": "mastermind.dialogue_wake_request/v2", "operation": SUBMIT_WAKE,
+        "parent": base["parent"], "candidate": base["candidate"],
+        "source_observation": {
+            "workspace_id": "T0BRD2AQXQV", "channel_id": "C0BSBM78V1N",
+            "thread_ts": "1788000000.123456", "predecessor_message_key": predecessor_key,
+            "predecessor_message_fingerprint": "a" * 64,
+        },
+        "attention_obligation": base["obligation"], "route": base["route"],
+    }
+    with pytest.raises(DialogueObservationProtocolError):
+        parse_wake_request(json.dumps(raw).encode())
 
 
 @pytest.mark.parametrize("operation", [RECONCILE_WAKE, SUBMIT_WAKE])

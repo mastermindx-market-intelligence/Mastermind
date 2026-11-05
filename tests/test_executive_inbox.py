@@ -746,7 +746,7 @@ def test_3_inbox_never_opens_a_write_transaction(store, frozen_git, monkeypatch)
 # 4. import fence
 # ---------------------------------------------------------------------------
 
-def test_4_module_imports_only_the_runtime_and_the_boot_packet():
+def test_4_module_imports_only_runtime_boot_packet_and_pure_selection_law():
     source = Path(mod.__file__).read_text(encoding="utf-8")
     submodules: set[str] = set()
     for node in ast.walk(ast.parse(source)):
@@ -760,7 +760,7 @@ def test_4_module_imports_only_the_runtime_and_the_boot_packet():
             elif node.module.startswith("control_plane."):
                 submodules.add(node.module.split(".", 1)[1].split(".")[0])
 
-    assert submodules == {"executive_runtime", "ceo_boot_packet"}, sorted(submodules)
+    assert submodules == {"executive_runtime", "ceo_boot_packet", "frontier_selection"}, sorted(submodules)
 
     forbidden = (
         "executive_supervisor",
@@ -1532,6 +1532,36 @@ def test_provenance_schema_is_pinned_to_the_intent_bridge():
     assert INTENT_SCHEMA.startswith(mod.CEO_INTENT_SCHEMA_PREFIX)
 
 
+def test_service_schema_provenance_is_not_classified_as_ceo_origin(tmp_path):
+    """A durable service-schema stamp is not CEO-origin. Reader UNCHANGED."""
+    from control_plane.ceo_intent import INTENT_SCHEMA_SERVICE
+
+    runtime = Runtime.at(tmp_path, clock=_Clock(), lease_seconds=_LONG_LEASE_SECONDS)
+    intent = {
+        "schema": INTENT_SCHEMA_SERVICE,
+        "intent_id": "svc-inbox-not-ceo",
+        "actor": "svc-site-maintenance",
+        "objective": "Audit published site health; do not treat as CEO origin.",
+        "department": "executive-infrastructure",
+        "priority": 3,
+        "grounding": {
+            "mastermind_sha": "1" * 40,
+            "macro_sha": "2" * 40,
+        },
+        "principal_id": "svc-site-maintenance",
+        "task_kind": "research",
+        "execution_contract": {
+            "requested_authorities": ["READ", "RESEARCH"],
+            "authority_level": "A0",
+        },
+    }
+    receipt = submit_intent(runtime, intent)
+    provenance, warning = mod.ceo_intent_provenance(runtime, receipt["job_id"])
+    assert provenance is None
+    assert warning is None
+    assert not INTENT_SCHEMA_SERVICE.startswith(mod.CEO_INTENT_SCHEMA_PREFIX)
+
+
 def test_a_versioned_sibling_provenance_is_named_not_silently_dropped(
     tmp_path, frozen_git
 ):
@@ -1843,3 +1873,46 @@ def test_classification_covers_every_job_status():
     }
     assert classified | set(mod._SUPPRESSION_BY_STATUS) == set(JobStatus)
     assert set(mod._SUPPRESSION_BY_STATUS.values()) == set(mod._SUPPRESSION_KEYS)
+
+
+def test_bound_inbox_real_projection_and_latched_return_refusal(tmp_path, frozen_git):
+    from contextlib import contextmanager
+    import threading
+    from control_plane import executive_runtime as er
+
+    assert hasattr(er, "RuntimeNamespaceCapability"), "bound-read API missing"
+
+    class Namespace(er.RuntimeNamespaceCapability):
+        def __init__(self):
+            self.lock = threading.Lock()
+            self.entries = self.exits = 0
+            self.revoke_at_exit = None
+
+        @contextmanager
+        def namespace(self, path):
+            with self.lock:
+                self.entries += 1
+                try:
+                    yield
+                finally:
+                    self.exits += 1
+                    if self.revoke_at_exit:
+                        self.revoke_at_exit()
+
+        def validate(self, path):
+            pass
+
+    writer = Runtime.at(tmp_path)
+    writer.jobs.create_job("APPROVED INBOX A")
+    provider = Namespace()
+    binding = er.RuntimeReadBinding(provider)
+    good = build_inbox(repo_root=tmp_path, include_boot_packet=False, now=_NOW,
+                       read_binding=binding)
+    assert good["runtime_counts"]["jobs"]["total"] == 1
+    assert provider.entries == provider.exits
+    provider.revoke_at_exit = binding.invalidate
+    bad = build_inbox(repo_root=tmp_path, include_boot_packet=False, now=_NOW,
+                      read_binding=binding)
+    assert bad["runtime_counts"] is None
+    assert not [x for x in bad["attention"] if x.get("source") == "runtime"]
+    assert any("bound" in x.lower() for x in bad["degraded"])

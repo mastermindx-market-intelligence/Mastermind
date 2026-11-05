@@ -61,11 +61,12 @@ ACCEPTANCE_ID = "P1FC-INERT-ACCEPTANCE-V1"
 CYCLE_ACCEPTANCE_ID = "P1FC-BOUNDED-CYCLE-REPLAY-V1"
 HAPPY_PATH_ACCEPTANCE_ID = "P1FC-TYPED-HAPPY-SUPERVISOR-V1"
 REPAIR_PATH_ACCEPTANCE_ID = "P1FC-REJECT-REPAIR-LINEAGE-V1"
-VOID_PATH_ACCEPTANCE_ID = "P1FC-VOID-REPLACEMENT-INDEPENDENCE-V1"
+VOID_PATH_ACCEPTANCE_ID = "P1FC-VOID-REPLACEMENT-INDEPENDENCE-V2"
 DISPATCH_REPLAY_ACCEPTANCE_ID = "P1FC-SUPERVISOR-CLAIM-CRASH-REPLAY-V1"
 DISPATCH_BOUNDARY_ACCEPTANCE_ID = "P1FC-EXACT-DISPATCH-BOUNDARY-V1"
 TX9_ACCEPTANCE_ID = "P1FC-TX9-QUARANTINE-V1"
 BOUNDED_EXHAUSTION_ACCEPTANCE_ID = "P1FC-TX9-BOUNDED-EXHAUSTION-V1"
+WEB_CEO_OFFLINE_DELIVERY_ACCEPTANCE_ID = "WEB-CEO-OFFLINE-DELIVERY-V1"
 
 # Acceptance evidence must be byte-identical across the macOS control host and
 # Linux hosted CI.  These are inert fixture identities, not observations of the
@@ -290,6 +291,7 @@ def _complete_fixture_role(
     role_result: dict[str, Any],
     *,
     identity_seed: int,
+    principal_identity_seed: int | None = None,
 ) -> dict[str, Any]:
     """Complete one typed role through inert OHF Runtime boundaries."""
 
@@ -325,6 +327,7 @@ def _complete_fixture_role(
         provider_session_id=provider_session,
         process=process,
     )
+    principal_seed = identity_seed if principal_identity_seed is None else principal_identity_seed
     principal = OperatorPrincipalObservation(
         attempt_id=sealed.attempt_id,
         worker_id=str(sealed.worker_id),
@@ -336,14 +339,14 @@ def _complete_fixture_role(
             "process_start_identity": process.process_start_identity,
             "boot_id": process.boot_id,
         },
-        os_principal_name=f"fixture-principal-{identity_seed}",
-        os_principal_uid=identity_seed,
+        os_principal_name=f"fixture-principal-{principal_seed}",
+        os_principal_uid=(principal_seed),
         provider_home_identity={
-            "path": f"/tmp/phase1fc-provider-home-{identity_seed}",
-            "device": identity_seed,
-            "inode": identity_seed + 1,
-            "uid": identity_seed,
-            "gid": identity_seed,
+            "path": f"/tmp/phase1fc-provider-home-{principal_seed}",
+            "device": principal_seed,
+            "inode": (principal_seed) + 1,
+            "uid": principal_seed,
+            "gid": principal_seed,
             "mode": 0o700,
         },
         observed_at_ms=runtime.store.now_ms(),
@@ -1059,7 +1062,7 @@ def _void_replacement_receipt(root_path: Path) -> dict[str, Any]:
     ) = _typed_fixture_through_work(
         root_path,
         intent_id="CEO-ACCEPTANCE-VOID-REPLACEMENT",
-        review_workers=("worker-a", "worker-b"),
+        review_workers=("worker-b", "worker-b"),
         identity_seed=4301,
     )
     first_created = cycle.run_once(root.job_id)
@@ -1089,7 +1092,7 @@ def _void_replacement_receipt(root_path: Path) -> dict[str, Any]:
         verdict="approve",
     )
     void_proof = _complete_fixture_role(
-        runtime, first_dispatch, approve_body, identity_seed=4303
+        runtime, first_dispatch, approve_body, identity_seed=4303, principal_identity_seed=4302
     )
     replacement_created = cycle.run_once(root.job_id)
     assert replacement_created.action == "REVIEW_CREATED"
@@ -1145,10 +1148,59 @@ def _void_replacement_receipt(root_path: Path) -> dict[str, Any]:
         ],
         "sentinel": _sentinel_proof(runtime, sentinel_before),
     }
-    assert proof["void_review_worker_id"] == proof["reviewed_worker_id"]
+    # Fresh placement excludes the old worker/account. The full result gate
+    # still rejects a different worker backed by the same physical principal.
+    assert proof["void_review_worker_id"] != proof["reviewed_worker_id"]
     assert proof["replacement_review_worker_id"] != proof["reviewed_worker_id"]
     proof["acceptance_digest"] = _digest(proof)
     return proof
+
+
+def run_web_ceo_offline_delivery_acceptance(root_path: Path) -> dict[str, Any]:
+    """Prove the existing reject/repair/re-review path needs no Web Sol turn."""
+    original_uuid4 = executive_runtime.uuid4
+    original_token = executive_runtime.secrets.token_urlsafe
+    counter = iter(range(10_000, 20_000))
+    executive_runtime.uuid4 = lambda: uuid.UUID(int=next(counter))
+    executive_runtime.secrets.token_urlsafe = lambda _n=32: "fixture-lease-token"
+    try:
+        proof = _repair_path_receipt(root_path / "web-ceo-offline-delivery")
+    finally:
+        executive_runtime.uuid4 = original_uuid4
+        executive_runtime.secrets.token_urlsafe = original_token
+
+    plan, work, reject, repair, approval = proof["role_proofs"]
+    lineage = {
+        role: {
+            "job_id": role_proof["job_id"],
+            "attempt_id": role_proof["attempt_id"],
+            "result_digest": role_proof["role_result_digest"],
+        }
+        for role, role_proof in {
+            "plan": plan,
+            "work": work,
+            "rejecting_review": reject,
+            "repair": repair,
+            "approving_review": approval,
+        }.items()
+    }
+    receipt: dict[str, Any] = {
+        "acceptance_id": WEB_CEO_OFFLINE_DELIVERY_ACCEPTANCE_ID,
+        "root_job_id": proof["root_job_id"],
+        "lineage": lineage,
+        "review_verdicts": ["reject", "approve"],
+        "repair_rounds": [1],
+        "handoff_digest": proof["handoff_digest"],
+        "aggregation_handoff_ready": True,
+        "web_sol_turns_between_admission_and_handoff": 0,
+        "manual_continue_edges": 0,
+        "production_accepted": False,
+        "sol_final_acceptance_pending": True,
+        "production_deploy_authority": False,
+        "new_control_planes_created": 0,
+    }
+    receipt["acceptance_digest"] = _digest(receipt)
+    return receipt
 
 
 def _cycle_receipt(root: Path) -> dict[str, Any]:

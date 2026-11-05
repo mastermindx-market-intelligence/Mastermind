@@ -11,6 +11,7 @@ import os
 import signal
 import sys
 import uuid
+import time
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +51,11 @@ class FakeAppServer:
         self.ambient_skill = os.environ.get("OHF_FAKE_AMBIENT_SKILL") or ""
         self.skills_changed_notify = os.environ.get("OHF_FAKE_SKILLS_CHANGED") == "1"
         self.bundled_disabled = os.environ.get("OHF_FAKE_BUNDLED_DISABLED") == "1"
+        self.sandbox_mode = os.environ.get("OHF_FAKE_SANDBOX_MODE") or "read-only"
+        if self.sandbox_mode not in {"read-only", "workspace-write"}:
+            raise ValueError("fake App Server sandbox mode is invalid")
         self.cap_s1_turn_replies = os.environ.get("OHF_FAKE_CAP_S1_TURN_REPLIES") == "1"
+        self.qualified_skill_names = os.environ.get("OHF_FAKE_QUALIFIED_SKILLS") == "1"
         self.native_helper = os.environ.get("OHF_FAKE_NATIVE_HELPER") == "1"
         self.native_helper_depth = int(
             os.environ.get("OHF_FAKE_NATIVE_HELPER_DEPTH") or "1"
@@ -59,6 +64,33 @@ class FakeAppServer:
             os.environ.get("OHF_FAKE_NATIVE_HELPER_MODEL_OVERRIDE") == "1"
         )
         self.die_after = int(os.environ.get("OHF_FAKE_DIE_AFTER") or "0")
+        self.gate_held = os.environ.get("OHF_FAKE_GATE_MODE") == "held"
+        self.gate_path = Path(
+            os.environ.get("OHF_FAKE_GATE_PATH")
+            or (self.state_path.parent / "w7_lc1_gate")
+        )
+        self.gate_log_path = Path(
+            os.environ.get("OHF_FAKE_GATE_LOG")
+            or (self.state_path.parent / "w7_lc1_gate.log")
+        )
+        self.item_gate_path = (
+            Path(os.environ["OHF_FAKE_ITEM_GATE_PATH"])
+            if os.environ.get("OHF_FAKE_ITEM_GATE_PATH")
+            else None
+        )
+        self.effect_counter_path = (
+            Path(os.environ.get("OHF_FAKE_EFFECT_COUNTERS"))
+            if os.environ.get("OHF_FAKE_EFFECT_COUNTERS")
+            else None
+        )
+        self.visible_updates = [
+            value
+            for value in (
+                os.environ.get("OHF_FAKE_VISIBLE_UPDATES")
+                or "LC1 partial one;LC1 final one;LC1 partial two;LC1 final two"
+            ).split(";")
+            if value
+        ]
         self.requests_seen = 0
         self.initialized = False
         self.threads: dict[str, dict[str, Any]] = {}
@@ -66,6 +98,13 @@ class FakeAppServer:
         self.mcp_status = "ready" if self.include_mcp else "missing"
         self._load()
         signal.signal(signal.SIGTERM, self._on_term)
+
+    def _effect(self, name: str) -> None:
+        if self.effect_counter_path is None:
+            return
+        self.effect_counter_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.effect_counter_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"{name}\n")
 
     def _untrusted_blob(self) -> str:
         return os.environ.get("OHF_FAKE_UNTRUSTED_BLOB") or ""
@@ -135,7 +174,13 @@ class FakeAppServer:
             if not root.exists():
                 continue
             for skill_md in sorted(root.glob("*/SKILL.md"), key=lambda p: p.parent.name):
-                rows.append(self._skill_row(skill_md.parent.name, str(skill_md.parent)))
+                name = skill_md.parent.name
+                # Real Codex App Server 0.159.3 namespaces extra-root Skills
+                # under their signed package-directory name, while the path
+                # still points to the unqualified directory on disk.
+                if self.qualified_skill_names and root in self.extra_roots:
+                    name = f"{root.parent.name}:{name}"
+                rows.append(self._skill_row(name, str(skill_md.parent)))
         if self.ambient_skill:
             rows.append(
                 self._skill_row(
@@ -164,6 +209,15 @@ class FakeAppServer:
         params = message.get("params") or {}
         if request_id is not None:
             self.requests_seen += 1
+            self._effect("provider_calls")
+            if method == "thread/start":
+                self._effect("session_starts")
+            elif method == "thread/resume":
+                self._effect("resumes")
+            elif method == "thread/fork":
+                self._effect("parent_obligations")
+            elif method == "thread/turns/list":
+                self._effect("raw_collections")
             if self.die_after and self.requests_seen >= self.die_after:
                 self._save()
                 raise SystemExit(9)
@@ -273,6 +327,7 @@ class FakeAppServer:
             )
             return
         if method == "thread/turns/list":
+            self._effect("candidate_collections")
             thread = self._require_thread(str(params.get("threadId") or ""))
             if thread is None:
                 self._error(request_id, "native session reference missing", code=-32004)
@@ -320,6 +375,7 @@ class FakeAppServer:
                     text_in += skill_name
                     input_skills.append(dict(item))
             turn_id = f"turn_{uuid.uuid4().hex[:8]}"
+            self._effect("turn_starts")
             cap_s1_reply = None
             if self.cap_s1_turn_replies and input_skills:
                 skill_name = str(input_skills[-1].get("name") or "")
@@ -354,8 +410,70 @@ class FakeAppServer:
                 }
             )
             self._save()
-            turn = {"id": turn_id, "status": "completed", "threadId": thread_id}
+            turn = {
+                "id": turn_id,
+                "status": "running" if self.gate_held else "completed",
+                "threadId": thread_id,
+            }
             self._ok(request_id, {"turn": turn})
+            if self.gate_held:
+                self._effect("native_acks")
+                self.gate_log_path.parent.mkdir(parents=True, exist_ok=True)
+                with self.gate_log_path.open("a", encoding="utf-8") as handle:
+                    handle.write(
+                        f"gate=held turn={turn_id} terminal=pending "
+                        f"gate_path={self.gate_path}\n"
+                    )
+                self._notify("turn/started", {"turn": {"id": turn_id}})
+                if self.item_gate_path is not None:
+                    while self.item_gate_path.exists():
+                        time.sleep(0.01)
+                for index, text in enumerate(self.visible_updates):
+                    self._notify(
+                        "item/updated",
+                        {
+                            "threadId": thread_id,
+                            "turnId": turn_id,
+                            "item": {
+                                "id": f"item_{turn_id}_{index}",
+                                "sequence": index,
+                                "type": "agentMessage",
+                                "text": text,
+                            }
+                        },
+                    )
+                self._notify(
+                    "item/completed",
+                    {
+                        "threadId": thread_id,
+                        "turnId": turn_id,
+                        "item": {
+                            "id": f"item_{turn_id}_0",
+                            "sequence": 0,
+                            "type": "agentMessage",
+                            "text": self.visible_updates[0],
+                        }
+                    },
+                )
+                self._notify(
+                    "item/completed",
+                    {
+                        "threadId": thread_id,
+                        "turnId": turn_id,
+                        "item": {
+                            "id": f"item_{turn_id}_1",
+                            "sequence": 1,
+                            "type": "agentMessage",
+                            "text": self.visible_updates[1],
+                        }
+                    },
+                )
+                while self.gate_path.exists():
+                    time.sleep(0.01)
+                with self.gate_log_path.open("a", encoding="utf-8") as handle:
+                    handle.write(f"gate=released turn={turn_id}\n")
+                self._notify("turn/completed", {"turn": {**turn, "status": "completed"}})
+                return
             self._notify("turn/started", {"turn": {"id": turn_id}})
             if self.native_helper:
                 child_id = f"thr_{uuid.uuid4().hex[:10]}"
@@ -543,12 +661,21 @@ class FakeAppServer:
             config: dict[str, Any] = {
                 "model": self.model,
                 "approval_policy": "never",
-                "sandbox_mode": "read-only",
+                "sandbox_mode": self.sandbox_mode,
                 "agents": agents,
                 "features": features,
                 "mcp_servers": {name: {"command": "python3"} for name in mcp},
                 "plugins": {},
             }
+            if self.sandbox_mode == "workspace-write":
+                # Fake-only echo of the reviewed CLI config overrides. This
+                # is not kernel network or filesystem enforcement evidence.
+                config["sandbox_workspace_write"] = {
+                    "network_access": False,
+                    "writable_roots": [],
+                    "exclude_slash_tmp": True,
+                    "exclude_tmpdir_env_var": True,
+                }
             if self.bundled_disabled:
                 skills_config = dict(config.get("skills") or {})
                 skills_config["bundled"] = {"enabled": False}

@@ -626,7 +626,7 @@ def test_static_map_is_closed_and_literal():
 
 
 # ---------------------------------------------------------------------------
-# 4. /api/open accepts ONLY binding_id
+# 4. /api/open accepts only binding_id plus the closed navigation target
 # ---------------------------------------------------------------------------
 
 
@@ -640,6 +640,81 @@ def test_open_rejects_unknown_top_level_keys(tmp_path):
     assert status == 400
     payload = json.loads(body)
     assert "url" in payload["detail"]
+
+
+def test_open_rejects_unknown_target_surface(tmp_path):
+    config = _make_config(tmp_path)
+    with _running_server(config) as (_httpd, port):
+        status, _headers, body = _post(
+            port, "/api/open", {"binding_id": "x", "target_surface": "screen-clicker"},
+            headers=_auth_headers(config),
+        )
+    assert status == 400
+    assert "target_surface" in json.loads(body)["detail"]
+
+
+def test_open_claude_code_in_desktop_end_to_end_through_server(tmp_path, monkeypatch):
+    monkeypatch.setattr(claude_surface, "_has_multiple_parall_claude_wrappers", lambda: False)
+    project = tmp_path / "project"
+    project.mkdir()
+    store = tmp_path / "claude-projects"
+    session_id = "22222222-2222-4222-8222-222222222222"
+    slug = claude_surface._slugify_project_dir(str(project))
+    transcript_dir = store / slug
+    transcript_dir.mkdir(parents=True)
+    (transcript_dir / f"{session_id}.jsonl").write_text("", encoding="utf-8")
+    cli = tmp_path / "claude-desktop-bridge"
+    cli.write_text("fixture", encoding="utf-8")
+    cli.chmod(0o700)
+
+    normal = FakeRunner(default={
+        "code": 0, "stdout": "2.1.285 (Claude Code)\n", "stderr": "", "timed_out": False,
+    })
+    pty_runner = FakeRunner(default={
+        "code": 0,
+        "stdout": f"Opening session {session_id} in Claude Desktop\r\n",
+        "stderr": "",
+        "timed_out": False,
+    })
+    config = _make_config(
+        tmp_path, runner=normal, claude_projects_dir=str(store),
+        now_value="2026-10-01T23:59:00Z",
+    )
+    config.claude_desktop_cli = str(cli)
+    config.claude_desktop_handoff_runner = pty_runner
+    binding = sb.new_binding(
+        work_ref="WS:DESKTOP-BRIDGE",
+        role="chairman",
+        provider="claude_code",
+        locator_kind="claude_code_session",
+        locator={"project_dir": str(project), "session_id": session_id},
+        observed_at="2026-10-01T23:58:00Z",
+        binding_id="33333333-3333-4333-8333-333333333333",
+    )
+    sb.save_bindings({"schema": sb.SCHEMA, "bindings": [binding]}, config.bindings_path)
+
+    with _running_server(config) as (_httpd, port):
+        status, _headers, body = _post(
+            port, "/api/open",
+            {"binding_id": binding["binding_id"], "target_surface": "desktop"},
+            headers=_auth_headers(config),
+        )
+
+    outcome = json.loads(body)
+    assert status == 200
+    assert outcome["ok"] is True
+    assert outcome["verified"] is True
+    assert outcome["action"] == "opened_desktop"
+    assert normal.calls == [{
+        "argv": [str(cli), "--version"], "timeout": 5.0, "cwd": None, "max_bytes": None,
+    }]
+    assert pty_runner.calls == [{
+        "argv": [str(cli), "--desktop", "--resume", session_id],
+        "timeout": 20.0, "cwd": str(project), "max_bytes": None,
+    }]
+    after, problems = sb.load_bindings(config.bindings_path)
+    assert problems == []
+    assert after["bindings"][0]["last_verified_at"] == "2026-10-01T23:59:00Z"
 
 
 @pytest.mark.parametrize("bad_body", [{"binding_id": "x", "argv": ["rm", "-rf"]}, {"binding_id": "x", "path": "/etc"}])
@@ -1548,9 +1623,13 @@ def test_superseded_background_refresh_never_overwrites_newer_explicit_recomposi
     entered_A = threading.Event()
     release_A = threading.Event()
 
-    def fake_compose(config, *, timeout=60.0):
+    def fake_compose(config, *, timeout=60.0, active_builds_snapshot=None):
         calls["n"] += 1
         n = calls["n"]
+        if n < 3:
+            assert active_builds_snapshot is None
+        else:
+            assert active_builds_snapshot == _STUB_FIXTURE_DOC
         if n == 1:
             return {"marker": "startup-doc"}
         if n == 2:
@@ -1627,9 +1706,13 @@ def test_superseded_background_failure_does_not_mask_newer_explicit_success(tmp_
     entered_A = threading.Event()
     release_A = threading.Event()
 
-    def fake_compose(config, *, timeout=60.0):
+    def fake_compose(config, *, timeout=60.0, active_builds_snapshot=None):
         calls["n"] += 1
         n = calls["n"]
+        if n < 3:
+            assert active_builds_snapshot is None
+        else:
+            assert active_builds_snapshot == _STUB_FIXTURE_DOC
         if n == 1:
             return {"marker": "startup-doc"}
         if n == 2:

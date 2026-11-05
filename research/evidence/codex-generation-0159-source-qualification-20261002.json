@@ -1,0 +1,72 @@
+{
+  "candidate_version": "0.159.2",
+  "code_mode_host": {
+    "codesign_verify": "PASS",
+    "identifier": "codex-code-mode-host",
+    "sha256": "ed79fbc9e1683feb29d73fb421f3e16932d178a459f63741754014c6c7ea6107",
+    "size_bytes": 65359872,
+    "team_identifier": "2DC432GLL2"
+  },
+  "effects": {
+    "credential_change": false,
+    "install": false,
+    "provider_turn": false,
+    "service_change": false,
+    "worker_arm": false
+  },
+  "operation_key": "executive-codex-generation-0159-20261002-sol-001",
+  "protected_base": "cfd3b996a2bf286f86375a5243232e027d58f724",
+  "protected_current_at_freeze": "5c4770ffaf533e652000e46670451c6ca8caf441",
+  "protected_movement_since_base": {
+    "candidate_path_overlap": false,
+    "changed_paths": [
+      "ops/executive_os/release_owner_issuer_binding.py",
+      "tests/test_executive_release_owner_issuer_binding.py"
+    ],
+    "classification": "PATH_DISJOINT_CURRENT_BASE_COMPATIBLE",
+    "commits": 1,
+    "merge": "#1122",
+    "skillpack_changed": false
+  },
+  "provider_free_compatibility": {
+    "app_server_overrides_parse": "PASS",
+    "batch_disabled_features_observed_false": 23,
+    "exec_cli_required_flags_present": [
+      "--json",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--ignore-rules",
+      "--strict-config",
+      "--model",
+      "--color",
+      "--output-schema",
+      "--output-last-message",
+      "-C"
+    ],
+    "minimal_surface_closed_features_observed_false": 14,
+    "minimal_surface_mcp_config_parse": "PASS",
+    "provider_call": false
+  },
+  "schema": "mastermind.codex_generation_source_qualification/v1",
+  "source_binary": {
+    "codesign_verify": "PASS",
+    "identifier": "codex",
+    "path": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+    "sha256": "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704",
+    "size_bytes": 240184096,
+    "team_identifier": "2DC432GLL2"
+  },
+  "tests": {
+    "affected_campaign": "PASS",
+    "affected_campaign_collected": 565,
+    "diff_check": "PASS",
+    "excluded_baseline_failures": [
+      "tests/test_executive_codex_worker.py::test_complete_launch_attestation_is_redacted_and_principal_bound",
+      "tests/test_provider_readiness_refresh.py::test_t11_real_protected_read_refuses_symlink_and_wrong_mode",
+      "tests/test_provider_readiness_refresh.py::test_t12_superseded_sibling_symlink_blocks_refresh"
+    ],
+    "excluded_failures_reproduced_on_exact_protected_base": true,
+    "python_compile": "PASS",
+    "shell_syntax": "PASS"
+  }
+}

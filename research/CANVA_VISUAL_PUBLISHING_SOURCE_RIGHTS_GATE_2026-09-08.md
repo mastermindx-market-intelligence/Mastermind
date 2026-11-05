@@ -5,7 +5,7 @@ Status: **records-only / publication `RIGHTS_BLOCKED`**
 
 This checkpoint supplements:
 
-- `research/CANVA_VISUAL_PUBLISHING_R0_CLOSEOUT_2026-09-07.md`
+- `research/CANVA_VISUAL_PUBLISHING_R0_2026-09-07.md`
 - `research/CANVA_VISUAL_PUBLISHING_R1_QA_2026-09-07.md`
 - `research/CANVA_VISUAL_PUBLISHING_R2_CONTINUATION_2026-09-08.md`
 
