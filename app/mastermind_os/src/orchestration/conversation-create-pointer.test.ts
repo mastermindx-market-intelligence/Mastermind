@@ -64,7 +64,7 @@ it("keeps a lost create outcome and original status key, with no source reconcil
   terminal=true;await reopened.recover();expect(await store.read(scope)).toBeNull();
 });
 it("does not let the new record version adopt a legacy kind",async()=>{
-  const factory=new IDBFactory();await raw(factory,{v:7,...pointer,kind:"launch"});
+  const factory=new IDBFactory();await raw(factory,{v:7,...pointer,kind:"launch",operationKey:"mmos-launch-"+"1".repeat(40)});
   const store=createIndexedDbPendingPointerStore(factory);
   await expect(store.read(scope)).rejects.toThrow("PENDING_POINTER_CORRUPT_RECORD");
   await expect(store.reserve(scope,pointer)).rejects.toThrow("PENDING_POINTER_CORRUPT_RECORD");
