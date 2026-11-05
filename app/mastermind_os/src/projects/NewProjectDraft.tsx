@@ -10,11 +10,12 @@ export interface NewProjectDraftProps {
   /** The actual creation owner controls admission, pending effects and recovery. */
   startControl?: ReactNode;
   feedbackPanel?: ReactNode;
+  startNote?: ReactNode;
 }
 
 /** Controlled unsent composition. This view neither creates nor addresses a project. */
 export function NewProjectDraft({ locale, goal, onGoalChange, attachmentsControl,
-  optionsPanel, startControl, feedbackPanel }: NewProjectDraftProps) {
+  optionsPanel, startControl, feedbackPanel, startNote }: NewProjectDraftProps) {
   const zh = locale === "zh-CN";
   const text = (en: string, cn: string) => zh ? cn : en;
   const goalId = useId();
@@ -56,8 +57,8 @@ export function NewProjectDraft({ locale, goal, onGoalChange, attachmentsControl
     {feedbackPanel != null && <div className="mm-new-project-feedback">{feedbackPanel}</div>}
     <footer className="mm-new-project-start">
       <div className="mm-new-project-start-control">{startControl ?? <button type="button" disabled>{text("Start project", "开始项目")}</button>}</div>
-      <p>{startControl != null ? text("Opens your project conversation.", "打开你的项目对话。") :
-        text("Your goal is a draft. Project creation is unavailable.", "目标仍是草稿。暂时无法创建项目。")}</p>
+      <p>{startNote ?? (startControl != null ? text("Opens your project conversation.", "打开你的项目对话。") :
+        text("Your goal is a draft. Project creation is unavailable.", "目标仍是草稿。暂时无法创建项目。"))}</p>
     </footer>
   </section>;
 }

@@ -2123,6 +2123,14 @@ class ExecutiveSupervisor:
                 commission.get("verified_local_path") if commission is not None else None
             ),
         }
+        if _is_direct_native_job(job):
+            admitted=self.runtime.jobs.direct_native_provenance(job.job_id)
+            if 'project_planning' in admitted:
+                from control_plane.project_planning_admission import ProjectPlanningInput
+                packet['project_initial_planning_input']=ProjectPlanningInput(self).read(
+                    admitted['project_planning']).decode('utf-8',errors='strict')
+                packet['project_initial_planning_source']=admitted['project_planning']['source']
+                packet['project_initial_planning_stage']=admitted['project_planning']['stage']
         if "responsibility_intent" in job.constraints:
             from control_plane.executive_responsibility import (
                 ResponsibilityIntentError, normalize_responsibility_intent,
@@ -2236,6 +2244,12 @@ class ExecutiveSupervisor:
         spec_kwargs: dict[str, Any] = {
             "effective_grant_digest": attempt.effective_grant_digest
         } if effective_grant is not None else {}
+        if _is_direct_native_job(job):
+            from control_plane.project_planning_policy import launch_limits
+            # Legacy direct Jobs return no overrides. Typed project planning
+            # must rejoin its protected policy before the physical owner sees
+            # a LaunchSpec; missing/drifted bounds cannot fall back to defaults.
+            spec_kwargs.update(launch_limits(self.runtime,job))
         return spec_type(
             run_id=attempt.attempt_id,
             job_id=job.job_id,

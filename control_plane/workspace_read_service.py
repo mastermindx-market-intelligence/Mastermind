@@ -713,20 +713,34 @@ class WorkspaceReadService:
         except Exception: return error("access_denied", 403)
         return result
 
-    def _read_project_plan(self, selected):
+    def _read_project_plan(self, selected, principal=None):
         from common import workspace_project_plan_contract as wire
+        selected=wire.validate_selection(selected)
         before = self.cache.snapshot()
         work_ref = selected["work_ref"]
+        if not _qualified(before):raise ValueError("source_unavailable")
+        data=None
+        if self._canonical_project_data is not None and principal is not None:
+            from control_plane.installed_canonical_project_data_binding import read_installed_project_data
+            data=read_installed_project_data(self._canonical_project_data,principal,operation='project_plan',selection=selected)
         def member(snapshot):
-            if not _qualified(snapshot):
-                raise ValueError("source_unavailable")
-            rows = [row for row in snapshot.document["work"] if row.get("work_ref") == work_ref]
-            if len(rows) != 1:
+            if not _qualified(snapshot):raise ValueError("source_unavailable")
+            rows=[row for row in snapshot.document["work"] if row.get("work_ref")==work_ref]
+            if len(rows)==1:return
+            # Only an actual same-principal CREATE/PLAN publication can expose
+            # a new project beyond the installed C catalogue. This does not
+            # add it to that catalogue or change any other read family.
+            if rows or data is None:raise LookupError("selection_not_found")
+            witness=data[1].witness();publication=witness['source_operation']
+            if (publication is None or data[1].code_commit==data[1].data_commit
+                    or publication['selection']['work_ref']!=work_ref
+                    or publication['selection']['action'] not in {'publish_project_proposal','publish_project_plan_proposal'}):
                 raise LookupError("selection_not_found")
         member(before)
-        if self._project_plan_reader is None:
+        if data is None and self._project_plan_reader is None:
             return wire.unavailable(work_ref, "SOURCE_UNAVAILABLE")
-        body = wire.validate_body(self._project_plan_reader.read(work_ref=work_ref))
+        body = wire.validate_body(self._project_plan_reader.read(work_ref=work_ref) if data is None else data[0])
+        if body['selection']!=selected:return wire.unavailable(work_ref,"SOURCE_CHANGED")
         after = self.cache.snapshot()
         member(after)
         if (before.owner is not after.owner or before.instance != after.instance
@@ -736,8 +750,10 @@ class WorkspaceReadService:
             return wire.unavailable(work_ref, "SOURCE_CHANGED")
         if body.get("availability") == "AVAILABLE":
             source = wire.validate_source(body.get("source"), work_ref)
-            if before.document.get("sources", {}).get("macro_sha") != source["commit"]:
+            code=before.document.get("sources", {}).get("macro_sha")
+            if (data is not None and code!=data[1].code_commit) or source['commit']!=(code if data is None else data[1].data_commit):
                 return wire.unavailable(work_ref, "SOURCE_CHANGED")
+        if data is not None:data[1].check()
         bounded_canonical({"ok": True, "result": body}, limit=wire.MAX_RESPONSE_BYTES)
         return body
 
@@ -753,7 +769,7 @@ class WorkspaceReadService:
             stamp = permission_stamp(self.authorize, frame["principal"])
         except Exception:
             return error("access_denied", 403)
-        task = asyncio.create_task(asyncio.to_thread(self._read_project_plan, frame["selection"]))
+        task = asyncio.create_task(asyncio.to_thread(self._read_project_plan, frame["selection"], frame["principal"]))
         try:
             body = await await_owned(task)
             result = {"ok": True, "result": body}

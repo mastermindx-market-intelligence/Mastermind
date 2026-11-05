@@ -525,7 +525,8 @@ def build_optional_apps(raw, source, config_path, sink):
             source_operation_context=WorkspaceSourceOperationContextFactory(
                 policy=policies['workspace'], load_bindings=workspace_project_bindings_loader),
             client=CeoIngressWorkspaceClient(raw['ceo_ingress_socket_path'])))
-        mounts['workspace_app'] = AuditedWorkspaceApp(app, verifiers['workspace'])
+        mounts['workspace_app'] = AuditedWorkspaceApp(app, verifiers['workspace'],
+            authenticator=authenticators['workspace'],authorize_principal=gate)
     if 'steward' in raw:
         from integrations.mastermind_steward_app.installed import (
             LiveWindowProfilesConfig, build_installed_steward_app_with_profiles)

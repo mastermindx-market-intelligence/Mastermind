@@ -31,6 +31,9 @@ def _observe(events,lookup,scope,guard):
   if len(paths)!=2 or ws not in paths or any(path!=ws and re.fullmatch(r'agentos/project-files/WS-'+re.escape(work)+r'/[a-f0-9]{64}\.(?:md|txt)',path) is None for path in paths):_fail()
  elif lookup['action']=='set_project_communication_preference':
   if paths!={ws,'agentos/decisions/DEC-PROJECT-COMMUNICATION-PREFERENCE-'+work+'.md'}:_fail()
+ elif lookup['action'] in {'publish_project_proposal','publish_project_plan_proposal'}:
+  from control_plane.project_journey_publication import validate_project_journey_publication
+  validate_project_journey_publication(lookup,images,sources)
  else:_fail()
  if len({s['commit'] for s in sources})!=1 or any(s['repository']!='macro' for s in sources):_fail()
  if sorted((i['path'],i['content_sha256']) for i in images)!=sorted((s['path'],s['content_sha256']) for s in sources):_fail()

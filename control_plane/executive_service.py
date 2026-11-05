@@ -2066,6 +2066,7 @@ class CeoIngressAppBinding:
     steward_provider_factory: Callable[[Runtime], Any] | None = None
     workspace_read_provider_factory: Callable[[Runtime], Any] | None = None
     source_operation_provider_factory: Callable[[Runtime, Any], Any] | None = None
+    project_planning_provider_factory: Callable[[Runtime], Any] | None = None
     session_bridge_provider_factory: Callable[[Runtime], Any] | None = None
     reply_event_provider_factory: Callable[[Runtime], Any] | None = None
     read_schema: str = CEO_APP_READ_SCHEMA
@@ -2095,6 +2096,8 @@ class CeoIngressAppBinding:
             raise ValueError("Session Bridge requires a host provider")
         if self.reply_event_provider_factory is not None and not callable(self.reply_event_provider_factory):
             raise ValueError("reply events require a host provider")
+        if self.project_planning_provider_factory is not None and not callable(self.project_planning_provider_factory):
+            raise ValueError("project planning requires an installed host provider")
         if self.principal_facts_factory is not None and not callable(self.principal_facts_factory):
             raise ValueError("principal facts require a host provider")
         if type(self.principal_admission_armed) is not bool:
@@ -5343,7 +5346,11 @@ class ExecutiveControlService:
                 and parsed.get("schema") == source_operation_wire.FRAME_SCHEMA)
             selected_source_operation = (is_source_operation and app_peer
                 and callable(app_binding.source_operation_provider_factory))
+            from common import project_planning_private_contract as planning_wire
+            selected_planning=(isinstance(parsed,dict) and parsed.get('schema')==planning_wire.SCHEMA and app_peer
+                and callable(app_binding.project_planning_provider_factory))
             request_ceiling = (source_operation_wire.MAX_REQUEST_BYTES if selected_source_operation else
+                planning_wire.MAX_BYTES if selected_planning else
                 principal_app_protocol.MAX_REQUEST_BYTES if selected_principal_dialogue else ceo_ingress.MAX_REQUEST_BYTES)
             if not is_release and len(raw) > request_ceiling:
                 await self._send_ceo_ingress_error(writer, "request_too_large", "request exceeds byte limit")
@@ -5553,6 +5560,50 @@ class ExecutiveControlService:
                 await self._send_ceo_ingress_response(
                     writer, result, response_ceiling=action_wire.MAX_RESPONSE_BYTES,
                 )
+                return
+            from common import project_planning_private_contract as project_planning_wire
+            if parsed.get('schema') == project_planning_wire.SCHEMA:
+                provider_factory = app_binding.project_planning_provider_factory if app_peer and app_binding is not None else None
+                if not app_peer or not callable(provider_factory):
+                    await self._send_ceo_ingress_error(writer,'peer_denied','Project planning requires its installed App owner')
+                    return
+                runtime=self._require_runtime()
+                from control_plane.foreground_operation import (
+                    _project_planning_foreground_dispatch,_observe_private_request_end,
+                )
+                operation=None
+                try:
+                    parsed=project_planning_wire.decode_frame(raw)
+                    def require_planning_host_current():
+                        if (self._closing or not self._ceo_ingress_ready or self._service_state!='READY'
+                                or self._ceo_ingress_app_binding is not app_binding or not app_binding.armed
+                                or app_binding.project_planning_provider_factory is not provider_factory
+                                or self._require_runtime() is not runtime or writer.get_extra_info('socket') is not connection
+                                or _peer_uid(connection)!=app_binding.peer_uid or reader.at_eof()
+                                or writer.is_closing() or writer.transport.is_closing()):
+                            raise ValueError('project planning original private peer unavailable')
+                        from control_plane.runtime_namespace_custody import ServiceRuntimeNamespaceCustody
+                        if type(self._namespace_custody) is not ServiceRuntimeNamespaceCustody:
+                            raise ValueError('project planning original Runtime namespace unavailable')
+                        self._namespace_custody.bound_runtime(runtime)
+                    require_planning_host_current()
+                    provider=provider_factory(runtime)
+                    if type(provider) is not project_planning_wire.ProjectPlanningIngressOwner:
+                        raise ValueError('project planning nominal installed owner unavailable')
+                    async with _project_planning_foreground_dispatch(runtime,parsed,require_planning_host_current) as operation:
+                        async with _observe_private_request_end(operation,reader):
+                            result=await provider.handle_frame(parsed)
+                    await self._send_ceo_ingress_response(writer,{'ok':True,'result':result},response_ceiling=project_planning_wire.MAX_BYTES)
+                except Exception:
+                    # Every provider launch follows a canonical Job commit. A
+                    # present original event is preserved as unknown; no second
+                    # submission/dispatch or reader is selected here.
+                    event=runtime.store.find_event_by_command_id(operation._command) if operation is not None else None
+                    await self._send_ceo_ingress_response(writer,{'ok':True,'result':dict(schema=project_planning_wire.RESULT_SCHEMA,
+                        operation=parsed.get('operation'),ok=False,data=None,error=dict(
+                            code='effect_unknown' if event is not None else 'refused',
+                            message='Reconcile the original project planning operation' if event is not None else 'Project planning admission refused'))},
+                        response_ceiling=project_planning_wire.MAX_BYTES)
                 return
             from common import workspace_instruction_admission_contract as instruction_wire
             if instruction_wire.is_frame(parsed):
@@ -7131,6 +7182,7 @@ class ExecutiveControlService:
                     raise StateConflict("direct native dispatch is already owned; no relaunch")
                 task=asyncio.create_task(self._finish_dispatched(job_id,active,_direct_owner=owner),name=f"executive-direct-finish-{job_id}")
                 self._dispatch_tasks[job_id]=task
+                return active
 
     def _observe_ceo_submit_admission(self) -> dict[str, str]:
         """Observe the SAME current guard, without constructing an intent or Runtime read.
@@ -8115,13 +8167,53 @@ class ExecutiveControlService:
                 self._foreground_cycle_qualification = None
             self._coo_action_tasks.discard(task)
 
-    async def _await_foreground_dispatch(self, operation, root_id, outcome):
+    async def _await_foreground_dispatch(self, operation, root_id, outcome, *, _direct_active=None, _direct_access=None):
+        # A returned native ActiveRun already represents a physical original.
+        # Capture its exact lease before any liveness/access read can fail.
+        # The existing finisher retains collection; cancellation is the same
+        # Runtime compare-and-cancel used by the ordinary foreground path.
+        if _direct_active is None:
+            return await self._await_foreground_dispatch_claim(operation,root_id,outcome)
+        from control_plane.executive_supervisor import ActiveRun
+        from control_plane.direct_native_execution import DirectNativeExecutionAccess
+        from control_plane.foreground_operation import ForegroundOperation
+        if (type(_direct_active) is not ActiveRun or type(_direct_access) is not DirectNativeExecutionAccess
+                or type(operation) is not ForegroundOperation or type(operation._runtime) is not Runtime):
+            raise StateConflict('original direct foreground owner unavailable')
+        original=_direct_active.lease.attempt
+        if original.job_id!=root_id:
+            raise StateConflict('direct foreground original root differs')
+        runtime=operation._runtime
+        try:
+            return await self._await_foreground_dispatch_claim(operation,root_id,outcome,
+                _direct_active=_direct_active,_direct_access=_direct_access)
+        except BaseException:
+            try:
+                runtime.jobs.cancel_job(original.job_id,expected_attempt_id=original.attempt_id,
+                    expected_fence_generation=original.fence_generation)
+            except Exception:
+                # A failed/stale compare never cancels a successor or proves
+                # containment. Preserve the original exception and UNKNOWN;
+                # the registered original finisher remains the sole owner.
+                pass
+            raise
+
+    async def _await_foreground_dispatch_claim(self, operation, root_id, outcome, *, _direct_active=None, _direct_access=None):
         """Await the already-owned exact finisher, never collect a second time."""
         runtime = self._require_runtime()
-        receipt = outcome.receipt
-        attempt_id = (receipt.get("attempt", {}).get("attempt_id")
-                      if isinstance(receipt, dict) else None)
-        job = runtime.jobs.get_job(outcome.selected_job_id)
+        if _direct_active is not None:
+            from control_plane.executive_supervisor import ActiveRun
+            from control_plane.direct_native_execution import DirectNativeExecutionAccess
+            if type(_direct_active) is not ActiveRun or type(_direct_access) is not DirectNativeExecutionAccess:
+                raise StateConflict('original direct foreground owner unavailable')
+            _direct_access.check()
+            attempt_id=_direct_active.lease.attempt.attempt_id
+            job=runtime.jobs.get_job(_direct_active.lease.attempt.job_id)
+        else:
+            receipt = outcome.receipt
+            attempt_id = (receipt.get("attempt", {}).get("attempt_id")
+                          if isinstance(receipt, dict) else None)
+            job = runtime.jobs.get_job(outcome.selected_job_id)
         if (job is None or job.root_job_id != root_id or not attempt_id
                 or job.current_attempt_id != attempt_id):
             raise StateConflict("foreground dispatch has no exact current Attempt")
@@ -8164,6 +8256,14 @@ class ExecutiveControlService:
                 or current_attempt.status in _COO_ACTIVE_ATTEMPT_STATUSES):
             raise StateConflict("foreground Attempt has not settled exactly")
         if current.status is JobStatus.COMPLETED:
+            if _direct_active is not None:
+                _direct_access.check()
+                bound=self._namespace_custody.bound_runtime(runtime)
+                result=bound.read_direct_native_result_bounded(dict(work_ref=_direct_access.work_ref,
+                    job_id=current.job_id,attempt_id=attempt_id),access=_direct_access)
+                bound.store.read_binding.validate_before_core_return()
+                if result['availability']!='AVAILABLE':raise StateConflict('direct foreground terminal is unavailable')
+                return result
             return runtime.validated_role_completion(job.job_id,
                 expected_attempt_id=attempt_id)
         return None

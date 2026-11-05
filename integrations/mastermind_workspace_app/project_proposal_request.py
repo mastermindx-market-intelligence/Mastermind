@@ -30,6 +30,22 @@ def profile_digest(profile):
         raise ValueError("invalid_profile") from None
 
 
+def creation_work_ref(request_id, *, principal):
+    """Same original CREATE address, derived only from the verified owner.
+
+    A lost prepare response need not invent or persist the not-yet-returned
+    workstream key. This is an address calculation, not source existence,
+    publication, membership or a permission. The calling read owner must still
+    qualify its current action grant and return only actual original Events.
+    """
+    if (type(request_id) is not str
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", request_id) is None):
+        raise ValueError("invalid_input")
+    identity = source_principal_frame(principal)
+    candidate = hashlib.sha256(canonical({"principal": identity, "request_id": request_id})).hexdigest()
+    return "WS:PROJECT-" + candidate[:32].upper()
+
+
 def build_proposal_request(request, *, principal, authored_profile):
     """Build the actual canonical compiler's input without inferring ownership.
 
@@ -50,9 +66,8 @@ def build_proposal_request(request, *, principal, authored_profile):
         raise ValueError("source_changed")
     # The existing auth owner extracts actual stable identity, not an email,
     # display label, token, client assertion or permission receipt generation.
-    identity = source_principal_frame(principal)
-    candidate = hashlib.sha256(canonical({"principal": identity, "request_id": request["request_id"]})).hexdigest()
-    record = {"key": "PROJECT-" + candidate[:32].upper(), "objective": request["goal"], "status": "proposed", **profile}
+    work_ref = creation_work_ref(request["request_id"], principal=principal)
+    record = {"key": work_ref[3:], "objective": request["goal"], "status": "proposed", **profile}
     value = {"schema": "agentos.project_proposal_request.v1", "request_id": request["request_id"],
              "expected_commit": request["expected_macro_sha"], "record": record}
     if len(canonical(value)) > 16384:

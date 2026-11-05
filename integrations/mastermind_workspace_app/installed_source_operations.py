@@ -33,6 +33,8 @@ class InstalledWorkspaceSourceOperations:
         self._permissions = WorkspaceSourceOperationContextFactory(policy=policy,load_bindings=load_bindings)
         self._runtime_guard = runtime_guard
         self._compiler = collector.project_knowledge_recipe_reader(macro_root=collector._macro_root)
+        from integrations.mastermind_workspace_app.project_journey_recipes import InstalledProjectJourneyRecipes
+        self._journey = InstalledProjectJourneyRecipes(collector)
 
     def __call__(self, runtime, supervisor):
         if type(runtime) is not Runtime:
@@ -63,7 +65,16 @@ class InstalledWorkspaceSourceOperations:
         owner = ProjectKnowledgeSourceOwner(events=events,private_inputs=private,permission_factory=contexts,
             adapter=ProjectKnowledgeRecipeAdapter(self._compiler),publisher_events=event_adapter,
             publisher_binding=self._git.binding,qualify_publisher=data.qualify_publisher,pr_owner=self._git)
-        service = WorkspaceSourceOperationService(knowledge_owner=owner,host_supervisor=host,
+        from integrations.mastermind_workspace_app.project_journey_recipes import InstalledProjectCreationRecipeAdapter
+        from integrations.mastermind_workspace_app.project_creation_service import ProjectCreationSourceOwner
+        create = ProjectCreationSourceOwner(events=events,private_inputs=private,permission_factory=contexts,
+            adapter=InstalledProjectCreationRecipeAdapter(self._journey),publisher_binding=self._git.binding,
+            qualify_publisher=data.qualify_publisher,pr_owner=self._git)
+        # The first coherent journey exposes CREATE and initial planning only.
+        # PLAN preparation is a following independently qualified source cut;
+        # no installed proposal owner is issued by this factory yet.
+        service = WorkspaceSourceOperationService(create_owner=create,knowledge_owner=owner,
+            journey_recipes=self._journey,host_supervisor=host,
             runtime_guard=lambda: self._runtime_guard(runtime),canonical_data_source=data)
         if self._runtime_guard(runtime) is not True:
             raise PermissionError('SOURCE_OPERATION_UNAVAILABLE')

@@ -3,6 +3,7 @@ import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import { decodeSessionContext, type ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import { normalizeDirectSelection, type DirectNativeTransport } from "./direct-native-result";
 import { closedReadFailureReason, type DiagnosticReadReason, type DiagnosticPhase, type ExecutiveDiagnosticSnapshot } from "./diagnostic-state";
+import { planningArguments } from "./planning/project-planning-transport";
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 type Listen = (event: string, listener: (event: { payload: unknown }) => void) => Promise<() => void>;
@@ -89,7 +90,7 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
   function call(command: "executive_context" | "executive_submit" | "executive_status" |
     "executive_session_context" | "executive_session_reply" | "executive_session_references" |
     "executive_project_session_references" |
-    "executive_direct_native_result" | "executive_direct_native_consume" | "executive_direct_correction",
+    "executive_direct_native_result" | "executive_direct_native_consume" | "executive_direct_correction" | "executive_project_planning",
     signal: AbortSignal, args?: Record<string, unknown>): Promise<unknown> {
     const started = epoch, boundary = generationAbort.signal;
     if (!available || signal.aborted) return Promise.reject(new Error("EXECUTIVE_UNAVAILABLE"));
@@ -129,6 +130,8 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
     context: (signal) => call("executive_context", signal),
     submit: (arguments_, signal) => call("executive_submit", signal, { arguments: arguments_ }),
     status: (arguments_, signal) => call("executive_status", signal, { intentId: arguments_.intent_id }),
+    projectPlanning: {request:(operation,arguments_,signal)=>call("executive_project_planning",signal,
+      {operation,arguments:planningArguments(operation,arguments_)})},
     directNative: {
       read: (selection, signal) => {
         const normalized = normalizeDirectSelection(selection);

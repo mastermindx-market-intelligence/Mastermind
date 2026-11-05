@@ -1774,6 +1774,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
 
     routes = [
         Route("/workspace/source-operation/context", source_operation_context_endpoint, methods=["GET"]),
+        Route("/workspace/source-operation/options", source_operation_endpoint("options"), methods=["GET"]),
         Route("/workspace/source-operation/operation", source_operation_endpoint("read"), methods=["GET"]),
         Route("/workspace/source-operation/prepare", source_operation_endpoint("prepare"), methods=["POST"]),
         Route("/workspace/source-operation/submit", source_operation_endpoint("submit"), methods=["POST"]),

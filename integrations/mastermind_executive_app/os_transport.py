@@ -367,6 +367,10 @@ class OsExecutiveTransportApp:
         "/os/executive/direct-native/result",
         "/os/executive/direct-native/consume",
         "/os/executive/direct-native/correction",
+        "/os/executive/project-planning/submit",
+        "/os/executive/project-planning/status",
+        "/os/executive/project-planning/result",
+        "/os/executive/project-planning/consume",
     )
 
     def __init__(
@@ -379,6 +383,7 @@ class OsExecutiveTransportApp:
         commission_preparer: Any | None = None,
         direct_result_client: Any | None = None,
         foreground_submissions: bool = False,
+        workspace_app: Any | None = None,
     ) -> None:
         verifiers = submit_verifier if isinstance(submit_verifier, tuple) else (submit_verifier,)
         if not verifiers or any(type(v) is not MastermindTokenVerifier for v in verifiers):
@@ -411,6 +416,10 @@ class OsExecutiveTransportApp:
         if type(foreground_submissions) is not bool:
             raise TypeError("compiled foreground selection must be boolean")
         self._foreground_submissions = foreground_submissions
+        from integrations.executive_mcp.server import AuditedWorkspaceApp
+        if workspace_app is not None and type(workspace_app) is not AuditedWorkspaceApp:
+            raise TypeError('project planning requires the incumbent audited Workspace owner')
+        self._project_planning_workspace_app=workspace_app
 
     # ---------------------------------------------------------------- ASGI
 
@@ -440,6 +449,10 @@ class OsExecutiveTransportApp:
             return
 
         headers = scope.get("headers") or ()
+        from integrations.mastermind_executive_app.project_planning_transport import HEADER,ROUTES
+        if any(key.lower()==HEADER for key,_ in headers) and path not in ROUTES:
+            await Response(status_code=HTTPStatus.FORBIDDEN,headers=_OS_HTTP_HEADERS)(scope,receive,send)
+            return
         hosts = [v for k, v in headers if k.lower() == b"host"]
         origins = [v for k, v in headers if k.lower() == b"origin"]
         authorizations = [v for k, v in headers if k.lower() == b"authorization"]
@@ -585,6 +598,9 @@ class OsExecutiveTransportApp:
                                 headers=_OS_HTTP_HEADERS)
         if path == "/os/executive/submit":
             return await self._dispatch_submit(scope, body_obj, principal, receive=receive)
+        from integrations.mastermind_executive_app.project_planning_transport import ROUTES,dispatch
+        if path in ROUTES:
+            return await dispatch(self,scope,body_obj,principal,operation=ROUTES[path],receive=receive)
         return await self._dispatch_status(scope, body_obj, principal)
 
     async def _dispatch_submit(

@@ -24,6 +24,7 @@ import { createNativeExecutiveTransport } from "./native-executive-transport";
 import type { MissionDiagnosticSnapshot } from "./diagnostic-state";
 import { createTerminalBriefsNavigationPort, type TerminalBriefsNavigationPort } from "./terminal/terminal-navigation";
 import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
+import type { ProjectPlanningTransport } from "./planning/project-planning-transport";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import {
   decodeMission,
@@ -163,6 +164,7 @@ export interface MissionResultRead {
 export interface MissionHost extends Partial<ProjectAdmissionHostMethods>,Partial<InstructionHostMethods>,Partial<ProjectAccessHostMethods> {
   /** Independent Terminal session; workspace grants never confer brief access. */
   readonly terminalSharing?: TerminalSharingSource;
+  readonly projectPlanning?: ProjectPlanningTransport;
   /** Optional zero-input navigation; no private content or access receipt. */
   openTerminalBriefs?: TerminalBriefsNavigationPort;
   readonly sourceOperations?:SourceOperationTransport;
@@ -255,6 +257,7 @@ export function bindMissionHost(
   const sourceEpochReader = client.invalidationGeneration;
   const sourceMethods = sourceGroup
     ? {
+        options: sourceGroup.readProjectCreationOptions,
         prepare: sourceGroup.prepareSourceOperation,
         read: sourceGroup.readSourceOperation,
         submit: sourceGroup.submitSourceOperation,
@@ -266,12 +269,13 @@ export function bindMissionHost(
     sourceGroup &&
     sourceMethods &&
     sourceEpochReader &&
-    Object.values(sourceMethods).every((fn) => typeof fn === "function")
+    Object.entries(sourceMethods).every(([key,fn]) => key === "options" || typeof fn === "function")
       ? createSourceOperationTransport(async (method, _path, body, signal) => {
           const started = epoch,
             source = sourceEpochReader.call(client);
           const name = (
             {
+              options: "readProjectCreationOptions",
               prepare: "prepareSourceOperation",
               read: "readSourceOperation",
               submit: "submitSourceOperation",
@@ -297,14 +301,15 @@ export function bindMissionHost(
             input: unknown,
             signal: AbortSignal,
           ) => Promise<unknown>;
-          const result = await call.call(sourceGroup, body, signal);
+          const result = method === "options" ? await sourceGroup.readProjectCreationOptions!(signal) : await call.call(sourceGroup, body, signal);
           if (!authorized()) throw new Error("READ_CANCELLED");
-          if (method === "prepare") return result;
+          if (method === "prepare" || method === "options") return result;
           const decoded = decodeSourceOperationStatus(result);
           if (
             decoded.selection.action !== body.action ||
             decoded.selection.request_id !== body.request_id ||
-            decoded.selection.work_ref !== body.work_ref
+            (decoded.selection.work_ref !== body.work_ref && !(method === "read" &&
+              body.action === "publish_project_proposal" && body.work_ref === null))
           )
             throw new Error("SOURCE_OPERATION_RESPONSE_INVALID");
           return decoded;
@@ -454,6 +459,18 @@ export function bindMissionHost(
         return decodeAutonomyPolicy(raw, selected);
       },
     } : {}),
+    ...(client.executive?.projectPlanning ? {projectPlanning:{request: async (operation,arguments_,signal)=>{
+      const transport=client.executive!,group=transport.projectPlanning!,method=group.request;
+      const started=epoch,source=client.invalidationGeneration?.(),executiveEpoch=transport.authGeneration();
+      const current=()=>!signal.aborted && epoch===started && client.executive===transport
+        && transport.projectPlanning===group && group.request===method
+        && client.invalidationGeneration?.()===source && transport.authGeneration()===executiveEpoch
+        && transport.available() && client.getState().status==='signed_in' && client.getState().acquisition;
+      if(!current())throw Error('PROJECT_PLANNING_UNAVAILABLE');
+      const result=await method.call(group,operation,arguments_,signal);
+      if(!current())throw Error('PROJECT_PLANNING_UNAVAILABLE');
+      return result;
+    }}} : {}),
     ...(boundSource?{sourceOperations:boundSource}:{}),
     ...(sourceContextReader && client.invalidationGeneration ? {
       async readSourceOperationContext(request: SourceOperationContextSelection & { signal: AbortSignal }) {
@@ -990,6 +1007,7 @@ export async function createNativeClient(
       | "read_project_archive"
       | "read_project_archive_page"
       | "read_source_operation_context"
+      | "source_operation_options"
       | "source_operation_prepare"
       | "source_operation_read"
       | "source_operation_submit"
@@ -1084,6 +1102,7 @@ export async function createNativeClient(
       return read(
         (
           {
+            options: "source_operation_options",
             prepare: "source_operation_prepare",
             read: "source_operation_read",
             submit: "source_operation_submit",

@@ -736,7 +736,7 @@ def validate_intent(payload: Any) -> dict[str, Any]:
     elif schema == INTENT_SCHEMA_V2:
         _exact_keys(raw, "intent", _V2_REQUIRED_KEYS, _V2_OPTIONAL_KEYS)
     elif schema == INTENT_SCHEMA_DIRECT:
-        _exact_keys(raw, "intent", _V2_REQUIRED_KEYS | {"workstream"}, frozenset())
+        _exact_keys(raw, "intent", _V2_REQUIRED_KEYS | {"workstream"}, frozenset({"project_planning_sha256"}))
     elif schema == INTENT_SCHEMA_SERVICE:
         _exact_keys(raw, "intent", _SERVICE_REQUIRED_KEYS, _SERVICE_OPTIONAL_KEYS)
     elif schema == INTENT_SCHEMA_PRINCIPAL:
@@ -771,6 +771,9 @@ def validate_intent(payload: Any) -> dict[str, Any]:
                 or contract.get("constraints")):
             raise CeoIntentError("direct native intent requires its exact read-only contract")
         intent.update(intent_kind="direct_native_readonly", business_impact="routine")
+        if "project_planning_sha256" in raw:
+            intent["project_planning_sha256"] = _text(raw["project_planning_sha256"],
+                "intent.project_planning_sha256", pattern=_FINGERPRINT_RE, max_chars=64)
     if schema == INTENT_SCHEMA_V2:
         intent_kind = _text(
             raw["intent_kind"], "intent.intent_kind", max_chars=64
@@ -1015,6 +1018,8 @@ def _provenance(intent: Mapping[str, Any], fingerprint: str, *, principal_reques
     }
     if "workstream" in intent:
         value["workstream"] = intent["workstream"]
+    if "project_planning_sha256" in intent:
+        value["project_planning_sha256"] = intent["project_planning_sha256"]
     if intent["schema"] == INTENT_SCHEMA_SERVICE:
         # Typed service evidence, read off the VALIDATED envelope and stamped
         # beside the shared base fields.  These are EVIDENCE, never a grant: the
@@ -1279,6 +1284,24 @@ def _require_workspace(intent: Mapping[str, Any], workspace_root: Path | None) -
         )
 
 
+def _notify_fresh_admission(fresh_admission_observer,job,command_id,created):
+    if fresh_admission_observer is not None:
+        try:
+            if created is None or created.get("job_id") != job.job_id:
+                raise ValueError("canonical root creation source is unavailable")
+            observed = fresh_admission_observer(job.job_id, command_id)
+            if observed is not None:
+                if inspect.iscoroutine(observed):
+                    observed.close()
+                raise ValueError("fresh admission observer returned a value")
+        except Exception as exc:
+            # Do not classify a post-commit observation failure as a zero-Job
+            # refusal, swallow it as a concurrent duplicate, or run a worker.
+            raise _FreshAdmissionObserverFailed(
+                "fresh admission observation failed; reconcile the original operation"
+            ) from exc
+
+
 def submit_intent(
     runtime: Any,
     payload: Any,
@@ -1332,8 +1355,14 @@ def submit_intent(
         from control_plane import direct_native_execution as direct
         if type(direct_admission) is not direct.DirectNativeAdmission:
             raise CeoIntentError("direct native host admission is not composed")
+        if fresh_admission_observer is not None and (not callable(fresh_admission_observer)
+                or inspect.iscoroutinefunction(fresh_admission_observer)):
+            raise CeoIntentError("fresh native admission observer must be synchronous")
         try:
             direct_admission.check()
+            expected_planning = direct_admission._project_planning
+            if intent.get("project_planning_sha256") != (None if expected_planning is None else direct.digest(expected_planning)):
+                raise CeoIntentError("project planning fingerprint differs from private admission")
             _require_workspace(intent,Path(workspace_root) if workspace_root else None)
             fingerprint=intent_fingerprint(intent)
             command=command_id_for(intent["intent_id"])
@@ -1353,7 +1382,9 @@ def submit_intent(
                 if actual != direct.admission_material(direct_admission):
                     raise CeoIntentConflict("direct native admission identity changed")
                 return _receipt_from_event(runtime,existing,intent_id=intent["intent_id"],fingerprint=fingerprint)
-            return build_receipt(job,intent=intent,fingerprint=fingerprint,duplicate=False,created_at_ms=int(runtime.store.find_event_by_command_id(command)["created_at_ms"]))
+            created=runtime.store.find_event_by_command_id(command)
+            _notify_fresh_admission(fresh_admission_observer,job,command,created)
+            return build_receipt(job,intent=intent,fingerprint=fingerprint,duplicate=False,created_at_ms=int(created["created_at_ms"]))
         except CeoIntentError:
             raise
         except (ValueError,StateConflict) as exc:
@@ -1492,21 +1523,7 @@ def submit_intent(
         raise CeoIntentError(str(exc)) from exc
 
     created = runtime.store.find_event_by_command_id(command_id)
-    if fresh_admission_observer is not None:
-        try:
-            if created is None or created.get("job_id") != job.job_id:
-                raise ValueError("canonical root creation source is unavailable")
-            observed = fresh_admission_observer(job.job_id, command_id)
-            if observed is not None:
-                if inspect.iscoroutine(observed):
-                    observed.close()
-                raise ValueError("fresh admission observer returned a value")
-        except Exception as exc:
-            # Do not classify a post-commit observation failure as a zero-Job
-            # refusal, swallow it as a concurrent duplicate, or run a worker.
-            raise _FreshAdmissionObserverFailed(
-                "fresh admission observation failed; reconcile the original operation"
-            ) from exc
+    _notify_fresh_admission(fresh_admission_observer,job,command_id,created)
     return build_receipt(
         job,
         intent=intent,
