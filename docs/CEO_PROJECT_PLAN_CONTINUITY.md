@@ -35,8 +35,8 @@ record source-linked handoff takeover without orphan ACK/old-chat wait. Preserve
 live owners/effects. CEO Web needs no independent review; native gates bind,
 no self-merge/approve.
 
-`docs/sol_skills/BOOTSTRAP_KERNEL.md` is untouched (recorded blob
-`0cc09227c77068c3997ff0a24bfef58cadeb7f44`); #1846 remains the single kernel.
+`docs/sol_skills/BOOTSTRAP_KERNEL.md` at the verified compatible protected
+pin is the canonical kernel; this contract does not change it.
 Cockpit uses fact owners, no second database/`latest` directory. Editorial depth
 does not enlarge Runtime admitted-plan schema/step limits.
 
