@@ -87,7 +87,7 @@
   "ext/pool_status.py": "494bcc3a0115ba98160139bdc1452a8b8850b966844fcc2634fe0fdeffaa9111",
   "ext/post_failure_observation.py": "2a78630ccaf574da752c77d7b8f821723ccb264b970e2fe38b1976d886ca97a0",
   "ext/post_failure_observation_delivery.py": "001a7d2dbcf661f9cd446d889c45c8e7d0d0884ea769fffa929c96d4fd5b27f7",
-  "ext/provider_outcome.py": "22b5ae9325118327b8b0734514c6f5711e39ae919f0e04426f7fac182895bf24",
+  "ext/provider_outcome.py": "ff909ac6fb0a734ce0ea1aa78c2b04e992c170e5be413c1b7778e6ffd7c7907e",
   "ext/quota_circuit.py": "0962d638a0a5655a71ea7a6eeb83088ad60af30f4a26e9c5bc47a92c3ab77945",
   "ext/quota_remote.py": "3c1484864848b5cdf4daeecde092f7c407ab313a9f0d94a7f0fd204dbcf813b8",
   "ext/qwen_exec.sh": "acb5477907820c9c29908f6675a785e5b8999dbfd21aba8d60ca972213b4fa58",

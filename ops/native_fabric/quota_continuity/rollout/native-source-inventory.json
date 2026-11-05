@@ -552,9 +552,9 @@
       "source": "candidate/post_failure_observation_delivery.py"
     },
     "ext/provider_outcome.py": {
-      "bytes": 30786,
+      "bytes": 30928,
       "installed_preimage_sha256": null,
-      "sha256": "22b5ae9325118327b8b0734514c6f5711e39ae919f0e04426f7fac182895bf24",
+      "sha256": "ff909ac6fb0a734ce0ea1aa78c2b04e992c170e5be413c1b7778e6ffd7c7907e",
       "source": "candidate/provider_outcome.py"
     },
     "ext/quota_circuit.py": {

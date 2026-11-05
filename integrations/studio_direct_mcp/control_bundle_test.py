@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import sys
 import stat
+import shutil
 import tempfile
 import unittest
 from unittest import mock
@@ -23,17 +24,31 @@ class BundleTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name)
-        self.source = self.root / "source"
-        self.control = self.root / "control"
-        self.bin = self.root / "bin"
-        self.source.mkdir()
-        self.control.mkdir(mode=0o700)
-        self.bin.mkdir()
+        self.root = Path(self.tmp.name).resolve()
+        self.home = self.root
+        patcher = mock.patch.object(bundle.Path, "home", return_value=self.home)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.source = self.root / "source/integrations/studio_direct_mcp"
+        self.control = self.home / ".local/share/studio-direct-mcp/control"
+        self.bin = self.home / ".local/bin"
+        self.source.mkdir(parents=True)
+        self.control.mkdir(parents=True, mode=0o700)
+        self.bin.mkdir(parents=True)
+        lock = self.control / ".control-bundle.lock"
+        lock.touch(mode=0o600)
         for name in bundle.CONTROL_FILES:
-            (self.source / name).write_text(f"new {name}\n", encoding="utf-8")
-            (self.control / name).write_text(f"old {name}\n", encoding="utf-8")
-            (self.control / name).chmod(0o600)
+            source_file = (self.source.parents[1] / name if "/" in name else self.source / name)
+            source_file.parent.mkdir(parents=True, exist_ok=True)
+            source_file.write_text(f"new {name}\n", encoding="utf-8")
+            destination = self.control / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            for parent in destination.parents:
+                if parent == self.control:
+                    break
+                parent.chmod(0o700)
+            destination.write_text(f"old {name}\n", encoding="utf-8")
+            destination.chmod(0o600)
         self.launcher = self.bin / "studio-direct"
         self.launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         self.launcher.chmod(0o700)
@@ -52,6 +67,35 @@ class BundleTests(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def _verify_legacy_then_adopt(self, names):
+        manifest = self.control / "manifest.json"
+        value = json.loads(manifest.read_text(encoding="utf-8"))
+        old = {name: value["files"][name] for name in names}
+        value["files"] = old
+        value["bundleDigest"] = bundle._bundle_digest(old, value["launcherHash"])
+        manifest.write_text(json.dumps(value), encoding="utf-8")
+        for name in set(bundle.CONTROL_FILES) - set(old):
+            (self.control / name).unlink()
+        shutil.rmtree(self.control / "ops")
+        (self.control / ".control-bundle.lock").unlink()
+        self.assertEqual(set(bundle.verify(
+            control_root=self.control, launcher=self.launcher)["files"]), set(old))
+        self.assertFalse((self.control / ".control-bundle.lock").exists())
+        installed = bundle.install(
+            source=self.source, control_root=self.control, launcher=self.launcher,
+            expected_bundle_digest=value["bundleDigest"])
+        self.assertEqual(installed["state"], "CONTROL_BUNDLE_INSTALLED")
+        self.assertEqual(set(installed["files"]), set(bundle.CONTROL_FILES))
+        self.assertEqual(set(bundle.verify(
+            control_root=self.control, launcher=self.launcher)["files"]),
+            set(bundle.CONTROL_FILES))
+
+    def test_legacy_three_file_bundle_verifies_then_adopts_full_closure(self):
+        self._verify_legacy_then_adopt(bundle.LEGACY_CONTROL_FILES)
+
+    def test_legacy_four_file_bundle_verifies_then_adopts_full_closure(self):
+        self._verify_legacy_then_adopt(bundle.STATUS_CONTROL_FILES)
 
     def test_install_adopts_exact_helpers_and_reseals_manifest(self):
         result = bundle.install(source=self.source, control_root=self.control, launcher=self.launcher, expected_bundle_digest=self._prior_digest())

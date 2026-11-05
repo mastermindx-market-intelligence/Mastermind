@@ -1793,8 +1793,28 @@ class TestCLI(unittest.TestCase):
         sub = next(a for a in parser._actions if hasattr(a, "choices") and a.choices)
         self.assertEqual(
             set(sub.choices),
-            {"stage", "upgrade", "paper-runtime-upgrade", "fabric-backend-release", "native-pool-pin", "native-pool-pin-enrollment", "seal-runtime", "start", "status", "stop"},
+            {"stage", "upgrade", "paper-runtime-upgrade", "fabric-backend-release", "native-pool-pin", "native-pool-pin-enrollment", "fleet-status-module-upgrade", "seal-runtime", "start", "status", "stop"},
         )
+
+    def test_source_successor_cli_exposes_no_credential_or_lifecycle_selector(self):
+        parser = svc.build_parser()
+        opts = parser.parse_args([
+            "fleet-status-module-upgrade",
+            "--account", "chatgpt1",
+            "--operation", "preview",
+            "--release-commit", "f" * 40,
+            "--expected-manifest-sha256", "a" * 64,
+        ])
+        self.assertEqual(opts.func, svc.cmd_fleet_status_module_upgrade)
+        self.assertFalse(hasattr(opts, "credential"))
+        self.assertFalse(hasattr(opts, "skip_integrity"))
+        self.assertFalse(hasattr(opts, "start"))
+        for name in ("fabric-read", "mastermind-os-publication", "other"):
+            with self.assertRaises(SystemExit):
+                parser.parse_args([
+                    "fleet-status-module-upgrade", "--account", name,
+                    "--operation", "preview",
+                ])
 
     def test_stage_requires_all_args(self):
         parser = svc.build_parser()

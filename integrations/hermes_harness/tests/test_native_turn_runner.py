@@ -35,9 +35,9 @@ if mode == "malformed":
     sys.exit(0)
 role = sys.argv[sys.argv.index("-p") + 1]
 marker = re.search(r"MMX-CANARY-[A-F0-9]{32}", sys.stdin.read()).group(0)
-model = "glm-5.3" if role == "mmmeta" else "glm-5-3-flash-260828"
+# Protocol-source fixture: gateway emitter initializes before session binding.
 events = [
-    {"type": "system", "subtype": "init", "model": model, "session_id": "session-source-test"},
+    {"type": "system", "subtype": "init", "model": "", "session_id": ""},
     {"type": "text", "text": marker},
     {"type": "result", "exit_code": 0, "text": marker, "session_id": "session-source-test",
      "tokens": {"input": 19, "output": 14, "total": 33}},
@@ -45,7 +45,7 @@ events = [
 for event in events:
     sys.stdout.write(json.dumps(event) + "\\n")
 sys.stdout.flush()
-sys.stderr.write("\\nsession_id: session-source-test\\n")
+sys.stderr.write("Session: session-source-test\\n\\nsession_id: session-source-test\\n")
 if mode == "private_stderr":
     sys.stderr.write("Authorization: PRIVATE_SECRET_SENTINEL\\n")
 '''.replace("MODE_TOKEN", repr(mode))
@@ -175,7 +175,9 @@ class SyntheticRunnerTests(unittest.TestCase):
         receipt = self._run()
         self.assertEqual(receipt["status"], "PASS_CHILD_OUTPUT_OBSERVATION_ONLY")
         self.assertEqual(receipt["role"], "mmmeta")
-        self.assertEqual(receipt["model"], "glm-5.3")
+        self.assertEqual(receipt["expected_model"], "glm-5.3")
+        self.assertIsNone(receipt["observed_model"])
+        self.assertFalse(receipt["model_identity_verified"])
         self.assertNotIn("SOURCE_ONLY_META_PROVIDER_FIXTURE", str(receipt))
 
     def test_cross_role_key_refused_before_child_spawn(self):
