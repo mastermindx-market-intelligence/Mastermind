@@ -3,7 +3,7 @@
 No production broker, capability, task, participant, source/rating, dispatch or
 study is accessed. A valid fixture still cannot authenticate a served actor.
 """
-import copy,hashlib,importlib.util,json,sqlite3,sys
+import copy,hashlib,importlib.util,json,sqlite3,sys,tempfile
 from pathlib import Path
 from unittest import mock
 import pytest
@@ -21,8 +21,13 @@ memory=importlib.util.module_from_spec(spec);spec.loader.exec_module(memory)
 canonical=lambda x:json.dumps(x,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode()
 
 @pytest.fixture
-def case(tmp_path):
- here=tmp_path/'inert';(here/'broker').mkdir(parents=True,mode=0o700);(here/'broker/leases.lock').touch(mode=0o600)
+def case(request):
+ # The real DirectoryChain rejects every writable ancestor, including Linux
+ # /tmp. Keep this inert state below the same owned home fixture root used by
+ # the incumbent native tests; never relax or chmod a production ancestor.
+ temporary=tempfile.TemporaryDirectory(prefix='.fabric-participant-',dir=Path.home().resolve(strict=True))
+ request.addfinalizer(temporary.cleanup)
+ here=Path(temporary.name)/'inert';(here/'broker').mkdir(parents=True,mode=0o700);(here/'broker/leases.lock').touch(mode=0o600)
  (here/'state/remote_sub').mkdir(parents=True);(here/'lanes').mkdir(mode=0o700)
  owner=owner_module.OperatorOwner(here=here,clock=lambda:1000.)
  lease=dict(id='inert-parent-lease',orchestrator_id='inert-root',pool='glm-frontier',account='parent-account',task_class='remote-glm',model='glm-5.3',host='parent-host',pid=123,granted_at=990.,ttl=180,last_heartbeat=999.,state='held',renewable=1)
@@ -78,6 +83,15 @@ def test_accepted_memory_public_contract_fixtures_are_byte_exact():
  for name,item in manifest['files'].items():
   raw=(FIXTURE/name).read_bytes()
   assert len(raw)==item['bytes'] and hashlib.sha256(raw).hexdigest()==item['sha256']
+
+def test_inert_fixture_preserves_real_directory_chain_ancestor_guard(case):
+ import artifact_delivery as delivery
+ with delivery.DirectoryChain(case['here']):pass
+ unsafe=case['here']/'intentionally-unsafe-fixture';unsafe.mkdir();unsafe.chmod(0o1777)
+ try:
+  with pytest.raises(ValueError,match='directory_owner_or_mode'):
+   with delivery.DirectoryChain(unsafe):pass
+ finally:unsafe.chmod(0o700)
 
 def test_unbound_old_child_cannot_be_backfilled_or_read(case):
  o=case['owner'];o.reserve(case['cap']['token'],case['request'])
