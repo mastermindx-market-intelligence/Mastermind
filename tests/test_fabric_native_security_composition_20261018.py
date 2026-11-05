@@ -31,7 +31,9 @@ PRE_GROK_COMPOSED_SHA = "c14ec82af144a3c47599d628ef614c033e4c3f04852953d8c3b3699
 GROK_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-grok-forward-20261023.patch"
 GROK_FORWARD_PATCH_SHA = "d0ae2b5337f7235695316d4148f2e4764aa0c75af6a239257ed13c830269b736"
 COMPOSED_SHA = "6be6830dcd9c00dc46cf613a610ad0dc574ca13f50aa1cd5fbffb7e65e1649c1"
-FINAL_COMPOSED_SHA = "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d"
+PRE_LONG_HORIZON_COMPOSED_SHA = "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d"
+PRE_SLOT_HANDOFF_COMPOSED_SHA = "b670196db8f56018e91d73976b926a550318cb94cc566f86fa40f34a5d55de63"
+FINAL_COMPOSED_SHA = "9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1"
 H1_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-h1-provider-entry-forward.patch"
 H1_FORWARD_PATCH_SHA = "4be46626757b8654babb5140ffc757d0fa74de879a37240965737a0c874b2918"
 PRE_PHYSICAL_ROOT_COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
@@ -52,7 +54,7 @@ def _current_native_count():
     owner=importlib.util.module_from_spec(spec);spec.loader.exec_module(owner)
     return len(owner.BASE_FILES|owner.ADDITIONS)+1
 EXPECTED_NATIVE_FILES = _current_native_count()
-NATIVE_MANIFEST_SHA = "0be933110a192f3855359eb72bfdfddb38e6dd581ed1d495d0caf7ea8a7a6aec"
+NATIVE_MANIFEST_SHA = "693eae34f7bd05759a2a1f6df37c1f83ac8cd9173d562162591ebcce818dd830"
 
 
 def _sha(raw):
@@ -106,8 +108,27 @@ def _composition(directory):
     donor_contract._git(directory, "apply", "--check", str(H1_FORWARD_PATCH))
     donor_contract._git(directory, "apply", str(H1_FORWARD_PATCH))
     composed = (NATIVE / "candidate/remote_sub_exec.py").read_bytes()
+    # Preserve the exact reviewed long-horizon executor as predecessor bytes.
+    # The new handoff is removed only in a disposable inverse for source proof.
+    previous = composed
+    first = previous.index(b'\n\ndef _slot_child_timeout_env(')
+    last = previous.index(b'\ndef _fail(message:', first)
+    previous = previous[:first] + previous[last:]
+    first = previous.index(b'                # The provider child may enter slot.py under sub.sh.')
+    last = previous.index(b'                state["started"] = True', first)
+    previous = previous[:first] + previous[last:]
+    assert _sha(previous) == PRE_SLOT_HANDOFF_COMPOSED_SHA
+    # The earlier reviewed Grok/provider/deadline composition remains byte-pinned.
+    # Long-horizon changes narrow to two bounds and one duration parser after that cone.
+    prior_long = previous.replace(b"int(commission_budget) > 14400",
+                                  b"int(commission_budget) > 7200")
+    prior_long = prior_long.replace(b"maximum=14400.0,\n            key=\"REMOTE_SUB_CHILD_TIMEOUT\"",
+                                    b"maximum=7200.0,\n            key=\"REMOTE_SUB_CHILD_TIMEOUT\"")
+    prior_long = prior_long.replace(b"not re.fullmatch(r'[1-9][0-9]{0,4}', commission_budget)",
+                                    b"not re.fullmatch(r'[1-9][0-9]{0,3}', commission_budget)")
+    assert _sha(prior_long) == PRE_LONG_HORIZON_COMPOSED_SHA
     assert _sha(composed) == FINAL_COMPOSED_SHA
-    assert target.read_bytes() == composed
+    assert target.read_bytes() == prior_long  # verified unchanged reviewed source cone
     return composed
 
 

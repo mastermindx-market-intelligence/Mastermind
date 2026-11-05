@@ -435,6 +435,7 @@ async def _submit(
     workspace_root: "Path | str",
     *,
     execution_binding: Mapping[str, Any] | None = None,
+    frontier_selection: Any = ceo_intent._FRONTIER_SELECTION_UNSET,
     dialogue_source: ExecutiveDialogueSource | None = None,
     require_dialogue_source: bool = False,
     principal_context: Any = None,
@@ -451,6 +452,8 @@ async def _submit(
         }
         if execution_binding is not None:
             submit_kwargs["execution_binding"] = dict(execution_binding)
+        if frontier_selection is not ceo_intent._FRONTIER_SELECTION_UNSET:
+            submit_kwargs["frontier_selection"] = copy.deepcopy(frontier_selection)
         if dialogue_source is not None:
             submit_kwargs["dialogue_source"] = dialogue_source.to_dict()
         if require_dialogue_source:
@@ -510,6 +513,8 @@ def _build_envelope(
     principal_context: Any = None,
     principal_request_ref: str | None = None,
 ) -> dict[str, Any]:
+    if "frontier_model_alias" in normalized and (not strict_v2 or principal_context is not None):
+        raise CeoIngressError("invalid_input", "frontier selection requires strict v2 admission")
     if principal_context is not None:
         from control_plane.coo_principal_envelope import derive_principal_envelope
         try:
@@ -537,6 +542,8 @@ def _build_envelope(
             envelope["schema"] = ceo_intent.INTENT_SCHEMA_V2
             envelope["intent_kind"] = "executive_coo_cycle"
             envelope["business_impact"] = "routine"
+            if "frontier_model_alias" in normalized:
+                envelope["frontier_model_alias"] = normalized["frontier_model_alias"]
         return ceo_intent.validate_intent(envelope)
     except ceo_intent.CeoIntentError as exc:
         raise CeoIngressError("invalid_input", str(exc)) from exc
@@ -614,6 +621,7 @@ async def _handle_submit_v2(
     workspace_root: "Path | str",
     strict_v2_admission: bool = False,
     execution_binding_provider: Callable[[], Mapping[str, Any]] | None = None,
+    frontier_selection_provider: Callable[[str], Mapping[str, Any]] | None = None,
     dialogue_source_provider: (
         Callable[[str, str], Mapping[str, Any] | None] | None
     ) = None,
@@ -647,6 +655,7 @@ async def _handle_submit_v2(
         workspace_root=workspace_root,
         strict_v2=strict_v2_admission,
         execution_binding_provider=execution_binding_provider,
+        frontier_selection_provider=frontier_selection_provider,
         dialogue_source_provider=dialogue_source_provider,
         admission_guard=admission_guard,
         fresh_admission_observer=fresh_admission_observer,
@@ -680,6 +689,7 @@ async def _handle_normalized_submit(
     workspace_root: "Path | str",
     strict_v2: bool = False,
     execution_binding_provider: Callable[[], Mapping[str, Any]] | None = None,
+    frontier_selection_provider: Callable[[str], Mapping[str, Any]] | None = None,
     dialogue_source_provider: (
         Callable[[str, str], Mapping[str, Any] | None] | None
     ) = None,
@@ -762,6 +772,20 @@ async def _handle_normalized_submit(
             principal_context=principal_context, principal_request_ref=principal_request_ref,
         )
 
+        selection: Any = ceo_intent._FRONTIER_SELECTION_UNSET
+        requested_alias = normalized.get("frontier_model_alias")
+        if requested_alias is not None:
+            if not callable(frontier_selection_provider):
+                raise _dependency_failure("backend_unavailable")
+            from control_plane.frontier_selection import validate_selection
+            try:
+                selection = validate_selection(
+                    await asyncio.to_thread(frontier_selection_provider, requested_alias),
+                    requested_alias=requested_alias,
+                )
+            except Exception as exc:
+                raise _dependency_failure("backend_refused") from exc
+
         execution_binding: Mapping[str, Any] | None = None
         admitted_source: ExecutiveDialogueSource | None = None
         if strict_v2:
@@ -796,6 +820,17 @@ async def _handle_normalized_submit(
                 work_ref=admitted_source.work_ref,
             )
             if reobserved_source != admitted_source:
+                raise _classification_failure("operation_conflict")
+
+        if requested_alias is not None:
+            try:
+                reobserved_selection = validate_selection(
+                    await asyncio.to_thread(frontier_selection_provider, requested_alias),
+                    requested_alias=requested_alias,
+                )
+            except Exception as exc:
+                raise _dependency_failure("backend_refused") from exc
+            if reobserved_selection != selection:
                 raise _classification_failure("operation_conflict")
 
         # 10. optional host-only admission gate.  Exactly one synchronous
@@ -845,6 +880,7 @@ async def _handle_normalized_submit(
             trusted_envelope,
             workspace_root,
             execution_binding=execution_binding,
+            frontier_selection=selection,
             dialogue_source=admitted_source,
             require_dialogue_source=strict_v2,
             principal_context=principal_context, principal_request_ref=principal_request_ref,
@@ -1017,6 +1053,7 @@ async def handle_frame(
     ceo_ingress_armed: bool = False,
     strict_v2_admission: bool = False,
     execution_binding_provider: Callable[[], Mapping[str, Any]] | None = None,
+    frontier_selection_provider: Callable[[str], Mapping[str, Any]] | None = None,
     dialogue_source_provider: (
         Callable[[str, str], Mapping[str, Any] | None] | None
     ) = None,
@@ -1083,6 +1120,7 @@ async def handle_frame(
             workspace_root=workspace_root,
             strict_v2_admission=strict_v2_admission,
             execution_binding_provider=execution_binding_provider,
+            frontier_selection_provider=frontier_selection_provider,
             dialogue_source_provider=dialogue_source_provider,
             admission_guard=admission_guard,
             fresh_admission_observer=fresh_admission_observer,

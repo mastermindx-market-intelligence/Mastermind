@@ -13,9 +13,15 @@ from pathlib import Path
 from common.executive_workspace_contract import _check_work_ref
 from control_plane.coo_principal_host import _refuse, _authority, validate_missions
 from control_plane.coo_principal_mandate import PrincipalFact
-from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry, observed_mcp_tool_schema_digest
+from control_plane.executive_agent_capabilities import (
+    CLAUDE_PRINCIPAL_AUTH_REALM,
+    CLAUDE_PRINCIPAL_EXECUTION_SURFACE,
+    ExecutionCapabilityRegistry,
+    observed_mcp_tool_schema_digest,
+)
 
 DEFAULT_INSTALL_PATH = Path("/Library/Application Support/MastermindExecutive/config/executive-mcp.json")
+CLAUDE_PRINCIPAL_POLICY = Path("config/executive_claude_principal_capabilities.json")
 
 
 def _fixed_original_target_reader(path, source, initial, *, expected_uid):
@@ -91,7 +97,7 @@ class CooInstalledSource:
         loader = entry.current_projection_loader(path, source, initial, "coo", None,
                                                   expected_uid=expected_uid)
         def registry():
-            policy = source / "config/executive_agent_capabilities.json"
+            policy = source / CLAUDE_PRINCIPAL_POLICY
             entry.require_sealed_path(policy)
             return ExecutionCapabilityRegistry.load(policy, source_root=source)
         owner = cls(loader, registry)
@@ -124,7 +130,10 @@ class CooInstalledSource:
         if type(registry) is not ExecutionCapabilityRegistry:
             _refuse()
         profile = registry.profiles.get(row["capability_profile_id"])
-        if profile is None or not profile.enabled or profile.profile_digest != row["capability_profile_digest"]:
+        if (profile is None or not profile.enabled
+                or profile.profile_digest != row["capability_profile_digest"]
+                or profile.execution_surface != CLAUDE_PRINCIPAL_EXECUTION_SURFACE
+                or profile.auth_realm != CLAUDE_PRINCIPAL_AUTH_REALM):
             _refuse()
         specs = {s.name: {"name": s.name, "inputSchema": s.input_schema,
                          "annotations": s.annotations} for s in COO_TOOL_SPECS}

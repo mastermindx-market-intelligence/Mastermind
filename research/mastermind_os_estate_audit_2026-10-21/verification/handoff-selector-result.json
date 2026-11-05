@@ -1,0 +1,29 @@
+{
+  "source_pin": "b9b0759af6b8f347a7d729e3b13b8925857c5f8f",
+  "source_sha256": "c772feeb9fa5bbfe5779c92a0e9158ecf145ac2b3cb3bf431f1e0fa0fdd1477f",
+  "inputs": [
+    {
+      "filename": "WS-EXECUTIVE-ECOSYSTEM-COMPLETION-2026-10-19-S3-PRIME-INSTALLED-BCF4A2F7.md",
+      "association_selected": true,
+      "rank": [
+        "",
+        "WS-EXECUTIVE-ECOSYSTEM-COMPLETION-2026-10-19-S3-PRIME-INSTALLED-BCF4A2F7"
+      ]
+    },
+    {
+      "filename": "WS-EXECUTIVE-ECOSYSTEM-COMPLETION-2026-10-19-BCF4A2F7-ACCEPTANCE-FAILED-CONTROL-ROOM-LISTENER.md",
+      "association_selected": true,
+      "rank": [
+        "",
+        "WS-EXECUTIVE-ECOSYSTEM-COMPLETION-2026-10-19-BCF4A2F7-ACCEPTANCE-FAILED-CONTROL-ROOM-LISTENER"
+      ]
+    }
+  ],
+  "selected_handoff": "WS-EXECUTIVE-ECOSYSTEM-COMPLETION-2026-10-19-S3-PRIME-INSTALLED-BCF4A2F7.md",
+  "dropped_as_older_handoff": [
+    "WS-EXECUTIVE-ECOSYSTEM-COMPLETION-2026-10-19-BCF4A2F7-ACCEPTANCE-FAILED-CONTROL-ROOM-LISTENER.md"
+  ],
+  "chronologically_latest": "WS-EXECUTIVE-ECOSYSTEM-COMPLETION-2026-10-19-BCF4A2F7-ACCEPTANCE-FAILED-CONTROL-ROOM-LISTENER.md",
+  "correct": false,
+  "scope": "Two real same-day records, association-relevant frontmatter excerpts; isolated source-extracted selector, not full compiler/runtime proof or canonical memory."
+}

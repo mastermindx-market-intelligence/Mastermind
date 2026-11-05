@@ -194,7 +194,7 @@ class _ForegroundExecution:
     binding: bytes
 
     def __bool__(self):
-        return self.mode in {"ORDINARY_OPERATOR", "ATTENDED_WORK"}
+        return self.mode in {"ORDINARY_OPERATOR", "ATTENDED_WORK", "PAID_WORK"}
 
 
 class ServiceError(RuntimeProofError):
@@ -1451,7 +1451,10 @@ class ExecutiveDialogueWakeBridge:
             ):
                 return DialogueWakeResult("MISSING", "CURRENT_WRITER_REFUSED")
             carrier_route = authoritative_route
-            extra_factory: dict[str, Any] = {}
+            # Physical source correlation is not a canary activation grant.
+            # Preserve it for ordinary armed routes as well, so the current
+            # recipient reads/replies to the exact newly committed message.
+            extra_factory: dict[str, Any] = {"physical_source": request.physical_source}
             if profile is not None:
                 current_provider = self._canary_current_facts_for
                 now_provider = self._canary_now_epoch_seconds
@@ -2063,6 +2066,7 @@ class CeoIngressAppBinding:
     steward_provider_factory: Callable[[Runtime], Any] | None = None
     workspace_read_provider_factory: Callable[[Runtime], Any] | None = None
     session_bridge_provider_factory: Callable[[Runtime], Any] | None = None
+    reply_event_provider_factory: Callable[[Runtime], Any] | None = None
     read_schema: str = CEO_APP_READ_SCHEMA
     # Separate principal capability; the incumbent CEO armed bit grants none.
     # Existing launchers omit these fields, so this route is dormant by default.
@@ -2086,6 +2090,8 @@ class CeoIngressAppBinding:
             and not callable(self.session_bridge_provider_factory)
         ):
             raise ValueError("Session Bridge requires a host provider")
+        if self.reply_event_provider_factory is not None and not callable(self.reply_event_provider_factory):
+            raise ValueError("reply events require a host provider")
         if self.principal_facts_factory is not None and not callable(self.principal_facts_factory):
             raise ValueError("principal facts require a host provider")
         if type(self.principal_admission_armed) is not bool:
@@ -2907,6 +2913,11 @@ class ExecutiveControlService:
         if current != self._coo_execution_binding:
             raise ServiceError("installed COO routing/capability policy drifted")
         return dict(current)
+
+    def _resolve_ceo_frontier_selection(self, alias: str) -> dict[str, Any]:
+        """Host catalog identity only; this does not start a CEO session."""
+        from control_plane.frontier_selection import resolve_selection
+        return resolve_selection(ModelRouter.load(), alias)
 
     def _require_coo_admission_binding(self) -> dict[str, Any]:
         """Fresh admission cannot export a qualification to an unrelated root."""
@@ -5199,9 +5210,9 @@ class ExecutiveControlService:
 
         Kernel identity selects the exact C1 or optional App capability before
         any body read. Neither uses the generic Operator allowlist. The App's
-        closed read frames project existing canonical state; all admission
-        remains with ``executive_ceo_ingress.handle_frame`` and its existing
-        validators. Exactly one bounded frame and response use each connection.
+        closed Workspace frames use existing canonical read/action owners.
+        CEO submission admission remains with ``executive_ceo_ingress.handle_frame``
+        and its existing validators. Exactly one bounded frame and response use each connection.
         """
 
         task = asyncio.current_task()
@@ -5415,12 +5426,180 @@ class ExecutiveControlService:
                 validate_frame as validate_activity_frame,
                 unavailable as activity_unavailable,
             )
-            if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA, ACTIVITY_FRAME_SCHEMA}:
+            from common.workspace_control_room_read_contract import (
+                FRAME_SCHEMA as CCR_READ_FRAME_SCHEMA, validate_frame as validate_ccr_read_frame,
+            )
+            from common import workspace_control_room_action_contract as action_wire
+            from common import executive_workspace_fabric_contract as fabric_read_wire
+            if type(parsed) is dict and parsed.get("schema") == action_wire.FRAME_SCHEMA:
+                if not app_peer:
+                    await self._send_ceo_ingress_error(
+                        writer, "peer_denied", "Control Room actions require the installed App peer",
+                    )
+                    return
+                try:
+                    # Reparse original bytes; schema discrimination must not
+                    # discard duplicate fields before action admission.
+                    action_request = action_wire.decode_frame(raw)
+                except (TypeError, ValueError):
+                    operation = parsed.get("operation")
+                    result = ({"ok": True, "result": action_wire.refused_result(
+                        operation, code="invalid_input", status=400,
+                    )} if type(operation) is str and operation in action_wire.OPERATIONS
+                              else workspace_error("invalid_input", 400))
+                    await self._send_ceo_ingress_response(
+                        writer, result, response_ceiling=action_wire.MAX_RESPONSE_BYTES,
+                    )
+                    return
+                operation = action_request["operation"]
+                factory = app_binding.workspace_read_provider_factory
+
+                def action_host_ready():
+                    return (
+                        app_binding is self._ceo_ingress_app_binding
+                        and app_binding.workspace_read_provider_factory is factory
+                        and callable(factory)
+                        and not self._closing and self._ceo_ingress_ready
+                        and self._service_state in {"READY", "AWAITING_CANARY"}
+                    )
+
+                delegated = False
+                try:
+                    if not action_host_ready():
+                        result = {"ok": True, "result": action_wire.refused_result(
+                            operation, code="source_unavailable", status=503,
+                        )}
+                    else:
+                        from control_plane.workspace_read_service import WorkspaceReadService
+                        provider = factory(self._require_runtime())
+                        if type(provider) is not WorkspaceReadService or not action_host_ready():
+                            result = {"ok": True, "result": action_wire.refused_result(
+                                operation, code="source_unavailable", status=503,
+                            )}
+                        else:
+                            delegated = True
+                            result = await provider.handle_frame(
+                                action_request, action_host_ready=action_host_ready,
+                            )
+                    if type(result) is not dict or set(result) != {"ok", "result"} or result["ok"] is not True:
+                        raise ValueError("source_unavailable")
+                    result = {"ok": True, "result": action_wire.validate_result(
+                        result["result"], operation=operation,
+                    )}
+                except Exception:
+                    result = {"ok": True, "result": (
+                        action_wire.unknown_result(operation) if delegated
+                        else action_wire.refused_result(operation, code="source_unavailable", status=503)
+                    )}
+                # The existing handler task retains custody through action
+                # completion and response cleanup, without READ result rewriting.
+                await self._send_ceo_ingress_response(
+                    writer, result, response_ceiling=action_wire.MAX_RESPONSE_BYTES,
+                )
+                return
+            from common import workspace_project_admission_wire as admission_wire
+            if admission_wire.is_project_admission_frame(parsed):
+                if not app_peer:
+                    await self._send_ceo_ingress_error(writer, "peer_denied", "Project controls require the installed App peer")
+                    return
+                try:
+                    admission_request = admission_wire.decode_frame(raw)
+                except (TypeError, ValueError):
+                    await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                        response_ceiling=admission_wire.MAX_RESPONSE_BYTES)
+                    return
+                factory = app_binding.workspace_read_provider_factory
+                def admission_host_ready():
+                    return (app_binding is self._ceo_ingress_app_binding
+                        and app_binding.workspace_read_provider_factory is factory and callable(factory)
+                        and not self._closing and self._ceo_ingress_ready
+                        and self._service_state in {"READY", "AWAITING_CANARY"})
+                delegated = False
+                try:
+                    if not admission_host_ready():
+                        result = admission_wire.withheld(admission_request, reason="OWNER_NOT_READY")
+                    else:
+                        from control_plane.workspace_read_service import WorkspaceReadService
+                        provider = factory(self._require_runtime())
+                        if type(provider) is not WorkspaceReadService or not admission_host_ready():
+                            result = admission_wire.withheld(admission_request, reason="OWNER_NOT_READY")
+                        else:
+                            delegated = True
+                            result = await provider.handle_frame(admission_request, action_host_ready=admission_host_ready)
+                    result = admission_wire.validate_result(result, admission_request)
+                except Exception:
+                    result = admission_wire.withheld(admission_request, attempted=delegated)
+                await self._send_ceo_ingress_response(writer, result, response_ceiling=admission_wire.MAX_RESPONSE_BYTES)
+                return
+            from common import workspace_project_plan_contract as project_plan_wire
+            from common import workspace_project_journal_contract as project_journal_wire
+            from common import workspace_project_session_contract as project_session_wire
+            from common import workspace_project_direction_contract as project_direction_wire
+            from common import workspace_autonomy_read_contract as autonomy_wire
+            from common import workspace_resource_capacity_contract as capacity_wire
+            if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
+                    FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
+                    ACTIVITY_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA,
+                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
                 operation = parsed.get("operation") if isinstance(parsed, dict) else None
-                if parsed.get("schema") == ACCEPTANCE_FRAME_SCHEMA:
+                if parsed.get("schema") == project_direction_wire.FRAME_SCHEMA:
+                    ceiling = project_direction_wire.MAX_RESPONSE_BYTES
+                    try:
+                        project_direction_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == capacity_wire.FRAME_SCHEMA:
+                    ceiling = capacity_wire.MAX_RESPONSE_BYTES
+                    try:
+                        capacity_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == autonomy_wire.FRAME_SCHEMA:
+                    ceiling = autonomy_wire.MAX_RESPONSE_BYTES
+                    try:
+                        autonomy_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == project_session_wire.FRAME_SCHEMA:
+                    ceiling = project_session_wire.MAX_RESPONSE_BYTES
+                    try:
+                        project_session_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == project_journal_wire.FRAME_SCHEMA:
+                    ceiling = project_journal_wire.MAX_RESPONSE_BYTES
+                    try:
+                        project_journal_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == project_plan_wire.FRAME_SCHEMA:
+                    ceiling = project_plan_wire.MAX_RESPONSE_BYTES
+                    try:
+                        project_plan_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == fabric_read_wire.FRAME_SCHEMA:
+                    ceiling = fabric_read_wire.MAX_STATUS_BYTES
+                    try:
+                        fabric_read_wire.validate_frame(parsed)
+                        ceiling = fabric_read_wire.ceiling(operation)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == ACCEPTANCE_FRAME_SCHEMA:
                     ceiling = WORKSPACE_MAX_RESPONSE_BYTES
                     try:
                         from common.product_acceptance_acquisition_contract import (
@@ -5431,13 +5610,29 @@ class ExecutiveControlService:
                         else:
                             validate_acceptance_frame(parsed)
                     except (TypeError, ValueError):
-                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST),
                                                              response_ceiling=ceiling)
                         return
                 elif parsed.get("schema") == ACTIVITY_FRAME_SCHEMA:
                     ceiling = ACTIVITY_MAX_RESPONSE_BYTES
                     try:
                         validate_activity_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST),
+                                                             response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == CCR_READ_FRAME_SCHEMA:
+                    ceiling = WORKSPACE_MAX_RESPONSE_BYTES
+                    try:
+                        validate_ccr_read_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == CCR_READ_FRAME_SCHEMA:
+                    ceiling = WORKSPACE_MAX_RESPONSE_BYTES
+                    try:
+                        validate_ccr_read_frame(parsed)
                     except (TypeError, ValueError):
                         await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
                                                              response_ceiling=ceiling)
@@ -5447,7 +5642,7 @@ class ExecutiveControlService:
                     try:
                         validate_v3_frame(parsed)
                     except (TypeError, ValueError):
-                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST),
                                                              response_ceiling=ceiling)
                         return
                 elif parsed.get("schema") == FRAME_SCHEMA_V2:
@@ -5456,6 +5651,46 @@ class ExecutiveControlService:
                     ceiling = WORKSPACE_MAX_RESPONSE_BYTES
                 if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
                     result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
+                elif parsed.get("schema") == fabric_read_wire.FRAME_SCHEMA:
+                    paid_source = self._paid_worker_binding_source
+                    facts_factory = app_binding.principal_facts_factory
+                    if (app_binding.principal_admission_armed is not True
+                            or facts_factory is None or factory is None or paid_source is None):
+                        result = workspace_error("access_denied", 403)
+                    else:
+                        try:
+                            from control_plane.coo_principal_host import CooHostProvider
+                            owner = facts_factory(self._require_runtime())
+                            if type(owner) is not CooHostProvider:
+                                raise ValueError("original installed COO source required")
+                            result = await owner.read_workspace_fabric(parsed, paid_source)
+                            if (self._ceo_ingress_app_binding is not app_binding
+                                    or app_binding.workspace_read_provider_factory is not factory
+                                    or app_binding.principal_facts_factory is not facts_factory
+                                    or app_binding.principal_admission_armed is not True
+                                    or self._paid_worker_binding_source is not paid_source):
+                                result = workspace_error("access_denied", 403)
+                        except Exception:
+                            result = workspace_error("source_unavailable", 503)
+                elif parsed.get("schema") == capacity_wire.FRAME_SCHEMA:
+                    # Only the *existing installed COO* source may carry a
+                    # separately verified Workspace principal to one original
+                    # Executive Attempt. Generic Workspace login is NOT an
+                    # original OHF run grant. Original installer byte remains
+                    # unchanged by this additional per-request composition.
+                    if (app_binding.principal_admission_armed is not True
+                            or app_binding.principal_facts_factory is None
+                            or factory is None):
+                        result = workspace_error("access_denied", HTTPStatus.FORBIDDEN)
+                    else:
+                        try:
+                            from control_plane.coo_principal_host import CooHostProvider
+                            owner = app_binding.principal_facts_factory(self._require_runtime())
+                            if type(owner) is not CooHostProvider:
+                                raise ValueError("original installed COO source required")
+                            result = await owner.read_workspace_resource_capacity(parsed)
+                        except Exception:
+                            result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
                 elif parsed.get("schema") == ACTIVITY_FRAME_SCHEMA:
                     # Only the *existing installed COO* source may carry a
                     # separately verified Workspace principal to one original
@@ -5489,6 +5724,8 @@ class ExecutiveControlService:
                 except (TypeError, ValueError):
                     result = (plan_unavailable(parsed["selection"], "RESPONSE_OVER_BUDGET")
                               if parsed.get("schema") == FRAME_SCHEMA_V3
+                              else capacity_wire.unavailable(parsed["selection"], "RESPONSE_OVER_BUDGET")
+                              if parsed.get("schema") == capacity_wire.FRAME_SCHEMA
                               else activity_unavailable(parsed["selection"], "RESPONSE_OVER_BUDGET")
                               if parsed.get("schema") == ACTIVITY_FRAME_SCHEMA
                               else workspace_error("source_unavailable", 503))
@@ -5509,6 +5746,45 @@ class ExecutiveControlService:
                         result = {"ok": False, "error": {"code": "CONTENT_UNAVAILABLE"}}
                 await self._send_ceo_ingress_response(writer, result, response_ceiling=(
                     MAX_PAGE_BYTES if parsed["schema"] == PAGE_SCHEMA else ceo_ingress.MAX_RESPONSE_BYTES))
+                return
+            from common.reply_subscription_private_contract import (
+                PRIVATE_SCHEMA as REPLY_EVENT_PRIVATE_SCHEMA, ReplyEventIngressOwner,
+                MODIFYING as REPLY_EVENT_MODIFYING, result as reply_event_result,
+            )
+            if isinstance(parsed, Mapping) and parsed.get("schema") == REPLY_EVENT_PRIVATE_SCHEMA:
+                if not app_peer:
+                    await self._send_ceo_ingress_error(writer,"peer_denied","reply events require installed App peer")
+                    return
+                factory = app_binding.reply_event_provider_factory
+                if (not app_binding.armed or factory is None or self._closing or not self._ceo_ingress_ready
+                        or self._service_state not in {"READY","AWAITING_CANARY"}):
+                    await self._send_ceo_ingress_error(writer,"ingress_unavailable","reply event owner unavailable")
+                    return
+                try:
+                    runtime = self._require_runtime()
+                    provider = factory(runtime)
+                    if type(provider) is not ReplyEventIngressOwner or provider.runtime is not runtime:
+                        raise ValueError("invalid reply event owner")
+                    operation = provider.validate_frame(parsed)
+                except Exception:
+                    await self._send_ceo_ingress_error(writer,"invalid_input","private event operation unavailable")
+                    return
+                if (self._closing or self._ceo_ingress_app_binding is not app_binding or not app_binding.armed
+                        or self._require_runtime() is not runtime or _peer_uid(connection) != app_binding.peer_uid
+                        or self._service_state not in {"READY","AWAITING_CANARY"}):
+                    await self._send_ceo_ingress_error(writer,"ingress_unavailable","reply event host changed")
+                    return
+                try:
+                    event_result = await provider.handle_frame(parsed)
+                    if (self._closing or self._ceo_ingress_app_binding is not app_binding or not app_binding.armed
+                            or self._service_state not in {"READY","AWAITING_CANARY"}):
+                        raise ValueError("entered reply event host changed")
+                except Exception:
+                    event_result = reply_event_result(operation,code=(
+                        "effect_unknown" if operation in REPLY_EVENT_MODIFYING else "backend_unavailable"))
+                # Once entered, transport loss never permits another callback or
+                # subscription mutation. The canonical Runtime CAS owns recovery.
+                await self._send_ceo_ingress_response(writer,{"ok":True,"result":event_result})
                 return
             from common.session_bridge_private_contract import (
                 PRIVATE_SCHEMA as SESSION_BRIDGE_PRIVATE_SCHEMA,
@@ -5796,6 +6072,7 @@ class ExecutiveControlService:
                         or self._ceo_ingress_dialogue_source_provider is not None
                     ),
                     execution_binding_provider=self._require_coo_admission_binding,
+                    frontier_selection_provider=self._resolve_ceo_frontier_selection,
                     dialogue_source_provider=(
                         self._ceo_ingress_dialogue_source_provider
                     ),
@@ -6669,6 +6946,22 @@ class ExecutiveControlService:
                     # dispatched=False and is not execution/result success.
 
             return result
+        if parsed.get('operation') in {'correction-inspect','correct'}:
+            from common import direct_native_correction_contract as correction
+            frame=wire.validate_private_frame(parsed)
+            write=frame['operation']=='correct'
+            body={key:value for key,value in frame.items() if key not in {'schema','operation','principal_scope'}}
+            with runtime.store.read() as connection:
+                rows=connection.execute("SELECT payload_json FROM events WHERE event_type='JOB_CREATED' AND job_id=? AND length(CAST(payload_json AS BLOB))<=65536 LIMIT 2",(body['job_id'],)).fetchall()
+                if len(rows)!=1:raise StateConflict('direct correction origin unavailable')
+                intent_id=json.loads(rows[0][0])['provenance']['intent_id']
+            access,_,_=await asyncio.to_thread(self._direct_native_access,principal_scope=frame['principal_scope'],
+                work_ref=body['work_ref'],intent_id=intent_id,app_binding=app_binding)
+            owner=(runtime.request_direct_native_correction if write else runtime.inspect_direct_native_correction)
+            from control_plane.workspace_owned_task import await_owned
+            # Retain an entered write through caller disconnect. Reconciliation
+            # is the exact authenticated inspection, never another dispatch.
+            return await await_owned(asyncio.create_task(asyncio.to_thread(owner,body,access=access)))
         expected={"schema","operation","work_ref","job_id","attempt_id","principal_scope"}
         consume=parsed.get("operation")=="consume"
         if consume: expected|={"result_digest","operation_key"}
@@ -7483,7 +7776,11 @@ class ExecutiveControlService:
             self._native_return_source(root)  # Fresh installed read/execute admission.
             await self._run_owned_coroutine(supervisor.run_native_continuation(
                 dispatch.retained, source=dispatch.source, read_ref=read_ref))
-            await dispatch.source.require_committed_native_reply(read_ref=read_ref)
+            committed_reply = await dispatch.source.require_committed_native_reply(read_ref=read_ref)
+            # Notification is a separate post-COMMIT effect, not a native-Job
+            # terminalization prerequisite. Retain it under existing service
+            # physical-task custody; its Runtime reservation survives restart.
+            self._schedule_native_reply_events(read_ref, committed_reply)
             await self._run_owned_coroutine(supervisor.finish_retained_native_job(dispatch.retained))
             await self._project_terminal_return(dispatch.job_id,
                 expected_attempt_id=lease.attempt.attempt_id)
@@ -7505,6 +7802,94 @@ class ExecutiveControlService:
                 self._native_operator_dispatch = None
             if self._dispatch_tasks.get(dispatch.job_id) is asyncio.current_task():
                 self._dispatch_tasks.pop(dispatch.job_id, None)
+
+    def _schedule_native_reply_events(self, read_ref, committed_reply) -> None:
+        """Retain post-COMMIT notification under existing Executive service custody.
+
+        An external callback cannot delay Job completion or terminal projection.
+        This is one invocation on the already-committed native result, not a
+        new queue, subscriber loop, timer, watcher or retry carrier. Shutdown
+        drains _physical_workers before closing the canonical Runtime owner.
+        """
+        from common.reply_subscription_private_contract import ReplyEventCommitConsumer
+        host, app = self._company_consultation_host, self._ceo_ingress_app_binding
+        consumer = getattr(host, "reply_event_consumer", None)
+        if (self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}
+                or type(consumer) is not ReplyEventCommitConsumer
+                or app is None or not getattr(app, "armed", False)
+                or getattr(app, "reply_event_provider_factory", None) is None
+                or type(read_ref) is not str or not read_ref
+                or type(committed_reply) is not dict):
+            return
+        # The canonical RuntimeSessionReturn.require_committed_native_reply
+        # supplies the *validated Dialogue message*, NOT the writer receipt.
+        # Validate its closed native-reply shape without accepting a caller-
+        # asserted reply_committed bit as independent COMMIT evidence. The
+        # actual durable COMMIT authority is the upstream Runtime reader.
+        try:
+            from common.agent_dialogue_contract_v2 import validate_message_v2
+            canonical = validate_message_v2(committed_reply)
+            if (canonical["message_type"] != "PROGRESS"
+                    or canonical["body"].get("stage") != "message_reply"
+                    or not canonical["message_key"].startswith("asd-native-reply-")):
+                return
+            message_key = canonical["message_key"]
+            fingerprint = canonical["fingerprint"]
+        except Exception:
+            return
+        try:
+            if consumer.runtime is not self._require_runtime():
+                return
+        except Exception:
+            return  # An optional notifier cannot change native Job completion.
+        # Capture the already admitted exact same-Runtime consumer. A normal
+        # service shutdown may begin before the scheduled task gets a
+        # timeslice; _notify_native_reply_events' new-admission gate would
+        # otherwise silently discard the committed reply. This retained task
+        # still runs all canonical subscription/READ checks inside the owner.
+        async def deliver_admitted():
+            try:
+                await consumer.handle_committed(
+                    read_ref=read_ref, message_key=message_key,
+                    fingerprint=fingerprint,
+                )
+            except Exception:
+                pass  # Native COMMIT and Job completion are independent.
+
+        coroutine = deliver_admitted()
+        try:
+            task = asyncio.create_task(
+                coroutine, name="executive-native-reply-notification",
+            )
+        except Exception:
+            coroutine.close()
+            return
+        self._physical_workers.add(task)
+
+        def finished(done):
+            self._physical_workers.discard(done)
+            if not done.cancelled():
+                done.exception()
+
+        task.add_done_callback(finished)
+
+    async def _notify_native_reply_events(self, read_ref, committed_reply):
+        """Independent post-COMMIT effect; no writer replay or receipt relabel."""
+        from common.reply_subscription_private_contract import ReplyEventCommitConsumer
+        host, app = self._company_consultation_host, self._ceo_ingress_app_binding
+        consumer = getattr(host,"reply_event_consumer",None)
+        if (self._closing or self._service_state not in {"READY","AWAITING_CANARY"}
+                or type(consumer) is not ReplyEventCommitConsumer
+                or app is None or not getattr(app, "armed", False)
+                or getattr(app, "reply_event_provider_factory", None) is None):
+            return
+        try:
+            if consumer.runtime is not self._require_runtime():
+                return
+            await consumer.handle_committed(read_ref=read_ref,
+                message_key=committed_reply["message_key"],fingerprint=committed_reply["fingerprint"])
+        except Exception:
+            pass  # Existing reservation owns unknown callback effects; native COMMIT stays committed.
 
     async def _signal_native_continuation(self) -> None:
         """Observe exact persisted ACK on an existing Wake ingress edge only."""
@@ -7550,7 +7935,8 @@ class ExecutiveControlService:
         elif not self.config.coo_attended_work_placements and not binding["operator_harness_armed"]:
             mode = "QUEUED_OPERATOR_HARNESS_OFF"
         else:
-            mode = "ATTENDED_WORK" if self.config.coo_attended_work_placements else "ORDINARY_OPERATOR"
+            mode = ("ATTENDED_WORK" if self.config.coo_attended_work_placements else
+                    "PAID_WORK" if self.config.coo_paid_work_placements else "ORDINARY_OPERATOR")
         return _ForegroundExecution(mode, _canonical_json(binding))
 
     def _require_foreground_execution(self, expectation):
@@ -7563,8 +7949,15 @@ class ExecutiveControlService:
                 raise StateConflict("foreground execution is unavailable")
             self._require_current_autonomy()
             self._require_coo_worker_composed()
+            self._require_paid_foreground_placements(binding)
         if self._require_attended_qualification() != qualification:
             raise StateConflict("foreground qualification changed")
+
+    def _require_paid_foreground_placements(self, binding):
+        if self.config.coo_paid_work_placements:
+            from control_plane.paid_fabric_admission import require_registered_paid_placements
+            require_registered_paid_placements(self._require_runtime(),
+                self._paid_worker_binding_source, self.config.coo_paid_work_placements, binding)
 
     def _require_attended_qualification(self):
         from control_plane.fabric_attended_routing import qualification_for
@@ -7693,6 +8086,7 @@ class ExecutiveControlService:
                     "REPAIR_CREATED", "HANDOFF_CREATED", "REQUEUED", "DISPATCHED"}
         for _ in range(128):
             operation.require_root(root_id)
+            self._require_paid_foreground_placements(root_binding)
             outcome = await self._run_coo_cycle(root_id)
             if outcome.root_job_id != root_id:
                 raise StateConflict("foreground cycle returned a foreign root")
@@ -7713,7 +8107,8 @@ class ExecutiveControlService:
                     }
                 if (material is not None and material.job.job_id != root_id
                         and material.job.orchestration_role == "plan"
-                        and not self.config.coo_attended_work_placements):
+                        and not self.config.coo_attended_work_placements
+                        and not self.config.coo_paid_work_placements):
                     # Ordinary Operator bound: the exact validated plan
                     # completion is this call's finite result. No plan
                     # admission, work creation or dispatch may follow here.
@@ -7882,6 +8277,8 @@ class ExecutiveControlService:
                 # The executor thread may begin after its originating request closes.
                 self._require_foreground_only_source(root_id)
                 return CooCycle(self._require_runtime(), dispatcher=dispatch,
+                    planner_plan_schema_version=getattr(
+                        self.operator_supervisor, "fresh_planner_schema_version", None),
                     before_admission=(require_cycle_admission
                                       if self.config.coo_foreground_only or self._foreground_cycle_owner is not None
                                       else None)).run_once(root_id)
@@ -7906,13 +8303,14 @@ class ExecutiveControlService:
                 self._coo_action_tasks.discard(task)
 
     def _next_bound_coo_root(
-        self, *, prestart_refusals: dict[str, Exception] | None = None
+        self, *, prestart_refusals: dict[str, Exception] | None = None,
+        previous_root_id: str | None = None,
     ) -> str | None:
-        """Select one root, optionally collecting ephemeral pre-start diagnostics.
+        """Select a bounded COO root without hiding original-run reconciliation.
 
-        Only a QUEUED root with no child or Attempt history may be deferred.
-        Existing work and ambiguous effects retain their reconciliation path.
-        No persistent exclusion, new queue or retry state is introduced.
+        A positively qualified, never-started independent root gets one
+        opportunity between reconciliations of an unresolved earlier root.
+        No extra queue, durable exclusion, provider retry or scheduler exists.
         """
         if self.config.coo_foreground_only:
             return None
@@ -7931,6 +8329,7 @@ class ExecutiveControlService:
             ).fetchall()
         if len(rows) > _COO_ROOT_SCAN_LIMIT:
             raise ServiceError("bounded COO root scan limit was exceeded")
+        first_reconciling_root: str | None = None
         for row in rows:
             root = runtime.jobs.get_job(str(row["job_id"]))
             if root is None:
@@ -7941,6 +8340,8 @@ class ExecutiveControlService:
                 continue
             if not self._is_bound_coo_root(root):
                 continue
+            prestart_ready = False
+            has_existing_child = False
             if (
                 root.status is JobStatus.QUEUED
                 and root.attempt_count == 0
@@ -7955,16 +8356,41 @@ class ExecutiveControlService:
                         "SELECT 1 FROM attempts WHERE job_id=? LIMIT 1",
                         (root.job_id,),
                     ).fetchone()
+                has_existing_child = child is not None
                 if child is None and attempt is None:
                     try:
                         if not self._maintenance_workspace_pending(root):
                             self._require_initial_coo_workspace(root)
+                            prestart_ready = True
                     except (OSError, ServiceError, StateConflict) as exc:
                         if prestart_refusals is not None:
                             prestart_refusals[root.job_id] = exc
                         continue
-            return root.job_id
-        return None
+            try:
+                unresolved = (
+                    runtime.jobs.pending_cycle_dispatch_effect_unknown(root.job_id)
+                    is not None
+                )
+            except StateConflict as exc:
+                # A malformed original-root marker also remains a per-root
+                # reconciliation/refusal problem, not independent admission.
+                unresolved = True
+                if prestart_refusals is not None:
+                    prestart_refusals[root.job_id] = exc
+            if unresolved:
+                if first_reconciling_root is None:
+                    first_reconciling_root = root.job_id
+                continue
+            if first_reconciling_root is None:
+                return root.job_id
+            # Alternate a bounded opportunity with A's original reconciliation.
+            # B can continue after creating its planner child; an idle status
+            # by itself does not qualify unrelated work for this exception.
+            if previous_root_id not in (None, first_reconciling_root):
+                return first_reconciling_root
+            if prestart_ready or has_existing_child:
+                return root.job_id
+        return first_reconciling_root
 
     def _live_bound_coo_root_id(self) -> str | None:
         """Return the one bound COO root owning every live service finisher."""
@@ -8039,6 +8465,7 @@ class ExecutiveControlService:
         if self.config.coo_foreground_only:
             return
         assert self._coo_shutdown_event is not None
+        previous_root_id: str | None = None
         while not self._coo_shutdown_event.is_set():
             try:
                 await asyncio.wait_for(
@@ -8072,7 +8499,8 @@ class ExecutiveControlService:
                 selected_root_id = live_root_id
                 if selected_root_id is None:
                     selected_root_id = self._next_bound_coo_root(
-                        prestart_refusals=prestart_refusals
+                        prestart_refusals=prestart_refusals,
+                        previous_root_id=previous_root_id,
                     )
                     for refused_root_id, refusal in prestart_refusals.items():
                         self._record_coo_tick_refusal(refused_root_id, refusal)
@@ -8080,6 +8508,9 @@ class ExecutiveControlService:
                 # root that has not yet been selected for any action.
                 root_id = selected_root_id
                 if root_id is not None:
+                    # Tick-local provenance only; a failed/no-op B cannot
+                    # defer an earlier unresolved A for two consecutive ticks.
+                    previous_root_id = root_id
                     await self._run_coo_cycle(root_id)
                 elif prestart_refusals:
                     self._coo_last_tick_at = datetime.now(timezone.utc).isoformat(
