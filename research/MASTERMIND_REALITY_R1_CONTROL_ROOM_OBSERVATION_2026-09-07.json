@@ -3,6 +3,14 @@
   "observation_id": "REALITY-CCR-20260907-ONE-SHOT",
   "capability_state": "PARTIAL",
   "recorded_at": "2026-09-08T06:22:29.936576Z",
+  "revision": {
+    "state": "ORIGINAL",
+    "predecessor_observation_id": null,
+    "changed_input_refs": [],
+    "affected_finding_ids": [],
+    "reason": null,
+    "revised_conclusion": null
+  },
   "persona": {
     "name": "Chairman",
     "user_job": "See what truly needs attention and whether a decision is safe now",
@@ -17,7 +25,11 @@
     "environment": "approved local read-only product at loopback origin",
     "locator": "owner-qualified local Control Room origin",
     "authorization_ref": "current Chairman-directed Reality R1 read-only inspection",
-    "surface_class": "APPROVED_PRODUCT"
+    "surface_class": "APPROVED_PRODUCT",
+    "surface_name": "current Control Room inspector",
+    "experience_role": "ADVANCED",
+    "architecture_ref": null,
+    "observed_surface_state": "PARTIAL"
   },
   "source_relationship": {
     "protected_sha": "b30422efde0308beb7fa069ddefd0987ac0bf4f3",
@@ -29,7 +41,7 @@
   "journey": {
     "steps": [
       {
-        "action": "Load the Chairman Today decision surface at desktop and mobile viewports",
+        "action": "Load the current Control Room decision surface at desktop and mobile viewports",
         "result": "The product rendered successfully and disclosed an active background refresh"
       },
       {
@@ -141,7 +153,8 @@
       ],
       "unknowns": [
         "No other product origin or account surface was exercised."
-      ]
+      ],
+      "finding_id": "FINDING-001"
     },
     {
       "basis": "DETERMINISTIC_OBSERVATION",
@@ -153,7 +166,8 @@
       ],
       "unknowns": [
         "The absent Executive database prevented a current canonical runtime read."
-      ]
+      ],
+      "finding_id": "FINDING-002"
     },
     {
       "basis": "MODEL_INFERENCE",
@@ -164,7 +178,8 @@
       ],
       "unknowns": [
         "No causal user study or witnessed task timing was performed."
-      ]
+      ],
+      "finding_id": "FINDING-003"
     },
     {
       "basis": "MODEL_INFERENCE",
@@ -175,36 +190,67 @@
       ],
       "unknowns": [
         "No comparative usability benchmark was run."
-      ]
+      ],
+      "finding_id": "FINDING-004"
     }
   ],
   "negative_controls": {
     "wrong_target": {
       "status": "DETECTED",
+      "method": "OWNER_EVIDENCE",
+      "signal": "HTTP_404",
+      "evidence_refs": [],
       "detail": "An isolated wrong loopback path returned HTTP 404; response SHA-256 442382ccc7e785caee0f26ebc4f061713d4cd1a2eeb1ae79b3994f9d8878964d."
     },
     "stale_capture": {
       "status": "DETECTED",
+      "method": "OWNER_EVIDENCE",
+      "signal": "STALE_INPUT_DISCLOSED",
+      "evidence_refs": [
+        "private-evidence/control-room-desktop-1440x900.state.json"
+      ],
       "detail": "The UI exposed Agent OS at 22h, GitHub live cache at 17h, and composed state at 59m rather than silently presenting those inputs as current."
     },
     "different_build": {
       "status": "DETECTED",
+      "method": "OWNER_EVIDENCE",
+      "signal": "SOURCE_SHA_DISTINCT",
+      "evidence_refs": [],
       "detail": "The deployed Mastermind revision differed from the protected Mastermind revision at the capture epoch."
     },
     "different_viewport_or_data_state": {
       "status": "DETECTED",
+      "method": "OWNER_EVIDENCE",
+      "signal": "VIEWPORT_OR_DATA_STATE_DISTINCT",
+      "evidence_refs": [
+        "private-evidence/control-room-desktop-1440x900.png",
+        "private-evidence/control-room-mobile-390x844.png",
+        "private-evidence/control-room-desktop-1440x900.semantic.json",
+        "private-evidence/control-room-mobile-390x844.semantic.json"
+      ],
       "detail": "Desktop and mobile captures have distinct viewport identities, PNG digests, and semantic artifact digests while retaining the same degraded source envelope."
     },
     "missing_screenshot_bytes": {
       "status": "REFUSED",
+      "method": "CONTRACT_REFUSAL",
+      "signal": "SCREENSHOT_BYTES_REQUIRED",
+      "evidence_refs": [],
       "detail": "The Reality contract refuses a visual claim unless screenshot bytes are present and a structured consumption receipt binds the intended model to the exact PNG identity."
     },
     "broken_browser_connection": {
       "status": "DETECTED",
+      "method": "OWNER_EVIDENCE",
+      "signal": "PROVIDER_DISCONNECTED",
+      "evidence_refs": [
+        "private-evidence/control-room-desktop-1440x900.trace.zip"
+      ],
       "detail": "Opera reported Browser not connected; this is retained as provider-specific evidence and is not generalized to all browser providers."
     },
     "excluded_account_surface": {
       "status": "REFUSED",
+      "method": "CONTRACT_REFUSAL",
+      "signal": "TARGET_CLASS_EXCLUDED",
+      "evidence_refs": [],
       "detail": "No managed Chairman account or ChatGPT provider surface was opened, inspected, or actuated."
     }
   },
@@ -212,20 +258,31 @@
     "state": "NOT_APPLIED",
     "operation_ref": "reality-control-room-inspection-20260907",
     "carrier_ref": "web-sol/current-chairman-directed-session",
-    "evidence_refs": [
-      "private-evidence/capture-set.json"
-    ],
-    "detail": "The bounded journey was read-only. No product, account, provider, source, or lifecycle mutation was attempted or observed."
+    "detail": "The bounded journey was read-only. No product, account, provider, source, or lifecycle mutation was attempted or observed. The historical owner's reported effect is retained as attribution; this source change did not re-verify the owner-native capture-set receipt.",
+    "evidence": [
+      {
+        "artifact_ref": "private-evidence/capture-set.json",
+        "sha256": null,
+        "coverage": "owner-native capture-set receipt covering the read-only journey; the historical owner's reported effect, not a current verification",
+        "identity_status": "UNRESOLVED",
+        "unresolved_reason": "Public source supplies no expected digest for this owner-native capture-set receipt, so no artifact identity is asserted and this record cannot be presented as fully verified."
+      }
+    ]
   },
   "cleanup": {
-    "state": "CLEAN",
+    "state": "INCOMPLETE",
     "temporary_processes": "ABSENT",
-    "temporary_profile": "REMOVED",
+    "temporary_profile": "UNKNOWN",
     "shared_resources": "UNCHANGED",
-    "evidence_refs": [
-      "private-evidence/cleanup-attestation-20260908.json"
-    ],
-    "detail": "The isolated browser process and temporary profile are absent; the persistent Control Room and unrelated browser, trace, observability, account, and worker resources were left unchanged."
+    "detail": "The retained attestation records zero matched processes and zero workspace-path matches at return. It does not identify the temporary profile and does not prove pre/post removal, so the profile disposition is recorded as unknown and the cleanup state is incomplete rather than clean.",
+    "evidence": [
+      {
+        "artifact_ref": "private-evidence/cleanup-attestation-20260908.json",
+        "sha256": "caf895906115f384492c376069e65061a74768f8d1b222414ff449eedb7b52fb",
+        "coverage": "owner-native cleanup attestation digest carried forward as historical attribution from the prior non-author review; not re-verified in this source change",
+        "identity_status": "RESOLVED"
+      }
+    ]
   },
   "limitations": [
     "This is a historical capture epoch, not a claim about current product or runtime state.",
@@ -233,7 +290,10 @@
     "No causal user study, witnessed completion-time benchmark, or fabricated speed multiplier is claimed.",
     "Private screenshots, state payloads, semantic snapshots, and traces remain on the authorized Mac and are not published in this public repository.",
     "No managed Chairman account, Web-Sol ChatGPT surface, or provider-native account target was tested.",
-    "Visual consumption is supported by a session-local attestation bound to exact image digests; the provider exposed no independent native consumption timestamp or immutable conversation identifier."
+    "Visual consumption is supported by a session-local attestation bound to exact image digests; the provider exposed no independent native consumption timestamp or immutable conversation identifier.",
+    "The observed architecture binding is not asserted for this capture epoch; this record carries an explicit null architecture_ref and therefore remains PARTIAL.",
+    "Full artifact verification of the nine retained historical files was not repeated in this source change; the retained digests are historical attribution from the prior non-author review.",
+    "The owner-native capture-set receipt has no publicly supplied digest, so its artifact identity is unresolved in this record and the record cannot be presented as fully verified."
   ],
   "next_action": {
     "owner": "shared plugin-package integration owner",

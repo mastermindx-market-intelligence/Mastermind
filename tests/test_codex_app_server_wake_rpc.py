@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import inspect
+import threading
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from types import SimpleNamespace
@@ -116,12 +117,18 @@ class FakeOwnedAppServerClient:
         params: Mapping[str, Any] | None = None,
         *,
         timeout: float = 60.0,
+        before_send=None,
     ) -> dict[str, Any]:
         self.calls.append((method, dict(params or {})))
         if method == "thread/read":
+            assert before_send is None
             return {"thread": {"id": NATIVE_HANDLE}}
         if method != "turn/start":
             raise AssertionError(f"second-writer/cold-resume method attempted: {method}")
+        if before_send is not None:
+            queued = list(self.queued_notifications)
+            self.queued_notifications.clear()
+            before_send(1, queued)
         if self.fail_request:
             raise RuntimeError("turn/start transport lost")
         return {"turn": {"id": self.turn_id}}
@@ -197,9 +204,12 @@ def _owned_adapter(
     adapter = object.__new__(codex_adapter.CodexOperatorAdapter)
     adapter.worker_id = GENERATION.worker_id
     adapter.workspace_root = Path("/tmp/mastermind-w3a-owned-workspace")
+    # This unit helper bypasses __init__; mirror the real constructor's
+    # default so guarded ordinary turns exercise the production send seam.
+    adapter.skill_canary_binding = None
     adapter.process_identity_observer = lambda _pid: observed_process
-    requested = SimpleNamespace(approval_policy="never")
-    attestation = SimpleNamespace(effective_config_digest="d" * 64)
+    requested = SimpleNamespace(approval_policy="never", capabilities=SimpleNamespace(required=()))
+    attestation = SimpleNamespace(effective_config_digest="d" * 64, capabilities=(), effective_mcp=())
     adapter._active_workers = {
         adapter.worker_id: GENERATION.process_generation_id,
     }
@@ -216,6 +226,8 @@ def _owned_adapter(
             resource=resource,
             events=[],
             turns={},
+            # Mirror _GenerationState's per-turn retained-input capture map.
+            retained_plain_inputs={},
             turn_subordinates={},
             attention_inflight=False,
             attention_native_turn_id=None,
@@ -2035,6 +2047,85 @@ def test_broker_pre_submit_refusal_maps_to_wake_target_unavailable() -> None:
     assert error.value.reason_code == "target_unavailable"
 
 
+def test_final_guard_runs_in_worker_thread_immediately_before_provider_io() -> None:
+    order: list[tuple[str, int]] = []
+
+    class Adapter(FakeRemoteAttentionAdapter):
+        def deliver_attention(self, **kwargs):
+            order.append(("provider", threading.get_ident()))
+            return super().deliver_attention(**kwargs)
+
+    fake = Adapter(
+        response=AttentionTurnObservation(
+            process_generation_id=GENERATION.process_generation_id,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            provider_native_turn_id="turn-wake-456",
+            accepted=True,
+            delivered=True,
+        )
+    )
+    client = CodexCurrentWriterWakeClient(
+        operator_adapter=fake,
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        runtime_binding=BINDING,
+        pre_submit_guard=lambda: order.append(("guard", threading.get_ident())),
+    )
+    caller_thread = threading.get_ident()
+
+    asyncio.run(
+        client.deliver_wake(
+            native_handle=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            opaque_ids=OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+        )
+    )
+
+    assert [name for name, _thread in order] == ["guard", "provider"]
+    assert order[0][1] == order[1][1]
+    assert order[0][1] != caller_thread
+
+
+def test_final_guard_refusal_is_typed_and_reconcile_never_calls_guard() -> None:
+    calls = 0
+
+    def refuse() -> None:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("binding moved")
+
+    fake = FakeRemoteAttentionAdapter()
+    client = CodexCurrentWriterWakeClient(
+        operator_adapter=fake,
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        runtime_binding=BINDING,
+        pre_submit_guard=refuse,
+    )
+    with pytest.raises(WakePreSubmitError) as error:
+        asyncio.run(
+            client.deliver_wake(
+                native_handle=NATIVE_HANDLE,
+                nudge_id=NUDGE_ID,
+                opaque_ids=OPAQUE_IDS,
+                instruction=CODEX_WAKE_INSTRUCTION,
+            )
+        )
+    assert error.value.reason_code == "target_unavailable"
+    assert fake.calls == []
+    with pytest.raises(Exception):
+        asyncio.run(
+            client.reconcile_wake(
+                native_handle=NATIVE_HANDLE,
+                nudge_id=NUDGE_ID,
+                opaque_ids=OPAQUE_IDS,
+            )
+        )
+    assert calls == 1
+
+
 def test_broker_effect_unknown_never_maps_to_safe_refusal() -> None:
     remote_error = RemoteBrokerError("BrokerEffectUnknownError", "provider write uncertain")
     fake = FakeRemoteAttentionAdapter(error=remote_error)
@@ -2051,3 +2142,62 @@ def test_w3a_module_contains_no_second_app_server_or_cold_resume_path() -> None:
     assert "client.start" not in source
     assert '"thread/resume"' not in source
     assert '"thread/start"' not in source
+
+
+def _company_projection(**overrides):
+    from control_plane.operator_harness_contract import AttentionCompanyReadProjection
+
+    values = dict(
+        target_attempt_id=ATTEMPT_ID,
+        process_generation_id=GENERATION.process_generation_id,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
+        provider_session_id=NATIVE_HANDLE,
+        provider_native_turn_id="turn-wake-456",
+        nudge_id=NUDGE_ID,
+        consultation_ref="consult-" + "a" * 32,
+        result_sha256="b" * 64,
+        native_item_sha256="c" * 64,
+        answer_attestation_sha256="d" * 64,
+    )
+    values.update(overrides)
+    return AttentionCompanyReadProjection(**values)
+
+
+def _company_attention(projection):
+    return AttentionTurnObservation(
+        process_generation_id=GENERATION.process_generation_id,
+        provider_session_id=NATIVE_HANDLE,
+        provider_native_turn_id="turn-wake-456",
+        nudge_id=NUDGE_ID,
+        accepted=True,
+        delivered=True,
+        wake_ack_projection=_worker_projection(),
+        company_read_projection=projection,
+    )
+
+
+def test_company_read_survives_exact_current_writer_mapping_without_consumption():
+    projection = _company_projection()
+    fake = FakeRemoteAttentionAdapter(response=_company_attention(projection))
+    result = _deliver_via_wake_client(fake, opaque_ids=ACK_OPAQUE_IDS)
+    assert result.company_read_projection is projection
+    assert result.delivered is True
+    assert result.target_ack_projection is not None
+    assert len(fake.calls) == 1
+
+
+@pytest.mark.parametrize("overrides", [
+    {"target_attempt_id": "ATT-foreign"},
+    {"binding_id": "bind-foreign"},
+    {"binding_generation": BINDING.binding_generation + 1},
+])
+def test_foreign_company_read_withheld_without_changing_delivery_or_ack(overrides):
+    fake = FakeRemoteAttentionAdapter(
+        response=_company_attention(_company_projection(**overrides)))
+    result = _deliver_via_wake_client(fake, opaque_ids=ACK_OPAQUE_IDS)
+    assert result.company_read_projection is None
+    assert result.accepted is True and result.delivered is True
+    assert result.target_ack_projection == TrustedWorkerWakeAckProjection(
+        **dataclasses.asdict(_worker_projection()))
+    assert len(fake.calls) == 1

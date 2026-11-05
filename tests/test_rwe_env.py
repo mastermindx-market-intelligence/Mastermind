@@ -916,3 +916,624 @@ def test_parse_discovered_takes_last_summary_line():
         "1 failed, 30 passed, 6 skipped in 9.00s\n"
     )
     assert rwe._parse_discovered(out) == 37
+
+
+# ---------------------------------------------------------------------------
+# RWE-E0: one-command disposable worker environment
+# ---------------------------------------------------------------------------
+
+
+def _fake_tempdir(path: Path):
+    class _TempDir:
+        def __enter__(self):
+            path.mkdir(parents=True, exist_ok=False)
+            return str(path)
+
+        def __exit__(self, exc_type, exc, tb):
+            rwe.shutil.rmtree(path, ignore_errors=True)
+            return False
+
+    return _TempDir()
+
+
+def test_cmd_run_realizes_gates_exports_receipt_and_cleans_env(tmp_path, monkeypatch):
+    import argparse
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root = _fake_repo(repo_dir, lock_bytes=b"fake-lock-content-v1\n")
+    temp_parent = tmp_path / "disposable"
+    receipt_out = tmp_path / "worker-receipt.json"
+    observed = {}
+
+    monkeypatch.setattr(
+        rwe.tempfile,
+        "TemporaryDirectory",
+        lambda **kwargs: _fake_tempdir(temp_parent),
+    )
+
+    def fake_realize(args):
+        env_dir = Path(args.dest)
+        observed["env_dir"] = env_dir
+        assert not env_dir.exists()
+        env_dir.mkdir(parents=True)
+        rwe.write_receipt(
+            env_dir,
+            {"schema": rwe.SCHEMA, "environment_id": "env-test", "proof": {"pip_check": "ok"}},
+        )
+        return 0
+
+    def fake_gate(args):
+        assert Path(args.env) == observed["env_dir"]
+        receipt = rwe.load_receipt(Path(args.env))
+        assert receipt is not None
+        receipt["proof"]["gate"] = {"exit": 0, "discovered": 7, "seconds": 0.1}
+        rwe.write_receipt(Path(args.env), receipt)
+        return 0
+
+    monkeypatch.setattr(rwe, "cmd_realize", fake_realize)
+    monkeypatch.setattr(rwe, "cmd_gate", fake_gate)
+
+    args = argparse.Namespace(
+        root=str(root),
+        subset="tests/test_rwe_env.py",
+        lock=None,
+        python=None,
+        receipt_out=str(receipt_out),
+    )
+    rc = rwe.cmd_run(args)
+
+    assert rc == 0
+    assert not temp_parent.exists()
+    exported = json.loads(receipt_out.read_text(encoding="utf-8"))
+    assert exported["schema"] == rwe.SCHEMA
+    assert exported["environment_id"] == "env-test"
+    assert exported["proof"]["gate"]["discovered"] == 7
+    assert exported["proof"]["run"] == {
+        "status": "gate_completed",
+        "exit": 0,
+        "gate_proof_recorded": True,
+    }
+    assert str(temp_parent) not in receipt_out.read_text(encoding="utf-8")
+
+
+def test_cmd_run_preserves_failing_gate_receipt_and_exit(tmp_path, monkeypatch):
+    import argparse
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root = _fake_repo(repo_dir, lock_bytes=b"fake-lock-content-v1\n")
+    temp_parent = tmp_path / "disposable"
+    receipt_out = tmp_path / "worker-receipt.json"
+
+    monkeypatch.setattr(
+        rwe.tempfile,
+        "TemporaryDirectory",
+        lambda **kwargs: _fake_tempdir(temp_parent),
+    )
+
+    def fake_realize(args):
+        env_dir = Path(args.dest)
+        env_dir.mkdir(parents=True)
+        rwe.write_receipt(env_dir, {"schema": rwe.SCHEMA, "proof": {"pip_check": "ok"}})
+        return 0
+
+    def fake_gate(args):
+        env_dir = Path(args.env)
+        receipt = rwe.load_receipt(env_dir)
+        assert receipt is not None
+        receipt["proof"]["gate"] = {"exit": 5, "discovered": 3, "seconds": 0.1}
+        rwe.write_receipt(env_dir, receipt)
+        return 5
+
+    monkeypatch.setattr(rwe, "cmd_realize", fake_realize)
+    monkeypatch.setattr(rwe, "cmd_gate", fake_gate)
+
+    rc = rwe.cmd_run(
+        argparse.Namespace(
+            root=str(root), subset="tests/test_x.py", lock=None, python=None,
+            receipt_out=str(receipt_out),
+        )
+    )
+
+    assert rc == 5
+    assert not temp_parent.exists()
+    exported = json.loads(receipt_out.read_text(encoding="utf-8"))
+    assert exported["proof"]["gate"]["exit"] == 5
+    assert exported["proof"]["run"] == {
+        "status": "gate_completed",
+        "exit": 5,
+        "gate_proof_recorded": True,
+    }
+
+
+def test_cmd_run_refuses_existing_receipt_before_realize(tmp_path, monkeypatch, capsys):
+    import argparse
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root = _fake_repo(repo_dir, lock_bytes=b"fake-lock-content-v1\n")
+    receipt_out = tmp_path / "worker-receipt.json"
+    receipt_out.write_text("owned\n", encoding="utf-8")
+    called = {"realize": False}
+
+    def fake_realize(args):
+        called["realize"] = True
+        raise AssertionError("run must refuse before environment realization")
+
+    monkeypatch.setattr(rwe, "cmd_realize", fake_realize)
+
+    rc = rwe.cmd_run(
+        argparse.Namespace(
+            root=str(root), subset="tests/test_x.py", lock=None, python=None,
+            receipt_out=str(receipt_out),
+        )
+    )
+
+    assert rc == 2
+    assert called["realize"] is False
+    assert receipt_out.read_text(encoding="utf-8") == "owned\n"
+    assert "receipt output already exists" in capsys.readouterr().err
+
+
+
+def test_cmd_run_refuses_broken_receipt_symlink_before_realize(tmp_path, monkeypatch, capsys):
+    import argparse
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root = _fake_repo(repo_dir, lock_bytes=b"fake-lock-content-v1\n")
+    receipt_out = tmp_path / "worker-receipt.json"
+    receipt_out.symlink_to(tmp_path / "missing-target.json")
+    called = {"realize": False}
+
+    def fake_realize(args):
+        called["realize"] = True
+        raise AssertionError("run must refuse before environment realization")
+
+    monkeypatch.setattr(rwe, "cmd_realize", fake_realize)
+
+    rc = rwe.cmd_run(
+        argparse.Namespace(
+            root=str(root), subset="tests/test_x.py", lock=None, python=None,
+            receipt_out=str(receipt_out),
+        )
+    )
+
+    assert rc == 2
+    assert called["realize"] is False
+    assert receipt_out.is_symlink()
+    assert "receipt output already exists" in capsys.readouterr().err
+
+
+
+
+def test_receipt_output_path_canonicalizes_parent_symlink(tmp_path):
+    real_parent = tmp_path / "real-artifacts"
+    real_parent.mkdir()
+    linked_parent = tmp_path / "artifact-link"
+    linked_parent.symlink_to(real_parent, target_is_directory=True)
+
+    resolved = rwe._receipt_output_path(str(linked_parent / "receipt.json"))
+
+    assert resolved == real_parent.resolve() / "receipt.json"
+
+
+def test_cmd_run_realize_failure_cleans_partial_env_and_writes_no_receipt(
+    tmp_path, monkeypatch
+):
+    import argparse
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root = _fake_repo(repo_dir, lock_bytes=b"fake-lock-content-v1\n")
+    temp_parent = tmp_path / "disposable"
+    receipt_out = tmp_path / "worker-receipt.json"
+
+    monkeypatch.setattr(
+        rwe.tempfile,
+        "TemporaryDirectory",
+        lambda **kwargs: _fake_tempdir(temp_parent),
+    )
+
+    def fake_realize(args):
+        env_dir = Path(args.dest)
+        env_dir.mkdir(parents=True)
+        (env_dir / "partial-install").write_text("partial\n", encoding="utf-8")
+        return 4
+
+    monkeypatch.setattr(rwe, "cmd_realize", fake_realize)
+
+    rc = rwe.cmd_run(
+        argparse.Namespace(
+            root=str(root), subset="tests/test_x.py", lock=None, python=None,
+            receipt_out=str(receipt_out),
+        )
+    )
+
+    assert rc == 4
+    assert not temp_parent.exists()
+    assert not receipt_out.exists()
+
+
+# RWE-E0 independent review repair: receipt/refusal/publication semantics.
+
+def test_cmd_run_exports_explicit_pre_execution_gate_refusal(tmp_path, monkeypatch):
+    import argparse
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root = _fake_repo(repo_dir, lock_bytes=b"fake-lock-content-v1\n")
+    temp_parent = tmp_path / "disposable"
+    receipt_out = tmp_path / "worker-receipt.json"
+
+    monkeypatch.setattr(
+        rwe.tempfile,
+        "TemporaryDirectory",
+        lambda **kwargs: _fake_tempdir(temp_parent),
+    )
+
+    def fake_realize(args):
+        env_dir = Path(args.dest)
+        env_dir.mkdir(parents=True)
+        rwe.write_receipt(env_dir, {"schema": rwe.SCHEMA, "proof": {"pip_check": "ok"}})
+        return 0
+
+    def fake_gate(args):
+        # Models cmd_gate's lawful pre-execution refusal paths: no proof.gate is written.
+        return 2
+
+    monkeypatch.setattr(rwe, "cmd_realize", fake_realize)
+    monkeypatch.setattr(rwe, "cmd_gate", fake_gate)
+
+    rc = rwe.cmd_run(
+        argparse.Namespace(
+            root=str(root), subset=None, lock=None, python=None,
+            receipt_out=str(receipt_out),
+        )
+    )
+
+    assert rc == 2
+    exported = json.loads(receipt_out.read_text(encoding="utf-8"))
+    assert "gate" not in exported["proof"]
+    assert exported["proof"]["run"] == {
+        "status": "gate_refused_before_execution",
+        "exit": 2,
+        "gate_proof_recorded": False,
+    }
+    assert not temp_parent.exists()
+
+
+def test_cmd_run_real_gate_vendor_refusal_is_machine_readable(tmp_path, monkeypatch):
+    import argparse
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root = _fake_repo(repo_dir, lock_bytes=b"fake-lock-content-v1\n")
+    temp_parent = tmp_path / "disposable"
+    receipt_out = tmp_path / "worker-receipt.json"
+
+    monkeypatch.setattr(
+        rwe.tempfile,
+        "TemporaryDirectory",
+        lambda **kwargs: _fake_tempdir(temp_parent),
+    )
+    monkeypatch.setattr(rwe, "require_supported_interpreter", lambda _python: None)
+
+    def fake_realize(args):
+        env_dir = Path(args.dest)
+        (env_dir / "bin").mkdir(parents=True)
+        (env_dir / "bin" / "python").symlink_to(Path(__import__("sys").executable))
+        rwe.write_receipt(env_dir, {"schema": rwe.SCHEMA, "proof": {"pip_check": "ok"}})
+        return 0
+
+    monkeypatch.setattr(rwe, "cmd_realize", fake_realize)
+
+    rc = rwe.cmd_run(
+        argparse.Namespace(
+            root=str(root), subset=None, lock=None, python=None,
+            receipt_out=str(receipt_out),
+        )
+    )
+
+    assert rc == 2
+    exported = json.loads(receipt_out.read_text(encoding="utf-8"))
+    assert "gate" not in exported["proof"]
+    assert exported["proof"]["run"]["status"] == "gate_refused_before_execution"
+    assert exported["proof"]["run"]["exit"] == 2
+    assert not temp_parent.exists()
+
+
+def test_cmd_run_preserves_failed_gate_exit_when_receipt_publication_fails(
+    tmp_path, monkeypatch, capsys
+):
+    import argparse
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root = _fake_repo(repo_dir, lock_bytes=b"fake-lock-content-v1\n")
+    temp_parent = tmp_path / "disposable"
+    receipt_out = tmp_path / "worker-receipt.json"
+
+    monkeypatch.setattr(
+        rwe.tempfile,
+        "TemporaryDirectory",
+        lambda **kwargs: _fake_tempdir(temp_parent),
+    )
+
+    def fake_realize(args):
+        env_dir = Path(args.dest)
+        env_dir.mkdir(parents=True)
+        rwe.write_receipt(env_dir, {"schema": rwe.SCHEMA, "proof": {"pip_check": "ok"}})
+        return 0
+
+    def fake_gate(args):
+        env_dir = Path(args.env)
+        receipt = rwe.load_receipt(env_dir)
+        receipt["proof"]["gate"] = {"exit": 5, "discovered": 0, "seconds": 0.1}
+        rwe.write_receipt(env_dir, receipt)
+        return 5
+
+    monkeypatch.setattr(rwe, "cmd_realize", fake_realize)
+    monkeypatch.setattr(rwe, "cmd_gate", fake_gate)
+    monkeypatch.setattr(
+        rwe,
+        "_export_receipt",
+        lambda *args, **kwargs: (_ for _ in ()).throw(rwe.EnvError("publication refused")),
+    )
+
+    rc = rwe.cmd_run(
+        argparse.Namespace(
+            root=str(root), subset="tests/test_x.py", lock=None, python=None,
+            receipt_out=str(receipt_out),
+        )
+    )
+
+    assert rc == 5
+    assert not receipt_out.exists()
+    assert not temp_parent.exists()
+    assert "publication refused" in capsys.readouterr().err
+
+
+def test_export_receipt_fsync_failure_never_creates_partial_final(tmp_path, monkeypatch):
+    receipt_out = tmp_path / "worker-receipt.json"
+    original_fsync = rwe.os.fsync
+
+    def fail_file_fsync(fd):
+        # _export_receipt fsyncs the file before publishing it.
+        raise OSError("simulated fsync failure")
+
+    monkeypatch.setattr(rwe.os, "fsync", fail_file_fsync)
+
+    with pytest.raises(rwe.EnvError, match="receipt output could not be written"):
+        rwe._export_receipt(receipt_out, {"schema": rwe.SCHEMA})
+
+    monkeypatch.setattr(rwe.os, "fsync", original_fsync)
+    assert not receipt_out.exists()
+    assert list(tmp_path.glob(".worker-receipt.json.*.tmp")) == []
+
+
+def test_export_receipt_atomic_no_overwrite_race_preserves_racer(tmp_path, monkeypatch):
+    receipt_out = tmp_path / "worker-receipt.json"
+    original_link = rwe.os.link
+
+    def race_link(src, dst, **kwargs):
+        receipt_out.write_text("racer-owned\n", encoding="utf-8")
+        return original_link(src, dst, **kwargs)
+
+    monkeypatch.setattr(rwe.os, "link", race_link)
+
+    with pytest.raises(rwe.EnvError, match="receipt output already exists"):
+        rwe._export_receipt(receipt_out, {"schema": rwe.SCHEMA})
+
+    assert receipt_out.read_text(encoding="utf-8") == "racer-owned\n"
+    assert list(tmp_path.glob(".worker-receipt.json.*.tmp")) == []
+
+
+def test_export_receipt_refuses_parent_identity_swap(tmp_path):
+    parent = tmp_path / "artifacts"
+    parent.mkdir()
+    target, parent_identity = rwe._receipt_output_target(str(parent / "receipt.json"))
+    moved = tmp_path / "artifacts-original"
+    parent.rename(moved)
+    parent.mkdir()
+
+    with pytest.raises(rwe.EnvError, match="receipt output parent identity changed"):
+        rwe._export_receipt(
+            target,
+            {"schema": rwe.SCHEMA},
+            expected_parent_identity=parent_identity,
+        )
+
+    assert not (parent / "receipt.json").exists()
+    assert not (moved / "receipt.json").exists()
+
+
+def test_main_run_cli_parses_and_dispatches(tmp_path, monkeypatch):
+    observed = {}
+
+    def fake_run(args):
+        observed.update(vars(args))
+        return 7
+
+    monkeypatch.setattr(rwe, "cmd_run", fake_run)
+    rc = rwe.main([
+        "run",
+        "--receipt-out", str(tmp_path / "receipt.json"),
+        "--subset", "tests/test_rwe_env.py",
+        "--python", "/test/python3.12",
+        "--lock", "requirements/test.lock",
+        "--root", str(tmp_path),
+    ])
+
+    assert rc == 7
+    assert observed["receipt_out"].endswith("receipt.json")
+    assert observed["subset"] == "tests/test_rwe_env.py"
+    assert observed["python"] == "/test/python3.12"
+    assert observed["lock"] == "requirements/test.lock"
+    assert observed["root"] == str(tmp_path)
+
+
+
+def test_cmd_run_gate_exception_exports_unknown_outcome_and_cleans(tmp_path, monkeypatch):
+    import argparse
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root = _fake_repo(repo_dir, lock_bytes=b"fake-lock-content-v1\n")
+    temp_parent = tmp_path / "disposable"
+    receipt_out = tmp_path / "worker-receipt.json"
+
+    monkeypatch.setattr(
+        rwe.tempfile,
+        "TemporaryDirectory",
+        lambda **kwargs: _fake_tempdir(temp_parent),
+    )
+
+    def fake_realize(args):
+        env_dir = Path(args.dest)
+        env_dir.mkdir(parents=True)
+        rwe.write_receipt(env_dir, {"schema": rwe.SCHEMA, "proof": {"pip_check": "ok"}})
+        return 0
+
+    def fake_gate(_args):
+        raise OSError("simulated gate transport failure")
+
+    monkeypatch.setattr(rwe, "cmd_realize", fake_realize)
+    monkeypatch.setattr(rwe, "cmd_gate", fake_gate)
+
+    rc = rwe.cmd_run(
+        argparse.Namespace(
+            root=str(root), subset="tests/test_x.py", lock=None, python=None,
+            receipt_out=str(receipt_out),
+        )
+    )
+
+    assert rc == 2
+    assert not temp_parent.exists()
+    exported = json.loads(receipt_out.read_text(encoding="utf-8"))
+    assert "gate" not in exported["proof"]
+    assert exported["proof"]["run"] == {
+        "status": "gate_outcome_unavailable",
+        "exit": 2,
+        "gate_proof_recorded": False,
+    }
+
+
+def test_cmd_run_zero_gate_publication_failure_fails_closed(tmp_path, monkeypatch):
+    import argparse
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root = _fake_repo(repo_dir, lock_bytes=b"fake-lock-content-v1\n")
+    temp_parent = tmp_path / "disposable"
+    receipt_out = tmp_path / "worker-receipt.json"
+
+    monkeypatch.setattr(
+        rwe.tempfile,
+        "TemporaryDirectory",
+        lambda **kwargs: _fake_tempdir(temp_parent),
+    )
+
+    def fake_realize(args):
+        env_dir = Path(args.dest)
+        env_dir.mkdir(parents=True)
+        rwe.write_receipt(env_dir, {"schema": rwe.SCHEMA, "proof": {"pip_check": "ok"}})
+        return 0
+
+    def fake_gate(args):
+        env_dir = Path(args.env)
+        receipt = rwe.load_receipt(env_dir)
+        receipt["proof"]["gate"] = {"exit": 0, "discovered": 1, "seconds": 0.1}
+        rwe.write_receipt(env_dir, receipt)
+        return 0
+
+    monkeypatch.setattr(rwe, "cmd_realize", fake_realize)
+    monkeypatch.setattr(rwe, "cmd_gate", fake_gate)
+    monkeypatch.setattr(
+        rwe,
+        "_export_receipt",
+        lambda *args, **kwargs: (_ for _ in ()).throw(rwe.EnvError("publication refused")),
+    )
+
+    rc = rwe.cmd_run(
+        argparse.Namespace(
+            root=str(root), subset="tests/test_x.py", lock=None, python=None,
+            receipt_out=str(receipt_out),
+        )
+    )
+
+    assert rc == 2
+    assert not receipt_out.exists()
+    assert not temp_parent.exists()
+
+
+def test_cmd_run_gate_exception_with_corrupt_receipt_fails_cleanly(tmp_path, monkeypatch, capsys):
+    import argparse
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root = _fake_repo(repo_dir, lock_bytes=b"fake-lock-content-v1\n")
+    temp_parent = tmp_path / "disposable"
+    receipt_out = tmp_path / "worker-receipt.json"
+
+    monkeypatch.setattr(
+        rwe.tempfile,
+        "TemporaryDirectory",
+        lambda **kwargs: _fake_tempdir(temp_parent),
+    )
+
+    def fake_realize(args):
+        env_dir = Path(args.dest)
+        env_dir.mkdir(parents=True)
+        rwe.write_receipt(env_dir, {"schema": rwe.SCHEMA, "proof": {"pip_check": "ok"}})
+        return 0
+
+    def fake_gate(args):
+        env_dir = Path(args.env)
+        (env_dir / rwe.RECEIPT_FILENAME).write_text("{partial", encoding="utf-8")
+        raise OSError("simulated gate write failure")
+
+    monkeypatch.setattr(rwe, "cmd_realize", fake_realize)
+    monkeypatch.setattr(rwe, "cmd_gate", fake_gate)
+
+    rc = rwe.cmd_run(
+        argparse.Namespace(
+            root=str(root), subset="tests/test_x.py", lock=None, python=None,
+            receipt_out=str(receipt_out),
+        )
+    )
+
+    assert rc == 2
+    assert not temp_parent.exists()
+    assert not receipt_out.exists()
+    assert "gate outcome unavailable and no receipt remains" in capsys.readouterr().err
+
+
+def test_record_run_gate_outcome_missing_zero_fails_closed():
+    receipt = {"schema": rwe.SCHEMA, "proof": {}}
+
+    rc = rwe._record_run_gate_outcome(receipt, 0)
+
+    assert rc == 2
+    assert receipt["proof"]["run"] == {
+        "status": "gate_evidence_missing",
+        "exit": 0,
+        "gate_proof_recorded": False,
+    }
+
+
+def test_record_run_gate_outcome_mismatch_fails_closed():
+    receipt = {
+        "schema": rwe.SCHEMA,
+        "proof": {"gate": {"exit": 5, "discovered": 1, "seconds": 0.1}},
+    }
+
+    rc = rwe._record_run_gate_outcome(receipt, 0)
+
+    assert rc == 2
+    assert receipt["proof"]["run"] == {
+        "status": "gate_evidence_mismatch",
+        "exit": 0,
+        "gate_proof_recorded": True,
+    }

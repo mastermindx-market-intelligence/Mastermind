@@ -1,0 +1,285 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import shutil
+import shlex
+import subprocess
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts" / "install_datadog_vps.sh"
+
+
+def _ssi_fixture_env(preload: Path, installer: Path, **extra: str) -> dict[str, str]:
+    """Synthetic host-only preflight: no real health, service or root operation."""
+    root = preload.parent
+    tools = root / "fixture-bin"
+    tools.mkdir(exist_ok=True)
+    commands = {
+        "id": "#!/bin/sh\nprintf '0\\n'\n",
+        "curl": "#!/bin/sh\nexit 0\n",
+        "systemctl": "#!/bin/sh\nexit 0\n",
+    }
+    for name, content in commands.items():
+        target = tools / name
+        target.write_text(content, encoding="utf-8")
+        target.chmod(0o700)
+    return {
+        "PATH": f"{tools}:/usr/bin:/bin",
+        "HOME": str(root),
+        "SSI_PRELOAD_FILE": str(preload),
+        "DD_HOST_INSTALL_BIN": str(installer),
+        "DD_API_KEY": "synthetic-fixture-only",
+        "DD_RELEASE_SHA": "a" * 40,
+        **extra,
+    }
+
+
+def _render(**overrides: str) -> subprocess.CompletedProcess[str]:
+    assignments = " ".join(
+        f"{key}={shlex.quote(value)}" for key, value in sorted(overrides.items())
+    )
+    command = f"{assignments} ./scripts/install_datadog_vps.sh --render-only".strip()
+    return subprocess.run(
+        ["bash", "-lc", command],
+        text=True,
+        capture_output=True,
+        cwd=ROOT,
+        env=os.environ.copy(),
+        check=False,
+    )
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
+def test_rendered_config_correlates_host_logs_and_apm() -> None:
+    result = _render()
+    assert result.returncode == 0, result.stderr
+    assert "Environment=DD_SERVICE=mastermind-api" in result.stdout
+    assert 'DD_SITE="${DD_SITE:-us5.datadoghq.com}"' in SCRIPT.read_text(encoding="utf-8")
+    assert "Environment=DD_ENV=production" in result.stdout
+    assert "Environment=DD_LOGS_INJECTION=true" in result.stdout
+    assert "service:mastermind-api" in result.stdout
+    assert "team:mastermind" in result.stdout
+    assert "role:authoritative-vps" in result.stdout
+    assert "type: journald" in result.stdout
+    assert "- mastermind.service" in result.stdout
+    assert "DD_API_KEY" not in result.stdout
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
+def test_rendered_config_accepts_bounded_overrides() -> None:
+    result = _render(
+        DD_ENVIRONMENT="staging",
+        DD_SERVICE_NAME="mastermind-canary",
+        DD_TEAM="platform",
+        DD_ROLE="canary-vps",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "DD_SERVICE=mastermind-canary" in result.stdout
+    assert "env:staging" in result.stdout
+    assert "team:platform" in result.stdout
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
+def test_render_only_rejects_unbounded_tag_values() -> None:
+    result = _render(DD_SERVICE_NAME="mastermind api")
+    assert result.returncode != 0
+    assert "invalid tag/service token" in result.stderr
+
+
+def test_installer_never_enables_high_authority_datadog_features() -> None:
+    text = SCRIPT.read_text(encoding="utf-8")
+    assert "DD_APPSEC_ENABLED=true" not in text
+    assert "DD_IAST_ENABLED=true" not in text
+    assert "DD_PROFILING_ENABLED=true" not in text
+    assert "set -x" not in text
+    assert "install_script_agent7.sh" in text
+    assert "DD_APM_INSTRUMENTATION_ENABLED=host" in text
+    assert "DD_APM_INSTRUMENTATION_LIBRARIES" in text
+    assert "SSI_PREEXISTING" in text
+    assert "DD_HOST_INSTALL_BIN" in text
+    assert "--uninstall" in text
+    assert "ensure_ssi_armed" in text
+    assert "ssi_is_armed" in text
+    assert "grep -Fq '/opt/datadog/apm/inject/launcher.preload.so'" not in text
+    assert "ROLLBACK_ARMED=1" in text
+    assert "rollback_on_exit" in text
+    assert "trap 'rollback_on_exit $?' EXIT" in text
+    assert "Datadog host SSI did not arm after installer success" in text
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "/run/datadog-apm-inject/launcher.preload.so",
+        "/opt/datadog-packages/datadog-apm-inject/stable/inject/launcher.preload.so",
+        "/opt/datadog/apm/inject/launcher.preload.so",
+    ],
+)
+def test_ssi_detection_accepts_supported_datadog_preload_paths(tmp_path: Path, entry: str) -> None:
+    preload = tmp_path / "ld.so.preload"
+    preload.write_text(f"{entry}\n", encoding="utf-8")
+    result = subprocess.run(
+        ["bash", "scripts/install_datadog_vps.sh", "--check-ssi-only"],
+        cwd=ROOT,
+        env={**os.environ, "SSI_PRELOAD_FILE": preload.as_posix()},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "armed"
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
+def test_ssi_detection_rejects_unrelated_preload_library(tmp_path: Path) -> None:
+    preload = tmp_path / "ld.so.preload"
+    preload.write_text("/opt/example/launcher.preload.so\n", encoding="utf-8")
+    result = subprocess.run(
+        ["bash", "scripts/install_datadog_vps.sh", "--check-ssi-only"],
+        cwd=ROOT,
+        env={**os.environ, "SSI_PRELOAD_FILE": preload.as_posix()},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert result.stdout.strip() == "not_armed"
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
+def test_ssi_rearm_invokes_datadog_host_installer_when_packages_are_already_present(tmp_path: Path) -> None:
+    preload = tmp_path / "ld.so.preload"
+    preload.write_text("", encoding="utf-8")
+    marker = tmp_path / "invoked"
+    installer = tmp_path / "dd-host-install"
+    installer.write_text(
+        "#!/bin/sh\nprintf '%s\n' '/run/datadog-apm-inject/launcher.preload.so' > \"$SSI_PRELOAD_FILE\"\n"
+        "printf invoked > \"$MARKER\"\n",
+        encoding="utf-8",
+    )
+    installer.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "scripts/install_datadog_vps.sh", "--ensure-ssi-only"],
+        cwd=ROOT,
+        env=_ssi_fixture_env(preload, installer, MARKER=str(marker)),
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-1] == "armed"
+    assert marker.read_text(encoding="utf-8") == "invoked"
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
+def test_ssi_rearm_does_not_reinstrument_when_preload_is_already_armed(tmp_path: Path) -> None:
+    preload = tmp_path / "ld.so.preload"
+    preload.write_text("/run/datadog-apm-inject/launcher.preload.so\n", encoding="utf-8")
+    installer = tmp_path / "must-not-run"
+    installer.write_text("#!/bin/sh\nexit 97\n", encoding="utf-8")
+    installer.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "scripts/install_datadog_vps.sh", "--ensure-ssi-only"], cwd=ROOT,
+        env=_ssi_fixture_env(preload, installer),
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "armed"
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
+def test_ssi_rearm_fails_if_host_installer_returns_success_without_arming_preload(tmp_path: Path) -> None:
+    preload = tmp_path / "ld.so.preload"
+    preload.write_text("", encoding="utf-8")
+    installer = tmp_path / "false-success"
+    installer.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    installer.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "scripts/install_datadog_vps.sh", "--ensure-ssi-only"], cwd=ROOT,
+        env=_ssi_fixture_env(preload, installer),
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 1
+    assert "SSI-only instrumentation failed" in result.stderr
+    assert preload.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
+def test_rendered_config_tags_exact_release_sha() -> None:
+    sha = "a" * 40
+    result = _render(DD_RELEASE_SHA=sha)
+    assert result.returncode == 0, result.stderr
+    assert f"Environment=DD_VERSION={sha}" in result.stdout
+
+
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Linux bash required")
+def test_release_tag_refresher_is_optional_and_atomic(tmp_path: Path) -> None:
+    script = ROOT / "scripts" / "refresh_datadog_release_tag.sh"
+    sha = "b" * 40
+    env = os.environ.copy()
+    env.update({"SYSTEMD_ROOT": tmp_path.as_posix(), "SYSTEMCTL_BIN": "true"})
+    result = subprocess.run(["bash", "scripts/refresh_datadog_release_tag.sh", sha], cwd=ROOT, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    dropin = tmp_path / "mastermind.service.d" / "81-datadog-version.conf"
+    assert not dropin.exists()
+
+    base = dropin.parent / "80-datadog.conf"
+    base.parent.mkdir(parents=True)
+    base.write_text("[Service]\n", encoding="utf-8")
+    result = subprocess.run(["bash", "scripts/refresh_datadog_release_tag.sh", sha], cwd=ROOT, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert dropin.read_text(encoding="utf-8") == f"[Service]\nEnvironment=DD_VERSION={sha}\n"
+
+
+@pytest.mark.parametrize("rollback_fails, expected_rc", [(False, 1), (True, 70)])
+def test_ssi_only_failed_install_reconciles_partial_effect(tmp_path: Path, rollback_fails: bool, expected_rc: int) -> None:
+    preload = tmp_path / "ld.so.preload"
+    preload.write_text("", encoding="utf-8")
+    marker = tmp_path / "calls"
+    installer = tmp_path / "dd-host-install"
+    installer.write_text(
+        '#!/bin/sh\n'
+        'if [ "${1:-}" = "--uninstall" ]; then\n'
+        ' printf "uninstall\\n" >> "$MARKER"\n'
+        + (' exit 1\n' if rollback_fails else ' : > "$SSI_PRELOAD_FILE"\n exit 0\n')
+        + 'fi\n'
+        'printf "install\\n" >> "$MARKER"\n'
+        'printf "%s\\n" /run/datadog-apm-inject/launcher.preload.so > "$SSI_PRELOAD_FILE"\n'
+        'exit 1\n',
+        encoding="utf-8",
+    )
+    installer.chmod(0o700)
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "--ensure-ssi-only"],
+        env=_ssi_fixture_env(preload, installer, MARKER=str(marker)),
+        text=True, capture_output=True, timeout=10, check=False,
+    )
+    assert result.returncode == expected_rc
+    assert marker.read_text().splitlines() == ["install", "uninstall"]
+    assert "not_armed" not in result.stdout
+    assert "SSI-only instrumentation failed" in result.stderr
+    if rollback_fails:
+        assert "launcher.preload.so" in preload.read_text()
+        assert "rollback did not recover cleanly" in result.stdout
+    else:
+        assert preload.read_text() == ""
+        assert "rollback recovered Mastermind health" in result.stdout
+
+
+def test_ssi_only_requires_transaction_preflight_before_installer(tmp_path: Path) -> None:
+    preload = tmp_path / "ld.so.preload"
+    preload.write_text("", encoding="utf-8")
+    marker = tmp_path / "calls"
+    installer = tmp_path / "must-not-run"
+    installer.write_text('#!/bin/sh\nprintf called > "$MARKER"\nexit 1\n', encoding="utf-8")
+    installer.chmod(0o700)
+    env = _ssi_fixture_env(preload, installer, MARKER=str(marker))
+    env.pop("DD_API_KEY")
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "--ensure-ssi-only"], env=env,
+        text=True, capture_output=True, timeout=10, check=False,
+    )
+    assert result.returncode == 1
+    assert "DD_API_KEY is required" in result.stderr
+    assert not marker.exists()
+    assert preload.read_text() == ""

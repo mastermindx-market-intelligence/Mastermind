@@ -1,17 +1,14 @@
 """China (Greater-China) equity market calendar — when the China and HK books may trade.
 
-The all-China book holds mainland A-shares (Shanghai/Shenzhen), Hong Kong names, and
-US-listed China ADRs. Those three venues keep different hours and holidays; rather than
-model all three, this module is anchored to the **mainland A-share session** (the binding,
-earliest-closing venue, Asia/Shanghai) because the book runs ONCE per Asia trading day
-after that close. HK overlaps it; the ADR leg trades the US session and is marked at the
-US close — both are close enough for a once-daily paper rebalance.
+This module supplies the mainland A-share clock by default and the HKEX clock
+for venue='HK'. A book-level clock does not qualify a mixed-venue holding or its
+price for execution; instrument and venue identity remain separate requirements.
 
 **Venue support (A4b fix):** ``is_trading_day(d, venue='CN'|'HK')`` gates on the correct
 exchange calendar. The HK book (bot/hk.py) was previously gated on the mainland A-share
 calendar, which misses ~6 HKEX-only holidays per year (e.g. HK SAR Establishment Day,
 Buddha's Birthday). Adding the HKEX closure set fixes the CN-HK-1 novel problem.
-All existing callers that omit `venue` default to ``'CN'`` — no behaviour change.
+Callers that omit `venue` default to ``'CN'``.
 
 Mirrors the API of ``portfolio.market_calendar`` (is_trading_day / is_open / next_open /
 status / trading-day arithmetic) so the builder and the pending-order lifecycle can use it
@@ -21,8 +18,10 @@ Pure-stdlib (zoneinfo), offline, deterministic. The A-share session is two halve
 (09:30–11:30 and 13:00–15:00 China Standard Time, Mon–Fri). Holidays are a best-effort
 SSE/SZSE closure set — the Lunar-calendar holidays SHIFT each year and the exchanges publish
 the official calendar only ~a year ahead, so the forward years are approximate; refresh them
-from the official SSE/SZSE notice as each year is published. Weekends are always closed, and
-the set never *opens* a session that should be shut.
+from the official SSE/SZSE notice as each year is published. Weekends are always closed.
+This static calendar does not discover exceptional closures or qualify prices.
+HKEX shortened sessions omit the afternoon continuous session; closing auctions
+and securities/cash settlement-day rules are outside this execution gate.
 """
 from __future__ import annotations
 
@@ -59,7 +58,8 @@ _HOLIDAYS: frozenset[date] = frozenset(
         "2025-10-01", "2025-10-02", "2025-10-03", "2025-10-06",         # Nat'l Day + Mid-Autumn
         "2025-10-07", "2025-10-08",
         # 2026 (official SSE/SZSE schedule published 2025-12-22)
-        "2026-01-01",                                                   # New Year
+        # https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+        "2026-01-01", "2026-01-02",                                     # New Year
         "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19",         # Spring Festival (CNY 2026-02-17)
         "2026-02-20", "2026-02-23",
         "2026-04-06",                                                   # Qingming (obs)
@@ -87,11 +87,9 @@ _HOLIDAYS: frozenset[date] = frozenset(
 # Source: HKEX official holiday schedule https://www.hkex.com.hk/Services/
 #         Trading/Securities/Overview/Trading-Hours-and-Schedules/
 #         Exchange-Holidays?sc_lang=en  (verified 2026-07-30, covers 2025–2027).
-# The mainland CN set above already excludes weekends; the HKEX set adds closures
-# that differ from SSE/SZSE (e.g. HK SAR Establishment Day, Christmas, Easter,
-# Buddha's Birthday, Good Friday, Day after Christmas).  Where the two sets overlap
-# (e.g. Lunar New Year, Labour Day) the days appear in BOTH sets — that's fine: the
-# union is taken by ``is_trading_day``.
+# Each venue selects its own holiday set; the CN/HK sets are not unioned.
+# Published HKEX securities circulars: CT/063/24 (2025), CT/075/25 (2026),
+# CT/077/26 (2027), verified against the exchange notices on 2026-10-18.
 # ---------------------------------------------------------------------------
 _HKEX_HOLIDAYS: frozenset[date] = frozenset(
     date.fromisoformat(s)
@@ -103,7 +101,6 @@ _HKEX_HOLIDAYS: frozenset[date] = frozenset(
         "2025-04-18", "2025-04-19", "2025-04-21",       # Good Friday + Easter Monday
         "2025-05-01",                                   # Labour Day
         "2025-05-05",                                   # Buddha's Birthday
-        "2025-06-02",                                   # Tuen Ng Festival
         "2025-07-01",                                   # HK SAR Establishment Day
         "2025-10-01",                                   # National Day
         "2025-10-07",                                   # day after Mid-Autumn Festival
@@ -112,25 +109,25 @@ _HKEX_HOLIDAYS: frozenset[date] = frozenset(
         # 2026 (official HKEX securities-market circular CT/075/25)
         "2026-01-01",                                   # New Year's Day
         "2026-02-17", "2026-02-18", "2026-02-19",       # Lunar New Year
-        "2026-04-03",                                   # Ching Ming Festival
-        "2026-04-06",                                   # Good Friday (Easter Mon falls on a Sun)
-        "2026-04-07",                                   # Easter Monday
+        "2026-04-03",                                   # Good Friday
+        "2026-04-06",                                   # day following Ching Ming Festival
+        "2026-04-07",                                   # day following Easter Monday
         "2026-05-01",                                   # Labour Day
-        "2026-05-25",                                   # Buddha's Birthday (approx)
+        "2026-05-25",                                   # day following Birthday of Buddha
         "2026-06-19",                                   # Tuen Ng Festival
         "2026-07-01",                                   # HK SAR Establishment Day
         "2026-10-01",                                   # National Day
         "2026-10-19",                                   # day following Chung Yeung Festival
         "2026-12-25",                                   # Christmas Day
-        # 2027 (approximate)
+        # 2027 (official HKEX securities-market circular CT/077/26)
         "2027-01-01",                                   # New Year's Day
         "2027-02-06", "2027-02-08", "2027-02-09",       # Lunar New Year
-        "2027-03-26",                                   # Good Friday (approx)
-        "2027-03-29",                                   # Easter Monday (approx)
-        "2027-04-05",                                   # Ching Ming Festival (approx)
+        "2027-03-26",                                   # Good Friday
+        "2027-03-29",                                   # Easter Monday
+        "2027-04-05",                                   # Ching Ming Festival
         "2027-05-01",                                   # Labour Day
         "2027-05-13",                                   # Buddha's Birthday
-        "2027-06-09",                                   # Tuen Ng Festival (approx)
+        "2027-06-09",                                   # Tuen Ng Festival
         "2027-07-01",                                   # HK SAR Establishment Day
         "2027-09-16",                                   # day after Mid-Autumn Festival
         "2027-10-01",                                   # National Day
@@ -138,6 +135,30 @@ _HKEX_HOLIDAYS: frozenset[date] = frozenset(
         "2027-12-27",                                   # Christmas (obs)
     )
 )
+
+# Published half-days, moved from the dashboard into the execution authority.
+# Sources: HKEX securities-market circulars CT/063/24, CT/075/25, CT/077/26.
+# Continuous trading ends at 12:00; this gate does not admit closing auctions.
+_HK_EARLY_CLOSES = frozenset(
+    date.fromisoformat(value)
+    for value in (
+        "2025-01-28", "2025-12-24", "2025-12-31",
+        "2026-02-16", "2026-12-24", "2026-12-31",
+        "2027-02-05", "2027-12-24", "2027-12-31",
+    )
+)
+
+
+def is_early_close(d: date, venue: str = "CN") -> bool:
+    """Whether HKEX omits the afternoon continuous session on a published half-day."""
+    return venue == "HK" and is_trading_day(d, venue=venue) and d in _HK_EARLY_CLOSES
+
+
+def session_close(d: date, venue: str = "CN") -> time:
+    """Scheduled continuous-session close, independent of full-day eligibility."""
+    if venue == "HK":
+        return _HK_AM_CLOSE if is_early_close(d, venue=venue) else _HK_PM_CLOSE
+    return _PM_CLOSE
 
 
 def is_holiday(d: date) -> bool:
@@ -157,13 +178,67 @@ def is_trading_day(d: date, venue: str = "CN") -> bool:
     callers that omit the argument are unchanged. ``venue='HK'`` gates on the HKEX
     holiday set instead, fixing the CN-HK-1 novel problem where the HK book ran on
     ~6 HKEX-only closure days per year (e.g. HK SAR Establishment Day on 2026-07-01).
-    Any unrecognised venue falls back to ``'CN'`` (fail-safe: coarsen, never unlock).
+    An unrecognised venue retains the legacy CN fallback; it is not strict venue validation.
     """
     if d.weekday() >= 5:          # weekends closed at both exchanges
         return False
     if venue == "HK":
         return d not in _HKEX_HOLIDAYS
     return d not in _HOLIDAYS     # 'CN' (default) or any unrecognised venue → A-share gate
+
+
+def session_date_evidence(start: date, end: date, venue: str = "CN") -> dict[str, object]:
+    """Describe only published CN/HK session dates, with explicit venue and coverage.
+
+    The approximate mainland 2027 table remains usable by legacy callers but
+    cannot qualify evaluation evidence through this stricter observation contract.
+    """
+    if type(start) is not date or type(end) is not date or start > end:
+        raise ValueError("session date evidence requires an ordered date window")
+    if type(venue) is not str or venue not in {"CN", "HK"}:
+        raise ValueError("session date evidence requires CN or HK")
+    coverage_start = date(2025, 1, 1)
+    coverage_end = date(2027 if venue == "HK" else 2026, 12, 31)
+    holidays = _HKEX_HOLIDAYS if venue == "HK" else _HOLIDAYS
+    sources = [
+        "https://www.hkex.com.hk/-/media/HKEX-Market/Services/Circulars-and-Notices/Participant-and-Members-Circulars/SEHK/2024/ce_SEHK_CT_063_2024.pdf",
+        "https://www.hkex.com.hk/-/media/HKEX-Market/Services/Circulars-and-Notices/Participant-and-Members-Circulars/SEHK/2025/ce_SEHK_CT_075_2025.pdf",
+        "https://www.hkex.com.hk/Services/Circulars-and-Notices/Participant-and-Members-Circulars/SEHK/2026/SEHK_CT_077_2026Jun01162846?sc_lang=en",
+    ] if venue == "HK" else [
+        "https://www.sse.com.cn/disclosure/announcement/general/c/c_20241223_10767108.shtml",
+        "https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml",
+    ]
+    evidence = {
+        "schema": "mastermind.cash_session_date_evidence.v1",
+        "calendar_owner": "portfolio.china_calendar",
+        "venue": venue,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "coverage_start": coverage_start.isoformat(),
+        "coverage_end": coverage_end.isoformat(),
+        "source_checked_on": "2026-10-18",
+        "source_refs": sources,
+        "scope": "published_static_cash_session_dates",
+        "exceptional_closures": "listed_only",
+        "price_or_cutoff_qualified": False,
+        "rule_version": "monday_friday_excluding_listed_closures.v1",
+        "full_day_closures": [
+            day.isoformat() for day in sorted(holidays)
+            if coverage_start <= day <= coverage_end
+        ],
+        "scheduled_dates": None,
+        "status": "unavailable",
+        "missing_reason": "outside_published_calendar_coverage",
+    }
+    if start < coverage_start or end > coverage_end:
+        return evidence
+    days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+    return {
+        **evidence,
+        "scheduled_dates": [day.isoformat() for day in days if is_trading_day(day, venue=venue)],
+        "status": "available",
+        "missing_reason": None,
+    }
 
 
 def _now_cst(now: datetime | None) -> datetime:
@@ -187,7 +262,8 @@ def is_open(now: datetime | None = None, venue: str = "CN") -> bool:
         return False
     t = cst.time()
     if venue == "HK":
-        return (_HK_AM_OPEN <= t < _HK_AM_CLOSE) or (_HK_PM_OPEN <= t < _HK_PM_CLOSE)
+        return (_HK_AM_OPEN <= t < _HK_AM_CLOSE) or (
+            not is_early_close(cst.date(), venue=venue) and _HK_PM_OPEN <= t < _HK_PM_CLOSE)
     return (_AM_OPEN <= t < _AM_CLOSE) or (_PM_OPEN <= t < _PM_CLOSE)
 
 
@@ -209,7 +285,7 @@ def next_trading_day(d: date, venue: str = "CN") -> date:
 
 def next_open(now: datetime | None = None, venue: str = "CN") -> datetime:
     """The next moment a session opens (at `venue`): today's morning open if still pre-market, the
-    same-day afternoon reopen during the lunch break, else the next trading day's morning open."""
+    same-day afternoon reopen during a regular lunch break, else the next trading day's morning open."""
     cst = _now_cst(now)
     today = cst.date()
     am_open, am_close, pm_open = (
@@ -219,7 +295,7 @@ def next_open(now: datetime | None = None, venue: str = "CN") -> datetime:
         t = cst.time()
         if t < am_open:
             return datetime.combine(today, am_open, tzinfo=CST)
-        if am_close <= t < pm_open:                   # lunch break — the next open is this afternoon
+        if not is_early_close(today, venue=venue) and am_close <= t < pm_open:
             return datetime.combine(today, pm_open, tzinfo=CST)
     nxt = next_trading_day(today, venue=venue)
     return datetime.combine(nxt, am_open, tzinfo=CST)

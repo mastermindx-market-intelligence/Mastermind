@@ -15,6 +15,8 @@ Read the owning product's current architecture, current Agent OS responsibility,
 
 Read `../../references/reality-boundary.md` before selecting a target or interpreting a result. Validate the final record against `../../references/reality-observation.schema.json`.
 
+Before returning, run the package-local deterministic verifier at `../../scripts/verify_reality_observation.py` over the final record, the owner-qualified evidence root, and this schema. The verifier is pure and stateless: it reads only the three supplied inputs, performs no write, no network access, and no search, and it creates no evidence store, browser registry, lifecycle, identity, retry, queue, or control plane. It grants no authority, and a valid receipt proves supplied-record and artifact consistency only, never live use or runtime authority.
+
 ## 2. Freeze one user job
 
 State:
@@ -63,7 +65,8 @@ For each capture:
 - keep source time, observation time, and `recorded_at` distinct;
 - collect the smallest semantic, accessibility, trace, and runtime evidence that can support or contradict the finding;
 - mark complete evidence `AVAILABLE`, incomplete retained evidence `PARTIAL` with a reason, and absent evidence `UNAVAILABLE with a concrete reason` rather than empty;
-- verify each evidence reference resolves to one declared artifact or one retained owner-native proof receipt.
+- verify each evidence reference resolves to one declared artifact or one retained owner-native proof receipt;
+- give every declared artifact one stable identity: one owner-relative reference, one SHA-256, and the exact byte count where the record asserts one. When public source cannot supply the expected digest of an owner-native artifact, disclose an explicit null digest with a concrete reason instead of inventing one. Such a record can never verify as valid.
 
 Do not upload private artifacts to a public destination. Do not expose tokens, cookies, account data, filesystem secrets, raw browser profiles, or unrelated personal information.
 
@@ -85,7 +88,7 @@ Exercise or explicitly mark `NOT_EXERCISED` for:
 - broken browser connection;
 - excluded account surface.
 
-A negative control must detect or refuse the intended bad state for the intended reason. A generic error, timeout, or unrelated assertion failure is not discrimination evidence.
+A negative control must detect or refuse the intended bad state for the intended reason. A generic error, timeout, or unrelated assertion failure is not discrimination evidence. Each control names the closed method and signal that make it discriminate its own bad state, and every control evidence reference resolves to a declared artifact.
 
 ## 8. Handle failures and effects
 
@@ -100,6 +103,7 @@ The return must state effect and cleanup separately. Effect comes from the ownin
 Emit one `mastermind.reality_observation.v1` record containing:
 
 - capability state and `recorded_at`;
+- one closed `revision` object: the explicit empty `ORIGINAL` form, or a correction that names its predecessor observation, its changed input references, its affected finding identities, its reason, its revised conclusion, and the owner-relative predecessor record reference and digest that prove the change;
 - persona and frozen journey;
 - approved target, deployed-observation time, revision comparison, and source/deployed relationship;
 - exact capture times and viewports, after proving completion does not precede start;
@@ -117,6 +121,6 @@ Validate the record against the packaged schema. The record is a transfer docume
 
 Inspect the exact source head, changed paths, tests, omitted checks, current-base compatibility, installation state, and real-path evidence separately. Obtain independent review when the governing commission requires it.
 
-Use the company capability vocabulary honestly. Source green is not installation. Installation is not authenticated use. Authenticated use is not a successful journey. One journey is not universal product proof. Final acceptance remains with the owning parent under current law.
+Use the company capability vocabulary honestly. Source green is not installation. Installation is not authenticated use. Authenticated use is not a successful journey. One journey is not universal product proof. Final acceptance remains with the owning parent under current law. A `PROVEN_LIVE` claim is refused when it coexists with a fixture target, a failed, unknown, or partial journey, an unexercised required control, an unresolved evidence identity, an unknown architecture binding, or an observed surface state that is not live.
 
 At a nonterminal return, provide the exact next action and preserve the continuation carrier. At a terminal boundary, stop only this owned child and leave shared browser, trace, observability, and account resources untouched.

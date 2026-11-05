@@ -33,6 +33,28 @@ from integrations.workbench_read_mcp import observer as observer_module
 from integrations.workbench_read_mcp import read_port as read_port_module
 from integrations.business_mcp_auth import mcp_adapter as adapter_module
 
+
+_FINAL_AUTH_HOOK = {"mode": "pass", "generation": "g1", "checks": 0}
+
+
+def _final_authorization(caller, request):
+    """Fixture-only SAME-binding guard for adversarial composition constructors."""
+    original = (caller, request.get("project_ref") if hasattr(request, "get") else None)
+    captured_generation = _FINAL_AUTH_HOOK["generation"]
+    def revalidate():
+        _FINAL_AUTH_HOOK["checks"] += 1
+        current = request.get("project_ref") if hasattr(request, "get") else None
+        if original[0] != caller or original[1] != current:
+            raise ProjectReadRefused("READ_BINDING_CHANGED")
+        # Same-project full-binding discriminator after the last await.
+        if _FINAL_AUTH_HOOK["mode"] == "generation-drift":
+            if _FINAL_AUTH_HOOK["generation"] != captured_generation:
+                raise ProjectReadRefused("READ_BINDING_CHANGED")
+        if _FINAL_AUTH_HOOK["mode"] == "fail":
+            raise ProjectReadRefused("READ_BINDING_CHANGED")
+    return revalidate
+
+
 ISSUER = "https://identity.workbench.example"
 RESOURCE = "https://workbench.example/mcp"
 SCOPE = "workbench.read"
@@ -175,7 +197,7 @@ class FullCompositionTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 self.outstanding -= 1
         self.port = create_descriptor_read_port(resolve_binding=resolve, clock_ms=lambda: self.clock * 1000, run_io=run_io)
-        self.server = create_authenticated_read_server(authenticator=self.auth, policy=policy, now=lambda: self.clock, audit_sink=self.audit, read_port=self.port, output_schema=OUTPUT, allowed_hosts=("127.0.0.1", "127.0.0.1:*"))
+        self.server = create_authenticated_read_server(authenticator=self.auth, policy=policy, now=lambda: self.clock, audit_sink=self.audit, read_port=self.port, output_schema=OUTPUT, final_authorization=_final_authorization, allowed_hosts=("127.0.0.1", "127.0.0.1:*"))
         self.app = self.server.streamable_http_app(); self.ready = asyncio.Event(); self.stop = asyncio.Event()
         async def lifespan():
             async with self.app.router.lifespan_context(self.app): self.ready.set(); await self.stop.wait()
@@ -246,6 +268,7 @@ class FullCompositionTests(unittest.IsolatedAsyncioTestCase):
         server = create_authenticated_read_server(
             authenticator=self.auth, policy=self.policy, now=lambda: self.clock,
             audit_sink=self.audit, read_port=port, output_schema=OUTPUT,
+            final_authorization=_final_authorization,
             allowed_hosts=("127.0.0.1", "127.0.0.1:*"),
         )
         app = server.streamable_http_app(); ready = asyncio.Event(); stop = asyncio.Event()
@@ -837,6 +860,7 @@ class FullCompositionTests(unittest.IsolatedAsyncioTestCase):
         server = create_authenticated_read_server(
             authenticator=self.auth, policy=self.policy, now=lambda: self.clock,
             audit_sink=self.audit, read_port=self.port, output_schema=impossible,
+            final_authorization=_final_authorization,
             allowed_hosts=("127.0.0.1", "127.0.0.1:*"),
         )
         app = server.streamable_http_app(); ready = asyncio.Event(); stop = asyncio.Event()
@@ -844,10 +868,14 @@ class FullCompositionTests(unittest.IsolatedAsyncioTestCase):
             async with app.router.lifespan_context(app):
                 ready.set()
                 await stop.wait()
-        life = asyncio.create_task(lifespan())
-        await asyncio.wait_for(ready.wait(), 5)
-        client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1")
+        life = None
+        client = None
+        primary_error: BaseException | None = None
         try:
+            # Readiness under cleanup try; cover readiness/close failure paths.
+            life = asyncio.create_task(lifespan())
+            await asyncio.wait_for(ready.wait(), 5)
+            client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1")
             response = await client.post(
                 "/mcp",
                 headers={"Accept":"application/json, text/event-stream", "MCP-Protocol-Version":"2025-03-26",
@@ -858,10 +886,263 @@ class FullCompositionTests(unittest.IsolatedAsyncioTestCase):
             refused = self.result(response)
             self.assertTrue(refused["isError"])
             self.assertNotIn("alpha sentinel", json.dumps(refused))
+        except BaseException as error:
+            primary_error = error
+            raise
         finally:
-            await client.aclose()
+            # R5 / R4-LOCAL-5: capture body primary BEFORE cleanup; never replace
+            # an existing primary with cleanup_only. Cleanup-only only when no primary.
+            cleanup_errors: list[BaseException] = []
+            if client is not None:
+                try:
+                    await client.aclose()
+                except BaseException as error:
+                    cleanup_errors.append(error)
             stop.set()
-            await asyncio.wait_for(life, 5)
+            if life is not None:
+                try:
+                    await asyncio.wait_for(life, 5)
+                except BaseException as error:
+                    cleanup_errors.append(error)
+            if primary_error is not None and cleanup_errors:
+                try:
+                    primary_error.add_note(
+                        "cleanup_errors="
+                        + ",".join(
+                            f"{type(err).__name__}:{err!r}" for err in cleanup_errors
+                        )
+                    )
+                except Exception:
+                    pass
+            elif primary_error is None and cleanup_errors:
+                raise AssertionError(
+                    "cleanup_only_failures="
+                    + ",".join(
+                        f"{type(err).__name__}:{err!r}" for err in cleanup_errors
+                    )
+                )
+
+    async def test_same_project_binding_change_after_await_withholds(self):
+        """R3-T4: actual ProjectReadBinding generation drift while final key_for awaits.
+
+        Uses production make_final_authorization/resolver against self.bindings.
+        Same project_ref; change real binding generation under the final-key gate;
+        refuse with READ_BINDING_CHANGED; unchanged positive control retained.
+        Synthetic _FINAL_AUTH_HOOK generation alone is insufficient here.
+        """
+        from integrations.workbench_read_mcp.deployment import make_final_authorization
+
+        gate = threading.Event()
+        release = threading.Event()
+        observed = threading.Event()
+        events: list[str] = []
+        key_state = {"tools": False, "final_calls": 0}
+
+        class GatedKeys(_Keys):
+            async def key_for(self, kid):
+                value = await super().key_for(kid)
+                if not key_state["tools"]:
+                    return value
+                key_state["final_calls"] += 1
+                if key_state["final_calls"] == 2:
+                    assert await asyncio.to_thread(observed.wait, 5)
+                    events.append("final_key_entry")
+                    gate.set()
+                    assert await asyncio.to_thread(release.wait, 5)
+                    events.append("release_resumption")
+                return value
+
+        priv = serialization.load_pem_private_key(self.pem, password=None)
+        jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(priv.public_key()))
+        jwk.update(kid="fixture-key", alg="RS256", use="sig")
+        gated_auth = JwtAuthenticator(policy=self.policy, jwks_cache=GatedKeys(jwk))
+
+        original_port = self.port
+
+        async def witnessing_port(caller, request):
+            result = await original_port(caller, request)
+            events.append("observation_complete")
+            observed.set()
+            return result
+
+        def resolve(caller, project):
+            return self.bindings.get((caller.subject_digest, project))
+
+        final_authorization = make_final_authorization(
+            resolve_binding=resolve, clock_ms=lambda: self.clock * 1000,
+        )
+
+        server = create_authenticated_read_server(
+            authenticator=gated_auth, policy=self.policy, now=lambda: self.clock,
+            audit_sink=self.audit, read_port=witnessing_port, output_schema=OUTPUT,
+            final_authorization=final_authorization,
+            allowed_hosts=("127.0.0.1", "127.0.0.1:*"),
+        )
+        app = server.streamable_http_app()
+        ready = asyncio.Event()
+        stop = asyncio.Event()
+        task = None
+        client = None
+
+        async def life():
+            async with app.router.lifespan_context(app):
+                ready.set()
+                await stop.wait()
+
+        pending = None
+        primary_error: BaseException | None = None
+        cleanup_errors: list[BaseException] = []
+        alpha_key = (self.subjects["alpha-user"], "alpha")
+        # Capture exact original binding/hook for outer restore (R3-LOCAL-3).
+        original_binding = self.bindings[alpha_key]
+        original_hook = dict(_FINAL_AUTH_HOOK)
+        try:
+            # Readiness registered under cleanup try (R3-T3 full-composition).
+            task = asyncio.create_task(life())
+            await asyncio.wait_for(ready.wait(), 5)
+            client = httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+            )
+            headers = {
+                "Accept": "application/json, text/event-stream",
+                "MCP-Protocol-Version": "2025-03-26",
+            }
+            token = self.token()
+            await client.post(
+                "/mcp",
+                headers={**headers, "Authorization": "Bearer " + token},
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-03-26",
+                        "capabilities": {},
+                        "clientInfo": {"name": "t", "version": "1"},
+                    },
+                },
+            )
+            # Positive control with unchanged binding (no final-key gate).
+            key_state["tools"] = False
+            key_state["final_calls"] = 0
+            pos = await client.post(
+                "/mcp",
+                headers={**headers, "Authorization": "Bearer " + token},
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "read_project_file",
+                        "arguments": {
+                            "project_ref": "alpha",
+                            "relative_path": "sentinel.txt",
+                        },
+                    },
+                },
+            )
+            pos_body = pos.json()["result"]
+            self.assertFalse(pos_body.get("isError"), pos_body)
+            self.assertIn("alpha sentinel", json.dumps(pos_body))
+
+            # Gated drift: change ACTUAL ProjectReadBinding generation while key held.
+            observed.clear()
+            gate.clear()
+            release.clear()
+            events.clear()
+            key_state["tools"] = True
+            key_state["final_calls"] = 0
+            # Register pending BEFORE any failing gate/assertion/mutation wait.
+            pending = asyncio.create_task(
+                client.post(
+                    "/mcp",
+                    headers={**headers, "Authorization": "Bearer " + token},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "read_project_file",
+                            "arguments": {
+                                "project_ref": "alpha",
+                                "relative_path": "sentinel.txt",
+                            },
+                        },
+                    },
+                )
+            )
+            assert await asyncio.to_thread(gate.wait, 5)
+            assert "observation_complete" in events
+            assert "final_key_entry" in events
+            binding = self.bindings[alpha_key]
+            self.bindings[alpha_key] = dataclasses.replace(
+                binding,
+                scope=dataclasses.replace(binding.scope, generation="g2"),
+            )
+            events.append("mutation")
+            release.set()
+            response = await pending
+            # Keep pending set so finally still gathers the done task.
+            body = response.json()["result"]
+            self.assertTrue(body.get("isError"), body)
+            dumped = json.dumps(body)
+            self.assertNotIn("alpha sentinel", dumped)
+            self.assertIn("READ_BINDING_CHANGED", dumped)
+            self.assertIn("release_resumption", events)
+        except BaseException as error:
+            primary_error = error
+            raise
+        finally:
+            # R3-LOCAL-3: release + settle every registered request INCLUDING done
+            # outcomes BEFORE client/lifespan close. Independent cleanups; restore
+            # captured original state; fail cleanup-only; retain primary+cleanup.
+            release.set()
+            if pending is not None:
+                owned = pending
+                pending = None
+                if not owned.done():
+                    owned.cancel()
+                try:
+                    settled = await asyncio.gather(owned, return_exceptions=True)
+                    for item in settled:
+                        if isinstance(item, BaseException) and not isinstance(
+                            item, asyncio.CancelledError
+                        ):
+                            cleanup_errors.append(item)
+                except BaseException as error:
+                    cleanup_errors.append(error)
+            if client is not None:
+                try:
+                    await client.aclose()
+                except BaseException as error:
+                    cleanup_errors.append(error)
+            stop.set()
+            if task is not None:
+                try:
+                    await asyncio.wait_for(task, 5)
+                except BaseException as error:
+                    cleanup_errors.append(error)
+            # Restore exact captured original binding/hook (not inferred g1).
+            self.bindings[alpha_key] = original_binding
+            _FINAL_AUTH_HOOK.clear()
+            _FINAL_AUTH_HOOK.update(original_hook)
+            if primary_error is not None and cleanup_errors:
+                try:
+                    primary_error.add_note(
+                        "cleanup_errors="
+                        + ",".join(
+                            f"{type(err).__name__}:{err!r}" for err in cleanup_errors
+                        )
+                    )
+                except Exception:
+                    pass
+            elif primary_error is None and cleanup_errors:
+                raise AssertionError(
+                    "cleanup_only_failures="
+                    + ",".join(
+                        f"{type(err).__name__}:{err!r}" for err in cleanup_errors
+                    )
+                )
 
 
 if __name__ == "__main__":

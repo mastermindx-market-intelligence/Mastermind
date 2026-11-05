@@ -108,7 +108,31 @@ Each control is `DETECTED`, `REFUSED`, or `NOT_EXERCISED`, with a concrete reaso
 
 Evidence is immutable historical observation. A correction creates a new owner-native record that identifies the earlier observation, changed input, affected finding, and revised conclusion. Do not overwrite historical artifacts or refresh old evidence by changing its wrapper timestamp.
 
+Every record carries one closed `revision` object. The `ORIGINAL` form is explicit and empty: no predecessor observation, no changed input references, no affected finding identities, no reason, and no revised conclusion. The correction form is not free prose. It names the predecessor observation identity, the changed input references, the affected finding identities, the reason, the revised conclusion, and it binds an explicit owner-relative predecessor-record reference together with that record's SHA-256.
+
+A predecessor observation identity alone proves nothing about changed evidence. The bound predecessor record is resolved under the same owner-qualified evidence root supplied to the verifier, its bytes must match its declared digest, and its own observation identity must match the named predecessor. There is no identity lookup, no registry, no path guessing, and no implicit current record.
+
+A correction is refused when it references its own observation, when the bound predecessor record is missing or its digest mismatches, when a changed input reference does not resolve to a declared artifact, when an affected finding identity is not present in the observation, when the changed or affected set is empty, or when nothing but the wrapper timestamp changed. A correction may not silently upgrade the capture epoch of its predecessor, and it may not change the effect state without changed effect evidence. A correction never rewrites the historical artifacts it corrects.
+
 If source or deployment changes after capture, the observation remains valid for its recorded epoch and must not be described as current. If a target identity, build relationship, or effect is ambiguous, fail closed rather than selecting the newest-looking candidate.
+
+## Unresolved artifact identity
+
+Public source may be unable to supply the expected digest of an owner-native artifact. That fact is disclosed, not hidden. An effect or cleanup evidence descriptor may carry an explicit null digest with `identity_status` `UNRESOLVED` and a concrete reason. The closed shape may represent a disclosed unavailable identity; executable acceptance stays fail-closed.
+
+A record that carries an unresolved artifact identity can never return a valid verification receipt, whether or not the artifact happens to be present on disk. The owner's separately reported effect is retained as attribution and is never converted into a current verification.
+
+## Cleanup grounding
+
+Cleanup states temporary-process, temporary-profile, and shared-resource disposition separately. A `CLEAN` state requires absent temporary processes and unchanged shared resources. A `REMOVED` temporary profile additionally requires owner-grounded evidence: the retained cleanup artifact must identify the profile and carry both pre-removal and post-removal evidence. A `NOT_CREATED` profile requires an owner-grounded profile identity and pre-creation evidence. Zero matched processes and zero matched workspace paths are absence counters, not proof that a named profile was removed. When the receipt proves only the counters, record the profile as `UNKNOWN` and the cleanup state as `INCOMPLETE`.
+
+## Deterministic verification seam
+
+The package ships one pure, stateless verifier at `scripts/verify_reality_observation.py`. It reads one observation record, one owner-qualified evidence root supplied by the caller, and the packaged schema, and it returns one closed receipt containing exactly the schema, verdict, observation identity, observation digest, artifact count, checks, and errors. It performs no write, no network access, no subprocess, no repository or filesystem search, and it creates no database, evidence store, browser registry, lifecycle, identity, retry, queue, or control plane. The caller supplies the evidence root; the API grants no authority over it.
+
+The verifier enforces the closed schema, strict JSON with duplicate-key and non-finite refusal, real UTC calendar parsing and ordering, source-revision sibling equality and difference, root-contained regular-file resolution with absolute, traversal, and symlink-escape refusal, existence, exact byte count, digest and unique identity for every declared artifact, actual PNG structure and dimensions with bounded reads and decompression, consumption-proof binding to the intended consumer and the exact screenshot identity, resolution of every finding and negative-control reference against the declared artifacts, negative-control method and signal meaning, capability, target, journey, and control consistency, honest cleanup, secret-shaped value refusal across every public text field, and the closed correction semantics above.
+
+A valid verdict proves exactly one thing: the supplied record and the supplied artifacts are mutually consistent. It does not prove newly authenticated model consumption, a real-product success, installation, deployment, or runtime authority.
 
 ## Completion law
 
@@ -122,6 +146,8 @@ Use:
 - `DARK_OR_DISCONNECTED` when a built capability cannot reach its intended consumer;
 - `BROKEN` when an expected live path demonstrably fails;
 - `PROVEN_LIVE` only for the exact approved target, account, package generation, journey, and proof epoch actually demonstrated.
+
+`PROVEN_LIVE` is refused when it coexists with a `TEST_FIXTURE` target, a `FAILURE`, `UNKNOWN`, or `PARTIAL` journey outcome, a required negative control that was not exercised, an unresolved evidence identity, an unknown architecture binding, or an observed surface state that is not `LIVE`. The completion claim is consistent with the evidence it cites, or it is refused.
 
 One successful journey does not prove every product, viewport, account, data state, or provider.
 

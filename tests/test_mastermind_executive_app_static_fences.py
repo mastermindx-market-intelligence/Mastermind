@@ -209,16 +209,23 @@ def test_schema_digest_unchanged():
 
 
 def test_temporary_e1_profile_has_no_admission_or_general_socket_reference():
-    """The new four-read boundary cannot gain a hidden mutation dependency."""
+    """Keep the four-read profile separate from the explicit five-tool builder.
 
-    for relative in (
-        "integrations/executive_mcp/e1_http.py",
-        "integrations/executive_mcp/server.py",
-    ):
-        source = (REPO_ROOT / relative).read_text(encoding="utf-8")
-        assert "send_control_request" not in source
-        assert "submit_ceo_intent" not in source
-        assert "reconcile_by_request_ref" not in source
+    The shared SDK module now also contains the commissioned App composition.
+    Apply the temporary-profile fence to its own builders and helpers, while
+    the general control socket remains forbidden throughout the SDK module.
+    """
+    boundary = (REPO_ROOT / "integrations/executive_mcp/e1_http.py").read_text(encoding="utf-8")
+    server = (REPO_ROOT / "integrations/executive_mcp/server.py").read_text(encoding="utf-8")
+    assert "send_control_request" not in server
+    tree = ast.parse(server)
+    temporary_nodes = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and (node.name.startswith("_e1_") or node.name in {"_is_e1_envelope", "build_e1_tools", "build_e1_mcp_app"})]
+    assert {node.name for node in temporary_nodes} >= {"build_e1_tools", "build_e1_mcp_app"}
+    for source in (boundary, *(ast.unparse(node) for node in temporary_nodes)):
+        for forbidden in ("send_control_request", "submit_ceo_intent", "compose_admission",
+                          "reconcile_by_request_ref", "build_executive_mcp_app"):
+            assert forbidden not in source
 
 
 def _git_stdout(*args: str) -> str:

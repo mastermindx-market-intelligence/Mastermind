@@ -23,6 +23,7 @@ EXPECTED_PACKAGE_FILES = {
     "references/catalog.fragment.json",
     "references/reality-boundary.md",
     "references/reality-observation.schema.json",
+    "scripts/verify_reality_observation.py",
     "skills/inspect-product-journey/SKILL.md",
 }
 APP_ID_RE = re.compile(
@@ -35,7 +36,13 @@ def load_json(path: Path) -> object:
 
 
 def valid_observation() -> dict[str, object]:
-    control = lambda status, detail: {"status": status, "detail": detail}
+    control = lambda status, method, signal, detail, refs=(): {
+        "status": status,
+        "method": method,
+        "signal": signal,
+        "evidence_refs": list(refs),
+        "detail": detail,
+    }
     proof_digest = "9" * 64
     consumption = lambda suffix: {
         "state": "CONSUMED",
@@ -51,6 +58,14 @@ def valid_observation() -> dict[str, object]:
         "observation_id": "REALITY-CONTROL-ROOM-R1",
         "capability_state": "PARTIAL",
         "recorded_at": "2026-09-08T06:15:00Z",
+        "revision": {
+            "state": "ORIGINAL",
+            "predecessor_observation_id": None,
+            "changed_input_refs": [],
+            "affected_finding_ids": [],
+            "reason": None,
+            "revised_conclusion": None,
+        },
         "persona": {
             "name": "Chairman",
             "user_job": "See what truly needs attention",
@@ -62,6 +77,10 @@ def valid_observation() -> dict[str, object]:
             "locator": "owner-qualified loopback target",
             "authorization_ref": "current live assignment",
             "surface_class": "APPROVED_PRODUCT",
+            "surface_name": "current Control Room inspector",
+            "experience_role": "ADVANCED",
+            "architecture_ref": "Mastermind:decision-first@e18cab4f3ca41725fdb517623543fa4fb1aba467",
+            "observed_surface_state": "PARTIAL",
         },
         "source_relationship": {
             "protected_sha": "b" * 40,
@@ -132,6 +151,7 @@ def valid_observation() -> dict[str, object]:
         },
         "findings": [
             {
+                "finding_id": "FINDING-001",
                 "basis": "MODEL_INFERENCE",
                 "claim": "raw diagnostics displace the decision outcome",
                 "evidence_refs": [
@@ -143,19 +163,60 @@ def valid_observation() -> dict[str, object]:
             }
         ],
         "negative_controls": {
-            "wrong_target": control("DETECTED", "target identity differs"),
-            "stale_capture": control("DETECTED", "source clocks expose age"),
-            "different_build": control("DETECTED", "deployed and protected revisions differ"),
-            "different_viewport_or_data_state": control("DETECTED", "receipts remain distinct"),
-            "missing_screenshot_bytes": control("REFUSED", "visual claims require bytes"),
-            "broken_browser_connection": control("DETECTED", "provider-specific disconnection retained"),
-            "excluded_account_surface": control("REFUSED", "managed account surface is outside scope"),
+            "wrong_target": control(
+                "DETECTED",
+                "OWNER_EVIDENCE",
+                "HTTP_404",
+                "target identity differs",
+            ),
+            "stale_capture": control(
+                "DETECTED",
+                "OWNER_EVIDENCE",
+                "STALE_INPUT_DISCLOSED",
+                "source clocks expose age",
+            ),
+            "different_build": control(
+                "DETECTED",
+                "OWNER_EVIDENCE",
+                "SOURCE_SHA_DISTINCT",
+                "deployed and protected revisions differ",
+            ),
+            "different_viewport_or_data_state": control(
+                "DETECTED",
+                "OWNER_EVIDENCE",
+                "VIEWPORT_OR_DATA_STATE_DISTINCT",
+                "receipts remain distinct",
+            ),
+            "missing_screenshot_bytes": control(
+                "REFUSED",
+                "CONTRACT_REFUSAL",
+                "SCREENSHOT_BYTES_REQUIRED",
+                "visual claims require bytes",
+            ),
+            "broken_browser_connection": control(
+                "DETECTED",
+                "OWNER_EVIDENCE",
+                "PROVIDER_DISCONNECTED",
+                "provider-specific disconnection retained",
+            ),
+            "excluded_account_surface": control(
+                "REFUSED",
+                "CONTRACT_REFUSAL",
+                "TARGET_CLASS_EXCLUDED",
+                "managed account surface is outside scope",
+            ),
         },
         "effect": {
             "state": "NOT_APPLIED",
             "operation_ref": "reality-control-room-r1",
             "carrier_ref": "web-sol/current-chairman-directed-session",
-            "evidence_refs": ["private-evidence/capture-set.json"],
+            "evidence": [
+                {
+                    "artifact_ref": "private-evidence/capture-set.json",
+                    "sha256": "7" * 64,
+                    "coverage": "owner-native capture-set receipt for the read-only journey",
+                }
+            ],
             "detail": "The one-shot journey was read-only and produced no product or account mutation.",
         },
         "cleanup": {
@@ -163,7 +224,13 @@ def valid_observation() -> dict[str, object]:
             "temporary_processes": "ABSENT",
             "temporary_profile": "REMOVED",
             "shared_resources": "UNCHANGED",
-            "evidence_refs": ["private-evidence/cleanup-attestation.json"],
+            "evidence": [
+                {
+                    "artifact_ref": "private-evidence/cleanup-attestation.json",
+                    "sha256": "8" * 64,
+                    "coverage": "owner-native cleanup attestation for the isolated profile",
+                }
+            ],
             "detail": "The isolated browser process and temporary profile were absent at return.",
         },
         "limitations": ["no accepted runtime admission"],

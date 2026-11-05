@@ -257,7 +257,11 @@ const flattened = node => node.textContent + node.children.map(flattened).join('
 async function popupFixture(reader, tabs) {
   const elements = Object.fromEntries(['refresh', 'rows', 'summary', 'scope', 'status', 'timestamp'].map(id => [id, new TestElement(id)]));
   const context = {document: {getElementById: id => elements[id], createElement: tag => new TestElement(tag)},
-    chrome: {tabs}, MMX_WEB_SOL_INSTANCE: {instanceId: INSTANCE}, MMXWebSolCensus: reader};
+    chrome: {runtime: {sendMessage(message) {
+      assert.equal(JSON.stringify(message), JSON.stringify({kind: 'MMX_WEB_SOL_CENSUS_REFRESH'}));
+      return reader.collect(tabs, INSTANCE);
+    }}}};
+  context.self = {}; context.top = context.self;
   vm.runInNewContext(fs.readFileSync(path.join(path.dirname(file), 'census.js'), 'utf8'), context);
   const done = async () => {
     for (let i = 0; i < 100 && elements.refresh.disabled; i++) await new Promise(r => setTimeout(r, 2));

@@ -109,3 +109,218 @@ def test_each_negative_control_is_discriminating(tmp_path,name,bad):
     if bad in {'CONTRACT_REFUSAL','OWNER_EVIDENCE'}: r['negative_controls'][name]['method']=bad
     else: r['negative_controls'][name]['signal']=bad
     assert 'NEGATIVE_CONTROL_INVALID' in codes(verify(tmp_path,r))
+
+
+# ---------------------------------------------------------------------------
+# Refinement 5649522220 additions.
+#
+# Every fixture below is generated in a temporary directory. The bytes are
+# synthetic; a passing synthetic case proves the verifier discriminates the
+# invariant, not that a real product journey ever happened.
+# ---------------------------------------------------------------------------
+
+CONTROL_NAMES = (
+    'wrong_target',
+    'stale_capture',
+    'different_build',
+    'different_viewport_or_data_state',
+    'missing_screenshot_bytes',
+    'broken_browser_connection',
+    'excluded_account_surface',
+)
+
+
+def verify_record(root, r):
+    p = root.parent / 'observation.json'
+    p.write_text(json.dumps(r), encoding='utf-8')
+    return mod().verify_observation_file(p, root, SCHEMA)
+
+
+def success_record(tmp_path):
+    """A synthetic, fully evidenced approved-product success case."""
+    r, root, _ = fixture(tmp_path)
+    r['capability_state'] = 'PROVEN_LIVE'
+    r['journey']['outcome'] = 'SUCCESS'
+    r['target']['observed_surface_state'] = 'LIVE'
+    return r, root
+
+
+def correction_record(tmp_path):
+    """A genuine correction: changed evidence, a revised finding, bound predecessor."""
+    r, root, _ = fixture(tmp_path)
+    predecessor = deepcopy(r)
+    predecessor['observation_id'] = 'REALITY-TEST-000'
+    sem_ref = 'private-evidence/semantic.json'
+    amended = b'{"surface":"advanced","amended":true}\n'
+    (root / sem_ref).write_bytes(amended)
+    r['capture']['semantic_evidence']['artifacts'][0]['sha256'] = sha(amended)
+    r['findings'][0]['claim'] = (
+        'Diagnostics compete with the outcome; the amended snapshot narrows the claim.'
+    )
+    r['observation_id'] = 'REALITY-TEST-001-CORRECTION'
+    predecessor_bytes = json.dumps(predecessor, sort_keys=True).encode()
+    (root / 'private-evidence/predecessor-observation.json').write_bytes(predecessor_bytes)
+    r['revision'] = {
+        'state': 'CORRECTION',
+        'predecessor_observation_id': 'REALITY-TEST-000',
+        'changed_input_refs': [sem_ref],
+        'affected_finding_ids': ['FINDING-001'],
+        'reason': 'The semantic snapshot was re-read and the earlier claim was too broad.',
+        'revised_conclusion': 'The finding is narrowed; the journey outcome is unchanged.',
+        'predecessor_record_ref': 'private-evidence/predecessor-observation.json',
+        'predecessor_record_sha256': sha(predecessor_bytes),
+    }
+    return r, root
+
+
+def test_valid_correction_is_accepted_against_its_bound_predecessor(tmp_path):
+    r, root = correction_record(tmp_path)
+    x = verify_record(root, r)
+    assert x['verdict'] == 'VALID' and x['errors'] == []
+    assert x['artifact_count'] == 7
+
+
+def test_synthetic_approved_success_case_is_valid(tmp_path):
+    r, root = success_record(tmp_path)
+    x = verify_record(root, r)
+    assert x['verdict'] == 'VALID' and x['errors'] == []
+    assert x['artifact_count'] == 7
+
+
+def test_missing_effect_artifact_fails_independently(tmp_path):
+    r, root, _ = fixture(tmp_path)
+    (root / 'private-evidence/effect.json').unlink()
+    assert 'ARTIFACT_MISSING' in codes(verify_record(root, r))
+
+
+def test_missing_cleanup_artifact_fails_independently(tmp_path):
+    r, root, _ = fixture(tmp_path)
+    (root / 'private-evidence/cleanup.json').unlink()
+    assert 'ARTIFACT_MISSING' in codes(verify_record(root, r))
+
+
+@pytest.mark.parametrize(
+    'mutate',
+    [
+        'unresolved_input',
+        'unknown_finding',
+        'empty_changed',
+        'empty_affected',
+        'timestamp_only',
+        'digest_mismatch',
+        'missing_predecessor',
+        'epoch_upgrade',
+        'effect_upgrade',
+        'self_reference',
+    ],
+)
+def test_correction_failures_are_refused_for_their_own_reason(tmp_path, mutate):
+    r, root = correction_record(tmp_path)
+    if mutate == 'unresolved_input':
+        r['revision']['changed_input_refs'] = ['private-evidence/undeclared.json']
+    elif mutate == 'unknown_finding':
+        r['revision']['affected_finding_ids'] = ['FINDING-999']
+    elif mutate == 'empty_changed':
+        r['revision']['changed_input_refs'] = []
+    elif mutate == 'empty_affected':
+        r['revision']['affected_finding_ids'] = []
+    elif mutate == 'timestamp_only':
+        original = b'{"surface":"advanced"}\n'
+        (root / 'private-evidence/semantic.json').write_bytes(original)
+        r['capture']['semantic_evidence']['artifacts'][0]['sha256'] = sha(original)
+        r['findings'][0]['claim'] = 'Diagnostics compete with outcome.'
+    elif mutate == 'digest_mismatch':
+        r['revision']['predecessor_record_sha256'] = '0' * 64
+    elif mutate == 'missing_predecessor':
+        (root / 'private-evidence/predecessor-observation.json').unlink()
+    elif mutate == 'epoch_upgrade':
+        r['capture']['started_at'] = '2026-09-08T11:58:00Z'
+    elif mutate == 'effect_upgrade':
+        r['effect']['state'] = 'APPLIED'
+    elif mutate == 'self_reference':
+        r['revision']['predecessor_observation_id'] = r['observation_id']
+        r['revision']['predecessor_record_sha256'] = '1' * 64
+    x = verify_record(root, r)
+    assert 'CORRECTION_INVALID' in codes(x)
+    assert x['verdict'] != 'VALID'
+
+
+@pytest.mark.parametrize(
+    'mutate', ['fixture_target', 'failure_journey', 'unknown_journey']
+)
+def test_proven_live_refuses_inconsistent_target_or_journey(tmp_path, mutate):
+    r, root = success_record(tmp_path)
+    if mutate == 'fixture_target':
+        r['target']['surface_class'] = 'TEST_FIXTURE'
+    elif mutate == 'failure_journey':
+        r['journey']['outcome'] = 'FAILURE'
+    else:
+        r['journey']['outcome'] = 'UNKNOWN'
+    assert 'CAPABILITY_CONSISTENCY_INVALID' in codes(verify_record(root, r))
+
+
+@pytest.mark.parametrize('control_name', CONTROL_NAMES)
+def test_proven_live_refuses_each_unexercised_control(tmp_path, control_name):
+    r, root = success_record(tmp_path)
+    r['negative_controls'][control_name]['status'] = 'NOT_EXERCISED'
+    assert 'CAPABILITY_CONSISTENCY_INVALID' in codes(verify_record(root, r))
+
+
+def test_control_evidence_must_resolve_to_a_declared_artifact(tmp_path):
+    r, root, _ = fixture(tmp_path)
+    r['negative_controls']['wrong_target']['evidence_refs'] = [
+        'private-evidence/undeclared.json'
+    ]
+    assert 'NEGATIVE_CONTROL_INVALID' in codes(verify_record(root, r))
+
+
+def test_control_evidence_must_exist_on_disk(tmp_path):
+    r, root, _ = fixture(tmp_path)
+    r['negative_controls']['stale_capture']['evidence_refs'] = [
+        'private-evidence/state.json'
+    ]
+    (root / 'private-evidence/state.json').unlink()
+    assert 'ARTIFACT_MISSING' in codes(verify_record(root, r))
+
+
+def test_secret_shape_in_a_non_locator_text_field_is_refused(tmp_path):
+    r, root, _ = fixture(tmp_path)
+    r['findings'][0]['claim'] = 'Diagnostics compete; credential ghp_' + 'a' * 36
+    assert 'SECRET_SHAPED_VALUE' in codes(verify_record(root, r))
+
+
+def test_unresolved_historical_identity_is_never_valid(tmp_path):
+    root = tmp_path / 'owner'
+    root.mkdir()
+    x = mod().verify_observation_file(OBS, root, SCHEMA)
+    assert 'ARTIFACT_IDENTITY_UNRESOLVED' in codes(x)
+    assert x['verdict'] != 'VALID'
+
+
+def test_published_record_declares_nine_unique_historical_files(tmp_path):
+    root = tmp_path / 'owner'
+    root.mkdir()
+    x = mod().verify_observation_file(OBS, root, SCHEMA)
+    assert x['artifact_count'] == 9
+
+
+def test_symlink_escape_from_the_evidence_root_is_refused(tmp_path):
+    r, root, _ = fixture(tmp_path)
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    target = outside / 'desktop.png'
+    target.write_bytes((root / 'private-evidence/desktop.png').read_bytes())
+    link = root / 'private-evidence/linked.png'
+    link.symlink_to(target)
+    extra = deepcopy(r['capture']['screenshots'][0])
+    extra['artifact_ref'] = 'private-evidence/linked.png'
+    r['capture']['screenshots'].append(extra)
+    assert 'ARTIFACT_REF_INVALID' in codes(verify_record(root, r))
+
+
+def test_url_shaped_artifact_reference_is_refused(tmp_path):
+    r, root, _ = fixture(tmp_path)
+    r['capture']['screenshots'][0]['artifact_ref'] = (
+        'https://example.invalid/image.png?token=secret'
+    )
+    assert 'ARTIFACT_REF_INVALID' in codes(verify_record(root, r))

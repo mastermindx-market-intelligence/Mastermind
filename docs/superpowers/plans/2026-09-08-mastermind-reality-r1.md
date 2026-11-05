@@ -33,7 +33,9 @@
 - Create `plugins/mastermind-reality/references/reality-boundary.md` — authority, evidence, time, correction, effect, privacy, completion, and rollback rules.
 - Create `plugins/mastermind-reality/references/reality-observation.schema.json` — closed transfer/evidence schema; never a mutable registry.
 - Create `plugins/mastermind-reality/references/catalog.fragment.json` — package-local inert integration input.
+- Create `plugins/mastermind-reality/scripts/verify_reality_observation.py` — pure, stateless deterministic verifier that turns one record plus one owner-qualified evidence root into one closed verification receipt.
 - Create `tests/test_mastermind_reality_contract.py` — package, schema, hostile-mutation, negative-control, and no-duplicate-plane tests.
+- Create `tests/test_mastermind_reality_verifier.py` — hostile RED suite and discriminating regressions for the package-local verifier.
 - Create `research/MASTERMIND_REALITY_R1_CONTROL_ROOM_OBSERVATION_2026-09-07.json` — sanitized schema-valid record of the already-inspected real Control Room journey; private bytes remain outside GitHub.
 - Create `docs/superpowers/plans/2026-09-08-mastermind-reality-r1.md` — this implementation and release plan.
 
@@ -278,6 +280,41 @@ Require 22 focused passes with zero skips. Mutate each new safety boundary indep
 - [x] **Step 5: Publish one same-carrier hardening commit**
 
 Re-read protected source, confirm no overlapping Reality writer, commit only the existing eight-path carrier subset, push by normal fast-forward, and update PR #535 without Ready, merge, installation, or production claims.
+
+### Task 8B: Add the Deterministic Verification Seam
+
+**Files:**
+- Create: `plugins/mastermind-reality/scripts/verify_reality_observation.py`.
+- Modify: `plugins/mastermind-reality/references/reality-observation.schema.json`.
+- Modify: `plugins/mastermind-reality/references/reality-boundary.md`.
+- Modify: `plugins/mastermind-reality/skills/inspect-product-journey/SKILL.md`.
+- Modify: `research/MASTERMIND_REALITY_R1_CONTROL_ROOM_OBSERVATION_2026-09-07.json`.
+- Modify: `tests/test_mastermind_reality_contract.py`.
+- Modify: `tests/test_mastermind_reality_verifier.py`.
+
+**Interfaces:**
+- Consumes: one `mastermind.reality_observation.v1` record, one owner-qualified evidence root supplied by the caller, and the packaged schema.
+- Produces: one closed receipt with exactly `schema`, `verdict`, `observation_id`, `observation_sha256`, `artifact_count`, `checks`, and `errors`.
+
+- [x] **Step 1: Establish the verification RED**
+
+Land the package-local RED suite first. On the composed baseline the verifier is absent and twenty-nine verifier tests fail while the twenty-three contract tests pass. The contract suite asserts the closed schema carries the revision object, the target surface identity, and the finding identity.
+
+- [x] **Step 2: Implement the pure stateless verifier**
+
+Read three explicit inputs and write nothing. Refuse duplicate JSON keys and non-finite numbers, parse real UTC calendar instants, order the capture window, relate source revisions, resolve owner-relative references inside the supplied root, prove existence, byte count, digest, unique identity, actual PNG structure and dimensions, bind the consumption proof to the intended consumer and the exact screenshot identity, resolve every finding and control reference, enforce negative-control method and signal meaning, enforce capability, target, journey, and control consistency, ground cleanup claims, and scan every public text field for secret-shaped values.
+
+- [x] **Step 3: Add the closed revision and correction law**
+
+Give every record an explicit empty `ORIGINAL` revision or a `CORRECTION` that binds its predecessor observation, changed input references, affected finding identities, reason, revised conclusion, and the owner-relative predecessor record reference and digest. Refuse self-reference, missing or mismatched predecessor, unresolved changed references, unknown affected findings, empty changed or affected sets, timestamp-only wrapper refreshes, capture-epoch upgrades, and effect-authority upgrades.
+
+- [x] **Step 4: Migrate the historical record honestly**
+
+Retain the historical identity, capture window, source revisions, findings, and all seven known capture identities. Correct the false surface wording, add stable finding identities and the explicit original revision, disclose the unavailable capture-set identity as an unresolved null digest with a concrete reason, lower the unsupported profile claim, and state that full artifact verification was not repeated.
+
+- [x] **Step 5: Prove GREEN and discriminating mutations**
+
+Require the focused suite green with zero skips, then independently weaken representative time, digest, path, PNG, consumption, correction, effect/cleanup, and completion checks and require the corresponding test to fail. Restore byte-identical source before the final green run.
 
 ### Task 9: Verify, Review, and Return
 
