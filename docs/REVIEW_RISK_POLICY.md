@@ -1,6 +1,6 @@
 # Risk-tiered PR review — lower friction without removing real safeguards
 
-**Status:** The baseline was accepted in protected Mastermind #1989. This Chairman-directed attended-Web all-tier review waiver and its safe CI-risk composition remain a **source candidate** until protected-accepted and installed. No source candidate grants a GitHub rule, approval or merge bypass. This document has no separate runtime authority.
+**Status:** The #1989 baseline and #2030 Chairman-directed attended-Web all-tier waiver / safe CI-risk composition are protected-merged (#2030 merge `68e3b816c95930f6996dbcc10403a6ad694e6889`). ChatGPT Project settings save/readback and fresh-session behavior remain NOT_PROVEN; the distinct signed AUTOMATIC review host remains OFF unless separately enabled. This source grants no GitHub rule, approval, merge bypass or independent runtime authority.
 
 **Owner:** Existing GitHub release workflow + `control_plane/github_release_assessment.py` (approval adjudication), Executive/Fabric (admission and independent results), and native branch rules/merge queue (enforcement). The pure `control_plane/github_review_risk_policy.py` only supplies a reproducible advisory risk tier. No new webhook, queue, reviewer registry, auth store, code owner, worker budget, retry process or release engine.
 
