@@ -28,3 +28,6 @@
   .mm-new-project-start,.mm-new-project-start-control,.mm-new-project-start-control > button { width:100%; }
   .mm-new-project-start { justify-items:stretch; }
 }
+
+/* Exact technical declaration remains readable inside its existing disclosure. */
+.mm-new-project-feedback pre { max-width:100%; white-space:pre-wrap; overflow-wrap:anywhere; overflow-x:auto; }
