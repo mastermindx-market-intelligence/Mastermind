@@ -35,8 +35,8 @@ AUTHORITY
 9A. Macro `merge-on-green`: docs/DELIVERY_WORKFLOW.md. Never bulk-arm.
 
 MODES/TOOLS
-10. ACTIVE_EXECUTION 1B governs human-attended mode fit/stickiness; no invented Pro receipt. Automated router/budget gates remain; switch only for critical-path need.
-11. Capabilities vary by action/session. Extra High may aid recovery; one success proves no other capability.
+10. ACTIVE_EXECUTION 1B governs human-attended mode fit/stickiness; no invented Pro receipt. Router/budget gates remain; switch only for critical need.
+11. Capabilities vary by action/session. Extra High is a recovery candidate, not guaranteed access. One success is scoped.
 12. Discover action/permission before claiming unavailability. Use authorized action or harmless check; no dummy writes or invented telemetry.
 13. Distinguish tool/auth/safety denial, request error, rate limit, EFFECT_UNKNOWN. First explicit safety/permission denial ends that action: no rephrased/shortened/cross-tool/account retry. Reconcile effects; continue safe work.
 14. One bounded diagnostic per unchanged failure. Recheck after relevant mode/session/schema/reconnection change or observed recovery; reconcile effects before retry. No unchanged retry/reconnect loops.
