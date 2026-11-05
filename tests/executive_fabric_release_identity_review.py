@@ -563,3 +563,10 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 # NEXT accepted source: callback input bound / existing HTTP permission denial,
 # never an OS identity. Exact whole-source hash and token sites only.
 REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '98a0be4402c331678b0870cd7b673d56c8e3704b83ff9e8b21c95610a5b54c4d', 'sites': ((703, 93, 96, 'int', '403'), (705, 56, 59, 'int', '403'), (712, 46, 49, 'int', '403'), (713, 56, 59, 'int', '403'))}
+# S14 reviewed private-directory comparison (Root + independent89cb). This
+# single permission check grants no identity or chmod capability. Any path,
+# token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
+REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/post_failure_observation.py'] = {
+    'sha256': '2a78630ccaf574da752c77d7b8f821723ccb264b970e2fe38b1976d886ca97a0',
+    'sites': ((293, 79, 84, 'int', '0o700'),),
+}

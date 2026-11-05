@@ -1025,7 +1025,7 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
     tokens = [
         (len(line) - len(line.lstrip(" ")), line.lstrip(" "))
         for line in lines[1:end]
-        if line.strip() and not line.lstrip().startswith("#")
+        if line.strip()
     ]
     entry_pattern = re.compile(
         r"^([A-Za-z_][A-Za-z0-9_-]*|'(?:[^']|'')*'|\"(?:[^\"\\]|\\.)*\")"
@@ -1039,6 +1039,13 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
 
     def refuse() -> None:
         raise ValueError("unsupported YAML structure in path-list frontmatter")
+
+    def skip_comments(index: int) -> int:
+        # Call only at a structural boundary, never inside a quoted scalar.
+        # A hash-prefixed continuation may contain the scalar's closing quote.
+        while index < len(tokens) and tokens[index][1].lstrip().startswith("#"):
+            index += 1
+        return index
 
     def string_item(raw: str) -> str:
         value = _frontmatter_scalar(raw)
@@ -1089,6 +1096,7 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
         # paths, and consumed fields still use their original closed grammar.
         raw, alias = metadata_property(raw)
         if alias:
+            index = skip_comments(index)
             if index < len(tokens) and tokens[index][0] > owner_indent:
                 refuse()
             return index, "*"
@@ -1179,10 +1187,13 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
                         finished = True
                         break
                 if not finished:
+                    if quote is None:
+                        index = skip_comments(index)
                     if index >= len(tokens) or tokens[index][0] == 0:
                         refuse()
                     text += "\n" + tokens[index][1]
                     index += 1
+            index = skip_comments(index)
             if index < len(tokens) and tokens[index][0] > owner_indent:
                 refuse()
         return index, raw
@@ -1193,6 +1204,9 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
         # root entry. Indentless sequences belong only to a block-valued entry.
         prose_indent: int | None = 0 if raw.startswith(("|", ">")) else None
         while index < len(tokens):
+            index = skip_comments(index)
+            if index == len(tokens):
+                break
             indent, text = tokens[index]
             if not (indent > 0 or (not raw and (text == "-" or text.startswith("- ")))):
                 break
@@ -1222,8 +1236,13 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
     if not tokens:
         refuse()
     seen: set[str] = set()
-    index = 0
+    index = skip_comments(0)
+    if index == len(tokens):
+        refuse()
     while index < len(tokens):
+        index = skip_comments(index)
+        if index == len(tokens):
+            break
         indent, text = tokens[index]
         match = entry_pattern.fullmatch(text) if indent == 0 else None
         if match is None:
@@ -1253,6 +1272,9 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
             continue
         item_indent: int | None = None
         while index < len(tokens):
+            index = skip_comments(index)
+            if index == len(tokens):
+                break
             indent, text = tokens[index]
             if indent == 0 and not text.startswith("- "):
                 break

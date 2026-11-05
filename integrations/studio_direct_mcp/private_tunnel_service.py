@@ -13,6 +13,18 @@ Gateway label stays com.mastermind.studio-direct-private.<account>.
 """
 from __future__ import annotations
 
+# The existing CLI remains the bootstrap trust boundary. Re-exec before any
+# path-searchable import; source library imports retain their existing behavior.
+import sys as _bootstrap_sys
+if __name__ == "__main__" and not (
+        _bootstrap_sys.flags.isolated and _bootstrap_sys.flags.no_site
+        and _bootstrap_sys.dont_write_bytecode):
+    import posix as _bootstrap_os
+    _bootstrap_os.execv(
+        _bootstrap_sys.executable,
+        [_bootstrap_sys.executable, "-I", "-S", "-B", __file__, *_bootstrap_sys.argv[1:]],
+    )
+
 import argparse
 import hashlib
 import json
@@ -26,7 +38,67 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
-import private_service as gw
+def _load_gateway_bootstrap():
+    # This one adjacent source file is trusted bootstrap code, not a selectable
+    # dependency. Read bounded, stable regular bytes without following links.
+    # Its existing guard owns manifest validation and the process-scoped lock.
+    import importlib.util
+    path = Path(os.path.abspath(__file__)).with_name("private_service.py")
+    fd = None
+    try:
+        home = Path.home()
+        current = path.parent
+        while True:
+            info = current.lstat()
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) & 0o022):
+                raise ValueError("unsafe bootstrap parent")
+            if current == home or not path.is_relative_to(home):
+                break
+            current = current.parent
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        before = os.fstat(fd)
+        limit = 2 * 1024 * 1024
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+                or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) & 0o022
+                or before.st_size > limit):
+            raise ValueError("unsafe bootstrap source")
+        data = bytearray()
+        while len(data) <= limit:
+            part = os.read(fd, min(65536, limit + 1 - len(data)))
+            if not part:
+                break
+            data.extend(part)
+        identity = lambda item: (
+            item.st_dev, item.st_ino, item.st_mode, item.st_uid, item.st_nlink,
+            item.st_size, item.st_mtime_ns, item.st_ctime_ns)
+        if (len(data) > limit or identity(before) != identity(os.fstat(fd))
+                or identity(before) != identity(path.lstat())):
+            raise ValueError("bootstrap source changed")
+    except (OSError, ValueError):
+        raise SystemExit("CONTROL_BUNDLE_CLOSURE_REFUSED") from None
+    finally:
+        if fd is not None:
+            os.close(fd)
+    spec = importlib.util.spec_from_file_location("private_service", path)
+    module = importlib.util.module_from_spec(spec)
+    previous = sys.modules.get(spec.name)
+    sys.modules[spec.name] = module
+    try:
+        exec(compile(bytes(data), str(path), "exec"), module.__dict__)
+    except BaseException:
+        if previous is None:
+            sys.modules.pop(spec.name, None)
+        else:
+            sys.modules[spec.name] = previous
+        raise
+    return module
+
+if sys.flags.isolated:
+    gw = _load_gateway_bootstrap()
+else:
+    # Source-worktree library imports retain their original module identity.
+    import private_service as gw
 
 RESERVED_FUNNEL_PORT = gw.RESERVED_FUNNEL_PORT
 

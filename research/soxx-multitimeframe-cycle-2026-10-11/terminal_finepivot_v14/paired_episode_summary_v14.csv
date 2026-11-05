@@ -1,0 +1,5 @@
+model,pair_n,earlier,cheaper,average_hours_earlier,average_price_advantage
+3h_30fast,8,5,4,1.1875,0.4617
+3h_15fast,9,6,5,-0.0556,1.4879
+3h_30duration,8,6,3,1.0625,0.3114
+3h_15duration,9,7,5,0.0833,0.4455

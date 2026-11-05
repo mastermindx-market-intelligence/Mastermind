@@ -1,0 +1,27 @@
+{
+  "test_cases_passed": 13,
+  "tests_are": "Constructed graph/timing/scoring correctness, not empirical success",
+  "protocol_commit": "b9bf9369c",
+  "implementation_freeze_commit": "ce5b1a25c",
+  "checks": [
+    "Known synthetic leader/follower orientation",
+    "Graphsourceendsbeforefeatureyear",
+    "Historicalgraphnotbackfilledfromfutureyear",
+    "Factorcoefficients strictlyprior-only",
+    "Full featureprefix invariance onsyntheticdata",
+    "Futurecurrentyear data cannotalterthatyeargraph",
+    "Permutationweightanddegreeinvariants",
+    "Entrysessionreturnexcludedfromlabel",
+    "Date-centeredmidranktarget",
+    "Missingfutureoutcomesexcludednotzero",
+    "Ridgetrainstatistics unaffectedbytestdistribution",
+    "Shortsamplesuppressinference",
+    "RankICconstant/opposite-orderarithmetic"
+  ],
+  "code_sha256": {
+    "network_study.py": "4e8a66449a2cfd5c3cd800540332abf86ee8dd7df8fbcd4c2df731df93574ea2",
+    "test_network_study.py": "f543ed4d10d868dcecb54b96c0d4e24297339e53425feafd3608f52a6dd205da"
+  },
+  "empirical_result_verified": false,
+  "no_production_authority": true
+}
