@@ -313,3 +313,10 @@ it("labels only the exact supplied recorded turn message, never a different curr
  expect(screen.queryByText("Different new unsent draft")).toBeNull();
  expect(screen.getByText("Your message")).toBeTruthy();
 });
+
+it.each(["en","zh-CN"] as const)("unknown Keep %s shows only original-status recovery without an unavailable-draft conclusion",locale=>{
+ render(entry(locale,{operationState:unitController("unknown"),message:"",data:null}).ui);
+ expect(screen.getByText(locale==="en"?"The original request needs a status check. Don’t send it again.":"原请求需要查询状态。请勿再次发送。")).toBeTruthy();
+ expect(screen.queryByText(locale==="en"?"Continuing is unavailable here right now. Your message remains a draft.":"此处暂时无法继续对话。消息仍是草稿。")).toBeNull();
+ expect(screen.getByRole("button",{name:"Unit check"})).toBeTruthy();
+});

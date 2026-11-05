@@ -136,7 +136,7 @@ export function FreshConversationTurnPanel({ locale, data, operationState, activ
   const keepVisible = keepControl != null && receipt == null && !holdActions;
   const sendVisible = sendControl != null && receipt != null && !holdActions;
   const inputHeld = readOnly || busy || unresolved || recorded || responsePending;
-  const showUnavailable = !busy && !recorded && !responsePending && !keepVisible && !sendVisible;
+  const showUnavailable = !busy && !unresolved && !recorded && !responsePending && !keepVisible && !sendVisible;
   return <section className="mm-fresh-conversation-turn" lang={zh ? "zh-CN" : "en"}>
     <h2 className="mm-fresh-conversation-turn-heading">{text("Continue this conversation", "继续此对话")}</h2>
     {status != null && <p role="status" className="mm-fresh-conversation-turn-status">{status.title}</p>}

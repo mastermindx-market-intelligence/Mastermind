@@ -163,7 +163,7 @@ export function NewConversationOutcome({ locale, data, operationState, originalM
     <footer className="mm-new-conversation-outcome-footer">
       <div className="mm-new-conversation-outcome-actions">
         <button type="button" disabled={busy} onClick={onCheck}>
-          {text("Check original request", "查看原请求状态")}
+          {continuation==null?text("Check original request", "查看原请求状态"):text("Check initial request", "查看首次请求状态")}
         </button>
         {!opened && responseOpenable && <button type="button" className="primary" disabled={busy} onClick={onOpen}>
           {text("Open initial response", "查看首条回复")}

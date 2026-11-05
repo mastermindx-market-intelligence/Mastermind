@@ -414,4 +414,5 @@ it.each(["en","zh-CN"] as const)("opened %s scope follows actual supplied contin
  expect(screen.getByText(locale==="en"?"The first response and any recorded follow-up are shown here.":"此处显示首条回复及已记录的后续回复。")).toBeTruthy();
  expect(screen.queryByText(locale==="en"?"Further messages are not available in this view yet.":"此视图暂不支持继续发送消息。")).toBeNull();
  expect(screen.getByText("Actual caller continuation slot")).toBeTruthy();
+ expect(screen.getByRole("button",{name:locale==="en"?"Check initial request":"查看首次请求状态"})).toBeTruthy();
 });
