@@ -62,12 +62,17 @@ def _observation(*, now_ms=NOW):
         invocation = str(index + 1) * 32
         rows.append({"role": role, "unit": unit, "main_pid": 100 + index,
                      "main_start_monotonic_us": 50_000_000, "invocation_id": invocation,
-                     "status": {"schema": status.STATUS_SCHEMA, "role": role,
+                     "status": {"schema": status.STATUS_SCHEMA_V2, "role": role,
                                 "host_boot_id": BOOT, "invocation_id": invocation,
                                 "implementation_sha": IMPLEMENTATION,
                                 "observed_at_ms": now_ms - age,
                                 "observed_monotonic_ms": MONOTONIC - age,
-                                "metadata": metadata}})
+                                "metadata": metadata,
+                                "custody": {"pid": 100 + index,
+                                    "start_ticks": str(1000 + index),
+                                    "uid": 993 + index, "gid": 980 + index,
+                                    "manifest_sha256": "8" * 64,
+                                    "image_sha256": "9" * 64}}})
     return {"host_binding_sha256": BINDING, "host_boot_id": BOOT,
             "implementation_sha": IMPLEMENTATION, "roles": rows}
 
@@ -125,14 +130,14 @@ def test_private_observation_refuses_identity_or_authority_drift(mutation):
 
 def test_status_text_is_closed_bounded_and_duplicate_free():
     value = _observation()["roles"][0]["status"]
-    encoded = status.encode_status_text(value)
+    encoded = status.encode_status_v2_text(value)
     assert len(encoded.encode()) <= status.MAX_STATUS_BYTES
-    assert status.decode_status_text(encoded, expected_role=status.ROLES[0]) == value
+    assert status.decode_status_v2_text(encoded, expected_role=status.ROLES[0]) == value
     duplicate = encoded.replace('"role":', '"role":"mmmeta","role":', 1)
     for raw in (duplicate, encoded + "\n", encoded + " " * 2048,
-                status.STATUS_PREFIX + '{"schema":NaN}', "wrong:" + encoded):
+                status.STATUS_PREFIX_V2 + '{"schema":NaN}', "wrong:" + encoded):
         with pytest.raises(status.RoleStatusError):
-            status.decode_status_text(raw, expected_role=status.ROLES[0])
+            status.decode_status_v2_text(raw, expected_role=status.ROLES[0])
 
 
 @pytest.mark.parametrize("mutation", ["pid", "invocation", "source", "boot", "status",
@@ -171,7 +176,7 @@ async def test_missing_installed_source_refuses_before_unit_or_private_io(monkey
         raise AssertionError("source gate must precede host reads")
     monkeypatch.setattr(observer, "_boot_id", forbidden)
     monkeypatch.setattr(observer, "_query_fixed_pid1", forbidden)
-    monkeypatch.setattr(observer, "inspect_linux_process_image", forbidden)
+    monkeypatch.setattr(observer, "inspect_linux_process", forbidden)
     instance = observer.HermesRoleMetadataObserver(host_binding_sha256=BINDING,
                                                   implementation_sha=IMPLEMENTATION)
     with pytest.raises(status.RoleStatusError, match="SOURCE_UNAVAILABLE"):
@@ -405,3 +410,28 @@ async def test_real_mtls_host_family_isolated_and_existing_worker_path_preserved
         assert await worker.request("status", {"run_id": "ATT-001"}) == {"worker": "ATT-001"}
     finally:
         await _close_gateway(fixture)
+
+@pytest.mark.parametrize("indices", [(0,), (0, 1)])
+def test_positive_host_pair_rejects_every_v1_downgrade(indices):
+    value = _observation()
+    request = transport.build_host_observation_request(HOST_REF, "1" * 64)
+    response = transport.build_host_observation_response(request, observation=value)
+    for index in indices:
+        document = value["roles"][index]["status"]
+        document["schema"] = status.STATUS_SCHEMA
+        del document["custody"]
+    with pytest.raises(status.RoleStatusError):
+        status.validate_observation(value)
+    with pytest.raises(status.RoleStatusError):
+        status.project_observation(value, expected_host_binding_sha256=BINDING,
+                                   expected_implementation_sha=IMPLEMENTATION, now_ms=NOW)
+    response["observation"] = value
+    with pytest.raises(transport.TransportValidationError):
+        transport.validate_host_observation_response(response, request)
+
+
+def test_positive_host_pair_binds_the_custody_pid_to_pid1():
+    value = _observation()
+    value["roles"][0]["status"]["custody"]["pid"] += 1
+    with pytest.raises(status.RoleStatusError):
+        status.validate_observation(value)

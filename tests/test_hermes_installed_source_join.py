@@ -229,6 +229,7 @@ def test_integral_restart_bounds_normalize_to_one_value():
 
 @pytest.fixture
 def release(tmp_path, monkeypatch):
+    monkeypatch.setattr(manifest_owner, "sys", Proxy(manifest_owner.sys, platform="linux"))
     root = _release_root(tmp_path)
     ancestors = {(p.stat().st_dev, p.stat().st_ino) for p in root.parents}
     monkeypatch.setattr(manifest_owner, "_LINUX_RELEASES", tmp_path / "releases")
@@ -388,6 +389,8 @@ def test_manifest_cli_rejects_a_malformed_argument(release, monkeypatch, capsys)
 # ---------------------------------------------------------- early policy ----
 
 
+@pytest.mark.skipif(sys.platform != "linux" or sys.version_info[:2] != (3, 12),
+                    reason="actual fixed Linux CPython 3.12 recipe")
 def test_early_policy_installs_sentinels_before_ordinary_imports(tmp_path):
     probe = """
 import importlib.util, json, sys
@@ -431,7 +434,7 @@ print(json.dumps({
     assert observed == {"site": "absent", "argparse": True}
 
 
-def test_early_policy_still_blocks_a_late_hermes_dispatch(tmp_path):
+def test_early_policy_refuses_late_dispatch_without_backfilling_sentinels(tmp_path):
     """A programmatic import must not leave the hermes dispatch unprotected."""
     probe = """
 import importlib.util, json, sys
@@ -458,11 +461,11 @@ print(json.dumps({
     observed = json.loads(result.stdout.strip().splitlines()[-1])
     # The legacy import installed no sentinel and kept ordinary imports.
     assert observed["legacy"] == "absent"
-    # The hermes dispatch blocks ambient site code even though the module was
-    # imported before the command was known.
-    assert observed["site"] is None
-    assert observed["sitecustomize"] is None
-    assert observed["usercustomize"] is None
+    # Ordinary imports already happened: late dispatch must refuse without
+    # manufacturing evidence that the early policy was installed.
+    assert observed["site"] == "absent"
+    assert observed["sitecustomize"] == "absent"
+    assert observed["usercustomize"] == "absent"
     assert observed["code"] == 78
     assert result.stderr.strip() == "HERMES_RELEASE_SOURCE_UNQUALIFIED"
 
@@ -561,24 +564,36 @@ def test_installer_decodes_the_argument_before_any_mutation():
     assert body.index("decode_hermes_runtime") < body.index("apply_enrollment")
 
 
-def test_installer_refuses_an_existing_release_with_a_different_input(
-        tmp_path, monkeypatch):
+def test_installer_adoption_uses_the_accepted_source_cli_and_exact_expectation(
+        release, monkeypatch):
+    """Real CLI/manifest semantics with only root ownership facts synthetic."""
     installer = _load_installer()
-    monkeypatch.setattr(installer, "RELEASES_ROOT", tmp_path / "releases")
-    destination = tmp_path / "releases" / RELEASE_SHA
-    destination.mkdir(parents=True)
-    (destination / "ops/executive_os").mkdir(parents=True)
-    (destination / "ops/executive_os/release_manifest.py").write_bytes(ENTRY.read_bytes())
-    _write_manifest(destination, hermes_runtime=INSTALLATION)
-    # The same input is reused; a different input conflicts before mutation.
+    monkeypatch.setattr(installer, "RELEASES_ROOT", release.parent)
+    manifest_owner.create(release, RELEASE_SHA, "c" * 40, hermes_runtime=INSTALLATION)
+    calls = []
+    def run(argv, *, check):
+        assert check is False
+        assert argv[:5] == ["/usr/bin/python3", "-I", "-S", "-B", str(ENTRY)]
+        assert argv[5:13] == ["verify", "--root", str(release), "--commit-sha",
+                              RELEASE_SHA, "--tree-sha", "c" * 40, "--hermes-runtime-json"]
+        calls.append(argv[-1])
+        with monkeypatch.context() as context:
+            context.setattr(sys, "argv", argv[4:])
+            try:
+                code = manifest_owner.main()
+            except manifest_owner.ReleaseManifestError:
+                code = 1
+        return subprocess.CompletedProcess(argv, code, stdout="", stderr="")
+    monkeypatch.setattr(installer, "_run", run)
+    installer._assert_release_input_adoption(ROOT, RELEASE_SHA, "c" * 40, INSTALLATION)
     other = copy.deepcopy(INSTALLATION)
     other["roles"][0]["uid"] = 995
-    with pytest.raises(installer.EnrollmentError):
-        installer._assert_release_input_adoption(
-            tmp_path, RELEASE_SHA, "c" * 40, other)
-    with pytest.raises(installer.EnrollmentError):
-        installer._assert_release_input_adoption(
-            tmp_path, RELEASE_SHA, "c" * 40, None)
+    for expected in (other, None):
+        with pytest.raises(installer.EnrollmentError, match="release_manifest_input_conflict"):
+            installer._assert_release_input_adoption(ROOT, RELEASE_SHA, "c" * 40, expected)
+    assert json.loads(calls[0]) == INSTALLATION
+    assert json.loads(calls[1]) == other
+    assert calls[2] == "null"
 
 
 def test_installer_refuses_an_unrenderable_recipe_before_any_mutation():
@@ -622,17 +637,17 @@ def test_release_paths_carry_the_shared_closure_without_a_copy():
 # -------------------------------------------------------------- observer ----
 
 
-def _status_text(role, invocation_id, now_ms, now_monotonic_ms):
+def _status_text(role, invocation_id, now_ms, now_monotonic_ms, custody):
     metadata = {
         "schema": status.METADATA_SCHEMA, "role": role, "state": "ABSENT",
         "reason": "INSTALL_MANIFEST_ABSENT", "source_binding": "NOT_ATTESTED",
         "proof": workspace.proof()}
-    return status.encode_status_text({
-        "schema": status.STATUS_SCHEMA, "role": role, "host_boot_id": BOOT,
+    return status.encode_status_v2_text({
+        "schema": status.STATUS_SCHEMA_V2, "role": role, "host_boot_id": BOOT,
         "invocation_id": invocation_id, "implementation_sha": IMPLEMENTATION,
         "observed_at_ms": now_ms - 1000,
         "observed_monotonic_ms": now_monotonic_ms - 1000,
-        "metadata": metadata})
+        "metadata": metadata, "custody": custody})
 
 
 def _unit_properties(role, unit_text, units, state_dir, pid):
@@ -668,6 +683,8 @@ class World:
 
     def __init__(self, tmp_path, monkeypatch, *, installation=INSTALLATION):
         self.installation = copy.deepcopy(installation)
+        monkeypatch.setattr(manifest_owner, "sys", Proxy(manifest_owner.sys, platform="linux"))
+        monkeypatch.setattr(observer, "sys", Proxy(observer.sys, platform="linux"))
         self.release_root = _release_root(tmp_path)
         _write_manifest(self.release_root, hermes_runtime=self.installation)
         ancestors = {(p.stat().st_dev, p.stat().st_ino)
@@ -703,10 +720,17 @@ class World:
             self.process[role] = {
                 "start_identity": str(1000 + index), "pgid": pid, "session_id": pid,
                 "effective_uid": row["uid"], "effective_gid": row["gid"],
-                "real_uid": row["uid"], "real_gid": row["gid"], "parent_pid": 1,
-                "boot_id": BOOT, "device": 1, "inode": 100 + index, "mode": 0o100755,
-                "uid": 0, "gid": 0, "size": 1024, "mtime_ns": 1, "ctime_ns": 1,
-                "sha256": IMAGE_SHA}
+                "real_uid": row["uid"], "real_gid": row["gid"], "parent_pid": 1}
+        manifest_sha = hashlib.sha256(
+            (self.release_root / manifest_owner.MANIFEST_NAME).read_bytes()).hexdigest()
+        self.custody = {}
+        for index, row in enumerate(self.installation["roles"]):
+            self.custody[row["role"]] = {
+                "pid": 100 + index, "start_ticks": str(1000 + index),
+                "uid": row["uid"], "gid": row["gid"],
+                "manifest_sha256": manifest_sha, "image_sha256": IMAGE_SHA}
+        self.boot = BOOT
+        self.query_action = None
         self.now_ms = int(time.time() * 1000)
         self.now_monotonic_ms = int(time.monotonic() * 1000)
         self.query_calls = 0
@@ -714,22 +738,23 @@ class World:
         self.query_drift = {}
         self.inspect_drift = {}
         self._build_rows()
-        monkeypatch.setattr(observer, "_boot_id", lambda: BOOT)
+        monkeypatch.setattr(observer, "_boot_id", lambda: self.boot)
         monkeypatch.setattr(observer, "_query_fixed_pid1", self._query)
-        monkeypatch.setattr(observer, "inspect_linux_process_image", self._inspect)
+        monkeypatch.setattr(observer, "inspect_linux_process", self._inspect)
 
     def _build_rows(self):
         self.rows = []
         for role in status.ROLES:
             properties = dict(self.properties[role])
             properties["StatusText"] = _status_text(
-                role, properties["InvocationID"], self.now_ms, self.now_monotonic_ms)
+                role, properties["InvocationID"], self.now_ms, self.now_monotonic_ms,
+                self.custody[role])
             self.rows.append({
                 "role": role, "unit": f"hermes-runtime-{role}.service",
                 "main_pid": int(properties["MainPID"]),
                 "main_start_monotonic_us": int(properties["ExecMainStartTimestampMonotonic"]),
                 "invocation_id": properties["InvocationID"],
-                "status": status.decode_status_text(properties["StatusText"], expected_role=role),
+                "status": status.decode_status_v2_text(properties["StatusText"], expected_role=role),
                 "notify_access": properties["NotifyAccess"],
                 "active_state": properties["ActiveState"],
                 "sub_state": properties["SubState"],
@@ -741,10 +766,16 @@ class World:
         rows = copy.deepcopy(self.rows)
         if self.query_calls > 1:
             for role, changes in self.query_drift.items():
-                rows[status.ROLES.index(role)]["unit_properties"].update(changes)
+                row = rows[status.ROLES.index(role)]
+                row["unit_properties"].update(changes)
+                row["status"] = status.decode_status_v2_text(
+                    row["unit_properties"]["StatusText"], expected_role=role)
+            if self.query_action is not None:
+                self.query_action()
         return rows
 
-    def _inspect(self, pid):
+    def _inspect(self, pid, *, require_live=False):
+        assert require_live is True
         self.inspect_calls += 1
         for role in status.ROLES:
             if int(self.properties[role]["MainPID"]) == pid:
@@ -785,7 +816,7 @@ async def test_positive_joined_pair_projects_the_unchanged_public_body(world):
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("mutation", [
-    "entry", "effective-args", "dropin", "stale-unit", "fragment", "image",
+    "entry", "effective-args", "ignore-errors", "dropin", "stale-unit", "fragment", "image",
     "principal", "user", "group", "type", "working-directory", "notify-access",
     "transient", "load-state", "daemon-reload", "boot", "other-role",
 ])
@@ -798,6 +829,9 @@ async def test_join_refuses_every_unqualified_unit_or_process(world, mutation):
     elif mutation == "effective-args":
         world.properties["mmmeta"]["ExecStart"] = world.properties["mmmeta"]["ExecStart"].replace(
             "-I -S -B", "-I -B")
+    elif mutation == "ignore-errors":
+        world.properties["mmmeta"]["ExecStart"] = world.properties["mmmeta"]["ExecStart"].replace(
+            "ignore_errors=no", "ignore_errors=yes")
     elif mutation == "dropin":
         world.properties["mmmeta"]["DropInPaths"] = "/etc/systemd/system/evil.conf"
     elif mutation == "stale-unit":
@@ -806,7 +840,7 @@ async def test_join_refuses_every_unqualified_unit_or_process(world, mutation):
         path = world.units / "hermes-runtime-mmmeta.service"
         path.write_text(path.read_text() + "\n# tampered\n")
     elif mutation == "image":
-        world.process["mmmeta"]["sha256"] = "0" * 64
+        world.custody["mmmeta"]["image_sha256"] = "0" * 64
     elif mutation == "principal":
         world.process["mmmeta"]["effective_uid"] = 4242
     elif mutation == "user":
@@ -826,7 +860,7 @@ async def test_join_refuses_every_unqualified_unit_or_process(world, mutation):
     elif mutation == "daemon-reload":
         world.properties["mmmeta"]["NeedDaemonReload"] = "yes"
     elif mutation == "boot":
-        world.process["mmmeta"]["boot_id"] = "00000000-1234-1234-1234-123456789abc"
+        world.boot = "00000000-1234-1234-1234-123456789abc"
     elif mutation == "other-role":
         world.properties["mmmeta"]["User"] = "mmsecretary"
     world._build_rows()
@@ -846,9 +880,12 @@ async def test_join_refuses_a_drift_between_the_two_snapshots(world, mutation):
     elif mutation == "invocation-drift":
         world.query_drift["mmmeta"] = {"InvocationID": "2" * 32}
     elif mutation == "source-identity":
-        world.inspect_drift["mmmeta"] = {"inode": 4242}
+        path = world.release_root / manifest_owner.MANIFEST_NAME
+        world.query_action = lambda: path.write_bytes(path.read_bytes() + b" ")
     elif mutation == "image-drift":
-        world.inspect_drift["mmmeta"] = {"sha256": "0" * 64}
+        published = copy.deepcopy(world.rows[0]["status"])
+        published["custody"]["image_sha256"] = "0" * 64
+        world.query_drift["mmmeta"] = {"StatusText": status.encode_status_v2_text(published)}
     with pytest.raises(status.RoleStatusError):
         await instance.read_pair()
 
@@ -886,3 +923,61 @@ async def test_join_closes_its_held_descriptors_on_refusal(world):
     with pytest.raises(status.RoleStatusError):
         held.check()
     assert instance.implementation_sha == IMPLEMENTATION
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("field", ["real_uid", "effective_uid", "real_gid", "effective_gid",
+                                  "start_identity"])
+async def test_join_compares_each_independent_process_field(world, field):
+    world.process["mmmeta"][field] = "4242" if field == "start_identity" else 4242
+    with pytest.raises(status.RoleStatusError):
+        await observer.HermesRoleMetadataObserver(
+            host_binding_sha256=BINDING, implementation_sha=IMPLEMENTATION).read_pair()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("field", ["pid", "start_ticks", "uid", "gid", "manifest_sha256",
+                                  "image_sha256"])
+async def test_join_compares_each_published_witness_field(world, field):
+    world.custody["mmmeta"][field] = (
+        "0" * 64 if field.endswith("sha256") else "4242" if field == "start_ticks" else 4242)
+    world._build_rows()
+    with pytest.raises(status.RoleStatusError):
+        await observer.HermesRoleMetadataObserver(
+            host_binding_sha256=BINDING, implementation_sha=IMPLEMENTATION).read_pair()
+
+
+@pytest.mark.anyio
+async def test_fragment_permission_drift_is_not_hidden_by_unchanged_bytes(world):
+    path = world.units / "hermes-runtime-mmmeta.service"
+    world.query_action = lambda: path.chmod(0o666)
+    with pytest.raises(status.RoleStatusError):
+        await observer.HermesRoleMetadataObserver(
+            host_binding_sha256=BINDING, implementation_sha=IMPLEMENTATION).read_pair()
+
+def test_member_enrollment_requires_the_executing_accepted_checkout(tmp_path):
+    installer = _load_installer()
+    with pytest.raises(installer.EnrollmentError, match="hermes_source_checkout_mismatch"):
+        installer.decode_hermes_runtime(json.dumps(INSTALLATION), source_repo=tmp_path)
+    with pytest.raises(installer.EnrollmentError, match="hermes_source_checkout_mismatch"):
+        installer.apply_enrollment(SimpleNamespace(
+            source_repo=tmp_path, hermes_runtime=INSTALLATION))
+    assert installer.decode_hermes_runtime(
+        json.dumps(INSTALLATION), source_repo=ROOT) == INSTALLATION
+    assert installer.decode_hermes_runtime(None, source_repo=tmp_path) is None
+    assert installer.decode_hermes_runtime("null", source_repo=tmp_path) is None
+
+
+@pytest.mark.anyio
+async def test_expired_source_stage_does_not_start_the_pid1_query(monkeypatch):
+    import asyncio
+    def forbidden():
+        pytest.fail("expired budget reached PID1")
+    monkeypatch.setattr(observer, "_query_fixed_pid1", forbidden)
+    monkeypatch.setattr(observer, "sys", Proxy(observer.sys, platform="linux"))
+    monkeypatch.setattr(observer, "_boot_id", lambda: BOOT)
+    held = SimpleNamespace(check=lambda: time.sleep(0.02))
+    instance = observer.HermesRoleMetadataObserver(
+        host_binding_sha256=BINDING, implementation_sha=IMPLEMENTATION)
+    with pytest.raises(status.RoleStatusError):
+        await instance._read_fixed_snapshot(
+            held, deadline=asyncio.get_running_loop().time() + 0.005)

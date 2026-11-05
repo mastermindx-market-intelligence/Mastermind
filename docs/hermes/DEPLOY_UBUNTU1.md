@@ -706,7 +706,9 @@ with a bounded closed decoder before the first mutation and always passes the
 explicit expectation — including its absence — to the manifest tool, which is
 still invoked from the accepted source copy. An already installed release
 whose frozen member differs conflicts before any mutation; the immutable
-manifest is never retrofitted.
+manifest is never retrofitted. When a Hermes member is supplied, execute the
+enroller from that same accepted checkout; a different source repository is
+refused before rendering so the unit hashes and sealed release use one source.
 
 The shared unit recipe now has one pure formatter. `render_host_unit` keeps
 every profile-facing validation and produces the same bytes as before, and
@@ -718,31 +720,44 @@ from the role and the enclosing manifest; the ExecStart always names
 path. Linux enrollment renders those expected units and reports their digest;
 it does not write them and does not start a role.
 
-The fixed PID1 observer now joins that approved source to the live host. For
+The fixed PID1 observer joins that approved source to the live host. For
 each role it holds the immutable release, the manifest-approved member and the
-root-owned unit fragment, queries only the two fixed units with an explicit
-property list, and requires a loaded, non-transient unit at the exact fragment
-with no unreviewed drop-in and no pending daemon reload. The effective
-ExecStart must be exactly the qualified `python -I -S -B` fixed release entry
-running `hermes-runtime supervise` with the fixed profile and bin paths, and
-the executed image of the PID1-acquired MainPID is observed with the incumbent
-`linux_process_identity` helper and joined to the approved interpreter digest,
-the real and effective UID/GID and the boot identity. The systemd and proc
-start-time domains are held and rechecked separately; they are never equated.
-A missing member, a refused acquisition or any drift is unavailable. The
-public role projection and its proof, including `service_observed: false`, are
-unchanged, and no provider, authentication, served turn or credential is
-claimed.
+root-owned unit fragment through the existing descriptor/ancestor/ACL owner.
+It queries only the two fixed units with an explicit property list and requires
+a loaded, non-transient unit at the exact fragment, no drop-in and no pending
+daemon reload. The effective ExecStart must be the qualified Python
+`-I -S -B` recipe, without an ignored-error prefix, running the fixed release
+entry and role profile. These checks do not claim independent observation of
+every effective sandbox property or kernel enforcement.
 
-The shared runtime custody helper `held_runtime_custody` is owned by a
-separate lane and is not composed in this tree; until it is, the qualified
-runtime entry fails closed rather than running without custody.
+The shared `held_runtime_custody` context now remains open for the complete
+role entry. Its no-site sentinels are installed before ordinary imports;
+programmatic late dispatch refuses without backfilling that early policy.
+Before importing the CLI or reading a role credential, the entry compares its
+actual executable, four Python prefixes, role principal, kernel self-image and
+process birth to the held approved inputs. The image's digest and complete
+identity must match the retained interpreter descriptor. Source/runtime checks
+bracket every subsequent main-process custody sample.
 
-This closes the source-loading recipe. Interpreter/stdlib/native-library
-qualification, effective-unit and current-process binding, credentials and
-kernel isolation still belong to their existing host owners. The BYOK observer
-continues to report its installed source as unbound until those facts are
-qualified. A rendered unit or implementation label does not establish them.
+The existing main-only STATUS publisher emits the closed v2 custody witness
+through PID1. The gateway requires v2 for a positive role pair and independently
+checks MainPID, live process birth and real/effective UID/GID with the incumbent
+non-image process reader. It joins the witness to the held root manifest's
+original-byte digest and approved launch-image digest. It does not open another
+role's executable or acquire tracing privileges. Standalone v1 codecs remain
+available for legacy diagnostics, but v1 cannot satisfy the positive host read.
+
+Both snapshots must agree, preserve the publisher's original timestamps and
+pass the existing dual-clock freshness checks. The same four-second deadline is
+checked between acquisition stages and before returning; bounded synchronous
+filesystem reads are not a hard preemption mechanism. Missing facts, refused
+reads and changed custody yield no positive observation.
+
+The public role projection and its proof, including `service_observed: false`
+and credential enrollment `UNVERIFIED`, remain unchanged. A completed metadata
+join establishes neither provider authentication nor a served model/turn.
+Protected installation, actual kernel isolation, credential enrollment and the
+real browser/serving path still require their corresponding host evidence.
 
 ### Credential-free qualification entry
 

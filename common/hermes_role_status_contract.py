@@ -273,8 +273,9 @@ def validate_observation(value) -> dict:
                 or not _integer(row["main_start_monotonic_us"], minimum=1)
                 or not _matches(row["invocation_id"], _INVOCATION)):
             raise RoleStatusError()
-        status = validate_status(row["status"], expected_role=role)
-        if (status["host_boot_id"] != value["host_boot_id"]
+        status = validate_status_v2(row["status"], expected_role=role)
+        if (status["custody"]["pid"] != row["main_pid"]
+                or status["host_boot_id"] != value["host_boot_id"]
                 or status["implementation_sha"] != value["implementation_sha"]
                 or status["invocation_id"] != row["invocation_id"]
                 or status["observed_monotonic_ms"] * 1000 < row["main_start_monotonic_us"]):

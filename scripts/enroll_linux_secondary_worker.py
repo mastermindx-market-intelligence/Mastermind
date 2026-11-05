@@ -161,7 +161,18 @@ def _closed_pairs(items):
     return result
 
 
-def decode_hermes_runtime(raw: str | None) -> dict[str, Any] | None:
+def _require_hermes_source_checkout(source_repo: Path) -> None:
+    """Keep the imported Hermes renderer in the accepted source checkout."""
+    try:
+        matches = Path(source_repo).resolve(strict=True) == _ROOT.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise EnrollmentError("hermes_source_checkout_unavailable") from exc
+    if not matches:
+        raise EnrollmentError("hermes_source_checkout_mismatch")
+
+
+def decode_hermes_runtime(raw: str | None, *, source_repo: Path | None = None
+                          ) -> dict[str, Any] | None:
     """Bounded closed decode of the optional approved installation input.
 
     ``None`` (an absent argument) and an explicit JSON ``null`` both mean the
@@ -179,6 +190,8 @@ def decode_hermes_runtime(raw: str | None) -> dict[str, Any] | None:
         raise EnrollmentError("hermes_runtime_json_invalid") from exc
     if document is None:
         return None
+    if source_repo is not None:
+        _require_hermes_source_checkout(source_repo)
     from ops.executive_os.release_manifest import validate_hermes_runtime_installation
     try:
         return validate_hermes_runtime_installation(document)
@@ -1059,6 +1072,8 @@ def install_inert_units(
 
 
 def apply_enrollment(args: Args) -> dict[str, Any]:
+    if args.hermes_runtime is not None:
+        _require_hermes_source_checkout(args.source_repo)
     if platform.system() != "Linux":
         raise EnrollmentError("linux_required")
     if os.geteuid() != 0:
@@ -1113,7 +1128,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stderr.write("invalid Codex digest\n")
         return 64
     try:
-        hermes_runtime = decode_hermes_runtime(ns.hermes_runtime_json)
+        hermes_runtime = decode_hermes_runtime(
+            ns.hermes_runtime_json, source_repo=ns.source_repo)
     except EnrollmentError as exc:
         sys.stderr.write(f"enrollment refused: {exc}\n")
         return 65

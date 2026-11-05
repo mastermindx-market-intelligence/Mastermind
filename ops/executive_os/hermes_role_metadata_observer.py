@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 from common.hermes_role_status_contract import (
-    MAX_SAFE_INTEGER, ROLES, UNITS, RoleStatusError, decode_status_text,
+    MAX_SAFE_INTEGER, ROLES, UNITS, RoleStatusError, decode_status_v2_text, validate_custody,
     project_observation, validate_observation, validate_source_pins,
 )
 # The release owner is the same package; its held-source class and manifest
@@ -31,7 +31,7 @@ from ops.executive_os.release_manifest import (
 )
 # The incumbent process identity helper is reused, never copied.
 from ops.native_fabric.quota_continuity.candidate.linux_process_identity import (
-    LinuxProcessIdentityError, inspect_linux_process_image,
+    LinuxProcessIdentityError, inspect_linux_process,
 )
 
 _HEX64 = re.compile(r"[0-9a-f]{64}")
@@ -50,7 +50,7 @@ _UNIT_DIRECTORY = Path("/etc/systemd/system")
 # The effective ExecStart rendering of one simple command. Only the path and
 # the joined argv are read; the volatile timing fields are not interpreted.
 _EXEC_START = re.compile(
-    r"^\{ path=(?P<path>[^;]*) ; argv\[\]=(?P<argv>.*?) ; ignore_errors=[^;]* ; "
+    r"^\{ path=(?P<path>[^;]*) ; argv\[\]=(?P<argv>.*?) ; ignore_errors=no ; "
     r"start_time=\[[^]]*\] ; stop_time=\[[^]]*\] ; pid=[^;]* ; code=[^;]* ; status=[^;]* \}$")
 
 
@@ -101,7 +101,7 @@ def _decode_pid1(raw: bytes) -> list[dict]:
         rows.append({"role": role, "unit": unit, "main_pid": _number(value["MainPID"]),
                      "main_start_monotonic_us": _number(value["ExecMainStartTimestampMonotonic"]),
                      "invocation_id": value["InvocationID"],
-                     "status": decode_status_text(value["StatusText"], expected_role=role),
+                     "status": decode_status_v2_text(value["StatusText"], expected_role=role),
                      "notify_access": value["NotifyAccess"], "active_state": value["ActiveState"],
                      "sub_state": value["SubState"], "unit_properties": value})
     return rows
@@ -201,7 +201,7 @@ class _HeldRoleQualification:
                 path = _UNIT_DIRECTORY / f"hermes-runtime-{role}.service"
                 self.fragment_paths[role] = path
                 self._fragment_fds[role] = self._hold_fragment(path)
-                self._fragment_bytes[role] = self._read_fragment(self._fragment_fds[role])
+                self._fragment_bytes[role] = self._read_fragment(path)
             self.check()
         except BaseException:
             self.__exit__(None, None, None)
@@ -210,11 +210,6 @@ class _HeldRoleQualification:
 
     def __exit__(self, *ignored: object) -> bool:
         self._closed = True
-        for descriptor in self._fragment_fds.values():
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
         self._fragment_fds.clear()
         self._fragment_bytes.clear()
         if self.release is not None:
@@ -222,30 +217,26 @@ class _HeldRoleQualification:
             self.release = None
         return False
 
-    @staticmethod
-    def _hold_fragment(path: Path) -> int:
-        try:
-            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-        except OSError as exc:
-            raise RoleStatusError() from exc
-        try:
-            info = os.fstat(descriptor)
-            if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
-                    or info.st_mode & 0o022 or info.st_nlink != 1
-                    or not 0 < info.st_size <= 64 * 1024):
-                raise RoleStatusError()
-        except BaseException:
-            os.close(descriptor)
-            raise
-        return descriptor
-
-    @staticmethod
-    def _read_fragment(descriptor: int) -> bytes:
-        info = os.fstat(descriptor)
-        raw = os.pread(descriptor, info.st_size, 0)
-        if len(raw) != info.st_size:
+    def _hold_fragment(self, path: Path) -> int:
+        if self.release is None:
             raise RoleStatusError()
-        return raw
+        try:
+            # Reuse the existing descriptor/ancestor/ACL owner for fixed units.
+            descriptor = self.release.hold(path)
+            info = os.fstat(descriptor)
+            if not 0 < info.st_size <= 64 * 1024:
+                raise RoleStatusError()
+            return descriptor
+        except ReleaseManifestError as exc:
+            raise RoleStatusError() from exc
+
+    def _read_fragment(self, path: Path) -> bytes:
+        if self.release is None:
+            raise RoleStatusError()
+        try:
+            return self.release.read(path, 64 * 1024)
+        except ReleaseManifestError as exc:
+            raise RoleStatusError() from exc
 
     def check(self) -> None:
         """Re-check the held custody: the release and both root fragments."""
@@ -261,7 +252,7 @@ class _HeldRoleQualification:
             held = os.fstat(descriptor)
             if (current.st_dev, current.st_ino) != (held.st_dev, held.st_ino):
                 raise RoleStatusError()
-            if self._read_fragment(descriptor) != self._fragment_bytes[role]:
+            if self._read_fragment(path) != self._fragment_bytes[role]:
                 raise RoleStatusError()
 
     def role_facts(self, role: str, properties: dict, boot_id: str) -> dict:
@@ -293,9 +284,16 @@ class _HeldRoleQualification:
                 or properties["WorkingDirectory"] != approved["state_dir"]
                 or properties["NotifyAccess"] != "main"):
             raise RoleStatusError()
+        published = decode_status_v2_text(properties["StatusText"], expected_role=role)
+        if (published["host_boot_id"] != boot_id
+                or published["implementation_sha"] != self.implementation_sha
+                or published["invocation_id"] != properties["InvocationID"]):
+            raise RoleStatusError("SOURCE_CHANGED")
         identity = self._process_identity(
             properties["MainPID"], approved, boot_id,
-            self.installation["launch_python"]["sha256"])
+            self.installation["launch_python"]["sha256"],
+            custody=published["custody"],
+            manifest_sha256=self.release.manifest_sha256())
         return {
             "role": role,
             "unit": unit,
@@ -312,49 +310,45 @@ class _HeldRoleQualification:
             "real_gid": identity["real_gid"],
             "effective_gid": identity["effective_gid"],
             "image_sha256": identity["image_sha256"],
-            "image_device": identity["image_device"],
-            "image_inode": identity["image_inode"],
-            "image_mtime_ns": identity["image_mtime_ns"],
-            "image_ctime_ns": identity["image_ctime_ns"],
+            "manifest_sha256": identity["manifest_sha256"],
         }
 
     @staticmethod
     def _process_identity(main_pid: str, approved: dict, boot_id: str,
-                          approved_image_sha256: str) -> dict:
-        """The actual role process: principals, boot and executed image."""
+                          approved_image_sha256: str, *, custody: dict,
+                          manifest_sha256: str) -> dict:
+        """Join a main-only publisher to an independent live process identity."""
         if type(main_pid) is not str or _DECIMAL.fullmatch(main_pid) is None:
             raise RoleStatusError()
         pid = int(main_pid)
         if not 0 < pid <= 2_147_483_647:
             raise RoleStatusError()
+        witness = validate_custody(custody)
         try:
-            identity = inspect_linux_process_image(pid)
+            identity = inspect_linux_process(pid, require_live=True)
         except LinuxProcessIdentityError as exc:
             raise RoleStatusError() from exc
-        if (type(identity) is not dict or identity.get("boot_id") != boot_id
+        if (type(identity) is not dict
+                or witness["pid"] != pid
+                or witness["start_ticks"] != identity.get("start_identity")
+                or witness["uid"] != approved["uid"]
+                or witness["gid"] != approved["gid"]
                 or identity.get("effective_uid") != approved["uid"]
                 or identity.get("real_uid") != approved["uid"]
                 or identity.get("effective_gid") != approved["gid"]
-                or identity.get("real_gid") != approved["gid"]):
-            raise RoleStatusError()
-        image_sha256 = identity.get("sha256")
-        if type(image_sha256) is not str or _HEX64.fullmatch(image_sha256) is None:
-            raise RoleStatusError()
-        if image_sha256 != approved_image_sha256:
-            raise RoleStatusError()
+                or identity.get("real_gid") != approved["gid"]
+                or witness["manifest_sha256"] != manifest_sha256
+                or witness["image_sha256"] != approved_image_sha256):
+            raise RoleStatusError("SOURCE_CHANGED")
         return {
-            "pid": pid,
-            "boot_id": identity["boot_id"],
+            "pid": pid, "boot_id": boot_id,
             "start_ticks": identity["start_identity"],
             "real_uid": identity["real_uid"],
             "effective_uid": identity["effective_uid"],
             "real_gid": identity["real_gid"],
             "effective_gid": identity["effective_gid"],
-            "image_sha256": image_sha256,
-            "image_device": identity["device"],
-            "image_inode": identity["inode"],
-            "image_mtime_ns": identity["mtime_ns"],
-            "image_ctime_ns": identity["ctime_ns"],
+            "image_sha256": witness["image_sha256"],
+            "manifest_sha256": witness["manifest_sha256"],
         }
 
 
@@ -392,8 +386,8 @@ def qualify_pair(before, after, *, host_binding_sha256: str, implementation_sha:
     observation = validate_observation({
         "host_binding_sha256": host_binding_sha256, "host_boot_id": after["host_boot_id"],
         "implementation_sha": implementation_sha,
-        "roles": [{key: value for key, value in row.items()
-                   if key not in {"notify_access", "active_state", "sub_state"}}
+        "roles": [{key: row[key] for key in (
+            "role", "unit", "main_pid", "main_start_monotonic_us", "invocation_id", "status")}
                   for row in after["roles"]],
     })
     for row in observation["roles"]:
@@ -418,24 +412,34 @@ def qualify_pair(before, after, *, host_binding_sha256: str, implementation_sha:
     return observation
 
 
+def _check_deadline(deadline: float) -> None:
+    if asyncio.get_running_loop().time() >= deadline:
+        raise RoleStatusError()
+
+
 class HermesRoleMetadataObserver:
     def __init__(self, *, host_binding_sha256: str, implementation_sha: str) -> None:
         validate_source_pins(host_binding_sha256, implementation_sha)
         self.host_binding_sha256 = host_binding_sha256
         self.implementation_sha = implementation_sha
 
-    async def _read_fixed_snapshot(self, held: _HeldRoleQualification) -> dict:
+    async def _read_fixed_snapshot(self, held: _HeldRoleQualification, *,
+                                   deadline: float) -> dict:
         if sys.platform != "linux":
             raise RoleStatusError()
+        _check_deadline(deadline)
         held.check()
         boot = _boot_id()
+        _check_deadline(deadline)
         rows = await _query_fixed_pid1()
         facts = []
         for row in rows:
+            _check_deadline(deadline)
             facts.append(held.role_facts(row["role"], row["unit_properties"], boot))
         held.check()
         if boot != _boot_id():
             raise RoleStatusError("SOURCE_CHANGED")
+        _check_deadline(deadline)
         identity = hashlib.sha256(json.dumps(
             facts, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
             allow_nan=False).encode("utf-8")).hexdigest()
@@ -452,8 +456,8 @@ class HermesRoleMetadataObserver:
             deadline = loop.time() + 4.0
             async with asyncio.timeout_at(deadline):
                 with _HeldRoleQualification(self.implementation_sha) as held:
-                    before = await self._read_fixed_snapshot(held)
-                    after = await self._read_fixed_snapshot(held)
+                    before = await self._read_fixed_snapshot(held, deadline=deadline)
+                    after = await self._read_fixed_snapshot(held, deadline=deadline)
                     result = qualify_pair(before, after, host_binding_sha256=self.host_binding_sha256,
                         implementation_sha=self.implementation_sha, now_ms=time.time_ns() // 1_000_000,
                         now_monotonic_ms=time.monotonic_ns() // 1_000_000)

@@ -48,9 +48,10 @@ INSTALLATION = {
     ],
 }
 
-# The shared runtime custody is owned by a separate lane and is not composed
-# here. This hermetic double stands in for it inside the test archive only.
-CUSTODY_DOUBLE = '''"""Hermetic double for the not-yet-composed shared runtime custody."""
+# This test isolates the source/import closure. Runtime and main-process
+# qualification use explicit synthetic dependencies; their real owners have
+# separate focused checks and actual Linux qualification.
+CUSTODY_DOUBLE = '''"""Hermetic runtime boundary for the source/import closure test."""
 
 
 class _Held:
@@ -327,8 +328,7 @@ def test_actual_archive_runs_closed_hermes_modes_with_held_yaml(tmp_path, comman
                      "integrations/hermes_runtime/system_service.py",
                      "scripts/enroll_linux_secondary_worker.py"):
         (root / relative).write_bytes((ROOT / relative).read_bytes())
-    # The shared runtime custody is owned by a separate lane; stand in for it
-    # inside this archive only.
+    # Isolate the source/import closure with the documented runtime double.
     custody = root / YAML_ROOT / "paid_initializer.py"
     custody.parent.mkdir(parents=True, exist_ok=True)
     custody.write_text(CUSTODY_DOUBLE, encoding="utf-8")
@@ -344,7 +344,12 @@ import importlib.util,os,pathlib,sys,types
 root=pathlib.Path(sys.argv[1])
 entry=root/'ops/executive_os/release_manifest.py'
 spec=importlib.util.spec_from_file_location('_held_entry_probe',entry)
-m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+m=importlib.util.module_from_spec(spec)
+original_platform,original_argv=sys.platform,sys.argv
+sys.platform='linux'
+sys.argv=[str(entry),'hermes-runtime',*original_argv[2:]]
+try:spec.loader.exec_module(m)
+finally:sys.platform,sys.argv=original_platform,original_argv
 real_os=os
 ancestors={(p.stat().st_dev,p.stat().st_ino) for p in root.parents}
 def root_info(raw):
@@ -360,6 +365,8 @@ m.os=Proxy(os,stat=lambda *a,**k:root_info(real_os.stat(*a,**k)),
 m.sys=Proxy(sys,platform='linux',argv=[str(entry),'hermes-runtime',sys.argv[2],sys.argv[3]])
 m._LINUX_RELEASES=root.parent
 m._linux_source_acl=lambda fd,directory:None
+# Main custody is a separate, explicitly synthetic boundary in this import test.
+m._main_custody_observer=lambda *args: (lambda: None)
 try:result=m.main()
 except SystemExit as exc:result=exc.code
 assert result==0,result

@@ -10,6 +10,7 @@ from __future__ import annotations
 import sys
 
 _HERMES_SITE_NAMES = ("site", "sitecustomize", "usercustomize")
+_HERMES_EARLY_NO_SITE = False
 
 
 def _hermes_recipe_is_qualified() -> bool:
@@ -44,6 +45,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "hermes-runtime":
         sys.stderr.write("HERMES_RELEASE_SOURCE_UNQUALIFIED\n")
         raise SystemExit(78)
     _install_no_site_sentinels()
+    _HERMES_EARLY_NO_SITE = True
 
 import argparse
 from contextlib import ExitStack, contextmanager
@@ -494,6 +496,7 @@ class _HeldReleaseSources:
                 raise ReleaseManifestError("fixed Linux release root is required")
             self.hold(self.root, directory=True)
             raw = self.read(self.root / MANIFEST_NAME, _MAX_SOURCE)
+            self._manifest_sha256 = hashlib.sha256(raw).hexdigest()
             document = _closed_json(raw)
             if (type(document) is not dict
                     or set(document) not in (_MANIFEST_LEGACY_KEYS, _MANIFEST_KEYS)
@@ -608,6 +611,11 @@ class _HeldReleaseSources:
         fd = self.hold(self.root / relative, directory=True)
         if stat.S_IMODE(os.fstat(fd).st_mode) != entry["mode"]:
             raise ReleaseManifestError("release package differs from manifest")
+
+    def manifest_sha256(self) -> str:
+        """Digest of the original bytes retained by this held manifest."""
+        self.check()
+        return self._manifest_sha256
 
     def hermes_runtime_input(self) -> dict[str, Any] | None:
         """The detached, checked approved installation input.
@@ -746,14 +754,81 @@ def _runtime_custody(factory: Any, installation: dict[str, Any], owner: "_HeldRe
                 boundary_check=owner.check)
 
 
+def _main_custody_observer(owner: "_HeldReleaseSources", finder: Any,
+                           runtime: Any, installation: dict[str, Any]):
+    """Measure this main process inside its held source and runtime contexts."""
+    installation = validate_hermes_runtime_installation(installation)
+    process_owner = importlib.import_module(
+        _CUSTODY_ROOT.replace("/", ".") + ".linux_process_identity")
+    if (not callable(getattr(runtime, "check", None))
+            or type(getattr(runtime, "launch_fd", None)) is not int):
+        raise ReleaseManifestError("Hermes runtime custody is invalid")
+    pid = os.getpid()
+    matches = [row for row in installation["roles"]
+               if (row["uid"] == os.getuid() == os.geteuid()
+                   and row["gid"] == os.getgid() == os.getegid())]
+    if len(matches) != 1:
+        raise ReleaseManifestError("Hermes role principal differs from installation")
+    approved = matches[0]
+    launch = installation["launch_python"]
+    startup = installation["startup"]
+    manifest_sha = owner.manifest_sha256()
+    birth = None
+
+    def observe() -> dict[str, Any]:
+        nonlocal birth
+        finder.check()
+        runtime.check()
+        if (os.getpid() != pid or not _HERMES_EARLY_NO_SITE
+                or not _hermes_recipe_is_qualified()
+                or any(name not in sys.modules or sys.modules[name] is not None
+                       for name in _HERMES_SITE_NAMES)
+                or sys.executable != launch["path"]
+                or any(getattr(sys, name) != startup[name]
+                       for name in ("prefix", "exec_prefix", "base_prefix", "base_exec_prefix"))):
+            raise ReleaseManifestError("Hermes actual startup differs from installation")
+        try:
+            measured = process_owner.inspect_linux_process_image(pid)
+        except process_owner.LinuxProcessIdentityError as exc:
+            raise ReleaseManifestError("Hermes main process is unavailable") from exc
+        image = os.fstat(runtime.launch_fd)
+        expected_image = {
+            "device": image.st_dev, "inode": image.st_ino, "mode": image.st_mode,
+            "uid": image.st_uid, "gid": image.st_gid, "size": image.st_size,
+            "mtime_ns": image.st_mtime_ns, "ctime_ns": image.st_ctime_ns,
+            "sha256": launch["sha256"],
+        }
+        if (any(measured.get(key) != value for key, value in expected_image.items())
+                or measured.get("real_uid") != approved["uid"]
+                or measured.get("effective_uid") != approved["uid"]
+                or measured.get("real_gid") != approved["gid"]
+                or measured.get("effective_gid") != approved["gid"]
+                or owner.manifest_sha256() != manifest_sha):
+            raise ReleaseManifestError("Hermes main custody differs from installation")
+        current = (pid, measured["boot_id"], measured["start_identity"],
+                   measured["real_uid"], measured["effective_uid"],
+                   measured["real_gid"], measured["effective_gid"])
+        if birth is None:
+            birth = current
+        elif current != birth:
+            raise ReleaseManifestError("Hermes main process custody changed")
+        runtime.check()
+        finder.check()
+        return {"pid": pid, "start_ticks": measured["start_identity"],
+                "uid": approved["uid"], "gid": approved["gid"],
+                "manifest_sha256": manifest_sha, "image_sha256": measured["sha256"]}
+
+    # This qualification precedes CLI import and any role/credential read.
+    observe()
+    return observe
+
+
 def _hermes_runtime(argv: list[str]) -> int:
     if (not argv or argv[0] not in {"supervise", "canary", "isolation-probe"}
-            or not _hermes_recipe_is_qualified()):
-        raise ReleaseManifestError("Hermes requires the fixed isolated Linux recipe")
-    # The sentinels are installed again here so the guarantee never depends on
-    # the import-time argument vector: a programmatic import that dispatches
-    # the hermes command later still blocks ambient site code.
-    _install_no_site_sentinels()
+            or not _HERMES_EARLY_NO_SITE or not _hermes_recipe_is_qualified()
+            or any(name not in sys.modules or sys.modules[name] is not None
+                   for name in _HERMES_SITE_NAMES)):
+        raise ReleaseManifestError("Hermes requires the fixed early isolated Linux recipe")
     entry = Path(__file__)
     root = entry.parents[2]
     if (not entry.is_absolute() or root.parent != _LINUX_RELEASES
@@ -770,7 +845,7 @@ def _hermes_runtime(argv: list[str]) -> int:
             raise ReleaseManifestError("Hermes implementation label differs from release")
         with _held_release_imports(owner) as finder:
             factory = importlib.import_module(_CUSTODY_ROOT.replace("/", ".") + ".paid_initializer")
-            with _runtime_custody(factory, installation, owner):
+            with _runtime_custody(factory, installation, owner) as runtime:
                 yaml_owner = importlib.import_module(_YAML_ROOT.replace("/", ".") + ".paid_yaml_runtime")
                 with yaml_owner.held_yaml(
                     owner.source(_YAML_ROOT + "/paid_pyyaml_6_0_3.zip"),
@@ -779,14 +854,18 @@ def _hermes_runtime(argv: list[str]) -> int:
                 ) as yaml:
                     finder.predecessor = yaml.__loader__
                     finder.check()
+                    custody_observer = _main_custody_observer(owner, finder, runtime, installation)
                     if argv[0] == "isolation-probe":
                         from integrations.hermes_runtime.isolation_probe import main as entry_main
                         entry_args = argv[1:]
+                        entry_kwargs = {}
                     else:
                         from integrations.hermes_runtime.cli import main as entry_main
                         entry_args = argv
+                        entry_kwargs = {"custody_observer": custody_observer}
                     finder.check()
-                    result = entry_main(entry_args)
+                    result = entry_main(entry_args, **entry_kwargs)
+                    custody_observer()
                     finder.check()
                     return result
     finally:
