@@ -8,8 +8,6 @@ No live host, provider, credentials, Git remote or service is contacted.
 import types
 from pathlib import Path
 import sys
-import json
-import subprocess
 
 import pytest
 
@@ -53,7 +51,7 @@ def actual_child(j, monkeypatch, *, after=lambda: None):
 
     def runner(argv, **options):
         result = original(argv, **options)
-        if any(str(item).endswith('/scripts/agentos_project_plan_entry.py') for item in argv):
+        if any(str(item).endswith(('/scripts/agentos_project_plan_entry.py', '/scripts/agentos_project_discovery_entry.py')) for item in argv):
             children.append(list(map(str, argv)))
             after()
         return result
@@ -104,6 +102,193 @@ def test_actual_late_latest_grant_withdrawal_withholds_completed_child(joined, m
             operation='project_plan', selection={'work_ref': j['args']['work_ref']})
     assert len(children) == 1
     assert j['runtime'].jobs.list_jobs() == []
+
+
+def test_actual_installed_discovery_compiles_current_n_record_with_c_owner(joined, monkeypatch):
+    j = joined
+    collector, children = actual_child(j, monkeypatch)
+    view = j['data'].view(j['workspace'], work_ref=j['args']['work_ref'])
+    before = j['runtime'].events.list_events()
+    with view.capture_scope():
+        with collector.canonical_project_data_scope(view, work_ref=j['args']['work_ref']):
+            record = collector.read_project_discovery(work_ref=j['args']['work_ref'],
+                observed_at_ms=view.witness()['canonical_observed_at_ms'])
+    assert record['selection'] == {'work_ref': j['args']['work_ref']}
+    assert record['source']['commit'] == j['current']
+    assert record['code_source']['commit'] == j['code']
+    assert record['agent_os_state']['workstreams'][0]['key'] == j['args']['work_ref'][3:]
+    assert record['agent_os_state']['workstreams'][0]['title'] == 'Mastermind OS delivery'
+    assert len(children) == 1
+    assert j['runtime'].events.list_events() == before
+    assert j['runtime'].jobs.list_jobs() == []
+
+
+def test_actual_discovery_capture_uses_original_create_and_installed_current_record(joined, monkeypatch):
+    from integrations.mastermind_workspace_app.project_discovery import InstalledProjectDiscovery
+    from control_plane.installed_project_discovery_binding import read_installed_project_discovery
+    j = joined
+    actual_child(j, monkeypatch)
+    owner = InstalledProjectDiscovery(j['data'])
+    before = j['runtime'].events.list_events()
+    capture = read_installed_project_discovery(owner.installed_binding(), principal_frame(j['workspace']), runtime=j['runtime'])
+    try:
+        body = capture.document()
+        assert body['coverage']['returned'] == 1
+        entry = body['entries'][0]
+        assert entry['creation_publication']['selection']['action'] == 'publish_project_proposal'
+        assert entry['record']['selection'] == {'work_ref': j['args']['work_ref']}
+        assert entry['record']['source']['commit'] == j['current']
+        assert entry['data_observation']['executable_macro_commit'] == j['code']
+        assert entry['data_observation']['canonical_data_commit'] == j['current']
+        assert j['runtime'].events.list_events() == before
+    finally:
+        capture.close()
+
+
+
+@pytest.fixture
+def full_joined(owner, identity, tmp_path, monkeypatch):
+    # A real previously published canonical project establishes configured C.
+    # The commissioned second CREATE remains absent at C and appears at N.
+    import copy
+    from tests.test_workspace_project_git_publisher import git
+    baseline = owner['service'].prepare(copy.deepcopy(owner['request']), owner['who'])
+    selected = {key:baseline['selection'][key] for key in ('action','request_id','work_ref')}
+    proposal = owner['service'].submit(lookup=dict(schema='mastermind.workspace_source_operation_lookup.v1',**selected),
+        preview_witness=baseline['preview_witness'],principal=owner['who'])
+    integrator = tmp_path/'prior-default'
+    git(tmp_path,'clone',str(owner['env'].origin),str(integrator))
+    git(integrator,'fetch','origin',proposal['receipt']['proposal']['head_branch'])
+    git(integrator,'merge','--no-ff','--no-edit','FETCH_HEAD');git(integrator,'push','origin','main')
+    original_lookup = dict(schema='mastermind.workspace_source_operation_lookup.v1',**selected)
+    assert owner['service'].reconcile(original_lookup,owner['who'])['receipt']['kind']=='SOURCE_OBSERVED'
+    # Materialize the actual prior protected default before capturing C.
+    git(owner['env'].clone,'fetch','origin','main');git(owner['env'].clone,'merge','--ff-only','origin/main')
+    return joined.__wrapped__(owner,identity,tmp_path,monkeypatch)
+
+
+def discovery_service(j, monkeypatch):
+    from tests.test_workspace_read_service import cache_fixture
+    from integrations.mastermind_workspace_app.project_discovery import InstalledProjectDiscovery
+    from control_plane.workspace_read_service import WorkspaceReadService
+    from integrations.mastermind_workspace_app.contract import workspace_authorizers
+    from integrations.mastermind_workspace_app.project_authoring_grant import legacy_workspace_document
+    from tests.test_fabric_result_projection import _bound_reader
+    if j.get('full_c'):
+        from tests.fresh_conversation_full_cache import CanonicalFixtureCache
+        captured = CanonicalFixtureCache(j['code_root'],j['tmp_path']/'genuine-cache',
+            mastermind_revision=j['factory'].service.config.proof_base_sha)
+        current, cache = [captured.owner], captured.cache
+    else:
+        current, clocks, cache = cache_fixture(j['tmp_path'])
+        current[0].state_cache['doc']['sources'] = {'macro_sha': j['code']}
+    _, authorize = workspace_authorizers(policy=j['factory'].workspace_policy,
+        load_bindings=lambda:legacy_workspace_document(j['document'],j['factory'].workspace_policy))
+    keeper, namespace, binding, bounded = _bound_reader(j['runtime'])
+    read = WorkspaceReadService(cache=cache, runtime=j['runtime'], authorize=authorize, armed={},runtime_identity={},
+        bounded_runtime=lambda runtime:bounded,
+        project_discovery=InstalledProjectDiscovery(j['data']).installed_binding())
+    return read, current, (keeper, binding)
+
+
+def test_actual_create_default_reload_programs_and_explicit_runtime_mission(full_joined, monkeypatch):
+    import asyncio, copy, json
+    from common.executive_workspace_contract import FRAME_SCHEMA, FRAME_SCHEMA_V2
+    from tests.test_project_planning_factory import invocation
+    from tests.test_fabric_result_projection import _release
+    j = full_joined
+    j['full_c'] = True
+    actual_child(j, monkeypatch)
+    # Existing real admitted planner root; no target/session is made by READ.
+    created = asyncio.run(invocation(j['factory'], j['args'], lambda:j['factory'].submit(**j['args'])))
+    read, current, lease = discovery_service(j, monkeypatch)
+    original = copy.deepcopy(current[0].state_cache['doc'])
+    try:
+        request = dict(schema=FRAME_SCHEMA,operation='programs',selection=None,principal=principal_frame(j['workspace']))
+        response = asyncio.run(read.handle_frame(request))
+        assert response['ok'], response
+        body = response['result']
+        assert body['schema'] == 'mastermind.workspace_programs.v2'
+        assert body['control_room'] == original
+        project = body['canonical_projects'][0]
+        assert project['work_ref'] == j['args']['work_ref']
+        assert project['control_room']['work'][0]['agent_os']['title'] == 'Mastermind OS delivery'
+        card = project['control_room']['autonomy']['responsibilities'][0]
+        assert card['root_job_id'] == created['job_id'], card
+        mission_request = dict(schema=FRAME_SCHEMA_V2,operation='mission_v3',
+            selection=dict(work_ref=j['args']['work_ref'],root_job_id=created['job_id']),principal=principal_frame(j['workspace']))
+        mission = asyncio.run(read.handle_frame(mission_request))
+        assert mission['ok'], mission
+        assert mission['result']['mission']['root_job_id'] == created['job_id']
+        assert mission['result']['source']['owner_observation']['schema'] == 'mastermind.workspace_source_observation.v2'
+        assert current[0].state_cache['doc'] == original and current[0].state_compose_seq == 0
+        # Keep actual producer DTOs for exact frontend decoder/consumer proof.
+        target = __import__('os').environ.get('MMOS_DISCOVERY_FIXTURE_OUTPUT')
+        if target:
+            from pathlib import Path
+            Path(target).write_text(json.dumps(dict(programs=body,mission=mission['result']),ensure_ascii=False,sort_keys=True))
+
+        # Same actual root, distinct closed native origin. No legacy coercion.
+        import dataclasses
+        from control_plane.project_discovery_direct_origin import validate_direct_origin
+        from control_plane.project_discovery_projection import runtime_metadata
+        rt = read._bounded_runtime(j['runtime'])
+        principal_scope = project['source_observation']['project_data']['creation_publication']['principal_scope']
+        creation = project['source_observation']['project_data']['creation_publication']
+        metadata, receipt = runtime_metadata(rt, {j['args']['work_ref']}, creation_publications={j['args']['work_ref']: creation})
+        assert metadata['rows'][0]['job_id'] == created['job_id']
+        foreign = copy.deepcopy(creation); foreign['principal_scope'] = 'f'*64
+        assert runtime_metadata(rt, {j['args']['work_ref']}, creation_publications={j['args']['work_ref']: foreign})[0]['rows'] == []
+        event = next(item for item in j['runtime'].events.list_events(job_id=created['job_id']) if item.event_type == 'JOB_CREATED')
+        job = j['runtime'].jobs.get_job(created['job_id'])
+        material = j['runtime'].jobs.direct_native_provenance(created['job_id'])
+        validate_direct_origin(job, event, material)
+        for mutation in ('actor', 'work', 'unknown', 'planning', 'schema', 'source'):
+            payload = copy.deepcopy(event.payload)
+            provenance = payload['provenance']
+            if mutation == 'actor': provenance['actor'] = 'bad actor'
+            if mutation == 'work': provenance['workstream'] = 'WS:FOREIGN'
+            if mutation == 'unknown': provenance['unexpected'] = True
+            if mutation == 'planning': provenance['project_planning_sha256'] = 'f'*64
+            if mutation == 'schema': provenance['schema'] = 'mastermind.ceo_intent.v1'
+            if mutation == 'source': provenance['grounding']['macro_sha'] = 'f'*40
+            with pytest.raises(ValueError):
+                validate_direct_origin(job, dataclasses.replace(event,payload=payload), material)
+        # Explicit unknown root refuses before Fabric acquisition; readonly
+        # observations add no Jobs, attempts, provider calls or owner Events.
+        event_count = len(j['runtime'].events.list_events())
+        unknown = copy.deepcopy(mission_request); unknown['selection']['root_job_id'] = 'JOB-99999'
+        assert asyncio.run(read.handle_frame(unknown))['status'] == 404
+        assert len(j['runtime'].events.list_events()) == event_count
+        old_code = current[0].state_cache['doc']['sources']['macro_sha']
+        current[0].state_cache['doc']['sources']['macro_sha'] = 'f'*40
+        assert asyncio.run(read.handle_frame(request))['result']['availability'] == 'UNAVAILABLE'
+        current[0].state_cache['doc']['sources']['macro_sha'] = old_code
+        slot = j['document']['profiles'][j['document']['primary_profile']]
+        previous = slot['project_canonical_data_read']; slot['project_canonical_data_read'] = None
+        without_latest = asyncio.run(read.handle_frame(request))['result']
+        assert without_latest['availability'] == 'AVAILABLE' and without_latest['schema'] == 'mastermind.workspace_programs.v1'
+        assert without_latest['control_room'] == original
+        slot['project_canonical_data_read'] = previous
+        assert len(j['runtime'].events.list_events()) == event_count
+        # Late Workspace READ revocation after the actual child must withhold
+        # its finished body; no source event or Runtime operation is added.
+        old_read = read.authorize
+        allowed = [True]
+        def enrolled(frame): return allowed[0] and old_read(frame)
+        enrolled.binding_digest = lambda frame: old_read.binding_digest(frame) if allowed[0] else None
+        read.authorize = enrolled
+        original_runner = j['collector']._runner
+        def late_runner(argv, **options):
+            result = original_runner(argv, **options)
+            if any(str(item).endswith('/scripts/agentos_project_discovery_entry.py') for item in argv):
+                allowed[0] = False
+            return result
+        monkeypatch.setattr(j['collector'], '_runner', late_runner)
+        assert asyncio.run(read.handle_frame(request))['status'] == 403
+        assert len(j['runtime'].events.list_events()) == event_count
+    finally:
+        _release(*lease)
 
 
 def test_actual_fixed_child_reads_code_from_c_when_shallow_n_lacks_c_object(joined, tmp_path):

@@ -27639,6 +27639,23 @@ class BoundedRuntimeReadObservation:
                         if warning is not None or not isinstance(provenance, Mapping):
                             raise RuntimeReadUnavailable("root origin strict-v2 provenance unavailable")
                         kind = "STRICT_V2_CEO"
+                    elif isinstance(payload.get("provenance"), Mapping) and payload["provenance"].get("schema") == "mastermind.ceo_direct_native_intent.v1":
+                        # The existing direct-native owner qualifies immutable
+                        # Job/source/planning material, inside this SAME bounded
+                        # read connection. Never coerce it to legacy v1 or grant
+                        # execution/continuation from its metadata.
+                        statements += 2
+                        returned_rows += 2
+                        total_bytes += sum(lengths)
+                        if (statements > BOUNDED_ROOT_ORIGIN_MAX_STATEMENTS
+                                or returned_rows > BOUNDED_ROOT_ORIGIN_MAX_ROWS
+                                or total_bytes > BOUNDED_ROOT_ORIGIN_MAX_TOTAL_BYTES):
+                            raise RuntimeReadUnavailable("direct root origin budget exceeded")
+                        direct_row = self._connection.execute("SELECT * FROM jobs WHERE job_id=?", (job.job_id,)).fetchone()
+                        material = _direct_native_provenance(self._connection, direct_row, required=True)
+                        from control_plane.project_discovery_direct_origin import validate_direct_origin
+                        provenance = validate_direct_origin(job, event, material)
+                        kind = "DIRECT_NATIVE_CEO"
                     else:
                         from control_plane.runtime_root_origin import classify_legacy_root_creation
                         classified = classify_legacy_root_creation(job, event)

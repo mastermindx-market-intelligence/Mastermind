@@ -498,7 +498,7 @@ class WorkspaceReadService:
                  product_acceptance_observe=None, activity_membership=None,
                  project_plan_reader=None, project_journal_reader=None, project_session_source=None, project_instructions_reader=None, project_direction_reader=None, project_archive_reader=None,
                  project_knowledge_catalogue_reader=None, project_knowledge_memory_reader=None, project_knowledge_source_reader=None,
-                 canonical_project_data=None,
+                 canonical_project_data=None, project_discovery=None,
                  control_room_presenter=None,
                  control_room_actions=None, project_admission_permissions=None, instruction_admission_permissions=None):
         from control_plane.workspace_project_permission_binding import ProjectAdmissionPermissions
@@ -513,6 +513,7 @@ class WorkspaceReadService:
                 raise ValueError("nominal installed instruction permission source required")
             instruction_admission_permissions.check()
         self._instruction_admission_permissions = instruction_admission_permissions
+        self._project_discovery = project_discovery
         self.cache = cache
         self.runtime = runtime
         self.authorize = authorize
@@ -1052,6 +1053,11 @@ class WorkspaceReadService:
             _join(before.document, selected)
         if not _qualified(before, selected):
             raise ValueError("source_unavailable")
+        if selected is None and self._project_discovery is not None:
+            from control_plane.workspace_project_discovery_read import read_programs
+            discovered = read_programs(self, frame, before)
+            if discovered is not None:
+                return discovered
         fabric = None
         runtime = None
         if selected is not None:
@@ -1740,6 +1746,11 @@ class WorkspaceReadService:
         """Join the canonical v3 companion and reducer through existing custody."""
         selected = frame["selection"]
         before = self.cache.snapshot()
+        if self._project_discovery is not None and not any(row.get('work_ref') == selected['work_ref'] for row in before.document.get('work', [])):
+            if not _qualified(before):
+                raise ValueError('source_unavailable')
+            from control_plane.workspace_project_discovery_read import read_mission
+            return read_mission(self, frame, before)
         _join(before.document, selected)
         if not _qualified(before, selected):
             raise ValueError("source_unavailable")
