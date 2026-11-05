@@ -22,12 +22,21 @@ What the update changes, and nothing else:
   configuration digests through the incumbent validator, changing no
   authority, state, evidence, policy, scope or timestamp;
 * the existing nonsecret control observation, published by the actual held
-  transaction owner.
+  transaction owner;
+* OPTIONALLY, and only when the caller supplies the PAIRED Hermes host-read
+  selection: the two Fabric-binding selector coordinates of the Control
+  configuration, together with the ONE immutable binding artifact they name.
 
 Every other Control field, the whole Worker configuration and the whole Worker
 runtime state are preserved.  No Relay, MCP, Backup or privileged-broker
 action is taken, and the original publish-os-gateway receipt and its history
 are excluded.
+
+The Hermes host-read selection is NOT a second operation.  It is one optional,
+paired input to the SAME verbs: both coordinates absent preserve the
+source-only behaviour byte-for-byte, and exactly one of them refuses.  It is
+composed in memory, published exactly once as one derived immutable artifact,
+and reconstructed from the sealed bytes during a reconciliation.
 
 Exactly two closed input states exist and the installed state selects one of
 them.  LIVE: the Control service is registered and enabled.  OFFLINE: the
@@ -50,10 +59,11 @@ import hashlib
 import json
 import plistlib
 import re
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 PLAN_SCHEMA = "mastermind.control_component_update_plan.v1"
 
+CONFIG_ROOT_PATH = "/Library/Application Support/MastermindExecutive/config"
 CONTROL_CONFIG_PATH = "/Library/Application Support/MastermindExecutive/config/control.json"
 CONTROL_PLIST_PATH = "/Library/LaunchDaemons/com.mastermind.executive.control.plist"
 WORKER_PLIST_PATH = "/Library/LaunchDaemons/com.mastermind.executive.worker.codex.plist"
@@ -115,6 +125,18 @@ OFFLINE_EFFECTS = (
     "bootstrap system/" + CONTROL_PLIST_PATH,
     "publish control observation",
 )
+
+# The ONE immutable Fabric-binding artifact a selection publishes.  Its name
+# is DERIVED from the digest of the exact composed bytes, so the destination
+# is a function of its own content and the caller never supplies a path.
+BINDING_ARTIFACT_PREFIX = "fabric-bindings-"
+BINDING_ARTIFACT_SUFFIX = ".json"
+# The closed effect of that publication.  It is inserted into the ordered
+# effect list between the stopped-boundary proof and the installed
+# publications, because the Control configuration may only name a binding
+# artifact that already exists.
+BINDING_EFFECT_PREFIX = "publish "
+
 
 # The closed precondition vocabulary.  Every one of these must hold before a
 # plan exists; a false precondition is a refusal with zero cutover.  The two
@@ -186,14 +208,51 @@ def preconditions_for_mode(mode: str) -> tuple[str, ...]:
     raise ComponentError("component_mode_invalid")
 
 
-def effects_for_mode(mode: str) -> tuple[str, ...]:
-    """The closed effect list of exactly one mode."""
+def binding_destination(candidate_sha256: str) -> str:
+    """The derived destination of one composed Fabric-binding artifact."""
+
+    if HEX64.fullmatch(candidate_sha256) is None:
+        raise ComponentError("binding_candidate_digest_invalid")
+    return (
+        CONFIG_ROOT_PATH
+        + "/"
+        + BINDING_ARTIFACT_PREFIX
+        + candidate_sha256
+        + BINDING_ARTIFACT_SUFFIX
+    )
+
+
+def binding_effect(destination: str) -> str:
+    """The closed, ordered effect of the one immutable binding publication."""
+
+    return BINDING_EFFECT_PREFIX + destination
+
+def effects_for_mode(mode: str, *, binding_destination: str | None = None) -> tuple[str, ...]:
+    """The closed effect list of exactly one mode.
+
+    Without a selection the list is byte-for-byte the historical one.  With
+    a selection the ONE immutable binding publication is inserted between the
+    stopped-boundary proof and the installed publications, because the
+    Control configuration may only name a binding artifact that already
+    exists.
+    """
 
     if mode == LIVE_MODE:
-        return LIVE_EFFECTS
-    if mode == OFFLINE_MODE:
-        return OFFLINE_EFFECTS
-    raise ComponentError("component_mode_invalid")
+        base = LIVE_EFFECTS
+    elif mode == OFFLINE_MODE:
+        base = OFFLINE_EFFECTS
+    else:
+        raise ComponentError("component_mode_invalid")
+    if binding_destination is None:
+        return base
+    effect = binding_effect(binding_destination)
+    if effect in base:
+        raise ComponentError("binding_effect_already_present")
+    # The bootout is the first live effect and there is no bootout at all in
+    # the offline mode, so the publication follows it in the live mode and
+    # leads the list in the offline mode.
+    index = 1 if mode == LIVE_MODE else 0
+    return base[:index] + (effect,) + base[index:]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -259,6 +318,64 @@ def _flat_text(value: Any) -> str:
 
 
 @dataclasses.dataclass(frozen=True)
+class BindingSelectionInputs:
+    """The qualified composition inputs of ONE Hermes host-read selection.
+
+    ``input_document`` is the accepted read member and ``prior_bindings`` and
+    ``prior_remote_transports`` are the EXACT execution rows of the prior
+    selected binding, in their original order.  The digests and the two
+    EXPLICIT presence flags are what the plan and the sealed marker carry;
+    the composition itself is derived from these inputs alone.
+    """
+
+    input_document: Mapping[str, Any]
+    prior_bindings: tuple[Mapping[str, Any], ...]
+    prior_remote_transports: tuple[Mapping[str, Any], ...]
+    input_sha256: str
+    prior_binding_sha256: str
+    prior_selector_present: bool
+    destination_present: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class BindingSelection:
+    """The closed selection metadata of ONE Hermes host-read selection.
+
+    Only hashes, EXPLICIT presence, the derived destination and the ordered
+    effect are carried.  No configuration, endpoint, key or credential
+    content ever reaches the plan, the sealed marker or a caller-readable
+    staging.
+    """
+
+    input_sha256: str
+    candidate_sha256: str
+    destination: str
+    destination_present: bool
+    prior_selector_present: bool
+    prior_binding_sha256: str
+    bindings_count: int
+    remote_transports_count: int
+    execution_present: bool
+    effect: str
+
+    def document(self) -> dict[str, Any]:
+        """The closed selection member of the plan and of the sealed marker."""
+
+        return {
+            "input_sha256": self.input_sha256,
+            "candidate_sha256": self.candidate_sha256,
+            "destination": self.destination,
+            "destination_present": self.destination_present,
+            "prior_selector_present": self.prior_selector_present,
+            "prior_binding_sha256": self.prior_binding_sha256,
+            "bindings_count": self.bindings_count,
+            "remote_transports_count": self.remote_transports_count,
+            "execution_present": self.execution_present,
+            "effect": self.effect,
+        }
+
+
+@dataclasses.dataclass(frozen=True)
 class Candidate:
     """The exact bytes one Control component update would publish."""
 
@@ -272,6 +389,10 @@ class Candidate:
     worker_plist_after: bytes
     worker_config_sha256: str
     changed_control_fields: tuple[str, ...]
+    # The optional closed selection metadata.  It is ABSENT -- and the
+    # historical source-only behaviour is byte-for-byte unchanged -- when the
+    # operation carries no Hermes host-read selection.
+    selection: BindingSelection | None = None
 
     @property
     def control_config_before_sha256(self) -> str:
@@ -344,6 +465,60 @@ def _encode_plist(document: Mapping[str, Any]) -> bytes:
     return plistlib.dumps(dict(document), fmt=plistlib.FMT_XML, sort_keys=False)
 
 
+def changed_keys(before: Mapping[str, Any], after: Mapping[str, Any]) -> tuple[str, ...]:
+    """The changed keys of TWO documents, with EXPLICIT presence semantics.
+
+    The comparison covers the UNION of both key sets, so a key that only one
+    side carries is a change.  A newly added key is never silently accepted
+    because the prior document did not mention it.
+    """
+
+    changed: list[str] = []
+    for key in set(before) | set(after):
+        if (key in before) != (key in after):
+            changed.append(key)
+        elif before[key] != after[key]:
+            changed.append(key)
+    return tuple(sorted(changed))
+
+
+def compose_binding_candidate(
+    *,
+    input_document: Mapping[str, Any],
+    prior_bindings: Sequence[Mapping[str, Any]],
+    prior_remote_transports: Sequence[Mapping[str, Any]],
+) -> bytes:
+    """The exact immutable Fabric-binding document ONE selection publishes.
+
+    The document is the EXISTING v3 composition: the pinned execution rows
+    and their transports are carried over EXACTLY and in their original
+    order, and the requested Hermes host-read member replaces the read
+    selection.  A v1 binding that carries no transports contributes an empty
+    transport list; it never invents one.
+
+    This function composes bytes and nothing else.  The read member and the
+    carried rows are qualified by the incumbent owners before they arrive
+    here, and the composed document is proved loadable by the incumbent v3
+    parser before it is ever published.
+    """
+
+    from control_plane.executive_fabric_composition import (
+        HOST_READ_CONFIG_SCHEMA_VERSION,
+    )
+
+    document = {
+        "schema_version": HOST_READ_CONFIG_SCHEMA_VERSION,
+        "bindings": [copy.deepcopy(dict(item)) for item in prior_bindings],
+        "remote_transports": [
+            copy.deepcopy(dict(item)) for item in prior_remote_transports
+        ],
+        "hermes_role_metadata_read": copy.deepcopy(dict(input_document)),
+    }
+    return (json.dumps(
+        document, sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False
+    ) + "\n").encode("utf-8")
+
+
 def compile_candidate(
     prior_control_config: bytes,
     prior_control_plist: bytes,
@@ -354,6 +529,7 @@ def compile_candidate(
     worker_config_sha256: str,
     prior_release_root: str,
     target_release_root: str,
+    selection: BindingSelectionInputs | None = None,
 ) -> Candidate:
     """Compile the exact candidate.  Pure: no file, no command, no state."""
 
@@ -373,14 +549,54 @@ def compile_candidate(
         build_component_successor,
     )
 
+    selection_metadata: BindingSelection | None = None
+    selector: dict[str, str] | None = None
+    if selection is not None:
+        if HEX64.fullmatch(selection.input_sha256) is None:
+            raise ComponentError("binding_input_digest_invalid")
+        if selection.prior_selector_present and (
+            HEX64.fullmatch(selection.prior_binding_sha256) is None
+        ):
+            raise ComponentError("binding_prior_digest_invalid")
+        composed = compose_binding_candidate(
+            input_document=selection.input_document,
+            prior_bindings=selection.prior_bindings,
+            prior_remote_transports=selection.prior_remote_transports,
+        )
+        candidate_sha256 = digest(composed)
+        destination = binding_destination(candidate_sha256)
+        selector = {"path": destination, "sha256": candidate_sha256}
+        selection_metadata = BindingSelection(
+            input_sha256=selection.input_sha256,
+            candidate_sha256=candidate_sha256,
+            destination=destination,
+            destination_present=bool(selection.destination_present),
+            prior_selector_present=bool(selection.prior_selector_present),
+            prior_binding_sha256=selection.prior_binding_sha256,
+            bindings_count=len(selection.prior_bindings),
+            remote_transports_count=len(selection.prior_remote_transports),
+            execution_present=bool(
+                selection.prior_bindings or selection.prior_remote_transports
+            ),
+            effect=binding_effect(destination),
+        )
+
     try:
-        successor = build_component_successor(document, source_sha=target_sha)
+        successor = build_component_successor(
+            document, source_sha=target_sha, fabric_bindings=selector
+        )
     except PreparationError as exc:
         raise ComponentError("control_config_successor_invalid") from exc
-    changed = tuple(
-        sorted(key for key in document if document[key] != successor[key])
-    )
-    if changed != ("proof_base_sha", "proof_source_repository"):
+    changed = changed_keys(document, successor)
+    allowed = ("proof_base_sha", "proof_source_repository")
+    if selector is not None:
+        allowed = (
+            "fabric_bindings_path",
+            "fabric_bindings_sha256",
+            "proof_base_sha",
+            "proof_source_repository",
+        )
+    if changed != allowed:
         raise ComponentError("control_config_scope_invalid")
     if successor.get("proof_source_repository") != (
         ADMIN_CHECKOUT_ROOT + "/" + target_sha
@@ -418,6 +634,7 @@ def compile_candidate(
         worker_plist_after=worker_plist_after,
         worker_config_sha256=worker_config_sha256,
         changed_control_fields=changed,
+        selection=selection_metadata,
     )
 
 
@@ -457,7 +674,7 @@ def plan_document(
             raise ComponentError("receipt_preimage_invalid")
         if HEX64.fullmatch(value.sha256) is None:
             raise ComponentError("receipt_preimage_invalid")
-    return {
+    document = {
         "schema": PLAN_SCHEMA,
         "mode": mode,
         "target_sha": candidate.target_sha,
@@ -495,8 +712,24 @@ def plan_document(
         "target_release_manifest_sha256": target_release_manifest_sha256,
         "admin_checkout_commit": admin_checkout_commit,
         "preconditions": {key: bool(preconditions[key]) for key in expected},
-        "effects": list(effects_for_mode(mode)),
+        "effects": list(
+            effects_for_mode(
+                mode,
+                binding_destination=(
+                    candidate.selection.destination
+                    if candidate.selection is not None
+                    else None
+                ),
+            )
+        ),
     }
+    if candidate.selection is not None:
+        # The closed selection metadata: hashes, EXPLICIT presence, the
+        # derived destination and the ordered effect.  It is ABSENT when the
+        # operation carries no selection, so the source-only plan stays
+        # byte-for-byte unchanged.
+        document["selection"] = candidate.selection.document()
+    return document
 
 
 # ---------------------------------------------------------------------------
@@ -506,12 +739,43 @@ def plan_document(
 # ---------------------------------------------------------------------------
 
 
-def plan(host: Any, *, target_sha: str) -> dict[str, Any]:
+def hermes_read_selector(
+    input_path: str | None, input_sha256: str | None
+) -> tuple[str, str] | None:
+    """The PAIRED Hermes host-read selection, or NOTHING.
+
+    The two coordinates are one selection: the exact qualified input path
+    and the exact digest of its raw bytes.  Both absent preserve the
+    existing source-only behaviour byte-for-byte; exactly one of them is a
+    refusal and is never treated as an absent selection.
+    """
+
+    if input_path is None and input_sha256 is None:
+        return None
+    if input_path is None or input_sha256 is None:
+        raise ComponentError("control_component_hermes_read_selector_incomplete")
+    if type(input_path) is not str or not input_path:
+        raise ComponentError("control_component_hermes_read_input_invalid")
+    if HEX64.fullmatch(input_sha256) is None:
+        raise ComponentError("control_component_hermes_read_input_invalid")
+    return (input_path, input_sha256)
+
+
+def plan(
+    host: Any,
+    *,
+    target_sha: str,
+    hermes_read_input: str | None = None,
+    hermes_read_sha256: str | None = None,
+) -> dict[str, Any]:
     """Compile and prove the plan.  Read-only: no marker, no effect."""
 
     if HEX40.fullmatch(target_sha) is None:
         raise ComponentError("release_sha_invalid")
-    observation = host.observe_control_component_update(target_sha=target_sha)
+    selector = hermes_read_selector(hermes_read_input, hermes_read_sha256)
+    observation = host.observe_control_component_update(
+        target_sha=target_sha, hermes_read=selector
+    )
     document = observation["plan"]
     return {
         "ok": True,
@@ -522,7 +786,14 @@ def plan(host: Any, *, target_sha: str) -> dict[str, Any]:
     }
 
 
-def apply(host: Any, *, target_sha: str, plan_sha256: str) -> dict[str, Any]:
+def apply(
+    host: Any,
+    *,
+    target_sha: str,
+    plan_sha256: str,
+    hermes_read_input: str | None = None,
+    hermes_read_sha256: str | None = None,
+) -> dict[str, Any]:
     """Publish exactly the approved plan through the incumbent owner."""
 
     from ops.executive_os import autonomy_control as owner
@@ -531,13 +802,21 @@ def apply(host: Any, *, target_sha: str, plan_sha256: str) -> dict[str, Any]:
         raise ComponentError("release_sha_invalid")
     if HEX64.fullmatch(plan_sha256) is None:
         raise ComponentError("plan_sha256_invalid")
+    selector = hermes_read_selector(hermes_read_input, hermes_read_sha256)
     return owner.execute_control_component_update(
-        host, target_sha=target_sha, plan_sha256=plan_sha256
+        host,
+        target_sha=target_sha,
+        plan_sha256=plan_sha256,
+        hermes_read=selector,
     )
 
 
 def reconcile(host: Any, *, target_sha: str) -> dict[str, Any]:
-    """Prove one interrupted update to its exact retained postimages."""
+    """Prove one interrupted update to its exact retained postimages.
+
+    A reconciliation takes NO replacement input: the original selection is
+    reconstructed from the SEALED bytes of the original operation.
+    """
 
     from ops.executive_os import autonomy_control as owner
 

@@ -6,12 +6,24 @@ against a hermetic stand-in for the one installed Executive host, so every
 refusal path is exercised with zero cutover and every crash gap of the happy
 path is exercised without dispatching a duplicate effect.
 
-The production QUALIFIERS are never replaced by a stub: the administrative
+The production QUALIFIERS are not replaced by a stub: the administrative
 checkout is proved by the real production method against a real hermetic Git
-repository, and the pinned interpreter is qualified through the installed
-peer's own runtime owner.  Only the leaf host observations (launchd, the
-process table, the installed release tree, the installed files) are stood in
-for, so a defect inside a qualification cannot hide behind an override.
+repository, and the receipt, manifest, compare-and-swap and effect-order
+discipline is the production one.
+
+The pinned interpreter is the ONE documented exception, and the exception is
+deliberate and narrow: the installed peer's two leaf runtime entry points
+(``installed._verify_python_runtime`` and
+``installed._recheck_python_runtime``) inspect the real installed interpreter
+binaries, their version, their code signature and their whole ancestor
+closure on this host, so they are stood in for.  Everything the component
+itself owns around them IS the production code: the retained observation, the
+ONE budget it was observed under, and the recheck of that same observation
+under that same budget immediately before the first effect.
+
+Only the leaf host observations (launchd, the process table, the installed
+release tree, the installed files) are stood in for, so a defect inside a
+qualification cannot hide behind an override.
 """
 
 import copy
@@ -19,6 +31,7 @@ import hashlib
 import json
 import os
 import plistlib
+import stat
 import subprocess
 import tempfile
 from pathlib import Path
@@ -215,6 +228,70 @@ def _disarmed_receipt(control_digest: str, worker_digest: str) -> dict:
     }
 
 
+def _disarmed_ceo_receipt() -> bytes:
+    """One complete existing DISARMED CEO-submit receipt.
+
+    The incumbent validator is the only authority on its shape, so the
+    fixture is built from the incumbent's own projection digest rather than
+    from a hand-written digest.
+    """
+
+    projection = {
+        "ceo_submit_armed": False,
+        "ceo_ingress_app_peer_uid": 501,
+        "ceo_ingress_app_armed": False,
+        "ceo_ingress_peer_uid": 502,
+        "ceo_ingress_socket_path": "/var/run/mastermind/ceo-ingress.sock",
+        "ceo_ingress_launchd_socket_name": "com.mastermind.executive.ceo",
+        "ceo_ingress_app_macro_root": MACRO_ROOT,
+        "coo_autonomy_armed": False,
+        "coo_operator_harness_armed": False,
+        "release_sha": PRIOR_SHA,
+        "installed_sha": PRIOR_SHA,
+        "app_peer_user": "_mastermind_ceo_app",
+        "app_binding_valid": True,
+        "app_acl_valid": True,
+        "app_topology_valid": True,
+        "worker_operator_harness_armed": False,
+        "worker_config_sha256": "5" * 64,
+        "transaction_id": "autonomy-000000000000",
+    }
+    receipt = {
+        "schema_version": ac.CEO_SUBMIT_RECEIPT_SCHEMA,
+        "state": "CEO_SUBMIT_DISARMED",
+        "operation": "CEO_SUBMIT_DISARM",
+        "projection": projection,
+        "projection_digest": ac.ceo_submit_projection_digest(projection),
+        "transaction_id": "autonomy-000000000000",
+        "observed_at": "2026-01-01T00:00:00Z",
+        "tool_version": ac.TOOL_VERSION,
+    }
+    assert ac.validate_ceo_submit_receipt_document(receipt, armed=False)
+    return ac._encoded_json(receipt)
+
+
+class _NoAmbientPath:
+    """One installed path that refuses every ambient existence probe.
+
+    An ``exists()`` or ``is_symlink()`` probe bypasses the qualified receipt
+    owner: it observes whatever the live host happens to carry instead of the
+    sealed bytes, and it cannot tell an absent receipt from an unreadable
+    one.  This stand-in turns such a probe into a hard test failure.
+    """
+
+    def __init__(self, path) -> None:
+        self._path = path
+
+    def __fspath__(self) -> str:
+        return os.fspath(self._path)
+
+    def exists(self) -> bool:
+        raise AssertionError("ambient existence probe on an installed receipt")
+
+    def is_symlink(self) -> bool:
+        raise AssertionError("ambient symlink probe on an installed receipt")
+
+
 class _Group:
     """The fixed control group identity the owner resolves on the host."""
 
@@ -297,6 +374,7 @@ class FakeHost(ac.ProductionControlComponentHost):
         self.phases: list[str] = []
         self.proofs: list[tuple[str, str]] = []
         self.publications: list[str] = []
+        self.binding_publications: list[str] = []
         self.closed = False
         self.manifest: dict = {}
         self.transaction_present = False
@@ -310,6 +388,11 @@ class FakeHost(ac.ProductionControlComponentHost):
             _sha(self.control_raw), _sha(self.worker_raw))
         self.crash_at: int | None = None
         self.fail_after: set[str] = set()
+        # When true, the CLOSED manifest reader is the production one, over the
+        # same in-memory installed file.  The fake reader is only a shortcut
+        # for the happy path; a malformed retained manifest must be classified
+        # by the real reader.
+        self.production_manifest = False
         self.interpreter_calls: dict = {"verify": [], "recheck": []}
         self.files.write(CONTROL_PLIST, plistlib.dumps(_control_plist(PRIOR_ROOT)))
         self.files.write(WORKER_PLIST, plistlib.dumps(_worker_plist(PRIOR_ROOT)))
@@ -431,8 +514,19 @@ class FakeHost(ac.ProductionControlComponentHost):
             self.files.write(
                 os.fspath(ac.AUTONOMY_TRANSACTION / name),
                 self._component_prior_archives.get(name, b""))
+        # The coordinated selection archives exist only for a transaction
+        # that sealed a selection.
+        for name in ac._COMPONENT_BINDING_ARCHIVES:
+            if name in self._component_prior_archives:
+                self.files.write(
+                    os.fspath(ac.AUTONOMY_TRANSACTION / name),
+                    self._component_prior_archives[name])
 
     def _manifest(self) -> dict:
+        if self.production_manifest:
+            # The incumbent's own closed manifest reader, over the same
+            # in-memory installed file.
+            return super()._manifest()
         return dict(self.manifest)
 
     def _persist_phase(self, transaction, phase: str, *, operation=None) -> None:
@@ -443,17 +537,38 @@ class FakeHost(ac.ProductionControlComponentHost):
                 if key in self.manifest:
                     value[key] = self.manifest[key]
         self.manifest = value
+        # The retained marker file follows the retained phase, so the
+        # production manifest reader sees exactly the same document.
+        self.files.data[
+            os.fspath(ac.AUTONOMY_TRANSACTION / ac._TRANSACTION_MANIFEST_NAME)
+        ] = ac._encoded_json(value)
         self.phases.append(phase)
 
-    def _component_archives(self) -> dict:
+    def _component_archives(self, manifest=None) -> dict:
         archives = {}
         for name in ("prior-control.json", "prior-worker.json"):
             archives[name] = self.files.read(
                 os.fspath(ac.AUTONOMY_TRANSACTION / name))
-        for name in ac._COMPONENT_ARCHIVES:
+        names = ac._COMPONENT_ARCHIVES
+        if manifest is not None and type(manifest.get("component_binding")) is dict:
+            names = names + ac._COMPONENT_BINDING_ARCHIVES
+        for name in names:
             archives[name] = self.files.read(
                 os.fspath(ac.AUTONOMY_TRANSACTION / name))
         return archives
+
+    def _publish_component_binding_artifact(self, destination, payload):
+        """The ONE leaf write of the immutable binding publication.
+
+        The leaf write is stood in for; the real primitive -- the private
+        stage, the qualified root, the no-replace rename and the exact
+        readback -- is exercised separately against a private temporary root.
+        The no-replace semantics are preserved here too: an occupied
+        destination is never overwritten.
+        """
+
+        self.files.write(os.fspath(destination), payload, replace=False)
+        self.binding_publications.append(os.fspath(destination))
 
     def replace_control_config(self, transaction) -> None:
         control_candidate, _worker = self._candidate_paths(transaction.transaction_id)
@@ -2183,3 +2298,1156 @@ def test_the_cli_reports_a_post_claim_receipt_read_failure_as_effect_unknown(
     # The original transaction is retained: nothing is replayed or rolled back.
     assert host.closed is False
     assert host.manifest["transaction_id"]
+
+
+# ---------------------------------------------------------------------------
+# The claimed-transaction classification.  Once the original transaction
+# owner is claimed, EVERY outcome is INCOMPLETE or EFFECT_UNKNOWN: a claimed
+# transaction is never reported as a clean zero-effect refusal.
+# ---------------------------------------------------------------------------
+
+
+def test_a_claimed_malformed_manifest_is_effect_unknown_and_never_refused(
+        host, publisher, capsys):
+    """The manifest read belongs INSIDE the claimed region.
+
+    A malformed but qualified retained manifest used to escape the
+    reconciliation as an unhandled error, which the CLI reported as a
+    generic REFUSED.  That is a false zero-effect report about an operation
+    that had already claimed the global transaction owner.
+    """
+
+    import argparse
+    from datetime import datetime, timezone
+
+    _apply(host)
+    host.closed = False
+    host.production_manifest = True
+    manifest_path = os.fspath(
+        ac.AUTONOMY_TRANSACTION / ac._TRANSACTION_MANIFEST_NAME)
+    # The retained marker now carries a qualified but malformed document.
+    host.files.data[manifest_path] = b'{"operation":[]}'
+    before = dict(host.files.data)
+    commands = [list(command) for command in host.commands]
+    published = list(publisher)
+    # The PRODUCTION closed manifest reader is the one that classifies this
+    # document, and it is exactly the unhashable-membership defect that used
+    # to escape the guarded region.
+    with pytest.raises(TypeError):
+        super(FakeHost, host)._manifest()
+    args = argparse.Namespace(
+        command="reconcile-control-component", expected_sha=TARGET_SHA)
+    code = ac._run_control_component_command(
+        host, args, now=datetime.now(timezone.utc))
+    assert code == 2
+    document = json.loads(capsys.readouterr().out)
+    assert document["outcome"] == "EFFECT_UNKNOWN"
+    assert document["code"]
+    assert "phase" not in document
+    # The original artifacts are unchanged, and NOTHING was published,
+    # dispatched, adopted or replayed.
+    assert host.files.data == before
+    assert [list(command) for command in host.commands] == commands
+    assert publisher == published
+    assert host.closed is False
+
+
+def test_a_claimed_malformed_manifest_is_never_reported_as_refused(
+        host, publisher, capsys):
+    """The generic refusal branch must not be reachable after a claim."""
+
+    import argparse
+    from datetime import datetime, timezone
+
+    _apply(host)
+    host.closed = False
+    host.production_manifest = True
+    host.files.data[
+        os.fspath(ac.AUTONOMY_TRANSACTION / ac._TRANSACTION_MANIFEST_NAME)
+    ] = b'{"operation":[]}'
+    args = argparse.Namespace(
+        command="reconcile-control-component", expected_sha=TARGET_SHA)
+    code = ac._run_control_component_command(
+        host, args, now=datetime.now(timezone.utc))
+    assert code == 2
+    document = json.loads(capsys.readouterr().out)
+    assert document["outcome"] != "REFUSED"
+    assert document["outcome"] == "EFFECT_UNKNOWN"
+
+
+def test_the_reconcile_never_probes_the_ceo_receipt_path_ambiently(
+        host, publisher, monkeypatch):
+    """The CEO receipt is read through the SAME qualified receipt owner.
+
+    A direct ``exists()``/``is_symlink()`` probe bypasses the owner and
+    observes whatever the live host happens to carry; on a host that already
+    has a CEO-submit receipt it turned a provable reconciliation into an
+    uncertain one.
+    """
+
+    _apply(host)
+    host.closed = False
+    reads: list[str] = []
+    original = host._component_receipt_bytes
+
+    def counted(path):
+        if os.fspath(path) == CEO_SUBMIT_RECEIPT:
+            reads.append(os.fspath(path))
+        return original(path)
+
+    monkeypatch.setattr(host, "_component_receipt_bytes", counted)
+    monkeypatch.setattr(
+        ac, "CEO_SUBMIT_RECEIPT", _NoAmbientPath(ac.CEO_SUBMIT_RECEIPT))
+    commands = [list(command) for command in host.commands]
+    result = ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert result["ok"] is True
+    assert result["outcome"] == "RECONCILED"
+    # Exactly ONE qualified read of the CEO receipt: the snapshot that proved
+    # the retained postimage is the snapshot the correlated bytes reuse.
+    assert len(reads) == 1
+    assert host._component_target_ceo_bytes == b""
+    # A reconciliation dispatches no lifecycle effect.
+    assert [list(command) for command in host.commands] == commands
+
+
+def test_the_reconcile_reuses_the_one_qualified_ceo_receipt_snapshot(
+        host, publisher, monkeypatch):
+    """The correlated CEO bytes and the sealed digest name ONE snapshot."""
+
+    host.files.write(CEO_SUBMIT_RECEIPT, _disarmed_ceo_receipt())
+    _apply(host)
+    host.closed = False
+    reads: list[bytes] = []
+    original = host._component_receipt_bytes
+
+    def counted(path):
+        present, raw = original(path)
+        if os.fspath(path) == CEO_SUBMIT_RECEIPT:
+            reads.append(raw)
+        return present, raw
+
+    monkeypatch.setattr(host, "_component_receipt_bytes", counted)
+    monkeypatch.setattr(
+        ac, "CEO_SUBMIT_RECEIPT", _NoAmbientPath(ac.CEO_SUBMIT_RECEIPT))
+    result = ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert result["outcome"] == "RECONCILED"
+    assert len(reads) == 1
+    # The correlated bytes are exactly the bytes the single qualified read
+    # returned: no second read of the same receipt exists.
+    assert host._component_target_ceo_bytes == reads[0]
+    assert host._component_target_ceo_bytes == host.files.read(CEO_SUBMIT_RECEIPT)
+
+
+# ---------------------------------------------------------------------------
+# The Hermes host-read selection.  The selection is ONE optional, PAIRED
+# input to the EXISTING plan/apply verbs.  It is never a second operation,
+# never a new selector and never a new owner.
+# ---------------------------------------------------------------------------
+
+
+HERMES_READ_SCHEMA = "mastermind.hermes_role_metadata_host_binding/v1"
+BINDING_V1 = "mastermind.executive_fabric_bindings/v1"
+BINDING_V2 = "mastermind.executive_fabric_bindings/v2"
+BINDING_V3 = "mastermind.executive_fabric_bindings/v3"
+
+
+@pytest.fixture
+def root_owned_files(monkeypatch, tmp_path):
+    """The staged files this host owns appear root-owned.
+
+    ONLY the leaf ownership observation is stood in for.  The real pinned
+    read, the real strict parser, the real v1/v2/v3 composition parser and
+    the real identity-joined read all run against the real files.
+
+    The observation is scoped to the staged area and its ancestors, so the
+    unrelated installed files of the hermetic host keep their own identity.
+    """
+
+    from types import SimpleNamespace
+
+    original_lstat, original_fstat = Path.lstat, os.fstat
+    root = os.fspath(tmp_path)
+
+    def owned(text: str) -> bool:
+        return text == root or text.startswith(root + "/") or root.startswith(
+            text + "/"
+        )
+
+    def altered(info, **changes):
+        values = {
+            name: getattr(info, name)
+            for name in (
+                "st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns",
+                "st_uid", "st_gid", "st_mode", "st_nlink",
+            )
+        }
+        return SimpleNamespace(**{**values, **changes})
+
+    def root_lstat(path):
+        info = original_lstat(path)
+        if not owned(os.fspath(path)):
+            return info
+        changes = {"st_uid": 0}
+        if stat.S_ISDIR(info.st_mode):
+            changes["st_mode"] = info.st_mode & ~0o022
+        return altered(info, **changes)
+
+    monkeypatch.setattr(Path, "lstat", root_lstat)
+    monkeypatch.setattr(
+        os, "fstat", lambda fd: altered(original_fstat(fd), st_uid=0))
+
+
+def _hermes_transport(tmp_path: Path) -> dict:
+    """The closed transport of ONE Hermes host read.
+
+    The three TLS paths are inert fixtures: they are never loaded as TLS
+    material, only their identity is observed.
+    """
+
+    transport = {
+        "endpoint_host": "127.0.0.1",
+        "endpoint_port": 8443,
+        "expected_server_fingerprint": "a" * 64,
+        "timeout_seconds": 30,
+    }
+    for key in ("ca_path", "client_cert_path", "client_key_path"):
+        path = tmp_path / key
+        path.write_text("inert fixture, never loaded as TLS")
+        path.chmod(0o600)
+        transport[key] = str(path)
+    return transport
+
+
+def _hermes_read_member(tmp_path: Path, *, host_ref: str = "host-" + "1" * 64) -> dict:
+    """The accepted read member: no credential bytes, only the closed shape."""
+
+    return {
+        "schema": HERMES_READ_SCHEMA,
+        "host_ref": host_ref,
+        "transport": _hermes_transport(tmp_path),
+        "expected_host_binding_sha256": "b" * 64,
+        "expected_implementation_sha": "c" * 40,
+    }
+
+
+def _hermes_input(tmp_path: Path, document: dict) -> tuple[str, str]:
+    """The staged, qualified input and the EXACT digest of its raw bytes."""
+
+    raw = json.dumps(document, sort_keys=True).encode("utf-8")
+    path = tmp_path / "hermes-role-metadata-read.json"
+    path.write_bytes(raw)
+    path.chmod(0o600)
+    return str(path), hashlib.sha256(raw).hexdigest()
+
+
+def _binding_route() -> dict:
+    """One pinned execution row."""
+
+    return {
+        "socket_path": "/var/run/mastermind/fabric.sock",
+        "host_ref": "host-" + "1" * 64,
+        "worker_id": "worker-1",
+        "worker_uid": 1001,
+        "worker_gid": 1001,
+        "provider": "fixture",
+        "model": "fixture-model",
+        "worker_source_config_digest": "2" * 64,
+        "execution_profile_digest": "3" * 64,
+        "service_source_sha256": "4" * 64,
+        "provider_home": "/srv/fabric/provider",
+        "binary_sha256": "e" * 64,
+        "permission_profile_sha256": "f" * 64,
+        "bridge_uid": 501,
+    }
+
+
+def _binding_transport(tmp_path: Path, route: dict) -> dict:
+    from control_plane.executive_fabric_composition import FabricHostBinding
+
+    transport = {
+        "host_ref": route["host_ref"],
+        "worker_id": route["worker_id"],
+        "physical_binding_sha256": FabricHostBinding(**route).digest,
+        "endpoint_host": "127.0.0.1",
+        "endpoint_port": 8443,
+        "expected_server_fingerprint": "a" * 64,
+        "timeout_seconds": 30,
+    }
+    for key in ("ca_path", "client_cert_path", "client_key_path"):
+        path = tmp_path / f"remote-{key}"
+        path.write_text("inert fixture, never loaded as TLS")
+        path.chmod(0o600)
+        transport[key] = str(path)
+    return transport
+
+
+def _prior_binding(tmp_path: Path, *, schema: str) -> tuple[str, str]:
+    """One prior selected binding file and the EXACT digest of its bytes."""
+
+    route = _binding_route()
+    if schema == BINDING_V1:
+        document = {"schema_version": BINDING_V1, "bindings": [route]}
+    elif schema == BINDING_V2:
+        document = {
+            "schema_version": BINDING_V2,
+            "bindings": [route],
+            "remote_transports": [_binding_transport(tmp_path, route)],
+        }
+    elif schema == BINDING_V3:
+        document = {
+            "schema_version": BINDING_V3,
+            "bindings": [route],
+            "remote_transports": [_binding_transport(tmp_path, route)],
+            "hermes_role_metadata_read": {
+                "schema": HERMES_READ_SCHEMA,
+                "host_ref": route["host_ref"],
+                "transport": {
+                    key: value
+                    for key, value in _binding_transport(tmp_path, route).items()
+                    if key
+                    not in {"host_ref", "worker_id", "physical_binding_sha256"}
+                },
+                "expected_host_binding_sha256": "b" * 64,
+                "expected_implementation_sha": "c" * 40,
+            },
+        }
+    else:  # pragma: no cover - the closed fixture vocabulary
+        raise AssertionError("unknown binding schema")
+    raw = json.dumps(document, sort_keys=True).encode("utf-8")
+    path = tmp_path / f"prior-{schema.rsplit('/', 1)[-1]}.json"
+    path.write_bytes(raw)
+    path.chmod(0o600)
+    return str(path), hashlib.sha256(raw).hexdigest()
+
+
+def _set_control(host, control: dict) -> None:
+    """Install ONE Control configuration and re-correlate its receipt.
+
+    The existing DISARMED authority receipt correlates the installed
+    configuration digest, so a fixture that changes the configuration
+    re-correlates that receipt exactly like the incumbent owner does.
+    """
+
+    host.control = copy.deepcopy(control)
+    host.control_raw = _canonical(control)
+    host.files.write(CONTROL_CONFIG, host.control_raw)
+    receipt = copy.deepcopy(host.receipt)
+    receipt["control_config_sha256"] = _sha(host.control_raw)
+    host.receipt = receipt
+    host.files.write(AUTONOMY_RECEIPT, ac._encoded_json(receipt))
+
+
+def _select_binding(host, path: str, digest: str) -> None:
+    """Make the installed Control configuration select ONE binding file."""
+
+    control = copy.deepcopy(host.control)
+    control["fabric_bindings_path"] = path
+    control["fabric_bindings_sha256"] = digest
+    _set_control(host, control)
+
+
+def _composed(host) -> dict:
+    """The published document of the selection, parsed from the sealed bytes."""
+
+    from control_plane import executive_fabric_composition as composition
+
+    raw = host._component_binding_candidate_bytes
+    assert raw is not None
+    return composition._document(raw)
+
+
+def _selection_plan(host, **kwargs) -> dict:
+    return ccu.plan(host, target_sha=TARGET_SHA, **kwargs)["plan"]
+
+
+def _selection_apply(host, plan_sha256=None, **kwargs) -> dict:
+    if plan_sha256 is None:
+        plan_sha256 = ccu.plan(
+            host, target_sha=TARGET_SHA, **kwargs)["plan_sha256"]
+    return ccu.apply(
+        host, target_sha=TARGET_SHA, plan_sha256=plan_sha256, **kwargs)
+
+
+# -- no-option compatibility ------------------------------------------------
+
+
+def test_without_the_selection_the_plan_is_byte_for_byte_the_historical_one(
+        host):
+    document = _plan(host)["plan"]
+    # The selection member is ABSENT, not null: the source-only plan is
+    # exactly the historical document.
+    assert "selection" not in document
+    assert document["effects"] == list(ccu.LIVE_EFFECTS)
+    assert document["control_config"]["changed_fields"] == [
+        "proof_base_sha", "proof_source_repository"]
+    assert ccu.effects_for_mode(ccu.LIVE_MODE) == ccu.LIVE_EFFECTS
+    assert ccu.effects_for_mode(ccu.OFFLINE_MODE) == ccu.OFFLINE_EFFECTS
+    # The candidate carries no selection at all.
+    observation = host.observe_control_component_update(target_sha=TARGET_SHA)
+    assert observation["candidate"].selection is None
+    assert observation["binding"] is None
+
+
+def test_the_selection_is_paired_and_one_coordinate_alone_refuses(host):
+    with pytest.raises(ccu.ComponentError) as caught:
+        ccu.plan(host, target_sha=TARGET_SHA, hermes_read_input="/tmp/input.json")
+    assert caught.value.code == "control_component_hermes_read_selector_incomplete"
+    with pytest.raises(ccu.ComponentError) as caught:
+        ccu.plan(host, target_sha=TARGET_SHA, hermes_read_sha256="0" * 64)
+    assert caught.value.code == "control_component_hermes_read_selector_incomplete"
+    with pytest.raises(ccu.ComponentError) as caught:
+        ccu.apply(
+            host, target_sha=TARGET_SHA, plan_sha256="0" * 64,
+            hermes_read_input="/tmp/input.json")
+    assert caught.value.code == "control_component_hermes_read_selector_incomplete"
+
+
+def test_the_reconcile_takes_no_replacement_input(host, publisher):
+    import argparse
+    from datetime import datetime, timezone
+
+    args = argparse.Namespace(
+        command="reconcile-control-component", expected_sha=TARGET_SHA)
+    # The reconciliation verb has NO selector argument at all.
+    parser = ac._parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args([
+            "reconcile-control-component", "--expected-sha", TARGET_SHA,
+            "--hermes-role-metadata-read-input", "/tmp/input.json",
+        ])
+    assert ac._run_control_component_command(
+        host, args, now=datetime.now(timezone.utc)) == 1
+
+
+# -- the selection itself ----------------------------------------------------
+
+
+def test_the_selection_composes_a_v3_document_with_the_requested_read_member(
+        host, tmp_path, root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    document = _selection_plan(
+        host, hermes_read_input=path, hermes_read_sha256=digest)
+    selection = document["selection"]
+    assert selection["input_sha256"] == digest
+    assert selection["prior_selector_present"] is False
+    assert selection["bindings_count"] == 0
+    assert selection["remote_transports_count"] == 0
+    assert selection["execution_present"] is False
+    assert selection["destination_present"] is False
+    # The destination is DERIVED from the digest of the composed bytes.
+    assert selection["destination"].startswith(
+        ccu.CONFIG_ROOT_PATH + "/fabric-bindings-")
+    assert selection["destination"].endswith(".json")
+    assert selection["destination"] == ccu.binding_destination(
+        selection["candidate_sha256"])
+    assert selection["effect"] == ccu.binding_effect(selection["destination"])
+    # The ordered effect list carries the ONE publication.
+    assert document["effects"] == list(
+        ccu.effects_for_mode(
+            ccu.LIVE_MODE, binding_destination=selection["destination"]))
+    assert document["effects"][1] == selection["effect"]
+    # The plan is read-only: nothing was created and nothing was published.
+    assert host.binding_publications == []
+    assert host.commands == []
+    assert host.closed is False
+
+
+def test_the_selection_carries_no_credential_or_endpoint_content(host, tmp_path,
+                                                                 root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    document = _selection_plan(
+        host, hermes_read_input=path, hermes_read_sha256=digest)
+    encoded = json.dumps(document, sort_keys=True)
+    # The plan carries hashes, presence, the derived destination and the
+    # ordered effect -- never the transport, the endpoint or a key path.
+    for forbidden in ("endpoint_host", "client_key_path", "client_cert_path",
+                      "ca_path", "127.0.0.1", "expected_server_fingerprint"):
+        assert forbidden not in encoded
+
+
+def test_a_v1_prior_binding_preserves_its_rows_and_contributes_no_transports(
+        host, tmp_path, root_owned_files):
+    prior_path, prior_digest = _prior_binding(tmp_path, schema=BINDING_V1)
+    _select_binding(host, prior_path, prior_digest)
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    document = _selection_plan(
+        host, hermes_read_input=path, hermes_read_sha256=digest)
+    selection = document["selection"]
+    assert selection["prior_selector_present"] is True
+    assert selection["prior_binding_sha256"] == prior_digest
+    assert selection["bindings_count"] == 1
+    # A v1 binding that carries no transports contributes an empty list; it
+    # never invents one.
+    assert selection["remote_transports_count"] == 0
+    assert selection["execution_present"] is True
+
+
+def test_a_v2_prior_binding_preserves_its_rows_and_transports_in_order(
+        host, tmp_path, root_owned_files):
+    prior_path, prior_digest = _prior_binding(tmp_path, schema=BINDING_V2)
+    _select_binding(host, prior_path, prior_digest)
+    # The read member names a DIFFERENT host, so the v3 rule that forbids a
+    # conflicting transport for the SAME observation host is not the thing
+    # under test here.
+    path, digest = _hermes_input(
+        tmp_path, _hermes_read_member(tmp_path, host_ref="host-" + "2" * 64))
+    document = _selection_plan(
+        host, hermes_read_input=path, hermes_read_sha256=digest)
+    selection = document["selection"]
+    assert selection["bindings_count"] == 1
+    assert selection["remote_transports_count"] == 1
+    # The published document carries the EXACT prior rows, in order.
+    observation = host.observe_control_component_update(
+        target_sha=TARGET_SHA, hermes_read=(path, digest))
+    composed = observation["candidate"].selection
+    assert composed.candidate_sha256 == selection["candidate_sha256"]
+
+
+def test_the_composed_document_preserves_the_prior_execution_rows_exactly(
+        host, publisher, tmp_path, root_owned_files):
+    prior_path, prior_digest = _prior_binding(tmp_path, schema=BINDING_V2)
+    _select_binding(host, prior_path, prior_digest)
+    member = _hermes_read_member(tmp_path, host_ref="host-" + "2" * 64)
+    path, digest = _hermes_input(tmp_path, member)
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    composed = _composed(host)
+    prior = json.loads(open(prior_path, "rb").read())
+    assert composed["bindings"] == prior["bindings"]
+    assert composed["remote_transports"] == prior["remote_transports"]
+    assert composed["schema_version"] == BINDING_V3
+    # The requested read member is the one the input carried.
+    assert composed["hermes_role_metadata_read"] == member
+
+
+def test_a_v3_prior_binding_is_replaced_by_the_requested_read_member(
+        host, publisher, tmp_path, root_owned_files):
+    prior_path, prior_digest = _prior_binding(tmp_path, schema=BINDING_V3)
+    _select_binding(host, prior_path, prior_digest)
+    member = _hermes_read_member(tmp_path, host_ref="host-" + "2" * 64)
+    path, digest = _hermes_input(tmp_path, member)
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    composed = _composed(host)
+    prior = json.loads(open(prior_path, "rb").read())
+    assert composed["bindings"] == prior["bindings"]
+    assert composed["remote_transports"] == prior["remote_transports"]
+    assert composed["hermes_role_metadata_read"] != prior[
+        "hermes_role_metadata_read"]
+
+
+def test_the_old_binding_file_is_never_touched(
+        host, publisher, tmp_path, root_owned_files):
+    prior_path, prior_digest = _prior_binding(tmp_path, schema=BINDING_V1)
+    _select_binding(host, prior_path, prior_digest)
+    before = open(prior_path, "rb").read()
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    assert open(prior_path, "rb").read() == before
+
+
+# -- the paid coexistence ----------------------------------------------------
+
+
+def test_metadata_only_coexists_with_the_installed_paid_source(
+        host, tmp_path, root_owned_files):
+    # The prior binding carries NO execution rows, so the metadata-only
+    # selection may coexist with the installed paid source.
+    control = copy.deepcopy(host.control)
+    control["canonical_paid_fabric"] = {
+        "bindings_path": "/Library/Application Support/MastermindExecutive/"
+        "config/fabric-glm-paid-01/bindings.json",
+        "bindings_sha256": "d" * 64,
+    }
+    _set_control(host, control)
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    document = _selection_plan(
+        host, hermes_read_input=path, hermes_read_sha256=digest)
+    assert document["selection"]["execution_present"] is False
+    # The paid stanza is preserved exactly.
+    after = json.loads(host.files.read(CONTROL_CONFIG))
+    assert after["canonical_paid_fabric"] == control["canonical_paid_fabric"]
+
+
+def test_execution_rows_never_coexist_with_the_installed_paid_source(
+        host, tmp_path, root_owned_files):
+    prior_path, prior_digest = _prior_binding(tmp_path, schema=BINDING_V2)
+    _select_binding(host, prior_path, prior_digest)
+    control = copy.deepcopy(host.control)
+    control["canonical_paid_fabric"] = {
+        "bindings_path": "/Library/Application Support/MastermindExecutive/"
+        "config/fabric-glm-paid-01/bindings.json",
+        "bindings_sha256": "d" * 64,
+    }
+    _set_control(host, control)
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        _selection_plan(host, hermes_read_input=path, hermes_read_sha256=digest)
+    assert caught.value.code == "control_component_hermes_read_binding_conflict"
+    # The rows were never deleted to satisfy the exclusion.
+    assert open(prior_path, "rb").read() == open(prior_path, "rb").read()
+    assert host.commands == []
+
+
+# -- the Control allowlist ---------------------------------------------------
+
+
+def test_the_selection_updates_only_the_four_allowed_control_coordinates(
+        host, publisher, tmp_path, root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    before = json.loads(host.files.read(CONTROL_CONFIG))
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    after = json.loads(host.files.read(CONTROL_CONFIG))
+    assert set(after) == set(before) | {
+        "fabric_bindings_path", "fabric_bindings_sha256"}
+    changed = ccu.changed_keys(before, after)
+    assert changed == (
+        "fabric_bindings_path", "fabric_bindings_sha256",
+        "proof_base_sha", "proof_source_repository")
+    # The two selector coordinates are exactly the derived ones.
+    assert after["fabric_bindings_path"] == ccu.binding_destination(
+        after["fabric_bindings_sha256"])
+
+
+def test_the_union_of_the_prior_and_successor_keys_is_compared(
+        host, tmp_path, root_owned_files):
+    # A key that only the SUCCESSOR carries is a change: it is never
+    # silently accepted because the prior document did not mention it.
+    document = {"a": 1}
+    assert ccu.changed_keys(document, {"a": 1, "b": 2}) == ("b",)
+    assert ccu.changed_keys({"a": 1, "b": 2}, document) == ("b",)
+    assert ccu.changed_keys(document, {"a": 1}) == ()
+
+
+def test_every_other_control_field_is_preserved(
+        host, publisher, tmp_path, root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    before = json.loads(host.files.read(CONTROL_CONFIG))
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    after = json.loads(host.files.read(CONTROL_CONFIG))
+    for key, value in before.items():
+        if key in {"proof_base_sha", "proof_source_repository"}:
+            continue
+        assert after[key] == value
+    # The arming, the Macro binding and the identities are untouched.
+    assert after["ceo_submit_armed"] is False
+    assert after["coo_autonomy_armed"] is False
+    assert after["ceo_ingress_app_macro_root"] == MACRO_ROOT
+
+
+def test_the_worker_configuration_is_exactly_the_original_bytes(
+        host, publisher, tmp_path, root_owned_files):
+    before = host.files.read(WORKER_CONFIG)
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    assert host.files.read(WORKER_CONFIG) == before
+
+
+def test_the_plan_of_a_selection_is_read_only(host, tmp_path, root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    before = dict(host.files.data)
+    _selection_plan(host, hermes_read_input=path, hermes_read_sha256=digest)
+    assert host.files.data == before
+    assert host.binding_publications == []
+    assert host.commands == []
+    assert host.closed is False
+
+
+# -- the sealed custody and the ordered effect -------------------------------
+
+
+def test_the_selection_preimages_are_sealed_before_the_marker(
+        host, publisher, tmp_path, root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    prior_path, prior_digest = _prior_binding(tmp_path, schema=BINDING_V1)
+    _select_binding(host, prior_path, prior_digest)
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    transaction = ac.AUTONOMY_TRANSACTION
+    # The exact qualified input, the ORIGINAL bytes of the prior selected
+    # binding and the exact merged candidate are sealed.
+    assert host.files.read(
+        os.fspath(transaction / "prior-component-hermes-read-input.json")
+    ) == Path(path).read_bytes()
+    assert host.files.read(
+        os.fspath(transaction / "prior-component-binding-selection.json")
+    ) == Path(prior_path).read_bytes()
+    assert host.files.read(
+        os.fspath(transaction / "component-binding-candidate.json")
+    ) == host._component_binding_candidate_bytes
+
+
+def test_the_binding_publication_is_ordered_between_the_boundary_and_the_config(
+        host, publisher, tmp_path, root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    phases = host.phases
+    assert phases.index("CONTROL_ABSENT_PROVEN") < phases.index(
+        "CONTROL_COMPONENT_BINDING_PUBLICATION_STARTED")
+    assert phases.index("CONTROL_COMPONENT_BINDING_PUBLICATION_STARTED") < (
+        phases.index("CONTROL_COMPONENT_BINDING_PROVEN"))
+    assert phases.index("CONTROL_COMPONENT_BINDING_PROVEN") < phases.index(
+        "CONTROL_REPLACED")
+    # The binding artifact is published exactly once.
+    assert len(host.binding_publications) == 1
+
+
+def test_the_binding_phases_are_recoverable_and_never_publication_admissible():
+    assert "CONTROL_COMPONENT_BINDING_PUBLICATION_STARTED" in ac._COMPONENT_PHASES
+    assert "CONTROL_COMPONENT_BINDING_PROVEN" in ac._COMPONENT_PHASES
+    # Neither binding phase ever authorises the control-observation
+    # publication, and neither is the observation publisher's own phase.
+    assert not {
+        "CONTROL_COMPONENT_BINDING_PUBLICATION_STARTED",
+        "CONTROL_COMPONENT_BINDING_PROVEN",
+    } & set(ac._CONTROL_COMPONENT_PUBLICATION_ADMISSIBLE_PHASES)
+    assert control_observation.COMPONENT_PUBLICATION_PHASE not in (
+        ac._CONTROL_COMPONENT_PUBLICATION_ADMISSIBLE_PHASES)
+
+
+# -- the compare-and-swap preimages ------------------------------------------
+
+
+def test_the_input_that_moved_after_the_seal_is_refused(
+        host, publisher, tmp_path, root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    original_create = host._create_marker
+
+    def create_then_move(transaction, *, operation):
+        original_create(transaction, operation=operation)
+        Path(path).write_bytes(b"moved after the seal")
+
+    host._create_marker = create_then_move
+    with pytest.raises(ac.TransactionEffectUnknown):
+        _selection_apply(
+            host, hermes_read_input=path, hermes_read_sha256=digest)
+    assert host.closed is False
+    assert host.binding_publications == []
+
+
+def test_the_prior_binding_that_moved_after_the_seal_is_refused(
+        host, publisher, tmp_path, root_owned_files):
+    prior_path, prior_digest = _prior_binding(tmp_path, schema=BINDING_V1)
+    _select_binding(host, prior_path, prior_digest)
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    original_create = host._create_marker
+
+    def create_then_move(transaction, *, operation):
+        original_create(transaction, operation=operation)
+        Path(prior_path).write_bytes(b"moved after the seal")
+
+    host._create_marker = create_then_move
+    with pytest.raises(ac.TransactionEffectUnknown):
+        _selection_apply(
+            host, hermes_read_input=path, hermes_read_sha256=digest)
+    assert host.closed is False
+
+
+def test_a_destination_that_appears_after_the_observation_is_never_overwritten(
+        host, publisher, tmp_path, root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    original_publish = host._publish_component_binding_artifact
+
+    raced = []
+
+    def publish_after_a_race(destination, payload):
+        # The destination appeared after the approved observation.
+        raced.append(os.fspath(destination))
+        host.files.write(os.fspath(destination), b"foreign", replace=True)
+        return original_publish(destination, payload)
+
+    host._publish_component_binding_artifact = publish_after_a_race
+    with pytest.raises(ac.TransactionEffectUnknown):
+        _selection_apply(
+            host, hermes_read_input=path, hermes_read_sha256=digest)
+    assert host.closed is False
+    # The foreign artifact was never overwritten.
+    assert len(raced) == 1
+    assert host.files.read(raced[0]) == b"foreign"
+
+
+def test_an_identical_preexisting_destination_is_adopted_without_a_write(
+        host, publisher, tmp_path, root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    # Observe the composition first, so the exact destination and bytes are
+    # known before the operation runs.
+    observation = host.observe_control_component_update(
+        target_sha=TARGET_SHA, hermes_read=(path, digest))
+    destination = observation["binding"]["destination"]
+    payload = observation["binding"]["candidate_bytes"]
+    # The identical artifact is ALREADY published.
+    host.files.write(destination, payload)
+    plan_sha256 = ccu.plan(
+        host, target_sha=TARGET_SHA,
+        hermes_read_input=path, hermes_read_sha256=digest)["plan_sha256"]
+    assert plan_sha256
+    _selection_apply(
+        host, plan_sha256=plan_sha256,
+        hermes_read_input=path, hermes_read_sha256=digest)
+    # It was ADOPTED: nothing was written.
+    assert host.binding_publications == []
+    assert host.files.read(destination) == payload
+    assert "CONTROL_COMPONENT_BINDING_PUBLICATION_STARTED" in host.phases
+
+
+def test_a_conflicting_preexisting_destination_is_refused_before_the_transaction(
+        host, publisher, tmp_path, root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    observation = host.observe_control_component_update(
+        target_sha=TARGET_SHA, hermes_read=(path, digest))
+    destination = observation["binding"]["destination"]
+    host.files.write(destination, b"a different artifact")
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        _selection_plan(
+            host, hermes_read_input=path, hermes_read_sha256=digest)
+    assert caught.value.code == "control_component_hermes_read_binding_conflict"
+    assert host.commands == []
+    assert host.binding_publications == []
+
+
+def test_a_binding_that_drifted_after_the_publication_prevents_completion(
+        host, publisher, tmp_path, root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    original_publish = host._publish_component_binding_artifact
+
+    def publish_then_move(destination, payload):
+        original_publish(destination, payload)
+        host.files.write(os.fspath(destination), b"drifted")
+
+    host._publish_component_binding_artifact = publish_then_move
+    with pytest.raises(ac.TransactionEffectUnknown):
+        _selection_apply(
+            host, hermes_read_input=path, hermes_read_sha256=digest)
+    assert host.closed is False
+
+
+# -- the reconciliation ------------------------------------------------------
+
+
+def test_the_reconcile_reconstructs_the_archived_selection(
+        host, publisher, tmp_path, root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    host.closed = False
+    # The staged input is GONE: the reconciliation uses the SEALED bytes of
+    # the original operation and never a new external input.
+    os.unlink(path)
+    result = ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert result["ok"] is True
+    assert result["outcome"] == "RECONCILED"
+    assert host.closed is True
+
+
+def test_a_published_binding_with_an_unswitched_config_remains_incomplete(
+        host, publisher, tmp_path, root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    host.closed = False
+    # The Control configuration was never switched to the published binding.
+    host.files.write(CONTROL_CONFIG, host.control_raw)
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert caught.value.code == "control_component_binding_config_not_switched"
+    # The original transaction is retained and named.
+    assert caught.value.transaction_id
+    assert caught.value.phase
+    assert host.closed is False
+
+
+def test_the_reconcile_never_republishes_the_binding(
+        host, publisher, tmp_path, root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    host.closed = False
+    published = list(host.binding_publications)
+    ccu.reconcile(host, target_sha=TARGET_SHA)
+    # The canonical publication is NEVER re-entered.
+    assert host.binding_publications == published
+
+
+def test_a_conflicting_binding_postimage_is_never_adopted(
+        host, publisher, tmp_path, root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    host.closed = False
+    destination = host.manifest["component_binding"]["destination"]
+    host.files.write(destination, b"a conflicting artifact")
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert host.closed is False
+    # The conflicting artifact was never adopted and never overwritten.
+    assert host.files.read(destination) == b"a conflicting artifact"
+
+
+# -- the marker formats ------------------------------------------------------
+
+
+def test_the_legacy_component_marker_carries_no_selection_member(
+        host, publisher):
+    _apply(host)
+    assert "component_binding" not in host.manifest
+    host.production_manifest = True
+    # The LEGACY marker format is preserved exactly: the closed reader
+    # accepts it and the legacy archive set is unchanged.
+    assert host._manifest() == host.manifest
+    assert ac._component_archive_names(host.manifest) == ac._COMPONENT_ARCHIVES
+
+
+def test_the_extended_marker_carries_the_closed_selection_member(
+        host, publisher, tmp_path, root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    host.production_manifest = True
+    manifest = host._manifest()
+    assert set(manifest["component_binding"]) == ac._COMPONENT_BINDING_MANIFEST_KEYS
+    assert ac._component_archive_names(manifest) == (
+        ac._COMPONENT_ARCHIVES + ac._COMPONENT_BINDING_ARCHIVES)
+
+
+def test_a_malformed_selection_member_is_refused(host, publisher, tmp_path,
+                                                  root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    host.production_manifest = True
+    manifest = dict(host.manifest)
+    manifest["component_binding"] = dict(manifest["component_binding"])
+    # The presence flags are EXPLICIT booleans, never a raw comparison.
+    manifest["component_binding"]["destination_present"] = "yes"
+    host.files.data[
+        os.fspath(ac.AUTONOMY_TRANSACTION / ac._TRANSACTION_MANIFEST_NAME)
+    ] = ac._encoded_json(manifest)
+    published = list(publisher)
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ccu.reconcile(host, target_sha=TARGET_SHA)
+    # The retained marker and its preimages are retained; nothing was
+    # republished.
+    assert host.transaction_present is True
+    assert publisher == published
+
+
+def test_a_selection_member_that_names_another_destination_is_refused(
+        host, publisher, tmp_path, root_owned_files):
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    host.production_manifest = True
+    manifest = dict(host.manifest)
+    manifest["component_binding"] = dict(manifest["component_binding"])
+    manifest["component_binding"]["destination"] = "/tmp/another.json"
+    host.files.data[
+        os.fspath(ac.AUTONOMY_TRANSACTION / ac._TRANSACTION_MANIFEST_NAME)
+    ] = ac._encoded_json(manifest)
+    published = list(publisher)
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ccu.reconcile(host, target_sha=TARGET_SHA)
+    # The retained marker and its preimages are retained; nothing was
+    # republished.
+    assert host.transaction_present is True
+    assert publisher == published
+
+
+# -- the closed command line -------------------------------------------------
+
+
+def _control_component_argv(*argv: str) -> subprocess.CompletedProcess:
+    """Run the incumbent controller's closed argv walk in isolation.
+
+    The walk is the controller's own shell function, extracted verbatim from
+    the installed script: the test exercises the real argument discipline
+    and the real rebuilt argv, not a re-implementation of it.
+    """
+
+    source = _service_control_source()
+    start = source.index("valid_component_input_path() {")
+    end = source.index("dispatch_control_component() {")
+    fragment = source[start:end]
+    script = (
+        "set -euo pipefail\n"
+        'CONTROL_COMPONENT_ARGV=()\n'
+        'CONTROL_COMPONENT_EXPECTED_SHA=""\n'
+        + fragment
+        + "\ncontrol_component_args \"$@\" || exit 1\n"
+        + "printf '%s\\n' \"${CONTROL_COMPONENT_ARGV[@]}\"\n"
+    )
+    return subprocess.run(
+        ["/bin/bash", "-c", script, "control-component", *argv],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, check=False, timeout=30)
+
+
+def test_the_closed_argv_walk_forwards_the_paired_selection():
+    completed = _control_component_argv(
+        "plan-control-component", "--expected-sha", "a" * 40,
+        "--hermes-role-metadata-read-input", "/var/db/staged/read.json",
+        "--hermes-role-metadata-read-sha256", "b" * 64)
+    assert completed.returncode == 0
+    assert completed.stdout.decode("utf-8").splitlines() == [
+        "plan-control-component",
+        "--expected-sha",
+        "a" * 40,
+        "--hermes-role-metadata-read-input",
+        "/var/db/staged/read.json",
+        "--hermes-role-metadata-read-sha256",
+        "b" * 64,
+    ]
+
+
+def test_the_closed_argv_walk_refuses_one_coordinate_alone():
+    for argv in (
+        ("plan-control-component", "--expected-sha", "a" * 40,
+         "--hermes-role-metadata-read-input", "/var/db/staged/read.json"),
+        ("plan-control-component", "--expected-sha", "a" * 40,
+         "--hermes-role-metadata-read-sha256", "b" * 64),
+    ):
+        assert _control_component_argv(*argv).returncode == 1
+
+
+def test_the_closed_argv_walk_refuses_an_unsafe_input_path():
+    for unsafe in (
+        "relative/read.json",
+        "/var/db/../etc/read.json",
+        "/var//db/read.json",
+        "/var/db/read.json; rm -rf /",
+        "/var/db/read file.json",
+        "/var/db/read.json\n",
+    ):
+        completed = _control_component_argv(
+            "plan-control-component", "--expected-sha", "a" * 40,
+            "--hermes-role-metadata-read-input", unsafe,
+            "--hermes-role-metadata-read-sha256", "b" * 64)
+        assert completed.returncode == 1, unsafe
+
+
+def test_the_closed_argv_walk_refuses_the_selection_on_the_reconcile():
+    completed = _control_component_argv(
+        "reconcile-control-component", "--expected-sha", "a" * 40,
+        "--hermes-role-metadata-read-input", "/var/db/staged/read.json",
+        "--hermes-role-metadata-read-sha256", "b" * 64)
+    assert completed.returncode == 1
+
+
+def test_the_closed_argv_walk_keeps_the_source_only_behaviour():
+    completed = _control_component_argv(
+        "plan-control-component", "--expected-sha", "a" * 40)
+    assert completed.returncode == 0
+    assert completed.stdout.decode("utf-8").splitlines() == [
+        "plan-control-component", "--expected-sha", "a" * 40]
+
+
+# -- the real publication primitive ------------------------------------------
+
+
+@pytest.fixture
+def root_owned_root(monkeypatch, tmp_path):
+    """The private root the REAL publication primitive publishes into.
+
+    The ownership observation is stood in for exactly as the incumbent
+    composition tests stand in for it, and the ONE leaf call that needs
+    real root -- the ownership normalisation -- is a no-op here.  Every
+    other part of the primitive is the real one: the qualified root, the
+    private stage, the no-replace rename and the exact readback.
+    """
+
+    from types import SimpleNamespace
+
+    original_lstat, original_fstat = Path.lstat, os.fstat
+
+    def altered(info, **changes):
+        values = {
+            name: getattr(info, name)
+            for name in (
+                "st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns",
+                "st_uid", "st_gid", "st_mode", "st_nlink",
+            )
+        }
+        return SimpleNamespace(**{**values, **changes})
+
+    def root_lstat(path):
+        info = original_lstat(path)
+        changes = {"st_uid": 0, "st_gid": 0}
+        if stat.S_ISDIR(info.st_mode):
+            changes["st_mode"] = info.st_mode & ~0o022
+        return altered(info, **changes)
+
+    monkeypatch.setattr(Path, "lstat", root_lstat)
+    monkeypatch.setattr(
+        os, "fstat", lambda fd: altered(original_fstat(fd), st_uid=0, st_gid=0))
+    monkeypatch.setattr(os, "fchown", lambda fd, uid, gid: None)
+    root = tmp_path / "config-root"
+    root.mkdir(mode=0o755)
+    os.chmod(root, 0o755)
+    monkeypatch.setattr(ac, "CONFIG_ROOT", root)
+    return root
+
+
+def test_the_real_publication_primitive_is_one_no_replace_rename(root_owned_root):
+    host = ac.ProductionControlComponentHost()
+    payload = b'{"schema_version":"mastermind.executive_fabric_bindings/v3"}\n'
+    digest = hashlib.sha256(payload).hexdigest()
+    destination = root_owned_root / ("fabric-bindings-" + digest + ".json")
+    host._publish_component_binding_artifact(destination, payload)
+    # The exact postimage, with the published mode and one link.
+    assert destination.read_bytes() == payload
+    info = destination.stat()
+    assert stat.S_IMODE(info.st_mode) == 0o444
+    assert info.st_nlink == 1
+    # No private stage is left behind.
+    assert sorted(p.name for p in root_owned_root.iterdir()) == [destination.name]
+
+
+def test_the_real_publication_primitive_never_replaces_a_name(root_owned_root):
+    host = ac.ProductionControlComponentHost()
+    payload = b'{"schema_version":"mastermind.executive_fabric_bindings/v3"}\n'
+    digest = hashlib.sha256(payload).hexdigest()
+    destination = root_owned_root / ("fabric-bindings-" + digest + ".json")
+    host._publish_component_binding_artifact(destination, payload)
+    # A second publication of the SAME name refuses: the exclusive rename
+    # never replaces an existing artifact.
+    with pytest.raises(ac.TransactionEffectUnknown):
+        host._publish_component_binding_artifact(destination, payload)
+    assert destination.read_bytes() == payload
+    # The refused publication left no private stage behind.
+    assert sorted(p.name for p in root_owned_root.iterdir()) == [destination.name]
+
+
+def test_the_real_publication_primitive_refuses_a_destination_outside_the_root(
+        root_owned_root, tmp_path):
+    host = ac.ProductionControlComponentHost()
+    payload = b"{}\n"
+    outside = tmp_path / "elsewhere.json"
+    with pytest.raises(ac.TransactionEffectUnknown):
+        host._publish_component_binding_artifact(outside, payload)
+    assert not outside.exists()
+
+
+def test_the_input_gateway_implementation_pin_is_kept_exactly(
+        host, publisher, tmp_path, root_owned_files):
+    member = _hermes_read_member(tmp_path)
+    path, digest = _hermes_input(tmp_path, member)
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    composed = _composed(host)
+    # The gateway implementation pin is carried EXACTLY, and it need not
+    # equal the Control release SHA.
+    assert composed["hermes_role_metadata_read"]["expected_implementation_sha"] == (
+        "c" * 40)
+    assert composed["hermes_role_metadata_read"]["expected_implementation_sha"] != (
+        TARGET_SHA)
+    assert composed["hermes_role_metadata_read"]["expected_host_binding_sha256"] == (
+        "b" * 64)
+
+
+def test_the_selection_is_part_of_the_same_pending_source_upgrade(
+        host, tmp_path, root_owned_files):
+    # The selection never invents a second, same-SHA operation: the release
+    # retarget refusal still holds with a selection in hand.
+    path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
+    with pytest.raises(ccu.ComponentError) as caught:
+        ccu.compile_candidate(
+            _canonical(host.control),
+            plistlib.dumps(_control_plist(PRIOR_ROOT)),
+            plistlib.dumps(_worker_plist(PRIOR_ROOT)),
+            target_sha=PRIOR_SHA,
+            prior_sha=PRIOR_SHA,
+            worker_config_sha256=_sha(host.worker_raw),
+            prior_release_root=PRIOR_ROOT,
+            target_release_root=PRIOR_ROOT,
+        )
+    assert caught.value.code == "release_not_retargeted"
+    assert host.commands == []
+    assert host.binding_publications == []

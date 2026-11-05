@@ -18,12 +18,22 @@ service itself.
 
 The target release must be staged and sealed first, and the installer-owned
 administrative checkout that backs the Control configuration's
-`proof_source_repository` must exist for the same commit:
+`proof_source_repository` must exist for the same commit.
+
+`--stage-admin-checkout-only` runs `install.sh` **from the same accepted
+source checkout** that is passed as `--source-repo`, so the script that
+stages the release and the source it stages are one checkout. It also needs
+the pinned interpreter coordinates, because the installer refuses to run
+without them:
 
 ```
-sudo /bin/bash <installed-release>/ops/executive_os/install.sh \
-  --source-repo <repo> --expected-sha <target-40-hex> \
-  --operator-user <name> --stage-admin-checkout-only
+cd <accepted-source-checkout>
+sudo /bin/bash ./ops/executive_os/install.sh \
+  --source-repo <accepted-source-checkout> --expected-sha <target-40-hex> \
+  --operator-user <name> \
+  --python-binary /Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 \
+  --python-runtime-root /Library/Frameworks/Python.framework/Versions/3.12 \
+  --stage-admin-checkout-only
 ```
 
 `--stage-admin-checkout-only` seals and publishes the target release and then
@@ -34,6 +44,11 @@ not already the exact expected checkout owned by the control principal refuses
 untouched; this preparation never recursively repairs another owner's tree.
 `--stage-release-only` keeps its existing behaviour and still returns before
 the administrative checkout is prepared.
+
+`--stage-release-only` and `--stage-admin-checkout-only` are two different
+staging intents and are **never combined**: one stages the release tree, the
+other prepares the administrative checkout, and a single invocation asks for
+both at once.
 
 ## Plan, apply, reconcile
 
@@ -57,6 +72,135 @@ staging. `apply` recompiles the plan from the live installed state and refuses
 on any digest mismatch. `reconcile` proves one interrupted update to its exact
 retained postimages; it never republishes a target, never re-dispatches a
 recorded bootout or bootstrap and never rolls back.
+
+## The optional Hermes host-read selection
+
+The Hermes host observation is SELECTED inside this same operation. It is not
+a second verb, a second transaction owner or a second installer command.
+
+`plan-control-component` and `apply-control-component` accept one **paired**
+selection:
+
+```
+--hermes-role-metadata-read-input <absolute canonical path>
+--hermes-role-metadata-read-sha256 <64 lowercase hex>
+```
+
+Both coordinates are one selection: the exact qualified input path and the
+exact digest of its raw bytes. **Both absent preserve the existing source-only
+behaviour byte-for-byte**; exactly one of them refuses and is never treated as
+an absent selection. `reconcile-control-component` takes **no** replacement
+input at all: the original selection is reconstructed from the SEALED bytes of
+the original operation.
+
+The input contains ONLY the accepted read member, and no credential bytes:
+
+```
+schema=mastermind.hermes_role_metadata_host_binding/v1
+host_ref
+transport={endpoint_host,endpoint_port,ca_path,client_cert_path,
+           client_key_path,expected_server_fingerprint,timeout_seconds}
+expected_host_binding_sha256
+expected_implementation_sha
+```
+
+The input is read through the incumbent's own bounded, no-follow,
+identity-joined pinned read and is bound to the supplied digest. The read
+member is qualified by the incumbent's own
+`HermesHostObservationBinding.from_document` and the incumbent
+`FabricRemoteTransport.from_host_document`; there is **no second TLS or
+schema validator**, and no configuration, endpoint or key is ever exported.
+
+The controller validates the input path as a canonical absolute path with no
+traversal, no empty component and no character outside its closed set, so the
+rebuilt argv carries one validated value and no caller text. The path is a
+QUALIFIED INPUT only: it is never a destination, never an output path and
+never a caller-chosen publication target.
+
+The selection is composed into the existing v3 composition. When the Control
+configuration carries BOTH selector coordinates, the prior selected binding is
+qualified by the incumbent v1/v2/v3 parser, its ORIGINAL raw bytes are
+archived, and its execution rows and transports are carried over EXACTLY and
+in their original order; a v1 binding that carries no transports contributes
+an empty transport list and never invents one. The old file is never touched.
+A partial selector, an unreadable, malformed, unqualified or unsupported
+binding refuses **before** the transaction and is never treated as an absence.
+
+Only four Control coordinates may change: `proof_base_sha`,
+`proof_source_repository`, `fabric_bindings_path` and `fabric_bindings_sha256`.
+The comparison covers the UNION of the prior and successor key sets with
+EXPLICIT presence semantics, so a newly added key is never silently accepted.
+Every other Control field — the arming, the Macro binding, the native
+capacity, the probes and `canonical_paid_fabric` — is preserved exactly, and
+the Worker configuration keeps its exact original bytes.
+
+A metadata-only selection may coexist with the installed paid source. A
+selection that carries actual EXECUTION rows may not: the existing exclusion
+is preserved and rows are never deleted to satisfy it.
+
+### The ONE immutable artifact
+
+The composed bytes are published exactly once as
+
+```
+<CONFIG_ROOT>/fabric-bindings-<candidate-sha256>.json
+```
+
+root-owned, root-grouped, mode 0444, one link, under the qualified ancestors
+and with no ACL, and read back exactly. The name is DERIVED from the digest
+of the composed bytes, so the destination is a function of its own content and
+the caller never supplies a path. The publication is a no-replace rename of a
+privately staged file under the current configuration publication mutex: it
+never replaces an existing name, never copies, never deletes and never
+emulates the exclusive rename. A destination that already holds the exact
+bytes is ADOPTED without a write; a destination that appears after the
+approved observation refuses without overwrite and without adoption.
+
+### The retained custody and the order
+
+The selection extends the sealed marker with ONE optional nested member that
+carries only hashes, EXPLICIT presence, the derived destination and the
+ordered effect, plus three coordinated archives: the exact qualified input
+bytes, the ORIGINAL bytes of the prior selected binding, and the exact merged
+candidate bytes. When the operation carries no selection the LEGACY marker
+and archive format is preserved exactly. The nested member is STRUCTURED: it
+is never validated as a digest string.
+
+The order is the existing one with the ONE binding publication inserted
+between the stopped-boundary proof and the installed publications, because the
+Control configuration may only name a binding artifact that already exists:
+
+1. observe and compile the whole plan, and match the plan digest;
+2. claim the original `AUTONOMY_TRANSACTION` and seal the originals;
+3. recheck the interpreter and the configuration, receipt, binding, input and
+   target preimages;
+4. the live bootout, or the existing offline proof;
+5. the stopped service UID/process and the Runtime quiescence;
+6. persist `CONTROL_COMPONENT_BINDING_PUBLICATION_STARTED`;
+7. publish once, or adopt an already identical destination;
+8. persist `CONTROL_COMPONENT_BINDING_PROVEN`;
+9. the Control plist, the Worker plist, the Control configuration and the
+   correlated authority receipts;
+10. the offline enable and then the bootstrap;
+11. prove the consumed Control configuration and source, and requalify the
+    selected binding;
+12. the existing component receipt, observation and closeout.
+
+Both binding phases are ordinary component phases. They NEVER authorise
+re-entering the canonical publication, and they are deliberately excluded from
+the publication-admissible set of the control observation, whose own
+`CONTROL_COMPONENT_PUBLICATION_STARTED` phase stays distinct. A
+reconciliation inspects ONLY the original derived destination and the exact
+retained postimage: it never publishes again, never writes a new filename,
+never retries a rename, never overwrites and never takes a replacement
+input.
+
+A reconciliation still proves COMPLETED postimages; it does not resume a
+missing configuration or lifecycle effect. A binding that was published while
+the Control configuration was never switched to it therefore leaves the
+original operation INCOMPLETE: the artifact stays inert, nothing is resumed
+and no publication is repeated. A post-claim failure is always INCOMPLETE or
+EFFECT_UNKNOWN, never a zero-effect REFUSED.
 
 ## Preconditions the plan proves
 
@@ -141,9 +285,17 @@ unjoined archive: the compare-and-swap refuses the moved receipt instead.
 Presence is EXPLICIT. It is proven by an absent file, never inferred from the
 byte length of an archived preimage, so an empty receipt stays present.
 
-A receipt that is present but malformed, empty, unreadable or misqualified is
+The AUTHORITY receipt and the CEO-SUBMIT receipt are semantically validated:
+one that is present but malformed, empty, unreadable or misqualified is
 REFUSED before any marker or effect. It is never read as an absent receipt:
 the absent receipt and the unreadable one lead to different correlations.
+
+This operation's OWN prior receipt is different, and the difference is
+deliberate. It is the output of an EARLIER component update, so it is bound
+only by its presence and its exact raw bytes: it is never parsed as a
+receipt, and it may legitimately be EMPTY and still PRESENT. Only a proven
+absence is absent. It is replaced by an exact-byte compare-and-swap, never
+by a re-serialisation of a parse.
 
 ## Effect order
 
@@ -221,6 +373,16 @@ Once the transaction owner is claimed, EVERY qualification or read failure is
 an `INCOMPLETE` or `EFFECT_UNKNOWN` outcome. The original marker and its
 preimages are retained and the phase that was still incomplete is named; a
 claimed transaction is never reported as a zero-effect refusal.
+
+The retained manifest read, the component identity checks, the qualified
+transaction identity and the delegated retained-postimage proof are ONE
+guarded region that begins immediately after the claim. A malformed or
+unexpected retained manifest therefore leaves the ORIGINAL operation
+uncertain (`EFFECT_UNKNOWN`) instead of escaping as a generic refusal; it is
+never reported as an operation that had no effect. Until the transaction
+identity is qualified every unexpected error is `EFFECT_UNKNOWN`; once it is
+qualified, a component refusal is the `INCOMPLETE` classification and names
+the phase that was still incomplete.
 
 The phase the component publication records, `CONTROL_COMPONENT_PUBLICATION_STARTED`,
 is a RECOVERABLE phase. An interruption AFTER the publication is closed by
