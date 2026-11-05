@@ -39,7 +39,8 @@ ADDITIONS = frozenset({"host_pull_daemon.sh", "host_pull_launchd.plist.template"
                       "paid_controller_channel.py", "paid_glm_model_client.py", "paid_model_owner.py",
                       "linux_process_identity.py", "paid_controller_spawn.py", "paid_incumbent_state.py", "paid_host_qualification.py", "paid_initializer.py", "paid_initializer_token_data.py", "paid_initializer_nested_data.py", "paid_yaml_runtime.py", "paid_pyyaml_6_0_3.zip", "paid_pyyaml_provenance.json",
                       "commission_deadline.py", "current_source_observation.py", "native_plain_packet_check.py", "native_plain_packet_reconcile.py",
-                      "post_failure_observation.py", "post_failure_observation_delivery.py"})
+                      "post_failure_observation.py", "post_failure_observation_delivery.py",
+                      "participant_binding.py", "fabric_participant_owner.py"})
 # The retired credential-to-stdout helper is audit evidence only. It must never
 # be importable from source/ or selected as a runtime fallback. Its exact bytes
 # still have to match the installed preimage before the secure overlay is used.
