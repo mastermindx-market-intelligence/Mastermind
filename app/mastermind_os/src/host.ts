@@ -1,4 +1,5 @@
 import { createLazyTerminalSharingHost, type TerminalSharingSource } from "./terminal/terminal-sharing-host";
+import {projectAccessHostMethods,projectAccessPublicSelection,type ProjectAccessRawMethods,type ProjectAccessHostMethods} from "./access/project-access-host";
 import { projectAdmissionHostMethods, projectAdmissionPublicRequest, type ProjectAdmissionRawMethods, type ProjectAdmissionHostMethods } from "./admission/project-admission-host";
 import { validArchiveCursor, type ArchiveCursor } from "./projects/archive/project-archive-continuation";
 import { decodeProjectArchive, type ProjectArchiveRead } from "./projects/archive/project-archive";
@@ -71,7 +72,7 @@ import {
   type ControlRoomOperation, type ControlRoomActionResult,
 } from "./control-room";
 
-export interface RawClient extends Partial<ProjectAdmissionRawMethods>,Partial<InstructionRawMethods> {
+export interface RawClient extends Partial<ProjectAdmissionRawMethods>,Partial<InstructionRawMethods>,Partial<ProjectAccessRawMethods> {
   /** Independent Terminal session; workspace grants never confer brief access. */
   readonly terminalSharing?: TerminalSharingSource;
   /** Public fixed navigation only; Terminal owns its user's authentication and access. */
@@ -159,7 +160,7 @@ export interface RawClient extends Partial<ProjectAdmissionRawMethods>,Partial<I
 export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
 }
-export interface MissionHost extends Partial<ProjectAdmissionHostMethods>,Partial<InstructionHostMethods> {
+export interface MissionHost extends Partial<ProjectAdmissionHostMethods>,Partial<InstructionHostMethods>,Partial<ProjectAccessHostMethods> {
   /** Independent Terminal session; workspace grants never confer brief access. */
   readonly terminalSharing?: TerminalSharingSource;
   /** Optional zero-input navigation; no private content or access receipt. */
@@ -436,6 +437,7 @@ export function bindMissionHost(
     },
     ...projectAdmissionHostMethods(client,()=>epoch),
     ...instructionHostMethods(client,()=>epoch),
+    ...projectAccessHostMethods(client,()=>epoch),
     ...(client.readAutonomyPolicy && client.invalidationGeneration ? {
       async readAutonomyPolicy(request: AutonomySelection & { signal: AbortSignal }) {
         const { signal, ...selected } = request;
@@ -973,6 +975,7 @@ export async function createNativeClient(
       | "resume_project_admission"
       | "read_project_admission_operation"
       | "read_project_instructions"
+      | "read_project_access"
       | "read_instruction_admission_control"
       | "pause_instruction_admission"
       | "read_instruction_admission_operation"
@@ -1114,6 +1117,11 @@ export async function createNativeClient(
       const input=projectAdmissionPublicRequest("current",request);
       if(!input)return Promise.reject(new Error("PROJECT_ADMISSION_REQUEST_INVALID"));
       return read("read_project_admission_control",request.signal,{selection:input.selection});
+    },
+    readProjectAccess: request => {
+      const selection=projectAccessPublicSelection(request);
+      if(!selection)return Promise.reject(Error("PROJECT_ACCESS_REQUEST_INVALID"));
+      return read("read_project_access",request.signal,{selection});
     },
     readProjectInstructions: request => {
       const input=instructionPublicRequest("content",request);

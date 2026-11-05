@@ -122,6 +122,7 @@ fn main() {
             auth::source_operation_submit,
             auth::source_operation_reconcile,
             auth::source_operation_advance,
+            auth::project_access::read_project_access,
             auth::instruction_admission::read_project_instructions,
             auth::instruction_admission::read_instruction_admission_control,
             auth::instruction_admission::pause_instruction_admission,

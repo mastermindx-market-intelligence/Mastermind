@@ -569,6 +569,7 @@ _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES: tuple[str, ...] = (
     "/workspace/project-admission/current",
     "/workspace/project-admission/operation",
     "/workspace/fabric/status/current",
+    "/workspace/project-access/current",
     "/workspace/project-instructions/current",
     "/workspace/instruction-admission/current",
     "/workspace/instruction-admission/operation",

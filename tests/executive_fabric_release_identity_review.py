@@ -500,7 +500,7 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Journal source-only read composition: exact unchanged action-handler AST and
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'dfb287e7a5439f8766d7966e25480b12c63045c55705dd8ee4b237272490c598', 'sites': ((871, 71, 74, 'int', '400'), (882, 71, 74, 'int', '403'), (890, 71, 74, 'int', '400'), (896, 79, 82, 'int', '400'), (905, 71, 74, 'int', '400'), (915, 71, 74, 'int', '403'), (920, 76, 79, 'int', '503'), (926, 71, 74, 'int', '403'))}
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '3c88aa6556875d3134137805b935bc14dddd4804ebea3cbc4fab34091075ad78', 'sites': ((875, 71, 74, 'int', '400'), (886, 71, 74, 'int', '403'), (894, 71, 74, 'int', '400'), (900, 79, 82, 'int', '400'), (909, 71, 74, 'int', '400'), (919, 71, 74, 'int', '403'), (924, 76, 79, 'int', '503'), (930, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.

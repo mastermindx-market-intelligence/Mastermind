@@ -1313,6 +1313,7 @@ async def plan_current(request: Request, *, config: WorkspaceAppConfig) -> JSONR
 
 
 def _project_instructions_envelope_response(envelope,*,principal=None):
+    from http import HTTPStatus
     from common import workspace_project_instructions_contract as wire
     if type(envelope) is not dict or envelope.get("ok") is not True:
         return _envelope_response(envelope)
@@ -1323,7 +1324,7 @@ def _project_instructions_envelope_response(envelope,*,principal=None):
         contract.bounded_canonical(envelope, limit=wire.MAX_RESPONSE_BYTES - 1)
         raw = contract.bounded_canonical(body, limit=wire.MAX_RESPONSE_BYTES - 1)
     except (TypeError, ValueError, KeyError, RecursionError): return _refuse_json(503, "source_unavailable")
-    return Response(raw, status_code=200 if body["availability"] == "AVAILABLE" else 503,
+    return Response(raw, status_code=HTTPStatus.OK if body["availability"] == "AVAILABLE" else HTTPStatus.SERVICE_UNAVAILABLE,
         media_type="application/json", headers={"Cache-Control": "no-store"})
 
 
@@ -1699,6 +1700,13 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def plan_endpoint(request: Request) -> JSONResponse:
         return await plan_current(request, config=config)
 
+    async def project_access_endpoint(request: Request):
+        from http import HTTPStatus
+        from integrations.mastermind_workspace_app.project_access import project_access_current
+        loader=config.project_admission_load_bindings
+        if loader is None:return _with_no_store(_refuse_json(HTTPStatus.SERVICE_UNAVAILABLE,"source_unavailable"))
+        return await project_access_current(request,config=config,load_bindings=loader)
+
     async def project_instructions_endpoint(request: Request):
         return await project_instructions_current(request, config=config)
 
@@ -1779,6 +1787,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_RESULT_ROUTE, result_endpoint, methods=["GET"]),
         Route(_RESULT_REFERENCES_ROUTE, result_references_endpoint, methods=["GET"]),
         Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
+        Route("/workspace/project-access/current", project_access_endpoint, methods=["GET"]),
         Route("/workspace/project-instructions/current", project_instructions_endpoint, methods=["GET"]),
         Route(_PROJECT_PLAN_ROUTE, project_plan_endpoint, methods=["GET"]),
         Route(_PROJECT_JOURNAL_ROUTE, project_journal_endpoint, methods=["GET"]),

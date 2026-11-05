@@ -1769,3 +1769,31 @@ describe("canonical archive continuation Web READ", () => {
     expect(e.fetcher).toHaveBeenCalledTimes(1);
   });
 });
+import projectAccessFixture from './access/fixtures/current-grants.json';
+import projectAccessV5Fixture from './access/fixtures/v5-current-grants.json';
+describe('fixed current project access Web read',()=>{
+ const request=()=>({selection:{work_ref:'WS:ONE'},signal:new AbortController().signal});
+ it('uses only fixed Acquisition GET and preserves the bounded unavailable body',async()=>{
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client);
+  e.fetcher.mockResolvedValueOnce(response(projectAccessFixture));
+  await expect(host.readProjectAccess!(request())).resolves.toEqual(projectAccessFixture);
+  const [url,options]=e.fetcher.mock.calls[0];
+  expect(new URL(String(url)).origin).toBe(ORIGIN);expect(new URL(String(url)).pathname).toBe('/workspace/project-access/current');
+  expect(Object.fromEntries(new URL(String(url)).searchParams)).toEqual({work_ref:'WS:ONE'});
+  expect(options).toMatchObject({method:'GET',redirect:'error',credentials:'omit',cache:'no-store'});
+  e.fetcher.mockResolvedValueOnce(response(projectAccessV5Fixture));await expect(host.readProjectAccess!(request())).resolves.toEqual(projectAccessV5Fixture);
+  const unavailable={schema:projectAccessFixture.schema,selection:projectAccessFixture.selection,availability:'UNAVAILABLE',source:null,membership:null,declaration:null,grants:null,reason_codes:['SOURCE_UNAVAILABLE']};
+  e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(unavailable),{status:503,headers:{'Content-Type':'application/json'}}));
+  await expect(host.readProjectAccess!(request())).resolves.toEqual(unavailable);
+ });
+ it('refuses login absence, extra selector and oversized grant bodies without a second request',async()=>{
+  const e=setup(),host=bindMissionHost(e.client);await expect(host.readProjectAccess!(request())).rejects.toThrow();expect(e.fetcher).not.toHaveBeenCalled();
+  await e.login();e.fetcher.mockClear();await expect(host.readProjectAccess!({...request(),principal:'forged'} as never)).rejects.toThrow();expect(e.fetcher).not.toHaveBeenCalled();
+  e.fetcher.mockResolvedValueOnce(response({padding:'x'.repeat(16385)}));await expect(host.readProjectAccess!(request())).rejects.toThrow();expect(e.fetcher).toHaveBeenCalledTimes(1);
+ });
+ it('withholds late access facts after sign-out with no retry',async()=>{
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client),late=deferred<Response>();e.fetcher.mockReturnValueOnce(late.promise);
+  const pending=host.readProjectAccess!(request()),rejected=expect(pending).rejects.toThrow();await host.auth!.signOut();late.resolve(response(projectAccessFixture));await rejected;
+  expect(e.fetcher).toHaveBeenCalledTimes(1);
+ });
+});

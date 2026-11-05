@@ -197,7 +197,8 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...], relay_port: int
     mcp_post_position = mcp_meta_position + 1
     # Match a complete admitted pair, not independent subsets or a cross-product.
     # Comparing list and set forms permits only the known index.html /os/ overlap.
-    new_profile = len(TRANSITION_ROUTE_PROFILES) - 1
+    source_profiles = {index for index, (fixed_get, _) in enumerate(TRANSITION_ROUTE_PROFILES)
+                       if "/workspace/source-operation/operation" in fixed_get}
     get_path = post_path = source_path = None
     post_group = None
     get_matches = post_matches = set()
@@ -283,11 +284,13 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...], relay_port: int
             or (has_source and source_path is None)
             or not get_matches.intersection(post_matches)):
         raise ValueError("OS edge transition mixed or incomplete route profile")
-    # The two exact shapes only: the legacy GET set without the dedicated
-    # source branch, or the new GET_ROUTES together with it.
-    if has_source and new_profile not in get_matches:
+    # All exact profiles containing the original-operation read retain its
+    # dedicated POST branch, including the sealed predecessor before controls.
+    # The intersection still requires one complete admitted GET/POST pair.
+    matched_source = bool(get_matches.intersection(post_matches, source_profiles))
+    if has_source and not matched_source:
         raise ValueError("OS edge transition source profile incomplete")
-    if not has_source and new_profile in get_matches:
+    if not has_source and matched_source:
         raise ValueError("OS edge transition mixed or incomplete route profile")
     return {"inner": path, "get": get_path, "post": post_path, "source": source_path,
             "source_branch": has_source, "post_group": post_group}

@@ -1,3 +1,4 @@
+import {projectAccessPublicSelection} from "./access/project-access-host";
 import {instructionPublicRequest,instructionQuery,type InstructionPauseRequest} from "./instructions/instruction-host";
 import { projectAdmissionPublicRequest, projectAdmissionQuery, type ProjectAdmissionPauseRequest, type ProjectAdmissionResumeRequest } from "./admission/project-admission-host";
 import { validArchiveCursor } from "./projects/archive/project-archive-continuation";
@@ -1278,6 +1279,12 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       return read("acquisition", `${ORIGIN}/workspace/fabric/status/current?${new URLSearchParams({
         root_id: selected.rootId, run_id: selected.runId,
       })}`, signal, { cap: 16_384, typedUnavailableSchema: null });
+    },
+    readProjectAccess: request => {
+      const selection=projectAccessPublicSelection(request);
+      if(!selection)return Promise.reject(Error("PROJECT_ACCESS_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/project-access/current?${new URLSearchParams({work_ref:selection.work_ref})}`,request.signal,
+        {cap:16_384,typedUnavailableSchema:"mastermind.workspace_project_access.v1"});
     },
     readProjectInstructions: request => {
       const payload=instructionPublicRequest("content",request);
