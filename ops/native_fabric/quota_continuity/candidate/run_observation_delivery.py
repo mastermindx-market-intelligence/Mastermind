@@ -2,6 +2,7 @@
 No worker launch, result publication, lease mutation or terminal acceptance.
 """
 import argparse
+import errno
 from contextvars import ContextVar
 import hashlib
 import json
@@ -420,7 +421,9 @@ def _failure(value):
         diagnostic=value['directory_diagnostic']
         if not _directory_diagnostic(diagnostic):return False
         if diagnostic['kind']=='unknown':
-            if value.get('reason') not in ('filesystem_error','missing_at_observation') or diagnostic['errno']!=value.get('errno'):return False
+            if value.get('status')=='absent':
+                if value.get('reason')!='missing_at_observation' or diagnostic['errno']!=errno.ENOENT or 'errno' in value:return False
+            elif value.get('reason')!='filesystem_error' or diagnostic['errno']!=value.get('errno'):return False
         elif value.get('reason')!='directory_owner_mode_or_type':return False
         value={key:item for key,item in value.items() if key!='directory_diagnostic'}
     if value.get('status') == 'absent':
@@ -605,7 +608,7 @@ def validate_response(raw,request):
             from run_observation import timestamp
             if timestamp(record['ended_at'])<timestamp(record['started_at']):raise ValueError('observation_process_time')
     if report['status']=='observed' and (set(observations)!={'support','marker','returncode','stdout','process_receipt'}
-            or observations['support']['status']!='observed' or any(v['status']=='unavailable' for v in observations.values())
+            or observations['support']['status']!='observed' or any(v['status']=='unavailable' or 'directory_diagnostic' in v for v in observations.values())
             or 'request_stopped' in report):
         raise ValueError('observation_overall_contradiction')
     return report

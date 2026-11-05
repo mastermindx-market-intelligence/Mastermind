@@ -602,12 +602,14 @@ def observe(run_id, expected_support_digest, *, observe_pid=False, artifact=None
                 observations[name] = capture(fn)
                 if 'directory_diagnostic' in observations[name]:
                     break  # First fixed-directory failure: no onward role reads.
-            if observe_pid and observations["marker"]["status"] == "observed":
+            directory_failed = any('directory_diagnostic' in value
+                                   for value in observations.values())
+            if observe_pid and not directory_failed and observations["marker"]["status"] == "observed":
                 observations["pid"] = capture(lambda: proc_observation(observations["marker"]["pid"], uid))
                 if observations["pid"]["status"] == "absent":
                     observations["pid"]["observed_pid_present"] = False
                     observations["pid"]["original_child_identity_proven"] = False
-            elif observe_pid:
+            elif observe_pid and not directory_failed:
                 observations["pid"] = {"status": "unavailable", "reason": "validated_marker_required"}
             reader.verify()
         report["status"] = ("unavailable" if any(

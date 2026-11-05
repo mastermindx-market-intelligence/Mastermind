@@ -395,7 +395,7 @@ _FAULTS = ('regular', 'symlink', 'other', 'uid', 'mode', 'open_io',
            'open_missing', 'open_permission', 'open_forbidden', 'fstat_io')
 
 
-def _fixed_reader_failure(module, component, fault):
+def _fixed_reader_failure(module, component, fault, observer=None):
     uid = 1000  # synthetic account, not an enrolled or observed principal
     reader = module.Reader.__new__(module.Reader)
     reader.uid, reader.fds, reader.edges = uid, [100], []
@@ -436,7 +436,8 @@ def _fixed_reader_failure(module, component, fault):
                         if path == '/'.join(filter(None, (paths[dir_fd], name))))]), \
          mock.patch.object(module.os, 'close', side_effect=closed.append):
         try:
-            result = module.capture(lambda: module.process_receipt(reader, 'synthetic-run'))
+            result = (observer(reader) if observer is not None else
+                      module.capture(lambda: module.process_receipt(reader, 'synthetic-run')))
         except OSError as exc:
             assert exc.errno in (errno.EACCES, errno.EPERM)
             result = dict(status='unavailable', reason='os_permission_denied',
@@ -555,3 +556,62 @@ def test_fixed_directory_diagnostics_preserve_original_custody_and_race_guards()
         info=types.SimpleNamespace(st_mode=stat.S_IFDIR|0o722,st_uid=1000)
         module._directory_failure(error,'/PRIVATE_PATH_CANARY',info)
         assert not hasattr(error,'directory_diagnostic')
+
+
+def test_process_directory_failure_also_stops_an_opted_in_pid_read():
+    module=load('fixed_directory_pid_stop_reader',_READER_PATHS[0])
+    def observe(reader):
+        # Actual process_receipt -> actual Reader -> original directory guard.
+        # Only earlier roles and the root context are synthetic; the PID spy
+        # must not be reached after this real fixed-component failure.
+        with mock.patch.object(module,'Reader',return_value=contextlib.nullcontext(reader)), \
+             mock.patch.object(module,'support',return_value={}), \
+             mock.patch.object(module,'marker',return_value={'pid':123}), \
+             mock.patch.object(module,'rc_file',return_value={}), \
+             mock.patch.object(module,'stdout_metadata',return_value={}), \
+             mock.patch.object(module,'proc_observation') as pid:
+            report=module.observe('synthetic-run','a'*64,observe_pid=True)
+        assert report['observations']['marker']['status']=='observed'
+        assert report['observations']['process_receipt']['reason']=='directory_owner_mode_or_type'
+        assert report['status']=='unavailable' and 'pid' not in report['observations']
+        pid.assert_not_called()
+        return report
+    _fixed_reader_failure(module,'lanes/ext/lanes','mode',observer=observe)
+
+
+def test_missing_fixed_directory_actual_reader_response_roundtrips_without_outer_errno():
+    module=load('fixed_directory_missing_reader',_READER_PATHS[0])
+    row=_fixed_reader_failure(module,'lanes/ext/lanes','open_missing')
+    assert row['status']=='absent' and row['reason']=='missing_at_observation'
+    assert 'errno' not in row and row['directory_diagnostic']['errno']==errno.ENOENT
+    request=dict(run_id='synthetic-run',support_digest='a'*64)
+    file=dict(device=1,inode=1,uid=1000,mode=0o600,bytes=0,mtime_ns=0)
+    # Complete closed companion rows make an overall-status-only mutation
+    # discriminate the directory diagnostic, not missing required row keys.
+    observations=dict(
+        support=dict(status='observed',digest=request['support_digest'],verified_code_files=21,
+            verification='manifest_and_fixed_code_hashes',running_process_source_identity_proven=False,
+            release_links_verified=False),
+        marker=dict(status='observed',file=file,marker_sha256='b'*64,pid=123,
+            started_at='2026-11-05T00:00:00+00:00',elapsed_since_marker_seconds=0,
+            source_sha256=None,process_generation_proven=False,root_identity_proven=False),
+        returncode=dict(status='absent',reason='missing_at_observation'),
+        stdout=dict(status='observed',file=file,content_read=False,useful_progress_proven=False),
+        process_receipt=row)
+    report=dict(schema='mastermind.run_observation.v1',run_id=request['run_id'],
+        expected_support_digest=request['support_digest'],status='unavailable',
+        observations=observations,limits=candidate.LIMITS)
+    def wire(value):
+        return json.dumps(dict(schema=candidate.SCHEMA,
+            request_sha256=candidate.delivery.digest(candidate.reader.canonical(request)),report=value)).encode()
+    candidate.delivery.digest=lambda raw:hashlib.sha256(raw).hexdigest()
+    with mock.patch.object(candidate,'validate_request'), \
+         mock.patch.dict(sys.modules,{'run_observation':module}):
+        assert candidate.validate_response(wire(report),request)==report
+        with pytest.raises(ValueError):
+            candidate.validate_response(wire(dict(report,status='observed')),request)
+        for bad in [dict(row,errno=errno.ENOENT),
+                    dict(row,directory_diagnostic=dict(row['directory_diagnostic'],errno=errno.EIO)),
+                    dict(row,directory_diagnostic=dict(row['directory_diagnostic'],errno=None))]:
+            with pytest.raises(ValueError):
+                candidate.validate_response(wire(dict(report,observations={'process_receipt':bad})),request)
