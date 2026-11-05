@@ -85,6 +85,9 @@ PRE_PROJECT_ACCESS_GET_ROUTES = PRE_INSTRUCTION_ADMISSION_GET_ROUTES + (
     "/workspace/instruction-admission/current", "/workspace/instruction-admission/operation")
 GET_ROUTES = PRE_PROJECT_ACCESS_GET_ROUTES + ("/workspace/project-access/current",)
 POST_ROUTES = PRE_INSTRUCTION_ADMISSION_POST_ROUTES + ("/workspace/instruction-admission/pause",)
+PRE_MISSION_RESULT_GET_ROUTES = GET_ROUTES
+PRE_MISSION_RESULT_POST_ROUTES = POST_ROUTES
+GET_ROUTES = PRE_MISSION_RESULT_GET_ROUTES + ("/workspace/mission-result/current",)
 
 # Preserve exactly the profiles admitted by the two predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
@@ -112,6 +115,7 @@ TRANSITION_ROUTE_PROFILES = (
     (PRE_PROJECT_INSTRUCTIONS_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
     (PRE_INSTRUCTION_ADMISSION_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
     (PRE_PROJECT_ACCESS_GET_ROUTES, POST_ROUTES),
+    (PRE_MISSION_RESULT_GET_ROUTES, PRE_MISSION_RESULT_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 

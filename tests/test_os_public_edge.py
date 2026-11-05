@@ -52,6 +52,7 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/workspace/project-admission/current",
         "/workspace/project-instructions/current",
         "/workspace/project-access/current",
+        "/workspace/mission-result/current",
         "/workspace/project-admission/operation",
         "/workspace/projects/archive/current",
         "/workspace/project-knowledge/current",
@@ -406,8 +407,8 @@ def test_instruction_read_profile_preserves_old_exact_profile_and_adds_only_get(
 
 
 def test_project_access_adds_one_fixed_read_and_preserves_full_instruction_predecessor():
-    from ops.executive_os.os_public_edge import PRE_PROJECT_ACCESS_GET_ROUTES,TRANSITION_ROUTE_PROFILES
-    assert GET_ROUTES==PRE_PROJECT_ACCESS_GET_ROUTES+('/workspace/project-access/current',)
+    from ops.executive_os.os_public_edge import PRE_PROJECT_ACCESS_GET_ROUTES,TRANSITION_ROUTE_PROFILES,PRE_MISSION_RESULT_GET_ROUTES
+    assert PRE_MISSION_RESULT_GET_ROUTES==PRE_PROJECT_ACCESS_GET_ROUTES+('/workspace/project-access/current',)
     assert (PRE_PROJECT_ACCESS_GET_ROUTES,POST_ROUTES) in TRANSITION_ROUTE_PROFILES
     assert '/workspace/project-access/current' not in POST_ROUTES
     assert not any('/workspace/project-access/pause' in routes for profile in TRANSITION_ROUTE_PROFILES for routes in profile)
