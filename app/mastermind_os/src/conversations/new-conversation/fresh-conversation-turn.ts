@@ -6,14 +6,16 @@
  * (`mastermind.executive.fresh_conversation_result.v1`), the turn DATA shape
  * (`mastermind.executive.fresh_conversation_turn_data.v1`), the conversation
  * reference selector (`mastermind.fresh_conversation_reference.v1`), and the
- * request syntax for the four reference-mode operations consume / turn /
- * turn_status / turn_read. The producer-sealed RECORDED result is validated
+ * request syntax for consume / turn / turn_status / turn_read and the
+ * successor readonly consume_status / pure turn_preview branches. The producer-sealed RECORDED result is validated
  * through the existing strict initial-result reader bound to the actual
  * locator — not merely its summary/digest. Parsing/validation grants no
  * admission, permission, consumption or send authority: every decoded value
  * stays data, `can_send`/`effect` remain producer claims, and nothing here is
  * transported, stored, rendered or acted on. No window, lifecycle, store or
  * runtime effect lives in this module.
+ * f3574ad06 adds readonly consume_status, pure turn_preview and optional
+ * turn preview_digest; actual successor-fixture acceptance is separate.
  */
 import { decodeFreshConversationInitialResult } from "./fresh-conversation";
 import type { FreshConversationPayload } from "./fresh-conversation";
@@ -23,7 +25,9 @@ export type FreshConversationTurnOperation =
   | "consume"
   | "turn"
   | "turn_status"
-  | "turn_read";
+  | "turn_read"
+  | "consume_status"
+  | "turn_preview";
 
 /** Closed conversation reference selector. Scalar fields only; validated
  * whole-string against the frozen Python laws. */
@@ -50,6 +54,7 @@ export type FreshConversationTurnRequest =
       readonly initial_digest: string;
       readonly message: string;
       readonly turn_key: string;
+      readonly preview_digest?: string;
     }
   | {
       readonly work_ref: string;
@@ -67,6 +72,7 @@ export type FreshConversationTurnRequest =
       readonly initial_digest: string;
       readonly message: string;
       readonly turn_key: string;
+      readonly preview_digest?: string;
     }
   | {
       readonly work_ref: string;
@@ -131,6 +137,8 @@ const TURN_OPERATIONS: ReadonlySet<string> = new Set([
   "turn",
   "turn_status",
   "turn_read",
+  "consume_status",
+  "turn_preview",
 ]);
 
 // Python `re.fullmatch` semantics: a leading anchor only, and the whole string
@@ -334,7 +342,7 @@ export function validateFreshConversationReference(
  * expected reference (or absence). Deep-equal of the validated scalar shape. */
 function sameReference(value: unknown, expected: FreshConversationReference | null): boolean {
   if (expected === null) return value === null;
-  if (!plainObject(value)) return false;
+  if (!plainObject(value)||!exactKeys(value,REFERENCE_KEYS)) return false;
   return (
     value.schema === expected.schema &&
     value.work_ref === expected.work_ref &&
@@ -353,77 +361,36 @@ export function validateFreshConversationTurnRequest(
   operation: FreshConversationTurnOperation,
 ): FreshConversationTurnRequest | null {
   try {
-    if (!isTurnOperation(operation)) return null;
-    if (!plainObject(value)) return null;
-    const referenceMode = Object.hasOwn(value, "reference");
-    const keys: string[] = ["work_ref", referenceMode ? "reference" : "operation_key"];
-    if (operation === "consume") keys.push("initial_digest");
-    if (operation === "turn") keys.push("message", "initial_digest", "turn_key");
-    if (operation === "turn_status" || operation === "turn_read") keys.push("turn_key");
-    if (!exactKeys(value, keys)) return null;
-    const workRef = value.work_ref;
-    if (typeof workRef !== "string" || !fullMatch(WORK_REF_RE, workRef)) return null;
-
-    let message: string | undefined;
-    if (operation === "turn") {
-      const rawMessage = value.message;
-      if (!isMessage(rawMessage)) return null;
-      message = rawMessage;
+    if (!isTurnOperation(operation) || !plainObject(value)) return null;
+    const referenceMode = Object.hasOwn(value,"reference");
+    const consumeLike=operation==="consume"||operation==="consume_status";
+    const messageLike=operation==="turn"||operation==="turn_preview";
+    const hasPreview=operation==="turn"&&Object.hasOwn(value,"preview_digest");
+    const keys=["work_ref",referenceMode?"reference":"operation_key"];
+    if(consumeLike)keys.push("initial_digest");
+    if(messageLike)keys.push("message","initial_digest","turn_key");
+    if(operation==="turn_status"||operation==="turn_read")keys.push("turn_key");
+    if(hasPreview)keys.push("preview_digest");
+    if(!exactKeys(value,keys))return null;
+    const workRef=value.work_ref;
+    if(typeof workRef!=="string"||!fullMatch(WORK_REF_RE,workRef))return null;
+    const reference=referenceMode?validateFreshConversationReference(value.reference):null;
+    if(referenceMode&&(!reference||reference.work_ref!==workRef))return null;
+    const operationKey=value.operation_key;
+    if(!referenceMode&&(typeof operationKey!=="string"||!fullMatch(OPERATION_KEY_RE,operationKey)))return null;
+    const selected=reference?{work_ref:workRef,reference}:{work_ref:workRef,operation_key:operationKey as string};
+    if(consumeLike){
+      if(!isHex64(value.initial_digest))return null;
+      return {...selected,initial_digest:value.initial_digest};
     }
-    let initialDigest: string | undefined;
-    if (operation === "consume" || operation === "turn") {
-      const rawDigest = value.initial_digest;
-      if (!isHex64(rawDigest)) return null;
-      initialDigest = rawDigest;
-    }
-    let turnKey: string | undefined;
-    if (operation !== "consume") {
-      const rawTurnKey = value.turn_key;
-      if (typeof rawTurnKey !== "string" || !fullMatch(OPERATION_KEY_RE, rawTurnKey)) {
-        return null;
-      }
-      turnKey = rawTurnKey;
-    }
-
-    if (referenceMode) {
-      const reference = validateFreshConversationReference(value.reference);
-      // Foreign work reference: the selector must agree with the request.
-      if (reference === null || reference.work_ref !== workRef) return null;
-      if (operation === "turn") {
-        return {
-          work_ref: workRef,
-          reference,
-          initial_digest: initialDigest!,
-          message: message!,
-          turn_key: turnKey!,
-        };
-      }
-      if (operation === "consume") {
-        return { work_ref: workRef, reference, initial_digest: initialDigest! };
-      }
-      return { work_ref: workRef, reference, turn_key: turnKey! };
-    }
-
-    const operationKey = value.operation_key;
-    if (typeof operationKey !== "string" || !fullMatch(OPERATION_KEY_RE, operationKey)) {
-      return null;
-    }
-    if (operation === "turn") {
-      return {
-        work_ref: workRef,
-        operation_key: operationKey,
-        initial_digest: initialDigest!,
-        message: message!,
-        turn_key: turnKey!,
-      };
-    }
-    if (operation === "consume") {
-      return { work_ref: workRef, operation_key: operationKey, initial_digest: initialDigest! };
-    }
-    return { work_ref: workRef, operation_key: operationKey, turn_key: turnKey! };
-  } catch {
-    return null;
-  }
+    const turnKey=value.turn_key;
+    if(typeof turnKey!=="string"||!fullMatch(OPERATION_KEY_RE,turnKey))return null;
+    if(!messageLike)return {...selected,turn_key:turnKey};
+    if(!isHex64(value.initial_digest)||!isMessage(value.message))return null;
+    if(hasPreview&&!isHex64(value.preview_digest))return null;
+    return {...selected,turn_key:turnKey,initial_digest:value.initial_digest,message:value.message,
+      ...(hasPreview?{preview_digest:value.preview_digest as string}:{})};
+  }catch{return null;}
 }
 
 function decodeTurnConsumption(
@@ -583,7 +550,7 @@ export function decodeFreshConversationTurnResult(
   expectedRequest: unknown,
 ): FreshConversationTurnResult | null {
   try {
-    if (!isTurnOperation(operation)) return null;
+    if (!isTurnOperation(operation)||operation==="turn_preview") return null;
     const request = validateFreshConversationTurnRequest(expectedRequest, operation);
     if (request === null) return null;
     if (
@@ -598,6 +565,10 @@ export function decodeFreshConversationTurnResult(
       if (value.error !== null) return null;
       const data = decodeTurnData(value.data, request);
       if (data === null) return null;
+      if(operation==="consume_status"&&(
+        data.can_send!==false||
+        !(data.state==="CONSUMED"&&data.effect==="COMMITTED"&&data.initial_consumption!==null||
+          data.state==="ABSENT"&&data.effect==="NONE"&&data.initial_consumption===null)))return null;
       return { ok: true, data };
     }
     if (value.ok === false) {
@@ -611,4 +582,54 @@ export function decodeFreshConversationTurnResult(
   } catch {
     return null;
   }
+}
+
+
+/** Pure f357 preview DATA. Readiness is never permission or an effect receipt. */
+export interface FreshConversationTurnPreviewData {
+ readonly schema:"mastermind.executive.fresh_conversation_turn_preview.v1";
+ readonly work_ref:string;
+ readonly operation_key:string|null;
+ readonly reference:FreshConversationReference|null;
+ readonly turn_key:string;
+ readonly state:"TURN_READY";
+ readonly effect:"NONE";
+ readonly initial_consumption:FreshConversationTurnConsumption;
+ readonly locator:FreshConversationTurnLocator;
+ readonly preview_digest:string;
+ readonly parent_consumed:false;
+ readonly can_send:true;
+}
+export type FreshConversationTurnPreviewResult=
+ |{readonly ok:true;readonly data:FreshConversationTurnPreviewData}
+ |{readonly ok:false;readonly data:null;readonly error:FreshConversationTurnError};
+const TURN_PREVIEW_SCHEMA="mastermind.executive.fresh_conversation_turn_preview.v1";
+const TURN_PREVIEW_KEYS=["schema","work_ref","operation_key","reference","turn_key","state","effect",
+ "initial_consumption","locator","preview_digest","parent_consumed","can_send"] as const;
+
+/** Separate preview reader: a TURN_READY frame can never become an accepted
+ * Keep/turn receipt merely by passing through the ordinary result decoder. */
+export function decodeFreshConversationTurnPreviewResult(value:unknown,expectedRequest:unknown):FreshConversationTurnPreviewResult|null{
+ try{
+  const request=validateFreshConversationTurnRequest(expectedRequest,"turn_preview");
+  if(!request||!("turn_key" in request)||!plainObject(value)||!exactKeys(value,OUTER_KEYS)||
+    value.schema!==TURN_RESULT_SCHEMA||value.operation!=="turn_preview")return null;
+  if(value.ok===false){
+   if(value.data!==null)return null;const error=decodeTurnError(value.error);
+   return error?{ok:false,data:null,error}:null;
+  }
+  if(value.ok!==true||value.error!==null||!plainObject(value.data)||!exactKeys(value.data,TURN_PREVIEW_KEYS))return null;
+  const raw=value.data;
+  if(raw.schema!==TURN_PREVIEW_SCHEMA||raw.state!=="TURN_READY"||raw.effect!=="NONE"||
+    raw.parent_consumed!==false||raw.can_send!==true||!isHex64(raw.preview_digest))return null;
+  // The frozen Python owner reuses the same receipt/selector/locator checks.
+  // This internal parse projection is not a producer frame or an effect.
+  const {preview_digest:previewDigest,...fields}=raw;
+  const data=decodeTurnData({...fields,schema:TURN_DATA_SCHEMA,state:"CONSUMED",result:null},request);
+  if(!data||!data.initial_consumption)return null;
+  return {ok:true,data:{schema:TURN_PREVIEW_SCHEMA,work_ref:data.work_ref,operation_key:data.operation_key,
+    reference:data.reference,turn_key:request.turn_key,state:"TURN_READY",effect:"NONE",
+    initial_consumption:data.initial_consumption,locator:data.locator,preview_digest:previewDigest as string,
+    parent_consumed:false,can_send:true}};
+ }catch{return null;}
 }

@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { canonicalJson, sha256Hex } from "../../orchestration/operation-key";
 import {
   decodeFreshConversationTurnResult,
+  decodeFreshConversationTurnPreviewResult,
   validateFreshConversationReference,
   validateFreshConversationTurnRequest,
 } from "./fresh-conversation-turn";
@@ -1024,4 +1025,60 @@ describe("closure and hostile input", () => {
       "work_ref",
     ]);
   });
+});
+
+
+// New f357 branches below use explicit SYNTHETIC schema units, not a replay,
+// rewrite, or joined acceptance claim for the future genuine successor run.
+const SYNTHETIC_RECOVERY_REQUEST={work_ref:WORK_REF,reference:REFERENCE,initial_digest:CONSUMPTION.initial_digest};
+const SYNTHETIC_RECOVERY_FRAME={...CONSUME_FRAME,operation:"consume_status",data:{...CONSUME_FRAME.data,can_send:false}};
+const SYNTHETIC_PREVIEW_FRAME={schema:"mastermind.executive.fresh_conversation_result.v1",operation:"turn_preview",ok:true,error:null,
+ data:{schema:"mastermind.executive.fresh_conversation_turn_preview.v1",work_ref:WORK_REF,operation_key:null,reference:REFERENCE,
+ turn_key:"original-followup-001",state:"TURN_READY",effect:"NONE",initial_consumption:CONSUMPTION,locator:LOCATOR,
+ preview_digest:"a".repeat(64),parent_consumed:false,can_send:true}};
+
+describe("f357 interrupted Keep and attended preflight pure schema units",()=>{
+ it("validates readonly consume_status without creating a turn selector",()=>{
+  expect(validateFreshConversationTurnRequest(SYNTHETIC_RECOVERY_REQUEST,"consume_status")).toEqual(SYNTHETIC_RECOVERY_REQUEST);
+  expect(validateFreshConversationTurnRequest({...SYNTHETIC_RECOVERY_REQUEST,turn_key:"invented"},"consume_status")).toBeNull();
+  const decoded=decodeFreshConversationTurnResult(SYNTHETIC_RECOVERY_FRAME,"consume_status",SYNTHETIC_RECOVERY_REQUEST);
+  expect(decoded?.ok).toBe(true);if(decoded?.ok){expect(decoded.data.can_send).toBe(false);expect(decoded.data.turn_key).toBeNull();}
+ });
+ it("keeps key-mode recovery exact and ABSENT separate from a receipt",()=>{
+  const request={work_ref:WORK_REF,operation_key:"unit-original-key",initial_digest:CONSUMPTION.initial_digest};
+  const data={...SYNTHETIC_RECOVERY_FRAME.data,reference:null,operation_key:request.operation_key};
+  expect(decodeFreshConversationTurnResult({...SYNTHETIC_RECOVERY_FRAME,data},"consume_status",request)?.ok).toBe(true);
+  const absent={...data,state:"ABSENT",effect:"NONE",initial_consumption:null};
+  expect(decodeFreshConversationTurnResult({...SYNTHETIC_RECOVERY_FRAME,data:absent},"consume_status",request)?.ok).toBe(true);
+  for(const delta of [{can_send:true},{effect:"UNKNOWN"},{state:"RECORDED"},{initial_consumption:null}])
+   expect(decodeFreshConversationTurnResult({...SYNTHETIC_RECOVERY_FRAME,data:{...data,...delta}},"consume_status",request)).toBeNull();
+ });
+ it("preserves legacy turn syntax and only accepts a valid optional Send preview digest",()=>{
+  expect(validateFreshConversationTurnRequest(TURN_REQUEST,"turn")).toEqual(TURN_REQUEST);
+  const checked={...TURN_REQUEST,preview_digest:"b".repeat(64)};
+  expect(validateFreshConversationTurnRequest(checked,"turn")).toEqual(checked);
+  expect(validateFreshConversationTurnRequest(TURN_REQUEST,"turn_preview")).toEqual(TURN_REQUEST);
+  expect(validateFreshConversationTurnRequest(checked,"turn_preview")).toBeNull();
+  for(const preview_digest of [undefined,null,"", "b".repeat(63),"B".repeat(64)])
+   expect(validateFreshConversationTurnRequest({...TURN_REQUEST,preview_digest},"turn")).toBeNull();
+ });
+ it("separates exact preflight DATA from a recorded effect receipt",()=>{
+  const decoded=decodeFreshConversationTurnPreviewResult(SYNTHETIC_PREVIEW_FRAME,TURN_REQUEST);
+  expect(decoded?.ok).toBe(true);if(decoded?.ok){expect(decoded.data).toEqual(SYNTHETIC_PREVIEW_FRAME.data);expect(decoded.data).not.toBe(SYNTHETIC_PREVIEW_FRAME.data);}
+  expect(decodeFreshConversationTurnResult(SYNTHETIC_PREVIEW_FRAME,"turn_preview",TURN_REQUEST)).toBeNull();
+  expect(decodeFreshConversationTurnPreviewResult(CONSUME_FRAME,TURN_REQUEST)).toBeNull();
+ });
+ it("rejects preview literal/schema/digest/root/receipt drift rather than minting readiness",()=>{
+  for(const delta of [{schema:"foreign"},{state:"CONSUMED"},{effect:"COMMITTED"},{parent_consumed:true},{can_send:false},
+   {preview_digest:"no"},{extra:true},{initial_consumption:null},{locator:{...LOCATOR,root_job_id:"foreign"}},
+   {initial_consumption:{...CONSUMPTION,initial_digest:"f".repeat(64)}}])
+   expect(decodeFreshConversationTurnPreviewResult({...SYNTHETIC_PREVIEW_FRAME,data:{...SYNTHETIC_PREVIEW_FRAME.data,...delta}},TURN_REQUEST)).toBeNull();
+ });
+ it("rejects extra response reference fields and accessors without executing them",()=>{
+  const extra={...REFERENCE,extra:true};
+  expect(decodeFreshConversationTurnResult({...TURN_FRAME,data:{...TURN_FRAME.data,reference:extra}},"turn",TURN_REQUEST)).toBeNull();
+  expect(decodeFreshConversationTurnPreviewResult({...SYNTHETIC_PREVIEW_FRAME,data:{...SYNTHETIC_PREVIEW_FRAME.data,reference:extra}},TURN_REQUEST)).toBeNull();
+  let called=false;const raw={...SYNTHETIC_PREVIEW_FRAME};Object.defineProperty(raw,"data",{enumerable:true,get(){called=true;return SYNTHETIC_PREVIEW_FRAME.data;}});
+  expect(decodeFreshConversationTurnPreviewResult(raw,TURN_REQUEST)).toBeNull();expect(called).toBe(false);
+ });
 });
