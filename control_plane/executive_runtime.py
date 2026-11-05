@@ -14221,6 +14221,10 @@ class JobRegistry:
             event_payload["fresh_conversation_admission"] = {
                 "schema": "mastermind.fresh_conversation_driven_root.v1", "task_kind": TASK_KIND,
                 "source": fresh_material, "source_digest": orchestration_digest(fresh_material)}
+            event_payload["fresh_conversation_original_request"] = {
+                "schema": "mastermind.fresh_conversation_original_request.v1",
+                "operation_key": _fresh_conversation_source.public_operation_key(),
+                "creation_digest": orchestration_digest(fresh_material)}
         self.store.append_event(
             connection,
             aggregate_type="job",

@@ -58,7 +58,7 @@ def admission_arguments(principal, request):
 
 class FreshConversationOwner:
     """Host-owned adapter; all effects remain existing admission/cycle effects."""
-    def __init__(self, service, *, expected_policy):
+    def __init__(self, service, *, expected_policy, authorized_policies=None):
         from control_plane.executive_service import ExecutiveControlService, CeoIngressAppBinding
         if type(service) is not ExecutiveControlService:
             raise ConversationRefusal()
@@ -72,6 +72,13 @@ class FreshConversationOwner:
         # Trusted composition from the incumbent installed submit policy,
         # never a frame field and never a new policy/enrollment registry.
         self._expected_policy = expected_policy
+        from integrations.session_bridge.runtime_return import _trusted_read_pair
+        self._trusted_read_pair = _trusted_read_pair(authorized_policies)
+        if self._trusted_read_pair is not None:
+            import hashlib
+            policy = self._trusted_read_pair[1]
+            if (policy.policy_id, hashlib.sha256(policy.issuer.encode()).hexdigest(), policy.resource) != expected_policy:
+                raise ConversationRefusal("principal_refused")
 
     def _current(self, principal, *, read_only=False):
         service = self._service
@@ -82,12 +89,24 @@ class FreshConversationOwner:
                 or not _SCOPES <= set(principal.scopes)
                 or tuple(getattr(principal, key) for key in ("policy_id", "issuer_digest", "resource")) != self._expected_policy):
             raise ConversationRefusal("principal_refused")
+        self._require_host_current(read_only=read_only)
+
+    def _require_host_current(self, *, read_only=False):
+        service = self._service
         states = {"READY", "QUARANTINED"} if read_only else {"READY"}
         if (service._closing or service._service_state not in states
                 or service._require_runtime() is not self._runtime
                 or service._ceo_ingress_app_binding is not self._app
                 or self._app.armed is not True or not service.ceo_ingress_ready):
             raise ConversationRefusal()
+
+    def project_references(self, principal, selection):
+        from control_plane.fresh_conversation_reference import project_references
+        return project_references(self, principal, selection)
+
+    def read_reference(self, principal, reference):
+        from control_plane.fresh_conversation_reference import read_reference
+        return read_reference(self, principal, reference)
 
     def _fresh(self, principal):
         """Current company admission and registered worker are separate facts.
@@ -293,7 +312,8 @@ class FreshConversationOwner:
                 project_sha256=wire.canonical_digest(material["project"]),
                 dialogue_source_sha256=wire.canonical_digest(material["source"]),
                 host_binding_sha256=wire.canonical_digest(material["binding"]),
-                principal_expires_at=principal.expires_at), current)
+                principal_expires_at=principal.expires_at), current,
+                public_operation_key=request["operation_key"])
 
         entered = False
         try:
@@ -430,7 +450,7 @@ class FreshConversationOwner:
             workspace = projection(frame["workspace_principal"]) if frame["workspace_principal"] is not None else None
             if not callable(host_current) or host_current() is not None:
                 raise ConversationRefusal()
-            self._current(principal, read_only=operation in {"status", "read"})
+            self._current(principal, read_only=operation in {"status", "read", "turn_status", "turn_read"})
             if operation == "create":
                 if reader is None:
                     raise ConversationRefusal()
@@ -456,6 +476,30 @@ class FreshConversationOwner:
                     async with _observe_private_request_end(live, reader):
                         entered = True
                         value = await self.create(principal, frame["arguments"], workspace_principal=workspace)
+            elif operation in {"consume", "turn", "turn_status", "turn_read"}:
+                from control_plane.fresh_conversation_turn import consume_initial, submit_turn, read_turn
+                arguments = frame["arguments"]
+                reference = arguments.get("reference")
+                if reference is not None:
+                    from control_plane.fresh_conversation_reference import resolve_action_reference
+                    original = resolve_action_reference(self, principal, reference,
+                        for_write=operation in {"consume", "turn"})
+                    arguments = {**arguments, **original}
+                    arguments.pop("reference")
+                if operation in {"consume", "turn"}:
+                    def live_turn_request():
+                        if reader is None or reader.at_eof() or host_current() is not None:
+                            raise ConversationRefusal("request_closed")
+                        self._current(principal)
+                    live_turn_request()
+                    entered = True
+                    value = await (consume_initial if operation == "consume" else submit_turn)(
+                        self, principal, workspace, arguments, host_current=live_turn_request)
+                else:
+                    value = await read_turn(self, principal, arguments)
+                if reference is not None:
+                    value = {**value, "operation_key": None, "reference": reference}
+                value = wire.validate_turn_data(value, frame["arguments"])
             elif operation == "preview":
                 value = await self.preview(principal, frame["arguments"], workspace_principal=workspace)
             elif operation == "status":
@@ -465,7 +509,7 @@ class FreshConversationOwner:
             try:
                 if host_current() is not None:
                     raise ConversationRefusal()
-                self._current(principal, read_only=operation in {"status", "read"})
+                self._current(principal, read_only=operation in {"status", "read", "turn_status", "turn_read"})
             except Exception:
                 raise ConversationRefusal("effect_unknown" if entered else "conversation_unavailable",
                     effect="UNKNOWN" if entered else "NONE") from None

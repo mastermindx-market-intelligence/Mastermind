@@ -38,7 +38,7 @@ class Sink:
 
 
 async def post(app, operation, arguments, executive_token, workspace_token=None, *, change=None):
-    path = "/os/executive/conversation/" + operation
+    path = "/os/executive/conversation/" + operation.replace("_", "/")
     scope = dict(type="http", asgi={"version": "3.0", "spec_version": "2.4"}, http_version="1.1",
         scheme="https", method="POST", path=path, raw_path=path.encode(), root_path="", query_string=b"",
         headers=[(b"host", b"mcp.mastermind-x.com"), (b"content-type", b"application/json"),
@@ -67,6 +67,7 @@ async def mounted(tmp_path, rsa_key, monkeypatch):
     assert verified is not None
     principal = neutral_principal_projection(**dataclasses.asdict(verified))
     service, runtime, owner, principal, request, adapters = case(tmp_path, principal)
+    service._fixture_fresh_owner = owner
     backend = owner._app.workspace_read_provider_factory(runtime)
     wp = workspace_auth._workspace_policy(policy_id="workspace-test",
         allowed_subject_digests=list(ep.allowed_subject_digests))
@@ -90,12 +91,14 @@ async def mounted(tmp_path, rsa_key, monkeypatch):
     async def actual_private(socket_path, frame, **options):
         calls.append(frame)
         source = options.get("foreground_source")
-        if frame["operation"] == "create":
+        if frame["operation"] in wire.MODIFYING:
             assert options["keep_write_open"] is True and source is not None
             source.require_live()
         elif source is not None:
             raise AssertionError("read acquired creation attendance")
-        result = await owner.handle_frame(frame, reader=asyncio.StreamReader() if source else None,
+        reader = asyncio.StreamReader() if source else None
+        service._fixture_active_private_reader = reader
+        result = await owner.handle_frame(frame, reader=reader,
             host_current=source.require_live if source else lambda: None)
         return CeoIngressResponse(transport=TRANSPORT_SENT_OK, ok=True, result=result)
     monkeypatch.setattr(client, "_send_frame", actual_private)
