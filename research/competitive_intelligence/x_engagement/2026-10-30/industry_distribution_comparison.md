@@ -1,8 +1,8 @@
 # Financial-X distribution and synthetic-engagement competitive study
 
-**Research cutoff:** 2026-10-30  
-**Audience:** MastermindX product, distribution and market intelligence  
-**Status:** Evidence-based comparative research; not a claim that any named legitimate company controls bots or violates platform rules  
+**Research cutoff:** 2026-10-30\
+**Audience:** MastermindX product, distribution and market intelligence\
+**Status:** Evidence-based comparative research; not a claim that any named legitimate company controls bots or violates platform rules\
 **Scope:** Public first-party marketing/affiliate documents, public X profiles and indexable X mirrors, regulator material, academic/vendor research; **not** a complete collection of all X posts or an audit of any private account
 
 ## Executive result

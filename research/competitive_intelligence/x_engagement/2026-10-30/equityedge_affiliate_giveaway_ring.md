@@ -123,4 +123,3 @@ The above are new observed accounts **not included in the original 22 + 13 indep
 ### Actual interaction edges versus participation instructions
 
 The network contains at least three **different event classes**. Direct replies and reposts between creators, such as @AfaaqFx's response to @skyshark0's HolaPrime result and the cited @deartrader__ reposts of @Emrik__ / @theplaymakerxx, indicate social amplification. Contest **entry requirements** (follow three accounts, like, repost, comment) are calls-to-action, not proof every entrant performed the action. Affiliate **sign-up links** demonstrate campaign attribution infrastructure, not payout amounts or company ownership. Future quantitative network scoring must keep all three types distinct.
-

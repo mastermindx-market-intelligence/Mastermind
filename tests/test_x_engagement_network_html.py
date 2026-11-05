@@ -155,7 +155,10 @@ process.stdout.write(JSON.stringify(result));
 
 def _renderer(action, *, cases=None, html=None):
     source = HTML.read_text(encoding="utf-8") if html is None else html
-    scripts = re.findall(r"<script\b([^>]*)>([\s\S]*?)</script>", source)
+    scripts = re.findall(
+        r"<script\b([^>]*)>([\s\S]*?)</script\s*>", source,
+        flags=re.IGNORECASE,
+    )
     payloads = [body for attrs, body in scripts if 'id="payload"' in attrs]
     executable = [body for attrs, body in scripts if not attrs.strip()]
     assert len(payloads) == len(executable) == 1

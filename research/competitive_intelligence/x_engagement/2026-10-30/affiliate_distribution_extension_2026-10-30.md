@@ -1,7 +1,7 @@
 # Financial-X engagement research — creator economics and cross-brand network extension
 
-**As of:** 2026-10-30 (North America)  
-**Scope:** public primary-source program terms, one first-person founder interview, public creator profiles, and explicitly marked third-party X mirrors. Companion to [industry distribution comparison](industry_distribution_comparison.md), [interaccount networks](interaccount_networks_first_pass.md), and [typed graph](interaccount_edges_first_pass.json).  
+**As of:** 2026-10-30 (North America)\
+**Scope:** public primary-source program terms, one first-person founder interview, public creator profiles, and explicitly marked third-party X mirrors. Companion to [industry distribution comparison](industry_distribution_comparison.md), [interaccount networks](interaccount_networks_first_pass.md), and [typed graph](interaccount_edges_first_pass.json).\
 **Status:** research-only; no verified attribution of covert company control or synthetic-user operator. Public repository: no personal contact details, nonpublic records, or Mastermind commercial secrets.
 
 ## Executive finding

@@ -1,7 +1,7 @@
 # Financial-X affiliate reply seeding: three-account cross-brand network and payout-claim evidence audit
 
-**Research cutoff:** 2026-10-31 (America/Dawson_Creek)  
-**Scope:** public X profiles and web-indexed third-party post mirrors; first-party affiliate terms and payout-review disclosures; independent journalistic reporting.  
+**Research cutoff:** 2026-10-31 (America/Dawson_Creek)\
+**Scope:** public X profiles and web-indexed third-party post mirrors; first-party affiliate terms and payout-review disclosures; independent journalistic reporting.\
 **Status:** bounded observed promotional-affiliation network with **unverified original X event IDs/times and ultimate control**, not a finding of bots, fake audiences, deceptive agency control, criminal activity, or actual referral payments.
 
 **Continuity:** [original X network](interaccount_networks_first_pass.md), [Equity Edge affiliate/giveaway hub](equityedge_affiliate_giveaway_ring.md), [March/October dated campaign evidence](2026-10-02_timestamped_campaign_investigation.md), [creator-commercial comparators](affiliate_distribution_extension_2026-10-30.md). This is an extension of the existing program, **not** a new task registry or a replacement for the 181-edge typed graph.
