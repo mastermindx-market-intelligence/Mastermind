@@ -13,10 +13,12 @@ RESULT_SCHEMA = "mastermind.executive.fresh_conversation_result.v1"
 DATA_SCHEMA = "mastermind.executive.fresh_conversation_data.v1"
 ROUTES = {f"/os/executive/conversation/{operation}": operation
           for operation in ("preview", "create", "status", "read", "consume", "turn")}
-ROUTES.update({"/os/executive/conversation/turn/status": "turn_status",
+ROUTES.update({"/os/executive/conversation/consume/status": "consume_status",
+    "/os/executive/conversation/turn/preview": "turn_preview",
+    "/os/executive/conversation/turn/status": "turn_status",
     "/os/executive/conversation/turn/read": "turn_read"})
 MODIFYING = frozenset({"create", "consume", "turn"})
-DUAL_RESOURCE = MODIFYING | {"preview"}
+DUAL_RESOURCE = MODIFYING | {"preview", "turn_preview"}
 PRINCIPAL_FIELDS = frozenset({"policy_id", "issuer", "issuer_digest", "resource", "subject_digest",
     "client_ref", "scopes", "issued_at", "expires_at", "jti_digest"})
 _WORK = re.compile(r"WS:[A-Za-z0-9][A-Za-z0-9._-]{0,68}\Z")
@@ -25,19 +27,19 @@ _HEX = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def validate_request(value, *, operation):
-    if type(operation) is not str or operation not in {"preview", "create", "status", "read", "consume", "turn", "turn_status", "turn_read"}:
+    if type(operation) is not str or operation not in {"preview", "create", "status", "read", "consume", "turn", "turn_status", "turn_read", "consume_status", "turn_preview"}:
         raise ValueError("invalid operation")
     reference_mode = "reference" in value if type(value) is dict else False
-    if reference_mode and operation not in {"consume", "turn", "turn_status", "turn_read"}:
+    if reference_mode and operation not in {"consume", "turn", "turn_status", "turn_read", "consume_status", "turn_preview"}:
         raise ValueError("unexpected reference")
     keys = {"work_ref", "reference" if reference_mode else "operation_key"}
-    if operation in {"preview", "create", "turn"}:
+    if operation in {"preview", "create", "turn", "turn_preview"}:
         keys.add("message")
-    if operation in {"consume", "turn"}:
+    if operation in {"consume", "turn", "consume_status", "turn_preview"}:
         keys.add("initial_digest")
-    if operation in {"turn", "turn_status", "turn_read"}:
+    if operation in {"turn", "turn_status", "turn_read", "turn_preview"}:
         keys.add("turn_key")
-    if operation == "create":
+    if operation == "create" or (operation == "turn" and type(value) is dict and "preview_digest" in value):
         keys.add("preview_digest")
     if type(value) is not dict or set(value) != keys:
         raise ValueError("invalid request")
@@ -110,6 +112,8 @@ def validate_private_frame(value):
 
 
 def validate_data(value, request):
+    if type(value) is dict and value.get("schema") == "mastermind.executive.fresh_conversation_turn_preview.v1":
+        return validate_turn_preview(value, request)
     if type(value) is dict and value.get("schema") == "mastermind.executive.fresh_conversation_turn_data.v1":
         return validate_turn_data(value, request)
     keys = {"schema", "operation_key", "work_ref", "state", "effect", "parent_consumed",
@@ -191,4 +195,21 @@ def validate_reference(value):
             or any(type(value[key]) is not str or not _HEX.fullmatch(value[key])
                 for key in ("root_event_sha256", "principal_scope_sha256"))):
         raise ValueError("invalid conversation reference")
+    return dict(value)
+
+
+def validate_turn_preview(value, request):
+    keys = {"schema", "work_ref", "operation_key", "reference", "turn_key", "state", "effect",
+        "initial_consumption", "locator", "preview_digest", "parent_consumed", "can_send"}
+    if (type(value) is not dict or set(value) != keys
+            or value["schema"] != "mastermind.executive.fresh_conversation_turn_preview.v1"
+            or value["state"] != "TURN_READY" or value["effect"] != "NONE"
+            or value["parent_consumed"] is not False or value["can_send"] is not True
+            or type(value["preview_digest"]) is not str or not _HEX.fullmatch(value["preview_digest"])):
+        raise ValueError("invalid turn preview")
+    # Reuse the exact closed selector/receipt/locator checks without changing
+    # the retained turn-result schema or granting authority from public DATA.
+    validate_turn_data({**{k: v for k, v in value.items() if k != "preview_digest"},
+        "schema": "mastermind.executive.fresh_conversation_turn_data.v1",
+        "state": "CONSUMED", "result": None}, request)
     return dict(value)

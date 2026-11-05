@@ -14,6 +14,7 @@ from tests.test_fresh_conversation import cleanup
 def test_signed_consumed_parent_second_turn_original_read_and_no_replay(tmp_path, rsa_key, monkeypatch):
     async def run():
         app, token, wt, service, runtime, request, adapters, calls, sink = await mounted(tmp_path, rsa_key, monkeypatch)
+        request = {**request, "operation_key": os.environ.get("S34_CREATE_OPERATION_KEY", request["operation_key"])}
         diagnostics = []
         from control_plane import fresh_conversation_turn as module
         original_read = module.read_turn
@@ -67,7 +68,7 @@ def test_signed_consumed_parent_second_turn_original_read_and_no_replay(tmp_path
             consume_request = {**selected,"initial_digest":initial_digest}
             _, consumed = await post(app,"consume",consume_request,token,wt)
             assert consumed["ok"] and consumed["data"]["state"] == "CONSUMED" and consumed["data"]["can_send"] is True, consumed
-            turn_request = {**consume_request,"turn_key":"original-followup-001","message":"Explain the next bounded action. 新消息"}
+            turn_request = {**consume_request,"turn_key":os.environ.get("S34_TURN_OPERATION_KEY", "original-followup-001"),"message":"Explain the next bounded action. 新消息"}
             code, second = await post(app,"turn",turn_request,token,wt)
             assert code == 200 and second["ok"] and second["data"]["state"] == "RECORDED", second
             assert second["data"]["result"]["envelope"]["summary"] == "Inert native follow-up answer."

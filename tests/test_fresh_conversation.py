@@ -34,7 +34,7 @@ from control_plane.workspace_read_service import WorkspaceReadService
 from common.executive_workspace_contract import RESOURCE, SCOPE, PRINCIPAL_KEYS
 
 
-def case(tmp_path, principal=None):
+def case(tmp_path, principal=None, *, runtime_override=None, workspace_override=None, workspace_reader_override=None, work_ref_override=None):
     source, _ = _source_repository(tmp_path)
     content = b"# Original fresh conversation commission\nRead only; one retained native parent; no child dispatch.\n"
     (source / "commission.md").write_bytes(content)
@@ -45,7 +45,10 @@ def case(tmp_path, principal=None):
         coo_operator_model_alias="coo.operator.native-return",
         operator_harness_binary_digest="a" * 64, operator_harness_version="0.147.0")
     service = ExecutiveControlService(config, autonomy_guard=lambda: None)
-    runtime = Runtime.at(config.runtime_root)
+    runtime = Runtime.at(config.runtime_root) if runtime_override is None else runtime_override
+    if runtime_override is not None:
+        assert type(runtime_override) is Runtime
+        service.config = dataclasses.replace(config, runtime_root=runtime.store.root)
     service.runtime = runtime
     service._register_worker()
     adapters = []
@@ -101,26 +104,26 @@ def case(tmp_path, principal=None):
         raw = principal_frame()
         raw.update(issued_at=int(time.time()) - 1, expires_at=int(time.time()) + 600)
         principal = neutral_principal_projection(**{**raw, "scopes": tuple(raw["scopes"])})
-    workspace_principal = dataclasses.replace(principal, policy_id="workspace-test",
-        resource=RESOURCE, scopes=(SCOPE,))
+    workspace_principal = (dataclasses.replace(principal, policy_id="workspace-test",
+        resource=RESOURCE, scopes=(SCOPE,)) if workspace_override is None else workspace_override)
     expected = {key: list(workspace_principal.scopes) if key == "scopes" else getattr(workspace_principal, key)
         for key in PRINCIPAL_KEYS}
     def authorize(p): return p == expected
     authorize.binding_digest = lambda p: "e" * 64 if authorize(p) else None
     owners, clock, cache = cache_fixture(tmp_path)
-    workspace = WorkspaceReadService(cache=cache, runtime=runtime, authorize=authorize,
-        armed={}, runtime_identity={})
+    workspace = (WorkspaceReadService(cache=cache, runtime=runtime, authorize=authorize,
+        armed={}, runtime_identity={}) if workspace_reader_override is None else workspace_reader_override)
     app = CeoIngressAppBinding(peer_uid=os.geteuid(), armed=True,
         grounding_provider=Grounding(), session_bridge_provider_factory=lambda r: None,
         workspace_read_provider_factory=lambda r: workspace)
     service._ceo_ingress_app_binding = app
     service._ceo_ingress_ready = True  # private peer/startup seam, no listener opened
     source_value = dict(schema_version="mastermind.executive_dialogue_source/v1",
-        work_ref="WS:ONE", commission_ref=dict(
+        work_ref="WS:ONE" if work_ref_override is None else work_ref_override, commission_ref=dict(
             repository="mastermindx-market-intelligence/Mastermind", commit=config.proof_base_sha,
             path="commission.md", content_sha256=hashlib.sha256(content).hexdigest()), watch_mode="turn_watch_v1")
     service._ceo_ingress_dialogue_source_provider = lambda intent_id, work_ref: dict(source_value)
-    request = dict(work_ref="WS:ONE", operation_key="fresh-original-one", message="  新对话\nRead source.  ")
+    request = dict(work_ref="WS:ONE" if work_ref_override is None else work_ref_override, operation_key="fresh-original-one", message="  新对话\nRead source.  ")
     owner = module.FreshConversationOwner(service, expected_policy=(principal.policy_id,
         principal.issuer_digest, principal.resource))
     owner._fixture_workspace_principal = workspace_principal

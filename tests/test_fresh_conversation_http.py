@@ -37,7 +37,7 @@ class Sink:
     def emit(self, event): self.events.append(event)
 
 
-async def post(app, operation, arguments, executive_token, workspace_token=None, *, change=None):
+async def post(app, operation, arguments, executive_token, workspace_token=None, *, change=None, timeout_seconds=15):
     path = "/os/executive/conversation/" + operation.replace("_", "/")
     scope = dict(type="http", asgi={"version": "3.0", "spec_version": "2.4"}, http_version="1.1",
         scheme="https", method="POST", path=path, raw_path=path.encode(), root_path="", query_string=b"",
@@ -50,31 +50,32 @@ async def post(app, operation, arguments, executive_token, workspace_token=None,
     frames, output = asyncio.Queue(), []
     await frames.put(dict(type="http.request", body=json.dumps({"arguments": arguments}).encode(), more_body=False))
     async def send(value): output.append(value)
-    await asyncio.wait_for(app(scope, frames.get, send), 15)
+    await asyncio.wait_for(app(scope, frames.get, send), timeout_seconds)
     status = next(value["status"] for value in output if value["type"] == "http.response.start")
     raw = b"".join(value.get("body", b"") for value in output if value["type"] == "http.response.body")
     return status, json.loads(raw) if raw else None
 
 
-async def mounted(tmp_path, rsa_key, monkeypatch):
+async def mounted(tmp_path, rsa_key, monkeypatch, *, case_factory=None, executive_policy=None, workspace_policy=None, claims=None):
     now = lambda: int(time.time())
-    ep = auth._submit_policy()
+    ep = auth._submit_policy() if executive_policy is None else executive_policy
     ea = JwtAuthenticator(policy=ep, jwks_cache=auth._FakeJwksCache(rsa_key))
     sink = Sink()
     ev = MastermindTokenVerifier(authenticator=ea, policy=ep, now=now, audit_sink=sink)
-    token = auth._submit_token(rsa_key, iat=now()-1, nbf=now()-1, exp=now()+600)
+    token = auth._submit_token(rsa_key, **({} if claims is None else claims), iat=now()-1, nbf=now()-1, exp=now()+600)
     verified = await ea.verify_token(token, now=now())
     assert verified is not None
     principal = neutral_principal_projection(**dataclasses.asdict(verified))
-    service, runtime, owner, principal, request, adapters = case(tmp_path, principal)
+    service, runtime, owner, principal, request, adapters = (case(tmp_path, principal) if case_factory is None else case_factory(principal))
     service._fixture_fresh_owner = owner
     backend = owner._app.workspace_read_provider_factory(runtime)
-    wp = workspace_auth._workspace_policy(policy_id="workspace-test",
-        allowed_subject_digests=list(ep.allowed_subject_digests))
+    wp = (workspace_auth._workspace_policy(policy_id="workspace-test",
+        allowed_subject_digests=list(ep.allowed_subject_digests)) if workspace_policy is None else workspace_policy)
     wa = JwtAuthenticator(policy=wp, jwks_cache=auth._FakeJwksCache(rsa_key))
     wv = MastermindTokenVerifier(authenticator=wa, policy=wp, now=now, audit_sink=sink)
+    wt_claims={} if claims is None else {key:value for key,value in claims.items() if key!="aud"}
     wt = auth._token(rsa_key, scope=workspace_auth.SCOPE, aud=workspace_auth.RESOURCE,
-        iat=now()-1, nbf=now()-1, exp=now()+600)
+        **wt_claims, iat=now()-1, nbf=now()-1, exp=now()+600)
     def authorize(value):
         return backend.authorize({key: list(value.scopes) if key == "scopes" else getattr(value, key)
             for key in PRINCIPAL_KEYS})
@@ -100,6 +101,8 @@ async def mounted(tmp_path, rsa_key, monkeypatch):
         service._fixture_active_private_reader = reader
         result = await owner.handle_frame(frame, reader=reader,
             host_current=source.require_live if source else lambda: None)
+        if frame["operation"] == "consume" and getattr(service, "_fixture_lose_consume_return", False):
+            raise OSError("inert original consume return lost after actual owner commit")
         return CeoIngressResponse(transport=TRANSPORT_SENT_OK, ok=True, result=result)
     monkeypatch.setattr(client, "_send_frame", actual_private)
     leaf = FreshConversationTransportApp(inner, executive=executive, workspace_config=wc,

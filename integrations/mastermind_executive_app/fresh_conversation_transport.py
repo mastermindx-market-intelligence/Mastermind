@@ -165,7 +165,8 @@ class FreshConversationTransportApp:
                             raise ValueError("foreign result")
                         wire.validate_data(value["data"], arguments)
                         if ((operation == "preview") != (value["data"]["state"] == "PREVIEW_READY")
-                                or (operation in {"preview", "status", "read"} and value["data"]["effect"] != "NONE")):
+                                or ((operation == "turn_preview") != (value["data"]["state"] == "TURN_READY"))
+                                or (operation in {"preview", "status", "read", "turn_preview"} and value["data"]["effect"] != "NONE")):
                             raise ValueError("foreign operation result")
                         response = JSONResponse(value, headers=_OS_HTTP_HEADERS)
                     else:
