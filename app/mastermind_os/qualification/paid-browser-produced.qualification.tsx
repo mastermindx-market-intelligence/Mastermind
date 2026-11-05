@@ -138,7 +138,8 @@ describe(`actual native producer → browser/App (${produced.case})`, () => {
     expect(document.body.textContent).not.toContain("Private retained answer");
     act(() => owner.revoke());
     await waitFor(() => expect(screen.queryByRole("button", { name: rowName })).toBeNull());
-    expect(screen.getByRole("button", { name: "Load runs" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("Sign in to your workspace.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Load runs" })).toBeNull();
     // Auth invalidation can unmount this entire App branch. Query the live
     // document rather than the detached pre-revocation inspector element.
     expect(screen.queryByText(expected.acceptance_reason)).toBeNull();

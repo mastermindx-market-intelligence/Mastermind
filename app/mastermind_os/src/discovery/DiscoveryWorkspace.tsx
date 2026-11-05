@@ -78,6 +78,7 @@ const ZH = {
   "Type filter": "类型筛选",
   "No supplied results match this search.": "没有符合此搜索的已提供结果。",
   "Supplied results": "已提供结果",
+  "Search sources are unavailable. No search results can be confirmed.": "搜索来源暂不可用，无法确认搜索结果。",
   "Inspect": "检查",
   "Close": "关闭",
   "Selected result": "已选结果",
@@ -618,8 +619,12 @@ function SearchView({
   });
   const total = matches.length;
   const visible = filter.expanded ? matches : matches.slice(0, MAX_VISIBLE);
+  const sourceAvailable = view.sources.some(source =>
+    (source.state === "CURRENT" || source.state === "STALE") && source.content !== "UNAVAILABLE");
   const status =
-    total === 0
+    total === 0 && !sourceAvailable
+      ? t("Search sources are unavailable. No search results can be confirmed.")
+      : total === 0
       ? t("No supplied results match this search.")
       : total <= visible.length
         ? countResults(locale, total)
@@ -692,9 +697,7 @@ function SearchView({
                 />
               ))}
             </ul>
-          ) : (
-            <p className="discovery-muted">{t("No supplied results match this search.")}</p>
-          )}
+          ) : null}
         </section>
         {selectedItem ? (
           <Preview

@@ -1,5 +1,7 @@
 #[path = "src/native_client.rs"]
 mod native_client;
+#[path = "src/terminal_public_config.rs"]
+mod terminal_public_config;
 
 fn required(name: &str) -> String {
     let value = std::env::var(name).unwrap_or_else(|_| panic!("{name} must be set at build time"));
@@ -17,6 +19,14 @@ fn required(name: &str) -> String {
 }
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=MM_TERMINAL_SUPABASE_ANON_KEY");
+    println!("cargo:rerun-if-changed=src/terminal_public_config.rs");
+    match std::env::var("MM_TERMINAL_SUPABASE_ANON_KEY") {
+        Ok(value) => terminal_public_config::validate_public_key(&value)
+            .expect("MM_TERMINAL_SUPABASE_ANON_KEY must be a public Terminal project key"),
+        Err(std::env::VarError::NotPresent) => {},
+        Err(_) => panic!("MM_TERMINAL_SUPABASE_ANON_KEY contains invalid characters"),
+    }
     println!("cargo:rerun-if-env-changed=MM_EXECUTIVE_RESOURCE");
     println!("cargo:rerun-if-env-changed=MM_NATIVE_CLIENT_ID");
     println!("cargo:rerun-if-env-changed=MM_NATIVE_REFRESH_ENABLED");

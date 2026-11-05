@@ -1,5 +1,12 @@
+import {projectAccessPublicSelection} from "./access/project-access-host";
+import {instructionPublicRequest,instructionQuery,type InstructionPauseRequest} from "./instructions/instruction-host";
 import { projectAdmissionPublicRequest, projectAdmissionQuery, type ProjectAdmissionPauseRequest, type ProjectAdmissionResumeRequest } from "./admission/project-admission-host";
+import { validArchiveCursor } from "./projects/archive/project-archive-continuation";
+import { knowledgeReadSelection } from "./knowledge/library/knowledge-read-port";
+import { validSourceOperationContextSelection } from './source-operations/context';
+import {createSourceOperationTransport,SOURCE_OPERATION_CAP} from './source-operations/transport';
 import { normalizeProjectAssociationSelection } from "./conversations/project-association";
+import { projectHistoryArguments } from "./orchestration/project-history-arguments";
 import { validResourceCapacitySelection } from "./resources/resource-capacity-read";
 import { isAutonomySelection, AUTONOMY_READ_BODY_SCHEMA } from "./supervision/autonomy-policy";
 import { validJournalSelection } from "./project-journal";
@@ -916,6 +923,75 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     } finally {if(timeout!==undefined)clear(timeout);signal.removeEventListener("abort",cancel);controller.abort();}
   }
 
+  async function sourcePost(
+    path: string,
+    body: Record<string, unknown>,
+    signal: AbortSignal,
+  ) {
+    const ticket = generation,
+      token = tokens.acquisition;
+    if (!token || !valid("acquisition")) throw new Error("TOKEN_REQUIRED");
+    const controller = new AbortController(),
+      onAbort = () => controller.abort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    const timer = later(() => controller.abort(), READ_TIMEOUT_MS);
+    try {
+      if (controller.signal.aborted) throw new Error("READ_CANCELLED");
+      const response = await fetchFn(ORIGIN + path, {
+        method: "POST",
+        redirect: "error",
+        credentials: "omit",
+        cache: "no-store",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token.value}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error("SOURCE_OPERATION_FAILED");
+      const result = await boundedJson(response, SOURCE_OPERATION_CAP);
+      if (
+        signal.aborted ||
+        controller.signal.aborted ||
+        ticket !== generation ||
+        !valid("acquisition")
+      )
+        throw new Error("READ_CANCELLED");
+      return result;
+    } finally {
+      clear(timer);
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
+  /** One explicit original instruction pause; no replay or alternate destination. */
+  async function instructionAdmissionAction(request:InstructionPauseRequest):Promise<unknown>{
+    const payload=instructionPublicRequest("pause",request),ticket=generation,token=tokens.acquisition;
+    if(!payload || !token || !valid("acquisition"))throw new Error("INSTRUCTION_UNAUTHORIZED");
+    const signal=request.signal,controller=new AbortController();let timeout:ReturnType<typeof setTimeout>|undefined;
+    let fail!:(reason:Error)=>void;
+    const interrupted=new Promise<never>((_,reject)=>{fail=reject;});
+    void interrupted.catch(()=>{});
+    const cancel=()=>{controller.abort();fail(new Error("INSTRUCTION_OUTCOME_UNCONFIRMED"));};
+    try {
+      signal.addEventListener("abort",cancel,{once:true});
+      timeout=later(cancel,60_000);if(signal.aborted)cancel();
+      const body=JSON.stringify(payload);if(new TextEncoder().encode(body).length>16_384)throw new Error("INSTRUCTION_REQUEST_INVALID");
+      const exchange=async()=>{
+        if(signal.aborted || controller.signal.aborted || ticket!==generation || !valid("acquisition"))throw new Error("INSTRUCTION_UNAUTHORIZED");
+        const response=await fetchFn(`${ORIGIN}/workspace/instruction-admission/pause`,{method:"POST",redirect:"error",credentials:"omit",cache:"no-store",
+          headers:{Accept:"application/json","Content-Type":"application/json",Authorization:`Bearer ${token.value}`},body,signal:controller.signal});
+        if(!response.ok)throw new Error("INSTRUCTION_REQUEST_FAILED");
+        const result=await boundedJson(response,32_768);
+        if(signal.aborted || controller.signal.aborted || ticket!==generation || tokens.acquisition!==token || !valid("acquisition"))throw new Error("INSTRUCTION_OUTCOME_UNCONFIRMED");
+        return result;
+      };
+      return await Promise.race([exchange(),interrupted]);
+    } finally {if(timeout!==undefined)clear(timeout);signal.removeEventListener("abort",cancel);controller.abort();}
+  }
+
   /**
    * One acquisition-authenticated attempt at a fixed Control Room route.
    * The server owns each action grant. A post-dispatch auth change cannot
@@ -1155,6 +1231,11 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       send: (arguments_, signal) => executivePost("session/send", arguments_, signal),
       reply: (arguments_, signal) => executivePost("session/reply", arguments_, signal),
       references: (arguments_, signal) => executivePost("session/references", arguments_, signal),
+      projectReferences: (arguments_, signal) => {
+        const closed = projectHistoryArguments(arguments_);
+        return closed ? executivePost("session/references", closed, signal)
+          : Promise.reject(new Error("SESSION_REFERENCES_INVALID"));
+      },
     } satisfies ExecutiveSessionTransport,
     // Same existing OAuth generation used by every bounded acquisition read.
     // The MissionHost requires this proof before it mounts the plan port.
@@ -1199,6 +1280,31 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         root_id: selected.rootId, run_id: selected.runId,
       })}`, signal, { cap: 16_384, typedUnavailableSchema: null });
     },
+    readProjectAccess: request => {
+      const selection=projectAccessPublicSelection(request);
+      if(!selection)return Promise.reject(Error("PROJECT_ACCESS_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/project-access/current?${new URLSearchParams({work_ref:selection.work_ref})}`,request.signal,
+        {cap:16_384,typedUnavailableSchema:"mastermind.workspace_project_access.v1"});
+    },
+    readProjectInstructions: request => {
+      const payload=instructionPublicRequest("content",request);
+      if(!payload)return Promise.reject(Error("INSTRUCTION_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/project-instructions/current?${instructionQuery(payload)}`,request.signal,
+        {cap:32_768,typedUnavailableSchema:"mastermind.workspace_project_instructions.v2"});
+    },
+    readInstructionAdmissionControl: request => {
+      const payload=instructionPublicRequest("current",request);
+      if(!payload)return Promise.reject(Error("INSTRUCTION_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/instruction-admission/current?${instructionQuery(payload)}`,request.signal,
+        {cap:32_768,typedUnavailableSchema:"mastermind.workspace_instruction_admission_control.v1"});
+    },
+    pauseInstructionAdmission: request => instructionAdmissionAction(request),
+    readInstructionAdmissionOperation: request => {
+      const payload=instructionPublicRequest("status",request);
+      if(!payload)return Promise.reject(Error("INSTRUCTION_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/instruction-admission/operation?${instructionQuery(payload)}`,request.signal,
+        {cap:32_768,typedUnavailableSchema:null});
+    },
     readProjectAdmissionControl: request => {
       const payload=projectAdmissionPublicRequest("current",request);
       if(!payload)return Promise.reject(new Error("PROJECT_ADMISSION_REQUEST_INVALID"));
@@ -1221,6 +1327,16 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         work_ref: selected.work_ref, root_job_id: selected.root_job_id,
       })}`, signal, { cap: 32_768, typedUnavailableSchema: AUTONOMY_READ_BODY_SCHEMA });
     },
+    sourceOperations:createSourceOperationTransport((method,path,body,signal)=>method==='read'
+      ?read('acquisition',ORIGIN+path,signal,{cap:SOURCE_OPERATION_CAP,typedUnavailableSchema:null})
+      :sourcePost(path,body,signal)),
+    readSourceOperationContext: (request) => {
+      const { signal, ...selected } = request;
+      if (!validSourceOperationContextSelection(selected)) return Promise.reject(new Error("SOURCE_OPERATION_CONTEXT_SELECTION_INVALID"));
+      const query = new URLSearchParams({ action: selected.action });
+      if (selected.workRef !== null) query.set('work_ref', selected.workRef);
+      return read("acquisition", `${ORIGIN}/workspace/source-operation/context?${query}`, signal, { cap: 4096, typedUnavailableSchema: null });
+    },
     readProjectPlan: (request) => {
       const { signal, ...selected } = request;
       if (!validProjectPlanSelection(selected))
@@ -1235,12 +1351,38 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       return read("acquisition", `${ORIGIN}/workspace/project-session/current?${new URLSearchParams({ work_ref: selected.workRef, root_job_id: selected.rootJobId })}`,
         signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_project_session_association.v1" });
     },
+    readProjectArchivePage: (request) => {
+      const { signal, ...cursor } = request;
+      if (!validArchiveCursor(cursor)) return Promise.reject(new Error("PROJECT_ARCHIVE_REQUEST_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/projects/archive/current?${new URLSearchParams({ after_work_ref: cursor.after_work_ref, catalogue_digest: cursor.catalogue_digest })}`,
+        signal, { cap: 262_144, typedUnavailableSchema: "mastermind.workspace_project_archive.v1" });
+    },
+    readProjectArchive: ({ signal }) => read("acquisition", `${ORIGIN}/workspace/projects/archive/current`,
+      signal, { cap: 262_144, typedUnavailableSchema: "mastermind.workspace_project_archive.v1" }),
     readProjectDirection: (request) => {
       const { signal, ...selected } = request;
       if (!validDirectionSelection(selected))
         return Promise.reject(new Error("DIRECTION_SELECTION_INVALID"));
       return read("acquisition", `${ORIGIN}/workspace/project-direction/current?${new URLSearchParams({ work_ref: selected.work_ref })}`,
         signal, { cap: 65_536, typedUnavailableSchema: "mastermind.workspace_project_direction.v1" });
+    },
+    readProjectKnowledgeCatalogue: (request) => {
+      const {signal,...value}=request, selected=knowledgeReadSelection(value,"catalogue");
+      if(!selected) return Promise.reject(new Error("PROJECT_KNOWLEDGE_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-knowledge/current?${new URLSearchParams({...selected})}`,
+        signal,{cap:131_072,typedUnavailableSchema:"mastermind.workspace_project_knowledge.v1"});
+    },
+    readProjectKnowledgeMemory: (request) => {
+      const {signal,...value}=request, selected=knowledgeReadSelection(value,"memory");
+      if(!selected) return Promise.reject(new Error("PROJECT_KNOWLEDGE_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-memory/current?${new URLSearchParams({...selected})}`,
+        signal,{cap:131_072,typedUnavailableSchema:"mastermind.workspace_project_preference.v1"});
+    },
+    readProjectKnowledgeSource: (request) => {
+      const {signal,...value}=request, selected=knowledgeReadSelection(value,"source");
+      if(!selected) return Promise.reject(new Error("PROJECT_KNOWLEDGE_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-source/current?${new URLSearchParams({...selected})}`,
+        signal,{cap:131_072,typedUnavailableSchema:"mastermind.workspace_project_source.v1"});
     },
     readProjectJournal: (request) => {
       const { signal, ...selected } = request;

@@ -90,6 +90,7 @@ async function start(f:Awaited<ReturnType<typeof fixture>>) {
   fireEvent.click(screen.getByRole("button",{name:"Unsent notes"}));
   fireEvent.change(screen.getByRole("textbox",{name:"Unsent notes"}),{target:{value:question}});
   fireEvent.click(screen.getByRole("button",{name:"Knowledge"}));
+  fireEvent.click(screen.getByRole("button",{name:"Retained task sources"}));
   fireEvent.click(await screen.findByRole("button",{name:"Show retained results"}));
   fireEvent.click(await screen.findByRole("button",{name:`Open retained result — ${f.exact.jobId}`}));
 }
@@ -183,6 +184,7 @@ async function searchFromActualDraft(f:Awaited<ReturnType<typeof fixture>>) {
   fireEvent.click(screen.getByRole("button",{name:"Unsent notes"}));
   fireEvent.change(screen.getByRole("textbox",{name:"Unsent notes"}),{target:{value:question}});
   fireEvent.click(screen.getByRole("button",{name:"Search"}));
+  fireEvent.click(screen.getByRole("button",{name:"Company references"}));
   fireEvent.change(screen.getByRole("searchbox",{name:"Search available sources"}),{target:{value:f.exact.jobId}});
   fireEvent.click(screen.getByRole("button",{name:new RegExp(`review result ${f.exact.jobId}`)}));
   fireEvent.click(screen.getByRole("button",{name:"Open source"}));

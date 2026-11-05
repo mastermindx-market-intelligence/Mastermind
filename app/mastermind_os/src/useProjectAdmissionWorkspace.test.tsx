@@ -80,8 +80,8 @@ it("preserves UNKNOWN across route hiding and an unavailable current gate, then 
   expect(screen.getByText(/original request outcome is unresolved/)).toBeTruthy();
   e.setData(unavailable);fireEvent.click(screen.getByRole("button",{name:"Check pause status"}));
   await waitFor(()=>expect(e.read).toHaveBeenCalledTimes(2));
-  await waitFor(()=>expect((screen.getByRole("button",{name:"Check original request"}) as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(screen.getByRole("button",{name:"Check original request"}));
+  await waitFor(()=>expect((screen.getByRole("button",{name:"Check original project request"}) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole("button",{name:"Check original project request"}));
   await screen.findByText(/Request committed/);
   expect(e.transport.status).toHaveBeenCalledExactlyOnceWith({kind:"project_pause",selection,command_id:pointer.operationKey,signal:expect.any(AbortSignal)});
   expect(e.transport.pause).toHaveBeenCalledTimes(1);expect(e.transport.resume).not.toHaveBeenCalled();
@@ -98,7 +98,7 @@ it("reopens the exact durable pointer only after explicit current-state read and
   expect(await e.store.read(scope)).toEqual(pointer);
   expect((screen.getByRole("button",{name:"Pause new work"}) as HTMLButtonElement).disabled).toBe(true);
   expect(e.transport.status).toHaveBeenCalledTimes(1);expect(mint).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button",{name:"Check original request"}));
+  fireEvent.click(screen.getByRole("button",{name:"Check original project request"}));
   await screen.findByText(/Request committed/);
   expect(e.transport.status.mock.calls.map(([request])=>request.command_id)).toEqual([pointer.operationKey,pointer.operationKey]);
   expect(e.transport.pause).not.toHaveBeenCalled();expect(e.transport.resume).not.toHaveBeenCalled();

@@ -27,7 +27,9 @@ async function mount() {
       ? await createNativeClient(invoke, listen)
       : createWebAuth();
     if (!isTauri()) void client.restore?.().catch(() => {});
-    const composition = composeMissionHost(client);
+    // The reported host kind is the actual mount surface; it changes no
+    // transport choice, request or subscription behavior.
+    const composition = composeMissionHost(client, undefined, undefined, isTauri() ? "native" : "web");
     window.MastermindMissionHost = composition.host;
     void composition.ready.catch(() => {});
     const onPageHide = (event: PageTransitionEvent) => { if (!event.persisted) composition.dispose(); };
