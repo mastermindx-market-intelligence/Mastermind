@@ -152,7 +152,7 @@ QUEUED, delivered, ACK, STARTED/RUNNING, completed and accepted are distinct. A 
 
 ## Step 7A — Preserve operational continuity before interruption
 
-Save material decisions and accepted capability changes at coherent milestones, not after each read/edit/test. Save before risky effects to existing Runtime/Agent OS: mission, authority, source/carrier/effects, DO_NOT_REDO, blockers, decisions, children, uncertainty and next action. Never defer saves, chain handoffs or overwrite immutable prepared Attempt capsules.
+Save material changes at milestones, not after each test. Save to existing Runtime/Agent OS before a long/risky action could lose the last known effect: mission, authority, source/carrier/effects, DO_NOT_REDO, blockers, decisions, children, uncertainty and next action. Do not defer all persistence: keep a working checkpoint with the last verified effect, rejected approaches, hypotheses/falsifiers and immutable prepared Attempt capsule.
 
 A checkpoint/new chat transfers no lease, source writer or STARTed operation. Execution stays within its grant; judgment stays with its lawful owner/successor. Verify original-parent consumption: delivery/tab names are not proof. No supported continuation means a held result, not an invented wake. Apply Step 1B; separate requested work profile, observed model/mode and tools: hidden reasoning budgets and unexposed deadlines remain UNKNOWN, and route-local payload is not total context. No fixed 20-minute Web deadline, invented token counter or minimum run. Actual deadlines require landing reserve; otherwise use bounded units and proactive saves. Server reminders cannot interrupt hidden reasoning.
 
