@@ -3,12 +3,19 @@
 No real account home, credentials, native pool selection or modification.
 The source validator alone never authorizes an installed effect.
 """
+import contextlib
 import copy
 from pathlib import Path
 import json
+import os
+import shutil
+import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
+import private_service as svc
+import private_service_pin_enrollment as owner
 import private_service_status_successor as s
 
 
@@ -742,6 +749,7 @@ class SelectedC4LockTests(unittest.TestCase):
             fake_enrollment = SimpleNamespace(
                 TRANSACTION="native-pool-pin-enrollment",
                 TARGET_FILES={},
+                PROFILES=accepted_enrollment.PROFILES,
                 frozen_profile=accepted_enrollment.frozen_profile,
                 original_pin=mock.create_autospec(
                     accepted_enrollment.original_pin, side_effect=selected_enrollment),
@@ -773,6 +781,347 @@ class SelectedC4LockTests(unittest.TestCase):
             self.assertEqual(nested["checks"], ["pin", "enrollment"])
             self.assertFalse(nested["active"])
 
+
+
+class EnrolledRetainedReceiptTests(unittest.TestCase):
+    """Retained enrollment receipts stay binding on the status-successor path.
+
+    Every profile builds one real native-pool-pin transaction and one real
+    completed enrollment transaction through the existing owners. Only the
+    native epoch proof, launchctl and the exact production cohort digests are
+    replaced by inert fixture bytes; the enrollment owner's own frozen
+    profile, original-pin proof, retained plan/intent/payload proof and
+    completion receipt stay real, so a missing or corrupted receipt is
+    rejected by the real verifier and not by a success stub.
+    """
+
+    ENROLLED = ("chatgpt4", "admin-business",
+                "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9")
+    NEWLY_COVERED = ("admin-business",
+                     "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9")
+    # The enrollment owner publishes ports only for its own four seats.
+    PORTS = {"chatgpt1": 45018}
+    SOURCE = b"qualified merged full-owner fleet-status projection"
+
+    def manifest_shape(self, data, account, label):
+        """Accept the inert fixture cohort only; every other rule stays real."""
+        if not isinstance(data, dict) or set(data) != frozenset(svc.MANIFEST_KEYS_V2):
+            return False
+        if data.get("version") != svc.MANIFEST_VERSION:
+            return False
+        if data.get("account") != account or data.get("label") != label:
+            return False
+        files = data.get("files")
+        if not isinstance(files, dict) or not files:
+            return False
+        digests = list(files.values()) + [data.get(key) for key in (
+            "configHash", "plistHash", "nodeHash", "backendHash")]
+        dependency = data.get("dependencyTreeHash")
+        if dependency is not None:
+            digests.append(dependency)
+        return all(svc._sha256_hex(digest) for digest in digests)
+
+    def build(self, account, enroll=True):
+        """One real native-pool-pin and (optionally) enrollment transaction."""
+        stack = contextlib.ExitStack()
+        self.addCleanup(stack.close)
+        home = Path(stack.enter_context(
+            tempfile.TemporaryDirectory())).resolve() / "home"
+        home.mkdir(mode=0o700)
+        label = "com.mastermind.studio-direct-private." + account
+
+        def patch(obj, attr, value):
+            stack.enter_context(mock.patch.object(obj, attr, value))
+
+        patch(svc, "_user_root", lambda: home)
+        roots = svc._build_runtime_roots(account)
+        calls = []
+        patch(svc, "_pin_enrollment_owner_module", lambda: owner)
+        real_valid = svc._valid_manifest
+        patch(svc, "_valid_manifest", lambda d, a, l: (
+            real_valid(d, a, l) or self.manifest_shape(d, a, l)))
+        patch(svc, "_c2_lifecycle_mutex", lambda account: contextlib.nullcontext())
+
+        def launchctl(argv, **kwargs):
+            calls.append(argv)
+            if argv[:2] == ["launchctl", "print"]:
+                return svc.CmdResult(113, "", (
+                    'Bad request.\nCould not find service "%s" in domain for '
+                    'user gui: %d\n' % (label, os.getuid())))
+            if argv[:2] == ["launchctl", "bootstrap"]:
+                return svc.CmdResult(0, "", "")
+            raise AssertionError("unexpected external effect")
+
+        patch(svc, "_run", launchctl)
+        reads = []
+        real_read = svc._fabric_release_bytes
+
+        def read(path, **kwargs):
+            reads.append(str(path))
+            return real_read(path, **kwargs)
+
+        patch(svc, "_fabric_release_bytes", read)
+
+        source = home / "initial-source"
+        source.mkdir()
+        for name in set(svc.STAGE_FILES) | set(svc.C2_PAPER_FILES_SHA256):
+            (source / name).write_bytes(("// original fixture " + name).encode())
+        node = home / "node"
+        node.write_bytes(b"inert node")
+        node.chmod(0o700)
+        backend = home / "backend.mjs"
+        backend.write_bytes(b"inert backend")
+        port = (owner.PROFILES[account]["port"] if account in owner.PROFILES
+                else self.PORTS[account])
+        svc._write_install(source, node, backend, account, label, "127.0.0.1",
+                           port, roots, result_key="staged", fabric_only=True)
+        deps = roots["node_modules"] / "fixture"
+        deps.mkdir(parents=True)
+        (deps / "index.js").write_bytes(b"inert dependency")
+        svc.cmd_seal_runtime(SimpleNamespace(account=account))
+        original_modules = {}
+        for name in svc.C2_PAPER_FILES_SHA256:
+            data = (source / name).read_bytes()
+            svc._atomic_write_bytes(roots["base"] / name, data)
+            original_modules[name] = owner.digest(data)
+        adapter = roots["base"] / "workspace-access.mjs"
+        if adapter.exists():
+            adapter.unlink()
+        pool = home / "pool"
+        pool.write_bytes(b"old-native-pool")
+        future_pool = b"selected-native-pool"
+        config = json.loads(roots["config"].read_bytes())
+        config.pop("fabricOnly", None)
+        config["gitPublish"] = svc._typed_git_config(home)
+        config["fleetStatus"] = {
+            "enabled": True, "launcherPath": str(home / "studio-direct"),
+            "launcherSha256": "a" * 64, "timeoutMs": 15000,
+            "fabricLauncherPath": str(pool), "fabricLauncherSha256": "9" * 64,
+            "fabricTimeoutMs": 8000,
+        }
+        config["paperDesign"] = {"preserved": True, "fixture": "PRIVATE-CANARY"}
+        roots["config"].write_bytes(owner.encode(config))
+        manifest = json.loads(roots["manifest"].read_bytes())
+        manifest["files"] = original_modules
+        manifest["configHash"] = owner.digest(owner.encode(config))
+        roots["manifest"].write_bytes(owner.encode(manifest))
+        patch(svc, "C2_PAPER_FILES_SHA256", original_modules)
+        binding = {
+            "successor_digest": "1" * 64, "target_generation": "2" * 64,
+            "expected_selection": {"generation": "3" * 64, "sequence": 23},
+            "pool_target": str(pool), "pool_previous": owner.digest(pool.read_bytes()),
+            "pool_bridge": owner.digest(future_pool), "phase": "PREVIOUS",
+        }
+        after_config = copy.deepcopy(config)
+        after_config["fleetStatus"]["fabricLauncherSha256"] = binding["pool_bridge"]
+        after_manifest = copy.deepcopy(manifest)
+        after_manifest["configHash"] = owner.digest(owner.encode(after_config))
+        nested = {"active": False}
+
+        @contextlib.contextmanager
+        def native(args):
+            # The original selector lock must never be re-entered.
+            self.assertFalse(nested["active"], "native selector contexts nested")
+            nested["active"] = True
+            try:
+                yield binding
+            finally:
+                nested["active"] = False
+
+        patch(svc, "_pin_native_context", native)
+        pin_args = SimpleNamespace(
+            account=account,
+            expected_manifest_sha256=owner.digest(owner.encode(manifest)),
+            successor_bundle=str(home / "successor"), successor_plan_sha256="1" * 64,
+            operation="preview", expected_plan_sha256=None)
+        preview = svc._pin_owner_module().run(svc, pin_args)
+        pin_args.expected_plan_sha256 = preview["planSha256"]
+        pin_args.operation = "apply"
+        svc._pin_owner_module().run(svc, pin_args)
+        pool.write_bytes(future_pool)
+        binding["phase"] = "SELECTED"
+        original_receipt = {p.name: p.read_bytes()
+                            for p in (roots["state"] / "native-pool-pin").iterdir()}
+        fixture = {
+            "roots": roots, "calls": calls,
+            "tx": roots["state"] / owner.TRANSACTION,
+            "successor_tx": roots["state"] / s.TRANSACTION,
+        }
+        if enroll:
+            profile = dict(owner.PROFILES[account])
+            profile["before_manifest"] = owner.digest(roots["manifest"].read_bytes())
+            profile["before_config"] = owner.digest(roots["config"].read_bytes())
+            profile["original_plan"] = owner.digest(original_receipt["plan.json"])
+            stack.enter_context(mock.patch.dict(owner.PROFILES, {account: profile}))
+            if account == owner.ACCOUNT:
+                for key in ("BEFORE_MANIFEST", "BEFORE_CONFIG", "ORIGINAL_PLAN"):
+                    patch(owner, key, profile[key.lower()])
+            payload = home / "payload"
+            payload.mkdir(mode=0o700)
+            targets = {}
+            for name in owner.TARGET_FILES:
+                data = ("// qualified target fixture " + name).encode()
+                (payload / name).write_bytes(data)
+                targets[name] = owner.digest(data)
+            patch(owner, "TARGET_FILES", targets)
+            args = SimpleNamespace(
+                account=account, operation="preview", source=str(payload),
+                expected_manifest_sha256=profile["before_manifest"],
+                expected_plan_sha256=None)
+            result = owner.run(svc, args)
+            args.expected_plan_sha256 = result["planSha256"]
+            args.operation = "apply"
+            owner.run(svc, args)
+            fixture["plan"] = json.loads((fixture["tx"] / "plan.json").read_bytes())
+            fixture["receipt"] = json.loads((fixture["tx"] / "result.json").read_bytes())
+        # Bind the successor's own exact cohort projection to this fixture.
+        manifest_bytes = roots["manifest"].read_bytes()
+        module_bytes = (roots["base"] / s.MODULE).read_bytes()
+        projected = copy.deepcopy(json.loads(manifest_bytes))
+        projected["files"][s.MODULE] = s.digest(self.SOURCE)
+        after_bytes = s.encoded_manifest(projected)
+        canonical = s.digest(json.dumps(
+            projected, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        for constants, value in (
+                (s.PREDECESSOR_MANIFEST_SHA256, {account: s.digest(manifest_bytes)}),
+                (s.LEGACY_MODULE_SHA256, {account: s.digest(module_bytes)}),
+                (s.POST_MANIFEST_RAW_SHA256, {account: s.digest(after_bytes)}),
+                (s.POST_MANIFEST_CANONICAL_SHA256, {account: canonical})):
+            stack.enter_context(mock.patch.dict(constants, value))
+        patch(s, "TARGET_SOURCE_SHA256", s.digest(self.SOURCE))
+        patch(s, "_protected_source", lambda *a, **k: (self.SOURCE, "a" * 40))
+        fixture["args"] = SimpleNamespace(
+            account=account, operation="preview", release_commit="e" * 40,
+            expected_manifest_sha256=s.digest(manifest_bytes),
+            expected_plan_sha256=None)
+        fixture["module_before"] = module_bytes
+        fixture["manifest_before"] = manifest_bytes
+        seen = len(reads)
+        fixture["pin_sha"] = s._original_pin(svc, account, roots)
+        fixture["enrollment_reads"] = reads[seen:]
+        return fixture
+
+    def corrupt(self, fixture, kind, action):
+        """Remove or corrupt exactly one retained enrollment artifact."""
+        names = {"plan": "plan.json", "intent": "intent.json",
+                 "payload": "manifest.after", "result": "result.json"}
+        target = fixture["tx"] / names[kind]
+        if action == "remove":
+            target.unlink()
+            return
+        data = json.loads(target.read_bytes())
+        if kind == "plan":
+            data["uid"] += 1
+        elif kind == "intent":
+            data["planSha256"] = "0" * 64
+        elif kind == "payload":
+            data["files"][s.MODULE] = "0" * 64
+        else:
+            data["effect"] = "NOT_APPLIED"
+        target.write_bytes(json.dumps(data, indent=2, sort_keys=True).encode("utf-8"))
+
+    def no_effect(self, fixture):
+        self.assertFalse(fixture["successor_tx"].exists())
+        self.assertEqual((fixture["roots"]["base"] / s.MODULE).read_bytes(),
+                         fixture["module_before"])
+        self.assertEqual(fixture["roots"]["manifest"].read_bytes(),
+                         fixture["manifest_before"])
+
+    def refuses(self, fixture):
+        """Preview and apply both refuse before publication or installed writes."""
+        with self.assertRaises(SystemExit):
+            s.run(svc, fixture["args"])
+        self.no_effect(fixture)
+        apply_args = SimpleNamespace(
+            **{**vars(fixture["args"]), "operation": "apply",
+               "expected_plan_sha256": "0" * 64})
+        with self.assertRaises(SystemExit):
+            s.run(svc, apply_args)
+        self.no_effect(fixture)
+
+    def test_valid_retained_receipt_is_authenticated_for_every_enrolled_profile(self):
+        for account in self.ENROLLED:
+            with self.subTest(account=account):
+                fixture = self.build(account)
+                self.assertEqual(sorted(p.name for p in fixture["tx"].iterdir()),
+                                 sorted(owner.FILES))
+                # The real enrollment owner produced this completion receipt.
+                self.assertEqual(fixture["receipt"],
+                                 owner.result_record(fixture["plan"]))
+                # The successor authenticates the same retained proof, and it
+                # really consults this profile's retained enrollment receipt.
+                self.assertEqual(s._original_pin(svc, account, fixture["roots"]),
+                                 fixture["pin_sha"])
+                self.assertTrue(any(owner.TRANSACTION in path
+                                    for path in fixture["enrollment_reads"]))
+                record = s.run(svc, fixture["args"])
+                self.assertEqual((record["effect"], record["phase"]),
+                                 ("NOT_APPLIED", "PREVIEW"))
+                self.no_effect(fixture)
+
+    def test_missing_or_corrupt_retained_receipt_refuses_preview_and_apply(self):
+        for account in self.NEWLY_COVERED:
+            for kind in ("plan", "intent", "payload", "result"):
+                for action in ("remove", "corrupt"):
+                    with self.subTest(account=account, kind=kind, action=action):
+                        fixture = self.build(account)
+                        self.corrupt(fixture, kind, action)
+                        self.refuses(fixture)
+
+    def test_absent_enrollment_directory_refuses_before_publication(self):
+        for account in self.NEWLY_COVERED:
+            with self.subTest(account=account):
+                fixture = self.build(account)
+                shutil.rmtree(fixture["tx"])
+                self.refuses(fixture)
+
+    def test_completed_successor_startup_refuses_before_service_action(self):
+        for account in self.NEWLY_COVERED:
+            with self.subTest(account=account):
+                fixture = self.build(account)
+                preview = s.run(svc, fixture["args"])
+                apply_args = SimpleNamespace(
+                    **{**vars(fixture["args"]), "operation": "apply",
+                       "expected_plan_sha256": preview["planSha256"]})
+                s.run(svc, apply_args)
+                self.assertTrue((fixture["successor_tx"] / "result.json").exists())
+                (fixture["tx"] / "result.json").unlink()
+                with self.assertRaises(SystemExit):
+                    svc.cmd_start(SimpleNamespace(account=account))
+                self.assertFalse(any(call[:2] == ["launchctl", "bootstrap"]
+                                     for call in fixture["calls"]))
+
+    def test_non_enrolled_predecessor_profiles_stay_unaffected(self):
+        fixture = self.build("chatgpt1", enroll=False)
+        self.assertFalse(fixture["tx"].exists())
+        self.assertEqual(s._original_pin(svc, "chatgpt1", fixture["roots"]),
+                         fixture["pin_sha"])
+        record = s.run(svc, fixture["args"])
+        self.assertEqual((record["effect"], record["phase"]),
+                         ("NOT_APPLIED", "PREVIEW"))
+        self.no_effect(fixture)
+
+    def test_c4_paper_v20_state_still_authenticates_the_retained_receipt(self):
+        """C4's newer Paper-only selection stays compatible with this path.
+
+        C4's Paper-v20 selection replaces the installed config and manifest
+        after enrollment. The retained enrollment proof must survive that,
+        because it authenticates the retained transaction and the immutable
+        enrollment modules, not the installed config/manifest postimage.
+        """
+        fixture = self.build("chatgpt4")
+        raw_config = (fixture["tx"] / "config.after").read_bytes()
+        raw_manifest = (fixture["tx"] / "manifest.after").read_bytes()
+        after = json.loads(raw_config)
+        after["paperDesign"] = {"enabled": True, "bridgeSha256": "a" * 64}
+        future = json.loads(raw_manifest)
+        future["configHash"] = owner.digest(owner.encode(after))
+        svc._atomic_write_bytes(fixture["roots"]["config"], owner.encode(after))
+        svc._atomic_write_bytes(fixture["roots"]["manifest"], owner.encode(future))
+        self.assertNotEqual(fixture["roots"]["config"].read_bytes(), raw_config)
+        self.assertNotEqual(fixture["roots"]["manifest"].read_bytes(), raw_manifest)
+        self.assertEqual(s._original_pin(svc, "chatgpt4", fixture["roots"]),
+                         fixture["pin_sha"])
 
 
 if __name__ == "__main__":

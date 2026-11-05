@@ -298,15 +298,18 @@ def _original_pin(svc, account, roots):
                 != plan["pool_bridge"]):
             fail("PIN_SELECTION_INVALID")
         original_pin_sha = pin.plan_sha(svc, plan)
-    # C4 has a newer, separate selected repository-enrollment successor.
-    # Check retained original evidence even after this source-only module
-    # update; never skip the original selection or rewrite that receipt.
-    if account == "chatgpt4":
-        enrollment = svc._pin_enrollment_owner_module()
+    # C4, admin-business and the two ChatGPT3 workspaces each own a newer,
+    # separate selected repository-enrollment successor. Check retained
+    # original evidence even after this source-only module update; never skip
+    # the original selection or rewrite that receipt. The enrolled cohort is
+    # the existing enrollment owner's own frozen PROFILES; every other
+    # predecessor seat owns no enrollment transaction and stays unaffected.
+    enrollment = svc._pin_enrollment_owner_module()
+    if account in enrollment.PROFILES:
         ep = roots["state"] / enrollment.TRANSACTION
         if not ep.is_dir():
             fail("C4_ENROLLMENT_MISSING")
-        profile = enrollment.frozen_profile("chatgpt4")
+        profile = enrollment.frozen_profile(account)
         with enrollment.original_pin(svc, roots, "status", profile) as (
                 enpin, enoriginal, fingerprint):
             stored = enpin.decode(svc._fabric_release_bytes(ep / "plan.json"))
