@@ -417,6 +417,7 @@ class CeoIngressClient:
         stream_limit = _STREAM_LIMIT
         principal_encoded = None
         direct_encoded = None
+        conversation_read_encoded = None
         from common.direct_native_result_contract import PRIVATE_SCHEMA as direct_schema, validate_private_frame
         from control_plane.direct_native_execution import SUBMIT_SCHEMA as direct_submit_schema
         direct_result_frame = isinstance(frame, Mapping) and frame.get("schema") == direct_schema
@@ -430,7 +431,19 @@ class CeoIngressClient:
             try: frame=fresh_wire.validate_private_frame(dict(frame))
             except (ValueError,TypeError):
                 return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail="conversation frame invalid")
-        strict_response=direct_frame or planning_frame or fresh_frame
+        from common import project_conversation_read_contract as conversation_read_wire
+        conversation_read_frame = isinstance(frame, Mapping) and frame.get("schema") == conversation_read_wire.SCHEMA
+        if conversation_read_frame:
+            try:
+                frame = conversation_read_wire.frame(dict(frame))
+                conversation_read_encoded = conversation_read_wire.encode_frame(frame)[:-1]
+            except (ValueError, TypeError):
+                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,
+                    detail="project conversation read frame invalid")
+            request_ceiling = conversation_read_wire.MAX_REQUEST_BYTES
+            response_ceiling = conversation_read_wire.MAX_RESPONSE_BYTES
+            stream_limit = response_ceiling + 4096
+        strict_response=direct_frame or planning_frame or fresh_frame or conversation_read_frame
         if planning_frame:
             try: frame=planning_wire.frame(dict(frame))
             except (ValueError,TypeError):
@@ -509,7 +522,9 @@ class CeoIngressClient:
             response_ceiling = release_ingress.MAX_RESPONSE_BYTES
             stream_limit = response_ceiling + 4096
         try:
-            if principal_encoded is not None:
+            if conversation_read_encoded is not None:
+                encoded = conversation_read_encoded
+            elif principal_encoded is not None:
                 encoded = principal_encoded
             elif direct_encoded is not None:
                 encoded = direct_encoded
