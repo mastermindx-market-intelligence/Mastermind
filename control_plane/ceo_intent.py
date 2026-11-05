@@ -1140,6 +1140,11 @@ def _receipt_from_event(
                 f"intent {intent_id!r} does not resolve to its strict v2 aggregation root"
             )
         durable_source = provenance.get("dialogue_source")
+        from control_plane.fresh_conversation_admission import read_creation_restriction
+        try:
+            read_creation_restriction(runtime, job)
+        except StateConflict as exc:
+            raise CeoIntentError("fresh conversation creation record is invalid") from exc
         durable_source_digest = provenance.get("dialogue_source_digest")
         if durable_source is None:
             if durable_source_digest is not None:
@@ -1316,6 +1321,7 @@ def submit_intent(
     principal_admission_guard: Any = None,
     fresh_admission_observer: Any = None,
     direct_admission: Any = None,
+    fresh_conversation_source: Any = None,
 ) -> dict[str, Any]:
     """Validate one intent and turn it into exactly one durable QUEUED Job.
 
@@ -1351,6 +1357,11 @@ def submit_intent(
     # path must provide the canonical fresh mission/binding/effect guard.
     # This sink adds no auth service, deployment, dispatch, or worker lifecycle.
     intent = validate_intent(payload)
+    if fresh_conversation_source is not None:
+        from control_plane.fresh_conversation_admission import FreshConversationCreationSource
+        if type(fresh_conversation_source) is not FreshConversationCreationSource or intent["schema"] != INTENT_SCHEMA_V2:
+            raise CeoIntentError("FRESH_CONVERSATION_SOURCE_REQUIRED")
+        fresh_conversation_source.check_intent(intent)
     if intent["schema"] == INTENT_SCHEMA_DIRECT:
         from control_plane import direct_native_execution as direct
         if type(direct_admission) is not direct.DirectNativeAdmission:
@@ -1443,6 +1454,7 @@ def submit_intent(
                 execution_binding=execution_binding,
                 dialogue_source=effective_dialogue_source,
                 frontier_selection=effective_selection,
+                _fresh_conversation_source=fresh_conversation_source,
             )
         else:
             if effective_selection is not None:

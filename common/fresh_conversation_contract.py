@@ -1,0 +1,120 @@
+"""Closed request syntax for the incumbent fresh conversation composition.
+
+Pure data only. No preview digest, request, or response grants admission.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+
+SCHEMA = "mastermind.executive.fresh_conversation.v1"
+RESULT_SCHEMA = "mastermind.executive.fresh_conversation_result.v1"
+DATA_SCHEMA = "mastermind.executive.fresh_conversation_data.v1"
+ROUTES = {f"/os/executive/conversation/{operation}": operation
+          for operation in ("preview", "create", "status", "read")}
+PRINCIPAL_FIELDS = frozenset({"policy_id", "issuer", "issuer_digest", "resource", "subject_digest",
+    "client_ref", "scopes", "issued_at", "expires_at", "jti_digest"})
+_WORK = re.compile(r"WS:[A-Za-z0-9][A-Za-z0-9._-]{0,68}\Z")
+_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,95}\Z")
+_HEX = re.compile(r"[0-9a-f]{64}\Z")
+
+
+def validate_request(value, *, operation):
+    if type(operation) is not str or operation not in {"preview", "create", "status", "read"}:
+        raise ValueError("invalid operation")
+    keys = {"work_ref", "operation_key"}
+    if operation in {"preview", "create"}:
+        keys.add("message")
+    if operation == "create":
+        keys.add("preview_digest")
+    if type(value) is not dict or set(value) != keys:
+        raise ValueError("invalid request")
+    if (type(value["work_ref"]) is not str or not _WORK.fullmatch(value["work_ref"])
+            or type(value["operation_key"]) is not str or not _KEY.fullmatch(value["operation_key"])):
+        raise ValueError("invalid selector")
+    if "message" in keys:
+        message = value["message"]
+        if (type(message) is not str or not message.strip() or len(message) > 700
+                or any((ord(c) < 32 and c not in "\t\n\r") or 127 <= ord(c) <= 159 for c in message)):
+            raise ValueError("invalid message")
+        try:
+            if len(message.encode("utf-8", errors="strict")) > 2800:
+                raise ValueError("invalid message")
+        except UnicodeEncodeError:
+            raise ValueError("invalid message") from None
+    if "preview_digest" in keys and (type(value["preview_digest"]) is not str
+            or not _HEX.fullmatch(value["preview_digest"])):
+        raise ValueError("invalid preview")
+    return dict(value)
+
+
+def canonical_digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=False, allow_nan=False).encode("utf-8", errors="strict")).hexdigest()
+
+
+def admission_arguments(request, scoped_operation_key):
+    selected = validate_request({key: request[key] for key in
+        ("work_ref", "operation_key", "message")}, operation="preview")
+    if type(scoped_operation_key) is not str or not _KEY.fullmatch(scoped_operation_key):
+        raise ValueError("invalid operation key")
+    return dict(operation_key=scoped_operation_key, objective=selected["message"],
+        department="executive-infrastructure", priority=0, execution_profile="research_only",
+        workstream=selected["work_ref"], attempt_limit=1)
+
+
+def validate_private_frame(value):
+    if (type(value) is not dict or set(value) != {"schema", "operation", "principal", "workspace_principal", "arguments"}
+            or value["schema"] != SCHEMA):
+        raise ValueError("invalid frame")
+    operation = value["operation"]
+    arguments = validate_request(value["arguments"], operation=operation)
+    def principal(raw):
+        if (type(raw) is not dict or set(raw) != PRINCIPAL_FIELDS
+                or any(type(raw[k]) is not str or not 1 <= len(raw[k]) <= 2048
+                    for k in PRINCIPAL_FIELDS - {"scopes", "issued_at", "expires_at", "jti_digest"})
+                or type(raw["issued_at"]) is not int or type(raw["expires_at"]) is not int
+                or type(raw["scopes"]) is not list or not 1 <= len(raw["scopes"]) <= 16
+                or len(set(raw["scopes"])) != len(raw["scopes"])
+                or any(type(scope) is not str or not 1 <= len(scope) <= 96 for scope in raw["scopes"])
+                or (raw["jti_digest"] is not None and (type(raw["jti_digest"]) is not str or not _HEX.fullmatch(raw["jti_digest"])))):
+            raise ValueError("invalid principal")
+        return {**raw, "scopes": list(raw["scopes"])}
+    p = principal(value["principal"])
+    workspace = value["workspace_principal"]
+    if operation in {"preview", "create"}:
+        workspace = principal(workspace)
+    elif workspace is not None:
+        raise ValueError("unexpected read principal")
+    return dict(schema=SCHEMA, operation=operation, principal=p, workspace_principal=workspace, arguments=arguments)
+
+
+def validate_data(value, request):
+    keys = {"schema", "operation_key", "work_ref", "state", "effect", "parent_consumed",
+        "preview", "locator", "session", "result", "can_send"}
+    if (type(value) is not dict or set(value) != keys or value["schema"] != DATA_SCHEMA
+            or any(value[key] != request[key] for key in ("work_ref", "operation_key"))
+            or value["state"] not in {"PREVIEW_READY", "ABSENT", "ADMITTED", "CREATED", "SETTLED", "RECONCILIATION_REQUIRED"}
+            or value["effect"] not in {"NONE", "ADMITTED", "COMMITTED"}
+            or value["parent_consumed"] is not False or value["can_send"] is not False):
+        raise ValueError("invalid response")
+    if value["state"] == "CREATED":
+        if (type(value["session"]) is not dict or set(value["session"]) != {"attempt_id", "generation", "binding_digest"}
+                or not _HEX.fullmatch(value["session"]["binding_digest"])):
+            raise ValueError("invalid created session")
+    elif value["session"] is not None:
+        raise ValueError("unexpected session")
+    if value["locator"] is not None:
+        locator = value["locator"]
+        if (type(locator) is not dict or set(locator) != {"work_ref", "root_job_id", "job_id", "attempt_id"}
+                or locator["work_ref"] != request["work_ref"] or type(locator["root_job_id"]) is not str
+                or any(locator[k] is not None and type(locator[k]) is not str for k in ("job_id", "attempt_id"))):
+            raise ValueError("invalid locator")
+    if value["result"] is not None:
+        result = value["result"]
+        if (type(result) is not dict or set(result) != {"digest", "envelope"}
+                or type(result["envelope"]) is not dict or canonical_digest(result["envelope"]) != result["digest"]
+                or len(json.dumps(result["envelope"], ensure_ascii=False).encode("utf-8")) > 16384):
+            raise ValueError("invalid result")
+    return dict(value)
