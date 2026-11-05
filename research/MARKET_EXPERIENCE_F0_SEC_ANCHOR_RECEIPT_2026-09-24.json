@@ -1,0 +1,107 @@
+{
+  "authority": {
+    "forecast_trial": false,
+    "production_write": false,
+    "trade_authority": false,
+    "training_admitted": false
+  },
+  "interpretation": {
+    "canonical_filing_key_required": [
+      "cik",
+      "accession"
+    ],
+    "delta_cause_proven": false,
+    "event_grouping_requires": [
+      "cik",
+      "report_date"
+    ],
+    "migration_required": true,
+    "revision_metadata_required": [
+      "accession",
+      "form",
+      "report_date"
+    ],
+    "store_ready_for_exact_revision_join": false
+  },
+  "manifest": {
+    "entries": 1315,
+    "malformed_entries": 0,
+    "status_counts": {
+      "ok": 1315
+    },
+    "sum_manifest_filings": 99758,
+    "sum_missing_shards": 0,
+    "ts_max": "2026-07-05T10:47:38.994072+00:00",
+    "ts_min": "2026-07-05T10:14:01.354347+00:00"
+  },
+  "manifest_minus_store_rows": 783,
+  "schema": "market_experience.f0_sec_anchor_audit.v1",
+  "source": {
+    "collector": {
+      "git_blob": "19665592a256bb4ef8af6ebc2fdd0f74bfdf992f",
+      "path": "collectors/edgar_earnings_8k.py"
+    },
+    "commit": "836379db84f9e34354f54e2fb26cd2065d186034",
+    "event_refresh": {
+      "git_blob": "7d01aacb3bec29e42de799eeed480d16f930389b",
+      "path": "scripts/refresh_event_workspaces.py"
+    },
+    "manifest": {
+      "git_blob": "a45bc80a3cea8b2cd554624cdeda19cb66d47b5d",
+      "path": "data/edgar/earnings_8k_dates_manifest.json"
+    },
+    "repository": "mastermindx-market-intelligence/macro",
+    "store": {
+      "git_blob": "e1fdf2c9717b02a98f6fe7cfab7e88e51bf912d6",
+      "path": "data/edgar/earnings_8k_dates.parquet"
+    }
+  },
+  "status": "FOUNDATION_PRESENT_MIGRATION_REQUIRED",
+  "store": {
+    "ciks": 1314,
+    "ciks_with_20_rows": 1255,
+    "ciks_with_8y_span": 1143,
+    "columns": [
+      "ticker",
+      "cik",
+      "filing_date",
+      "acceptance_datetime",
+      "items"
+    ],
+    "exact_item_202_rows": 98975,
+    "filing_max": "2026-07-02",
+    "filing_min": "2004-08-24",
+    "missing_identity_columns": [
+      "accession",
+      "report_date"
+    ],
+    "missing_revision_columns": [
+      "accession",
+      "form",
+      "report_date"
+    ],
+    "row_count_quantiles": {
+      "0.0": 2.0,
+      "0.1": 29.0,
+      "0.25": 55.0,
+      "0.5": 87.0,
+      "0.75": 92.0,
+      "0.9": 99.0,
+      "1.0": 188.0
+    },
+    "rows": 98975,
+    "schema_state": "LEGACY_DATE_KEY_MISSING_CANONICAL_IDENTITY",
+    "span_year_quantiles": {
+      "0.0": 0.1971252566735113,
+      "0.1": 6.746885694729637,
+      "0.25": 12.647501711156742,
+      "0.5": 21.4839151266256,
+      "0.75": 21.516769336071185,
+      "0.9": 21.541409993155373,
+      "1.0": 21.815195071868583
+    },
+    "tickers": 1314,
+    "valid_acceptance_datetimes": 98975,
+    "valid_filing_dates": 98975
+  }
+}

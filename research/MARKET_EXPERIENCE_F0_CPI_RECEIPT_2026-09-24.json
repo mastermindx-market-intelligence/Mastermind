@@ -1,0 +1,165 @@
+{
+  "counts": {
+    "normalization_row_reduction": 0,
+    "normalized_dataframe_deep_bytes": 25781366,
+    "normalized_rows": 292553,
+    "period_max": "2026-08-01",
+    "period_min": "1947-01-01",
+    "periods": 955,
+    "raw_dataframe_deep_bytes": 25744796,
+    "raw_rows": 292553,
+    "vintage_dates": 376,
+    "vintage_max": "2026-09-11",
+    "vintage_min": "1997-01-01"
+  },
+  "environment": {
+    "pandas": "3.0.5",
+    "platform": "darwin",
+    "pyarrow": "25.0.1",
+    "python": "3.14.7"
+  },
+  "evidence_class": "REAL_INPUT_INTERNAL_TECHNICAL_AUDIT_NOT_PILOT_ADMISSION",
+  "measurements": {
+    "git_object_read": {
+      "cpu_seconds": 0.004451999999999998,
+      "passes": 1,
+      "wall_seconds": 0.07731495797634125
+    },
+    "native_normalization": {
+      "cpu_seconds": 0.308874,
+      "passes": 1,
+      "wall_seconds": 0.3310020831413567
+    },
+    "parquet_decode": {
+      "cpu_seconds": 0.014365000000000072,
+      "passes": 1,
+      "wall_seconds": 0.018023207783699036
+    },
+    "process_lifetime_peak_rss_bytes": 240779264,
+    "rss_scope": "lifetime high-water mark; not incremental or fleet capacity"
+  },
+  "model_calls": 0,
+  "native_structural_cases": [
+    {
+      "as_of": "2019-04-01",
+      "measurement": {
+        "cpu_seconds": 0.30541799999999997,
+        "passes": 1,
+        "wall_seconds": 0.3321036659181118
+      },
+      "passed": true,
+      "period": "2019-01",
+      "reason": null,
+      "release_date": "2019-02-13",
+      "same_vintage_provenance_checked": true,
+      "status": "ok"
+    },
+    {
+      "as_of": "2020-04-01",
+      "measurement": {
+        "cpu_seconds": 0.2807010000000001,
+        "passes": 1,
+        "wall_seconds": 0.295497624669224
+      },
+      "passed": true,
+      "period": "2020-01",
+      "reason": null,
+      "release_date": "2020-02-13",
+      "same_vintage_provenance_checked": true,
+      "status": "ok"
+    },
+    {
+      "as_of": "2021-04-01",
+      "measurement": {
+        "cpu_seconds": 0.2925890000000002,
+        "passes": 1,
+        "wall_seconds": 0.3101363331079483
+      },
+      "passed": true,
+      "period": "2021-01",
+      "reason": null,
+      "release_date": "2021-02-10",
+      "same_vintage_provenance_checked": true,
+      "status": "ok"
+    },
+    {
+      "as_of": "2022-04-01",
+      "measurement": {
+        "cpu_seconds": 0.3057129999999999,
+        "passes": 1,
+        "wall_seconds": 0.34055104199796915
+      },
+      "passed": true,
+      "period": "2022-01",
+      "reason": null,
+      "release_date": "2022-02-10",
+      "same_vintage_provenance_checked": true,
+      "status": "ok"
+    },
+    {
+      "as_of": "2023-04-01",
+      "measurement": {
+        "cpu_seconds": 0.3080160000000003,
+        "passes": 1,
+        "wall_seconds": 0.35245870891958475
+      },
+      "passed": true,
+      "period": "2023-01",
+      "reason": null,
+      "release_date": "2023-02-14",
+      "same_vintage_provenance_checked": true,
+      "status": "ok"
+    },
+    {
+      "as_of": "2018-12-31",
+      "measurement": {
+        "cpu_seconds": 0.28385499999999997,
+        "passes": 1,
+        "wall_seconds": 0.3007518327794969
+      },
+      "passed": true,
+      "period": "2019-01",
+      "reason": "current_period_not_available_by_as_of",
+      "release_date": null,
+      "same_vintage_provenance_checked": false,
+      "status": "unavailable"
+    }
+  ],
+  "observed_at": "2026-09-24T14:58:15.652934+00:00",
+  "probe_sha256": "9714a987b81d2b46325c113786c4294181a4066195d99380bbd332f2ef1f1dc7",
+  "production_data_admitted": 0,
+  "promotion_eligible": false,
+  "protocol_sha256": "306325a2b3d8a6bd5fd612745a71cf49065cb15bd58da3787d73ca664c780ad8",
+  "provider_spend_usd": 0,
+  "schema": "market_experience.f0_cpi_source_audit.v1",
+  "source": {
+    "artifact_bytes": 134327,
+    "artifact_path": "data/fred_vintage/release_targets/CPIAUCSL_all_vintages.parquet",
+    "artifact_sha256": "abc6b65a873a3d6de63d85379c86b61f71f99480354f46915c391d506970718b",
+    "collector_completed_at": "2026-09-23T21:19:16+00:00",
+    "commit": "b9d23ca4bce4308fa7466c4e0f5d318168a50f6f",
+    "manifest_git_blob": "b4fe4314097c93847b691060beeb8adc35a79546",
+    "manifest_path": "data/fred_vintage/release_targets/manifest.json",
+    "manifest_sha256": "bfb4b923cc344b4204db42018ec838b877726dfd6bfd72e1d4c745e43992b754",
+    "owner_git_blob": "c9da53421cc8ab2ed7cdef2f3097a64f5e8ee222",
+    "owner_path": "engine/release_target_truth.py",
+    "owner_sha256": "7ec58d265edd8e14f1ac0dc3e33529849b5e3b80e6b2f31d7a81f3ede10a13a4",
+    "repository": "mastermindx-market-intelligence/macro",
+    "requested_vintage_start": "1997-01-01"
+  },
+  "source_values_published": false,
+  "status": "source_component_checks_passed",
+  "stock_pilot_admitted": false,
+  "training_eligible": false,
+  "unproven": [
+    "historical operational possession",
+    "intraday publication time",
+    "stock universe and membership",
+    "earnings source coverage",
+    "ML training and redistribution rights",
+    "product consumer proof",
+    "forecast value",
+    "LLM extraction cost",
+    "fleet throughput"
+  ]
+}

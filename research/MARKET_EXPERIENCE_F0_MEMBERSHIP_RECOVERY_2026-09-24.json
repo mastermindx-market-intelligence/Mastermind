@@ -1,0 +1,81 @@
+{
+  "schema": "market_experience.membership_recovery_evidence.v1",
+  "operation_id": "market-experience-direction-20260924-astra-001",
+  "procedure_commit": "a29161fa0a44cca9927afe042b5f7ea25aae1736",
+  "evidence_class": "SOURCE_RECOVERY_IDENTIFIED_AND_SYNTHETIC_BOUNDARY_REGRESSION",
+  "upstream": {
+    "repository": "fja05680/sp500",
+    "commit": "a2430f2af0c79ddf0748e91de11bdeb1616ab5a7",
+    "files": [
+      {"path": "sp500_ticker_start_end.csv", "git_blob": "3ed3b0e8d9e6e63730c153ee1f13ddaf6ed281bb", "bytes": 28058},
+      {"path": "S&P 500 Historical Components & Changes (Updated).csv", "git_blob": "656b033be9418db272f1903f4f8e79a2a8664e6a", "bytes": 5530907},
+      {"path": "PIT to Ticker Delta.ipynb", "git_blob": "50304417f01ec3f711445c4f32ef1a53291c9598", "bytes": 9868},
+      {"path": "LICENSE", "git_blob": "1702a4df51e2c2a0a96ede6b10afeb880b976bbd", "bytes": 1100},
+      {"path": "README.md", "git_blob": "43072b7901eaaedbc63a523a1040ac91b5c65dbb", "bytes": 4847}
+    ],
+    "identity_evidence": "GitHub pinned tree and source-code reads; raw CSVs not acquired in the computation environment",
+    "declared_license": "MIT",
+    "attribution": "Farrell J. Aultman; upstream LICENSE retained by reference",
+    "permitted_use_admission": "PENDING_EXISTING_RIGHTS_OWNER",
+    "source_completeness": "UNPROVEN",
+    "historical_operational_possession": "UNPROVEN"
+  },
+  "existing_producer": {
+    "repository": "mastermindx-market-intelligence/macro",
+    "commit": "5600bb63b27978031769eb428911fe9b46572a92",
+    "path": "scripts/residual_alpha_pit.py",
+    "git_blob": "cc3bd319a1c00fabba5e8d95df176be7402aedc7",
+    "output_path": "data/breadth/sp500_pit_membership.parquet",
+    "output_present_in_commit": false,
+    "output_present_at_checked_macro_main_path": false,
+    "absence_scope": "only the exact Git object and the checked macro-main local path; other stores not inspected",
+    "collector_executed": false
+  },
+  "reader_boundary": {
+    "source_end_meaning": "first source snapshot where the ticker is absent",
+    "correct_existing_reader": "Mastermind loop/single_name_panel.py::members_asof",
+    "correct_reader_commit": "a29161fa0a44cca9927afe042b5f7ea25aae1736",
+    "correct_reader_git_blob": "9967191353f96dd8feebf6f16941e47f2a69ed15",
+    "correct_interval": "start_date <= date < end_date; null end remains open within separately proven coverage",
+    "different_consumer": "Macro scripts/s13_reversal_phase0.py::_eligible",
+    "different_consumer_git_blob": "dadcb0043ba5ed380f4984ea4e2bf360a1ebd72f",
+    "different_interval": "start_date <= date <= end_date",
+    "production_impact_measured": false,
+    "native_readers_modified": false
+  },
+  "regression": {
+    "observed_at": "2026-09-25T01:19:04.931409+00:00",
+    "execution_scope": "isolated Linux container, Python 3.13.5; not user-fleet throughput",
+    "method": "reviewed executable function excerpts; native docstring normalized and excluded from AST identity",
+    "full_original_modules_executed": false,
+    "fixture_native_ast_sha256": "b2c43336b2c86e0403aaab23893cf064c7dcf0825813815f5080ab8759621ed5",
+    "fixture_legacy_ast_sha256": "1cbf5dfbc38945ced3a6249f93b91d1efed1afb0611d66038f0fb3a79cb808c1",
+    "ast_hash_scope": "interpreter-specific; compare within the same interpreter",
+    "dates": ["2020-01-01", "2020-01-02", "2020-01-05", "2020-01-06", "2020-01-07", "2020-01-09", "2020-01-10"],
+    "native_pass_count": 7,
+    "legacy_mismatch_count": 1,
+    "legacy_mismatch": "SYNTHETIC_A incorrectly retained on its first absent day, 2020-01-06",
+    "instrumentation_tests_passed": 15,
+    "instrumentation_tests_skipped": 1,
+    "instrumentation_tests_failed": 0,
+    "skip_reason": "explicit excerpt-only mode; actual repository-file AST equality test remains for CI",
+    "test_command": "MMX_MEMBERSHIP_EXCERPT_ONLY_TESTS=1 python -m pytest -q tests/test_market_experience_membership_boundaries.py",
+    "module_sha256": "1ad7581c396e0070ce2b6164bf8192d934c22b5c12b2df45b96def5931ea730e",
+    "tests_sha256": "358eae329bdff72edf2cd064c4bf2f3545337d325a4d3810298f544df478e71b",
+    "published_source_bytes_match_tested_local_files": true
+  },
+  "full_corpus_comparison": {
+    "status": "NOT_RUN",
+    "reason": "isolated computation environment could not resolve raw.githubusercontent.com; downloader also failed",
+    "protocol": "research/MARKET_EXPERIENCE_F0_MEMBERSHIP_PROTOCOL_2026-09-24.md",
+    "expected_quarter_end_cases": 20,
+    "completed_quarter_end_cases": 0,
+    "substitute_data_used": false
+  },
+  "stock_pilot_admitted": false,
+  "training_eligible": false,
+  "production_data_admitted": 0,
+  "model_calls": 0,
+  "provider_spend_usd": 0,
+  "next_action": "Qualify exact upstream interval and snapshot bytes through the existing source owner, compare the frozen dates with the existing end-exclusive reader, and resolve historical identity, coverage and permitted-use requirements before cohort selection."
+}
