@@ -6,6 +6,7 @@ import {
 import type { OwnerContext, PendingPointerStore } from "./operation-controller";
 import type { DirectNativeTransport, DirectSelection, DirectTerminalSelection } from "../direct-native-result";
 import { DirectNativeCommandPort } from "./direct-native-command-port";
+import { closedReadFailurePhase, type DiagnosticPhase, type ExecutiveDiagnosticSnapshot } from "../diagnostic-state";
 
 /** Implemented inside the existing private web/Rust auth owner. No token getter. */
 export interface OsExecutiveTransport {
@@ -15,6 +16,8 @@ export interface OsExecutiveTransport {
   context(signal: AbortSignal): Promise<unknown>;
   submit(arguments_: Readonly<Record<string, unknown>>, signal: AbortSignal): Promise<unknown>;
   status(arguments_: { readonly intent_id: string }, signal: AbortSignal): Promise<unknown>;
+  /** Observer-only closed diagnostics; a snapshot read performs no native call. */
+  diagnostics?(): ExecutiveDiagnosticSnapshot;
   readonly directNative?: DirectNativeTransport;
 }
 
@@ -58,6 +61,16 @@ export function createOsExecutiveHost(
   let disposed = false;
   let expiryTimer: ReturnType<typeof setTimeout> | undefined;
   let boundary = new AbortController();
+  // Observer-only context diagnostics over existing refresh/expiry activity;
+  // a snapshot read never calls context(), subscribes or mutates state.
+  let contextPhase: DiagnosticPhase = "not_requested";
+  const blockedPhase = (): DiagnosticPhase => {
+    try {
+      const native = transport.diagnostics?.();
+      if (native && native.kind === "native" && native.authAvailable === false) return "auth_unavailable";
+      return contextPhase === "not_requested" ? "not_requested" : "unknown";
+    } catch { return "unknown"; }
+  };
   const listeners = new Set<() => void>();
   const notify = () => { for (const listener of listeners) listener(); };
   const context = (): OwnerContext | null =>
@@ -79,25 +92,38 @@ export function createOsExecutiveHost(
 
   async function refresh() {
     invalidate();
-    if (disposed || !transport.available()) return;
+    if (disposed || !transport.available()) {
+      contextPhase = disposed ? "unknown" : blockedPhase();
+      return;
+    }
     const capturedEpoch = epoch;
     const authGeneration = transport.authGeneration();
+    contextPhase = "pending"; // observed only at the existing context attempt
     const signal = boundary.signal;
     try {
       const raw = await transport.context(signal);
       if (disposed || signal.aborted || capturedEpoch !== epoch ||
           authGeneration !== transport.authGeneration() || !transport.available()) return;
       const decoded = decodeExecutiveContext(raw, now());
-      if (!decoded) return;
+      if (!decoded) { contextPhase = "invalid_response"; return; }
+      contextPhase = "ready";
       verified = decoded;
       verifiedAuthGeneration = authGeneration;
       // Very distant or malformed lifetimes cannot overflow a platform timer.
       expiryTimer = setTimeout(() => {
-        if (capturedEpoch === epoch) invalidate();
+        if (capturedEpoch === epoch) {
+          // The existing safety timer may be clamped before the actual expiry.
+          contextPhase = now() >= decoded.expiresAt ? "expired" : "unknown";
+          invalidate();
+        }
       }, Math.min(decoded.expiresAt - now(), 2_147_483_647));
       notify();
-    } catch {
+    } catch (reason) {
       // No raw auth/transport error is exposed; the command remains unavailable.
+      // Only a current, noncancelled rejection yields a phase; unknown stays unknown.
+      if (!signal.aborted && !disposed && capturedEpoch === epoch &&
+          authGeneration === transport.authGeneration() && transport.available())
+        contextPhase = closedReadFailurePhase(reason);
     }
   }
 
@@ -166,9 +192,18 @@ export function createOsExecutiveHost(
   return {
     binding,
     ready,
+    diagnostics: (): { contextPhase: DiagnosticPhase } => {
+      try {
+        if (disposed) return { contextPhase: "unknown" };
+        if (verified && now() >= verified.expiresAt) return { contextPhase: "expired" };
+        if (contextPhase === "ready" && !context()) return { contextPhase: blockedPhase() };
+        return { contextPhase };
+      } catch { return { contextPhase: "unknown" }; }
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
+      contextPhase = "unknown";
       unsubscribe();
       invalidate();
       listeners.clear();

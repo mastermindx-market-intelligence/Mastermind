@@ -12554,6 +12554,9 @@ def _insert_cycle_child(
     """Insert one cycle-owned direct child inside its caller's transaction."""
     store._assert_owned_snapshot_connection(connection)
     _assert_workstream_admission_open(connection, _admission_root_workstream(connection, str(root_row["root_job_id"])))
+    from control_plane.instruction_admission_state import root_is_suspended
+    if root_is_suspended(connection, str(root_row["root_job_id"])):
+        raise StateConflict("INSTRUCTION_ADMISSION_SUSPENDED")
 
     nested_plan = plan_schema_version == "mastermind.execution_plan/v5"
     policy = CooCyclePolicy.load(version=2 if nested_plan else 1)
@@ -13798,6 +13801,20 @@ class JobRegistry:
     def __init__(self, store: RuntimeStore) -> None:
         self.store = store
 
+    def read_instruction_admission_suspension(self, work_ref: str, instruction_ref: str):
+        from control_plane.instruction_admission_state import current_pause
+        with self.store.read() as connection:
+            return current_pause(connection, work_ref, instruction_ref)
+
+    def read_instruction_admission_pause_command(self, work_ref: str, instruction_ref: str, *, command_id: str, actor: str):
+        from control_plane.instruction_admission_state import read_pause_command
+        return read_pause_command(self, work_ref, instruction_ref, command_id=command_id, actor=actor)
+
+    def pause_instruction_admission(self, binding, *, command_id: str, actor: str, _commit_guard):
+        """Pause only new work bound to one stable instruction, never a lease."""
+        from control_plane.instruction_admission_state import pause_in_owner
+        return pause_in_owner(self, binding, command_id=command_id, actor=actor, _commit_guard=_commit_guard)
+
     def admission_workstream_for_root(self, root_job_id: str) -> str | None:
         """Read the actual root creation association for a qualified App guard."""
         if type(root_job_id) is not str or re.fullmatch(r"JOB-[0-9]{1,9}", root_job_id) is None:
@@ -13917,6 +13934,7 @@ class JobRegistry:
         *,
         spec: _JobCreationSpec,
         _c2_capability: object | None = None,
+        _instruction_source: object | None = None,
     ) -> Job:
         """Own the existing Job insert plus immutable creation receipt.
 
@@ -13993,12 +14011,36 @@ class JobRegistry:
                 "private C2 capability requires exact carrier provenance"
             )
 
+        # Only the private nominal capture may label a NEW instruction root.
+        # Public provenance and private carrier inputs cannot manufacture it.
+        provenance = spec.event_provenance
+        instruction_fields = isinstance(provenance, Mapping) and any(key in provenance for key in ("instruction_source", "instruction_source_digest"))
+        if _instruction_source is not None or instruction_fields:
+            from control_plane.instruction_work_source import InstructionWorkSource
+            if (type(_instruction_source) is not InstructionWorkSource or spec.parent_job_id is not None
+                    or _c2_capability is not None or not instruction_fields):
+                raise StateConflict("INSTRUCTION_ADMISSION_SOURCE_REQUIRED")
+            from common.executive_workspace_contract import canonical as instruction_canonical
+            material = _instruction_source.material()
+            if (provenance.get("instruction_source") != material
+                    or provenance.get("instruction_source_digest") != hashlib.sha256(instruction_canonical(material)).hexdigest()
+                    or provenance.get("workstream") != material["work_ref"]):
+                raise StateConflict("INSTRUCTION_ADMISSION_SOURCE_MISMATCH")
+
         # The same writer lock orders pause against every normal/root/child
         # insert, including the private carrier caller. Children inherit only
         # their actual root's immutable creation source.
         work_ref = (_admission_workstream_from_provenance(spec.event_provenance)
             if spec.parent_job_id is None else _admission_root_workstream(connection, str(spec.parent_root_job_id)))
         _assert_workstream_admission_open(connection, work_ref)
+        from control_plane.instruction_admission_state import current_pause, root_is_suspended
+        if spec.parent_job_id is not None:
+            if root_is_suspended(connection, str(spec.parent_root_job_id)):
+                raise StateConflict("INSTRUCTION_ADMISSION_SUSPENDED")
+        elif _instruction_source is not None:
+            if current_pause(connection, material["work_ref"], material["instruction_ref"]) is not None:
+                raise StateConflict("INSTRUCTION_ADMISSION_SUSPENDED")
+            _instruction_source.check()
 
         numbers: list[int] = []
         for row in connection.execute("SELECT job_id FROM jobs"):
@@ -14138,6 +14180,11 @@ class JobRegistry:
             event_payload["provenance"] = dict(spec.event_provenance)
             if "direct_native" in spec.event_provenance:
                 event_payload["direct_workspace"]=dict(worktree=spec.worktree,branch=spec.branch,base_sha=spec.constraints["base_sha"])
+        if _instruction_source is not None:
+            # This owner-only creation field distinguishes NEW qualified roots
+            # from arbitrary historical provenance; no legacy Job is backfilled.
+            event_payload["instruction_admission"] = {"schema": "mastermind.instruction_driven_root.v1",
+                "source": material, "source_digest": hashlib.sha256(instruction_canonical(material)).hexdigest()}
         self.store.append_event(
             connection,
             aggregate_type="job",
@@ -14153,6 +14200,8 @@ class JobRegistry:
         ).fetchone()
         if row is None:  # pragma: no cover - same-transaction invariant
             raise PersistenceError("created Job disappeared inside its transaction")
+        if _instruction_source is not None:
+            _instruction_source.check()
         return _job_from_row(row)
 
     def create_v2_orchestration_root(
@@ -14165,6 +14214,8 @@ class JobRegistry:
         execution_binding: dict[str, Any] | None = None,
         dialogue_source: Mapping[str, Any] | None = None,
         frontier_selection: Mapping[str, Any] | None = None,
+        _instruction_source: object | None = None,
+        _instruction_admission_guard: Callable[[], None] | None = None,
     ) -> Job:
         """The sole strict v2 intent -> Phase 1F-C aggregation-root boundary.
 
@@ -14182,6 +14233,8 @@ class JobRegistry:
         )
 
         normalized = validate_intent(intent)
+        if (_instruction_source is None) != (_instruction_admission_guard is None):
+            raise StateConflict("instruction-driven root requires its current host admission guard")
         if normalized.get("schema") != INTENT_SCHEMA_V2:
             raise StateConflict(
                 "only strict mastermind.ceo_intent.v2 may create a COO root"
@@ -14262,6 +14315,8 @@ class JobRegistry:
                 "source_digest": fingerprint,
             },
             _v2_root_capability=_V2_ROOT_CREATION_CAPABILITY,
+            **({"_instruction_source": _instruction_source,
+                "_principal_commit_guard": _instruction_admission_guard} if _instruction_source is not None else {}),
         )
 
     def create_principal_orchestration_root(
@@ -14273,6 +14328,7 @@ class JobRegistry:
         execution_binding: Mapping[str, Any] | None = None,
         dialogue_source: Mapping[str, Any] | None = None,
         require_dialogue_source: bool = False,
+        _instruction_source: object | None = None,
     ) -> Job:
         """Create one source-only COO-principal aggregation root.
 
@@ -14410,6 +14466,9 @@ class JobRegistry:
                 "source_digest": bundle_digest,
             },
             _v2_root_capability=_V2_ROOT_CREATION_CAPABILITY,
+            **({"_instruction_source": _instruction_source,
+                "_principal_commit_guard": lambda: principal_admission_guard(normalized)}
+               if _instruction_source is not None else {}),
         )
 
     def create_cycle_planner(
@@ -16453,6 +16512,7 @@ class JobRegistry:
         _principal_commit_guard: Callable[[], None] | None = None,
         _planner_plan_schema_version: str | None = None,
         _direct_native_admission: direct_native.DirectNativeAdmission | None = None,
+        _instruction_source: object | None = None,
     ) -> Job:
         """Insert one QUEUED Job and its ``JOB_CREATED`` receipt in one transaction.
 
@@ -16468,6 +16528,24 @@ class JobRegistry:
         that must record who asked and on what grounding.  It changes no job
         column and confers no authority.
         """
+        instruction_fields = isinstance(provenance, Mapping) and any(key in provenance for key in ("instruction_source", "instruction_source_digest"))
+        if instruction_fields:
+            raise StateConflict("INSTRUCTION_ADMISSION_SOURCE_REQUIRED")
+        if _instruction_source is not None:
+            from control_plane.instruction_work_source import InstructionWorkSource
+            from common.executive_workspace_contract import canonical as instruction_canonical
+            if (type(_instruction_source) is not InstructionWorkSource or parent_job_id is not None
+                    or _principal_commit_guard is None or _direct_native_admission is not None):
+                raise StateConflict("INSTRUCTION_ADMISSION_SOURCE_REQUIRED")
+            material = _instruction_source.material()
+            if not isinstance(provenance, Mapping) or provenance.get("workstream") != material["work_ref"]:
+                raise StateConflict("INSTRUCTION_ADMISSION_SOURCE_MISMATCH")
+            grounding = provenance.get("grounding")
+            if grounding is not None and (not isinstance(grounding, Mapping)
+                    or grounding.get("macro_sha") != material["source"]["commit"]):
+                raise StateConflict("INSTRUCTION_ADMISSION_SOURCE_MISMATCH")
+            provenance = {**provenance, "instruction_source": material,
+                "instruction_source_digest": hashlib.sha256(instruction_canonical(material)).hexdigest()}
         if _direct_native_admission is not None:
             if type(_direct_native_admission) is not direct_native.DirectNativeAdmission:
                 raise StateConflict("direct native admission has no owner capability")
@@ -16992,6 +17070,7 @@ class JobRegistry:
                     timestamp_ms=timestamp,
                     planner_plan_schema_version=_planner_plan_schema_version,
                 ),
+                **({"_instruction_source": _instruction_source} if _instruction_source is not None else {}),
             )
             # Refusal rolls back both the Job and its JOB_CREATED event.
             recheck_principal()
@@ -17914,6 +17993,9 @@ class AttemptRegistry:
         # fresh Attempt creation, under the original atomic claim transaction.
         work_ref = _admission_root_workstream(connection, str(job_row["root_job_id"]))
         if work_ref is not None and _current_workstream_suspension(connection, work_ref) is not None:
+            return None
+        from control_plane.instruction_admission_state import root_is_suspended
+        if root_is_suspended(connection, str(job_row["root_job_id"])):
             return None
         unresolved = ReleaseMaintenanceRegistry(self.store).read_unresolved_admission(
             connection

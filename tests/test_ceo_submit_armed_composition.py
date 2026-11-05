@@ -1571,16 +1571,13 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # Return plus attention composition changes the module; the installed entry
     # AST below remains identical to protected d65414e. This static literal
     # freezes the combined candidate, not independent review or release authority.
-    # P16 READ composition adds only the qualified Plan/Journal reader factories;
-    # the exact installed event-loop AST below and all dispatch guards stay fixed.
-    # BYOK host-reader injection changes only factory wiring; parent compared
-    # the exact installed event-loop AST to protected 766e06f and found no change.
-    # This source pin records that composition, not new runtime/release authority.
+    # The accepted current Knowledge/Instructions owner composition changes this
+    # module; the exact installed event-loop AST and closed call below stay fixed.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            '072610c765ab1dffbf1a76e358633c2f61b1d9d0c3a8963f2519ec9cf137bd96'):
+            '0147f1eae70f9e443c9c07876c2c23a4d5aa5fbeac65291e7f2ec89d789ac539'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
@@ -3166,8 +3163,8 @@ def test_d8_hermes_https_port_rejects_false_postimage():
 def test_d8_s14_private_parent_mode_is_one_exact_source_bound_token():
     path = 'ops/native_fabric/quota_continuity/candidate/post_failure_observation.py'
     source = (ROOT / path).read_text()
-    assert hashlib.sha256(source.encode()).hexdigest() == '2a78630ccaf574da752c77d7b8f821723ccb264b970e2fe38b1976d886ca97a0'
-    assert REVIEWED_FILES[path]['sites'] == ((293, 79, 84, 'int', '0o700'),)
+    assert hashlib.sha256(source.encode()).hexdigest() == '80fc9d95068099fb797c9e7a05981a9650d50ec170935d748d92a8e7bcd04337'
+    assert REVIEWED_FILES[path]['sites'] == ((294, 79, 84, 'int', '0o700'),)
     def scan(content, actual_path=path, postimage=True):
         return _scan_added_identity_diff(_d8_frozen_source_diff(actual_path, content),
             source_postimages={actual_path: content} if postimage else None)

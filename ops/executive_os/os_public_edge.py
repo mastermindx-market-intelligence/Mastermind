@@ -56,11 +56,44 @@ PRE_PROJECT_ADMISSION_GET_ROUTES = PRE_DIRECTION_GET_ROUTES + ("/workspace/resou
 PRE_PROJECT_ADMISSION_POST_ROUTES = POST_ROUTES
 PROJECT_ADMISSION_GET_ROUTES = ("/workspace/project-admission/current", "/workspace/project-admission/operation")
 PROJECT_ADMISSION_POST_ROUTES = ("/workspace/project-admission/pause", "/workspace/project-admission/resume")
-GET_ROUTES = PRE_PROJECT_ADMISSION_GET_ROUTES + PROJECT_ADMISSION_GET_ROUTES
+PRE_ARCHIVE_GET_ROUTES = PRE_PROJECT_ADMISSION_GET_ROUTES + PROJECT_ADMISSION_GET_ROUTES
+PRE_PROJECT_KNOWLEDGE_GET_ROUTES = PRE_ARCHIVE_GET_ROUTES + ("/workspace/projects/archive/current",)
+PROJECT_KNOWLEDGE_GET_ROUTES = ("/workspace/project-knowledge/current", "/workspace/project-memory/current", "/workspace/project-source/current")
+GET_ROUTES = PRE_PROJECT_KNOWLEDGE_GET_ROUTES + PROJECT_KNOWLEDGE_GET_ROUTES
 POST_ROUTES = PRE_PROJECT_ADMISSION_POST_ROUTES + PROJECT_ADMISSION_POST_ROUTES
+PRE_SOURCE_CONTEXT_GET_ROUTES = GET_ROUTES
+SOURCE_CONTEXT_GET_ROUTES = PRE_SOURCE_CONTEXT_GET_ROUTES + ("/workspace/source-operation/context",)
+SOURCE_OPERATION_GET_ROUTE = ("/workspace/source-operation/operation",)
+GET_ROUTES = SOURCE_CONTEXT_GET_ROUTES + SOURCE_OPERATION_GET_ROUTE
+# Dedicated source-operation command POSTs. Source commands are separately
+# granted downstream; these edge paths confer no authority of their own and
+# stay out of POST_ROUTES so the legacy branch matcher is never widened.
+SOURCE_POST_ROUTES = (
+    "/workspace/source-operation/prepare", "/workspace/source-operation/submit",
+    "/workspace/source-operation/reconcile", "/workspace/source-operation/advance",
+)
+# The legacy Executive/session/CCR branches and POST /mcp keep exactly 64000
+# bytes; only the dedicated source branch admits the larger legitimate
+# 32KiB UTF-8 text uploads with JSON escaping.
+SOURCE_MAX_BODY = 98304
+# Accepted project controls extend the current exact source-operation profile.
+# Keep each predecessor's complete GET/POST pair; route presence grants nothing.
+PRE_PROJECT_INSTRUCTIONS_GET_ROUTES = GET_ROUTES
+PRE_INSTRUCTION_ADMISSION_GET_ROUTES = PRE_PROJECT_INSTRUCTIONS_GET_ROUTES + ("/workspace/project-instructions/current",)
+PRE_INSTRUCTION_ADMISSION_POST_ROUTES = POST_ROUTES
+PRE_PROJECT_ACCESS_GET_ROUTES = PRE_INSTRUCTION_ADMISSION_GET_ROUTES + (
+    "/workspace/instruction-admission/current", "/workspace/instruction-admission/operation")
+GET_ROUTES = PRE_PROJECT_ACCESS_GET_ROUTES + ("/workspace/project-access/current",)
+POST_ROUTES = PRE_INSTRUCTION_ADMISSION_POST_ROUTES + ("/workspace/instruction-admission/pause",)
+PRE_MISSION_RESULT_GET_ROUTES = GET_ROUTES
+PRE_MISSION_RESULT_POST_ROUTES = POST_ROUTES
+GET_ROUTES = PRE_MISSION_RESULT_GET_ROUTES + ("/workspace/mission-result/current",)
+
 # Preserve exactly the profiles admitted by the two predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
 # partial upgrades, wildcards and extra paths cannot become transition inputs.
+# The source-context profile is the installed predecessor of GET_ROUTES and
+# remains an exact legacy transition input.
 TRANSITION_ROUTE_PROFILES = (
     (LEGACY_GET_ROUTES, LEGACY_POST_ROUTES),
     (LEGACY_GET_ROUTES, READER_POST_ROUTES),
@@ -75,6 +108,14 @@ TRANSITION_ROUTE_PROFILES = (
     (PRE_PROJECT_SESSION_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES),
     (PRE_DIRECTION_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES),
     (PRE_PROJECT_ADMISSION_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES),
+    (PRE_ARCHIVE_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
+    (PRE_PROJECT_KNOWLEDGE_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
+    (PRE_SOURCE_CONTEXT_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
+    (SOURCE_CONTEXT_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
+    (PRE_PROJECT_INSTRUCTIONS_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
+    (PRE_INSTRUCTION_ADMISSION_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
+    (PRE_PROJECT_ACCESS_GET_ROUTES, POST_ROUTES),
+    (PRE_MISSION_RESULT_GET_ROUTES, PRE_MISSION_RESULT_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 
@@ -117,8 +158,16 @@ def render(manifest: object, relay_port: int) -> str:
         raise ValueError("OS edge relay port refused")
     routes = asset_routes(manifest)
     template = _TEMPLATE.read_text(encoding="utf-8")
-    if (template.count("__ASSET_PATHS__") != 1 or template.count("__RELAY_PORT__") != 4
-            or template.count("path " + " ".join(POST_ROUTES) + "\n") != 1):
+    # The fixed GET matcher must list exactly GET_ROUTES in order, so a route
+    # admitted in metadata but missing from the template cannot pass render
+    # (the previously missing source-operation context read is corrected here).
+    if (template.count("__ASSET_PATHS__") != 1
+            or template.count("__RELAY_PORT__") != 5
+            or template.count("path " + " ".join(GET_ROUTES) + " __ASSET_PATHS__\n") != 1
+            or template.count("path " + " ".join(POST_ROUTES) + "\n") != 1
+            or template.count("path " + " ".join(SOURCE_POST_ROUTES) + "\n") != 1
+            or template.count("max_size 98304") != 1
+            or template.count("max_size 64KB") != 2):
         raise ValueError("OS edge template differs")
     return template.replace("__ASSET_PATHS__", " ".join(routes)).replace("__RELAY_PORT__", str(relay_port))
 
@@ -145,7 +194,9 @@ def stage(*, manifest: object, relay_port: int, output: Path) -> dict:
         "schema": "mastermind.os_public_edge.stage.v1",
         "sha256": hashlib.sha256(content).hexdigest(),
         "relay_port": relay_port,
-        "routes": {"get": sorted(set(GET_ROUTES) | set(asset_routes(manifest))), "post": list(POST_ROUTES)},
+        "routes": {"get": sorted(set(GET_ROUTES) | set(asset_routes(manifest))),
+                   "post": list(POST_ROUTES),
+                   "source_post": list(SOURCE_POST_ROUTES)},
         "mcp": {"get": [MCP_METADATA_ROUTE], "post": list(MCP_ROUTES)},
         "installed": False,
     }

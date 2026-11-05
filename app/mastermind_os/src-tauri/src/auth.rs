@@ -11,6 +11,8 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
+pub mod instruction_admission;
+pub mod project_access;
 use url::Url;
 
 const ISSUER: &str = "https://dev-eo0jf8us5mup7wd5.us.auth0.com/";
@@ -1077,6 +1079,61 @@ pub async fn read_project_plan(app: AppHandle, selection: ProjectPlanSelection) 
     Ok(value)
 }
 
+const PROJECT_ARCHIVE_PATH: &str = "/workspace/projects/archive/current";
+const PROJECT_ARCHIVE_SCHEMA: &str = "mastermind.workspace_project_archive.v1";
+const PROJECT_ARCHIVE_RESPONSE_CAP: usize = 262_144;
+fn project_archive_target() -> Result<Url> {
+    Url::parse(&format!("{ORIGIN}{PROJECT_ARCHIVE_PATH}")).map_err(|_| "REQUEST_INVALID".into())
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectArchiveCursor {
+    after_work_ref: String,
+    catalogue_digest: String,
+}
+fn project_archive_page_target(cursor: &ProjectArchiveCursor) -> Result<Url> {
+    ProjectPlanSelection { work_ref: cursor.after_work_ref.clone() }.validate()?;
+    if cursor.catalogue_digest.len() != 64 || !cursor.catalogue_digest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err("REQUEST_INVALID".into());
+    }
+    let mut url = project_archive_target()?;
+    url.query_pairs_mut().append_pair("after_work_ref", &cursor.after_work_ref)
+        .append_pair("catalogue_digest", &cursor.catalogue_digest);
+    Ok(url)
+}
+#[tauri::command]
+pub async fn read_project_archive(app: AppHandle) -> Result<Value> {
+    let target = project_archive_target()?;
+    read_project_archive_at(app, target).await
+}
+#[tauri::command]
+pub async fn read_project_archive_page(app: AppHandle, cursor: ProjectArchiveCursor) -> Result<Value> {
+    let target = project_archive_page_target(&cursor)?;
+    read_project_archive_at(app, target).await
+}
+async fn read_project_archive_at(app: AppHandle, target: Url) -> Result<Value> {
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(target).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, PROJECT_ARCHIVE_RESPONSE_CAP).await
+            .and_then(|value| typed_unavailable(value, PROJECT_ARCHIVE_SCHEMA, false))
+    } else {
+        bounded_json(response, PROJECT_ARCHIVE_RESPONSE_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(PROJECT_ARCHIVE_SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // The existing host performs the full closed-body decode before display.
+    Ok(value)
+}
+
 const PROJECT_DIRECTION_PATH: &str = "/workspace/project-direction/current";
 const PROJECT_DIRECTION_SCHEMA: &str = "mastermind.workspace_project_direction.v1";
 const PROJECT_DIRECTION_RESPONSE_CAP: usize = 65_536;
@@ -1113,6 +1170,95 @@ pub async fn read_project_direction(app: AppHandle, selection: ProjectPlanSelect
     }
     // Full closed-body validation remains in the existing host decode boundary.
     Ok(value)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectKnowledgeSourceSelection {
+    work_ref: String,
+    source_ref: String,
+    expected_revision: String,
+}
+impl ProjectKnowledgeSourceSelection {
+    fn validate(&self) -> Result<()> {
+        ProjectPlanSelection { work_ref: self.work_ref.clone() }.validate()?;
+        let digest = self.source_ref.strip_prefix("project-file.v1.")
+            .or_else(|| self.source_ref.strip_prefix("project-record.v1.")).ok_or("SELECTION_INVALID")?;
+        if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || self.expected_revision.len() != 40
+            || !self.expected_revision.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+            return Err("SELECTION_INVALID".into());
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, Copy)]
+enum ProjectKnowledgeReadKind { Catalogue, Memory, Source }
+impl ProjectKnowledgeReadKind {
+    fn path(self) -> &'static str { match self {
+        Self::Catalogue => "/workspace/project-knowledge/current",
+        Self::Memory => "/workspace/project-memory/current",
+        Self::Source => "/workspace/project-source/current",
+    }}
+    fn schema(self) -> &'static str { match self {
+        Self::Catalogue => "mastermind.workspace_project_knowledge.v1",
+        Self::Memory => "mastermind.workspace_project_preference.v1",
+        Self::Source => "mastermind.workspace_project_source.v1",
+    }}
+}
+fn project_knowledge_target(kind: ProjectKnowledgeReadKind, work_ref: &str,
+        source: Option<(&str, &str)>) -> Result<Url> {
+    ProjectPlanSelection { work_ref: work_ref.to_owned() }.validate()?;
+    if matches!(kind, ProjectKnowledgeReadKind::Source) != source.is_some() {
+        return Err("SELECTION_INVALID".into());
+    }
+    let mut url = Url::parse(&format!("{ORIGIN}{}",kind.path())).map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut().append_pair("work_ref",work_ref);
+    if let Some((source_ref,revision)) = source {
+        ProjectKnowledgeSourceSelection {work_ref:work_ref.to_owned(),source_ref:source_ref.to_owned(),expected_revision:revision.to_owned()}.validate()?;
+        url.query_pairs_mut().append_pair("source_ref",source_ref).append_pair("expected_revision",revision);
+    }
+    Ok(url)
+}
+async fn project_knowledge_read(app: AppHandle, kind: ProjectKnowledgeReadKind,
+        work_ref: String, source: Option<(String,String)>) -> Result<Value> {
+    let url = project_knowledge_target(kind,&work_ref,source.as_ref().map(|(a,b)|(a.as_str(),b.as_str())))?;
+    let state=app.state::<NativeAuth>();
+    let (token,generation)=ensure_native_token(&app,Resource::Acquisition).await?;
+    let response=state.http.get(url).bearer_auth(token).header("Accept","application/json")
+        .header("Cache-Control","no-store").send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result=if response.status().as_u16()==503 {
+        read_json_body(response,131_072).await.and_then(|value|typed_unavailable(value,kind.schema(),false))
+    } else { bounded_json(response,131_072).await };
+    if !state.lock()?.release_allowed(generation,Resource::Acquisition) {return Err("AUTHENTICATION_CHANGED".into());}
+    let value=result?;
+    let selected=value.get("selection").and_then(Value::as_object).ok_or("RESPONSE_INVALID")?;
+    let expected_count=if source.is_some(){2}else{1};
+    if value.get("schema").and_then(Value::as_str)!=Some(kind.schema()) || selected.len()!=expected_count
+        || selected.get("work_ref").and_then(Value::as_str)!=Some(work_ref.as_str()) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    if let Some((source_ref,revision))=source {
+        if selected.get("source_ref").and_then(Value::as_str)!=Some(source_ref.as_str())
+            || (value.get("availability").and_then(Value::as_str)==Some("AVAILABLE")
+                && value.get("source").and_then(|v|v.get("revision")).and_then(Value::as_str)!=Some(revision.as_str())) {
+            return Err("RESPONSE_INVALID".into());
+        }
+    }
+    Ok(value)
+}
+#[tauri::command]
+pub async fn read_project_knowledge_catalogue(app:AppHandle,selection:ProjectPlanSelection)->Result<Value>{
+    project_knowledge_read(app,ProjectKnowledgeReadKind::Catalogue,selection.work_ref,None).await
+}
+#[tauri::command]
+pub async fn read_project_knowledge_memory(app:AppHandle,selection:ProjectPlanSelection)->Result<Value>{
+    project_knowledge_read(app,ProjectKnowledgeReadKind::Memory,selection.work_ref,None).await
+}
+#[tauri::command]
+pub async fn read_project_knowledge_source(app:AppHandle,selection:ProjectKnowledgeSourceSelection)->Result<Value>{
+    selection.validate()?;
+    project_knowledge_read(app,ProjectKnowledgeReadKind::Source,selection.work_ref,Some((selection.source_ref,selection.expected_revision))).await
 }
 
 const PROJECT_JOURNAL_PATH: &str = "/workspace/project-journal/current";
@@ -1340,6 +1486,324 @@ mod project_admission_transport_tests {
 const PROJECT_SESSION_PATH: &str = "/workspace/project-session/current";
 const PROJECT_SESSION_SCHEMA: &str = "mastermind.workspace_project_session_association.v1";
 const PROJECT_SESSION_RESPONSE_CAP: usize = 16_384;
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceOperationContextSelection {
+    action: String,
+    work_ref: Option<String>,
+}
+fn source_operation_context_target(selection: &SourceOperationContextSelection) -> Result<Url> {
+    if !matches!(selection.action.as_str(), "publish_project_proposal" | "ADOPT_PLAN" | "ACCEPT_DIRECTION"
+        | "add_project_file" | "set_project_communication_preference") {
+        return Err("SELECTION_INVALID".into());
+    }
+    if let Some(work) = &selection.work_ref {
+        ProjectPlanSelection { work_ref: work.clone() }.validate()?;
+    } else if selection.action != "publish_project_proposal" {
+        return Err("SELECTION_INVALID".into());
+    }
+    let mut url = Url::parse(&format!("{ORIGIN}/workspace/source-operation/context"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut().append_pair("action", &selection.action);
+    if let Some(work) = &selection.work_ref {
+        url.query_pairs_mut().append_pair("work_ref", work);
+    }
+    Ok(url)
+}
+#[tauri::command]
+pub async fn read_source_operation_context(app: AppHandle, selection: SourceOperationContextSelection) -> Result<Value> {
+    let url = source_operation_context_target(&selection)?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = bounded_json(response, 4096).await;
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some("mastermind.workspace_source_operation_context.v1")
+        || value.get("selection").and_then(|s| s.get("action")).and_then(Value::as_str) != Some(selection.action.as_str())
+        || value.get("selection").and_then(|s| s.get("work_ref")).and_then(Value::as_str) != selection.work_ref.as_deref() {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
+}
+const SOURCE_OPERATION_CAP: usize = 32_768;
+const PROJECT_FILE_PREPARE_CAP: usize = 98_304;
+fn source_operation_keys(value: &Value, keys: &[&str]) -> Result<()> {
+    let object = value.as_object().ok_or("REQUEST_INVALID")?;
+    if object.len() != keys.len() || keys.iter().any(|key| !object.contains_key(*key)) {
+        return Err("REQUEST_INVALID".into());
+    }
+    Ok(())
+}
+fn source_operation_hex(value: Option<&str>, length: usize) -> bool {
+    value.is_some_and(|s| {
+        s.len() == length
+            && s.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
+}
+fn source_operation_identity(request: &Value) -> Result<(&str, &str, &str)> {
+    let action = request
+        .get("action")
+        .and_then(Value::as_str)
+        .ok_or("REQUEST_INVALID")?;
+    let prefix = match action {
+        "publish_project_proposal" => "mmos-project-create-",
+        "ADOPT_PLAN" => "mmos-project-adopt-",
+        "ACCEPT_DIRECTION" => "mmos-direction-accept-",
+        "add_project_file" => "mmos-project-file-add-",
+        "set_project_communication_preference" => "mmos-project-preference-set-",
+        _ => return Err("REQUEST_INVALID".into()),
+    };
+    let id = request
+        .get("request_id")
+        .and_then(Value::as_str)
+        .ok_or("REQUEST_INVALID")?;
+    if !id
+        .strip_prefix(prefix)
+        .is_some_and(|tail| source_operation_hex(Some(tail), 40))
+    {
+        return Err("REQUEST_INVALID".into());
+    }
+    let work = request
+        .get("work_ref")
+        .and_then(Value::as_str)
+        .ok_or("REQUEST_INVALID")?;
+    ProjectPlanSelection {
+        work_ref: work.to_owned(),
+    }
+    .validate()?;
+    Ok((action, id, work))
+}
+fn source_operation_target(kind: &str, request: &Value) -> Result<Url> {
+    let file_prepare = kind == "prepare" && request.get("action").and_then(Value::as_str) == Some("add_project_file");
+    let request_cap = if file_prepare { PROJECT_FILE_PREPARE_CAP } else { SOURCE_OPERATION_CAP };
+    if serde_json::to_vec(request)
+        .map_err(|_| "REQUEST_INVALID")?
+        .len()
+        > request_cap
+    {
+        return Err("REQUEST_INVALID".into());
+    }
+    if kind == "prepare" {
+        source_operation_keys(request, &["action", "request"])?;
+        let inner = request
+            .get("request")
+            .filter(|v| v.is_object())
+            .ok_or("REQUEST_INVALID")?;
+        if file_prepare {
+            source_operation_keys(inner, &["schema", "request_id", "work_ref", "source_commit", "base_revision", "file"])?;
+            let file = inner.get("file").ok_or("REQUEST_INVALID")?;
+            source_operation_keys(file, &["display_name", "media_type", "content_utf8"])?;
+            let name = file.get("display_name").and_then(Value::as_str).ok_or("REQUEST_INVALID")?;
+            let content = file.get("content_utf8").and_then(Value::as_str).ok_or("REQUEST_INVALID")?;
+            let (stem, suffix) = name.rsplit_once('.').ok_or("REQUEST_INVALID")?;
+            let media = if suffix.eq_ignore_ascii_case("md") { "text/markdown" } else if suffix.eq_ignore_ascii_case("txt") { "text/plain" } else { return Err("REQUEST_INVALID".into()); };
+            if inner.get("schema").and_then(Value::as_str) != Some("mastermind.project_file_add_request.v1")
+                || !source_operation_hex(inner.get("source_commit").and_then(Value::as_str), 40)
+                || !source_operation_hex(inner.get("base_revision").and_then(Value::as_str), 64)
+                || name.is_empty() || name.len() > 128 || stem.is_empty()
+                || name.chars().any(|c| c < '\u{20}' || ('\u{7f}'..='\u{9f}').contains(&c) || c == '/' || c == '\\')
+                || content.len() > 32_768
+                || content.chars().any(|c| (c < '\u{20}' && !matches!(c, '\n' | '\r' | '\t')) || ('\u{7f}'..='\u{9f}').contains(&c))
+                || file.get("media_type").and_then(Value::as_str) != Some(media) {
+                return Err("REQUEST_INVALID".into());
+            }
+        }
+        let action = request
+            .get("action")
+            .and_then(Value::as_str)
+            .ok_or("REQUEST_INVALID")?;
+        let work = inner.get("work_ref").and_then(Value::as_str);
+        source_operation_context_target(&SourceOperationContextSelection {
+            action: action.to_owned(),
+            work_ref: work.map(str::to_owned),
+        })?;
+        let prefix = match action {
+            "publish_project_proposal" => "mmos-project-create-",
+            "ADOPT_PLAN" => "mmos-project-adopt-",
+            "ACCEPT_DIRECTION" => "mmos-direction-accept-",
+            "add_project_file" => "mmos-project-file-add-",
+            "set_project_communication_preference" => "mmos-project-preference-set-",
+            _ => return Err("REQUEST_INVALID".into()),
+        };
+        if !inner
+            .get("request_id")
+            .and_then(Value::as_str)
+            .and_then(|id| id.strip_prefix(prefix))
+            .is_some_and(|tail| source_operation_hex(Some(tail), 40))
+        {
+            return Err("REQUEST_INVALID".into());
+        }
+    } else if kind == "submit" {
+        source_operation_keys(
+            request,
+            &["action", "request_id", "work_ref", "preview_witness"],
+        )?;
+        source_operation_identity(request)?;
+        let witness = request.get("preview_witness").ok_or("REQUEST_INVALID")?;
+        source_operation_keys(witness, &["original_input", "recipe_fingerprint_sha256"])?;
+        let input = witness.get("original_input").ok_or("REQUEST_INVALID")?;
+        source_operation_keys(
+            input,
+            &["schema", "input_ref", "artifact_sha256", "payload_sha256"],
+        )?;
+        if input.get("schema").and_then(Value::as_str)
+            != Some("mastermind.terminal_original_input_reference.v1")
+            || !input
+                .get("input_ref")
+                .and_then(Value::as_str)
+                .and_then(|r| r.strip_prefix("terminal-input:"))
+                .is_some_and(|tail| source_operation_hex(Some(tail), 64))
+            || !source_operation_hex(input.get("artifact_sha256").and_then(Value::as_str), 64)
+            || !source_operation_hex(input.get("payload_sha256").and_then(Value::as_str), 64)
+            || !source_operation_hex(
+                witness
+                    .get("recipe_fingerprint_sha256")
+                    .and_then(Value::as_str),
+                64,
+            )
+        {
+            return Err("REQUEST_INVALID".into());
+        }
+    } else if kind == "advance" {
+        source_operation_keys(
+            request,
+            &[
+                "schema",
+                "action",
+                "request_id",
+                "work_ref",
+                "phase_receipt_digest",
+            ],
+        )?;
+        let (action, _, _) = source_operation_identity(request)?;
+        if action != "ADOPT_PLAN"
+            || request.get("schema").and_then(Value::as_str)
+                != Some("mastermind.workspace_source_operation_advance.v1")
+            || !source_operation_hex(
+                request.get("phase_receipt_digest").and_then(Value::as_str),
+                64,
+            )
+        {
+            return Err("REQUEST_INVALID".into());
+        }
+    } else if kind == "read" || kind == "reconcile" {
+        let (action, _, _) = source_operation_identity(request)?;
+        if matches!(action, "add_project_file" | "set_project_communication_preference") {
+            source_operation_keys(request, &["action", "request_id", "work_ref", "source_commit", "base_revision", "request_sha256", "expected_preference_revision"])?;
+            let preference = request.get("expected_preference_revision").ok_or("REQUEST_INVALID")?;
+            if !source_operation_hex(request.get("source_commit").and_then(Value::as_str), 40)
+                || !source_operation_hex(request.get("base_revision").and_then(Value::as_str), 64)
+                || !source_operation_hex(request.get("request_sha256").and_then(Value::as_str), 64)
+                || (!preference.is_null() && !source_operation_hex(preference.as_str(), 64))
+                || (action == "add_project_file" && !preference.is_null()) {
+                return Err("REQUEST_INVALID".into());
+            }
+        } else {
+            source_operation_keys(request, &["schema", "action", "request_id", "work_ref"])?;
+            if request.get("schema").and_then(Value::as_str) != Some("mastermind.workspace_source_operation_lookup.v1") {
+                return Err("REQUEST_INVALID".into());
+            }
+        }
+    } else {
+        return Err("REQUEST_INVALID".into());
+    }
+    let suffix = if kind == "read" { "operation" } else { kind };
+    let mut url = Url::parse(&format!("{ORIGIN}/workspace/source-operation/{suffix}"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    if kind == "read" {
+        let (action, id, work) = source_operation_identity(request)?;
+        url.query_pairs_mut()
+            .append_pair("action", action)
+            .append_pair("request_id", id)
+            .append_pair("work_ref", work);
+        if matches!(action, "add_project_file" | "set_project_communication_preference") {
+            for field in ["source_commit", "base_revision", "request_sha256", "expected_preference_revision"] {
+                // The fixed HTTP owner decodes only literal null for the
+                // nullable preference preimage; POST keeps actual JSON null.
+                let value = request.get(field).ok_or("REQUEST_INVALID")?;
+                url.query_pairs_mut().append_pair(field, if value.is_null() { "null" } else { value.as_str().ok_or("REQUEST_INVALID")? });
+            }
+        }
+    }
+    Ok(url)
+}
+async fn source_operation_exchange(app: AppHandle, kind: &str, request: Value) -> Result<Value> {
+    let url = source_operation_target(kind, &request)?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let mut call = state
+        .http
+        .request(
+            if kind == "read" {
+                reqwest::Method::GET
+            } else {
+                reqwest::Method::POST
+            },
+            url,
+        )
+        .bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store");
+    if kind != "read" {
+        call = call.json(&request);
+    }
+    let response = call.send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = bounded_json(response, SOURCE_OPERATION_CAP).await;
+    if !state
+        .lock()?
+        .release_allowed(generation, Resource::Acquisition)
+    {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    let source = if kind == "prepare" {
+        request.get("request").ok_or("REQUEST_INVALID")?
+    } else {
+        &request
+    };
+    let schema = if kind == "prepare" {
+        "mastermind.workspace_source_operation_preview.v1"
+    } else {
+        "mastermind.workspace_source_operation_status.v1"
+    };
+    if value.get("schema").and_then(Value::as_str) != Some(schema)
+        || value.get("selection").and_then(|v| v.get("action")) != request.get("action")
+        || value.get("selection").and_then(|v| v.get("request_id")) != source.get("request_id")
+        || (source.get("work_ref").is_some()
+            && value.get("selection").and_then(|v| v.get("work_ref")) != source.get("work_ref"))
+    {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
+}
+#[tauri::command]
+pub async fn source_operation_prepare(app: AppHandle, request: Value) -> Result<Value> {
+    source_operation_exchange(app, "prepare", request).await
+}
+#[tauri::command]
+pub async fn source_operation_read(app: AppHandle, request: Value) -> Result<Value> {
+    source_operation_exchange(app, "read", request).await
+}
+#[tauri::command]
+pub async fn source_operation_submit(app: AppHandle, request: Value) -> Result<Value> {
+    source_operation_exchange(app, "submit", request).await
+}
+#[tauri::command]
+pub async fn source_operation_reconcile(app: AppHandle, request: Value) -> Result<Value> {
+    source_operation_exchange(app, "reconcile", request).await
+}
+#[tauri::command]
+pub async fn source_operation_advance(app: AppHandle, request: Value) -> Result<Value> {
+    source_operation_exchange(app, "advance", request).await
+}
+
 fn project_session_target(selection: &MissionSelection) -> Result<Url> {
     selection.validate()?;
     let key = selection.work_ref.strip_prefix("WS:").ok_or("SELECTION_INVALID")?;
@@ -2060,6 +2524,32 @@ fn original_reference_args(
     }
     Ok(args)
 }
+// Separate closed project-history selector. Never reinterpret an absent root
+// as a current/latest root, and never widen the incumbent selected-root command.
+fn project_original_reference_args(work_ref: &str, cursor: Option<&str>) -> Result<Value> {
+    let work = work_ref.strip_prefix("WS:").ok_or("SESSION_REFERENCES_INVALID")?;
+    if !(2..=64).contains(&work.len()) ||
+        !(work.as_bytes()[0].is_ascii_uppercase() || work.as_bytes()[0].is_ascii_digit()) ||
+        !work.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b)) {
+        return Err("SESSION_REFERENCES_INVALID".into());
+    }
+    if cursor.is_some_and(|value| !valid_reference_cursor(value)) {
+        return Err("SESSION_REFERENCES_INVALID".into());
+    }
+    let mut args = serde_json::json!({ "work_ref": work_ref, "page_size": 4 });
+    if let Some(cursor) = cursor { args["cursor"] = Value::String(cursor.to_owned()); }
+    Ok(args)
+}
+#[tauri::command]
+pub async fn executive_project_session_references(
+    app: AppHandle, work_ref: String, cursor: Option<String>,
+) -> Result<Value> {
+    let args = project_original_reference_args(&work_ref, cursor.as_deref())?;
+    let result = executive_post(app.clone(), "/os/executive/session/references",
+        serde_json::json!({ "arguments": args })).await;
+    if result.is_err() { emit(&app); }
+    result
+}
 #[tauri::command]
 pub async fn executive_session_context(app: AppHandle, selection: MissionSelection) -> Result<Value> {
     selection.validate()?;
@@ -2096,6 +2586,19 @@ pub async fn executive_session_references(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn project_history_omits_root_and_fixes_four_reference_budget() {
+        let args = project_original_reference_args("WS:ALPHA", Some("YQ==")).unwrap();
+        assert_eq!(args, serde_json::json!({"work_ref":"WS:ALPHA","page_size":4,"cursor":"YQ=="}));
+        assert!(args.get("root_job_id").is_none());
+        assert_eq!(project_original_reference_args("WS:ALPHA", None).unwrap(),
+            serde_json::json!({"work_ref":"WS:ALPHA","page_size":4}));
+        for work in ["WS:A", "WS:lower", "WS:ALPHA\n", "WS:../private", "https://private"] {
+            assert!(project_original_reference_args(work, None).is_err());
+        }
+        assert!(project_original_reference_args("WS:ALPHA", Some("abc/..")).is_err());
+        assert!(project_original_reference_args("WS:ALPHA", Some(&"A".repeat(2049))).is_err());
+    }
     #[test]
     fn native_original_reads_admit_only_closed_selection_operation_and_cursor() {
         let selected = MissionSelection { work_ref: "WS:ORIGINAL".into(), root_job_id: "JOB-1".into() };
@@ -3416,5 +3919,222 @@ mod project_direction_read_tests {
             "selection": {"work_ref": "WS:DIRECTION-TEST"}}), &selected));
         assert!(!project_direction_header_matches(&serde_json::json!({"schema": PROJECT_DIRECTION_SCHEMA,
             "selection": {"work_ref": "WS:OTHER"}}), &selected));
+    }
+}
+
+#[cfg(test)]
+mod project_archive_read_tests {
+    use super::*;
+    #[test]
+    fn project_archive_has_only_one_fixed_rootless_acquisition_target() {
+        let target = project_archive_target().unwrap();
+        assert_eq!(target.origin().ascii_serialization(), ORIGIN);
+        assert_eq!(target.path(), "/workspace/projects/archive/current");
+        assert!(target.query().is_none());
+        assert_eq!(PROJECT_ARCHIVE_RESPONSE_CAP, 262_144);
+        assert_eq!(PROJECT_ARCHIVE_SCHEMA, "mastermind.workspace_project_archive.v1");
+    }
+    #[test]
+    fn project_archive_continuation_has_only_fixed_member_and_digest_selectors() {
+        let cursor = ProjectArchiveCursor { after_work_ref: "WS:PAGE-127".into(), catalogue_digest: "a".repeat(64) };
+        let target = project_archive_page_target(&cursor).unwrap();
+        assert_eq!(target.origin().ascii_serialization(), ORIGIN);
+        assert_eq!(target.path(), PROJECT_ARCHIVE_PATH);
+        assert_eq!(target.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect::<Vec<_>>(),
+            vec![("after_work_ref".to_owned(), "WS:PAGE-127".to_owned()), ("catalogue_digest".to_owned(), "a".repeat(64))]);
+        let extra = serde_json::json!({"after_work_ref":"WS:PAGE-127","catalogue_digest":"a".repeat(64),"root_job_id":"JOB-1"});
+        assert!(serde_json::from_value::<ProjectArchiveCursor>(extra).is_err());
+        assert!(project_archive_page_target(&ProjectArchiveCursor { after_work_ref: "../private".into(), catalogue_digest: "a".repeat(64) }).is_err());
+        assert!(project_archive_page_target(&ProjectArchiveCursor { after_work_ref: "WS:PAGE-127".into(), catalogue_digest: "A".repeat(64) }).is_err());
+    }
+}
+
+#[cfg(test)]
+mod source_operation_transport_tests {
+    use super::*;
+    fn lookup() -> Value {
+        serde_json::json!({"schema":"mastermind.workspace_source_operation_lookup.v1","action":"ADOPT_PLAN","request_id":format!("mmos-project-adopt-{}","a".repeat(40)),"work_ref":"WS:TEST"})
+    }
+    #[test]
+    fn file_prepare_uses_actual_utf8_serializer_with_decoded_content_limit() {
+        for unit in ["\"", "\\", "\r", "\n", "\t", "中文😀", "\"\\\r\n\t中文😀"] {
+            let content = unit.repeat(32_768 / unit.len()) + &"x".repeat(32_768 % unit.len());
+            let mut body = serde_json::json!({"action":"add_project_file","request":{
+                "schema":"mastermind.project_file_add_request.v1","request_id":format!("mmos-project-file-add-{}","a".repeat(40)),
+                "work_ref":format!("WS:{}","A".repeat(64)),"source_commit":"b".repeat(40),"base_revision":"c".repeat(64),
+                "file":{"display_name":format!("{}.MD","\"".repeat(125)),"media_type":"text/markdown","content_utf8":content}}});
+            let actual = serde_json::to_vec(&body).unwrap();
+            assert!(actual.len() > SOURCE_OPERATION_CAP && actual.len() <= PROJECT_FILE_PREPARE_CAP);
+            assert_eq!(serde_json::from_slice::<Value>(&actual).unwrap()["request"]["file"]["content_utf8"], content);
+            assert!(source_operation_target("prepare", &body).is_ok());
+            body["request"]["file"]["content_utf8"] = serde_json::json!(format!("{content}x"));
+            assert!(source_operation_target("prepare", &body).is_err());
+            let other = serde_json::json!({"action":"ADOPT_PLAN","request":{"request_id":format!("mmos-project-adopt-{}","a".repeat(40)),"work_ref":"WS:TEST","body":content}});
+            assert!(source_operation_target("prepare", &other).is_err());
+        }
+    }
+    fn knowledge_lookup(preference: bool) -> Value {
+        serde_json::json!({"action": if preference {"set_project_communication_preference"} else {"add_project_file"},
+            "request_id": format!("{}{}", if preference {"mmos-project-preference-set-"} else {"mmos-project-file-add-"}, "a".repeat(40)),
+            "work_ref":"WS:TEST", "source_commit":"b".repeat(40), "base_revision":"c".repeat(64),
+            "request_sha256":"d".repeat(64), "expected_preference_revision": if preference {Value::String("e".repeat(64))} else {Value::Null}})
+    }
+    #[test]
+    fn knowledge_original_lookup_preserves_closed_seven_fields_and_null_encoding() {
+        for preference in [false, true] {
+            let body = knowledge_lookup(preference);
+            let url = source_operation_target("read", &body).unwrap();
+            let pairs: std::collections::HashMap<_,_> = url.query_pairs().into_owned().collect();
+            assert_eq!(pairs.len(), 7);
+            assert_eq!(pairs["expected_preference_revision"], if preference {"e".repeat(64)} else {"null".to_owned()});
+            assert_eq!(pairs["request_sha256"], "d".repeat(64));
+            assert_eq!(source_operation_target("reconcile", &body).unwrap().query(), None);
+            assert_eq!(body["expected_preference_revision"].is_null(), !preference);
+        }
+    }
+    #[test]
+    fn knowledge_lookup_refuses_extra_authority_and_mismatched_original_fields() {
+        for (field, value) in [("schema",serde_json::json!("mastermind.workspace_source_operation_lookup.v1")),
+            ("source_commit",serde_json::json!("B".repeat(40))), ("base_revision",serde_json::json!("short")),
+            ("request_sha256",serde_json::json!(format!("{}\n","d".repeat(64)))),
+            ("expected_preference_revision",serde_json::json!("e".repeat(64))),
+            ("principal_scope",serde_json::json!("f".repeat(64))), ("source_path",serde_json::json!("/private/file")),
+            ("work_ref",serde_json::json!("WS:OTHER\n")),
+            ("request_id",serde_json::json!(format!("mmos-project-preference-set-{}","a".repeat(40))))] {
+            let mut body=knowledge_lookup(false); body[field]=value;
+            assert!(source_operation_target("read",&body).is_err(),"{field}");
+            assert!(source_operation_target("reconcile",&body).is_err(),"{field}");
+        }
+        let mut graft=knowledge_lookup(false);graft["action"]=serde_json::json!("ADOPT_PLAN");
+        graft["request_id"]=serde_json::json!(format!("mmos-project-adopt-{}","a".repeat(40)));
+        assert!(source_operation_target("read",&graft).is_err());
+    }
+    #[test]
+    fn source_operation_transport_fixed_targets_preserve_original_identity() {
+        let body = lookup();
+        let url = source_operation_target("read", &body).unwrap();
+        assert_eq!(url.path(), "/workspace/source-operation/operation");
+        assert_eq!(
+            url.query_pairs().collect::<Vec<_>>(),
+            vec![
+                ("action".into(), "ADOPT_PLAN".into()),
+                (
+                    "request_id".into(),
+                    format!("mmos-project-adopt-{}", "a".repeat(40)).into()
+                ),
+                ("work_ref".into(), "WS:TEST".into())
+            ]
+        );
+        let reconcile = source_operation_target("reconcile", &body).unwrap();
+        assert_eq!(reconcile.path(), "/workspace/source-operation/reconcile");
+        assert_eq!(reconcile.query(), None);
+        let mut advance = body.clone();
+        advance["schema"] = "mastermind.workspace_source_operation_advance.v1".into();
+        advance["phase_receipt_digest"] = "f".repeat(64).into();
+        assert_eq!(
+            source_operation_target("advance", &advance).unwrap().path(),
+            "/workspace/source-operation/advance"
+        );
+        let prepare = serde_json::json!({"action":"ADOPT_PLAN","request":{"request_id":body["request_id"],"work_ref":"WS:TEST"}});
+        assert_eq!(
+            source_operation_target("prepare", &prepare).unwrap().path(),
+            "/workspace/source-operation/prepare"
+        );
+        assert_eq!(SOURCE_OPERATION_CAP, 32768);
+    }
+    #[test]
+    fn source_operation_transport_rejects_forged_identity_extra_authority_and_payloads() {
+        for (key, value) in [
+            ("principal", serde_json::json!("caller")),
+            ("work_ref", serde_json::json!("WS:TEST\n")),
+            (
+                "request_id",
+                serde_json::json!(format!("mmos-project-create-{}", "a".repeat(40))),
+            ),
+        ] {
+            let mut body = lookup();
+            body[key] = value;
+            assert!(source_operation_target("read", &body).is_err());
+        }
+        let mut file = lookup();
+        file["action"] = "add_project_file".into();
+        file["request_id"] = format!("mmos-project-file-add-{}", "a".repeat(40)).into();
+        assert!(source_operation_target("read", &file).is_err());
+        let oversized = serde_json::json!({"action":"ADOPT_PLAN","request":{"request_id":lookup()["request_id"],"work_ref":"WS:TEST","content":"x".repeat(32768)}});
+        assert!(source_operation_target("prepare", &oversized).is_err());
+        let mut advance = lookup();
+        advance["schema"] = "mastermind.workspace_source_operation_advance.v1".into();
+        advance["phase_receipt_digest"] = format!("{}\n", "f".repeat(64)).into();
+        assert!(source_operation_target("advance", &advance).is_err());
+        let submit = serde_json::json!({"action":"ADOPT_PLAN","request_id":lookup()["request_id"],"work_ref":"WS:TEST","preview_witness":{"principal":"caller"}});
+        assert!(source_operation_target("submit", &submit).is_err());
+        assert!(source_operation_target("caller/path", &lookup()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod project_knowledge_read_tests {
+    use super::*;
+    #[test]
+    fn three_reads_have_only_fixed_rootless_project_routes() {
+        for (kind,path) in [(ProjectKnowledgeReadKind::Catalogue,"/workspace/project-knowledge/current"),
+                (ProjectKnowledgeReadKind::Memory,"/workspace/project-memory/current")] {
+            let url=project_knowledge_target(kind,"WS:ONE",None).unwrap();
+            assert_eq!(url.path(),path);
+            assert_eq!(url.query_pairs().map(|(k,v)|(k.into_owned(),v.into_owned())).collect::<Vec<_>>(),vec![("work_ref".to_string(),"WS:ONE".to_string())]);
+        }
+        let reference=format!("project-file.v1.{}","a".repeat(64)); let revision="b".repeat(40);
+        let url=project_knowledge_target(ProjectKnowledgeReadKind::Source,"WS:ONE",Some((&reference,&revision))).unwrap();
+        assert_eq!(url.path(),"/workspace/project-source/current");
+        assert_eq!(url.query_pairs().map(|(k,v)|(k.into_owned(),v.into_owned())).collect::<Vec<_>>(),vec![("work_ref".to_string(),"WS:ONE".to_string()),("source_ref".to_string(),reference),("expected_revision".to_string(),revision)]);
+    }
+    #[test]
+    fn source_selector_rejects_paths_and_foreign_principal_selectors() {
+        let valid=serde_json::json!({"work_ref":"WS:ONE","source_ref":format!("project-record.v1.{}","a".repeat(64)),"expected_revision":"b".repeat(40)});
+        let parsed:ProjectKnowledgeSourceSelection=serde_json::from_value(valid.clone()).unwrap();assert!(parsed.validate().is_ok());
+        for key in ["path","root_job_id","principal_scope","provider_session_id"] {
+            let mut value=valid.clone();value.as_object_mut().unwrap().insert(key.to_string(),serde_json::json!("caller"));
+            assert!(serde_json::from_value::<ProjectKnowledgeSourceSelection>(value).is_err());
+        }
+        for reference in ["docs/private.md","https://example.com/file","project-file.v1.not-a-digest"] {
+            assert!(project_knowledge_target(ProjectKnowledgeReadKind::Source,"WS:ONE",Some((reference,&"b".repeat(40)))).is_err());
+        }
+    }
+    #[test]
+    fn source_tuple_is_neither_optional_nor_transferable_to_another_read_kind() {
+        assert!(project_knowledge_target(ProjectKnowledgeReadKind::Source,"WS:ONE",None).is_err());
+        assert!(project_knowledge_target(ProjectKnowledgeReadKind::Memory,"WS:ONE",Some((&format!("project-file.v1.{}","a".repeat(64)),&"b".repeat(40)))).is_err());
+        assert!(project_knowledge_target(ProjectKnowledgeReadKind::Catalogue,"WS:ONE\n",None).is_err());
+        assert!(project_knowledge_target(ProjectKnowledgeReadKind::Source,"WS:ONE",Some((&format!("project-file.v1.{}\n","a".repeat(64)),&"b".repeat(40)))).is_err());
+    }
+}
+
+#[cfg(test)]
+mod source_operation_context_tests {
+    use super::*;
+    #[test]
+    fn source_context_uses_only_fixed_action_and_optional_canonical_work() {
+        let selection: SourceOperationContextSelection = serde_json::from_value(serde_json::json!({
+            "action": "ADOPT_PLAN", "work_ref": "WS:PROJECT-TEST"
+        })).unwrap();
+        let url = source_operation_context_target(&selection).unwrap();
+        assert_eq!(url.as_str(), "https://mcp.mastermind-x.com/workspace/source-operation/context?action=ADOPT_PLAN&work_ref=WS%3APROJECT-TEST");
+        let creation: SourceOperationContextSelection = serde_json::from_value(serde_json::json!({
+            "action": "publish_project_proposal", "work_ref": null
+        })).unwrap();
+        assert_eq!(source_operation_context_target(&creation).unwrap().query(), Some("action=publish_project_proposal"));
+    }
+    #[test]
+    fn source_context_rejects_principal_grant_and_non_source_action_selectors() {
+        assert!(serde_json::from_value::<SourceOperationContextSelection>(serde_json::json!({
+            "action": "ADOPT_PLAN", "work_ref": "WS:TEST", "principal_scope": "a".repeat(64)
+        })).is_err());
+        for (action, work) in [("pause_workstream_admission", Some("WS:TEST")),
+            ("ADOPT_PLAN\n", Some("WS:TEST")), ("ADOPT_PLAN", None),
+            ("ADOPT_PLAN", Some("WS:TEST\n")), ("ADOPT_PLAN", Some("WS:lower"))] {
+            assert!(source_operation_context_target(&SourceOperationContextSelection {
+                action: action.into(), work_ref: work.map(str::to_string)
+            }).is_err());
+        }
     }
 }

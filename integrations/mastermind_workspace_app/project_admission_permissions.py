@@ -22,6 +22,10 @@ class _WorkspaceProjectAdmissionPermissionsOwner:
     def _authorizer(self,*,action,work_ref):
         return self._factory(policy=self._policy,load_bindings=self._load_bindings,action=action,work_ref=work_ref)[1]
 
+    def _instruction_authorizer(self,*,work_ref,instruction_ref):
+        return self._factory(policy=self._policy,load_bindings=self._load_bindings,
+            action=grant_owner.INSTRUCTION_SUSPEND_ACTION,work_ref=work_ref,instruction_ref=instruction_ref)[1]
+
 
 def project_admission_permissions(*,policy,load_bindings):
     """Existing installer composes this source; construction grants nothing."""
@@ -31,3 +35,14 @@ def project_admission_permissions(*,policy,load_bindings):
             and type(value._policy) is ResourcePolicy and astuple(value._policy)==value._policy_snapshot
             and value._factory is grant_owner.workspace_project_authorizers)
     return _issue_project_admission_permissions(owner,qualified_owner=qualified)
+
+
+def instruction_admission_permissions(*,policy,load_bindings):
+    """Same sealed owner, distinct stable instruction-scoped grant function."""
+    from control_plane.workspace_instruction_permission_binding import _issue_instruction_permissions
+    owner=_WorkspaceProjectAdmissionPermissionsOwner(policy,load_bindings)
+    def qualified(value):
+        return (type(value) is _WorkspaceProjectAdmissionPermissionsOwner
+            and type(value._policy) is ResourcePolicy and astuple(value._policy)==value._policy_snapshot
+            and value._factory is grant_owner.workspace_project_authorizers)
+    return _issue_instruction_permissions(owner,qualified_owner=qualified)

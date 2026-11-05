@@ -173,10 +173,10 @@ describe("Atelier Today", () => {
     for (const refs of receiptCases) {
       const mission = chairmanOwed("Hold delivery", refs as never);
       const rendered = renderToday({ projection: projection({ mission: { source: snapshot(mission).source, value: mission, reason: null } }) });
-      expect(screen.getByText("Decision summary unavailable")).toBeTruthy();
+      expect(screen.getAllByText("Decisions")[0]).toBeTruthy();
       expect(screen.queryByText("Nothing needs your decision")).toBeNull();
       expect(screen.queryByRole("button", { name: "Open project" })).toBeNull();
-      expect(screen.getByText("Missing information doesn’t mean there are no decisions.")).toBeTruthy();
+      expect(screen.getByText("Decision information is unavailable right now.")).toBeTruthy();
       rendered.view.unmount();
     }
   });
@@ -186,7 +186,7 @@ describe("Atelier Today", () => {
       const mission = chairmanOwed();
       const read = { source: { ...snapshot(mission).source, state }, value: state === "WITHHELD" || state === "UNAVAILABLE" ? null : mission, reason: `SOURCE_${state}` };
       renderToday({ projection: projection({ mission: read }) });
-      expect(screen.getByText("Decision summary unavailable")).toBeTruthy();
+      expect(screen.getAllByText("Decisions")[0]).toBeTruthy();
       expect(screen.queryByText("Nothing needs your decision")).toBeNull();
       expect(screen.queryByText("Chairman request · Alpha program")).toBeNull();
       expect(screen.getByRole("button", { name: "Open inbox" })).toBeTruthy();
@@ -196,7 +196,7 @@ describe("Atelier Today", () => {
     const state = projection();
     state.mission.source.coverage = coverage;
     renderToday({projection:state});
-    expect(screen.getByText("Decision summary unavailable")).toBeTruthy();
+    expect(screen.getAllByText("Decisions")[0]).toBeTruthy();
     expect(screen.queryByText("Nothing needs your decision")).toBeNull();
   });
 
@@ -222,7 +222,7 @@ describe("Atelier Today", () => {
     expect(screen.getByRole("heading",{name:"Your team owns the next step"})).toBeTruthy();
     expect(screen.getByText("Next turn · worker")).toBeTruthy();
     expect(screen.queryByRole("heading",{name:"Needs your decision"})).toBeNull();
-    expect(screen.queryByText("Decision summary unavailable")).toBeNull();
+    expect(screen.queryByText("Decision information is unavailable right now.")).toBeNull();
   });
 
   it("keeps a selected Mission effect-unknown warning visible even with a qualified attention request", () => {
@@ -261,8 +261,8 @@ describe("Atelier Today", () => {
 
   it("offers stale programs only as retained facts without current navigation", () => {
     const { onOpenMission } = renderToday({ projection: projection({ programs: programsRead([card], "STALE") }) });
-    expect(screen.getByText("Project facts cannot be displayed from this source.")).toBeTruthy();
-    expect(screen.getByText("SOURCE_STALE")).toBeTruthy();
+    expect(screen.getByText("Projects are unavailable right now.")).toBeTruthy();
+    expect(screen.getByText("STALE")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Open project/ })).toBeNull();
     expect(onOpenMission).not.toHaveBeenCalled();
   });
@@ -288,7 +288,7 @@ describe("Atelier Today", () => {
       onOpenInbox={vi.fn()} onOpenProjects={vi.fn()} onOpenMission={vi.fn()} />);
     expect(screen.queryByText("Chairman request · Alpha program")).toBeNull();
     expect(screen.queryByRole("button", { name: /Open project/ })).toBeNull();
-    expect(screen.getByText("Decision summary unavailable")).toBeTruthy();
+    expect(screen.getAllByText("Decisions")[0]).toBeTruthy();
     // A different selected mission also clears prior scope markers.
     const moved = projection({ programs: programsRead([card]) });
     moved.context = { ...moved.context, selection: { workRef: "WS:BETA", rootJobId: "JOB-ROOT" } };
@@ -408,7 +408,7 @@ describe("Atelier Today", () => {
     fireEvent.click(screen.getByRole("button", { name: "打开项目" }));
     expect(onOpenMission).toHaveBeenCalledExactlyOnceWith({ workRef: "WS:ALPHA", rootJobId: "JOB-ROOT" });
     expect(screen.queryByText("Nothing needs your decision")).toBeNull();
-    expect(screen.queryByText("Decision summary unavailable")).toBeNull();
+    expect(screen.queryByText("Decision information is unavailable right now.")).toBeNull();
   });
 
   it("keeps receipt semantics visible compactly without inventing new facts", () => {
