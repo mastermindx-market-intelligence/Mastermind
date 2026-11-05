@@ -371,6 +371,7 @@ class OsExecutiveTransportApp:
         "/os/executive/project-planning/status",
         "/os/executive/project-planning/result",
         "/os/executive/project-planning/consume",
+        "/os/executive/project-planning/prepare_proposal",
     )
 
     def __init__(

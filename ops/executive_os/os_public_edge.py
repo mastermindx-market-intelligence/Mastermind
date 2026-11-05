@@ -91,6 +91,10 @@ PRE_JOURNEY_POST_ROUTES = POST_ROUTES
 GET_ROUTES = PRE_JOURNEY_GET_ROUTES + ("/workspace/source-operation/options",)
 PROJECT_PLANNING_POST_ROUTES = tuple("/os/executive/project-planning/"+name for name in ("submit","status","result","consume"))
 POST_ROUTES = PRE_JOURNEY_POST_ROUTES + PROJECT_PLANNING_POST_ROUTES
+PRE_PLAN_PROPOSAL_GET_ROUTES = GET_ROUTES
+PRE_PLAN_PROPOSAL_POST_ROUTES = POST_ROUTES
+PROJECT_PLANNING_POST_ROUTES += ("/os/executive/project-planning/prepare_proposal",)
+POST_ROUTES = PRE_PLAN_PROPOSAL_POST_ROUTES + ("/os/executive/project-planning/prepare_proposal",)
 
 # Preserve exactly the profiles admitted by the two predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
@@ -119,6 +123,7 @@ TRANSITION_ROUTE_PROFILES = (
     (PRE_INSTRUCTION_ADMISSION_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
     (PRE_PROJECT_ACCESS_GET_ROUTES, PRE_JOURNEY_POST_ROUTES),
     (PRE_JOURNEY_GET_ROUTES, PRE_JOURNEY_POST_ROUTES),
+    (PRE_PLAN_PROPOSAL_GET_ROUTES, PRE_PLAN_PROPOSAL_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 

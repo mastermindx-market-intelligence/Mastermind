@@ -14,7 +14,7 @@ from integrations.mastermind_executive_app.direct_native import DirectNativeResu
 from integrations.session_bridge.http_foreground import owned_request,bind_request
 
 HEADER=b'x-mastermind-workspace-authorization'
-ROUTES={f'/os/executive/project-planning/{name}':name for name in ('submit','status','result','consume')}
+ROUTES={f'/os/executive/project-planning/{name}':name for name in ('submit','status','result','consume','prepare_proposal')}
 
 
 async def dispatch(owner,scope,body,principal,*,operation,receive):
