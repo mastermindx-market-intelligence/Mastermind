@@ -5999,7 +5999,7 @@ class ExecutiveControlService:
                     from integrations.session_bridge.installed import _principal
                     from integrations.session_bridge.project_conversations import RuntimeProjectConversationsReader
                     from control_plane.fresh_conversation import FreshConversationOwner
-                    frame = conversation_read_wire.frame(parsed)
+                    frame = conversation_read_wire.decode_frame(raw)
                     principal = _principal(frame["principal"])
                     runtime = self._require_runtime()
                     factory = app_binding.project_conversation_read_provider_factory
