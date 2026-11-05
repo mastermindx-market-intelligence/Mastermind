@@ -563,3 +563,24 @@
 .auth-entry__preferences .display-preferences__toggle:hover {
   background: transparent;
 }
+
+.auth-entry__recovery-notice {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 20px;
+}
+.auth-entry__recovery-notice p {
+  margin: 0;
+}
+.auth-entry__protected-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--text);
+  text-underline-offset: 3px;
+}
+.auth-entry__protected-link:focus-visible,
+.auth-entry__protected:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}

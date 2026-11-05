@@ -379,4 +379,29 @@ describe("AuthEntry", () => {
     );
     expect(screen.getAllByRole("button")).toHaveLength(1);
   });
+  it("points to guarded unfinished work before the supplied sign-in action", () => {
+    const { container } = render(
+      <AuthEntry
+        {...entryProps({
+          protectedWork: (
+            <textarea
+              aria-label="Guarded local draft"
+              defaultValue="Exact user text"
+            />
+          ),
+        })}
+      />,
+    );
+    const link = screen.getByRole("link", { name: "Review unfinished work" });
+    const button = screen.getByRole("button", { name: "Sign in" });
+    expect(
+      Boolean(
+        link.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
+    expect(link.getAttribute("href")).toBe("#auth-entry-protected");
+    expect(
+      container.querySelector("#auth-entry-protected textarea"),
+    ).toBeTruthy();
+  });
 });

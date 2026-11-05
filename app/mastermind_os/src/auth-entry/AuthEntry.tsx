@@ -248,6 +248,23 @@ export function AuthEntry({
                 </p>
               ) : null}
 
+              {protectedWork && (
+                <div className="auth-entry__recovery-notice" role="status">
+                  <p>
+                    {locale === "en"
+                      ? "Review unfinished work below before signing in."
+                      : "登录前，请先查看下方未完成的工作。"}
+                  </p>
+                  <a
+                    className="auth-entry__protected-link"
+                    href="#auth-entry-protected"
+                  >
+                    {locale === "en"
+                      ? "Review unfinished work"
+                      : "查看未完成的工作"}
+                  </a>
+                </div>
+              )}
               <div className="auth-entry__control">{authenticationControl}</div>
 
               {preferencesControl ? (
@@ -267,7 +284,13 @@ export function AuthEntry({
         </div>
 
         {protectedWork ? (
-          <section className="auth-entry__protected">{protectedWork}</section>
+          <section
+            className="auth-entry__protected"
+            id="auth-entry-protected"
+            tabIndex={-1}
+          >
+            {protectedWork}
+          </section>
         ) : null}
       </main>
 
