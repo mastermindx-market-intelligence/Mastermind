@@ -519,3 +519,25 @@
     display: none;
   }
 }
+
+/* Entry keeps the incumbent preference disclosure secondary to Sign in.
+   Only this presentation wrapper changes; the owner, fields and focus stay. */
+.auth-entry__preferences .display-preferences {
+  max-width: none;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+.auth-entry__preferences .display-preferences__toggle {
+  padding: 8px 0;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.auth-entry__preferences .display-preferences__toggle:hover {
+  color: var(--text);
+}

@@ -204,7 +204,20 @@ export function AuthEntry({
           <section className="auth-entry__story">
             <div className="auth-entry__story-copy">
               <p className="auth-entry__story-eyebrow">{copy.storyEyebrow}</p>
-              <h1 className="auth-entry__title">{copy.storyTitle}</h1>
+              <h1 className="auth-entry__title">
+                {locale === "en" ? (
+                  <>
+                    Your company, <br />
+                    in focus.
+                  </>
+                ) : (
+                  <>
+                    让公司事务，
+                    <br />
+                    清晰在握。
+                  </>
+                )}
+              </h1>
               <p className="auth-entry__subtitle">{copy.storySubtitle}</p>
             </div>
             {illustrationSrc ? (
