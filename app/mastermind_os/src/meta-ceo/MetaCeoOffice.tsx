@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { createDirectionPreview, previewIsCurrent, type DirectionPreview } from "./preview";
+import {
+  createDirectionPreview, previewIsCurrent, type DirectionPreview, type OfficeLaunchOutcome,
+} from "./preview";
 import { ProgrammeDirection, type ProgrammeDirectionProps } from "../direction/ProgrammeDirection";
 import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceClaim } from "./projection";
 import "./office.css";
@@ -35,6 +37,12 @@ export interface MetaCeoOfficeProps {
   nativeContinuation?: ReactNode;
   /** Reuse App's exact Result owner reader; this component never acquires content. */
   onInspectWorkerResult?: (selection: ResultSelection) => void;
+  /**
+   * The existing launch owner. Supplied only when the actual launch binding
+   * can offer a handoff. The request is effect-free: it neither prepares nor
+   * submits, and this component keeps the Office draft either way.
+   */
+  onStartNewWork?: (preview: DirectionPreview) => OfficeLaunchOutcome;
   locale?: "en" | "zh-CN";
 }
 
@@ -126,7 +134,15 @@ const OFFICE_ZH = {
   "Mission": "任务",
   "Projects": "项目",
   "Return": "返回结果",
-  "Conversation": "对话"
+  "Conversation": "对话",
+  "Start new work": "开始新工作",
+  "This opens the existing launch form with this exact direction. Nothing is prepared or sent until you launch it there.": "这会用这段确切方向打开已有的启动表单。在那里启动之前，不会准备或发送任何内容。",
+  "The existing launch form now holds this exact direction. Review the project and profile there, then launch.": "已有的启动表单现已填入这段确切方向。请在那里核对项目与执行方式，然后启动。",
+  "This preview is no longer current. Review the direction again before starting new work.": "此预览已不再有效。请重新查看方向预览后再开始新工作。",
+  "The existing launch owner cannot offer a handoff here. Your direction is kept.": "已有的启动负责人此处无法提供交接。您的方向已保留。",
+  "This direction names another workstream than the configured launch. The handoff is refused so no other workstream is targeted.": "此方向指向的工作流与已配置的启动不同。为避免指向其他工作流，已拒绝交接。",
+  "An unsent launch goal already exists. It is kept as it is; resolve it before starting new work.": "已存在未发送的启动目标。该目标原样保留；请先处理它再开始新工作。",
+  "An original launch command is still held on its own pointer. Reconcile it before starting new work.": "原有启动命令仍在自己的指针上保持。请先完成核对再开始新工作。"
 } as const;
 
 function SourceBadge({ source }: { source: SourceClaim }) {
@@ -134,11 +150,13 @@ function SourceBadge({ source }: { source: SourceClaim }) {
 }
 
 export function MetaCeoOffice({
-  projection, draft, onDraftChange, nativeContinuation, onInspectWorkerResult, programmeDirection, locale = "en",
+  projection, draft, onDraftChange, nativeContinuation, onInspectWorkerResult, programmeDirection,
+  onStartNewWork, locale = "en",
 }: MetaCeoOfficeProps) {
   const t = (en: keyof typeof OFFICE_ZH): string => locale === "zh-CN" ? OFFICE_ZH[en] : en;
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [preview, setPreview] = useState<DirectionPreview | null>(null);
+  const [launchOutcome, setLaunchOutcome] = useState<OfficeLaunchOutcome | null>(null);
   const previewButton = useRef<HTMLButtonElement>(null);
   const sourcesButton = useRef<HTMLButtonElement>(null);
   const previewPanel = useRef<HTMLElement>(null);
@@ -170,11 +188,19 @@ export function MetaCeoOffice({
   ] as const;
   const closePreview = () => {
     setPreview(null);
+    setLaunchOutcome(null);
     if (previewButton.current?.isConnected) previewButton.current.focus();
   };
   const closeSources = () => {
     setSourcesOpen(false);
     if (sourcesButton.current?.isConnected) sourcesButton.current.focus();
+  };
+  // The handoff request is effect-free: it asks the existing launch owner to
+  // take this exact frozen direction. It prepares and submits nothing here,
+  // and the Office draft is never cleared by it.
+  const startNewWork = () => {
+    if (!visiblePreview || !onStartNewWork) return;
+    setLaunchOutcome(onStartNewWork(visiblePreview));
   };
 
   const nativeSessionQualified = nativeContinuation != null &&
@@ -333,7 +359,7 @@ export function MetaCeoOffice({
       </div>
       <button ref={previewButton} className="office-primary" type="button" disabled={!draftAssociated || !draft.text.trim()}
         aria-controls={previewPanelId} aria-expanded={!!visiblePreview}
-        onClick={() => setPreview(createDirectionPreview(projection, draft.text))}>{t("Review direction preview")}</button>
+        onClick={() => { setLaunchOutcome(null); setPreview(createDirectionPreview(projection, draft.text)); }}>{t("Review direction preview")}</button>
     </section>
     {visiblePreview && <section ref={previewPanel} id={previewPanelId} tabIndex={-1} className="office-panel office-preview" aria-label={t("Direction preview")} onKeyDown={event => { if (event.key === "Escape") closePreview(); }}>
       <div className="office-section-label"><h2>{t("Frozen direction preview")}</h2><span className="office-state">EFFECT_NONE</span></div>
@@ -342,6 +368,26 @@ export function MetaCeoOffice({
       <p>{t("Binding generation")} · {String(visiblePreview.context.bindingGeneration ?? t("unknown"))}</p>
       <p>{t("Content permission · NOT_PROJECTED. Command permission · NOT_PROJECTED.")}</p>
       <p>{t("Inspecting this preview supplies no authorization. Submission requires the canonical command owner.")}</p>
+      {onStartNewWork ? <>
+        <p className="office-muted">{t("This opens the existing launch form with this exact direction. Nothing is prepared or sent until you launch it there.")}</p>
+        <button type="button" className="office-primary" disabled={launchOutcome?.status === "OPENED"} onClick={startNewWork}>
+          {t("Start new work")}
+        </button>
+      </> : null}
+      {launchOutcome?.status === "OPENED" ? <p role="status" className="office-muted">
+        {t("The existing launch form now holds this exact direction. Review the project and profile there, then launch.")}
+      </p> : null}
+      {launchOutcome?.status === "REFUSED" ? <p role="alert" className="office-muted">
+        {launchOutcome.reason === "PREVIEW_NOT_CURRENT"
+          ? t("This preview is no longer current. Review the direction again before starting new work.")
+          : launchOutcome.reason === "LAUNCH_OWNER_UNAVAILABLE"
+            ? t("The existing launch owner cannot offer a handoff here. Your direction is kept.")
+            : launchOutcome.reason === "WORKSTREAM_MISMATCH"
+              ? t("This direction names another workstream than the configured launch. The handoff is refused so no other workstream is targeted.")
+              : launchOutcome.reason === "LAUNCH_GOAL_PRESERVED"
+                ? t("An unsent launch goal already exists. It is kept as it is; resolve it before starting new work.")
+                : t("An original launch command is still held on its own pointer. Reconcile it before starting new work.")}
+      </p> : null}
       <button type="button" onClick={closePreview}>{t("Close preview")}</button>
     </section>}
   </section>;

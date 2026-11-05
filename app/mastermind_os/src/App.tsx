@@ -11,6 +11,11 @@ import {
   canNavigateForAutomaticSignIn, explicitLogoutRecorded, registerUnsavedNavigationHold,
 } from "./auth-navigation-guard";
 import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
+import {
+  decideOfficeLaunchHandoff, officeLaunchWorkstreamAgrees, previewIsCurrent,
+  type DirectionPreview, type OfficeLaunchOutcome,
+} from "./meta-ceo/preview";
+import { readLaunchBindingConfig } from "./launch-config";
 import { Today } from "./today/Today";
 import { AttendedFabricWorkspace } from "./fabric/AttendedFabricWorkspace";
 import { qualifyWorkerResultRef } from "./fabric/mission-worker-result";
@@ -1488,6 +1493,16 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     } | null>(null),
     [heldKind, setHeldKind] = useState<OperationKind | null>(null),
     [launchDraftDismissed, setLaunchDraftDismissed] = useState(false),
+    // The Office → existing launch owner handoff. It holds the exact frozen
+    // preview and the owner identity it was opened under, so the same
+    // captured context can be revalidated before a submission. It never
+    // carries a sessionRef and never owns a command.
+    [officeLaunchHandoff, setOfficeLaunchHandoff] = useState<{
+      preview: DirectionPreview;
+      binding: OrchestratorCommandBinding;
+      principalScope: string;
+      generation: string;
+    } | null>(null),
     // True only while a Check-status recover() is actually in flight. A
     // static checking/PENDING_POINTER hold (a persisted pointer with no
     // recovery promise) is NOT busy — its recovery control stays usable.
@@ -3154,6 +3169,47 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         owner.generation !== ownerContext?.generation) return {state: "UNAVAILABLE" as const};
     return readLaunchRequestPreview(binding, form);
   }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation, authRevision]);
+  // The Office → existing launch owner handoff. It re-reads the live host,
+  // binding and owner epoch at the moment of the request, refuses rather than
+  // replacing an existing unsent goal or a held original command, and only
+  // then hands the exact frozen text to the existing launch draft. It never
+  // prepares, submits, or carries a session reference.
+  const startOfficeLaunch = (preview: DirectionPreview): OfficeLaunchOutcome => {
+    const liveBinding = completeOrchestratorCommandBinding(
+      window.MastermindMissionHost?.commandBinding);
+    const liveAuth = window.MastermindMissionHost?.auth?.getState();
+    const liveOwner = liveBinding ? readOwnerContext(liveBinding.port) : null;
+    const launchAvailable = canLaunch && !!commandView &&
+      liveBinding === commandBinding &&
+      liveAuth?.status === "signed_in" && !!liveOwner &&
+      liveOwner.principalScope === ownerContext?.principalScope &&
+      liveOwner.generation === ownerContext?.generation;
+    // Revisiting an open handoff is idempotent: the same frozen direction never
+    // places a second launch owner and never replaces its own goal.
+    const alreadyOpen = officeLaunchHandoff !== null &&
+      officeLaunchHandoff.preview.draft === preview.draft &&
+      previewIsCurrent(officeLaunchHandoff.preview, office.projection.context);
+    const outcome = decideOfficeLaunchHandoff(preview, office.projection.context, {
+      configuredWorkstream: readLaunchBindingConfig()?.workstream ?? null,
+      selectedWorkstream: office.projection.context.selection?.workRef ?? null,
+      launchAvailable,
+      retainedGoal: retainedComposerDrafts.launch,
+      commandHeld: pendingCommand.current?.kind === "launch" || heldKind === "launch",
+      handoffAlreadyOpen: alreadyOpen,
+    });
+    if (outcome.status !== "OPENED") return outcome;
+    if (alreadyOpen) return outcome;
+    retainedComposerScope.current = liveComposerScope;
+    updateRetainedComposer("launch", preview.draft);
+    setLaunchDraftDismissed(false);
+    setOfficeLaunchHandoff({
+      preview,
+      binding: liveBinding!,
+      principalScope: liveOwner!.principalScope,
+      generation: liveOwner!.generation,
+    });
+    return outcome;
+  };
   const commandPanel =
     !signedIn && passiveExpiryHold.current && retainedComposerDrafts.launch ? (
       <section className="card" aria-label={copy.retainedDraft}>
@@ -3233,6 +3289,37 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               onComplete({ status: "refused" });
               return;
             }
+            // A handoff carries the exact frozen preview it was opened from.
+            // Revalidate it against the live owner before anything is
+            // prepared: a stale, changed or mismatched source refuses here
+            // and leaves the Office draft and the launch goal untouched.
+            if (officeLaunchHandoff) {
+              const liveOwner = readOwnerContext(binding.port);
+              const workstreamAgrees = officeLaunchWorkstreamAgrees(
+                office.projection.context.selection?.workRef ?? null,
+                readLaunchBindingConfig()?.workstream ?? null);
+              if (!previewIsCurrent(officeLaunchHandoff.preview, office.projection.context) ||
+                  binding !== officeLaunchHandoff.binding ||
+                  liveOwner?.principalScope !== officeLaunchHandoff.principalScope ||
+                  liveOwner?.generation !== officeLaunchHandoff.generation ||
+                  !workstreamAgrees) {
+                setCommandRefusal({
+                  // The refusal is published against the live owner identity,
+                  // so it stays visible under exactly the route that would
+                  // have dispatched it.
+                  binding,
+                  principalScope: ctx.principalScope,
+                  generation: ctx.generation,
+                  kind: "launch", selectionSeq: selectionSeq.current, sessionKey: null,
+                  presentationSeq: commandPresentation.current.seq,
+                  reason: locale === "zh-CN"
+                    ? "方向交接已不再有效。未准备也未发送任何内容。"
+                    : "The direction handoff is no longer current. Nothing was prepared or sent.",
+                });
+                onComplete({ status: "refused" });
+                return;
+              }
+            }
             const intent = launchIntentFromBinding(binding, form);
             beginCommand("launch", intent, onComplete);
           }}
@@ -3245,6 +3332,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             ) return;
             updateRetainedComposer("launch", "");
             setLaunchDraftDismissed(true);
+            // The Office handoff closes with its own form. The Office draft
+            // itself is never cleared by a cancel.
+            setOfficeLaunchHandoff(null);
             routeHeading.current?.focus();
           }}
         />
@@ -3987,7 +4077,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               ? sessionContinuationPanel
               : null
           }
+          onStartNewWork={canLaunch && commandView ? startOfficeLaunch : undefined}
         />
+        {/* The one existing launch owner, mounted where the Office mounts it.
+            It is the same commandPanel element the other routes use, so only
+            one LaunchOrchestrator owner exists at a time. */}
+        {officeLaunchHandoff ? commandPanel : null}
         <OperationalNavigation label="Company operations" onNavigate={navigateOperationalView} />
       </>
     );
