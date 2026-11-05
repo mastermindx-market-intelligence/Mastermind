@@ -606,6 +606,8 @@ def _raw_worktree_blob_oid(
 _MACRO_BRIEF_FIXED_CONTENT = frozenset({
     "scripts/__init__.py",
     "scripts/agentos.py",
+    "scripts/agentos_direction.py",
+    "scripts/agentos_project_plan_contract.py",
     "scripts/audit_stranded_work.py",
     "config/mastermind_programs.yml",
     "data/governance/active_builds.json",
@@ -2326,8 +2328,128 @@ class InstalledBootPacketCollector:
             acceptance_request=(work_ref, execution_commission_ref, root_objective),
         )
 
+    def project_plan_reader(self, *, macro_root: Path):
+        """Issue a read facade bound to this exact installed source owner."""
+        from control_plane.agentos_project_plan import AgentOsProjectPlanReader, _SOURCE_ROOT
+        root = Path(macro_root)
+        if (not root.is_absolute() or type(self) is not InstalledBootPacketCollector
+                or self._macro_root != root.resolve() or self._code_root != _SOURCE_ROOT.resolve()
+                or self._expected_source_sha is None or self._allow_synthetic_fixture):
+            raise ValueError("installed project plan source is unavailable")
+        reader = AgentOsProjectPlanReader(macro_root=root)
+        reader._installed_context_owner = self
+        reader._installed_context_binding = reader._context_binding(self)
+        from control_plane.installed_project_read_binding import _issue_installed_project_read
+        reader._installed_reader_binding = _issue_installed_project_read(
+            reader, owner=self, kind="project_plan",
+            qualified_owner=lambda owner: type(owner) is InstalledBootPacketCollector,
+        )
+        return reader
+
+    def read_project_plan(self, *, work_ref: str, timeout: float = 15.0):
+        from common.workspace_project_plan_contract import validate_selection
+        import math
+        validate_selection({"work_ref": work_ref})
+        if (type(timeout) not in (int, float) or not math.isfinite(timeout)
+                or not 0 < timeout <= 15 or self._expected_source_sha is None):
+            raise ValueError("installed project plan source is unavailable")
+        return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
+                                    project_plan_request=work_ref)
+
+    def project_direction_reader(self, *, macro_root: Path):
+        """Issue the fixed Direction facade after exact installed qualification."""
+        from control_plane.agentos_project_direction import AgentOsProjectDirectionReader, _SOURCE_ROOT
+        from control_plane.installed_project_read_binding import _issue_installed_project_read
+        root = Path(macro_root)
+        if (not root.is_absolute() or type(self) is not InstalledBootPacketCollector
+                or self._macro_root != root.resolve() or self._code_root != _SOURCE_ROOT.resolve()
+                or self._expected_source_sha is None or self._allow_synthetic_fixture):
+            raise ValueError("SOURCE_UNAVAILABLE")
+        reader = AgentOsProjectDirectionReader(macro_root=root)
+        reader._installed_context_owner = self
+        reader._installed_context_binding = reader._context_binding(self)
+        reader._installed_reader_binding = _issue_installed_project_read(
+            reader, owner=self, kind="project_direction",
+            qualified_owner=lambda owner: type(owner) is InstalledBootPacketCollector,
+        )
+        return reader
+
+    def read_project_direction(self, *, work_ref: str, timeout: float = 15.0):
+        from common.workspace_project_direction_contract import selection
+        import math
+        selection({"work_ref": work_ref})
+        if (type(timeout) not in (int, float) or not math.isfinite(timeout)
+                or not 0 < timeout <= 15 or self._expected_source_sha is None):
+            raise ValueError("SOURCE_UNAVAILABLE")
+        return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
+                                    project_direction_request=work_ref)
+
+    def project_journal_reader(self, *, macro_root: Path):
+        """Issue a read facade bound to this exact installed source owner."""
+        from control_plane.agentos_project_journal import AgentOsProjectJournalReader, _SOURCE_ROOT
+        root = Path(macro_root)
+        if (not root.is_absolute() or type(self) is not InstalledBootPacketCollector
+                or self._macro_root != root.resolve() or self._code_root != _SOURCE_ROOT.resolve()
+                or self._expected_source_sha is None or self._allow_synthetic_fixture):
+            raise ValueError("installed project journal source is unavailable")
+        reader = AgentOsProjectJournalReader(macro_root=root)
+        reader._installed_context_owner = self
+        reader._installed_context_binding = reader._context_binding(self)
+        from control_plane.installed_project_read_binding import _issue_installed_project_read
+        reader._installed_reader_binding = _issue_installed_project_read(
+            reader, owner=self, kind="project_journal",
+            qualified_owner=lambda owner: type(owner) is InstalledBootPacketCollector,
+        )
+        return reader
+
+    def read_project_journal(self, *, work_ref: str, timeout: float = 15.0):
+        from common.workspace_project_journal_contract import validate_selection
+        import math
+        validate_selection({"work_ref": work_ref})
+        if (type(timeout) not in (int, float) or not math.isfinite(timeout)
+                or not 0 < timeout <= 15 or self._expected_source_sha is None):
+            raise ValueError("installed project journal source is unavailable")
+        return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
+                                    project_journal_request=work_ref)
+
+    def project_creation_source_reader(self, *, macro_root: Path):
+        from control_plane.agentos_project_creation_source import AgentOsProjectCreationReader, _SOURCE_ROOT
+        from control_plane.installed_project_read_binding import _issue_installed_project_read
+        root = Path(macro_root)
+        if (not root.is_absolute() or type(self) is not InstalledBootPacketCollector
+                or self._macro_root != root.resolve() or self._code_root != _SOURCE_ROOT.resolve()
+                or self._expected_source_sha is None or self._allow_synthetic_fixture):
+            raise ValueError("installed project creation source is unavailable")
+        reader = AgentOsProjectCreationReader(macro_root=root)
+        reader._installed_context_owner = self
+        reader._installed_context_binding = reader._context_binding(self)
+        reader._installed_reader_binding = _issue_installed_project_read(reader, owner=self,
+            kind="project_creation_source", qualified_owner=lambda owner: type(owner) is InstalledBootPacketCollector)
+        return reader
+
+    def read_project_creation_source(self, *, work_ref, record_commit, expected_current_macro_sha=None, timeout=15.0):
+        from common.workspace_project_journal_contract import validate_selection
+        from common.workspace_project_session_contract import _hex
+        import math
+        validate_selection({"work_ref": work_ref})
+        if (not _hex(record_commit, 40) or not _hex(expected_current_macro_sha, 40)
+                or type(timeout) not in (int, float) or not math.isfinite(timeout)
+                or not 0 < timeout <= 15 or self._expected_source_sha is None):
+            raise ValueError("installed project creation source is unavailable")
+        packet = self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
+            project_creation_request=(work_ref, record_commit, expected_current_macro_sha))
+        if packet["availability"] != "AVAILABLE":
+            raise ValueError(packet["reason"].lower())
+        return packet["source"]
+
     def _collect_packet(self, *, repo: Path, now: str | None,
-                        timeout: float, acceptance_request: tuple | None = None) -> Any:
+                        timeout: float, acceptance_request: tuple | None = None,
+                        project_plan_request: str | None = None,
+                        project_journal_request: str | None = None,
+                        project_creation_request: tuple | None = None,
+                        project_direction_request: str | None = None) -> Any:
+        if sum(x is not None for x in (acceptance_request, project_plan_request, project_journal_request, project_creation_request, project_direction_request)) > 1:
+            raise ValueError("ambiguous installed source read")
         deadline = time.monotonic() + timeout
 
         def remaining() -> float:
@@ -2353,6 +2475,8 @@ class InstalledBootPacketCollector:
                 ),
             )
         )
+        if project_creation_request is not None and pre_macro_sha != project_creation_request[2]:
+            raise GatewayError("backend_unavailable", "project catalogue source changed")
         materialization_plan = None
         if not self._allow_synthetic_fixture:
             if len(macro_snapshots) != 1:
@@ -2405,8 +2529,39 @@ class InstalledBootPacketCollector:
             if acceptance_request is not None:
                 argv.extend(["--workstream", acceptance_request[0][3:],
                              "--expected-macro-sha", pre_macro_sha])
-            output_limit = (262144 if acceptance_request is not None
+            if project_plan_request is not None:
+                argv = [os.fspath(self._python), "-I", "-B",
+                        os.fspath(self._code_root / "scripts" / "agentos_project_plan_entry.py"),
+                        "--macro-root", os.fspath(packet_macro_root),
+                        "--expected-macro-sha", pre_macro_sha,
+                        "--work-ref", project_plan_request,
+                        "--continuity",
+                        "--timeout", f"{inner_timeout:g}"]
+            if project_journal_request is not None:
+                argv = [os.fspath(self._python), "-I", "-B",
+                        os.fspath(self._code_root / "scripts" / "agentos_project_journal_entry.py"),
+                        "--macro-root", os.fspath(packet_macro_root),
+                        "--expected-macro-sha", pre_macro_sha,
+                        "--work-ref", project_journal_request,
+                        "--timeout", f"{inner_timeout:g}"]
+            if project_creation_request is not None:
+                argv = [os.fspath(self._python), "-I", "-B",
+                    os.fspath(self._code_root / "scripts" / "agentos_project_creation_source_entry.py"),
+                    "--macro-root", os.fspath(packet_macro_root), "--expected-macro-sha", pre_macro_sha,
+                    "--work-ref", project_creation_request[0], "--record-commit", project_creation_request[1],
+                    "--timeout", f"{inner_timeout:g}"]
+            if project_direction_request is not None:
+                argv = [os.fspath(self._python), "-I", "-B",
+                        os.fspath(self._code_root / "scripts" / "agentos_project_direction_entry.py"),
+                        "--macro-root", os.fspath(packet_macro_root),
+                        "--expected-macro-sha", pre_macro_sha,
+                        "--work-ref", project_direction_request,
+                        "--timeout", f"{inner_timeout:g}"]
+            output_limit = (65536 if project_direction_request is not None else
+                            262144 if acceptance_request is not None or project_plan_request is not None or project_journal_request is not None
                             else ceo_boot_packet.DEFAULT_MAX_OUTPUT_BYTES)
+            if project_creation_request is not None:
+                output_limit = 4096
             try:
                 result = self._runner(
                     argv, cwd=self._code_root, timeout=remaining(),
@@ -2421,7 +2576,80 @@ class InstalledBootPacketCollector:
             stdout = result.get("stdout")
             if type(stdout) is not str:
                 raise GatewayError("backend_unavailable", "installed boot-packet collector failed")
-            if acceptance_request is not None:
+            if project_creation_request is not None:
+                from common.workspace_project_session_contract import validate_source_observation
+                try:
+                    def unique_creation_object(pairs):
+                        value = {}
+                        for key, item in pairs:
+                            if key in value: raise ValueError("duplicate creation field")
+                            value[key] = item
+                        return value
+                    packet = validate_source_observation(json.loads(stdout, object_pairs_hook=unique_creation_object),
+                        work_ref=project_creation_request[0], record_commit=project_creation_request[1])
+                except (ValueError, TypeError, KeyError, RecursionError):
+                    raise GatewayError("backend_unavailable", "installed project creation source unavailable") from None
+            elif project_direction_request is not None:
+                from common.workspace_project_direction_contract import validate_body
+                try:
+                    def unique_direction_object(pairs):
+                        result = {}
+                        for key, item in pairs:
+                            if key in result:
+                                raise ValueError("SOURCE_UNAVAILABLE")
+                            result[key] = item
+                        return result
+                    packet = validate_body(json.loads(stdout, object_pairs_hook=unique_direction_object))
+                    if (packet["selection"] != {"work_ref": project_direction_request}
+                            or packet["availability"] == "AVAILABLE" and packet["source"]["commit"] != pre_macro_sha):
+                        raise ValueError("SOURCE_UNAVAILABLE")
+                except (ValueError, TypeError, KeyError, RecursionError):
+                    raise GatewayError("backend_unavailable", "installed Direction source unavailable") from None
+            elif project_journal_request is not None:
+                from common.workspace_project_journal_contract import BODY_SCHEMA, validate_body
+                try:
+                    def unique_plan_object(pairs):
+                        result = {}
+                        for key, item in pairs:
+                            if key in result:
+                                raise ValueError("invalid project journal")
+                            result[key] = item
+                        return result
+                    packet = validate_body(json.loads(stdout, object_pairs_hook=unique_plan_object))
+                    if (type(packet) is not dict or packet.get("schema") != BODY_SCHEMA
+                            or packet.get("selection") != {"work_ref": project_journal_request}):
+                        raise ValueError("project journal response invalid")
+                    if packet.get("availability") == "AVAILABLE":
+                        source = packet["source"]
+                        if source["commit"] != pre_macro_sha:
+                            raise ValueError("project journal source changed")
+                    elif packet.get("availability") != "UNAVAILABLE":
+                        raise ValueError("project journal availability invalid")
+                except (ValueError, TypeError, KeyError, RecursionError):
+                    raise GatewayError("backend_unavailable", "installed project journal source unavailable") from None
+            elif project_plan_request is not None:
+                from common.workspace_project_plan_contract import BODY_SCHEMAS, validate_source, validate_body
+                try:
+                    def unique_plan_object(pairs):
+                        result = {}
+                        for key, item in pairs:
+                            if key in result:
+                                raise ValueError("invalid project plan")
+                            result[key] = item
+                        return result
+                    packet = validate_body(json.loads(stdout, object_pairs_hook=unique_plan_object))
+                    if (type(packet) is not dict or packet.get("schema") not in BODY_SCHEMAS
+                            or packet.get("selection") != {"work_ref": project_plan_request}):
+                        raise ValueError("project plan response invalid")
+                    if packet.get("availability") == "AVAILABLE":
+                        source = validate_source(packet.get("source"), project_plan_request)
+                        if source["commit"] != pre_macro_sha:
+                            raise ValueError("project plan source changed")
+                    elif packet.get("availability") != "UNAVAILABLE":
+                        raise ValueError("project plan availability invalid")
+                except (ValueError, TypeError, KeyError, RecursionError):
+                    raise GatewayError("backend_unavailable", "installed project plan source unavailable") from None
+            elif acceptance_request is not None:
                 from common.commission_ref import normalize_commission_ref
                 from control_plane.agentos_product_acceptance_basis import (
                     AgentOsProductAcceptanceBasisReader, ProductAcceptanceBasisUnavailable,
@@ -2545,7 +2773,7 @@ class InstalledBootPacketCollector:
                 or post_macro_seal != pre_macro_seal
             ):
                 raise GatewayError("backend_unavailable", "installed source changed during boot-packet read")
-            if acceptance_request is None:
+            if acceptance_request is None and project_plan_request is None and project_journal_request is None and project_creation_request is None and project_direction_request is None:
                 packet = _project_macro_identity(
                     packet, materialized_root=packet_macro_root, canonical_root=self._macro_root,
                 )

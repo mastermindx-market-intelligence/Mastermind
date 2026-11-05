@@ -255,6 +255,7 @@ def test_real_reviewer_falsifiers_through_signed_reader_and_dispatch(path, tier)
     expected = (ReviewDispatch.SKIP_NO_REVIEW_NEEDED if tier is ReviewTier.FAST
                 else ReviewDispatch.AUTO_REVIEW_ELIGIBLE)
     assert advice.action is expected
+    assert advice.source_tier is tier
 
 
 def test_explicit_manual_review_skips_risk_preflight_and_keeps_original_route():

@@ -497,19 +497,10 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # 2026-11-03 catalog composition adds fixed metadata GETs before that handler;
 # its AST is still identical and all eight sites move by 58 lines. Previous
 # source SHA de6f82cd7861cd79d90bc058c2753f5912a20e47c4ff992201962d8abdc78f31.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {
-    'sha256': '624b6a49ac97eea32adfa0691e85f5d0c7dcdb784b00f5192b1c227dbce8e5eb',
-    'sites': (
-        (820, 71, 74, 'int', '400'),
-        (831, 71, 74, 'int', '403'),
-        (839, 71, 74, 'int', '400'),
-        (845, 79, 82, 'int', '400'),
-        (854, 71, 74, 'int', '400'),
-        (864, 71, 74, 'int', '403'),
-        (869, 76, 79, 'int', '503'),
-        (875, 71, 74, 'int', '403'),
-    ),
-}
+# Journal source-only read composition: exact unchanged action-handler AST and
+# original eight complete literal tokens; new GET registration is reviewed separately.
+# Composed READ source: original eight whole action tokens and action AST unchanged.
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '5f6e043f3f8f525670f51c7f27a9e6ea7f17e7508489e13f661ea69007e840ff', 'sites': ((857, 71, 74, 'int', '400'), (868, 71, 74, 'int', '403'), (876, 71, 74, 'int', '400'), (882, 79, 82, 'int', '400'), (891, 71, 74, 'int', '400'), (901, 71, 74, 'int', '403'), (906, 76, 79, 'int', '503'), (912, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -539,4 +530,18 @@ REVIEWED_FILES['integrations/session_bridge/mmtask_restore/payload/mmtask'] = {
 REVIEWED_FILES['integrations/session_bridge/mmtask_restore/preimage/mmtask'] = {
     'sha256': '9567ecad658e50b149a14f4c0cd0c7b42d15ad546b0508e2153619f14d0eb336',
     'sites': ((556, 93, 96, 'int', '400'),),
+}
+
+# Exact unchanged JSON traversal node budget, never an OS identity or grant.
+# Any changed source byte/site returns this numeric token to the ordinary D8 guard.
+REVIEWED_FILES['app/mastermind_os/src/admission/project-admission-command-port.ts'] = {'sha256': 'bc14696fce184ce0d186431f044a79d93c61ca07b8c4eaf718e4ed19b3af2571', 'sites': ((37, 87, 90, 'int', '400'),)}
+
+# PR1917 source review5761933327 at63d184218e8d6a2b7da48f98045a2e67f504f5aa:
+# default HTTPS port in the exact parsed-origin condition, not a UID/GID.
+# Existing full-file SHA + token-span verification binds this one Constant;
+# any source/path/context drift restores the ordinary D8 scanner. This does
+# not change the URL/port policy or the separate reviewed Squid ACL exception.
+REVIEWED_FILES['integrations/hermes_secretary/tab_sweep.py'] = {
+    'sha256': '12d2c8f059f941eb908cc9d7ec3651763f8102832e05435118ce8e1385d5fd46',
+    'sites': ((19, 77, 80, 'int', '443'),),
 }

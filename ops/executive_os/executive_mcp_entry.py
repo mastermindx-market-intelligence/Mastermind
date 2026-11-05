@@ -230,8 +230,8 @@ def validate_optional_mounts(raw):
             raise ValueError('optional mount configuration differs')
     policies = optional_policies(raw)
     if 'workspace' in raw:
-        from integrations.mastermind_workspace_app.contract import validate_workspace_bindings
-        validate_workspace_bindings(raw['workspace']['bindings'], policies['workspace'])
+        from integrations.mastermind_workspace_app.project_authoring_grant import validate_project_bindings
+        validate_project_bindings(raw['workspace']['bindings'], policies['workspace'])
     if 'steward' in raw:
         from integrations.executive_content_contract import ContentObserverProfiles
         content = policies['content']
@@ -505,18 +505,22 @@ def build_optional_apps(raw, source, config_path, sink):
         )
         from common.workspace_control_room_action_contract import OPERATIONS
         from integrations.mastermind_workspace_app.installed import CeoIngressWorkspaceClient
-        loader = current_projection_loader(config_path, source, raw, 'workspace', 'bindings')
-        gate, _ = workspace_authorizers(policy=policies['workspace'], load_bindings=loader)
+        workspace_project_bindings_loader = current_projection_loader(config_path, source, raw, 'workspace', 'bindings')
+        from integrations.mastermind_workspace_app.project_authoring_grant import legacy_workspace_document
+        def legacy_workspace_loader(current_loader=workspace_project_bindings_loader, project_policy=policies['workspace']):
+            return legacy_workspace_document(current_loader(), project_policy)
+        gate, _ = workspace_authorizers(policy=policies['workspace'], load_bindings=legacy_workspace_loader)
         discovery_gate, _ = workspace_control_room_authorizers(
-            policy=policies['workspace'], load_bindings=loader, action='discover')
+            policy=policies['workspace'], load_bindings=legacy_workspace_loader, action='discover')
         action_gates = {
             operation: workspace_control_room_authorizers(
-                policy=policies['workspace'], load_bindings=loader, action=operation)[0]
+                policy=policies['workspace'], load_bindings=legacy_workspace_loader, action=operation)[0]
             for operation in OPERATIONS
         }
         app = create_workspace_app(WorkspaceAppConfig(authenticator=authenticators['workspace'],
             now=lambda: int(time.time()), authorize_principal=gate,
             authorize_discovery=discovery_gate, authorize_actions=action_gates,
+            project_admission_load_bindings=workspace_project_bindings_loader,
             client=CeoIngressWorkspaceClient(raw['ceo_ingress_socket_path'])))
         mounts['workspace_app'] = AuditedWorkspaceApp(app, verifiers['workspace'])
     if 'steward' in raw:

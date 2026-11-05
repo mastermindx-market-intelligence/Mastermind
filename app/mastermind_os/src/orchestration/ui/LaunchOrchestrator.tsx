@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { registerUnsavedNavigationHold } from "../../auth-navigation-guard";
+import { LaunchRequestPreview, type LaunchRequestPreviewRead } from "../../activation/LaunchRequestPreview";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,6 +51,8 @@ export type LaunchCompletion = (outcome: LaunchOutcome) => void;
 
 export interface LaunchOrchestratorProps {
   locale?: "en" | "zh-CN";
+  /** Presentation only; all original selection and submission guards remain shared. */
+  presentation?: "standard" | "composer";
   projects: readonly LaunchChoice[];
   profiles: readonly LaunchChoice[];
   frontierModels?: readonly LaunchChoice[];
@@ -62,6 +65,8 @@ export interface LaunchOrchestratorProps {
   /** Optional App-owned presentation draft, never a credential or host state. */
   initialDraft?: string;
   onDraftChange?: (text: string) => void;
+  /** Explicit, effect-free owner mapper. Preview never prepares or submits an operation. */
+  previewRequest?: (intent: LaunchForm) => LaunchRequestPreviewRead;
   onSubmit: (intent: LaunchForm, onComplete: LaunchCompletion) => void;
   onCancel: () => void;
 }
@@ -106,6 +111,7 @@ function readTerminalStatus(outcome: unknown): "accepted" | "refused" | null {
 
 export function LaunchOrchestrator({
   locale = "en",
+  presentation = "standard",
   projects,
   profiles,
   frontierModels,
@@ -115,6 +121,7 @@ export function LaunchOrchestrator({
   error,
   initialDraft = "",
   onDraftChange,
+  previewRequest,
   onSubmit,
   onCancel,
 }: LaunchOrchestratorProps) {
@@ -129,6 +136,14 @@ export function LaunchOrchestrator({
   const [draftProject, setDraftProject] = useState("");
   const [draftProfile, setDraftProfile] = useState("");
   const [draftFrontier, setDraftFrontier] = useState("");
+  const [requestPreview, setRequestPreview] = useState<{
+    read: LaunchRequestPreviewRead;
+    formKey: string;
+    mapper: NonNullable<LaunchOrchestratorProps["previewRequest"]>;
+    projects: readonly LaunchChoice[];
+    profiles: readonly LaunchChoice[];
+    frontierModels: readonly LaunchChoice[] | undefined;
+  } | null>(null);
 
   // In-flight launch owned by this component: armed synchronously when
   // onSubmit is dispatched, resolved only by its correlated completion.
@@ -213,6 +228,24 @@ export function LaunchOrchestrator({
     !goalBlank &&
     !goalTooLong;
 
+  const previewForm: LaunchForm = {
+    goal: draftGoal, projectRef: selectedProject, profileRef: selectedProfile,
+    ...(frontierRequired ? { frontierModelAlias: selectedFrontier } : {}),
+  };
+  const previewFormKey = JSON.stringify(previewForm);
+  const visiblePreview = canSubmit && requestPreview?.formKey === previewFormKey &&
+    requestPreview.mapper === previewRequest && requestPreview.projects === projects &&
+    requestPreview.profiles === profiles && requestPreview.frontierModels === frontierModels
+      ? requestPreview.read : null;
+  const previewCurrentRequest = () => {
+    if (!canSubmit || !previewRequest || launchTokenRef.current !== null) return;
+    let read: LaunchRequestPreviewRead;
+    try { read = previewRequest(previewForm); }
+    catch { read = { state: "UNAVAILABLE" }; }
+    setRequestPreview({ read, formKey: previewFormKey, mapper: previewRequest,
+      projects, profiles, frontierModels });
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit || launchTokenRef.current !== null) return;
@@ -249,10 +282,10 @@ export function LaunchOrchestrator({
       : undefined;
 
   return (
-    <section className="card">
+    <section className={`card launch-orchestrator${presentation === "composer" ? " launch-orchestrator-composer" : ""}`}>
       <div className="section-title">
         <div>
-          <h2>{selectedProfile === "native_research_only" ? (locale === "zh-CN" ? "启动单个原生任务" : "Launch one native task") : "Launch Orchestrator"}</h2>
+          <h2>{selectedProfile === "native_research_only" ? (locale === "zh-CN" ? "启动单个原生任务" : "Launch one native task") : (locale === "zh-CN" ? "开始工作" : "Start work")}</h2>
         </div>
       </div>
 
@@ -263,9 +296,9 @@ export function LaunchOrchestrator({
       ) : (
         <form onSubmit={handleSubmit} noValidate>
           {/* Goal textarea */}
-          <div className="form-field">
+          <div className="form-field launch-goal">
             <label htmlFor={goalId}>
-              <span>Goal</span>
+              <span>{locale === "zh-CN" ? "目标" : "Goal"}</span>
               {goalTooLong && (
                 <span className="field-error">
                   {" "}
@@ -276,9 +309,9 @@ export function LaunchOrchestrator({
             <textarea
               id={goalId}
               value={draftGoal}
-              onChange={(e) => { setDraftGoal(e.target.value); onDraftChange?.(e.target.value); }}
-              rows={4}
-              placeholder="Describe the objective for this launch…"
+              onChange={(e) => { setRequestPreview(null); setDraftGoal(e.target.value); onDraftChange?.(e.target.value); }}
+              rows={presentation === "composer" ? 2 : 4}
+              placeholder={locale === "zh-CN" ? "描述你希望完成的目标…" : "Describe the objective for this launch…"}
               disabled={launchPending}
               aria-describedby={goalTooLong ? `${goalId}-length` : undefined}
               aria-invalid={!!goalError}
@@ -292,11 +325,11 @@ export function LaunchOrchestrator({
 
           {/* Project select */}
           <div className="form-field">
-            <label htmlFor={projectId}>Project</label>
+            <label htmlFor={projectId}>{locale === "zh-CN" ? "项目" : "Project"}</label>
             <select
               id={projectId}
               value={selectedProject}
-              onChange={(e) => setDraftProject(e.target.value)}
+              onChange={(e) => { setRequestPreview(null); setDraftProject(e.target.value); }}
               disabled={launchPending}
               aria-invalid={!!projectError}
               aria-describedby={projectError ? `${projectId}-error` : undefined}
@@ -321,11 +354,11 @@ export function LaunchOrchestrator({
 
           {/* Profile select */}
           <div className="form-field">
-            <label htmlFor={profileId}>Profile</label>
+            <label htmlFor={profileId}>{locale === "zh-CN" ? "执行方式" : "Profile"}</label>
             <select
               id={profileId}
               value={selectedProfile}
-              onChange={(e) => setDraftProfile(e.target.value)}
+              onChange={(e) => { setRequestPreview(null); setDraftProfile(e.target.value); }}
               disabled={launchPending}
               aria-invalid={!!profileError}
               aria-describedby={[profileError ? `${profileId}-error` : "",selectedProfile === "native_research_only" ? `${profileId}-meaning` : ""].filter(Boolean).join(" ") || undefined}
@@ -357,7 +390,7 @@ export function LaunchOrchestrator({
               <select
                 id={frontierId}
                 value={selectedFrontier}
-                onChange={(e) => setDraftFrontier(e.target.value)}
+                onChange={(e) => { setRequestPreview(null); setDraftFrontier(e.target.value); }}
                 disabled={launchPending}
                 aria-invalid={!!frontierError}
                 aria-describedby={frontierError ? `${frontierId}-error` : `${frontierId}-help`}
@@ -388,12 +421,18 @@ export function LaunchOrchestrator({
           )}
 
           {/* Actions */}
+          {visiblePreview ? <LaunchRequestPreview preview={visiblePreview}
+            projects={projects} profiles={profiles} frontierModels={frontierModels} locale={locale} /> : null}
           <div className="form-actions">
+            {previewRequest ? <button type="button" disabled={!canSubmit}
+              onClick={previewCurrentRequest}>
+              {locale === "zh-CN" ? "预览请求范围" : "Preview requested scope"}
+            </button> : null}
             <button type="submit" disabled={!canSubmit} className="primary">
-              {launchPending ? "Launching…" : "Launch"}
+              {launchPending ? (locale === "zh-CN" ? "正在启动…" : "Launching…") : (locale === "zh-CN" ? "启动" : "Launch")}
             </button>
             <button type="button" onClick={onCancel} disabled={launchPending}>
-              Cancel
+              {locale === "zh-CN" ? "取消" : "Cancel"}
             </button>
           </div>
         </form>

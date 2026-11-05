@@ -150,6 +150,20 @@ describe("Research evidence sign-in presentation over the actual private auth ow
     expect(current.popups[0].closed).toBe(false);
   });
 
+  it("honors a same-app explicit logout from the replaced owner by withdrawing the current citation", async () => {
+    const old = fixture(), current = fixture(); const r = render(view(old)); await start();
+    r.rerender(view(current)); await start(); await authorize(current);
+    expect(document.querySelector("pre")?.textContent).toBe(payload.text);
+    // Explicit logout is shared by this configured app, even if its initiating
+    // transport is no longer the displayed owner. It is not a stale callback.
+    await act(async () => { await old.client.signOut(); await flush(); });
+    expect(status()).toBe("Sign in to read this evidence item.");
+    expect(document.querySelector("pre")).toBeNull();
+    expect(current.client.research!.available()).toBe(false);
+    expect(old.fetcher).not.toHaveBeenCalled();
+    expect(current.fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it("withdraws evidence on generation change and rejects a late evidence response after sign-out", async () => {
     const pending = deferred<Response>(), f = fixture({ evidenceResponse: pending.promise });
     render(view(f)); await start(); await authorize(f);

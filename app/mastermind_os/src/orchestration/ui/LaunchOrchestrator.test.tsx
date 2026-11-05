@@ -52,6 +52,30 @@ describe("LaunchOrchestrator", () => {
     view.unmount();
     expect(canNavigateForAutomaticSignIn()).toBe(true);
   });
+  it("keeps real project/profile/CEO controls and one-shot guard in composer presentation", async () => {
+    const user = userEvent.setup();
+    const props = makeProps({ frontierModels: [{ ref: "ceo-a", label: "Requested CEO A" }] });
+    render(<LaunchOrchestrator {...props} presentation="composer" />);
+    await user.type(screen.getByLabelText("Goal"), "Review the project sources");
+    await user.selectOptions(screen.getByLabelText("Project"), "proj-gamma");
+    await user.selectOptions(screen.getByLabelText("Profile"), "prof-2");
+    expect((screen.getByLabelText("Requested CEO") as HTMLSelectElement).value).toBe("ceo-a");
+    fireEvent.submit(goalForm());
+    fireEvent.submit(goalForm());
+    expect(props.onSubmit).toHaveBeenCalledTimes(1);
+    expect(props.onSubmit.mock.calls[0][0]).toEqual({ goal: "Review the project sources", projectRef: "proj-gamma", profileRef: "prof-2", frontierModelAlias: "ceo-a" });
+    expect(pendingLaunchButton().disabled).toBe(true);
+  });
+
+  it("keeps unavailable and stale choices blocked in composer presentation", () => {
+    const props = makeProps({ projects: [{ ref: "unavailable", label: "Unavailable project", unavailableReason: "Read only" }] });
+    render(<LaunchOrchestrator {...props} presentation="composer" />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Do not launch" } });
+    fireEvent.submit(goalForm());
+    expect(launchButton().disabled).toBe(true);
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+
   describe("rendering", () => {
     it("renders project and profile selects with all choices", () => {
       render(<LaunchOrchestrator {...makeProps()} />);

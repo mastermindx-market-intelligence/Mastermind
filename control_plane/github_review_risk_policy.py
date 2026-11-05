@@ -16,8 +16,8 @@ _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _REPO = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
 _MAX_PATHS = 256
 _MAX_METRIC = 10_000_000
-_FAST_MAX_LINES = 200
-_FAST_MAX_FILES = 8
+_FAST_MAX_LINES = 2400
+_FAST_MAX_FILES = 40
 _MAX_TEST_DELETIONS = 50
 
 # A small line count must never bypass trust-boundary / source-law review.
@@ -82,6 +82,15 @@ _CRITICAL_EXACT = frozenset({
     "docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md",
     "docs/REVIEW_RISK_POLICY.md",
     "docs/GITHUB_REVIEW_INGRESS.md",
+    # Accepted #2018 constitutional/security pins. An apparently tiny diff in
+    # any of these must stay CRITICAL even under the CEO Web review waiver.
+    "control_plane/packet_gate.py",
+    "control_plane/governance.py",
+    "control_plane/strategic_state.py",
+    "config/strategic_state.yml",
+    "config/contracts.yml",
+    "research/MASTERMIND_CHARTER_V2.md",
+    "DOCTRINE.md",
 })
 _CRITICAL_SEGMENTS = frozenset({
     "auth", "authentication", "authorization", "oauth", "security", "secrets",
@@ -93,9 +102,11 @@ _CRITICAL_SEGMENTS = frozenset({
     "execution", "deployment", "workflow", "policy_authority",
 })
 _STANDARD_PREFIXES = (
-    "control_plane/", "integrations/", "brain/", "finance/", "engine/risk_",
-    "backend/", "server/", "services/", "api/", "lib/",
-    "scripts/", "ops/", "config/",
+    # Reserved platform/integration and financial source is machine-elevated.
+    # Ordinary executable/test source is also at least STANDARD so #2016's
+    # CI qualifier retains its required smoke checks.
+    "control_plane/", "integrations/", "finance/", "engine/risk_",
+    "ops/", "config/",
 )
 _STANDARD_EXACT = frozenset({
     "pyproject.toml", "requirements.txt", "package.json",
@@ -106,6 +117,7 @@ _STANDARD_SEGMENTS = frozenset({
     "schema", "schemas", "migration", "migrations", "reconciliation",
     "risk", "position", "positions", "portfolio", "signal", "signals",
     "prophet", "settlement", "webhook", "runtime", "publication",
+    "session", "authority",
 })
 _CRITICAL_HINTS = frozenset({
     "trust_boundary", "secrets", "auth", "privileged_ci", "deployment",
@@ -239,6 +251,13 @@ def _validate(facts: ReviewChangeFacts) -> None:
 
 
 def _result(facts: ReviewChangeFacts, tier: ReviewTier, *reasons: str) -> ReviewRiskAssessment:
+    # This authority-neutral assessment is also consumed by signed AUTOMATIC
+    # GitHub/Executive ingress, which has no authenticated attended-CEO-Web
+    # origin discriminator. Keep the accepted machine review-risk requirements.
+    # The Chairman's all-tier no-mandatory-review waiver is for attended CEO
+    # Web author workflow (docs/DELIVERY_WORKFLOW.md / Project instructions),
+    # NOT a global exemption for bot/privileged release or financial ingress.
+    # The optional automatic review host stays OFF unless separately enabled.
     review_counts = {
         ReviewTier.FAST: (0, 0),
         ReviewTier.STANDARD: (1, 1),
@@ -278,8 +297,6 @@ def _is_critical_path(path: str) -> bool:
 
 def _is_standard_path(path: str) -> bool:
     lower = path.lower()
-    if _is_test_path(lower):
-        return True
     if lower in _STANDARD_EXACT or lower.endswith((".sql", ".lock")):
         return True
     if any(lower.startswith(prefix) for prefix in _STANDARD_PREFIXES):
@@ -298,15 +315,17 @@ def _is_test_path(path: str) -> bool:
     )
 
 
-# No executable TSX/JSX/CSS files are FAST by filename or line count alone.
-# A future independently accepted semantic source qualifier may narrow this,
-# but no such receipt or trusted AST proof exists in the current ingress.
+# FAST is shared with the accepted #2016 CI qualifier: FAST selects static-only
+# checks; STANDARD selects executable smoke checks. Even a tiny code/test diff
+# must never use FAST to waive a smoke test. Attended CEO Web's no-review
+# decision is separate from this signed machine/CI risk classification.
 
 
 _SUPPORTING_PREFIXES = (
     "research/evidence/", "mockups/evidence/", "ux-evidence/",
     "terminal/docs/pr-crops/", "terminal/docs/verification/",
     "docs/verification/", "docs/screenshots/",
+    "docs/evidence/", "docs/superpowers/plans/",
 )
 _INERT_DOC_EXACT = frozenset({
     "readme.md", "docs/readme.md", "docs/guide.md", "docs/user-guide.md",
@@ -371,6 +390,7 @@ def assess_review_risk(facts: ReviewChangeFacts) -> ReviewRiskAssessment:
         return _result(facts, ReviewTier.FAST, "ROUTINE_DOCUMENTATION_TESTS_OR_EVIDENCE")
     if total > _FAST_MAX_LINES or material_count > _FAST_MAX_FILES:
         return _result(facts, ReviewTier.STANDARD, "SCOPE_EXCEEDS_FAST_LIMIT")
-    # Executable components, CSS and unqualified code require review even
-    # when the source diff is small. Patch availability is not proof of inertness.
-    return _result(facts, ReviewTier.STANDARD, "SOURCE_NOT_SEMANTICALLY_QUALIFIED_FOR_FAST")
+    # Under #2016, risk tier FAST also selects CI mode=fast (static-only).
+    # Active code and tests stay STANDARD even when a Web CEO session needs no
+    # additional independent reviewer; their smoke checks must remain enabled.
+    return _result(facts, ReviewTier.STANDARD, "ACTIVE_SOURCE_REQUIRES_CI_SMOKE")
