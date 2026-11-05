@@ -34,6 +34,7 @@ it("restores only a lookup outcome after the terminal pointer cleared, then read
  expect(store.reserve).not.toHaveBeenCalled();expect(props.onOriginalKeySelected).not.toHaveBeenCalled();
  fireEvent.click(screen.getByRole("button",{name:"Explicit new-entry gesture"}));
  expect(screen.queryByRole("button",{name:"Review conversation"})).toBeNull();
+ await waitFor(()=>expect((screen.getByRole("button",{name:"Check original request"}) as HTMLButtonElement).disabled).toBe(false));
  fireEvent.click(screen.getByRole("button",{name:"Check original request"}));
  await waitFor(()=>expect(transport.read).toHaveBeenCalledTimes(1));
  expect(transport.read.mock.calls[0]?.[0]).toEqual(props.originalLookup!.selection);
@@ -135,4 +136,40 @@ it("does not apply late explicit rediscovery after the actual Executive owner is
  expect((screen.getByRole("button",{name:"Review conversation"}) as HTMLButtonElement).disabled).toBe(true);
  expect(transport.preview).not.toHaveBeenCalled();expect(transport.create).not.toHaveBeenCalled();expect(transport.status).not.toHaveBeenCalled();expect(transport.read).not.toHaveBeenCalled();
  expect(props.onOriginalKeySelected).not.toHaveBeenCalled();expect(await durable.read(scope)).toBeNull();
+});
+it.each(['conversation_consume','conversation_turn'] as const)('reopens a real durable %s original through initial READ only, preserving the attended pointer',async kind=>{
+ const {props,transport}=setup();const currentOwner={principalScope:'d'.repeat(64),generation:'unit-auth-1'};
+ const store=createIndexedDbPendingPointerStore(new IDBFactory());
+ const target=JSON.stringify({operation_key:fixture.request.operation_key,work_ref:fixture.request.work_ref});
+ const pointer:OperationPointer={kind,operationKey:(kind==='conversation_consume'?'mmos-conversation-consume-':'mmos-conversation-turn-')+'1'.repeat(40),targetKey:target};
+ await store.reserve(currentOwner.principalScope,pointer);
+ props.binding=createFreshConversationBinding({owner:()=>currentOwner,canPreviewCreate:()=>false,store,transport});props.draftOwner=currentOwner;props.originalLookup=null;
+ const recover=vi.spyOn(props.binding.controller,'recover');let issued:FreshConversationInitialRead|null=null;
+ props.renderContinuation=read=>{issued=read;return <p>Actual initial read reaches attended owner</p>;};
+ const mounted=render(<Harness {...props}/>);
+ await screen.findByText('An original follow-up request needs a status check. Open its first response to use the existing status controls. Don’t send it again.');
+ expect(transport.preview).not.toHaveBeenCalled();expect(transport.create).not.toHaveBeenCalled();expect(transport.status).not.toHaveBeenCalled();expect(transport.read).not.toHaveBeenCalled();expect(recover).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'Check original request'}));await screen.findByRole('button',{name:'Open initial response'});
+ fireEvent.click(screen.getByRole('button',{name:'Open initial response'}));await screen.findByText('Actual initial read reaches attended owner');
+ expect(issued!.selection).toEqual({work_ref:fixture.request.work_ref,operation_key:fixture.request.operation_key});expect(issued!.current()).toBe(true);
+ expect(await store.read(currentOwner.principalScope)).toEqual(pointer);expect(recover).not.toHaveBeenCalled();expect(transport.status).not.toHaveBeenCalled();expect(transport.preview).not.toHaveBeenCalled();expect(transport.create).not.toHaveBeenCalled();
+ mounted.unmount();render(<Harness {...props}/>);await screen.findByText('An original follow-up request needs a status check. Open its first response to use the existing status controls. Don’t send it again.');
+ expect(await store.read(currentOwner.principalScope)).toEqual(pointer);expect(transport.read).toHaveBeenCalledTimes(2);
+});
+it('discovers an attended original created by the real shared store after this App-lifetime view mounted',async()=>{
+ const {props,transport}=setup();const ownerNow={principalScope:'e'.repeat(64),generation:'unit-auth-1'};const store=createIndexedDbPendingPointerStore(new IDBFactory());
+ props.binding=createFreshConversationBinding({owner:()=>ownerNow,canPreviewCreate:()=>true,store,transport});props.draftOwner=ownerNow;props.originalLookup=null;
+ const view=render(<Harness {...props}/>);await waitFor(()=>expect((screen.getByRole('button',{name:'Review conversation'}) as HTMLButtonElement).disabled).toBe(false));
+ const pointer:OperationPointer={kind:'conversation_turn',operationKey:'mmos-conversation-turn-'+'2'.repeat(40),targetKey:JSON.stringify({operation_key:fixture.request.operation_key,work_ref:fixture.request.work_ref})};
+ await store.reserve(ownerNow.principalScope,pointer);fireEvent.click(screen.getByRole('button',{name:'Explicit new-entry gesture'}));
+ await screen.findByText('An original follow-up request needs a status check. Open its first response to use the existing status controls. Don’t send it again.');
+ expect(screen.queryByRole('button',{name:'Review conversation'})).toBeNull();expect(transport.preview).not.toHaveBeenCalled();expect(transport.create).not.toHaveBeenCalled();expect(transport.read).not.toHaveBeenCalled();expect(await store.read(ownerNow.principalScope)).toEqual(pointer);
+ view.unmount();
+});
+it('leaves reference-mode and malformed attended hints with their existing owner',async()=>{
+ for(const targetKey of [JSON.stringify({work_ref:fixture.request.work_ref,reference:{schema:'mastermind.fresh_conversation_reference.v1',work_ref:fixture.request.work_ref,root_job_id:'JOB-001',root_event_id:1,root_event_sha256:'a'.repeat(64),principal_scope_sha256:'b'.repeat(64)}}),'{"work_ref":"WS:FOREIGN"}']){
+  const {props,transport}=setup({kind:'conversation_turn',operationKey:'mmos-conversation-turn-'+'3'.repeat(40),targetKey});
+  const view=render(<Harness {...props}/>);await screen.findByText('Another request needs its existing status controls before a new conversation can be created.');
+  expect((screen.getByRole('button',{name:'Check original request'}) as HTMLButtonElement).disabled).toBe(true);expect(transport.read).not.toHaveBeenCalled();expect(transport.status).not.toHaveBeenCalled();expect(transport.create).not.toHaveBeenCalled();view.unmount();
+ }
 });

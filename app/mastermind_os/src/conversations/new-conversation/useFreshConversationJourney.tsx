@@ -4,6 +4,7 @@ import {NewConversationDraft} from "./NewConversationDraft";
 import {NewConversationOutcome} from "./NewConversationOutcome";
 import {decodeFreshConversationResult,decodeFreshConversationInitialResult,validateFreshConversationRequest,type FreshConversationData,type FreshConversationPayload,type FreshConversationLocator} from "./fresh-conversation";
 import {sameConversationOwner,type ConversationPreviewRequest,type ConversationRequestSelection,type ConversationProjectChoice,type FreshConversationBinding} from "./fresh-conversation-binding";
+import {parseFreshConversationTarget} from "../../orchestration/fresh-conversation-target";
 import "./new-conversation-journey.css";
 
 export interface FreshConversationInitialRead {
@@ -53,7 +54,14 @@ const ownerOf=(binding:FreshConversationBinding|null):OwnerContext|null=>{
  try{const value=binding?.context();return value?{...value}:null;}catch{return null;}
 };
 function selectionOf(pointer:OperationPointer|null):ConversationRequestSelection|null{
- if(pointer?.kind!=="conversation_create"||!pointer.targetKey)return null;
+ if(!pointer?.targetKey)return null;
+ if(pointer.kind==="conversation_consume"||pointer.kind==="conversation_turn"){
+  const key=pointer.kind==="conversation_consume"?/^mmos-conversation-consume-[0-9a-f]{40}$/:/^mmos-conversation-turn-[0-9a-f]{40}$/;
+  if(typeof pointer.operationKey!=="string"||!key.test(pointer.operationKey))return null;
+  const original=parseFreshConversationTarget(pointer.targetKey);
+  return original&&"operation_key"in original?{work_ref:original.work_ref,operation_key:original.operation_key}:null;
+ }
+ if(pointer.kind!=="conversation_create")return null;
  return validateFreshConversationRequest({work_ref:pointer.targetKey,operation_key:pointer.operationKey},"status")
   ?{work_ref:pointer.targetKey,operation_key:pointer.operationKey}:null;
 }
@@ -184,7 +192,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
   patch({busy:"read",error:null});readAbort.current?.abort();readAbort.current=new AbortController();
   try{
    latest.current.onOriginalKeySelected({work_ref:original.work_ref,operation_key:original.operation_key});
-   if(v.retained){
+   if(v.retained?.kind==="conversation_create"){
     const state=await c.binding.controller.recover();if(!live(c))return;
     const retained=state.pointer;
     if(retained&&(retained.kind!=="conversation_create"||!sameSelection(original,{work_ref:retained.targetKey??"",operation_key:retained.operationKey}))){
@@ -204,6 +212,14 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
    readAbort.current?.abort();ticket.current++;
    patch({busy:null,phase:"draft",preview:null,error:null});
   }
+  // Retire only a stale presentation hint after the incumbent owner cleared
+  // its durable slot. This is not an effect verdict or a source request.
+  const retained=current.current.retained,c=capture();
+  if(c&&retained&&(retained.kind==="conversation_consume"||retained.kind==="conversation_turn")){
+   Promise.resolve().then(()=>c.binding.store.read(c.owner.principalScope)).then(pointer=>{
+    if(live(c)&&!pointer&&current.current.retained===retained)patch({retained:null});
+   },()=>{});
+  }
   latest.current.onBack();
  }
  async function start(){
@@ -212,7 +228,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
   // Another owner may have completed its original while this App-lifetime
   // view stayed mounted. An explicit entry gesture rechecks ONLY local lookup
   // storage. It never mints a key, reads a source, or submits a command.
-  if(v.other && v.operation?.status!=="unknown"){
+  {
    const c=capture();if(!c)return;
    const id=++ticket.current;patch({discovering:true,error:null});
    try{
@@ -222,13 +238,14 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
     if(pointer){
      gestureFocus(".mm-new-conversation-outcome h1",origin);
      patch({discovering:false,retained:pointer,other:!pending,phase:"outcome",opened:false,
-      ...(pending?{original:pending,lookup:false,data:null,preview:null,operation:null}:{})});
+      ...(pending?{original:{...pending,...(v.original&&sameSelection(v.original,pending)&&v.original.message!==undefined?{message:v.original.message}:{})},lookup:false,data:null,preview:null,
+       operation:v.operation?.status==="unknown"&&v.operation.pointer.kind===pointer.kind&&v.operation.pointer.operationKey===pointer.operationKey?v.operation:null}:{})});
      return;
     }
     const supplied=latest.current.originalLookup;
     const lookup=!current.current.original&&supplied&&sameConversationOwner(supplied.owner,c.owner)
      ?validateFreshConversationRequest(supplied.selection,"status"):null;
-    patch({discovering:false,retained:null,other:false,error:null,
+    patch({discovering:false,retained:v.operation?.status==="unknown"?v.retained:null,other:false,error:null,
      ...(lookup?{original:{work_ref:lookup.work_ref,operation_key:lookup.operation_key},lookup:true}: {})});
    }catch{if(live(c)&&ticket.current===id)patch({discovering:false,other:true,error:"unavailable"});return;}
    v=current.current;
@@ -249,7 +266,9 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
   view.phase==="outcome"?t("The original request cannot be checked here right now.","此处暂时无法查看原请求。"):
   t("Conversation preview is unavailable here. Your message remains a draft.","此处暂时无法预览对话。消息仍是草稿。")}</p>:null;
  const feedback=<>{view.discovering?<p role="status">{t("Checking for an original request…","正在查找原请求…")}</p>:null}
-  {view.retained&&!view.other&&!view.operation?<p role="status">{t("An original conversation request needs a status check. Don’t create it again.","原对话请求需要查询状态。请勿再次创建。")}</p>:null}
+  {view.retained&&!view.other&&!view.operation?<p role="status">{view.retained.kind==="conversation_create"
+   ?t("An original conversation request needs a status check. Don’t create it again.","原对话请求需要查询状态。请勿再次创建。")
+   :t("An original follow-up request needs a status check. Open its first response to use the existing status controls. Don’t send it again.","原后续请求需要查询状态。请打开首条回复，通过原有状态控件查询。请勿再次发送。")}</p>:null}
   {view.lookup&&!view.operation?<p role="status">{t("An original conversation request is selected. Check its status to reopen it.","已选择原对话请求。请查询状态后重新打开。")}</p>:null}
   {view.phase==="outcome"&&!view.operation?<p>{t("Going back does not cancel the original request.","返回不会取消原请求。")}</p>:null}
   {view.other?<p role="status">{t("Another request needs its existing status controls before a new conversation can be created.","请先通过原有状态控件处理另一条请求，再创建新对话。")}</p>:null}{error}</>;
@@ -286,7 +305,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
     <details><summary>{t("Sources and access","来源与访问")}</summary><dl>{Object.entries(prepared.data.preview??{}).map(([key,value])=>
      <div key={key}><dt>{key}</dt><dd><code>{typeof value==="object"?JSON.stringify(value):String(value)}</code></dd></div>)}</dl></details>
    </section>:<>{feedback}<NewConversationOutcome locale={props.locale} data={view.data} operationState={view.operation}
-    awaitingCheck={view.lookup&&!view.data&&!view.operation&&!view.busy&&!view.error}
+    awaitingCheck={(view.lookup||!!view.retained&&view.retained.kind!=="conversation_create")&&!view.data&&!view.operation&&!view.busy&&!view.error}
     originalMessage={view.original&&"message"in view.original?view.original.message??null:null} projectTitle={view.projectTitle}
     opened={view.opened} busy={!!view.busy||view.discovering||view.other} activity={view.busy==="operation"?"creating":view.busy==="read"?"checking":null} canOpen={canOpen(view.data)&&!view.other&&!!actualOwner}
     onCheck={()=>void check()} onOpen={()=>void check(true)} onBack={back} continuation={continuation}/></>}

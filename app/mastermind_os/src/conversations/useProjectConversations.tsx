@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { MissionHost } from "../host";
-import { ProjectConversations } from "./ProjectConversations";
+import { ProjectConversations, type ProjectConversationsProps } from "./ProjectConversations";
 import type { ProjectConversationCatalogueReaderFactory } from "./project-conversation-catalogue-factory";
 
 type HistoryHost = MissionHost & { session?: NonNullable<MissionHost["session"]> & {
@@ -19,6 +19,7 @@ export interface ProjectConversationsWorkspace {
   canReadCurrentProject: () => boolean;
   locale?: "en" | "zh-CN";
   theme?: "dark" | "light";
+  renderFreshContinuation?: ProjectConversationsProps["renderFreshContinuation"];
 }
 
 /** One selected project only. Construction subscribes but performs no READ.
@@ -50,5 +51,5 @@ export function useProjectConversations(props: ProjectConversationsWorkspace) {
   const current = held && held.host === props.host && held.session === session && held.factory === factory &&
     held.sourceGeneration === sourceGeneration ? held.reader : undefined;
   return { history: current, panel: props.workRef ? <ProjectConversations key={`project-conversations:${sourceGeneration}`}
-    workRef={props.workRef} owner={current?.owner} locale={props.locale} theme={props.theme}/> : null };
+    workRef={props.workRef} owner={current?.owner} locale={props.locale} theme={props.theme} renderFreshContinuation={props.renderFreshContinuation}/> : null };
 }

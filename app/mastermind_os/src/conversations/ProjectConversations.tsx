@@ -122,10 +122,11 @@ export function ProjectConversations(props:ProjectConversationsProps){
       <button type="button" onClick={back}>{t('Back to conversations','返回对话列表')}</button>
       <FreshConversationInitialResponse locale={props.locale??'en'} result={freshWindow.initial_result} originalMessage={freshWindow.initial_message}
         caption={t('Opening this recorded conversation does not send or acknowledge a message.','打开此对话记录不会发送消息或确认接收。')}/>
-      {(freshSource?props.renderFreshContinuation?.(freshSource):null)??freshWindow.turns.map(turn=><article className="conversations-list__section" key={turn.turn_key}>
+      {freshWindow.turns.map(turn=><article className="conversations-list__section" key={turn.turn_key}>
         <FreshConversationInitialResponse locale={props.locale??'en'} result={turn.result} originalMessage={turn.message}
           responseKind="followup" headingLevel={3}/>
       </article>)}
+      {freshSource?props.renderFreshContinuation?.(freshSource):null}
     </>:visible?<>
       <div className="conversations-list__filter"><label htmlFor={filterId}>{t('Find in these conversations','查找这些对话')}</label>
         <input id={filterId} value={query} onChange={event=>setQuery(event.target.value)}/></div>

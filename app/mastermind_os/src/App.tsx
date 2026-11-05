@@ -12,6 +12,12 @@ import { readFreshConversationLocation } from "./conversations/fresh-conversatio
 import { useFreshConversationDraftState } from "./conversations/new-conversation/useFreshConversationDraftState";
 import { useFreshConversationJourney } from "./conversations/new-conversation/useFreshConversationJourney";
 import { createFreshConversationBinding } from "./conversations/new-conversation/fresh-conversation-command-binding";
+import { createFreshConversationAttendedBinding, type FreshConversationOriginalRead } from "./conversations/new-conversation/fresh-conversation-attended-binding";
+import { FreshConversationContinuation } from "./conversations/new-conversation/FreshConversationContinuation";
+import { useFreshConversationTurnDraftState } from "./conversations/new-conversation/useFreshConversationTurnDraftState";
+import { sameConversationOwner } from "./conversations/new-conversation/fresh-conversation-binding";
+import { decodeFreshConversationResult } from "./conversations/new-conversation/fresh-conversation";
+import { freshConversationOriginalSelector, freshConversationTarget } from "./orchestration/fresh-conversation-target";
 import {
   canNavigateForAutomaticSignIn, explicitLogoutRecorded, registerUnsavedNavigationHold,
 } from "./auth-navigation-guard";
@@ -1742,6 +1748,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     ownerContext?.principalScope, ownerContext?.generation]);
   const freshDraft = useFreshConversationDraftState({host: freshHost ?? null, authRevision,
     currentAuthRevision: freshAuthRevision, getExecutiveOwner: freshExecutiveOwner});
+  const freshTurnDraft = useFreshConversationTurnDraftState({host: freshHost ?? null, authRevision,
+    currentAuthRevision: freshAuthRevision, getExecutiveOwner: freshExecutiveOwner});
+  const freshTurnDraftRef = useRef(freshTurnDraft);
+  freshTurnDraftRef.current = freshTurnDraft;
   const freshDraftRef = useRef(freshDraft);
   freshDraftRef.current = freshDraft;
   const freshOriginalHeld = useRef(false);
@@ -1761,6 +1771,79 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         status: (args, signal) => send("status", args, signal),
         read: (args, signal) => send("read", args, signal)}});
   }, [freshHost, freshExecutiveOwner, commandBinding?.store, freshDraft.navigationEpoch]);
+  const freshReferenceReadFrame = useMemo(() => ({}), [freshHost, freshExecutiveOwner]);
+  const freshReferenceRead = useRef<{frame: object; read: FreshConversationOriginalRead;
+    owner: NonNullable<ReturnType<typeof freshExecutiveOwner>>} | null>(null);
+  const reportFreshReferenceRead = useMemo(() => {
+    const frame = freshReferenceReadFrame;
+    return (read: FreshConversationOriginalRead | null) => {
+      const owner = freshExecutiveOwner();
+      if (owner && read?.current() === true)
+        freshReferenceRead.current = {frame, read, owner: {...owner}};
+      else if (freshReferenceRead.current?.frame === frame) freshReferenceRead.current = null;
+    };
+  }, [freshReferenceReadFrame, freshExecutiveOwner]);
+  const attendedReadSequence = useRef(0);
+  const freshAttendedBinding = useMemo(() => {
+    const host = freshHost, transport = host?.freshConversation, request = transport?.request;
+    if (!host || !transport || !request || !freshBinding || !commandBinding?.store) return null;
+    const current = () => !!freshExecutiveOwner() && window.MastermindMissionHost === host &&
+      host.freshConversation === transport && transport.request === request;
+    const send = (operation: "consume" | "consume_status" | "turn_preview" | "turn" | "turn_status" | "turn_read",
+      args: unknown, signal: AbortSignal) => current()
+        ? request.call(transport, operation, args, signal)
+        : Promise.reject(new Error("FRESH_CONVERSATION_UNAVAILABLE"));
+    return createFreshConversationAttendedBinding({owner: () => current() ? freshExecutiveOwner() : null,
+      canModify: () => current() && host.auth?.getState().acquisition === true,
+      store: commandBinding.store,
+      transport: {consume: (args, signal) => send("consume", args, signal),
+        consumeStatus: (args, signal) => send("consume_status", args, signal),
+        turnPreview: (args, signal) => send("turn_preview", args, signal),
+        turn: (args, signal) => send("turn", args, signal),
+        turnStatus: (args, signal) => send("turn_status", args, signal),
+        turnRead: (args, signal) => send("turn_read", args, signal)},
+      readInitial: async (value, signal): Promise<FreshConversationOriginalRead | null> => {
+        const selected = freshConversationOriginalSelector(value), owner = freshExecutiveOwner();
+        const sequence = ++attendedReadSequence.current;
+        const live = () => current() && sequence === attendedReadSequence.current &&
+          sameConversationOwner(owner, freshExecutiveOwner());
+        if (!selected || !owner || !live() || signal.aborted) return null;
+        if ("operation_key" in selected) {
+          const raw = await freshBinding.readOriginal(selected, signal);
+          if (!live() || signal.aborted) return null;
+          const decoded = decodeFreshConversationResult(raw, "read", selected);
+          const data = decoded?.ok ? decoded.data : null, locator = data?.locator;
+          if (!data?.result || !locator?.job_id || !locator.attempt_id) return null;
+          return {selection: selected, result: data.result, locator,
+            current: live};
+        }
+        // Reuse the actual still-current issued reference body, never a hint.
+        // A hidden owner.readFresh would retire the UI's current witness. The
+        // independent status/preflight endpoint reauthorizes every request.
+        const issued = freshReferenceRead.current;
+        if (!issued || issued.frame !== freshReferenceReadFrame || !sameConversationOwner(issued.owner, owner) ||
+            freshConversationTarget(issued.read.selection) !== freshConversationTarget(selected) ||
+            issued.read.current() !== true) return null;
+        return {selection: selected, result: issued.read.result, locator: issued.read.locator,
+          current: () => live() && freshReferenceRead.current === issued && issued.read.current() === true};
+      }});
+  }, [freshHost, freshExecutiveOwner, freshBinding, commandBinding?.store, freshReferenceReadFrame]);
+  const freshAttendedRef = useRef(freshAttendedBinding);
+  freshAttendedRef.current = freshAttendedBinding;
+  const freshAttendedViewHeld = useRef({binding: freshAttendedBinding, held: false});
+  const reportFreshAttendedOriginal = useMemo(() => {
+    const binding = freshAttendedBinding;
+    return (held: boolean) => {
+      if (freshAttendedRef.current === binding) freshAttendedViewHeld.current = {binding, held};
+    };
+  }, [freshAttendedBinding]);
+  const hasFreshAttendedOriginal = useMemo(() => () => {
+    const binding = freshAttendedRef.current;
+    if (!binding) return false;
+    const state = binding.controller.getState();
+    return !!state.pointer ||
+      freshAttendedViewHeld.current.binding === binding && freshAttendedViewHeld.current.held;
+  }, []);
   const initialFreshRestored = useRef(false);
   useEffect(() => {
     // Initial URL is lookup DATA only. Delay its owner association until the
@@ -1805,7 +1888,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const office = useOfficeProjection(authRevision, selection, officeSession);
   // The Office draft is part of the unsent-text signal. It is read after the
   // session-qualified projection exists, never before.
-  hasUnsentUserText.current = Boolean(freshDraft.hasUnsentDraft() || projectJourney.hasUnsentDraft() || office.draft.text ||
+  hasUnsentUserText.current = Boolean(freshDraft.hasUnsentDraft() || freshTurnDraft.hasUnsentDraft() || hasFreshAttendedOriginal() || projectJourney.hasUnsentDraft() || office.draft.text ||
     observedConversation.hasUnsentDraft() ||
     (signedIn ? presentedComposerDrafts.launch || presentedComposerDrafts.session
       : retainedComposerDrafts.launch || retainedComposerDrafts.session));
@@ -1911,7 +1994,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   // A retained command pointer is an effect-reconciliation obligation.
   // Automatic OAuth navigation must not tear down an unresolved UI owner.
   useEffect(() => registerUnsavedNavigationHold(() =>
-    freshDraftRef.current.hasUnsentDraft() || freshOriginalHeld.current ||
+    freshDraftRef.current.hasUnsentDraft() || freshTurnDraftRef.current.hasUnsentDraft() || hasFreshAttendedOriginal() || freshOriginalHeld.current ||
     projectJourney.hasUnsentDraft() || pendingCommand.current !== null || heldKind !== null || recoverInFlight ||
     (passiveExpiryHold.current && hasUnsentUserText.current)
   ), [heldKind, recoverInFlight]);
@@ -2206,6 +2289,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           setRetainedComposerDrafts(blank);
         }
         freshDraftRef.current.invalidateAuth(passiveLoss);
+        freshTurnDraftRef.current.invalidateAuth(passiveLoss);
+        freshAttendedRef.current?.controller.invalidate();
         if (!native || !nativeGoalHeld) projectJourneyRef.current.invalidateAuth(passiveLoss);
         office.invalidateAuth(passiveLoss);
         observedConversation.invalidateAuth(passiveLoss);
@@ -4298,7 +4383,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         current.index.programs.filter(card => card.workRef === current.workRef).length === 1;
     }, locale, theme};
   const projectConversationHistory = useProjectConversationHistory(projectConversationReadScope);
-  const projectConversations = useProjectConversations(projectConversationReadScope);
+  const projectConversations = useProjectConversations({...projectConversationReadScope,
+    renderFreshContinuation: source => <FreshConversationContinuation locale={locale}
+      active={active === "Projects"} binding={freshAttendedBinding} host={freshHost} authGeneration={authRevision}
+      entry={{kind: "reference", window: source.window, current: source.current}}
+      turnDraft={freshTurnDraft} onUnresolvedChange={reportFreshAttendedOriginal}
+      onReadCurrent={reportFreshReferenceRead}/>});
   const [knowledgeRefresh, setKnowledgeRefresh] = useState(0);
   const knowledgePorts = useMemo(() => {
     const host=retainedResultHost;
@@ -4548,10 +4638,14 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     workRef: freshDraft.workRef, message: freshDraft.message, draftOwner: freshDraft.draftOwner,
     onWorkRefChange: freshDraft.onWorkRefChange, onMessageChange: freshDraft.onMessageChange,
     onOriginalKeySelected: freshDraft.onOriginalKeySelected, originalLookup: freshDraft.originalLookup,
+    renderContinuation: read => <FreshConversationContinuation locale={locale}
+      active={active === "Conversations" && freshDraft.shown} binding={freshAttendedBinding}
+      host={freshHost} authGeneration={authRevision} entry={{kind: "initial", read}}
+      turnDraft={freshTurnDraft} onUnresolvedChange={reportFreshAttendedOriginal}/>,
     onBack: () => {freshDraftRef.current.hide();conversationNavigation.backFromNewConversation();setActive("Conversations");}});
   freshOriginalHeld.current = freshJourney.hasUnresolvedOriginal;
   const openFreshConversation = () => {
-    if (!freshDraft.open(freshJourney.hasUnresolvedOriginal ? "resume" : "new")) return;
+    if (!freshDraft.open(freshJourney.hasUnresolvedOriginal || hasFreshAttendedOriginal() ? "resume" : "new")) return;
     // Close the mobile drawer before the Journey captures this explicit
     // gesture's focus origin. Its owned field/outcome focus can then proceed.
     if (navigationOpen) closeNavigation();
@@ -5264,6 +5358,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                   aria-current={active === x ? "page" : undefined}
                   onClick={() => {
                     setProjectTab(null);
+                    if (x === "Projects") setCatalogueProject(null);
                     if (x === "Conversations") {freshDraftRef.current.hide();conversationNavigation.showList();}
                     setActive(x);
                     if (navigationOpen) closeNavigation();
@@ -5359,6 +5454,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             <p>{copy.expiredUnsent}</p>
             <button type="button" onClick={() => {
               freshDraftRef.current.invalidateAuth(false);
+              freshTurnDraftRef.current.invalidateAuth(false);
+              freshAttendedRef.current?.controller.invalidate();
               projectJourney.invalidateAuth(false);
               office.changeDraft("");
               observedConversation.discardDraft();

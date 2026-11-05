@@ -144,3 +144,15 @@ it('the optional attended slot receives a stable issued read witness and only ex
   expect(s.transport.freshReferences).toHaveBeenCalledTimes(2);expect(s.transport.readFreshReference).toHaveBeenCalledTimes(1);
   view.unmount();expect(captured.current()).toBe(false);
 });
+
+it('keeps real archived turns visible beside an optional attended component that returns no controls',async()=>{
+  const s=make();s.state.window=fixture.archived_read;
+  function ReadOnlyContinuation(){return null;}
+  render(<ProjectConversations workRef={work} owner={s.owner}
+    renderFreshContinuation={()=> <ReadOnlyContinuation/>}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Read project conversations'}));
+  fireEvent.click(await screen.findByRole('button',{name:'Open'}));
+  await screen.findByText(fixture.archived_read.turns[0]!.result.envelope.summary);
+  expect(screen.getByText(fixture.turn_request.message)).toBeTruthy();
+  expect(s.transport.readFreshReference).toHaveBeenCalledTimes(1);
+});
