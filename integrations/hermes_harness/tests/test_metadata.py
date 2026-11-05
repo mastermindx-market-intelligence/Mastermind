@@ -9,11 +9,13 @@ process, opens a socket, reads a credential or observes a running service.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -70,7 +72,7 @@ class RoleMetadataFixture(unittest.TestCase):
 
         temporary = tempfile.TemporaryDirectory(prefix="hermes-role-metadata-")
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = Path(temporary.name).resolve()
         self.state = self.root / "state"
         self.unit_dir = self.root / "config" / "systemd" / "user"
         self.unit_dir.mkdir(parents=True)
@@ -428,31 +430,31 @@ class RoleMetadataRefusalTests(RoleMetadataFixture):
 
 class RoleMetadataObservationStabilityTests(RoleMetadataFixture):
     def test_a_metadata_change_during_the_read_is_unavailable(self) -> None:
-        real_read = metadata._read_bounded
+        real_read = metadata._HeldObservation.read
         mutated: list[bool] = []
 
-        def mutating_read(path, **kwargs):
-            data = real_read(path, **kwargs)
-            if path.name == "install-receipt.json" and not mutated:
+        def mutating_read(held, parent, name, **kwargs):
+            data = real_read(held, parent, name, **kwargs)
+            if name == "install-receipt.json" and not mutated:
                 mutated.append(True)
                 receipt = self.read_json(self.receipt_path)
                 receipt["upstream_attested"] = True
                 self.write_json(self.receipt_path, receipt)
             return data
 
-        with mock.patch.object(metadata, "_read_bounded", mutating_read):
+        with mock.patch.object(metadata._HeldObservation, "read", mutating_read):
             result = role_metadata(self.state, self.role)
         self.assertTrue(mutated)
         self.assertEqual(result["state"], UNAVAILABLE)
         self.assertEqual(result["reason"], "OBSERVATION_CHANGED")
 
     def test_a_current_release_change_during_the_read_is_unavailable(self) -> None:
-        real_read = metadata._read_bounded
+        real_read = metadata._HeldObservation.read
         swapped: list[bool] = []
 
-        def swapping_read(path, **kwargs):
-            data = real_read(path, **kwargs)
-            if path.name == "profile.yaml" and not swapped:
+        def swapping_read(held, parent, name, **kwargs):
+            data = real_read(held, parent, name, **kwargs)
+            if name == "profile.yaml" and not swapped:
                 swapped.append(True)
                 (self.state / "releases" / "2").mkdir()
                 temporary = self.state / ".current.swap"
@@ -460,73 +462,303 @@ class RoleMetadataObservationStabilityTests(RoleMetadataFixture):
                 os.replace(temporary, self.state / "current")
             return data
 
-        with mock.patch.object(metadata, "_read_bounded", swapping_read):
+        with mock.patch.object(metadata._HeldObservation, "read", swapping_read):
             result = role_metadata(self.state, self.role)
         self.assertTrue(swapped)
         self.assertEqual(result["state"], UNAVAILABLE)
         self.assertEqual(result["reason"], "OBSERVATION_CHANGED")
 
     def test_a_profile_change_between_the_digest_and_the_parse_is_unavailable(self) -> None:
-        # The profile owner reads the file itself. If its view is not the
-        # bytes the published digest attests, the projection would mix two
-        # different profiles.
-        real_read = metadata._read_bounded
+        # Parsing uses held bytes; a persistent change is still refused at
+        # the final descriptor and directory-edge check.
+        real_read = metadata._HeldObservation.read
         changed: list[bool] = []
 
-        def changing_read(path, **kwargs):
-            data = real_read(path, **kwargs)
-            if path.name == "profile.yaml" and not changed:
+        def changing_read(held, parent, name, **kwargs):
+            data = real_read(held, parent, name, **kwargs)
+            if name == "profile.yaml" and not changed:
                 changed.append(True)
-                path.write_text(
+                self.profile_release_path.write_text(
                     data.decode("utf-8") + "# changed after the digest\n", encoding="utf-8",
                 )
             return data
 
-        with mock.patch.object(metadata, "_read_bounded", changing_read):
+        with mock.patch.object(metadata._HeldObservation, "read", changing_read):
             result = role_metadata(self.state, self.role)
         self.assertTrue(changed)
         self.assertEqual(result["state"], UNAVAILABLE)
         self.assertEqual(result["reason"], "OBSERVATION_CHANGED")
 
 
+class RoleMetadataDescriptorTests(RoleMetadataFixture):
+    def test_profile_declared_state_must_match_held_root(self) -> None:
+        raw = self.profile_release_path.read_bytes()
+        changed = raw.replace(str(self.state).encode(), str(self.root / "other-state").encode())
+        self.assertNotEqual(raw, changed)
+        self.profile_release_path.write_bytes(changed)
+        receipt = self.read_json(self.receipt_path)
+        receipt["profile_sha256"] = hashlib.sha256(changed).hexdigest()
+        self.write_json(self.receipt_path, receipt)
+        result = role_metadata(self.state, self.role)
+        self.assertEqual((result["state"], result["reason"]), (UNAVAILABLE, "PROFILE_UNQUALIFIED"))
+
+    def test_ancestor_alias_and_nonphysical_root_are_refused(self) -> None:
+        alias = self.root / "alias"
+        alias.symlink_to(self.root, target_is_directory=True)
+        self.assertEqual(role_metadata(alias / "state", self.role)["reason"], "STATE_ROOT_SYMLINK_REFUSED")
+        for path in (Path("relative-state"), self.state / ".." / "state"):
+            self.assertEqual(role_metadata(path, self.role)["reason"], "STATE_ROOT_NOT_QUALIFIED")
+
+    def test_profile_parser_uses_held_bytes_even_during_pathname_change(self) -> None:
+        from integrations.hermes_runtime import profile as profile_owner
+        original = self.profile_release_path.read_bytes()
+        actual = profile_owner.load_profile_bytes
+        seen = []
+
+        def parse(data, *, source_path, **kwargs):
+            seen.append(data)
+            self.profile_release_path.write_bytes(original + b"# transient changed pathname\n")
+            try:
+                return actual(data, source_path=source_path, **kwargs)
+            finally:
+                self.profile_release_path.write_bytes(original)
+
+        with mock.patch.object(profile_owner, "load_profile", side_effect=AssertionError("path parser used")), mock.patch.object(
+            profile_owner, "load_profile_bytes", parse,
+        ):
+            result = role_metadata(self.state, self.role)
+        self.assertEqual(seen, [original])
+        self.assertEqual(result["reason"], "OBSERVATION_CHANGED")
+
+    def test_root_and_intermediate_directory_replacement_are_detected(self) -> None:
+        actual = metadata._HeldObservation.read
+        for index, path in enumerate((self.state, self.release / "hermes-home")):
+            with self.subTest(path=path.name):
+                changed = []
+
+                def read(held, parent, name, **kwargs):
+                    data = actual(held, parent, name, **kwargs)
+                    if name == "config.yaml" and not changed:
+                        changed.append(True)
+                        retained = self.root / f"retained-{index}"
+                        path.rename(retained)
+                        shutil.copytree(retained, path, symlinks=True)
+                    return data
+
+                with mock.patch.object(metadata._HeldObservation, "read", read):
+                    result = role_metadata(self.state, self.role)
+                self.assertTrue(changed)
+                self.assertEqual(result["reason"], "OBSERVATION_CHANGED")
+
+    def test_same_bytes_in_new_file_do_not_preserve_identity(self) -> None:
+        actual = metadata._HeldObservation.read
+        changed = []
+
+        def read(held, parent, name, **kwargs):
+            data = actual(held, parent, name, **kwargs)
+            if name == "config.yaml" and not changed:
+                changed.append(True)
+                replacement = self.config_path.with_name("replacement.yaml")
+                replacement.write_bytes(data)
+                os.replace(replacement, self.config_path)
+            return data
+
+        with mock.patch.object(metadata._HeldObservation, "read", read):
+            result = role_metadata(self.state, self.role)
+        self.assertTrue(changed)
+        self.assertEqual(result["reason"], "OBSERVATION_CHANGED")
+
+    def test_file_open_races_refuse_symlink_and_fifo_without_content_read(self) -> None:
+        original = self.profile_release_path.read_bytes()
+        outside = self.root / "outside-profile.yaml"
+        outside.write_bytes(original)
+        actual_open, actual_read = os.open, os.read
+        for kind in ("symlink", "fifo"):
+            with self.subTest(kind=kind):
+                swapped = []
+
+                def open_race(path, flags, *args, **kwargs):
+                    if path == "profile.yaml" and not swapped:
+                        self.assertTrue(flags & os.O_NOFOLLOW)
+                        self.assertTrue(flags & os.O_NONBLOCK)
+                        swapped.append(True)
+                        self.profile_release_path.unlink()
+                        if kind == "symlink":
+                            self.profile_release_path.symlink_to(outside)
+                        else:
+                            os.mkfifo(self.profile_release_path)
+                    return actual_open(path, flags, *args, **kwargs)
+
+                def read_regular(fd, length):
+                    self.assertTrue(stat.S_ISREG(os.fstat(fd).st_mode))
+                    return actual_read(fd, length)
+
+                with mock.patch("os.open", open_race), mock.patch("os.read", read_regular):
+                    result = role_metadata(self.state, self.role)
+                self.assertTrue(swapped)
+                self.assertEqual(result["reason"], "METADATA_NOT_REGULAR_FILE")
+                self.profile_release_path.unlink()
+                self.profile_release_path.write_bytes(original)
+
+    def test_intermediate_symlink_swap_cannot_redirect_the_open(self) -> None:
+        actual_open = os.open
+        home = self.release / "hermes-home"
+        retained = self.root / "retained-home"
+        swapped = []
+
+        def open_race(path, flags, *args, **kwargs):
+            if path == "hermes-home" and not swapped:
+                swapped.append(True)
+                self.assertTrue(flags & os.O_DIRECTORY and flags & os.O_NOFOLLOW)
+                home.rename(retained)
+                home.symlink_to(retained, target_is_directory=True)
+            return actual_open(path, flags, *args, **kwargs)
+
+        with mock.patch("os.open", open_race):
+            result = role_metadata(self.state, self.role)
+        self.assertTrue(swapped)
+        self.assertEqual(result["reason"], "OBSERVATION_CHANGED")
+
+    def test_root_replacement_between_stat_and_open_is_refused(self) -> None:
+        actual_open = os.open
+        swapped = []
+
+        def open_race(path, flags, *args, **kwargs):
+            if path == "state" and not swapped:
+                swapped.append(True)
+                self.state.rename(self.root / "retained-state")
+                self.state.mkdir()
+            return actual_open(path, flags, *args, **kwargs)
+
+        with mock.patch("os.open", open_race):
+            result = role_metadata(self.state, self.role)
+        self.assertTrue(swapped)
+        self.assertEqual(result["reason"], "OBSERVATION_CHANGED")
+
+    def test_absence_is_rechecked_after_all_install_evidence_inspection(self) -> None:
+        actual = metadata._HeldObservation.install_evidence
+        for kind in ("manifest", "current", "release", "new-releases"):
+            with self.subTest(kind=kind):
+                root = self.root / ("absent-" + kind)
+                root.mkdir()
+                if kind != "new-releases":
+                    (root / "releases").mkdir()
+
+                def evidence(held):
+                    result = actual(held)
+                    self.assertFalse(result)
+                    if kind == "manifest":
+                        (root / "install-manifest.json").write_text("{}")
+                    elif kind == "current":
+                        (root / "current").symlink_to("releases/1")
+                    elif kind == "release":
+                        (root / "releases" / "1").mkdir()
+                    else:
+                        (root / "releases").mkdir()
+                    return result
+
+                with mock.patch.object(metadata._HeldObservation, "install_evidence", evidence):
+                    result = role_metadata(root, self.role)
+                self.assertEqual(result["reason"], "OBSERVATION_CHANGED")
+
+    def test_evidence_appearing_during_final_empty_directory_scan_is_refused(self) -> None:
+        actual = os.scandir
+        for kind in ("manifest", "current"):
+            with self.subTest(kind=kind):
+                root = self.root / ("final-scan-" + kind)
+                (root / "releases").mkdir(parents=True)
+                calls = []
+
+                def scan(fd):
+                    calls.append(fd)
+                    if len(calls) == 2:
+                        if kind == "manifest":
+                            (root / "install-manifest.json").write_text("{}")
+                        else:
+                            (root / "current").symlink_to("releases/1")
+                    return actual(fd)
+
+                with mock.patch("os.scandir", scan):
+                    result = role_metadata(root, self.role)
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(result["reason"], "OBSERVATION_CHANGED")
+
+    def test_descriptors_close_on_success_absence_and_refusal(self) -> None:
+        empty = self.root / "empty-descriptors"
+        empty.mkdir()
+        malformed = self.root / "malformed-descriptors"
+        malformed.mkdir()
+        (malformed / "install-manifest.json").write_text("not-json")
+        actual_open, actual_close = os.open, os.close
+        for path, expected in ((self.state, CONFIGURATION_OBSERVED), (empty, ABSENT), (malformed, UNAVAILABLE)):
+            with self.subTest(state=expected):
+                active = set()
+                opened = []
+
+                def open_fd(*args, **kwargs):
+                    fd = actual_open(*args, **kwargs)
+                    self.assertNotIn(fd, active)
+                    active.add(fd)
+                    opened.append(fd)
+                    return fd
+
+                def close_fd(fd):
+                    self.assertIn(fd, active)
+                    active.remove(fd)
+                    return actual_close(fd)
+
+                with mock.patch("os.open", open_fd), mock.patch("os.close", close_fd):
+                    result = role_metadata(path, self.role)
+                self.assertEqual(result["state"], expected)
+                self.assertTrue(opened)
+                self.assertEqual(active, set())
+
+
 class RoleMetadataBoundaryTests(RoleMetadataFixture):
     def test_the_facade_never_opens_the_secrets_file(self) -> None:
-        opened: list[str] = []
-        real_os_open = os.open
-        real_builtin_open = open
-        real_io_open = io.open
+        descriptor_paths: dict[int, Path] = {}
+        content_reads: set[Path] = set()
+        other_opens: list[str] = []
+        real_os_open, real_os_read = os.open, os.read
+        real_builtin_open, real_io_open = open, io.open
+        expected = {self.manifest_path, self.receipt_path,
+                    self.profile_release_path, self.config_path}
 
         def recording_os_open(path, flags, *args, **kwargs):
-            opened.append(str(path))
-            return real_os_open(path, flags, *args, **kwargs)
+            fd = real_os_open(path, flags, *args, **kwargs)
+            physical = Path(path)
+            if not physical.is_absolute():
+                physical = descriptor_paths[kwargs["dir_fd"]] / physical
+            descriptor_paths[fd] = physical
+            # Ancestor directories are held for custody. Content-bearing
+            # opens must remain exactly the four incumbent metadata leaves.
+            if not stat.S_ISDIR(os.fstat(fd).st_mode):
+                self.assertIn(physical, expected)
+            return fd
+
+        def recording_os_read(fd, length):
+            self.assertIn(descriptor_paths[fd], expected)
+            content_reads.add(descriptor_paths[fd])
+            return real_os_read(fd, length)
 
         def recording_builtin_open(file, *args, **kwargs):
-            opened.append(str(file))
+            other_opens.append(str(file))
             return real_builtin_open(file, *args, **kwargs)
 
         def recording_io_open(file, *args, **kwargs):
-            # ``Path.read_bytes`` and ``Path.read_text`` go through io.open,
-            # not through builtins.open, so both have to be recorded.
-            opened.append(str(file))
+            other_opens.append(str(file))
             return real_io_open(file, *args, **kwargs)
 
         with mock.patch("os.open", recording_os_open), mock.patch(
-            "builtins.open", recording_builtin_open,
-        ), mock.patch("io.open", recording_io_open):
+            "os.read", recording_os_read,
+        ), mock.patch("builtins.open", recording_builtin_open), mock.patch(
+            "io.open", recording_io_open,
+        ):
             result = role_metadata(self.state, self.role)
         self.assertEqual(result["state"], CONFIGURATION_OBSERVED)
-        self.assertFalse([p for p in opened if str(self.secrets) in p])
-        # Every file the facade read is inside the selected role's own state
-        # tree: the manifest, the current release receipt, the release
-        # profile and the installed role config. Nothing else is opened.
-        self.assertTrue(opened)
-        root = os.path.realpath(self.state)
-        for path in opened:
-            resolved = os.path.realpath(path)
-            self.assertTrue(
-                resolved == root or resolved.startswith(root + os.sep),
-                f"read outside the selected role state root: {path}",
-            )
+        self.assertEqual(content_reads, expected)
+        self.assertEqual(other_opens, [])
+        self.assertNotIn(self.secrets, descriptor_paths.values())
 
     def test_the_facade_never_invokes_the_secret_loader_doctor_or_a_provider(self) -> None:
         with mock.patch(
