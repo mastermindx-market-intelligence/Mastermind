@@ -262,7 +262,7 @@ def qualify(request):
  return proof
 
 
-def code_for_request(request, *, expected_sources):
+def _code_for_request(request, *, expected_sources):
  proof = qualify(request)
  if expected_sources != proof['source_sha256']:
   raise ValueError('post_failure_observer_source_changed')
@@ -280,20 +280,75 @@ def code_for_request(request, *, expected_sources):
   'exec('+repr(sources['post_failure_observation.py'])+',phase)\n'
   'files={"__name__":"_fixed_artifact_reader"}\n'
   'exec('+repr(sources['artifact_reader.py'])+',files)\n'
-  'raw=sys.stdin.buffer.read(8193)\nassert len(raw)<=8192\n'
-  'req=base["strict_json"](raw)\nassert req=='+repr(request)+'\n'
-  'report=phase["observe_original"](base,files,req)\n'
-  'print(json.dumps({"schema":req["schema"],"request_sha256":hashlib.sha256(phase["canonical"](req)).hexdigest(),"report":report},sort_keys=True,separators=(",",":")))\n')
+  'expected='+repr(request)+'\n'
+  'stage="REMOTE_REQUEST"\n'
+  'try:\n'
+  ' raw=sys.stdin.buffer.read(8193)\n assert len(raw)<=8192\n'
+  ' req=base["strict_json"](raw)\n assert req==expected\n'
+  ' stage="REMOTE_OBSERVATION"\n'
+  ' report=phase["observe_original"](base,files,req)\n'
+  ' result={"report":report}\n'
+  'except Exception as exc:\n'
+  ' permission=isinstance(exc,PermissionError) or isinstance(exc,OSError) and exc.errno in (1,13)\n'
+  ' code="REMOTE_READ_PERMISSION_REFUSED" if permission else "REMOTE_OBSERVATION_FAILED"\n'
+  ' if not permission and stage=="REMOTE_REQUEST":code="REMOTE_REQUEST_INVALID"\n'
+  ' if not permission and stage=="REMOTE_OBSERVATION":\n'
+  '  if isinstance(exc,FileNotFoundError):code="REMOTE_ORIGINAL_INPUT_NOT_FOUND"\n'
+  '  elif isinstance(exc,ValueError):code='+repr(REMOTE_VALUE_CODES)+'.get(str(exc),code)\n'
+  ' result={"diagnostic":{"stage":stage,"code":code,"permission_refusal":permission}}\n'
+  'result.update(schema=expected["schema"],request_sha256=hashlib.sha256(phase["canonical"](expected)).hexdigest())\n'
+  'print(json.dumps(result,sort_keys=True,separators=(",",":")))\n')
+
+
+# Closed diagnostics describe this new read only. They neither recover a lost
+# prior transport cause nor turn original recorded failure into settlement.
+REMOTE_VALUE_CODES = {
+ 'original_lease_projection':'REMOTE_MARKER_PROJECTION_INVALID',
+ 'original_lease_time_zone':'REMOTE_MARKER_PROJECTION_INVALID',
+ 'marker_detail_shape':'REMOTE_MARKER_PROJECTION_INVALID',
+ 'marker_detail_absence':'REMOTE_MARKER_PROJECTION_INVALID',
+ 'same_record_projection_mismatch':'REMOTE_RECEIPT_PROJECTION_INVALID',
+ 'original_remote_packet_unqualified':'REMOTE_ORIGINAL_PACKET_INVALID',
+ 'original_remote_contract_unqualified':'REMOTE_ORIGINAL_PACKET_INVALID',
+ 'original_remote_body_unqualified':'REMOTE_ORIGINAL_PACKET_INVALID',
+}
+REMOTE_CODES=frozenset(REMOTE_VALUE_CODES.values()) | frozenset((
+ 'REMOTE_READ_PERMISSION_REFUSED','REMOTE_OBSERVATION_FAILED',
+ 'REMOTE_REQUEST_INVALID','REMOTE_ORIGINAL_INPUT_NOT_FOUND'))
+
+
+def code_for_request(request, *, expected_sources):
+ try:
+  return _code_for_request(request,expected_sources=expected_sources)
+ except (OSError,ValueError,TypeError,KeyError,UnicodeError,RecursionError,sqlite3.Error) as exc:
+  # The incumbent transport calls this before Popen. Only a closed label
+  # crosses the module/main boundary; no exception detail is serialized.
+  permission=isinstance(exc,OSError) and exc.errno in (1,13)
+  raise ValueError('post_failure_local_preparation_permission_refused' if permission
+                   else 'post_failure_local_preparation_failed') from None
+
+
+def validate_remote_diagnostic(value):
+ if (type(value) is not dict or set(value)!={'stage','code','permission_refusal'}
+     or value['stage'] not in ('REMOTE_REQUEST','REMOTE_OBSERVATION')
+     or type(value['code']) is not str or value['code'] not in REMOTE_CODES or type(value['permission_refusal']) is not bool
+     or value['permission_refusal'] != (value['code']=='REMOTE_READ_PERMISSION_REFUSED')
+     or value['stage']=='REMOTE_REQUEST' and value['code'] not in ('REMOTE_REQUEST_INVALID','REMOTE_READ_PERMISSION_REFUSED')
+     or value['stage']=='REMOTE_OBSERVATION' and value['code']=='REMOTE_REQUEST_INVALID'):
+  raise ValueError('post_failure_remote_diagnostic_shape')
+ return dict(value)
 
 
 def validate_response(raw, request):
  model.validate_request(request)
  if len(raw)>reader.MAX_RESPONSE: raise ValueError('post_failure_response_limit')
  value = reader.strict_json(raw)
- if (type(value) is not dict or set(value) != {'schema','request_sha256','report'}
+ if (type(value) is not dict or set(value) not in ({'schema','request_sha256','report'}, {'schema','request_sha256','diagnostic'})
      or value['schema'] != model.SCHEMA
      or value['request_sha256'] != delivery.digest(reader.canonical(request))):
   raise ValueError('post_failure_response_binding')
+ if 'diagnostic' in value:
+  return {'diagnostic':validate_remote_diagnostic(value['diagnostic'])}
  bundle=value['report']
  if (type(bundle) is not dict or set(bundle)!={'report','files','original_contract','snapshot_state','source_adoption_allowed'}
      or bundle['snapshot_state']!='PARTIAL_UNSETTLED' or bundle['source_adoption_allowed'] is not False):
@@ -406,20 +461,45 @@ def observe(request, destination):
    unchanged();chain.verify();receipt['read_transport_state']='ATTEMPTED_UNCONFIRMED'
    raw=delivery.transport(proof['ssh_alias'],request,current_sources_sha256=proof['source_sha256'])
    receipt['read_transport_state']='RESPONSE_RECEIVED'
-   validated=validate_response(raw,request);receipt['report']=validated['report']
-   import base64
-   for item in validated['files']:
-    item=dict(item)
-    if item['status']=='RETRIEVED':
-     data=base64.b64decode(item.pop('data_base64'),validate=True)
-     delivery.write_exclusive(chain.fd,item['local_name'],data)
-     item['status']='RETAINED_UNSETTLED';item['snapshot_only']=True
-     item['source_adoption_allowed']=False
-    receipt['files'].append(item)
-   unchanged();chain.verify();receipt['state']='METADATA_OBSERVED' if request.get('receipt_metadata_only') else 'PARTIAL_UNSETTLED'
-   receipt['local_preservation_created']=bool(receipt['files']) if request.get('receipt_metadata_only') else True
+   validated=validate_response(raw,request)
+   if 'diagnostic' in validated:
+    diagnostic=validated['diagnostic']
+    receipt.update(state='UNAVAILABLE',diagnostic_stage=diagnostic['stage'],
+                   diagnostic_code=diagnostic['code'],read_permission_refusal=diagnostic['permission_refusal'])
+   else:
+    receipt['report']=validated['report']
+    import base64
+    for item in validated['files']:
+     item=dict(item)
+     if item['status']=='RETRIEVED':
+      data=base64.b64decode(item.pop('data_base64'),validate=True)
+      delivery.write_exclusive(chain.fd,item['local_name'],data)
+      item['status']='RETAINED_UNSETTLED';item['snapshot_only']=True
+      item['source_adoption_allowed']=False
+     receipt['files'].append(item)
+    unchanged();chain.verify();receipt['state']='METADATA_OBSERVED' if request.get('receipt_metadata_only') else 'PARTIAL_UNSETTLED'
+    receipt['local_preservation_created']=bool(receipt['files']) if request.get('receipt_metadata_only') else True
   except (OSError,ValueError,TypeError,KeyError,UnicodeError,RecursionError,sqlite3.Error,subprocess.SubprocessError) as exc:
-   receipt['state']='UNAVAILABLE';receipt['diagnostic_code']=('LOCAL_OS_PERMISSION_REFUSED' if isinstance(exc,OSError) and exc.errno in (1,13) else 'POST_FAILURE_READ_UNCONFIRMED')
+   receipt['state']='UNAVAILABLE'
+   # Only source-defined labels from the incumbent transport are classified.
+   # Arbitrary exception text, stderr, paths, identities and values stay private.
+   local_code=str(exc) if isinstance(exc,ValueError) else None
+   if local_code in ('post_failure_local_preparation_failed','post_failure_local_preparation_permission_refused'):
+    receipt['read_transport_state']='NOT_ATTEMPTED'  # code constructor failed before incumbent Popen
+    receipt.update(diagnostic_stage='LOCAL_CODE_PREPARATION',diagnostic_code=(
+     'LOCAL_SOURCE_PERMISSION_REFUSED' if local_code.endswith('permission_refused') else 'LOCAL_SOURCE_QUALIFICATION_FAILED'))
+   elif receipt['read_transport_state']=='NOT_ATTEMPTED':
+    receipt.update(diagnostic_stage='LOCAL_PREFLIGHT',diagnostic_code='LOCAL_OBSERVATION_PREFLIGHT_FAILED')
+   elif receipt['read_transport_state']=='RESPONSE_RECEIVED':
+    receipt.update(diagnostic_stage='RESPONSE_VALIDATION',diagnostic_code='POST_FAILURE_RESPONSE_UNQUALIFIED')
+   else:
+    transport_codes={'transport_unavailable':'READ_TRANSPORT_EXIT_UNCONFIRMED',
+     'transport_timeout':'READ_TRANSPORT_TIMEOUT','transport_output_limit':'READ_TRANSPORT_OUTPUT_LIMIT'}
+    receipt.update(diagnostic_stage='READ_TRANSPORT',diagnostic_code=(
+     'LOCAL_OS_PERMISSION_REFUSED' if isinstance(exc,OSError) and exc.errno in (1,13)
+     else transport_codes.get(local_code,'POST_FAILURE_READ_UNCONFIRMED')))
+   receipt['read_permission_refusal']=(isinstance(exc,OSError) and exc.errno in (1,13)
+    or local_code=='post_failure_local_preparation_permission_refused')
   receipt['observed_at_epoch']=time.time()
   # One publication attempt. Never republish after an ambiguous publication.
   delivery.publish_receipt(chain,receipt,{'paths':[]},verify_source=unchanged)
