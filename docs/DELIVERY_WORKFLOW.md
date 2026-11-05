@@ -134,6 +134,12 @@ adds no manual review. See [session review policy](SESSION_LOCAL_REVIEW_POLICY.m
    green PR checks or a successful CLI return as a merged SHA. Read the actual
    merged PR and commit before claiming release or deploying.
 
+   For integration proof, do not add a manual synthetic PR merge-ref check
+   requirement; GitHub's native merge queue runs integrated checks after entry
+   and before the actual merge. If final integrated checks fail, the queue must
+   not merge. Protected integration requires that required PR-head checks and
+   all **actually required** reviews pass and queue entry is authorized.
+
 7. Deploy only when the assigned change requires runtime rollout and release is authorized.
    A source-only, research, documentation or instruction task must not restart an unrelated
    application. For a required deployment, resolve this operation's actual merge commit from
