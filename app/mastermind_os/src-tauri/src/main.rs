@@ -1,5 +1,6 @@
 mod auth;
 mod project_planning;
+mod fresh_conversation;
 mod native_client;
 mod native_refresh;
 mod terminal_handoff;
@@ -133,6 +134,7 @@ fn main() {
             auth::read_admitted_plan,
             auth::read_retained_activity,
             auth::read_resource_capacity,
+            auth::host_observation::read_host_observation,
             auth::read_fabric_catalog,
             auth::read_fabric_status,
             auth::read_result,
@@ -146,6 +148,7 @@ fn main() {
             auth::executive_direct_native_consume,
             auth::executive_direct_correction,
             auth::executive_project_planning,
+            auth::executive_fresh_conversation,
             auth::executive_session_context,
             auth::executive_project_history_context,
             auth::executive_session_reply,

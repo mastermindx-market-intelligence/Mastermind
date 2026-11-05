@@ -1,5 +1,6 @@
 //! The native client owns OAuth transactions and bearer tokens. The webview
 //! receives fixed read results and sanitized state, never credential material.
+pub mod host_observation;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -2324,6 +2325,11 @@ where
         && body.get("arguments").and_then(|v| v.get("execution_profile"))
             .and_then(Value::as_str) == Some("research_only");
     let planning=crate::project_planning::operation(path);
+    let fresh=crate::fresh_conversation::operation(path);
+    if let Some(operation)=fresh {
+        if !body.as_object().is_some_and(|o|o.len()==1 && o.contains_key("arguments")) {return Err("REQUEST_INVALID".into())}
+        crate::fresh_conversation::validate(operation,&body["arguments"])?;
+    }
     if let Some(operation)=planning {
         if !body.as_object().is_some_and(|o|o.len()==1 && o.contains_key("arguments")) {return Err("REQUEST_INVALID".into())}
         crate::project_planning::validate(operation,&body["arguments"])?;
@@ -2358,6 +2364,10 @@ where
                 }
             }
             _ if planning.is_some() => {if !token.executive_send {return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into())}}
+            // Every original fresh-conversation operation belongs to the
+            // enrolled submit-policy principal. Pure project catalogue READ
+            // is separately composed; it is never relabeled here.
+            _ if fresh.is_some() => {if !token.executive_send {return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into())}}
             _ => return Err("REQUEST_INVALID".into()),
         }
         (
@@ -2365,7 +2375,7 @@ where
             token.expires,
             inner.executive_generation,
             inner.executive_changed.subscribe(),
-            if planning.is_some() {let workspace=inner.token(Resource::Acquisition).ok_or("WORKSPACE_AUTH_REQUIRED")?;
+            if planning.is_some() || matches!(fresh,Some("preview"|"create"|"consume"|"turn")) {let workspace=inner.token(Resource::Acquisition).ok_or("WORKSPACE_AUTH_REQUIRED")?;
                 Some((workspace.value.clone(),inner.generation,workspace.expires))} else {None},
         )
     };
@@ -2388,7 +2398,9 @@ where
     if let Some((value,_,_))=&workspace {
         request=request.header("X-Mastermind-Workspace-Authorization",format!("Bearer {value}"));
     }
-    if foreground_research || planning.is_some() {
+    if fresh.is_some() {
+        request = request.timeout(Duration::from_secs(300));
+    } else if foreground_research || planning.is_some() {
         request = request.timeout(EXECUTIVE_FOREGROUND_TIMEOUT);
     }
     let exchange = async {
@@ -2415,7 +2427,7 @@ where
         { planning_auth_guard(&mut *state.lock()?,generation,token_expires,workspace.as_ref())?; }
         result
     };
-    if foreground_research || direct || planning.is_some() {
+    if foreground_research || direct || planning.is_some() || fresh.is_some() {
         executive_foreground_exchange(state, generation, token_expires, changed, workspace.as_ref(), exchange).await
     } else {
         exchange.await
@@ -2453,6 +2465,14 @@ where F: std::future::Future<Output = Result<T>> {
         }
         exchange.as_mut().poll(cx)
     }).await
+}
+#[tauri::command]
+pub async fn executive_fresh_conversation(app:AppHandle,operation:String,arguments:Value)->Result<Value> {
+    let path=crate::fresh_conversation::path(&operation).ok_or("REQUEST_INVALID")?;
+    crate::fresh_conversation::validate(&operation,&arguments)?;
+    let result=executive_post(app.clone(),path,serde_json::json!({"arguments":arguments})).await;
+    if result.is_err(){emit(&app);}
+    result
 }
 #[tauri::command]
 pub async fn executive_project_planning(app:AppHandle,operation:String,arguments:Value)->Result<Value> {
