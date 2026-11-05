@@ -13,8 +13,9 @@ it("shows plain Chinese unavailable work, selection and footer without changing 
  render(<App locale="zh-CN" theme="light"/>);
  expect(screen.getByRole("heading",{name:"开始工作"})).toBeTruthy();
  expect(screen.getByText("暂时无法开始工作。")).toBeTruthy();
- expect(screen.getByText("尚未选择工作项")).toBeTruthy();
- expect(screen.getByRole("navigation",{name:"工作导航"})).toBeTruthy();
+ expect(screen.queryByText("尚未选择工作项")).toBeNull();
+ expect(document.querySelector("details.nav-advanced nav")?.getAttribute("aria-label")).toBe("工作导航");
+ expect(document.querySelector<HTMLDetailsElement>("details.nav-advanced")?.open).toBe(false);
  expect(screen.getByText("状态与来源")).toBeTruthy();
  const summary=screen.getByText("技术详情");
  expect(summary.closest("details")?.open).toBe(false);

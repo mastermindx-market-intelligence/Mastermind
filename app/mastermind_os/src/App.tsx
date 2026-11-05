@@ -1379,6 +1379,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   };
   const navigationToggle = useRef<HTMLButtonElement>(null);
   const closeNavigation = () => { setNavigationOpen(false); navigationToggle.current?.focus(); };
+  const advancedDisclosure = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     if (!navigationOpen) return;
     const drawerMedia = window.matchMedia?.("(max-width: 959px)");
@@ -1562,6 +1563,14 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           program.rootState === "RESOLVED" &&
           program.rootJobId === selection.rootJobId,
       );
+  // Auto-open the Advanced disclosure only while an actual advanced route is
+  // active. This never navigates and never closes the disclosure itself; the
+  // incumbent summary click keeps ownership of manual toggling.
+  const advancedRoute = advancedNavigation.includes(active);
+  useEffect(() => {
+    if (advancedRoute && advancedDisclosure.current && !advancedDisclosure.current.open)
+      advancedDisclosure.current.open = true;
+  }, [active, advancedRoute]);
   const controlRoomSurfaceControls = useControlRoomSurfaceControls({
     selection, selectionSeq, authEpoch: controlRoomAuthEpoch, authRevision,
     active: active === "Control Room" || active === "Session Estate",
@@ -4630,79 +4639,100 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       {navigationOpen && <button className="navigation-backdrop" aria-label={locale === "zh-CN" ? "关闭导航" : "Close navigation"} tabIndex={-1} onClick={closeNavigation} />}
       <aside id="workspace-navigation" ref={navigationPane} data-open={navigationOpen ? "true" : "false"}>
         <button type="button" className="navigation-close" onClick={closeNavigation}>{locale === "zh-CN" ? "关闭导航" : "Close navigation"}</button>
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            M
-          </span>
-          <span className="brand-copy">
-            mastermind<small>EXECUTIVE OS</small>
-          </span>
+        <div className="nav-top">
+          <div className="brand">
+            <span className="brand-mark" aria-hidden="true">
+              M
+            </span>
+            <span className="brand-copy">
+              mastermind<small>EXECUTIVE OS</small>
+            </span>
+          </div>
+          <button type="button" className="sidebar-search" aria-current={active === "Search" ? "page" : undefined}
+            onClick={() => {setProjectTab(null);setActive("Search");if (navigationOpen) closeNavigation();}}>
+            <NavigationIcon view="Search"/>{locale === "zh-CN" ? "搜索" : "Search"}
+          </button>
+          <div className="nav-section">
+            <span className="nav-section-label">COMPANY</span>
+            <nav aria-label="Company navigation">
+              {primaryNavigation.map((x) => (
+                <button
+                  key={x}
+                  className={active === x ? "active" : ""}
+                  aria-label={navigationLabel(x, locale)}
+                  aria-current={active === x ? "page" : undefined}
+                  onClick={() => {
+                    setProjectTab(null);
+                    setActive(x);
+                    if (navigationOpen) closeNavigation();
+                  }}
+                >
+                  <span className="nav-glyph" aria-hidden="true">
+                    <NavigationIcon view={x} />
+                  </span>
+                  <span className="nav-label">{navigationLabel(x, locale)}</span>
+                </button>
+              ))}
+            </nav>
+          </div>
         </div>
-        <button type="button" className="sidebar-search" aria-current={active === "Search" ? "page" : undefined}
-          onClick={() => {setProjectTab(null);setActive("Search");if (navigationOpen) closeNavigation();}}>
-          <NavigationIcon view="Search"/>{locale === "zh-CN" ? "搜索" : "Search"}
-        </button>
-        <div className="nav-section">
-          <span className="nav-section-label">COMPANY</span>
-          <nav aria-label="Company navigation">
-            {primaryNavigation.map((x) => (
-              <button
-                key={x}
-                className={active === x ? "active" : ""}
-                aria-label={navigationLabel(x, locale)}
-                aria-current={active === x ? "page" : undefined}
-                onClick={() => {
-                  setProjectTab(null);
-                  setActive(x);
-                  if (navigationOpen) closeNavigation();
-                }}
-              >
-                <span className="nav-glyph" aria-hidden="true">
-                  <NavigationIcon view={x} />
-                </span>
-                <span className="nav-label">{navigationLabel(x, locale)}</span>
-              </button>
-            ))}
-          </nav>
+        <div className="nav-scroll">
+          <div className="nav-section mission-nav">
+            <span className="nav-section-label">{locale === "zh-CN" ? "工作与上下文" : "WORK & CONTEXT"}</span>
+            {selection && d && d.read_state.state === "CURRENT" &&
+             d.mission.root_job_id === selection.rootJobId ? (
+              <div className="mission-context">
+                <b>{d.program.title || selection.workRef}</b>
+                <small>{copy.selectedWork}</small>
+              </div>
+            ) : null}
+            <details className="nav-advanced" ref={advancedDisclosure}>
+              <summary>{locale === "zh-CN" ? "高级工具" : "Advanced"}</summary>
+              <nav aria-label={copy.missionNavigation}>
+                {advancedNavigation.map((x) => (
+                  <button
+                    key={x}
+                    className={active === x ? "active" : ""}
+                    aria-label={advancedLabel(x, locale)}
+                    aria-current={active === x ? "page" : undefined}
+                    onClick={() => {
+                      setProjectTab(null);
+                      setActive(x);
+                      if (navigationOpen) closeNavigation();
+                    }}
+                  >
+                    <span className="nav-glyph" aria-hidden="true">
+                      <NavigationIcon view={x} />
+                    </span>
+                    <span className="nav-label">{navigationLabel(x, locale)}</span>
+                  </button>
+                ))}
+              </nav>
+            </details>
+          </div>
         </div>
-        <div className="nav-section mission-nav">
-          <span className="nav-section-label">{locale === "zh-CN" ? "工作与上下文" : "WORK & CONTEXT"}</span>
-          {selection ? (
-            <div className="mission-context">
-              <b>{d?.program.title || selection.workRef}</b>
-              <small>{copy.selectedWork}</small>
+        <div className="nav-bottom">
+          <div ref={preferencesPane}>{preferencesControl}</div>
+          {authState ? (
+            <div className="nav-account">
+              <small>{copy.authStatus[authState.status]}</small>
+              {authState.reason && authState.status !== "unconfigured" ? (
+                <p className="muted">
+                  {authState.reason === "POPUP_BLOCKED"
+                    ? copy.allowPopup
+                    : authState.reason === "POPUP_CLOSED"
+                      ? copy.popupClosed
+                      : authState.reason.includes("EXPIRED") ||
+                          authState.reason.includes("TIMEOUT")
+                        ? copy.signInTimeout
+                        : authState.acquisition
+                          ? copy.conversationUnavailable
+                          : copy.signInFailed}
+                </p>
+              ) : null}
+              {active === "Today" && todayNeedsAuthentication ? null : authenticationControl}
             </div>
-          ) : (
-            <div className="mission-context mission-context-empty">
-              {copy.noWork}
-            </div>
-          )}
-          <nav aria-label={copy.missionNavigation}>
-            {advancedNavigation.map((x) => (
-              <button
-                key={x}
-                className={active === x ? "active" : ""}
-                aria-label={advancedLabel(x, locale)}
-                aria-current={active === x ? "page" : undefined}
-                onClick={() => {
-                  setProjectTab(null);
-                  setActive(x);
-                  if (navigationOpen) closeNavigation();
-                }}
-              >
-                <span className="nav-glyph" aria-hidden="true">
-                  <NavigationIcon view={x} />
-                </span>
-                <span className="nav-label">{navigationLabel(x, locale)}</span>
-              </button>
-            ))}
-          </nav>
-        </div>
-        <div ref={preferencesPane}>{preferencesControl}</div>
-        <div className="side-note">
-          <b>{copy.statusSources}</b>
-          <br />
-          {copy.statusNote}
+          ) : null}
         </div>
       </aside>
       <main id="content" tabIndex={-1}>
@@ -4716,29 +4746,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             {!quietHeader && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : headerSummary}</p>}
           </div>
           <div className="facts">
-            {!directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Inbox" ? (locale === "zh-CN" ? "工作区来源" : "Workspace source") : (locale === "zh-CN" ? "来源状态" : "Source status")} <State value={headerState} /></summary><p>{headerSummary}</p><p role="status">{visibleNotice}</p></details> : <State value={headerState} /> : null}
-            {authState ? (
-              <div>
-                <small>
-                  {copy.authStatus[authState.status]}
-                </small>
-                {authState.reason && authState.status !== "unconfigured" ? (
-                  <p className="muted">
-                    {authState.reason === "POPUP_BLOCKED"
-                      ? copy.allowPopup
-                      : authState.reason === "POPUP_CLOSED"
-                        ? copy.popupClosed
-                        : authState.reason.includes("EXPIRED") ||
-                            authState.reason.includes("TIMEOUT")
-                          ? copy.signInTimeout
-                          : authState.acquisition
-                            ? copy.conversationUnavailable
-                            : copy.signInFailed}
-                  </p>
-                ) : null}
-                {active === "Today" && todayNeedsAuthentication ? null : authenticationControl}
-              </div>
-            ) : null}
+            {!directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Inbox" ? (locale === "zh-CN" ? "工作区来源" : "Workspace source") : (locale === "zh-CN" ? "来源状态" : "Source status")} <State value={headerState} /></summary><p>{headerSummary}</p><p role="status">{visibleNotice}</p><p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} /> : null}
           </div>
         </header>
         {!native && authState && authState.status === "signed_out" &&
