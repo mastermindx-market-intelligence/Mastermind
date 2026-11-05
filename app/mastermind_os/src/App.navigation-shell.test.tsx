@@ -148,6 +148,23 @@ describe("readable workspace shell", () => {
     expect(activeRoute()).toBe("Evidence");
     expect(details.open).toBe(true);
   });
+  it("cleans the drawer when signing out through its account control before reauthentication", async () => {
+    const user=userEvent.setup();
+    let state={status:"signed_in",reason:null,acquisition:true,content:true} as import("./host").AuthState;
+    const listeners=new Set<(s:import("./host").AuthState)=>void>();
+    const update=(next:import("./host").AuthState)=>{state=next;for(const listener of listeners)listener(next);};
+    window.MastermindMissionHost={auth:{getState:()=>state,subscribe:listener=>{listeners.add(listener);return()=>{listeners.delete(listener);};},
+      signOut:async()=>update({status:"signed_out",reason:null,acquisition:false,content:false}),
+      signIn:async()=>update({status:"signed_in",reason:null,acquisition:true,content:true})}};
+    vi.stubGlobal("matchMedia",vi.fn(()=>({matches:true,addEventListener:vi.fn(),removeEventListener:vi.fn()})));
+    render(<App/>);
+    await user.click(screen.getByRole("button",{name:"Open navigation"}));
+    expect(screen.getByRole("button",{name:"Open navigation"}).getAttribute("aria-expanded")).toBe("true");
+    await user.click(screen.getByRole("button",{name:"Sign out"}));
+    expect(screen.getByRole("heading",{name:"Welcome back."})).toBeTruthy();
+    await user.click(screen.getByRole("button",{name:"Sign in"}));
+    expect(screen.getByRole("button",{name:"Open navigation"}).getAttribute("aria-expanded")).toBe("false");
+  });
   it("opens the full navigation drawer and returns focus on Escape", async () => {
     const user = userEvent.setup();
     render(<App />);

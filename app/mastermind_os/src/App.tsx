@@ -4597,6 +4597,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const privateEntryState = authState && !authState.acquisition && !authState.content &&
     (authState.status === "signed_out" || authState.status === "signing_in" ||
       authState.status === "error" || authState.status === "unconfigured") ? authState.status : null;
+  useEffect(() => {
+    // Leaving the product shell must release its existing drawer focus owner.
+    if (privateEntryState) setNavigationOpen(false);
+  }, [privateEntryState]);
   if (privateEntryState) return <AuthEntry state={privateEntryState} locale={locale} theme={theme}
     illustrationSrc={privateEntryArt} authenticationControl={authenticationControl}
     preferencesControl={preferencesControl}
