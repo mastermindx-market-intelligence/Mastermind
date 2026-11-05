@@ -162,9 +162,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 88577,
+      "bytes": 109297,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "36fbd16469befa0f4ade8d75fe15b3384a042b726668879c59ae03c82d194058",
+      "sha256": "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -294,9 +294,9 @@
       "source": "candidate/lane_runtime.py"
     },
     "ext/lease_broker.py": {
-      "bytes": 73321,
+      "bytes": 74098,
       "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
-      "sha256": "a2847a29abe590cb168c2cd8ae34e0b1c3222b6e92ab4c00f252a342d56e6406",
+      "sha256": "598d9b905b71897275a0617d143f3280bc802fbd6c375bed9848d222564e1488",
       "source": "candidate/lease_broker.py"
     },
     "ext/linux_process_identity.py": {
@@ -594,9 +594,9 @@
       "source": "candidate/remote_sub_exec.py"
     },
     "ext/remote_sub_helpers.py": {
-      "bytes": 76361,
+      "bytes": 77931,
       "installed_preimage_sha256": "60a01b4a56f827b36885ff262c407a3f47af69398cbe4a6fd8eb57b5520eec1b",
-      "sha256": "3a4efaefd63244e77cee385d83da0bb4e53b86a0e83a183601f2fa80ec4d602b",
+      "sha256": "f7d62e9bdfa7388b7f86c0f968a021bf3949141ddcc8515103075ed3a1da2f93",
       "source": "candidate/remote_sub_helpers.py"
     },
     "ext/run_observation.py": {

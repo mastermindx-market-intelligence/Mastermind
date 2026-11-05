@@ -424,6 +424,55 @@ def _decode_launch_binding(parsed):
     return parsed
 
 
+def _decode_launch_bindings(parsed):
+    """Validate v1 or the finite v2 enrollment; return v1-shaped bindings.
+
+    Labels/default selection are presentation DATA. The sealed receipt retains
+    the original manifest bytes, and each derived binding keeps optional-field
+    presence exactly. This does not choose a runtime principal or grant.
+    """
+    if type(parsed) is not dict or type(parsed.get("v")) is not int:
+        return None
+    if parsed["v"] == 1:
+        try:
+            return (parsed,) if _decode_launch_binding(parsed) is not None else None
+        except (KeyError, TypeError):
+            return None
+    if parsed["v"] != 2 or set(parsed) != {"v", "defaultWorkstream", "bindings"}:
+        return None
+    bindings = parsed["bindings"]
+    if type(bindings) is not list or not 1 <= len(bindings) <= 16:
+        return None
+    if _launch_string(parsed["defaultWorkstream"], 72) is None:
+        return None
+    allowed = (_LAUNCH_ROOT_KEYS - {"v"}) | {"label"}
+    result, workstreams, templates = [], set(), 0
+    for binding in bindings:
+        if (type(binding) is not dict or not set(binding) <= allowed
+                or _launch_string(binding.get("label"), 120) is None):
+            return None
+        values = {"v": 1, **{key: value for key, value in binding.items() if key != "label"}}
+        try:
+            if _decode_launch_binding(values) is None:
+                return None
+        except (KeyError, TypeError):
+            return None
+        profiles = [profile["ref"] for profile in values["profiles"]]
+        if (len(values["projects"]) != 1 or profiles not in (
+                ["research_only"], ["research_only", "native_research_only"])
+                or values["workstream"] in workstreams):
+            return None
+        # Match the incumbent native-pair publisher without changing legacy v1 decoding.
+        if len(profiles) == 2 and values.get("validation", {}) != {}:
+            return None
+        workstreams.add(values["workstream"])
+        templates += len(profiles)
+        result.append(values)
+    if parsed["defaultWorkstream"] not in workstreams or templates > 16:
+        return None
+    return tuple(result)
+
+
 def _reject_duplicate_keys(pairs):
     seen = {}
     for key, value in pairs:
@@ -469,7 +518,7 @@ def decode_launch_manifest(raw):
     _no_surrogates(parsed)
     if raw != _canonical(parsed):
         raise ValueError("launch manifest bytes are not the canonical JSON encoding")
-    if _decode_launch_binding(parsed) is None:
+    if _decode_launch_bindings(parsed) is None:
         raise ValueError("launch manifest refused by the incumbent Launch decoder law")
     return raw
 

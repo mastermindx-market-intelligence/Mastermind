@@ -12,7 +12,14 @@ export interface LaunchChoice {
   unavailableReason?: string;
 }
 
+export interface LaunchWorkstreamChoice extends LaunchChoice {
+  readonly projects: readonly LaunchChoice[];
+  readonly profiles: readonly LaunchChoice[];
+  readonly frontierModels?: readonly LaunchChoice[];
+}
+
 export interface LaunchForm {
+  workstreamRef?: string;
   goal: string;
   projectRef: string;
   profileRef: string;
@@ -53,6 +60,11 @@ export interface LaunchOrchestratorProps {
   locale?: "en" | "zh-CN";
   /** Presentation only; all original selection and submission guards remain shared. */
   presentation?: "standard" | "composer";
+  workstreams?: readonly LaunchWorkstreamChoice[];
+  defaultWorkstream?: string;
+  workstreamRef?: string;
+  onWorkstreamChange?: (ref: string) => void;
+  lockWorkstream?: boolean;
   projects: readonly LaunchChoice[];
   profiles: readonly LaunchChoice[];
   frontierModels?: readonly LaunchChoice[];
@@ -112,9 +124,14 @@ function readTerminalStatus(outcome: unknown): "accepted" | "refused" | null {
 export function LaunchOrchestrator({
   locale = "en",
   presentation = "standard",
-  projects,
-  profiles,
-  frontierModels,
+  projects: defaultProjects,
+  profiles: defaultProfiles,
+  frontierModels: defaultFrontierModels,
+  workstreams,
+  defaultWorkstream,
+  workstreamRef,
+  onWorkstreamChange,
+  lockWorkstream = false,
   submitting,
   blocked = false,
   unavailableReason,
@@ -127,15 +144,33 @@ export function LaunchOrchestrator({
 }: LaunchOrchestratorProps) {
   const formId = useId();
   const goalId = `${formId}-goal`;
+  const workstreamId = `${formId}-workstream`;
   const projectId = `${formId}-project`;
   const profileId = `${formId}-profile`;
   const frontierId = `${formId}-frontier`;
 
   // Draft state — preserved across error and rerender
   const [draftGoal, setDraftGoal] = useState(initialDraft);
-  const [draftProject, setDraftProject] = useState("");
-  const [draftProfile, setDraftProfile] = useState("");
-  const [draftFrontier, setDraftFrontier] = useState("");
+  const [draftWorkstream, setDraftWorkstream] = useState("");
+  const selectedWorkstream = workstreamRef ?? (draftWorkstream || defaultWorkstream);
+  const selectedBinding = workstreams?.find(choice => choice.ref === selectedWorkstream);
+  // A missing enrollment is unavailable; it never falls back to default choices.
+  const projects = workstreams ? selectedBinding?.projects ?? [] : defaultProjects;
+  const profiles = workstreams ? selectedBinding?.profiles ?? [] : defaultProfiles;
+  const frontierModels = workstreams ? selectedBinding?.frontierModels : defaultFrontierModels;
+  const workstreamUnavailable = workstreams !== undefined &&
+    (!selectedBinding || !!selectedBinding.unavailableReason);
+  const [draftChoices, setDraftChoices] = useState({
+    workstream: selectedWorkstream, project: "", profile: "", frontier: "",
+  });
+  const choices = draftChoices.workstream === selectedWorkstream ? draftChoices :
+    { workstream: selectedWorkstream, project: "", profile: "", frontier: "" };
+  const draftProject = choices.project;
+  const draftProfile = choices.profile;
+  const draftFrontier = choices.frontier;
+  const setDraftProject = (project: string) => setDraftChoices({ ...choices, project });
+  const setDraftProfile = (profile: string) => setDraftChoices({ ...choices, profile });
+  const setDraftFrontier = (frontier: string) => setDraftChoices({ ...choices, frontier });
   const [requestPreview, setRequestPreview] = useState<{
     read: LaunchRequestPreviewRead;
     formKey: string;
@@ -158,9 +193,9 @@ export function LaunchOrchestrator({
   // Draft goals and exact pending-command handles must survive automatic
   // identity renewal. No form content enters browser credential storage.
   useEffect(() => registerUnsavedNavigationHold(() =>
-    draftGoal.length > 0 || draftProject.length > 0 || draftProfile.length > 0 ||
+    draftGoal.length > 0 || draftWorkstream.length > 0 || draftProject.length > 0 || draftProfile.length > 0 ||
     launchTokenRef.current !== null || submitting || launchInFlight
-  ), [draftGoal, draftProject, draftProfile, submitting, launchInFlight]);
+  ), [draftGoal, draftWorkstream, draftProject, draftProfile, submitting, launchInFlight]);
 
   const launchPending = submitting || launchInFlight;
 
@@ -219,6 +254,7 @@ export function LaunchOrchestrator({
   const canSubmit =
     !blocked &&
     !unavailableReason &&
+    !workstreamUnavailable &&
     !launchPending &&
     !projectStale &&
     !profileStale &&
@@ -230,6 +266,7 @@ export function LaunchOrchestrator({
 
   const previewForm: LaunchForm = {
     goal: draftGoal, projectRef: selectedProject, profileRef: selectedProfile,
+    ...(selectedWorkstream !== undefined ? { workstreamRef: selectedWorkstream } : {}),
     ...(frontierRequired ? { frontierModelAlias: selectedFrontier } : {}),
   };
   const previewFormKey = JSON.stringify(previewForm);
@@ -258,6 +295,7 @@ export function LaunchOrchestrator({
           goal: draftGoal,
           projectRef: selectedProject,
           profileRef: selectedProfile,
+          ...(selectedWorkstream !== undefined ? { workstreamRef: selectedWorkstream } : {}),
           ...(frontierRequired ? { frontierModelAlias: selectedFrontier } : {}),
         },
         (outcome) => {
@@ -322,6 +360,30 @@ export function LaunchOrchestrator({
               </p>
             )}
           </div>
+
+          {workstreams !== undefined && <div className="form-field">
+            <label htmlFor={workstreamId}>{locale === "zh-CN" ? "工作流" : "Workstream"}</label>
+            <select id={workstreamId} value={selectedWorkstream ?? ""}
+              disabled={launchPending || lockWorkstream}
+              aria-invalid={workstreamUnavailable}
+              aria-describedby={workstreamUnavailable ? `${workstreamId}-error` : undefined}
+              onChange={event => {
+                const ref = event.target.value;
+                setRequestPreview(null);
+                setDraftWorkstream(ref);
+                setDraftChoices({ workstream: ref, project: "", profile: "", frontier: "" });
+                onWorkstreamChange?.(ref);
+              }}>
+              {!selectedBinding && <option value={selectedWorkstream ?? ""} disabled>
+                {locale === "zh-CN" ? "工作流不可用" : "Workstream unavailable"}
+              </option>}
+              {workstreams.map(choice => <option key={choice.ref} value={choice.ref}
+                disabled={!!choice.unavailableReason}>{choice.label}</option>)}
+            </select>
+            {workstreamUnavailable && <p id={`${workstreamId}-error`} className="field-error" role="alert">
+              {locale === "zh-CN" ? "此工作流未登记。请选择可用的工作流。" : "This workstream is not enrolled. Select an available workstream."}
+            </p>}
+          </div>}
 
           {/* Project select */}
           <div className="form-field">
