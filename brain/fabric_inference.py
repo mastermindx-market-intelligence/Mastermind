@@ -118,6 +118,10 @@ def call_model(system: str, user: str, *, role: str = "pm", max_tokens: int = 15
     except Exception:
         # A provider call may already have occurred; no fallback or replay.
         reason = "fabric_effect_unknown"
+    finally:
+        # Invalidate this local operation; close does not claim an uncertain
+        # upstream request has settled or release its native account lease.
+        shared.close_fabric_provider(provider)
     try:
         _record_turn(
             provider, shared.fabric_usage(provider), user=user, text=text, reason=reason,

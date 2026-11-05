@@ -290,7 +290,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: d02f741f258e6f84485f65bf8755a60117ca530d
+          ref: 3301181d1a1528bcc6112c3a97f254c0fa8af1d9
           path: .ci-production-macro
           sparse-checkout: |
             engine
@@ -303,12 +303,16 @@ jobs:
         env:
           MM_REQUIRE_PRODUCTION_MODE_COMPOSITION: "1"
           MM_REQUIRE_FABRIC_COMPOSITION: "1"
+          MM_REQUIRE_FABRIC_BROWSER: "1"
         run: |
           set -euo pipefail
           brain_composition_root="$(mktemp -d "${RUNNER_TEMP}/brain-production-composition.XXXXXX")"
           trap 'rm -rf "$brain_composition_root" "$GITHUB_WORKSPACE/.ci-production-macro"' EXIT
-          git archive HEAD brain bot common tests/integration/test_production_inference_composition.py \
+          git archive HEAD brain bot common app control_plane portfolio \
+            tests/integration/test_production_inference_composition.py \
             tests/integration/test_fabric_inference_composition.py \
+            tests/integration/test_fabric_chat_inference_composition.py \
+            tests/integration/test_fabric_chat_browser.py \
             ops/native_fabric/experiential_proxy/gateway.py |
             tar -x -C "$brain_composition_root"
           mkdir -p "$brain_composition_root/vendor/macro"
@@ -321,6 +325,10 @@ jobs:
           cd "$brain_composition_root"
           PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
             -p 'test_*inference_composition.py' -v
+          python -m pip install --disable-pip-version-check playwright==1.62.0
+          python -m playwright install --with-deps chromium
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_chat_browser.py -v
 
       - name: Prepare fixed test diagnostics
         run: |

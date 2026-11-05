@@ -86,8 +86,23 @@ def gateway_surface(module, root, dispatches, next_response):
     async def upstream(request):
         dispatches.append({"body": json.loads(request.content), "headers": dict(request.headers)})
         result = next_response()
+        if callable(result):
+            result = result()
         if isinstance(result, Exception):
             raise result
+        if json.loads(request.content).get("stream"):
+            message = result["choices"][0]["message"]
+            delta = {"content": message.get("content")}
+            if message.get("tool_calls"):
+                delta["tool_calls"] = [{"index": i, **item}
+                                       for i, item in enumerate(message["tool_calls"])]
+            frames = [{"model": result["model"], "choices": [{"index": 0, "delta": delta,
+                "finish_reason": result["choices"][0]["finish_reason"]}], "usage": None}]
+            if result.get("usage") is not None:
+                frames.append({"model": result["model"], "choices": [], "usage": result["usage"]})
+            body = b"".join(b"data: " + json.dumps(frame).encode() + b"\n\n" for frame in frames)
+            return httpx.Response(200, stream=Body(body + b"data: [DONE]\n\n"),
+                                  headers={"content-type": "text/event-stream"})
         return httpx.Response(200, stream=Body(json.dumps(result).encode()),
                               headers={"content-type": "application/json"})
 
