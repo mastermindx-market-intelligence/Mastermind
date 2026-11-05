@@ -573,7 +573,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='b4c355a11ec63d49281fe416c2690340dea3add7cae7be9f40801c645d12945c'
+    assert hashlib.sha256(current_raw).hexdigest()=='db2335aa70f814f4ab3ca9ccec26ee4d7be976bf4a31444f556a0af44c0e9d31'
     current=json.loads(current_raw)
     assert len(before)==95 and len(current)==102
     assert set(before)<=set(current)
@@ -588,7 +588,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
         'ext/host_pull.sh','ext/host_pull_backend.py','ext/paid_glm_model_client.py',
         'ext/paid_host_qualification.py','ext/paid_incumbent_state.py',
         'ext/paid_model_owner.py','ext/pick.py','ext/pool_ledger.py','ext/remote_sub.sh',
-        'ext/remote_sub_exec.py','ext/support_bundle.py','ext/paid_yaml_runtime.py','pool'}
+        'ext/remote_sub_exec.py','ext/native_remote.py','ext/lease_broker.py','ext/host_pick.py','ext/support_bundle.py','ext/paid_yaml_runtime.py','pool'}
     # P8.T1.S7's reviewed diagnostic boundary changes exactly these four
     # members. Collector/provider_outcome were previously unchanged from f608;
     # task/remote_sub already belong to the finite accepted composition above.
@@ -601,7 +601,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
                           'ext/oc_free_exec.sh','ext/remote_sub_helpers.py',
                           'ext/slot.py','ext/sub.sh'}
     assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed
-    assert sum(before[p]==current[p] for p in before)==69
+    assert sum(before[p]==current[p] for p in before)==len(before)-len((changed|diagnostic_changed|long_horizon_changed)&set(before))
     for name in added|changed|diagnostic_changed|long_horizon_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
         assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()

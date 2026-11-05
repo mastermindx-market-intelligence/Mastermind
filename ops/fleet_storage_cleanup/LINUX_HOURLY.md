@@ -5,7 +5,7 @@ and existing M2/M1/MacBook 30-minute sweepers, not an alternative coordinator,
 watcher lifecycle, worker queue, or Git authority. See `README.md` and issue #1632.
 
 * `linux_hygiene.py` samples root and `~/lanes` free space, inodes,
-  MemAvailable/swap, optional **operator-supplied** configured Fabric floor,
+  MemAvailable/swap, the **operator-supplied** configured Fabric floor,
   and shallow `~/lanes/wt` directory ages. It writes one JSONL heartbeat each run
   to `~/.local/state/mastermind/storage-cleanup/linux-hygiene.jsonl`.
 * **Current source-release HOLD: no package-manager purge is admitted.** A
@@ -74,6 +74,30 @@ systemctl --user list-timers --all
 Do not manufacture another bus, alter access grants, use a different user's
 manager, or infer an install from this read-only preflight. If this original
 manager is unreachable, keep the installation pending with its exact failure.
+
+Before report-only validation, install the **existing host owner's effective
+Fabric reserve** at `~/.config/mastermind/fabric-storage-reserve.json`.
+The configuration is required for a verified, non-degraded maintenance receipt:
+omitting it yields `fabric_reserve.state=UNVERIFIED` and
+`SKIPPED_MANDATORY_OBSERVATION_UNVERIFIED` under the service, even on a host
+with ample free space.
+
+Use the reserve already required by that host's incumbent admission policy,
+expressed in GiB. Do not invent a new default, lower the picker floor, or copy
+another consumer's threshold. For example, when the existing host registry
+requires 60 GiB plus a 15 GiB checkout reserve, the file is:
+
+```json
+{"internal_floor_gib":75}
+```
+
+Create an absent file exclusively, with mode `0600`, after verifying the
+parent directories are owned by the logged-in user and are not symlinks.
+Preserve a pre-existing file and reconcile any differing value with the original
+host owner. Read back the exact bytes and verify `fabric_reserve.state=CONFIGURED`
+and the intended `floor_gib` in the report-only receipt before activating the
+timer. This config binds the cleaner's observation only; it does not grant
+Fabric worker admission or resolve CI-specific storage requirements.
 
 Validate with `/usr/bin/python3 .../linux_hygiene.py` first (report-only),
 then run `systemctl --user daemon-reload` and

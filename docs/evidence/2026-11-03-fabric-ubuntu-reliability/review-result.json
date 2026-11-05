@@ -1,0 +1,162 @@
+{
+  "schema": "mastermind.fabric_independent_source_review.v1",
+  "operation_id": "fabric-ubuntu-reliability-20261103-c4",
+  "reviewed_source_head": "bb0266fc54124255e5373ec20607ba410674cecd",
+  "candidate_path": "ops/native_fabric/quota_continuity/candidate/remote_sub_exec.py",
+  "candidate_sha256": "7c7b94a974b85804598c49fc21ea1eb0d5ea55888dc3a6394dde8ab0b4d113e2",
+  "scope": "Exact two-hunk patch and supplied supporting function excerpts; not whole-repository approval",
+  "run_id": "fabric-sparse-source-review-20261103-c4",
+  "root_id": "agent-fabric-end-to-end-fable-integration-20260913-sol-001",
+  "parent_id": "agent-fabric-end-to-end-fable-integration-20260913-sol-001",
+  "controller_pid": 84700,
+  "requested_pool": "grok",
+  "requested_model": "grok-4.7",
+  "served_model_proven": false,
+  "routing_rationale": "C3 judgment concerns effect classification and fail-closed source observation. WHY NOT FABLE: bounded independent technical review did not require scarce principal continuity.",
+  "worker_host": "ubuntu0",
+  "response_sha256": "7f9062a1c449fe08c4b3c89d0b89c77712e743df17303f3879e35dcd45eab5b8",
+  "response_bytes": 6204,
+  "digest_independently_recomputed": true,
+  "adapter_response": "NO_BLOCKING_FINDING_WITHIN_SCOPE\n\nThis excerpt review covers the two-hunk change in `ops/native_fabric/quota_continuity/candidate/remote_sub_exec.py` at head `bb0266fc54124255e5373ec20607ba410674cecd`, with the stated file hashes. The patch appends `advice.sparseIndexExpanded=false` to `_SPARSE_GIT_SETTINGS`, and it runs `git cat-file -t` on the already scoped 40-hex pin after `_qualify_sparse_donor` and before the existing helper recheck and `run_owned_process` mint. I did not run the reported 79 tests. The candidate is not installed, no release is selected, and no hold is released.\n\nUnknown effects on the new check stay unknown. `_sparse_git` sets `effect_unknown=True` for `FABRIC_SPARSE_GIT_CLEANUP_UNKNOWN` and for `FABRIC_SPARSE_GIT_OBSERVATION_UNQUALIFIED` when a process exists and `observation_completed` is still false (timeout, oversize abort, or read failure before wait). The new handler re-raises that same exception when `exc.effect_unknown` is true, so the reason and the flag both survive, and mint does not start. A completed observation with nonzero status, any remaining stderr, or a changed `_sparse_git_context` is already `effect_unknown=False` inside `_sparse_git`. Relabeling that result to `FABRIC_SPARSE_PINNED_COMMIT_UNQUALIFIED` keeps the flag false. A clean stdout other than exactly `b\"commit\\n\"` raises that same known-effect reason before mint. Blob, tree, and tag objects therefore never enter the effectful owner. The pin is one argv element after the scope regex, so it is not parsed as a Git option.\n\nDonor and helper policy in the shown function is intact. Blob constants, destination and receipt checks, and `_qualify_sparse_donor(donor, common, pinned=donor != original_donor)` are unchanged. Pinned-donor drift still propagates `exc.effect_unknown` through `FABRIC_SPARSE_REVIEWED_DONOR_DRIFT`. The helper byte recheck still runs after `cat-file` and still raises `FABRIC_SPARSE_HELPER_CHANGED`. Mint start failures remain `FABRIC_SPARSE_MINT_EFFECT_UNKNOWN`; bad exit, timeout, unproven cleanup, and truncation remain `FABRIC_SPARSE_MINT_UNVERIFIED`; both keep `effect_unknown=True`. The post-mint input loop still forces helper or policy failure with `effect_unknown=True`.\n\nThe advice entry is one fixed key and value. `GIT_CONFIG_COUNT` follows `len(_SPARSE_GIT_SETTINGS)`, and the same pair is applied in the environment and as `-c`. `protocol.allow`, `GIT_ALLOW_PROTOCOL`, replace-ref denial, hooks, fsmonitor, untracked cache, auto-gc, and maintenance are unchanged. The observer still rejects every other stderr byte, every nonzero status, and every context mismatch. Disabling this advice stops that one informational line. It does not disable sparse-index expansion. `cat-file -t` does not read the index. Pre-existing index-using calls, including postcondition `status --porcelain=v1 -uall`, and the mint environment from `_sparse_git_env`, inherit the quieter setting. Whether an expansion write is still caught depends on `_sparse_git_context` and on the qualification inputs, which are not in the excerpt. The stated qualifier rejects dirty and untracked excluded files; that dependence is a limit of this review.\n\nFindings, highest severity first:\n\n1. Low, non-blocking: known-effect observer failures at the new site, including a missing object, unexpected stderr, context drift, and Git never starting (`process is None`), are reported as `FABRIC_SPARSE_PINNED_COMMIT_UNQUALIFIED`. `from exc` keeps the observer reason. The hold flag remains false because `_sparse_git` has already classified the process as finished or never created. That narrows operator diagnosis. It does not convert an unknown effect into a known one.\n\n2. Low, conditional, non-blocking: the setting is global. If expansion rewrites an index and the unseen context fingerprint omits that identity, the advisory is no longer a separate tripwire. The shown observer still fails closed on any other stderr and on context inequality. No shown path skips that comparison.\n\nExisting behavior, not an introduced regression: a present commit object does not prove its trees and blobs exist; a missing checkout object still fails in mint and stays unknown. Older Git may still create a transport-denied internal child; an incomplete observation, including timeout, stays unknown, while a completed nonzero `cat-file` inherits the pre-existing completed-observation classification. The pre-mint helper handler still replaces any read error with `FABRIC_SPARSE_HELPER_CHANGED` and drops `effect_unknown`. The patch does not edit that handler. A later helper failure on the post-mint path remains unknown.\n\nRequired evidence, treating the parent report as a claim rather than as execution by this review: timeout and cleanup failure on `cat-file` must keep the original reason and `effect_unknown=True` and must not start mint; a finished nonzero or drifted-context read must raise `FABRIC_SPARSE_PINNED_COMMIT_UNQUALIFIED` with the flag false and must not start mint; `blob`, `tree`, and `tag` must refuse, and exact `commit\\n` must reach the helper recheck; a helper change after a successful type read must still raise `FABRIC_SPARSE_HELPER_CHANGED`; stderr other than the suppressed advisory, including a fatal missing-object line, must fail the observer; a zero-status case that would have emitted only `sparseIndexExpanded` must pass only with an unchanged context and must fail if the index identity is covered and changes; `GIT_CONFIG_COUNT` must match the longer tuple while prior keys stay put. The reported matrix (missing, blob, tree, tag, observer uncertainty, helper drift, later helper unknown, dirty excluded rejection, clean materialization, composition and release) matches those claims. I did not run it.\n\nThis is not whole-repository approval. `_sparse_git_context`, `_qualify_sparse_donor`, the helper body, and the lease caller are outside the excerpt. The unchanged historical fixture and the statement that the 102-member closure touches only `ext/remote_sub_exec.py`, with metadata recomposed by the existing builder, are taken as given. No Ubuntu2 hold is cleared and no root cause is established. No deployment or fleet state follows from this review.",
+  "acceptance": {
+    "schema": "mastermind.fabric_mcp.v1",
+    "action": "fabric_accept",
+    "run_id": "fabric-sparse-source-review-20261103-c4",
+    "root_id": "agent-fabric-end-to-end-fable-integration-20260913-sol-001",
+    "accepted": true,
+    "accepted_by": "reviewer",
+    "reviewed_response_sha256": "7f9062a1c449fe08c4b3c89d0b89c77712e743df17303f3879e35dcd45eab5b8",
+    "verification_summary": "manual_result_review",
+    "legacy_acceptance_not_atomic_attestation": true,
+    "retry_allowed": false
+  },
+  "process_receipt": {
+    "bytes": 849,
+    "sha256": "7f204d83295ee61daf50f78006cb2626041cadda7c38b1b6a76b729f8cc73045",
+    "data": {
+      "cleanup": {
+        "census_proven": true,
+        "error_code": null,
+        "identity_verified": true,
+        "reason": "normal_completion",
+        "residual_count": 0,
+        "sigkill_sent": false,
+        "sigterm_sent": false,
+        "status": "not_needed",
+        "stderr_capture_complete": true,
+        "stderr_capture_error": null,
+        "stdin_delivery_complete": true,
+        "stdin_delivery_error": null,
+        "stdout_capture_complete": true,
+        "stdout_capture_error": null
+      },
+      "ended_at": "2026-11-03T09:07:44.579Z",
+      "label": "fabric-sparse-source-review-20261103-c4",
+      "nice_applied": true,
+      "nice_requested": 10,
+      "pgid": 2087537,
+      "pid": 2087537,
+      "returncode": 0,
+      "runtime_failure_code": null,
+      "schema": "mastermind.local_owned_process_receipt.v1",
+      "started_at": "2026-11-03T09:03:30.897Z",
+      "stderr_bytes": 0,
+      "stderr_truncated": false,
+      "stdout_bytes": 42491,
+      "stdout_sha256": "c809ed5321168719391ba832bc97508598fc80c7ccff48c469d68cf25ca3a8d8",
+      "stdout_truncated": false,
+      "timed_out": false
+    }
+  },
+  "native_terminal": {
+    "bytes": 1303,
+    "sha256": "696f5669dd6524eb0a44d3a9e302931bd951e68e22afce6658c81ae9fa33fc19",
+    "data": {
+      "root": "agent-fabric-end-to-end-fable-integration-20260913-sol-001",
+      "lease_id": "5426285742c7",
+      "account": "default",
+      "host": "ubuntu0",
+      "run_id": "fabric-sparse-source-review-20261103-c4",
+      "schema": "mastermind.native.remote-terminal.v1",
+      "mode": "grok",
+      "model": "grok-4.7",
+      "started": true,
+      "returncode": 0,
+      "cleanup": {
+        "census_proven": true,
+        "error_code": null,
+        "identity_verified": true,
+        "reason": "normal_completion",
+        "residual_count": 0,
+        "sigkill_sent": false,
+        "sigterm_sent": false,
+        "status": "not_needed",
+        "stderr_capture_complete": true,
+        "stderr_capture_error": null,
+        "stdin_delivery_complete": true,
+        "stdin_delivery_error": null,
+        "stdout_capture_complete": true,
+        "stdout_capture_error": null
+      },
+      "capture": {
+        "stdout_bytes": 42491,
+        "stderr_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false
+      },
+      "output_complete": true,
+      "cleanup_proven": true,
+      "launch_timing": {
+        "controller_issued_at": 1793696610,
+        "controller_deadline_at": 1793703790,
+        "remote_shell_entered_at": 1793696610,
+        "remote_env_ready_at": 1793696610,
+        "remote_python_invoked_at": 1793696610,
+        "remote_exec_entered_at": 1793696610.8129544,
+        "remote_scope_checked_at": 1793696610.8133671,
+        "scope_age_seconds": 0.8133671283721924,
+        "support_digest": "87be08914d96c2574749239d63606f3dddeb83ba70a5e06554598e68d4400b23"
+      }
+    }
+  },
+  "usage": {
+    "bytes": 433,
+    "sha256": "84ab709c4b53a4d13bf715a7b154984cb08a49562a47c43d9cb061dc0e2f2672",
+    "data": {
+      "cached_tokens": 1536,
+      "input_tokens": 22360,
+      "model_identity_source": "requested_cli_only",
+      "output_tokens": 16039,
+      "reason": "native_headless_final",
+      "requested_model": "grok-4.7",
+      "run_id": "fabric-sparse-source-review-20261103-c4",
+      "schema": "mastermind.grok_usage.v2",
+      "served_model": null,
+      "session_ids": [
+        "01a1a0a6-430f-7a90-97ba-4769b2792382"
+      ],
+      "source": "grok_native_headless",
+      "status": "observed",
+      "total_tokens": 38399
+    }
+  },
+  "active_marker_exists_after_completion": false,
+  "provider_lease": {
+    "id": "5426285742c7",
+    "pool": "grok",
+    "host": "ubuntu0",
+    "state": "released",
+    "observed_read_only": true
+  },
+  "parent_adjudication": {
+    "verdict": "NO_BLOCKING_FINDING_WITHIN_SCOPE",
+    "diagnostic_narrowing": "Known-effect observer refusals deliberately share PINNED_COMMIT_UNQUALIFIED; original cause is retained and uncertain effects remain unchanged.",
+    "advice_scope": "The reviewer used 'global' for the shared settings. The setting is scoped to observer/helper invocations and does not persist Git configuration.",
+    "index_limit": "The pre/post context fingerprint covers Git metadata/configuration, not index bytes. The additional real sparse-index regression separately proves unchanged index/config/sparse-checkout bytes for the formerly advisory-producing ls-files command. This is not a general concurrent-index-mutation guarantee.",
+    "additional_checks": "Two added tests passed after review dispatch: sparse-index byte preservation and rc0/valid stdout with unrelated stderr still refusing. The executable source digest is unchanged.",
+    "lease_consumer": "Source inspection confirms _execute calls hold_for_reconciliation only when effect_unknown is true and exits with 76; false returns 78 inside the lease context. LaneLease.__exit__ calls release; the sticky preserve flag retains unknown-effect markers. No live historical hold was exercised by tests."
+  },
+  "formal_github_review": "NOT_PROVEN; GitHub review submissions were empty at readback",
+  "release_state": "SOURCE_CANDIDATE_NOT_INSTALLED_OR_SELECTED",
+  "historical_holds_reconciled": false
+}

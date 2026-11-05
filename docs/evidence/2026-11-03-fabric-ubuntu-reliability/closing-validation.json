@@ -1,0 +1,325 @@
+{
+  "schema": "mastermind.fabric_ubuntu_closing_validation.v1",
+  "operation_id": "fabric-ubuntu-reliability-20261103-c4",
+  "recorded_at": "2026-11-03T09:11:22.998Z",
+  "mission_state": "PARTIAL_LIVE_MAINTENANCE_REPAIR_SOURCE_READY_UNRELEASED",
+  "source_head": "bb0266fc54124255e5373ec20607ba410674cecd",
+  "candidate_sha256": "7c7b94a974b85804598c49fc21ea1eb0d5ea55888dc3a6394dde8ab0b4d113e2",
+  "host_snapshot": [
+    {
+      "fabric_host": "ubuntu0",
+      "ssh_rc": 0,
+      "observed_epoch": 1793696634.888954,
+      "host": "ubuntu0-MS-A2",
+      "uid": 1000,
+      "installed_hashes": {
+        ".config/mastermind/fabric-storage-reserve.json": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+        ".config/systemd/user/mastermind-linux-hygiene.service": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+        ".config/systemd/user/mastermind-linux-hygiene.timer": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3"
+      },
+      "reserve": {
+        "internal_floor_gib": 75
+      },
+      "timer": {
+        "rc": 0,
+        "stdout": "NextElapseUSecRealtime=Tue 2026-11-03 02:00:45 PST\nActiveState=active\nUnitFileState=enabled\n",
+        "stderr": ""
+      },
+      "service": {
+        "rc": 0,
+        "stdout": "Result=exit-code\nExecMainExitTimestamp=Tue 2026-11-03 01:02:48 PST\nExecMainStatus=1\nActiveState=failed\n",
+        "stderr": ""
+      },
+      "lanes_available_bytes": 118215110656,
+      "lanes_total_bytes": 1005867986944,
+      "receipt": {
+        "schema": "mastermind.fleet_linux_hygiene.v1",
+        "epoch": 1793696568.6990638,
+        "mode": "CRITICAL",
+        "degraded": true,
+        "fabric_admission": "UNVERIFIED",
+        "attributable_reclaimed_bytes": 0,
+        "cleanup": [
+          {
+            "cache": "pip",
+            "effect_state": "NOT_APPLIED",
+            "reason": "manager_target_handoff_unproven",
+            "state": "HELD_UNBOUND_CACHE_TARGET"
+          }
+        ]
+      },
+      "original_hold_hashes": {}
+    },
+    {
+      "fabric_host": "ubuntu1",
+      "ssh_rc": 0,
+      "observed_epoch": 1793696634.9012802,
+      "host": "mastermind-pc",
+      "uid": 1000,
+      "installed_hashes": {
+        ".config/mastermind/fabric-storage-reserve.json": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+        ".config/systemd/user/mastermind-linux-hygiene.service": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+        ".config/systemd/user/mastermind-linux-hygiene.timer": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3"
+      },
+      "reserve": {
+        "internal_floor_gib": 75
+      },
+      "timer": {
+        "rc": 0,
+        "stdout": "NextElapseUSecRealtime=Tue 2026-11-03 02:01:32 PST\nActiveState=active\nUnitFileState=enabled\n",
+        "stderr": ""
+      },
+      "service": {
+        "rc": 0,
+        "stdout": "Result=success\nExecMainExitTimestamp=Tue 2026-11-03 01:01:31 PST\nExecMainStatus=0\nActiveState=inactive\n",
+        "stderr": ""
+      },
+      "lanes_available_bytes": 156602904576,
+      "lanes_total_bytes": 1425647083520,
+      "receipt": {
+        "schema": "mastermind.fleet_linux_hygiene.v1",
+        "epoch": 1793696491.5189185,
+        "mode": "CRITICAL",
+        "degraded": false,
+        "fabric_admission": "UNVERIFIED",
+        "attributable_reclaimed_bytes": 0,
+        "cleanup": [
+          {
+            "cache": "pip",
+            "state": "SKIPPED_UNTRUSTED_CACHE_PATH"
+          },
+          {
+            "cache": "uv",
+            "state": "SKIPPED_UNAVAILABLE"
+          },
+          {
+            "cache": "npm",
+            "state": "SKIPPED_UNTRUSTED_CACHE_PATH"
+          }
+        ]
+      },
+      "original_hold_hashes": {}
+    },
+    {
+      "fabric_host": "ubuntu2",
+      "ssh_rc": 0,
+      "observed_epoch": 1793696634.8803718,
+      "host": "ubuntu2",
+      "uid": 1000,
+      "installed_hashes": {
+        ".config/mastermind/fabric-storage-reserve.json": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+        ".config/systemd/user/mastermind-linux-hygiene.service": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+        ".config/systemd/user/mastermind-linux-hygiene.timer": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3"
+      },
+      "reserve": {
+        "internal_floor_gib": 75
+      },
+      "timer": {
+        "rc": 0,
+        "stdout": "NextElapseUSecRealtime=Tue 2026-11-03 02:00:10 PST\nActiveState=active\nUnitFileState=enabled\n",
+        "stderr": ""
+      },
+      "service": {
+        "rc": 0,
+        "stdout": "Result=success\nExecMainExitTimestamp=Tue 2026-11-03 01:01:53 PST\nExecMainStatus=0\nActiveState=inactive\n",
+        "stderr": ""
+      },
+      "lanes_available_bytes": 308923314176,
+      "lanes_total_bytes": 958234603520,
+      "receipt": {
+        "schema": "mastermind.fleet_linux_hygiene.v1",
+        "epoch": 1793696513.7653458,
+        "mode": "CALM",
+        "degraded": false,
+        "fabric_admission": "UNVERIFIED",
+        "attributable_reclaimed_bytes": 0,
+        "cleanup": [
+          {
+            "state": "NO_PRESSURE"
+          }
+        ]
+      },
+      "original_hold_hashes": {
+        "news-w4-v91-v1-review-r1": "47c3a4ddfc701712f15e1b8b9e5cf01edde9451d77f5c3b296b670c8dc4b8871",
+        "news-w4-v91-v4-review-r1": "d2881145a8ab311b61a2cf1d5eececef6eb446ac9bc35e2a77202b0861249e1d",
+        "news-w4-v91-v6-review-r1": "634ed74ba0ebf0e1c7c1f3a1b0caed1fd7db421df60d0436b6c1312f69546628",
+        "news-w4-v91-v7-review-r2": "6f771b465065e2e45010fe48103117e685f7598349c0bf9ab2dd9b7de85d1f5a"
+      }
+    },
+    {
+      "fabric_host": "ubuntu3",
+      "ssh_rc": 0,
+      "observed_epoch": 1793696634.7899349,
+      "host": "ubuntu3-MS-7E61",
+      "uid": 1000,
+      "installed_hashes": {
+        ".config/mastermind/fabric-storage-reserve.json": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+        ".config/systemd/user/mastermind-linux-hygiene.service": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+        ".config/systemd/user/mastermind-linux-hygiene.timer": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3"
+      },
+      "reserve": {
+        "internal_floor_gib": 75
+      },
+      "timer": {
+        "rc": 0,
+        "stdout": "NextElapseUSecRealtime=Tue 2026-11-03 02:00:12 PST\nActiveState=active\nUnitFileState=enabled\n",
+        "stderr": ""
+      },
+      "service": {
+        "rc": 0,
+        "stdout": "Result=exit-code\nExecMainExitTimestamp=Tue 2026-11-03 01:00:53 PST\nExecMainStatus=1\nActiveState=failed\n",
+        "stderr": ""
+      },
+      "lanes_available_bytes": 116482408448,
+      "lanes_total_bytes": 982240026624,
+      "receipt": {
+        "schema": "mastermind.fleet_linux_hygiene.v1",
+        "epoch": 1793696451.7246492,
+        "mode": "CRITICAL",
+        "degraded": true,
+        "fabric_admission": "UNVERIFIED",
+        "attributable_reclaimed_bytes": 0,
+        "cleanup": [
+          {
+            "cache": "pip",
+            "state": "SKIPPED_UNTRUSTED_CACHE_PATH"
+          },
+          {
+            "cache": "uv",
+            "effect_state": "NOT_APPLIED",
+            "reason": "manager_target_handoff_unproven",
+            "state": "HELD_UNBOUND_CACHE_TARGET"
+          }
+        ]
+      },
+      "original_hold_hashes": {}
+    },
+    {
+      "fabric_host": "ubuntu4",
+      "ssh_rc": 0,
+      "observed_epoch": 1793696634.8818517,
+      "host": "ubuntu4-MS-7E61",
+      "uid": 1000,
+      "installed_hashes": {
+        ".config/mastermind/fabric-storage-reserve.json": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+        ".config/systemd/user/mastermind-linux-hygiene.service": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+        ".config/systemd/user/mastermind-linux-hygiene.timer": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3"
+      },
+      "reserve": {
+        "internal_floor_gib": 75
+      },
+      "timer": {
+        "rc": 0,
+        "stdout": "NextElapseUSecRealtime=Tue 2026-11-03 02:00:17 PST\nActiveState=active\nUnitFileState=enabled\n",
+        "stderr": ""
+      },
+      "service": {
+        "rc": 0,
+        "stdout": "Result=success\nExecMainExitTimestamp=Tue 2026-11-03 01:00:47 PST\nExecMainStatus=0\nActiveState=inactive\n",
+        "stderr": ""
+      },
+      "lanes_available_bytes": 930889072640,
+      "lanes_total_bytes": 1005867986944,
+      "receipt": {
+        "schema": "mastermind.fleet_linux_hygiene.v1",
+        "epoch": 1793696447.4154704,
+        "mode": "CALM",
+        "degraded": false,
+        "fabric_admission": "UNVERIFIED",
+        "attributable_reclaimed_bytes": 0,
+        "cleanup": [
+          {
+            "state": "NO_PRESSURE"
+          }
+        ]
+      },
+      "original_hold_hashes": {}
+    }
+  ],
+  "supplemental_tests": {
+    "command": "python3 -m pytest -q tests/test_fabric_sparse_commit_preflight_20261103.py -k 'sparse_index_observer_preserves or zero_exit_valid_stdout' --basetemp <owned-temp>/pytest-advice-edges --junitxml <owned-temp>/pytest-advice-edges.xml -ra",
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "rc": 0,
+    "duration_seconds": 1.479,
+    "test_sha256": "1f9eb383c445071b4957e35460c56dffb8febec8adf92a1297f3505dae600cc7"
+  },
+  "test_evidence_total": {
+    "earlier_full_targeted_run": 79,
+    "supplemental_distinct_tests": 2,
+    "total_passing": 81,
+    "not_a_single_81_test_run": true
+  },
+  "upstream_compatibility": {
+    "protected_base": "e39a617b6771cb6b07323a533b4cf9db7e78900a",
+    "observed_master": "d47cdb5652096e038a8bfb24e431ebe48ccf7ff2",
+    "changed_path_overlap": [],
+    "read_only_merge_tree_rc": 0,
+    "conflict_markers_present": false,
+    "github_mergeable_projection": false,
+    "github_review_submissions": [],
+    "combined_commit_statuses": [],
+    "note": "The connector mergeable projection was false despite no overlapping upstream paths and no read-only merge-tree conflicts. No branch protection, CI or formal approval success is inferred."
+  },
+  "ubuntu1_ci": {
+    "units": [
+      "actions.runner.mastermindx-market-intelligence-macro.pc-ci-1.service",
+      "actions.runner.mastermindx-market-intelligence-macro.pc-ci-2.service",
+      "actions.runner.mastermindx-market-intelligence-macro.pc-ci-3.service",
+      "actions.runner.mastermindx-market-intelligence-macro.pc-ci-4.service"
+    ],
+    "state": "activating",
+    "substate": "start-pre",
+    "disk_used_percent": 89,
+    "disk_available_kib": 150328292,
+    "thresholds_changed": false
+  },
+  "ubuntu4": {
+    "allowed_modes": [
+      "go-codex",
+      "grok",
+      "glm",
+      "minimax",
+      "qwen",
+      "cursor",
+      "oc-free"
+    ],
+    "qualification_only_modes": [
+      "go-codex",
+      "grok",
+      "glm",
+      "minimax",
+      "qwen",
+      "cursor",
+      "oc-free"
+    ],
+    "max_active": 2,
+    "qualification_granted": false,
+    "tool_boundary": "Installed fabric_request schema has no host/qualification_host parameter; generic Studio host-command tool explicitly excludes agent handoffs."
+  },
+  "review_run": {
+    "run_id": "fabric-sparse-source-review-20261103-c4",
+    "host": "ubuntu0",
+    "rc": 0,
+    "accepted": true,
+    "response_sha256": "7f9062a1c449fe08c4b3c89d0b89c77712e743df17303f3879e35dcd45eab5b8",
+    "process_cleanup_proven": true,
+    "residual_count": 0,
+    "provider_lease_released": true
+  },
+  "remaining": [
+    "Protected formal non-author GitHub review, merge and original native release publisher, followed by installed real-path proof.",
+    "Ubuntu0/3 cache cleanup target binding remains held by the existing cleanup owner; no deletion authority is invented.",
+    "Ubuntu1 pc-ci services remain at their start-pre gate with 89% disk use; no threshold lowered.",
+    "Ubuntu2 four original local unknown-effect holds remain byte-identical and need original-owner reconciliation proof.",
+    "Ubuntu4 provider qualification remains pending through its admitted qualifier owner.",
+    "Earlier Ubuntu1 audit and Ubuntu3 Qwen review failures remain terminal and nonaccepted."
+  ]
+}

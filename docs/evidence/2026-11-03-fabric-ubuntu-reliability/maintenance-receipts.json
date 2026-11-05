@@ -1,0 +1,272 @@
+{
+  "schema": "mastermind.fleet_maintenance_checkpoint.v1",
+  "operation_id": "fabric-ubuntu-reliability-20261103-c4",
+  "source_pin": "e39a617b6771cb6b07323a533b4cf9db7e78900a",
+  "workstream": "WS:EXECUTIVE-CAPACITY-FABRIC",
+  "integration_root": "agent-fabric-end-to-end-fable-integration-20260913-sol-001",
+  "authority": "Current user request to repair Subagent Fabric and all Ubuntu hosts",
+  "state": "MAINTENANCE_CONFIGURED_WORKER_QUALIFICATION_INCOMPLETE",
+  "floor_basis": {
+    "internal_floor_gib": 75,
+    "registry_min_free_gb": 60,
+    "registry_checkout_reserve_gb": 15,
+    "admission_changed": false
+  },
+  "observations": [
+    {
+      "fabric_host": "ubuntu0",
+      "home": "/home/ubuntu0",
+      "host": "ubuntu0-MS-A2",
+      "installed": {
+        ".config/mastermind/fabric-storage-reserve.json": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+        ".config/systemd/user/mastermind-linux-hygiene.service": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+        ".config/systemd/user/mastermind-linux-hygiene.timer": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3"
+      },
+      "lanes_available_bytes": 101185155072,
+      "receipt": {
+        "attributable_reclaimed_bytes": 0,
+        "cleanup": [
+          {
+            "cache": "pip",
+            "effect_state": "NOT_APPLIED",
+            "reason": "manager_target_handoff_unproven",
+            "state": "HELD_UNBOUND_CACHE_TARGET"
+          }
+        ],
+        "degraded": true,
+        "effect_hold": "ABSENT",
+        "epoch": 1793693027.1971521,
+        "fabric_admission": "UNVERIFIED",
+        "fabric_reserve": {
+          "floor_gib": 75,
+          "state": "CONFIGURED"
+        },
+        "host": "ubuntu0-MS-A2",
+        "mode": "CRITICAL",
+        "schema": "mastermind.fleet_linux_hygiene.v1"
+      },
+      "receipt_path": "/home/ubuntu0/.local/state/mastermind/storage-cleanup/linux-hygiene.jsonl",
+      "root_available_bytes": 101185155072,
+      "service": "Result=exit-code\nExecMainStatus=1\nActiveState=failed\nSubState=failed",
+      "service_start_rc": 1,
+      "source_sha256": {
+        "linux_hygiene.py": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3",
+        "mastermind-linux-hygiene.service": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+        "mastermind-linux-hygiene.timer": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867"
+      },
+      "timer": "NextElapseUSecRealtime=Tue 2026-11-03 01:02:48 PST\nActiveState=active\nUnitFileState=enabled"
+    },
+    {
+      "fabric_host": "ubuntu1",
+      "home": "/home/longr",
+      "host": "mastermind-pc",
+      "installed": {
+        ".config/mastermind/fabric-storage-reserve.json": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+        ".config/systemd/user/mastermind-linux-hygiene.service": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+        ".config/systemd/user/mastermind-linux-hygiene.timer": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3"
+      },
+      "lanes_available_bytes": 105329664000,
+      "receipt": {
+        "attributable_reclaimed_bytes": 0,
+        "cleanup": [
+          {
+            "cache": "pip",
+            "state": "SKIPPED_UNTRUSTED_CACHE_PATH"
+          },
+          {
+            "cache": "uv",
+            "state": "SKIPPED_UNAVAILABLE"
+          },
+          {
+            "cache": "npm",
+            "state": "SKIPPED_UNTRUSTED_CACHE_PATH"
+          }
+        ],
+        "degraded": false,
+        "effect_hold": "ABSENT",
+        "epoch": 1793693052.5165179,
+        "fabric_admission": "UNVERIFIED",
+        "fabric_reserve": {
+          "floor_gib": 75,
+          "state": "CONFIGURED"
+        },
+        "host": "mastermind-pc",
+        "mode": "CRITICAL",
+        "schema": "mastermind.fleet_linux_hygiene.v1"
+      },
+      "receipt_path": "/home/longr/.local/state/mastermind/storage-cleanup/linux-hygiene.jsonl",
+      "root_available_bytes": 105329664000,
+      "service": "Result=success\nExecMainStatus=0\nActiveState=inactive\nSubState=dead",
+      "service_start_rc": 0,
+      "source_sha256": {
+        "linux_hygiene.py": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3",
+        "mastermind-linux-hygiene.service": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+        "mastermind-linux-hygiene.timer": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867"
+      },
+      "timer": "NextElapseUSecRealtime=Tue 2026-11-03 01:00:40 PST\nActiveState=active\nUnitFileState=enabled"
+    },
+    {
+      "fabric_host": "ubuntu2",
+      "home": "/home/ubuntu2",
+      "host": "ubuntu2",
+      "installed": {
+        ".config/mastermind/fabric-storage-reserve.json": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+        ".config/systemd/user/mastermind-linux-hygiene.service": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+        ".config/systemd/user/mastermind-linux-hygiene.timer": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3"
+      },
+      "lanes_available_bytes": 308922736640,
+      "receipt": {
+        "attributable_reclaimed_bytes": 0,
+        "cleanup": [
+          {
+            "state": "NO_PRESSURE"
+          }
+        ],
+        "degraded": false,
+        "effect_hold": "ABSENT",
+        "epoch": 1793693058.7115335,
+        "fabric_admission": "UNVERIFIED",
+        "fabric_reserve": {
+          "floor_gib": 75,
+          "state": "CONFIGURED"
+        },
+        "host": "ubuntu2",
+        "mode": "CALM",
+        "schema": "mastermind.fleet_linux_hygiene.v1"
+      },
+      "receipt_path": "/home/ubuntu2/.local/state/mastermind/storage-cleanup/linux-hygiene.jsonl",
+      "root_available_bytes": 308922736640,
+      "service": "Result=success\nExecMainStatus=0\nActiveState=inactive\nSubState=dead",
+      "service_start_rc": 0,
+      "source_sha256": {
+        "linux_hygiene.py": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3",
+        "mastermind-linux-hygiene.service": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+        "mastermind-linux-hygiene.timer": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867"
+      },
+      "timer": "NextElapseUSecRealtime=Tue 2026-11-03 01:01:32 PST\nActiveState=active\nUnitFileState=enabled"
+    },
+    {
+      "fabric_host": "ubuntu3",
+      "home": "/home/ubuntu3",
+      "host": "ubuntu3-MS-7E61",
+      "installed": {
+        ".config/mastermind/fabric-storage-reserve.json": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+        ".config/systemd/user/mastermind-linux-hygiene.service": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+        ".config/systemd/user/mastermind-linux-hygiene.timer": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3"
+      },
+      "lanes_available_bytes": 136896012288,
+      "receipt": {
+        "attributable_reclaimed_bytes": 0,
+        "cleanup": [
+          {
+            "cache": "pip",
+            "state": "SKIPPED_UNTRUSTED_CACHE_PATH"
+          },
+          {
+            "cache": "uv",
+            "effect_state": "NOT_APPLIED",
+            "reason": "manager_target_handoff_unproven",
+            "state": "HELD_UNBOUND_CACHE_TARGET"
+          }
+        ],
+        "degraded": true,
+        "effect_hold": "ABSENT",
+        "epoch": 1793693064.3804047,
+        "fabric_admission": "UNVERIFIED",
+        "fabric_reserve": {
+          "floor_gib": 75,
+          "state": "CONFIGURED"
+        },
+        "host": "ubuntu3-MS-7E61",
+        "mode": "CRITICAL",
+        "schema": "mastermind.fleet_linux_hygiene.v1"
+      },
+      "receipt_path": "/home/ubuntu3/.local/state/mastermind/storage-cleanup/linux-hygiene.jsonl",
+      "root_available_bytes": 136896012288,
+      "service": "Result=exit-code\nExecMainStatus=1\nActiveState=failed\nSubState=failed",
+      "service_start_rc": 1,
+      "source_sha256": {
+        "linux_hygiene.py": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3",
+        "mastermind-linux-hygiene.service": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+        "mastermind-linux-hygiene.timer": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867"
+      },
+      "timer": "NextElapseUSecRealtime=Tue 2026-11-03 01:00:51 PST\nActiveState=active\nUnitFileState=enabled"
+    },
+    {
+      "fabric_host": "ubuntu4",
+      "home": "/home/ubuntu4",
+      "host": "ubuntu4-MS-7E61",
+      "installed": {
+        ".config/mastermind/fabric-storage-reserve.json": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+        ".config/systemd/user/mastermind-linux-hygiene.service": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+        ".config/systemd/user/mastermind-linux-hygiene.timer": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3"
+      },
+      "lanes_available_bytes": 930891313152,
+      "receipt": {
+        "attributable_reclaimed_bytes": 0,
+        "cleanup": [
+          {
+            "state": "NO_PRESSURE"
+          }
+        ],
+        "degraded": false,
+        "effect_hold": "ABSENT",
+        "epoch": 1793692862.914193,
+        "fabric_admission": "UNVERIFIED",
+        "fabric_reserve": {
+          "floor_gib": 75,
+          "state": "CONFIGURED"
+        },
+        "host": "ubuntu4-MS-7E61",
+        "mode": "CALM",
+        "schema": "mastermind.fleet_linux_hygiene.v1"
+      },
+      "receipt_path": "/home/ubuntu4/.local/state/mastermind/storage-cleanup/linux-hygiene.jsonl",
+      "root_available_bytes": 930891313152,
+      "service": "Result=success\nExecMainStatus=0\nActiveState=inactive\nSubState=dead\nUnitFileState=static",
+      "timer": "Result=success\nActiveState=active\nSubState=waiting\nUnitFileState=enabled"
+    }
+  ],
+  "effects": {
+    "installed_missing_toolkit": [
+      "ubuntu0",
+      "ubuntu1",
+      "ubuntu2",
+      "ubuntu3"
+    ],
+    "repaired_missing_reserve": [
+      "ubuntu4"
+    ],
+    "reclaimed_bytes": 0,
+    "unknown_worker_holds_removed": 0,
+    "provider_qualification_holds_changed": 0,
+    "release_generation_changed": false
+  },
+  "audit": {
+    "run_id": "fabric-ubuntu-reliability-20261103-c4-source-audit",
+    "root_id": "agent-fabric-end-to-end-fable-integration-20260913-sol-001",
+    "host": "ubuntu1",
+    "pool": "glm",
+    "model": "glm-5.3-flash",
+    "max_turns": 18,
+    "state": "TERMINAL",
+    "rc": 1,
+    "provider_kind": "turn_limit",
+    "result_bytes": 366,
+    "response_sha256": "ab876265c363be23a6ea83bf7ba14f0c040210027e72a8c7b7b1ce52c3fd1dbc",
+    "accepted": false,
+    "retry_allowed": false,
+    "worker_audit_delivered": false
+  },
+  "unresolved_ubuntu2_runs": [
+    "news-w4-v91-v1-review-r1",
+    "news-w4-v91-v4-review-r1",
+    "news-w4-v91-v6-review-r1",
+    "news-w4-v91-v7-review-r2"
+  ]
+}

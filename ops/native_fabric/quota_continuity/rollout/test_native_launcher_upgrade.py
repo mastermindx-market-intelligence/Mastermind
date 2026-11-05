@@ -138,6 +138,33 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 if len(payload)!=item['bytes'] or g.digest(payload)!=item['sha256'] or item['sha256']!=old[name]:
                     raise AssertionError('historical95 diagnostic preimage differs')
                 (cls.built/'native-code-stage'/name).write_bytes(payload)
+            # The Grok host/account binding guard is CURRENT-only. The original
+            # historical95 stage must retain the exact protected Grok base,
+            # not the forward-composed candidate or a repinned old digest.
+            grok_preimage = (Path(builder.__file__).parents[2] /
+                             'grok47/overlay/native_remote.py').read_bytes()
+            if (g.digest(grok_preimage) !=
+                    '388c412ee5803ac54356275323eba5fb0ee57519a8810490f81fe13977459f9e'
+                    or old['ext/native_remote.py'] != g.digest(grok_preimage)):
+                raise AssertionError('historical95 native Grok preimage differs')
+            (cls.built/'native-code-stage/ext/native_remote.py').write_bytes(grok_preimage)
+            # Latest native pre-lease broker and host picker are CURRENT-only;
+            # historical95 retains their exact original code, not renamed evidence.
+            prelease_raw = fixture.with_name('native-grok-prelease-predecessors-74efbfd1.json').read_bytes()
+            if g.digest(prelease_raw) != '728d67e580b2598c609cbc28a23d53505f3d65b4680d7a0625c1b1eb16cc75a5':
+                raise AssertionError('prelease predecessor fixture changed')
+            prelease = json.loads(prelease_raw)
+            if (prelease['schema'] != 'mastermind.test_grok_prelease_predecessors/v1'
+                    or prelease['source_commit'] != '74efbfd170edb15bd5f4915698c1a37a1583412e'
+                    or set(prelease['files']) != {'ext/lease_broker.py', 'ext/host_pick.py'}):
+                raise AssertionError('prelease predecessor fixture shape changed')
+            for name, item in prelease['files'].items():
+                raw = zlib.decompress(base64.b64decode(item['zlib_base64'], validate=True))
+                if len(raw) != item['bytes'] or g.digest(raw) != item['sha256']:
+                    raise AssertionError('prelease predecessor source mismatch')
+                if item['sha256'] != old[name]:
+                    raise AssertionError('historical95 prelease digest mismatch')
+                (cls.built/'native-code-stage'/name).write_bytes(raw)
             # Pinned finite long-horizon forward deltas are not historical95
             # bytes. Restore ONLY these named changed members inside this
             # disposable historical fixture; retain original SHA checks.

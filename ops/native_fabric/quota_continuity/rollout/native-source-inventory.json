@@ -252,10 +252,10 @@
       "source": "source/go_remote_transport.py"
     },
     "ext/host_pick.py": {
-      "bytes": 28203,
+      "bytes": 28964,
       "installed_preimage_sha256": "e5a398a0a2178abd9a79c9f9693b2528cf3a6d8b21d5829541e01158f952a092",
-      "sha256": "e5a398a0a2178abd9a79c9f9693b2528cf3a6d8b21d5829541e01158f952a092",
-      "source": "source/host_pick.py"
+      "sha256": "025ca9fea8ba96c4a66c26ad7be8c1e8b317e81101e67b5f6dc42c606a10fa6a",
+      "source": "candidate/host_pick.py"
     },
     "ext/host_pull.sh": {
       "bytes": 15118,
@@ -294,9 +294,9 @@
       "source": "candidate/lane_runtime.py"
     },
     "ext/lease_broker.py": {
-      "bytes": 73321,
+      "bytes": 77123,
       "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
-      "sha256": "a2847a29abe590cb168c2cd8ae34e0b1c3222b6e92ab4c00f252a342d56e6406",
+      "sha256": "42f510490014928aa02bedebbfc9fc0f1e60e689c12144c0f1caf881120082ab",
       "source": "candidate/lease_broker.py"
     },
     "ext/linux_process_identity.py": {
@@ -390,9 +390,9 @@
       "source": "candidate/native_prestart_reconcile.py"
     },
     "ext/native_remote.py": {
-      "bytes": 17001,
+      "bytes": 19782,
       "installed_preimage_sha256": "a111878452f2d7ba6ad97af53055d77ed9de13d783653029e5f20311902ff051",
-      "sha256": "2beef7dd4de1dab2908970bed48cfd3fdfd99da2d99bc8de72a92d2a1b2418b6",
+      "sha256": "82e9f94fc0148367a4237cccbf44410240f6f897276dd9a37fc8357c6e55f4df",
       "source": "candidate/native_remote.py"
     },
     "ext/native_runtime_bindings.py": {
@@ -576,9 +576,9 @@
       "source": "candidate/remote_sub.sh"
     },
     "ext/remote_sub_exec.py": {
-      "bytes": 60654,
+      "bytes": 61467,
       "installed_preimage_sha256": "a29798abb84294b1d8a67c53ef2b45137db4517f960598e51c8da21796d6cf61",
-      "sha256": "9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1",
+      "sha256": "f365bf7c10eb5b7fcf77aa61141329d5f14e2b1e92f98f88382d3e617b67bcda",
       "source": "candidate/remote_sub_exec.py"
     },
     "ext/remote_sub_helpers.py": {

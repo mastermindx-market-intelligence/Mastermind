@@ -54,6 +54,56 @@ def studio_projection(mode, env):
         operator_delegation=bool(env.get("FABRIC_OPERATOR_CAPABILITY")),
     )
 
+# Host-registry enrollment is custody evidence, not OAuth account proof.
+# The registry's source/host checks precede any native Grok provider invocation.
+# A changed local credential must be explicitly requalified by the owning host.
+_GROK_ACCOUNT_BINDING_SCHEMA = "mastermind.grok_host_account_binding.v1"
+
+
+def grok_registry_binding(entry, selected_host, account):
+    """Pure broker/host contract: an enrollment assertion, not OAuth proof."""
+    if type(entry) is not dict:
+        raise ValueError("native_grok_account_binding_unqualified")
+    binding = entry.get("grok_account_binding")
+    if (type(binding) is not dict
+            or set(binding) != {"schema", "host", "account", "subscription_scope", "auth_identity"}
+            or binding.get("schema") != _GROK_ACCOUNT_BINDING_SCHEMA
+            or binding.get("host") != selected_host
+            or binding.get("account") != account
+            or not isinstance(binding.get("subscription_scope"), str)
+            or not IDENT.fullmatch(binding["subscription_scope"])):
+        raise ValueError("native_grok_account_binding_unqualified")
+    expected = binding["auth_identity"]
+    fields = ("uid", "dev", "ino", "size", "mtime_ns", "ctime_ns")
+    if (type(expected) is not dict or set(expected) != set(fields)
+            or any(type(expected[f]) is not int or expected[f] < 0 for f in fields)):
+        raise ValueError("native_grok_account_binding_unqualified")
+    return binding
+
+
+def _bound_grok_auth(entry, selected_host, account, env):
+    binding = grok_registry_binding(entry, selected_host, account)
+    expected = binding["auth_identity"]
+    fields = ("uid", "dev", "ino", "size", "mtime_ns", "ctime_ns")
+    home = Path(env.get("HOME", str(Path.home())))
+    if not home.is_absolute():
+        raise ValueError("native_grok_account_binding_unqualified")
+    auth = home / ".grok" / "auth.json"
+    try:
+        info = os.lstat(auth)
+    except OSError:
+        raise ValueError("native_grok_account_binding_unqualified") from None
+    if (not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)
+            or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != os.getuid()
+            or (info.st_uid, info.st_dev, info.st_ino, info.st_size,
+                info.st_mtime_ns, info.st_ctime_ns)
+               != tuple(expected[f] for f in fields)):
+        raise ValueError("native_grok_account_binding_unqualified")
+    # This binds only the recorded local auth-file object. It cannot identify a
+    # provider principal; the actual subscriber remains an enrollment gate.
+    return auth
+
+
 def scope(key, mode, model, here, env, *, timing=None):
     names = {"root":"POOL_ORCHESTRATOR_ID", "lease_id":"POOL_LEASE_ID",
              "account":"POOL_ACCOUNT", "host":"LANE_REMOTE_HOST",
@@ -74,6 +124,8 @@ def scope(key, mode, model, here, env, *, timing=None):
         raise ValueError("native_remote_support_invalid")
     hosts = json.loads((here / "hosts.json").read_text())
     entry = hosts.get(value["host"], {})
+    if type(entry) is not dict:
+        raise ValueError("native_remote_host_refused")
     if entry.get("local") is True or "lanes" not in entry.get("roles", []):
         raise ValueError("native_remote_host_refused")
     allowed = entry.get("allowed_modes")
@@ -82,6 +134,8 @@ def scope(key, mode, model, here, env, *, timing=None):
     actual = socket.gethostname().split(".", 1)[0]
     if actual not in [h.split(".", 1)[0] for h in entry.get("hostnames", [])]:
         raise ValueError("native_remote_host_identity_mismatch")
+    if mode == "grok":
+        _bound_grok_auth(entry, value["host"], value["account"], env)
     issued = float(env.get("NATIVE_LEASE_ISSUED", "0"))
     deadline = float(env.get("NATIVE_LEASE_DEADLINE", "0"))
     now = time.time()
@@ -134,6 +188,11 @@ def environment(mode, model, key, here, env):
             if name.startswith(("ANTHROPIC_", "CLAUDE_", "CODEX_", "OPENAI_", "OPENCODE_")):
                 result.pop(name)
     if mode == "grok":
+        # Refuse credential/host drift BEFORE creating the per-run config.
+        hosts = json.loads((here / "hosts.json").read_text())
+        selected = env.get("LANE_REMOTE_HOST", "")
+        auth = _bound_grok_auth(hosts.get(selected, {}), selected,
+                                env.get("POOL_ACCOUNT", ""), env)
         for name in list(result):
             if name.startswith("GROK_"):
                 result.pop(name)
@@ -150,12 +209,7 @@ def environment(mode, model, key, here, env):
             stream.write(projection.config_text + hook_text)
             stream.flush()
             os.fsync(stream.fileno())
-        auth = Path(env.get("HOME", str(Path.home()))) / ".grok" / "auth.json"
-        auth_stat = os.lstat(auth)
-        if not stat.S_ISREG(auth_stat.st_mode) or stat.S_ISLNK(auth_stat.st_mode):
-            raise ValueError("native_grok_auth_unsafe")
-        if hasattr(os, "getuid") and auth_stat.st_uid != os.getuid():
-            raise ValueError("native_grok_auth_owner_refused")
+        _bound_grok_auth(hosts[selected], selected, env.get("POOL_ACCOUNT", ""), env)
         result.update(GROK_HOME=str(home), GROK_AUTH_PATH=str(auth))
     if mode == "cursor":
         projection = studio_projection(mode, env)

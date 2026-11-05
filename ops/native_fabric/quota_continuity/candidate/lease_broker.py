@@ -870,19 +870,41 @@ class Broker:
     def _front_of_queue(
         self, conn: sqlite3.Connection, pool: str, orch: str, task_class: str
     ) -> bool:
-        """True if this orch may take the next slot (priority + oldest-first)."""
+        """True if this orch may take the next slot (priority + oldest-first).
+
+        Only waiters the current lending predicate would actually refuse are
+        skipped: a lending-blocked head (already at/above its fair share while
+        below-share demand waits) cannot convoy eligible later demand. A
+        skipped waiter keeps its exact id, enqueued_at and priority, and still
+        blocks again once it becomes eligible.
+        """
         waiters = self._waiters(conn, pool)
         if not waiters:
             return True
         my_p = _class_priority(task_class)
-        # higher-priority (lower number) waiter from someone else blocks us
-        for w in waiters:
+        # Same lending predicate _try_acquire enforces as lending_blocked.
+        # Match the preceding acquire gate, including a newly arriving caller
+        # whose demand has not yet been registered in the queue.
+        share = self.fair_share(conn, pool, extra=orch)
+        below_any = bool(self._below_share_waiters(conn, pool, "", share))
+        held: Dict[str, int] = {}
+
+        def lending_eligible(w: sqlite3.Row) -> bool:
+            w_orch = w["orchestrator_id"]
+            if w_orch not in held:
+                held[w_orch] = len(self._held_by(conn, w_orch, pool))
+            return not (below_any and held[w_orch] >= share)
+
+        eligible = [w for w in waiters if lending_eligible(w)]
+        # higher-priority (lower number) eligible waiter from someone else
+        # blocks us; priority and oldest-first within a class are unchanged
+        for w in eligible:
             if w["orchestrator_id"] == orch:
                 return True
             if int(w["priority"]) < my_p:
                 return False
             if int(w["priority"]) == my_p:
-                # oldest at this class: if it's us, ok; if someone else, wait
+                # oldest eligible at this class: if it's us, ok; else wait
                 return w["orchestrator_id"] == orch
         return True
 
@@ -1043,6 +1065,48 @@ class Broker:
             finally:
                 conn.close()
         compatible_accounts = None
+        if pool == "grok":
+            # Every Grok grant needs an enrolled original subscriber + host.
+            # Neither task_class nor caller-controlled broker-host identity is
+            # authentication; unenrolled local hosts also fail closed.
+            # Original broker grant owner, before capacity demand/lease creation.
+            # A shared account alias cannot prove which remote credential pays.
+            # Reuse existing host registry plus account catalog; the remote
+            # executor separately rechecks the actual local auth inode.
+            try:
+                from glm_host_account_source import owned_bytes
+                from native_remote import grok_registry_binding
+                registry = json.loads(owned_bytes(self.hosts_path, maximum=65536))
+                entry = registry.get(host) if type(registry) is dict else None
+                if type(entry) is not dict:
+                    raise ValueError("grok_host_not_enrolled")
+                roles = entry.get("roles")
+                modes = entry.get("allowed_modes")
+                held_modes = entry.get("qualification_only_modes", [])
+                if (entry.get("local") is True or type(roles) is not list
+                        or "lanes" not in roles or type(modes) is not list
+                        or "grok" not in modes or type(held_modes) is not list
+                        or "grok" in held_modes):
+                    raise ValueError("grok_host_not_enrolled")
+                compatible_accounts = []
+                for row in self.grantable_accounts(pool):
+                    name = row.get("name")
+                    if type(name) is not str or (account is not None and name != account):
+                        continue
+                    try:
+                        enrollment = grok_registry_binding(entry, host, name)
+                    except ValueError:
+                        continue
+                    # Original account catalog owns the subscription-scope claim.
+                    required_scope = row.get("subscription_scope")
+                    if (type(required_scope) is str and required_scope
+                            and required_scope == enrollment["subscription_scope"]):
+                        compatible_accounts.append(row)
+                if not compatible_accounts:
+                    raise ValueError("grok_subscription_not_qualified")
+            except (OSError, ValueError, KeyError, TypeError, ImportError):
+                return (AcquireResult(ok=False, reason="host_account_unavailable",
+                    pool=pool, orchestrator_id=orch), waiter_id, "host_account_unavailable")
         if (pool == "glm" and task_class == "remote-glm") or (
                 self.provider_name(pool) == "bailian" and task_class == "remote-qwen"):
             # Pairing precedes capacity demand; no new waiter for an unavailable

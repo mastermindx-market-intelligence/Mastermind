@@ -332,6 +332,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python -m scripts.ci_postmerge_proof
 
+      # tests/test_agent_eval_pro_turn_corpus.py pins all 40 public fixture
+      # references to their original pre-squash anchor commit
+      # edd30b4686d3aaf358b4ca6ebd9485b04d15751d. A normal branch-history
+      # fetch can omit that original after the corpus wave's squash merge
+      # d5067b83. Materialize that one exact
+      # immutable anchor once per shard checkout with a single bounded
+      # ordinary read from the same origin before repository tests; the
+      # test's own assertions, refs and digests are unchanged.
+      - name: Materialize immutable corpus anchor
+        if: ${{ steps.previous_ci.outputs.reuse != 'true' }}
+        run: |
+          set -euo pipefail
+          corpus_anchor=edd30b4686d3aaf358b4ca6ebd9485b04d15751d
+          if ! git cat-file -e "${corpus_anchor}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth 1 origin "${corpus_anchor}"
+          fi
+          git show --no-patch --format='materialized %H' "${corpus_anchor}"
       - name: Run repository test shard
         if: ${{ steps.previous_ci.outputs.reuse != 'true' }}
         # Give best-effort upload an opportunity inside the 60-minute job.

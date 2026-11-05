@@ -68,6 +68,31 @@ def source_owners(tmp_path_factory):
     diagnostic = json.loads(diagnostic_raw)
     assert diagnostic['schema'] == 'mastermind.test_native_diagnostic_predecessors/v1'
     assert diagnostic['source_commit'] == 'e5f49cf4dbe8d06382c1d6f32368e9e9fb51c63d'
+    # Sparse pin qualification changes one more CURRENT member. The retained
+    # executor below is the exact protected predecessor, never a relabelled
+    # historical manifest or a weakened current-stage verification.
+    sparse_raw = (ROLLOUT.parents[3] / 'tests/fixtures/native-sparse-executor-predecessor-e39a617b.json').read_bytes()
+    assert g.digest(sparse_raw) == '5dde14ea06bd038dc173bb680a186fd0d6c99f5cd7afdebc3136b539227f4ec8'
+    sparse = json.loads(sparse_raw)
+    assert sparse['schema'] == 'mastermind.test_native_sparse_executor_predecessor/v1'
+    assert sparse['source_commit'] == 'e39a617b6771cb6b07323a533b4cf9db7e78900a'
+    assert set(sparse['files']) == {'ext/remote_sub_exec.py'}
+    # The new Grok host/account guard is a forward-only CURRENT member.
+    # Restore its exact unchanged protected base in the historical B11 test.
+    grok_raw = (ROLLOUT.parents[3] / 'tests/fixtures/native-grok-account-predecessor-388c412e.json').read_bytes()
+    assert g.digest(grok_raw) == 'a37bd58d7c972cabbeb0f247811a001d3fccb4d4e6b626417f06f4fb5e4962b0'
+    grok = json.loads(grok_raw)
+    assert grok['schema'] == 'mastermind.test_native_grok_account_predecessor/v1'
+    assert grok['source_commit'] == '9f65957e29eba92245d78609f032aaea523b7cb4'
+    assert set(grok['files']) == {'ext/native_remote.py'}
+    # The new broker/host-picker admission guard is CURRENT-only.
+    # Restore its exact last protected predecessor for historical B11.
+    prelease_raw = (ROLLOUT.parents[3] / 'tests/fixtures/native-grok-prelease-predecessors-74efbfd1.json').read_bytes()
+    assert g.digest(prelease_raw) == '728d67e580b2598c609cbc28a23d53505f3d65b4680d7a0625c1b1eb16cc75a5'
+    prelease = json.loads(prelease_raw)
+    assert prelease['schema'] == 'mastermind.test_grok_prelease_predecessors/v1'
+    assert prelease['source_commit'] == '74efbfd170edb15bd5f4915698c1a37a1583412e'
+    assert set(prelease['files']) == {'ext/lease_broker.py', 'ext/host_pick.py'}
     assert set(retained['files']) == {'ext/fabric_task.py', 'ext/pool_ledger.py'}
     assert set(diagnostic['files']) == {'ext/original_delivery_collector.py',
                                       'ext/provider_outcome.py', 'ext/remote_sub.sh'}
@@ -109,7 +134,8 @@ def source_owners(tmp_path_factory):
     assert selection['commit'] == '9f65957e29eba92245d78609f032aaea523b7cb4'
     assert selection['blob'] == 'dd542dbc5bb746c0ad1428b177b25a98b7a02536'
     assert selection['path'] == 'ops/native_fabric/quota_continuity/candidate/pick.py'
-    predecessor_files = {**retained['files'], **diagnostic['files'], 'ext/pick.py': selection}
+    predecessor_files = {**retained['files'], **diagnostic['files'], **sparse['files'],
+                         **grok['files'], **prelease['files'], 'ext/pick.py': selection}
     assert {name for name in manifest if manifest[name] != historical_manifest[name]} == (
         set(predecessor_files) | new_names
     )

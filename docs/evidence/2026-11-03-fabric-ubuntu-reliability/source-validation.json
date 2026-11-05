@@ -1,0 +1,64 @@
+{
+  "schema": "mastermind.fabric_source_validation.v1",
+  "operation_id": "fabric-ubuntu-reliability-20261103-c4",
+  "protected_base": "e39a617b6771cb6b07323a533b4cf9db7e78900a",
+  "previous_branch_head": "07a8ec5a31e56e292ccb330dd0e9b791dba4d1a8",
+  "candidate_path": "ops/native_fabric/quota_continuity/candidate/remote_sub_exec.py",
+  "candidate_preimage_sha256": "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d",
+  "candidate_sha256": "7c7b94a974b85804598c49fc21ea1eb0d5ea55888dc3a6394dde8ab0b4d113e2",
+  "forward_patch_path": "tests/fixtures/fabric-native-sparse-commit-preflight-20261103.patch",
+  "forward_patch_sha256": "34d3cbbe2033bc8a1a68d6d711407ad57ee892a951f4ef68303c719f3585a9c9",
+  "manifest_sha256": "5650b1d55f8e67bf15964bc026be98ca93d2eef4eab04ce67c54f68885058f20",
+  "source_inventory_sha256": "d3b310e30b2eaf7907d2658b2da3874cc2ad2397ff2a91d812ee9a50bd895505",
+  "native_members": 102,
+  "changed_native_members": [
+    "ext/remote_sub_exec.py"
+  ],
+  "tests": {
+    "command": "python3 -m pytest -q tests/test_fabric_sparse_commit_preflight_20261103.py tests/test_fabric_native_security_composition_20261018.py --basetemp <owned-temp>/pytest-final --junitxml <owned-temp>/pytest-final.xml -ra",
+    "host": "m2studio",
+    "tests": 79,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "duration_seconds": 66.13,
+    "completed_rc": 0
+  },
+  "fixture_scope": "Real disposable Git repositories and inert helper fixtures. No provider or live worker is executed by these tests.",
+  "initial_diagnostic": {
+    "command": "ls-files -v --stage -z -- scripts/worktree_sparse.py",
+    "git_returncode": 0,
+    "stdout_valid": true,
+    "stderr_class": "Git advice.sparseIndexExpanded informational advisory",
+    "effect": "Existing strict observer rejected a valid read before workspace mint",
+    "repair": "Disable only this advice in the existing scoped Git settings; retain all other stderr and source-state checks"
+  },
+  "release_state": "SOURCE_CANDIDATE_NOT_INSTALLED_OR_SELECTED",
+  "historical_holds_reconciled": false,
+  "external_reference": "https://git-scm.com/docs/git-config/2.46.2.html",
+  "supplemental_tests": {
+    "command": "python3 -m pytest -q tests/test_fabric_sparse_commit_preflight_20261103.py -k 'sparse_index_observer_preserves or zero_exit_valid_stdout' --basetemp <owned-temp>/pytest-advice-edges --junitxml <owned-temp>/pytest-advice-edges.xml -ra",
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "rc": 0,
+    "duration_seconds": 1.479,
+    "test_sha256": "1f9eb383c445071b4957e35460c56dffb8febec8adf92a1297f3505dae600cc7"
+  },
+  "test_evidence_total": {
+    "earlier_full_targeted_run": 79,
+    "supplemental_distinct_tests": 2,
+    "total_passing": 81,
+    "not_a_single_81_test_run": true
+  },
+  "independent_review": {
+    "run_id": "fabric-sparse-source-review-20261103-c4",
+    "reviewed_head": "bb0266fc54124255e5373ec20607ba410674cecd",
+    "response_sha256": "7f9062a1c449fe08c4b3c89d0b89c77712e743df17303f3879e35dcd45eab5b8",
+    "accepted": true,
+    "verdict": "NO_BLOCKING_FINDING_WITHIN_SCOPE",
+    "scope": "Exact patch and supplied function excerpts; executable digest unchanged by later tests/evidence.",
+    "formal_github_approval": false
+  }
+}

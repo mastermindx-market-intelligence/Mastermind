@@ -31,9 +31,12 @@ PRE_GROK_COMPOSED_SHA = "c14ec82af144a3c47599d628ef614c033e4c3f04852953d8c3b3699
 GROK_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-grok-forward-20261023.patch"
 GROK_FORWARD_PATCH_SHA = "d0ae2b5337f7235695316d4148f2e4764aa0c75af6a239257ed13c830269b736"
 COMPOSED_SHA = "6be6830dcd9c00dc46cf613a610ad0dc574ca13f50aa1cd5fbffb7e65e1649c1"
+PRE_PIN_PREFLIGHT_SHA = "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d"
+PIN_PREFLIGHT_PATCH = ROOT / "tests/fixtures/fabric-native-sparse-commit-preflight-20261103.patch"
+PIN_PREFLIGHT_PATCH_SHA = "34d3cbbe2033bc8a1a68d6d711407ad57ee892a951f4ef68303c719f3585a9c9"
 PRE_LONG_HORIZON_COMPOSED_SHA = "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d"
 PRE_SLOT_HANDOFF_COMPOSED_SHA = "b670196db8f56018e91d73976b926a550318cb94cc566f86fa40f34a5d55de63"
-FINAL_COMPOSED_SHA = "9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1"
+FINAL_COMPOSED_SHA = "f365bf7c10eb5b7fcf77aa61141329d5f14e2b1e92f98f88382d3e617b67bcda"
 H1_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-h1-provider-entry-forward.patch"
 H1_FORWARD_PATCH_SHA = "4be46626757b8654babb5140ffc757d0fa74de879a37240965737a0c874b2918"
 PRE_PHYSICAL_ROOT_COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
@@ -54,7 +57,7 @@ def _current_native_count():
     owner=importlib.util.module_from_spec(spec);spec.loader.exec_module(owner)
     return len(owner.BASE_FILES|owner.ADDITIONS)+1
 EXPECTED_NATIVE_FILES = _current_native_count()
-NATIVE_MANIFEST_SHA = "b4c355a11ec63d49281fe416c2690340dea3add7cae7be9f40801c645d12945c"
+NATIVE_MANIFEST_SHA = "db2335aa70f814f4ab3ca9ccec26ee4d7be976bf4a31444f556a0af44c0e9d31"
 
 
 def _sha(raw):
@@ -107,6 +110,10 @@ def _composition(directory):
     assert _sha(H1_FORWARD_PATCH.read_bytes()) == H1_FORWARD_PATCH_SHA
     donor_contract._git(directory, "apply", "--check", str(H1_FORWARD_PATCH))
     donor_contract._git(directory, "apply", str(H1_FORWARD_PATCH))
+    assert _sha(target.read_bytes()) == PRE_PIN_PREFLIGHT_SHA
+    assert _sha(PIN_PREFLIGHT_PATCH.read_bytes()) == PIN_PREFLIGHT_PATCH_SHA
+    donor_contract._git(directory, "apply", "--check", str(PIN_PREFLIGHT_PATCH))
+    donor_contract._git(directory, "apply", str(PIN_PREFLIGHT_PATCH))
     composed = (NATIVE / "candidate/remote_sub_exec.py").read_bytes()
     # Preserve the exact reviewed long-horizon executor as predecessor bytes.
     # The new handoff is removed only in a disposable inverse for source proof.
@@ -117,6 +124,20 @@ def _composition(directory):
     first = previous.index(b'                # The provider child may enter slot.py under sub.sh.')
     last = previous.index(b'                state["started"] = True', first)
     previous = previous[:first] + previous[last:]
+    # Current native combines the protected long-horizon/slot handoff
+    # with the previously accepted sparse-commit preflight. The latter
+    # is verified by byte-exact reverse application ONLY to this inert
+    # test fixture, never by changing the old source/manifest digest.
+    assert _sha(previous) == "6ed83f75716d49f5134c5ee8b54a8614d24d83bec651ebd52c7133c6bab38fe3"
+    inverse_dir = directory / "sparse-commit-inverse"
+    inverse_dir.mkdir()
+    inverse_file = inverse_dir / "remote_sub_exec.py"
+    inverse_file.write_bytes(previous)
+    donor_contract._git(inverse_dir, "apply", "--reverse", "--check",
+                        str(PIN_PREFLIGHT_PATCH))
+    donor_contract._git(inverse_dir, "apply", "--reverse",
+                        str(PIN_PREFLIGHT_PATCH))
+    previous = inverse_file.read_bytes()
     assert _sha(previous) == PRE_SLOT_HANDOFF_COMPOSED_SHA
     # The earlier reviewed Grok/provider/deadline composition remains byte-pinned.
     # Long-horizon changes narrow to two bounds and one duration parser after that cone.
@@ -128,7 +149,9 @@ def _composition(directory):
                                     b"not re.fullmatch(r'[1-9][0-9]{0,3}', commission_budget)")
     assert _sha(prior_long) == PRE_LONG_HORIZON_COMPOSED_SHA
     assert _sha(composed) == FINAL_COMPOSED_SHA
-    assert target.read_bytes() == prior_long  # verified unchanged reviewed source cone
+    # Pre-long source is the accepted pre-pin sparse predecessor; the
+    # target has the separately pinned sparse patch applied above.
+    assert _sha(target.read_bytes()) == "7c7b94a974b85804598c49fc21ea1eb0d5ea55888dc3a6394dde8ab0b4d113e2"
     return composed
 
 

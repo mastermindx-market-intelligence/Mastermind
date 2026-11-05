@@ -1,0 +1,136 @@
+{
+  "composition": {
+    "delta_vs_previous_pr_head": [
+      "ext/fabric_task.py",
+      "ext/original_delivery_collector.py",
+      "ext/provider_outcome.py",
+      "ext/remote_sub.sh"
+    ],
+    "delta_vs_protected_master": [
+      "ext/remote_sub_exec.py"
+    ],
+    "manifest_sha256": "dbf5371bd7e346d8abd4c52d65731b52a0eb388cc45c41ce28fe143f295700b8",
+    "native_files": 102,
+    "source_inventory_sha256": "2b02de89d0fac9a72930e7aa1fbd302f710d3b2c36661245620e48b984e0c934"
+  },
+  "count_correction": "The upstream-diagnostics aggregate reports 88, but contains 69 unique testcase records, all passing. Report 69 distinct tests; do not use the aggregate as that count.",
+  "failed_github_run": 41609235395,
+  "failed_jobs": [
+    125830211419,
+    125830211238,
+    125830211265
+  ],
+  "historical_preservation": {
+    "executor_predecessor_bytes": 59042,
+    "executor_predecessor_sha256": "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d",
+    "historical_manifest_changed": false,
+    "historical_manifest_sha256": "0be933110a192f3855359eb72bfdfddb38e6dd581ed1d495d0caf7ea8a7a6aec",
+    "original_catalog_fixture_sha256": "1df5d35c48678fea337238cf23aca6a68e3a16169192259873f7f48c36212fb9",
+    "supplemental_executor_fixture_sha256": "5dde14ea06bd038dc173bb680a186fd0d6c99f5cd7afdebc3136b539227f4ec8",
+    "upstream_diagnostic_fixture_sha256": "fcc3ab7de9a8f517ca59d94cf745c1d894fc14478f399e7d18f198f0679233df"
+  },
+  "observed_at_utc": "2026-11-03T22:31:33.940501+00:00",
+  "prior_pr_head": "081c1c8d3b90881da8aefa3c6129c9a04aea7f13",
+  "protected_master_composed": "9f65957e29eba92245d78609f032aaea523b7cb4",
+  "release": {
+    "github_ci_for_new_head": "not_yet_published",
+    "live_installation": false,
+    "protected_merge": "not_performed",
+    "source_only": true
+  },
+  "reproduced_before": {
+    "causes": [
+      "four CURRENT manifest pins stale",
+      "historical B11 reconstruction lacked the exact old executor"
+    ],
+    "errors": 1,
+    "failures": 3,
+    "log_sha256": "0b5f97d20e70e2af3625471b957fc0d5c9ae619d3470e87d8f006df35babd559"
+  },
+  "review": {
+    "execution_absence_proven": false,
+    "formal_approval": false,
+    "integration_review_run_id": "fabric-ubuntu-ci-fixture-review-20261103-c4",
+    "prior_executor_review": "NO_BLOCKING_FINDING_WITHIN_SCOPE; retains its original scope",
+    "request_error": "MANUAL_ROUTE_UNAVAILABLE",
+    "retry_allowed": false,
+    "same_id_status": "NOT_FOUND"
+  },
+  "schema": "mastermind.fabric_ubuntu_ci_repair_validation.v1",
+  "ubuntu1_followup": {
+    "cleanup_or_threshold_change": false,
+    "four_ci_units": "activating/start-pre",
+    "guard_predicate": "used_pct >= 85 OR free < 100 GiB",
+    "guard_sha256": "031fc56aad4ec117bca4af8ff894f30800873ae0b1adabf64c11432608ede79e",
+    "home_size_scan": "bounded 25s; partial, not a complete census",
+    "memory_cpu_gates": "no refusal observed",
+    "observed_disk_used_percent": 88.86,
+    "refusal_reason": "critical disk pressure",
+    "root_ci_directories": "unreadable as longr; ownership preserved"
+  },
+  "validation": [
+    {
+      "junit_sha256": "916ed8b9696ee6e94c9b4291b7516a2884b65909dd139190e495f2a4f208ddf0",
+      "local_evidence_dir": "/Users/chriswong/.local/state/mastermind/fabric-ci-pin-repair-20261103-rv41nuq0",
+      "log_sha256": "afc944a63fa06acb905cce94ea72d3022a61f532a5f21974d5e20849c53e1ed2",
+      "name": "after",
+      "suites": [
+        {
+          "errors": "0",
+          "failures": "0",
+          "hostname": "m2studio",
+          "name": "pytest",
+          "skipped": "6",
+          "tests": "188",
+          "time": "94.073",
+          "timestamp": "2026-11-03T15:27:39.515341-07:00"
+        }
+      ],
+      "testcase_records": {
+        "errors": 0,
+        "failures": 0,
+        "passed": 182,
+        "skipped": 6,
+        "total": 188,
+        "unique_keys": 188
+      }
+    },
+    {
+      "junit_sha256": "b19380ce4d9740da413bb3925a2b84fa79459134d34f6b0e71c07981d2eefc34",
+      "local_evidence_dir": "/Users/chriswong/.local/state/mastermind/fabric-ci-pin-repair-20261103-rv41nuq0",
+      "log_sha256": "9ddf64ffecbda460bfb1d37e906ebd70f6caf70e903c92b21a1613288276dd79",
+      "name": "upstream-diagnostics",
+      "suites": [
+        {
+          "errors": "0",
+          "failures": "0",
+          "hostname": "m2studio",
+          "name": "pytest",
+          "skipped": "0",
+          "tests": "88",
+          "time": "9.208",
+          "timestamp": "2026-11-03T15:29:56.603947-07:00"
+        }
+      ],
+      "testcase_records": {
+        "errors": 0,
+        "failures": 0,
+        "passed": 69,
+        "skipped": 0,
+        "total": 69,
+        "unique_keys": 69
+      }
+    }
+  ],
+  "verified_files_sha256": {
+    "ops/native_fabric/quota_continuity/rollout/native-manifest.json": "dbf5371bd7e346d8abd4c52d65731b52a0eb388cc45c41ce28fe143f295700b8",
+    "ops/native_fabric/quota_continuity/rollout/native-source-inventory.json": "2b02de89d0fac9a72930e7aa1fbd302f710d3b2c36661245620e48b984e0c934",
+    "ops/native_fabric/quota_continuity/tests/test_support_policy_source.py": "d83194a28a2dc7b091c811f5c8e31d8aa1bd790f01cc5d0a3bec59810cee7806",
+    "tests/fixtures/native-sparse-executor-predecessor-e39a617b.json": "5dde14ea06bd038dc173bb680a186fd0d6c99f5cd7afdebc3136b539227f4ec8",
+    "tests/test_catalog_native_release_staging.py": "27cfa8347ea2260be9ac35502e960770ebe2056f52aac91de40dc34386d7f5fa",
+    "tests/test_fabric_native_security_composition_20261018.py": "3bfc3e1e3e068c3f2fcfcfd7863affc9efdbd06c28fedda185c989f071f41e44",
+    "tests/test_host_pull_launchd_admission.py": "5e0bb70d5f7acbe5c4f810d0a0a5a95b45a17805c4ffa4980128a782e40d3d38",
+    "tests/test_native_launcher_successor_transition.py": "9f04f6dae2f18b93554ce171253803b6981ada8a26f617fa8b6fdc1179e94df6",
+    "tests/test_paid_initializer.py": "fb4318ab2e25c18a426a0912e1ced5bf4cc17290f0a9498b372f1628baf4382d"
+  }
+}

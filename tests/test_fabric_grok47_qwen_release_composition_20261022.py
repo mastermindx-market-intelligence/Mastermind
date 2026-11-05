@@ -55,6 +55,17 @@ REVIEWED_QWEN_FORWARD_DIGESTS = {
     "glm_host_account_source.py": "cf2be3503d31d8b3f5d2098ebab5d6c2e61e46842468db73baf2f7d8f8b70855",
 }
 
+GROK_PRELEASE_BROKER_FORWARD_DIGESTS = {
+    "lease_broker.py": "a83a2fd667b1b6055d8aa07bb0a9f9f438baf6d6ca610c11256eb6faf7c27b3e",
+}
+
+# The reviewed eligible-waiter supplier composes over the Grok prelease guard.
+# Keep both historical source maps; bind only this current reviewed composition.
+REVIEWED_BROKER_QUEUE_FORWARD_DIGESTS = {
+    "lease_broker.py": "42f510490014928aa02bedebbfc9fc0f1e60e689c12144c0f1caf881120082ab",
+}
+
+
 
 def digest(raw):
     return hashlib.sha256(raw).hexdigest()
@@ -341,8 +352,12 @@ def test_protected_qwen_files_and_exact_context_reader_forward():
     manifest = json.loads((NATIVE / "rollout/native-manifest.json").read_text())
     inventory = json.loads((NATIVE / "rollout/native-source-inventory.json").read_text())
     assert set(REVIEWED_QWEN_FORWARD_DIGESTS) == {"glm_host_account_source.py"}
+    assert set(GROK_PRELEASE_BROKER_FORWARD_DIGESTS) == {"lease_broker.py"}
+    assert set(REVIEWED_BROKER_QUEUE_FORWARD_DIGESTS) == {"lease_broker.py"}
     for name, original in sorted(PROTECTED_QWEN_SOURCE_DIGESTS.items()):
-        expected = REVIEWED_QWEN_FORWARD_DIGESTS.get(name, original)
+        expected = REVIEWED_BROKER_QUEUE_FORWARD_DIGESTS.get(
+            name, REVIEWED_QWEN_FORWARD_DIGESTS.get(
+                name, GROK_PRELEASE_BROKER_FORWARD_DIGESTS.get(name, original)))
         assert name in builder.BASE_FILES
         candidate = NATIVE / "candidate" / name
         assert candidate.is_file() and not candidate.is_symlink()
