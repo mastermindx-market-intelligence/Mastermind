@@ -562,4 +562,4 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 
 # NEXT accepted source: callback input bound / existing HTTP permission denial,
 # never an OS identity. Exact whole-source hash and token sites only.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '6d7fc6e04b43006e3f5cd87d8a157b28938c73e11e375353de4f7066dbe5ee21', 'sites': ((703, 93, 96, 'int', '403'), (705, 56, 59, 'int', '403'), (712, 46, 49, 'int', '403'), (713, 56, 59, 'int', '403'))}
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '98a0be4402c331678b0870cd7b673d56c8e3704b83ff9e8b21c95610a5b54c4d', 'sites': ((703, 93, 96, 'int', '403'), (705, 56, 59, 'int', '403'), (712, 46, 49, 'int', '403'), (713, 56, 59, 'int', '403'))}
