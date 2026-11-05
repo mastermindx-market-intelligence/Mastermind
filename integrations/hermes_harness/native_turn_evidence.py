@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "mastermind.hermes_native_turn_observation.v1"
+SCHEMA = "mastermind.hermes_native_turn_observation.v2"
 MAX_STREAM_BYTES = 64 * 1024
 MAX_EVENTS = 64
 MAX_ANSWER_CHARS = 4096
@@ -24,7 +24,22 @@ ROLE_MODELS = {
 }
 _MARKER = re.compile(r"\A[A-Z0-9][A-Z0-9-]{7,63}\Z")
 _SESSION = re.compile(r"\A[A-Za-z0-9_.:-]{1,128}\Z")
-_STDERR_SESSION = re.compile(r"\A\s*session_id: ([A-Za-z0-9_.:-]{1,128})\s*\Z")
+
+
+def _stderr_session_matches(stderr: object, session: str) -> bool:
+    """Pinned gateway binding and terminal identity, never model text.
+
+    gateway_chat prints Session after allocation; emit_result prints session_id.
+    Only blank LF lines may surround these two ordered declarations. A warning,
+    pending admission, duplicate declaration or invalid UTF-8 is not success.
+    """
+    if not isinstance(stderr, bytes) or len(stderr) > 1024:
+        return False
+    try:
+        lines = [line for line in stderr.decode("utf-8", "strict").split("\n") if line]
+    except UnicodeError:
+        return False
+    return lines == [f"Session: {session}", f"session_id: {session}"]
 
 
 class ObservationRefusal(ValueError):
@@ -108,8 +123,13 @@ def _inspect_native_protocol(
         init, final = events[0], events[-1]
         if init.get("type") != "system" or init.get("subtype") != "init":
             issues.add("INIT_INVALID")
-        if init.get("model") != expected_model:
-            issues.add("MODEL_IDENTITY_MISMATCH")
+        # At this pin, launch_from_args constructs the emitter before binding
+        # a gateway session. Our argv supplies neither --model nor --resume.
+        # Even a nonempty launch hint would not prove the model actually served.
+        if init.get("model") != "":
+            issues.add("INIT_MODEL_HINT_INVALID")
+        if init.get("session_id") != "":
+            issues.add("INIT_SESSION_STATE_INVALID")
         if final.get("type") != "result":
             issues.add("TERMINAL_RESULT_MISSING")
         if sum(ev.get("type") == "result" for ev in events) != 1:
@@ -133,13 +153,9 @@ def _inspect_native_protocol(
                 or tokens["input"] <= 0 or tokens["output"] <= 0):
             issues.add("USAGE_NOT_OBSERVED")
         session = final.get("session_id")
-        if init.get("session_id") != session:
-            issues.add("INIT_SESSION_IDENTITY_MISMATCH")
         if not isinstance(session, str) or not _SESSION.fullmatch(session):
             issues.add("SESSION_IDENTITY_MISSING")
-        elif (not isinstance(stderr, bytes) or len(stderr) > 1024
-              or not _STDERR_SESSION.fullmatch(stderr.decode("utf-8", "replace"))
-              or _STDERR_SESSION.fullmatch(stderr.decode("utf-8", "replace")).group(1) != session):
+        elif not _stderr_session_matches(stderr, session):
             issues.add("SESSION_STDERR_MISMATCH")
     return issues, events, final
 
@@ -194,7 +210,9 @@ def observe_native_turn(
         "schema": SCHEMA,
         "status": "PASS_CHILD_OUTPUT_OBSERVATION_ONLY" if not issues else "BLOCKED",
         "role": role if role in ROLE_MODELS else "UNQUALIFIED",
-        "model": expected_model if expected_model in ROLE_MODELS.get(role, ()) else "UNQUALIFIED",
+        "expected_model": expected_model if expected_model in ROLE_MODELS.get(role, ()) else "UNQUALIFIED",
+        "observed_model": None,
+        "model_identity_verified": False,
         "issue_codes": sorted(issues),
         "event_count": len(events),
         "stream_sha256": hashlib.sha256(stdout).hexdigest() if isinstance(stdout, bytes) else None,
