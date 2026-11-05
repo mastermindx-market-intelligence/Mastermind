@@ -500,7 +500,16 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Journal source-only read composition: exact unchanged action-handler AST and
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '5f6e043f3f8f525670f51c7f27a9e6ea7f17e7508489e13f661ea69007e840ff', 'sites': ((857, 71, 74, 'int', '400'), (868, 71, 74, 'int', '403'), (876, 71, 74, 'int', '400'), (882, 79, 82, 'int', '400'), (891, 71, 74, 'int', '400'), (901, 71, 74, 'int', '403'), (906, 76, 79, 'int', '503'), (912, 71, 74, 'int', '403'))}
+# 2026-11-05 Mission-result composition re-pin (attended parent source review
+# under the current Chairman waiver, NOT an independent/formal review): the
+# original eight action-refusal status tokens are byte-identical and each moves
+# exactly +1 line (the new _MISSION_RESULT_ROUTE constant above them); the
+# action-handler AST itself is unchanged. Only the exact full-source digest and
+# the eight whole-token coordinates move. Previous source SHA
+# 5f6e043f3f8f525670f51c7f27a9e6ea7f17e7508489e13f661ea69007e840ff. These are
+# HTTP response statuses, never account/UID/GID values, grants or admission
+# decisions; any changed byte/site restores ordinary D8.
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'e0d13427d248043ec0116cffb49f3b8ae2e5dcff50e65e4fa63d8fd6b9f53715', 'sites': ((858, 71, 74, 'int', '400'), (869, 71, 74, 'int', '403'), (877, 71, 74, 'int', '400'), (883, 79, 82, 'int', '400'), (892, 71, 74, 'int', '400'), (902, 71, 74, 'int', '403'), (907, 76, 79, 'int', '503'), (913, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -544,4 +553,12 @@ REVIEWED_FILES['app/mastermind_os/src/admission/project-admission-command-port.t
 REVIEWED_FILES['integrations/hermes_secretary/tab_sweep.py'] = {
     'sha256': '12d2c8f059f941eb908cc9d7ec3651763f8102832e05435118ce8e1385d5fd46',
     'sites': ((19, 77, 80, 'int', '443'),),
+}
+
+# S14 reviewed private-directory comparison (Root + independent89cb). This
+# single permission check grants no identity or chmod capability. Any path,
+# token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
+REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/post_failure_observation.py'] = {
+    'sha256': '2a78630ccaf574da752c77d7b8f821723ccb264b970e2fe38b1976d886ca97a0',
+    'sites': ((293, 79, 84, 'int', '0o700'),),
 }

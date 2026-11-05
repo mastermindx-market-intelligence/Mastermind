@@ -35,9 +35,9 @@ if mode == "malformed":
     sys.exit(0)
 role = sys.argv[sys.argv.index("-p") + 1]
 marker = re.search(r"MMX-CANARY-[A-F0-9]{32}", sys.stdin.read()).group(0)
-model = "glm-5.3" if role == "mmmeta" else "glm-5-3-flash-260828"
+# Protocol-source fixture: gateway emitter initializes before session binding.
 events = [
-    {"type": "system", "subtype": "init", "model": model, "session_id": "session-source-test"},
+    {"type": "system", "subtype": "init", "model": "", "session_id": ""},
     {"type": "text", "text": marker},
     {"type": "result", "exit_code": 0, "text": marker, "session_id": "session-source-test",
      "tokens": {"input": 19, "output": 14, "total": 33}},
@@ -45,7 +45,7 @@ events = [
 for event in events:
     sys.stdout.write(json.dumps(event) + "\\n")
 sys.stdout.flush()
-sys.stderr.write("\\nsession_id: session-source-test\\n")
+sys.stderr.write("Session: session-source-test\\n\\nsession_id: session-source-test\\n")
 if mode == "private_stderr":
     sys.stderr.write("Authorization: PRIVATE_SECRET_SENTINEL\\n")
 '''.replace("MODE_TOKEN", repr(mode))
@@ -55,15 +55,19 @@ class CgroupAndEnvironmentTests(unittest.TestCase):
     def test_exact_service_cgroup_matches(self):
         assert_role_service_cgroup(
             "mmsecretary",
-            raw="0::/user.slice/user-1000.slice/user@1000.service/app.slice/hermes-runtime-mmsecretary.service\n",
+            raw="0::/system.slice/hermes-runtime-mmsecretary.service\n",
         )
         assert_role_service_cgroup(
             "mmmeta",
-            raw="0::/user.slice/hermes-runtime-mmmeta.service/child.slice\n",
+            raw="0::/system.slice/hermes-runtime-mmmeta.service/child.slice\n",
         )
 
     def test_wrong_or_forged_cgroup_refuses(self):
         bad = [
+            "0::/user.slice/user-1000.slice/user@1000.service/app.slice/hermes-runtime-mmsecretary.service\n",
+            "0::/user.slice/hermes-runtime-mmsecretary.service/child.slice\n",
+            "0::/system.slice/unrelated.service/hermes-runtime-mmsecretary.service\n",
+            "1:name=systemd:/system.slice/hermes-runtime-mmsecretary.service\n",
             "0::/user.slice/hermes-runtime-mmmeta.service\n",
             "0::/user.slice/hermes-runtime-mmsecretary.service-fake\n",
             "0::/unrelated/sol-shell.scope\n",
@@ -86,7 +90,7 @@ class CgroupAndEnvironmentTests(unittest.TestCase):
                 "HERMES_HOME": str(profile.hermes_home),
                 "BYTEPLUS_MODELARK_API_KEY": "synthetic-not-live",
                 "HTTPS_PROXY": "http://127.0.0.2:18651",
-                "NO_PROXY": "127.0.0.1,localhost",
+                "NO_PROXY": "127.0.0.1,localhost,127.0.0.2",
             }
             self.assertEqual(_private_child_environment(profile, env), env)
             for key, value in [
@@ -95,6 +99,7 @@ class CgroupAndEnvironmentTests(unittest.TestCase):
                 ("HTTPS_PROXY", "http://127.0.0.3:18651"),
                 ("HTTPS_PROXY", "http://127.0.0.1:99999"),
                 ("NO_PROXY", "*"),
+                ("NO_PROXY", "127.0.0.1,localhost"),
                 ("HERMES_GATEWAY_TOKEN", "PRIVATE-NOT-LIVE"),
                 ("HERMES_SLACK_BOT_TOKEN", "PRIVATE-NOT-LIVE"),
                 ("HTTP_PROXY", "http://127.0.0.1:1234"),
@@ -127,7 +132,7 @@ class SyntheticRunnerTests(unittest.TestCase):
             "HERMES_HOME": str(self.home),
             "BYTEPLUS_MODELARK_API_KEY": "SOURCE_ONLY_PRIVATE_FIXTURE_KEY",
             "HTTPS_PROXY": "http://127.0.0.2:18651",
-            "NO_PROXY": "127.0.0.1,localhost",
+            "NO_PROXY": "127.0.0.1,localhost,127.0.0.2",
         }
 
     def _write(self, mode="good"):
@@ -165,11 +170,14 @@ class SyntheticRunnerTests(unittest.TestCase):
         self.child_env.pop("BYTEPLUS_MODELARK_API_KEY")
         self.child_env["ZAI_API_KEY"] = "SOURCE_ONLY_META_PROVIDER_FIXTURE"
         self.child_env["HTTPS_PROXY"] = "http://127.0.0.3:18652"
+        self.child_env["NO_PROXY"] = "127.0.0.1,localhost,127.0.0.3"
         self._write()
         receipt = self._run()
         self.assertEqual(receipt["status"], "PASS_CHILD_OUTPUT_OBSERVATION_ONLY")
         self.assertEqual(receipt["role"], "mmmeta")
-        self.assertEqual(receipt["model"], "glm-5.3")
+        self.assertEqual(receipt["expected_model"], "glm-5.3")
+        self.assertIsNone(receipt["observed_model"])
+        self.assertFalse(receipt["model_identity_verified"])
         self.assertNotIn("SOURCE_ONLY_META_PROVIDER_FIXTURE", str(receipt))
 
     def test_cross_role_key_refused_before_child_spawn(self):

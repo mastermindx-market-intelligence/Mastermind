@@ -34,14 +34,25 @@ REVIEWED_ANCHORS = {
         # in addition to the method AST; all three literal lines are ASCII.
         # Qualified session/direction/capacity READ and admission additions change the enclosing ingress AST.
         # The original CCR branch and listener remain structurally unchanged.
-        "source_sha256": "e43df430e5652ffd9aff5114572bccb5438616e615f7edd065239f018493ef96",
-        "ast_sha256": "6735cd4807ae1d203599d8210f141ea9b49b5d3487deaaa169789d6fd4565c72",
+        # 2026-11-05 Mission-result composition re-pin (attended parent source
+        # review under the current Chairman waiver, NOT an independent/formal
+        # review of this postimage): the method body gains one statement before
+        # the pinned branch, so only the enclosing body index moves (35 -> 36);
+        # the three pinned status operands keep their exact spelling, values and
+        # relative AST paths, and their source lines shift by the same +14.
+        # The new MISSION_RESULT read branch uses the existing HTTPStatus
+        # convention for its own invalid_input refusal. Previous source SHA
+        # e43df430e5652ffd9aff5114572bccb5438616e615f7edd065239f018493ef96 and
+        # previous AST SHA
+        # 6735cd4807ae1d203599d8210f141ea9b49b5d3487deaaa169789d6fd4565c72.
+        "source_sha256": "835c619a2a31659bff848b319b175ef63e44430d269d4d7982941ab3e563280b",
+        "ast_sha256": "a28a07df30890f0945054f42d6a1434cc41c57838ea3079128c2cf7c2d9d76cc",
         "sites": (
-            (("body", 3, "body", 35, "body", 3, "orelse", 0, "body", 2,
+            (("body", 3, "body", 36, "body", 3, "orelse", 0, "body", 2,
               "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 35, "body", 3, "orelse", 0, "body", 2,
+            (("body", 3, "body", 36, "body", 3, "orelse", 0, "body", 2,
               "orelse", 0, "body", 4, "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 35, "body", 3, "orelse", 0, "body", 2,
+            (("body", 3, "body", 36, "body", 3, "orelse", 0, "body", 2,
               "orelse", 0, "handlers", 0, "body", 0, "value", "args", 1), "int", 503, "503"),
         ),
     },

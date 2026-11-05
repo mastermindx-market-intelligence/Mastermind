@@ -18,6 +18,7 @@ from .constants import (
     UPSTREAM_REPOSITORY,
 )
 from .errors import RuntimeRefusal, refusal
+from .egress import ROLE_PROXY_HOST
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _TOOL = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -81,6 +82,27 @@ def load_profile(
     if path.is_symlink():
         raise RuntimeRefusal("PROFILE_SYMLINK_REFUSED")
     data = path.read_bytes()
+    return load_profile_bytes(
+        data, source_path=path, state_dir=state_dir,
+        secrets_file=secrets_file, hermes_home=hermes_home,
+    )
+
+
+def load_profile_bytes(
+    data: bytes,
+    *,
+    source_path: Path,
+    state_dir: Path | None = None,
+    secrets_file: Path | None = None,
+    hermes_home: Path | None = None,
+) -> RuntimeProfile:
+    """Parse exactly the supplied profile bytes with the incumbent validator.
+
+    ``source_path`` describes those bytes; it is never opened here. Existing
+    path qualification in the validator still applies to declared locations.
+    Descriptor-owning readers can therefore bind the selected configuration
+    to the same bytes they hash, without another profile-content read.
+    """
     if len(data) > 64 * 1024:
         raise RuntimeRefusal("PROFILE_TOO_LARGE")
     parsed = _load_unique_yaml(data)
@@ -90,7 +112,7 @@ def load_profile(
         parsed["state_dir"] = str(state_dir)
     if secrets_file is not None:
         parsed["secrets_file"] = str(secrets_file)
-    return _validate(parsed, source_path=path, hermes_home=hermes_home)
+    return _validate(parsed, source_path=Path(source_path), hermes_home=hermes_home)
 
 
 def dump_profile(profile: RuntimeProfile) -> str:
@@ -227,7 +249,7 @@ def _validate(config: dict[str, Any], *, source_path: Path, hermes_home: Path | 
         issues.add("GATEWAY_INVALID")
     else:
         host = gateway.get("host")
-        if host != LOOPBACK_HOST:
+        if host not in (LOOPBACK_HOST, ROLE_PROXY_HOST.get(role)):
             issues.add("NON_LOOPBACK_BIND_REFUSED")
             host = ""
         if gateway.get("auth") != "required":
