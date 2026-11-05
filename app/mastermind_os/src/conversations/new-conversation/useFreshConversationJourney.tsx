@@ -204,12 +204,38 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
   }
   latest.current.onBack();
  }
- function start(){const v=current.current;
+ async function start(){
+  const origin=document.activeElement;let v=current.current;
+  if(v.busy||v.discovering)return;
+  // Another owner may have completed its original while this App-lifetime
+  // view stayed mounted. An explicit entry gesture rechecks ONLY local lookup
+  // storage. It never mints a key, reads a source, or submits a command.
+  if(v.other && v.operation?.status!=="unknown"){
+   const c=capture();if(!c)return;
+   const id=++ticket.current;patch({discovering:true,error:null});
+   try{
+    const pointer=await c.binding.store.read(c.owner.principalScope);
+    if(!live(c)||ticket.current!==id)return;
+    const pending=selectionOf(pointer);
+    if(pointer){
+     gestureFocus(".mm-new-conversation-outcome h1",origin);
+     patch({discovering:false,retained:pointer,other:!pending,phase:"outcome",opened:false,
+      ...(pending?{original:pending,lookup:false,data:null,preview:null,operation:null}:{})});
+     return;
+    }
+    const supplied=latest.current.originalLookup;
+    const lookup=!current.current.original&&supplied&&sameConversationOwner(supplied.owner,c.owner)
+     ?validateFreshConversationRequest(supplied.selection,"status"):null;
+    patch({discovering:false,retained:null,other:false,error:null,
+     ...(lookup?{original:{work_ref:lookup.work_ref,operation_key:lookup.operation_key},lookup:true}: {})});
+   }catch{if(live(c)&&ticket.current===id)patch({discovering:false,other:true,error:"unavailable"});return;}
+   v=current.current;
+  }
   // A pending original always wins over a new-entry gesture. Back/reopen
   // never prepares, reserves, submits, or replays that operation.
-  if(v.retained||v.busy||v.other||v.operation?.status==="unknown"||v.lookup&&!canOpen(v.data)){gestureFocus(".mm-new-conversation-outcome h1");patch({phase:"outcome",opened:false});return;}
+  if(v.retained||v.busy||v.other||v.operation?.status==="unknown"||v.lookup&&!canOpen(v.data)){gestureFocus(".mm-new-conversation-outcome h1",origin);patch({phase:"outcome",opened:false});return;}
   const settled=v.operation?.status==="accepted"||v.operation?.status==="refused"||v.lookup&&canOpen(v.data);
-  gestureFocus("select");
+  gestureFocus("select",origin);
   if(settled){
    if(v.operation?.status==="accepted")latest.current.onMessageChange("");
    patch({phase:"draft",preview:null,original:null,data:null,operation:null,lookup:false,opened:false,error:null});

@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 // Source-only integration: actual binding/controller + captured owner responses;
 // the principal/host and atomic store are explicitly inert test seams.
+import {IDBFactory} from "fake-indexeddb";
+import {createIndexedDbPendingPointerStore} from "../../orchestration/indexeddb-pending-pointer-store";
 import {afterEach,expect,it,vi} from "vitest";
-import {cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
+import {act,cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
 import {useFreshConversationJourney,type FreshConversationJourneyProps,type FreshConversationInitialRead} from "./useFreshConversationJourney";
 import {createFreshConversationBinding} from "./fresh-conversation-command-binding";
 import type {OperationPointer,OwnerContext,PendingPointerStore} from "../../orchestration/operation-controller";
@@ -80,4 +82,57 @@ it("supplies one stable actual initial-read witness, never authority, and retire
  await waitFor(()=>expect(issued.at(-1)).not.toBe(first));const second=issued.at(-1)!;
  expect(second.current()).toBe(true);view.unmount();expect(second.current()).toBe(false);
  expect(transport.create).not.toHaveBeenCalled();expect(transport.preview).not.toHaveBeenCalled();
+});
+
+
+it("rediscovers a cleared foreign original on explicit entry using the actual durable store, preserving exact text",async()=>{
+ const {props,transport}=setup();const currentOwner={principalScope:"a".repeat(64),generation:"unit-auth-1"};
+ const store=createIndexedDbPendingPointerStore(new IDBFactory());
+ const foreign:OperationPointer={kind:"launch",operationKey:"mmos-launch-"+"1".repeat(40),targetKey:fixture.request.work_ref};
+ await store.reserve(currentOwner.principalScope,foreign);
+ props.binding=createFreshConversationBinding({owner:()=>currentOwner,canPreviewCreate:()=>true,store,transport});
+ props.draftOwner=currentOwner;props.originalLookup=null;
+ render(<Harness {...props}/>);
+ await screen.findByText("Another request needs its existing status controls before a new conversation can be created.");
+ expect(await store.clearIfEqual(currentOwner.principalScope,foreign)).toBe(true);
+ fireEvent.click(screen.getByRole("button",{name:"Explicit new-entry gesture"}));
+ await waitFor(()=>expect((screen.getByRole("button",{name:"Review conversation"}) as HTMLButtonElement).disabled).toBe(false));
+ expect((screen.getByRole("textbox",{name:"First message"}) as HTMLTextAreaElement).value).toBe(props.message);
+ expect(await store.read(currentOwner.principalScope)).toBeNull();
+ expect(transport.preview).not.toHaveBeenCalled();expect(transport.create).not.toHaveBeenCalled();
+ expect(transport.status).not.toHaveBeenCalled();expect(transport.read).not.toHaveBeenCalled();
+ expect(props.onOriginalKeySelected).not.toHaveBeenCalled();expect(props.onMessageChange).not.toHaveBeenCalled();
+});
+
+it("gives an actual replacement conversation pointer precedence during explicit foreign-state refresh",async()=>{
+ const {props,transport}=setup();const currentOwner={principalScope:"b".repeat(64),generation:"unit-auth-1"};
+ const store=createIndexedDbPendingPointerStore(new IDBFactory());
+ const foreign:OperationPointer={kind:"launch",operationKey:"mmos-launch-"+"2".repeat(40),targetKey:fixture.request.work_ref};
+ const original:OperationPointer={kind:"conversation_create",operationKey:fixture.request.operation_key,targetKey:fixture.request.work_ref};
+ await store.reserve(currentOwner.principalScope,foreign);
+ props.binding=createFreshConversationBinding({owner:()=>currentOwner,canPreviewCreate:()=>true,store,transport});props.draftOwner=currentOwner;props.originalLookup=null;
+ render(<Harness {...props}/>);await screen.findByText("Another request needs its existing status controls before a new conversation can be created.");
+ await store.clearIfEqual(currentOwner.principalScope,foreign);await store.reserve(currentOwner.principalScope,original);
+ fireEvent.click(screen.getByRole("button",{name:"Explicit new-entry gesture"}));
+ await screen.findByText("An original conversation request needs a status check. Don’t create it again.");
+ expect(await store.read(currentOwner.principalScope)).toEqual(original);
+ expect(screen.queryByRole("button",{name:"Review conversation"})).toBeNull();
+ expect(transport.create).not.toHaveBeenCalled();expect(transport.status).not.toHaveBeenCalled();expect(transport.read).not.toHaveBeenCalled();
+});
+
+it("does not apply late explicit rediscovery after the actual Executive owner is withdrawn",async()=>{
+ const {props,transport}=setup();let currentOwner:OwnerContext|null={principalScope:"c".repeat(64),generation:"unit-auth-1"};
+ const durable=createIndexedDbPendingPointerStore(new IDBFactory());const scope=currentOwner.principalScope;
+ const foreign:OperationPointer={kind:"launch",operationKey:"mmos-launch-"+"3".repeat(40),targetKey:fixture.request.work_ref};
+ await durable.reserve(scope,foreign);let reads=0,finish:((pointer:OperationPointer|null)=>void)|undefined;
+ const store:PendingPointerStore={...durable,read:who=>++reads===1?durable.read(who):new Promise(resolve=>{finish=resolve;})};
+ props.binding=createFreshConversationBinding({owner:()=>currentOwner,canPreviewCreate:()=>true,store,transport});props.draftOwner=currentOwner;props.originalLookup=null;
+ const view=render(<Harness {...props}/>);await screen.findByText("Another request needs its existing status controls before a new conversation can be created.");
+ await durable.clearIfEqual(scope,foreign);fireEvent.click(screen.getByRole("button",{name:"Explicit new-entry gesture"}));
+ await waitFor(()=>expect(reads).toBe(2));currentOwner=null;
+ view.rerender(<Harness {...props} binding={null} draftOwner={null} message="" authGeneration={2}/>);
+ await act(async()=>{finish?.(null);});
+ expect((screen.getByRole("button",{name:"Review conversation"}) as HTMLButtonElement).disabled).toBe(true);
+ expect(transport.preview).not.toHaveBeenCalled();expect(transport.create).not.toHaveBeenCalled();expect(transport.status).not.toHaveBeenCalled();expect(transport.read).not.toHaveBeenCalled();
+ expect(props.onOriginalKeySelected).not.toHaveBeenCalled();expect(await durable.read(scope)).toBeNull();
 });
