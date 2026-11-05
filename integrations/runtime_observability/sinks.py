@@ -25,11 +25,14 @@ class SinkFailure:
 
 
 def _failure(sink: object, operation: str, error: Exception) -> SinkFailure:
-    message = sanitize_external_text(
-        error,
-        include_environment=True,
-        limit=160,
-    )
+    try:
+        message = sanitize_external_text(
+            error,
+            include_environment=True,
+            limit=160,
+        )
+    except Exception:
+        message = "diagnostic sink failed"
     return SinkFailure(
         sink_class=type(sink).__name__[:80] or "unknown",
         operation=operation,

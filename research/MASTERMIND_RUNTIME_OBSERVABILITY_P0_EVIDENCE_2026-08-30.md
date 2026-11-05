@@ -221,8 +221,9 @@ or write a production telemetry backend.
 ### Failure isolation
 
 - The producer sets the Unix datagram socket nonblocking before send and performs one send only.
-- Missing, stopped, permission-denied, would-block, partial-send, socket-factory, send, and close
-  failures return `False` and do not retry or persist.
+- Missing, stopped, permission-denied, would-block, partial-send, socket-factory, and send failures
+  return `False` and do not retry or persist. A contained socket-close failure after a successful
+  send preserves `True`; cleanup failure does not relabel the completed send.
 - Ordinary diagnostic exceptions are contained; process-control `BaseException` is not swallowed.
 - `CompositeSink` catches ordinary sink exceptions, including `TimeoutError`, records a bounded
   failure, and continues to later fixed sinks. It does not add threads, retries, or a timeout scheduler.

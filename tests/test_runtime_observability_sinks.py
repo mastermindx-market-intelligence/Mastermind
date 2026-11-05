@@ -168,3 +168,93 @@ def test_composite_sink_preserves_configured_order() -> None:
         "close:first",
         "close:second",
     ]
+
+
+class UnrenderableSinkError(Exception):
+    def __init__(self) -> None:
+        self.render_calls = 0
+
+    def __str__(self) -> str:
+        self.render_calls += 1
+        raise ValueError("sk-ant-abcdefghijklmnopqrstuvwxyz")
+
+
+class UnrenderableSink:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+        self.emit_calls = 0
+        self.close_calls = 0
+
+    def emit(self, event) -> None:
+        self.emit_calls += 1
+        raise self.error
+
+    def close(self) -> None:
+        self.close_calls += 1
+        raise self.error
+
+
+def test_composite_sink_contains_unrenderable_emit_failure() -> None:
+    event = normalized_event()
+    error = UnrenderableSinkError()
+    broken = UnrenderableSink(error)
+    healthy = InMemorySink()
+
+    failures = CompositeSink((broken, healthy)).emit(event)
+
+    assert healthy.events == [event]
+    assert broken.emit_calls == error.render_calls == 1
+    assert len(failures) == 1
+    assert failures[0].sink_class == "UnrenderableSink"
+    assert failures[0].operation == "emit"
+    assert failures[0].message == "diagnostic sink failed"
+
+
+def test_composite_sink_contains_unrenderable_close_failure() -> None:
+    error = UnrenderableSinkError()
+    broken = UnrenderableSink(error)
+    healthy = InMemorySink()
+
+    failures = CompositeSink((broken, healthy)).close()
+
+    assert healthy.closed is True
+    assert broken.close_calls == error.render_calls == 1
+    assert len(failures) == 1
+    assert failures[0].sink_class == "UnrenderableSink"
+    assert failures[0].operation == "close"
+    assert failures[0].message == "diagnostic sink failed"
+
+
+class ProcessControlRenderingError(Exception):
+    def __str__(self) -> str:
+        raise KeyboardInterrupt("process control")
+
+
+def test_composite_sink_preserves_emit_rendering_process_control() -> None:
+    broken = UnrenderableSink(ProcessControlRenderingError())
+    healthy = InMemorySink()
+
+    try:
+        CompositeSink((broken, healthy)).emit(normalized_event())
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise AssertionError("process-control exception was swallowed")
+
+    assert broken.emit_calls == 1
+    assert healthy.events == []
+
+
+def test_composite_sink_preserves_close_rendering_process_control() -> None:
+    broken = UnrenderableSink(ProcessControlRenderingError())
+    healthy = InMemorySink()
+
+    try:
+        CompositeSink((broken, healthy)).close()
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise AssertionError("process-control exception was swallowed")
+
+    assert broken.close_calls == 1
+    assert healthy.closed is False
