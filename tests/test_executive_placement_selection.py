@@ -525,6 +525,7 @@ _ALLOWED_MODULE_IMPORTS: frozenset[tuple[str | None, str]] = frozenset({
     ("typing", "Any"),
     ("control_plane.executive_orchestration_principal", "OrchestrationPrincipalError"),
     ("control_plane.executive_orchestration_principal", "build_placement_snapshot"),
+    ("control_plane.executive_orchestration_principal", "digest"),
     ("control_plane.executive_orchestration_principal", "validate_placement_snapshot"),
     ("control_plane.executive_steward", "CapacityState"),
     ("control_plane.executive_steward", "EffectState"),
