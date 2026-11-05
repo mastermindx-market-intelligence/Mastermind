@@ -53,5 +53,7 @@ export function useConversationListNavigation(scope: ConversationListNavigationS
       projectReturn: workRef, selectedKey, restore: false })),
     backToList: () => update(value => ({ ...value, view: "list", projectReturn: null,
       focusRequest: value.focusRequest + 1, restore: true })),
+    backFromNewConversation: () => update(value => ({ ...value, view: 'list', projectReturn: null,
+      selectedKey: 'new-conversation', focusRequest: value.focusRequest + 1, restore: true })),
   };
 }

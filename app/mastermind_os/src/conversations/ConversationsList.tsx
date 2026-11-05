@@ -6,6 +6,7 @@ import "./conversations-list.css";
 export function ConversationsList(props: ConversationListProps) {
   const live = useRef(props); live.current = props;
   const search = useRef<HTMLInputElement>(null);
+  const newConversation = useRef<HTMLButtonElement>(null);
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const [refused, setRefused] = useState(false);
   const zh = props.locale === "zh-CN", t = (en: string, cn: string) => zh ? cn : en;
@@ -19,7 +20,8 @@ export function ConversationsList(props: ConversationListProps) {
   const shownProjects = props.showAllProjects ? projects : projects.slice(0, 8);
   useEffect(() => {
     if (!props.restoreFocus || props.restoreFocus.request < 1) return;
-    const button = props.restoreFocus.key ? buttons.current.get(props.restoreFocus.key) : undefined;
+    const button = props.restoreFocus.key === 'new-conversation' ? newConversation.current
+      : props.restoreFocus.key ? buttons.current.get(props.restoreFocus.key) : undefined;
     (button?.isConnected ? button : search.current)?.focus();
   }, [props.restoreFocus?.request]);
 
@@ -47,7 +49,7 @@ export function ConversationsList(props: ConversationListProps) {
       <div><h1 id="conversations-list-title">{t("Conversations", "对话")}</h1>
         <p>{props.onNewConversation ? t("Continue a conversation or start a new one.", "继续对话或开始新对话。")
           : t("Continue a conversation or open a project.", "继续对话或打开项目。")}</p></div>
-      {props.onNewConversation ? <button type="button" onClick={() => live.current.onNewConversation?.()}>{t("New conversation", "新建对话")}</button> : null}
+      {props.onNewConversation ? <button type="button" ref={newConversation} onClick={() => live.current.onNewConversation?.()}>{t("New conversation", "新建对话")}</button> : null}
     </header>
     <div className="conversations-list__coverage">
       <p role="note">{t("This list is incomplete. More conversations may be available within a project.", "此列表不完整。项目中可能还有其他对话。")}</p>

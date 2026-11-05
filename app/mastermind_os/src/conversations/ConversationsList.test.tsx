@@ -76,6 +76,15 @@ it("restores explicit Back focus to the real row, falling back to search when it
   view.rerender(<ConversationsList {...p} query="Original topic" restoreFocus={{ key: "project-1", request: 2 }} />);
   expect(document.activeElement).toBe(screen.getByRole("searchbox"));
 });
+it('restores explicit new-entry Back to its real trigger without automatic entry or query loss',()=>{
+  const p={...props(),query:'Original topic',onNewConversation:vi.fn()};
+  const view=render(<ConversationsList {...p}/>);
+  expect(p.onNewConversation).not.toHaveBeenCalled();
+  view.rerender(<ConversationsList {...p} restoreFocus={{key:'new-conversation',request:1}}/>);
+  expect(document.activeElement).toBe(screen.getByRole('button',{name:'New conversation'}));
+  expect(screen.getByRole('searchbox')).toHaveProperty('value','Original topic');
+  expect(p.onNewConversation).not.toHaveBeenCalled();
+});
 it.each(["dark", "light"] as const)("preserves Chinese actions, clock meaning, and partial-source scope in %s", theme => {
   const p = props(); render(<ConversationsList {...p} locale="zh-CN" theme={theme} />);
   expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("对话");
