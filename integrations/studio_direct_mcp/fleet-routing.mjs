@@ -65,8 +65,9 @@ export const STUDIO_SELECT_HOST_TOOL = Object.freeze({
   description:
     'Bind this MCP session once to one operator-configured fleet host before using Desktop Commander tools. ' +
     'The selection is preflighted against the remote Studio tool contract. It does not start work, move an ' +
-    'existing process, retry an effect, or change Fleet/Capacity placement. A session cannot switch hosts after ' +
-    'selection or after a Desktop Commander tool has been dispatched.',
+    'existing process, retry an effect, or change Fleet/Capacity placement. This is NOT required for studio_git_*, ' +
+    'studio_fleet_status or paper_* tools, which have independent owners; a refused host bind affects only routed ' +
+    'Desktop Commander operations. A session cannot switch hosts after selection or after a Desktop Commander tool has been dispatched.',
   inputSchema: {
     type: 'object',
     properties: {
