@@ -82,29 +82,36 @@ COMPONENT_MODES = (LIVE_MODE, OFFLINE_MODE)
 # for this operation, in this order, for the given mode.  The list is inside
 # the plan digest, so the operator's approved effect set is digest-bound.
 #
+# The order below is the order the owner actually dispatches the effects in:
+# both installed plists are retargeted first, the Control configuration is
+# replaced next, the receipt correlations follow, and only then is the
+# Control boundary changed.  The list is a SEQUENCE, not an unordered set:
+# it names the exact order the approved effects happen in.
+#
 # LIVE: the Control service is registered and enabled, so it is booted out
 # once and bootstrapped once.
 #
 # OFFLINE: the Control service is already genuinely absent AND explicitly
-# disabled, so there is NO bootout to dispatch and NO bootout to record: the
-# only launchd effects are one enable and one bootstrap.  The Worker is never
-# started, stopped, enabled or disarmed in either mode.
+# disabled, so there is NO bootout to dispatch and NO bootout to record.  The
+# publications and the receipt correlations are identical, and the enable
+# happens after them, immediately before the single bootstrap.  The Worker is
+# never started, stopped, enabled or disarmed in either mode.
 LIVE_EFFECTS = (
     "bootout system/com.mastermind.executive.control",
-    "replace " + CONTROL_CONFIG_PATH,
     "replace " + CONTROL_PLIST_PATH,
     "replace " + WORKER_PLIST_PATH,
+    "replace " + CONTROL_CONFIG_PATH,
     "correlate " + AUTHORITY_RECEIPT_PATH,
     "bootstrap system/" + CONTROL_PLIST_PATH,
     "publish control observation",
 )
 
 OFFLINE_EFFECTS = (
-    "enable system/com.mastermind.executive.control",
-    "replace " + CONTROL_CONFIG_PATH,
     "replace " + CONTROL_PLIST_PATH,
     "replace " + WORKER_PLIST_PATH,
+    "replace " + CONTROL_CONFIG_PATH,
     "correlate " + AUTHORITY_RECEIPT_PATH,
+    "enable system/com.mastermind.executive.control",
     "bootstrap system/" + CONTROL_PLIST_PATH,
     "publish control observation",
 )

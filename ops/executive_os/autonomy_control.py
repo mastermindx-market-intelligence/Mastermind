@@ -498,6 +498,12 @@ _COMPONENT_PHASES = frozenset(
         "CONTROL_COMPONENT_TARGETS_PROVEN",
         "CONTROL_COMPONENT_RECEIPT_REPLACED",
         "CONTROL_OBSERVATION_PUBLICATION_STARTED",
+        # The phase the component publication path actually records.  It is a
+        # RECOVERABLE phase: an interruption after the observation was
+        # published must be reconciled by an exact-byte readback, never by a
+        # second publication.  It is deliberately NOT a member of
+        # ``_CONTROL_COMPONENT_PUBLICATION_ADMISSIBLE_PHASES``.
+        "CONTROL_COMPONENT_PUBLICATION_STARTED",
     }
 )
 # The fixed receipt of one completed update.  It carries only hashes, source
@@ -7688,6 +7694,51 @@ def _component_refusal(code: str) -> ComponentUpdateRefused:
     return ComponentUpdateRefused(code)
 
 
+def _component_receipt_payload(raw: bytes, *, code: str) -> dict[str, Any]:
+    """One receipt document, parsed strictly from its EXACT raw bytes.
+
+    The incumbent receipt readers reject a duplicate field, so the document
+    derived from one raw snapshot is exactly the document those bytes carry.
+    A malformed, empty or truncated receipt is a REFUSAL, never an absence:
+    the two states lead to different correlations and are never conflated.
+    """
+
+    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in items:
+            if key in value:
+                raise ValueError("duplicate receipt field")
+            value[key] = item
+        return value
+
+    try:
+        document = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise _component_refusal(code) from exc
+    if type(document) is not dict:
+        raise _component_refusal(code)
+    return document
+
+
+def _component_receipt_metadata() -> ReceiptMetadata:
+    """The metadata of receipt bytes the incumbent root reader has proved.
+
+    ``_read_root_file`` proves the regular file, the root owner, the root
+    group, mode 0444, the single link and the absent ACL of every byte it
+    returns, so the metadata of those exact bytes is fixed.
+    """
+
+    return ReceiptMetadata(
+        uid=0,
+        gid=0,
+        mode=0o444,
+        nlink=1,
+        is_regular=True,
+        is_symlink=False,
+        has_acl=False,
+    )
+
+
 def _component_run(
     argv: Sequence[str], *, timeout: float, stdin_bytes: bytes | None = None
 ) -> tuple[int, bytes]:
@@ -7858,6 +7909,11 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         self._component_receipt_preimages_bound: dict[
             str, tuple[bool, str, bytes]
         ] = {}
+        # The EXPLICIT presence of every receipt this operation may replace.
+        # Presence is never inferred from the byte length of an archived
+        # preimage: an empty receipt is present, and only a proven absence
+        # is absent.
+        self._component_prior_receipt_presence: dict[str, bool] = {}
         # The retained interpreter qualification and the ONE budget it was
         # observed under.  The same budget rechecks it before any effect.
         self._component_interpreter_observed: Any = None
@@ -8191,22 +8247,35 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         return head
 
     def _component_autonomy_receipt(
-        self, prior_sha: str, configs: ConfigEvidence
+        self,
+        prior_sha: str,
+        configs: ConfigEvidence,
+        snapshot: tuple[bool, str, bytes],
     ) -> tuple[dict[str, Any], ReceiptMetadata]:
-        """Read and validate the EXISTING disarmed authority receipt.
+        """Validate the EXISTING disarmed authority receipt.
 
         The bounded first path requires existing DISARMED authority: an armed
         receipt cannot survive a source change without an authority migration,
         and this operation never migrates or refreshes authority.
+
+        The validated document is derived from the SAME raw snapshot that is
+        archived and compared against, so the semantic validation, the
+        archived preimage, the presence flag and the correlation all name one
+        set of bytes.  A receipt that moves between the validation and the
+        capture can therefore never become an unjoined archive: the
+        compare-and-swap refuses the moved receipt instead.
         """
 
-        try:
-            payload, metadata = load_receipt_file(AUTONOMY_RECEIPT)
-        except (AutonomyRefusal, OSError, ValueError) as exc:
+        present, _digest, raw = snapshot
+        if not present:
             raise _component_refusal(
                 "control_component_authority_receipt_invalid"
-            ) from exc
-        if type(payload) is not dict or payload.get("state") != "DISARMED":
+            )
+        payload = _component_receipt_payload(
+            raw, code="control_component_authority_receipt_invalid"
+        )
+        metadata = _component_receipt_metadata()
+        if payload.get("state") != "DISARMED":
             raise _component_refusal("control_component_authority_receipt_armed")
         readiness = payload.get("provider_readiness_receipt_sha256")
         if type(readiness) is not str:
@@ -8236,12 +8305,24 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             ) from exc
         return dict(payload), metadata
 
-    def _component_ceo_receipt(self) -> dict[str, Any] | None:
-        """Read the EXISTING disarmed CEO-submit receipt, or None."""
+    def _component_ceo_receipt(
+        self, snapshot: tuple[bool, str, bytes]
+    ) -> dict[str, Any] | None:
+        """The EXACT bytes of the EXISTING disarmed CEO-submit receipt.
 
-        receipt = self.existing_ceo_submit_receipt()
-        if receipt is None:
+        ``None`` means the receipt is proven ABSENT.  A receipt that is
+        present but malformed, empty, unreadable or misqualified is a
+        REFUSAL: it is never silently treated as an absent receipt, because
+        the absent receipt and the unreadable one lead to different
+        correlations.
+        """
+
+        present, _digest, raw = snapshot
+        if not present:
             return None
+        receipt = _component_receipt_payload(
+            raw, code="control_component_receipt_invalid"
+        )
         if receipt.get("state") != "CEO_SUBMIT_DISARMED":
             raise _component_refusal("control_component_authority_receipt_armed")
         if not validate_ceo_submit_receipt_document(receipt, armed=False):
@@ -8253,6 +8334,12 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
     def _component_receipt_bytes(self, path: Path) -> tuple[bool, bytes]:
         """The EXACT prior bytes of one receipt this operation may replace.
 
+        The read is the incumbent's own root-file proof: a regular file,
+        root owned, root grouped, mode 0444, one link, no ACL and no
+        symlink.  Its ABSENCE is proven by an explicit FileNotFoundError and
+        is never inferred from the byte length, so an empty receipt stays
+        present and distinct from a missing one.
+
         The digest is always of the raw bytes that were on disk, never of a
         re-encoded parse of them: a receipt whose serialisation differs from
         the canonical one is still the receipt that is being replaced, and
@@ -8260,31 +8347,18 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         """
 
         try:
-            info = path.lstat()
+            raw, _info = _read_root_file(
+                path, modes=frozenset({0o444}), uid=0, gid=0
+            )
         except FileNotFoundError:
             return False, b""
-        except OSError as exc:
+        except HostControlError as exc:
+            # The incumbent reader reports an absent path through the
+            # FileNotFoundError it raised; anything else is an unreadable or
+            # an unowned receipt, which is a refusal and never an absence.
+            if isinstance(exc.__cause__, FileNotFoundError):
+                return False, b""
             raise _component_refusal("control_component_receipt_invalid") from exc
-        if (
-            stat.S_ISLNK(info.st_mode)
-            or not stat.S_ISREG(info.st_mode)
-            or info.st_uid != 0
-            or info.st_nlink != 1
-        ):
-            raise _component_refusal("control_component_receipt_invalid")
-        descriptor = -1
-        try:
-            descriptor = os.open(
-                path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-            )
-            raw = os.read(descriptor, _MAX_JSON_BYTES + 1)
-            if len(raw) > _MAX_JSON_BYTES or os.read(descriptor, 1):
-                raise _component_refusal("control_component_receipt_invalid")
-        except OSError as exc:
-            raise _component_refusal("control_component_receipt_invalid") from exc
-        finally:
-            if descriptor >= 0:
-                os.close(descriptor)
         return True, raw
 
     def _component_receipt_preimages(self) -> dict[str, tuple[bool, str, bytes]]:
@@ -8377,10 +8451,23 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             or worker.get("operator_harness_armed") is not False
         ):
             raise _component_refusal("control_component_authority_receipt_armed")
+        # Every receipt this operation may replace is bound by ONE raw
+        # snapshot: its presence, its exact bytes, its semantic validation
+        # and the later correlation all name the same bytes.  The snapshot is
+        # taken BEFORE the validation, so a receipt that moves afterwards is
+        # an unbound later receipt that the compare-and-swap refuses; it can
+        # never become an unjoined archive.
+        receipt_preimages = self._component_receipt_preimages()
+        self._component_receipt_preimages_bound = receipt_preimages
+        self._component_prior_receipt_presence = {
+            name: bool(value[0]) for name, value in receipt_preimages.items()
+        }
         autonomy_receipt, autonomy_metadata = self._component_autonomy_receipt(
-            prior_sha, configs
+            prior_sha, configs, receipt_preimages["authority_receipt"]
         )
-        ceo_receipt = self._component_ceo_receipt()
+        ceo_receipt = self._component_ceo_receipt(
+            receipt_preimages["ceo_submit_receipt"]
+        )
 
         # No incumbent global transaction may exist.
         try:
@@ -8405,11 +8492,6 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         # disarmed to fit.  A mixed or mismatched Control boundary matches
         # neither closed mode and refuses here too.
         mode, control_disabled, worker_disabled = self._component_mode()
-
-        # Every receipt this operation may replace is bound by its exact
-        # prior raw bytes and its presence, before any effect.
-        receipt_preimages = self._component_receipt_preimages()
-        self._component_receipt_preimages_bound = receipt_preimages
 
         try:
             candidate = compiler.compile_candidate(
@@ -8529,8 +8611,8 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             component_target_control_plist_sha256=candidate.control_plist_after_sha256,
             component_prior_worker_plist_sha256=candidate.worker_plist_before_sha256,
             component_target_worker_plist_sha256=candidate.worker_plist_after_sha256,
-            component_prior_autonomy_receipt_present=(
-                archives.get("prior-component-autonomy-receipt.json", b"") != b""
+            component_prior_autonomy_receipt_present=bool(
+                self._component_prior_receipt_presence.get("authority_receipt")
             ),
             component_prior_autonomy_receipt_sha256=sha256_bytes(
                 archives.get("prior-component-autonomy-receipt.json", b"")
@@ -8538,8 +8620,8 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             component_target_autonomy_receipt_sha256=sha256_bytes(
                 self._component_target_autonomy_bytes
             ),
-            component_prior_ceo_receipt_present=(
-                archives.get("prior-component-ceo-submit-receipt.json", b"") != b""
+            component_prior_ceo_receipt_present=bool(
+                self._component_prior_receipt_presence.get("ceo_submit_receipt")
             ),
             component_prior_ceo_receipt_sha256=sha256_bytes(
                 archives.get("prior-component-ceo-submit-receipt.json", b"")
@@ -8547,8 +8629,8 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             component_target_ceo_receipt_sha256=sha256_bytes(
                 self._component_target_ceo_bytes
             ),
-            component_prior_component_receipt_present=(
-                archives.get("prior-component-receipt.json", b"") != b""
+            component_prior_component_receipt_present=bool(
+                self._component_prior_receipt_presence.get("component_receipt")
             ),
             component_prior_component_receipt_sha256=sha256_bytes(
                 archives.get("prior-component-receipt.json", b"")
@@ -9079,7 +9161,7 @@ def _component_receipt_document(
 
 def _component_incomplete(
     host: ProductionControlComponentHost,
-    transaction: TransactionContext,
+    transaction_id: str,
     exc: ComponentUpdateRefused,
 ) -> ComponentUpdateRefused:
     """Classify a refusal raised after the original transaction was claimed.
@@ -9097,7 +9179,7 @@ def _component_incomplete(
     return ComponentUpdateRefused(
         exc.code,
         phase=phase,
-        transaction_id=transaction.transaction_id,
+        transaction_id=transaction_id,
     )
 
 
@@ -9281,7 +9363,7 @@ def execute_control_component_update(
         # original transaction and its preimages are retained and the phase
         # that was still incomplete is named, so the caller reports an
         # uncertain original operation instead of a clean one.
-        raise _component_incomplete(host, transaction, exc) from exc
+        raise _component_incomplete(host, transaction.transaction_id, exc) from exc
     except TransactionEffectUnknown:
         raise
     except Exception as exc:
@@ -9304,9 +9386,12 @@ def reconcile_control_component_update(
     bootout or bootstrap and NEVER rolls back.  It recompiles the candidate
     from the ARCHIVED preimages, proves every retained postimage exactly, and
     completes the marker only when all of them hold.
-    """
 
-    from ops.executive_os import control_component_update as compiler
+    Once the transaction owner is claimed, EVERY qualification or read
+    failure is an INCOMPLETE or EFFECT_UNKNOWN outcome.  The original marker
+    and its preimages are retained, and the caller is never told that an
+    already claimed transaction had no effect.
+    """
 
     host.effective_uid()
     if not host._transaction_present():
@@ -9320,6 +9405,36 @@ def reconcile_control_component_update(
         or not _COMPONENT_MANIFEST_FIELDS <= set(manifest)
     ):
         raise TransactionEffectUnknown()
+    try:
+        return _reconcile_control_component_update(
+            host, manifest, target_sha
+        )
+    except ComponentUpdateRefused as exc:
+        # The original transaction was already claimed: this is NOT a
+        # zero-effect refusal.  The marker and its preimages are retained,
+        # the incomplete phase is named, and nothing is replayed or rolled
+        # back.
+        raise _component_incomplete(
+            host, str(manifest["transaction_id"]), exc
+        ) from exc
+    except TransactionEffectUnknown:
+        raise
+    except Exception as exc:
+        # A qualification or a read that fails after the claim leaves the
+        # ORIGINAL transaction uncertain: nothing is replayed, nothing is
+        # rolled back and nothing is reported as a clean refusal.
+        raise TransactionEffectUnknown() from exc
+
+
+def _reconcile_control_component_update(
+    host: ProductionControlComponentHost,
+    manifest: Mapping[str, Any],
+    target_sha: str,
+) -> dict[str, Any]:
+    """The retained-postimage proof of one claimed Control component update."""
+
+    from ops.executive_os import control_component_update as compiler
+
     archives = host._component_archives()
     prior_control_plist = archives["prior-control-plist.plist"]
     prior_worker_plist = archives["prior-worker-plist.plist"]
@@ -9334,6 +9449,29 @@ def reconcile_control_component_update(
     )
     prior_release_root = os.fspath(SYSTEM_ROOT / "releases" / prior_sha)
     target_release_root = os.fspath(SYSTEM_ROOT / "releases" / target_sha)
+    # BOTH actual configurations are re-read through the incumbent qualified
+    # configuration owner.  The retained manifest is never a substitute for
+    # the installed Worker configuration: the Worker must still carry the
+    # exact bytes and the exact digest this operation left untouched, so a
+    # Worker that drifted after the interruption is refused here, before any
+    # publication, lifecycle effect or closeout.
+    try:
+        (
+            _control_document,
+            _worker_document,
+            control_digest,
+            worker_digest,
+            _control_raw,
+            worker_raw,
+        ) = host._configs()
+    except (HostControlError, KeyError, OSError, ValueError) as exc:
+        raise TransactionEffectUnknown() from exc
+    if control_digest != manifest["target_control_sha256"]:
+        raise TransactionEffectUnknown()
+    if worker_digest != manifest["target_worker_sha256"]:
+        raise TransactionEffectUnknown()
+    if worker_raw != prior_worker_config:
+        raise TransactionEffectUnknown()
     try:
         candidate = compiler.compile_candidate(
             prior_control_config,
@@ -9341,7 +9479,7 @@ def reconcile_control_component_update(
             prior_worker_plist,
             target_sha=target_sha,
             prior_sha=prior_sha,
-            worker_config_sha256=str(manifest["target_worker_sha256"]),
+            worker_config_sha256=worker_digest,
             prior_release_root=prior_release_root,
             target_release_root=target_release_root,
         )
@@ -9373,9 +9511,6 @@ def reconcile_control_component_update(
     if admin_checkout_commit != target_sha:
         raise TransactionEffectUnknown()
     # Every retained postimage must hold exactly.
-    control_raw = host._component_control_config_bytes()
-    if sha256_bytes(control_raw) != manifest["target_control_sha256"]:
-        raise TransactionEffectUnknown()
     for path, field in (
         (CONTROL_PLIST, "component_target_control_plist_sha256"),
         (WORKER_PLIST, "component_target_worker_plist_sha256"),
@@ -9446,11 +9581,11 @@ def reconcile_control_component_update(
         ),
         candidates=CandidateConfigs(
             control=json.loads(candidate.control_config_after.decode("utf-8")),
-            worker=json.loads(prior_worker_config.decode("utf-8")),
+            worker=json.loads(worker_raw.decode("utf-8")),
             control_bytes=candidate.control_config_after,
-            worker_bytes=prior_worker_config,
+            worker_bytes=worker_raw,
             control_sha256=candidate.control_config_after_sha256,
-            worker_sha256=str(manifest["target_worker_sha256"]),
+            worker_sha256=worker_digest,
         ),
         admission=None,
     )
@@ -9461,6 +9596,20 @@ def reconcile_control_component_update(
     host._component_target_seal = str(manifest["component_target_release_seal_sha256"])
     host._component_observed_at = str(manifest["component_observed_at"])
     host._component_prior_archives = archives
+    # The EXPLICIT presence of every receipt the original operation bound.
+    # It is read back from the retained manifest, never inferred from the
+    # byte length of an archived preimage.
+    host._component_prior_receipt_presence = {
+        "authority_receipt": bool(
+            manifest["component_prior_autonomy_receipt_present"]
+        ),
+        "ceo_submit_receipt": bool(
+            manifest["component_prior_ceo_receipt_present"]
+        ),
+        "component_receipt": bool(
+            manifest["component_prior_component_receipt_present"]
+        ),
+    }
     host._component_mode_bound = mode
     host._component_control_launchd_disabled = bool(
         manifest["component_prior_control_launchd_disabled"]

@@ -30,6 +30,7 @@ from ops.executive_os import autonomy_control as ac
 from ops.executive_os import control_component_update as ccu
 from ops.executive_os import control_observation
 from ops.executive_os import prepare_control_successor as prepare
+from ops.executive_os.capacity_broker_topology import CONTROL_UID
 
 try:  # the incumbent's real schema fixture is reused, never redefined
     from tests.test_prepare_control_successor import control_input  # noqa: F401
@@ -307,7 +308,6 @@ class FakeHost(ac.ProductionControlComponentHost):
         self.release_seals = {PRIOR_SHA: "1" * 64, TARGET_SHA: "2" * 64}
         self.receipt = _disarmed_receipt(
             _sha(self.control_raw), _sha(self.worker_raw))
-        self.ceo_receipt = None
         self.crash_at: int | None = None
         self.fail_after: set[str] = set()
         self.interpreter_calls: dict = {"verify": [], "recheck": []}
@@ -345,13 +345,26 @@ class FakeHost(ac.ProductionControlComponentHost):
             path, code="control_component_plist_unreadable"))
 
     def _configs(self):
+        """The ACTUAL installed configurations, as the incumbent owner reads them.
+
+        The installed Control configuration is replaced by the operation, so
+        the qualified configuration owner must report what is on disk now and
+        not the state it had before the update.  ``self.control`` and
+        ``self.worker`` keep the PRIOR installed state for the assertions
+        that compare against it.
+        """
+
+        control_raw = self.files.read(CONTROL_CONFIG)
+        worker_raw = self.files.read(WORKER_CONFIG)
+        control = json.loads(control_raw.decode("utf-8"))
+        worker = json.loads(worker_raw.decode("utf-8"))
         return (
-            self.control,
-            self.worker,
-            _sha(self.control_raw),
-            _sha(self.worker_raw),
-            self.control_raw,
-            self.worker_raw,
+            control,
+            worker,
+            _sha(control_raw),
+            _sha(worker_raw),
+            control_raw,
+            worker_raw,
         )
 
     def _component_release_seal(self, sha: str, *, target: bool = False) -> str:
@@ -359,26 +372,6 @@ class FakeHost(ac.ProductionControlComponentHost):
         if value is None:
             raise ac.ComponentUpdateRefused("control_component_release_seal_invalid")
         return value
-
-    def _component_receipt_bytes(self, path):
-        key = os.fspath(path)
-        if key not in self.files.data:
-            return False, b""
-        return True, self.files.data[key]
-
-    def _component_autonomy_receipt(self, prior_sha, configs):
-        if self.receipt is None:
-            raise ac.ComponentUpdateRefused(
-                "control_component_authority_receipt_invalid")
-        if self.receipt.get("state") != "DISARMED":
-            raise ac.ComponentUpdateRefused(
-                "control_component_authority_receipt_armed")
-        return copy.deepcopy(self.receipt), ac.ReceiptMetadata(
-            uid=0, gid=0, mode=0o444, nlink=1, is_regular=True,
-            is_symlink=False, has_acl=False)
-
-    def _component_ceo_receipt(self):
-        return copy.deepcopy(self.ceo_receipt) if self.ceo_receipt else None
 
     def require_transaction_absent(self) -> None:
         if self.transaction_present:
@@ -834,9 +827,10 @@ def test_plan_digest_is_bound_to_the_mode_and_the_launchd_preimages(host):
          "control_component_owner_not_quiescent"),
         (lambda h: h.release_seals.pop(TARGET_SHA),
          "control_component_release_seal_invalid"),
-        (lambda h: setattr(h, "receipt", None),
+        (lambda h: h.files.data.pop(AUTONOMY_RECEIPT),
          "control_component_authority_receipt_invalid"),
-        (lambda h: h.receipt.__setitem__("state", "ARMED"),
+        (lambda h: h.files.write(AUTONOMY_RECEIPT, ac._encoded_json(
+            dict(h.receipt, state="ARMED"))),
          "control_component_authority_receipt_armed"),
         # A Control that is absent but not explicitly disabled matches
         # NEITHER closed mode.
@@ -850,6 +844,9 @@ def test_plan_digest_is_bound_to_the_mode_and_the_launchd_preimages(host):
 )
 def test_every_refusal_is_pre_effect_with_zero_cutover(host, mutate, code):
     mutate(host)
+    # A mutation that installs a fixture state is not an effect of the
+    # operation: only what the operation itself writes is observed.
+    host.files.writes.clear()
     with pytest.raises(ac.ComponentUpdateRefused) as caught:
         _plan(host)
     assert caught.value.code == code
@@ -876,7 +873,10 @@ def test_an_armed_control_flag_is_an_authority_refusal_not_a_transport_one(host)
     # authority: it stays armed and the plan still succeeds.
     assert host.control["ceo_ingress_app_armed"] is True
     assert _plan(host)["ok"] is True
-    host.control["ceo_submit_armed"] = True
+    # The INSTALLED configuration carries the armed flag; the qualified
+    # configuration owner reads it from the installed file.
+    host.files.write(CONTROL_CONFIG, _canonical(
+        dict(host.control, ceo_submit_armed=True)))
     with pytest.raises(ac.ComponentUpdateRefused) as caught:
         _plan(host)
     assert caught.value.code == "control_component_authority_receipt_armed"
@@ -1791,3 +1791,395 @@ def test_the_administrative_checkout_is_read_by_the_control_principal():
     assert "GIT_CONFIG_GLOBAL=/dev/null" in argv
     assert "GIT_CONFIG_NOSYSTEM=1" in argv
     assert "GIT_TERMINAL_PROMPT=0" in argv
+
+
+# ---------------------------------------------------------------------------
+# The final Control component repair.
+#
+#   1. the recovered publication phase is a RECOVERABLE phase, and only the
+#      exact-byte readback may consume the observation that was published;
+#   2. the semantic validation, the archival, the presence and the
+#      correlation are bound to ONE qualified raw snapshot;
+#   3. the reconciliation re-reads the ACTUAL Worker configuration through
+#      the incumbent qualified configuration owner;
+#   4. every post-claim qualification or read failure retains the original
+#      transaction instead of reporting a zero-effect refusal;
+#   5. the digest-bound effect list is the order the effects happen in.
+# ---------------------------------------------------------------------------
+
+
+_OBSERVATION_ANCESTRY = (
+    (
+        "/Library/Application Support/MastermindExecutive/config",
+        (1, 2, 0o40700, 0, 0, 1, 0, 0, 0),
+    ),
+)
+
+
+class _ObservationInfo:
+    """The stat facts the observation publisher's own reader consumes."""
+
+    def __init__(self, size: int):
+        self.st_dev = 1
+        self.st_ino = 1
+        self.st_mode = 0o100440
+        self.st_uid = 0
+        self.st_gid = CONTROL_UID
+        self.st_nlink = 1
+        self.st_size = size
+        self.st_mtime_ns = 0
+        self.st_ctime_ns = 0
+
+
+@pytest.fixture
+def real_publisher(host, tmp_path, monkeypatch):
+    """The REAL control-observation publisher, with only the leaf I/O stood in.
+
+    The installed-source proof is an environment fact a hermetic run cannot
+    have, and the two installed-peer readers are the leaf I/O.  Every
+    publisher decision -- the admission, the phase it records, the exact-byte
+    readback and the write itself -- is the production one.
+    """
+
+    observation_path = tmp_path / "control-observation.json"
+    monkeypatch.setattr(
+        control_observation.contract,
+        "OBSERVATION_PATH",
+        os.fspath(observation_path),
+    )
+    monkeypatch.setattr(control_observation, "_source", lambda expected_sha: None)
+
+    def fake_atomic_file(path, payload, *, mode, uid, gid, replace):
+        host.files.write(path, payload, replace=replace)
+        if os.fspath(path) == os.fspath(observation_path):
+            observation_path.write_bytes(payload)
+            os.chmod(observation_path, 0o444)
+
+    monkeypatch.setattr(ac, "_atomic_file", fake_atomic_file)
+
+    def observe_ancestors(path, budget):
+        return _OBSERVATION_ANCESTRY
+
+    def read_trusted_bytes(
+        path, *, budget, maximum, expected_mode=None, expected_gid=None
+    ):
+        raw = host.files.read(path)
+        return raw, _ObservationInfo(len(raw))
+
+    monkeypatch.setattr(installed, "_observe_ancestors", observe_ancestors)
+    monkeypatch.setattr(installed, "_read_trusted_bytes", read_trusted_bytes)
+    return observation_path
+
+
+def test_the_recovered_publication_phase_is_recoverable_and_never_republished(
+        host, real_publisher):
+    """An interruption AFTER the publication closes by an exact-byte readback."""
+
+    def interrupted(transaction):
+        raise Crash("the closeout never ran")
+
+    # The original operation is interrupted before its closeout: the
+    # publication never happened and the marker is retained at the phase
+    # that was still incomplete.
+    host.complete_transaction = interrupted
+    with pytest.raises(Crash):
+        _apply(host)
+    assert host.manifest["phase"] == "CONTROL_COMPONENT_RECEIPT_REPLACED"
+    assert not real_publisher.exists()
+
+    # The first reconciliation performs the ONE publication the transaction
+    # owes and is interrupted right after the publisher recorded its phase.
+    with pytest.raises(Crash):
+        ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert host.manifest["phase"] == "CONTROL_COMPONENT_PUBLICATION_STARTED"
+    assert real_publisher.exists()
+    published = real_publisher.read_bytes()
+    writes = [w for w in host.files.writes if w == os.fspath(real_publisher)]
+    assert len(writes) == 1
+    commands = [list(command) for command in host.commands]
+
+    # The second reconciliation closes the marker by reading the EXACT
+    # published bytes back: no second observation write, no lifecycle effect.
+    del host.complete_transaction
+    result = ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert result["ok"] is True
+    assert result["outcome"] == "RECONCILED"
+    assert host.closed is True
+    assert real_publisher.read_bytes() == published
+    assert [w for w in host.files.writes if w == os.fspath(real_publisher)] == writes
+    assert [list(command) for command in host.commands] == commands
+
+
+def test_the_publication_phase_itself_is_never_publication_admissible():
+    # The phase the component publication records is RECOVERABLE, and it is
+    # NOT admissible for another publication: an attempted publication is
+    # never repeated.
+    assert "CONTROL_COMPONENT_PUBLICATION_STARTED" in ac._COMPONENT_PHASES
+    assert control_observation.COMPONENT_PUBLICATION_PHASE not in (
+        ac._CONTROL_COMPONENT_PUBLICATION_ADMISSIBLE_PHASES
+    )
+
+
+def test_a_malformed_receipt_is_refused_and_never_read_as_absent(host):
+    # A malformed receipt is NOT an absent receipt: the two states lead to
+    # different correlations, so the operation refuses instead of guessing.
+    host.files.write(CEO_SUBMIT_RECEIPT, b'{"schema_version": ')
+    host.files.writes.clear()
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        _plan(host)
+    assert caught.value.code == "control_component_receipt_invalid"
+    assert host.commands == []
+    assert host.files.writes == []
+    assert host.closed is False
+
+
+def test_an_empty_receipt_is_refused_and_never_read_as_absent(host):
+    host.files.write(CEO_SUBMIT_RECEIPT, b"")
+    host.files.writes.clear()
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        _plan(host)
+    assert caught.value.code == "control_component_receipt_invalid"
+    assert host.commands == []
+    assert host.files.writes == []
+
+
+def test_an_unreadable_receipt_is_refused_and_never_read_as_absent(
+        host, monkeypatch):
+    original = ac._read_root_file
+
+    def unreadable(path, *, modes, uid=0, gid=None):
+        if os.fspath(path) == CEO_SUBMIT_RECEIPT:
+            raise ac.HostControlError("config_identity_unavailable")
+        return original(path, modes=modes, uid=uid, gid=gid)
+
+    monkeypatch.setattr(ac, "_read_root_file", unreadable)
+    host.files.write(CEO_SUBMIT_RECEIPT, b'{"state": "CEO_SUBMIT_DISARMED"}')
+    host.files.writes.clear()
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        _plan(host)
+    assert caught.value.code == "control_component_receipt_invalid"
+    assert host.commands == []
+    assert host.files.writes == []
+
+
+def test_an_absent_receipt_stays_distinct_from_a_malformed_one(host):
+    # The ABSENT CEO-submit receipt is a closed input state, not a failure:
+    # the plan binds it as absent and correlates nothing.
+    document = _plan(host)["plan"]
+    assert document["receipts"]["ceo_submit_receipt"]["present"] is False
+    # The MALFORMED one refuses before any marker or effect.
+    host.files.write(CEO_SUBMIT_RECEIPT, b"{")
+    host.files.writes.clear()
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        _plan(host)
+    assert caught.value.code == "control_component_receipt_invalid"
+
+
+def test_the_receipt_is_read_once_and_the_archive_joins_the_validated_bytes(
+        host, publisher, monkeypatch):
+    reads: list[str] = []
+    original = ac._read_root_file
+
+    def counted(path, *, modes, uid=0, gid=None):
+        reads.append(os.fspath(path))
+        return original(path, modes=modes, uid=uid, gid=gid)
+
+    monkeypatch.setattr(ac, "_read_root_file", counted)
+    # The installed authority receipt is NOT canonically serialised.
+    original_bytes = json.dumps(host.receipt, indent=4).encode("utf-8")
+    host.files.write(AUTONOMY_RECEIPT, original_bytes)
+    document = _plan(host)["plan"]
+    # ONE qualified read: the semantic validation, the archived preimage, the
+    # presence flag and the correlation all name the same bytes.
+    assert reads.count(AUTONOMY_RECEIPT) == 1
+    assert document["receipts"]["authority_receipt"]["before_sha256"] == _sha(
+        original_bytes
+    )
+    _apply(host)
+    archived = host.files.read(
+        os.fspath(ac.AUTONOMY_TRANSACTION / "prior-component-autonomy-receipt.json")
+    )
+    assert archived == original_bytes
+    published = json.loads(host.files.read(AUTONOMY_RECEIPT).decode("utf-8"))
+    # The correlation moved only the four correlation fields of the SAME
+    # document the archived bytes carry.
+    for key, value in host.receipt.items():
+        if key in {"release_sha", "control_config_sha256",
+                   "prior_control_config_sha256", "transaction_id"}:
+            continue
+        assert published[key] == value
+
+
+def test_an_empty_receipt_stays_present_in_the_sealed_marker(host, publisher):
+    # Presence is EXPLICIT: it is never inferred from the byte length of the
+    # archived preimage.  An empty receipt is present.
+    host.files.write(COMPONENT_RECEIPT, b"")
+    _apply(host)
+    assert host.manifest["component_prior_component_receipt_present"] is True
+    assert host.manifest["component_prior_component_receipt_sha256"] == _sha(b"")
+
+
+def test_a_worker_that_drifted_after_the_interruption_is_refused(host, publisher):
+    _apply(host)
+    host.closed = False
+    before = [list(command) for command in host.commands]
+    # The Worker configuration drifted after the interrupted update.  The
+    # reconciliation never took the retained manifest's Worker digest for the
+    # installed one.
+    host.files.write(WORKER_CONFIG, _canonical(
+        dict(host.worker, operator_harness_armed=True)))
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ccu.reconcile(host, target_sha=TARGET_SHA)
+    # The marker is retained and NOTHING is published, dispatched or closed.
+    assert host.closed is False
+    assert [list(command) for command in host.commands] == before
+    assert host.manifest["phase"] == "CONTROL_COMPONENT_RECEIPT_REPLACED"
+
+
+def test_the_reconciliation_reads_both_actual_configurations(host, publisher,
+                                                             monkeypatch):
+    _apply(host)
+    host.closed = False
+    reads: list[str] = []
+    original_read = host.files.read
+
+    def counted(path):
+        reads.append(os.fspath(path))
+        return original_read(path)
+
+    monkeypatch.setattr(host.files, "read", counted)
+    ccu.reconcile(host, target_sha=TARGET_SHA)
+    # BOTH actual configurations are re-read through the incumbent qualified
+    # configuration owner; the retained manifest is never their substitute.
+    assert CONTROL_CONFIG in reads
+    assert WORKER_CONFIG in reads
+
+
+@pytest.mark.parametrize(
+    "failure,expected",
+    [
+        ("control_plist", "control_component_plist_unreadable"),
+        ("lifecycle", "control_component_worker_state_unknown"),
+    ],
+)
+def test_the_cli_reports_a_post_claim_refusal_as_incomplete(
+        host, publisher, capsys, monkeypatch, failure, expected):
+    import argparse
+    from datetime import datetime, timezone
+
+    _apply(host)
+    host.closed = False
+
+    if failure == "control_plist":
+        def unreadable(path, *, code):
+            raise ac.ComponentUpdateRefused(code)
+        monkeypatch.setattr(host, "_component_root_file", unreadable)
+    else:
+        def unknown(label):
+            raise ac.ArmAdmissionError("service_uid_process_unknown")
+        monkeypatch.setattr(host, "_loaded_observe_only", unknown)
+
+    args = argparse.Namespace(
+        command="reconcile-control-component", expected_sha=TARGET_SHA,
+        plan_sha256="0" * 64)
+    code = ac._run_control_component_command(
+        host, args, now=datetime.now(timezone.utc))
+    # The original transaction was already claimed: this is NOT a zero-effect
+    # refusal.
+    assert code == 2
+    document = json.loads(capsys.readouterr().out)
+    assert document["outcome"] == "INCOMPLETE"
+    assert document["code"] == expected
+    assert document["transaction_id"] == host.manifest["transaction_id"]
+    assert document["phase"]
+    assert host.closed is False
+
+
+def test_the_cli_reports_a_post_claim_read_failure_as_effect_unknown(
+        host, publisher, capsys, monkeypatch):
+    import argparse
+    from datetime import datetime, timezone
+
+    _apply(host)
+    host.closed = False
+
+    def unreadable():
+        raise ac.HostControlError("config_identity_unavailable")
+
+    monkeypatch.setattr(host, "_configs", unreadable)
+    args = argparse.Namespace(
+        command="reconcile-control-component", expected_sha=TARGET_SHA,
+        plan_sha256="0" * 64)
+    code = ac._run_control_component_command(
+        host, args, now=datetime.now(timezone.utc))
+    assert code == 2
+    document = json.loads(capsys.readouterr().out)
+    assert document["outcome"] == "EFFECT_UNKNOWN"
+    assert host.closed is False
+
+
+def test_the_effect_list_is_the_order_the_effects_happen_in(host, publisher):
+    live = list(ccu.LIVE_EFFECTS)
+    offline = list(ccu.OFFLINE_EFFECTS)
+    # Both installed plists are retargeted BEFORE the Control configuration
+    # is replaced.
+    assert live.index("replace " + ccu.CONTROL_PLIST_PATH) < live.index(
+        "replace " + ccu.CONTROL_CONFIG_PATH)
+    assert live.index("replace " + ccu.WORKER_PLIST_PATH) < live.index(
+        "replace " + ccu.CONTROL_CONFIG_PATH)
+    # The offline enable happens AFTER the publications, immediately before
+    # the single bootstrap.
+    assert offline.index("enable system/com.mastermind.executive.control") > \
+        offline.index("replace " + ccu.CONTROL_CONFIG_PATH)
+    assert offline.index("enable system/com.mastermind.executive.control") < \
+        offline.index("bootstrap system/" + ccu.CONTROL_PLIST_PATH)
+    assert _plan(host)["plan"]["effects"] == live
+
+    # The owner dispatches them in exactly that order.
+    _apply(host)
+    assert host.phases.index("CONTROL_PLIST_REPLACED") < host.phases.index(
+        "CONTROL_REPLACED")
+    assert host.phases.index("WORKER_PLIST_REPLACED") < host.phases.index(
+        "CONTROL_REPLACED")
+    assert host.phases.index("CONTROL_REPLACED") < host.phases.index(
+        "AUTHORITY_RECEIPT_CORRELATED")
+    assert host.phases.index("AUTHORITY_RECEIPT_CORRELATED") < host.phases.index(
+        "CONTROL_BOOTSTRAP_RECORDED")
+
+
+def test_the_offline_mode_enables_after_the_publications(host, publisher):
+    _offline(host)
+    _apply(host)
+    assert host.phases.index("AUTHORITY_RECEIPT_CORRELATED") < host.phases.index(
+        "CONTROL_ENABLE_RECORDED")
+    assert host.phases.index("CONTROL_ENABLE_RECORDED") < host.phases.index(
+        "CONTROL_BOOTSTRAP_RECORDED")
+
+
+def test_the_cli_reports_a_post_claim_receipt_read_failure_as_effect_unknown(
+        host, publisher, capsys, monkeypatch):
+    import argparse
+    from datetime import datetime, timezone
+
+    _apply(host)
+    host.closed = False
+
+    original = ac._read_root_file
+
+    def unreadable(path, *, modes, uid=0, gid=None):
+        if os.fspath(path) == AUTONOMY_RECEIPT:
+            raise ac.HostControlError("config_identity_unavailable")
+        return original(path, modes=modes, uid=uid, gid=gid)
+
+    monkeypatch.setattr(ac, "_read_root_file", unreadable)
+    args = argparse.Namespace(
+        command="reconcile-control-component", expected_sha=TARGET_SHA,
+        plan_sha256="0" * 64)
+    code = ac._run_control_component_command(
+        host, args, now=datetime.now(timezone.utc))
+    assert code == 2
+    document = json.loads(capsys.readouterr().out)
+    assert document["outcome"] == "EFFECT_UNKNOWN"
+    # The original transaction is retained: nothing is replayed or rolled back.
+    assert host.closed is False
+    assert host.manifest["transaction_id"]

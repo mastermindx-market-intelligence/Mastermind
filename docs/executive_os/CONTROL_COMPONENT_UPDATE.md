@@ -133,13 +133,31 @@ parse of them. Immediately before each replacement the receipt on disk must
 still be exactly the sealed prior bytes; a receipt that moved after the seal is
 an unbound later receipt and is never overwritten.
 
+One receipt is read ONCE. The semantic validation, the archived preimage, the
+presence flag and the correlation all name the SAME qualified raw bytes, so a
+receipt that moves between the validation and the capture can never become an
+unjoined archive: the compare-and-swap refuses the moved receipt instead.
+
+Presence is EXPLICIT. It is proven by an absent file, never inferred from the
+byte length of an archived preimage, so an empty receipt stays present.
+
+A receipt that is present but malformed, empty, unreadable or misqualified is
+REFUSED before any marker or effect. It is never read as an absent receipt:
+the absent receipt and the unreadable one lead to different correlations.
+
 ## Effect order
+
+The plan's `effects` list is a digest-bound SEQUENCE: it names the exact
+order in which the approved effects happen. The two installed plists are
+retargeted first, the Control configuration is replaced next, the receipt
+correlations follow, and only then is the Control boundary changed.
 
 **Live mode:** one Control bootout (a source switch cannot be kickstart-only:
 a kickstart would reuse the already-loaded job definition and keep running the
 prior release), then the absence proof and the stopped-boundary recheck, then
-the bounded target publications and the validated receipt correlations, then
-one Control bootstrap of the verified new plist, then the wrapper-attested
+the bounded target publications — the Control plist, the Worker plist and the
+Control configuration — and the validated receipt correlations, then one
+Control bootstrap of the verified new plist, then the wrapper-attested
 consumed-config proof (`_control_config_probe` /
 `prove_control_admission_bound`: the exact live pid, the boot identity, the
 target release and the exact consumed configuration digest), then the control
@@ -150,7 +168,9 @@ The Control absence is proved by observation and recorded as
 `CONTROL_ABSENT_PROVEN`. The publications, the receipt correlations and the
 target source/PID/boot/consumed-config proof are identical. The Control is
 then enabled exactly once (the incumbent stop left it disabled), the disabled
-override is read back, and the Control is bootstrapped exactly once.
+override is read back, and the Control is bootstrapped exactly once. The
+enable therefore happens AFTER the publications, immediately before the single
+bootstrap.
 
 **The stopped boundary** proves the incumbent Runtime quiescence, the fixed
 service-UID census through the incumbent owner, and the launchd absence and
@@ -191,3 +211,19 @@ the retained component receipt against the byte-identical document the
 original operation owed, and completes the marker only when all of them hold.
 It never republishes a target, never re-dispatches a recorded bootout, enable
 or bootstrap, and never rolls back.
+
+Both ACTUAL configurations are re-read through the incumbent qualified
+configuration owner. The retained manifest is never a substitute for the
+installed Worker configuration: a Worker that drifted after the interruption
+is refused before any publication, lifecycle effect or closeout.
+
+Once the transaction owner is claimed, EVERY qualification or read failure is
+an `INCOMPLETE` or `EFFECT_UNKNOWN` outcome. The original marker and its
+preimages are retained and the phase that was still incomplete is named; a
+claimed transaction is never reported as a zero-effect refusal.
+
+The phase the component publication records, `CONTROL_COMPONENT_PUBLICATION_STARTED`,
+is a RECOVERABLE phase. An interruption AFTER the publication is closed by
+reading the published observation back EXACTLY: the retained phase is not
+admissible for another publication, so the observation is never written twice
+and no lifecycle effect is dispatched.
