@@ -6,6 +6,8 @@ creator or automatic activation is installed here.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import copy
 from dataclasses import dataclass
 import inspect
@@ -76,6 +78,16 @@ class ProjectPlanningSource:
     _events: object
     _publication_guard: object
     _canonical_source_reader: object = None
+    _read_scope: object = None
+
+    @contextmanager
+    def read_scope(self):
+        """Private pure-read bracket; never an authority or effect allowance."""
+        if self._seal is not _SEAL:raise ValueError("project planning source is not host-issued")
+        if self._read_scope is None:
+            yield
+        else:
+            with self._read_scope():yield
 
     def material(self):
         import json
@@ -121,10 +133,10 @@ class ProjectPlanningSource:
             raise ValueError("project planning authority changed during source observation")
 
 
-def _issue_source(*, reader, executive, context, authority_guard, input_owner, events, publication_guard, canonical_source_reader=None):
+def _issue_source(*, reader, executive, context, authority_guard, input_owner, events, publication_guard, canonical_source_reader=None, read_scope=None):
     """Private host join; publication/Workspace grants cannot call this alone."""
     value = ProjectPlanningSource(_SEAL, reader, executive,
-        native.canonical(normalize_context(context)), authority_guard, input_owner,events,publication_guard,canonical_source_reader)
+        native.canonical(normalize_context(context)), authority_guard, input_owner,events,publication_guard,canonical_source_reader,read_scope)
     value.check()
     return value
 
