@@ -18,9 +18,11 @@ from tests.test_workbench_browser_tunnel import _call, _error_code, _tools
 def test_snapshot_only_private_channel_stays_dormant_until_exact_receipt(tmp_path, monkeypatch):
     """A fixture-bound channel refuses before receipt, admits, then revokes.
 
-    This test does not invoke the real broker's resource factory, provider
-    start or receipt writer. It verifies the existing admission predicate
-    against a synthetic Runtime/receipt fixture without granting Browser use.
+    This does not invoke the real broker resource factory or provider start.
+    The fixture uses a real SQLite Runtime and the production receipt writer
+    and reader with synthetic process identities. After persistence the
+    admitted call reaches the Browser port; its unsigned BrowserRef is refused.
+    No real Browser resource is started or granted by this test.
     """
     original_grant = owner_fixture._grant
     monkeypatch.setattr(
