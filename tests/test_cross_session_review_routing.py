@@ -178,6 +178,25 @@ def test_project_installed_fence_separates_native_review_from_formal_approval():
     assert len(block.encode("utf-8")) <= 8000
 
 
+def test_project_kernel_explicit_all_tier_web_waiver_and_handoff_exemption():
+    block = _project_instructions(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md"))
+    assert "5A. CHATGPT WEB REVIEW WAIVER (FAST/STANDARD/CRITICAL)" in block
+    for guard in (
+        "No blanket independent technical/source review for code, tests, docs, PRs or delivery",
+        "Self-check exact diff, focused tests, required CI and real-path proof",
+        "GitHub/CODEOWNERS, security/release holds bind",
+        "never self-approve/merge, bypass, falsify or duplicate active/uncertain review",
+        "No independent review solely for handoff",
+        "HANDOFF_SOURCE_LINK_V1",
+        "9A. Macro",
+    ):
+        assert guard in block, f"required actual Project-fence clause missing: {guard}"
+    numbered = [line.split(".", 1)[0] for line in block.splitlines() if line[:1].isdigit()]
+    assert set(map(str, range(1, 41))).issubset(numbered)
+    assert {"5A", "6A", "9A"}.issubset(numbered)
+    assert len(block.encode("utf-8")) <= 8000
+
+
 def test_session_finishes_original_pr_not_draft_or_ci_handoff():
     policy = _read("docs/SESSION_LOCAL_REVIEW_POLICY.md")
     agents = _read("AGENTS.md")
