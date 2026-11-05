@@ -107,7 +107,7 @@ _DATE = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})")
 _MEMBER = r"100644 blob [0-9a-f]{40}\t"
 # Permitted controls are exactly LF, CR and TAB; every other C0, the C1
 # range and DEL are refused anywhere a captured or emitted body echoes them.
-_CONTROL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x80-\x9f]")
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x80-\x9f]")
 _IRREGULAR = object()
 
 _PARSE_FAULTS = (

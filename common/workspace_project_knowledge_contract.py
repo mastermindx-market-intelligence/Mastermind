@@ -122,7 +122,7 @@ _STAMP = re.compile(
 # Permitted controls are exactly LF, CR and TAB.  Every other C0, the whole
 # C1 range (U+0080..U+009F, reachable from valid UTF-8 such as b"\xc2\x80")
 # and DEL are refused.
-_CONTROL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x80-\x9f]")
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x80-\x9f]")
 
 
 class ContractInvalid(ValueError):
