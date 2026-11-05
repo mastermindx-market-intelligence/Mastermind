@@ -55,6 +55,10 @@ import { createAwaitingAnswerPort } from "./conversations/awaiting-answer-port";
 import { useQualifiedOriginalAnswer } from "./conversations/useQualifiedOriginalAnswer";
 import type { QualifiedSessionAnswer } from "./orchestration/executive-session-command-port";
 import { useObservedConversation } from "./conversations/useObservedConversation";
+import { ConversationsList } from "./conversations/ConversationsList";
+import { composeConversationsList, isListedCurrentConversation, isListedConversationProject } from "./conversations/conversation-list-source";
+import { captureConversationListOwner, conversationListOwnerCurrent, type ConversationListOwnerCapture } from "./conversations/conversation-list-owner";
+import { useConversationListNavigation } from "./conversations/useConversationListNavigation";
 import {
   OperationController,
   type OperationKind,
@@ -1604,6 +1608,21 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     authState?.content,
   );
   authRevisionRef.current = authRevision;
+  const catalogueListOwner = useRef<ConversationListOwnerCapture | null>(null);
+  const windowListOwner = useRef<ConversationListOwnerCapture | null>(null);
+  const captureListReadOwner = (host: MissionHost | undefined) => captureConversationListOwner({
+    host, authGeneration: authRevision, selectionSequence: selectionSeq.current,
+    currentHost: () => window.MastermindMissionHost,
+    currentAuthGeneration: () => authRevisionRef.current,
+    currentSelectionSequence: () => selectionSeq.current,
+  });
+  const conversationNavigation = useConversationListNavigation({host: window.MastermindMissionHost,
+    authGeneration: authRevision,
+    hostGeneration: (() => { try { return window.MastermindMissionHost?.invalidationGeneration?.() ?? null; } catch { return null; } })()});
+  const showCurrentConversation = () => {
+    conversationNavigation.showCurrentDetail();
+    setActive("Conversations");
+  };
   retainedComposerRef.current = retainedComposerDrafts;
   // The currently authenticated command scope is checked below, after the
   // qualified host identity has been read. Off-view Office text is inspected
@@ -2193,6 +2212,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     setAssociation(null);
     setWindowPending(false);
     const host = window.MastermindMissionHost;
+    const listReadOwner = captureListReadOwner(host);
+    windowListOwner.current = null;
     const readWindow = host?.readCurrentWindow;
     const readV3 = host?.readMissionV3;
     const stillCurrent = () =>
@@ -2235,6 +2256,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         setAssociation(
           observedMissionAssociation(value, pairMission, selection),
         );
+        windowListOwner.current = conversationListOwnerCurrent(listReadOwner, true) ? listReadOwner : null;
         observedConversation.accept(conversationRead, pairMission, value);
       } catch {
         if (!stillCurrent()) return;
@@ -2302,6 +2324,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     // Mission effect can use the preceding selection's AVAILABLE index.
     programSelection.current = selection;
     const officeRead = office.beginPrograms();
+    const listReadOwner = captureListReadOwner(window.MastermindMissionHost);
+    catalogueListOwner.current = null;
     if (
       native &&
       !window.MastermindMissionHost?.readPrograms &&
@@ -2380,6 +2404,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           setProgramIndexEpoch(current);
           setProgramsReadPhase("ready");
           setProgramsReadReason("NONE");
+          catalogueListOwner.current = observation && conversationListOwnerCurrent(listReadOwner, false) ? listReadOwner : null;
           office.acceptPrograms(officeRead, observation);
         }
       })
@@ -4034,7 +4059,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const genuineProjectDraft: KnowledgeDraftPort = {projection: observedConversation.projection,
     text: observedConversation.draft, revision: observedConversation.draftRevision,
     insertion: observedConversation.draftInsertion, append: observedConversation.appendSource,
-    undo: observedConversation.undoSource, edit: () => setActive("Conversations")};
+    undo: observedConversation.undoSource, edit: () => showCurrentConversation()};
   const projectDraftOwner = useRef({host: retainedResultHost, generation: archiveHostGeneration,
     context: observedConversation.projection.context, port: genuineProjectDraft});
   projectDraftOwner.current = {host: retainedResultHost, generation: archiveHostGeneration,
@@ -4226,14 +4251,14 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           current.workRef === projectWorkRef && current.workRef === instructionDraftWitness.workRef &&
           current.binding === instructionDraftWitness.binding && current.revision === instructionDraftWitness.revision &&
           projectDraftMethods.append(source, instructionDraftWitness.revision)) {
-        setActive("Conversations");
+        showCurrentConversation();
       }
     } : undefined,
   });
   const recordedDirection = <AcceptedDirectionPanel selection={projectWorkRef ? {work_ref:projectWorkRef} : null}
     read={projectReaders.direction} sourceGeneration={projectReaders.generation} canRead={projectReaders.canRead} locale={locale}
     onChangeDirection={directionConversation ? workRef => {
-      if (workRef === projectWorkRef && projectReaders.canRead()) setActive("Conversations");
+      if (workRef === projectWorkRef && projectReaders.canRead()) showCurrentConversation();
     } : undefined}/>;
   const projectSessionEvidence = <ProjectConversationAssociation selection={projectAssociationSelection}
     authGeneration={authRevision} hostGeneration={retainedResultHost?.invalidationGeneration?.() ?? null}
@@ -4311,7 +4336,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         )}
       />
     ) : null;
-  const quietHeader = active === "Inbox" || active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
+  const quietHeader = (active === "Conversations" && conversationNavigation.view === "list") || active === "Inbox" || active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
     active === "Projects" && !directRoute && (!projectTab ||
       Boolean(projectWorkRef && (projectTab === "Conversation" || catalogueWorkRef)));
   const independentProjectRead =
@@ -4324,6 +4349,45 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const discoveryView = projectDiscovery({projection: office.projection,
     conversation: observedConversation.projection, controlRoom: currentControlRoom});
 
+  const conversationListModel = composeConversationsList({authGeneration: authRevision,
+    catalogue: office.projection, conversation: observedConversation.projection,
+    acquisitionAllowed: authState?.acquisition === true, contentAllowed: authState?.content === true,
+    catalogueReadCurrent: conversationListOwnerCurrent(catalogueListOwner.current, false),
+    conversationReadCurrent: conversationListOwnerCurrent(windowListOwner.current, true),
+    programsPending: programsReadPhase === "pending", windowPending,
+    hasUnsentDraft: !!observedConversation.draft.trim()});
+  const conversationListSnapshot = useRef({model: conversationListModel,
+    catalogueOwner: catalogueListOwner.current, windowOwner: windowListOwner.current,
+    index, epoch: programIndexEpoch});
+  conversationListSnapshot.current = {model: conversationListModel,
+    catalogueOwner: catalogueListOwner.current, windowOwner: windowListOwner.current,
+    index, epoch: programIndexEpoch};
+  const conversationListPanel = <ConversationsList model={conversationListModel} locale={locale} theme={theme}
+    query={conversationNavigation.query} onQueryChange={conversationNavigation.changeQuery}
+    showAllProjects={conversationNavigation.showAllProjects} onShowAllProjects={conversationNavigation.showAll}
+    restoreFocus={conversationNavigation.restoreFocus}
+    onOpenCurrent={locator => {
+      const latest = conversationListSnapshot.current;
+      if (latest.windowOwner !== windowListOwner.current || !conversationListOwnerCurrent(latest.windowOwner, true) ||
+          !isListedCurrentConversation(latest.model, locator)) return false;
+      const row = latest.model.recent.find(item => item.locator === locator ||
+        JSON.stringify(item.locator) === JSON.stringify(locator));
+      if (!row) return false;
+      conversationNavigation.showCurrentDetail(row.key); return true;
+    }}
+    onOpenProject={locator => {
+      const latest = conversationListSnapshot.current;
+      if (latest.catalogueOwner !== catalogueListOwner.current || !conversationListOwnerCurrent(latest.catalogueOwner, false) ||
+          !isListedConversationProject(latest.model, locator) || latest.index.state !== "AVAILABLE" ||
+          latest.index.programs.filter(card => card.workRef === locator.workRef).length !== 1) return false;
+      const row = latest.model.projects.find(item => item.locator.workRef === locator.workRef);
+      if (!row) return false;
+      conversationNavigation.rememberProject(locator.workRef, row.key);
+      setCatalogueProject({workRef: locator.workRef, authRevision, epoch: latest.epoch});
+      setProjectTab("More"); setActive("Projects"); return true;
+    }}
+    onOpenMetaCeo={() => setActive("Meta-CEO")} onSourcesAndAccess={() => setActive("Sources")}
+    onRefresh={() => {setProgramRevision(n => n + 1);setWindowRevision(n => n + 1);}} />;
   const currentConversationPanel = (
       <>
         <ConversationWindow
@@ -4423,7 +4487,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       />
     );
   else if (active === "Conversations")
-    content = currentConversationPanel;
+    content = conversationNavigation.view === "list" ? conversationListPanel : <>
+      <button type="button" onClick={conversationNavigation.backToList}>{locale === "zh-CN" ? "返回对话" : "Back to conversations"}</button>
+      {currentConversationPanel}</>;
   else if ((active === "Search" && (!hasProjectSearch || !projectSearchSelected)) || active === "Sources" || active === "Tools")
     content = <DiscoveryWorkspace view={discoveryView} projection={office.projection}
       mode={active} locale={locale} theme={theme}
@@ -4433,7 +4499,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         draftPort: {projection: observedConversation.projection, text: observedConversation.draft,
           revision: observedConversation.draftRevision, insertion: observedConversation.draftInsertion,
           append: observedConversation.appendSource, undo: observedConversation.undoSource,
-          edit: () => setActive("Conversations")}}}
+          edit: () => showCurrentConversation()}}}
       onModeChange={setActive}
       onOpenProject={office.projection.programs.source.state === "CURRENT" && index.state === "AVAILABLE"
         ? (target, mode) => {
@@ -4444,7 +4510,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                 cards[0].rootCandidates[0] !== target.rootJobId) return;
             open(target.workRef, target.rootJobId);
           } : undefined}
-      onOpenConversation={() => setActive("Conversations")}
+      onOpenConversation={() => showCurrentConversation()}
       onOpenMetaCeo={() => setActive("Meta-CEO")}
       onOpenKnowledge={() => setActive("Knowledge")}
       onOpenPreferences={hasPreferencesNavigation ? openDisplayPreferences : undefined}
@@ -4472,7 +4538,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       draftPort={{ projection: observedConversation.projection, text: observedConversation.draft,
         revision: observedConversation.draftRevision, insertion: observedConversation.draftInsertion,
         append: observedConversation.appendSource, undo: observedConversation.undoSource,
-        edit: () => setActive("Conversations") }} />;
+        edit: () => showCurrentConversation() }} />;
   else if (directRoute)
     content = <>
       {directResultPanel}
@@ -4840,6 +4906,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   else if (active === "Connections") content = <Connections d={d} />;
   else if (active === "Evidence") content = <><Evidence d={d} />{productAcceptancePanel}</>;
   else content = <Conversation locale={locale} />;
+  if (active === "Projects" && conversationNavigation.projectReturn === projectWorkRef)
+    content = <><button type="button" onClick={() => {conversationNavigation.backToList();setActive("Conversations");}}>{locale === "zh-CN" ? "返回对话" : "Back to conversations"}</button>{content}</>;
   const privateEntryState = authState && !authState.acquisition && !authState.content &&
     (authState.status === "signed_out" || authState.status === "signing_in" ||
       authState.status === "error" || authState.status === "unconfigured") ? authState.status : null;
@@ -4913,6 +4981,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                   aria-current={active === x ? "page" : undefined}
                   onClick={() => {
                     setProjectTab(null);
+                    if (x === "Conversations") conversationNavigation.showList();
                     setActive(x);
                     if (navigationOpen) closeNavigation();
                   }}
@@ -4947,6 +5016,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                     aria-current={active === x ? "page" : undefined}
                     onClick={() => {
                       setProjectTab(null);
+                      if (x === "Conversations") conversationNavigation.showList();
                       setActive(x);
                       if (navigationOpen) closeNavigation();
                     }}
