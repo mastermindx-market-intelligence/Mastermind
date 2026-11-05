@@ -15,6 +15,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from integrations.notion_knowledge_surface.bootstrap import (  # noqa: E402
     BootstrapError,
     NotionClient,
+    NotionEffectUnknown,
     _prove_parent,
     apply_workspace,
     build_plan,
@@ -77,8 +78,29 @@ def main(argv: list[str] | None = None) -> int:
             }
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
+    except NotionEffectUnknown as exc:
+        print(
+            json.dumps(
+                {
+                    "schema": "mastermind.notion_bootstrap_receipt.v1",
+                    "status": "EFFECT_UNKNOWN",
+                    "error": str(exc),
+                    "effect": exc.evidence.to_dict() if exc.evidence else None,
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return 2
     except BootstrapError as exc:
-        print(json.dumps({"schema": "mastermind.notion_bootstrap_receipt.v1", "status": "REFUSED", "error": str(exc)}), file=sys.stderr)
+        receipt = {
+            "schema": "mastermind.notion_bootstrap_receipt.v1",
+            "status": "REFUSED",
+            "error": str(exc),
+        }
+        if exc.evidence is not None:
+            receipt["effect"] = exc.evidence.to_dict()
+        print(json.dumps(receipt, sort_keys=True), file=sys.stderr)
         return 2
 
 

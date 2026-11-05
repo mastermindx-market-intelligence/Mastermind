@@ -28,8 +28,49 @@ DEFAULT_MIN_REQUEST_INTERVAL = 0.35
 DEFINITIVE_MUTATION_HTTP_ERRORS = {400, 401, 403, 404, 406}
 
 
+@dataclass(frozen=True)
+class EffectEvidence:
+    """Bounded identity of one intended N0 object and its outstanding write effect.
+
+    The record binds uncertainty to the existing intended-object identity only. It is
+    not an operation registry, persistence layer, retry plane or identity store.
+    """
+
+    parent_page_id: str
+    child_key: str
+    kind: str
+    title: str
+    object_id: str | None = None
+    state: str = "POSSIBLE"
+    cause: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "parent_page_id": self.parent_page_id,
+            "child_key": self.child_key,
+            "kind": self.kind,
+            "title": self.title,
+            "object_id": self.object_id,
+            "state": self.state,
+            "cause": self.cause,
+        }
+
+
 class BootstrapError(RuntimeError):
     """Base fail-closed bootstrap error."""
+
+    def __init__(self, message: str, *, evidence: EffectEvidence | None = None):
+        super().__init__(message)
+        self.evidence = evidence
+
+    def bind_effect(
+        self, *, evidence: EffectEvidence, cause: str = ""
+    ) -> "BootstrapError":
+        """Attach bounded write-effect evidence and a bounded cause to this error."""
+        if cause:
+            self.args = (f"{self.args[0]} ({cause})",)
+        self.evidence = evidence
+        return self
 
 
 class ManifestError(BootstrapError):
@@ -413,6 +454,114 @@ def _prove_reused_database_schemas(
         _prove_database_schema(client, item.object_id, child["properties"])
 
 
+def _effect_evidence(
+    parent_page_id: str,
+    item: PlanItem,
+    *,
+    object_id: str | None = None,
+    state: str = "POSSIBLE",
+    cause: str = "",
+) -> EffectEvidence:
+    return EffectEvidence(
+        parent_page_id=parent_page_id,
+        child_key=item.key,
+        kind=item.kind,
+        title=item.title,
+        object_id=object_id,
+        state=state,
+        cause=cause,
+    )
+
+
+def _prove_created_database_schema(
+    client: NotionClient,
+    parent_page_id: str,
+    item: PlanItem,
+    object_id: str,
+    properties: Mapping[str, Any],
+    *,
+    state: str,
+    original: NotionEffectUnknown | None = None,
+) -> None:
+    """Prove a created database's schema while keeping the observed write evidence."""
+    try:
+        _prove_database_schema(client, object_id, properties)
+    except (SchemaMismatchError, NotionAPIError) as exc:
+        failure = type(exc)(
+            f"N0 database {item.key!r} schema proof failed after a write: {exc}",
+            evidence=_effect_evidence(
+                parent_page_id,
+                item,
+                object_id=object_id,
+                state=state,
+                cause=str(exc),
+            ),
+        )
+        if original is not None:
+            raise failure from original
+        raise failure from exc
+
+
+def _reconcile_unknown_create(
+    client: NotionClient,
+    parent_page_id: str,
+    manifest: Mapping[str, Any],
+    item: PlanItem,
+    child: Mapping[str, Any],
+    original: NotionEffectUnknown,
+) -> PlanItem:
+    """Reconcile one outstanding create effect without replacing it with a refusal.
+
+    A failed reconciliation read, a failed validation, a completed scan without the
+    intended child, and an apparent match without a usable object id all leave the
+    original possible-create effect outstanding and unresolved.
+    """
+    try:
+        reconciled = build_plan(manifest, client.list_children(parent_page_id))
+    except BootstrapError as exc:
+        raise original.bind_effect(
+            evidence=_effect_evidence(
+                parent_page_id,
+                item,
+                state="POSSIBLE",
+                cause=f"reconciliation read failed: {exc}",
+            )
+        ) from exc
+
+    exact = next(
+        (candidate for candidate in reconciled if candidate.key == item.key), None
+    )
+    if exact is None or exact.action != "reuse":
+        raise original.bind_effect(
+            evidence=_effect_evidence(
+                parent_page_id,
+                item,
+                state="POSSIBLE",
+                cause="reconciliation did not observe the intended child",
+            )
+        )
+    if not exact.object_id:
+        raise original.bind_effect(
+            evidence=_effect_evidence(
+                parent_page_id,
+                item,
+                state="POSSIBLE",
+                cause="reconciled child matched without a usable object id",
+            )
+        )
+    if item.kind == "database":
+        _prove_created_database_schema(
+            client,
+            parent_page_id,
+            item,
+            exact.object_id,
+            child["properties"],
+            state="OBSERVED",
+            original=original,
+        )
+    return PlanItem(item.key, item.kind, item.title, "reconciled", exact.object_id)
+
+
 def apply_workspace(
     client: NotionClient,
     parent_page_id: str,
@@ -439,34 +588,33 @@ def apply_workspace(
                 created = client.create_database(
                     parent_page_id, item.title, child["properties"]
                 )
-        except NotionEffectUnknown:
-            reconciled = build_plan(manifest, client.list_children(parent_page_id))
-            exact = next(candidate for candidate in reconciled if candidate.key == item.key)
-            if exact.action == "reuse":
-                if not exact.object_id:
-                    raise BootstrapError(
-                        f"reconciled Notion child {item.key!r} has no object id"
-                    )
-                if item.kind == "database":
-                    _prove_database_schema(
-                        client, exact.object_id, child["properties"]
-                    )
-                results.append(
-                    PlanItem(
-                        item.key,
-                        item.kind,
-                        item.title,
-                        "reconciled",
-                        exact.object_id,
-                    )
+        except NotionEffectUnknown as exc:
+            results.append(
+                _reconcile_unknown_create(
+                    client, parent_page_id, manifest, item, child, exc
                 )
-                continue
-            raise
+            )
+            continue
         object_id = created.get("id")
         if not isinstance(object_id, str) or not object_id:
-            raise NotionEffectUnknown(f"create for {item.key!r} returned no object id")
+            raise NotionEffectUnknown(
+                f"create for {item.key!r} returned no object id",
+                evidence=_effect_evidence(
+                    parent_page_id,
+                    item,
+                    state="POSSIBLE",
+                    cause="create response contained no usable object id",
+                ),
+            )
         if item.kind == "database":
-            _prove_database_schema(client, object_id, child["properties"])
+            _prove_created_database_schema(
+                client,
+                parent_page_id,
+                item,
+                object_id,
+                child["properties"],
+                state="OBSERVED",
+            )
         results.append(PlanItem(item.key, item.kind, item.title, "created", object_id))
 
     final_plan = build_plan(manifest, client.list_children(parent_page_id))

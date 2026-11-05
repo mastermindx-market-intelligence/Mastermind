@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import socket
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -10,6 +12,7 @@ from scripts.notion_knowledge_surface import main as notion_cli_main
 from integrations.notion_knowledge_surface.bootstrap import (
     AmbiguousChildError,
     ManifestError,
+    NotionAPIError,
     NotionClient,
     NotionEffectUnknown,
     SchemaMismatchError,
@@ -21,6 +24,17 @@ from integrations.notion_knowledge_surface.bootstrap import (
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "config" / "notion_knowledge_surface_n0.json"
 PARENT = "11111111-1111-4111-8111-111111111111"
+
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch) -> None:
+    """Make any accidental network access fail; this suite is offline only."""
+
+    def _blocked(*args, **kwargs):
+        raise AssertionError("network access is not permitted in the N0 focused suite")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _blocked)
+    monkeypatch.setattr(socket, "create_connection", _blocked)
 
 
 def _block(kind: str, title: str, object_id: str) -> dict:
@@ -188,6 +202,214 @@ def test_effect_unknown_reconciles_without_blind_retry() -> None:
     assert client.created.count(target_title) == 1
 
 
+def test_uncertain_create_with_failed_reconciliation_read_stays_unknown() -> None:
+    manifest = load_manifest(MANIFEST)
+    target = manifest["children"][0]
+
+    class ReconcileReadFailsClient(FakeClient):
+        def __init__(self) -> None:
+            super().__init__(effect_unknown_key=target["title"])
+            self.reads = 0
+
+        def list_children(self, parent_page_id: str) -> list[dict]:
+            self.reads += 1
+            if self.reads > 1:
+                raise NotionAPIError("simulated reconciliation read failure")
+            return super().list_children(parent_page_id)
+
+    client = ReconcileReadFailsClient()
+
+    with pytest.raises(NotionEffectUnknown) as excinfo:
+        apply_workspace(client, PARENT, manifest)
+
+    evidence = excinfo.value.evidence
+    assert evidence is not None
+    assert evidence.parent_page_id == PARENT
+    assert evidence.child_key == target["key"]
+    assert evidence.kind == target["kind"]
+    assert evidence.title == target["title"]
+    assert evidence.object_id is None
+    assert evidence.state == "POSSIBLE"
+    assert "reconciliation read failed" in evidence.cause
+    assert client.created == [target["title"]]
+
+
+def test_uncertain_create_without_observed_child_stays_unknown() -> None:
+    manifest = load_manifest(MANIFEST)
+    target = manifest["children"][0]
+
+    class MissingChildClient(FakeClient):
+        def create_page(self, parent_page_id: str, title: str) -> dict:
+            self.created.append(title)
+            raise NotionEffectUnknown(
+                "simulated lost response without an observable effect"
+            )
+
+    client = MissingChildClient()
+
+    with pytest.raises(NotionEffectUnknown) as excinfo:
+        apply_workspace(client, PARENT, manifest)
+
+    evidence = excinfo.value.evidence
+    assert evidence is not None
+    assert evidence.child_key == target["key"]
+    assert evidence.title == target["title"]
+    assert evidence.object_id is None
+    assert evidence.state == "POSSIBLE"
+    assert "did not observe the intended child" in evidence.cause
+    assert client.created == [target["title"]]
+
+
+def test_uncertain_create_with_unusable_matched_id_stays_unknown() -> None:
+    manifest = load_manifest(MANIFEST)
+    target = manifest["children"][0]
+
+    class UnusableIdClient(FakeClient):
+        def create_page(self, parent_page_id: str, title: str) -> dict:
+            self.blocks.append(_block("page", title, ""))
+            self.created.append(title)
+            raise NotionEffectUnknown("simulated lost response with an unusable id")
+
+    client = UnusableIdClient()
+
+    with pytest.raises(NotionEffectUnknown) as excinfo:
+        apply_workspace(client, PARENT, manifest)
+
+    evidence = excinfo.value.evidence
+    assert evidence is not None
+    assert evidence.child_key == target["key"]
+    assert evidence.object_id is None
+    assert evidence.state == "POSSIBLE"
+    assert "without a usable object id" in evidence.cause
+    assert client.created == [target["title"]]
+
+
+def test_create_without_usable_object_id_is_effect_unknown() -> None:
+    manifest = load_manifest(MANIFEST)
+    target = manifest["children"][0]
+
+    class NoObjectIdClient(FakeClient):
+        def create_page(self, parent_page_id: str, title: str) -> dict:
+            self.created.append(title)
+            return {}
+
+    client = NoObjectIdClient()
+
+    with pytest.raises(NotionEffectUnknown) as excinfo:
+        apply_workspace(client, PARENT, manifest)
+
+    evidence = excinfo.value.evidence
+    assert evidence is not None
+    assert evidence.parent_page_id == PARENT
+    assert evidence.child_key == target["key"]
+    assert evidence.kind == target["kind"]
+    assert evidence.title == target["title"]
+    assert evidence.object_id is None
+    assert evidence.state == "POSSIBLE"
+    assert "no usable object id" in evidence.cause
+    assert client.created == [target["title"]]
+
+
+def test_uncertain_database_create_with_failed_schema_fetch_keeps_effect() -> None:
+    manifest = load_manifest(MANIFEST)
+    programs = next(child for child in manifest["children"] if child["key"] == "programs")
+    board_book = next(child for child in manifest["children"] if child["key"] == "chairman_board_book")
+
+    class SchemaFetchFailsClient(FakeClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self._schema_unknown_fired = False
+
+        def create_database(self, parent_page_id: str, title: str, properties: dict) -> dict:
+            if not self._schema_unknown_fired and title == programs["title"]:
+                self._schema_unknown_fired = True
+                object_id = "70000000-0000-4000-8000-000000000001"
+                self.blocks.append(_block("database", title, object_id))
+                self._register_database(object_id, properties)
+                self.created.append(title)
+                raise NotionEffectUnknown("simulated lost response before schema proof")
+            return super().create_database(parent_page_id, title, properties)
+
+        def retrieve_database(self, database_id: str) -> dict:
+            raise NotionAPIError("simulated schema fetch failure")
+
+    client = SchemaFetchFailsClient()
+    client.blocks.append(
+        _block("page", board_book["title"], "80000000-0000-4000-8000-000000000001")
+    )
+
+    with pytest.raises(NotionAPIError) as excinfo:
+        apply_workspace(client, PARENT, manifest)
+
+    evidence = excinfo.value.evidence
+    assert evidence is not None
+    assert evidence.parent_page_id == PARENT
+    assert evidence.child_key == programs["key"]
+    assert evidence.kind == "database"
+    assert evidence.title == programs["title"]
+    assert evidence.object_id == "70000000-0000-4000-8000-000000000001"
+    assert evidence.state == "OBSERVED"
+    assert "schema fetch failure" in evidence.cause
+    assert client.created == [programs["title"]]
+
+
+def test_cli_reports_effect_unknown_with_original_identity(monkeypatch, capsys) -> None:
+    manifest = load_manifest(MANIFEST)
+    target = manifest["children"][0]
+
+    class ReconcileReadFailsClient(FakeClient):
+        def __init__(self) -> None:
+            super().__init__(effect_unknown_key=target["title"])
+            self.reads = 0
+
+        def list_children(self, parent_page_id: str) -> list[dict]:
+            self.reads += 1
+            if self.reads > 1:
+                raise NotionAPIError("simulated reconciliation read failure")
+            return super().list_children(parent_page_id)
+
+    monkeypatch.setenv("NOTION_API_KEY", "not-a-real-token")
+    monkeypatch.setenv("NOTION_PARENT_PAGE_ID", PARENT)
+    monkeypatch.setattr(
+        "scripts.notion_knowledge_surface.NotionClient",
+        lambda token: ReconcileReadFailsClient(),
+    )
+
+    assert notion_cli_main(["--apply"]) == 2
+
+    receipt = json.loads(capsys.readouterr().err)
+    assert receipt["status"] == "EFFECT_UNKNOWN"
+    assert receipt["effect"]["parent_page_id"] == PARENT
+    assert receipt["effect"]["child_key"] == target["key"]
+    assert receipt["effect"]["kind"] == target["kind"]
+    assert receipt["effect"]["title"] == target["title"]
+    assert receipt["effect"]["object_id"] is None
+    assert receipt["effect"]["state"] == "POSSIBLE"
+
+
+def test_cli_pre_effect_refusal_stays_refused_without_effect(monkeypatch, capsys) -> None:
+    class PreEffectRefusalClient(FakeClient):
+        def retrieve_page(self, page_id: str) -> dict:
+            return {
+                "object": "page",
+                "id": "22222222-2222-4222-8222-222222222222",
+                "in_trash": False,
+            }
+
+    monkeypatch.setenv("NOTION_API_KEY", "not-a-real-token")
+    monkeypatch.setenv("NOTION_PARENT_PAGE_ID", PARENT)
+    monkeypatch.setattr(
+        "scripts.notion_knowledge_surface.NotionClient",
+        lambda token: PreEffectRefusalClient(),
+    )
+
+    assert notion_cli_main(["--apply"]) == 2
+
+    receipt = json.loads(capsys.readouterr().err)
+    assert receipt["status"] == "REFUSED"
+    assert "effect" not in receipt
+
+
 def test_created_database_schema_refuses_before_later_writes() -> None:
     manifest = load_manifest(MANIFEST)
     programs = next(child for child in manifest["children"] if child["key"] == "programs")
@@ -208,9 +430,18 @@ def test_created_database_schema_refuses_before_later_writes() -> None:
         _block("page", board_book["title"], "60000000-0000-4000-8000-000000000001")
     )
 
-    with pytest.raises(SchemaMismatchError):
+    with pytest.raises(SchemaMismatchError) as excinfo:
         apply_workspace(client, PARENT, manifest)
 
+    evidence = excinfo.value.evidence
+    assert evidence is not None
+    assert evidence.parent_page_id == PARENT
+    assert evidence.child_key == programs["key"]
+    assert evidence.kind == "database"
+    assert evidence.title == programs["title"]
+    assert evidence.object_id == "50000000-0000-4000-8000-000000000001"
+    assert evidence.state == "OBSERVED"
+    assert "schema mismatch" in evidence.cause
     assert client.created == [programs["title"]]
 
 
@@ -239,9 +470,19 @@ def test_effect_unknown_database_schema_refuses_before_later_writes() -> None:
         _block("page", board_book["title"], "40000000-0000-4000-8000-000000000001")
     )
 
-    with pytest.raises(SchemaMismatchError):
+    with pytest.raises(SchemaMismatchError) as excinfo:
         apply_workspace(client, PARENT, manifest)
 
+    evidence = excinfo.value.evidence
+    assert evidence is not None
+    assert evidence.parent_page_id == PARENT
+    assert evidence.child_key == programs["key"]
+    assert evidence.kind == "database"
+    assert evidence.title == programs["title"]
+    assert evidence.object_id == "30000000-0000-4000-8000-000000000001"
+    assert evidence.state == "OBSERVED"
+    assert "schema mismatch" in evidence.cause
+    assert isinstance(excinfo.value.__cause__, NotionEffectUnknown)
     assert client.created == [programs["title"]]
 
 
