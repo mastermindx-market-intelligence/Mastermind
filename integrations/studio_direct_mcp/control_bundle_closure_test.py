@@ -490,6 +490,40 @@ print(json.dumps(value))
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("CONTROL_BUNDLE_CLOSURE_REFUSED", result.stderr)
 
+    def test_exact_inert_historical_backup_is_retained_but_never_trusted_as_code(self):
+        import private_service as svc
+        self._install()
+        name = "private_service.py.pre-exact-legacy-manifests-20261022"
+        blob = b"fixture historical source; never an executable dependency\n"
+        pinned = hashlib.sha256(blob).hexdigest()
+        backup = self.control / name
+        backup.write_bytes(blob)
+        backup.chmod(0o600)
+        with mock.patch.dict(bundle.HISTORICAL_CONTROL_BACKUPS, {name: pinned}, clear=True), \
+             mock.patch.dict(svc.HISTORICAL_CONTROL_BACKUPS, {name: pinned}, clear=True), \
+             mock.patch.object(svc, "_user_root", return_value=self.home):
+            verified = bundle.verify(control_root=self.control, launcher=self.launcher)
+            self.assertEqual(set(verified["files"]), EXPECTED_FILES)
+            svc._installed_control_layout(self.control)
+            installed = self._install()
+            self.assertEqual(installed["state"], "CONTROL_BUNDLE_INSTALLED")
+            self.assertEqual(backup.read_bytes(), blob)
+            self.assertEqual(set(json.loads((self.control / "manifest.json").read_bytes())["files"]),
+                             EXPECTED_FILES)
+            backup.write_bytes(blob + b"tamper")
+            with self.assertRaisesRegex(bundle.Refusal, "CONTROL_BUNDLE_HISTORICAL_BACKUP_CHANGED"):
+                bundle.verify(control_root=self.control, launcher=self.launcher)
+            with self.assertRaisesRegex(ValueError, "unsealed installed historical backup"):
+                svc._installed_control_layout(self.control)
+            backup.write_bytes(blob)
+            unknown = self.control / "private_service.py.pre-unrecognized-backup"
+            unknown.write_bytes(b"foreign")
+            unknown.chmod(0o600)
+            with self.assertRaisesRegex(bundle.Refusal, "CONTROL_BUNDLE_CONTENTS_INVALID"):
+                bundle.verify(control_root=self.control, launcher=self.launcher)
+            with self.assertRaisesRegex(ValueError, "unsealed installed control path"):
+                svc._installed_control_layout(self.control)
+
     def test_installer_removes_prior_bootstrap_caches_under_its_lock(self):
         self._install()
         source = self.control / "private_service.py"

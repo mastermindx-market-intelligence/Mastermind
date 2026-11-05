@@ -77,6 +77,26 @@ class ExactStatusSuccessorPlanTests(unittest.TestCase):
         self.assertEqual(row.public_receipt()["effect"], "NOT_APPLIED")
         self.assertFalse(row.public_receipt()["runtimeReady"])
 
+    def test_new_publisher_and_paper_modules_survive_status_only_successor(self):
+        extra = copy.deepcopy(self.manifest)
+        extra['files'].update({'workspace-access.mjs': '1' * 64,
+                               'git-publish.mjs': '2' * 64,
+                               'paper-design.mjs': '3' * 64})
+        extra['nativePinProof'] = {'preserve': True}
+        before = s.encoded_manifest(extra)
+        after = copy.deepcopy(extra)
+        after['files'][s.MODULE] = s.digest(self.new_module)
+        with mock.patch.dict(s.PREDECESSOR_MANIFEST_SHA256, {self.account: s.digest(before)}), \
+             mock.patch.dict(s.POST_MANIFEST_RAW_SHA256, {self.account: s.digest(s.encoded_manifest(after))}), \
+             mock.patch.dict(s.POST_MANIFEST_CANONICAL_SHA256, {
+                 self.account: s.digest(json.dumps(after, sort_keys=True, separators=(',', ':')).encode())}):
+            projected = json.loads(self.qualify(manifest_bytes=before).manifest_after_bytes)
+            self.assertEqual(projected['nativePinProof'], extra['nativePinProof'])
+            self.assertEqual({k: v for k, v in projected['files'].items() if k != s.MODULE},
+                             {k: v for k, v in extra['files'].items() if k != s.MODULE})
+            with self.assertRaisesRegex(s.SourceRefused, 'PREDECESSOR_MANIFEST_CHANGED'):
+                self.qualify(manifest_bytes=before+b'\n')
+
     def test_transition_recheck_rejects_any_changed_byte(self):
         row = self.qualify()
         inputs = {

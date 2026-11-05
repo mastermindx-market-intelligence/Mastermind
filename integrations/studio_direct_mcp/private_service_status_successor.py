@@ -12,18 +12,18 @@ import json
 
 SCHEMA = "mastermind.studio_fleet_status_successor_plan.v1"
 MODULE = "fleet-status.mjs"
-TARGET_SOURCE_SHA256 = "1a6fe88c8323be307dae487f0999606f2c69ee6fb7fd5e73ff4f6e308679ec92"
+TARGET_SOURCE_SHA256 = "b1ca93566b50246a271dc1720b9e0328d9887d4c3b32b50a7b9ed7107a1fae5a"
 SOURCE_GENERATION = "full-owner-redacted-14-profile-20261103"
 # Actual enrolled private manifest preimages, observed under original M2 owner.
 # The current actor cannot select, invent or broaden a predecessor at runtime.
 PREDECESSOR_MANIFEST_SHA256 = {
-    "admin-business": "35903622d2e10b3ba56aedbf64cc2484d8b53bdb67ab71a8e0f9b0b7ebacc148",
+    "admin-business": "dab1561865cbbf8db10000b655bb33e803201103af76167801159e9b31f5f8e1",
     "chatgpt1": "f05c412f1a5e9076b5804aed547b1c85cfc9f00dcea0c4c2342698f20eac9aa1",
     "chatgpt2-business": "9f2f1cdecdd99b1673181b0109d8e6b11896d95541ad42d5e087fb64c2646d3b",
     "chatgpt2-personal": "b1b1232ae64417e9cf69d8f373c8c2978ed642ec72250470645a5cb39428e61a",
     "chatgpt3": "f826239592b62512dbbcd3f3546facc71e1d3696bdda150666711d50d6ae20f7",
-    "chatgpt3-w570f6f34": "aa24bddbad7e989cedf566f4fbf4288fa333ee8fac8d2585cdcd9c954736eab3",
-    "chatgpt3-wa2a9e6f9": "38d5427f418f9f3f7aa1ff671befa55555f276cd4b639a6312e24fa0672965a3",
+    "chatgpt3-w570f6f34": "0f6b3d5f846ac33b27be7ff38c90f630db044c2b399a7e6ac3b064ce7a89eae2",
+    "chatgpt3-wa2a9e6f9": "f1a6f856d87a841f7c7213a229e092ebdcdcba0c3763d27c76d32216bf9ad8cb",
     "chatgpt4": "3648a9a8e9711bab7be9fc7a3950f73579ce7d78358a18c15ac7d39adf924a9f",
 }
 LEGACY_MODULE_SHA256 = {
@@ -39,24 +39,24 @@ LEGACY_MODULE_SHA256 = {
 
 
 POST_MANIFEST_RAW_SHA256 = {
-    'admin-business': '598c026d1e929f7a1ee801836b7aa3c966df20820e012cc0f39f63c2d980ef7f',
-    'chatgpt1': 'd4e83dce983045adf043e4e38094c9b6e37ed818698ed935af9ede265a93afe1',
-    'chatgpt2-business': '75ed6b2901c6ac617a8ada28d17a267ff66a89dd08f3c3f6f8c296ab856b8753',
-    'chatgpt2-personal': '09d28e4c2ed0b3e7117238654eeacca646429eb8fdd6e24a0c9d44a7aa760f3e',
-    'chatgpt3': '8261d40f1a0af3a1d8f05857179a9546b37dbce2eda9a6258c12a602be07caf4',
-    'chatgpt3-w570f6f34': 'a017482a0e59e6f5d00573a001c56d0efb048172eb37c8f4a0ab6004c5b1c800',
-    'chatgpt3-wa2a9e6f9': 'b23a413d3f313383ebbfb29b29769c04f358567c5b9337114549119312478f28',
-    'chatgpt4': '97879f00020215c99c4e21f94d90bdd3defc13f5618a23aa05dec317c377dc6c',
+    'admin-business': 'df82f28cf650cba351d7226c6d6f2075b30cb202b437bcc1acdcdf3d598e92be',
+    'chatgpt1': 'b5b83d89bcd11c1aaf1a58ff4b224769627b6776afd2ac5f3d3c99979261b7e1',
+    'chatgpt2-business': '70f5d57b2e4ec712feb0370cd68efdc79d8722e62748e4c0607a00ba90f3003f',
+    'chatgpt2-personal': '8c093aa4ffb4e92c684a4ba549e3050263df1c5ba3207ddc6cd89baaadafcba8',
+    'chatgpt3': '157e3f1bfdcba82ccc70ca58455bd92b57ad99787db3e02b82b4191545916dd4',
+    'chatgpt3-w570f6f34': '5a2489ab3a1995c8a79bd7694c1776a33d90e5dc23d4509dcbf2d336b3f7d9fa',
+    'chatgpt3-wa2a9e6f9': 'a70009129ccb0995a3c06880da2475809ae9dfe60e3ede65c55c303ea6f575ca',
+    'chatgpt4': '9b087e6f7323f4a07071e0b8a0685278bb73918fa41509027c9b5d436ce1e6a8',
 }
 POST_MANIFEST_CANONICAL_SHA256 = {
-    'admin-business': 'd9ca87ef89e50860be8f2c7effddc839d301875f3431fd676d2ac05698026e46',
-    'chatgpt1': 'b833bd5a2ac92e6da678a9eda85d14fc5e77149d6abc424baf45f3c41853dd92',
-    'chatgpt2-business': '78a605519cd90d4be80295cd53b4900411dfa38e2424fbceb2b25398c0ccf12b',
-    'chatgpt2-personal': 'b0c2f8dffbebf632cd3c722fe8fc33d39899a4ef13c77733ba04ba5a86079a1d',
-    'chatgpt3': '49f24d7288ff77224fcf400db26b15766392ec3c22c4818ffc8a9175e0906b88',
-    'chatgpt3-w570f6f34': '120a18f53a39dfc1e2c262b0b643d533eb3b378aa3b2b7d799fb609af814681a',
-    'chatgpt3-wa2a9e6f9': '3126a0c147faaecc9d85e2de7edfb481cd273f282db3aa34710335e76b1c7cbd',
-    'chatgpt4': '5eb80fb17723e995f6726044a82cdc5e91c654fa300dee58a14b1835ad05dfea',
+    'admin-business': 'f1be0181586614faca5df567416899ac067e74f1301267faac544bc74773394a',
+    'chatgpt1': 'f001ad660f58e185207cb7a3e04e38f4f110005100560860b4f0c3be6181f44d',
+    'chatgpt2-business': 'c510f1872f3afefa33f04ba68421fe715086410e4407015e5da039b5300e5af5',
+    'chatgpt2-personal': '1ece099699391cf85e18fd44eff4f1a78126dc76171a1583f93ff856077395ad',
+    'chatgpt3': '7e282c31b0cf3a19e2815c29aa310ac790d232dcc88baa5c86d95cd8c9dc71e0',
+    'chatgpt3-w570f6f34': 'e6cd6bcbd9fbc9efbbddd5ee93b239bd88f8939049292bfd7e716650399baebc',
+    'chatgpt3-wa2a9e6f9': 'b162f0f70e16d6386ad1f09b0cf031530e08288e69b34cdaa8edad3fe78f9ade',
+    'chatgpt4': '4d2a7dc1c6a2da1cc9ee6f1fed338ddc8b96c9c99c9e7bbecbd084d7820961c0',
 }
 
 

@@ -802,6 +802,18 @@ CONTROL_BUNDLE_FILES = (
     "ops/native_fabric/quota_continuity/rollout/native_generation.py",
     "ops/fabric_launch/install.py",
 )
+# Exact inert pre-control-bundle snapshots observed on the original M2 host.
+# These are NOT executable/source dependencies and confer no runtime authority.
+# Preserve them without admission of arbitrary pre-* names or changed content.
+HISTORICAL_CONTROL_BACKUPS = {
+    'private_service.py.pre-exact-legacy-manifests-20261022': 'a184ca7f3408e20454adf4f1e5986add845b5742908efd9ed4e0f552755820bb',
+    'private_service.py.pre-sealed-byte-validation-20261022': 'e636a728dbde6ca43b2248456aaabddbab8d78693066df7717030d07e757ebe4',
+    'private_tunnel_service.py.pre-concurrency8-20261022': '4a7d425a2345eaf30b56ed1ca148e0afa2f8e474bd03e2453d4e0a9a4ef85467',
+    'private_tunnel_service.py.pre-exact-sealed-roster-20261022': 'c3753a0c4167560a7980c366e707ce41153d93b8a8710ba4365ba9a45ff8d81f',
+    'private_tunnel_service.py.pre-sealed-argv-20261022': 'b0449df0252159dbebed084ccc3d4520690ff811f0e30125d37ca8effb3e68fa',
+    'studio_direct_control.py.pre-public-projection-20261022': '6fca63efd82132f3063d065d9757e10c22e7d4cef4b6549b24068b407bce912d',
+}
+
 _INSTALLED_CONTROL_CONTEXT = None
 
 
@@ -822,6 +834,17 @@ def _installed_control_layout(root):
                 or stat.S_IMODE(info.st_mode) != DIR_MODE):
             raise ValueError("unsafe installed control directory")
         observed = {path.name for path in directory.iterdir()}
+        if relative == Path("."):
+            for backup, expected_hash in HISTORICAL_CONTROL_BACKUPS.items():
+                if backup not in observed:
+                    continue
+                historical = directory / backup
+                info = historical.lstat()
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                        or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != FILE_MODE
+                        or hashlib.sha256(_fabric_release_bytes(historical)).hexdigest() != expected_hash):
+                    raise ValueError("unsealed installed historical backup")
+                observed.remove(backup)
         if observed != expected:
             raise ValueError("unsealed installed control path")
 

@@ -36,6 +36,18 @@ CONTROL_FILES = (
     "ops/native_fabric/quota_continuity/rollout/native_generation.py",
     "ops/fabric_launch/install.py",
 )
+# Exact inert pre-control-bundle snapshots observed on the original M2 host.
+# These are NOT executable/source dependencies and confer no runtime authority.
+# Preserve them without admission of arbitrary pre-* names or changed content.
+HISTORICAL_CONTROL_BACKUPS = {
+    'private_service.py.pre-exact-legacy-manifests-20261022': 'a184ca7f3408e20454adf4f1e5986add845b5742908efd9ed4e0f552755820bb',
+    'private_service.py.pre-sealed-byte-validation-20261022': 'e636a728dbde6ca43b2248456aaabddbab8d78693066df7717030d07e757ebe4',
+    'private_tunnel_service.py.pre-concurrency8-20261022': '4a7d425a2345eaf30b56ed1ca148e0afa2f8e474bd03e2453d4e0a9a4ef85467',
+    'private_tunnel_service.py.pre-exact-sealed-roster-20261022': 'c3753a0c4167560a7980c366e707ce41153d93b8a8710ba4365ba9a45ff8d81f',
+    'private_tunnel_service.py.pre-sealed-argv-20261022': 'b0449df0252159dbebed084ccc3d4520690ff811f0e30125d37ca8effb3e68fa',
+    'studio_direct_control.py.pre-public-projection-20261022': '6fca63efd82132f3063d065d9757e10c22e7d4cef4b6549b24068b407bce912d',
+}
+
 FILE_MODE = 0o600
 DIR_MODE = 0o700
 
@@ -161,6 +173,14 @@ def _require_code_layout(root: Path, names, *, complete: bool, allow_cache: bool
                     raise Refusal("CONTROL_BUNDLE_CONTENTS_INVALID")
                 _require_regular(cached)
             observed.remove("__pycache__")
+        if relative == Path("."):
+            for backup, expected_hash in HISTORICAL_CONTROL_BACKUPS.items():
+                if backup not in observed:
+                    continue
+                original = _require_regular(directory / backup, private=True)
+                if _sha256(original) != expected_hash:
+                    raise Refusal("CONTROL_BUNDLE_HISTORICAL_BACKUP_CHANGED")
+                observed.remove(backup)
         if not observed <= expected or (complete and observed != expected):
             raise Refusal("CONTROL_BUNDLE_CONTENTS_INVALID")
     for name in names:
