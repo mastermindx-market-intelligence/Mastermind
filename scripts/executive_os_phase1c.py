@@ -2829,6 +2829,27 @@ def _service_from_config(
                     authorized_policies=trusted_policies,
                     reference_cursor_key=session_reference_cursor_key)
             session_factories["session_bridge_provider_factory"] = session_bridge_factory
+        if "workspace_read_provider_factory" in workspace_factories and installed_profile == WEB_CEO_V3_PROFILE:
+            # Same sealed Workspace collector/membership and existing root-sealed
+            # OS policy source; no second OAuth configuration or admission store.
+            def project_planning_factory(runtime, workspace_policy=policy,
+                    load_workspace_bindings=legacy_workspace_loader,
+                    creation_reader=creation_source_reader,collector=packet_collector):
+                service._namespace_custody.bound_runtime(runtime)
+                from ops.executive_os.executive_mcp_entry import installed_os_session_policy_source
+                from ops.executive_os.coo_principal_host import DEFAULT_INSTALL_PATH
+                from integrations.mastermind_executive_app.project_planning_factory import (
+                    ProjectPlanningAppFactory,build_ingress_owner)
+                from control_plane.workspace_source_operations import SourceOperationEvents
+                policy_loader=installed_os_session_policy_source(DEFAULT_INSTALL_PATH,
+                    Path(__file__).resolve().parents[1],expected_uid=int(raw["control_uid"]))
+                return build_ingress_owner(ProjectPlanningAppFactory(service=service,
+                    app_binding=service._ceo_ingress_app_binding,policies=policy_loader(),
+                    policy_loader=policy_loader,reader=creation_reader,
+                    plan_reader=collector.project_plan_reader(macro_root=Path(raw["ceo_ingress_app_macro_root"])),
+                    events=SourceOperationEvents(runtime.store),workspace_policy=workspace_policy,
+                    load_workspace_bindings=load_workspace_bindings))
+            workspace_factories["project_planning_provider_factory"]=project_planning_factory
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
             armed=raw["ceo_ingress_app_armed"],

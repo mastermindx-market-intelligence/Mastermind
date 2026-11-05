@@ -77,6 +77,10 @@ _OS_EXECUTIVE_ROUTES: tuple[str, ...] = (
     "/os/executive/direct-native/result",
     "/os/executive/direct-native/consume",
     "/os/executive/direct-native/correction",
+    "/os/executive/project-planning/submit",
+    "/os/executive/project-planning/status",
+    "/os/executive/project-planning/result",
+    "/os/executive/project-planning/consume",
 )
 
 #: Three fixed POST routes served by the opt-in selected-session transport.
@@ -690,6 +694,18 @@ class _ExecutivePathFence:
                     "code": "not_found", "message": "unknown Executive transport route",
                 }}, status_code=404)(scope, receive, send)
                 return
+            from integrations.mastermind_executive_app.project_planning_transport import HEADER,ROUTES as PLANNING_ROUTES
+            # The incumbent selected-session leaf owns malformed ASGI header
+            # classification and its UNKNOWN reply. Inspect only well-formed
+            # header pairs here; this additive fence must not preempt it.
+            headers=scope.get('headers')
+            has_planning_header=type(headers) in (list,tuple) and any(
+                type(pair) in (list,tuple) and len(pair)==2 and type(pair[0]) is bytes
+                and pair[0].lower()==HEADER for pair in headers)
+            if has_planning_header and path not in PLANNING_ROUTES:
+                await JSONResponse({'error':'transport_refused'},status_code=403,
+                    headers=_OS_RESPONSE_HEADERS)(scope,receive,send)
+                return
             if (self._routes.get(path) != scope.get("method") or not path.isascii()
                     or scope.get("raw_path") != path.encode("ascii")
                     or (scope.get("query_string") and path not in self._query_routes)):
@@ -732,10 +748,30 @@ class AuditedWorkspaceApp:
     No principal is injected into ASGI state. A sink failure in the existing
     verifier refuses admission before the sibling can acquire its source.
     """
-    def __init__(self, app, verifier):
+    def __init__(self, app, verifier, *, authenticator=None,authorize_principal=None):
         if not isinstance(verifier, MastermindTokenVerifier):
             raise TypeError("incumbent A1 verifier required")
         self._app, self._verifier = app, verifier
+        if (authenticator is None)!=(authorize_principal is None):
+            raise TypeError('Workspace planning READ must retain both existing owners')
+        if authenticator is not None:
+            from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
+            if type(authenticator) is not JwtAuthenticator or not callable(authorize_principal):
+                raise TypeError('actual Workspace authenticator and current membership required')
+        self._planning_authenticator,self._planning_authorize=authenticator,authorize_principal
+
+    async def project_planning_principal(self,token,*,now):
+        """Independently authenticate this resource; no Executive relabeling."""
+        authenticator=self._planning_authenticator
+        try:
+            if (authenticator is None or type(self._verifier) is not MastermindTokenVerifier
+                    or self._verifier._validated_composition()!=authenticator.policy):return None
+            access,_=await self._verifier.verify_token_with_code(token)
+            if access is None:return None
+            principal=await authenticator.verify_token(token,now=now)
+            if self._planning_authorize(principal) is not True:return None
+            return principal
+        except Exception:return None
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") != "http":
@@ -1123,6 +1159,7 @@ def _build_profile_mcp_app(
             direct_result_client=DirectNativeResultClient(configured.ceo_ingress_socket_path, CeoIngressClient(
                 connect_timeout=configured.connect_timeout, read_timeout=configured.read_timeout)),
             foreground_submissions=os_session_bridge_client is not None,
+            workspace_app=workspace_app if type(workspace_app) is AuditedWorkspaceApp else None,
         )
         if os_session_bridge_client is not None:
             # The opt-in selected-session leaf reuses this factory's audited

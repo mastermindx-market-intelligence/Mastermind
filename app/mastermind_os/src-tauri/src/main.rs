@@ -1,4 +1,5 @@
 mod auth;
+mod project_planning;
 mod native_client;
 mod native_refresh;
 mod terminal_handoff;
@@ -117,6 +118,7 @@ fn main() {
             auth::executive_direct_native_result,
             auth::executive_direct_native_consume,
             auth::executive_direct_correction,
+            auth::executive_project_planning,
             auth::executive_session_context,
             auth::executive_session_reply,
             auth::executive_session_references,

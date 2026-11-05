@@ -2771,6 +2771,17 @@ def _direct_native_provenance(connection, row, *, required=False):
     outer = created.get("provenance")
     value = outer.get("direct_native") if isinstance(outer,dict) else None
     keys = {"schema_version","principal_scope","receiver_binding_digest","authority_generation_digest","source","source_digest","binding"}
+    if type(value) is dict and (("project_planning" in value) != ("project_planning_sha256" in outer)):
+        raise StateConflict("project planning original-command provenance differs")
+    if type(value) is dict and "project_planning" in value:
+        from control_plane.project_planning_admission import normalize_context
+        planning = normalize_context(value["project_planning"])
+        if (planning["principal_scope"] != value.get("principal_scope")
+                or planning["work_ref"] != value.get("source", {}).get("work_ref")
+                or direct_native.digest(planning) != value.get("authority_generation_digest")
+                or direct_native.digest(planning) != outer.get("project_planning_sha256")):
+            raise StateConflict("project planning immutable provenance drifted")
+        keys.add("project_planning")
     if (type(value) is not dict or set(value) != keys or value["schema_version"] != direct_native.PROVENANCE_SCHEMA
             or row["parent_job_id"] is not None or row["root_job_id"] != row["job_id"]
             or row["orchestration_role"] is not None or row["attempt_limit"] != 1
@@ -17005,6 +17016,9 @@ class JobRegistry:
         intent=validate_intent(intent)
         if intent["schema"] != INTENT_SCHEMA_DIRECT or intent["workstream"] != admission.access.work_ref:
             raise StateConflict("direct intent and host source differ")
+        expected_planning = admission._project_planning
+        if intent.get("project_planning_sha256") != (None if expected_planning is None else direct_native.digest(expected_planning)):
+            raise StateConflict("project planning original-command fingerprint differs")
         root=Path(workspace_root)
         if not root.is_absolute() or root != root.resolve(strict=True):
             raise StateConflict("direct workspace root must be an existing canonical owner directory")

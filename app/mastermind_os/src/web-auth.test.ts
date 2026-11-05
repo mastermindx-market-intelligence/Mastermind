@@ -120,6 +120,34 @@ afterEach(() => {
   history.replaceState(null, "", "/os/");
   Object.defineProperty(window, "opener", { value: null, configurable: true });
 });
+describe("fixed project planning two-resource requests",()=>{
+  const resource="https://fixture-resource.mastermind-x.com/executive";
+  const args={operation_key:"original-planning",work_ref:"WS:EXAMPLE"};
+  it("sends two private resource bearers only to the fixed same-origin route",async()=>{
+    const e=setup({executiveResource:resource});await e.login();e.fetcher.mockReset();
+    e.fetcher.mockImplementation(async()=>response({schema:"mastermind.project_initial_planning.private_result.v1",operation:"status",ok:true,data:{},error:null}));
+    await e.client.executive!.projectPlanning!.request("status",args,new AbortController().signal);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    const [url,options]=e.fetcher.mock.calls[0]!;
+    expect(url).toBe(`${ORIGIN}/os/executive/project-planning/status`);
+    expect(options).toMatchObject({method:"POST",redirect:"error",credentials:"omit",cache:"no-store",
+      headers:{Authorization:"Bearer private-token","X-Mastermind-Workspace-Authorization":"Bearer private-token"},body:JSON.stringify({arguments:args})});
+    e.fetcher.mockClear();await e.client.executive!.context(new AbortController().signal);
+    expect(e.fetcher.mock.calls[0]![1]!.headers).not.toHaveProperty("X-Mastermind-Workspace-Authorization");
+  });
+  it("rejects arbitrary routes and additional authority fields before fetch",async()=>{
+    const e=setup({executiveResource:resource});await e.login();e.fetcher.mockReset();
+    expect(()=>e.client.executive!.projectPlanning!.request("../submit" as never,args,new AbortController().signal)).toThrow("PROJECT_PLANNING_INPUT_INVALID");
+    expect(()=>e.client.executive!.projectPlanning!.request("status",{...args,job_id:"JOB-invented"},new AbortController().signal)).toThrow("PROJECT_PLANNING_INPUT_INVALID");
+    expect(e.fetcher).not.toHaveBeenCalled();
+  });
+  it("drops a pending planning response when either resource is signed out",async()=>{
+    const e=setup({executiveResource:resource});await e.login();const held=deferred<Response>();e.fetcher.mockReset();e.fetcher.mockReturnValue(held.promise);
+    const pending=e.client.executive!.projectPlanning!.request("status",args,new AbortController().signal);
+    const rejection=expect(pending).rejects.toThrow();await e.client.signOut();held.resolve(response({ok:true}));await rejection;
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+});
 describe("browser public PKCE", () => {
   it("keeps missing public client IDs explicit without opening or requesting", async () => {
     const e = setup({ configured: false });

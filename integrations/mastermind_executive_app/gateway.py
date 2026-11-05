@@ -396,6 +396,16 @@ class CeoIngressClient:
         return await self._send_frame(socket_path, wire_frame, keep_write_open=True,
                                       foreground_source=source)
 
+    async def send_project_planning_frame(self,socket_path,frame):
+        from common.project_planning_private_contract import frame as validate
+        from integrations.session_bridge.http_foreground import current_request,HttpForegroundClosed
+        try:
+            frame=validate(frame)
+            source=current_request()
+        except (ValueError,HttpForegroundClosed):
+            return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail='project planning original foreground unavailable')
+        return await self._send_frame(socket_path,frame,keep_write_open=True,foreground_source=source)
+
     async def _send_frame(
         self, socket_path: "Path | str", frame: Mapping[str, Any], *,
         keep_write_open: bool,
@@ -412,6 +422,16 @@ class CeoIngressClient:
         direct_result_frame = isinstance(frame, Mapping) and frame.get("schema") == direct_schema
         direct_submit_frame = isinstance(frame, Mapping) and frame.get("schema") == direct_submit_schema
         direct_frame = direct_result_frame or direct_submit_frame
+        from common import project_planning_private_contract as planning_wire
+        planning_frame=isinstance(frame,Mapping) and frame.get('schema')==planning_wire.SCHEMA
+        strict_response=direct_frame or planning_frame
+        if planning_frame:
+            try: frame=planning_wire.frame(dict(frame))
+            except (ValueError,TypeError):
+                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail='project planning frame invalid')
+            request_ceiling=planning_wire.MAX_BYTES
+            response_ceiling=planning_wire.MAX_BYTES
+            stream_limit=response_ceiling+4096
         if direct_result_frame:
             try:
                 frame = validate_private_frame(dict(frame))
@@ -572,7 +592,7 @@ class CeoIngressClient:
                     transport=TRANSPORT_SENT_UNKNOWN, detail="response exceeded byte ceiling"
                 )
             try:
-                if direct_frame:
+                if strict_response:
                     def unique(pairs):
                         value = {}
                         for key, item in pairs:
@@ -598,7 +618,7 @@ class CeoIngressClient:
                     transport=TRANSPORT_SENT_UNKNOWN, detail="response was not valid JSON"
                 )
             except (ValueError, RecursionError):
-                if not direct_frame:
+                if not strict_response:
                     raise
                 return CeoIngressResponse(
                     transport=TRANSPORT_SENT_UNKNOWN, detail="direct-native response was invalid")

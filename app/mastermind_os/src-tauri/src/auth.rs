@@ -2303,6 +2303,11 @@ where
     let foreground_research = path == "/os/executive/submit"
         && body.get("arguments").and_then(|v| v.get("execution_profile"))
             .and_then(Value::as_str) == Some("research_only");
+    let planning=crate::project_planning::operation(path);
+    if let Some(operation)=planning {
+        if !body.as_object().is_some_and(|o|o.len()==1 && o.contains_key("arguments")) {return Err("REQUEST_INVALID".into())}
+        crate::project_planning::validate(operation,&body["arguments"])?;
+    }
     // Validate the closed selectors at the shared boundary before dispatch,
     // including callers other than the public command wrappers.
     match path {
@@ -2311,7 +2316,7 @@ where
         "/os/executive/direct-native/correction" => { direct_native_correction_arguments(body.clone())?; }
         _ => {}
     }
-    let (token, token_expires, generation, changed) = {
+    let (token, token_expires, generation, changed, workspace) = {
         let inner = state.lock()?;
         let token = inner.token(Resource::Executive).ok_or("EXECUTIVE_AUTH_REQUIRED")?;
         match path {
@@ -2331,6 +2336,7 @@ where
                     return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into());
                 }
             }
+            _ if planning.is_some() => {if !token.executive_send {return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into())}}
             _ => return Err("REQUEST_INVALID".into()),
         }
         (
@@ -2338,6 +2344,8 @@ where
             token.expires,
             inner.executive_generation,
             inner.executive_changed.subscribe(),
+            if planning.is_some() {let workspace=inner.token(Resource::Acquisition).ok_or("WORKSPACE_AUTH_REQUIRED")?;
+                Some((workspace.value.clone(),inner.generation,workspace.expires))} else {None},
         )
     };
     let serialized = executive_body(&body)?;
@@ -2356,14 +2364,17 @@ where
         .header("Cache-Control", "no-store")
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(serialized);
-    if foreground_research {
+    if let Some((value,_,_))=&workspace {
+        request=request.header("X-Mastermind-Workspace-Authorization",format!("Bearer {value}"));
+    }
+    if foreground_research || planning.is_some() {
         request = request.timeout(EXECUTIVE_FOREGROUND_TIMEOUT);
     }
     let exchange = async {
         let response = dispatch(request)
             .await
             .map_err(|_| "EXECUTIVE_TRANSPORT_UNAVAILABLE".to_owned())?;
-        { executive_guard(&mut *state.lock()?, generation, token_expires)?; }
+        { planning_auth_guard(&mut *state.lock()?,generation,token_expires,workspace.as_ref())?; }
         let status = response.status();
         let result = if status.is_success() {
             read_json_body(response, if direct { DIRECT_NATIVE_RESPONSE_CAP } else { EXECUTIVE_RESPONSE_CAP }).await
@@ -2380,34 +2391,53 @@ where
                 _ => "EXECUTIVE_TRANSPORT_UNAVAILABLE",
             }.into())
         };
-        { executive_guard(&mut *state.lock()?, generation, token_expires)?; }
+        { planning_auth_guard(&mut *state.lock()?,generation,token_expires,workspace.as_ref())?; }
         result
     };
-    if foreground_research || direct {
-        executive_foreground_exchange(state, generation, token_expires, changed, exchange).await
+    if foreground_research || direct || planning.is_some() {
+        executive_foreground_exchange(state, generation, token_expires, changed, workspace.as_ref(), exchange).await
     } else {
         exchange.await
     }
 }
 
+fn planning_auth_guard(inner:&mut Inner,generation:u64,expires:Instant,workspace:Option<&(String,u64,Instant)>)->Result<()> {
+    executive_guard(inner,generation,expires)?;
+    if let Some((value,epoch,deadline))=workspace {
+        if inner.generation!=*epoch || !inner.token(Resource::Acquisition).is_some_and(|t|t.expires==*deadline && t.value==*value) {
+            return Err("WORKSPACE_AUTH_CHANGED".into());
+        }
+    }
+    Ok(())
+}
+
 async fn executive_foreground_exchange<T, F>(
     state: &NativeAuth, generation: u64, expires: Instant,
-    mut changed: tokio::sync::watch::Receiver<()>, exchange: F,
+    mut changed: tokio::sync::watch::Receiver<()>, workspace:Option<&(String,u64,Instant)>, exchange: F,
 ) -> Result<T>
 where F: std::future::Future<Output = Result<T>> {
     use std::{future::Future, task::Poll};
     let mut exchange = std::pin::pin!(exchange);
-    let mut expiry = std::pin::pin!(tokio::time::sleep_until(expires.into()));
+    let deadline=workspace.map(|(_,_,deadline)|expires.min(*deadline)).unwrap_or(expires);
+    let mut expiry = std::pin::pin!(tokio::time::sleep_until(deadline.into()));
+    let mut workspace_tick=tokio::time::interval(Duration::from_millis(25));
     let mut notification = std::pin::pin!(changed.changed());
     std::future::poll_fn(|cx| {
         if notification.as_mut().poll(cx).is_ready() || expiry.as_mut().poll(cx).is_ready() {
             return Poll::Ready(Err("EXECUTIVE_AUTH_CHANGED".into()));
         }
-        if let Err(error) = state.lock().and_then(|mut inner| executive_guard(&mut inner, generation, expires)) {
+        if workspace.is_some() {let _=workspace_tick.poll_tick(cx);}
+        if let Err(error) = state.lock().and_then(|mut inner| planning_auth_guard(&mut inner,generation,expires,workspace)) {
             return Poll::Ready(Err(error));
         }
         exchange.as_mut().poll(cx)
     }).await
+}
+#[tauri::command]
+pub async fn executive_project_planning(app:AppHandle,operation:String,arguments:Value)->Result<Value> {
+    let path=crate::project_planning::route(&operation)?;
+    let arguments=crate::project_planning::validate(&operation,&arguments)?;
+    executive_post(app,path,serde_json::json!({"arguments":arguments})).await
 }
 #[tauri::command]
 pub fn executive_auth_status(state: tauri::State<'_, NativeAuth>) -> Result<ExecutiveAuthStatus> {
@@ -3157,6 +3187,49 @@ mod tests {
             .body(r#"{"fixture":"native-dispatch"}"#.to_owned())
             .unwrap()
             .into()
+    }
+
+    #[test]
+    fn project_planning_requires_both_private_resources_before_native_dispatch() {
+        for workspace in [false,true] {
+            let state=native_executive_state(EXECUTIVE_SCOPE);
+            state.lock().unwrap().acquisition=if workspace {Some(token("fixture-workspace"))} else {None};
+            let calls=std::cell::Cell::new(0);
+            let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,
+                "/os/executive/project-planning/status",serde_json::json!({"arguments":{"operation_key":"original","work_ref":"WS:EXAMPLE"}}),|builder|{
+                    calls.set(calls.get()+1);let request=builder.build().unwrap();
+                    assert_eq!(request.url().as_str(),format!("{ORIGIN}/os/executive/project-planning/status"));
+                    assert_eq!(request.headers()["x-mastermind-workspace-authorization"],"Bearer fixture-workspace");
+                    assert_eq!(request.headers()["authorization"],"Bearer fixture-native-executive");
+                    async {Ok(native_fixture_response())}
+                }));
+            assert_eq!(calls.get(),usize::from(workspace));assert_eq!(result.is_ok(),workspace);
+        }
+        let state=native_executive_state("mastermind.executive.read");
+        state.lock().unwrap().acquisition=Some(token("fixture-workspace"));
+        let calls=std::cell::Cell::new(0);
+        let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,
+            "/os/executive/project-planning/status",serde_json::json!({"arguments":{"operation_key":"original","work_ref":"WS:EXAMPLE"}}),|_|{
+                calls.set(calls.get()+1);async {Ok(native_fixture_response())}
+            }));
+        assert_eq!(calls.get(),0);assert!(result.is_err());
+    }
+
+    #[test]
+    fn project_planning_secondary_resource_generation_and_expiry_fence_pending_native_response() {
+        for change in ["generation","remove","expire"] {
+            let state=native_executive_state(EXECUTIVE_SCOPE);
+            state.lock().unwrap().acquisition=Some(token("fixture-workspace"));
+            let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,
+                "/os/executive/project-planning/status",serde_json::json!({"arguments":{"operation_key":"original","work_ref":"WS:EXAMPLE"}}),|_|async{
+                    {let mut inner=state.lock().unwrap();match change {
+                        "generation"=>inner.generation+=1,"remove"=>inner.acquisition=None,
+                        _=>inner.acquisition.as_mut().unwrap().wall_expires=SystemTime::UNIX_EPOCH,
+                    }}
+                    Ok(native_fixture_response())
+                }));
+            assert_eq!(result.unwrap_err(),"WORKSPACE_AUTH_CHANGED");
+        }
     }
 
     #[test]
