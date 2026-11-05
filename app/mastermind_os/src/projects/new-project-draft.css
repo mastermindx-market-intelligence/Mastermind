@@ -17,6 +17,7 @@
 .mm-new-project-options-header { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-4); margin-bottom:var(--sp-4); }
 .mm-new-project-options-header h3 { margin:0; font-size:16px; }
 .mm-new-project-feedback { min-width:0; overflow-wrap:anywhere; }
+.mm-new-project-feedback summary { box-sizing:border-box; min-height:44px; padding-block:var(--sp-3); }
 .mm-new-project-start { display:grid; justify-items:end; gap:10px; }
 .mm-new-project-start-control > button { min-height:48px; min-width:160px; }
 .mm-new-project-start > p { margin:0; color:var(--muted); font-size:14px; line-height:22px; }
