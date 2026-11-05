@@ -62,6 +62,7 @@ import { ConversationsList } from "./conversations/ConversationsList";
 import { composeConversationsList, isListedCurrentConversation, isListedConversationProject } from "./conversations/conversation-list-source";
 import { captureConversationListOwner, conversationListOwnerCurrent, type ConversationListOwnerCapture } from "./conversations/conversation-list-owner";
 import { useConversationListNavigation } from "./conversations/useConversationListNavigation";
+import { useProjectConversationHistory } from "./conversations/useProjectConversationHistory";
 import {
   OperationController,
   type OperationKind,
@@ -1452,7 +1453,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     // Pure disclosure tick: one re-render when a Technical details disclosure
     // opens, so the observer snapshot is fresh. It starts no read.
     [, setDiagnosticTick] = useState(0),
-    [catalogueProject, setCatalogueProject] = useState<{workRef: string; authRevision: number; epoch: number} | null>(null),
+    [catalogueProject, setCatalogueProjectState] = useState<{workRef: string; authRevision: number; epoch: number} | null>(null),
     [retainedRoot, setRetainedRoot] = useState<{
       pair: MissionSelection;
       index: ProgramIndex;
@@ -1594,6 +1595,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           program.rootState === "RESOLVED" &&
           program.rootJobId === selection.rootJobId,
       );
+  // Track the actual project-selection event, including A→B→A before render.
+  const cataloguePresentationSequence = useRef(0);
+  const setCatalogueProject = (next: typeof catalogueProject) => {
+    cataloguePresentationSequence.current += 1;
+    setCatalogueProjectState(next);
+  };
   // Auto-open the Advanced disclosure only while an actual advanced route is
   // active. This never navigates and never closes the disclosure itself; the
   // incumbent summary click keeps ownership of manual toggling.
@@ -4162,6 +4169,25 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     index.state === "AVAILABLE" && requestedProjectWorkRef
       ? index.programs.filter(card => card.workRef === requestedProjectWorkRef) : [];
   const projectWorkRef = currentProjectCards.length === 1 ? currentProjectCards[0].workRef : null;
+  const historyReadState = useRef({host: retainedResultHost, authRevision, workRef: projectWorkRef,
+    owner: catalogueListOwner.current, index, programs: office.projection.programs,
+    selectionEpoch: cataloguePresentationSequence.current});
+  historyReadState.current = {host: retainedResultHost, authRevision, workRef: projectWorkRef,
+    owner: catalogueListOwner.current, index, programs: office.projection.programs,
+    selectionEpoch: cataloguePresentationSequence.current};
+  const projectConversationHistory = useProjectConversationHistory({host: retainedResultHost,
+    workRef: projectWorkRef, authGeneration: authRevision, hostGeneration: retainedHostGeneration,
+    selectionGeneration: JSON.stringify([programIndexEpoch, selectionSeq.current,
+      cataloguePresentationSequence.current, office.projection.context.revisions.programs]),
+    canReadCurrentProject: () => {
+      const current = historyReadState.current;
+      return !!current.workRef && current.host === window.MastermindMissionHost &&
+        current.authRevision === authRevisionRef.current &&
+        current.selectionEpoch === cataloguePresentationSequence.current &&
+        current.owner === catalogueListOwner.current && conversationListOwnerCurrent(current.owner, false) &&
+        current.programs.source.state === "CURRENT" && current.index.state === "AVAILABLE" &&
+        current.index.programs.filter(card => card.workRef === current.workRef).length === 1;
+    }, locale, theme});
   const [knowledgeRefresh, setKnowledgeRefresh] = useState(0);
   const knowledgePorts = useMemo(() => {
     const host=retainedResultHost;
@@ -4645,6 +4671,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               {panel}{recordedDirection}{projectAdmissionPanel}
               {projectDetailsControls.instructions}{projectDetailsControls.access}
               <details className="reason-details"><summary>{locale === "zh-CN" ? "项目历史与来源证据" : "Project history and source evidence"}</summary>
+              {projectConversationHistory.panel}
                 {projectSessionEvidence}{recordedProjectJournal}
               </details>
               {projectConversationActive ? <>

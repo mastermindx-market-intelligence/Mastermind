@@ -1,6 +1,8 @@
 import { projectHistoryArguments } from "./orchestration/project-history-arguments";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
-import { decodeSessionContext, type ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
+import { decodeSessionContext } from "./orchestration/executive-session-command-port";
+import type { ProjectConversationHistoryTransport } from "./conversations/project-conversation-history-owner";
+import { projectHistorySelection } from "./conversations/project-history-selection";
 import { normalizeDirectSelection, type DirectNativeTransport } from "./direct-native-result";
 import { closedReadFailureReason, type DiagnosticReadReason, type DiagnosticPhase, type ExecutiveDiagnosticSnapshot } from "./diagnostic-state";
 import { planningArguments } from "./planning/project-planning-transport";
@@ -90,6 +92,7 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
   function call(command: "executive_context" | "executive_submit" | "executive_status" |
     "executive_session_context" | "executive_session_reply" | "executive_session_references" |
     "executive_project_session_references" |
+    "executive_project_history_context" |
     "executive_direct_native_result" | "executive_direct_native_consume" | "executive_direct_correction" | "executive_project_planning",
     signal: AbortSignal, args?: Record<string, unknown>): Promise<unknown> {
     const started = epoch, boundary = generationAbort.signal;
@@ -179,9 +182,14 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
   // only the preexisting authenticated READ endpoints and cannot submit even
   // if the backend reports an addressable target. The independent native
   // executive_submit F2 review remains held; this does not modify that route.
-  const sessionTransport: ExecutiveSessionTransport = {
+  const sessionTransport: ProjectConversationHistoryTransport = {
     authGeneration: () => epoch, available: () => available,
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    historyContext: (selection, signal) => {
+      const closed = projectHistorySelection(selection);
+      return closed ? call("executive_project_history_context", signal, {workRef: closed.workRef})
+        : Promise.reject(new Error("SESSION_HISTORY_SELECTION_INVALID"));
+    },
     context: async (selection, signal) => {
       if (!WORK.test(selection.workRef) || !ROOT.test(selection.rootJobId))
         throw new Error("SESSION_SELECTION_INVALID");

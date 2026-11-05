@@ -2343,6 +2343,7 @@ where
             "/os/executive/context"
             | "/os/executive/status"
             | "/os/executive/session/context"
+            | "/os/executive/session/history-context"
             | "/os/executive/session/reply"
             | "/os/executive/session/references"
             | "/os/executive/direct-native/result" => {}
@@ -2585,6 +2586,18 @@ pub async fn executive_session_context(app: AppHandle, selection: MissionSelecti
         serde_json::json!({ "selection": {
             "work_ref": selection.work_ref, "root_job_id": selection.root_job_id
         }})).await;
+    if result.is_err() { emit(&app); }
+    result
+}
+fn project_history_context_body(work_ref: String) -> Result<Value> {
+    let selection = ProjectPlanSelection { work_ref };
+    selection.validate()?;
+    Ok(serde_json::json!({ "selection": { "work_ref": selection.work_ref } }))
+}
+#[tauri::command]
+pub async fn executive_project_history_context(app: AppHandle, work_ref: String) -> Result<Value> {
+    let body = project_history_context_body(work_ref)?;
+    let result = executive_post(app.clone(), "/os/executive/session/history-context", body).await;
     if result.is_err() { emit(&app); }
     result
 }

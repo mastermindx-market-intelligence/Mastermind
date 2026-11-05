@@ -41,7 +41,8 @@ import { DIRECT_RESULT_BYTES, decodeDirectNativeResult, normalizeDirectSelection
 import { validActivitySelection } from "./planning/retained-activity";
 import { planningArguments, type PlanningOperation } from "./planning/project-planning-transport";
 import { attendedSelection } from "./fabric/attended-status";
-import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
+import type { ProjectConversationHistoryTransport } from "./conversations/project-conversation-history-owner";
+import { projectHistorySelection } from "./conversations/project-history-selection";
 import type { AuthState, RawClient } from "./host";
 import {
   CONTROL_ROOM_REQUEST_BYTES, CONTROL_ROOM_RESPONSE_BYTES,
@@ -1116,7 +1117,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     });
   }
   async function executivePost(
-    route: "context" | "submit" | "status" | "session/context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction" | `project-planning/${PlanningOperation}`,
+    route: "context" | "submit" | "status" | "session/context" | "session/history-context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction" | `project-planning/${PlanningOperation}`,
     arguments_: unknown,
     signal: AbortSignal,
   ) {
@@ -1131,7 +1132,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       token.executiveSend !== true)
       throw new Error("EXECUTIVE_SEND_SCOPE_REQUIRED");
     const direct = route.startsWith("direct-native/");
-    const body = JSON.stringify(route === "context" ? {} : (route === "session/context" || direct) ? arguments_ : { arguments: arguments_ });
+    const body = JSON.stringify(route === "context" ? {} : (route === "session/context" || route === "session/history-context" || direct) ? arguments_ : { arguments: arguments_ });
     if (new TextEncoder().encode(body).length > (direct ? 4096 : 65_536)) throw new Error("EXECUTIVE_INPUT_TOO_LARGE");
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -1226,6 +1227,11 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       authGeneration: () => executiveGeneration,
       available: () => configured && executiveResource !== null && valid("executive"),
       subscribe(listener) { executiveListeners.add(listener); return () => { executiveListeners.delete(listener); }; },
+      historyContext: (selection, signal) => {
+        const closed = projectHistorySelection(selection);
+        return closed ? executivePost("session/history-context", {selection: {work_ref: closed.workRef}}, signal)
+          : Promise.reject(new Error("SESSION_HISTORY_SELECTION_INVALID"));
+      },
       context: (selection, signal) => {
         const normalized = normalizeSelection(selection);
         if (!normalized) return Promise.reject(new Error("SELECTION_INVALID"));
@@ -1243,7 +1249,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         return closed ? executivePost("session/references", closed, signal)
           : Promise.reject(new Error("SESSION_REFERENCES_INVALID"));
       },
-    } satisfies ExecutiveSessionTransport,
+    } satisfies ProjectConversationHistoryTransport,
     // Same existing OAuth generation used by every bounded acquisition read.
     // The MissionHost requires this proof before it mounts the plan port.
     invalidationGeneration: () => generation,

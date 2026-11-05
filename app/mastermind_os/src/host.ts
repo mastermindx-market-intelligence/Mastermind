@@ -23,7 +23,7 @@ import { decodeRetainedActivity, validActivitySelection, type ActivitySelection,
 import { createNativeExecutiveTransport } from "./native-executive-transport";
 import type { MissionDiagnosticSnapshot } from "./diagnostic-state";
 import { createTerminalBriefsNavigationPort, type TerminalBriefsNavigationPort } from "./terminal/terminal-navigation";
-import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
+import type { ProjectConversationHistoryTransport, ProjectConversationHistoryReaderFactory } from "./conversations/project-conversation-history-owner";
 import type { ProjectPlanningTransport } from "./planning/project-planning-transport";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import {
@@ -89,7 +89,7 @@ export interface RawClient extends Partial<ProjectAdmissionRawMethods>,Partial<I
   readonly research?: ResearchEvidenceTransport;
   readonly executive?: OsExecutiveTransport;
   /** Optional fixed selected-session continuation transport; same private bearer custody. */
-  readonly executiveSession?: ExecutiveSessionTransport;
+  readonly executiveSession?: ProjectConversationHistoryTransport;
   getState(): AuthState;
   /** Existing source epoch, when exposed by the fixed client; never a principal or grant. */
   invalidationGeneration?(): number;
@@ -231,12 +231,14 @@ export interface MissionHost extends Partial<ProjectAdmissionHostMethods>,Partia
   sessionCommandBinding?: unknown;
   /** Pushes the exact selection on every transition and registers the explicit condition provider. */
   session?: {
+    createProjectHistoryReader?: ProjectConversationHistoryReaderFactory;
     refresh(selection: unknown): Promise<void>;
     setStopCondition(provider: () => unknown): void;
   };
 }
 export interface SessionHostAttachment {
   readonly binding: unknown;
+  readonly createProjectHistoryReader?: ProjectConversationHistoryReaderFactory;
   refresh(selection: unknown): Promise<void>;
   setStopCondition(provider: () => unknown): void;
 }
@@ -939,6 +941,7 @@ export function bindMissionHost(
       ? {
           sessionCommandBinding: session.binding,
           session: {
+            ...(session.createProjectHistoryReader ? {createProjectHistoryReader: session.createProjectHistoryReader} : {}),
             refresh: (selection: unknown) => session.refresh(selection),
             setStopCondition: (provider: () => unknown) => session.setStopCondition(provider),
           },

@@ -1934,3 +1934,43 @@ describe('fixed current project access Web read',()=>{
   expect(e.fetcher).toHaveBeenCalledTimes(1);
  });
 });
+
+describe("project history fixed READ",()=>{
+  const historyResource="https://mcp.mastermind-x.com/os/executive";
+  async function readOnlyHistory(){
+    const e=setup({executiveResource:historyResource});
+    e.fetcher.mockImplementation(async()=>response({token_type:"Bearer",access_token:"private-token",expires_in:3600,
+      scope:new URL(e.popup.location).searchParams.get("audience")===historyResource
+        ?"mastermind.executive.read":new URL(e.popup.location).searchParams.get("scope")}));
+    await e.login();e.fetcher.mockClear();return e;
+  }
+  it("sends only the direct work selection with READ-only Executive authority and never widens SEND",async()=>{
+    const e=await readOnlyHistory(),signal=new AbortController().signal;
+    e.fetcher.mockImplementation(async()=>response({ok:true}));
+    await e.client.executiveSession!.historyContext!({workRef:"WS:Original.Project"},signal);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    const [url,request]=e.fetcher.mock.calls[0];
+    expect(url).toBe(ORIGIN+"/os/executive/session/history-context");
+    expect(JSON.parse(request!.body as string)).toEqual({selection:{work_ref:"WS:Original.Project"}});
+    const headers=new Headers(request!.headers);
+    expect(headers.has("x-mastermind-workspace-authorization")).toBe(false);
+    await expect(e.client.executiveSession!.send({operation_key:"inert-original",target_ref:"fabric_attempt:"+"a".repeat(64),instruction:"inert message",stop_condition:"finish"},signal)).rejects.toThrow("EXECUTIVE_SEND_SCOPE_REQUIRED");
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("rejects root/additional/accessor selectors before OAuth or fetch",async()=>{
+    const e=setup({executiveResource:historyResource}),signal=new AbortController().signal;
+    const getter=vi.fn(()=>"WS:Original.Project");
+    for(const selection of [{workRef:"WS:Original.Project",rootJobId:"JOB-1"},
+      Object.defineProperty({},"workRef",{get:getter}),{workRef:"WS:Original.Project\n"}]){
+      await expect(e.client.executiveSession!.historyContext!(selection as {workRef:string},signal)).rejects.toThrow("SESSION_HISTORY_SELECTION_INVALID");
+    }
+    expect(getter).not.toHaveBeenCalled();expect(e.fetcher).not.toHaveBeenCalled();
+  });
+  it("refuses the original READ reply after actual auth generation withdrawal",async()=>{
+    const e=await readOnlyHistory(),held=deferred<Response>();e.fetcher.mockImplementation(()=>held.promise);
+    const pending=e.client.executiveSession!.historyContext!({workRef:"WS:Original.Project"},new AbortController().signal);
+    const refused=expect(pending).rejects.toThrow();await flush();
+    await e.client.signOut();held.resolve(response({ok:true}));await refused;
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+});

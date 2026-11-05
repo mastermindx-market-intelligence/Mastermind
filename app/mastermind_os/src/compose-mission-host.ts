@@ -1,4 +1,5 @@
 import { bindMissionHost, type RawClient, type SessionHostAttachment } from "./host";
+import { createProjectConversationHistoryReaderFactory } from "./conversations/project-conversation-history-owner";
 import { readLaunchBindingConfig } from "./launch-config";
 import type { MissionSelection } from "./mission";
 import type { LaunchBindingConfig } from "./orchestration/executive-launch-command-port";
@@ -73,9 +74,12 @@ export function composeMissionHost(
         createIndexedDbSessionPendingPointerStore(indexedDB),
       )
     : null;
+  const projectHistoryReader = client.executiveSession
+    ? createProjectConversationHistoryReaderFactory(client.executiveSession) : undefined;
   const sessionAttachment: SessionHostAttachment | undefined = session
     ? {
         binding: session.binding,
+        ...(projectHistoryReader ? {createProjectHistoryReader: projectHistoryReader} : {}),
         refresh: (selection) => session.refresh(selection as MissionSelection | null),
         setStopCondition: (provider) => session.setStopCondition(provider),
       }

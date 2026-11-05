@@ -147,6 +147,7 @@ fn main() {
             auth::executive_direct_correction,
             auth::executive_project_planning,
             auth::executive_session_context,
+            auth::executive_project_history_context,
             auth::executive_session_reply,
             auth::executive_session_references,
             auth::executive_project_session_references
