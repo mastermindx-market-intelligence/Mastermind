@@ -283,6 +283,23 @@ jobs:
               echo "::notice title=H1 isolated provider module fixture proof::all 23 exact nodes passed; zero skipped, failures or errors; CI fixture only"
             '
 
+      - name: Verify native application admission and dispatch custody
+        if: matrix.index == 0
+        run: |
+          python - <<'PYTEST'
+          import unittest
+          suite = unittest.TestSuite()
+          for pattern in (
+              "test_application_turn_*.py", "test_quota_continuity.py",
+              "test_broker_prelease_deadline.py", "test_slot_release_custody.py",
+              "test_qwen_account_eligibility.py", "test_qwen_429_account_priority.py",
+          ):
+              suite.addTests(unittest.defaultTestLoader.discover(
+                  "ops/native_fabric/quota_continuity/tests", pattern=pattern))
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(not result.wasSuccessful())
+          PYTEST
+
       # Use a separate pinned owner fixture; keep the ordinary Macro vendor pin.
       # This executes before any full-suite reuse decision, including merge_group.
       - name: Checkout paired Brain inference owner fixture

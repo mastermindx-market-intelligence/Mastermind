@@ -16,15 +16,18 @@ CLI:
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from contextvars import ContextVar
 import fcntl
+import hashlib
 import json
+import math
 import os
+import re
 import socket
 import sqlite3
 import sys
 import time
-from dataclasses import dataclass
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -36,6 +39,175 @@ from commission_deadline import (CommissionDeadlineExpired, require_remaining,
 # Only acquire sets this context. Independent threads/controllers and existing
 # heartbeat/release/settlement operations never inherit another acquire's fuse.
 _ACQUIRE_DEADLINE_NS = ContextVar("fabric_acquire_deadline_ns", default=None)
+_APPLICATION_ACCOUNTS = ContextVar("fabric_application_accounts", default=None)
+
+
+class ApplicationAdmissionError(ValueError):
+    """A bounded refusal; never a provider or credential diagnostic."""
+
+    def __init__(self, code):
+        self.code = code
+        super().__init__("application admission refused: " + code)
+
+
+def _application_id(value):
+    if not isinstance(value, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", value) is None:
+        raise ApplicationAdmissionError("invalid_identity")
+    return value
+
+
+def _application_model(value):
+    if not isinstance(value, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./:-]{0,127}", value) is None:
+        raise ApplicationAdmissionError("invalid_model")
+    return value
+
+
+def _application_json(value):
+    try:
+        return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                          ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError, OverflowError, RecursionError):
+        raise ApplicationAdmissionError("invalid_document") from None
+
+
+def _application_time(value):
+    if type(value) not in (int, float):
+        raise ApplicationAdmissionError("invalid_time")
+    try:
+        if not math.isfinite(value) or value <= 0:
+            raise ApplicationAdmissionError("invalid_time")
+    except (OverflowError, ValueError):
+        raise ApplicationAdmissionError("invalid_time") from None
+    return float(value)
+
+
+def _application_receipt(receipt):
+    """Validate the original handler's final upstream response receipt."""
+    fields = {"dispatch_id", "request_digest", "lease_id", "account", "model", "response_digest",
+              "status_code", "completed_at", "usage"}
+    if not isinstance(receipt, dict) or set(receipt) != fields:
+        raise ApplicationAdmissionError("invalid_terminal_receipt")
+    for key in ("dispatch_id", "lease_id", "account"):
+        _application_id(receipt[key])
+    _application_model(receipt["model"])
+    for key in ("request_digest", "response_digest"):
+        if not isinstance(receipt[key], str) or re.fullmatch(r"[0-9a-f]{64}", receipt[key]) is None:
+            raise ApplicationAdmissionError("invalid_terminal_receipt")
+    if type(receipt["status_code"]) is not int or not 200 <= receipt["status_code"] <= 599:
+        raise ApplicationAdmissionError("invalid_terminal_receipt")
+    _application_time(receipt["completed_at"])
+    usage = receipt["usage"]
+    if not isinstance(usage, dict) or set(usage) != {"input_tokens", "output_tokens"}:
+        raise ApplicationAdmissionError("invalid_terminal_receipt")
+    if any(value is not None and (type(value) is not int or not 0 <= value <= 10**12) for value in usage.values()):
+        raise ApplicationAdmissionError("invalid_terminal_receipt")
+    return _application_json(receipt)
+
+
+def _application_stored_terminal(request, turn):
+    """Positive settlement proof; corrupt or unfamiliar states retain custody."""
+    if request["state"] != "terminal" or not isinstance(request["terminal_receipt"], str):
+        return None
+    try:
+        receipt = json.loads(request["terminal_receipt"])
+        encoded = _application_receipt(receipt)
+        if (encoded != request["terminal_receipt"]
+                or receipt["dispatch_id"] != request["dispatch_id"]
+                or receipt["request_digest"] != request["request_digest"]
+                or any(receipt[key] != turn[key] for key in ("lease_id", "account", "model"))
+                or receipt["completed_at"] < request["created_at"]):
+            return None
+        return receipt
+    except (ValueError, TypeError, KeyError, OverflowError, RecursionError):
+        return None
+
+
+_APPLICATION_GRANT_FIELDS = frozenset({
+    "grant_id", "purpose", "enabled", "principal_id", "credential_ref", "admission_root",
+    "caller_hosts", "workloads", "pool", "accounts", "models", "route", "stream",
+    "expires_at", "max_turn_seconds", "max_steps", "qualification_ref", "application_permission_ref",
+})
+
+
+def _read_application_accounts(path):
+    """Fresh owner document; no mtime fallback, duplicate keys or secret lookup."""
+    try:
+        import yaml
+
+        class ClosedLoader(yaml.SafeLoader):
+            pass
+
+        def mapping(loader, node, deep=False):
+            result = {}
+            for key_node, value_node in node.value:
+                key = loader.construct_object(key_node, deep=deep)
+                if not isinstance(key, str) or key in result:
+                    raise ApplicationAdmissionError("invalid_accounts_document")
+                result[key] = loader.construct_object(value_node, deep=deep)
+            return result
+
+        ClosedLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
+        with open(path, "rb") as source:
+            raw = source.read(2 * 1024 * 1024 + 1)
+        if len(raw) > 2 * 1024 * 1024:
+            raise ApplicationAdmissionError("invalid_accounts_document")
+        document = yaml.load(raw.decode("utf-8"), Loader=ClosedLoader)
+        if (not isinstance(document, dict)
+                or document.get("schema") != "mastermind.provider_accounts.v1"
+                or not isinstance(document.get("providers"), dict)
+                or not isinstance(document.get("application_grants"), list)):
+            raise ApplicationAdmissionError("invalid_accounts_document")
+        _application_json(document)
+        seen = set()
+        for grant in document["application_grants"]:
+            if not isinstance(grant, dict) or set(grant) != _APPLICATION_GRANT_FIELDS:
+                raise ApplicationAdmissionError("invalid_application_grant")
+            for key in ("grant_id", "principal_id", "credential_ref", "admission_root"):
+                _application_id(grant[key])
+            if grant["grant_id"] in seen:
+                raise ApplicationAdmissionError("duplicate_application_grant")
+            seen.add(grant["grant_id"])
+            if (grant["purpose"] != "APPLICATION" or type(grant["enabled"]) is not bool
+                    or grant["pool"] != "go" or grant["route"] != "/v1/chat/completions"
+                    or grant["stream"] is not False):
+                raise ApplicationAdmissionError("invalid_application_grant")
+            _application_time(grant["expires_at"])
+            for key, limit in (("max_turn_seconds", 900), ("max_steps", 64)):
+                if type(grant[key]) is not int or not 1 <= grant[key] <= limit:
+                    raise ApplicationAdmissionError("invalid_application_grant")
+            for key in ("caller_hosts", "workloads", "accounts", "models"):
+                values = grant[key]
+                if not isinstance(values, list) or not 1 <= len(values) <= 128:
+                    raise ApplicationAdmissionError("invalid_application_grant")
+                for value in values:
+                    (_application_model if key == "models" else _application_id)(value)
+                if len(set(values)) != len(values):
+                    raise ApplicationAdmissionError("invalid_application_grant")
+            for key in ("qualification_ref", "application_permission_ref"):
+                if (not isinstance(grant[key], str) or not grant[key].strip()
+                        or len(grant[key]) > 512 or any(ord(c) < 32 for c in grant[key])):
+                    raise ApplicationAdmissionError("invalid_application_grant")
+            provider = document["providers"].get(grant["pool"])
+            if (not isinstance(provider, dict) or type(provider.get("enabled")) is not bool
+                    or not isinstance(provider.get("accounts"), list)):
+                raise ApplicationAdmissionError("invalid_account_reference")
+            for account in provider["accounts"]:
+                _application_id(account["name"])
+                if (type(account.get("per_account_cap")) is not int
+                        or not 0 <= account["per_account_cap"] <= 4096
+                        or ("enabled" in account and type(account["enabled"]) is not bool)):
+                    raise ApplicationAdmissionError("invalid_account_reference")
+            account_names = [a.get("name") for a in provider["accounts"] if isinstance(a, dict)]
+            if (len(account_names) != len(provider["accounts"])
+                    or any(not isinstance(name, str) for name in account_names)
+                    or len(set(account_names)) != len(account_names)
+                    or not set(grant["accounts"]).issubset(account_names)):
+                raise ApplicationAdmissionError("invalid_account_reference")
+        return document
+    except ApplicationAdmissionError:
+        raise
+    except Exception:
+        raise ApplicationAdmissionError("accounts_unavailable") from None
 
 
 class _DeadlineConnection(sqlite3.Connection):
@@ -84,6 +256,7 @@ DEFAULT_TTL = 180
 RENT_TTL = 90
 WAITER_STALE_S = 90  # demand grace; live acquirers refresh last_heartbeat
 CLASS_PRIORITY = {
+    "application": 3,
     "heal": 0,
     "heals": 0,
     "fix_build": 1,
@@ -306,6 +479,73 @@ class Broker:
             conn.execute(
                 "ALTER TABLE leases ADD COLUMN model TEXT NOT NULL DEFAULT ''"
             )
+        if "purpose" not in lcols:
+            conn.execute("ALTER TABLE leases ADD COLUMN purpose TEXT NOT NULL DEFAULT 'WORKER'")
+        conn.execute("""CREATE TABLE IF NOT EXISTS application_turns (
+            principal_id TEXT NOT NULL, turn_id TEXT NOT NULL,
+            grant_id TEXT NOT NULL, grant_digest TEXT NOT NULL,
+            caller_host TEXT NOT NULL, workload TEXT NOT NULL,
+            admission_root TEXT NOT NULL, pool TEXT NOT NULL, account TEXT NOT NULL,
+            model TEXT NOT NULL, lease_id TEXT NOT NULL UNIQUE,
+            created_at REAL NOT NULL, expires_at REAL NOT NULL,
+            max_steps INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'open',
+            PRIMARY KEY (principal_id, turn_id))""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS application_requests (
+            principal_id TEXT NOT NULL, turn_id TEXT NOT NULL, request_id TEXT NOT NULL,
+            request_digest TEXT NOT NULL, dispatch_id TEXT NOT NULL UNIQUE,
+            state TEXT NOT NULL CHECK (state IN ('pending','unknown','terminal')), created_at REAL NOT NULL,
+            terminal_receipt TEXT, unknown_reason TEXT,
+            CHECK ((state='terminal' AND terminal_receipt IS NOT NULL)
+                   OR (state IN ('pending','unknown') AND terminal_receipt IS NULL)),
+            PRIMARY KEY (principal_id, turn_id, request_id))""")
+        # Older immutable worker releases also run GC against this same DB.
+        # Keep application custody in the canonical schema, where an old PID,
+        # TTL or generic release path cannot erase it. IGNORE affects only the
+        # incompatible row; ordinary worker updates continue in the same batch.
+        conn.execute("""CREATE TRIGGER IF NOT EXISTS application_lease_binding_v1
+            BEFORE UPDATE ON leases WHEN OLD.purpose='APPLICATION' AND (
+                NEW.purpose IS NOT OLD.purpose OR NEW.id IS NOT OLD.id
+                OR NEW.orchestrator_id IS NOT OLD.orchestrator_id OR NEW.pool IS NOT OLD.pool
+                OR NEW.account IS NOT OLD.account OR NEW.model IS NOT OLD.model
+                OR NEW.host IS NOT OLD.host OR NEW.pid IS NOT OLD.pid
+                OR NEW.granted_at IS NOT OLD.granted_at OR NEW.ttl IS NOT OLD.ttl
+                OR NEW.last_heartbeat IS NOT OLD.last_heartbeat
+                OR NEW.renewable > OLD.renewable)
+            BEGIN SELECT RAISE(IGNORE); END""")
+        conn.execute("""CREATE TRIGGER IF NOT EXISTS application_lease_delete_v1
+            BEFORE DELETE ON leases WHEN OLD.purpose='APPLICATION'
+            BEGIN SELECT RAISE(IGNORE); END""")
+        conn.execute("""CREATE TRIGGER IF NOT EXISTS application_lease_release_v1
+            BEFORE UPDATE OF state ON leases WHEN OLD.purpose='APPLICATION'
+            AND OLD.state IN ('held','rented') AND NEW.state NOT IN ('held','rented')
+            AND NOT EXISTS (
+                SELECT 1 FROM application_turns t WHERE t.lease_id=OLD.id AND t.state='closed'
+                AND NOT EXISTS (
+                    SELECT 1 FROM application_requests r
+                    WHERE r.principal_id=t.principal_id AND r.turn_id=t.turn_id
+                    AND CASE WHEN r.state='terminal' AND json_valid(r.terminal_receipt)=1 THEN
+                        CASE WHEN json_type(r.terminal_receipt)='object'
+                            AND json_extract(r.terminal_receipt,'$.dispatch_id')=r.dispatch_id
+                            AND json_extract(r.terminal_receipt,'$.request_digest')=r.request_digest
+                            AND json_extract(r.terminal_receipt,'$.lease_id')=t.lease_id
+                            AND json_extract(r.terminal_receipt,'$.account')=t.account
+                            AND json_extract(r.terminal_receipt,'$.model')=t.model
+                            AND json_type(r.terminal_receipt,'$.response_digest')='text'
+                            AND length(json_extract(r.terminal_receipt,'$.response_digest'))=64
+                            AND json_extract(r.terminal_receipt,'$.response_digest') NOT GLOB '*[^0-9a-f]*'
+                            AND json_type(r.terminal_receipt,'$.status_code')='integer'
+                            AND json_extract(r.terminal_receipt,'$.status_code') BETWEEN 200 AND 599
+                            AND json_type(r.terminal_receipt,'$.completed_at') IN ('integer','real')
+                            AND json_extract(r.terminal_receipt,'$.completed_at')>=r.created_at
+                            AND json_type(r.terminal_receipt,'$.usage')='object'
+                            AND (json_type(r.terminal_receipt,'$.usage.input_tokens')='null'
+                                 OR (json_type(r.terminal_receipt,'$.usage.input_tokens')='integer'
+                                     AND json_extract(r.terminal_receipt,'$.usage.input_tokens') BETWEEN 0 AND 1000000000000))
+                            AND (json_type(r.terminal_receipt,'$.usage.output_tokens')='null'
+                                 OR (json_type(r.terminal_receipt,'$.usage.output_tokens')='integer'
+                                     AND json_extract(r.terminal_receipt,'$.usage.output_tokens') BETWEEN 0 AND 1000000000000))
+                        THEN 0 ELSE 1 END ELSE 1 END=1))
+            BEGIN SELECT RAISE(IGNORE); END""")
         wcols = {r[1] for r in conn.execute("PRAGMA table_info(waiters)")}
         if "last_heartbeat" not in wcols:
             conn.execute("ALTER TABLE waiters ADD COLUMN last_heartbeat REAL")
@@ -315,6 +555,9 @@ class Broker:
             )
 
     def load_accounts_doc(self) -> Dict[str, Any]:
+        selected = _APPLICATION_ACCOUNTS.get()
+        if selected is not None:
+            return selected
         try:
             mtime = os.path.getmtime(self.accounts_path)
         except OSError:
@@ -648,6 +891,16 @@ class Broker:
         try:
             now = self.now()
             for row in self._active_leases(conn):
+                if row["purpose"] == "APPLICATION":
+                    turn = conn.execute("SELECT * FROM application_turns WHERE lease_id=?", (row["id"],)).fetchone()
+                    # Missing custody is not evidence that an application ended.
+                    if turn is None or self._application_unsettled(conn, turn):
+                        continue
+                    if now >= min(float(turn["expires_at"]), float(row["granted_at"]) + float(row["ttl"])):
+                        conn.execute("UPDATE application_turns SET state='closed' WHERE lease_id=?", (row["id"],))
+                        conn.execute("UPDATE leases SET state='expired' WHERE id=?", (row["id"],))
+                        expired += 1
+                    continue  # Application liveness never depends on a fabricated PID.
                 dead = False
                 try:
                     renewable = int(row["renewable"])
@@ -822,7 +1075,6 @@ class Broker:
                     wid,
                 ),
             )
-            conn.commit()
             return wid
         wid = waiter_id or uuid.uuid4().hex[:12]
         conn.execute(
@@ -843,7 +1095,6 @@ class Broker:
                 now,
             ),
         )
-        conn.commit()
         return wid
 
     def _register_demand(
@@ -864,7 +1115,6 @@ class Broker:
         share_now = self.fair_share(conn, pool)
         if self._below_share_waiters(conn, pool, "", share_now):
             self._mark_surplus_nonrenewable(conn, pool, share_now)
-            conn.commit()
         return wid
 
     def _front_of_queue(
@@ -1016,6 +1266,36 @@ class Broker:
         capacity_handoff: bool = False,
         not_before: Optional[str] = None,
     ) -> Tuple[AcquireResult, Optional[str], str]:
+        conn = self._conn()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            result = self._try_acquire_in_transaction(conn, orch, pool, account, task_class,
+                host, pid, ttl, waiter_id, model, operator_child_id, capacity_handoff, not_before)
+            conn.commit()
+            return result
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _try_acquire_in_transaction(
+        self,
+        conn: sqlite3.Connection,
+        orch: str,
+        pool: str,
+        account: Optional[str],
+        task_class: str,
+        host: str,
+        pid: int,
+        ttl: Optional[int],
+        waiter_id: Optional[str],
+        model: str = "",
+        operator_child_id: Optional[str] = None,
+        capacity_handoff: bool = False,
+        not_before: Optional[str] = None,
+        *, allowed_accounts=None, purpose="WORKER",
+    ) -> Tuple[AcquireResult, Optional[str], str]:
         spec = self.provider(pool)
         if spec.get("enabled") is False:
             return (
@@ -1031,17 +1311,12 @@ class Broker:
             )
         if capacity_handoff and operator_child_id is None:
             import quota_circuit
-            conn = self._conn()
-            try:
-                blockade = quota_circuit.capacity_blockade(self, conn, pool, account)
-                if blockade is not None:
-                    if waiter_id is not None:
-                        conn.execute("DELETE FROM waiters WHERE id=?", (waiter_id,))
-                        conn.commit()
-                    return (AcquireResult(ok=False, reason="quota_cooldown", pool=pool,
-                        orchestrator_id=orch, quota_blockade=blockade), waiter_id, "quota_cooldown")
-            finally:
-                conn.close()
+            blockade = quota_circuit.capacity_blockade(self, conn, pool, account)
+            if blockade is not None:
+                if waiter_id is not None:
+                    conn.execute("DELETE FROM waiters WHERE id=?", (waiter_id,))
+                return (AcquireResult(ok=False, reason="quota_cooldown", pool=pool,
+                    orchestrator_id=orch, quota_blockade=blockade), waiter_id, "quota_cooldown")
         compatible_accounts = None
         if (pool == "glm" and task_class == "remote-glm") or (
                 self.provider_name(pool) == "bailian" and task_class == "remote-qwen"):
@@ -1054,133 +1329,132 @@ class Broker:
             if not compatible_accounts:
                 return (AcquireResult(ok=False, reason="host_account_unavailable", pool=pool,
                                       orchestrator_id=orch), waiter_id, "host_account_unavailable")
+        if allowed_accounts is not None:
+            available = self.grantable_accounts(pool) if compatible_accounts is None else compatible_accounts
+            compatible_accounts = [a for a in available if a.get("name") in allowed_accounts
+                                   and a.get("enabled", True) is not False]
         cap = self.pool_cap(pool)
-        conn = self._conn()
-        try:
-            if cap <= 0:
-                waiter_id = self._register_demand(
-                    conn, waiter_id, orch, pool, account, task_class, host
-                )
-                return (
-                    AcquireResult(ok=False, reason="no_grantable_account", pool=pool, orchestrator_id=orch),
-                    waiter_id,
-                    "no_grantable_account",
-                )
-            active = self._active_leases(conn, pool)
-            share = self.fair_share(conn, pool, extra=orch)
-            held_rows = self._held_by(conn, orch, pool)
-            held_n = len(held_rows)
-            below_any = self._below_share_waiters(conn, pool, "", share)
-            below = self._below_share_waiters(conn, pool, orch, share)
-            if below_any:
-                self._mark_surplus_nonrenewable(conn, pool, share)
-                conn.commit()
-            else:
-                conn.execute(
-                    "UPDATE leases SET state='held', renewable=1 "
-                    "WHERE state IN ('held','rented') AND pool=?",
-                    (pool,),
-                )
-                conn.commit()
-
-            want_surplus = held_n >= share
-            if want_surplus and below:
-                waiter_id = self._register_demand(
-                    conn, waiter_id, orch, pool, account, task_class, host
-                )
-                return (
-                    AcquireResult(ok=False, reason="lending_blocked", pool=pool, orchestrator_id=orch),
-                    waiter_id,
-                    "lending_blocked",
-                )
-            if len(active) >= cap:
-                waiter_id = self._register_demand(
-                    conn, waiter_id, orch, pool, account, task_class, host
-                )
-                return (
-                    AcquireResult(ok=False, reason="cap_full", pool=pool, orchestrator_id=orch),
-                    waiter_id,
-                    "cap_full",
-                )
-            if not self._front_of_queue(conn, pool, orch, task_class):
-                waiter_id = self._register_demand(
-                    conn, waiter_id, orch, pool, account, task_class, host
-                )
-                return (
-                    AcquireResult(ok=False, reason="priority_wait", pool=pool, orchestrator_id=orch),
-                    waiter_id,
-                    "priority_wait",
-                )
-
-            picked = self._pick_account(conn, pool, account, model=model,
-                                        grantable_override=compatible_accounts)
-            if not picked:
-                reason = "account_unavailable" if account else "accounts_at_cap"
-                if account and any(self._parked(a, self.now()) for a in (spec.get("accounts") or []) if a.get("name") == account):
-                    reason = "account_parked"
-                grantable_names = {a.get("name") for a in self.grantable_accounts(pool)}
-                persist = reason not in ("account_parked",) and (
-                    not account or account in grantable_names or reason == "accounts_at_cap"
-                )
-                if persist:
-                    waiter_id = self._register_demand(
-                        conn, waiter_id, orch, pool, account, task_class, host
-                    )
-                return (
-                    AcquireResult(ok=False, reason=reason, pool=pool, orchestrator_id=orch),
-                    waiter_id,
-                    reason,
-                )
-
-            state = "rented" if want_surplus else "held"
-            use_ttl = int(ttl if ttl is not None else (RENT_TTL if state == "rented" else DEFAULT_TTL))
-            lid = uuid.uuid4().hex[:12]
-            now = self.now()
-            original_deadline = _ACQUIRE_DEADLINE_NS.get()
-            if original_deadline is not None:
-                require_remaining(original_deadline)
-            if operator_child_id is not None:
-                try:
-                    from fabric_operator_owner import validate_child_admission
-                    validate_child_admission(conn, operator_child_id, orch, now=now)
-                except (ValueError, KeyError, TypeError, sqlite3.Error):
-                    return (AcquireResult(ok=False, reason="operator_authorization_refused",
-                                          pool=pool, orchestrator_id=orch),
-                            waiter_id, "operator_authorization_refused")
-            if not_before is not None:
-                from commission_deadline import require_not_before
-                require_not_before(not_before)
-            conn.execute(
-                "INSERT INTO leases "
-                "(id, orchestrator_id, pool, account, task_class, model, host, pid, "
-                "granted_at, ttl, last_heartbeat, state, renewable, quota_scope) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (lid, orch, pool, picked, task_class, model, host, pid, now, use_ttl, now, state, 1,
-                 __import__("quota_circuit").scope_for(self, pool, picked)),
+        if cap <= 0:
+            waiter_id = self._register_demand(
+                conn, waiter_id, orch, pool, account, task_class, host
             )
-            if operator_child_id is not None:
-                conn.execute("UPDATE operator_child_authorizations SET admitted_lease_id=? WHERE run_id=? AND root=? AND admitted_lease_id IS NULL",
-                             (lid, operator_child_id, orch))
-            conn.execute(
-                "DELETE FROM waiters WHERE orchestrator_id=? AND pool=?",
-                (orch, pool),
-            )
-            waiter_id = None
-            conn.commit()
             return (
-                AcquireResult(
-                    ok=True,
-                    lease_id=lid,
-                    account=picked,
-                    state=state,
-                    orchestrator_id=orch,
-                    pool=pool,
-                ),
-                None,
-                "",
+                AcquireResult(ok=False, reason="no_grantable_account", pool=pool, orchestrator_id=orch),
+                waiter_id,
+                "no_grantable_account",
             )
-        finally:
-            conn.close()
+        active = self._active_leases(conn, pool)
+        share = self.fair_share(conn, pool, extra=orch)
+        held_rows = self._held_by(conn, orch, pool)
+        held_n = len(held_rows)
+        below_any = self._below_share_waiters(conn, pool, "", share)
+        below = self._below_share_waiters(conn, pool, orch, share)
+        if below_any:
+            self._mark_surplus_nonrenewable(conn, pool, share)
+        else:
+            conn.execute(
+                "UPDATE leases SET state='held', renewable=1 "
+                "WHERE state IN ('held','rented') AND pool=? AND purpose!='APPLICATION'",
+                (pool,),
+            )
+
+        want_surplus = held_n >= share
+        if want_surplus and below:
+            waiter_id = self._register_demand(
+                conn, waiter_id, orch, pool, account, task_class, host
+            )
+            return (
+                AcquireResult(ok=False, reason="lending_blocked", pool=pool, orchestrator_id=orch),
+                waiter_id,
+                "lending_blocked",
+            )
+        if len(active) >= cap:
+            waiter_id = self._register_demand(
+                conn, waiter_id, orch, pool, account, task_class, host
+            )
+            return (
+                AcquireResult(ok=False, reason="cap_full", pool=pool, orchestrator_id=orch),
+                waiter_id,
+                "cap_full",
+            )
+        if not self._front_of_queue(conn, pool, orch, task_class):
+            waiter_id = self._register_demand(
+                conn, waiter_id, orch, pool, account, task_class, host
+            )
+            return (
+                AcquireResult(ok=False, reason="priority_wait", pool=pool, orchestrator_id=orch),
+                waiter_id,
+                "priority_wait",
+            )
+
+        picked = self._pick_account(conn, pool, account, model=model,
+                                    grantable_override=compatible_accounts)
+        if not picked:
+            reason = "account_unavailable" if account else "accounts_at_cap"
+            if account and any(self._parked(a, self.now()) for a in (spec.get("accounts") or []) if a.get("name") == account):
+                reason = "account_parked"
+            grantable_names = {a.get("name") for a in self.grantable_accounts(pool)}
+            persist = reason not in ("account_parked",) and (
+                not account or account in grantable_names or reason == "accounts_at_cap"
+            )
+            if persist:
+                waiter_id = self._register_demand(
+                    conn, waiter_id, orch, pool, account, task_class, host
+                )
+            return (
+                AcquireResult(ok=False, reason=reason, pool=pool, orchestrator_id=orch),
+                waiter_id,
+                reason,
+            )
+
+        state = "rented" if want_surplus else "held"
+        use_ttl = int(ttl if ttl is not None else (RENT_TTL if state == "rented" else DEFAULT_TTL))
+        if purpose == "APPLICATION" and state == "rented":
+            use_ttl = min(use_ttl, RENT_TTL)
+        lid = uuid.uuid4().hex[:12]
+        now = self.now()
+        original_deadline = _ACQUIRE_DEADLINE_NS.get()
+        if original_deadline is not None:
+            require_remaining(original_deadline)
+        if operator_child_id is not None:
+            try:
+                from fabric_operator_owner import validate_child_admission
+                validate_child_admission(conn, operator_child_id, orch, now=now)
+            except (ValueError, KeyError, TypeError, sqlite3.Error):
+                return (AcquireResult(ok=False, reason="operator_authorization_refused",
+                                      pool=pool, orchestrator_id=orch),
+                        waiter_id, "operator_authorization_refused")
+        if not_before is not None:
+            from commission_deadline import require_not_before
+            require_not_before(not_before)
+        conn.execute(
+            "INSERT INTO leases "
+            "(id, orchestrator_id, pool, account, task_class, model, host, pid, "
+            "granted_at, ttl, last_heartbeat, state, renewable, quota_scope, purpose) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (lid, orch, pool, picked, task_class, model, host, pid, now, use_ttl, now, state, 1,
+             __import__("quota_circuit").scope_for(self, pool, picked), purpose),
+        )
+        if operator_child_id is not None:
+            conn.execute("UPDATE operator_child_authorizations SET admitted_lease_id=? WHERE run_id=? AND root=? AND admitted_lease_id IS NULL",
+                         (lid, operator_child_id, orch))
+        conn.execute(
+            "DELETE FROM waiters WHERE orchestrator_id=? AND pool=?",
+            (orch, pool),
+        )
+        waiter_id = None
+        return (
+            AcquireResult(
+                ok=True,
+                lease_id=lid,
+                account=picked,
+                state=state,
+                orchestrator_id=orch,
+                pool=pool,
+            ),
+            None,
+            "",
+        )
 
     def heartbeat(self, lease_id: str) -> HeartbeatResult:
         lock = self._lock()
@@ -1189,6 +1463,8 @@ class Broker:
             pre = self._conn()
             try:
                 row = pre.execute("SELECT * FROM leases WHERE id=?", (lease_id,)).fetchone()
+                if row and row["purpose"] == "APPLICATION":
+                    return HeartbeatResult(False, "application_owned")
                 if row and row["state"] in HELD_STATES:
                     now = self.now()
                     if int(row["renewable"]) == 0 and (now - float(row["granted_at"])) > float(row["ttl"]):
@@ -1238,6 +1514,8 @@ class Broker:
                 ).fetchone()
                 if not row:
                     return False
+                if row["purpose"] == "APPLICATION":
+                    return False  # Only the application effect owner can settle it.
                 if row["state"] not in HELD_STATES:
                     return False
                 if row["orchestrator_id"] != oid:
@@ -1252,6 +1530,271 @@ class Broker:
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
             lock.close()
+
+    # ── application purpose, same admission/effect owner ─────────────────────
+
+    @contextmanager
+    def _application_transaction(self, *, deadline_ns=None, collect=False):
+        deadline = validate_deadline_ns(deadline_ns) if deadline_ns is not None else None
+        token = _ACQUIRE_DEADLINE_NS.set(deadline)
+        lock = conn = None
+        try:
+            lock = self._lock()
+            if collect:
+                self._gc_locked()
+            conn = self._conn()
+            conn.execute("BEGIN IMMEDIATE")
+            yield conn
+            conn.commit()
+        except BaseException:
+            if conn is not None:
+                conn.rollback()
+            raise
+        finally:
+            if conn is not None:
+                conn.close()
+            if lock is not None:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+                lock.close()
+            _ACQUIRE_DEADLINE_NS.reset(token)
+
+    def _application_grant(self, principal_id, caller_host, workload, pool, model):
+        document = _read_application_accounts(self.accounts_path)
+        now = _application_time(self.now())
+        matches = [g for g in document["application_grants"]
+                   if g["enabled"] and g["expires_at"] > now
+                   and g["principal_id"] == principal_id and g["pool"] == pool
+                   and caller_host in g["caller_hosts"] and workload in g["workloads"]
+                   and model in g["models"]]
+        if len(matches) != 1:
+            raise ApplicationAdmissionError("grant_unavailable" if not matches else "grant_ambiguous")
+        grant = matches[0]
+        digest = hashlib.sha256(_application_json(grant).encode()).hexdigest()
+        return document, grant, digest
+
+    @staticmethod
+    def _application_unsettled(conn, turn):
+        requests = conn.execute("SELECT * FROM application_requests WHERE principal_id=? AND turn_id=?",
+                                (turn["principal_id"], turn["turn_id"]))
+        return any(_application_stored_terminal(request, turn) is None for request in requests)
+
+    @staticmethod
+    def _application_turn(conn, principal_id, turn_id):
+        turn = conn.execute("SELECT * FROM application_turns WHERE principal_id=? AND turn_id=?",
+                            (principal_id, turn_id)).fetchone()
+        if turn is None:
+            raise ApplicationAdmissionError("turn_unavailable")
+        return turn
+
+    def _application_binding(self, conn, turn, *, disposition=None):
+        if disposition is None:
+            requests = conn.execute("SELECT * FROM application_requests WHERE principal_id=? AND turn_id=?",
+                                    (turn["principal_id"], turn["turn_id"]))
+            unresolved = [row for row in requests if _application_stored_terminal(row, turn) is None]
+            disposition = ("pending" if all(row["state"] == "pending" for row in unresolved)
+                           else "effect_unknown") if unresolved else (
+                "closed" if turn["state"] != "open" else "existing")
+        return {"ok": True, "disposition": disposition,
+                **{key: turn[key] for key in ("principal_id", "turn_id", "grant_id", "grant_digest",
+                    "caller_host", "workload", "admission_root", "pool", "account", "model",
+                    "lease_id", "created_at", "expires_at", "max_steps", "state")}}
+
+    def begin_application_turn(self, *, principal_id, caller_host, workload, turn_id,
+                               pool, model, deadline_ns=None, transport_accounts=None):
+        for value in (principal_id, caller_host, workload, turn_id):
+            _application_id(value)
+        _application_model(model)
+        if pool != "go":
+            raise ApplicationAdmissionError("unsupported_application_pool")
+        if transport_accounts is not None:
+            if not isinstance(transport_accounts, (set, frozenset, tuple, list)):
+                raise ApplicationAdmissionError("invalid_transport_accounts")
+            for account in transport_accounts:
+                _application_id(account)
+            transport_accounts = frozenset(transport_accounts)
+        with self._application_transaction(deadline_ns=deadline_ns, collect=True) as conn:
+            prior = conn.execute("SELECT * FROM application_turns WHERE principal_id=? AND turn_id=?",
+                                 (principal_id, turn_id)).fetchone()
+            if prior is not None:
+                if any(prior[key] != value for key, value in (("caller_host", caller_host),
+                        ("workload", workload), ("pool", pool), ("model", model))):
+                    raise ApplicationAdmissionError("turn_conflict")
+                recovered = self._application_binding(conn, prior)
+                if recovered["disposition"] != "existing":
+                    return recovered
+            document, grant, digest = self._application_grant(principal_id, caller_host, workload, pool, model)
+            if prior is not None:
+                if prior["grant_digest"] != digest:
+                    raise ApplicationAdmissionError("grant_changed")
+                if transport_accounts is not None and prior["account"] not in transport_accounts:
+                    raise ApplicationAdmissionError("account_unavailable")
+                return self._application_binding(conn, prior)
+            admitted_accounts = frozenset(grant["accounts"])
+            if transport_accounts is not None:
+                admitted_accounts &= transport_accounts
+            accounts_token = _APPLICATION_ACCOUNTS.set(document)
+            try:
+                result, _, reason = self._try_acquire_in_transaction(
+                    conn, grant["admission_root"], pool, None, "application", caller_host, 0,
+                    grant["max_turn_seconds"], None, model,
+                    allowed_accounts=admitted_accounts, purpose="APPLICATION")
+            finally:
+                _APPLICATION_ACCOUNTS.reset(accounts_token)
+            if not result.ok:
+                return {"ok": False, "disposition": "refused", "reason": reason}
+            lease = conn.execute("SELECT * FROM leases WHERE id=?", (result.lease_id,)).fetchone()
+            expires = min(grant["expires_at"], lease["granted_at"] + lease["ttl"])
+            if _application_time(self.now()) >= expires:
+                raise ApplicationAdmissionError("grant_expired")
+            conn.execute("INSERT INTO application_turns (principal_id,turn_id,grant_id,grant_digest,"
+                         "caller_host,workload,admission_root,pool,account,model,lease_id,created_at,"
+                         "expires_at,max_steps,state) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open')",
+                         (principal_id, turn_id, grant["grant_id"], digest, caller_host, workload,
+                          grant["admission_root"], pool, result.account, model, result.lease_id,
+                          lease["granted_at"], expires, grant["max_steps"]))
+            return self._application_binding(conn, self._application_turn(conn, principal_id, turn_id),
+                                             disposition="admitted")
+
+    @staticmethod
+    def _application_request_identity(principal_id, turn_id, request_id, request_digest):
+        for value in (principal_id, turn_id, request_id):
+            _application_id(value)
+        if not isinstance(request_digest, str) or re.fullmatch(r"[0-9a-f]{64}", request_digest) is None:
+            raise ApplicationAdmissionError("invalid_request_digest")
+
+    @staticmethod
+    def _application_prior_request(conn, turn, request_id, request_digest):
+        prior = conn.execute("SELECT * FROM application_requests WHERE principal_id=? AND turn_id=? AND request_id=?",
+                             (turn["principal_id"], turn["turn_id"], request_id)).fetchone()
+        if prior is None:
+            return None
+        if prior["request_digest"] != request_digest:
+            raise ApplicationAdmissionError("request_conflict")
+        terminal = _application_stored_terminal(prior, turn)
+        result = {"ok": True, "dispatch_permitted": False,
+                  "disposition": "terminal" if terminal is not None else (
+                      "pending" if prior["state"] == "pending" else "effect_unknown"),
+                  "dispatch_id": prior["dispatch_id"]}
+        if terminal is not None:
+            result["terminal_receipt"] = terminal
+        return result
+
+    def recover_application_request(self, *, principal_id, turn_id, request_id, request_digest):
+        """Original identity only; never admit a turn or grant another dispatch."""
+        self._application_request_identity(principal_id, turn_id, request_id, request_digest)
+        with self._application_transaction() as conn:
+            turn = self._application_turn(conn, principal_id, turn_id)
+            return self._application_prior_request(conn, turn, request_id, request_digest)
+
+    def prepare_application_request(self, *, principal_id, turn_id, request_id, request_digest):
+        self._application_request_identity(principal_id, turn_id, request_id, request_digest)
+        with self._application_transaction() as conn:
+            turn = self._application_turn(conn, principal_id, turn_id)
+            prior = self._application_prior_request(conn, turn, request_id, request_digest)
+            if prior is not None:
+                return prior
+            document, grant, digest = self._application_grant(principal_id, turn["caller_host"],
+                                                            turn["workload"], turn["pool"], turn["model"])
+            if digest != turn["grant_digest"]:
+                raise ApplicationAdmissionError("grant_changed")
+            lease = conn.execute("SELECT * FROM leases WHERE id=?", (turn["lease_id"],)).fetchone()
+            now = _application_time(self.now())
+            if (turn["state"] != "open" or lease is None or lease["purpose"] != "APPLICATION"
+                    or lease["state"] not in HELD_STATES
+                    or now >= min(turn["expires_at"], lease["granted_at"] + lease["ttl"])):
+                raise ApplicationAdmissionError("turn_closed")
+            if self._application_unsettled(conn, turn):
+                return {"ok": False, "dispatch_permitted": False, "disposition": "effect_unknown"}
+            count = conn.execute("SELECT COUNT(*) FROM application_requests WHERE principal_id=? AND turn_id=?",
+                                 (principal_id, turn_id)).fetchone()[0]
+            if count >= turn["max_steps"]:
+                raise ApplicationAdmissionError("step_limit")
+            accounts_token = _APPLICATION_ACCOUNTS.set(document)
+            try:
+                if not any(a["name"] == turn["account"] and a.get("enabled", True) is not False
+                           for a in self.grantable_accounts(turn["pool"])):
+                    raise ApplicationAdmissionError("account_unavailable")
+            finally:
+                _APPLICATION_ACCOUNTS.reset(accounts_token)
+            if any(lease[key] != turn[key] for key in ("account", "model", "pool")):
+                raise ApplicationAdmissionError("lease_changed")
+            now = _application_time(self.now())
+            expires = min(grant["expires_at"], turn["expires_at"], lease["granted_at"] + lease["ttl"])
+            if now >= expires:
+                raise ApplicationAdmissionError("turn_closed")
+            dispatch_id = uuid.uuid4().hex
+            conn.execute("INSERT INTO application_requests (principal_id,turn_id,request_id,request_digest,dispatch_id,state,created_at) "
+                         "VALUES (?,?,?,?,?,'pending',?)", (principal_id, turn_id, request_id, request_digest, dispatch_id, now))
+            return {"ok": True, "dispatch_permitted": True, "disposition": "dispatch_permitted",
+                    "dispatch_id": dispatch_id, "request_digest": request_digest,
+                    "expires_at": expires,
+                    "lease_id": turn["lease_id"], "pool": turn["pool"], "account": turn["account"], "model": turn["model"]}
+
+    def _application_release_if_finished(self, conn, turn):
+        lease = conn.execute("SELECT * FROM leases WHERE id=?", (turn["lease_id"],)).fetchone()
+        if lease is None or self._application_unsettled(conn, turn):
+            return False
+        expired = self.now() >= min(turn["expires_at"], lease["granted_at"] + lease["ttl"])
+        if turn["state"] == "open" and not expired:
+            return False
+        conn.execute("UPDATE application_turns SET state='closed' WHERE principal_id=? AND turn_id=?",
+                     (turn["principal_id"], turn["turn_id"]))
+        conn.execute("UPDATE leases SET state='released' WHERE id=? AND purpose='APPLICATION' AND state IN ('held','rented')",
+                     (turn["lease_id"],))
+        return True
+
+    def complete_application_request(self, *, dispatch_id, terminal_receipt):
+        _application_id(dispatch_id)
+        receipt = terminal_receipt
+        encoded = _application_receipt(receipt)
+        with self._application_transaction() as conn:
+            request = conn.execute("SELECT * FROM application_requests WHERE dispatch_id=?", (dispatch_id,)).fetchone()
+            if request is None:
+                raise ApplicationAdmissionError("dispatch_unavailable")
+            turn = self._application_turn(conn, request["principal_id"], request["turn_id"])
+            if (receipt["dispatch_id"] != dispatch_id or receipt["request_digest"] != request["request_digest"]
+                    or any(receipt[key] != turn[key] for key in ("lease_id", "account", "model"))
+                    or not request["created_at"] <= receipt["completed_at"] <= self.now()):
+                raise ApplicationAdmissionError("terminal_conflict")
+            if request["state"] == "terminal":
+                if request["terminal_receipt"] != encoded:
+                    raise ApplicationAdmissionError("terminal_conflict")
+                return {"ok": True, "disposition": "terminal", "terminal_receipt": json.loads(encoded)}
+            if request["state"] not in {"pending", "unknown"}:
+                raise ApplicationAdmissionError("invalid_request_state")
+            conn.execute("UPDATE application_requests SET state='terminal', terminal_receipt=?, unknown_reason=NULL WHERE dispatch_id=?",
+                         (encoded, dispatch_id))
+            self._application_release_if_finished(conn, turn)
+            return {"ok": True, "disposition": "terminal", "terminal_receipt": json.loads(encoded)}
+
+    def mark_application_request_unknown(self, *, dispatch_id, reason):
+        _application_id(dispatch_id)
+        if not isinstance(reason, str) or re.fullmatch(r"[a-z][a-z0-9_]{0,63}", reason) is None:
+            raise ApplicationAdmissionError("invalid_unknown_reason")
+        with self._application_transaction() as conn:
+            request = conn.execute("SELECT * FROM application_requests WHERE dispatch_id=?", (dispatch_id,)).fetchone()
+            if request is None:
+                raise ApplicationAdmissionError("dispatch_unavailable")
+            if request["state"] == "terminal":
+                turn = self._application_turn(conn, request["principal_id"], request["turn_id"])
+                return {"ok": True, "disposition": "terminal" if _application_stored_terminal(request, turn)
+                        is not None else "effect_unknown"}
+            if request["state"] not in {"pending", "unknown"}:
+                raise ApplicationAdmissionError("invalid_request_state")
+            conn.execute("UPDATE application_requests SET state='unknown', unknown_reason=? WHERE dispatch_id=?",
+                         (reason, dispatch_id))
+            return {"ok": True, "disposition": "effect_unknown"}
+
+    def close_application_turn(self, *, principal_id, turn_id):
+        _application_id(principal_id)
+        _application_id(turn_id)
+        with self._application_transaction() as conn:
+            turn = self._application_turn(conn, principal_id, turn_id)
+            conn.execute("UPDATE application_turns SET state='closing' WHERE principal_id=? AND turn_id=? AND state='open'",
+                         (principal_id, turn_id))
+            turn = self._application_turn(conn, principal_id, turn_id)
+            self._application_release_if_finished(conn, turn)
+            return self._application_binding(conn, self._application_turn(conn, principal_id, turn_id))
 
     # ── plan / status ────────────────────────────────────────────────────────
 
