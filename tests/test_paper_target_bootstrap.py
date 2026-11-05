@@ -114,11 +114,13 @@ class TargetBootstrapTests(unittest.TestCase):
             self.edit(result['document']['snapshot_sha256'])
         self.assertFalse(any(n == 'set_text_content' for n,_ in self.client.calls))
     def test_unreviewed_schema_read_does_not_authorize_write(self):
-        result = self.run_bridge(_catalog_pin='0'*64)
-        self.assertIn('document',result)
-        self.assertFalse(result['write_schema']['accepted_for_write'])
+        # Unknown synthetic getters must not mint any target guard, even
+        # when the caller supplies a non-matching explicit full-catalog pin.
+        with self.assertRaisesRegex(b.Refusal,'TOOL_SCHEMA_CHANGED'):
+            self.run_bridge(_catalog_pin='0'*64)
+        self.assertEqual(self.client.calls, [])
         with self.assertRaisesRegex(b.Refusal,'UPSTREAM_SCHEMA_UNREVIEWED'):
-            self.edit(result['document']['snapshot_sha256'],_catalog_pin='0'*64)
+            self.edit('a'*64,_catalog_pin='0'*64)
         self.assertFalse(any(n == 'set_text_content' for n,_ in self.client.calls))
     def test_lost_edit_response_remains_unknown_without_retry(self):
         result = self.run_bridge()

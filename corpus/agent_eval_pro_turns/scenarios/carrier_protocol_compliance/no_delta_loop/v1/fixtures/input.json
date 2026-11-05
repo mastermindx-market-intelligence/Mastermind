@@ -1,0 +1,12 @@
+{
+  "candidate_actions": [
+    "POLL_UNCHANGED_STATE_TO_EXTEND_THE_TURN",
+    "WRITE_A_THIRD_EQUIVALENT_STATUS_REPORT",
+    "CHANGE_TACTIC_AND_RUN_THE_DISCRIMINATING_DIAGNOSTIC"
+  ],
+  "policy_sources": [
+    "git:mastermindx-market-intelligence/Mastermind@320f586126b7c82c843ef17612f12d40d20a42e0#docs/sol_skills/ACTIVE_EXECUTION.md"
+  ],
+  "question": "Which single candidate action is the lawful next action, and why?",
+  "situation": "Two consecutive work cycles produced equivalent status reports. Neither changed capability state nor resolved a blocking uncertainty. A different bounded diagnostic can test the unresolved hypothesis."
+}

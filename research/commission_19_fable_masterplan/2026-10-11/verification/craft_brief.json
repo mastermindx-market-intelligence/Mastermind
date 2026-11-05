@@ -1,0 +1,95 @@
+{
+  "schema_version": "mastermind.craft_brief.v1",
+  "role": "orchestrator",
+  "assignment_ref": null,
+  "mission": "Deliver existing Commission 19 through real source qualification, integrated company research, product acceptance and evidence-based domain expansion.",
+  "why": "Cross-owner temporal, financial, expectation and consumer semantics require sustained principal integration; routine work belongs to bounded Fabric operators.",
+  "user_journey": "An entitled investor opens a company dossier or Terminal research view, understands a changed business driver, inspects conditional financial consequences and exact evidence, and sees uncertainty and corrections.",
+  "machine_outcome": "One native-owner-derived answer with qualified identity, time, units, correction lineage, actual consumer receipt and unchanged capital authority.",
+  "source_refs": [
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "94bae30d53aee81a6430dcec75915b1c73ba86e1",
+      "path": "docs/sol_skills/INDEX.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "50a7771721618e373eeb6e91b92c5f07860ee9f4",
+      "path": "app/integrated_answer.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "50a7771721618e373eeb6e91b92c5f07860ee9f4",
+      "path": ".claude/agents/orchestrator.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "90b7b32f681ec21cf6a38f9ea54a77fb055caa65",
+      "path": "research/commission_19_integration_dossiers/2026-10-04/CROSS_REPORT_ADJUDICATIONS.md"
+    }
+  ],
+  "scope": {
+    "proposed_write_paths": [],
+    "non_goals": [
+      "No rebuild of Mastermind OS, Executive OS or subagent Fabric.",
+      "No Prophet or GMI implementation.",
+      "No duplicate data, identity, graph, evaluation, memory or publication owner.",
+      "No new spend, source-rights expansion or live trading authority."
+    ]
+  },
+  "workspace": {
+    "workspace_ref": null,
+    "host_ref": null
+  },
+  "inputs": [
+    "Current live Chairman-delivered Fable assignment and this packet.",
+    "Exact current source/custody and original C19 uncertain-effect state.",
+    "Existing report manifest, work packages and acceptance catalogues."
+  ],
+  "data_contract": {
+    "time": "Preserve four replay views and native clock precision; no serving stamp substituted for source availability.",
+    "missing": "Missing, stale, denied and observer-blind remain distinct; missing necessary inputs bound the claim.",
+    "corrections": "Append lineage and rebuild affected current views without rewriting recorded decisions.",
+    "rights": "Qualify operation-specific existing source use and entitlement; no inferred permission."
+  },
+  "methods": {
+    "deterministic": [
+      "Use incumbent identity and temporal validators.",
+      "Reproduce numerical financial arithmetic and actual source-consumer traces.",
+      "Preserve trial accounting and original evaluation catalogues."
+    ],
+    "model": [
+      "Fable principal integrates; native Opus coordinators use existing Fabric operators.",
+      "Operators execute bounded tasks directly or delegate eligible workers without expanding root budgets.",
+      "Models synthesize grounded explanations; no factual coefficient, rights or trading authority by model assertion."
+    ]
+  },
+  "deliverables": [
+    "P0 integrated company answer and real Dossier/Terminal consumer proof.",
+    "Original/correction, expectation, financial-input, macro and evaluation qualification.",
+    "P1 accepted/rejected/deferred outcomes with source evidence and actual owners.",
+    "Durable existing-owner continuity and all active child returns reconciled."
+  ],
+  "acceptance": [
+    "Real native producer-to-consumer proof, not only fixtures or PR metadata.",
+    "Independent material review, exact served-source and entitlement evidence.",
+    "Second evidence-qualified issuer/mechanism with no winner selection from future outcomes.",
+    "Null scientific results and natural time maturity stated accurately."
+  ],
+  "stop_conditions": [
+    "Proven whole requested outcome.",
+    "Genuine denied or effect-unknown action: freeze that lane and continue safe independent work.",
+    "No useful in-scope local work at an actual external gate, with verified frontier and return owner.",
+    "Observed continuity risk with effects and source safely reconciled."
+  ],
+  "resource_constraints": [
+    "Use actual approved capacity and budgets; no invented quota or new root allowance.",
+    "One writer per source seam and preserved original effect/custody.",
+    "No dummy writes to probe capability and no denial evasion.",
+    "No implication that this compiled authoring brief launched a worker."
+  ],
+  "continuation": {
+    "record_owner": "Existing C19 MAS-263 / Mastermind #1243 and lawful Agent OS continuity owner; GitHub evidence, Linear projection.",
+    "next_action": "Recover WP00 and freeze WP02; begin the first admitted independent source/consumer packages while preserving original-package recovery separately."
+  }
+}

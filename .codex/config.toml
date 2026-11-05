@@ -6,8 +6,9 @@ BOT_REASONING_LAYER = "1"
 
 [agents]
 enabled = true
-# Daily portfolio research is read-heavy. Keep fan-out bounded so one nightly run
-# cannot turn a wide Prophet board into an unbounded token tree.
-max_concurrent_threads_per_session = 3
-default_subagent_model = "gpt-5.6-terra"
-default_subagent_reasoning_effort = "medium"
+# Chairman: flexible coordination, with Fabric preferred and one shared root budget.
+# V1 uses depth 3 (four levels including the primary); V2 ignores this setting.
+max_concurrent_threads_per_session = 16
+max_depth = 3
+default_subagent_model = "gpt-6.1-sol"
+default_subagent_reasoning_effort = "high"

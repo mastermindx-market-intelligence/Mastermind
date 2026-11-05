@@ -216,3 +216,142 @@ def test_company_evidence_compaction_preserves_contradiction_falsifier_and_valid
     assert result["authority"]["may_trade"] is False
     # Round-trip proves structural compaction kept valid JSON.
     assert json.loads(json.dumps(result, ensure_ascii=False))["ticker"] == "600519.SS"
+
+
+
+def _assert_company_boundaries(result):
+    required = {
+        "schema", "status", "ticker", "context_only", "execution_authority",
+        "authority", "source", "contradictions", "falsifier", "unknowns",
+        "evidence_context", "evidence", "recognition", "prophet_timing",
+    }
+    assert required <= set(result), f"mandatory fields lost: {sorted(required - set(result))}"
+    assert "_keys_omitted" not in result
+    assert result["context_only"] is True
+    assert result["execution_authority"] is False
+    assert result["authority"]["context_only"] is True
+    assert all(
+        result["authority"][key] is False
+        for key in (
+            "may_rank", "may_feed_prophet", "may_size", "may_change_eligibility",
+            "may_change_entry", "may_change_exit", "may_trade", "may_execute_source_text",
+        )
+    )
+    assert result["recognition"] == {
+        "status": "not_attached_until_accepted_cie14",
+        "may_multiply_conviction": False,
+    }
+    assert result["prophet_timing"] == {
+        "included": False, "reason": "separate_authority",
+    }
+    assert pi._packet_size(result) <= 6_500
+    assert json.loads(json.dumps(result, ensure_ascii=False)) == result
+
+
+@pytest.mark.parametrize("bulk", ["long source text ", "风险证据与未知项😀"])
+def test_late_compaction_preserves_boundaries_clocks_and_negative_context(macro_root, bulk):
+    root = _root()
+    row = root["command"][0]
+    ce = row["company_evidence"]
+    citation = ce["evidence"][0]
+    ce["evidence"] = [
+        {
+            **citation,
+            "source_id": f"POS-{i}",
+            "title": bulk * 400,
+            "summary": bulk * 400,
+        }
+        for i in range(6)
+    ]
+    ce["contradictions"] = [
+        {
+            "basis": f"risk-{i}",
+            "detail_en": "NEGATIVE-CONTEXT " + bulk * 400,
+            "detail_zh": "明确风险 " + bulk * 400,
+            "source_id": f"NEG-{i}",
+            "source_url": citation["source_url"],
+            "source_published_at": citation["source_published_at"],
+            "system_recorded_at": citation["system_recorded_at"],
+        }
+        for i in range(6)
+    ]
+    ce["unknowns"] = [f"UNKNOWN-{i} " + bulk * 200 for i in range(12)]
+    row["falsifier"] = "FALSIFIER " + bulk * 400
+    row["falsifier_zh"] = "反证 " + bulk * 400
+    _write(macro_root, root)
+
+    result = pi.china_company_evidence("600519.SS")
+
+    _assert_company_boundaries(result)
+    assert result["status"] == "ok"
+    assert result["packet_truncated"] is True
+    assert result["source"]["root_as_of"] == root["as_of"]
+    assert result["source"]["root_generated_utc"] == root["generated_utc"]
+    assert result["evidence_context"] == {
+        key: ce[key]
+        for key in ("source_state", "coverage_start", "clocks", "change", "market_context")
+    }
+    assert result["contradictions"][0]["detail_en"].startswith("NEGATIVE-CONTEXT")
+    assert result["contradictions"][0]["source_id"] == "NEG-0"
+    assert result["falsifier"]["en"].startswith("FALSIFIER")
+    assert result["falsifier"]["zh"].startswith("反证")
+    assert result["unknowns"][0].startswith("UNKNOWN-0")
+    assert len(result["evidence"]) == 1
+    for item in (result["evidence"][0], result["contradictions"][0]):
+        for key in ("source_url", "source_published_at", "system_recorded_at"):
+            assert item[key] == citation[key]
+    assert result["compaction"]["evidence_rows_omitted"] == 5
+    assert result["compaction"]["contradiction_rows_omitted"] == (
+        6 - len(result["contradictions"])
+    )
+    assert result["compaction"]["unknown_rows_omitted"] == (
+        12 - len(result["unknowns"])
+    )
+
+
+def test_positive_bulk_is_compacted_before_negative_evidence(macro_root):
+    root = _root()
+    row = root["command"][0]
+    ce = row["company_evidence"]
+    citation = ce["evidence"][0]
+    ce["evidence"] = [
+        {**citation, "source_id": f"POS-{i}", "title": "positive " * 1_000}
+        for i in range(6)
+    ]
+    _write(macro_root, root)
+
+    result = pi.china_company_evidence("600519.SS")
+
+    _assert_company_boundaries(result)
+    assert result["status"] == "ok"
+    assert result["packet_truncated"] is True
+    assert result["contradictions"] == ce["contradictions"]
+    assert result["unknowns"] == ce["unknowns"]
+    assert result["falsifier"] == {"en": row["falsifier"], "zh": row["falsifier_zh"]}
+    assert result["evidence_context"]["clocks"] == ce["clocks"]
+    assert result["compaction"]["contradiction_rows_omitted"] == 0
+    assert result["compaction"]["unknown_rows_omitted"] == 0
+    assert result["evidence"]
+    assert all(item["source_url"] == citation["source_url"] for item in result["evidence"])
+
+
+@pytest.mark.parametrize("unrepresentable", ["clock", "citation"])
+def test_unrepresentable_mandatory_context_is_explicitly_unavailable(macro_root, unrepresentable):
+    root = _root()
+    ce = root["command"][0]["company_evidence"]
+    if unrepresentable == "clock":
+        ce["clocks"]["latest_system_recorded_at"] = "unrepresentable-clock-" * 1_000
+    else:
+        ce["evidence"][0]["source_url"] = "https://example.test/" + ("exact-path/" * 1_000)
+    _write(macro_root, root)
+
+    result = pi.china_company_evidence("600519.SS")
+
+    assert result["status"] == "packet_budget_exceeded", "unrepresentable context reported as usable"
+    _assert_company_boundaries(result)
+    assert result["packet_truncated"] is True
+    assert result["source"]["available"] is False
+    assert result["source"]["status"] == "packet_budget_exceeded"
+    assert result["evidence_context"] == {"status": "unavailable", "clocks": None}
+    assert result["unknowns"] == ["mandatory_context_exceeds_packet_budget"]
+    assert result["evidence"] == []

@@ -399,6 +399,111 @@ def _fit_content(value: Any, *, budget: int) -> Any:
     return {"status": "content_budget_exceeded", "_content_truncated": True}
 
 
+def _fit_china_company_evidence(packet: dict) -> dict:
+    """Fit CIE-15 without dropping its authority or negative-context envelope."""
+    budget = 6_500
+    complete = {**packet, "packet_truncated": False}
+    if _packet_size(complete) <= budget:
+        return complete
+
+    row_priority = (
+        "basis", "detail_en", "detail_zh", "kind", "title", "source",
+        "source_id", "source_url", "source_published_at",
+        "system_recorded_at", "visitor_identity_state",
+    )
+    exact_provenance = (
+        "source", "source_id", "source_url", "source_published_at",
+        "system_recorded_at", "visitor_identity_state",
+    )
+
+    def project_rows(rows: list, limit: int, text_limit: int) -> list:
+        projected = []
+        for row in rows[:limit]:
+            if not isinstance(row, dict):
+                projected.append(_bounded_value(row, str_limit=text_limit))
+                continue
+            ordered = {key: row[key] for key in row_priority if key in row}
+            ordered.update({key: value for key, value in row.items() if key not in ordered})
+            item = _bounded_value(
+                ordered, list_limit=limit, dict_limit=14,
+                str_limit=text_limit, max_depth=4,
+            )
+            # A shortened URL, source ID or clock is not usable provenance.
+            for key in exact_provenance:
+                if key in row:
+                    item[key] = row[key]
+            projected.append(item)
+        return projected
+
+    # Never pass this top-level packet through an insertion-order dict limiter.
+    # Source, clocks, market context and both authority boundaries remain exact.
+    for limit, text_limit in ((6, 180), (4, 120), (2, 90), (1, 60)):
+        compact = {
+            **packet,
+            "name": _bounded_value(packet.get("name"), str_limit=140),
+            "evidence": project_rows(packet["evidence"], limit, text_limit),
+            "packet_truncated": True,
+            "compaction": {
+                "evidence_rows_omitted": max(0, len(packet["evidence"]) - limit),
+                "contradiction_rows_omitted": 0,
+                "unknown_rows_omitted": 0,
+            },
+        }
+        if _packet_size(compact) <= budget:
+            return compact
+
+    # Bulk positive evidence has reached one row before negative text/row
+    # compaction begins. Keep at least that row's exact citation when present.
+    for limit, text_limit in ((6, 180), (4, 120), (2, 90), (1, 60), (1, 40)):
+        compact = {
+            **packet,
+            "name": _bounded_value(packet.get("name"), str_limit=140),
+            "evidence": project_rows(packet["evidence"], 1, 60),
+            "contradictions": project_rows(packet["contradictions"], limit, text_limit),
+            "falsifier": {
+                key: _bounded_value(value, str_limit=text_limit)
+                for key, value in packet["falsifier"].items()
+            },
+            "unknowns": _bounded_value(
+                packet["unknowns"], list_limit=limit, str_limit=text_limit,
+            ),
+            "packet_truncated": True,
+            "compaction": {
+                "evidence_rows_omitted": max(0, len(packet["evidence"]) - 1),
+                "contradiction_rows_omitted": max(0, len(packet["contradictions"]) - limit),
+                "unknown_rows_omitted": max(0, len(packet["unknowns"]) - limit),
+            },
+        }
+        if _packet_size(compact) <= budget:
+            return compact
+
+    # Unrepresentable mandatory context is unavailable, never a smaller
+    # positive packet that silently lost its clocks, warnings or boundaries.
+    return {
+        "schema": packet["schema"],
+        "status": "packet_budget_exceeded",
+        "ticker": packet["ticker"],
+        "name": None,
+        "context_only": True,
+        "execution_authority": False,
+        "authority": packet["authority"],
+        "source": {
+            "artifact": _CHINA_COMPANY_EVIDENCE_ARTIFACT,
+            "url": f"{_URL_BASE}/china_intel.html",
+            "available": False,
+            "status": "packet_budget_exceeded",
+        },
+        "contradictions": [],
+        "falsifier": {"en": None, "zh": None},
+        "unknowns": ["mandatory_context_exceeds_packet_budget"],
+        "evidence_context": {"status": "unavailable", "clocks": None},
+        "evidence": [],
+        "recognition": packet["recognition"],
+        "prophet_timing": packet["prophet_timing"],
+        "packet_truncated": True,
+    }
+
+
 def china_company_evidence(ticker: str) -> dict:
     """Return one bounded, read-only China company-evidence packet.
 
@@ -591,7 +696,7 @@ def china_company_evidence(ticker: str) -> dict:
             "reason": "separate_authority",
         },
     }
-    return _fit_packet(packet, budget=6_500)
+    return _fit_china_company_evidence(packet)
 
 
 def _num(value: Any) -> float | None:
