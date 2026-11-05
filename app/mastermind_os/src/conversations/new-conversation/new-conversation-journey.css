@@ -15,3 +15,5 @@
 .shell[data-theme="light"] .new-conversation-preview-message{background:var(--panel);box-shadow:0 2px 8px color-mix(in srgb,var(--text) 5%,transparent)}
 .new-conversation-journey:lang(zh-CN) :is(h1,h2,button,summary){letter-spacing:normal;text-transform:none}
 @media(max-width:600px){.new-conversation-preview h1{font-size:28px;line-height:36px}.new-conversation-preview-actions>button{flex:1 1 auto}}
+
+.new-conversation-journey button:disabled{opacity:.6;cursor:not-allowed}

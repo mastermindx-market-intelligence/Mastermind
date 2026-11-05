@@ -156,13 +156,14 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
   }catch{if(live(c)&&ticket.current===id)patch({busy:null,error:"unavailable"});}
  }
  async function confirm(){
-  const c=capture(),shown=current.current.preview,p=latest.current;
+  const origin=document.activeElement,c=capture(),shown=current.current.preview,p=latest.current;
   if(!c||!shown||current.current.busy||current.current.retained||current.current.other||current.current.discovering)return;
   if(p.workRef!==shown.request.work_ref||p.message!==shown.request.message||!projectCurrent(shown.request.work_ref)||!sameConversationOwner(p.draftOwner,c.owner)){
    patch({phase:"draft",preview:null,error:"changed"});return;}
   try{
    const intent=c.binding.makeCreateIntent(shown.request,shown.data);
    if(!live(c)||!intent||intent.kind!=="conversation_create"||intent.targetKey!==shown.request.work_ref){patch({error:"unavailable"});return;}
+   gestureFocus(".mm-new-conversation-outcome h1",origin);
    patch({busy:"operation",phase:"outcome",opened:false,error:null,projectTitle:shown.projectTitle,original:shown.request});
    const pending=c.binding.controller.begin(intent);
    patch({operation:c.binding.controller.getState()});
@@ -206,7 +207,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
  function start(){const v=current.current;
   // A pending original always wins over a new-entry gesture. Back/reopen
   // never prepares, reserves, submits, or replays that operation.
-  if(v.retained||v.busy||v.other||v.lookup&&!canOpen(v.data)){gestureFocus(".mm-new-conversation-outcome h1");patch({phase:"outcome",opened:false});return;}
+  if(v.retained||v.busy||v.other||v.operation?.status==="unknown"||v.lookup&&!canOpen(v.data)){gestureFocus(".mm-new-conversation-outcome h1");patch({phase:"outcome",opened:false});return;}
   const settled=v.operation?.status==="accepted"||v.operation?.status==="refused"||v.lookup&&canOpen(v.data);
   gestureFocus("select");
   if(settled){
@@ -220,7 +221,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
   view.phase==="outcome"?t("The original request cannot be checked here right now.","此处暂时无法查看原请求。"):
   t("Conversation preview is unavailable here. Your message remains a draft.","此处暂时无法预览对话。消息仍是草稿。")}</p>:null;
  const feedback=<>{view.discovering?<p role="status">{t("Checking for an original request…","正在查找原请求…")}</p>:null}
-  {view.retained&&!view.operation?<p role="status">{t("An original conversation request needs a status check. Don’t create it again.","原对话请求需要查询状态。请勿再次创建。")}</p>:null}
+  {view.retained&&!view.other&&!view.operation?<p role="status">{t("An original conversation request needs a status check. Don’t create it again.","原对话请求需要查询状态。请勿再次创建。")}</p>:null}
   {view.lookup&&!view.operation?<p role="status">{t("An original conversation request is selected. Check its status to reopen it.","已选择原对话请求。请查询状态后重新打开。")}</p>:null}
   {view.phase==="outcome"&&!view.operation?<p>{t("Going back does not cancel the original request.","返回不会取消原请求。")}</p>:null}
   {view.other?<p role="status">{t("Another request needs its existing status controls before a new conversation can be created.","请先通过原有状态控件处理另一条请求，再创建新对话。")}</p>:null}{error}</>;
@@ -229,7 +230,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
   workRef={props.workRef} onWorkRefChange={value=>{patch({preview:null,error:null});props.onWorkRefChange(value);}}
   message={ownsDraft?props.message:""} onMessageChange={value=>{patch({preview:null,error:null});props.onMessageChange(value);}}
   readOnly={!actualOwner||!!view.busy||view.other} onBack={back} feedback={feedback}
-  previewControl={<button type="button" disabled={!actualOwner||!ownsDraft||!validDraft||!!view.busy||view.discovering||!!view.retained||view.other}
+  previewControl={<button type="button" className="primary" disabled={!actualOwner||!ownsDraft||!validDraft||!!view.busy||view.discovering||!!view.retained||view.other}
    onClick={()=>void preview()}>{view.busy==="preview"?t("Reviewing…","正在预览…"):t("Review conversation","预览对话")}</button>}/>;
  const prepared=view.preview;
  const initialRead=useMemo<FreshConversationInitialRead|null>(()=>{
@@ -251,7 +252,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
      <h2>{t("First message","第一条消息")}</h2><p>{prepared.request.message}</p></div>
     {error}<div className="new-conversation-preview-actions"><button type="button" disabled={!!view.busy} onClick={()=>{
      gestureFocus("textarea");patch({phase:"draft",preview:null,error:null});}}>{t("Back to message","返回消息草稿")}</button>
-     <button type="button" disabled={!!view.busy||!actualOwner} onClick={()=>void confirm()}>{t("Create conversation","创建对话")}</button>
+     <button type="button" className="primary" disabled={!!view.busy||!actualOwner} onClick={()=>void confirm()}>{t("Create conversation","创建对话")}</button>
      <button type="button" onClick={back}>{t("Cancel","取消")}</button></div>
     <p>{t("Creation still depends on the current conversation checks.","创建仍需通过当前的对话检查。")}</p>
     <details><summary>{t("Sources and access","来源与访问")}</summary><dl>{Object.entries(prepared.data.preview??{}).map(([key,value])=>
@@ -261,5 +262,5 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
     opened={view.opened} busy={!!view.busy||view.discovering||view.other} activity={view.busy==="operation"?"creating":view.busy==="read"?"checking":null} canOpen={canOpen(view.data)&&!view.other&&!!actualOwner}
     onCheck={()=>void check()} onOpen={()=>void check(true)} onBack={back} continuation={continuation}/></>}
  </div>;
- return {panel,start,hasUnresolvedOriginal:!!view.retained||view.other||view.lookup&&!canOpen(view.data)};
+ return {panel,start,hasUnresolvedOriginal:!!view.retained||view.other||view.busy==="operation"||view.discovering||view.operation?.status==="unknown"||view.lookup&&!canOpen(view.data)};
 }

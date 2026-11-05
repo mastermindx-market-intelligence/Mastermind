@@ -160,7 +160,7 @@ export function NewConversationOutcome({ locale, data, operationState, originalM
         <button type="button" disabled={busy} onClick={onCheck}>
           {text("Check original request", "查看原请求状态")}
         </button>
-        {!opened && responseOpenable && <button type="button" disabled={busy} onClick={onOpen}>
+        {!opened && responseOpenable && <button type="button" className="primary" disabled={busy} onClick={onOpen}>
           {text("Open initial response", "查看首条回复")}
         </button>}
         <button type="button" onClick={onBack}>{text("Back to conversations", "返回对话")}</button>
