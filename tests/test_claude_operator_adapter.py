@@ -10,13 +10,25 @@ from types import SimpleNamespace
 
 import pytest
 
-from control_plane.claude_operator_adapter import ClaudeOperatorAdapter, ClaudeReadbackPolicyObserver, ClaudeOperatorError, _digest
-from control_plane.executive_agent_capabilities import claude_security_config_digest
+from control_plane.claude_mcp_client_projection import project_claude_mcp_client
+from control_plane.claude_operator_adapter import (
+    ClaudeOperatorAdapter,
+    ClaudeOperatorError,
+    ClaudeProjectedMcpReadbackObserver,
+    ClaudeReadbackPolicyObserver,
+    _digest,
+)
+from control_plane.executive_agent_capabilities import (
+    ExecutionCapabilityRegistry,
+    claude_security_config_digest,
+)
 from control_plane.claude_operator_helper_protocol import native_plan_contract
 from control_plane.operator_harness_contract import (CapabilityIdentity, CapabilityManifest,
     RequestedExecutionProfile, NativeHelperPolicy, SessionEpochRef, ProcessGenerationRef,
     ProcessIdentityObservation, OperationId, TurnRef, EventCursor, compare_launch, LaunchDecision,
     ProcessLiveness, ProviderWriterState)
+
+ROOT = Path(__file__).resolve().parents[1]
 
 POLICY = {'tools':['Read','Glob','Grep'],'permission_mode':'dontAsk','setting_sources':[],
           'strict_mcp_config':True,'mcp_servers':{},'skills':[],
@@ -31,6 +43,7 @@ class FakeClient:
         self.calls=[]
         self.turn=None
         self.sid=None
+        self.plan_contract="executive-plan-v1"
         self.lost_begin=False
         self.bad_result=False
         self.terminal=True
@@ -41,11 +54,12 @@ class FakeClient:
         self.calls.append((method,copy.deepcopy(fields)))
         if method=='initialize':
             c=fields['config'];self.sid=c['session_id']
+            self.plan_contract=c.get('result_contract','executive-plan-v1')
             return {'sdk_version':'0.2.160','cli_version':'2.1.275','session_id':self.sid,
                     'registration_zero_turn':True,'native_subscription_verified':True,
                     'applied_launch_provenance':{'setting_sources':[],'strict_mcp_config':True,'skills':[]},
                     'settings_readback_provenance':'native-get_settings/0.2.160/2.1.275',
-                    'result_contract':native_plan_contract(),
+                    'result_contract':native_plan_contract(self.plan_contract),
                     'initialization':{'model':c['model'],'cwd':c['cwd'],'tools':['Read','Glob','Grep','StructuredOutput'],
                         'skills':[],'plugins':[],'mcp_servers':[],'permissionMode':'dontAsk'},
                     'mcp_status':{'servers':[]},'server_info':{'account':{'apiProvider':'firstParty','subscriptionType':'Claude Max'}},
@@ -61,7 +75,7 @@ class FakeClient:
         return {'acknowledged':True}
     def request_raw_turn_page(self, **kwargs):
         result={'terminal':self.terminal,'success':not self.bad_result,'session_id':self.sid,'turn_id':self.turn,
-                'result_source':'native-structured-output','result_contract':native_plan_contract(),
+                'result_source':'native-structured-output','result_contract':native_plan_contract(self.plan_contract),
                 'native_result_id':'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','summary':'{"answer":"verified"}'}
         return SimpleNamespace(consume=lambda:result)
     def graceful_close(self, **kwargs):
@@ -297,3 +311,223 @@ def test_native_requested_version_cannot_override_bound_runtime_floor(configured
     assert 'native profile differs from bound constructor' in validation.reasons
     assert 'native model/runtime is not qualified' in validation.reasons
     assert not c.running and not c.calls
+
+@pytest.mark.parametrize("contract", ["executive-plan-v3", "executive-plan-v4", "executive-plan-v5"])
+def test_native_adapter_selects_exact_versioned_plan_contract(configured, contract):
+    a, client, profile, epoch, generation = configured
+    from control_plane.claude_operator_helper_protocol import native_plan_contract
+    alt = ClaudeOperatorAdapter(
+        binary_path=a.binary_path, provider_home=a.provider_home,
+        workspace_root=a.workspace_root, worker_id=a.worker_id,
+        expected_harness_version=a.expected_harness_version,
+        expected_config_digest=a.expected_config_digest,
+        network_policy=a.network_policy, turn_input_loader=a.turn_input_loader,
+        policy_observer=a.policy_observer,
+        sdk_python=a.sdk_python, helper_path=a.helper_path,
+        process_identity_observer=a.process_identity_observer,
+        base_sha_resolver=a.base_sha_resolver,
+        client_factory=a.client_factory,
+        plan_contract=contract,
+    )
+    session, launch = start((alt, client, profile, epoch, generation))
+    assert launch.decision is LaunchDecision.ALLOW
+    init = [fields for method, fields in client.calls if method == "initialize"][0]
+    assert init["config"]["result_contract"] == contract
+    turn = TurnRef("turn", "epoch", "generation", "attempt")
+    alt.begin_turn(
+        operation_id=OperationId("ohf-op:turn"),
+        turn=turn, generation=generation, launch=launch,
+    )
+    candidate = alt.collect_candidate_result(turn)
+    assert candidate is not None
+    assert client.plan_contract == contract
+    alt.graceful_stop(generation, operation_id=OperationId("ohf-op:stop"))
+
+
+@pytest.mark.parametrize("contract", ["executive-plan-v2", "executive-plan-v6", "", True, None])
+def test_native_adapter_refuses_unqualified_plan_contract(configured, contract):
+    a, _, _, _, _ = configured
+    with pytest.raises(ValueError, match="contract"):
+        ClaudeOperatorAdapter(
+            binary_path=a.binary_path, provider_home=a.provider_home,
+            workspace_root=a.workspace_root, worker_id=a.worker_id,
+            expected_harness_version=a.expected_harness_version,
+            expected_config_digest=a.expected_config_digest,
+            network_policy=a.network_policy, turn_input_loader=a.turn_input_loader,
+            policy_observer=a.policy_observer,
+            client_factory=a.client_factory,
+            process_identity_observer=a.process_identity_observer,
+            base_sha_resolver=a.base_sha_resolver,
+            plan_contract=contract,
+        )
+
+def projected_browser_observer():
+    registry = ExecutionCapabilityRegistry.load(
+        ROOT / "config" / "executive_agent_capabilities.json",
+        source_root=ROOT,
+    )
+    profile = registry.resolve("operator.browser.local-review.v1")
+    projection = project_claude_mcp_client(profile, surface="agent-sdk")
+    observer = ClaudeProjectedMcpReadbackObserver(copy.deepcopy(POLICY), projection)
+    return profile, projection, observer
+
+
+def projected_handshake(projection, observer):
+    config = observer.launch_config()
+    servers = sorted(config["mcp_servers"])
+    return {
+        "registration_zero_turn": True,
+        "native_subscription_verified": True,
+        "sdk_version": "0.2.160",
+        "cli_version": "2.1.275",
+        "result_contract": native_plan_contract(),
+        "initialization": {
+            "model": "claude-opus-5",
+            "cwd": "/fixture/workspace",
+            "tools": [
+                "Read",
+                "Glob",
+                "Grep",
+                "StructuredOutput",
+                *projection.enabled_tools,
+            ],
+            "skills": [],
+            "plugins": [],
+            "mcp_servers": servers,
+            "permissionMode": "dontAsk",
+        },
+        "mcp_status": {
+            "servers": [{"name": name, "status": "connected"} for name in servers],
+        },
+        "applied_launch_provenance": {
+            "setting_sources": [],
+            "strict_mcp_config": True,
+            "skills": [],
+        },
+        "settings_readback_provenance": "native-get_settings/0.2.160/2.1.275",
+        "effective_policy": {"sandbox": copy.deepcopy(POLICY["sandbox"])},
+    }
+
+
+def test_projected_mcp_observer_preserves_exact_agent_sdk_projection_without_arming():
+    profile, projection, observer = projected_browser_observer()
+    config = observer.launch_config()
+    projected = projection.configuration()
+
+    assert config["mcp_servers"] == projected["mcp_servers"]
+    assert config["allowed_tools"] == projected["allowed_tools"]
+    assert config["strict_mcp_config"] is True
+    assert config["tools"] == ["Read", "Glob", "Grep"]
+    assert config["skills"] == []
+    assert config["setting_sources"] == []
+    assert projection.production_armed is False
+    assert profile.profile_id == "operator.browser.local-review.v1"
+
+
+def test_projected_mcp_observer_attests_names_but_not_tool_schema_or_resource_generation():
+    profile, projection, observer = projected_browser_observer()
+    observed = observer.observe(projected_handshake(projection, observer))
+
+    assert observed.source_profile_id == profile.profile_id
+    assert observed.source_profile_digest == profile.profile_digest
+    assert observed.client_projection_digest == observer.client_projection_digest
+    assert observed.observed_mcp_servers == tuple(
+        sorted(projection.configuration()["mcp_servers"])
+    )
+    assert observed.observed_mcp_tools == tuple(sorted(projection.enabled_tools))
+    assert observed.native_tool_schema_attested is False
+    assert observed.resource_generation_attested is False
+    assert observed.sandbox_state == "read-only"
+    assert observed.approval_state == "never"
+    assert observed.network_state == "disabled"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda h, p: h["initialization"]["tools"].append(
+            "mcp__ambient__unexpected_tool"
+        ),
+        lambda h, p: h["initialization"]["tools"].remove(p.enabled_tools[0]),
+        lambda h, p: h["initialization"]["mcp_servers"].append("ambient"),
+        lambda h, p: h["mcp_status"]["servers"].append(
+            {"name": "ambient", "status": "connected"}
+        ),
+        lambda h, p: h["mcp_status"]["servers"][0].__setitem__(
+            "status", "disconnected"
+        ),
+        lambda h, p: h["initialization"]["skills"].append("ambient-skill"),
+        lambda h, p: h["initialization"]["plugins"].append("ambient-plugin"),
+    ],
+)
+def test_projected_mcp_readback_refuses_capability_or_server_drift(mutation):
+    _, projection, observer = projected_browser_observer()
+    handshake = projected_handshake(projection, observer)
+    mutation(handshake, projection)
+
+    with pytest.raises(
+        ClaudeOperatorError,
+        match="projected|capability readback",
+    ) as error:
+        observer.observe(handshake)
+    assert error.value.failure_class.value == "CAPABILITY_ATTESTATION_FAILURE"
+
+
+def test_projected_mcp_readback_refuses_effective_sandbox_drift():
+    _, projection, observer = projected_browser_observer()
+    handshake = projected_handshake(projection, observer)
+    handshake["effective_policy"]["sandbox"]["allowUnsandboxedCommands"] = True
+
+    with pytest.raises(ClaudeOperatorError, match="effective native policy") as error:
+        observer.observe(handshake)
+    assert error.value.failure_class.value == "CONFIG_DRIFT"
+
+
+def test_projected_mcp_observer_requires_inert_agent_sdk_projection():
+    registry = ExecutionCapabilityRegistry.load(
+        ROOT / "config" / "executive_agent_capabilities.json",
+        source_root=ROOT,
+    )
+    profile = registry.resolve("operator.browser.local-review.v1")
+    cli = project_claude_mcp_client(profile, surface="cli")
+
+    with pytest.raises(ValueError, match="Agent SDK"):
+        ClaudeProjectedMcpReadbackObserver(copy.deepcopy(POLICY), cli)
+
+
+def test_projected_mcp_observer_does_not_become_native_adapter_admission(tmp_path):
+    _, projection, observer = projected_browser_observer()
+    root = tmp_path.resolve()
+    home = root / "home"
+    home.mkdir(mode=0o700)
+    (home / ".claude").mkdir(mode=0o700)
+    (home / "tmp").mkdir(mode=0o700)
+    workspace = root / "workspace"
+    workspace.mkdir()
+    binary = root / "claude"
+    binary.write_bytes(b"qualified fixture executable")
+
+    with pytest.raises(ValueError, match="qualified native policy observer"):
+        ClaudeOperatorAdapter(
+            binary_path=binary,
+            provider_home=home,
+            workspace_root=workspace,
+            worker_id="worker",
+            expected_harness_version="2.1.275",
+            expected_config_digest="0" * 64,
+            network_policy="disabled",
+            turn_input_loader=lambda _turn: "unused",
+            policy_observer=observer,
+        )
+
+
+def test_projected_mcp_observer_never_claims_native_tool_schema_from_expected_digest():
+    profile, projection, observer = projected_browser_observer()
+    assert projection.source_tool_schema_digests
+    observed = observer.observe(projected_handshake(projection, observer))
+
+    # These digests are expected source facts carried by the projection. The
+    # current Claude helper does not expose native tools/list schemas, so the
+    # same-session observer must never convert them into native proof.
+    assert observed.native_tool_schema_attested is False
+    assert observed.resource_generation_attested is False

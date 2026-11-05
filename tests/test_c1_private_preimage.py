@@ -83,6 +83,21 @@ def test_canonical_receipt_is_finite_sorted_compact_utf8_with_one_newline():
         assert error.value.code == "NONFINITE_RECEIPT"
 
 
+def test_legacy_and_durable_agent_socket_share_pinned_identity_contract():
+    module = subject()
+    legacy = module._metadata_contract("/var/run/mastermind-agent-relay/agent-relay.sock")
+    durable = module._metadata_contract("/var/db/mastermind-agent-relay/socket/agent-relay.sock")
+    assert legacy == durable == {
+        "type": "socket",
+        "uid": 457,
+        "gid": 457,
+        "mode": 0o660,
+        "required_mode": 0,
+        "forbidden_mode": 0,
+        "link_count": None,
+    }
+
+
 def test_public_contract_enums_are_closed():
     module = subject()
     assert module.SCHEMA == "mastermind.c1_private_preimage/v1"
@@ -917,7 +932,7 @@ class InstalledFilesystem:
                     "-B",
                     f"{release_root}/scripts/slack_agent_dialogue_service.py",
                     "--socket-path",
-                    "/var/run/mastermind-agent-relay/agent-relay.sock",
+                    "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
                     "--token-file",
                     f"{module.SYSTEM_ROOT}/config/agent-relay.token",
                     "--workspace-id",
@@ -1299,7 +1314,8 @@ def test_missing_agent_relay_plist_requires_explicit_prepared_only_evidence():
     assert prepared["matching_installation"] is True
 
 
-def test_collect_stale_exec_accepts_inert_prepared_only_agent_relay():
+@pytest.mark.parametrize("explicitly_disabled", [False, True])
+def test_collect_stale_exec_accepts_inert_prepared_only_agent_relay(explicitly_disabled):
     module = subject()
     filesystem = _stale_prepared_only_agent_relay_fixture(module)
 
@@ -1309,7 +1325,7 @@ def test_collect_stale_exec_accepts_inert_prepared_only_agent_relay():
                 entries = "".join(
                     f'    "{label}" => true\n'
                     for label in module.LABELS
-                    if label != "com.mastermind.executive.agent-relay"
+                    if explicitly_disabled or label != "com.mastermind.executive.agent-relay"
                 )
                 return {
                     "status": "ok",
@@ -1336,7 +1352,7 @@ def test_collect_stale_exec_accepts_inert_prepared_only_agent_relay():
         if service["label"] == "com.mastermind.executive.agent-relay"
     )
     assert agent["loaded"] is False
-    assert agent["disabled"] is None
+    assert agent["disabled"] is (True if explicitly_disabled else None)
     assert receipt["mutation_count"] == 0
 
 

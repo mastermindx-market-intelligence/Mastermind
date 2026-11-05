@@ -1,0 +1,33 @@
+{
+  "status": "POST_RESULT_DIAGNOSTICS_NO_REFIT_OR_GATE_CHANGE",
+  "single_day_only": true,
+  "unchanged_predictions_sha256": "d3ee9cc1d77b0cf91e1757f83e16b311baf5e688cb23c0a64254b772ee0da355",
+  "primary_gain": -0.011415312783586049,
+  "carry_direction_rule": {
+    "definition": "UP/DOWN/SAME sign of observed latest5 median versusprevious5 median; hard classification only, not calibrated probabilities",
+    "timing": "specified as secondary in protocol, omitted from frozen primary script; computed after primary as explicit diagnostic",
+    "accuracy": 0.49193899782135075,
+    "class_recall": {
+      "0": 0.4606986899563319,
+      "1": 0.07563025210084033,
+      "2": 0.553968253968254
+    }
+  },
+  "block_sensitivity": {
+    "15": {
+      "number_of_blocks": 10,
+      "ci95": [
+        -0.020892417066004546,
+        -0.0018056533265638462
+      ]
+    },
+    "30": {
+      "number_of_blocks": 5,
+      "ci95": [
+        -0.017452055646221126,
+        -0.003097215651616066
+      ]
+    }
+  },
+  "interpretation": "Dependence sensitivity is not independent-day evidence. Outcome overlap and one selectedday prohibit a population-significance claim. Carry classification cannot establish calibrated forecast or executableprofit."
+}

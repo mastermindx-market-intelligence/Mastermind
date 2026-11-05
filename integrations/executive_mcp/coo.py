@@ -2,13 +2,19 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 from collections.abc import Mapping
 
 from common.executive_workspace_contract import _check_work_ref
 from control_plane.coo_principal_request import (
     normalize_principal_request, principal_intent_id, CooPrincipalRequestInternalError,
 )
-from integrations.executive_mcp.schemas import GatewayError, ToolSpec, tool_spec
+from integrations.executive_mcp.schemas import (
+    GatewayError,
+    ToolSpec,
+    canonical_json,
+    tool_spec,
+)
 from integrations.executive_mcp.web_ceo import (
     validate_web_ceo_v2_tool_arguments, web_ceo_v2_tool_spec,
 )
@@ -39,6 +45,34 @@ COO_TOOL_SPECS = (
                  "work_ref": dict(_WORK), "request_ref": {"type": "string", "pattern": "^req-coo-[0-9a-f]{32}$", "maxLength": 40}}}, "Original role-neutral receipt or explicit refusal.", True),
 )
 COO_TOOL_NAMES = tuple(spec.name for spec in COO_TOOL_SPECS)
+
+
+def coo_tool_schema_snapshot():
+    """Return the exact authority-bearing COO tools/list projection.
+
+    Descriptions/output prose are deliberately excluded, matching
+    observed_mcp_tool_schema_digest: tool names, input schemas, output schemas
+    and security annotations are the capability-bearing fields.
+    """
+
+    return [
+        {
+            "annotations": copy.deepcopy(spec.annotations),
+            "input_schema": copy.deepcopy(spec.input_schema),
+            "name": spec.name,
+            "output_schema": None,
+        }
+        for spec in sorted(COO_TOOL_SPECS, key=lambda item: item.name)
+    ]
+
+
+def coo_tool_schema_digest():
+    return hashlib.sha256(canonical_json(coo_tool_schema_snapshot())).hexdigest()
+
+
+COO_TOOL_SCHEMA_DIGEST = (
+    "8d4ff58a30c02b717788b80fdfd1c5b8b35493dc11dd76cac351cde7b4509d72"
+)
 
 
 def validate_coo_tool_arguments(name, arguments):

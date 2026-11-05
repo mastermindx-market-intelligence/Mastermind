@@ -4,11 +4,11 @@ set -euo pipefail
 umask 077
 
 [ "$#" -ge 3 ] || {
-  /bin/echo "usage: sudo /bin/bash $0 {status|arm|disarm|ceo-submit-status|ceo-submit-arm|ceo-submit-disarm|ceo-submit-reconcile} --expected-sha SHA [arm gates]" >&2
+  /bin/echo "usage: sudo /bin/bash $0 {status|arm|arm-quiesce-control-uid|disarm|ceo-submit-status|ceo-submit-arm|ceo-submit-disarm|ceo-submit-reconcile|dialogue-canary-publish|dialogue-canary-reconcile|a2-disable-prepare|a2-disable-prepare-reconcile} --expected-sha SHA [arm gates]" >&2
   exit 64
 }
 case "$1" in
-  status|arm|disarm|ceo-submit-status|ceo-submit-arm|ceo-submit-disarm|ceo-submit-reconcile) ;;
+  status|arm|arm-quiesce-control-uid|disarm|ceo-submit-status|ceo-submit-arm|ceo-submit-disarm|ceo-submit-reconcile|dialogue-canary-publish|dialogue-canary-reconcile|a2-disable-prepare|a2-disable-prepare-reconcile) ;;
   *)
     /bin/echo "autonomy-control.sh accepts only the closed autonomy/CEO-submit command set" >&2
     exit 64

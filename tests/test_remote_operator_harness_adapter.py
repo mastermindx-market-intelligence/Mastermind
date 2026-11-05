@@ -110,12 +110,13 @@ def test_generic_proxy_source_has_no_provider_selector_or_codex_identity():
         assert forbidden not in lowered
 
 
-def test_wrong_interface_version_refuses_before_any_broker_call():
+@pytest.mark.parametrize("version", ["mastermind.operator_harness/v1", "mastermind.operator_harness.v999"])
+def test_wrong_interface_version_refuses_before_any_broker_call(version):
     with pytest.raises(BrokerProtocolError, match="interface version"):
         RemoteOperatorHarnessAdapter(
             _Client(),
             turn_input_loader=lambda _turn: "",
-            capabilities=_capabilities(interface_version="mastermind.operator_harness.v999"),
+            capabilities=_capabilities(interface_version=version),
         )
 
 

@@ -10,9 +10,11 @@ import dataclasses
 import hashlib
 import json
 import os
+import posixpath
 import re
 import stat
 from collections.abc import Iterator, Mapping
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
@@ -22,6 +24,7 @@ from typing import Any, Protocol, runtime_checkable
 WORKER_EXECUTION_CONTRACT_VERSION = "mastermind.worker_execution_contract/v1"
 LAUNCH_ATTESTATION_SCHEMA_VERSION = "mastermind.executive_launch_attestation/v1"
 WORKER_RECOVERY_BINDING_VERSION = "mastermind.worker_recovery_binding/v1"
+WORKER_REMOTE_RECOVERY_BINDING_VERSION = "mastermind.worker_recovery_binding/v2"
 DURABLE_COLLECTION_CONTRACT_VERSION = "mastermind.worker_durable_collection/v1"
 _MAX_RECOVERY_PROMPT_BYTES = 1024 * 1024
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -52,6 +55,10 @@ _SUBSCRIPTION_CANARY_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$
 MAX_ARTIFACTS = 32
 MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
 MAX_ARTIFACT_TOTAL_BYTES = 32 * 1024 * 1024
+PAID_MODEL_PROCESS_REF_SCHEMA = "mastermind.paid_model_process_ref/v1"
+_PAID_MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_PAID_MODEL_IDENTITY_MAX_BYTES = 512
+_PAID_MODEL_PATH_MAX_BYTES = 4096
 
 
 class _FrozenMapping(Mapping[Any, Any]):
@@ -161,6 +168,13 @@ def validate_subscription_canary_claim(value: Any) -> Mapping[str, Any]:
     return frozen
 
 
+class CleanupPolicy(str, Enum):
+    """Trusted composition chooses evidence; no provider advertises isolation."""
+
+    DEDICATED_UID = "DEDICATED_UID"
+    FABRIC_PROCESS_GROUP = "FABRIC_PROCESS_GROUP"
+
+
 class WorkerRunStatus(str, Enum):
     STARTING = "STARTING"
     RUNNING = "RUNNING"
@@ -211,6 +225,7 @@ class LaunchAttestation:
     subscription_canary_observation_digest: str | None = None
     subscription_canary_binding_id: str | None = None
     subscription_canary_model: str | None = None
+    isolation_manifest_sha256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -230,6 +245,11 @@ class LaunchAttestation:
             "secret_canary_verdict": _jsonable(self.secret_canary_verdict),
             "launch_nonce": self.launch_nonce,
             "process_identity": dict(self.process_identity),
+            **(
+                {"isolation_manifest_sha256": self.isolation_manifest_sha256}
+                if self.isolation_manifest_sha256 is not None
+                else {}
+            ),
             **(
                 {
                     "subscription_canary_observation_digest": (
@@ -303,6 +323,26 @@ class WorkerLaunchSpec:
         )
 
 
+def validate_orchestration_grant_digest(value: Any) -> str:
+    """Validate provenance representation; Runtime owns the grant binding."""
+    if not isinstance(value, str) or _SHA256_RE.fullmatch(value) is None:
+        raise WorkerRecoveryContractError(
+            "effective_grant_digest must be an exact lowercase SHA-256 digest"
+        )
+    return value
+
+
+@dataclasses.dataclass(frozen=True)
+class OrchestrationLaunchSpec(WorkerLaunchSpec):
+    """LaunchSpec carrying the immutable v4 grant without widening legacy bytes."""
+
+    effective_grant_digest: str = ""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        validate_orchestration_grant_digest(self.effective_grant_digest)
+
+
 @dataclasses.dataclass(frozen=True)
 class WorkerProcessRef:
     run_id: str
@@ -327,6 +367,224 @@ class WorkerProcessRef:
 
 class WorkerRecoveryContractError(ValueError):
     """Durable worker recovery evidence is malformed or has drifted."""
+
+
+class PaidModelProcessRefError(ValueError):
+    """Paid model process identity evidence is malformed or has drifted."""
+
+
+def _paid_model_identity_text(value: Any, field_name: str) -> str:
+    if (
+        type(value) is not str
+        or not value
+        or len(value) > _PAID_MODEL_IDENTITY_MAX_BYTES
+        or value.strip() != value
+        or "\x00" in value
+    ):
+        raise PaidModelProcessRefError(
+            f"paid model process ref {field_name} is invalid"
+        )
+    try:
+        if len(value.encode("utf-8")) > _PAID_MODEL_IDENTITY_MAX_BYTES:
+            raise PaidModelProcessRefError("paid model process ref text is invalid")
+    except UnicodeError:
+        raise PaidModelProcessRefError("paid model process ref text is invalid") from None
+    return value
+
+
+def _paid_model_identifier(value: Any, field_name: str) -> str:
+    if type(value) is not str or _PAID_MODEL_ID_RE.fullmatch(value) is None:
+        raise PaidModelProcessRefError(
+            f"paid model process ref {field_name} is invalid"
+        )
+    return value
+
+
+def _paid_model_positive_int(value: Any, field_name: str) -> int:
+    if type(value) is not int or not 0 < value < 2**63:
+        raise PaidModelProcessRefError(
+            f"paid model process ref {field_name} is invalid"
+        )
+    return value
+
+
+def _paid_model_uid_int(value: Any, field_name: str) -> int:
+    if type(value) is not int or not 0 <= value <= 2**31 - 1:
+        raise PaidModelProcessRefError(
+            f"paid model process ref {field_name} is invalid"
+        )
+    return value
+
+
+def _paid_model_timestamp(value: Any, field_name: str) -> str:
+    text = _paid_model_identity_text(value, field_name)
+    candidate = text[:-1] + "+00:00" if text.endswith("Z") else text
+    try:
+        moment = datetime.fromisoformat(candidate)
+    except ValueError as exc:
+        raise PaidModelProcessRefError(
+            f"paid model process ref {field_name} is invalid"
+        ) from exc
+    if moment.tzinfo is None or moment.utcoffset() is None:
+        raise PaidModelProcessRefError(
+            f"paid model process ref {field_name} is not timezone aware"
+        )
+    return text
+
+
+def _paid_model_absolute_path(value: Any, field_name: str) -> str:
+    if (
+        type(value) is not str
+        or not value
+        or len(value) > _PAID_MODEL_PATH_MAX_BYTES
+        or not value.startswith("/")
+        or value.strip() != value
+        or "\x00" in value
+        or "//" in value
+        or ".." in value.split("/")
+        or posixpath.normpath(value) != value
+    ):
+        raise PaidModelProcessRefError(
+            f"paid model process ref {field_name} is not a canonical absolute path"
+        )
+    try:
+        if len(value.encode("utf-8")) > _PAID_MODEL_PATH_MAX_BYTES:
+            raise PaidModelProcessRefError("paid model process ref path is invalid")
+    except UnicodeError:
+        raise PaidModelProcessRefError("paid model process ref path is invalid") from None
+    return value
+
+
+def _paid_model_binary(value: Any) -> BinaryAttestation:
+    if type(value) is not BinaryAttestation:
+        raise PaidModelProcessRefError("paid model process ref binary is invalid")
+    for field_name in ("path", "real_path"):
+        _paid_model_absolute_path(getattr(value, field_name), f"binary {field_name}")
+    _paid_model_identity_text(value.version, "binary version")
+    if type(value.sha256) is not str or _SHA256_RE.fullmatch(value.sha256) is None:
+        raise PaidModelProcessRefError("paid model process ref binary digest is invalid")
+    if value.team_identifier is not None:
+        _paid_model_identity_text(value.team_identifier, "binary team identifier")
+    for field_name in ("size", "device", "inode", "mode", "uid", "gid", "mtime_ns"):
+        number = getattr(value, field_name)
+        if type(number) is not int or number < 0:
+            raise PaidModelProcessRefError(
+                f"paid model process ref binary {field_name} is invalid"
+            )
+    return value
+
+
+_BINARY_ATTESTATION_FIELDS = frozenset(
+    field.name for field in dataclasses.fields(BinaryAttestation)
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class PaidModelProcessRef:
+    """Closed, secret-free process identity for one paid model execution.
+
+    Unlike :class:`WorkerProcessRef` this shape carries no provider session,
+    workspace, or admission fields: it is the durable evidence that a specific
+    paid process ran under a specific non-forged OS identity on one host.
+    """
+
+    run_id: str
+    worker_id: str
+    host_ref: str
+    pid: int
+    pgid: int
+    session_id: int
+    process_start_identity: str
+    boot_session_id: str
+    launch_nonce: str
+    started_at: str
+    effective_uid: int
+    effective_gid: int
+    real_uid: int
+    real_gid: int
+    binary: BinaryAttestation
+    stdout_path: str
+    stderr_path: str
+    result_path: str
+    schema_version: str = PAID_MODEL_PROCESS_REF_SCHEMA
+
+    def __post_init__(self) -> None:
+        if type(self.schema_version) is not str or (
+            self.schema_version != PAID_MODEL_PROCESS_REF_SCHEMA
+        ):
+            raise PaidModelProcessRefError(
+                "paid model process ref schema is unsupported"
+            )
+        for field_name in ("run_id", "worker_id", "host_ref"):
+            _paid_model_identifier(getattr(self, field_name), field_name)
+        for field_name in ("pid", "pgid", "session_id"):
+            _paid_model_positive_int(getattr(self, field_name), field_name)
+        for field_name in (
+            "process_start_identity",
+            "boot_session_id",
+            "launch_nonce",
+        ):
+            _paid_model_identity_text(getattr(self, field_name), field_name)
+        _paid_model_timestamp(self.started_at, "started_at")
+        for field_name in ("effective_uid", "effective_gid", "real_uid", "real_gid"):
+            _paid_model_uid_int(getattr(self, field_name), field_name)
+        if self.real_uid != self.effective_uid or self.real_gid != self.effective_gid:
+            raise PaidModelProcessRefError(
+                "paid model process ref real and effective identities differ"
+            )
+        _paid_model_binary(self.binary)
+        paths = [
+            _paid_model_absolute_path(getattr(self, field_name), field_name)
+            for field_name in ("stdout_path", "stderr_path", "result_path")
+        ]
+        if len(set(paths)) != len(paths):
+            raise PaidModelProcessRefError(
+                "paid model process ref output paths are not distinct"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "run_id": self.run_id,
+            "worker_id": self.worker_id,
+            "host_ref": self.host_ref,
+            "pid": self.pid,
+            "pgid": self.pgid,
+            "session_id": self.session_id,
+            "process_start_identity": self.process_start_identity,
+            "boot_session_id": self.boot_session_id,
+            "launch_nonce": self.launch_nonce,
+            "started_at": self.started_at,
+            "effective_uid": self.effective_uid,
+            "effective_gid": self.effective_gid,
+            "real_uid": self.real_uid,
+            "real_gid": self.real_gid,
+            "binary": dataclasses.asdict(self.binary),
+            "stdout_path": self.stdout_path,
+            "stderr_path": self.stderr_path,
+            "result_path": self.result_path,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Any) -> "PaidModelProcessRef":
+        if type(value) is not dict or set(value) != _PAID_MODEL_PROCESS_REF_FIELDS:
+            raise PaidModelProcessRefError("paid model process ref fields are invalid")
+        raw_binary = value.get("binary")
+        if type(raw_binary) is not dict or set(raw_binary) != _BINARY_ATTESTATION_FIELDS:
+            raise PaidModelProcessRefError("paid model process ref binary is invalid")
+        fields = {key: item for key, item in value.items() if key != "binary"}
+        try:
+            fields["binary"] = BinaryAttestation(**raw_binary)
+            return cls(**fields)
+        except (TypeError, ValueError) as exc:
+            raise PaidModelProcessRefError(
+                "paid model process ref is invalid"
+            ) from exc
+
+
+_PAID_MODEL_PROCESS_REF_FIELDS = frozenset(
+    field.name for field in dataclasses.fields(PaidModelProcessRef)
+)
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -420,6 +678,25 @@ def _process_ref_from_recovery(value: Any) -> WorkerProcessRef:
         ) from exc
 
 
+def _validate_control_recovery_context(value: Any) -> None:
+    if not isinstance(value, Mapping) or set(value) != {"input_root", "source_workspace"}:
+        raise WorkerRecoveryContractError("Control recovery coordinates are invalid")
+    for path in value.values():
+        if (not isinstance(path, str) or not path or "\x00" in path
+                or not Path(path).is_absolute() or ".." in Path(path).parts
+                or str(Path(path)) != path):
+            raise WorkerRecoveryContractError("Control recovery coordinates are invalid")
+
+
+def _control_recovery_digest(spec_digest: str, material: Mapping[str, Any]) -> str:
+    return _canonical_sha256({
+        "launch_spec_sha256": spec_digest,
+        "prompt_path": material["prompt_path"],
+        "prompt_sha256": material["prompt_sha256"],
+        "control_recovery": material["control_recovery"],
+    })
+
+
 @dataclasses.dataclass(frozen=True)
 class WorkerRecoveryBinding:
     """Provider-neutral durable coordinates for one already-started execution."""
@@ -433,7 +710,9 @@ class WorkerRecoveryBinding:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "launch_spec", _freeze(self.launch_spec))
-        if self.schema_version != WORKER_RECOVERY_BINDING_VERSION:
+        if self.schema_version not in {
+            WORKER_RECOVERY_BINDING_VERSION, WORKER_REMOTE_RECOVERY_BINDING_VERSION,
+        }:
             raise WorkerRecoveryContractError(
                 "recovery binding schema is unsupported"
             )
@@ -455,10 +734,15 @@ class WorkerRecoveryBinding:
             raise WorkerRecoveryContractError(
                 "recovery launch digest is invalid"
             )
+        expected_fields = {"fields", "prompt_path", "prompt_sha256"}
+        if self.schema_version == WORKER_REMOTE_RECOVERY_BINDING_VERSION:
+            if self.adapter_id != "attended-fabric":
+                raise WorkerRecoveryContractError("remote recovery requires the Fabric owner")
+            expected_fields |= {"control_recovery", "control_recovery_sha256"}
         fields = self.launch_spec.get("fields")
         if (
             set(self.launch_spec)
-            != {"fields", "prompt_path", "prompt_sha256"}
+            != expected_fields
             or not isinstance(fields, Mapping)
             or fields.get("run_id") != self.process_ref.run_id
         ):
@@ -473,6 +757,18 @@ class WorkerRecoveryBinding:
             raise WorkerRecoveryContractError(
                 "recovery prompt digest is invalid"
             )
+        if self.schema_version == WORKER_REMOTE_RECOVERY_BINDING_VERSION:
+            context = self.launch_spec.get("control_recovery")
+            _validate_control_recovery_context(context)
+            if self.launch_spec.get("control_recovery_sha256") != _control_recovery_digest(
+                self.launch_spec_sha256, self.launch_spec,
+            ):
+                raise WorkerRecoveryContractError("Control recovery context digest has drifted")
+
+    @property
+    def control_recovery(self) -> Mapping[str, str] | None:
+        """Integrity-bound coordinates, not an authentication or filesystem grant."""
+        return self.launch_spec.get("control_recovery")
 
     @classmethod
     def bind(
@@ -482,6 +778,7 @@ class WorkerRecoveryBinding:
         spec: WorkerLaunchSpec,
         process_ref: WorkerProcessRef,
         prompt_path: str | Path,
+        control_recovery: Mapping[str, str] | None = None,
     ) -> "WorkerRecoveryBinding":
         if process_ref.run_id != spec.run_id:
             raise WorkerRecoveryContractError(
@@ -494,7 +791,12 @@ class WorkerRecoveryBinding:
             )
         try:
             resolved = path.resolve(strict=True)
-            input_root = (Path(spec.run_dir) / "input").resolve(strict=True)
+            if control_recovery is not None:
+                _validate_control_recovery_context(control_recovery)
+            input_root = (
+                Path(control_recovery["input_root"]) if control_recovery is not None
+                else Path(spec.run_dir) / "input"
+            ).resolve(strict=True)
             resolved.relative_to(input_root)
         except (OSError, ValueError) as exc:
             raise WorkerRecoveryContractError(
@@ -510,16 +812,22 @@ class WorkerRecoveryBinding:
             for field in dataclasses.fields(spec)
             if field.name != "prompt"
         }
+        material = {
+            "fields": fields,
+            "prompt_path": str(resolved),
+            "prompt_sha256": hashlib.sha256(payload).hexdigest(),
+        }
+        spec_digest = worker_launch_spec_sha256(spec)
+        if control_recovery is not None:
+            material["control_recovery"] = dict(control_recovery)
+            material["control_recovery_sha256"] = _control_recovery_digest(spec_digest, material)
         return cls(
-            schema_version=WORKER_RECOVERY_BINDING_VERSION,
+            schema_version=(WORKER_REMOTE_RECOVERY_BINDING_VERSION
+                            if control_recovery is not None else WORKER_RECOVERY_BINDING_VERSION),
             adapter_id=str(adapter_id),
             collection_contract_version=DURABLE_COLLECTION_CONTRACT_VERSION,
-            launch_spec_sha256=worker_launch_spec_sha256(spec),
-            launch_spec={
-                "fields": fields,
-                "prompt_path": str(resolved),
-                "prompt_sha256": hashlib.sha256(payload).hexdigest(),
-            },
+            launch_spec_sha256=spec_digest,
+            launch_spec=material,
             process_ref=process_ref,
         )
 
@@ -562,6 +870,58 @@ class WorkerRecoveryBinding:
             process_ref=_process_ref_from_recovery(value.get("process_ref")),
         )
 
+    def validate_wire(self) -> "WorkerRecoveryBinding":
+        """Validate retained launch material without opening its private prompt.
+
+        This proves the wire digest and closed launch shape only. Recovery still
+        verifies the actual prompt file before reattaching an execution.
+        """
+        fields = self.launch_spec["fields"]
+        spec_type = (
+            OrchestrationLaunchSpec
+            if "effective_grant_digest" in fields else WorkerLaunchSpec
+        )
+        expected_keys = {
+            field.name for field in dataclasses.fields(spec_type) if field.name != "prompt"
+        }
+        if set(fields) != expected_keys:
+            raise WorkerRecoveryContractError("recovery launch fields are invalid")
+        if _canonical_sha256({
+            **fields, "prompt_sha256": self.launch_spec["prompt_sha256"],
+        }) != self.launch_spec_sha256:
+            raise WorkerRecoveryContractError("recovery launch digest has drifted")
+        try:
+            raw = dict(_jsonable(fields))
+            for name in ("workspace_path", "run_dir", "result_schema_path"):
+                if (
+                    not isinstance(raw[name], str)
+                    or not Path(raw[name]).is_absolute()
+                    or ".." in Path(raw[name]).parts
+                ):
+                    raise WorkerRecoveryContractError("recovery launch path is invalid")
+                raw[name] = Path(raw[name])
+            # Instantiation reuses the canonical value owner, including grant
+            # and subscription-claim validation; the prompt never leaves disk.
+            spec_type(prompt="", **raw)
+            prompt_path = self.launch_spec["prompt_path"]
+            if not isinstance(prompt_path, str) or not Path(prompt_path).is_absolute():
+                raise WorkerRecoveryContractError("recovery prompt path is invalid")
+            if ".." in Path(prompt_path).parts or ".." in raw["run_dir"].parts:
+                raise WorkerRecoveryContractError("recovery prompt path escapes run input")
+            prompt_root = (Path(self.control_recovery["input_root"])
+                           if self.control_recovery is not None
+                           else raw["run_dir"] / "input")
+            Path(prompt_path).relative_to(prompt_root)
+            raw["result_schema_path"].relative_to(raw["run_dir"] / "input")
+            for name in ("stdout_path", "stderr_path", "result_path"):
+                path = getattr(self.process_ref, name)
+                if not isinstance(path, str) or ".." in Path(path).parts:
+                    raise WorkerRecoveryContractError("recovery process path is invalid")
+                Path(path).relative_to(raw["run_dir"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise WorkerRecoveryContractError("recovery launch wire is invalid") from exc
+        return self
+
     def recover_launch_spec(
         self,
         spec_type: type[WorkerLaunchSpec] = WorkerLaunchSpec,
@@ -580,9 +940,11 @@ class WorkerRecoveryBinding:
         raw = dict(_jsonable(fields))
         prompt_path = Path(str(self.launch_spec["prompt_path"]))
         run_dir = Path(str(raw.get("run_dir", "")))
+        input_root = (Path(self.control_recovery["input_root"])
+                      if self.control_recovery is not None else run_dir / "input")
         try:
             prompt_path.resolve(strict=True).relative_to(
-                (run_dir / "input").resolve(strict=True)
+                input_root.resolve(strict=True)
             )
         except (OSError, ValueError) as exc:
             raise WorkerRecoveryContractError(
@@ -705,6 +1067,7 @@ __all__ = [
     "WORKER_EXECUTION_CONTRACT_VERSION",
     "LAUNCH_ATTESTATION_SCHEMA_VERSION",
     "WORKER_RECOVERY_BINDING_VERSION",
+    "WORKER_REMOTE_RECOVERY_BINDING_VERSION",
     "DURABLE_COLLECTION_CONTRACT_VERSION",
     "validate_subscription_canary_claim",
     "MAX_ARTIFACTS",
@@ -724,4 +1087,7 @@ __all__ = [
     "WorkerProcessRef",
     "WorkerResult",
     "WorkerRunStatus",
+    "PAID_MODEL_PROCESS_REF_SCHEMA",
+    "PaidModelProcessRef",
+    "PaidModelProcessRefError",
 ]

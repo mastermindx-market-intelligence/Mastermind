@@ -53,7 +53,7 @@ def request() -> dict[str, object]:
             "installed": True,
             "enabled": True,
             "research_skill_loaded": True,
-            "research_skill_blob_sha": "006c10283d200b47e4cb816906be5f5db3ce7a0f",
+            "research_skill_blob_sha": "72de49df746ba5de9668416d43e6b77f7a79b75f",
         },
         "steward": {
             "app_id": STEWARD_ID,
@@ -256,11 +256,35 @@ def test_matching_but_unaccepted_steward_contract_is_refused(mutation: str) -> N
         preflight_research_generation(value)
 
 
-def test_wrong_loaded_research_skill_blob_is_refused() -> None:
+@pytest.mark.parametrize(
+    "skill_blob_sha",
+    ("9" * 40, "006c10283d200b47e4cb816906be5f5db3ce7a0f"),
+)
+def test_wrong_loaded_research_skill_blob_is_refused(skill_blob_sha: str) -> None:
     value = request()
-    value["plugin"]["research_skill_blob_sha"] = "9" * 40
+    value["plugin"]["research_skill_blob_sha"] = skill_blob_sha
     with pytest.raises(ResearchGenerationError, match="PLUGIN_IDENTITY_MISMATCH"):
         preflight_research_generation(value)
+
+
+def test_research_generation_pins_the_packaged_skill() -> None:
+    skill_path = (
+        Path(__file__).resolve().parents[1]
+        / "plugins/mastermind-sol/skills/mastermind-deep-research/SKILL.md"
+    )
+    raw = skill_path.read_bytes()
+    blob_header = b"blob " + str(len(raw)).encode("ascii") + b"\0"
+    packaged_blob_sha = hashlib.sha1(blob_header + raw).hexdigest()
+    value = request()
+    assert value["plugin"]["research_skill_blob_sha"] == packaged_blob_sha
+
+    preflight = preflight_research_generation(value)
+    compiled = compile_research_binding(value)
+    for receipt in (preflight, compiled.public_receipt):
+        assert receipt["research_skill_blob_sha"] == packaged_blob_sha
+        assert receipt["workspace_effect_applied"] is False
+        assert receipt["oauth_effect_applied"] is False
+        assert receipt["production_acceptance_granted"] is False
 
 
 def test_missing_steward_app_identity_is_typed_assembly_hold() -> None:
