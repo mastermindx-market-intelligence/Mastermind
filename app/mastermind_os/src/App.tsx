@@ -24,6 +24,9 @@ import { qualifyWorkerResultRef } from "./fabric/mission-worker-result";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
 import { qualifyExecutiveOfficeSession, SESSION_TARGET_REF } from "./meta-ceo/session-context";
 import { Projects } from "./projects/Projects";
+import { ProjectPlanningJourney } from "./projects/ProjectPlanningJourney";
+import { useProjectJourneyState } from "./projects/useProjectJourneyState";
+import { readProjectJourneyLocation } from "./projects/project-journey-location";
 import { ProjectArchiveBrowser } from "./projects/archive/ProjectArchiveBrowser";
 import { ProjectWorkspace } from "./projects/ProjectWorkspace";
 import { ProjectConversationAssociation } from "./conversations/ProjectConversationAssociation";
@@ -1424,6 +1427,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   }, [navigationOpen]);
   const native = "__TAURI_INTERNALS__" in window,
     initialLocation = useMemo(() => directLocationInput(), []),
+    initialProjectJourney = useMemo(() => readProjectJourneyLocation(window.location.href), []),
     initial = useMemo(
       () =>
         initialLocation.hasIdentity
@@ -1432,7 +1436,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       [initialLocation],
     ),
     [selection, setSelection] = useState<MissionSelection | null>(initial),
-    [active, setActive] = useState<View>(initial && new URL(window.location.href).searchParams.get("direct_native_job")===initial.rootJobId ? "Projects" : "Today"),
+    [active, setActive] = useState<View>(initialProjectJourney.open || !initialProjectJourney.valid ? "Projects" : initial && new URL(window.location.href).searchParams.get("direct_native_job")===initial.rootJobId ? "Projects" : "Today"),
     [projectTab, setProjectTab] = useState<ProjectTab | null>(initial && new URL(window.location.href).searchParams.get("direct_native_job")===initial.rootJobId ? "Overview" : null),
     [index, setIndex] = useState<ProgramIndex>({
       programs: [],
@@ -1608,6 +1612,14 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     authState?.content,
   );
   authRevisionRef.current = authRevision;
+  const projectJourney = useProjectJourneyState({host: window.MastermindMissionHost ?? null,
+    authRevision, currentAuthRevision: () => authRevisionRef.current});
+  const projectJourneyRef = useRef(projectJourney);
+  projectJourneyRef.current = projectJourney;
+  const openProjectJourney = () => {
+    if (!projectJourney.open()) return;
+    setCatalogueProject(null);setProjectTab(null);setActive("Projects");
+  };
   const catalogueListOwner = useRef<ConversationListOwnerCapture | null>(null);
   const windowListOwner = useRef<ConversationListOwnerCapture | null>(null);
   const captureListReadOwner = (host: MissionHost | undefined) => captureConversationListOwner({
@@ -1717,7 +1729,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const office = useOfficeProjection(authRevision, selection, officeSession);
   // The Office draft is part of the unsent-text signal. It is read after the
   // session-qualified projection exists, never before.
-  hasUnsentUserText.current = Boolean(office.draft.text ||
+  hasUnsentUserText.current = Boolean(projectJourney.hasUnsentDraft() || office.draft.text ||
     observedConversation.hasUnsentDraft() ||
     (signedIn ? presentedComposerDrafts.launch || presentedComposerDrafts.session
       : retainedComposerDrafts.launch || retainedComposerDrafts.session));
@@ -1823,7 +1835,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   // A retained command pointer is an effect-reconciliation obligation.
   // Automatic OAuth navigation must not tear down an unresolved UI owner.
   useEffect(() => registerUnsavedNavigationHold(() =>
-    pendingCommand.current !== null || heldKind !== null || recoverInFlight ||
+    projectJourney.hasUnsentDraft() || pendingCommand.current !== null || heldKind !== null || recoverInFlight ||
     (passiveExpiryHold.current && hasUnsentUserText.current)
   ), [heldKind, recoverInFlight]);
 
@@ -2113,6 +2125,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           retainedComposerScope.current = null;
           setRetainedComposerDrafts(blank);
         }
+        projectJourney.invalidateAuth(passiveLoss);
         office.invalidateAuth(passiveLoss);
         observedConversation.invalidateAuth(passiveLoss);
         commandSlot.current?.controller.invalidate();
@@ -2282,7 +2295,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     authState?.acquisition,
   ]);
   useEffect(() => {
-    if (!initialLocation.hasIdentity && initial) {
+    if (!initialProjectJourney.open && initialProjectJourney.valid && !initialLocation.hasIdentity && initial) {
       const location = new URL(window.location.href);
       location.search = new URLSearchParams({
         work_ref: initial.workRef,
@@ -2294,7 +2307,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         `${location.pathname}${location.search}${location.hash}`,
       );
     }
-  }, [initial, initialLocation.hasIdentity]);
+  }, [initial, initialLocation.hasIdentity, initialProjectJourney]);
   useEffect(() => {
     let attached = true;
     if (!native)
@@ -2534,6 +2547,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   }, [native, authRevision, authState?.acquisition, workRevision]);
   useEffect(() => {
     const restoreSelection = () => {
+      const journey = readProjectJourneyLocation(window.location.href);
+      projectJourneyRef.current.restoreLocation();
+      if (journey.open || !journey.valid) {
+        setCatalogueProject(null);setProjectTab(null);setActive("Projects");
+        return;
+      }
       const next = directLocationInput().selection;
       office.clearSelection(next);
       observedConversation.clear();
@@ -4438,8 +4457,42 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     pendingLegacyTabFocus.current = tab;
     setProjectTab(tab);
   };
+  const retainedProjectGoal = projectJourney.retainedGoal &&
+    (!projectJourney.retainedGoal.passivelyHeld || passiveExpiryHold.current) ?
+    <section className="card" aria-label={locale === "zh-CN" ? "保留的项目目标" : "Retained project goal"}>
+      <h2>{locale === "zh-CN" ? "未发送的项目目标" : "Unsent project goal"}</h2>
+      <label htmlFor="retained-project-goal">{locale === "zh-CN" ? "原项目目标" : "Original project goal"}</label>
+      <textarea id="retained-project-goal" value={projectJourney.retainedGoal.text}
+        onChange={event => projectJourney.editRetainedGoal(event.target.value)} rows={4}/>
+      {!projectJourney.retainedGoal.passivelyHeld ? <button type="button" onClick={() => {
+        if (projectJourney.returnToRetainedGoal()) {setCatalogueProject(null);setProjectTab(null);setActive("Projects");}
+      }}>{locale === "zh-CN" ? "返回原项目设置" : "Return to original project setup"}</button> : null}
+      <button type="button" onClick={projectJourney.discardRetainedGoal}>{locale === "zh-CN" ? "丢弃项目目标" : "Discard project goal"}</button>
+    </section> : null;
   let content: React.ReactNode;
-  if (active === "Today")
+  if (active === "Projects" && (projectJourney.shown || projectJourney.invalidLink))
+    content = <>
+      <button type="button" onClick={() => {
+        if (!projectJourney.isHostCurrent()) return;
+        projectJourney.hide();setProjectTab(null);
+      }}>{locale === "zh-CN" ? "返回项目" : "Back to projects"}</button>
+      {projectJourney.invalidLink ? <section className="card"><h1>{locale === "zh-CN" ? "项目设置链接不可用" : "Project setup link unavailable"}</h1>
+        <p>{locale === "zh-CN" ? "请使用原始项目设置链接，或明确打开项目设置。" : "Use the original project setup link, or explicitly open project setup."}</p>
+        <button type="button" onClick={openProjectJourney}>{locale === "zh-CN" ? "打开项目设置" : "Open project setup"}</button></section>
+      : commandBinding ? <ProjectPlanningJourney key={`project-journey:${authRevision}`} locale={locale}
+        host={window.MastermindMissionHost ?? null} store={commandBinding.store}
+        executiveOwner={() => {
+          if (!projectJourney.isHostCurrent() || window.MastermindMissionHost?.commandBinding !== commandBinding) return null;
+          const live = readOwnerContext(commandBinding.port);
+          return live && live.principalScope === ownerContext?.principalScope && live.generation === ownerContext?.generation ? live : null;
+        }}
+        isHostCurrent={projectJourney.isHostCurrent} selection={projectJourney.selection}
+        onSelection={projectJourney.onSelection} goal={projectJourney.goal} onGoalChange={projectJourney.onGoalChange}/>
+      : <section className="card"><h1>{locale === "zh-CN" ? "项目设置暂不可用" : "Project setup unavailable"}</h1>
+        <p>{locale === "zh-CN" ? "当前来源未提供项目操作接口。" : "The current source has not supplied the project operation interface."}</p></section>}
+      {retainedProjectGoal}
+    </>;
+  else if (active === "Today")
     content = <Today locale={locale} projection={office.projection} work={workState}
       composer={commandPanel}
       authenticationCue={todayAuthenticationCue}
@@ -4561,6 +4614,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   else if (active === "Projects")
     content = (
       <>
+        <button type="button" onClick={openProjectJourney} disabled={!projectJourney.isHostCurrent()}>{locale === "zh-CN" ? projectJourney.selection ? "继续项目设置" : "新建项目" : projectJourney.selection ? "Continue project setup" : "New project"}</button>
+        {retainedProjectGoal}
         {programsRefreshControl}
         {!directSelected && projectWorkRef && (catalogueWorkRef || projectTab === "Conversation") ? (
           <ProjectPlanPanel {...projectPlanProps} renderWorkspace={({objective, panel}) => <ProjectWorkspace headingLevel={1} headingRef={projectHeading} locale={locale}
@@ -4928,7 +4983,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       authState.reason === "POPUP_CLOSED" ? copy.popupClosed :
       authState.reason.includes("EXPIRED") || authState.reason.includes("TIMEOUT") ? copy.signInTimeout : copy.signInFailed
     }</p> : undefined}
-    protectedWork={((passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.session || office.draft.text || observedConversation.draft)) || showCheckStatus) ? <>
+    protectedWork={((passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.session || office.draft.text || observedConversation.draft || projectJourney.retainedGoal?.text)) || showCheckStatus) ? <>
+      {passiveExpiryHold.current ? retainedProjectGoal : null}
       {passiveExpiryHold.current && office.draft.text ? <section className="card">
         <h2>{locale === "zh-CN" ? "未发送的指示" : "Unsent direction"}</h2>
         <p>{copy.expiredUnsent}</p>
@@ -5079,6 +5135,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           <section className="notice" aria-label={copy.unsentProtected}>
             <p>{copy.expiredUnsent}</p>
             <button type="button" onClick={() => {
+              projectJourney.invalidateAuth(false);
               office.changeDraft("");
               observedConversation.discardDraft();
               updateRetainedComposer("launch", "");
@@ -5088,7 +5145,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           </section>
         ) : null}
         {active !== "Control Room" && active !== "Today" && active !== "Conversations" && !directRoute &&
-          !(active === "Inbox" && visibleNotice === "Choose a Program with one resolved mission before opening the workspace.") &&
+          !((active === "Inbox" || active === "Projects" && (projectJourney.shown || projectJourney.invalidLink)) && visibleNotice === "Choose a Program with one resolved mission before opening the workspace.") &&
           !reading.suppressBodyNotice ? (
           <div className="notice" role="status">{visibleNotice === "Choose a Program with one resolved mission before opening the workspace."
             ? locale === "zh-CN" ? "选择一个项目，查看其工作。" : "Choose a project to view its work."

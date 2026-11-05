@@ -294,7 +294,7 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
     const current = stateRef.current;
     // Local pane visibility only: the safe URL ids stay for reopen, and an
     // off-view owned draft stays held.
-    if (current.shown) apply({ ...current, shown: false });
+    if (current.shown || current.invalidLink) apply({ ...current, shown: false, invalidLink: false });
   };
 
   const onGoalChange = (text: string): void => {

@@ -273,6 +273,16 @@ describe("New-project journey presentation state", () => {
     expect(e.result.current.shown).toBe(true);
   });
 
+  it("hides invalid-link presentation locally without rewriting the original URL", () => {
+    const e = setup("/os/?new_project=0");
+    const original = location.href;
+    expect(e.result.current.invalidLink).toBe(true);
+    act(() => e.result.current.hide());
+    expect(e.result.current.invalidLink).toBe(false);
+    expect(e.result.current.shown).toBe(false);
+    expect(location.href).toBe(original);
+  });
+
   it("keeps the exact currency proof and refuses when a read throws", () => {
     const e = setup("/os/?new_project=1");
     expect(e.result.current.isHostCurrent()).toBe(true);
