@@ -87,6 +87,88 @@ def native_lineage(expected_parent, root):
  raise ValueError('native_ancestry_limit')
 
 
+def historical_launch_correlation(run, log, log_path):
+ """Retained historical correlation, NOT the generic active-run projection.
+
+ Consume the FULL stable original log. A recorded prelaunch acquire return can
+ survive its later exact cleanup-unknown terminal shape without becoming active
+ lineage, admission, authentication, worker START, quiescence or settlement.
+ """
+ import stat
+ from remote_sub_helpers import validate_acquisition_pool
+ scope=model.scope_for(run)
+ initial=log_path.lstat()
+ if (not stat.S_ISREG(initial.st_mode) or initial.st_uid!=os.getuid()
+     or initial.st_nlink!=1 or initial.st_mode & 0o022
+     or type(log) is not bytes or not log.endswith(b'\n')
+     or len(log)>fabric_task.MAX_LOG_BYTES
+     or delivery.local_file(log_path,fabric_task.MAX_LOG_BYTES)!=log):
+  raise ValueError('historical_full_log_unqualified')
+ pattern=re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z \[remote_sub id='+re.escape(run)+r' host='+re.escape(scope['host'])+r'\] (.*)\n')
+ lines=log.decode('utf-8').splitlines(keepends=True);events=[]
+ for line in lines:
+  match=pattern.fullmatch(line)
+  if not match:raise ValueError('original_terminal_log_shape')
+  events.append(match[1])
+ indices=[i for i,x in enumerate(events) if x.startswith('LAUNCH_BINDING ')]
+ if len(indices)!=1:raise ValueError('original_launch_binding_count')
+ index=indices[0];binding=reader.strict_json(events[index][len('LAUNCH_BINDING '):])
+ keys={'schema','run_id','root','parent','host','mode','requested_model','pool','acquisition_pool',
+       'lease_id','account','packet_sha256','support_digest','acquire_response_sha256','source','phase'}
+ if (type(binding) is not dict or set(binding)!=keys
+     or binding['schema']!='mastermind.fabric_launch_binding.v2'
+     or any(binding.get(k)!=scope[k] for k in ('root','parent','host','lease_id'))
+     or scope['account'] is not None and binding.get('account')!=scope['account']
+     or binding['run_id']!=run or binding['support_digest']!=model.SUPPORT
+     or binding['source']!='controller_original_acquire_return' or binding['phase']!='PRE_LAUNCH'
+     or binding['mode'] not in ('glm','qwen')
+     or binding['pool']!={'glm':'glm','qwen':'bailian'}[binding['mode']]
+     or any(type(binding[k]) is not str or not model.IDENT.fullmatch(binding[k])
+            for k in ('run_id','root','parent','host','requested_model','account'))
+     or any(type(binding[k]) is not str or not model.HEX.fullmatch(binding[k])
+            for k in ('packet_sha256','support_digest','acquire_response_sha256'))):
+  raise ValueError('historical_prelaunch_binding_unqualified')
+ acquisition=validate_acquisition_pool(binding['mode'],binding['requested_model'],binding['acquisition_pool'])
+ acquired=('LEASE='+binding['lease_id']+' ACCOUNT='+binding['account']).encode('ascii')
+ if binding['acquire_response_sha256'] not in {delivery.digest(acquired),delivery.digest(acquired+b'\n')}:
+  raise ValueError('historical_acquire_response_mismatch')
+ before=events[:index]
+ support='SUPPORT_VERSION_READY digest='+model.SUPPORT+r' policy=[a-f0-9]{64}'
+ if (sum(x=='RUN_RESERVED explicit=1' for x in before)!=1
+     or [x for x in before if x.startswith('LEASE_OK ')]!=['LEASE_OK pool='+acquisition]
+     or len([x for x in before if x.startswith('SUPPORT_VERSION_READY ')])!=1
+     or not any(re.fullmatch(support,x) for x in before)
+     or any(x.startswith(('LAUNCH','DONE','REMOTE_DONE','LEASE_PRESERVED')) for x in before)
+     or any(token in x for x in before for token in ('REFUSED','FAILED','EFFECT_UNKNOWN'))
+     or not (before.index('RUN_RESERVED explicit=1') < before.index('LEASE_OK pool='+acquisition)
+             < next(i for i,x in enumerate(before) if x.startswith('SUPPORT_VERSION_READY ')))):
+  raise ValueError('historical_prelaunch_order_unqualified')
+ terminal=[('LAUNCH_ATTEMPT ','LAUNCH_ATTEMPT attempt=1'),('REMOTE_DONE ','REMOTE_DONE rc=76'),
+           ('REMOTE_EFFECT_UNKNOWN ','REMOTE_EFFECT_UNKNOWN worker_rc=76 same_run_reconciliation_required=1'),
+           ('REMOTE_ARTIFACTS_PRESERVED ','REMOTE_ARTIFACTS_PRESERVED effect_unknown=1'),
+           ('DONE ','DONE rc=76 signal=effect_unknown reason=remote_cleanup_unproven'),
+           ('LEASE_PRESERVED ','LEASE_PRESERVED effect_unknown=1 lease='+scope['lease_id'])]
+ positions=[index]
+ for prefix,expected in terminal:
+  if [x for x in events if x.startswith(prefix)]!=[expected]:
+   raise ValueError('exact_original_cleanup_failure_not_retained')
+  positions.append(events.index(expected))
+ launches=[i for i,x in enumerate(events) if x.startswith('LAUNCH ')]
+ if (positions!=sorted(set(positions)) or positions[-1]!=len(events)-1
+     or len(launches)!=1 or not index<launches[0]<positions[1]
+     or sum(x=='RUN_RESERVED explicit=1' for x in events)!=1
+     or [x for x in events if x.startswith('LEASE_OK ')]!=['LEASE_OK pool='+acquisition]
+     or len([x for x in events if x.startswith('SUPPORT_VERSION_READY ')])!=1
+     or any(token in x for x in events for token in ('REFUSED','FAILED'))
+     or [x for x in events if 'EFFECT_UNKNOWN' in x]!=[terminal[2][1]]
+     or delivery.local_file(log_path,fabric_task.MAX_LOG_BYTES)!=log
+     or reader.identity(log_path.lstat())!=reader.identity(initial)):
+  raise ValueError('historical_terminal_or_stability_unqualified')
+ return ({'state':'RECORDED_HISTORICAL_PRE_LAUNCH','root_id':binding['root'],
+          'parent_run_id':binding['parent'],'source':'controller_original_acquire_return',
+          'is_authentication':False},binding,lines,events)
+
+
 def snapshot(run, *, invocation_id):
  scope=model.scope_for(run)
  ancestry=native_lineage(scope['parent'],scope['root'])
@@ -106,27 +188,7 @@ def snapshot(run, *, invocation_id):
      or launch.get('request_sha256')!=delivery.digest(request_raw)):
   raise ValueError('original_native_launch_record_unqualified')
  log_path=state/(run+'.log');log=delivery.local_file(log_path,fabric_task.MAX_LOG_BYTES)
- lineage=fabric_task._active_lineage_projection(run,log)['controller_lineage']
- if (lineage.get('state')!='RECORDED_PRE_LAUNCH' or lineage.get('root_id')!=scope['root']
-     or lineage.get('parent_run_id')!=scope['parent']):
-  raise ValueError('original_launch_prefix_unqualified')
- pattern=re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z \[remote_sub id='+re.escape(run)+r' host=ubuntu3\] (.*)\n')
- lines=log.decode('utf-8').splitlines(keepends=True);events=[]
- for line in lines:
-  match=pattern.fullmatch(line)
-  if not match:raise ValueError('original_terminal_log_shape')
-  events.append(match[1])
- bindings=[reader.strict_json(x[len('LAUNCH_BINDING '):]) for x in events if x.startswith('LAUNCH_BINDING ')]
- if (len(bindings)!=1 or [x for x in events if x.startswith('LAUNCH_ATTEMPT ')]!=['LAUNCH_ATTEMPT attempt=1']
-     or [x for x in events if x.startswith('REMOTE_DONE ')]!=['REMOTE_DONE rc=76']
-     or [x for x in events if x.startswith('DONE ')]!=['DONE rc=76 signal=effect_unknown reason=remote_cleanup_unproven']
-     or [x for x in events if x.startswith('LEASE_PRESERVED ')]!=['LEASE_PRESERVED effect_unknown=1 lease='+scope['lease_id']]):
-  raise ValueError('exact_original_cleanup_failure_not_retained')
- binding=bindings[0]
- if (any(binding.get(k)!=scope[k] for k in ('root','parent','host','lease_id'))
-     or scope['account'] is not None and binding.get('account')!=scope['account']
-     or binding.get('run_id')!=run or binding.get('support_digest')!=model.SUPPORT):
-  raise ValueError('original_terminal_launch_binding_mismatch')
+ lineage,binding,lines,events=historical_launch_correlation(run,log,log_path)
  manifest_raw=delivery.local_file(state/(run+'.support.json'),MAX_BYTES)
  files=reader.strict_json(manifest_raw)
  artifact={'packet_sha256':binding['packet_sha256'],'support_files':files}
@@ -151,7 +213,10 @@ def snapshot(run, *, invocation_id):
   if old.get('log')!=delivery.digest(prefix) or old.get('support')!=delivery.digest(manifest_raw):
    raise ValueError('original_contemporaneous_launch_support_changed')
  lease=delivery.retained_lease(scope['lease_id'],include_pool=True)
- if (lease is None or any(lease.get(k)!=v for k,v in {'id':scope['lease_id'],
+ # The incumbent broker owner returns sqlite3.Row, not a dict. Normalize
+ # exactly its retained columns; do not infer admission or settlement.
+ if isinstance(lease,sqlite3.Row):lease=dict(lease)
+ if (type(lease) is not dict or any(lease.get(k)!=v for k,v in {'id':scope['lease_id'],
      'orchestrator_id':scope['root'],'host':scope['host'],'account':binding['account'],
      'model':binding['requested_model'],'pool':binding['pool']}.items())):
   raise ValueError('original_retained_lease_binding_mismatch')
