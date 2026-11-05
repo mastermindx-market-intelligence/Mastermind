@@ -45,7 +45,7 @@ async function prepare() {
   vi.spyOn(host, "invalidationGeneration").mockImplementation(() => generation.call(host) + generationDelta);
   window.MastermindMissionHost = host;
   render(<App />);
-  fireEvent.click(screen.getByRole("button", { name: "Conversations", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Conversations" }));
   const open = await screen.findByRole("button", { name: "Open conversation: Current conversation" });
   await screen.findByRole("button", { name: "Open project Qualified conversation project" });
   const list = within(document.querySelector(".conversations-list") as HTMLElement);
