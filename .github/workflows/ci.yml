@@ -63,7 +63,7 @@ jobs:
   pr_fast:
     name: PR fast checks
     needs: [pr_scope]
-    if: ${{ always() && github.event_name == 'pull_request' && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     permissions:
@@ -118,7 +118,7 @@ jobs:
     # All critical/unqualified PRs still run full pytest. Ordinary PRs use
     # pr_fast; *every* merge-group and master push runs all six canonical
     # shards (with the existing exact merge-group proof-reuse logic on push).
-    if: ${{ always() && (github.event_name != 'pull_request' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}
     # Only the test-shard job needs read-only workflow-run evidence.
     permissions:
       contents: read
