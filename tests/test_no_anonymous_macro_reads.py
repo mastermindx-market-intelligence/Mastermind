@@ -105,6 +105,61 @@ _ALLOWLIST: dict[tuple[str, str], str] = {
     ),
 }
 
+# PR #2055: fixed pull-request URL DATA and closed URL validators, not remote
+# acquisition. Each exception binds one entire reviewed source line in one file.
+# A fetch/clone/raw-content call added even in the same file is still rejected.
+_INERT_PR_LINK_DATA_LINES: dict[str, frozenset[str]] = {
+    'app/mastermind_os/src/fixtures/knowledge-data-observation-owner.json': frozenset((
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401",',
+    )),
+    'app/mastermind_os/src/fixtures/knowledge-signed-canonical-journey.json': frozenset((
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401"',
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/402"',
+    )),
+    'app/mastermind_os/src/fixtures/knowledge-write-owner.json': frozenset((
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401",',
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/402",',
+    )),
+    'app/mastermind_os/src/knowledge/library/project-source-operation-contract-cases.json': frozenset((
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/12",',
+    )),
+    'app/mastermind_os/src/knowledge/library/project-source-operation.test.ts': frozenset((
+        '"https://github.com/mastermindx-market-intelligence/macro/pull/" +',
+        '"https://github.com/mastermindx-market-intelligence/macro/pull/12/files",',
+        '"https://github.com/mastermindx-market-intelligence/macro/pull/13",',
+    )),
+    'app/mastermind_os/src/knowledge/library/project-source-operation.ts': frozenset((
+        "'https://github.com/mastermindx-market-intelligence/macro/pull/';",
+    )),
+    'app/mastermind_os/src/planning/plan-adoption-status.ts': frozenset((
+        '"https://github.com/mastermindx-market-intelligence/macro/pull/";',
+    )),
+    'common/workspace_source_operation_contract.py': frozenset((
+        '_PR_URL_PREFIX = "https://github.com/mastermindx-market-intelligence/macro/pull/"',
+    )),
+    'tests/test_installed_source_git_identity.py': frozenset((
+        "item={'number':12,'html_url':'https://github.com/mastermindx-market-intelligence/macro/pull/12',",
+    )),
+    'tests/test_knowledge_publisher_events.py': frozenset((
+        'PR = {"number": 11, "url": "https://github.com/mastermindx-market-intelligence/macro/pull/11",',
+    )),
+    'tests/test_workspace_source_operation_contract.py': frozenset((
+        '"https://github.com/mastermindx-market-intelligence/macro/pull/"',
+        'url="https://github.com/mastermindx-market-intelligence/macro/pull/07"))',
+        'url="https://github.com/mastermindx-market-intelligence/macro/pull/7/files"))',
+        'url="https://github.com/mastermindx-market-intelligence/macro/pull/8"))',
+        'url="https://github.com/mastermindx-market-intelligence/macro/pull/8",',
+    )),
+    'tests/test_workspace_source_operations.py': frozenset((
+        'PR = {"number": 7, "url": "https://github.com/mastermindx-market-intelligence/macro/pull/7",',
+    )),
+}
+
+def _is_inert_pr_link_data(relative: str, shape: str, line: str) -> bool:
+    return (shape == "bare_clone_url"
+            and "/macro/pull/" in line
+            and line.strip() in _INERT_PR_LINK_DATA_LINES.get(relative, ()))
+
 _ALLOWED_EXTS = {".py", ".sh", ".js", ".ts", ".yml", ".yaml", ".json", ".toml"}
 # Top-level directories excluded from the walk per the commission's scope, plus
 # `vendor` (added here, not in the original scope list): vendor/macro_src is the
@@ -128,6 +183,11 @@ def _is_excluded(path: Path) -> bool:
     if "worktrees" in parts:          # other sessions' nested checkouts, not our content
         return True
     if parts and parts[0] in _EXCLUDED_TOP_DIRS:
+        return True
+    # Vite's canonical, gitignored output duplicates the source literals above.
+    # This is a source-origin guard, not production-bundle acceptance. Keep
+    # adjacent/custom dist-like paths and every authored source path in scope.
+    if parts[:3] == ("app", "mastermind_os", "dist"):
         return True
     if path.suffix.lower() == ".md":
         return True
@@ -173,6 +233,10 @@ def violations() -> dict[str, list[tuple[str, str]]]:
             for m in pattern.finditer(text):
                 matched = m.group(0)
                 if (rel, matched) in _ALLOWLIST:
+                    continue
+                end = text.find("\n", m.end())
+                line = text[text.rfind("\n", 0, m.start()) + 1:end if end != -1 else len(text)]
+                if _is_inert_pr_link_data(rel, shape, line):
                     continue
                 found.setdefault(rel, []).append((shape, matched))
     return found
@@ -483,3 +547,42 @@ def test_ci_yml_macro_checkout_step_is_authenticated():
         f"expected the || github.token fallback form exactly, got {token!r} -- a "
         f"bare secrets.MACRO_CI_READ_TOKEN with no fallback breaks CI immediately "
         f"while the secret does not exist")
+
+
+def test_inert_pr_link_lines_are_exact_live_data_not_file_exemptions():
+    for relative, expected in _INERT_PR_LINK_DATA_LINES.items():
+        actual = {line.strip() for line in (_ROOT / relative).read_text().splitlines()}
+        assert expected and expected <= actual
+        for line in expected:
+            assert _BANNED_PATTERNS["bare_clone_url"].search(line)
+            assert _is_inert_pr_link_data(relative, "bare_clone_url", line)
+            assert not _is_inert_pr_link_data(relative + ".foreign", "bare_clone_url", line)
+            assert not _is_inert_pr_link_data(relative, "bare_clone_url", line + " # drift")
+
+
+def test_same_pr_data_path_still_refuses_anonymous_fetch_and_raw_content():
+    acquisition = (
+        "fetch('https://github.com/mastermindx-market-intelligence/macro')",
+        "git clone https://github.com/mastermindx-market-intelligence/macro.git",
+        "fetch('https://raw.githubusercontent.com/mastermindx-market-intelligence/macro/main/secret.json')",
+        "fetch('https://api.github.com/repos/mastermindx-market-intelligence/macro/contents/README.md')",
+    )
+    for relative in _INERT_PR_LINK_DATA_LINES:
+        for line in acquisition:
+            hits = [shape for shape, pattern in _BANNED_PATTERNS.items() if pattern.search(line)]
+            assert hits
+            assert all(not _is_inert_pr_link_data(relative, shape, line) for shape in hits)
+
+
+@pytest.mark.parametrize("relative, excluded", [
+    ("app/mastermind_os/dist/assets/generated.js", True),
+    ("app/mastermind_os/src/project-source-operation.ts", False),
+    ("app/mastermind_os/src/dist/authored.ts", False),
+    ("app/mastermind_os/dist-custom/authored.js", False),
+    ("app/mastermind_os/.dist/authored.js", False),
+    ("app/other/dist/authored.js", False),
+    ("custom/app/mastermind_os/dist/authored.js", False),
+    ("dist/authored.js", False),
+])
+def test_only_canonical_vite_generated_output_is_outside_source_scan(relative, excluded):
+    assert _is_excluded(_ROOT / relative) is excluded
