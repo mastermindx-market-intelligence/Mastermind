@@ -23,6 +23,14 @@ MODULE = CANDIDATE / "native_remote.py"
 SPEC = importlib.util.spec_from_file_location("grok_host_account_binding_fixture", MODULE)
 native_remote = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(native_remote)
+# The binding gate only exists in this PR's candidate host_pick. Merge-group
+# siblings cache an older source host_pick under the bare module name, so load
+# the candidate by exact file identity instead of trusting sys.modules.
+HOST_PICK = CANDIDATE / "host_pick.py"
+HOST_PICK_SPEC = importlib.util.spec_from_file_location(
+    "grok_host_account_binding_candidate_host_pick", HOST_PICK)
+host_pick = importlib.util.module_from_spec(HOST_PICK_SPEC)
+HOST_PICK_SPEC.loader.exec_module(host_pick)
 
 
 class HostAccountBindingTest(unittest.TestCase):
@@ -125,10 +133,9 @@ class HostAccountBindingTest(unittest.TestCase):
         self.assertFalse((self.here / "lanes").exists())
 
     def _host_picker_account_gate(self):
-        from host_pick import evaluate_hosts
         state = {self.host: {"ts": time.time(), "reachable": True}}
-        rows = evaluate_hosts({self.host: self.entry}, str(self.root),
-                              "grok", states=state)
+        rows = host_pick.evaluate_hosts({self.host: self.entry}, str(self.root),
+                                        "grok", states=state)
         return next(g for g in rows[0]["gates"] if g["gate"] == "grok-account-binding")
 
     def test_host_picker_accepts_enrolled_registry_only(self):
@@ -142,6 +149,39 @@ class HostAccountBindingTest(unittest.TestCase):
         self.set_binding()
         self.entry["grok_account_binding"]["auth_identity"]["ino"] = True
         self.assertEqual("FAIL", self._host_picker_account_gate()["result"])
+
+    def test_gate_ignores_cached_source_host_pick_module(self):
+        # Merge-group regression: a sibling test module can leave the older
+        # source host_pick cached under the bare name before this module is
+        # imported. The helper evaluates the candidate by exact file identity,
+        # so the binding gate is still reported instead of raising
+        # StopIteration on a source row without it.
+        saved = sys.modules.pop("host_pick", None)
+        saved_path = list(sys.path)
+        self.addCleanup(self._restore_host_pick_cache, saved, saved_path)
+        spec = importlib.util.spec_from_file_location(
+            "host_pick", SOURCE / "host_pick.py")
+        stale = importlib.util.module_from_spec(spec)
+        sys.modules["host_pick"] = stale
+        spec.loader.exec_module(stale)
+        stale_gates = [
+            gate["gate"] for gate in stale.evaluate_hosts(
+                {self.host: self.entry}, str(self.root), "grok",
+                states={self.host: {"ts": time.time(), "reachable": True}}
+            )[0]["gates"]
+        ]
+        self.assertNotIn("grok-account-binding", stale_gates)
+        self.assertEqual("PASS", self._host_picker_account_gate()["result"])
+        self.entry.pop("grok_account_binding")
+        self.assertEqual("FAIL", self._host_picker_account_gate()["result"])
+
+    @staticmethod
+    def _restore_host_pick_cache(saved, saved_path):
+        if saved is None:
+            sys.modules.pop("host_pick", None)
+        else:
+            sys.modules["host_pick"] = saved
+        sys.path[:] = saved_path
 
     def test_valid_environment_binds_only_fixture_auth_and_private_workspace(self):
         with patch.object(native_remote, "studio_projection",
