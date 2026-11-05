@@ -67,7 +67,7 @@ def assert_role_network_profile(profile: RuntimeProfile) -> None:
 
 def render_host_unit(
     profile: RuntimeProfile, *, runtime_user: str, runtime_group: str,
-    python_executable: str, repo_root: Path,
+    python_executable: str, repo_root: Path, implementation_sha: str | None = None,
 ) -> str:
     """An operator-reviewed SYSTEM unit; never installs or starts services."""
     if (type(profile) is not RuntimeProfile
@@ -94,6 +94,12 @@ def render_host_unit(
         raise RuntimeRefusal("ROOT_UNIT_PATH_INVALID")
     role_ip = ROLE_PROXY_HOST[profile.role]
     assert_role_network_profile(profile)
+    if implementation_sha is not None and (
+        type(implementation_sha) is not str or re.fullmatch(r"[0-9a-f]{40}", implementation_sha) is None
+    ):
+        raise RuntimeRefusal("ROOT_UNIT_IMPLEMENTATION_LABEL_INVALID")
+    implementation_line = ("" if implementation_sha is None else
+                           f"Environment=MM_HERMES_IMPLEMENTATION_SHA={implementation_sha}\n")
     seconds = int(profile.restart_sec) if float(profile.restart_sec).is_integer() else profile.restart_sec
     unit = f"""# ROOT-OWNED /etc/systemd/system/{profile.service_name}.service
 # Enforcing IPAddressDeny requires PID1's system manager; NEVER systemd --user.
@@ -110,6 +116,7 @@ StartLimitBurst={profile.start_limit_burst}
 
 [Service]
 Type=simple
+NotifyAccess=main
 User={runtime_user}
 Group={runtime_group}
 WorkingDirectory={state}
@@ -119,7 +126,7 @@ ExecReload={exe} -P -m integrations.hermes_runtime canary --profile {state}/curr
 Environment=PYTHONPATH={root}
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONNOUSERSITE=1
-Restart=on-failure
+{implementation_line}Restart=on-failure
 RestartSec={seconds}
 RestartPreventExitStatus={CONFIG_EXIT}
 KillMode=control-group
@@ -166,11 +173,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--group", required=True)
     p.add_argument("--python", required=True)
     p.add_argument("--repo", type=Path, required=True)
+    p.add_argument("--implementation-sha", help="Optional Mastermind source label; not installed-source attestation")
     a = p.parse_args(argv)
     try:
         print(render_host_unit(load_profile(a.profile),
               runtime_user=a.user, runtime_group=a.group,
-              python_executable=a.python, repo_root=a.repo), end="")
+              python_executable=a.python, repo_root=a.repo,
+              implementation_sha=a.implementation_sha), end="")
     except RuntimeRefusal as exc:
         print(exc.code, file=sys.stderr)
         return CONFIG_EXIT

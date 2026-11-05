@@ -23,7 +23,8 @@ from .gateway import Gateway, reserve_loopback_port
 from .memory import HighWaterLog, read_rss_kib
 from .profile import RuntimeProfile
 from .registry import assert_registered_tools_exact, extension_tools_for
-from .secrets import Secrets, child_env
+from .secrets import Secrets, child_env, assert_no_supervisor_notification_env
+from .role_status_publisher import PUBLICATION_INTERVAL_SECONDS, RoleStatusPublisher
 
 _UNSAFE = set(" \n\r\t\"'`$")
 
@@ -103,6 +104,7 @@ class ServiceRuntime:
         hermes_bin: Path,
         *,
         extra_child_env: dict[str, str] | None = None,
+        role_status_publisher: RoleStatusPublisher | None = None,
     ):
         self.profile = profile
         self.secrets = secrets
@@ -120,11 +122,15 @@ class ServiceRuntime:
         self._child: subprocess.Popen[bytes] | None = None
         self._thread: threading.Thread | None = None
         self.memory: HighWaterLog | None = None
+        self._role_status_publisher = role_status_publisher
+        self._next_role_status_publication = 0.0
 
     def start(self) -> None:
         # Check native BYOK/alias policy before *any* Hermes subprocess,
         # including the tools-list census. A failed preflight starts nothing.
         self._model_child_env()
+        if self._role_status_publisher is not None:
+            self._publish_role_status_if_due(time.monotonic())
         self._check_registry()
         self.profile.hermes_home.mkdir(parents=True, exist_ok=True)
         os.chmod(self.profile.hermes_home, 0o700)
@@ -245,6 +251,7 @@ class ServiceRuntime:
             # Never copy an ambient shell HTTPS_PROXY to the child.
             from .egress import native_egress_child_env
             env.update(native_egress_child_env(self.profile.role, self.secrets.values))
+        assert_no_supervisor_notification_env(env)
         return env
 
     def _expected_disabled_mcp(self) -> dict[str, tuple[str, ...]] | None:
@@ -350,6 +357,18 @@ class ServiceRuntime:
             self.child_pid = None
             self._backend_ready = False
 
+    def _publish_role_status_if_due(self, now: float) -> None:
+        # One due-time check in the incumbent loop, independent of the profile's
+        # 0.01–300 second memory cadence. No timer, thread or cached document.
+        if self._role_status_publisher is None or now < self._next_role_status_publication:
+            return
+        self._next_role_status_publication = now + PUBLICATION_INTERVAL_SECONDS
+        try:
+            self._role_status_publisher.publish()
+        except Exception:
+            # Optional status failure must not enter the child-failure path.
+            pass
+
     def _loop(self) -> None:
         assert self.memory is not None
         while not self._stop.is_set():
@@ -402,6 +421,7 @@ class ServiceRuntime:
                     if rss is not None:
                         self.memory.record(proc.pid, rss)
                     next_memory_sample = now + self.profile.memory_sample_interval_sec
+                self._publish_role_status_if_due(now)
                 self._stop.wait(poll_sec)
             if self._stop.is_set():
                 _terminate(proc)
