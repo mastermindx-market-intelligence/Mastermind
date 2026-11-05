@@ -50,6 +50,11 @@ G7B_DEV_DRIFT='-    "pytest>=8,<10",
 # platform-scoped: the Linux deploy never pip-installs and its rsync drops *.lock. It is admitted and listed in
 # gates/G7b.RULING; a modified or deleted pre-existing file, a gate-* name, a subdirectory or any other platform STOPs.
 G7B_MAC_ADDED_RE='^requirements/[A-Za-z0-9][A-Za-z0-9._-]*-macos-arm64-py312[.](in|lock)$'
+# G7b rev 3.5 (seat ruling D-G7B-3, 2026-11-05): with pyproject.toml unchanged OLD->SHA, a drift set that is a non-empty
+# subset of the two gate locks (#1909: header-comment-only regeneration) takes the existing lockbody check alone -
+# 0 non-comment lines = equal, any pin/extra/hash/option line = STOP. The #1714 trio path and D-G7B-2 are unchanged.
+G7B_GATE_LOCKS="requirements/gate-linux-x86_64-py312.lock
+requirements/gate-macos-arm64-py312.lock"
 SHOW_PROPS="-p ActiveState -p SubState -p MainPID -p ActiveEnterTimestamp -p ExecMainStartTimestamp -p NRestarts -p FragmentPath -p DropInPaths -p NeedDaemonReload -p ControlGroup -p Result -p InvocationID"
 VPS=(ssh -i "$KEY" -o BatchMode=yes -o ConnectTimeout=20 "$HOST")
 
@@ -272,7 +277,17 @@ gates_all() { g5_clock; g8_master; g12_events; g2_cgroup; g3_apt; g4_gate; g6_fo
 
 g7b_mac_added() {  # g7b_mac_added <wt> <old> <sha>: stdout the D-G7B-2 admitted paths, sorted (may be empty); rc 1 = git failed. git reads only.
   local ns; ns=$(git -C "$1" diff --no-renames --name-status --diff-filter=A "$2" "$3" -- requirements/) || return 1
-  printf '%s\n' "$ns" | cut -f2- | grep -E "$G7B_MAC_ADDED_RE" | grep -v '^requirements/gate-' | sort
+  printf '%s\n' "$ns" | cut -f2- | grep -E "$G7B_MAC_ADDED_RE" | grep -vi '^requirements/gate-' | sort   # rev 3.5 (r5o NIT): case-insensitive gate-* exclusion
+  return 0
+}
+
+g7b_gate_locks_only() {  # g7b_gate_locks_only <sorted drift list>: rc 0 iff every line is one of G7B_GATE_LOCKS (D-G7B-3); pure bash
+  local f g ok
+  while IFS= read -r f; do
+    ok=1
+    while IFS= read -r g; do [ "$f" = "$g" ] && ok=0; done <<< "$G7B_GATE_LOCKS"
+    [ "$ok" = 0 ] || return 1
+  done <<< "$1"
   return 0
 }
 
@@ -280,11 +295,18 @@ g7b_classify() {  # g7b_classify <wt> <old> <sha>: stdout T2_MODE (equal|floor_p
   local wt=$1 old=$2 sha=$3 dep mac
   dep=$(git -C "$wt" diff --no-renames --name-only "$old" "$sha" -- pyproject.toml requirements/ | sort) || { echo "G7b: git diff failed" >&2; return 1; }
   mac=$(g7b_mac_added "$wt" "$old" "$sha") || { echo "G7b: git diff failed" >&2; return 1; }
-  [ -z "$mac" ] || dep=$(comm -23 <(printf '%s\n' "$dep") <(printf '%s\n' "$mac"))   # rev 3.4 / D-G7B-2: drop the admitted macOS-only additions
+  if [ -n "$mac" ]; then   # rev 3.4 / D-G7B-2: drop the admitted macOS-only additions. rev 3.5 (r5o MINOR): comm must succeed and drop exactly |mac| lines
+    local nd nm nr
+    nd=$(printf '%s\n' "$dep" | grep -c .); nm=$(printf '%s\n' "$mac" | grep -c .)
+    dep=$(comm -23 <(printf '%s\n' "$dep") <(printf '%s\n' "$mac")) || { echo "G7b: comm failed - STOP, seat" >&2; return 1; }
+    nr=$(printf '%s\n' "$dep" | grep -c .)
+    [ "$((nd - nr))" = "$nm" ] || { echo "G7b: D-G7B-2 admitted list is not a subset of the drift ($nd-$nr != $nm) - STOP, seat" >&2; return 1; }
+  fi
   [ -n "$dep" ] || { echo equal; return 0; }
-  [ "$dep" = "$SDK_TRIO" ] || { echo "G7b: dependency drift beyond the #1714 trio: $(echo $dep) - STOP, seat" >&2; return 1; }
+  [ "$dep" = "$SDK_TRIO" ] || g7b_gate_locks_only "$dep" || { echo "G7b: dependency drift beyond the #1714 trio / the D-G7B-3 gate-lock subset: $(echo $dep) - STOP, seat" >&2; return 1; }
+  # rev 3.5 / D-G7B-3: on a gate-lock-only drift pyproject.toml is unchanged, so plines/sdk/rest are empty and only lockbody decides
   local plines sdk sdk_bad rest lockbody
-  plines=$(git -C "$wt" diff -U0 "$old" "$sha" -- pyproject.toml | grep -E '^[-+]' | grep -vE '^(--- |\+\+\+ )' | grep -vE '^[-+][[:space:]]*#')
+  plines=$(git -C "$wt" diff --text --no-textconv --no-ext-diff -U0 "$old" "$sha" -- pyproject.toml | grep -E '^[-+]' | grep -vE '^(--- |\+\+\+ )' | grep -vE '^[-+][[:space:]]*#')
   sdk=$(printf '%s\n' "$plines" | grep 'claude-agent-sdk' | grep -v '^$')                 # the floor's -/+ lines
   sdk_bad=$(printf '%s\n' "$sdk" | grep '^+' | grep -vc 'claude-agent-sdk>=0\.2')          # a new floor must stay in the 0.2 series
   rest=$(printf '%s\n' "$plines" | grep -v 'claude-agent-sdk' | grep -v '^$')
@@ -293,7 +315,7 @@ g7b_classify() {  # g7b_classify <wt> <old> <sha>: stdout T2_MODE (equal|floor_p
     echo "G7b: pyproject drift is not the claude-agent-sdk floor / the ruled dev bound (D-G7B-1): $(echo $rest) - STOP, seat" >&2; return 1
   fi
   if [ -n "$sdk" ]; then echo floor_pending; return 0; fi   # #1714 trio: rev-2 semantics, T2 runs in floor_pending mode
-  lockbody=$(git -C "$wt" diff -U0 "$old" "$sha" -- requirements/gate-linux-x86_64-py312.lock requirements/gate-macos-arm64-py312.lock | grep -E '^[-+]' | grep -vE '^(--- |\+\+\+ )' | grep -vcE '^[-+][[:space:]]*#')   # rev 3.1: column-0 option lines (-r, --index-url, -e) count as body lines; only the ---/+++ headers are dropped. rev 3.4: the two gate locks only
+  lockbody=$(git -C "$wt" diff --text --no-textconv --no-ext-diff -U0 "$old" "$sha" -- requirements/gate-linux-x86_64-py312.lock requirements/gate-macos-arm64-py312.lock | grep -E '^[-+]' | grep -vE '^(--- |\+\+\+ )' | grep -vcE '^[-+][[:space:]]*#')   # rev 3.1: column-0 option lines (-r, --index-url, -e) count as body lines; only the ---/+++ headers are dropped. rev 3.4: the two gate locks only. rev 3.5 (r5o NIT): --text --no-textconv --no-ext-diff
   [ "$lockbody" = 0 ] || { echo "G7b: $lockbody non-comment gate-lock line(s) changed without an SDK floor (pins/extras/hashes) - STOP, seat" >&2; return 1; }
   echo equal
 }
@@ -364,10 +386,10 @@ EOF
   rm -f "$EV/gates/G7b.reason"
   git -C "$wt" diff -U0 "$OLD" "$sha" -- pyproject.toml requirements/ > "$EV/identity/dep_drift.diff" || stop "dep drift diff"
   if [ -s "$EV/identity/dep_drift.diff" ]; then
-    printf 'G7b (rev 3.4): dependency drift OLD->SHA classified T2_MODE=%s under seat rulings D-G7B-1/D-G7B-2; see identity/dep_drift.diff\n' "$t2" \
+    printf 'G7b (rev 3.5): dependency drift OLD->SHA classified T2_MODE=%s under seat rulings D-G7B-1/D-G7B-2/D-G7B-3; see identity/dep_drift.diff\n' "$t2" \
       > "$EV/gates/G7b.RULING" || stop "G7b ruling record"
     local mac; mac=$(g7b_mac_added "$wt" "$OLD" "$sha") || stop "G7b admitted list"
-    [ -z "$mac" ] || printf 'D-G7B-2 admitted (added since OLD; macOS-arm64 only; the Linux deploy never pip-installs, its rsync drops *.lock):\n%s\n' "$mac" \
+    [ -z "$mac" ] || printf 'D-G7B-2 admitted (added since OLD; macOS-arm64 only; the Linux deploy never pip-installs; .lock is rsync-excluded, .in is transferred but unconsumed):\n%s\n' "$mac" \
       >> "$EV/gates/G7b.RULING" || stop "G7b ruling record"
   fi
   state T2_MODE "$t2"
@@ -950,7 +972,7 @@ rollback_c() {  # transactional re-deploy of OLD through deploy_code_to_vps.sh (
 }
 rollback_c_result() { STEP=R-c-result; load; classify rc "$OLD" "$EV/rollback/rc.deploy.log"; state ROLLED_BACK R-c; say "R-c OK - run proof-old"; }
 
-g7b_selftest() {  # helper import check + eighteen synthetic repos + one live read of SEAT_WT (git only, no host contact); rc 0 = all PASS
+g7b_selftest() {  # helper import check + twenty-one synthetic repos + one live read of SEAT_WT (git only, no host contact); rc 0 = all PASS
   STEP=g7b-selftest
   local root fail=0 n=0 r live
   root=$(mktemp -d) || stop "mktemp"
@@ -1034,11 +1056,20 @@ g7b_selftest() {  # helper import check + eighteen synthetic repos + one live re
     "${_g[@]}" -C "$r" mv requirements/extra.txt requirements/extra-macos-arm64-py312.lock || stop "selftest mv"; _run c18_renamed_to_mac STOP
   r=$(_mk c19_mac_subdir) || stop "mk"; mkdir -p "$r/requirements/sub"; _lock aaaa 0.1.0 s1 9.1.1 "$r/requirements/sub/x-macos-arm64-py312.lock"
     _run c19_mac_subdir STOP
+  # rev 3.5 / D-G7B-3: gate-lock-only drift with pyproject.toml unchanged (#1909 shape)
+  r=$(_mk c20_locks_header_only) || stop "mk"
+    _lock 1909 0.1.0 s1 9.1.1 "$r/requirements/gate-linux-x86_64-py312.lock"; _lock 1909 0.1.0 s1 9.1.1 "$r/requirements/gate-macos-arm64-py312.lock"
+    _run c20_locks_header_only equal
+  r=$(_mk c21_one_lock_header_only) || stop "mk"; _lock 1909 0.1.0 s1 9.1.1 "$r/requirements/gate-linux-x86_64-py312.lock"
+    _run c21_one_lock_header_only equal
+  r=$(_mk c22_lock_pin_pyproject_equal) || stop "mk"
+    _lock 1909 0.1.0 s1 9.2.0 "$r/requirements/gate-linux-x86_64-py312.lock"; _lock 1909 0.1.0 s1 9.2.0 "$r/requirements/gate-macos-arm64-py312.lock"
+    _run c22_lock_pin_pyproject_equal STOP
   live=$(git -C "$SEAT_WT" rev-parse --verify -q origin/master) || stop "SEAT_WT origin/master unreadable"
   _expect "c8_live(OLD..origin/master@${live:0:8})" "$SEAT_WT" "$OLD" "$live" ANY
   rm -rf "$root"
   [ "$fail" = 0 ] || stop "g7b-selftest FAILED"
-  [ "$n" = 20 ] || stop "g7b-selftest ran $n cases, expected 20"
+  [ "$n" = 23 ] || stop "g7b-selftest ran $n cases, expected 23"
   say "g7b-selftest PASS ($n cases)"
 }
 
