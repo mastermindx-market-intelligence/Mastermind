@@ -96,7 +96,7 @@ def test_explicit_v5_producer_matches_typed_nested_contract():
         with pytest.raises(OrchestrationResultError): typed(bad)
 
 
-@pytest.mark.parametrize("version", [None, True, [], "mastermind.execution_plan/v2", "mastermind.execution_plan/v6"])
+@pytest.mark.parametrize("version", [None, True, [], "mastermind.execution_plan/v2", "mastermind.execution_plan/v99"])
 def test_unknown_producer_version_refuses_without_fallback(version):
     with pytest.raises(OrchestrationResultError):
         orchestration_result_schema("plan", plan_schema_version=version)

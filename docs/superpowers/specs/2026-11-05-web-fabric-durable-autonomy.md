@@ -212,3 +212,45 @@ Missing observation-host composition after an in-time material record is tempora
 The finite helper accepts optional `review_baseline` rows `{id,state,commit,login}` alongside `after_review_id`, so an owner can detect an existing approval dismissed before the first sample. IDs are exact positive integers; conflicting duplicates refuse. CI binds the workflow execution repository, permits a different fork head repository, and retains `run_attempt`. All sequential GitHub calls and fixed MCP body reads share an absolute deadline; late results are discarded and cancellation wins. Streamed GitHub overflow kills/reaps only the exact read child. Positive Studio ping and official documentation-search shapes are required for READY. Errors retain bounded classification and no response/credential text.
 
 The implementation plan records exact source-test receipts, the CI reading-budget correction and the still-open production/account gates.
+
+## Resource limits and Web fan-out qualification
+
+The real canary validates functional timer/continuation behavior and exposes a
+separate budget-evidence limit. Its report says approximately 25 provider turns
+against behavioral guidance of 12. That report does not define an equality among
+tool calls, native CLI turns, provider requests, tokens or billed cost.
+
+Protected native source already has request-level turn-limit plumbing:
+`ops/native_fabric/quota_continuity/candidate/fabric_task.py` validates and retains
+`max_turns`, forwards `POOL_REQUEST_MAX_TURNS`, and restricts a bounded request to
+supported GLM/MiniMax routes. `remote_sub_helpers.py` carries the value.
+`sub.sh::_claude_worker_profile` clamps it to the smaller profile/request bound;
+the ordinary MiniMax branch and `glm_bound_claude.make_command` pass the effective
+value to `claude --max-turns`. The visual-helper branch instead fixes 60, so it
+must be qualified or excluded before claiming a caller's ceiling across profiles.
+
+The currently exposed Web `fabric_request` schema has no `max_turns` field.
+Neither prose in a work packet nor an advertised capability expands that schema.
+The ordinary retained process receipt does not prove the effective numeric argv;
+the inspected provider projection reads native `num_turns` internally but does
+not retain it as a returned field. A support digest proves source identity, not
+the completed canary's effective turn count or requested ceiling.
+
+Future exposure belongs to existing owners: a strictly typed optional facade
+field forwarded unchanged to native admission, plus a credential-free projection
+of requested ceiling, effective ceiling, exact support/profile and native
+`num_turns` when supplied. Preserve actual unsupported-route refusal. #2063
+currently owns facade files; this mission does not shadow-edit that writer.
+No new budget ledger, watchdog, detached cancellation process or queue is needed.
+
+This gap does not block finite observers or the durable observation feature.
+Ready fan-out remains subject to actual capacity/admission and conserved root
+reservations; observation deadlines, sample/call/byte budgets and the existing
+bounded process owner apply independently. Do not sell a behavioral suggestion as
+a hard spend/turn limit, multiply allowances by child/account, or retroactively
+claim a missing execution/usage receipt. A commission requiring an unavailable
+hard ceiling must use a qualified owner path or refuse that requirement.
+
+C3 judgment references the same protected pin
+`b9e4c72c101d1f5a4ef6c86e51e8eb1fdc89cf8c`; source lookup and reasoning were
+performed without native labor substitution, runtime probes or facade edits.

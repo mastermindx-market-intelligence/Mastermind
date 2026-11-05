@@ -35,10 +35,9 @@ Sol/Opus may consume the same scarce subscription pool as Astra/Fable.
 for economical admitted operators, delegated easy labor, integrated principal returns,
 reserved exceptions and actual role loading. Load
 `skills/mastermind-fabric-orchestration/SKILL.md` and only the assigned role at this
-pin; an existing valid load is reusable. This references the existing owner, not
-optionalizes its before-dispatch conditions.
+pin; an existing valid load is reusable.
 
-These provisional profiles are not duration guarantees, model aliases or Runtime roles/admission. Either model may fit either principal duty. No forced
+These provisional profiles are not duration guarantees, model aliases or Runtime roles/admission. No forced
 Astra-to-Sol handoff, extra principal or productive-incumbent displacement: one
 existing action-authoritative owner and current RuntimeBinding remain responsible.
 
@@ -59,7 +58,9 @@ answer. Compare the entire framing/delegation/build/review/repair/integration/
 consumption cycle, actual shared-pool scarcity, delay and useful parallel work.
 Quality and accepted-result cost outrank nominal token or agent-count savings.
 
-Load and apply ACTIVE_EXECUTION Step 2A for its direct-work reasons and reassessment; a pointer is not a read.
+Load and apply ACTIVE_EXECUTION Step 2A for direct-work reasons and reassessment:
+`LOWER_TOTAL_OVERHEAD`, `PRINCIPAL_JUDGMENT`, `UNIQUE_APPROVED_ACCESS`,
+`CRITICAL_PATH_SHORTCUT`, `NO_ELIGIBLE_PRE_EFFECT_WORKER`. A pointer is not a read.
 
 ### Optional layers, conserved root
 
@@ -109,9 +110,8 @@ new evidence/hypothesis or lawful reassessment after effect reconciliation.
 
 Model Router fixes the first lawful suitability tier; Capacity Fabric ranks only
 eligible candidates within it by least cost/scarcity. No lower-tier promotion or
-waived exclusion. Model/harness/plan/host/role differ. An installed binary, catalog,
-preference or unrelated native success is not admission; unknown quota/proof/budget
-stays unknown.
+waived exclusion. Model/harness/plan/host/role differ. Binary/catalog/preference/native success grants no admission;
+unknown quota/proof/budget stays unknown.
 
 Provider/credential/activation holds apply before reads or calls. Approved spend
 includes review/repair; willingness to spend is not unlimited. Metered cognition

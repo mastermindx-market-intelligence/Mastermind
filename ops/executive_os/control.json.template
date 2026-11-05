@@ -30,6 +30,7 @@
   "control_uid": 450,
   "cost_class": "standard",
   "coo_autonomy_armed": false,
+  "coo_observations_armed": false,
   "coo_principal_armed": false,
   "ceo_submit_armed": false,
   "coo_foreground_only": false,

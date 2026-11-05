@@ -2186,6 +2186,7 @@ _CAP_S1_PYTEST_SOURCE_MODULES = (
     ('common.product_acceptance_contract', 'common/product_acceptance_contract.py'),
     ('common.redaction', 'common/redaction.py'),
     ('control_plane', 'control_plane/__init__.py'),
+    ('control_plane.coo_observation', 'control_plane/coo_observation.py'),
     ('control_plane.executive_orchestration_principal', 'control_plane/executive_orchestration_principal.py'),
     ('control_plane.executive_orchestration_result', 'control_plane/executive_orchestration_result.py'),
     ('control_plane.executive_peer_identity', 'control_plane/executive_peer_identity.py'),
