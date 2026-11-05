@@ -9,6 +9,11 @@ from pathlib import Path
 import sys
 
 from integrations.hermes_harness.doctor import doctor, format_doctor
+from integrations.hermes_harness.metadata import (
+    model_choices,
+    model_selection,
+    role_metadata,
+)
 from integrations.hermes_harness.overlays import overlay_chain, render_overlays
 from integrations.hermes_harness.stack import write_composed_profile
 from integrations.hermes_harness.tick import FIXTURE, routine_tick
@@ -37,7 +42,12 @@ def main(argv: list[str] | None = None) -> int:
     uninstall_p.add_argument("--state", type=Path, required=True)
     uninstall_p.add_argument("--systemd-user-dir", type=Path, required=True)
 
-    status_p = sub.add_parser("status")
+    status_p = sub.add_parser(
+        "status",
+        help="Summarise one installed role. This incumbent summary is deliberately "
+             "lenient about a damaged installation; a consumer that must not report a "
+             "damaged install as healthy reads 'role-metadata' instead",
+    )
     status_p.add_argument("--state", type=Path, required=True)
 
     shadow_p = sub.add_parser("shadow-run")
@@ -55,6 +65,13 @@ def main(argv: list[str] | None = None) -> int:
 
     models_p = sub.add_parser("models", help="List source-configurable BYOK role choices without loading credentials")
     models_p.add_argument("--role", choices=("mmsecretary", "mmmeta"), required=True)
+
+    role_p = sub.add_parser(
+        "role-metadata",
+        help="Read one role's installed configuration metadata without loading credentials",
+    )
+    role_p.add_argument("--state", type=Path, required=True)
+    role_p.add_argument("--role", choices=("mmsecretary", "mmmeta"), required=True)
 
     doctor_p = sub.add_parser("doctor")
     doctor_p.add_argument("--json", action="store_true")
@@ -90,6 +107,11 @@ def main(argv: list[str] | None = None) -> int:
             payload = _parity(args.decisions, args.posts, args.start, args.end)
         elif args.command == "models":
             payload = _models(args.role)
+        elif args.command == "role-metadata":
+            # A read of one explicitly selected role root. It never reads a
+            # credential, calls a provider, observes a service or attests a
+            # host; the projection carries the observation state itself.
+            payload = role_metadata(args.state, args.role)
         elif args.command == "doctor":
             report = doctor()
             if args.json:
@@ -176,39 +198,11 @@ def _install_selection(args: argparse.Namespace) -> str | None:
 
 
 def _model_selection(profile) -> dict:
-    from integrations.hermes_models.contract import native_provider
-    try:
-        spec = native_provider(profile.role, profile.native_provider_id)
-    except (ValueError, KeyError):
-        raise RuntimeRefusal("NATIVE_MODEL_SELECTION_UNQUALIFIED") from None
-    return {
-        "provider_id": spec.provider_id,
-        "native_provider": spec.hermes_name,
-        "requested_model": spec.served_model,
-        "served_model_verified": False,
-        "credential_env": spec.credential_env,
-        "credential_file_env": spec.credential_file_env,
-        "automatic_fallback": False,
-        "provider_called": False,
-    }
+    return model_selection(profile)
 
 
 def _models(role: str) -> dict:
-    from integrations.hermes_models.contract import PROFILE_PRIMARY, native_provider_choices
-    return {
-        "role": role,
-        "default_provider_id": PROFILE_PRIMARY[role],
-        "choices": [{
-            "provider_id": spec.provider_id,
-            "native_provider": spec.hermes_name,
-            "requested_model": spec.served_model,
-            "credential_file_env": spec.credential_file_env,
-        } for spec in native_provider_choices(role)],
-        "selection_is_admission": False,
-        "automatic_fallback": False,
-        "provider_called": False,
-        "credentials_read": False,
-    }
+    return model_choices(role)
 
 
 def _uninstall(state: Path, unit_dir: Path) -> dict:
