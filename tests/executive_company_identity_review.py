@@ -34,7 +34,7 @@ REVIEWED_ANCHORS = {
         # in addition to the method AST; all three literal lines are ASCII.
         # Qualified Knowledge/Archive READ additions change the enclosing ingress AST.
         # The original CCR branch and listener remain structurally unchanged.
-        "source_sha256": "f8941ef499eef04b07844018b23a47e1f75594f6f4c48dd01995aea18ce253e9",
+        "source_sha256": "bd08a48092ab60a64c75628e81fcece5586f3baa175ce551039797a525bdd457",
         "ast_sha256": "02707945ffd488d2caa157c6779c5c39d374f41e31e029fa8fc8c1448d525e63",
         "sites": (
             (("body", 3, "body", 43, "body", 3, "orelse", 0, "body", 2,
