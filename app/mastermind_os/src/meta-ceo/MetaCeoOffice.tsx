@@ -1,14 +1,49 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { createDirectionPreview, previewIsCurrent, type DirectionPreview } from "./preview";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  createDirectionPreview, previewIsCurrent, type DirectionPreview, type OfficeLaunchOutcome,
+} from "./preview";
+import { ProgrammeDirection, type ProgrammeDirectionProps } from "../direction/ProgrammeDirection";
 import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceClaim } from "./projection";
 import "./office.css";
+import { ByokRolesPanel } from "./ByokRolesPanel";
+import { registerUnsavedNavigationHold } from "../auth-navigation-guard";
+import { FabricMissionInspector } from "../fabric/FabricMissionInspector";
+import type { ResultSelection } from "../result";
+import { AttendedFabricWorkspace } from "../fabric/AttendedFabricWorkspace";
+import { AdmittedPlanInspector } from "../planning/AdmittedPlanInspector";
+import type { PlanSelection } from "../planning/admitted-plan";
+import type { ActivitySelection } from "../planning/retained-activity";
+
+// Stable presentation callbacks: parent render churn cannot invalidate an acquired plan.
+// Each call resolves the *current* installed host; neither reference conveys authorization.
+const readOfficePlan = (request: PlanSelection & { signal: AbortSignal }) =>
+  window.MastermindMissionHost!.readAdmittedPlan!(request);
+const readOfficeActivity = (request: ActivitySelection & { signal: AbortSignal }) =>
+  window.MastermindMissionHost!.readRetainedActivity!(request);
+const officePlanGeneration = () => window.MastermindMissionHost!.invalidationGeneration!();
+const officePlanPermission = () => {
+  const state = window.MastermindMissionHost!.auth!.getState();
+  return state.status === "signed_in" && state.acquisition;
+};
 
 /** Draft storage belongs to the existing shell. Inspection never rewrites or sends it. */
 export interface OfficeDraft { text: string; context: ProjectionContext }
 export interface MetaCeoOfficeProps {
   projection: OfficeProjection;
+  /** Existing canonical Agent OS reader; authored objectives never confer adoption. */
+  programmeDirection?: Omit<ProgrammeDirectionProps, "locale">;
   draft: OfficeDraft;
   onDraftChange: (text: string) => void;
+  /** Only the existing signed-in Executive owner may supply a continuation. */
+  nativeContinuation?: ReactNode;
+  /** Reuse App's exact Result owner reader; this component never acquires content. */
+  onInspectWorkerResult?: (selection: ResultSelection) => void;
+  /**
+   * The existing launch owner. Supplied only when the actual launch binding
+   * can offer a handoff. The request is effect-free: it neither prepares nor
+   * submits, and this component keeps the Office draft either way.
+   */
+  onStartNewWork?: (preview: DirectionPreview) => OfficeLaunchOutcome;
   locale?: "en" | "zh-CN";
 }
 
@@ -18,6 +53,9 @@ const OFFICE_ZH = {
   "Keep the whole company moving with intention.": "让整个公司有方向地前进。",
   "A clear view of direction, movement and the next accountable action.": "看清方向、进展，以及下一步由谁负责。",
   "Read + preview only": "仅供阅读和预览",
+  "Owner-qualified session": "经负责人验证的会话",
+  "Continue the exact selected Executive session": "继续当前已验证的 Executive 会话",
+  "Native continuation uses the existing Executive owner. Sending confirms only the original operation receipt, not a worker result or acceptance.": "原有 Executive 负责人处理会话继续。发送回执只证明原操作已提交，不代表工作结果或验收。",
   "Current direction": "当前方向",
   "Source unavailable": "来源不可用",
   "The adopted direction has not been supplied by its owner.": "负责人尚未提供已采纳的方向。",
@@ -97,17 +135,29 @@ const OFFICE_ZH = {
   "Mission": "任务",
   "Projects": "项目",
   "Return": "返回结果",
-  "Conversation": "对话"
+  "Conversation": "对话",
+  "Start new work": "开始新工作",
+  "This opens the existing launch form with this exact direction. Nothing is prepared or sent until you launch it there.": "这会用这段确切方向打开已有的启动表单。在那里启动之前，不会准备或发送任何内容。",
+  "The existing launch form now holds this exact direction. Review the project and profile there, then launch.": "已有的启动表单现已填入这段确切方向。请在那里核对项目与执行方式，然后启动。",
+  "This preview is no longer current. Review the direction again before starting new work.": "此预览已不再有效。请重新查看方向预览后再开始新工作。",
+  "The existing launch owner cannot offer a handoff here. Your direction is kept.": "已有的启动负责人此处无法提供交接。您的方向已保留。",
+  "This direction names another workstream than the configured launch. The handoff is refused so no other workstream is targeted.": "此方向指向的工作流与已配置的启动不同。为避免指向其他工作流，已拒绝交接。",
+  "An unsent launch goal already exists. It is kept as it is; resolve it before starting new work.": "已存在未发送的启动目标。该目标原样保留；请先处理它再开始新工作。",
+  "An original launch command is still held on its own pointer. Reconcile it before starting new work.": "原有启动命令仍在自己的指针上保持。请先完成核对再开始新工作。"
 } as const;
 
 function SourceBadge({ source }: { source: SourceClaim }) {
   return <span className="office-state" data-state={source.state}>{source.state}</span>;
 }
 
-export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" }: MetaCeoOfficeProps) {
+export function MetaCeoOffice({
+  projection, draft, onDraftChange, nativeContinuation, onInspectWorkerResult, programmeDirection,
+  onStartNewWork, locale = "en",
+}: MetaCeoOfficeProps) {
   const t = (en: keyof typeof OFFICE_ZH): string => locale === "zh-CN" ? OFFICE_ZH[en] : en;
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [preview, setPreview] = useState<DirectionPreview | null>(null);
+  const [launchOutcome, setLaunchOutcome] = useState<OfficeLaunchOutcome | null>(null);
   const previewButton = useRef<HTMLButtonElement>(null);
   const sourcesButton = useRef<HTMLButtonElement>(null);
   const previewPanel = useRef<HTMLElement>(null);
@@ -123,6 +173,8 @@ export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" 
   const title = mission?.program.title ?? mission?.program.work_ref;
   const unknownEffect = projection.receipts.effect === "EFFECT_UNKNOWN";
   const draftAssociated = draft.context.authGeneration === projection.context.authGeneration && sameTarget(draft.context, projection.context);
+  useEffect(() => registerUnsavedNavigationHold(() => draftAssociated && draft.text.length > 0),
+    [draftAssociated, draft.text]);
   const visiblePreview = preview && previewIsCurrent(preview, projection.context) ? preview : null;
   useEffect(() => {
     if (sourcesOpen) sourcesPanel.current?.focus();
@@ -137,30 +189,88 @@ export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" 
   ] as const;
   const closePreview = () => {
     setPreview(null);
+    setLaunchOutcome(null);
     if (previewButton.current?.isConnected) previewButton.current.focus();
   };
   const closeSources = () => {
     setSourcesOpen(false);
     if (sourcesButton.current?.isConnected) sourcesButton.current.focus();
   };
+  // The handoff request is effect-free: it asks the existing launch owner to
+  // take this exact frozen direction. It prepares and submits nothing here,
+  // and the Office draft is never cleared by it.
+  const startNewWork = () => {
+    if (!visiblePreview || !onStartNewWork) return;
+    setLaunchOutcome(onStartNewWork(visiblePreview));
+  };
 
+  const nativeSessionQualified = nativeContinuation != null &&
+    projection.mission.source.state === "CURRENT" &&
+    projection.context.sessionRef !== null &&
+    projection.context.bindingGeneration !== null;
   return <section className="meta-ceo-office" aria-label={t("Meta-CEO office")}>
     <header className="office-heading">
       <div><p className="office-eyebrow">{t("One company. One office.")}</p>
         <h1>{t("Keep the whole company moving with intention.")}</h1>
         <p>{t("A clear view of direction, movement and the next accountable action.")}</p></div>
       <div className="office-heading-aside"><div className="office-art" aria-hidden="true" />
-        <span className="office-state" data-state="UNKNOWN">{t("Read + preview only")}</span></div>
+        <span className="office-state" data-state={nativeSessionQualified ? "CURRENT" : "UNKNOWN"}>
+          {t(nativeSessionQualified ? "Owner-qualified session" : "Read + preview only")}
+        </span></div>
     </header>
 
-    <section className="office-direction" aria-label={t("Current direction")}>
+    {programmeDirection ? <ProgrammeDirection
+      key={`objective:${projection.context.authGeneration}`}
+      {...programmeDirection}
+      locale={locale} /> : <section className="office-direction" aria-label={t("Current direction")}>
       <div><p className="office-eyebrow">{t("Current direction")}</p><span className="office-muted">{t("Source unavailable")}</span></div>
       <p>{t("The adopted direction has not been supplied by its owner.")}</p>
-    </section>
+    </section>}
+
+    <ByokRolesPanel locale={locale} />
 
     {unknownEffect && <div className="office-effect-alert" role="alert">
       <strong>EFFECT_UNKNOWN</strong><p>{t("Reconcile the original operation. Resend, failover and target change remain held.")}</p>
     </div>}
+    {nativeSessionQualified && <section className="office-panel office-native-session"
+      aria-label={t("Continue the exact selected Executive session")}>
+      <h2>{t("Continue the exact selected Executive session")}</h2>
+      <p className="office-muted">
+        {t("Native continuation uses the existing Executive owner. Sending confirms only the original operation receipt, not a worker result or acceptance.")}
+      </p>
+      {nativeContinuation}
+    </section>}
+
+    <details className="fi-disclosure">
+      <summary>{locale === "zh-CN" ? "子代理 Fabric · 查看执行内部状态" : "Subagent Fabric · inspect execution"}</summary>
+    <AdmittedPlanInspector
+      key={`plan:${projection.context.authGeneration}`}
+      selection={mission?.program?.work_ref && mission?.mission?.root_job_id
+        ? { work_ref: mission.program.work_ref, root_job_id: mission.mission.root_job_id } : null}
+      read={typeof window !== "undefined" && window.MastermindMissionHost?.readAdmittedPlan
+        ? readOfficePlan : undefined}
+      readActivity={typeof window !== "undefined" && window.MastermindMissionHost?.readRetainedActivity
+        ? readOfficeActivity : undefined}
+      sourceGeneration={typeof window !== "undefined" && window.MastermindMissionHost?.invalidationGeneration
+        ? officePlanGeneration : undefined}
+      canRead={typeof window !== "undefined" && window.MastermindMissionHost?.auth
+        ? officePlanPermission : undefined}
+      locale={locale}
+      mission={mission}
+      missionSourceState={projection.mission.source.state}
+      missionObservedAt={projection.mission.source.observed_at}
+    />
+    <FabricMissionInspector
+      key={JSON.stringify([projection.context.authGeneration, projection.context.selection])}
+      mission={mission} locale={locale}
+      onInspectResult={projection.mission.source.state === "CURRENT" ? onInspectWorkerResult : undefined}
+    />
+    <AttendedFabricWorkspace
+      key={`attended:${projection.context.authGeneration}`}
+      host={typeof window === "undefined" ? undefined : window.MastermindMissionHost}
+      locale={locale}
+    />
+    </details>
 
     <div className="office-top-grid">
       <section className="office-panel office-answer" aria-label={t("Meta-CEO answer")}>
@@ -252,7 +362,7 @@ export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" 
       </div>
       <button ref={previewButton} className="office-primary" type="button" disabled={!draftAssociated || !draft.text.trim()}
         aria-controls={previewPanelId} aria-expanded={!!visiblePreview}
-        onClick={() => setPreview(createDirectionPreview(projection, draft.text))}>{t("Review direction preview")}</button>
+        onClick={() => { setLaunchOutcome(null); setPreview(createDirectionPreview(projection, draft.text)); }}>{t("Review direction preview")}</button>
     </section>
     {visiblePreview && <section ref={previewPanel} id={previewPanelId} tabIndex={-1} className="office-panel office-preview" aria-label={t("Direction preview")} onKeyDown={event => { if (event.key === "Escape") closePreview(); }}>
       <div className="office-section-label"><h2>{t("Frozen direction preview")}</h2><span className="office-state">EFFECT_NONE</span></div>
@@ -261,6 +371,26 @@ export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" 
       <p>{t("Binding generation")} · {String(visiblePreview.context.bindingGeneration ?? t("unknown"))}</p>
       <p>{t("Content permission · NOT_PROJECTED. Command permission · NOT_PROJECTED.")}</p>
       <p>{t("Inspecting this preview supplies no authorization. Submission requires the canonical command owner.")}</p>
+      {onStartNewWork ? <>
+        <p className="office-muted">{t("This opens the existing launch form with this exact direction. Nothing is prepared or sent until you launch it there.")}</p>
+        <button type="button" className="office-primary" disabled={launchOutcome?.status === "OPENED"} onClick={startNewWork}>
+          {t("Start new work")}
+        </button>
+      </> : null}
+      {launchOutcome?.status === "OPENED" ? <p role="status" className="office-muted">
+        {t("The existing launch form now holds this exact direction. Review the project and profile there, then launch.")}
+      </p> : null}
+      {launchOutcome?.status === "REFUSED" ? <p role="alert" className="office-muted">
+        {launchOutcome.reason === "PREVIEW_NOT_CURRENT"
+          ? t("This preview is no longer current. Review the direction again before starting new work.")
+          : launchOutcome.reason === "LAUNCH_OWNER_UNAVAILABLE"
+            ? t("The existing launch owner cannot offer a handoff here. Your direction is kept.")
+            : launchOutcome.reason === "WORKSTREAM_MISMATCH"
+              ? t("This direction names another workstream than the configured launch. The handoff is refused so no other workstream is targeted.")
+              : launchOutcome.reason === "LAUNCH_GOAL_PRESERVED"
+                ? t("An unsent launch goal already exists. It is kept as it is; resolve it before starting new work.")
+                : t("An original launch command is still held on its own pointer. Reconcile it before starting new work.")}
+      </p> : null}
       <button type="button" onClick={closePreview}>{t("Close preview")}</button>
     </section>}
   </section>;

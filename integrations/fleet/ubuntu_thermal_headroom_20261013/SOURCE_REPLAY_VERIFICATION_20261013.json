@@ -1,0 +1,63 @@
+{
+  "schema": "mastermind.fabric_thermal_disk_source_replay.v1",
+  "observed_date_utc": "2026-10-13",
+  "target": "existing M2 Fabric controller",
+  "verification": "isolated scratch git init + git apply --check + git apply, sequential from exact preserved backups",
+  "modifies_production": false,
+  "patches": [
+    {
+      "path": "precheckout_disk_admission.patch",
+      "git_blob_sha1": "9f435155c8abf40bba0e4d34a46bf2555cf1e58d",
+      "bytes": 10951,
+      "files": [
+        "hosts.json",
+        "host_pick.py",
+        "remote_sub.sh",
+        "lane_runtime.py"
+      ]
+    },
+    {
+      "path": "go_thermal_disk_admission.patch",
+      "git_blob_sha1": "18e59859a5c6f5bdac0fec708856cabf3e24e68d",
+      "bytes": 4535,
+      "files": [
+        "go_remote_run.py",
+        "remote_sub.sh"
+      ]
+    },
+    {
+      "path": "intel_package_thermal_admission.patch",
+      "git_blob_sha1": "d81167204eaa0e523427cc90d38dd140d955af91",
+      "bytes": 2687,
+      "files": [
+        "hosts.json",
+        "lane_runtime.py"
+      ]
+    },
+    {
+      "path": "thermal_trend_status.patch",
+      "git_blob_sha1": "bf23de4f6649bd03a43347305fa7351af3e0c060",
+      "bytes": 4766,
+      "files": [
+        "pool_status.py"
+      ]
+    }
+  ],
+  "github_blob_matches": 4,
+  "git_apply_checks_passed": 4,
+  "git_apply_steps_passed": 4,
+  "installed_final_source_matches": [
+    "go_remote_run.py",
+    "host_pick.py",
+    "hosts.json",
+    "lane_runtime.py",
+    "pool_status.py",
+    "remote_sub.sh"
+  ],
+  "qualifications": [
+    "Source replay and Git blob equivalence do not imply a production Go/Intel worker START, complete BIOS tuning, or PR merge",
+    "Physical host temperatures remain workload-dependent; Ubuntu 2 power-profile authorization remains explicitly denied",
+    "Separate worker-created full Git checkouts still need original worktree-owner coverage",
+    "Original C19 support symlink correction is retained without overwrite"
+  ]
+}

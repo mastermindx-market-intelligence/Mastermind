@@ -90,10 +90,10 @@ def build_server(allow_write=False, allow_prepare=False, *,
         if execution_binding is not None:
             value = dict(value, execution_binding=dict(execution_binding))
         if transport_diagnostic is not None:
-            # Append only after the guarded bridge has produced an effect receipt.
-            # This does not enter snapshot hash, permission or retry decisions.
+            # Append after the guarded bridge has produced its effect receipt.
+            # This never enters snapshot, permission, custody or retry decisions.
             value = dict(value, transport_diagnostic=dict(transport_diagnostic))
-        bad = value.get("state") not in {None, "CONNECTED", "OBSERVED", "APPLIED_RESPONSE_OBSERVED", "PAPER_READY", "PAPER_READY_READ_ONLY"}
+        bad = value.get("state") not in {None, "CONNECTED", "OBSERVED", "APPLIED_RESPONSE_OBSERVED", "RESPONSE_OBSERVED_REQUIRES_TARGET_VERIFICATION", "PAPER_READY", "PAPER_READY_READ_ONLY"}
         # Formatting is downstream of effect observation. A missing reply or
         # malformed image must not erase the operation's canonical receipt.
         value = copy.deepcopy(value)
@@ -184,11 +184,12 @@ def build_server(allow_write=False, allow_prepare=False, *,
             Other admitted sessions may modify disjoint targets in the same Paper file or page.
             Known same-board overlap should use disjoint node targets plus fresh re-read/re-plan;
             this operation/carrier fence is not a file-wide or page-wide lease.
-            File creation/open transitions, native exports, node deletion and token deletion are intentionally not permitted.
+            Use this existing paper_edit action for guarded file management too: create_file accepts a known cloneFileId or sourceFileId plus name; rename_resource accepts a known exact file resourceId plus name. All require the source-file snapshot and operation ID. A new-file reply requires destination readback. Raw open transitions, native exports, node deletion and token deletion remain blocked.
             """
             return await asyncio.to_thread(run, "edit", tool=tool, arguments=arguments,
                                            expected_snapshot=expected_snapshot,
                                            operation_id=operation_id, allow_write=True)
+
     return server
 
 

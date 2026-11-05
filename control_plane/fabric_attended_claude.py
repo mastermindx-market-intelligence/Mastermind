@@ -48,6 +48,7 @@ from control_plane.claude_worker import (
     _protected_file_tool_denies,
     _subprocess_sandbox_request,
     _tool_policy,
+    _compile_tool_policy,
 )
 from control_plane.subscription_harness_bindings import SubscriptionHarnessBinding
 from control_plane.subscription_provider_profiles import SubscriptionProviderProfile
@@ -119,9 +120,11 @@ MOVING_MODEL_ALIASES = frozenset(
     {"best", "default", "fable", "haiku", "opus", "opusplan", "sonnet"}
 )
 _MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-# Conservative reviewed-binary grammar: absolute, single path token, no shell
-# metacharacters or whitespace.  Fail closed on anything else.
-_SAFE_BINARY_PATH_RE = re.compile(r"^[A-Za-z0-9/._+-]+$")
+# Preserve the conservative grammar; admit only the canonical macOS install
+# directory's literal space. The compiler transports this as one argv element
+# with shell=False, never a quoted shell command or a broader path selector.
+_SAFE_BINARY_PATH_RE = re.compile(
+    r"^(?:[A-Za-z0-9/._+-]+|/Library/Application Support/MastermindExecutive/bin/claude-[0-9][A-Za-z0-9._+-]*)$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SECRET_NAME_RE = re.compile(
     r"(?:^|_)(?:api[-_]?key|authorization|credential|secret|token)(?:$|_)",
@@ -256,6 +259,7 @@ def _reviewed_binary(binary: Any) -> str:
             not isinstance(value, str)
             or not value
             or not PurePosixPath(value).is_absolute()
+            or str(PurePosixPath(value)) != value or '..' in PurePosixPath(value).parts
             or _SAFE_BINARY_PATH_RE.fullmatch(value) is None
         ):
             raise AttendedClaudePreparationError(
@@ -424,7 +428,8 @@ def _closed_settings(
         raise AttendedClaudePreparationError(
             "allowed permission rules must be scoped, never broad tool approval"
         )
-    deny = tuple(sorted(set((*_protected_deny_rules(tools), *forbidden))))
+    deny = tuple(sorted(set((*_protected_deny_rules(tools), *forbidden,
+                             "SendMessage", "ListAgents"))))
     return {
         "permissions": {
             "allow": allow,
@@ -435,7 +440,33 @@ def _closed_settings(
         "sandbox": _subprocess_sandbox_request(),
         "disableAllHooks": True,
         "enableAllProjectMcpServers": False,
+        # One finite assignment returns through its existing parent; native
+        # peer traffic must not inject unrelated work into this process.
+        "crossSessionInbound": "refuse",
     }
+
+
+def finite_read_permission_digest() -> str:
+    """Expected finite READ settings; no fabricated spec, grant or admission."""
+    return _canonical_sha256(_closed_settings(*_compile_tool_policy(frozenset({"READ"}))))
+
+
+def compiled_permission_digest(descriptor) -> str:
+    """Bind the permission receipt to the actual --settings launch operand."""
+    argv = descriptor.argv
+    try:
+        if argv.count("--settings") != 1:
+            raise ValueError("exact settings operand required")
+        encoded = argv[argv.index("--settings") + 1]
+        document = json.loads(encoded)
+        if type(document) is not dict or encoded != _canonical_json(document):
+            raise ValueError("canonical settings required")
+        digest = _canonical_sha256(document)
+        if digest != descriptor.settings_sha256:
+            raise ValueError("compiled settings changed")
+        return digest
+    except (ValueError, TypeError, IndexError, AttributeError) as exc:
+        raise AttendedClaudePreparationError("compiled permission settings changed") from exc
 
 
 @dataclasses.dataclass(frozen=True)
@@ -540,6 +571,12 @@ class AttendedClaudeLaunchPreparation:
             raise AttendedClaudePreparationError("descriptor must default to dontAsk")
         if permissions.get("disableBypassPermissionsMode") is not True:
             raise AttendedClaudePreparationError("descriptor must disable the bypass")
+        if self.settings.get("crossSessionInbound") != "refuse":
+            raise AttendedClaudePreparationError("descriptor must refuse native peer messages")
+        native_denies = permissions.get("deny")
+        if (not isinstance(native_denies, (list, tuple))
+                or not {"SendMessage", "ListAgents"}.issubset(native_denies)):
+            raise AttendedClaudePreparationError("descriptor must deny native peer tools")
         if self.settings.get("disableAllHooks") is not True:
             raise AttendedClaudePreparationError("descriptor must disable hooks")
         if self.settings.get("enableAllProjectMcpServers") is not False:

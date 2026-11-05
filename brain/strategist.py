@@ -160,7 +160,9 @@ def _strategist_input(regime: dict | None, asof: str) -> dict:
     try:
         from brain import decision_context as _dc
 
-        decision_context = _dc.prompt_summary()
+        decision_context = _dc.prompt_summary(
+            expected_publication=market_view_enrichment.get("publication")
+        )
     except Exception:  # noqa: BLE001
         pass
 

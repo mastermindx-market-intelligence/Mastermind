@@ -454,7 +454,10 @@ def _git_env(home: Path) -> dict[str, str]:
     }
 
 
-def _run(argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]) -> str:
+def _run(
+    argv: Sequence[str], *, cwd: Path | None, env: dict[str, str],
+    timeout_seconds: int = 60,
+) -> str:
     try:
         completed = subprocess.run(
             list(argv),
@@ -464,7 +467,7 @@ def _run(argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]) -> str:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=60,
+            timeout=timeout_seconds,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise WorkspaceError(f"workspace command could not run: {argv[0]}: {exc}") from exc
@@ -1951,6 +1954,64 @@ def _worktree_record(
     return None
 
 
+
+def _registered_linked_worktree_status_record(
+    source: Path, destination: Path, *, env: dict[str, str]
+) -> dict[str, str] | None:
+    """Verify ONE locked linked-worktree registration without enumerating the fleet.
+
+    Status reads run on hosts with thousands of other worktrees; repository-wide
+    `git worktree list --porcelain` may exceed the publisher's bounded precheck.
+    Git's own .git -> common/worktrees/<id> -> gitdir reciprocal registration and
+    the exact managed lock are sufficient for this *read-only* status lookup.
+    The regular release, removal and acquisition paths keep the existing fleet
+    enumeration and safety rules. No worktree registry is created here.
+    """
+    try:
+        dot_git = destination / ".git"
+        if dot_git.is_symlink() or not dot_git.is_file():
+            return None
+        if dot_git.stat().st_size > 4096:
+            return None
+        pointer = dot_git.read_text(encoding="utf-8")
+        if not pointer.startswith("gitdir: ") or pointer.count("\n") > 1:
+            return None
+        value = pointer[len("gitdir: "):].strip()
+        if not value or any(c in value for c in "\r\n\x00"):
+            return None
+        raw_admin = Path(value)
+        if not raw_admin.is_absolute():
+            raw_admin = destination / raw_admin
+        if raw_admin.is_symlink():
+            return None
+
+        common = _common_git_dir(source, env=env)
+        common_worktrees = common / "worktrees"
+        if common_worktrees.is_symlink():
+            return None
+        owner_dir = common_worktrees.resolve(strict=True)
+        admin = raw_admin.resolve(strict=True)
+        if admin.parent != owner_dir or not admin.is_dir():
+            return None
+
+        backref, lock = admin / "gitdir", admin / "locked"
+        if (backref.is_symlink() or lock.is_symlink()
+                or not backref.is_file() or not lock.is_file()
+                or backref.stat().st_size > 4096 or lock.stat().st_size > 2048):
+            return None
+        back = backref.read_text(encoding="utf-8").strip()
+        if (not Path(back).is_absolute() or any(c in back for c in "\r\n\x00")
+                or Path(back).resolve(strict=True) != dot_git.resolve(strict=True)):
+            return None
+        reason = lock.read_text(encoding="utf-8").strip()
+        if ("\n" in reason or "\r" in reason
+                or not reason.startswith(LINKED_WORKTREE_LOCK_PREFIX + " ")):
+            return None
+        return {"worktree": str(destination.resolve()), "locked": reason}
+    except (OSError, UnicodeError, RuntimeError, ValueError):
+        return None
+
+
 def _run_status(
     argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]
 ) -> tuple[int, str, str]:
@@ -1993,8 +2054,13 @@ def _require_linked_identity(
     *,
     env: dict[str, str],
     expected_lock_reason: str | None = None,
+    status_direct_registration: bool = False,
 ) -> tuple[dict[str, str], str, str, Path]:
-    record = _worktree_record(source, destination, env=env)
+    record = (
+        _registered_linked_worktree_status_record(source, destination, env=env)
+        if status_direct_registration
+        else _worktree_record(source, destination, env=env)
+    )
     if record is None:
         raise WorkspaceError("workspace is not registered to the source repository")
     reason = record.get("locked", "")
@@ -2140,8 +2206,12 @@ def prepare_linked_worktree(
         created = True
         _configure_new_sparse_workspace(destination, sparse_directories, env=env)
         # Hydrate the admitted HEAD without detaching its operation-bound branch.
-        # The destination is new and locked; existing workspaces returned above.
-        _run(["git", "read-tree", "-mu", "HEAD"], cwd=destination, env=env)
+        # A large sparse index on an occupied host can exceed the normal 60s
+        # Git read limit. Extend only this new-worktree hydration to a finite
+        # 240s budget; reads, identity checks and other Git calls keep 60s.
+        # Failed hydration still follows the existing exact-branch cleanup.
+        _run(["git", "read-tree", "-mu", "HEAD"], cwd=destination, env=env,
+             timeout_seconds=240)
         _, head, actual_branch, common = _require_linked_identity(
             source, destination, env=env, expected_lock_reason=expected_lock
         )
@@ -2202,6 +2272,7 @@ def inspect_linked_worktree(
     workspace_path: str | Path,
     *,
     expected_operation_id: str | None = None,
+    status_direct_registration: bool = False,
 ) -> LinkedWorkspaceReleaseReceipt:
     """Classify whether a managed linked worktree can be removed without data loss."""
 
@@ -2215,7 +2286,10 @@ def inspect_linked_worktree(
     if destination == root:
         raise WorkspaceError("managed workspace may not be the workspace root itself")
     env = _git_env(root / ".control-home")
-    record, head, branch, _ = _require_linked_identity(source, destination, env=env)
+    record, head, branch, _ = _require_linked_identity(
+        source, destination, env=env,
+        status_direct_registration=status_direct_registration,
+    )
     lock_reason = record.get("locked", "")
     if expected_operation_id is not None:
         observed_operation = _lock_value(lock_reason, "operation")
@@ -2237,7 +2311,15 @@ def inspect_linked_worktree(
             dirty=True,
             recoverability="WORKSPACE_ONLY_CHANGES_PRESENT",
             removed=False,
-            reason="tracked or untracked workspace changes are present",
+            reason=(
+                "tracked or untracked workspace changes are present; "
+                f"tracked_changes={'present' if cleanliness.status else 'absent'}; "
+                f"all_untracked={'present' if cleanliness.all_untracked else 'absent'} "
+                "(including ignored files). Ordinary git status may hide ignored files. "
+                "Inspect git ls-files --others -z; retain needed source and evidence, "
+                "and remove only verified disposable outputs before requesting release. "
+                "No files were removed."
+            ),
         )
 
     if head.lower() == base.lower():
@@ -2361,3 +2443,97 @@ def release_linked_worktree(
         removed=True,
         reason="clean recoverable linked worktree removed; branch/ref history retained",
     )
+
+
+# This capability is local to the allocator's actual return. Persisted DTOs and
+# coincident paths cannot manufacture same-call allocation completion.
+_CREATED_CHILD_CLONE = object()
+
+
+@dataclasses.dataclass(frozen=True)
+class _CreatedChildClone:
+    receipt: WorkspaceReceipt
+    identity: dict[str, object]
+    _origin: object
+
+
+def child_workspace_directory_identity(path: Path) -> dict[str, int]:
+    """Stable directory custody; never pin mutable timestamps as live identity."""
+    path = Path(path)
+    try:
+        canonical = path.resolve(strict=True)
+        info = path.lstat()
+    except OSError as exc:
+        raise WorkspaceError("child workspace directory is unavailable") from exc
+    if not path.is_absolute() or canonical != path:
+        raise WorkspaceError("child workspace directory is not canonical")
+    if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+        raise WorkspaceError("child workspace is not a real directory")
+    return dict(device=info.st_dev, inode=info.st_ino, uid=info.st_uid,
+                gid=info.st_gid, mode=stat.S_IMODE(info.st_mode))
+
+
+def _child_git_file_identity(path: Path) -> dict[str, object]:
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        raise WorkspaceError("child Git metadata is unavailable") from exc
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise WorkspaceError("child Git metadata is not a single regular file")
+        h = hashlib.sha256()
+        while block := os.read(fd, 1024 * 1024):
+            h.update(block)
+        after = os.fstat(fd)
+        stable = lambda i: (i.st_dev,i.st_ino,i.st_uid,i.st_gid,i.st_mode,i.st_nlink,
+                            i.st_size,i.st_mtime_ns,i.st_ctime_ns)
+        if stable(before) != stable(after) or stable(before) != stable(path.lstat()):
+            raise WorkspaceError("child Git metadata changed during identity read")
+        return dict(device=before.st_dev, inode=before.st_ino, uid=before.st_uid,
+                    gid=before.st_gid, mode=stat.S_IMODE(before.st_mode),
+                    size=before.st_size, sha256=h.hexdigest())
+    finally:
+        os.close(fd)
+
+
+def _child_clone_identity(workspace: Path) -> dict[str, object]:
+    env = git_observation_env({
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "HOME": str(workspace.parent / ".supervisor-home"),
+        "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never",
+    })
+    return {"workspace": child_workspace_directory_identity(workspace),
+            "git": child_workspace_directory_identity(workspace / '.git'),
+            "git_files": {name: _child_git_file_identity(workspace / '.git' / name)
+                          for name in ('config', 'index', 'HEAD')},
+            "head": _run(['git', '-C', str(workspace), 'rev-parse', '--verify', 'HEAD^{commit}'], cwd=None, env=env),
+            "status": _run(['git', '-C', str(workspace), 'status', '--porcelain=v1', '--untracked-files=all'], cwd=None, env=env)}
+
+
+def verify_child_clone_identity(workspace: Path, expected: dict, *, control_uid: int, shared_gid: int) -> None:
+    if (type(expected) is not dict or set(expected) != {"workspace", "git", "git_files", "head", "status"}
+            or expected["status"] != ""
+            or expected != _child_clone_identity(workspace)):
+        raise WorkspaceError("child workspace allocator identity changed")
+    validate_shared_git_handoff(workspace, control_uid=control_uid, shared_gid=shared_gid)
+
+
+def is_created_child_clone(value: object) -> bool:
+    return type(value) is _CreatedChildClone and value._origin is _CREATED_CHILD_CLONE
+
+
+def create_readonly_child_clone(source_repository: Path, workspace_root: Path, *,
+                                job_id: str, base_sha: str, branch: str,
+                                shared_gid: int) -> _CreatedChildClone:
+    """Actual existing allocator, no remote acquisition or write-path grant."""
+    receipt = prepare_credentialless_clone(source_repository, workspace_root,
+        job_id=job_id, base_sha=base_sha, branch=branch, shared_gid=shared_gid,
+        shared_write_paths=(), commission_dependency=None)
+    workspace = Path(receipt.workspace_path)
+    expected = _child_clone_identity(workspace)
+    if expected["head"] != base_sha:
+        raise WorkspaceError("child clone did not resolve the assigned source commit")
+    verify_child_clone_identity(workspace, expected, control_uid=os.geteuid(), shared_gid=shared_gid)
+    return _CreatedChildClone(receipt, expected, _CREATED_CHILD_CLONE)

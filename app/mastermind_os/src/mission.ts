@@ -1973,3 +1973,76 @@ export function decodeMissionv3(
     return null;
   return value as unknown as Missionv3Document;
 }
+
+export interface ProductAcceptanceView {
+  schema: "mastermind.product_acceptance_view.v1";
+  selection: { work_ref: string; root_job_id: string; request_message_key: string };
+  state: "ACCEPTED" | "UNAVAILABLE";
+  reason_codes: string[];
+  receipt: {
+    state: "PRODUCT_ACCEPTED";
+    subject_job_id: string;
+    subject_result_envelope_digest: string;
+    ruling_message_key: string;
+    qualified_ruling_digest: string;
+    parent_job_id: string;
+    parent_attempt_id: string;
+    parent_result_envelope_digest: string;
+    source_continuity: {
+      issued_basis_digest: string; current_basis_digest: string;
+      declaration_digest: string; disposition: string;
+    };
+  } | null;
+}
+export interface Missionv4Document {
+  schema: "mastermind.mission_workspace.v4";
+  mission: Missionv3Document;
+  product_acceptance: ProductAcceptanceView;
+}
+
+/** A separate selected read; no v1-v3 parser gains acceptance authority. */
+export function decodeMissionv4(value: unknown, sel: MissionSelection,
+  requestMessageKey: string): Missionv4Document | null {
+  if (!normalizeWorkspaceSelection(sel) || !/^asd-mcp-[0-9a-f]{32}$/.test(requestMessageKey)
+    || !obj(value) || !exact(value, ["schema", "mission", "product_acceptance"])
+    || value.schema !== "mastermind.mission_workspace.v4") return null;
+  const mission = decodeMissionv3(value.mission, sel);
+  const view = value.product_acceptance;
+  if (!mission || !obj(view) || !exact(view, ["schema", "selection", "state", "reason_codes", "receipt"])
+    || view.schema !== "mastermind.product_acceptance_view.v1" || !obj(view.selection)
+    || !exact(view.selection, ["work_ref", "root_job_id", "request_message_key"])
+    || view.selection.work_ref !== sel.workRef || view.selection.root_job_id !== sel.rootJobId
+    || view.selection.request_message_key !== requestMessageKey || !Array.isArray(view.reason_codes)) return null;
+  const reasons = ["ACCEPTANCE_NOT_COMPOSED", "ACCEPTANCE_UNAVAILABLE", "SELECTION_MISMATCH",
+    "PARENT_RETURN_UNVERIFIED", "PARENT_CONSUMPTION_UNPROVEN", "SOURCE_UNAVAILABLE",
+    "SOURCE_CHANGED", "RUNTIME_CHANGED"];
+  if (view.state === "UNAVAILABLE") {
+    if (view.receipt !== null || view.reason_codes.length !== 1
+      || !reasons.includes(view.reason_codes[0])) return null;
+  } else if (view.state === "ACCEPTED") {
+    const receipt = view.receipt;
+    const hash = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
+    if (mission.read_state.state !== "CURRENT" || mission.result_refs.availability !== "AVAILABLE"
+      || view.reason_codes.length !== 0 || !obj(receipt)
+      || !exact(receipt, ["state", "subject_job_id", "subject_result_envelope_digest", "ruling_message_key",
+        "qualified_ruling_digest", "parent_job_id", "parent_attempt_id", "parent_result_envelope_digest", "source_continuity"])
+      || receipt.state !== "PRODUCT_ACCEPTED" || receipt.parent_job_id !== sel.rootJobId
+      || !workspaceJob(receipt.subject_job_id) || typeof receipt.parent_attempt_id !== "string"
+      || !/^ATT-[0-9a-f]{32}$/.test(receipt.parent_attempt_id)
+      || !hash(receipt.subject_result_envelope_digest) || !hash(receipt.qualified_ruling_digest)
+      || !hash(receipt.parent_result_envelope_digest) || typeof receipt.ruling_message_key !== "string"
+      || !/^asd-principal-[0-9a-f]{32}$/.test(receipt.ruling_message_key)) return null;
+    const source = receipt.source_continuity;
+    if (!obj(source) || !exact(source, ["issued_basis_digest", "current_basis_digest", "declaration_digest", "disposition"])
+      || !hash(source.issued_basis_digest) || !hash(source.current_basis_digest) || !hash(source.declaration_digest)
+      || typeof source.disposition !== "string"
+      || !["UNCHANGED_SOURCE", "SOURCE_OBSERVATION_CHANGED_DECLARATION_UNCHANGED"].includes(source.disposition)
+      || (source.disposition === "UNCHANGED_SOURCE") !== (source.issued_basis_digest === source.current_basis_digest)) return null;
+    const parent = mission.result_refs.refs.filter(r => r.job_id === sel.rootJobId);
+    const subject = mission.result_refs.refs.filter(r => r.job_id === receipt.subject_job_id);
+    if (parent.length !== 1 || subject.length !== 1 || parent[0].attempt_id !== receipt.parent_attempt_id
+      || parent[0].result_envelope_digest !== receipt.parent_result_envelope_digest
+      || subject[0].result_envelope_digest !== receipt.subject_result_envelope_digest) return null;
+  } else return null;
+  return value as unknown as Missionv4Document;
+}
