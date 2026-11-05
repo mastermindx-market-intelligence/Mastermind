@@ -588,15 +588,15 @@
       "source": "candidate/remote_sub_helpers.py"
     },
     "ext/run_observation.py": {
-      "bytes": 31286,
+      "bytes": 33331,
       "installed_preimage_sha256": "1151cf3e5a3b4c582935b82c08719b6cb0c271c4327fa0607be9067a2ca4c6d5",
-      "sha256": "0984a7a221e7d79e30e3c0c0a7cb7425e9f762d73f2946df1d28283f36f85809",
+      "sha256": "cbe4b0b4db3783e44d9cc442ab973996e8b5102c178ab61e172bfd0aae7accfb",
       "source": "candidate/run_observation.py"
     },
     "ext/run_observation_delivery.py": {
-      "bytes": 40482,
+      "bytes": 42618,
       "installed_preimage_sha256": "db54aa15630e29535980e0fccb406c3904cc7df92c66d17ec520f40d4fd5447b",
-      "sha256": "eba658de92294a833108c83804c2b237ef9be0356bbc0158ff5709755e8bb147",
+      "sha256": "c18ab07723b42a8dece4c072256ad161384508f65bac44bbb9781948710f675b",
       "source": "candidate/run_observation_delivery.py"
     },
     "ext/slot.py": {
