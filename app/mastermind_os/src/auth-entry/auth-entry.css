@@ -29,6 +29,8 @@
   --muted: var(--mx-light-muted);
   --brass: var(--mx-light-text);
   --control-border: var(--mx-light-muted);
+  --hover: var(--mx-light-panel2);
+  --faint: var(--mx-light-muted);
   --focus: var(--mx-light-ink-link);
   color-scheme: light;
 }
@@ -540,4 +542,24 @@
 }
 .auth-entry__preferences .display-preferences__toggle:hover {
   color: var(--text);
+}
+
+/* The global hover selector must not override entry action semantics. */
+.auth-entry .auth-entry__control > button:hover:not(:disabled),
+.auth-entry .auth-entry__control > button:active:not(:disabled) {
+  background: var(--brass);
+  color: var(--bg);
+}
+.auth-entry.auth-entry--signing_in .auth-entry__control > button,
+.auth-entry.auth-entry--signing_in
+  .auth-entry__control
+  > button:hover:not(:disabled),
+.auth-entry.auth-entry--signing_in
+  .auth-entry__control
+  > button:active:not(:disabled) {
+  background: var(--raised);
+  color: var(--text);
+}
+.auth-entry__preferences .display-preferences__toggle:hover {
+  background: transparent;
 }
