@@ -137,6 +137,12 @@ GO_POST_FAILURE_METADATA_ADDITIONS = {
     "post_failure_observation.py": "80fc9d95068099fb797c9e7a05981a9650d50ec170935d748d92a8e7bcd04337",
     "post_failure_observation_delivery.py": "81ab6f7f673e53c53b0e0a0cf4f3f1324642e29563f9213170f2a1ae29a0e4fc",
 }
+# Protected PR #2104 adds a closed delivery-error diagnostic variant.
+# Retain both earlier exact cohorts and reject unknown or mixed members.
+GO_POST_FAILURE_DIAGNOSTICS_ADDITIONS = {
+    "post_failure_observation.py": "80fc9d95068099fb797c9e7a05981a9650d50ec170935d748d92a8e7bcd04337",
+    "post_failure_observation_delivery.py": "45636d279cd784248942d37c76e5625b2af7824a8f83638f804d56cff2d568e1",
+}
 
 # The completed-SSH255 observer and its helper are one protected source cohort.
 # Neither half is admitted independently or backdated into the historical102.
@@ -184,7 +190,8 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     if current_diagnostics:
         additions = {name: manifest["ext/" + name]
                      for name in GO_POST_FAILURE_ADDITIONS}
-        if additions not in (GO_POST_FAILURE_ADDITIONS, GO_POST_FAILURE_METADATA_ADDITIONS):
+        if additions not in (GO_POST_FAILURE_ADDITIONS, GO_POST_FAILURE_METADATA_ADDITIONS,
+                             GO_POST_FAILURE_DIAGNOSTICS_ADDITIONS):
             raise ValueError("native Go post-failure additions are not one exact protected cohort")
         for name in GO_POST_FAILURE_ADDITIONS:
             del historical["ext/" + name]

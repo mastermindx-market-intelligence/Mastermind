@@ -126,7 +126,7 @@ def test_default_build_stays_exact_reviewed_104_and_go_adds_only_the_fixed_pair(
     for name, original in builder.GO_POST_FAILURE_PREIMAGES.items():
         assert default["ext/" + name] == builder.GO_POST_FAILURE_DIGESTS[name]
         historical["ext/" + name] = original
-    for name, digest in builder.GO_POST_FAILURE_METADATA_ADDITIONS.items():
+    for name, digest in builder.GO_POST_FAILURE_DIAGNOSTICS_ADDITIONS.items():
         assert default["ext/" + name] == digest
         del historical["ext/" + name]
     assert g.digest((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) == builder.GO_BASE_MANIFEST_SHA256
@@ -245,6 +245,10 @@ def test_old_and_updated_post_failure_pairs_remain_exact_cohorts(builds):
         {
             "post_failure_observation.py": "80fc9d95068099fb797c9e7a05981a9650d50ec170935d748d92a8e7bcd04337",
             "post_failure_observation_delivery.py": "81ab6f7f673e53c53b0e0a0cf4f3f1324642e29563f9213170f2a1ae29a0e4fc",
+        },
+        {
+            "post_failure_observation.py": "80fc9d95068099fb797c9e7a05981a9650d50ec170935d748d92a8e7bcd04337",
+            "post_failure_observation_delivery.py": "45636d279cd784248942d37c76e5625b2af7824a8f83638f804d56cff2d568e1",
         },
     )
     for pair in pairs:
