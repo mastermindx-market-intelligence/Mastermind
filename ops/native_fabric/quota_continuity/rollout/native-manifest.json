@@ -85,7 +85,7 @@
   "ext/placement_view.py": "315519caa4644f9b6a431153556c5ce2080f921ce9ec4b0ddbff172517e3feb3",
   "ext/pool_ledger.py": "34be52eca114c32f44538254b3675ce2d0a79dc420ebda2f42702c6be56ad6cc",
   "ext/pool_status.py": "494bcc3a0115ba98160139bdc1452a8b8850b966844fcc2634fe0fdeffaa9111",
-  "ext/provider_outcome.py": "22b5ae9325118327b8b0734514c6f5711e39ae919f0e04426f7fac182895bf24",
+  "ext/provider_outcome.py": "ff909ac6fb0a734ce0ea1aa78c2b04e992c170e5be413c1b7778e6ffd7c7907e",
   "ext/quota_circuit.py": "0962d638a0a5655a71ea7a6eeb83088ad60af30f4a26e9c5bc47a92c3ab77945",
   "ext/quota_remote.py": "3c1484864848b5cdf4daeecde092f7c407ab313a9f0d94a7f0fd204dbcf813b8",
   "ext/qwen_exec.sh": "acb5477907820c9c29908f6675a785e5b8999dbfd21aba8d60ca972213b4fa58",
