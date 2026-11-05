@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import {cleanup, fireEvent, render, screen, waitFor} from "@testing-library/react";
+import {act, cleanup, fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {afterEach, beforeEach, expect, it, vi} from "vitest";
 import {App} from "./App";
+import type {AuthState} from "./host";
 import {createFixtureCommandBinding} from "./browser-proof-command-fixture";
 import type {PendingPointerStore} from "./orchestration/operation-controller";
 const readiness = vi.hoisted(() => ({version:"test-version",source_revision:"raw-source-revision",build_identity:"raw-build-identity",transport:"raw-transport",state:"raw-state",native_client_ref:"raw-client"}));
@@ -62,4 +63,22 @@ it.each(["en", "zh-CN"] as const)("shows an explicit signed-out cue with the ori
  expect(screen.queryByText(locale==="zh-CN"?"暂时无法获取待决策事项。":"Decision information is unavailable right now.")).toBeNull();
  fireEvent.click(screen.getByRole("button",{name:locale==="zh-CN"?"登录":"Sign in"}));
  expect(signIn).toHaveBeenCalledTimes(1);
+});
+
+it("keeps the unsent Today goal protected before the explicit expired-auth cue",async()=>{
+ let signedIn=true;
+ let notify: (state: AuthState)=>void=()=>{};
+ const store:PendingPointerStore={read:()=>null,reserve:()=>({reserved:true}),clearIfEqual:()=>true};
+ const binding=createFixtureCommandBinding(store);
+ const submit=vi.spyOn(binding.port,"submit");
+ const signIn=vi.fn(async()=>{});
+ window.MastermindMissionHost={commandBinding:binding,auth:{getState:()=>({status:signedIn?"signed_in":"signed_out",reason:signedIn?null:"TOKEN_EXPIRED",acquisition:signedIn,content:false}),subscribe:listener=>{notify=listener;return()=>{};},signIn,signOut:vi.fn(async()=>{})}};
+ render(<App locale="en"/>);
+ fireEvent.change(screen.getByLabelText("Goal"),{target:{value:"Literal unsent Today goal"}});
+ await act(async()=>{signedIn=false;notify(window.MastermindMissionHost!.auth!.getState());});
+ expect(screen.getByRole("heading",{name:"Sign in to continue"})).toBeTruthy();
+ expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Literal unsent Today goal");
+ expect(screen.getByLabelText("Goal").closest("section")?.textContent).toContain("expired");
+ expect(screen.queryByText("Decision information is unavailable right now.")).toBeNull();
+ expect(submit).not.toHaveBeenCalled();
 });
