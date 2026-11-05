@@ -7,6 +7,78 @@ these pins are not learned or refreshed by the tests.
 """
 
 REVIEWED_FILES = {
+    # Reviewed application HTTP statuses, permission modes and bounded limits.
+    # These exact 49 spans contain no account/principal identity. Byte drift
+    # exposes the source to the original guard again.
+    'app/main.py': {
+        "sha256": 'dea65255815d2a906f1b2108e889e5fbb087389b4508ce68c179037a7457513b',
+        "sites": (
+            (624, 44, 47, 'int', '400'),
+            (661, 44, 47, 'int', '400'),
+        ),
+    },
+    'ops/native_fabric/quota_continuity/candidate/go_shim.py': {
+        "sha256": '46020c3cd89c32cd5bc151ac504bf38bacee52fbf617df2a7594e2ddbe7e714c',
+        "sites": (
+            (1264, 32, 37, 'int', '0o700'),
+            (1615, 140, 143, 'int', '900'),
+            (1617, 33, 36, 'int', '900'),
+            (1680, 22, 25, 'int', '429'),
+            (1913, 79, 82, 'int', '500'),
+            (1991, 34, 37, 'int', '400'),
+            (2006, 33, 36, 'int', '500'),
+            (2026, 34, 37, 'int', '502'),
+            (2247, 92, 95, 'int', '400'),
+            (2254, 99, 102, 'int', '503'),
+            (2257, 80, 83, 'int', '409'),
+            (2262, 91, 94, 'int', '401'),
+            (2266, 96, 99, 'int', '400'),
+            (2282, 113, 116, 'int', '512'),
+            (2286, 94, 97, 'int', '400'),
+            (2294, 106, 109, 'int', '503'),
+            (2304, 96, 99, 'int', '400'),
+            (2312, 103, 106, 'int', '503'),
+            (2315, 96, 99, 'int', '429'),
+            (2325, 102, 105, 'int', '429'),
+            (2355, 103, 106, 'int', '503'),
+            (2373, 74, 77, 'int', '502'),
+            (2474, 23, 26, 'int', '400'),
+            (2521, 35, 38, 'int', '429'),
+            (2550, 37, 40, 'int', '404'),
+            (2581, 27, 30, 'int', '400'),
+            (2584, 27, 30, 'int', '400'),
+            (2587, 27, 30, 'int', '400'),
+            (2593, 31, 34, 'int', '400'),
+            (2600, 31, 34, 'int', '429'),
+        ),
+    },
+    'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {
+        "sha256": '81784a033dda52be8f1a2643e38da0e8a4922906c48e01a0890534ba8a667273',
+        "sites": (
+            (394, 60, 65, 'int', '0o700'),
+        ),
+    },
+    'ops/native_fabric/quota_continuity/source/go_shim.py': {
+        "sha256": '4a41548a757f763ed5210df96aff6c7148d25d9e192cd3d849e108e1e917d100',
+        "sites": (
+            (1035, 32, 37, 'int', '0o700'),
+            (1365, 140, 143, 'int', '900'),
+            (1367, 33, 36, 'int', '900'),
+            (1430, 22, 25, 'int', '429'),
+            (1516, 79, 82, 'int', '500'),
+            (1594, 34, 37, 'int', '400'),
+            (1609, 33, 36, 'int', '500'),
+            (1629, 34, 37, 'int', '502'),
+            (1872, 23, 26, 'int', '400'),
+            (1919, 35, 38, 'int', '429'),
+            (1943, 37, 40, 'int', '404'),
+            (1974, 27, 30, 'int', '400'),
+            (1977, 27, 30, 'int', '400'),
+            (1980, 27, 30, 'int', '400'),
+            (1986, 31, 34, 'int', '400'),
+            (1993, 31, 34, 'int', '429'),
+        ),
+    },
     # R2 AEAD source candidate: the existing Control UID remains fixed at this
     # single exact site. Independent source acceptance remains a release gate;
     # these static test pins do not establish it or grant a new identity.

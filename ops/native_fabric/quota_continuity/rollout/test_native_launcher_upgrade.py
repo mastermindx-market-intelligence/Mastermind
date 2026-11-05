@@ -77,11 +77,15 @@ APPLICATION_PREIMAGES = {
 def verify_current_stage(output):
     """Qualify the current102 build before restoring any historical bytes."""
     native = Path(builder.__file__).parent.parent
-    manifest = json.loads((output / 'native-manifest.json').read_bytes())
-    baseline = json.loads((native / 'rollout/native-manifest.json').read_bytes())
-    inventory = json.loads((output / 'native-source-inventory.json').read_bytes())
-    if (len(manifest) != 102 or set(manifest) != set(baseline)
-            or {n for n in manifest if manifest[n] != baseline[n]} != set(APPLICATION_PREIMAGES)
+    manifest_raw = (output / 'native-manifest.json').read_bytes()
+    inventory_raw = (output / 'native-source-inventory.json').read_bytes()
+    baseline_raw = (native / 'rollout/native-manifest.json').read_bytes()
+    baseline_inventory_raw = (native / 'rollout/native-source-inventory.json').read_bytes()
+    manifest = json.loads(manifest_raw)
+    inventory = json.loads(inventory_raw)
+    if (manifest_raw != baseline_raw or inventory_raw != baseline_inventory_raw
+            or len(manifest) != 102
+            or set(manifest) != {'ext/' + name for name in builder.BASE_FILES | builder.ADDITIONS} | {'pool'}
             or set(inventory['files']) != set(manifest)
             or inventory['native_code_files'] != len(manifest)):
         raise AssertionError('current application source closure differs')

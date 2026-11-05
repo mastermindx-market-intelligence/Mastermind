@@ -162,7 +162,13 @@ _SAFE = lambda s: "".join(c for c in (s or "") if c.isalnum() or c in "-_")  # n
 
 
 def _hist_path(conversation_id: str) -> Path:
-    return _HISTORY / f"{validate_conversation_id(conversation_id)}.json"
+    identifier = validate_conversation_id(conversation_id)
+    root = os.path.abspath(_HISTORY)
+    path = os.path.abspath(os.path.join(root, f"{identifier}.json"))
+    if not path.startswith(root + os.sep):
+        raise FabricConversationError("fabric_conversation_id_invalid")
+    # Keep the original leaf identity for the atomic conversation replacement.
+    return Path(path)
 
 
 def load_history(conversation_id: str | None) -> list:

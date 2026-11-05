@@ -370,6 +370,7 @@ jobs:
             tests/integration/test_fabric_inference_composition.py \
             tests/integration/test_fabric_chat_inference_composition.py \
             tests/integration/test_fabric_chat_buffered_delivery.py \
+            tests/integration/test_fabric_text_native_application.py \
             tests/integration/test_fabric_chat_browser.py \
             ops/native_fabric/quota_continuity \
             ops/native_fabric/experiential_proxy/gateway.py |
@@ -386,6 +387,8 @@ jobs:
             -p 'test_*inference_composition.py' -v
           PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
             -p test_fabric_chat_buffered_delivery.py -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_text_native_application.py -v
           python -m pip install --disable-pip-version-check playwright==1.62.0
           python -m playwright install --with-deps chromium
           PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \

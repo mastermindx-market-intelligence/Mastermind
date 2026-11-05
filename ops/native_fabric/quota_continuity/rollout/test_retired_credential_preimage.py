@@ -38,11 +38,11 @@ class RetiredCredentialPreimageTests(unittest.TestCase):
         shutil.copyfile(ROOT.parents[2] / lock, target)
         for directory in ("source", "candidate", "rollout"):
             (self.root / directory).mkdir()
-        for name in builder.BASE_FILES | {"pool_launcher.sh"}:
+        for name in builder.BASE_FILES | {"pool_launcher.sh", "go_shim.py"}:
             evidence_name = builder.PREIMAGE_ONLY.get(name, name)
             shutil.copyfile(ROOT / "source" / evidence_name,
                             self.root / "source" / evidence_name)
-        for name in builder.BASE_FILES | builder.ADDITIONS | {"pool_launcher.sh"}:
+        for name in builder.BASE_FILES | builder.ADDITIONS | {"pool_launcher.sh", "go_shim.py"}:
             source = ROOT / "candidate" / name
             if source.is_file():
                 shutil.copyfile(source, self.root / "candidate" / name)

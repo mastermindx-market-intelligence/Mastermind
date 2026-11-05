@@ -82,7 +82,7 @@ def test_original_two_argument_python_process_enters_actual_B_and_retains_pid_ow
         port = int(line.rsplit("=", 1)[1])
         assert port > 0
         assert int((published.ext / "go_shim/shim.pid").read_text().strip()) == process.pid
-        observed = subprocess.check_output(["ps", "-p", str(process.pid), "-o", "command="], text=True).strip()
+        observed = subprocess.check_output(["ps", "-ww", "-p", str(process.pid), "-o", "command="], text=True).strip()
         assert str(published.original) in observed and "native_go_entry.py" not in observed
         assert observed.endswith(str(published.original))
         import http.client

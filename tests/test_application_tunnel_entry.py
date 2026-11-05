@@ -28,8 +28,8 @@ APP_CONFIG = {"schema": os_tunnel_entry.APPLICATION_SCHEMA, "binary_sha256": "b"
 APP_SECRET = b"mastermind-fabric-app:" + b"y" * 48
 
 
-def _isolated_entry(monkeypatch, *, isolated=1, argv=None):
-    """The entry only runs under an isolated, no-bytecode, root invocation."""
+def _isolated_entry(monkeypatch, *, isolated=1, argv=None, euid=0):
+    """Explicit invocation data; not proof of actual root-owned file access."""
     stub = SimpleNamespace(
         argv=["application_tunnel_entry.py"] if argv is None else argv,
         flags=SimpleNamespace(isolated=isolated),
@@ -37,6 +37,7 @@ def _isolated_entry(monkeypatch, *, isolated=1, argv=None):
         stderr=sys.stderr,
     )
     monkeypatch.setattr(application_tunnel_entry, "sys", stub)
+    monkeypatch.setattr(os, "geteuid", lambda: euid)
     return stub
 
 
@@ -155,8 +156,7 @@ def test_application_entry_opens_no_incumbent_os_file(monkeypatch):
 
 
 def test_application_entry_refuses_a_non_root_caller(monkeypatch):
-    monkeypatch.setattr(os, "geteuid", lambda: 1000)
-    _isolated_entry(monkeypatch)
+    _isolated_entry(monkeypatch, euid=1000)
     assert application_tunnel_entry.main() == 1
 
 
@@ -172,8 +172,11 @@ def test_application_entry_refuses_a_non_isolated_interpreter(monkeypatch):
 
 def test_application_entry_refuses_a_binary_that_changed(monkeypatch):
     config = {**APP_CONFIG, "binary_sha256": "b" * 64}
+    opened = []
+    executed = []
 
     def fake_read(path, *, limit, private=False, acl_observer=None):
+        opened.append(Path(path))
         if Path(path) == application_tunnel_entry.CONFIG:
             return json.dumps(config).encode()
         if Path(path) == application_tunnel_entry.CREDENTIAL:
@@ -181,9 +184,12 @@ def test_application_entry_refuses_a_binary_that_changed(monkeypatch):
         return b"different bytes"
 
     monkeypatch.setattr(os_tunnel_entry, "_read_sealed", fake_read)
-    monkeypatch.setattr(os, "execve", lambda binary, argv, env: None)
+    monkeypatch.setattr(os, "execve", lambda *args: executed.append(args))
     _isolated_entry(monkeypatch)
     assert application_tunnel_entry.main() == 1
+    assert opened[:2] == [application_tunnel_entry.CONFIG, application_tunnel_entry.CREDENTIAL]
+    assert len(opened) == 3
+    assert executed == []
 
 
 @pytest.mark.parametrize("failure", ["directory", "file", "observer"])

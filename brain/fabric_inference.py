@@ -33,13 +33,13 @@ def _selection(owner, root):
 
 
 def available() -> bool:
-    """Fresh configuration readiness, without inference or a capacity claim."""
+    """Fresh eligible identity, without credentials, clients or admission."""
     try:
         owner, _, root = _owner()
         selected, factory = _selection(owner, root)
         if selected is not True or type(factory) is not owner.ApplicationFabricFactory:
             return False
-        factory()  # Readiness is discarded; the actual turn binds afresh.
+        factory.inspect()  # The actual turn checks eligibility and binds afresh.
         return True
     except Exception:
         return False

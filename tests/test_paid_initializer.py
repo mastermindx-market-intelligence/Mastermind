@@ -573,7 +573,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='ee2daaf97d7ea960a07e9318cd3230f3e796c9e0907fbda8c4f190da149dc34c'
+    assert hashlib.sha256(current_raw).hexdigest()=='8062512b10fc5c62b030c3ceb398495e63e6abd35b2018c5008b658f40d2251c'
     current=json.loads(current_raw)
     assert len(before)==95 and len(current)==102
     assert set(before)<=set(current)
@@ -600,9 +600,10 @@ def test_native_initializer_extends_only_exact_preimage_members():
                           'ext/fabric_operator_contract.py','ext/native_remote.py',
                           'ext/oc_free_exec.sh','ext/remote_sub_helpers.py',
                           'ext/slot.py','ext/sub.sh'}
-    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed
-    assert sum(before[p]==current[p] for p in before)==69
-    for name in added|changed|diagnostic_changed|long_horizon_changed:
+    application_changed={'ext/lease_broker.py', 'ext/go_lease_capability.py', 'ext/go_lease_gateway.py'}
+    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|application_changed
+    assert sum(before[p]==current[p] for p in before)==66
+    for name in added|changed|diagnostic_changed|long_horizon_changed|application_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
         assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()
     # The paired-upgrade target remains historical; only ordinary generation
