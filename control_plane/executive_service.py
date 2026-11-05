@@ -1557,6 +1557,10 @@ class ServiceConfig:
     cost_class: str = "standard"
     coo_autonomy_armed: bool = False
     coo_observations_armed: bool = False
+    # Explicit opt-in for the versioned external observation gate.  It needs
+    # the armed observation composition and a qualified single-sample reader;
+    # external network composition is never implied by the timer gate.
+    coo_external_observations_armed: bool = False
     # Persistent reviewed host mode: only the actual live assigning request
     # can drive fresh cycles. Open roots never become background work in it.
     coo_foreground_only: bool = False
@@ -1636,6 +1640,10 @@ class ServiceConfig:
             raise ValueError("coo_observations_armed must be boolean")
         if self.coo_observations_armed and not self.coo_autonomy_armed:
             raise ValueError("observations require armed COO autonomy")
+        if type(self.coo_external_observations_armed) is not bool:
+            raise ValueError("coo_external_observations_armed must be boolean")
+        if self.coo_external_observations_armed and not self.coo_observations_armed:
+            raise ValueError("external observations require armed observations")
         if type(self.coo_foreground_only) is not bool:
             raise ValueError("coo_foreground_only must be boolean")
         if self.coo_foreground_only and (not self.coo_autonomy_armed
@@ -2262,6 +2270,7 @@ class ExecutiveControlService:
         attended_worker_registration: Callable[[Runtime], Any] | None = None,
         paid_worker_binding_source=None,
         observation_host=None,
+        external_observation_reader=None,
     ) -> None:
         self.config = config
         from control_plane.coo_observation import TimerObservationHost
@@ -2270,10 +2279,33 @@ class ExecutiveControlService:
         if observation_host is not None and any(not callable(getattr(observation_host, name, None))
                 for name in ("require_scope", "require_current")):
             raise ValueError("observation host requires trusted owner methods")
+        if external_observation_reader is not None and not callable(external_observation_reader):
+            raise ValueError("external observation reader must be callable")
+        if (external_observation_reader is not None
+                and not config.coo_external_observations_armed):
+            raise ValueError("external observation reader requires the external opt-in")
         binding = hashlib.sha256(json.dumps({"runtime_root": str(config.runtime_root),
             "socket_path": str(config.socket_path)}, sort_keys=True).encode()).hexdigest()
-        self._observation_host = ((observation_host or TimerObservationHost("executive-timer:" + binding))
-                                  if config.coo_observations_armed else None)
+        self._observation_host = None
+        if config.coo_observations_armed:
+            if observation_host is not None:
+                self._observation_host = observation_host
+            elif config.coo_external_observations_armed:
+                from control_plane.coo_external_observation import (
+                    ComposedObservationHost,
+                    ExternalObservationHost,
+                    default_external_reader,
+                    incumbent_services,
+                )
+                external = ExternalObservationHost(
+                    binding_ref="executive-external:" + binding,
+                    reader=external_observation_reader or default_external_reader(),
+                    services=incumbent_services(),
+                )
+                self._observation_host = ComposedObservationHost(
+                    timer=TimerObservationHost("executive-timer:" + binding), external=external)
+            else:
+                self._observation_host = TimerObservationHost("executive-timer:" + binding)
         if attended_worker_registration is not None and not callable(attended_worker_registration):
             raise ValueError('attended registration requires fixed host composition')
         self._attended_worker_registration = attended_worker_registration

@@ -26,158 +26,174 @@ Completion requires source tests, protected release where required, installed-ve
 
 ## Implemented and source-qualified frontier
 
-This section supersedes historical candidate statuses below. The original mission
-and DONE_WHEN remain open through durable external acquisition, protected release,
-installed consumer proof and fresh-account adoption.
+This section supersedes historical statuses below. Original DONE_WHEN remains
+open through final V7 integration, protected release, installed autonomous
+consumer proof and fresh-account adoption.
 
-- **Published implementation baseline:** `72973e99beb9f92183a81e9af2ed612eebb99e38`, same PR2066
-  and managed source carrier. Exact commit/push/HEAD readback passed.
-- **Durable timer:** explicit V6 plan contract, retained admission and one Runtime
-  event, deferred reservation without a work Attempt/lease, restart/replay and
-  bounded exact evidence in the actual worker prompt. Existing COO/service owners
-  drive progress; observation arming is default-off.
-- **Scheduling/recovery:** missing current host preserves material evidence;
-  independent ready gates can progress during proven preclaim review pressure,
-  without inheriting a different subject's pressure. Accepted dependencies and
-  live/uncertain effect fences remain enforced. Existing root selection rotates
-  past parked roots, including more than two, without another queue or cursor.
-- **Finite observer:** parent repaired all seven initial defects. One absolute
-  deadline spans sequential reads and body streaming, cancellation wins over
-  late success, strict source identity and byte limits apply, semantic review
-  baselines catch same-ID changes, and health requires affirmative evidence.
-- **Paid source custody:** original finite repair ended rc75/LEASE_REFUSED before
-  launch; original Runtime request refused prelaunch/ProcessCensusError. Direct
-  parent source work used the recorded NO_ELIGIBLE_PRE_EFFECT_WORKER route.
-  Original guidance run/lease `d7800b64337e` remains EFFECT_UNKNOWN, unaccepted
-  and unretried despite physical-writer termination and reviewed source recovery.
-- **Real functional canary accepted:** original
-  `web-fabric-autonomy-real-canary-20261105-c3-01`, controller42709, rc0.
-  Complete 4,714-byte response SHA256
-  `8a45482c0ae8d2ab3b2734bd56474a53dae92d8ba9a1d2e2fdab4dfa3e0cffed`.
-  Exact helper SHA256
-  `3654d67e782a79cf116b420633f4ea7a359223e1fa35382efc6f4c0d725b8663`
-  matches reviewed source. Real timer fired after 3.000105 seconds, then the
-  same worker ran 161 focused tests successfully. Actual exact-head GitHub
-  selected runs were pending; one-sample TIMEOUT was correct, not policy GREEN.
-- **Canary acceptance boundary:** manual acceptance covers functional evidence.
-  Worker disclosed about 25 provider turns against behavioral guidance 12;
-  exact usage receipt is absent. No budget-conforming or hard-limit claim.
-  Existing native source has max-turn plumbing, but current Web request schema
-  does not expose it and effective canary argv/native turn usage is unproven.
-- **Skills published and read back:** Fabric C3 1.0.1, release
-  `pluginrel_6aec2201a2bc81919c02cc46b275db26`; original Mastermind Sol 0.1.1,
-  release `pluginrel_6aec30816e948191aaaffd81a8f57e69`. Existing identities,
-  audiences and presentation preserved. Sol's minimal account update adds three
-  Fabric skill/recipe files while retaining its original seven skills; it differs
-  from full shared CEO source package 0.2.2. Current-session skill catalog still
-  reports the old seven Sol skills after publication. Fresh loading and all-account
-  installation/use remain unproven; do not republish merely to force a refresh.
-- **CI:** old 2b1 procedure-budget failures were fixed without changing thresholds
-  or frozen baseline; corpus 99,985 bytes and 212 contract cases pass. Exact72973
-  workflow41987375801 now reports four static source-pin failures in shard4,
-  job127111284853, plus source-closure, configuration-template, prompt-fixture,
-  unknown-version fixture and five reason-token failures in other shards: 13 total.
-  This compatibility delta repairs all 13 without changing protected AST/literal
-  meaning, lowering thresholds or weakening guards. The restored reason list leaves
-  the protected corpus at 99,958 bytes. Full exact-head CI must run on publication.
-- **Agent OS:** updated decision validates locally with zero errors/warnings,
-  but existing Macro publisher commit/status returned
-  TYPED_GIT_PRECHECK_REFUSED / NOT_APPLIED / INVALID_ARGUMENT. One bounded
+- **Published baseline:** f6f56ed15aef92ad5bf31dcd911aa63c1f7ffde2 on PR2066.
+  This delta integrates the recovered V7 source and parent corrections on the
+  same managed branch. It is not an installation or activation.
+- **V6 and existing joins:** durable timer gates, finite worker-local observation,
+  exact CI-to-Wake persistence, actual evidence in the reserved worker prompt,
+  and existing service rotation remain qualified source behavior. V6 is frozen;
+  external acquisition uses explicit plan/v7, gate/v2 and admission/v5.
+- **V7 recovery and evidence:** each complete sample is reserved before bounded
+  I/O outside the Runtime transaction. Exact immutable event-chain validation
+  binds admission, source, owner, ordinal, time, costs, previous digest and result.
+  Unsettled original reservations remain charged and UNRESOLVED without takeover.
+  Original late denial can settle even after fresh finite authority expires;
+  late success expires. Historical material survives reopen while fresh work
+  still requires current authority, cancellation, host and finite gates.
+- **V7 fairness:** at most one new acquisition per cycle; existing reservation
+  events order unpolled/least-recent leaves. A pending sample yields to ready
+  siblings. At the existing review-pressure boundary a real observation wait
+  returns NO_ACTION with the complete original review-pressure receipt, allowing
+  unchanged root rotation. Review remains first on the next selected tick.
+- **Reader integration still open:** the paid repair owns only the bounded
+  GitHub/fixed-service transport and focused tests. Its result must enforce one
+  absolute deadline, actual aggregate raw bytes, all three MCP requests, terminal
+  HTTP 401/403 or gh exit4, and each workflow run's own commit/attempt identity.
+  Parent core requires a retained per-run head_sha. No production qualification
+  can be inferred from deterministic core seams.
+- **Source guards:** parent verified unchanged ASTs of the Company listener,
+  CEO ingress and installed event-loop wrapper, plus every protected literal
+  and spelling. Only two full-source SHA literals and three line coordinates
+  changed. All 368 identity/dispatch guard cases pass; no guard, threshold or
+  issued review receipt was weakened.
+- **Default composition:** coo_external_observations_armed is explicit false in
+  the control template and requires existing armed COO/observation composition.
+  The new imported module is added to the sealed source closure. Four closure
+  cases and three actual bootstrap/config cases pass after owning the same pytest
+  and dependency versions inside the isolated test environment.
+- **Published guidance:** Fabric C3 1.0.2 release
+  pluginrel_6aec526941408191b678713eecbc144d and Mastermind Sol 0.1.2 release
+  pluginrel_6aec52756df48191906b76eb8c8c74a9 retain their original app identity,
+  private audience and presentation. Both releases' changed files match readback;
+  six and fourteen total files remain. V7 opt-in, precise sample charges,
+  unresolved-read recovery and evidence-to-consumer proof are documented.
+  Guide SHA256 682bddbf6441288468ba99b6e31de90edaf086c301ce1a8078e66aeceeeafb73;
+  recipes SHA256 2279165509a3b0a71d21a5746708449d7b09ef856abcdbffec74db573165d94b.
+  Shared CEO source remains 0.2.2; the account package is a separate release.
+  Fresh loading and all-account adoption remain unproven.
+- **Hosted CI:** f6 workflow41994870017 completed successfully, including the
+  aggregate required test job. That baseline does not qualify this V7 checkpoint;
+  required exact-candidate CI and transport completion remain owed.
+- **Agent OS:** current decision publication remains lane-blocked by the original
+  Macro TYPED_GIT_PRECHECK_REFUSED / NOT_APPLIED / INVALID_ARGUMENT. One bounded
   same-carrier diagnostic did not resolve it. NOT_CANONICALLY_PERSISTED for the
-  new milestone; last durable Macro head remains
-  `0f019ca1e80ad374f1aa1223a669aa8ca5bba269` on PR10749. No alternate commit route.
+  new milestone; last durable Macro head is
+  0f019ca1e80ad374f1aa1223a669aa8ca5bba269 on PR10749. No alternate publisher.
 
-### Source validation receipts
+### Real-path proof already consumed
 
-Overlapping batches, not a summed unique-test count:
+Original run web-fabric-autonomy-real-canary-20261105-c3-01, controller42709,
+returned rc0. Full 4,714-byte response SHA256
+8a45482c0ae8d2ab3b2734bd56474a53dae92d8ba9a1d2e2fdab4dfa3e0cffed
+was manually accepted for functional proof. Exact helper SHA256
+3654d67e782a79cf116b420633f4ea7a359223e1fa35382efc6f4c0d725b8663
+executed a real 3.000105-second timer and then 161 focused tests in the same paid
+worker. Actual selected CI runs were pending; one-sample TIMEOUT was correct.
+Approximately 25 provider turns exceeded behavioral guidance12; exact usage is
+absent. This is not machine-enforced budget or unattended-service proof.
 
-| Receipt | Result and scope |
-|---|---|
-| M2 95024 | 109 native plan export/opt-in/helper cases passed |
-| M2 29403 | 97 timer, host recovery, review-pressure and tick-liveness cases passed |
-| M2 40658 | 545 legacy cases passed before obsolete V6-unsupported fixture failed |
-| M2 89075 | Final observation/Claude/planner suites: 121 passed; positive V6 handshake |
-| M2 82068 | 125 repaired finite-observer cases, including real inert subprocess streaming |
-| M2 93113 | 35 existing MCP reply/transport neighboring cases passed |
-| M2 16425 | 212 reading-budget/procedure contracts passed, frozen baseline unchanged |
-| Original real canary | Actual Ubuntu Fabric worker: 161 focused cases passed after real timer |
-| CI pin worker | 380 cases passed; full return and exact five-line patch consumed and accepted |
-| M2 57747 / 20897 | Parent broad pin run reached a missing PyJWT dependency; repository-pinned 2.14.0 installed in isolated /tmp venv, then all four original failing cases passed |
-| M2 91238 | Delegation/compaction suites pass after explicit reason-token restoration |
-| M2 39305 | Bootstrap source-closure and control-template suites pass |
-| M2 31506 | Plan-version/responsibility suites pass after inherited V6 fixture fixes |
+The independent service-probe controller17402 ended LEASE_REFUSED rc75 before
+launch. Its terminal prelaunch branch qualified NO_ELIGIBLE_PRE_EFFECT_WORKER,
+without altering conservative facade absence/retry flags. Parent made one fixed
+read-only openai-docs MCP probe through the exact f6 helper: READY in 0.716582
+seconds, 08:47:17.939056–08:47:18.656227 UTC, M2 process2531 exit0. No retry,
+invented prior outage, installation or downstream admission. After transport
+repair, a real sample through the new reserved-budget seam remains materially
+different proof to obtain.
 
-### Active independent Fabric wave
+### Original external worker and source recovery
 
-Original root and parent remain `web-fabric-durable-autonomy-20261105-c3`.
-Full bounded briefs are retained in [PR2066](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2066).
+Original external-gates controller13605 reported COMMISSION_PROCESS_UNPROVEN
+and transport_deadline_without_rc. Complete controller capture SHA256
+ebc62b5cfe37e5e51e36ed0eeb6fccc52613bb5596186a79ee8b76047294bada
+remains accounting evidence; original lease bfbee5019b0e is preserved.
 
-| Original run suffix after `web-fabric-autonomy-` | Controller | Scope and custody |
+The matching original remote process receipt now proves positive completion:
+started07:43:17.659Z, ended08:35:28.329Z, pid/pgid1887336, rc0, complete stream
+capture, census_proven/identity_verified true, residual_count0, cleanup not_needed.
+Its 860-byte SHA256 is
+f696b029807536ee5b56df3077a61f31189274539ee1c925b8549df5ff75cba0.
+Original stdout was fully consumed: 6,490 bytes, SHA256
+b3f66e30de6fe18361e4c0e3a9495b8a7653ef85e8281991ea4663eb78397c1d.
+
+That receipt qualified read-only source recovery, not Fabric accounting repair.
+The original 152,308-byte patch SHA256
+cced889225eadbd1cb93186dabfe624d0cd3cf6ed4188e924af80b352b53adca
+was recovered exactly, checked against its original preimage and applied once
+to the parent workspace. It changes seventeen paths. The original worker
+workspace remains untouched. Initial27 tests passed, but parent C3 review found
+substantial recovery, evidence, fairness and transport defects. The original
+worker return is not accepted. Parent core corrections use PRINCIPAL_JUDGMENT
+and LOWER_TOTAL_OVERHEAD; a disjoint paid unit owns transport repair.
+
+The original guidance lease d7800b64337e also remains EFFECT_UNKNOWN despite
+qualified physical-writer termination and recovered source. No unknown lease
+has been released, retried or rehomed. The generic original-delivery collector
+does not qualify the new MiniMax external run; no invented recovery binding.
+
+### Current paid wave and direct integration custody
+
+All runs retain root/parent web-fabric-durable-autonomy-20261105-c3. Full briefs
+remain source-linked in PR2066.
+
+| Original run suffix after web-fabric-autonomy- | Controller | Observed outcome |
 |---|---:|---|
-| `external-gates-20261105-c3-01` | 13605 | EFFECT_UNKNOWN after local controller sleep qualification failed; original remote executor/Claude chain observed live; workspace protected and lease bfbee5019b0e preserved |
-| `service-probe-20261105-c3-01` | 17402 | C0 real fixed official MCP probe through repaired transport, 15-second shared deadline, no source edits/retry |
-| `ci-pins-20261105-c3-01` | 40047 | Terminal rc0; full 3,302-byte return a29c2a90999e13bb5d007a2067ca2ef092173e41ab6152f12a4b064294264ef6 accepted after exact patch review and parent qualification |
+| external-reader-repair-20261105-c3-01 | 37846 | Original controller reports launch on Ubuntu3 at09:47 and local polling at09:59; canonical worker START/result remains unverified. Owns ops/fabric_launch/finite_watch.py, observe.py and focused reader tests only. |
+| v7-pins-20261105-c3-01 | 15117 | Terminal rc0/root verified; complete 5,060-byte response 5dac683a5774df965ad676c65b3235858e3eac5e4b65b4c9295a685cb9626468 consumed. Exact candidate patch was inaccessible from Ubuntu0, so only baseline evidence returned and no candidate patch was proposed. Commission remains unaccepted. |
 
-Controller creation is not START. Service-probe remains in its original MiniMax
-capacity wait; no replacement probe or provider reroute. Parent compatibility edits
-repair the already-published V6 baseline in its own workspace; the original V7
-worker's isolated source is untouched and future integration must preserve its diff.
+The paid pin audit's terminal result establishes no active source writer. Parent
+completed the five-line static integration from the actual managed candidate
+under LOWER_TOTAL_OVERHEAD, preserving protected AST/literal meaning; it did not
+claim Fabric globally unavailable or substitute native labor. Worker-estimated
+wall usage is not a qualified controller measurement. Reader custody remains
+exclusive until its original effect resolves.
 
-### Original external-gate effect reconciliation
+### Focused source receipts
 
-At 08:05 UTC the controller emitted COMMISSION_PROCESS_UNPROVEN for poll-sleep,
-then rc124 / transport_deadline_without_rc. This is failure to qualify the local
-sleep subprocess, not proof the remote worker stopped. Complete 30,791-byte
-controller receipt SHA256
-`ebc62b5cfe37e5e51e36ed0eeb6fccc52613bb5596186a79ee8b76047294bada`
-was retrieved through retained pages and hash-verified, without rerunning the action.
-Original broker lease `bfbee5019b0e` remains preserved; no retry is authorized.
+Batches overlap; do not sum them as a unique coverage count.
 
-The exact remote active marker
-`/home/longr/lanes/ext/active/web-fabric-autonomy-external-gates-20261105-c3-01`
-names executor PID1887335, created 07:43:17.658Z. One bounded read-only process
-observation found that executor and descendants, including Claude PID1887372,
-with start times consistent with the original marker. This is protective live
-custody evidence; it does not reconcile the ledger root or grant takeover.
+| Receipt | Result and meaning |
+|---|---|
+| M2 28329 | Original recovered V7 suite:27 pass; not source acceptance |
+| M2 1345 | Original26 selected V7 cases passed before a parent test fixture attempted an immutable-event UPDATE; fixture was replaced with creation-time malformed producer evidence, never a weakened trigger |
+| M2 8403 | All25 initial parent recovery/evidence/fairness regressions pass |
+| M2 19514 | Timer, COO, version/responsibility, native producer and planner compatibility suites pass |
+| M2 28359 | Additional review-pressure/observation-wait fairness regression passes |
+| M2 93127 | All368 static identity/dispatch guard cases pass after five exact pin updates |
+| M2 74769 | Four sealed-source closure cases pass; separate bootstrap environment failure identified |
+| M2 85161 | Actual owned-source bootstrap, digest-drift refusal and explicit composition cases all pass after isolated environment repair |
+| M2 68146 | All52 combined core observation cases pass; the one production-reader seam case is explicitly excluded pending the assigned transport repair |
 
-Original remote return/rc paths are
-`/home/longr/lanes/ext/lanes_web-fabric-autonomy-external-gates-20261105-c3-01.stdout`
-and the same basename with `.rc`. The empty stdout is buffered until process
-completion and is not evidence of no execution. Process/provider/usage receipts
-belong under `/home/longr/lanes/ext/lanes/`, named by the original run; they were
-not present at the bounded observation. Do not confuse the separate controller
-process receipt with remote cleanup proof.
-
-Before recovering source, require the matching original worker receipt with
-terminal capture and cleanup census/identity proven, residual_count zero and
-cleanup status not_needed or terminated. Preserve unknown accounting separately.
-The protected generic original-delivery collector does not qualify this new
-MiniMax run; do not invent a collection binding, extend a historical scope table,
-release a lease, or launch a replacement to evade that limitation.
+Earlier accepted V6/finite/Wake tests and real worker proof are retained in the
+historical sections and prior commits. They need not be rerun without a material
+source or behavior change.
 
 ### Remaining exact frontier
 
-1. Consume the original three new returns and complete any needed same-carrier
-   source corrections/integration. V6 remains frozen; external source contracts
-   require V7. One sample is reserved in Runtime before bounded I/O outside its
-   transaction; restart cannot reset budgets or blindly repeat an acquisition.
-2. Material CI/review/service evidence must release only the existing admitted
-   follow-up with exact prompt input, without a new scheduler or authority grant.
-   Test changed head/run/attempt, same-ID dismissal, denial, false health, budget,
-   cancellation, interrupted acquisition, replay, dependencies and root fairness.
-3. Recompute static candidate hashes/sites only after protected AST and literal
-   semantics are verified unchanged on the final combined source; run meaningful
-   affected tests and required exact-head CI. Never weaken identity/dispatch guards.
-4. Publish/read back the same source carrier and durable records when their
-   original owners permit it. Macro precheck remains a lane-local persistence
-   failure, not permission to bypass its publisher.
-5. Prove fresh account skill loading and each account's actual request/START/return
-   capability independently. Current plugin release does not refresh this chat's
-   cached skill catalog or prove other account credentials.
-6. Production activation remains on #1893's original call5913 and denied read.
-   Project-editor ceremony remains on #917. No alternate account/browser replay.
-   Existing paid background composition is sealed READ input; unattended repair
-   still requires a qualified tool-capable admitted route and fresh candidate check.
+1. Consume the original reader result or reconcile its exact terminal effect.
+   Never replace an uncertain launch or edit its owned paths while it may run. Integrate actual counts,
+   absolute deadlines, retained run head and strict denial behavior; then run
+   combined core/transport and relevant compatibility checks.
+2. Prove one actual bounded read through the final seam and its retained evidence
+   path, without fabricating a service transition or touching installed services.
+   Preserve source-unit, real-network and installed-consumer receipts separately.
+3. Publish/read back the same managed source carrier and obtain exact-head CI.
+   Align the existing Agent OS decision locally; its publisher remains a
+   lane-local hold, not permission for alternate publication.
+4. When the existing owner permits qualification, prove installed service
+   acquisition -> exact admitted work START -> retained result -> original-parent
+   consumption, plus replay at the committed-material boundary. An unresolved
+   acquisition is an explicit recovery obligation, not automatic retry.
+5. Fresh eligible account loading and request/START/return capability remain owed.
+   Account-neutral skill publication does not establish credentials or adoption.
+6. Production activation remains on #1893 original call5913 and its denied read;
+   Project editing remains on #917. Preserve #2063 facade/browser-watcher and
+   #2064 bootstrap custody. Tool-capable unattended healing and hard turn-limit
+   guarantees need their existing qualified routes; no new owner bypasses them.
 
 ## Historical task tree and execution evidence
 

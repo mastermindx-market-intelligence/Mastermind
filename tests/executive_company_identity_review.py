@@ -34,7 +34,7 @@ REVIEWED_ANCHORS = {
         # in addition to the method AST; all three literal lines are ASCII.
         # Qualified session/direction/capacity READ and admission additions change the enclosing ingress AST.
         # The original CCR branch and listener remain structurally unchanged.
-        "source_sha256": "0618be296f9eaab69b402b09d66425700c3f8a26a463a31d95b3797be1065483",
+        "source_sha256": "e6295c99d80d7dd4e74ae2d5bcccfc9a7475faef9991f0fbbf95ad3c49e73c06",
         "ast_sha256": "6735cd4807ae1d203599d8210f141ea9b49b5d3487deaaa169789d6fd4565c72",
         "sites": (
             (("body", 3, "body", 35, "body", 3, "orelse", 0, "body", 2,

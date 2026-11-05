@@ -1,6 +1,6 @@
 # Web Fabric autonomy through the existing execution owners
 
-Status: timer, finite observer and CI-Wake source implemented and qualified; installation, real-worker and all-account acceptance remain open.
+Status: timer, finite observer and CI-Wake source qualified with real bounded Fabric proof; V7 external observations are an unarmed integration candidate. Installed autonomous continuation and fresh-account acceptance remain open.
 Governing source: Mastermind `b9e4c72c101d1f5a4ef6c86e51e8eb1fdc89cf8c`.
 Delivery carrier: [Mastermind #2066](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2066).
 Operation: `web-fabric-durable-autonomy-20261105-c3`.
@@ -51,7 +51,7 @@ Network sampling is deterministic and bounded; a sleeping process is not a model
 6. The principal reads the complete retained result, verifies proportionate evidence and records acceptance using the exact effective/accept run ID. It advances each useful return without waiting for unrelated siblings.
 7. If the foreground session ends, original operation and effect identities remain recoverable through existing source/Agent OS records and the original result path. A resume must reconcile them before creating another effect. No detached chat daemon is implied.
 
-An existing execution plan may sequence steps through accepted predecessor result manifests. In legacy plan schemas, a completed work result releases a dependency without a built-in conditional material-event predicate. Explicit V6 timer gates add the material-only observation predicate described below. A downstream worker must revalidate semantic disposition and, when no effect is warranted, return truthful no-action or inconclusive evidence using its admitted result schema. The existing supervisor and COO owner retain lifecycle blocking and failure decisions; do not invent a BLOCKED work-result envelope. Do not encode quiescent timeout as fabricated failure, or claim that generic dependencies suppress every non-material launch.
+An existing execution plan may sequence steps through accepted predecessor result manifests. In legacy plan schemas, a completed work result releases a dependency without a built-in conditional material-event predicate. Explicit V6 timer gates and V7 external gates add the material-only observation predicate described below. A downstream worker must revalidate semantic disposition and, when no effect is warranted, return truthful no-action or inconclusive evidence using its admitted result schema. The existing supervisor and COO owner retain lifecycle blocking and failure decisions; do not invent a BLOCKED work-result envelope. Do not encode quiescent timeout as fabricated failure, or claim that generic dependencies suppress every non-material launch.
 
 Dependency manifests establish predecessor identity and readiness, not automatic transfer of the predecessor's report into a worker prompt. The current ordinary supervisor prompt does not project arbitrary predecessor result bytes. A whole bounded worker already holds its observed evidence. A separate sealed-input triage step must receive that evidence through its existing verified immutable commission/input owner; manifest presence alone is not proof of consumption.
 
@@ -130,7 +130,7 @@ bytes. An already-due timer is allowed; delayed admission never moves its due ti
 Do not reserve authority by accepting unimplemented source variants.
 
 The existing service composes the trusted host. A private observation-host protocol
-provides source scope/current-binding checks and a future bounded-reader seam;
+provides source scope/current-binding checks; V7 extends that same bounded-reader seam;
 a type, hash or scope object does not authenticate its caller. Runtime independently
 revalidates the canonical root, sealed planner result, producer binding, plan digest,
 persisted READ authority and current Executive authority policy, workstream and
@@ -254,3 +254,142 @@ hard ceiling must use a qualified owner path or refuse that requirement.
 C3 judgment references the same protected pin
 `b9e4c72c101d1f5a4ef6c86e51e8eb1fdc89cf8c`; source lookup and reasoning were
 performed without native labor substitution, runtime probes or facade edits.
+
+## Versioned external observations — V7 candidate
+
+The recovered V7 extension uses the same Runtime, COO and service owners as the
+timer implementation. The parent has repaired its ownership, evidence and
+scheduling invariants. The single-sample transport repair remains an independent
+open lane; this candidate is not production-qualified or armed.
+
+### Contracts and source identities
+
+| Existing owner contract | V7 use |
+|---|---|
+| `mastermind.execution_plan/v7` | The same flat, at-most-eight-leaf topology; every leaf has a nullable gate |
+| `mastermind.coo_observation_gate/v2` | Timer, selected CI, formal review change, or fixed-service health |
+| `mastermind.coo_plan_admission/v5` | The exact original root, planner Attempt, immutable plan/step and source grant |
+| `mastermind.coo_observation_reservation/v1` | One charged sample ordinal, source digest, original deadline and complete limits |
+| `mastermind.coo_observation_record/v2` | The exact reservation, settled semantic evidence and its retained charges |
+| Existing dependency manifest/input | One material event releases only its already-reserved leaf and enters its actual Attempt prompt |
+
+Authoritative normalization binds V6 exclusively to gate/v1 and V7 exclusively to
+gate/v2. Output JSON schema alone is insufficient. The external Runtime path also
+requires plan/v7 plus admission/v5. Published V6 timer wire/defaults remain intact;
+a V7 timer still follows the existing timer acquisition and record path.
+
+A CI source binds repository, PR, exact candidate SHA, selected run IDs and
+explicit run attempts. Each retained run also carries its actual commit SHA.
+All selected runs must be terminal, with a valid actual conclusion. Failure,
+cancellation and success are evidence; none is branch-policy GREEN or a release
+grant. Review sources bind the candidate and a semantic baseline
+`{review_id,state,commit,login}`; same-ID dismissal is observable. Health sources
+bind an incumbent allowlisted service plus an explicit baseline/expected state.
+Health is an affirmative state/change detector, not an implicit wait-for-READY
+claim. Nonaffirmative transport answers never satisfy it.
+
+### One reserved acquisition and one original settlement
+
+The existing Runtime event transaction reserves the whole sample before I/O:
+ordinal, exact source digest, call allowance, raw response-body allowance,
+absolute acquisition deadline and per-sample timeout. The remaining total gate
+budget must cover a complete sample; an undersized remainder does not start a
+partial acquisition. There is no work Job, Attempt, model call or paid worker
+lease while the leaf is parked.
+
+The transaction ends before the trusted single-sample reader runs. One absolute
+monotonic deadline spans all requests and body reads. The time spent leaving the
+reservation transaction consumes that window. Closed host composition selects
+GET-only GitHub or a fixed read-only MCP service. Caller input never selects a
+URL, credential, callable or command. Full MCP acquisition costs three requests:
+initialize, tools/list and the fixed read-only tools/call. Reader limits must
+apply to actual calls and aggregate raw bodies, not a reserialized JSON value or
+the length of the word READY.
+
+The original call settles only its own retained reservation. Settlement uses the
+existing incumbent-effect boundary so a finite-root expiry or exhausted fresh
+attempt allowance cannot strand an original denial. Current cancellation,
+policy/host drift and finite gates prevent a newly arriving result from becoming
+material work. Late non-denied evidence is terminally expired; a late explicit
+denial remains a denial. No lower-level observer retries an auth or permission
+refusal.
+
+A material event already committed within bounds remains historical evidence
+after its acquisition deadline. Exact replay returns that original event with no
+network access. New work still passes current authority, root, host, dependency,
+finite and execution gates. This distinction is deliberate: retaining evidence
+does not issue a fresh effect.
+
+### Unsettled acquisition is not a timeout retry
+
+A reservation without a result stays charged and is projected as UNRESOLVED.
+Neither elapsed time nor a newly opened Runtime proves the original read ended.
+Another tick cannot mark that read interrupted, swallow its eventual denial or
+start a replacement. The original in-flight call can still settle the exact
+reservation. Restart after a committed pending or material sample resumes from
+the durable history; restart with a missing original result requires qualified
+incumbent recovery. This source does not invent such a recovery owner or promise
+automatic resampling of a lost receipt.
+
+For a settled transient UNAVAILABLE result, a later tick may reserve a new sample
+only within the original remaining count, interval, API, byte and time bounds.
+The earlier reservation is never refunded. Successful measurement fields reflect
+the qualified reader; an exception without complete measurements conservatively
+charges the entire reserved allowance. Those charges are not a claim that every
+reserved request or byte was physically consumed.
+
+### Exact historical validation
+
+Every consumer validates the complete event chain before deriving budgets,
+replaying a terminal result or creating a work manifest. Checks include:
+
+- Exact aggregate, actor, Job, planner Attempt, worker/quota-null envelope and
+  bounded canonical bytes.
+- Deterministic reservation/record command IDs and consecutive sample ordinals.
+- Exact admission, source digest, per-sample reservation limits, total budgets,
+  minimum interval, event order and original timestamps.
+- A record's one existing unsettled reservation, counters within its allowance,
+  previous snapshot digest and closed semantic snapshot.
+- A material result arriving within its original sample/acquisition window.
+- Exact event, evidence and dependency-manifest joins into the actual current
+  work Job and Attempt.
+
+A correctly hashed payload with an unrelated reservation, wrong event owner,
+unknown ordinal or over-budget counters cannot satisfy a gate. Closed denied
+and unavailable snapshots replay through the same validator. Reader contract
+violations preserve the unsettled original reservation instead of silently
+allowing another read. No extra evidence database or result queue is added.
+
+### Fairness and review priority
+
+The existing reservation events supply a fairness hint among external leaves:
+an unpolled or least recently sampled eligible leaf is considered first. At most
+one new acquisition occurs in one COO cycle. A nonmaterial sample remains in the
+event ledger and yields to dependency-ready or already-ready sibling work in
+that same cycle.
+
+With a proven preclaim review-capacity miss, only the existing disjoint READ
+allowance applies. A genuine nonmaterial observation returns the normal
+observation-wait NO_ACTION receipt and nests the complete original review
+pressure receipt. That existing receipt lets the unchanged service selector
+rotate to another qualified root. The cycle still returns at the review boundary;
+it cannot fall through to a writer, retry the review in the same tick or create a
+handoff. On the root's next tick, current review priority is attempted first.
+
+The implementation keeps the current root-selection hint, immutable ledger and
+admission owners. It adds no durable queue, daemon, retry broker or scheduler.
+
+### Composition and acceptance boundary
+
+Both `coo_observations_armed` and `coo_external_observations_armed` default false.
+External composition requires the existing armed COO/observation guards and a
+trusted reader. Explicit service configuration still does not prove installed
+source, account credentials, worker START, tool-capable healing or acceptance.
+
+The source qualification includes actual Runtime admission, reservation, reopen,
+material evidence, one work Job and real supervisor-prompt consumption with
+deterministic network seams. Additional regressions cover live-read timeout races,
+late denial, current cancellation, immutable-event validation, source/charge
+mismatch, V6 isolation, transient error replay and review/root fairness.
+Transport, real-network and installed-consumer proofs remain separately named
+in the implementation plan; a passing unit suite is not a production receipt.

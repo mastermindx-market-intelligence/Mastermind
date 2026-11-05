@@ -15,7 +15,10 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, runtime_checkable
 
-from control_plane.coo_observation import ObservationError, gate_schema, validate_spec
+from control_plane.coo_observation import (
+    EXTERNAL_GATE_SCHEMA, GATE_SCHEMA, ObservationError, gate_schema, validate_spec,
+)
+from control_plane.coo_external_observation import external_gate_schema
 from scripts.ohf.redaction import evidence_contains_secret, redact_evidence
 from common.product_acceptance_contract import (
     PRODUCT_ACCEPTANCE_REVIEW_PROOF_SCHEMA,
@@ -32,6 +35,7 @@ PLAN_SCHEMA_V3 = "mastermind.execution_plan/v3"
 PLAN_SCHEMA_V4 = "mastermind.execution_plan/v4"
 PLAN_SCHEMA_V5 = "mastermind.execution_plan/v5"
 PLAN_SCHEMA_V6 = "mastermind.execution_plan/v6"
+PLAN_SCHEMA_V7 = "mastermind.execution_plan/v7"
 AGGREGATION_SCHEMA_V1 = "mastermind.aggregation_result/v1"
 AGGREGATION_SCHEMA_V2 = "mastermind.aggregation_result/v2"
 MAX_CANONICAL_RESULT_BYTES = 8_388_608
@@ -200,6 +204,12 @@ def _role_body_schema(
         v6_step = json.loads(json.dumps(v3_step))
         v6_step["properties"]["observation_gate"] = {"anyOf": [{"type": "null"}, gate_schema()]}
         v6_step["required"].append("observation_gate")
+        # V7 is the versioned external-gate extension of the same V3 step.  The
+        # published V6 timer gate above is unchanged.
+        v7_step = json.loads(json.dumps(v3_step))
+        v7_step["properties"]["observation_gate"] = {
+            "anyOf": [{"type": "null"}, external_gate_schema()]}
+        v7_step["required"].append("observation_gate")
         plan_body = _schema_object(
             {
                 "schema_version": {
@@ -210,13 +220,14 @@ def _role_body_schema(
                         {"const": PLAN_SCHEMA_V4},
                         {"const": PLAN_SCHEMA_V5},
                         {"const": PLAN_SCHEMA_V6},
+                        {"const": PLAN_SCHEMA_V7},
                     ]
                 },
                 "root_job_id": identifier,
                 "plan_attempt_id": identifier,
                 "steps": {
                     **_schema_array(v1_step, minimum=1, maximum=16),
-                    "items": {"anyOf": [v1_step, v2_step, v3_step, v4_step, v5_step, v6_step]},
+                    "items": {"anyOf": [v1_step, v2_step, v3_step, v4_step, v5_step, v6_step, v7_step]},
                 },
             }
         )
@@ -233,6 +244,7 @@ def _role_body_schema(
                 (PLAN_SCHEMA_V4, v4_step),
                 (PLAN_SCHEMA_V5, v5_step),
                 (PLAN_SCHEMA_V6, v6_step),
+                (PLAN_SCHEMA_V7, v7_step),
             )
         ]
         plan_body["properties"]["coordinator_job_id"] = identifier
@@ -367,6 +379,7 @@ def orchestration_result_schema(
     admitted_plan_versions = {
         PLAN_SCHEMA_V1: 0, PLAN_SCHEMA_V3: 2, PLAN_SCHEMA_V4: 3, PLAN_SCHEMA_V5: 4,
         PLAN_SCHEMA_V6: 5,
+        PLAN_SCHEMA_V7: 6,
     }
     if (
         type(plan_schema_version) is not str
@@ -673,6 +686,7 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
         PLAN_SCHEMA_V4,
         PLAN_SCHEMA_V5,
         PLAN_SCHEMA_V6,
+        PLAN_SCHEMA_V7,
     }:
         raise OrchestrationResultError("unsupported plan schema")
     expected_root = outer.get("expected_root_job_id")
@@ -692,7 +706,7 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
             "review_required", "requested_authorities", "allowed_write_paths",
             "validation_ids", "attempt_limit", "cost_class",
         }
-        if schema_version in {PLAN_SCHEMA_V2, PLAN_SCHEMA_V3, PLAN_SCHEMA_V6}:
+        if schema_version in {PLAN_SCHEMA_V2, PLAN_SCHEMA_V3, PLAN_SCHEMA_V6, PLAN_SCHEMA_V7}:
             step_keys.add("placement")
         elif (
             schema_version in {PLAN_SCHEMA_V4, PLAN_SCHEMA_V5}
@@ -700,9 +714,10 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
             and "placement" in item
         ):
             step_keys.add("placement")
-        if schema_version in {PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5, PLAN_SCHEMA_V6}:
+        if schema_version in {PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5, PLAN_SCHEMA_V6,
+                              PLAN_SCHEMA_V7}:
             step_keys.add("prerequisite_step_ids")
-        if schema_version == PLAN_SCHEMA_V6:
+        if schema_version in {PLAN_SCHEMA_V6, PLAN_SCHEMA_V7}:
             step_keys.add("observation_gate")
         if schema_version == PLAN_SCHEMA_V5:
             step_keys.add("delegation")
@@ -752,7 +767,8 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
             ),
             "cost_class": step["cost_class"],
         }
-        if schema_version in {PLAN_SCHEMA_V2, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5, PLAN_SCHEMA_V6} and "placement" in step:
+        if schema_version in {PLAN_SCHEMA_V2, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
+                              PLAN_SCHEMA_V6, PLAN_SCHEMA_V7} and "placement" in step:
             placement_value = step["placement"]
             placement_keys = (
                 set(placement_value) if isinstance(placement_value, Mapping) else set()
@@ -791,7 +807,8 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
                     maximum=128,
                     nonempty=True,
                 )
-        if schema_version in {PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5, PLAN_SCHEMA_V6}:
+        if schema_version in {PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5, PLAN_SCHEMA_V6,
+                              PLAN_SCHEMA_V7}:
             prerequisites = _unique_strings(
                 step["prerequisite_step_ids"],
                 name=f"steps[{index}].prerequisite_step_ids",
@@ -814,8 +831,13 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
                     "max_depth": _integer(delegation["max_depth"],
                         name="max_depth", minimum=2, maximum=3),
                 }
-        if schema_version == PLAN_SCHEMA_V6:
+        if schema_version in {PLAN_SCHEMA_V6, PLAN_SCHEMA_V7}:
             try:
+                gate = step["observation_gate"]
+                expected_gate = GATE_SCHEMA if schema_version == PLAN_SCHEMA_V6 else EXTERNAL_GATE_SCHEMA
+                if gate is not None and (not isinstance(gate, Mapping)
+                        or gate.get("schema_version") != expected_gate):
+                    raise ObservationError("observation gate does not match its plan version")
                 resolved["observation_gate"] = (None if step["observation_gate"] is None
                                                 else validate_spec(step["observation_gate"]))
             except ObservationError as exc:
@@ -823,7 +845,8 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
         steps.append(resolved)
         if not isinstance(step["cost_class"], str) or step["cost_class"] not in {"default", "small"}:
             raise OrchestrationResultError("step cost_class is invalid")
-    if schema_version in {PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5, PLAN_SCHEMA_V6}:
+    if schema_version in {PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5, PLAN_SCHEMA_V6,
+                          PLAN_SCHEMA_V7}:
         for index, step in enumerate(steps):
             prerequisites = step.get("prerequisite_step_ids", [])
             seen: set[str] = set()

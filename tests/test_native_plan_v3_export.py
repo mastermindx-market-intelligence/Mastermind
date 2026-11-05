@@ -117,7 +117,7 @@ def test_v3_explicit_placement_required_and_v4_auto_placement_allowed():
     assert not Draft7Validator(v3).is_valid(_envelope(PLAN_SCHEMA_V4))
 
 
-@pytest.mark.parametrize("value", [None, "", "executive-plan-v2", "executor-plan-v3", "executive-plan-v7", True])
+@pytest.mark.parametrize("value", [None, "", "executive-plan-v2", "executor-plan-v3", "executive-plan-v8", True])
 def test_unknown_native_contract_fails_closed(value):
     with pytest.raises((ValueError, OrchestrationResultError)):
         native_plan_schema(value)

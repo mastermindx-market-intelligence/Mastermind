@@ -110,9 +110,20 @@ The configured ceilings include at most 7,200 seconds, 120 samples and at least 
 
 For a long wait, prefer an admitted observation gate in the existing Runtime/COO path when the actual installed version supports and arms it. A pending gate retains its absolute deadline and evidence in Runtime events, creates no work Job/Attempt/provider claim, and is considered by the existing Executive tick. Once satisfied, the normal dependency consumer creates the already-reserved work Job; normal grant, capacity, review and release rules still apply.
 
-Confirm source qualification and installed composition independently. The initial timer gate is not proof that CI, review or API reader adapters are composed. Missing or disarmed support must refuse gated admission; silently ignoring a gate is incorrect. Never create cron, a shadow queue or a background process to stand in for missing owner support.
+Confirm source qualification and installed composition independently. Missing or disarmed support must refuse gated admission; silently ignoring a gate is incorrect. Never create cron, a shadow queue or a background process to stand in for missing owner support.
 
-Source tests should cover independent ready siblings, no living children while a gate is pending, Runtime reopen, deadline/cancellation, evidence-before-job crash recovery, exact-once materialization and the actual worker prompt consuming retained evidence. Production proof additionally needs the real armed service and downstream START/result path.
+| Explicit plan contract | Gate / admission | Qualified source shape |
+|---|---|---|
+| `mastermind.execution_plan/v6` | gate/v1, admission/v4 | Timer only |
+| `mastermind.execution_plan/v7` | gate/v2, admission/v5 | Timer, selected CI, semantic review change, fixed-service health |
+
+Use the installed contract's full schema names and closed field sets. An older producer cannot return a newer plan version. This table is not an extra Web request parameter or permission to arm the host. V7 needs the existing `coo_autonomy_armed`, `coo_observations_armed` and `coo_external_observations_armed` composition; the observation switches are default-off. The trusted host supplies the reader and fixed service allowlist.
+
+Bind CI to the exact repository, PR, candidate SHA, selected workflow runs and run attempts; retain each run's actual commit. Bind review observations to an owner-acquired semantic baseline so a same-ID dismissal is visible. Use truthful baseline/expected health states for fixed services; do not invent a prior outage to demonstrate a transition. A terminal CI conclusion is evidence even when it is failure, and never means required-check policy GREEN.
+
+Reserve each complete sample before the network read. The absolute deadline covers every call and body read; count actual requests and aggregate raw response bodies. A fixed MCP sample reserves three requests. Preserve the original total budgets across Runtime reopen. A settled transient unavailable result may permit a later bounded sample; a reservation without a settled result remains `UNRESOLVED` with its original charge and cannot be replaced because time elapsed.
+
+Source proof must join the real bounded reader to Runtime settlement, the exact material record, its reserved work and the actual worker prompt. Exercise independent siblings, cancellation, stale identity, late denial, forged or over-budget history, unchanged observations and committed-evidence replay. The existing service's one-acquisition-per-cycle and root rotation should let other ready work progress. Production proof additionally needs the installed armed consumer and downstream START/retained-result path. A tool-capable repair route requires its own existing admission; a sealed READ route proves observation/triage only.
 
 ## 8. Recovery decisions
 
@@ -125,6 +136,7 @@ Source tests should cover independent ready siblings, no living children while a
 | Explicit safety/permission denial | End that action; no reworded or cross-carrier/account replay |
 | `EFFECT_UNKNOWN` | Retain original identity and lease; reconcile before dependent mutations |
 | Worker BLOCKED/decision request | Principal verifies evidence and advances independent safe lanes |
+| Reserved external sample without a result | Keep its charge and original identity; reconcile incumbent recovery, with no timeout takeover |
 | Duplicate observation delivery | Reuse the existing idempotent obligation and consumer |
 | Terminal finite leaf | Consume it; no invented STOP/heartbeat lifecycle |
 

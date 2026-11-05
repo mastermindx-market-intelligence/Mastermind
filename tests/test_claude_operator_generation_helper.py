@@ -931,7 +931,7 @@ def test_native_versioned_structured_plan_is_provider_schema_bound(
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("contract", ["executive-plan-v2", "executive-plan-v7", ""])
+@pytest.mark.parametrize("contract", ["executive-plan-v2", "executive-plan-v8", ""])
 def test_unknown_native_plan_helper_contract_refuses_before_sdk_start(
     fake_sdk, contract
 ):

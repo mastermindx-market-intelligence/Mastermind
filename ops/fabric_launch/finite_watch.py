@@ -77,6 +77,7 @@ SCHEMA = "mastermind.fabric_finite_watch.v1"
 RESULT_SCHEMA = "mastermind.fabric_finite_watch_result.v1"
 SOURCES = ("timer", "github_ci", "github_review", "service_health")
 NETWORK_SOURCES = frozenset({"github_ci", "github_review", "service_health"})
+EXTERNAL_SOURCE_KINDS = ("github_ci", "github_review", "service_health")
 
 MAX_TIMEOUT_SECONDS = 7200
 MAX_INTERVAL_SECONDS = 300
@@ -831,6 +832,100 @@ def _build_sampler(spec, *, wall, gh_get, service_probe):
     if spec.source == "github_review":
         return _make_review_sampler(spec, gh_get)
     return _make_health_sampler(spec, service_probe)
+
+
+class _SourceSpec:
+    """The minimal read-only view the incumbent readers already expect."""
+
+    def __init__(self, params):
+        self.params = params
+
+
+def read_external_sample(source, *, timeout_ms=10_000, max_api_calls=1,
+                         max_response_bytes=MAX_RESPONSE_BYTES, gh_get=None,
+                         service_probe=None, check=None):
+    """Take exactly one bounded sample of one external source.
+
+    The caller owns the reservation and every budget; this performs at most
+    ``max_api_calls`` reads, bounds each by the remaining timeout, and returns
+    the measured call and byte counts.  It has no loop, no retry, no state, no
+    write and no authority.  A bounded source failure raises
+    :class:`SourceUnavailable`; it never becomes a success.
+    """
+
+    if type(source) is not dict or source.get("kind") not in EXTERNAL_SOURCE_KINDS:
+        raise _unavailable("EXTERNAL_SOURCE_INVALID")
+    kind = source["kind"]
+    if type(timeout_ms) is not int or timeout_ms <= 0:
+        raise _unavailable("EXTERNAL_TIMEOUT_INVALID")
+    if type(max_api_calls) is not int or max_api_calls <= 0:
+        raise _unavailable("EXTERNAL_CALL_BUDGET_INVALID")
+    if type(max_response_bytes) is not int or max_response_bytes <= 0:
+        raise _unavailable("EXTERNAL_BYTE_BUDGET_INVALID")
+    timeout = min(float(timeout_ms) / 1000.0, MAX_COMMAND_TIMEOUT_SECONDS)
+    counts = {"calls": 0, "bytes": 0}
+    reader = gh_get if gh_get is not None else (
+        lambda path, remaining: _gh_get_json(path, remaining, check=check))
+
+    def counted(path, remaining):
+        if counts["calls"] >= max_api_calls:
+            raise _unavailable("EXTERNAL_CALL_BUDGET_EXHAUSTED")
+        counts["calls"] += 1
+        try:
+            value = reader(path, remaining)
+        except SourceUnavailable as exc:
+            # An explicit credential refusal terminates this watch action; it
+            # is never retried as if it were a temporary source failure.
+            payload = dict(exc.signal_payload)
+            if payload.get("code") == "GH_API_FAILED" and payload.get("exit_code") == 4:
+                payload["code"] = "GH_AUTH_REFUSED"
+                payload["terminal"] = True
+                raise SourceUnavailable(payload) from None
+            raise
+        size = len(json.dumps(value, ensure_ascii=True, sort_keys=True,
+                              separators=(",", ":"), default=str).encode("utf-8"))
+        counts["bytes"] += size
+        if counts["bytes"] > max_response_bytes:
+            raise _unavailable("EXTERNAL_BYTE_BUDGET_EXHAUSTED")
+        return value
+
+    if kind in ("github_ci", "github_review"):
+        spec = _SourceSpec({
+            "repository": source["repository"],
+            "pull_request": source["pull_request"],
+            "expected_head_sha": source["expected_head_sha"],
+        })
+        counted_reader = counted
+        if kind == "github_ci":
+            def read_runs(remaining):
+                runs = []
+                for entry in source["selected_runs"]:
+                    run = _read_workflow_run(spec, counted_reader, entry["run_id"], remaining)
+                    runs.append({
+                        "run_id": run["run_id"],
+                        "run_attempt": run["run_attempt"],
+                        "status": run["status"],
+                        "conclusion": run["conclusion"],
+                    })
+                return runs
+            head, runs = _observe_with_head_guard(spec, counted_reader, read_runs, timeout)
+            facts = {"head_sha": head, "runs": runs}
+        else:
+            head, records = _observe_with_head_guard(
+                spec, counted_reader, lambda t: _read_reviews(spec, counted_reader, t), timeout)
+            facts = {"head_sha": head, "reviews": records}
+        return {"facts": facts, "api_calls": counts["calls"],
+                "response_bytes": counts["bytes"]}
+
+    probe = service_probe or (lambda service, remaining:
+                               _default_service_probe(service, remaining, check=check))
+    counts["calls"] = 1
+    state = probe(source["service"], timeout)
+    if type(state) is not str or state not in HEALTH_STATES:
+        raise _unavailable("SERVICE_HEALTH_INVALID")
+    counts["bytes"] = len(state.encode("utf-8"))
+    return {"facts": {"state": state}, "api_calls": counts["calls"],
+            "response_bytes": counts["bytes"]}
 
 
 def _install_sigterm(state):

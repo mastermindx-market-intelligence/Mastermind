@@ -23,9 +23,9 @@ METHOD = next(node for node in OWNER.body
 BLOCK = "".join(SOURCE.splitlines(keepends=True)[METHOD.lineno - 1:METHOD.end_lineno])
 FRAGMENT = "class ExecutiveControlService:\n" + BLOCK + "\n"
 STATUS_SITES = (
-    (5675, 66, 69, "int"),
-    (5688, 74, 77, "int"),
-    (5690, 75, 78, "int"),
+    (5707, 66, 69, "int"),
+    (5720, 74, 77, "int"),
+    (5722, 75, 78, "int"),
 )
 BACKEND_SITES = (
     (120, 73, 76, "int"),

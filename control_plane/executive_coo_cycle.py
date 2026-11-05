@@ -399,6 +399,7 @@ class CooCycle:
         if not active or not targets or plan_body is None or plan_body.get("schema_version") not in {
             "mastermind.execution_plan/v3", "mastermind.execution_plan/v4",
             "mastermind.execution_plan/v5", "mastermind.execution_plan/v6",
+            "mastermind.execution_plan/v7",
         }:
             return False
         scope = self.runtime.jobs.get_job(root_id)
@@ -502,6 +503,7 @@ class CooCycle:
         if not repairs and plan_body is not None and plan_body.get("schema_version") in {
             "mastermind.execution_plan/v3", "mastermind.execution_plan/v4",
             "mastermind.execution_plan/v5", "mastermind.execution_plan/v6",
+            "mastermind.execution_plan/v7",
         }:
             target = targets[str(selected.reviews_job_id)]
             for candidate in queued:
@@ -529,7 +531,8 @@ class CooCycle:
             "policy_sha": policy_sha,
         })
         if (not repairs and plan_body is not None
-                and plan_body.get("schema_version") == "mastermind.execution_plan/v6"):
+                and plan_body.get("schema_version") in {"mastermind.execution_plan/v6",
+                                                         "mastermind.execution_plan/v7"}):
             return _ReviewCapacityPressure(pressure,
                 frozenset({str(targets[str(selected.reviews_job_id)].plan_step_id)}))
         return pressure
@@ -1475,7 +1478,8 @@ class CooCycle:
         observation_states: dict[str, dict[str, Any]] = {}
         if (not review_pressure_reconciliation and admission is not None
                 and plan_body is not None
-                and plan_body["schema_version"] == "mastermind.execution_plan/v6"):
+                and plan_body["schema_version"] in {"mastermind.execution_plan/v6",
+                                                    "mastermind.execution_plan/v7"}):
             active_observation_peers = [job for job in children
                 if job.status in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}]
             observation_frontier_open = all(
@@ -1485,7 +1489,18 @@ class CooCycle:
                 and current_by_step.get(str(job.plan_step_id), {}).get("current_job_id") == job.job_id
                 and self._active_attempt_is_current_and_live(job)
                 for job in active_observation_peers)
-            for step in plan_body["steps"]:
+            # Fairness comes from existing reservation events, not another
+            # queue/cursor. Prefer an unpolled or least recently sampled leaf.
+            last_sample: dict[str, int] = {}
+            for event in events:
+                if (event.event_type == "COO_OBSERVATION_RESERVED"
+                        and event.payload.get("plan_attempt_id") == admission["plan_attempt_id"]
+                        and event.payload.get("plan_digest") == admission["plan_digest"]):
+                    key = str(event.payload.get("plan_step_id"))
+                    last_sample[key] = max(last_sample.get(key, 0), event.event_id)
+            observation_steps = sorted(plan_body["steps"], key=lambda item: (
+                last_sample.get(str(item["step_id"]), 0), int(item["ordinal"])))
+            for step in observation_steps:
                 step_id = str(step["step_id"])
                 if step.get("observation_gate") is None or step_id in current_by_step:
                     continue
@@ -1506,16 +1521,20 @@ class CooCycle:
                     continue
                 observation_states[step_id] = observed
                 if observed["created"]:
-                    return self._outcome(root_id, "OBSERVATION_RECORDED", root_id,
-                                         observed["command_id"], observed)
+                    if observed["disposition"] in {"MATERIAL", "STALE", "DENIED", "EXPIRED"}:
+                        return self._outcome(root_id, "OBSERVATION_RECORDED", root_id,
+                                             observed["command_id"], observed)
+                    # One acquisition per tick. Its immutable event is retained;
+                    # a nonmaterial sample must yield to ready work below.
+                    break
 
         # 4. Materialize one lowest-ordinal missing dependency-ready V3/V4 work Job.
         if (
             not review_pressure_reconciliation
             and admission is not None
             and plan_body is not None
-            and admission.get("schema_version") in {"mastermind.coo_plan_admission/v2", "mastermind.coo_plan_admission/v3", "mastermind.coo_plan_admission/v4"}
-            and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6"}
+            and admission.get("schema_version") in {"mastermind.coo_plan_admission/v2", "mastermind.coo_plan_admission/v3", "mastermind.coo_plan_admission/v4", "mastermind.coo_plan_admission/v5"}
+            and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6", "mastermind.execution_plan/v7"}
         ):
             materialized_steps = {
                 str(job.plan_step_id)
@@ -1569,6 +1588,14 @@ class CooCycle:
         if review_capacity_pressure is not None:
             # This tick already tried this exact review. Never retry it or
             # fall through to a writer/handoff because its capacity is absent.
+            waiting = {step: state for step, state in observation_states.items()
+                       if state["disposition"] != "MATERIAL"}
+            if waiting:
+                return self._outcome(root_id, "NO_ACTION", None, None,
+                    {"reason": "observation_pending" if all(
+                        state["disposition"] == "PENDING" for state in waiting.values())
+                        else "observation_unsatisfied", "observations": waiting,
+                     "review_capacity_pressure": review_capacity_pressure.outcome.to_dict()})
             return review_capacity_pressure.outcome
 
         # 5. Create exactly the sole planner.
@@ -1617,7 +1644,7 @@ class CooCycle:
             active
             and queued
             and plan_body is not None
-            and plan_body["schema_version"] in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6"}
+            and plan_body["schema_version"] in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6", "mastermind.execution_plan/v7"}
             and self._ready_frontier_open(active, queued, current_by_step)
         ):
             for candidate in queued:
@@ -1676,7 +1703,7 @@ class CooCycle:
                 unavailable.append(candidate.job_id)
                 if not (
                     plan_body is not None
-                    and plan_body["schema_version"] in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6"}
+                    and plan_body["schema_version"] in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6", "mastermind.execution_plan/v7"}
                     and all(self._is_read_only_frontier_work(job) for job in queued)
                 ):
                     break
