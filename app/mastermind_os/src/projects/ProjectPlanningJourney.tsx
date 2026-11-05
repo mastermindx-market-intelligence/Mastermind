@@ -1869,13 +1869,15 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
                   <span> {copy(["Plan", "规划"])}</span>
                 </label>
               </div>
-              <label htmlFor={requestIdLabel}>{copy(["Initial request", "初始请求"])}</label>
-              <textarea
-                id={requestIdLabel}
-                value={requestText}
-                onChange={(event) => setPlanRequest(event.target.value)}
-                rows={4}
-              />
+              <div className="form-field">
+                <label htmlFor={requestIdLabel}>{copy(["Initial request", "初始请求"])}</label>
+                <textarea
+                  id={requestIdLabel}
+                  value={requestText}
+                  onChange={(event) => setPlanRequest(event.target.value)}
+                  rows={4}
+                />
+              </div>
               <p>
                 <button type="button" onClick={sendPlanning} disabled={disabled}>
                   {busy === "plan" ? copy(["Sending…", "发送中…"]) : copy(["Send initial planning request", "发送初始规划请求"])}
