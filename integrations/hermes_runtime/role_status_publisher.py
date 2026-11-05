@@ -100,10 +100,9 @@ class RoleStatusPublisher:
         metadata read, and they must be identical: a drifting or missing
         witness sends nothing at all.
 
-        The recheck compares the measured *values*, so a callback that
-        memoizes its own return would make the second read vacuous.  The
-        callback must therefore build a fresh mapping for every call; that
-        is the caller's side of this contract.
+        Each validated result is detached before comparing measured values.
+        Reusing a mutable mapping cannot hide drift. The callback still owns
+        fresh measurement on every call; a copied value is not that proof.
         """
         observer = self.custody_observer
         if observer is None:

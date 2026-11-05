@@ -148,7 +148,7 @@ def _metadata(value, role: str) -> None:
 
 
 def validate_custody(value) -> dict:
-    """Validate the closed main-process custody witness and return it.
+    """Validate and detach the closed main-process custody witness.
 
     The witness is exactly six measurements of the main supervisor process:
     its pid, its kernel start identity, its uid/gid and the two sha256 it was
@@ -167,7 +167,7 @@ def validate_custody(value) -> dict:
             or not _matches(value["manifest_sha256"], _HEX64)
             or not _matches(value["image_sha256"], _HEX64)):
         raise RoleStatusError()
-    return value
+    return dict(value)
 
 
 def _validate_status_document(value, *, schema, keys, prefix,

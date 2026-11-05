@@ -591,3 +591,47 @@ def test_live_option_is_keyword_only_and_preserves_the_existing_signature():
     assert list(signature.parameters) == ["pid", "require_live"]
     assert signature.parameters["require_live"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["require_live"].default is False
+
+
+
+def test_custody_validation_detaches_the_six_scalar_measurements():
+    original = _witness()
+    captured = wire.validate_custody(original)
+    original["start_ticks"] = "999"
+    assert captured["start_ticks"] == "123456789"
+
+
+def test_mutating_and_returning_the_same_witness_sends_nothing(tmp_path, monkeypatch):
+    profile = _profile(tmp_path)
+    monkeypatch.setattr(publisher, "role_metadata", Mock(return_value=_metadata()))
+    shared = _witness()
+    calls = []
+    def observer():
+        calls.append(1)
+        if len(calls) == 2:
+            shared["start_ticks"] = "999"
+        return shared
+    with tempfile.TemporaryDirectory(prefix="mm-custody-alias-", dir="/tmp") as directory:
+        receiver, address = _receiver(directory)
+        try:
+            assert _context(profile, address, custody_observer=observer).publish() is False
+            assert len(calls) == 2
+            with pytest.raises(socket.timeout):
+                receiver.recv(4096)
+        finally:
+            receiver.close()
+
+
+@pytest.mark.parametrize("closing_state", [b"Z", b"X", b"x"])
+def test_live_non_image_identity_refuses_death_during_the_bracket(inert_proc, monkeypatch, closing_state):
+    _serve(monkeypatch, [_synthetic_stat(), _synthetic_stat(state=closing_state)],
+           [_synthetic_status(), _synthetic_status()])
+    with pytest.raises(lpi.LinuxProcessIdentityError, match="zombie"):
+        lpi.inspect_linux_process(4242, require_live=True)
+    inert_proc.assert_not_called()
+
+
+def test_both_live_packaging_surfaces_keep_one_process_identity_implementation():
+    root = Path(__file__).resolve().parents[1]
+    assert (root / "control_plane/linux_process_identity.py").read_bytes() == (
+        root / "ops/native_fabric/quota_continuity/candidate/linux_process_identity.py").read_bytes()

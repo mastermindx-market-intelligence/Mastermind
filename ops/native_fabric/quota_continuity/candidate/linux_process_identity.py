@@ -427,10 +427,10 @@ def _fstat_image(image_fd: int) -> dict[str, Any]:
 
 
 def _reject_zombie(stat: dict[str, Any], pid: int) -> None:
-    """A zombie has no live image; refuse before touching ``exe`` at all."""
-    if stat["state"] == "Z":
+    """A zombie or dead process has no live image or live identity."""
+    if stat["state"] in {"Z", "X", "x"}:
         raise LinuxProcessIdentityError(
-            f"process {pid} is a zombie; there is no executed image to observe"
+            f"process {pid} is a zombie or dead; there is no live process to observe"
         )
 
 
@@ -613,8 +613,8 @@ def inspect_linux_process(pid: int, *, require_live: bool = False) -> dict[str, 
     the very predicate :func:`inspect_linux_process_image` applies, inside
     this same owner, and it never opens the executed image: a caller that may
     not read another role's ``/proc/<pid>/exe`` can still qualify whether
-    that process is alive.  The default preserves the historical behaviour
-    and API exactly.
+    that process is alive.  The default preserves historical identity observations; the live check
+    is an explicit keyword-only extension.
     """
     _require_valid_pid(pid)
     try:
@@ -652,6 +652,8 @@ def inspect_linux_process(pid: int, *, require_live: bool = False) -> dict[str, 
             stat_after = _read_proc_file(
                 pid_dir_fd, "stat", _STAT_MAX_BYTES, f"/proc/{pid}/stat"
             )
+            if require_live:
+                _reject_zombie(_parse_stat(stat_after, pid), pid)
         finally:
             _close_fd(pid_dir_fd)
     finally:
