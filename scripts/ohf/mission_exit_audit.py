@@ -66,7 +66,7 @@ VALID_LANE_STATES = {
 }
 VALID_EXIT_CLAIMS = {
     "CONTINUE", "CHECKPOINT_SUMMARY_STOP", "CHECKPOINTED_CONTINUATION",
-    "WAIT_EXTERNAL_EXECUTOR", "ALL_LANES_BLOCKED_STOP",
+    "WAIT_EXTERNAL_EXECUTOR", "ALL_LANES_BLOCKED_STOP", "OWNER_HANDOFF_STOP",
 }
 VALID_CONTINUITY_REASONS = {
     "CONTEXT_PRESSURE", "SESSION_UNSTABLE", "SURFACE_TRANSITION",
@@ -178,6 +178,11 @@ def _audit_lanes(snapshot: dict[str, Any], effect: dict[str, Any]) -> dict[str, 
     cycles = lanes.get("support_cycles_without_delta", 0)
     if type(cycles) is not int or cycles < 0:
         raise InvalidSnapshot("support cycles must be a nonnegative integer")
+
+    # An owner name or requested reviewer is not a successor receipt. A
+    # purported handoff without an actual current receiver/continuation is
+    # always a premature exit, even when other lanes are waiting.
+    owner_handoff_stop = exit_claim == "OWNER_HANDOFF_STOP"
 
     # A started worker is relevant only when bound to a specific waiting lane.
     # Canonical blocker/owner evidence is validated above; the caller still
@@ -318,6 +323,7 @@ def _audit_lanes(snapshot: dict[str, Any], effect: dict[str, Any]) -> dict[str, 
         "checkpoint_continuation_verified": checkpoint_proven,
         "wait_executor_verified": durable_wait,
         "status_summary_is_not_continuation": exit_claim == "CHECKPOINT_SUMMARY_STOP",
+        "owner_only_handoff_is_not_continuation": owner_handoff_stop,
         "wait_requires_started_durable_executor": (
             exit_claim == "WAIT_EXTERNAL_EXECUTOR" and not durable_wait
         ),

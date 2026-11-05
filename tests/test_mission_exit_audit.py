@@ -33,6 +33,7 @@ LANE_FLAGS = (
     "wait_executor_verified",
     "no_delta_loop_forces_tactic_change",
     "status_summary_is_not_continuation",
+    "owner_only_handoff_is_not_continuation",
     "wait_requires_started_durable_executor",
     "premature_exit_detected",
 )
@@ -327,6 +328,37 @@ def test_same_facts_with_continue_claim_is_not_premature():
     assert report["lane_local_wait_blocks_only_its_lane"] is True
     assert report["remaining_safe_work"] is True
     assert report["no_delta_loop_forces_tactic_change"] is True
+
+
+def test_owner_only_handoff_cannot_close_a_mission_with_safe_work():
+    # Regression: the session completed CI, then assigned runtime and review
+    # next steps to historical role names without a live receiver or uptake.
+    data = prophet_snapshot()
+    data["lanes"]["exit_claim"] = "OWNER_HANDOFF_STOP"
+    report = audit(data)
+    assert report["owner_only_handoff_is_not_continuation"] is True
+    assert report["remaining_safe_work"] is True
+    assert report["premature_exit_detected"] is True
+    assert report["all_lanes_proven_blocked"] is False
+    assert report["merge_authorized"] is False
+    assert report["production_activation_authorized"] is False
+
+
+def test_owner_only_handoff_is_not_durable_executor_or_verified_checkpoint():
+    data = prophet_snapshot()
+    data["lanes"]["items"] = [
+        {"id": "github:review-request", "state": "WAITING_EXTERNAL",
+         "blocker_ref": "github:requested-review", "blocker_owner_ref": "github:review-role",
+         "blocker_observed": True},
+    ]
+    _attest_complete_lanes(data)
+    data["lanes"]["exit_claim"] = "OWNER_HANDOFF_STOP"
+    report = audit(data)
+    assert report["owner_only_handoff_is_not_continuation"] is True
+    assert report["all_external_waits_proven_blocked"] is True
+    assert report["wait_executor_verified"] is False
+    assert report["checkpoint_continuation_verified"] is False
+    assert report["premature_exit_detected"] is True
 
 
 def test_staging_the_guard_lane_removes_remaining_safe_work_flag():
