@@ -98,17 +98,41 @@ adds no manual review. See [session review policy](SESSION_LOCAL_REVIEW_POLICY.m
    another writer’s checks or replay an uncertain side effect.
    Without a usable observer, continue useful foreground work and check once at the next real
    integration boundary. Never claim a background Web turn or automatic wake that does not exist.
-6. After required PR-head checks and all **actually required** reviews pass and queue entry is authorized, use the
-   repository's native GitHub merge queue when enabled. The active queue's `merge_group`
-   workflow qualifies the exact integrated candidate after queue entry and **before merge**;
-   do not add a manual synthetic PR merge-ref check requirement or ancestry-only rebase as
-   a precondition to queue entry. If final integrated checks fail, the queue must not merge.
-   Preserve current head/concurrency checks and never use an admin bypass:
+6. **Enroll a qualified Ready PR in native Merge when ready without waiting for pending CI.**
+   The assigned session owns this routine release request; do not introduce a second
+   non-author arming ceremony. Immediately before acting, re-read the exact GitHub
+   repository (`mastermindx-market-intelligence/Mastermind`), PR number, protected
+   `master` base, full current 40-hex head SHA, Draft/Ready state, source-writer
+   and effect custody, actual native/CODEOWNERS reviews, conflicts, explicit
+   HOLD/STOP/security restrictions, and current trusted required-check conclusions.
+   A source-complete, review-qualified candidate may be **armed while required
+   hosted CI is pending**; a Draft, incomplete source, known failing check,
+   conflict, missing/ambiguous enforcement evidence or binding hold must not be
+   armed. Do not use `--admin`, REST direct merge, an ancestry-only rebase or an
+   invented approval. Required CI remains a condition for the **merge**, not for
+   a qualified pending-CI auto-merge request.
+
+   Before the single request, inspect GitHub's native `autoMergeRequest` **and**
+   `mergeQueueEntry` (or a verified exact queue ref). REST `auto_merge=null`
+   alone does not prove a PR is unqueued. If it is already armed or queued,
+   preserve that existing effect rather than submitting another. Otherwise run
+   this head-leased request against the exact qualified candidate:
 
    ```bash
-   gh pr checks --required
-   gh pr merge --squash --delete-branch
+   gh pr merge <PR> --repo mastermindx-market-intelligence/Mastermind \
+     --auto --squash --delete-branch \
+     --match-head-commit <CURRENT_40_HEX_HEAD>
    ```
+
+   Reconcile the actual returned request: pending conditions may create an
+   auto-merge request; satisfied conditions may enter the existing protected
+   merge queue immediately. An ambiguous reply requires reading the **same**
+   PR/queue before any new effect. A changed head requires fresh source, hold,
+   review and CI qualification; never blindly re-arm it. Only GitHub's enforced
+   PR-head checks and native `merge_group` integrated candidate checks can
+   permit the eventual protected SQUASH merge. Do not treat QUEUED, armed,
+   green PR checks or a successful CLI return as a merged SHA. Read the actual
+   merged PR and commit before claiming release or deploying.
 
 7. Deploy only when the assigned change requires runtime rollout and release is authorized.
    A source-only, research, documentation or instruction task must not restart an unrelated
