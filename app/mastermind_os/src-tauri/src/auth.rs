@@ -2,6 +2,8 @@
 //! receives fixed read results and sanitized state, never credential material.
 pub mod host_observation;
 mod draft_continuity;
+mod transport_diagnostics;
+use transport_diagnostics::{ExecutiveObservation, ExecutiveReason, ProgramsRead};
 pub mod native_draft_identity;
 #[cfg(test)]
 mod draft_recovery_tests;
@@ -103,6 +105,9 @@ struct Inner {
     executive_generation: u64,
     executive_changed: tokio::sync::watch::Sender<()>,
     executive: Option<Token>,
+    executive_reason: ExecutiveReason,
+    programs_sequence: u64,
+    programs_read: ProgramsRead,
     generation: u64,
     pending: Option<Pending>,
     exchanging: bool,
@@ -126,6 +131,9 @@ impl Inner {
             executive_generation: 0,
             executive_changed: tokio::sync::watch::channel(()).0,
             executive: None,
+            executive_reason: ExecutiveReason::NotEstablished,
+            programs_sequence: 0,
+            programs_read: ProgramsRead::default(),
             generation: 0,
             pending: None,
             exchanging: false,
@@ -183,16 +191,17 @@ impl Inner {
         self.executive_changed.send_replace(());
         match self.executive_generation.checked_add(1).filter(|n| *n <= MAX_SAFE_GENERATION) {
             Some(next) => { self.executive_generation = next; true }
-            None => { self.executive = None; self.executive_resource = None; false }
+            None => { self.executive = None; self.executive_resource = None; self.executive_reason = ExecutiveReason::GenerationExhausted; false }
         }
     }
     fn clear_executive(&mut self) {
         self.executive = None;
-        self.advance_executive();
+        if self.advance_executive() { self.executive_reason = ExecutiveReason::NotEstablished; }
     }
     fn expire_executive(&mut self) {
         if self.executive.as_ref().is_some_and(|t| t.expires <= Instant::now()) {
             self.clear_executive();
+            if self.executive_resource.is_some() { self.executive_reason = ExecutiveReason::Expired; }
         }
     }
     fn executive_status(&mut self) -> ExecutiveAuthStatus {
@@ -200,9 +209,33 @@ impl Inner {
         ExecutiveAuthStatus { generation: self.executive_generation,
             available: self.token(Resource::Executive).is_some() }
     }
+    fn executive_observation(&mut self) -> ExecutiveObservation {
+        let status = self.executive_status();
+        let configured = self.executive_resource.is_some();
+        let reason = if status.available { ExecutiveReason::Available }
+            else if self.executive_reason == ExecutiveReason::GenerationExhausted { ExecutiveReason::GenerationExhausted }
+            else if !configured { ExecutiveReason::Unconfigured }
+            else if self.executive.is_some() { ExecutiveReason::Expired }
+            else { self.executive_reason };
+        ExecutiveObservation { schema: "mastermind.native_executive_status.v1",
+            generation: status.generation, available: status.available, configured, reason,
+            programs_read: self.programs_read }
+    }
+    fn begin_programs_observation(&mut self) -> Option<(u64, u64)> {
+        let Some(next) = self.programs_sequence.checked_add(1) else {
+            self.programs_read = ProgramsRead::default(); return None;
+        };
+        self.programs_sequence = next; self.programs_read = ProgramsRead::pending();
+        Some((self.generation, next))
+    }
+    fn finish_programs_observation(&mut self, ticket: Option<(u64, u64)>, observed: ProgramsRead) {
+        if ticket == Some((self.generation, self.programs_sequence)) { self.programs_read = observed; }
+    }
     fn fail_transaction(&mut self, resource: Resource, reason: &'static str) {
-        if resource == Resource::Executive { self.clear_executive(); }
-        else { self.reason = Some(reason); }
+        if resource == Resource::Executive {
+            self.clear_executive();
+            if self.executive_resource.is_some() { self.executive_reason = ExecutiveReason::failure(reason); }
+        } else { self.reason = Some(reason); }
     }
     fn invalidate(&mut self) {
         self.invalidate_auth();
@@ -214,6 +247,7 @@ impl Inner {
     }
     fn invalidate_auth(&mut self) {
         self.generation = self.generation.wrapping_add(1);
+        self.programs_sequence = 0; self.programs_read = ProgramsRead::default();
         self.clear_executive();
         self.pending = None;
         self.exchanging = false;
@@ -237,6 +271,7 @@ impl Inner {
         let url = if resource == Resource::Executive {
             authorization_url_for_audience(client, resource, self.executive_resource.as_deref().ok_or("EXECUTIVE_UNCONFIGURED")?, &state, &verifier)
         } else { authorization_url(client, resource, &state, &verifier) };
+        if resource == Resource::Executive { self.executive_reason = ExecutiveReason::Authorizing; }
         self.pending = Some(Pending {
             state,
             verifier,
@@ -271,6 +306,7 @@ impl Inner {
             return Err("AUTHORIZATION_REFUSED".into());
         }
         self.exchanging = true;
+        if pending.resource == Resource::Executive { self.executive_reason = ExecutiveReason::Exchanging; }
         Ok((
             pending,
             code.ok_or("AUTH_CALLBACK_INVALID")?,
@@ -305,11 +341,17 @@ impl Inner {
             Ok(token) => {
                 if self.executive_resource.is_some() && self.advance_executive() {
                     self.executive = Some(token);
+                    self.executive_reason = ExecutiveReason::Available;
                 }
                 None
             }
-            Err(_) => {
+            Err(error) => {
+                // Only the dedicated public enum may retain a closed cause.
+                // Raw token/provider/error material is never stored or emitted.
                 self.fail_transaction(resource, "TOKEN_EXCHANGE_FAILED");
+                if resource == Resource::Executive && self.executive_resource.is_some() {
+                    self.executive_reason = ExecutiveReason::failure(&error);
+                }
                 None
             }
         }
@@ -979,6 +1021,22 @@ fn typed_unavailable(value: Value, schema: &str, require_null_result: bool) -> R
         Ok(value)
     }
 }
+// Header compatibility is deliberately fixed to this one zero-selector read.
+// The shared frontend decoder still validates the entire versioned DTO.
+fn workspace_read_body(value: Value, path: &str, schema: &str) -> Result<Value> {
+    let actual = value.get("schema").and_then(Value::as_str);
+    let programs_v2 = path == "/workspace/programs/current"
+        && schema == "mastermind.workspace_programs.v1"
+        && actual == Some("mastermind.workspace_programs.v2");
+    if !value.is_object() || (actual != Some(schema) && !programs_v2) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
+}
+fn finish_programs_observation(state: &NativeAuth, ticket: Option<(u64, u64)>, observed: ProgramsRead) {
+    // Optional observability never adds a fallible gate to the real read.
+    if let Ok(mut inner) = state.lock() { inner.finish_programs_observation(ticket, observed); }
+}
 async fn read(
     app: AppHandle,
     resource: Resource,
@@ -994,26 +1052,35 @@ async fn read(
             .append_pair("root_job_id", &selection.root_job_id);
     }
     let state = app.state::<NativeAuth>();
-    let (token, generation) = ensure_native_token(&app, resource).await?;
-    let response = state
-        .http
-        .get(url)
-        .bearer_auth(token)
-        .header("Accept", "application/json")
-        .header("Cache-Control", "no-store")
-        .send()
-        .await
-        .map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let observation = if resource == Resource::Acquisition && path == "/workspace/programs/current" {
+        state.lock().ok().and_then(|mut inner| inner.begin_programs_observation())
+    } else { None };
+    let (token, generation) = match ensure_native_token(&app, resource).await {
+        Ok(value) => value,
+        Err(error) => {
+            finish_programs_observation(&state, observation, ProgramsRead::auth_unavailable());
+            return Err(error);
+        }
+    };
+    let response = match state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await {
+        Ok(response) => response,
+        Err(error) => {
+            finish_programs_observation(&state, observation, ProgramsRead::network(error.is_timeout()));
+            return Err("SOURCE_UNAVAILABLE".into());
+        }
+    };
+    let status = response.status().as_u16();
     let result = bounded_json(response, MAX_RESPONSE).await;
     if !state.lock()?.release_allowed(generation, resource) {
+        finish_programs_observation(&state, observation, ProgramsRead::auth_unavailable());
         return Err("AUTHENTICATION_CHANGED".into());
     }
-    let value = result?;
-    if !value.is_object() || value.get("schema").and_then(Value::as_str) != Some(schema) {
-        return Err("RESPONSE_INVALID".into());
-    }
-    // The shared frontend decoder validates the full closed DTO before rendering.
-    Ok(value)
+    let result = result.and_then(|value| workspace_read_body(value, path, schema));
+    finish_programs_observation(&state, observation,
+        ProgramsRead::response(status, result.as_ref().err().map(String::as_str)));
+    result
 }
 #[tauri::command]
 pub async fn read_programs(app: AppHandle) -> Result<Value> {
@@ -1819,7 +1886,9 @@ async fn source_operation_exchange(app: AppHandle, kind: &str, request: Value) -
     {
         return Err("AUTHENTICATION_CHANGED".into());
     }
-    let value = result?;
+    source_operation_body(result?, kind, &request)
+}
+fn source_operation_body(value: Value, kind: &str, request: &Value) -> Result<Value> {
     if kind == "options" {
         if value.get("schema").and_then(Value::as_str)!=Some("mastermind.project_creation_options.v1") {return Err("RESPONSE_INVALID".into());}
         return Ok(value);
@@ -2563,8 +2632,13 @@ pub async fn executive_project_planning(app:AppHandle,operation:String,arguments
     executive_post(app,path,serde_json::json!({"arguments":arguments})).await
 }
 #[tauri::command]
-pub fn executive_auth_status(state: tauri::State<'_, NativeAuth>) -> Result<ExecutiveAuthStatus> {
-    Ok(state.lock()?.executive_status())
+pub fn executive_auth_status(state: tauri::State<'_, NativeAuth>, diagnostics: Option<bool>) -> Result<Value> {
+    let mut inner = state.lock()?;
+    if diagnostics.unwrap_or(false) {
+        serde_json::to_value(inner.executive_observation()).map_err(|_| "RESPONSE_INVALID".into())
+    } else {
+        serde_json::to_value(inner.executive_status()).map_err(|_| "RESPONSE_INVALID".into())
+    }
 }
 #[tauri::command]
 pub async fn executive_context(app: AppHandle) -> Result<Value> {
@@ -3193,6 +3267,57 @@ mod tests {
         assert_eq!(i.status().status, "signed_in");
     }
     #[test]
+    fn native_diagnostic_status_preserves_regular_wire_and_workspace_authority() {
+        let mut i = at_executive_pending();
+        let workspace_generation = i.generation;
+        let pending_state = i.pending.as_ref().unwrap().state.clone();
+        let regular = serde_json::to_value(i.executive_status()).unwrap();
+        assert_eq!(regular.as_object().unwrap().len(), 2);
+        let observation = serde_json::to_value(i.executive_observation()).unwrap();
+        assert_eq!(observation.as_object().unwrap().len(), 6);
+        assert_eq!(observation["configured"], true);
+        assert_eq!(observation["reason"], "AUTHORIZING");
+        assert_eq!(i.generation, workspace_generation);
+        assert_eq!(i.pending.as_ref().unwrap().state, pending_state);
+        assert!(i.token(Resource::Acquisition).is_some() && i.token(Resource::Content).is_some());
+        assert!(!i.executive_status().available);
+        assert!(i.consume(&format!("{CALLBACK}?state={pending_state}&error=access_denied")).is_err());
+        assert_eq!(serde_json::to_value(i.executive_observation()).unwrap()["reason"], "AUTHORIZATION_REFUSED");
+        assert!(i.reason.is_none());
+        assert_eq!(i.status().status, "signed_in");
+        assert!(i.token(Resource::Acquisition).is_some() && i.token(Resource::Content).is_some());
+    }
+    #[test]
+    fn native_diagnostic_status_reports_ready_expired_and_unconfigured_without_grant_inference() {
+        let mut i = at_executive_pending();
+        assert!(complete_resource(&mut i, Resource::Executive).is_none());
+        assert_eq!(serde_json::to_value(i.executive_observation()).unwrap()["reason"], "AVAILABLE");
+        i.executive.as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1);
+        let observed = serde_json::to_value(i.executive_observation()).unwrap();
+        assert_eq!(observed["reason"], "EXPIRED");
+        assert_eq!(observed["available"], false);
+        assert!(i.token(Resource::Acquisition).is_some() && i.token(Resource::Content).is_some());
+        i.executive_resource = None;
+        assert_eq!(serde_json::to_value(i.executive_observation()).unwrap()["reason"], "UNCONFIGURED");
+    }
+    #[test]
+    fn native_diagnostic_programs_observation_is_latest_same_generation_only() {
+        let mut i = executive_inner();
+        let first = i.begin_programs_observation();
+        let second = i.begin_programs_observation();
+        i.finish_programs_observation(first, ProgramsRead::response(503, None));
+        assert_eq!(i.programs_read, ProgramsRead::pending());
+        i.finish_programs_observation(second, ProgramsRead::response(200, None));
+        assert_eq!(i.programs_read.phase, transport_diagnostics::ProgramsPhase::Ready);
+        i.invalidate_auth();
+        i.finish_programs_observation(second, ProgramsRead::response(503, None));
+        assert_eq!(i.programs_read, ProgramsRead::default());
+        i.programs_sequence = u64::MAX;
+        assert_eq!(i.begin_programs_observation(), None);
+        i.finish_programs_observation(None, ProgramsRead::response(503, None));
+        assert_eq!(i.programs_read, ProgramsRead::default());
+    }
+    #[test]
     fn executive_denial_and_exchange_failure_preserve_workspace_tokens() {
         for denied in [true, false] {
             let mut i = at_executive_pending();
@@ -3322,6 +3447,108 @@ mod tests {
             .body(r#"{"fixture":"native-dispatch"}"#.to_owned())
             .unwrap()
             .into()
+    }
+
+    #[test]
+    fn native_diagnostic_wire_same_run_file_source_requests_and_responses_preserve_exact_bodies() {
+        let fixture: Value = serde_json::from_str(include_str!("../../src/fixtures/native-wire/source-file-6cb8.json")).unwrap();
+        for index in [3usize, 4, 5, 6, 8, 9, 10, 11, 12] {
+            let sample = &fixture["samples"][index];
+            let kind = sample["operation"].as_str().unwrap();
+            let request = &sample["request"];
+            let response = sample["response"].clone();
+            let target = source_operation_target(kind, request).unwrap();
+            assert_eq!(target.path(), format!("/workspace/source-operation/{}", if kind == "read" {"operation"} else {kind}));
+            assert_eq!(source_operation_body(response.clone(), kind, request).unwrap(), response);
+            let mut foreign = response.clone(); foreign["schema"] = "foreign.v1".into();
+            assert!(source_operation_body(foreign, kind, request).is_err());
+            let mut foreign = response; foreign["selection"]["request_id"] = "foreign".into();
+            assert!(source_operation_body(foreign, kind, request).is_err());
+            let mut foreign = request.clone(); foreign["principal_scope"] = "foreign".into();
+            assert!(source_operation_target(kind, &foreign).is_err());
+        }
+        let sample = &fixture["samples"][2];
+        assert!(source_operation_target("options", &sample["request"]).is_ok());
+        assert_eq!(source_operation_body(sample["response"].clone(), "options", &sample["request"]).unwrap(), sample["response"]);
+    }
+    #[test]
+    fn native_diagnostic_wire_same_run_planning_preserves_signed_producer_vectors() {
+        let fixture: Value = serde_json::from_str(include_str!("../../src/fixtures/native-wire/source-file-6cb8.json")).unwrap();
+        for index in [15usize,16] {
+            let sample = &fixture["samples"][index];
+            let operation = sample["operation"].as_str().unwrap();
+            let arguments = &sample["request"]["arguments"];
+            assert_eq!(crate::project_planning::validate(operation,arguments).unwrap(), *arguments);
+            let path = crate::project_planning::route(operation).unwrap();
+            let state = native_executive_state(EXECUTIVE_SCOPE);
+            state.lock().unwrap().acquisition = Some(token("fixture-workspace"));
+            let calls = std::cell::Cell::new(0);
+            let body = serde_json::json!({"arguments":arguments});
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state, path, body.clone(), |builder| {
+                calls.set(calls.get()+1);
+                let request=builder.build().unwrap();
+                assert_eq!(request.url().path(),path);
+                assert_eq!(serde_json::from_slice::<Value>(request.body().unwrap().as_bytes().unwrap()).unwrap(),body);
+                assert!(request.headers().contains_key("x-mastermind-workspace-authorization"));
+                let encoded=serde_json::to_string(&sample["response"]).unwrap();
+                async move {Ok(tauri::http::Response::builder().status(200).header("Content-Type","application/json").body(encoded).unwrap().into())}
+            })).unwrap();
+            assert_eq!(calls.get(),1);assert_eq!(result,sample["response"]);
+            let mut foreign=arguments.clone();foreign["principal_scope"]="foreign".into();
+            assert!(crate::project_planning::validate(operation,&foreign).is_err());
+        }
+    }
+    #[test]
+    fn native_diagnostic_wire_same_run_initial_and_attended_requests_dispatch_once_and_preserve_bodies() {
+        let fixture: Value = serde_json::from_str(include_str!("../../src/fixtures/native-wire/fresh-attended-0f44.json")).unwrap();
+        let initial = serde_json::json!({"work_ref":fixture["request"]["work_ref"],"operation_key":fixture["request"]["operation_key"]});
+        let attended = &fixture["attended"];
+        let cases = [
+            ("preview", fixture["request"].clone(), fixture["preview"].clone()),
+            ("create", fixture["create_request"].clone(), fixture["create"].clone()),
+            ("status", initial.clone(), fixture["status"].clone()),
+            ("read", initial, fixture["read"].clone()),
+            ("consume", attended["consume_request"].clone(), attended["lost_consume"].clone()),
+            ("consume_status", attended["consume_request"].clone(), attended["consume_status"].clone()),
+            ("turn_preview", attended["turn_preview_request"].clone(), attended["turn_preview"].clone()),
+            ("turn", attended["turn_request"].clone(), attended["turn"].clone()),
+            ("turn_status", attended["turn_selection"].clone(), attended["status"].clone()),
+            ("turn_read", attended["turn_selection"].clone(), attended["turn_read"].clone()),
+        ];
+        for (operation, arguments, response) in cases {
+            crate::fresh_conversation::validate(operation, &arguments).unwrap();
+            let path = crate::fresh_conversation::path(operation).unwrap();
+            let state = native_executive_state(EXECUTIVE_SCOPE);
+            state.lock().unwrap().acquisition = Some(token("fixture-workspace"));
+            let calls = std::cell::Cell::new(0);
+            let body = serde_json::json!({"arguments":arguments});
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state, path, body.clone(), |builder| {
+                calls.set(calls.get() + 1);
+                let request = builder.build().unwrap();
+                assert_eq!(request.url().path(), path);
+                assert_eq!(serde_json::from_slice::<Value>(request.body().unwrap().as_bytes().unwrap()).unwrap(), body);
+                let encoded = serde_json::to_string(&response).unwrap();
+                async move {Ok(tauri::http::Response::builder().status(200).header("Content-Type", "application/json").body(encoded).unwrap().into())}
+            })).unwrap();
+            assert_eq!(calls.get(), 1); assert_eq!(result, response);
+            let mut foreign = arguments; foreign["principal_scope"] = "foreign".into();
+            assert!(crate::fresh_conversation::validate(operation, &foreign).is_err());
+        }
+    }
+    #[test]
+    fn native_diagnostic_programs_header_preserves_actual_same_run_v1_v2_and_rejects_foreign() {
+        let fixture: Value = serde_json::from_str(include_str!("../../src/fixtures/project-discovery-app-source.json")).unwrap();
+        for key in ["programs_before", "programs"] {
+            let raw = fixture[key].clone();
+            let body = workspace_read_body(raw.clone(), "/workspace/programs/current", "mastermind.workspace_programs.v1").unwrap();
+            assert_eq!(body, raw); // no source/row/clock/identity or DATA relabel
+        }
+        for header in ["mastermind.workspace_programs.v3", "foreign", "mastermind.workspace_work_queue.v1"] {
+            let mut raw = fixture["programs"].clone(); raw["schema"] = header.into();
+            assert_eq!(workspace_read_body(raw, "/workspace/programs/current", "mastermind.workspace_programs.v1").unwrap_err(), "RESPONSE_INVALID");
+        }
+        assert!(workspace_read_body(fixture["programs"].clone(), "/workspace/work/current", "mastermind.workspace_programs.v1").is_err());
+        assert!(workspace_read_body(fixture["programs"].clone(), "/workspace/programs/current", "mastermind.workspace_work_queue.v1").is_err());
     }
 
     #[test]
@@ -4321,4 +4548,5 @@ mod source_operation_context_tests {
             }).is_err());
         }
     }
+
 }

@@ -1,3 +1,4 @@
+import { decodeNativeExecutiveObservation, type NativeExecutiveObservation } from "./native-executive-observation";
 import {hostObservationHostMethods,hostObservationPublicSelection,type HostObservationRawMethods,type HostObservationHostMethods} from "./resources/host-observation-host";
 import {freshConversationArguments, freshConversationNeedsWorkspace, type FreshConversationTransport} from "./orchestration/fresh-conversation-transport";
 import { createLazyTerminalSharingHost, type TerminalSharingSource } from "./terminal/terminal-sharing-host";
@@ -79,6 +80,8 @@ import {
 } from "./control-room";
 
 export interface RawClient extends Partial<HostObservationRawMethods>,Partial<ProjectAdmissionRawMethods>,Partial<InstructionRawMethods>,Partial<ProjectAccessRawMethods> {
+  /** Explicit fixed local metadata read; never refreshes an authorization owner. */
+  readNativeExecutiveDiagnostics?(request: { signal: AbortSignal }): Promise<unknown>;
   /** Native-owned privacy metadata only; never reconstructed from an event. */
   readonly nativeDraftRecovery?: NativeDraftRecoveryOwner;
   /** Independent Terminal session; workspace grants never confer brief access. */
@@ -174,6 +177,7 @@ export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
 }
 export interface MissionHost extends Partial<HostObservationHostMethods>,Partial<ProjectAdmissionHostMethods>,Partial<InstructionHostMethods>,Partial<ProjectAccessHostMethods> {
+  readNativeExecutiveDiagnostics?(request: { signal: AbortSignal }): Promise<NativeExecutiveObservation>;
   readonly nativeDraftRecovery?: NativeDraftRecoveryOwner;
   /** Independent Terminal session; workspace grants never confer brief access. */
   readonly terminalSharing?: TerminalSharingSource;
@@ -443,6 +447,21 @@ export function bindMissionHost(
     ...(client.terminalSharing ? { terminalSharing: client.terminalSharing } : {}),
     ...(client.openTerminalBriefs ? {
       openTerminalBriefs: createTerminalBriefsNavigationPort(() => client.openTerminalBriefs!()),
+    } : {}),
+    ...(client.readNativeExecutiveDiagnostics && client.invalidationGeneration ? {
+      async readNativeExecutiveDiagnostics({ signal }: { signal: AbortSignal }) {
+        const reader = client.readNativeExecutiveDiagnostics!, started = epoch;
+        const source = client.invalidationGeneration!();
+        const current = () => !signal.aborted && started === epoch &&
+          Number.isSafeInteger(source) && source >= 0 && source === client.invalidationGeneration?.() &&
+          reader === client.readNativeExecutiveDiagnostics;
+        if (!current()) throw new Error("READ_CANCELLED");
+        const raw = await reader.call(client, { signal });
+        if (!current()) throw new Error("READ_CANCELLED");
+        const value = decodeNativeExecutiveObservation(raw);
+        if (!value) throw new Error("RESPONSE_INVALID");
+        return value;
+      },
     } : {}),
     invalidationGeneration: () => epoch,
     ...(catalogueRead ? {readProjectKnowledgeCatalogue: catalogueRead} : {}),
@@ -1059,6 +1078,7 @@ export async function createNativeClient(
   if (initial === epoch) update(status);
   async function read(
     command:
+      | "executive_auth_status"
       | "read_programs"
       | "read_work"
       | "read_mission"
@@ -1139,6 +1159,7 @@ export async function createNativeClient(
     });
   }
   return {
+    readNativeExecutiveDiagnostics: ({ signal }) => read("executive_auth_status", signal, { diagnostics: true }),
     nativeDraftRecovery,
     terminalSharing,
     executive: executive.transport,

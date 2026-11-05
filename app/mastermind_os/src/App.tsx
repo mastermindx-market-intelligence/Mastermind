@@ -3467,6 +3467,24 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   // Observer-only snapshot for the fallback disclosures. A throwing or
   // absent getter degrades to null, which the fields render as unknown
   // values; reading it triggers no request, refresh or subscription change.
+  // Explicit local observation only: no transport update, auth notification or
+  // context/Programs refresh. Keep the reader stable within this owner epoch.
+  const nativeDiagnosticHost = window.MastermindMissionHost;
+  const nativeDiagnosticGeneration = nativeDiagnosticHost?.invalidationGeneration?.();
+  const refreshNativeDiagnostics = useMemo(() => {
+    const host = nativeDiagnosticHost, reader = host?.readNativeExecutiveDiagnostics;
+    const revision = authRevision, generation = nativeDiagnosticGeneration;
+    if (!host || !reader) return undefined;
+    return async ({ signal }: { signal: AbortSignal }) => {
+      const current = () => !signal.aborted && window.MastermindMissionHost === host &&
+        authRevisionRef.current === revision && host.readNativeExecutiveDiagnostics === reader &&
+        host.invalidationGeneration?.() === generation;
+      if (!current()) throw new Error("READ_CANCELLED");
+      const value = await reader.call(host, { signal });
+      if (!current()) throw new Error("READ_CANCELLED");
+      return value;
+    };
+  }, [nativeDiagnosticHost, nativeDiagnosticGeneration, authRevision]);
   const missionDiagnostics = (): unknown => {
     try {
       return window.MastermindMissionHost?.diagnostics?.() ?? null;
@@ -3758,6 +3776,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           <summary>{copy.technicalDetails}</summary>
           <code>{COMMAND_ROUTE_UNAVAILABLE}</code>
           <TransportDiagnosticFields
+            refreshNativeDiagnostics={refreshNativeDiagnostics}
             snapshot={missionDiagnostics()}
             programsPhase={programsReadPhase}
             programsReason={programsReadReason}
@@ -3799,6 +3818,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         <summary>{locale === "zh-CN" ? "技术详情" : "Technical details"}</summary>
         <code>{COMMAND_ROUTE_UNAVAILABLE}</code>
         <TransportDiagnosticFields
+          refreshNativeDiagnostics={refreshNativeDiagnostics}
           snapshot={missionDiagnostics()}
           programsPhase={programsReadPhase}
             programsReason={programsReadReason}
