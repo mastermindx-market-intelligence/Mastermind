@@ -68,6 +68,61 @@ class TestPaperV20SealedFleet(unittest.TestCase):
                                           config_bytes=cbytes,
                                           plist_bytes=plist_bytes, home=home)
 
+    def test_workspace_12file_successors_preserve_closed_original_cohort(self):
+        self.assertEqual(
+            set(cohorts.WORKSPACE_12FILE_SUCCESSORS),
+            {"admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9"},
+        )
+        self.assertEqual(len(cohorts.COHORTS), 8)
+        for seat, updated in cohorts.WORKSPACE_12FILE_SUCCESSORS.items():
+            with self.subTest(seat=seat):
+                original = cohorts.COHORTS[seat]
+                self.assertEqual(updated["file_count"], 12)
+                self.assertEqual(updated["generation"], "v10")
+                self.assertEqual(updated["bridge_sha256"], cohorts.PREDECESSORS["v10"])
+                self.assertEqual(updated["plist_sha256"], original["plist_sha256"])
+                self.assertNotEqual(updated["manifest_sha256"], original["manifest_sha256"])
+                self.assertNotEqual(updated["nonpaper_sha256"], original["nonpaper_sha256"])
+                for field in ("config_sha256", "manifest_sha256", "nonpaper_sha256", "plist_sha256"):
+                    self.assertEqual(len(updated[field]), 64)
+                    int(updated[field], 16)
+
+    def test_workspace_12file_exact_successor_cas_preserves_nonpaper(self):
+        seat, home, config, manifest, original, plist = self.make_case()
+        for i in range(11):
+            manifest["files"][f"sealed-extra-{i:02d}.mjs"] = "a" * 64
+        self.assertEqual(len(manifest["files"]), 12)
+        pre_config = as_bytes(config)
+        pre_manifest = as_bytes(manifest)
+        newer = {**original, "file_count": 12, "manifest_sha256": sha(pre_manifest)}
+        with mock.patch.object(cohorts, "COHORTS", {seat: original}), mock.patch.object(
+                cohorts, "WORKSPACE_12FILE_SUCCESSORS", {seat: newer}):
+            plan = cohorts.plan_selection(
+                seat, manifest_bytes=pre_manifest, config_bytes=pre_config,
+                plist_bytes=plist, home=home)
+            self.assertEqual(plan["originalManifestSha256"], newer["manifest_sha256"])
+            self.assertEqual(plan["preservedGatewayFiles"], 12)
+            before = json.loads(pre_config)
+            after = json.loads(plan["configBytes"])
+            self.assertEqual({k: v for k, v in before.items() if k != "paperDesign"},
+                             {k: v for k, v in after.items() if k != "paperDesign"})
+            self.assertEqual(plan["manifest"]["files"], manifest["files"])
+            self.assertEqual({k for k in before["paperDesign"]
+                              if before["paperDesign"][k] != after["paperDesign"][k]},
+                             {"bridgePath", "bridgeSha256", "pythonPath"})
+            changed_manifest = {**manifest, "files": {**manifest["files"],
+                                 "sealed-extra-00.mjs": "b" * 64}}
+            with self.assertRaises(ValueError):
+                cohorts.plan_selection(seat, manifest_bytes=as_bytes(changed_manifest),
+                    config_bytes=pre_config, plist_bytes=plist, home=home)
+            with self.assertRaises(ValueError):
+                cohorts.plan_selection(seat, manifest_bytes=pre_manifest,
+                    config_bytes=as_bytes({**config, "testMode": True}),
+                    plist_bytes=plist, home=home)
+            with self.assertRaises(ValueError):
+                cohorts.plan_selection(seat, manifest_bytes=pre_manifest,
+                    config_bytes=pre_config, plist_bytes=plist+b"changed", home=home)
+
     def test_all_real_cohorts_have_unique_fixed_original_identity(self):
         self.assertEqual(len(cohorts.COHORTS), 8)
         self.assertNotIn("fabric-read", cohorts.COHORTS)
