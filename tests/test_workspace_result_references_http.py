@@ -395,6 +395,8 @@ def test_public_edge_allowlist_and_caddy_template_carry_the_exact_path():
         "/workspace/project-instructions/current",
         "/workspace/instruction-admission/current", "/workspace/instruction-admission/operation",
         "/workspace/project-access/current",
+        "/workspace/source-operation/options", "/workspace/resources/host-observation/current",
+        "/workspace/mission-result/current",
     )
     assert not any("result-references" in route for route in POST_ROUTES)
     names = ["index.html", "assets/index-a.css", "assets/index-b.js"]
