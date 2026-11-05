@@ -178,6 +178,9 @@ class FixedDiagnostics:
         self.progress = []
         self.failures = []
         self.native_catalog = None
+        # Per-instance admitted row identity/content, never serialized or reused.
+        # Commission and a_f may report the same leaf; membership alone cannot bind its origin.
+        self._native_rows = {}
         self.truncated = False
         self.directory = None
         self.directory_identity = None
@@ -227,7 +230,7 @@ class FixedDiagnostics:
                 self.failures.append(value.copy())
             else:
                 self.truncated = True
-            # Only the exact allowlisted wrapper exceptions carry a live, validated
+            # Only the actual selected wrapper exceptions carry a live, validated
             # private channel. Raw child output is never a diagnostic input.
             try:
                 from scripts.native_unittest_diagnostics import records_for_error
@@ -236,7 +239,10 @@ class FixedDiagnostics:
                 if native:
                     self.native_catalog=PublicCatalog(self.catalog.root,native=True)
                     for record in native:
-                        if len(self.failures)<MAX_FAILURES:self.failures.append(record.copy())
+                        if len(self.failures)<MAX_FAILURES:
+                            row=record.copy()
+                            self._native_rows[len(self.failures)]=(row,tuple(sorted(row.items())))
+                            self.failures.append(row)
                         else:self.truncated=True
             except Exception:pass
             self.flush()
@@ -248,7 +254,8 @@ class FixedDiagnostics:
             return False
         if (type(self.truncated) is not bool or type(self.progress) is not list
                 or type(self.failures) is not list or len(self.progress)>MAX_PROGRESS
-                or len(self.failures)>MAX_FAILURES):
+                or len(self.failures)>MAX_FAILURES or type(self._native_rows) is not dict
+                or len(self._native_rows)>MAX_FAILURES):
             return False
         for value in self.progress:
             if type(value) is not dict or type(value.get('module')) is not str or value['module'] not in self.catalog.cache:
@@ -264,7 +271,8 @@ class FixedDiagnostics:
                     or value['cases_finished']>value['cases_started']
                     or type(seconds) not in (int,float) or not math.isfinite(seconds) or not 0<=seconds<=7200):
                 return False
-        for value in self.failures:
+        native_indices=set()
+        for index,value in enumerate(self.failures):
             if type(value) is not dict:return False
             module=value.get('module')
             native=type(module) is str and NATIVE_PUBLIC_PATH.fullmatch(module)
@@ -272,12 +280,14 @@ class FixedDiagnostics:
             if native:fields|={'native_invocation','native_wrapper'}
             if set(value)!=fields:return False
             if native:
-                wrappers={'test_native_quota_continuity_owners':'tests',
-                    'test_native_generation_and_ingress_rollout':'rollout',
-                    'test_existing_commission_deadlines_remain_binding':'tests'}
+                admitted=self._native_rows.get(index)
+                if (type(admitted) is not tuple or len(admitted)!=2 or admitted[0] is not value
+                        or admitted[1]!=tuple(sorted(value.items()))):return False
+                native_indices.add(index)
+                from scripts.native_unittest_diagnostics import module_selected,selection_for_wrapper_name
                 wrapper=value['native_wrapper']
-                if (type(wrapper) is not str or wrapper not in wrappers
-                        or not module.startswith('ops/native_fabric/quota_continuity/'+wrappers[wrapper]+'/')
+                selection=selection_for_wrapper_name(wrapper)
+                if (selection is None or not module_selected(module,selection)
                         or type(value['native_invocation']) is not str
                         or not re.fullmatch(r'[a-f0-9]{32}',value['native_invocation'])):return False
                 catalog=self.native_catalog
@@ -294,7 +304,7 @@ class FixedDiagnostics:
                     or type(value['kind']) is not str or value['kind'] not in {*KINDS.values(),'UNKNOWN'}
                     or value['line'] is not None and (not _integer(value['line'],source['lines']) or value['line']==0)):
                 return False
-        return True
+        return native_indices == set(self._native_rows)
 
     @staticmethod
     def _private_file(info, size):

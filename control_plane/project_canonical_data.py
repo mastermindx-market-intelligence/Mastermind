@@ -4,6 +4,12 @@ A latest-data grant is distinct from revision-pinned Workspace READ. No source
 root/HEAD is advanced, no code is loaded from the observed data revision, and
 no PR branch is mistaken for protected/default publication. This is request-
 local evidence, not a cache, store, grant, installer or publication command.
+
+An unrelated canonical movement may instead retain a nominal unchanged-DATA
+proof: the actual configured readers discover the same finite selected inputs
+at both C and N, with C ancestral to N. This proof never supplies an Event or
+publication clock. Changed selected DATA still needs the existing real Event
+proof; source writes and their original-CAS authority are unchanged.
 """
 from dataclasses import dataclass,field
 from contextlib import contextmanager
@@ -53,6 +59,19 @@ class CanonicalDataUnavailable(ValueError):
 def _fail():raise CanonicalDataUnavailable('CANONICAL_DATA_UNAVAILABLE')
 
 @dataclass(frozen=True,slots=True)
+class _UnchangedProjectDataProof:
+ _seal:object=field(repr=False)
+ _owner:object=field(repr=False)
+ _principal:object=field(repr=False)
+ _scope:str
+ _stamp:str
+ _work_ref:str
+ _binding:str
+ _code_root:Path=field(repr=False)
+ _deadline:float
+ _material:bytes=field(repr=False)
+
+@dataclass(frozen=True,slots=True)
 class CanonicalProjectDataView:
  _seal:object=field(repr=False)
  _owner:object=field(repr=False)
@@ -65,6 +84,7 @@ class CanonicalProjectDataView:
  _publication:object=field(repr=False,default=None)
  _verified_facts:dict=field(repr=False,default_factory=dict)
  _deadline:object=field(repr=False,default=None)
+ _continuity:object=field(repr=False,default=None)
  def _full_check(self,operation=None):
   if self._seal is not _SEAL or type(self._owner) is not CanonicalProjectDataMode:_fail()
   try:self._owner.check(self,operation=operation)
@@ -180,7 +200,7 @@ class CanonicalProjectDataMode:
   op=view._operation
   return (view._owner,id(op),id(op.principal),op.scope,op.stamp,op.selected_work_ref,
    op.read_deadline,view._deadline,view.data_commit,view.code_commit,view._root,view._code_root,
-   self.publisher._binding.fingerprint,id(view._publication))
+   self.publisher._binding.fingerprint,id(view._publication),id(view._continuity))
  def _validate_view(self,view):
   if (view._seal is not _SEAL or view._owner is not self or view.code_commit!=self.code_commit
       or view._code_root!=self.code_root or view._root!=Path(self.publisher._binding.worktree)
@@ -210,9 +230,42 @@ class CanonicalProjectDataMode:
   self._permission_guard(op)
   self.publisher._read_guard(op);self._configured(op)
   if self.publisher._remote_branch_commit(op,self.publisher._binding.default_branch)!=view.data_commit:_fail()
-  if view.data_commit!=view.code_commit:self._proof(op,view.data_commit,view._publication,verified=view._verified_facts)
+  if view.data_commit!=view.code_commit:
+   if view._continuity is not None:
+    material=self._check_continuity(op,view.data_commit,view._continuity)
+    if material!=view._witness.get('data_continuity') or view._publication is not None:_fail()
+   else:self._proof(op,view.data_commit,view._publication,verified=view._verified_facts)
   self.publisher._read_guard(op)
   self._permission_guard(op)
+ def _check_continuity(self,op,canonical,proof):
+  if (type(proof) is not _UnchangedProjectDataProof or proof._seal is not _SEAL or proof._owner is not self
+      or proof._principal is not op.principal or proof._scope!=op.scope or proof._stamp!=op.stamp
+      or proof._work_ref!=op.selected_work_ref or proof._binding!=self.publisher._binding.fingerprint
+      or proof._code_root!=self.code_root or op.read_deadline>proof._deadline):_fail()
+  material=json.loads(proof._material)
+  if material['executable_macro_commit']!=self.code_commit or material['canonical_data_commit']!=canonical:_fail()
+  return material
+ def _capture_continuity(self,op,canonical,reader_digest):
+  # Only immutable Git facts may survive within the original issued view.
+  # Current grants, principal, config, origin and actual default still bracket
+  # every outer capture/check. No Event or publication clock is acquired.
+  from control_plane.agentos_project_knowledge import capture_selected_project_data_closure,_CaptureFailure
+  self._permission_guard(op)
+  ancestor=self.publisher._git(['merge-base','--is-ancestor',self.code_commit,canonical],op)
+  if ancestor.returncode!=0:_fail()
+  try:
+   digest=capture_selected_project_data_closure(macro_root=Path(self.publisher._binding.worktree),
+    code_root=self.code_root,code_commit=self.code_commit,data_commit=canonical,
+    work_ref=op.selected_work_ref,deadline=op.read_deadline)
+  except (_CaptureFailure,ImportError,SystemExit):_fail()
+  material=dict(schema='mastermind.project_data_continuity.v1',kind='UNCHANGED_SELECTED_PROJECT_DATA',
+   work_ref=op.selected_work_ref,principal_scope=op.scope,executable_macro_commit=self.code_commit,
+   canonical_data_commit=canonical,reader_closure_sha256=reader_digest,
+   selected_data_closure_sha256=digest,ancestry='CODE_ANCESTOR_OF_DATA')
+  self._permission_guard(op)
+  return _UnchangedProjectDataProof(_SEAL,self,op.principal,op.scope,op.stamp,op.selected_work_ref,
+   self.publisher._binding.fingerprint,self.code_root,op.read_deadline,
+   json.dumps(material,sort_keys=True,separators=(',',':')).encode())
  def _proof(self,op,canonical,proof,*,verified=None):
   from control_plane.canonical_data_publication import CanonicalDataPublicationProof
   if type(proof) is not CanonicalDataPublicationProof:_fail()
@@ -250,17 +303,21 @@ class CanonicalProjectDataMode:
    if closure.returncode!=0 or compatible.returncode!=0 or len(closure.stdout)>65536:_fail()
    if not closure.stdout or any(re.fullmatch(rb'100(?:644|755) blob [a-f0-9]{40}\t[^\x00\r\n]+',row) is None
        for row in closure.stdout.rstrip(b'\0').split(b'\0')):_fail()
-   proof=None;publication=None;verified={}
+   proof=None;publication=None;verified={};continuity=None
+   reader_digest=hashlib.sha256(closure.stdout).hexdigest()
    if observed!=self.code_commit:
-    if self.publication is not None:
-     if p._callable_identity(self.publication)!=self.publication_identity:_fail()
-     proof=self.publication(principal,observed,work_ref)
-    else:
-     from control_plane.canonical_data_publication import select_source_publication
-     proof=select_source_publication(self.events,work_ref,op.scope,
-      qualify=lambda candidate: self._proof(op,observed,candidate,verified=verified) is not None,
-      guard=lambda: self._permission_guard(op))
-    publication=self._proof(op,observed,proof,verified=verified)
+    from control_plane.canonical_data_publication import select_source_publication,CanonicalPublicationUnavailable
+    try:
+     if self.publication is not None:
+      if p._callable_identity(self.publication)!=self.publication_identity:_fail()
+      proof=self.publication(principal,observed,work_ref)
+     else:
+      proof=select_source_publication(self.events,work_ref,op.scope,
+       qualify=lambda candidate: self._proof(op,observed,candidate,verified=verified) is not None,
+       guard=lambda: self._permission_guard(op))
+     publication=self._proof(op,observed,proof,verified=verified)
+    except CanonicalPublicationUnavailable:
+     continuity=self._capture_continuity(op,observed,reader_digest)
    stamp=self.publisher._git(['show','-s','--format=%cI',observed],op)
    if stamp.returncode!=0:_fail()
    committed_at=stamp.stdout.decode('ascii').strip()
@@ -269,8 +326,9 @@ class CanonicalProjectDataMode:
    witness=dict(schema='mastermind.canonical_project_data_observation.v1',repository=p.REPOSITORY,default_ref=self.publisher._binding.default_branch,
     executable_macro_commit=self.code_commit,canonical_data_commit=observed,canonical_commit_at=committed_at,
     canonical_observed_at_ms=int(time.time()*1000),publication_recorded_at_ms=None if publication is None else publication['recorded_at_ms'],publication_time=None,
-    source_operation=publication,reader_closure_sha256=hashlib.sha256(closure.stdout).hexdigest(),
+    source_operation=publication,reader_closure_sha256=reader_digest,
     code_config_relation='IDENTICAL_READER_CLOSURE',authority='OBSERVATION_ONLY')
-   view=CanonicalProjectDataView(_SEAL,self,op,observed,self.code_commit,Path(self.publisher._binding.worktree),self.code_root,witness,proof,verified,op.read_deadline)
+   if continuity is not None:witness['data_continuity']=self._check_continuity(op,observed,continuity)
+   view=CanonicalProjectDataView(_SEAL,self,op,observed,self.code_commit,Path(self.publisher._binding.worktree),self.code_root,witness,proof,verified,op.read_deadline,continuity)
    view.check();return view
   except (p._Refusal,p._Unknown,OSError,ValueError,TypeError,KeyError,AttributeError,UnicodeError):_fail()

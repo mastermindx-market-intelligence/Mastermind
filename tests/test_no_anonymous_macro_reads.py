@@ -116,6 +116,10 @@ _INERT_PR_LINK_DATA_LINES: dict[str, frozenset[str]] = {
         '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401"',
         '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/402"',
     )),
+    'app/mastermind_os/src/fixtures/knowledge-first-use-signed-journey.json': frozenset((
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401"',
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/402"',
+    )),
     'app/mastermind_os/src/fixtures/knowledge-write-owner.json': frozenset((
         '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401",',
         '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/402",',

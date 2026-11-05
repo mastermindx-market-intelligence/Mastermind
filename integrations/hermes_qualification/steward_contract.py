@@ -9,6 +9,7 @@ contract; runtime authorization must be enforced by the receiving Steward MCP.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -36,8 +37,15 @@ EXPECTED_CAPABILITIES = {
     "elicitation": False,
     "dynamic_registration": False,
 }
-MAX_ADVERTISEMENT_BYTES = 1024 * 1024  # Upper cap for actual owner-generated closed schema
-MAX_ADVERTISEMENT_OVERAGE_BYTES = 4096  # Drift headroom, not an authority grant
+MAX_ADVERTISEMENT_BYTES = 128 * 1024
+# The original owner's generated v2 output schema is 158,531 bytes because
+# each of the six tools advertises the full cross-source grounding contract.
+# Preserve the generic 128-KiB rejection for anything except THESE EXACT
+# source-owned bytes. Changing owner tools or source text requires new review.
+PINNED_OWNER_ADVERTISEMENT_BYTES = 158531
+PINNED_OWNER_ADVERTISEMENT_SHA256 = (
+    "23f13aa028a564889da10285ecdfd648a9a451fa2635d0251fd2340b45821837"
+)
 
 
 def inspect_advertisement(advertised: object) -> dict[str, Any]:
@@ -84,19 +92,24 @@ def inspect_advertisement(advertised: object) -> dict[str, Any]:
         except (TypeError, ValueError, OverflowError, RecursionError):
             errors.add("ADVERTISED_SHAPE_INVALID")
         else:
-            # The reviewed six-tool owner expands to a substantial nested
-            # JSON Schema. Base the advertisement allowance on *that exact
-            # canonical source*, not an undersized arbitrary fixed threshold.
-            # The independent hard ceiling still refuses unexpected growth.
-            source_size = len(current.encode("utf-8"))
-            candidate_size = len(encoded.encode("utf-8"))
-            if source_size > MAX_ADVERTISEMENT_BYTES:
-                errors.add("OWNER_ADVERTISEMENT_TOO_LARGE")
-            permitted_size = min(MAX_ADVERTISEMENT_BYTES, source_size + MAX_ADVERTISEMENT_OVERAGE_BYTES)
-            if candidate_size > permitted_size:
-                errors.add("ADVERTISED_SIZE_EXCEEDED")
+            current_bytes = current.encode("utf-8")
+            exact_reviewed_owner = (
+                len(current_bytes) == PINNED_OWNER_ADVERTISEMENT_BYTES
+                and hashlib.sha256(current_bytes).hexdigest()
+                == PINNED_OWNER_ADVERTISEMENT_SHA256
+            )
+            if not exact_reviewed_owner:
+                errors.add("OWNER_ADVERTISEMENT_DRIFT")
             if encoded != current:
                 errors.add("ADVERTISED_SOURCE_DRIFT")
+            # Exact reviewed owner is the only exception; no general cap
+            # expansion, no matching-by-name, and no tolerance for altered
+            # oversized advertisements or a changed owning source contract.
+            if (
+                len(encoded.encode("utf-8")) > MAX_ADVERTISEMENT_BYTES
+                and not (exact_reviewed_owner and encoded == current)
+            ):
+                errors.add("ADVERTISED_SIZE_EXCEEDED")
 
     return {
         "schema": SCHEMA,

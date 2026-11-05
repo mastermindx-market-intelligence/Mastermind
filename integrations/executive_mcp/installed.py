@@ -654,6 +654,20 @@ class _VerifiedRepositorySnapshot:
     sealed_to_caller: bool = False
 
 
+_CANONICAL_CODE_CAPTURE = object()
+
+@dataclass(frozen=True)
+class _CanonicalCodeCapture:
+    """One collector's verified immutable CODE objects, never live authority."""
+    seal: object
+    owner: object
+    binding: tuple
+    observations: tuple
+    macro_snapshot: _VerifiedRepositorySnapshot
+    view: object = None
+    view_identity: tuple | None = None
+
+
 @dataclass(frozen=True)
 class _MacroMaterializationPlan:
     """Exact sparse worktree required by ``agentos.py brief --json --no-remember``."""
@@ -2245,6 +2259,59 @@ class InstalledBootPacketCollector:
             raise GatewayError("backend_unavailable", "installed Mastermind source SHA changed")
         return source_sha, macro_sha, source_seal, macro_seal
 
+    def _canonical_code_capture_binding(self):
+        return (self._source_root,self._macro_root,self._code_root,self._expected_source_sha,
+                self._python,self._runner,self._allow_synthetic_fixture)
+
+    def _capture_canonical_code(self):
+        snapshots=[]
+        observations=self._snapshot_pair(_installed_child_env(code_root=self._code_root,
+            macro_root=self._macro_root),deadline=time.monotonic()+15.0,snapshot_capture=snapshots)
+        if self._allow_synthetic_fixture or len(snapshots)!=1:
+            raise ValueError('CANONICAL_DATA_UNAVAILABLE')
+        return _CanonicalCodeCapture(_CANONICAL_CODE_CAPTURE,self,
+            self._canonical_code_capture_binding(),observations,snapshots[0])
+
+    def _bind_canonical_code_capture(self,capture,view):
+        from control_plane.project_canonical_data import CanonicalProjectDataView
+        if (type(capture) is not _CanonicalCodeCapture or capture.seal is not _CANONICAL_CODE_CAPTURE
+                or capture.owner is not self or capture.binding!=self._canonical_code_capture_binding()
+                or capture.view is not None or capture.view_identity is not None
+                or type(view) is not CanonicalProjectDataView
+                or capture.observations[1]!=view.code_commit or capture.macro_snapshot.root!=self._macro_root):
+            raise ValueError('CANONICAL_DATA_UNAVAILABLE')
+        view._owner._validate_view(view)
+        view._owner._permission_guard(view._operation)
+        view._verified_facts[_CANONICAL_CODE_CAPTURE]=_CanonicalCodeCapture(capture.seal,self,
+            capture.binding,capture.observations,capture.macro_snapshot,view,view._owner._view_identity(view))
+
+    def _discard_canonical_code_capture(self,view):
+        view._verified_facts.pop(_CANONICAL_CODE_CAPTURE,None)
+
+    def _take_canonical_code_capture(self,view,env,*,deadline):
+        # Single use: even an unsuccessful build cannot lend this snapshot to
+        # another scope/view. Current source/config generation is never cached.
+        capture=view._verified_facts.pop(_CANONICAL_CODE_CAPTURE,None)
+        if capture is None:return None
+        if (type(capture) is not _CanonicalCodeCapture or capture.seal is not _CANONICAL_CODE_CAPTURE
+                or capture.owner is not self or capture.view is not view
+                or capture.view_identity!=view._owner._view_identity(view)
+                or capture.binding!=self._canonical_code_capture_binding()
+                or capture.observations[1]!=view.code_commit):
+            raise ValueError('CANONICAL_DATA_UNAVAILABLE')
+        view.check()
+        snapshot=capture.macro_snapshot
+        # _snapshot_pair's captured Macro proof uses the exact brief scope,
+        # rather than the unrelated whole checkout inventory. Compare the
+        # current generation under that SAME scope before consuming it.
+        files=_macro_brief_content_paths(set(snapshot.expected))
+        plan=_MacroMaterializationPlan(snapshot.head,frozenset(files),
+            frozenset(_tree_directory_paths(files)),
+            MappingProxyType({path:snapshot.expected[path] for path in files}))
+        if self._generation_pair(env,deadline=deadline,macro_plan=plan)!=capture.observations:
+            raise ValueError('CANONICAL_DATA_UNAVAILABLE')
+        return capture
+
     def _generation_pair(
         self, env: Mapping[str, str], *, deadline: float | None,
         macro_plan: _MacroMaterializationPlan | None = None,
@@ -2637,9 +2704,13 @@ class InstalledBootPacketCollector:
         if bound is not None:
             if bound[0] is not self or bound[2] != request['work_ref']:
                 raise ValueError('CANONICAL_DATA_UNAVAILABLE')
-            with self.canonical_project_data_scope(bound[1], work_ref=bound[2]):
-                return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
-                    project_knowledge_recipe_request=(mode, body, encoded))
+            # Compilation/restoration is a pure capture. Keep its immutable
+            # C/N facts inside the existing original-budget capture scope;
+            # the later publisher effect remains outside this scope.
+            with bound[1].capture_scope():
+                with self.canonical_project_data_scope(bound[1], work_ref=bound[2]):
+                    return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
+                        project_knowledge_recipe_request=(mode, body, encoded))
         return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
                                     project_knowledge_recipe_request=(mode, body, encoded))
 
@@ -2669,6 +2740,11 @@ class InstalledBootPacketCollector:
             data_view._require_work(selected_work)
             data_view.check()
         deadline = time.monotonic() + timeout
+        if data_view is not None:
+            # The collector/child cannot acquire another observation lifetime.
+            # Reserve all source/materialization work from the issued view's
+            # original remaining budget, including compiler restoration.
+            deadline = min(deadline, data_view._operation.read_deadline)
 
         def remaining() -> float:
             try:
@@ -2685,14 +2761,17 @@ class InstalledBootPacketCollector:
             code_root=self._code_root, macro_root=self._macro_root,
         )
         macro_snapshots: list[_VerifiedRepositorySnapshot] = []
-        pre_source_sha, pre_macro_sha, pre_source_seal, pre_macro_seal = (
-            self._snapshot_pair(
+        retained = None if data_view is None else self._take_canonical_code_capture(data_view,live_env,deadline=deadline)
+        if retained is not None:
+            pre_source_sha,pre_macro_sha,pre_source_seal,pre_macro_seal=retained.observations
+            macro_snapshots.append(retained.macro_snapshot)
+        else:
+            pre_source_sha, pre_macro_sha, pre_source_seal, pre_macro_seal = self._snapshot_pair(
                 live_env, deadline=deadline,
                 snapshot_capture=(
                     None if self._allow_synthetic_fixture else macro_snapshots
                 ),
             )
-        )
         if project_creation_request is not None and pre_macro_sha != project_creation_request[2]:
             raise GatewayError("backend_unavailable", "project catalogue source changed")
         if project_archive_request is not None and pre_macro_sha != project_archive_request[1]:
