@@ -8,6 +8,7 @@ import {
   type LaunchCompletion,
   type LaunchForm,
 } from "./LaunchOrchestrator";
+import { canNavigateForAutomaticSignIn } from "../../auth-navigation-guard";
 
 const makeProps = (overrides = {}) => ({
   projects: [
@@ -39,6 +40,42 @@ afterEach(() => {
 });
 
 describe("LaunchOrchestrator", () => {
+  it("prevents automatic Auth0 navigation during an unsent or in-flight launch", () => {
+    const view = render(<LaunchOrchestrator {...makeProps()} />);
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Keep this private launch goal." } });
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "" } });
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    view.rerender(<LaunchOrchestrator {...makeProps({ submitting: true })} />);
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    view.unmount();
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+  });
+  it("keeps real project/profile/CEO controls and one-shot guard in composer presentation", async () => {
+    const user = userEvent.setup();
+    const props = makeProps({ frontierModels: [{ ref: "ceo-a", label: "Requested CEO A" }] });
+    render(<LaunchOrchestrator {...props} presentation="composer" />);
+    await user.type(screen.getByLabelText("Goal"), "Review the project sources");
+    await user.selectOptions(screen.getByLabelText("Project"), "proj-gamma");
+    await user.selectOptions(screen.getByLabelText("Profile"), "prof-2");
+    expect((screen.getByLabelText("Requested CEO") as HTMLSelectElement).value).toBe("ceo-a");
+    fireEvent.submit(goalForm());
+    fireEvent.submit(goalForm());
+    expect(props.onSubmit).toHaveBeenCalledTimes(1);
+    expect(props.onSubmit.mock.calls[0][0]).toEqual({ goal: "Review the project sources", projectRef: "proj-gamma", profileRef: "prof-2", frontierModelAlias: "ceo-a" });
+    expect(pendingLaunchButton().disabled).toBe(true);
+  });
+
+  it("keeps unavailable and stale choices blocked in composer presentation", () => {
+    const props = makeProps({ projects: [{ ref: "unavailable", label: "Unavailable project", unavailableReason: "Read only" }] });
+    render(<LaunchOrchestrator {...props} presentation="composer" />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Do not launch" } });
+    fireEvent.submit(goalForm());
+    expect(launchButton().disabled).toBe(true);
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+
   describe("rendering", () => {
     it("renders project and profile selects with all choices", () => {
       render(<LaunchOrchestrator {...makeProps()} />);
@@ -1092,5 +1129,74 @@ describe("LaunchOrchestrator stale selection retention", () => {
     expect(
       (screen.getByLabelText("Project") as HTMLSelectElement).value,
     ).toBe("proj-gamma");
+  });
+});
+
+describe("requested CEO selection", () => {
+
+  it("omits the planner CEO for a native launch and retains the unsent draft", () => {
+    const onSubmit = vi.fn();
+    const onDraftChange = vi.fn();
+    const initialDraft = "Previously retained launch draft";
+    const goal = "Preserve this native research goal";
+    render(<LaunchOrchestrator {...makeProps({
+      onSubmit, onDraftChange, initialDraft, frontierModels,
+      profiles: [
+        { ref: "research_only", label: "Research only" },
+        { ref: "native_research_only", label: "Native research" },
+      ],
+    })} />);
+    const goalInput = screen.getByLabelText("Goal") as HTMLTextAreaElement;
+    expect(goalInput.value).toBe(initialDraft);
+    fireEvent.change(goalInput, { target: { value: goal } });
+    expect(onDraftChange).toHaveBeenLastCalledWith(goal);
+    fireEvent.change(screen.getByLabelText("Requested CEO"), { target: { value: "frontier.two" } });
+    fireEvent.change(screen.getByLabelText("Profile"), { target: { value: "native_research_only" } });
+    expect(screen.queryByLabelText("Requested CEO")).toBeNull();
+    expect(goalInput.value).toBe(goal);
+    expect(launchButton().disabled).toBe(false);
+    fireEvent.submit(goalForm());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).toEqual({
+      goal, projectRef: "proj-alpha", profileRef: "native_research_only",
+    });
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("frontierModelAlias");
+    act(() => onSubmit.mock.calls[0][1]({ status: "refused" }));
+    expect(goalInput.value).toBe(goal);
+    expect(launchButton().disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText("Profile"), { target: { value: "research_only" } });
+    expect((screen.getByLabelText("Requested CEO") as HTMLSelectElement).value).toBe("frontier.two");
+    expect(goalInput.value).toBe(goal);
+  });
+  const frontierModels = [{ ref: "frontier.one", label: "First CEO" }, { ref: "frontier.two", label: "Second CEO" }];
+  it("submits the explicit choice and preserves it after a refusal", () => {
+    const onSubmit = vi.fn();
+    render(<LaunchOrchestrator {...makeProps({ onSubmit, frontierModels })} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Build a project" } });
+    fireEvent.change(screen.getByLabelText("Requested CEO"), { target: { value: "frontier.two" } });
+    fireEvent.submit(goalForm());
+    expect(onSubmit.mock.calls[0][0].frontierModelAlias).toBe("frontier.two");
+    act(() => onSubmit.mock.calls[0][1]({ status: "refused" }));
+    expect((screen.getByLabelText("Requested CEO") as HTMLSelectElement).value).toBe("frontier.two");
+  });
+  it("blocks a selected CEO removed from the current catalog", () => {
+    const onSubmit = vi.fn();
+    const view = render(<LaunchOrchestrator {...makeProps({ onSubmit, frontierModels })} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Build a project" } });
+    fireEvent.change(screen.getByLabelText("Requested CEO"), { target: { value: "frontier.two" } });
+    view.rerender(<LaunchOrchestrator {...makeProps({ onSubmit, frontierModels: [frontierModels[0]] })} />);
+    expect(launchButton().disabled).toBe(true);
+    fireEvent.submit(goalForm());
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+  it("blocks all unavailable choices and leaves legacy launches unchanged", () => {
+    const view = render(<LaunchOrchestrator {...makeProps({ frontierModels: [
+      { ref: "frontier.one", label: "First CEO", unavailableReason: "Not qualified" },
+    ] })} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Build a project" } });
+    expect(launchButton().disabled).toBe(true);
+    view.unmount();
+    render(<LaunchOrchestrator {...makeProps()} />);
+    expect(screen.queryByLabelText("Requested CEO")).toBeNull();
   });
 });

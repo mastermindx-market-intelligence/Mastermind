@@ -1,0 +1,45 @@
+/* Existing Atelier theme aliases own both art directions. No local palette. */
+.resources-workspace { display: grid; gap: var(--sp-5); min-width: 0; }
+.resources-header { display: flex; align-items: start; justify-content: space-between; gap: var(--sp-5); }
+.resources-header h2 { font-family: var(--font-display); font-size: clamp(24px, 2.8vw, 34px); font-weight: 600; margin-block: var(--sp-3); }
+.resources-header button { flex-shrink: 0; }
+.resources-columns { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(260px, 1fr); gap: var(--sp-5); }
+.resources-workspace .card { min-width: 0; margin: 0; }
+.resources-workspace h3 { margin-top: 0; }
+.resources-table-heading, .resources-row { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: var(--sp-3); }
+.resources-table-heading { color: var(--muted); font-size: 10px; padding-block: var(--sp-3); }
+.resources-list, .resources-work-list { list-style: none; padding: 0; margin: 0; }
+.resources-row { width: 100%; min-height: 72px; text-align: start; padding: var(--sp-4); background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-ctl); margin-bottom: var(--sp-2); color: var(--text); }
+.resources-row[aria-pressed="true"] { background: var(--raised); font-weight: 600; }
+.resources-row span { min-width: 0; }
+.resources-row b, .resources-row strong, .resources-row small { display: block; overflow-wrap: anywhere; }
+.resources-row b { font-size: 12px; font-weight: 500; }
+.resources-row small { color: var(--muted); font-size: 11px; margin-top: var(--sp-2); line-height: 1.5; }
+.resources-workspace dl { margin: 0; }
+.resources-workspace dl > div { padding-block: var(--sp-3); border-bottom: 1px solid var(--border); }
+.resources-workspace dt { color: var(--muted); font-size: 12px; }
+.resources-workspace dd { margin: var(--sp-2) 0 0; overflow-wrap: anywhere; font-size: 13px; }
+.resources-workspace details { margin-top: var(--sp-4); font-size: 12px; }
+.resources-workspace summary { cursor: pointer; min-height: 44px; align-content: center; }
+.resources-work-list > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-3); border-bottom: 1px solid var(--border); padding-block: var(--sp-4); }
+.resources-work-list strong { font-size: 12px; overflow-wrap: anywhere; }
+.resources-work-list p { margin-block: var(--sp-2); }
+.resources-work-list details { grid-column: 1 / -1; margin: 0; }
+.resources-missing { color: var(--muted); }
+.resources-missing h3 { color: var(--text); }
+.resources-telemetry-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); }
+.resources-workspace button, .resources-workspace summary { touch-action: manipulation; }
+[data-theme="light"] .resources-inventory, [data-theme="light"] .resources-inspector { background: var(--panel); box-shadow: 0 4px 16px color-mix(in srgb, var(--text) 8%, transparent); }
+[data-theme="light"] .resources-row[aria-pressed="true"] { background: var(--raised); border-color: var(--muted); }
+@media (max-width: 900px) { .resources-columns { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 600px) {
+  .resources-header { flex-direction: column; }
+  .resources-header h2 { font-size: 26px; }
+  .resources-table-heading { display: none; }
+  .resources-row { grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); padding: var(--sp-4); }
+  .resources-row span { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-2); }
+  .resources-row small { margin: 0; }
+  .resources-workspace button { min-height: 44px; }
+  .resources-work-list > li { grid-template-columns: minmax(0, 1fr); }
+  .resources-telemetry-metrics { grid-template-columns: minmax(0, 1fr); }
+}

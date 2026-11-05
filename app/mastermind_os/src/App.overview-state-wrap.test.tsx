@@ -46,6 +46,9 @@ async function openOverview(width: number, extendedStates = false) {
   root = createRoot(container);
   await act(async () => { root!.render(<App />); });
   await click('Projects'); await click('Open project Beta program');
+  await click('Project details');
+  await act(async () => { Array.from(container.querySelectorAll('summary')).find(n => n.textContent === 'More work details')!.click(); });
+  await click('Overview');
   expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Overview');
   return { readProgramsObservation, readMission };
 }
@@ -140,7 +143,7 @@ it('the selector matches only the seven shared Mission badges across actual App 
     await click(route); expect(count(), route).toBe(0);
   }
   for (const route of ['Work', 'Open Programs', 'Fleet & Capacity']) {
-    await click('Today'); await click(route); expect(count(), route).toBe(0);
+    await click('Meta-CEO'); await click(route); expect(count(), route).toBe(0);
   }
   expect(location.search).toBe('?work_ref=WS%3ABETA&root_job_id=JOB-B');
   expect(readers.readProgramsObservation).toHaveBeenCalledTimes(2);

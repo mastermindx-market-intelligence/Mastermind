@@ -47,7 +47,7 @@ def test_only_server_and_app_import_mcp_sdk():
     for path in PACKAGE.glob("*.py"):
         imports = _imports(path)
         if any(name == "mcp" or name.startswith("mcp.") for name in imports):
-            if path.name not in {"server.py", "app.py"}:
+            if path.name not in {"server.py", "app.py", "research_server.py"}:
                 offenders.append(path.name)
     assert offenders == []
 

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { isTauri, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { App } from "./App";
+import { DisplayPreferences, DisplayPreferencesRoot } from "./preferences/DisplayPreferences";
 import { createNativeClient } from "./host";
 import { composeMissionHost } from "./compose-mission-host";
 import { createWebAuth, handleWebAuthCallback } from "./web-auth";
@@ -25,6 +26,7 @@ async function mount() {
     const client = isTauri()
       ? await createNativeClient(invoke, listen)
       : createWebAuth();
+    if (!isTauri()) void client.restore?.().catch(() => {});
     const composition = composeMissionHost(client);
     window.MastermindMissionHost = composition.host;
     void composition.ready.catch(() => {});
@@ -39,7 +41,10 @@ async function mount() {
   }
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <App />
+      <DisplayPreferencesRoot>
+        {({ theme, locale, control }) => <App theme={theme} locale={locale}
+          preferencesControl={<DisplayPreferences control={control} />} />}
+      </DisplayPreferencesRoot>
     </StrictMode>,
   );
 }

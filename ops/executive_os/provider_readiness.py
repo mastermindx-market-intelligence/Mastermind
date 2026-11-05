@@ -34,6 +34,7 @@ try:
     from ops.executive_os.provider_identity_policy import (
         COMPANY_WORKSPACE_BINDING_CLASS,
         COMPANY_DEVICE_DRIFT_PREDECESSOR_SHA256,
+        NATIVE_PROBE_DRIFT_PREDECESSOR_SHA256,
         PERSONAL_PRO_WORKER_BINDING_CLASS,
         EXPECTED_AUTH_MODE,
         WORKSPACE_BINDING_CLASSES,
@@ -43,6 +44,7 @@ except ModuleNotFoundError:  # pragma: no cover - installed direct-script mode
     from provider_identity_policy import (  # type: ignore[no-redef]
         COMPANY_WORKSPACE_BINDING_CLASS,
         COMPANY_DEVICE_DRIFT_PREDECESSOR_SHA256,
+        NATIVE_PROBE_DRIFT_PREDECESSOR_SHA256,
         PERSONAL_PRO_WORKER_BINDING_CLASS,
         EXPECTED_AUTH_MODE,
         WORKSPACE_BINDING_CLASSES,
@@ -940,6 +942,98 @@ def classify_device_revalidation(
         raise ReadinessError("revalidation_deadline_out_of_bounds")
 
 
+def validate_passed_device_renumbering_predecessor_document(
+    value: Mapping[str, Any], *,
+    auth_identity: Mapping[str, Any], binary_identity: Mapping[str, Any],
+    expected_kind: str, workspace_binding_class: str,
+    worker_uid: int = WORKER_UID, worker_gid: int = WORKER_GID,
+) -> None:
+    """Qualify an expired current-pin PASS for a fresh, explicit canary.
+
+    The historical receipt is validated against its actual historical objects;
+    neither it nor the current observations are normalized. Only a coupled
+    filesystem device-number change may separate the two generations. This
+    grants no passing-receipt reuse or retrospective volume-identity claim.
+    """
+    if (expected_kind != "device-auth"
+            or workspace_binding_class != COMPANY_WORKSPACE_BINDING_CLASS
+            or (worker_uid, worker_gid) != (WORKER_UID, WORKER_GID)):
+        raise ReadinessError("passed_device_renumbering_requires_company_device_auth")
+    if not isinstance(value, Mapping):
+        raise ReadinessError("readiness_receipt_fields_malformed")
+    historical_auth = value.get("credential_lstat")
+    historical_binary = value.get("codex_binary")
+    fields = {"device", "inode", "uid", "gid", "mode", "size", "mtime_ns", "ctime_ns", "nlink"}
+    binary_fields = fields | {"path", "version", "sha256", "team_identifier"}
+    for metadata, expected_fields, uid, gid, mode in (
+        (historical_auth, fields, WORKER_UID, WORKER_GID, 0o600),
+        (auth_identity, fields, WORKER_UID, WORKER_GID, 0o600),
+        (historical_binary, binary_fields, 0, 0, 0o555),
+        (binary_identity, binary_fields, 0, 0, 0o555),
+    ):
+        if (not isinstance(metadata, Mapping) or set(metadata) != expected_fields
+                or any(type(metadata[key]) is not int or metadata[key] < 0 for key in fields)
+                or metadata["uid"] != uid or metadata["gid"] != gid
+                or metadata["mode"] != mode or metadata["nlink"] != 1
+                or any(metadata[key] <= 0 for key in ("device", "inode", "size"))):
+            raise ReadinessError("passed_device_renumbering_metadata_invalid")
+    for binary in (historical_binary, binary_identity):
+        if (binary["path"] != os.fspath(CODEX_BINARY)
+                or binary["version"] != CODEX_VERSION
+                or binary["sha256"] != CODEX_SHA256
+                or binary["team_identifier"] != CODEX_TEAM_ID):
+            raise ReadinessError("passed_device_renumbering_binary_unreviewed")
+    validate_revalidation_predecessor_document(
+        value, auth_identity=historical_auth, binary_identity=historical_binary,
+        expected_kind=expected_kind, workspace_binding_class=workspace_binding_class,
+        worker_uid=worker_uid, worker_gid=worker_gid,
+    )
+    # This same-pin transition has one actual current binary, so that exact
+    # observation occupies both current-binary positions in the shared checker.
+    if not paired_filesystem_device_renumbering(
+        historical_auth=historical_auth, current_auth=auth_identity,
+        historical_binary=historical_binary, attested_predecessor=binary_identity,
+        current_binary=binary_identity,
+    ):
+        raise ReadinessError("passed_device_renumbering_identity_continuity_unproven")
+    if _timestamp(value["credential_expires_at"], code="credential_expiry_malformed") > datetime.now(UTC):
+        raise ReadinessError("passed_device_renumbering_requires_expired_predecessor")
+
+
+def classify_passed_device_renumbering_requalification(
+    value: Mapping[str, Any], *,
+    auth_identity: Mapping[str, Any], binary_identity: Mapping[str, Any],
+    expected_kind: str, workspace_binding_class: str,
+    new_credential_expires_at: str,
+    worker_uid: int = WORKER_UID, worker_gid: int = WORKER_GID,
+) -> None:
+    validate_passed_device_renumbering_predecessor_document(
+        value, auth_identity=auth_identity, binary_identity=binary_identity,
+        expected_kind=expected_kind, workspace_binding_class=workspace_binding_class,
+        worker_uid=worker_uid, worker_gid=worker_gid,
+    )
+    current = datetime.now(UTC)
+    deadline = _timestamp(new_credential_expires_at, code="credential_expiry_malformed")
+    if not current + MIN_ACCEPTANCE_MARGIN < deadline <= current + MAX_REQUALIFICATION_HORIZON:
+        raise ReadinessError("passed_device_renumbering_deadline_out_of_bounds")
+
+
+def _passed_device_renumbering_preimage(
+    args: argparse.Namespace, *, auth_identity: Mapping[str, Any],
+    binary_identity: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if os.geteuid() != 0:
+        raise ReadinessError("passed_device_renumbering_requires_root")
+    if (args.receipt != RECEIPT_PATH or args.auth != AUTH_PATH
+            or args.binary != CODEX_BINARY):
+        raise ReadinessError("passed_device_renumbering_path_unreviewed")
+    return _explicit_requalification_preimage(
+        args, auth_identity=auth_identity, binary_identity=binary_identity,
+        expected_digest=args.requalify_passed_device_renumbering_sha256,
+        classifier=classify_passed_device_renumbering_requalification,
+    )
+
+
 def validate_company_device_drift_predecessor_document(
     value: Mapping[str, Any], *,
     auth_identity: Mapping[str, Any], binary_identity: Mapping[str, Any],
@@ -1014,6 +1108,54 @@ def _company_device_drift_preimage(
         args, auth_identity=auth_identity, binary_identity=binary_identity,
         expected_digest=args.requalify_company_device_drift_sha256,
         classifier=classify_company_device_drift_requalification,
+    )
+
+
+def validate_native_probe_drift_predecessor_document(
+    value: Mapping[str, Any], *,
+    auth_identity: Mapping[str, Any], binary_identity: Mapping[str, Any],
+    expected_kind: str, workspace_binding_class: str,
+    worker_uid: int = WORKER_UID, worker_gid: int = WORKER_GID,
+) -> None:
+    """Validate this native incident's timestamp-only drift, not auth continuity."""
+    validate_company_device_drift_predecessor_document(
+        value, auth_identity=auth_identity, binary_identity=binary_identity,
+        expected_kind=expected_kind, workspace_binding_class=workspace_binding_class,
+        worker_uid=worker_uid, worker_gid=worker_gid,
+    )
+    if value["credential_lstat"]["size"] != auth_identity["size"]:
+        raise ReadinessError("native_probe_drift_credential_size_changed")
+
+
+def classify_native_probe_drift_requalification(
+    value: Mapping[str, Any], *, auth_identity: Mapping[str, Any],
+    binary_identity: Mapping[str, Any], expected_kind: str,
+    workspace_binding_class: str, new_credential_expires_at: str,
+    worker_uid: int = WORKER_UID, worker_gid: int = WORKER_GID,
+) -> None:
+    validate_native_probe_drift_predecessor_document(
+        value, auth_identity=auth_identity, binary_identity=binary_identity,
+        expected_kind=expected_kind, workspace_binding_class=workspace_binding_class,
+        worker_uid=worker_uid, worker_gid=worker_gid,
+    )
+    current = datetime.now(UTC)
+    deadline = _timestamp(new_credential_expires_at, code="credential_expiry_malformed")
+    if not current + MIN_ACCEPTANCE_MARGIN < deadline <= current + MAX_REQUALIFICATION_HORIZON:
+        raise ReadinessError("native_probe_drift_deadline_out_of_bounds")
+
+
+def _native_probe_drift_preimage(
+    args: argparse.Namespace, *, auth_identity: Mapping[str, Any],
+    binary_identity: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if (args.requalify_native_probe_drift_sha256 != NATIVE_PROBE_DRIFT_PREDECESSOR_SHA256
+            or args.receipt != RECEIPT_PATH or args.auth != AUTH_PATH
+            or args.binary != CODEX_BINARY):
+        raise ReadinessError("native_probe_drift_unreviewed_preimage_or_path")
+    return _explicit_requalification_preimage(
+        args, auth_identity=auth_identity, binary_identity=binary_identity,
+        expected_digest=args.requalify_native_probe_drift_sha256,
+        classifier=classify_native_probe_drift_requalification,
     )
 
 
@@ -1825,7 +1967,9 @@ def _parser() -> argparse.ArgumentParser:
     reuse_replacement.add_argument("--requalify-terminal-adverse-sha256")
     reuse_replacement.add_argument("--requalify-same-generation-terminal-sha256")
     reuse_replacement.add_argument("--renew-device-revalidation-sha256")
+    reuse_replacement.add_argument("--requalify-passed-device-renumbering-sha256")
     reuse_replacement.add_argument("--requalify-company-device-drift-sha256")
+    reuse_replacement.add_argument("--requalify-native-probe-drift-sha256")
     reuse_replacement.add_argument("--recover-current-pin-grant-sha256")
     reuse.add_argument("--successor-request-id")
     reserve = sub.add_parser("reserve")
@@ -1842,7 +1986,9 @@ def _parser() -> argparse.ArgumentParser:
     replacement.add_argument("--requalify-terminal-adverse-sha256")
     replacement.add_argument("--requalify-same-generation-terminal-sha256")
     replacement.add_argument("--renew-device-revalidation-sha256")
+    replacement.add_argument("--requalify-passed-device-renumbering-sha256")
     replacement.add_argument("--requalify-company-device-drift-sha256")
+    replacement.add_argument("--requalify-native-probe-drift-sha256")
     replacement.add_argument("--recover-current-pin-grant-sha256")
     replacement.add_argument(
         "--refresh-expired",
@@ -1978,6 +2124,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             if (args.successor_request_id is not None
                     and args.recover_current_pin_grant_sha256 is None):
                 raise ReadinessError("recovery_arguments_are_recovery_only")
+            if args.requalify_passed_device_renumbering_sha256 is not None:
+                _passed_device_renumbering_preimage(
+                    args, auth_identity=current_auth_identity(
+                        args.auth, worker_uid=args.worker_uid, worker_gid=args.worker_gid,
+                    ), binary_identity=current_binary_identity(args.binary),
+                )
+                return 11
+            if args.requalify_native_probe_drift_sha256 is not None:
+                _native_probe_drift_preimage(
+                    args, auth_identity=current_auth_identity(
+                        args.auth, worker_uid=args.worker_uid, worker_gid=args.worker_gid,
+                    ), binary_identity=current_binary_identity(args.binary),
+                )
+                return 10
             if args.requalify_company_device_drift_sha256 is not None:
                 _company_device_drift_preimage(
                     args, auth_identity=current_auth_identity(
@@ -2082,11 +2242,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.identity_json is None:
                 raise ReadinessError("identity_json_required")
             identity_payload = _read_json(args.identity_json)
-            if (args.requalify_company_device_drift_sha256 is not None
+            if (args.requalify_passed_device_renumbering_sha256 is not None
+                    or args.requalify_native_probe_drift_sha256 is not None
+                    or args.requalify_company_device_drift_sha256 is not None
                     or args.requalify_terminal_adverse_sha256 is not None
                     or args.requalify_same_generation_terminal_sha256 is not None
                     or args.renew_device_revalidation_sha256 is not None):
-                preimage = (_company_device_drift_preimage
+                preimage = (_passed_device_renumbering_preimage
+                            if args.requalify_passed_device_renumbering_sha256 is not None
+                            else _native_probe_drift_preimage
+                            if args.requalify_native_probe_drift_sha256 is not None
+                            else _company_device_drift_preimage
                             if args.requalify_company_device_drift_sha256 is not None
                             else _device_revalidation_preimage
                             if args.renew_device_revalidation_sha256 is not None
@@ -2097,7 +2263,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args, auth_identity=auth_identity, binary_identity=binary_identity,
                 )
                 fresh = _safe_identity(identity_payload)
-                if (args.requalify_company_device_drift_sha256 is not None
+                if (args.requalify_passed_device_renumbering_sha256 is not None
+                        and fresh["refusal"] is not None):
+                    raise ReadinessError("passed_device_renumbering_fresh_identity_refused")
+                if ((args.requalify_native_probe_drift_sha256 is not None
+                        or args.requalify_company_device_drift_sha256 is not None)
                         and fresh["refusal"] is not None):
                     raise ReadinessError("drift_requalification_fresh_identity_refused")
                 observed = _timestamp(fresh["observed_at"], code="identity_timestamp_malformed")
@@ -2119,21 +2289,30 @@ def main(argv: Sequence[str] | None = None) -> int:
                     worker_uid=args.worker_uid, worker_gid=args.worker_gid,
                 )
                 identity_guard = None
-                if args.requalify_company_device_drift_sha256 is not None:
+                if (args.requalify_passed_device_renumbering_sha256 is not None
+                        or args.requalify_native_probe_drift_sha256 is not None
+                        or args.requalify_company_device_drift_sha256 is not None):
                     # Freeze both observations across the durable archive and
                     # final receipt CAS. A race leaves old bytes and evidence.
                     expected_auth = dict(auth_identity)
                     expected_binary = dict(binary_identity)
+                    identity_refusal = (
+                        "passed_device_renumbering_identity_changed_before_reservation"
+                        if args.requalify_passed_device_renumbering_sha256 is not None
+                        else "drift_requalification_identity_changed_before_reservation"
+                    )
                     def identity_guard() -> None:
                         if (current_auth_identity(
                                 args.auth, worker_uid=args.worker_uid, worker_gid=args.worker_gid,
                             ) != expected_auth
                                 or current_binary_identity(args.binary) != expected_binary):
-                            raise ReadinessError("drift_requalification_identity_changed_before_reservation")
+                            raise ReadinessError(identity_refusal)
                 refresh_expired_receipt(
                     args.receipt, receipt, expected_identity=receipt_identity,
                     workspace_binding_class=args.workspace_binding_class, worker_gid=args.worker_gid,
-                    expected_receipt_sha256=(args.requalify_company_device_drift_sha256
+                    expected_receipt_sha256=(args.requalify_passed_device_renumbering_sha256
+                                             or args.requalify_native_probe_drift_sha256
+                                             or args.requalify_company_device_drift_sha256
                                              or args.requalify_terminal_adverse_sha256
                                              or args.requalify_same_generation_terminal_sha256
                                              or args.renew_device_revalidation_sha256),

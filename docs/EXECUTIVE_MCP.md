@@ -421,6 +421,57 @@ file placed under a production tree is refused as well.
   mechanism (**Secure MCP Tunnel**). **Do not expose the gateway to the public
   Internet as a workaround**, and do not add TCP/HTTP to
   `ExecutiveControlService`.
+- **Amendment (Chairman decision, incident #1656, 2026-10-21).** The Chairman
+  decided to publish an authenticated public MCP entrypoint on
+  `https://mcp.mastermind-x.com/mcp`, superseding the blanket prohibition above for
+  that one endpoint. It is not a workaround for the tunnel: the owner-rendered
+  Caddy block (`ops/executive_os/os_public_edge.caddy.template`) exposes exactly
+  GET `/.well-known/oauth-protected-resource/mcp` and POST `/mcp`, the gateway
+  remains the only authenticator (Caddy performs none), Caddy caps request bodies
+  at 64000 bytes (below the gateway's own 65536-byte ceiling), and every other
+  path on the host still aborts. `ExecutiveControlService` still gains no
+  TCP/HTTP.
+  **Installing the Caddy routes is not neutral.** Without the gateway key below
+  the gateway's token verifier accepts a token minted for any configured resource
+  (the OS audience and every tunnel audience) at `/mcp`, and the primary
+  challenge/metadata still name a tunnel URL. So the moment the routes are live,
+  an Internet client holding a token for any of those audiences could reach
+  `/mcp`, and a compliant client could not discover this host. The gateway
+  therefore carries an opt-in **sealed installed-config key,
+  `public_mcp_resource`**, and the routes must not be installed until the
+  installed gateway runs with it.
+  - **Value and profile.** The only accepted value is exactly
+    `https://mcp.mastermind-x.com/mcp`, and only on the plain `web_ceo_v3`
+    profile; it is refused together with `coo` or `principal_ruling_target`,
+    with any other profile, or when the value duplicates a primary or additional
+    (OS/tunnel) resource. `gateway_refresh_preflight` runs the same validation, so
+    a bad value is refused before any service-control effect.
+  - **What it does.** `/mcp` accepts that single audience only: the primary
+    connector, the OS Executive and every tunnel audience are refused there with
+    a 401 whose challenge carries
+    `resource_metadata="https://mcp.mastermind-x.com/.well-known/oauth-protected-resource/mcp"`
+    and names no other resource, and
+    `GET /.well-known/oauth-protected-resource/mcp` returns metadata for
+    `https://mcp.mastermind-x.com/mcp` alone. The public policy is derived from the
+    primary pair, differs from it only by resource and metadata URL, and reuses its
+    policy ids and audit sinks (no new audit directory). The reconcile route is not
+    mounted in this mode.
+  - **Confinement.** The OS Executive transport authenticates with its own
+    exact-resource pair, so a public-audience token is refused on
+    `/os/executive/*` (the OS resource may not be set to the public resource). The
+    Workspace and content apps are built with fixed-resource policies of their own,
+    and the OS static app serves anonymous public assets and accepts no bearer at
+    all; none of them receives the public Executive pair. Only the
+    `web_ceo_v3` builder opts in; every other builder, including the COO
+    compositions, refuses a configured public policy.
+  - **Exclusive per process.** Public mode replaces the multi-audience `/mcp`
+    behaviour for that gateway process; it is not additive. Keeping the OpenAI
+    tunnel entrypoint reachable at the same time needs a second gateway instance
+    with its own sealed config. With the key absent nothing changes.
+  - **Still outside the source.** (c) a distinct, separately registered Auth0 API
+    audience for `https://mcp.mastermind-x.com/mcp` (a human step in the tenant),
+    and the sealed M2 installed-config change that adds the key, are prerequisites
+    for the VPS apply. Neither is performed by a source change.
 - EXEC-MCP-A does not modify `allowed_peer_uids` or the production
   service-principal topology. A dedicated least-privilege principal for the
   tunnel-facing process is a **separate reviewed architecture decision** for the

@@ -35,7 +35,7 @@ The **developer-only** launcher now requires explicit `DSH_SOURCE` and
 refuses unpinned/unbuilt donors, public host flags, symlinked state and use
 of the donor checkout as the model's workspace. It starts the full DSH
 Web app only on `127.0.0.1`, from an isolated `HOME` / `DSH_HOME` /
-empty workspace, with **no inherited provider, account or computer-use
+separate workspace, with **no inherited provider, account or computer-use
 environment credentials**. `DSH_PORT=0` lets the OS choose a free local
 port. Before the launch, use the no-effect preflight:
 
@@ -45,6 +45,8 @@ export DSH_HOME="$HOME/agent-workspaces/dsh-preview-20261029"
 sh integrations/deepseek_harness/run_local.sh --check-only
 sh integrations/deepseek_harness/run_local.sh
 ```
+
+This launcher is for **trusted local development**. Its Git HEAD and artifact-presence checks do not attest the contents of a dirty checkout, dependencies, build outputs, or the Node binary. Separate directories and a cleared environment do not create an OS filesystem sandbox, isolate other readable credential stores, or contain network egress. Existing pilot directories may be reused.
 
 The launcher prints an ephemeral local login URL; treat the token as a
 secret and do not paste it into issues, logs or chats. `DSH_HOME` is a
