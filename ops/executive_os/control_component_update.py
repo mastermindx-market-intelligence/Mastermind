@@ -29,10 +29,17 @@ runtime state are preserved.  No Relay, MCP, Backup or privileged-broker
 action is taken, and the original publish-os-gateway receipt and its history
 are excluded.
 
+Exactly two closed input states exist and the installed state selects one of
+them.  LIVE: the Control service is registered and enabled.  OFFLINE: the
+Control service is genuinely absent AND explicitly disabled, which is the
+state the incumbent stop leaves behind.  Every other combination refuses
+before any effect.
+
 The plan output carries only allowed hashes, source identifiers, precondition
-states and the closed effect list.  No installed configuration, token or
-credential content is ever placed in the plan, in any argv, or in any
-caller-readable staging.
+states, the receipt preimages (presence and the exact raw-byte digest of
+every receipt this operation may replace), the mode and the closed effect list.
+No installed configuration, token or credential content is ever placed in the
+plan, in any argv, or in any caller-readable staging.
 """
 
 from __future__ import annotations
@@ -51,26 +58,61 @@ CONTROL_CONFIG_PATH = "/Library/Application Support/MastermindExecutive/config/c
 CONTROL_PLIST_PATH = "/Library/LaunchDaemons/com.mastermind.executive.control.plist"
 WORKER_PLIST_PATH = "/Library/LaunchDaemons/com.mastermind.executive.worker.codex.plist"
 ADMIN_CHECKOUT_ROOT = "/var/db/mastermind-executive/control/admin-checkout"
+AUTHORITY_RECEIPT_PATH = (
+    "/Library/Application Support/MastermindExecutive/config/autonomy-state-v1.json"
+)
+CEO_SUBMIT_RECEIPT_PATH = (
+    "/Library/Application Support/MastermindExecutive/config/ceo-submit-state-v1.json"
+)
+COMPONENT_RECEIPT_PATH = (
+    "/Library/Application Support/MastermindExecutive/config/control-component-update-v1.json"
+)
 
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
-# The closed effect list.  These are the only commands the owner may dispatch
-# for this operation, in this order.  The list is inside the plan digest, so
-# the operator's approved effect set is digest-bound.
-EFFECTS = (
+# The closed mode vocabulary.  Exactly two input states exist, and the
+# observed installed state selects exactly one of them.  Any other
+# combination -- unknown, mixed or mismatched -- refuses before any effect.
+LIVE_MODE = "live"
+OFFLINE_MODE = "offline"
+COMPONENT_MODES = (LIVE_MODE, OFFLINE_MODE)
+
+# The closed effect lists.  These are the only commands the owner may dispatch
+# for this operation, in this order, for the given mode.  The list is inside
+# the plan digest, so the operator's approved effect set is digest-bound.
+#
+# LIVE: the Control service is registered and enabled, so it is booted out
+# once and bootstrapped once.
+#
+# OFFLINE: the Control service is already genuinely absent AND explicitly
+# disabled, so there is NO bootout to dispatch and NO bootout to record: the
+# only launchd effects are one enable and one bootstrap.  The Worker is never
+# started, stopped, enabled or disarmed in either mode.
+LIVE_EFFECTS = (
     "bootout system/com.mastermind.executive.control",
     "replace " + CONTROL_CONFIG_PATH,
     "replace " + CONTROL_PLIST_PATH,
     "replace " + WORKER_PLIST_PATH,
-    "correlate " + "/Library/Application Support/MastermindExecutive/config/autonomy-state-v1.json",
+    "correlate " + AUTHORITY_RECEIPT_PATH,
+    "bootstrap system/" + CONTROL_PLIST_PATH,
+    "publish control observation",
+)
+
+OFFLINE_EFFECTS = (
+    "enable system/com.mastermind.executive.control",
+    "replace " + CONTROL_CONFIG_PATH,
+    "replace " + CONTROL_PLIST_PATH,
+    "replace " + WORKER_PLIST_PATH,
+    "correlate " + AUTHORITY_RECEIPT_PATH,
     "bootstrap system/" + CONTROL_PLIST_PATH,
     "publish control observation",
 )
 
 # The closed precondition vocabulary.  Every one of these must hold before a
-# plan exists; a false precondition is a refusal with zero cutover.
-PRECONDITIONS = (
+# plan exists; a false precondition is a refusal with zero cutover.  The two
+# modes differ ONLY in the Control boundary state they require.
+_COMMON_PRECONDITIONS = (
     "prior_release_sealed",
     "target_release_sealed",
     "interpreter_qualified",
@@ -83,10 +125,28 @@ PRECONDITIONS = (
     "autonomy_receipt_valid",
     "autonomy_receipt_disarmed",
     "owner_quiescent",
+)
+
+LIVE_PRECONDITIONS = _COMMON_PRECONDITIONS + (
     "control_registered",
     "control_enabled",
     "worker_absent",
     "worker_disabled",
+)
+
+OFFLINE_PRECONDITIONS = _COMMON_PRECONDITIONS + (
+    "control_absent",
+    "control_disabled",
+    "worker_absent",
+    "worker_disabled",
+)
+
+# The receipt preimages this operation binds.  Every receipt it may replace is
+# named, so an unbound receipt can never be overwritten silently.
+RECEIPT_PREIMAGE_NAMES = (
+    "authority_receipt",
+    "ceo_submit_receipt",
+    "component_receipt",
 )
 
 WARNINGS = (
@@ -96,6 +156,8 @@ WARNINGS = (
     "transaction marker for a separately approved restore",
     "the consumed-config proof is the wrapper-owned attestation: it binds the live pid, the boot identity, "
     "the target release and the exact consumed configuration digest",
+    "the offline mode requires the Control service to be already absent AND explicitly disabled; it "
+    "enables and bootstraps the Control exactly once and never records a bootout it did not dispatch",
 )
 
 
@@ -105,6 +167,40 @@ class ComponentError(ValueError):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+def preconditions_for_mode(mode: str) -> tuple[str, ...]:
+    """The closed precondition vocabulary of exactly one mode."""
+
+    if mode == LIVE_MODE:
+        return LIVE_PRECONDITIONS
+    if mode == OFFLINE_MODE:
+        return OFFLINE_PRECONDITIONS
+    raise ComponentError("component_mode_invalid")
+
+
+def effects_for_mode(mode: str) -> tuple[str, ...]:
+    """The closed effect list of exactly one mode."""
+
+    if mode == LIVE_MODE:
+        return LIVE_EFFECTS
+    if mode == OFFLINE_MODE:
+        return OFFLINE_EFFECTS
+    raise ComponentError("component_mode_invalid")
+
+
+@dataclasses.dataclass(frozen=True)
+class ReceiptPreimage:
+    """One receipt's exact prior state.
+
+    ``present`` says whether the receipt existed at all; ``sha256`` is the
+    digest of the EXACT raw bytes that were on disk, never of a re-encoded
+    parse of them.  An absent receipt binds the digest of no bytes at all.
+    """
+
+    path: str
+    present: bool
+    sha256: str
 
 
 def canonical(value: Any) -> bytes:
@@ -321,19 +417,42 @@ def compile_candidate(
 def plan_document(
     candidate: Candidate,
     *,
+    mode: str,
     preconditions: Mapping[str, bool],
     prior_release_manifest_sha256: str,
     target_release_manifest_sha256: str,
     admin_checkout_commit: str,
+    receipts: Mapping[str, ReceiptPreimage],
+    launchd_disabled: Mapping[str, bool],
 ) -> dict[str, Any]:
     """The closed plan document: hashes, source ids, states and effects only."""
 
-    if set(preconditions) != set(PRECONDITIONS):
+    expected = preconditions_for_mode(mode)
+    if set(preconditions) != set(expected):
         raise ComponentError("precondition_vocabulary_invalid")
     if any(type(state) is not bool for state in preconditions.values()):
         raise ComponentError("precondition_state_invalid")
+    if set(launchd_disabled) != {"control", "worker"}:
+        raise ComponentError("launchd_preimage_invalid")
+    if any(type(state) is not bool for state in launchd_disabled.values()):
+        raise ComponentError("launchd_preimage_invalid")
+    # The Worker is disabled in BOTH modes, and the Control is explicitly
+    # disabled in exactly the offline mode.  A preimage that contradicts the
+    # mode is a mismatched state and never reaches a plan.
+    if launchd_disabled["worker"] is not True:
+        raise ComponentError("launchd_preimage_invalid")
+    if (mode == OFFLINE_MODE) is not (launchd_disabled["control"] is True):
+        raise ComponentError("launchd_preimage_invalid")
+    if set(receipts) != set(RECEIPT_PREIMAGE_NAMES):
+        raise ComponentError("receipt_preimage_invalid")
+    for value in receipts.values():
+        if type(value) is not ReceiptPreimage:
+            raise ComponentError("receipt_preimage_invalid")
+        if HEX64.fullmatch(value.sha256) is None:
+            raise ComponentError("receipt_preimage_invalid")
     return {
         "schema": PLAN_SCHEMA,
+        "mode": mode,
         "target_sha": candidate.target_sha,
         "prior_sha": candidate.prior_sha,
         "control_config": {
@@ -353,11 +472,23 @@ def plan_document(
             "after_sha256": candidate.worker_plist_after_sha256,
         },
         "worker_config_sha256": candidate.worker_config_sha256,
+        "receipts": {
+            name: {
+                "path": receipts[name].path,
+                "present": receipts[name].present,
+                "before_sha256": receipts[name].sha256,
+            }
+            for name in RECEIPT_PREIMAGE_NAMES
+        },
+        "launchd_disabled": {
+            "control": launchd_disabled["control"],
+            "worker": launchd_disabled["worker"],
+        },
         "prior_release_manifest_sha256": prior_release_manifest_sha256,
         "target_release_manifest_sha256": target_release_manifest_sha256,
         "admin_checkout_commit": admin_checkout_commit,
-        "preconditions": {key: bool(preconditions[key]) for key in PRECONDITIONS},
-        "effects": list(EFFECTS),
+        "preconditions": {key: bool(preconditions[key]) for key in expected},
+        "effects": list(effects_for_mode(mode)),
     }
 
 

@@ -5,6 +5,13 @@ and no administrative checkout is read or written.  The composition is driven
 against a hermetic stand-in for the one installed Executive host, so every
 refusal path is exercised with zero cutover and every crash gap of the happy
 path is exercised without dispatching a duplicate effect.
+
+The production QUALIFIERS are never replaced by a stub: the administrative
+checkout is proved by the real production method against a real hermetic Git
+repository, and the pinned interpreter is qualified through the installed
+peer's own runtime owner.  Only the leaf host observations (launchd, the
+process table, the installed release tree, the installed files) are stood in
+for, so a defect inside a qualification cannot hide behind an override.
 """
 
 import copy
@@ -12,10 +19,13 @@ import hashlib
 import json
 import os
 import plistlib
+import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
 
+from control_plane import executive_installed_peer as installed
 from ops.executive_os import autonomy_control as ac
 from ops.executive_os import control_component_update as ccu
 from ops.executive_os import control_observation
@@ -27,8 +37,54 @@ except ImportError:  # pragma: no cover - the flat test root is equally valid
     from test_prepare_control_successor import control_input  # noqa: F401
 
 
+def _git(*args: str, cwd: Path | None = None, env: dict | None = None) -> str:
+    completed = subprocess.run(
+        ["git", *args], cwd=None if cwd is None else os.fspath(cwd),
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, check=False, timeout=30,
+        env=None if env is None else {**os.environ, **env})
+    if completed.returncode != 0:
+        raise RuntimeError("git observation failed")
+    return completed.stdout.decode("utf-8").strip()
+
+
+# The fixed identity of the hermetic administrative checkout.  The commit is
+# built from a fixed tree and fixed author/committer coordinates, so its
+# object id is the same on every machine: the production owner compares the
+# checkout HEAD against the target commit exactly.
+_COMMIT_ENVIRONMENT = {
+    "GIT_AUTHOR_NAME": "Component Test",
+    "GIT_AUTHOR_EMAIL": "component@example.invalid",
+    "GIT_COMMITTER_NAME": "Component Test",
+    "GIT_COMMITTER_EMAIL": "component@example.invalid",
+    "GIT_AUTHOR_DATE": "2026-01-01T00:00:00+0000",
+    "GIT_COMMITTER_DATE": "2026-01-01T00:00:00+0000",
+}
+
+
+def _build_admin_checkout(root: Path) -> tuple[Path, str]:
+    """One real, local, credential-free Git checkout of the exact target."""
+
+    staging = root / "staging"
+    staging.mkdir(parents=True)
+    _git("init", "-q", "--", os.fspath(staging))
+    (staging / "source.txt").write_text("control component\n", encoding="utf-8")
+    _git("add", "source.txt", cwd=staging)
+    tree = _git("write-tree", cwd=staging)
+    commit = _git("commit-tree", tree, "-m", "target", cwd=staging,
+                  env=_COMMIT_ENVIRONMENT)
+    _git("update-ref", "refs/heads/component-target", commit, cwd=staging)
+    _git("symbolic-ref", "HEAD", "refs/heads/component-target", cwd=staging)
+    _git("reset", "--hard", "-q", commit, cwd=staging)
+    final = root / commit
+    os.rename(staging, final)
+    return final, commit
+
+
+_ADMIN_ROOT = Path(tempfile.mkdtemp(prefix="c14-admin-checkout-"))
+_ADMIN_CHECKOUT, TARGET_SHA = _build_admin_checkout(_ADMIN_ROOT)
+
 PRIOR_SHA = "80f384b8f58b7ca46422d9783aa5c0613c7bf4b2"
-TARGET_SHA = "2" * 40
 PRIOR_ROOT = os.fspath(ac.SYSTEM_ROOT / "releases" / PRIOR_SHA)
 TARGET_ROOT = os.fspath(ac.SYSTEM_ROOT / "releases" / TARGET_SHA)
 MACRO_ROOT = "/approved/retained/Macro"
@@ -36,6 +92,11 @@ CONTROL_CONFIG = os.fspath(ac.CONTROL_CONFIG)
 WORKER_CONFIG = os.fspath(ac.WORKER_CONFIG)
 CONTROL_PLIST = os.fspath(ac.CONTROL_PLIST)
 WORKER_PLIST = os.fspath(ac.WORKER_PLIST)
+AUTONOMY_RECEIPT = os.fspath(ac.AUTONOMY_RECEIPT)
+CEO_SUBMIT_RECEIPT = os.fspath(ac.CEO_SUBMIT_RECEIPT)
+COMPONENT_RECEIPT = os.fspath(ac.CONTROL_COMPONENT_RECEIPT)
+CONTROL = "com.mastermind.executive.control"
+WORKER = "com.mastermind.executive.worker.codex"
 
 
 def _canonical(value) -> bytes:
@@ -62,7 +123,7 @@ def _control_plist(root: str) -> dict:
         "ExitTimeOut": 15,
         "GroupName": "_mastermind_exec",
         "KeepAlive": True,
-        "Label": "com.mastermind.executive.control",
+        "Label": CONTROL,
         "ProcessType": "Interactive",
         "ProgramArguments": [
             os.fspath(ac.PINNED_PYTHON),
@@ -94,7 +155,7 @@ def _worker_plist(root: str) -> dict:
     return {
         "GroupName": "_mastermind_worker",
         "KeepAlive": True,
-        "Label": "com.mastermind.executive.worker.codex",
+        "Label": WORKER,
         "ProcessType": "Interactive",
         "ProgramArguments": [
             os.fspath(ac.PINNED_PYTHON),
@@ -179,6 +240,14 @@ class _Info:
     st_ino = 1
 
 
+class _Passwd:
+    """The identity source: the test principal owns the hermetic checkout."""
+
+    @staticmethod
+    def getpwnam(name: str):
+        return type("_Entry", (), {"pw_uid": os.geteuid()})()
+
+
 class FakeFiles:
     """An in-memory installed filesystem."""
 
@@ -205,7 +274,14 @@ class Crash(BaseException):
 
 
 class FakeHost(ac.ProductionControlComponentHost):
-    """A hermetic stand-in for the one installed Executive host."""
+    """A hermetic stand-in for the one installed Executive host.
+
+    Only the LEAF host observations are stood in for: launchd, the process
+    table, the installed release tree and the installed files.  Every
+    qualification method of the component -- the administrative checkout, the
+    interpreter, the mode derivation, the receipt preimages, the compare-and-
+    swap and the manifest -- is the production one.
+    """
 
     def __init__(self, control: dict, worker: dict, *, files: FakeFiles | None = None):
         super().__init__()
@@ -214,10 +290,8 @@ class FakeHost(ac.ProductionControlComponentHost):
         self.worker = worker
         self.control_raw = _canonical(control)
         self.worker_raw = _canonical(worker)
-        self.labels = {"com.mastermind.executive.control": True,
-                       "com.mastermind.executive.worker.codex": False}
-        self.disabled = {"com.mastermind.executive.control": False,
-                        "com.mastermind.executive.worker.codex": True}
+        self.labels = {CONTROL: True, WORKER: False}
+        self.disabled = {CONTROL: False, WORKER: True}
         self.commands: list[list[str]] = []
         self.phases: list[str] = []
         self.proofs: list[tuple[str, str]] = []
@@ -227,17 +301,21 @@ class FakeHost(ac.ProductionControlComponentHost):
         self.transaction_present = False
         self.quiescent = True
         self.admission_ok = True
+        self.service_uids_quiescent = True
+        self.service_uid_failures = 0
+        self.census_observed_at: list[int] = []
         self.release_seals = {PRIOR_SHA: "1" * 64, TARGET_SHA: "2" * 64}
-        self.admin_checkout = TARGET_SHA
         self.receipt = _disarmed_receipt(
             _sha(self.control_raw), _sha(self.worker_raw))
         self.ceo_receipt = None
         self.crash_at: int | None = None
         self.fail_after: set[str] = set()
+        self.interpreter_calls: dict = {"verify": [], "recheck": []}
         self.files.write(CONTROL_PLIST, plistlib.dumps(_control_plist(PRIOR_ROOT)))
         self.files.write(WORKER_PLIST, plistlib.dumps(_worker_plist(PRIOR_ROOT)))
         self.files.write(CONTROL_CONFIG, self.control_raw)
         self.files.write(WORKER_CONFIG, self.worker_raw)
+        self.files.write(AUTONOMY_RECEIPT, ac._encoded_json(self.receipt))
         # The fixture installation is not an effect of the operation.
         self.files.writes.clear()
 
@@ -251,7 +329,7 @@ class FakeHost(ac.ProductionControlComponentHost):
         if any(token in joined for token in self.fail_after):
             raise OSError("response lost")
 
-    # -- the owner's installed reads ------------------------------------------
+    # -- the leaf host observations -------------------------------------------
 
     def effective_uid(self) -> int:
         return 0
@@ -282,15 +360,11 @@ class FakeHost(ac.ProductionControlComponentHost):
             raise ac.ComponentUpdateRefused("control_component_release_seal_invalid")
         return value
 
-    @staticmethod
-    def _component_interpreter_qualified() -> bool:
-        return True
-
-    def _component_admin_checkout(self, target_sha: str) -> str:
-        if self.admin_checkout != target_sha:
-            raise ac.ComponentUpdateRefused(
-                "control_component_admin_checkout_unavailable")
-        return self.admin_checkout
+    def _component_receipt_bytes(self, path):
+        key = os.fspath(path)
+        if key not in self.files.data:
+            return False, b""
+        return True, self.files.data[key]
 
     def _component_autonomy_receipt(self, prior_sha, configs):
         if self.receipt is None:
@@ -314,11 +388,22 @@ class FakeHost(ac.ProductionControlComponentHost):
         if not self.quiescent:
             raise ac.ComponentUpdateRefused("control_component_owner_not_quiescent")
 
-    def _component_label_loaded(self, label: str) -> bool:
-        return self.labels[label]
+    def require_service_uids_quiescent(self) -> None:
+        self.census_observed_at.append(len(self.commands))
+        if self.service_uid_failures > 0:
+            self.service_uid_failures -= 1
+            raise ac.ArmAdmissionError("service_uid_process_live")
+        if not self.service_uids_quiescent:
+            raise ac.ArmAdmissionError("service_uid_process_unknown")
 
-    def _component_disabled_override(self, label: str):
-        return self.disabled[label]
+    def _read_launchd_disabled_override(self, target_label: str, *,
+                                       allow_absent: bool = False):
+        value = self.disabled.get(target_label)
+        if value is None:
+            if allow_absent:
+                return None
+            raise ac.TransactionEffectUnknown()
+        return value
 
     # -- the transaction seams -------------------------------------------------
 
@@ -395,9 +480,11 @@ class FakeHost(ac.ProductionControlComponentHost):
         argv = list(command)
         self._effect(argv)
         if "bootout" in argv:
-            self.labels["com.mastermind.executive.control"] = False
+            self.labels[CONTROL] = False
         if "bootstrap" in argv:
-            self.labels["com.mastermind.executive.control"] = True
+            self.labels[CONTROL] = True
+        if "enable" in argv:
+            self.disabled[CONTROL] = False
 
     def _loaded_observe_only(self, label: str) -> bool:
         return self.labels[label]
@@ -413,14 +500,40 @@ class FakeHost(ac.ProductionControlComponentHost):
     def _ceo_admission_probe(self, expected_sha: str, digest: str) -> bool:
         return self.admission_ok
 
-    def write_control_component_receipt(self, transaction, receipt) -> None:
-        self.files.write(os.fspath(ac.CONTROL_COMPONENT_RECEIPT),
-                         ac._encoded_json(receipt))
-        self._persist_phase(transaction, "CONTROL_COMPONENT_RECEIPT_REPLACED")
+
+
+
+def _fake_component_run(argv, *, timeout, stdin_bytes=None):
+    """Run the real Git command the production owner asks for.
+
+    The fixed Control-principal owner prefix is dropped -- the hermetic
+    checkout is owned by the test principal -- and the real Git binary runs
+    the real command, so the production qualification is exercised against
+    real Git output.
+    """
+
+    command = list(argv)
+    index = command.index("/usr/bin/git")
+    if stdin_bytes is None:
+        completed = subprocess.run(
+            command[index:], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, check=False, timeout=timeout)
+    else:
+        completed = subprocess.run(
+            command[index:], input=stdin_bytes, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, check=False, timeout=timeout)
+    return completed.returncode, completed.stdout
+
+
+class _RuntimeObservation:
+    """The installed peer's own runtime observation, as a stand-in."""
+
+    def __init__(self):
+        self.ancestor_identities = ()
 
 
 @pytest.fixture
-def host(control_input, monkeypatch):
+def host(control_input, monkeypatch, tmp_path):
     control = copy.deepcopy(control_input)
     control["ceo_ingress_app_macro_root"] = MACRO_ROOT
     worker = {"operator_harness_armed": False}
@@ -432,9 +545,30 @@ def host(control_input, monkeypatch):
     def fake_read_root_file(path, *, modes, uid=0, gid=None):
         return host_obj.files.read(path), _Info()
 
+    def fake_receipt_metadata(path):
+        return ac.ReceiptMetadata(
+            uid=0, gid=0, mode=0o444, nlink=1, is_regular=True,
+            is_symlink=False, has_acl=False)
+
+    def fake_verify_python_runtime(budget):
+        host_obj.interpreter_calls["verify"].append(budget)
+        return _RuntimeObservation()
+
+    def fake_recheck_python_runtime(observation, budget):
+        host_obj.interpreter_calls["recheck"].append(
+            (observation, budget, len(host_obj.commands)))
+
     monkeypatch.setattr(ac, "_atomic_file", fake_atomic_file)
     monkeypatch.setattr(ac, "_read_root_file", fake_read_root_file)
+    monkeypatch.setattr(ac, "_receipt_metadata", fake_receipt_metadata)
     monkeypatch.setattr(ac, "grp", _Groups)
+    monkeypatch.setattr(ac, "pwd", _Passwd)
+    monkeypatch.setattr(ac, "_CONTROL_ADMIN_CHECKOUT_ROOT", _ADMIN_ROOT)
+    monkeypatch.setattr(ac, "_component_run", _fake_component_run)
+    monkeypatch.setattr(
+        installed, "_verify_python_runtime", fake_verify_python_runtime)
+    monkeypatch.setattr(
+        installed, "_recheck_python_runtime", fake_recheck_python_runtime)
     return host_obj
 
 
@@ -563,6 +697,81 @@ def test_prepare_support_refuses_a_document_without_a_macro_binding(control_inpu
         prepare.build_component_successor(control, source_sha=TARGET_SHA)
 
 
+def test_the_two_modes_bind_different_closed_precondition_and_effect_lists():
+    assert ccu.COMPONENT_MODES == ("live", "offline")
+    assert set(ccu.LIVE_PRECONDITIONS) != set(ccu.OFFLINE_PRECONDITIONS)
+    assert "control_registered" in ccu.LIVE_PRECONDITIONS
+    assert "control_absent" in ccu.OFFLINE_PRECONDITIONS
+    assert "worker_absent" in ccu.LIVE_PRECONDITIONS
+    assert "worker_absent" in ccu.OFFLINE_PRECONDITIONS
+    # The live mode keeps the incumbent bootout; the offline mode has NO
+    # bootout to record and exactly one enable instead.
+    assert ccu.LIVE_EFFECTS[0].startswith("bootout ")
+    assert not any(effect.startswith("bootout ") for effect in ccu.OFFLINE_EFFECTS)
+    assert [effect for effect in ccu.OFFLINE_EFFECTS if effect.startswith("enable ")]
+    assert ccu.effects_for_mode("live") == ccu.LIVE_EFFECTS
+    assert ccu.effects_for_mode("offline") == ccu.OFFLINE_EFFECTS
+    with pytest.raises(ccu.ComponentError) as caught:
+        ccu.effects_for_mode("maintenance")
+    assert caught.value.code == "component_mode_invalid"
+
+
+def test_the_offline_mode_refuses_a_preimage_that_contradicts_the_mode():
+    candidate = ccu.Candidate(
+        target_sha=TARGET_SHA,
+        prior_sha=PRIOR_SHA,
+        control_config_before=b"{}",
+        control_config_after=b"{}",
+        control_plist_before=b"{}",
+        control_plist_after=b"{}",
+        worker_plist_before=b"{}",
+        worker_plist_after=b"{}",
+        worker_config_sha256="3" * 64,
+        changed_control_fields=("proof_base_sha",),
+    )
+    receipts = {
+        name: ccu.ReceiptPreimage(path="/x", present=True, sha256="0" * 64)
+        for name in ccu.RECEIPT_PREIMAGE_NAMES
+    }
+    # The offline mode requires the Control to be explicitly disabled.
+    with pytest.raises(ccu.ComponentError) as caught:
+        ccu.plan_document(
+            candidate, mode="offline",
+            preconditions={key: True for key in ccu.OFFLINE_PRECONDITIONS},
+            prior_release_manifest_sha256="1" * 64,
+            target_release_manifest_sha256="2" * 64,
+            admin_checkout_commit=TARGET_SHA,
+            receipts=receipts,
+            launchd_disabled={"control": False, "worker": True},
+        )
+    assert caught.value.code == "launchd_preimage_invalid"
+    # The Worker is disabled in BOTH modes.
+    with pytest.raises(ccu.ComponentError) as caught:
+        ccu.plan_document(
+            candidate, mode="live",
+            preconditions={key: True for key in ccu.LIVE_PRECONDITIONS},
+            prior_release_manifest_sha256="1" * 64,
+            target_release_manifest_sha256="2" * 64,
+            admin_checkout_commit=TARGET_SHA,
+            receipts=receipts,
+            launchd_disabled={"control": False, "worker": False},
+        )
+    assert caught.value.code == "launchd_preimage_invalid"
+
+
+def test_the_plan_binds_receipt_presence_and_exact_raw_digests(host):
+    document = ccu.plan(host, target_sha=TARGET_SHA)["plan"]
+    receipts = document["receipts"]
+    assert set(receipts) == set(ccu.RECEIPT_PREIMAGE_NAMES)
+    assert receipts["authority_receipt"]["present"] is True
+    assert receipts["authority_receipt"]["before_sha256"] == _sha(
+        host.files.read(AUTONOMY_RECEIPT))
+    assert receipts["ceo_submit_receipt"]["present"] is False
+    assert receipts["component_receipt"]["present"] is False
+    assert document["launchd_disabled"] == {"control": False, "worker": True}
+    assert document["mode"] == "live"
+
+
 # ---------------------------------------------------------------------------
 # The plan.
 # ---------------------------------------------------------------------------
@@ -579,9 +788,10 @@ def test_plan_is_read_only_and_carries_only_hashes_states_and_effects(host):
     assert result["outcome"] == "PLANNED"
     assert host.files.data == before
     document = result["plan"]
-    assert set(document["preconditions"]) == set(ccu.PRECONDITIONS)
+    assert set(document["preconditions"]) == set(ccu.LIVE_PRECONDITIONS)
     assert all(state is True for state in document["preconditions"].values())
-    assert document["effects"] == list(ccu.EFFECTS)
+    assert document["effects"] == list(ccu.EFFECTS if hasattr(ccu, "EFFECTS")
+                                       else ccu.LIVE_EFFECTS)
     assert document["target_sha"] == TARGET_SHA
     assert document["prior_sha"] == PRIOR_SHA
     # No installed configuration, token or credential content anywhere.
@@ -599,31 +809,43 @@ def test_plan_digest_is_bound_to_every_precondition(host):
     assert ccu.plan_digest(changed) != ccu.plan_digest(document)
 
 
+def test_plan_digest_is_bound_to_the_mode_and_the_launchd_preimages(host):
+    document = _plan(host)["plan"]
+    changed = copy.deepcopy(document)
+    changed["mode"] = "offline"
+    assert ccu.plan_digest(changed) != ccu.plan_digest(document)
+    changed = copy.deepcopy(document)
+    changed["launchd_disabled"]["worker"] = False
+    assert ccu.plan_digest(changed) != ccu.plan_digest(document)
+
+
 @pytest.mark.parametrize(
     "mutate,code",
     [
-        (lambda h: h.labels.__setitem__("com.mastermind.executive.worker.codex", True),
+        (lambda h: h.labels.__setitem__(WORKER, True),
          "control_component_worker_live"),
-        (lambda h: h.disabled.__setitem__("com.mastermind.executive.worker.codex", False),
+        (lambda h: h.disabled.__setitem__(WORKER, False),
          "control_component_worker_not_disabled"),
-        (lambda h: h.disabled.__setitem__("com.mastermind.executive.worker.codex", None),
+        (lambda h: h.disabled.__setitem__(WORKER, None),
          "control_component_worker_not_disabled"),
         (lambda h: setattr(h, "transaction_present", True),
          "control_component_transaction_occupied"),
         (lambda h: setattr(h, "quiescent", False),
          "control_component_owner_not_quiescent"),
-        (lambda h: setattr(h, "admin_checkout", "4" * 40),
-         "control_component_admin_checkout_unavailable"),
         (lambda h: h.release_seals.pop(TARGET_SHA),
          "control_component_release_seal_invalid"),
         (lambda h: setattr(h, "receipt", None),
          "control_component_authority_receipt_invalid"),
         (lambda h: h.receipt.__setitem__("state", "ARMED"),
          "control_component_authority_receipt_armed"),
-        (lambda h: h.labels.__setitem__("com.mastermind.executive.control", False),
-         "control_component_control_not_registered"),
-        (lambda h: h.disabled.__setitem__("com.mastermind.executive.control", True),
-         "control_component_control_disabled"),
+        # A Control that is absent but not explicitly disabled matches
+        # NEITHER closed mode.
+        (lambda h: h.labels.__setitem__(CONTROL, False),
+         "control_component_control_state_mixed"),
+        # A Control that is registered AND explicitly disabled matches
+        # NEITHER closed mode either.
+        (lambda h: h.disabled.__setitem__(CONTROL, True),
+         "control_component_control_state_mixed"),
     ],
 )
 def test_every_refusal_is_pre_effect_with_zero_cutover(host, mutate, code):
@@ -635,6 +857,18 @@ def test_every_refusal_is_pre_effect_with_zero_cutover(host, mutate, code):
     assert host.files.writes == []
     assert host.proofs == []
     assert host.closed is False
+
+
+def test_an_unqualified_interpreter_refuses_before_any_effect(host, monkeypatch):
+    def refuse(budget):
+        raise installed._refuse("SERVICE_RUNTIME_DIGEST_MISMATCH")
+
+    monkeypatch.setattr(installed, "_verify_python_runtime", refuse)
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        _plan(host)
+    assert caught.value.code == "control_component_interpreter_unqualified"
+    assert host.commands == []
+    assert host.files.writes == []
 
 
 def test_an_armed_control_flag_is_an_authority_refusal_not_a_transport_one(host):
@@ -692,7 +926,7 @@ def test_apply_preserves_every_nonallowed_field_and_the_worker_runtime(host, pub
     # The Worker configuration is never written.
     assert host.files.read(WORKER_CONFIG) == _canonical(before_worker)
     # The Worker daemon is never started, stopped, enabled or disarmed.
-    assert host.labels["com.mastermind.executive.worker.codex"] is False
+    assert host.labels[WORKER] is False
     assert not any("worker" in " ".join(command) for command in host.commands)
 
 
@@ -702,8 +936,8 @@ def test_apply_retargets_both_plists_to_the_target_release(host, publisher):
     worker = plistlib.loads(host.files.read(WORKER_PLIST))
     assert control["WorkingDirectory"] == TARGET_ROOT
     assert worker["WorkingDirectory"] == TARGET_ROOT
-    assert control["Label"] == "com.mastermind.executive.control"
-    assert worker["Label"] == "com.mastermind.executive.worker.codex"
+    assert control["Label"] == CONTROL
+    assert worker["Label"] == WORKER
     # The Worker plist keeps every non-release coordinate.
     assert control["UserName"] == "_mastermind_exec"
     assert worker["UserName"] == "_mastermind_worker"
@@ -745,17 +979,6 @@ def test_apply_refuses_a_wrong_consumed_config(host, publisher):
     # The marker and its preimages are retained: nothing was rolled back.
     assert host.closed is False
     assert host.files.data.get(os.fspath(ac.AUTONOMY_TRANSACTION / "transaction.json"))
-
-
-def test_apply_refuses_a_wrong_pid_or_old_wrapper(host, publisher):
-    # The consumed-config proof is the wrapper-attested one: it is the ONLY
-    # admission the update accepts, and the owner refuses without it.
-    host.proofs.clear()
-    host.admission_ok = False
-    with pytest.raises(ac.TransactionEffectUnknown):
-        _apply(host)
-    assert host.proofs == [(TARGET_SHA, host.proofs[0][1])] if host.proofs else True
-    assert host.proofs  # the proof was attempted with the exact new digest
 
 
 @pytest.mark.parametrize("lost", ["bootout", "bootstrap"])
@@ -816,8 +1039,356 @@ def test_the_worker_plist_is_retargeted_while_the_worker_stays_inert(host, publi
     _apply(host)
     worker = plistlib.loads(host.files.read(WORKER_PLIST))
     assert worker["WorkingDirectory"] == TARGET_ROOT
-    assert host.labels["com.mastermind.executive.worker.codex"] is False
-    assert host.disabled["com.mastermind.executive.worker.codex"] is True
+    assert host.labels[WORKER] is False
+    assert host.disabled[WORKER] is True
+
+
+# ---------------------------------------------------------------------------
+# The bound preimages and the receipt compare-and-swap.
+# ---------------------------------------------------------------------------
+
+
+def test_the_archive_holds_the_exact_original_receipt_bytes(host, publisher):
+    # The installed authority receipt is NOT canonically serialised.
+    original = json.dumps(host.receipt, indent=4).encode("utf-8")
+    host.files.write(AUTONOMY_RECEIPT, original)
+    _apply(host)
+    archived = host.files.read(
+        os.fspath(ac.AUTONOMY_TRANSACTION / "prior-component-autonomy-receipt.json"))
+    assert archived == original
+    assert archived != ac._encoded_json(host.receipt)
+    # The manifest binds the digest of the EXACT prior bytes.
+    assert host.manifest["component_prior_autonomy_receipt_sha256"] == _sha(original)
+    assert host.manifest["component_prior_autonomy_receipt_present"] is True
+
+
+def test_a_receipt_that_moved_after_the_seal_is_never_overwritten(host, publisher):
+    plan_sha256 = ccu.plan(host, target_sha=TARGET_SHA)["plan_sha256"]
+    # The authority receipt changes between the plan and the apply.
+    host.files.write(AUTONOMY_RECEIPT, ac._encoded_json(
+        dict(host.receipt, transaction_id="autonomy-999999999999")))
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        ccu.apply(host, target_sha=TARGET_SHA, plan_sha256=plan_sha256)
+    assert caught.value.code == "control_component_plan_digest_mismatch"
+    assert host.commands == []
+    assert host.closed is False
+
+
+def test_a_receipt_that_moves_after_the_marker_is_never_overwritten(host, publisher):
+    plan_sha256 = ccu.plan(host, target_sha=TARGET_SHA)["plan_sha256"]
+    original = ac._encoded_json(host.receipt)
+
+    class _Moving(ac.ProductionControlComponentHost):
+        pass
+
+    host_obj = host
+    original_publish = host_obj._publish_control_component_receipts
+
+    def move_then_publish(transaction):
+        # A later actor replaces the receipt between the seal and the
+        # publication.
+        host_obj.files.write(AUTONOMY_RECEIPT, b'{"moved": true}')
+        return original_publish(transaction)
+
+    host_obj._publish_control_component_receipts = move_then_publish
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ccu.apply(host, target_sha=TARGET_SHA, plan_sha256=plan_sha256)
+    # The moved receipt was NOT overwritten.
+    assert host_obj.files.read(AUTONOMY_RECEIPT) == b'{"moved": true}'
+    assert host_obj.closed is False
+    assert original != b'{"moved": true}'
+
+
+def test_the_component_receipt_is_never_overwritten_when_it_moved(host, publisher):
+    plan_sha256 = ccu.plan(host, target_sha=TARGET_SHA)["plan_sha256"]
+    host.files.write(COMPONENT_RECEIPT, b'{"unbound": true}')
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        ccu.apply(host, target_sha=TARGET_SHA, plan_sha256=plan_sha256)
+    assert caught.value.code == "control_component_plan_digest_mismatch"
+    assert host.files.read(COMPONENT_RECEIPT) == b'{"unbound": true}'
+    assert host.commands == []
+
+
+# ---------------------------------------------------------------------------
+# The interpreter qualification and the stopped boundary.
+# ---------------------------------------------------------------------------
+
+
+def test_the_interpreter_is_qualified_and_rechecked_before_the_first_effect(
+        host, publisher):
+    plan_sha256 = ccu.plan(host, target_sha=TARGET_SHA)["plan_sha256"]
+    host.interpreter_calls["verify"].clear()
+    host.interpreter_calls["recheck"].clear()
+    ccu.apply(host, target_sha=TARGET_SHA, plan_sha256=plan_sha256)
+    verify = host.interpreter_calls["verify"]
+    recheck = host.interpreter_calls["recheck"]
+    assert len(verify) == 1
+    assert len(recheck) == 1
+    # The SAME budget is used for the observation and the recheck.
+    assert recheck[0][1] is verify[0]
+    assert isinstance(verify[0], installed._Budget)
+    # The recheck happened before the first dispatched effect.
+    assert recheck[0][2] == 0
+    assert host.commands
+
+
+def test_the_reconcile_qualifies_the_runtime_freshly(host, publisher):
+    _apply(host)
+    host.interpreter_calls["verify"].clear()
+    host.interpreter_calls["recheck"].clear()
+    host.closed = False
+    ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert len(host.interpreter_calls["verify"]) == 1
+    assert len(host.interpreter_calls["recheck"]) == 1
+    assert host.interpreter_calls["recheck"][0][1] is (
+        host.interpreter_calls["verify"][0])
+
+
+def test_the_stopped_boundary_proves_the_service_uid_census(host, publisher):
+    _apply(host)
+    # The census is observed at the stopped boundary, after the bootout and
+    # before the first publication.
+    assert host.census_observed_at
+    bootout = [c for c in host.commands if "bootout" in c]
+    assert host.census_observed_at[0] == host.commands.index(bootout[0]) + 1
+
+
+def test_a_live_service_uid_at_the_stopped_boundary_refuses(host, publisher,
+                                                            monkeypatch):
+    monkeypatch.setattr(ac, "_CONTROL_COMPONENT_UID_CENSUS_TIMEOUT", 0.0)
+    host.service_uids_quiescent = False
+    with pytest.raises(ac.TransactionEffectUnknown):
+        _apply(host)
+    # The transaction is retained; nothing was rolled back.
+    assert host.closed is False
+    assert host.files.data.get(
+        os.fspath(ac.AUTONOMY_TRANSACTION / "transaction.json")) is not None
+
+
+def test_the_stopped_boundary_waits_within_one_bounded_window(host, publisher,
+                                                              monkeypatch):
+    monkeypatch.setattr(ac, "_CONTROL_COMPONENT_UID_CENSUS_TIMEOUT", 5.0)
+    host.service_uid_failures = 1
+    _apply(host)
+    # The census was observed again after the first live observation.
+    assert len(host.census_observed_at) >= 2
+    assert host.closed is True
+
+
+# ---------------------------------------------------------------------------
+# The offline mode.
+# ---------------------------------------------------------------------------
+
+
+def _offline(host_obj):
+    """The closed offline input state: both absent and explicitly disabled."""
+
+    host_obj.labels[CONTROL] = False
+    host_obj.disabled[CONTROL] = True
+    host_obj.labels[WORKER] = False
+    host_obj.disabled[WORKER] = True
+    return host_obj
+
+
+def test_the_offline_mode_is_selected_and_bound_by_the_plan(host):
+    _offline(host)
+    document = ccu.plan(host, target_sha=TARGET_SHA)["plan"]
+    assert document["mode"] == "offline"
+    assert document["launchd_disabled"] == {"control": True, "worker": True}
+    assert set(document["preconditions"]) == set(ccu.OFFLINE_PRECONDITIONS)
+    assert document["effects"] == list(ccu.OFFLINE_EFFECTS)
+
+
+def test_the_offline_mode_skips_the_bootout_and_records_no_bootout_history(
+        host, publisher):
+    _offline(host)
+    result = _apply(host)
+    assert result["outcome"] == "UPDATED"
+    assert not any("bootout" in " ".join(command) for command in host.commands)
+    assert "CONTROL_BOOTOUT_RECORDED" not in host.phases
+    assert "CONTROL_ABSENT_PROVEN" in host.phases
+    assert host.closed is True
+
+
+def test_the_offline_mode_enables_once_before_the_single_bootstrap(host, publisher):
+    _offline(host)
+    _apply(host)
+    enables = [c for c in host.commands if "enable" in c]
+    bootstraps = [c for c in host.commands if "bootstrap" in c]
+    assert len(enables) == 1
+    assert len(bootstraps) == 1
+    assert host.commands.index(enables[0]) < host.commands.index(bootstraps[0])
+    assert host.phases.index("CONTROL_ENABLE_RECORDED") < host.phases.index(
+        "CONTROL_BOOTSTRAP_RECORDED")
+    assert "CONTROL_ENABLED_PROVEN" in host.phases
+
+
+def test_the_offline_mode_preserves_the_worker(host, publisher):
+    _offline(host)
+    before = host.files.read(WORKER_CONFIG)
+    _apply(host)
+    assert host.files.read(WORKER_CONFIG) == before
+    assert host.labels[WORKER] is False
+    assert host.disabled[WORKER] is True
+    assert not any(WORKER in " ".join(command) for command in host.commands)
+
+
+def test_the_offline_mode_refuses_a_mixed_control_boundary(host):
+    # Absent but NOT explicitly disabled: neither closed mode.
+    host.labels[CONTROL] = False
+    host.disabled[CONTROL] = False
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        _plan(host)
+    assert caught.value.code == "control_component_control_state_mixed"
+    assert host.commands == []
+
+
+def test_the_offline_mode_refuses_a_registered_and_disabled_control(host):
+    host.labels[CONTROL] = True
+    host.disabled[CONTROL] = True
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        _plan(host)
+    assert caught.value.code == "control_component_control_state_mixed"
+    assert host.commands == []
+
+
+def test_an_unknown_worker_state_refuses_before_any_effect(host):
+    host.disabled[WORKER] = None
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        _plan(host)
+    assert caught.value.code == "control_component_worker_not_disabled"
+    assert host.commands == []
+
+
+def test_an_absent_launchd_row_is_the_default_enabled_state(host, publisher):
+    # The Control label carries no persistent override row at all: launchd's
+    # default is enabled, which is the live mode.  The row's ABSENCE is not
+    # an unknown state, and it is not the same state as being disabled.
+    host.disabled[CONTROL] = None
+    document = ccu.plan(host, target_sha=TARGET_SHA)["plan"]
+    assert document["mode"] == "live"
+    assert document["launchd_disabled"]["control"] is False
+    _apply(host)
+    assert host.closed is True
+
+
+def test_a_lost_enable_response_retains_the_original_transaction(host, publisher):
+    _offline(host)
+    plan_sha256 = ccu.plan(host, target_sha=TARGET_SHA)["plan_sha256"]
+    host.fail_after = {"enable"}
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ccu.apply(host, target_sha=TARGET_SHA, plan_sha256=plan_sha256)
+    assert len([c for c in host.commands if "enable" in c]) == 1
+    assert host.closed is False
+    assert host.files.data.get(
+        os.fspath(ac.AUTONOMY_TRANSACTION / "transaction.json")) is not None
+
+
+# ---------------------------------------------------------------------------
+# A refusal after the effect boundary.
+# ---------------------------------------------------------------------------
+
+
+def test_a_refusal_after_the_effect_boundary_retains_the_transaction(host,
+                                                                    publisher):
+    plan_sha256 = ccu.plan(host, target_sha=TARGET_SHA)["plan_sha256"]
+    original = host._component_receipt_cas
+
+    def refuse_cas(path, *, prior_field):
+        raise ac.ComponentUpdateRefused("control_component_receipt_preimage_mismatch")
+
+    host._component_receipt_cas = refuse_cas
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        ccu.apply(host, target_sha=TARGET_SHA, plan_sha256=plan_sha256)
+    assert caught.value.code == "control_component_receipt_preimage_mismatch"
+    # The original transaction is retained and the phase is named: this is
+    # NOT a zero-effect refusal.
+    assert caught.value.incomplete is True
+    assert caught.value.transaction_id is not None
+    assert caught.value.phase is not None
+    assert host.closed is False
+    assert host.files.data.get(
+        os.fspath(ac.AUTONOMY_TRANSACTION / "transaction.json")) is not None
+    assert original is not refuse_cas
+
+
+def test_the_target_source_is_rechecked_under_the_claimed_transaction(host,
+                                                                      publisher,
+                                                                      monkeypatch):
+    plan_sha256 = ccu.plan(host, target_sha=TARGET_SHA)["plan_sha256"]
+    original_create = host._create_marker
+
+    def create_then_move(transaction, *, operation):
+        original_create(transaction, operation=operation)
+        # The administrative checkout moves after the marker was claimed.
+        monkeypatch.setattr(ac, "_CONTROL_ADMIN_CHECKOUT_ROOT", _ADMIN_ROOT / "gone")
+
+    host._create_marker = create_then_move
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        ccu.apply(host, target_sha=TARGET_SHA, plan_sha256=plan_sha256)
+    assert caught.value.code == "control_component_admin_checkout_unavailable"
+    # The original transaction is retained and no effect was dispatched.
+    assert caught.value.incomplete is True
+    assert host.commands == []
+    assert host.closed is False
+
+
+def test_the_target_seal_is_rechecked_under_the_claimed_transaction(host,
+                                                                   publisher):
+    plan_sha256 = ccu.plan(host, target_sha=TARGET_SHA)["plan_sha256"]
+    original_create = host._create_marker
+
+    def create_then_move(transaction, *, operation):
+        original_create(transaction, operation=operation)
+        host.release_seals[TARGET_SHA] = "9" * 64
+
+    host._create_marker = create_then_move
+    # The sealed target release moved after the marker was claimed: the
+    # original transaction is retained and the outcome is uncertain.
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ccu.apply(host, target_sha=TARGET_SHA, plan_sha256=plan_sha256)
+    assert host.commands == []
+    assert host.closed is False
+
+
+def test_the_cli_reports_a_post_effect_refusal_as_incomplete(host, capsys):
+    import argparse
+    from datetime import datetime, timezone
+
+    plan_sha256 = ccu.plan(host, target_sha=TARGET_SHA)["plan_sha256"]
+
+    def refuse_cas(path, *, prior_field):
+        raise ac.ComponentUpdateRefused("control_component_receipt_preimage_mismatch")
+
+    host._component_receipt_cas = refuse_cas
+    args = argparse.Namespace(
+        command="apply-control-component", expected_sha=TARGET_SHA,
+        plan_sha256=plan_sha256)
+    code = ac._run_control_component_command(
+        host, args, now=datetime.now(timezone.utc))
+    assert code == 2
+    document = json.loads(capsys.readouterr().out)
+    assert document["outcome"] == "INCOMPLETE"
+    assert document["code"] == "control_component_receipt_preimage_mismatch"
+    assert document["transaction_id"]
+    assert document["phase"]
+
+
+def test_the_cli_reports_a_zero_effect_refusal_as_refused(host, capsys):
+    import argparse
+    from datetime import datetime, timezone
+
+    host.labels[WORKER] = True
+    args = argparse.Namespace(
+        command="plan-control-component", expected_sha=TARGET_SHA,
+        plan_sha256="0" * 64)
+    code = ac._run_control_component_command(
+        host, args, now=datetime.now(timezone.utc))
+    assert code == 1
+    document = json.loads(capsys.readouterr().out)
+    assert document["outcome"] == "REFUSED"
+    assert document["code"] == "control_component_worker_live"
+    assert "phase" not in document
 
 
 # ---------------------------------------------------------------------------
@@ -839,7 +1410,8 @@ def test_reconcile_refuses_a_marker_of_another_operation(host, publisher):
         ccu.reconcile(host, target_sha=TARGET_SHA)
 
 
-def test_reconcile_proves_the_retained_postimages_and_closes_the_marker(host, publisher):
+def test_reconcile_proves_the_retained_postimages_and_closes_the_marker(host,
+                                                                      publisher):
     _apply(host)
     host.closed = False
     host.phases = []
@@ -879,6 +1451,87 @@ def test_reconcile_refuses_a_target_that_is_not_at_its_postimage(host, publisher
     _apply(host)
     host.closed = False
     host.files.write(CONTROL_PLIST, plistlib.dumps(_control_plist(PRIOR_ROOT)))
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert host.closed is False
+
+
+def test_reconcile_refuses_a_target_whose_seal_moved(host, publisher):
+    _apply(host)
+    host.closed = False
+    host.release_seals[TARGET_SHA] = "9" * 64
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert host.closed is False
+
+
+def test_reconcile_refuses_a_target_whose_admin_checkout_moved(host, publisher,
+                                                              monkeypatch):
+    _apply(host)
+    host.closed = False
+    monkeypatch.setattr(
+        ac, "_CONTROL_ADMIN_CHECKOUT_ROOT", ac._CONTROL_ADMIN_CHECKOUT_ROOT / "gone")
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert host.closed is False
+
+
+def test_reconcile_refuses_a_retained_receipt_that_moved(host, publisher):
+    _apply(host)
+    host.closed = False
+    host.files.write(AUTONOMY_RECEIPT, b'{"moved": true}')
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert host.closed is False
+
+
+def test_reconcile_refuses_a_worker_that_came_back(host, publisher):
+    _apply(host)
+    host.closed = False
+    host.labels[WORKER] = True
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert host.closed is False
+
+
+def test_reconcile_refuses_a_component_receipt_that_is_not_there(host, publisher):
+    _apply(host)
+    host.closed = False
+    host.files.data.pop(os.fspath(ac.CONTROL_COMPONENT_RECEIPT))
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert host.closed is False
+
+
+def test_reconcile_refuses_a_component_receipt_that_moved(host, publisher):
+    _apply(host)
+    host.closed = False
+    host.files.write(COMPONENT_RECEIPT, b'{"unbound": true}')
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert host.closed is False
+    # The unbound later receipt was not overwritten.
+    assert host.files.read(COMPONENT_RECEIPT) == b'{"unbound": true}'
+
+
+def test_reconcile_never_replays_a_recorded_lifecycle_action(host, publisher):
+    _apply(host)
+    host.closed = False
+    before = [list(command) for command in host.commands]
+    ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert host.commands == before
+
+
+def test_reconcile_refuses_an_unqualified_runtime(host, publisher, monkeypatch):
+    _apply(host)
+    host.closed = False
+
+    def refuse(budget):
+        raise installed._refuse("SERVICE_RUNTIME_DIGEST_MISMATCH")
+
+    monkeypatch.setattr(installed, "_verify_python_runtime", refuse)
+    # The original transaction is retained and nothing is replayed: a
+    # reconciliation that cannot freshly qualify the runtime is uncertain.
     with pytest.raises(ac.TransactionEffectUnknown):
         ccu.reconcile(host, target_sha=TARGET_SHA)
     assert host.closed is False
@@ -946,7 +1599,8 @@ def test_the_observation_publisher_still_requires_the_genuine_held_owner(host):
         control_observation.publish_for_transaction(host, transaction)
 
 
-def test_the_component_manifest_is_accepted_by_the_incumbent_validator(host, tmp_path,
+def test_the_component_manifest_is_accepted_by_the_incumbent_validator(host,
+                                                                      tmp_path,
                                                                       monkeypatch):
     marker = tmp_path / "autonomy-transaction.lock"
     marker.mkdir(mode=0o700)
@@ -977,9 +1631,14 @@ def test_the_component_manifest_is_accepted_by_the_incumbent_validator(host, tmp
     host._component_observed_at = "2026-01-01T00:00:00Z"
     host._component_target_autonomy_bytes = b"{}"
     host._component_target_ceo_bytes = b""
+    host._component_target_component_bytes = b"{}"
+    host._component_mode_bound = ac._COMPONENT_LIVE_MODE
+    host._component_control_launchd_disabled = False
+    host._component_worker_launchd_disabled = True
     host._component_prior_archives = {
         "prior-component-autonomy-receipt.json": b"{}",
         "prior-component-ceo-submit-receipt.json": b"",
+        "prior-component-receipt.json": b"",
         "prior-control-plist.plist": b"{}",
         "prior-worker-plist.plist": b"{}",
     }
@@ -999,6 +1658,65 @@ def test_the_component_manifest_is_accepted_by_the_incumbent_validator(host, tmp
     assert value["operation"] == ac.CONTROL_COMPONENT_UPDATE
     assert ac._COMPONENT_MANIFEST_FIELDS <= set(value)
     assert value["component_plan_sha256"] == "8" * 64
+    assert value["component_mode"] == ac._COMPONENT_LIVE_MODE
+
+
+def test_the_component_manifest_refuses_a_mode_that_contradicts_its_preimages(
+        host, tmp_path, monkeypatch):
+    marker = tmp_path / "autonomy-transaction.lock"
+    marker.mkdir(mode=0o700)
+    transaction = ac.TransactionContext(
+        transaction_id="autonomy-000000000000",
+        expected_sha=TARGET_SHA,
+        prior_configs=ac.ConfigEvidence(
+            control_sha256="5" * 64, worker_sha256="6" * 64,
+            control={}, worker={}, control_bytes=b"{}", worker_bytes=b"{}"),
+        candidates=ac.CandidateConfigs(
+            control={}, worker={}, control_bytes=b"{}", worker_bytes=b"{}",
+            control_sha256="7" * 64, worker_sha256="6" * 64),
+        admission=None,
+    )
+    host._component_candidate = ccu.compile_candidate(
+        host.control_raw,
+        plistlib.dumps(_control_plist(PRIOR_ROOT)),
+        plistlib.dumps(_worker_plist(PRIOR_ROOT)),
+        target_sha=TARGET_SHA,
+        prior_sha=PRIOR_SHA,
+        worker_config_sha256="6" * 64,
+        prior_release_root=PRIOR_ROOT,
+        target_release_root=TARGET_ROOT,
+    )
+    host._component_plan_sha256 = "8" * 64
+    host._component_prior_seal = "9" * 64
+    host._component_target_seal = "a" * 64
+    host._component_observed_at = "2026-01-01T00:00:00Z"
+    host._component_target_autonomy_bytes = b"{}"
+    host._component_target_ceo_bytes = b""
+    host._component_target_component_bytes = b"{}"
+    host._component_mode_bound = ac._COMPONENT_OFFLINE_MODE
+    host._component_control_launchd_disabled = False
+    host._component_worker_launchd_disabled = True
+    host._component_prior_archives = {
+        "prior-component-autonomy-receipt.json": b"{}",
+        "prior-component-ceo-submit-receipt.json": b"",
+        "prior-component-receipt.json": b"",
+        "prior-control-plist.plist": b"{}",
+        "prior-worker-plist.plist": b"{}",
+    }
+    document = host._manifest_document(
+        transaction, "LOCKED", operation=ac.CONTROL_COMPONENT_UPDATE)
+    (marker / ac._TRANSACTION_MANIFEST_NAME).write_bytes(
+        ac._encoded_json(document))
+    monkeypatch.setattr(ac, "AUTONOMY_TRANSACTION", marker)
+    monkeypatch.setattr(
+        ac, "_root_json",
+        lambda path, **kwargs: (
+            json.loads(Path(path).read_text(encoding="utf-8")),
+            Path(path).read_bytes(),
+        ),
+    )
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ac.ProductionTransactionHost._manifest(host)
 
 
 # ---------------------------------------------------------------------------
@@ -1045,7 +1763,7 @@ def test_install_exposes_the_admin_checkout_staging_option():
     boundary = source.index("# Cross the mutation boundary only after")
     assert staging < boundary
     # The existing release staging option still returns before the admin
-    # checkout preparation.
+    # checkout is prepared.
     release_dispatch = source.index("# --- BEGIN stage-only dispatch ---")
     preparation = source.index("# --- BEGIN administrative checkout preparation ---")
     assert release_dispatch > preparation
@@ -1058,3 +1776,18 @@ def test_install_exposes_the_admin_checkout_staging_option():
     # The reviewed normalizer is still the one that proves the closure.
     assert "admin_checkout.py\" normalize" in function
     assert "--expected-commit \"$EXPECTED_SHA\"" in function
+
+
+def test_the_administrative_checkout_is_read_by_the_control_principal():
+    # The Git observation is made AS the Control principal: Git refuses a
+    # repository owned by another principal, and no safe.directory or other
+    # trust exception is ever granted.
+    argv = ac._component_git_argv(Path("/var/db/x"), "rev-parse", "HEAD")
+    assert argv[0] == "/usr/bin/sudo"
+    assert argv[1] == "-u"
+    assert argv[2] == ac.CONTROL_USER
+    assert "/usr/bin/git" in argv
+    assert not any("safe.directory" in token for token in argv)
+    assert "GIT_CONFIG_GLOBAL=/dev/null" in argv
+    assert "GIT_CONFIG_NOSYSTEM=1" in argv
+    assert "GIT_TERMINAL_PROMPT=0" in argv
