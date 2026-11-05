@@ -34,7 +34,7 @@ PINS = {
     "candidate/go_lease_gateway.py": "7eb74e2a9a18d3c6a1ad1f51ed198bd0e32bcdeb",
     "candidate/go_lease_capability.py": "13e6b2d43cbb2933512e6e46d27a431e7813af88",
     "candidate/application_http_transports.py": "b0b8404b45dd0a3e73a34430c2ef3a28b1edbf6d",
-    "candidate/provider_outcome.py": "4236303eb3abfa7c9dcad4d3e1a5454f15600c98",
+    "candidate/provider_outcome.py": "981f35a01183e83fdb9f0b8a4175b290cdeb85f8",
     "candidate/quota_circuit.py": "1583a6ba773e56dbc3f295b65ffc08dea2d31d48",
     "source/model_tier.py": "96093c2747d2dda69b3f2255cb84e656355c87ea",
     "source/pool_status.py": "02922043357d63b4bcfa3791899df27a5c42be12",

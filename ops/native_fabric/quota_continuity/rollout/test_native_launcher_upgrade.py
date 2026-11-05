@@ -119,7 +119,7 @@ APPLICATION_PREIMAGES = {
 
 
 def verify_current_stage(output):
-    """Qualify the current102 build before restoring any historical bytes."""
+    """Qualify the current104 build before restoring any historical bytes."""
     native = Path(builder.__file__).parent.parent
     manifest_raw = (output / 'native-manifest.json').read_bytes()
     inventory_raw = (output / 'native-source-inventory.json').read_bytes()
@@ -128,7 +128,7 @@ def verify_current_stage(output):
     manifest = json.loads(manifest_raw)
     inventory = json.loads(inventory_raw)
     if (manifest_raw != baseline_raw or inventory_raw != baseline_inventory_raw
-            or len(manifest) != 102
+            or len(manifest) != 104
             or set(manifest) != {'ext/' + name for name in builder.BASE_FILES | builder.ADDITIONS} | {'pool'}
             or set(inventory['files']) != set(manifest)
             or inventory['native_code_files'] != len(manifest)):
@@ -179,7 +179,8 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 raise AssertionError('historical95 fixture bytes changed')
             retained = json.loads(raw)
             old = retained['manifest']
-            removed = set(retained['removed_current_members'])
+            removed = set(retained['removed_current_members']) | {
+                'ext/post_failure_observation.py', 'ext/post_failure_observation_delivery.py'}
             if (retained['schema'] != 'mastermind.test_native_paired_historical95/v1'
                     or set(cls.manifest) - set(old) != removed or set(old) - set(cls.manifest)
                     or len(old) != 95 or retained['historical_manifest_sha256'] != installer.UPGRADE_MANIFEST):
@@ -228,11 +229,28 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 if len(payload)!=item['bytes'] or g.digest(payload)!=item['sha256'] or item['sha256']!=old[name]:
                     raise AssertionError('historical95 diagnostic preimage differs')
                 (cls.built/'native-code-stage'/name).write_bytes(payload)
+            # PR2097 changed precisely these two original95 members. Restore
+            # authentic protected candidate bytes only in the disposable owner;
+            # source/ preimages are a different generation and are not valid.
+            observer_raw = fixture.with_name('native-observer-historical95-48ca.json').read_bytes()
+            if g.digest(observer_raw) != '0dd81a279641b9c456ef94439d519d97f7670ec18831f5bd78f69bcdd710b3b2':
+                raise AssertionError('historical observer fixture changed')
+            observer = json.loads(observer_raw)
+            if (observer['schema'] != 'mastermind.test_native_observer_historical95/v1'
+                    or observer['source_commit'] != '48ca51f882338c58e377a0acf16931066c703384'
+                    or set(observer['files']) != {'ext/run_observation.py', 'ext/run_observation_delivery.py'}):
+                raise AssertionError('historical observer fixture scope differs')
+            for name,item in observer['files'].items():
+                payload = zlib.decompress(base64.b64decode(item['zlib_base64'],validate=True))
+                if len(payload) != item['bytes'] or g.digest(payload) != item['sha256'] or item['sha256'] != old[name]:
+                    raise AssertionError('historical95 observer preimage differs')
+                (cls.built/'native-code-stage'/name).write_bytes(payload)
             # Pinned finite long-horizon forward deltas are not historical95
             # bytes. Restore ONLY these named changed members inside this
             # disposable historical fixture; retain original SHA checks.
             native_root = Path(builder.__file__).parent.parent
             baseline_sources = {
+                'ext/artifact_delivery.py': native_root.parent / 'grok47/overlay/artifact_delivery.py',
                 'ext/fabric_operator_contract.py': native_root.parent / 'grok47/overlay/fabric_operator_contract.py',
                 'ext/native_remote.py': native_root.parent / 'grok47/overlay/native_remote.py',
                 'ext/sub.sh': native_root.parent / 'grok47/overlay/sub.sh',
@@ -285,7 +303,7 @@ class PairedLauncherUpgrade(unittest.TestCase):
             cls.manifest = old
             for name,wanted in cls.manifest.items():
                 if g.digest((cls.built / 'native-code-stage' / name).read_bytes()) != wanted:
-                    raise AssertionError('historical95 full payload differs')
+                    raise AssertionError('historical95 full payload differs: '+name)
             historical_manifest = (json.dumps(cls.manifest,sort_keys=True,indent=2)+'\n').encode()
             if g.digest(historical_manifest) != installer.UPGRADE_MANIFEST:
                 raise AssertionError('historical paired-upgrade manifest differs')

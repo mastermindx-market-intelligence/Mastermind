@@ -105,11 +105,11 @@ def loaded_entry(published, *, clean_yaml=False):
         sys.path[:] = path_before
 
 
-def test_default_build_stays_exact_reviewed_102_and_go_adds_only_the_fixed_pair(builds):
+def test_default_build_stays_exact_reviewed_104_and_go_adds_only_the_fixed_pair(builds):
     default_raw = (builds.default / "native-manifest.json").read_bytes()
     default = json.loads(default_raw)
     application = json.loads((builds.application / "native-manifest.json").read_bytes())
-    assert len(default) == 102
+    assert len(default) == 104
     captured = {name: g.digest((ROOT / "candidate" / name).read_bytes())
                 for name in builder.GO_APPLICATION_DEPENDENCIES}
     builder.validate_go_base_manifest(default, captured)
@@ -120,10 +120,16 @@ def test_default_build_stays_exact_reviewed_102_and_go_adds_only_the_fixed_pair(
     historical.update({"ext/" + name: value for name, value in builder.GO_SELECTION_SUPPORT_PREIMAGES.items()})
     assert default["ext/provider_outcome.py"] == builder.GO_PROTECTED_PROVIDER_OUTCOME_SHA256
     historical["ext/provider_outcome.py"] = builder.GO_BASE_PROVIDER_OUTCOME_SHA256
+    for name, original in builder.GO_POST_FAILURE_PREIMAGES.items():
+        assert default["ext/" + name] == builder.GO_POST_FAILURE_DIGESTS[name]
+        historical["ext/" + name] = original
+    for name, digest in builder.GO_POST_FAILURE_ADDITIONS.items():
+        assert default["ext/" + name] == digest
+        del historical["ext/" + name]
     assert g.digest((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) == builder.GO_BASE_MANIFEST_SHA256
     assert {k: v for k, v in application.items() if k in default} == default
     assert set(application) - set(default) == {g.GO_ENTRY, g.GO_HANDLER}
-    assert len(application) == 104
+    assert len(application) == 106
     inventory = json.loads((builds.application / "native-source-inventory.json").read_bytes())
     component = json.loads((builds.application / "external-go-component/component.json").read_bytes())
     assert component["native_stage_dependencies"] == {n: application["ext/" + n] for n in builder.GO_APPLICATION_DEPENDENCIES}
@@ -156,7 +162,7 @@ def test_exact_historical_picker_remains_a_valid_base_but_no_arbitrary_fourth_me
         builder.validate_go_base_manifest(bad, captured)
 
 
-@pytest.mark.parametrize("corruption", ["handler", "dependency", "base", "picker", "provider-outcome", "other-member", "entry-symlink"])
+@pytest.mark.parametrize("corruption", ["handler", "dependency", "base", "picker", "provider-outcome", "post-failure", "other-member", "entry-symlink"])
 def test_closed_component_drift_refuses_before_go_pair_creation(builds, tmp_path, corruption):
     output = tmp_path / "copy"
     shutil.copytree(builds.default, output)
@@ -174,6 +180,8 @@ def test_closed_component_drift_refuses_before_go_pair_creation(builds, tmp_path
         manifest["ext/pick.py"] = "0" * 64
     elif corruption == "provider-outcome":
         manifest["ext/provider_outcome.py"] = "0" * 64
+    elif corruption == "post-failure":
+        manifest["ext/post_failure_observation.py"] = "0" * 64
     elif corruption == "other-member":
         manifest["ext/model_tier.py"] = "0" * 64
     else:
@@ -184,3 +192,34 @@ def test_closed_component_drift_refuses_before_go_pair_creation(builds, tmp_path
         builder.compose_go_stage(root, output, manifest, inventory["files"], component)
     assert not (output / "native-code-stage" / g.GO_ENTRY).exists()
     assert not (output / "native-code-stage" / g.GO_HANDLER).exists()
+
+def test_exact_post_failure_cohort_and_prior_102_are_both_closed(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    prior = dict(current)
+    for name, original in builder.GO_POST_FAILURE_PREIMAGES.items():
+        prior["ext/" + name] = original
+    for name in builder.GO_POST_FAILURE_ADDITIONS:
+        del prior["ext/" + name]
+    assert len(prior) == 102
+    builder.validate_go_base_manifest(prior, captured)
+    members = set(builder.GO_POST_FAILURE_PREIMAGES) | set(builder.GO_POST_FAILURE_ADDITIONS)
+    for name in members:
+        bad = dict(current)
+        bad["ext/" + name] = "f" * 64
+        with pytest.raises(ValueError):
+            builder.validate_go_base_manifest(bad, captured)
+    for name in builder.GO_POST_FAILURE_ADDITIONS:
+        partial = dict(current)
+        del partial["ext/" + name]
+        with pytest.raises(ValueError):
+            builder.validate_go_base_manifest(partial, captured)
+    missing_both = {k: v for k, v in current.items()
+                    if k not in {"ext/" + n for n in builder.GO_POST_FAILURE_ADDITIONS}}
+    with pytest.raises(ValueError):
+        builder.validate_go_base_manifest(missing_both, captured)
+    mixed = dict(current)
+    name = next(iter(builder.GO_POST_FAILURE_PREIMAGES))
+    mixed["ext/" + name] = builder.GO_POST_FAILURE_PREIMAGES[name]
+    with pytest.raises(ValueError):
+        builder.validate_go_base_manifest(mixed, captured)

@@ -38,7 +38,8 @@ ADDITIONS = frozenset({"host_pull_daemon.sh", "host_pull_launchd.plist.template"
                       "capacity_preflight.py", "provider_outcome.py", "native_runtime_bindings.py",
                       "paid_controller_channel.py", "paid_glm_model_client.py", "paid_model_owner.py",
                       "linux_process_identity.py", "paid_controller_spawn.py", "paid_incumbent_state.py", "paid_host_qualification.py", "paid_initializer.py", "paid_initializer_token_data.py", "paid_initializer_nested_data.py", "paid_yaml_runtime.py", "paid_pyyaml_6_0_3.zip", "paid_pyyaml_provenance.json",
-                      "commission_deadline.py", "current_source_observation.py", "native_plain_packet_check.py", "native_plain_packet_reconcile.py"})
+                      "commission_deadline.py", "current_source_observation.py", "native_plain_packet_check.py", "native_plain_packet_reconcile.py",
+                      "post_failure_observation.py", "post_failure_observation_delivery.py"})
 # The retired credential-to-stdout helper is audit evidence only. It must never
 # be importable from source/ or selected as a runtime fallback. Its exact bytes
 # still have to match the installed preimage before the secure overlay is used.
@@ -64,6 +65,7 @@ GROK47_MERGED_SOURCE_DIGESTS = {
 # Grok bases above as well as the
 # closed composed candidate bytes; neither source may silently replace the other.
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
+    'artifact_delivery.py': '81749610b8afd7151dbadb4cbcedbef853fc18ad9de9364fd3b2b1d747d535b1',
     'remote_sub_exec.py': '9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1',
     'pick.py': '5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892',
     'remote_sub.sh': 'a1e271170778f992cf07c780234620c22d17f6242581311c414e30dd428ade40',
@@ -114,8 +116,25 @@ GO_SELECTION_SUPPORT_DIGESTS = {
 }
 
 
+# Exact protected95e diagnostic cohort: three replacements and two additions.
+GO_POST_FAILURE_PREIMAGES = {
+    "artifact_delivery.py": "447ab9d65264f46acfe5662d60e38c1f4db97198afc9113c2717109e298db9c3",
+    "run_observation.py": "0984a7a221e7d79e30e3c0c0a7cb7425e9f762d73f2946df1d28283f36f85809",
+    "run_observation_delivery.py": "eba658de92294a833108c83804c2b237ef9be0356bbc0158ff5709755e8bb147"
+}
+GO_POST_FAILURE_DIGESTS = {
+    "artifact_delivery.py": "81749610b8afd7151dbadb4cbcedbef853fc18ad9de9364fd3b2b1d747d535b1",
+    "run_observation.py": "cbe4b0b4db3783e44d9cc442ab973996e8b5102c178ab61e172bfd0aae7accfb",
+    "run_observation_delivery.py": "c18ab07723b42a8dece4c072256ad161384508f65bac44bbb9781948710f675b"
+}
+GO_POST_FAILURE_ADDITIONS = {
+    "post_failure_observation.py": "2a78630ccaf574da752c77d7b8f821723ccb264b970e2fe38b1976d886ca97a0",
+    "post_failure_observation_delivery.py": "0e096d439e71600a20aabd6f29ea94127596ab3c1a4fb31d567194eba145c7f3"
+}
+
+
 def validate_go_base_manifest(manifest, dependency_hashes):
-    """Accept historical102, captured A3, and exact selection compositions.
+    """Accept exact historical102/current104 and captured application compositions.
 
     Both the builder and installer compare A3 with their reviewed source
     component first. The picker successor is independently source-pinned by
@@ -125,11 +144,24 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     Every other member/key stays bound to actual395b.
     """
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
-    if (type(manifest) is not dict or set(manifest) != expected
+    prior_expected = expected - {"ext/" + name for name in GO_POST_FAILURE_ADDITIONS}
+    if (type(manifest) is not dict
+            or frozenset(manifest) not in (frozenset(expected), frozenset(prior_expected))
             or type(dependency_hashes) is not dict
             or set(dependency_hashes) != set(GO_APPLICATION_DEPENDENCIES)):
         raise ValueError("native Go base dependency closure differs")
     historical = dict(manifest)
+    current_diagnostics = set(manifest) == expected
+    for name, original in GO_POST_FAILURE_PREIMAGES.items():
+        exact = GO_POST_FAILURE_DIGESTS[name] if current_diagnostics else original
+        if manifest["ext/" + name] != exact:
+            raise ValueError("native Go post-failure cohort is not the exact protected source")
+        historical["ext/" + name] = original
+    for name, digest in GO_POST_FAILURE_ADDITIONS.items():
+        if current_diagnostics:
+            if manifest["ext/" + name] != digest:
+                raise ValueError("native Go post-failure member differs")
+            del historical["ext/" + name]
     for name, original in GO_BASE_DEPENDENCIES.items():
         if manifest["ext/" + name] != dependency_hashes[name]:
             raise ValueError("native Go base differs from captured application dependency")
