@@ -85,6 +85,9 @@ export function ConversationsList(props: ConversationListProps) {
             } catch { failed(); } }}>{t("Open", "打开")}</button>
         </article>;
       })}
+      {props.onOpenSessionRequests ? <button type="button" ref={element => remember("selected-session", element)}
+        onClick={() => {try {if (!live.current.onOpenSessionRequests?.()) failed(); else setRefused(false);} catch {failed();}}}>
+        {t("Open session requests", "查看会话请求")}</button> : null}
     </section>
     <section className="conversations-list__section" aria-labelledby="conversations-list-projects">
       <h2 id="conversations-list-projects">{t("Projects", "项目")}</h2>

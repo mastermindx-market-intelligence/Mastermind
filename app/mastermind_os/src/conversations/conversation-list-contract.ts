@@ -82,4 +82,6 @@ export interface ConversationListProps {
   readonly onRefresh?: () => void;
   /** Supplied only by a real new-conversation owner; absence is not a grant. */
   readonly onNewConversation?: () => void;
+  /** Independent authenticated Session source, never a current-window grant. */
+  readonly onOpenSessionRequests?: () => boolean;
 }

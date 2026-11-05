@@ -4717,8 +4717,29 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     ? (locale === "zh-CN" ? "当前连接无法新建对话。" : "This connection can’t start a new conversation.")
     : !freshExecutiveOwner()
       ? (locale === "zh-CN" ? "暂时无法确认新建对话的访问权限。" : "Conversation access couldn’t be confirmed.") : null;
+  // The existing Executive Session source is independent of Workspace Content.
+  // A user gesture opens its existing reader; no window locator/body is minted.
+  const sessionEntryHost = window.MastermindMissionHost;
+  const sessionEntryAuth = sessionEntryHost?.auth, sessionEntryAuthRead = sessionEntryAuth?.getState;
+  const sessionEntryContext = sessionBinding?.port.context;
+  const sessionEntryGeneration = sessionEntryHost?.invalidationGeneration;
+  const sessionEntrySequence = selectionSeq.current;
+  const openSessionRequests = sessionBinding && sessionOwner && signedIn ? () => {
+    try {
+      if (!sessionEntryHost || window.MastermindMissionHost !== sessionEntryHost ||
+          sessionEntryHost.auth !== sessionEntryAuth || sessionEntryAuth?.getState !== sessionEntryAuthRead ||
+          !sessionEntryAuthRead || sessionEntryAuthRead.call(sessionEntryAuth).status !== "signed_in" ||
+          sessionEntryHost.sessionCommandBinding !== sessionBinding || sessionBinding.port.context !== sessionEntryContext ||
+          sessionEntryHost.invalidationGeneration !== sessionEntryGeneration ||
+          (sessionEntryGeneration?.call(sessionEntryHost) ?? null) !== freshHostGeneration ||
+          !ownsSession(sessionBinding, sessionOwner, sessionEntrySequence)) return false;
+      conversationNavigation.showCurrentDetail("selected-session");
+      return true;
+    } catch { return false; }
+  } : undefined;
   const conversationListPanel = <ConversationsList model={conversationListModel} locale={locale} theme={theme}
     onNewConversation={freshHost?.freshConversation ? openFreshConversation : undefined}
+    onOpenSessionRequests={openSessionRequests}
     query={conversationNavigation.query} onQueryChange={conversationNavigation.changeQuery}
     showAllProjects={conversationNavigation.showAllProjects} onShowAllProjects={conversationNavigation.showAll}
     restoreFocus={conversationNavigation.restoreFocus}

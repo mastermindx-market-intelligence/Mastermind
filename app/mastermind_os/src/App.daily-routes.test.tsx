@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { openLegacyProjectTabs } from "./test-operational-navigation";
+import { openLegacyProjectTabs, openObservedConversation } from "./test-operational-navigation";
 import {
   act,
   cleanup,
@@ -84,7 +84,7 @@ async function hostFixture() {
     hold: () => {
       hold = true;
     },
-    settle: () => held.forEach((resolve) => resolve()),
+    settle: () => { hold = false; held.splice(0).forEach((resolve) => resolve()); },
   };
 }
 beforeEach(async () => {
@@ -132,7 +132,7 @@ describe("owner-backed daily routes in App", () => {
     expect(
       screen.getByRole("region", { name: "Knowledge source" }).textContent,
     ).toContain("CURRENT");
-    await user.click(screen.getByRole("button", { name: "Conversations" }));
+    await openObservedConversation(user);
     expect(await screen.findByText(visible)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Unsent notes" }));
     expect(
@@ -153,7 +153,7 @@ describe("owner-backed daily routes in App", () => {
       ),
     ).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Knowledge" }));
-    await user.click(screen.getByRole("button", { name: "Conversations" }));
+    await openObservedConversation(user);
     expect(await screen.findByText(visible)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Unsent notes" }));
     expect(
@@ -163,7 +163,7 @@ describe("owner-backed daily routes in App", () => {
     expect(
       screen.queryByRole("button", { name: "Send message" }),
     ).toBeNull();
-    expect(screen.getByText("No recipient is qualified by this window. Send is unavailable.")).toBeTruthy();
+    expect(screen.getByText("These notes are not sent.")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     expect(
       screen.getByRole<HTMLTextAreaElement>("textbox", {
@@ -192,7 +192,7 @@ describe("owner-backed daily routes in App", () => {
     window.MastermindMissionHost = e.host;
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Conversations" }));
+    await openObservedConversation(user);
     expect(await screen.findByText(visible)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Unsent notes" }));
     await user.type(
@@ -219,6 +219,7 @@ describe("owner-backed daily routes in App", () => {
         for (let n = 0; n < 20; n++) await Promise.resolve();
       });
     }
+    await openObservedConversation(user);
     await user.click(screen.getByRole("button", { name: "Unsent notes" }));
     expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Unsent notes" }).value).toBe("");
   });

@@ -2654,7 +2654,7 @@ describe("host-composition repair regressions (R2)", () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Conversation" }));
-    expect(screen.getByText("Session Workspace")).toBeTruthy();
+    expect(screen.getByRole("heading",{name:"Session controls"})).toBeTruthy();
     expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
     // No fabricated session, connection, or dispatch surface.
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
