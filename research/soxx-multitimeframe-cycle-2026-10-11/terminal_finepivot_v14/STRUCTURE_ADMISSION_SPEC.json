@@ -1,0 +1,36 @@
+{
+  "schema": "soxx.rth.pivot-risk-admission_v14",
+  "date": "2026-10-11",
+  "research_only": true,
+  "predeclared_before_outcomes": true,
+  "scope": "SOXX and SMH/QQQ/AMD from private Terminal 15m stored+live OHLC, original year 2025-10-09 to 2026-10-08; no BOATS; no real fills",
+  "entry_models": {
+    "SOXX": [
+      "3h_60fast",
+      "3h_30fast",
+      "3h_15fast"
+    ],
+    "SMH": [
+      "3h_60fast",
+      "3h_15fast"
+    ],
+    "QQQ": [
+      "3h_60fast",
+      "3h_15fast"
+    ],
+    "AMD": [
+      "3h_60fast",
+      "3h_15fast"
+    ]
+  },
+  "admission": "For the original confirmed lower-timeframe pivot, entry price MUST be above pivot; stop = pivot - 0.1*ATR(lower). Require risk from actual next opening 0.3% to1.5%. No automatic widening of existing risk.",
+  "skip_convention": "Record all denied original opportunities as zero and count winning originals forgone; do not drop skips or report selected only",
+  "exit_policies": [
+    "time52",
+    "structural_cycle"
+  ],
+  "partial_at_2pct": 0.25,
+  "entry_cost_bps_each_side": 5,
+  "horizon_RTH_hours": 52,
+  "stress": "Worst observed bar stop-first and next-open market exits; no actual bid/ask."
+}
