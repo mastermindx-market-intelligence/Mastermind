@@ -118,6 +118,7 @@ import {
   FLEET_BACKEND_TOOL_NAMES,
   STUDIO_SELECT_HOST_TOOL,
   createFleetRouter,
+  fleetPreflightReason,
   fleetRouteToolResult,
   resolveFleetRoutingConfig,
 } from './fleet-routing.mjs';
@@ -1060,12 +1061,14 @@ class GatewaySession {
         toolCount: receipt.toolCount,
         reused: false,
       });
-    } catch {
+    } catch (error) {
       return fleetRouteToolResult({
         schema: 'mastermind.studio_fleet_route_binding.v1',
         status: 'REFUSED',
         effect_state: 'NOT_APPLIED',
         code: 'FLEET_ROUTE_PREFLIGHT_REFUSED',
+        // Closed diagnostic vocabulary; never expose the raw backend error.
+        reason_code: fleetPreflightReason(error),
       }, true);
     }
   }
