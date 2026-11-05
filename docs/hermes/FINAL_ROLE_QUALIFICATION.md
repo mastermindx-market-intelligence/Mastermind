@@ -136,13 +136,15 @@ errno name, and the symptom, and then only these outcomes are possible:
 
 - The forbidden target answered the connection: FAIL. A forbidden address that
   is reachable is a real failure and the report says so.
-- The attempt was refused immediately with EACCES/EPERM, or timed out with
+- The attempt was refused immediately with EPERM, or timed out with
   EAGAIN/ETIMEDOUT: the refusal shape is recorded with an unverified
   attribution, the external witness is marked insufficient, and the case stays
   UNAVAILABLE. The role report stays INCOMPLETE.
-- Nothing answered at the target, or the errno was unrelated to a denial:
-  UNAVAILABLE. A missing listener and an unrelated errno are never denial
-  proof, and a timeout is only an unverified refusal shape.
+- Nothing answered at the target (ECONNREFUSED): UNAVAILABLE; a missing
+  listener is never policy proof.
+- An unrelated error, including immediate EACCES, EIO, EMFILE or ENETUNREACH:
+  ERROR/FAIL, preserving the existing probe's classification. It is never
+  counted as policy denial.
 
 The absence of an observed denial is never upgraded into a denial, and a
 missing witness never yields PASS. The operator adjudicates the separate
@@ -299,9 +301,9 @@ provenance is compared around profile loading and after the matrix.
 Aggregate PASS requires the entire13-case matrix, all four production guards,
 stable final context and completed cleanup. A subset never qualifies the whole
 role. Current external-witness limitations mean a real full run remains INCOMPLETE.
-Under `--external-address-fixtures` the two address-denial cases can never reach
-PASS, so that report is INCOMPLETE by construction unless a forbidden target
-answers, which is FAIL.
+Under `--external-address-fixtures` the two address-denial cases can never earn
+PASS. Without a failing observation, their insufficient external witness keeps
+the report INCOMPLETE; any observed FAIL remains FAIL.
 Exit0 means aggregate PASS;2 means FAIL;78 means INCOMPLETE/configuration refusal;
 3 means I/O failure. An early setup refusal can produce only a fixed stderr
 refusal, without a report.

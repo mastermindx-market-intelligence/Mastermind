@@ -712,13 +712,26 @@ class ExternalAddressFixtureTests(unittest.TestCase):
                 self.assertEqual(probe._status_for(case, result), probe.STATUS_FAIL)
 
     def test_expected_refusal_without_the_external_bracket_is_unavailable(self):
-        for code, symptom in ((errno.EPERM, 'refused_immediately'), (errno.EACCES, 'refused_immediately'),
+        for code, symptom in ((errno.EPERM, 'refused_immediately'),
                               (errno.EAGAIN, 'timed_out'), (errno.ETIMEDOUT, 'timed_out')):
             with self.subTest(code=code, symptom=symptom):
                 case, result, _ = self.outcome('tcp.sibling_alias.gateway_port', code, symptom)
                 self.assertEqual(probe._status_for(case, result), probe.STATUS_UNAVAILABLE)
                 self.assertIs(result.witness['sufficient'], False)
                 self.assertNotEqual(result.attribution, 'CGROUP_IP_POLICY')
+
+    def test_unrelated_external_errors_keep_the_existing_fail_classification(self):
+        for code in (errno.EACCES, errno.EIO, errno.EMFILE, errno.ENETUNREACH):
+            with self.subTest(errno=code):
+                case, result, connect = self.outcome(
+                    'tcp.sibling_alias.gateway_port', code, 'refused_immediately')
+                connect.assert_called_once()
+                self.assertEqual(result.observed, probe.OBSERVED_ERROR)
+                self.assertEqual(probe._status_for(case, result), probe.STATUS_FAIL)
+                self.assertEqual(result.attribution, 'UNDETERMINED')
+                self.assertFalse(result.witness['sufficient'])
+                self.assertNotIn('fixture_owner', result.witness)
+                self.assertEqual(result.witness['fixture_owner_expected'], 'outside_role_cgroup')
 
     def test_missing_listener_unrelated_errno_and_timeout_never_pass(self):
         for code, symptom in ((errno.ECONNREFUSED, 'refused_immediately'),

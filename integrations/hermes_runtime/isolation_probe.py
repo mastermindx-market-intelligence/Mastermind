@@ -1365,9 +1365,9 @@ def _tcp_external_address_outcome(case: _Case, landlock_connect: frozenset[int],
                                   timeout: float) -> _Outcome:
     """One bounded attempt against an operator-supplied outside-cgroup fixture.
 
-    The fixture at this target is owned outside the role cgroup, so this
-    context can neither join its socket inode nor bracket it before and after
-    the attempt. The attempt is therefore an observation only: it never
+    The required fixture is outside the role cgroup, but this context does
+    not observe its existence or ownership and cannot bracket it before and
+    after the attempt. The attempt is therefore an observation only: it never
     supplies the external positive, a refusal here stays unattributed, and the
     case stays UNAVAILABLE. The operator's separate outside-cgroup pre/post
     connection bracket is the final acceptance evidence.
@@ -1380,8 +1380,8 @@ def _tcp_external_address_outcome(case: _Case, landlock_connect: frozenset[int],
         'sufficient': False,
         'external_positive_required': True,
         'external_bracket_required': True,
-        'fixture_owner': 'outside_role_cgroup',
-        'note': ('the fixture at this target is owned outside the role cgroup, so this probe can '
+        'fixture_owner_expected': 'outside_role_cgroup',
+        'note': ('an external fixture is expected but not observed by this process; this probe can '
                  'neither witness nor bracket it; the outside-cgroup pre/post connection bracket '
                  'remains separate acceptance evidence'),
     }
@@ -1399,13 +1399,13 @@ def _tcp_external_address_outcome(case: _Case, landlock_connect: frozenset[int],
                         basis='nothing answered at this target; a refused connection is not policy proof',
                         detail='no external fixture answered; a refused connection is not policy proof')
     denial_shaped = ((symptom == 'timed_out' and code in {errno.EAGAIN, errno.ETIMEDOUT})
-                     or (symptom == 'refused_immediately' and code in LANDLOCK_DENIAL_ERRNOS))
+                     or (symptom == 'refused_immediately' and code == errno.EPERM))
     if not denial_shaped:
-        return _Outcome(OBSERVED_UNAVAILABLE, errno=code, errno_name=_errno_name(code),
+        return _Outcome(OBSERVED_ERROR, errno=code, errno_name=_errno_name(code),
                         symptom=symptom, target=target, witness=witness,
                         attribution='UNDETERMINED',
-                        basis='an unrelated errno or a timeout is not denial proof',
-                        detail='unrelated error or timeout is not denial proof')
+                        basis='an unrelated errno or symptom is not IP-policy denial proof',
+                        detail='unrelated error remains an error, not unavailable denial evidence')
     if port in landlock_connect:
         attribution = 'UNVERIFIED_CGROUP_IP_POLICY'
         basis = ("the target port is inside the role's Landlock connect set, so Landlock permits "
@@ -1606,8 +1606,8 @@ def _build_report(profile: RuntimeProfile, role: str, peer_role: str,
     ]
     if external_address_fixtures:
         limitations.append(
-            "The two address-denial cases were attempted against an operator-supplied "
-            "outside-role-cgroup fixture that this probe can neither witness nor bracket; "
+            "External-address fixture mode was selected. Any selected address case "
+            "requires an outside-role-cgroup fixture that this probe cannot witness or bracket; "
             "the separate outside-cgroup pre/post connection bracket remains required and "
             "this report qualifies neither case."
         )
