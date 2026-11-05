@@ -1891,8 +1891,8 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
           <h3>{copy(["Planning result", "规划结果"])}</h3>
           <p>{result.result.summary}</p>
           {returnedDeclaration === null ? <p>{result.result.current_state}</p> :
-            <p>{copy(["This result includes a suggested plan. Its declaration is in Source details; it has not been published or adopted.",
-              "此结果包含建议计划。原始声明位于来源详情中，尚未发布或采纳。"] )}</p>}
+            <p>{copy(["This result includes a suggested plan declaration. Publication and adoption are not confirmed here. See Source details.",
+              "此结果包含建议计划声明。此处尚未确认发布或采纳；原始声明位于来源详情。"] )}</p>}
           {result.result.completed_steps.length > 0 && (
             <section><h4>{copy(["Completed steps", "已完成的步骤"])}</h4><ul>
               {result.result.completed_steps.map((step, index) => <li key={index}>{step}</li>)}
@@ -1933,7 +1933,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
       <details>
         <summary>{copy(["Source details", "来源详情"])}</summary>
         {returnedDeclaration !== null && <section>
-          <h4>{copy(["Suggested plan declaration — not published or adopted", "建议计划声明 — 尚未发布或采纳"])}</h4>
+          <h4>{copy(["Suggested plan declaration · Publication and adoption are not confirmed here.", "建议的计划声明 · 此处尚未确认发布或采纳。"])}</h4>
           <pre>{returnedDeclaration}</pre>
         </section>}
         <dl>
