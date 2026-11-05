@@ -5996,11 +5996,12 @@ class ExecutiveControlService:
                     await self._send_ceo_ingress_error(writer, "peer_denied", "project conversations require installed App peer")
                     return
                 try:
-                    from integrations.session_bridge.installed import _principal
-                    from integrations.session_bridge.project_conversations import RuntimeProjectConversationsReader
+                    from control_plane.installed_project_conversations_binding import require_installed_project_conversations
+                    from control_plane.principal_projection import neutral_principal_projection
                     from control_plane.fresh_conversation import FreshConversationOwner
                     frame = conversation_read_wire.decode_frame(raw)
-                    principal = _principal(frame["principal"])
+                    principal = neutral_principal_projection(**{
+                        **frame["principal"], "scopes": tuple(frame["principal"]["scopes"])})
                     runtime = self._require_runtime()
                     factory = app_binding.project_conversation_read_provider_factory
                     fresh_factory = app_binding.fresh_conversation_provider_factory
@@ -6009,11 +6010,13 @@ class ExecutiveControlService:
                     if selected_factory is None:
                         raise ValueError("read provider unavailable")
                     provider = selected_factory(runtime)
-                    expected_type = FreshConversationOwner if fresh_read else RuntimeProjectConversationsReader
-                    if type(provider) is not expected_type or provider._runtime is not runtime:
-                        raise ValueError("read provider unavailable")
-                    source_stamp = ((provider._expected_policy, provider._trusted_read_pair) if fresh_read
-                                    else provider._source)
+                    if fresh_read:
+                        if type(provider) is not FreshConversationOwner or provider._runtime is not runtime:
+                            raise ValueError("read provider unavailable")
+                        source_stamp = (provider._expected_policy, provider._trusted_read_pair)
+                    else:
+                        provider = require_installed_project_conversations(provider, runtime)
+                        source_stamp = provider.source
                     def require_conversation_read_current():
                         if (self._closing or not self._ceo_ingress_ready
                                 or self._service_state not in {"READY", "QUARANTINED"}
@@ -6026,12 +6029,16 @@ class ExecutiveControlService:
                                 or writer.is_closing() or writer.transport.is_closing()):
                             raise ValueError("project conversation host changed")
                         current = selected_factory(runtime)
-                        stamp = ((current._expected_policy, current._trusted_read_pair) if fresh_read
-                                 else current._source)
-                        if type(current) is not expected_type or current._runtime is not runtime or stamp != source_stamp:
-                            raise ValueError("project conversation source changed")
-                        if fresh_read and (current._service is not self or current._app is not app_binding):
-                            raise ValueError("fresh read owner changed")
+                        if fresh_read:
+                            if (type(current) is not FreshConversationOwner or current._runtime is not runtime
+                                    or (current._expected_policy, current._trusted_read_pair) != source_stamp
+                                    or current._service is not self or current._app is not app_binding):
+                                raise ValueError("fresh read owner changed")
+                        else:
+                            current = require_installed_project_conversations(current, runtime)
+                            provider.check(runtime)
+                            if current.source != source_stamp:
+                                raise ValueError("project conversation source changed")
                         return True
                     require_conversation_read_current()
                     arguments = frame["arguments"]

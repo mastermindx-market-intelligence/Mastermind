@@ -93,6 +93,10 @@ class RuntimeProjectConversationsReader:
         self._methods = tuple(getattr(getattr(original, name), "__func__", getattr(original, name)) for name in
             ("session_reply_references", "resolve_read", "_continuation_messages"))
 
+    def installed_binding(self):
+        from control_plane.installed_project_conversations_binding import _issue_project_conversations
+        return _issue_project_conversations(self, qualifier=_installed_reader_current)
+
     def _current(self, principal, identity, guard):
         methods = tuple(getattr(self._original, name).__func__ if hasattr(getattr(self._original, name), "__func__")
                         else getattr(self._original, name) for name in
@@ -233,3 +237,14 @@ class RuntimeProjectConversationsReader:
 
 
 __all__ = ["RuntimeProjectConversationsReader", "validate_selection"]
+
+
+def _installed_reader_current(reader):
+    """Integration owns the exact installed source types, core owns the seal."""
+    if type(reader) is not RuntimeProjectConversationsReader:
+        return False
+    original = reader._original
+    return (type(original) is RuntimeSessionReturn and original.runtime is reader._runtime
+        and reader._source == (original.socket_path, original.service_call, original._trusted_read_pair)
+        and reader._methods == tuple(getattr(getattr(original, name), "__func__", getattr(original, name))
+            for name in ("session_reply_references", "resolve_read", "_continuation_messages")))

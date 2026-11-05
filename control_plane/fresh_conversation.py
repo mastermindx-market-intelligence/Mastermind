@@ -72,7 +72,7 @@ class FreshConversationOwner:
         # Trusted composition from the incumbent installed submit policy,
         # never a frame field and never a new policy/enrollment registry.
         self._expected_policy = expected_policy
-        from integrations.session_bridge.runtime_return import _trusted_read_pair
+        from control_plane.installed_principal_read_binding import trusted_read_pair as _trusted_read_pair
         self._trusted_read_pair = _trusted_read_pair(authorized_policies)
         if self._trusted_read_pair is not None:
             import hashlib

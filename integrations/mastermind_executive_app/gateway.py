@@ -117,6 +117,8 @@ class AppPolicies:
             raise ValueError(
                 f"submit policy must require exactly {expected_submit!r}"
             )
+        from integrations.mastermind_executive_app.installed_principal_read_pair import bind_installed_read_pair
+        object.__setattr__(self, "_installed_read_pair", bind_installed_read_pair(self))
 
 
 def load_app_policies(payload: Mapping[str, Any]) -> AppPolicies:

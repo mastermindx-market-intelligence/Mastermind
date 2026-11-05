@@ -35,6 +35,10 @@ class InstalledWorkspaceSourceOperations:
         self._compiler = collector.project_knowledge_recipe_reader(macro_root=collector._macro_root)
         from integrations.mastermind_workspace_app.project_journey_recipes import InstalledProjectJourneyRecipes
         self._journey = InstalledProjectJourneyRecipes(collector)
+        # Private nominal read-source recognition only; issued once, by the
+        # actual installed constructor, through the integration helper.
+        from integrations.mastermind_workspace_app.installed_read_provider_binding import install_installed_read_source
+        install_installed_read_source(self)
 
     def canonical_data_owner(self, runtime):
         """Same installed owner construction for READ and source operations.

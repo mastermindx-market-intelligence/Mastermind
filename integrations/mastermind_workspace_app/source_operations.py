@@ -151,8 +151,16 @@ class WorkspaceSourceOperationService:
         return (self._store, self._supervisor, self._runtime_guard,
                 None if self._canonical_data_source is None else self._canonical_data_source.context_binding(), host, context(self._create), context(self._knowledge), context(self._proposal), context(self._adoption), self._journey_recipes)
 
+    def prepare_project_plan_proposal(self, request, principal, *, basis, result):
+        from integrations.mastermind_workspace_app.project_plan_proposal_service import ProjectPlanProposalSourceOwner
+        if (type(self) is not WorkspaceSourceOperationService
+                or type(self._proposal) is not ProjectPlanProposalSourceOwner):
+            raise ValueError("SOURCE_OPERATION_UNAVAILABLE")
+        return self._proposal.prepare_qualified(request, principal, basis=basis, result=result)
+
     def installed_binding(self):
         """Private installed factory composition; construction grants nothing."""
         from control_plane.workspace_source_operation_binding import _issue_source_operation_binding
         return _issue_source_operation_binding(self,
-            qualified_owner=lambda owner: type(owner) is WorkspaceSourceOperationService)
+            qualified_owner=lambda owner: type(owner) is WorkspaceSourceOperationService,
+            proposal_callback=self.prepare_project_plan_proposal)

@@ -18,8 +18,8 @@ _LIMIT = 8
 
 
 def origin_identity(owner, principal):
-    from integrations.mastermind_executive_app.gateway import READ_SCOPE, SUBMIT_SCOPE
-    from integrations.session_bridge.runtime_return import _read_matches_original
+    from control_plane.installed_principal_read_binding import (
+        READ_SCOPE, SUBMIT_SCOPE, read_matches_original as _read_matches_original)
     current = {key: getattr(principal,key,None) for key in _IDENTITY}
     if (type(principal) is not NeutralPrincipalProjection or type(principal.issued_at) is not int
             or type(principal.expires_at) is not int or not principal.issued_at <= time.time() < principal.expires_at
