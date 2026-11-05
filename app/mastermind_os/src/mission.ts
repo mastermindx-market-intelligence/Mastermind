@@ -817,6 +817,15 @@ export function decodeMission(
       })
     : null;
   if (v2 && !observation) return null;
+  if (observation?.schema === "mastermind.workspace_source_observation.v2") {
+    const basis = observation.project_data;
+    if (!obj(basis) || !obj(basis.data_observation) || typeof s.control_room_generated_at !== "string"
+      || typeof basis.data_observation.canonical_observed_at_ms !== "number"
+      || !Number.isSafeInteger(basis.data_observation.canonical_observed_at_ms)
+      || !Number.isFinite(Date.parse(s.control_room_generated_at))
+      || Math.abs(Date.parse(s.control_room_generated_at) - basis.data_observation.canonical_observed_at_ms) >= 1000)
+      return null;
+  }
   const r = value.read_state;
   if (
     !obj(r) ||
