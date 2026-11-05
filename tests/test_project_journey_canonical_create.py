@@ -18,6 +18,7 @@ import pytest
 
 from tests.test_project_creation_source_owner import owner, env, isolated_git_env, selection
 from tests.test_project_planning_factory import fixture as planning_fixture, invocation
+from tests.test_mastermind_executive_app_asgi import rsa_key
 from tests.test_installed_source_git_identity import identity
 from tests.test_workspace_project_git_publisher import git, rev_parse
 from integrations.mastermind_workspace_app.project_creation_operation import ProjectCreationRecipeAdapter
@@ -124,7 +125,7 @@ def joined(owner,identity,tmp_path,monkeypatch):
     return locals()
 
 
-def test_actual_create_default_event_qualifies_initial_plan_and_original_reopen(joined):
+def test_actual_create_default_event_qualifies_initial_plan_and_original_reopen(joined,monkeypatch,rsa_key):
     j=joined;factory,args=j['factory'],j['args']
     assert len(j['runtime'].jobs.list_jobs())==0
     view=j['data'].view(j['workspace'],work_ref=args['work_ref'])
@@ -182,27 +183,66 @@ def test_actual_create_default_event_qualifies_initial_plan_and_original_reopen(
         assert terminal.job.status is JobStatus.COMPLETED
         return dict(work_ref=args['work_ref'],job_id=job.job_id,attempt_id=terminal.attempt.attempt_id)
     selected=asyncio.run(invocation(factory,args,complete))
-    def inspect_then_explicit_consume():
-        source,executive=factory.prepare(**args)
-        access=requalify_original(runtime,job_id=first['job_id'],source=source,executive_admission=executive)
-        keeper,_,binding,reader=_bound_reader(runtime)
-        try:
-            before=len(runtime.store.list_events())
-            result=reader.read_direct_native_result_bounded(selected,access=access)
-            assert result['availability']=='AVAILABLE' and result['consumption']=={'state':'UNCONSUMED','receipt_digest':None}
-            assert len(runtime.store.list_events())==before
-            digest=result['result']['result_digest']
-            ack=runtime.consume_direct_native_result(dict(selected,result_digest=digest,operation_key='explicit-parent-result-consume'),access=access)
-            assert ack['state']=='CONSUMED'
-            after=reader.read_direct_native_result_bounded(selected,access=access)
-            assert after['result']==result['result'] and after['consumption']==ack
-            count=len(runtime.store.list_events())
-            assert runtime.consume_direct_native_result(dict(selected,result_digest=digest,operation_key='explicit-parent-result-consume'),access=access)==ack
-            assert len(runtime.store.list_events())==count
-        finally:_release(keeper,binding)
-    asyncio.run(invocation(factory,args,inspect_then_explicit_consume,operation='result'))
-    assert len(runtime.jobs.list_jobs())==1 and len(runtime.attempts.list_attempts())==1
-    assert j['create'].read_status(j['lookup'],j['workspace'])==j['status']
+    # Direct Runtime result/consume/replay was qualified in the retained
+    # earlier run. This joined case uses the real authenticated public action
+    # for its first result read and explicit consume instead of repeating that
+    # expensive direct-only loop before exercising the actual product path.
+    # Reopen that exact completed operation through the real two-resource HTTP
+    # ingress and temporary Unix Service peer, not a direct Runtime reader.
+    # The signed tokens/JWKS are synthetic test authority; no credentials or
+    # installed socket are used. Both grants still resolve the same principal.
+    from tests import test_project_planning_transport as transport
+    monkeypatch.setattr(transport,'fixture',lambda *_:(factory,args,j['armed'],None))
+    parts=transport.composition(j['tmp_path'],monkeypatch,rsa_key)
+    # Observe the genuine installed private handler without replacing any
+    # authority or result. Public errors deliberately hide the failed predicate;
+    # retain only finite source locations/type here, never exception payloads.
+    import traceback
+    from common.project_planning_private_contract import ProjectPlanningIngressOwner
+    actual_build=transport.build_ingress_owner
+    private_failures=[]
+    def diagnostic_owner(actual_factory):
+        actual=actual_build(actual_factory)
+        async def handle(frame):
+            try:
+                return await actual.handle_frame(frame)
+            except Exception as exc:
+                diagnostic=dict(operation=frame['operation'],kind=type(exc).__name__,
+                    frames=[(Path(item.filename).name,item.name,item.lineno)
+                            for item in traceback.extract_tb(exc.__traceback__)[-16:]])
+                private_failures.append(diagnostic)
+                print('PRIVATE_PLANNING_FAILURE '+json.dumps(diagnostic,sort_keys=True),flush=True)
+                raise
+        return ProjectPlanningIngressOwner(handle)
+    monkeypatch.setattr(transport,'build_ingress_owner',diagnostic_owner)
+    async def public_reopen(client,headers,arguments,*tokens):
+        lookup={key:arguments[key] for key in ('operation_key','work_ref')}
+        status=await client.post('/os/executive/project-planning/status',headers=headers,json={'arguments':lookup})
+        assert status.status_code==200,status.text
+        assert status.json()['data']['job_id']==first['job_id']
+        response=await client.post('/os/executive/project-planning/result',headers=headers,json={'arguments':lookup})
+        assert response.status_code==200,(response.text,private_failures)
+        body=response.json()['data']
+        assert body['availability']=='AVAILABLE' and body['selection']==selected
+        assert body['consumption']==dict(state='UNCONSUMED',receipt_digest=None)
+        consume={**lookup,'attempt_id':body['selection']['attempt_id'],
+            'result_digest':body['result']['result_digest'],
+            'consumption_operation_key':'explicit-parent-result-consume'}
+        acknowledged=await client.post('/os/executive/project-planning/consume',headers=headers,json={'arguments':consume})
+        assert acknowledged.status_code==200,(acknowledged.text,private_failures)
+        ack=acknowledged.json()['data']
+        assert ack['consumption']['state']=='CONSUMED' and ack['result']==body['result']
+        count=len(runtime.store.list_events())
+        replay=await client.post('/os/executive/project-planning/consume',headers=headers,json={'arguments':consume})
+        assert replay.status_code==200,(replay.text,private_failures)
+        assert replay.json()['data']['consumption']==ack['consumption']
+        assert len(runtime.store.list_events())==count
+        reopened=await client.post('/os/executive/project-planning/result',headers=headers,json={'arguments':lookup})
+        assert reopened.status_code==200,(reopened.text,private_failures)
+        assert reopened.json()['data']==ack
+        assert parts[4]==[] and len(runtime.jobs.list_jobs())==1 and len(runtime.attempts.list_attempts())==1
+        for token in tokens: assert token not in status.text+response.text+acknowledged.text+replay.text+reopened.text
+    asyncio.run(transport.exercise(parts,public_reopen))
 
 
 def test_actual_installed_options_create_and_readonly_original_return(joined):
@@ -246,3 +286,54 @@ def test_current_read_grant_original_event_and_default_drift_refuse_without_job(
     assert j['runtime'].jobs.list_jobs()==[]
     assert j['create'].read_status(j['lookup'],j['workspace'])==j['status']
     assert j['o']['pr'].create_calls==1
+
+
+def test_pure_original_read_capture_discards_on_revocation_expiry_and_default_drift(joined):
+    import contextvars
+    import time
+    from control_plane.project_canonical_data import _CAPTURE
+    j=joined;factory,args=j['factory'],j['args']
+    slot=j['document']['profiles'][j['document']['primary_profile']]
+    escaped=[];reached=[];retained=[];copied=[]
+    before=len(j['runtime'].store.list_events())
+    def scope():
+        return factory.canonical_read_scope(principal=args['principal'],
+            operation_key=args['operation_key'],work_ref=args['work_ref'])
+    def revoke():
+        with scope() as view:
+            retained.append(_CAPTURE.get())
+            copied.append((contextvars.copy_context(),view))
+            view.witness();reached.append('revoked')
+            slot['enabled']=False
+            with pytest.raises(ValueError):view.check()
+        escaped.append('revoked data')
+    with pytest.raises(ValueError):
+        asyncio.run(invocation(factory,args,revoke,operation='result'))
+    assert reached==['revoked'] and escaped==[] and retained[-1].active is False
+    with pytest.raises(ValueError):copied[0][0].run(copied[0][1].check)
+    slot['enabled']=True
+    def expire():
+        with scope() as view:
+            retained.append(_CAPTURE.get());view.witness();reached.append('expiry')
+            time.sleep(max(0,view._operation.read_deadline-time.monotonic())+.01)
+        escaped.append('expired data')
+    with pytest.raises(ValueError):
+        asyncio.run(invocation(factory,args,expire,operation='result'))
+    assert reached==['revoked','expiry'] and escaped==[] and retained[-1].active is False
+    def default_drift():
+        with scope() as view:
+            retained.append(_CAPTURE.get());view.witness()
+            # Independent disposable Git actor, not a publication/effect by
+            # the read owner. Its full postcheck must discard captured DATA.
+            root=j['integrator'];path=root/args['project_source']['path']
+            path.write_bytes(path.read_bytes()+b'\nExternal mid-capture default drift.\n')
+            git(root,'add',str(path.relative_to(root)))
+            git(root,'commit','-m','Independent mid-capture source drift')
+            git(root,'push','origin','main');reached.append('default')
+        escaped.append('stale data')
+    with pytest.raises(ValueError):
+        asyncio.run(invocation(factory,args,default_drift,operation='result'))
+    assert reached==['revoked','expiry','default'] and escaped==[]
+    assert retained[-1].active is False and _CAPTURE.get() is None
+    assert j['runtime'].jobs.list_jobs()==[] and j['runtime'].attempts.list_attempts()==[]
+    assert len(j['runtime'].store.list_events())==before
