@@ -102,11 +102,11 @@ The proposed hierarchy is interpretable, but correlated market/factor/sector/ind
 
 For stock (i), session (d), minute (t):
 
-[
-r_{i,d,t}=alpha_i+eta_{i,m}r_{m,d,t}+mathbf{b}_{i,f}'mathbf{f}_{d,t}
-+gamma_{i,g}r_{g,-i,d,t}^{perp}
-+delta_{i,	heta}r_{	heta,-i,d,t}^{perp}+epsilon_{i,d,t}.
-]
+$$
+r_{i,d,t}=\alpha_i+\beta_{i,m}r_{m,d,t}+\mathbf{b}_{i,f}'\mathbf{f}_{d,t}
++\gamma_{i,g}r_{g,-i,d,t}^{\perp}
++\delta_{i,\theta}r_{\theta,-i,d,t}^{\perp}+\epsilon_{i,d,t}.
+$$
 
 Use leave-one-out group/theme returns. Exposures must be estimated only from information available before the formation session. If intraday betas are unstable, estimate stable daily exposures on a trailing window and apply them intraday.
 
@@ -130,7 +130,7 @@ A ratio (r_i/r_b) under small negative benchmark returns can explode. Prefer con
 
 ### MAJOR E — recovery is a first-passage/censoring problem
 
-For a shock at (t_0), let (C_{i,t}=sum_{	au=t_0}^{t}epsilon_{i,	au}). Define
+For a shock at $t_0$, let $C_{i,t}=\sum_{\tau=t_0}^{t}\epsilon_{i,\tau}$. Define
 
 [
 T^{rec}_{i}=inf{h>0:C_{i,t_0+h}ge 0},
@@ -167,17 +167,17 @@ Regular trading hours should be primary in V1. Overnight gap and extended-hours 
 
 For residual (epsilon_{i,d,t}), estimate a pre-(d) expected variance curve:
 
-[
-hat{sigma}_{i,	au}^{2}=E[epsilon_{i,d,	au}^{2}mid mathcal{F}_{d-1}].
-]
+$$
+\hat{\sigma}_{i,\tau}^{2}=E[\epsilon_{i,d,\tau}^{2}\mid \mathcal{F}_{d-1}].
+$$
 
 Then
 
-[
+$$
 RSZ_{i,d,t}=
-rac{sum_{	aule t}epsilon_{i,d,	au}}
-{sqrt{sum_{	aule t}hat{sigma}_{i,	au}^{2}}}.
-]
+\frac{\sum_{\tau\le t}\epsilon_{i,d,\tau}}
+{\sqrt{\sum_{\tau\le t}\hat{\sigma}_{i,\tau}^{2}}}.
+$$
 
 Primary seasonality candidates:
 
@@ -194,9 +194,9 @@ RV^+_{i}=sum_t epsilon_{i,t}^{2}mathbf{1}(epsilon_{i,t}>0),quad
 RV^-_{i}=sum_t epsilon_{i,t}^{2}mathbf{1}(epsilon_{i,t}<0).
 ]
 
-[
-UpsideShare_i=rac{RV^+_i}{RV^+_i+RV^-_i}.
-]
+$$
+UpsideShare_i=\frac{RV^+_i}{RV^+_i+RV^-_i}.
+$$
 
 This family is not presumed distinct. It must add beyond total realized variance, downside variance and cumulative residual return.
 
@@ -232,10 +232,19 @@ T^{rec}_{i,e}=inf{h>0:sum_{u=0}^{h}epsilon_{i,t_0+u}ge 0}.
 ]
 
 **Recovery half-life**
-[
-T^{1/2}_{i,e}=inf{h>0:C_{i,t_0+h}ge 	frac{1}{2}|C_{i,t_0+h^*}|},
-]
-where (h^*) is the time of maximum adverse residual displacement inside the initial shock window.
+
+Use the predeclared initial shock window $0\le h\le W$ and the cumulative residual path $C_{i,t}$ defined in Section 4E. The window must be fully observed; otherwise the measurement is unavailable. Let $h^*$ be the earliest time attaining its minimum, and let $C^*=C_{i,t_0+h^*}$. Only a strictly negative trough, $C^*<0$, is eligible; a path with no negative trough is ineligible, not a zero-time recovery.
+
+Let $H_{\mathrm{obs}}\ge W$ be the observation cutoff in elapsed time since $t_0$, bounded by the predeclared horizon and session close. Define the post-trough first-passage duration:
+
+$$
+T^{1/2}_{i,e}
+=\inf\left\{h-h^*:h^*<h\le H_{\mathrm{obs}},\ C_{i,t_0+h}\ge \frac{C^*}{2}\right\}.
+$$
+
+Time is measured since the trough. Equality at the negative halfway level counts: a trough of $-10$ first reaches half recovery at $-5$, not $+5$. A crossing before the selected trough cannot count. If no crossing is observed by $H_{\mathrm{obs}}$, record right-censoring at $H_{\mathrm{obs}}-h^*$ rather than an observed recovery. If $H_{\mathrm{obs}}=h^*$, there is no observed post-trough interval; this is censoring at zero, not recovery.
+
+The trough selected from the initial window is not known until that window closes. This descriptive feature and any observed crossing are available only after all observations used in them are known; any predictive use must begin strictly after that measurement cutoff.
 
 **Recovery probability**
 [
@@ -249,16 +258,16 @@ The primary test should ask whether resilience measured on prior shocks predicts
 
 Estimate on trailing pre-formation data:
 
-[
-eta_{up}=rac{Cov(r_i,r_bmid r_b>0)}{Var(r_bmid r_b>0)},qquad
-eta_{down}=rac{Cov(r_i,r_bmid r_b<0)}{Var(r_bmid r_b<0)}.
-]
+$$
+\beta_{up}=\frac{\operatorname{Cov}(r_i,r_b\mid r_b>0)}{\operatorname{Var}(r_b\mid r_b>0)},\qquad
+\beta_{down}=\frac{\operatorname{Cov}(r_i,r_b\mid r_b<0)}{\operatorname{Var}(r_b\mid r_b<0)}.
+$$
 
 Candidate asymmetry:
 
-[
-Aeta_i=eta_{up}-eta_{down}.
-]
+$$
+A\beta_i=\beta_{up}-\beta_{down}.
+$$
 
 This is a control/competitor to event resilience, not automatically a separate feature family.
 
@@ -266,15 +275,15 @@ This is a control/competitor to event resilience, not automatically a separate f
 
 For positive residual contributions (g_t=max(epsilon_t,0)):
 
-[
-GainConcentration_i=sum_tleft(rac{g_t}{sum_j g_j}ight)^2.
-]
+$$
+GainConcentration_i=\sum_t\left(\frac{g_t}{\sum_j g_j}\right)^2.
+$$
 
 Also test largest-positive-bar share, sign-based information discreteness, and jump share:
 
-[
-JumpShare=rac{max(RV-BV,0)}{RV},
-]
+$$
+JumpShare=\frac{\max(RV-BV,0)}{RV},
+$$
 
 where (BV) is a jump-robust bipower-variation estimate.
 
@@ -284,9 +293,9 @@ The critical matched test is: **same cumulative residual return, similar RV/down
 
 Let (q_{i,t}in[0,1]) be the cross-sectional residual-strength percentile.
 
-[
-RankPersistence_{i,H}(q^*)=rac{1}{N_H}sum_{tin H}mathbf{1}(q_{i,t}ge q^*).
-]
+$$
+RankPersistence_{i,H}(q^*)=\frac{1}{N_H}\sum_{t\in H}\mathbf{1}(q_{i,t}\ge q^*).
+$$
 
 Also predefine rank volatility, maximum rank drawdown, first-entry time into the top decile, loss/reclaim count, and area above a threshold. The test must control for endpoint rank and cumulative residual return.
 
@@ -294,9 +303,9 @@ Also predefine rank volatility, maximum rank drawdown, first-entry time into the
 
 Price high occupancy:
 
-[
-HighOcc_{i,H}(c)=rac{1}{N_H}sum_t mathbf{1}(P_{i,t}ge ccdot High_{i,H}(t)).
-]
+$$
+HighOcc_{i,H}(c)=\frac{1}{N_H}\sum_t \mathbf{1}(P_{i,t}\ge c\cdot High_{i,H}(t)).
+$$
 
 More defensible variants are residual-high occupancy and occupancy conditional on benchmark drawdowns. This family has a high prior probability of redundancy with distance-to-high and volatility and should receive a strict kill rule.
 
