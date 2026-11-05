@@ -275,6 +275,48 @@ The doctor now checks the selected provider and actual private credential
 file referenced by an installed role profile, rather than treating an
 operator shell key or a different role's config as native readiness.
 
+## Role configuration metadata read
+
+Read one role's installed configuration without opening a credential, calling
+a provider, observing a running service or attesting the host:
+
+```sh
+python3 integrations/hermes_harness/hermesctl role-metadata \
+  --state "$HOME/.local/state/hermes-runtime-mmsecretary" --role mmsecretary
+python3 integrations/hermes_harness/hermesctl role-metadata \
+  --state "$HOME/.local/state/hermes-runtime-mmmeta" --role mmmeta
+```
+
+The projection is `mastermind.hermes.role_metadata.v1`. `state` is
+`CONFIGURATION_OBSERVED` when the installed manifest, current release
+receipt and role profile agree, `ABSENT` when the selected role root is
+readable and qualified, the incumbent install manifest is genuinely absent
+and no surviving install evidence is left in the root, and `UNAVAILABLE` with
+one fixed `reason` code otherwise. A root that still has a current-release
+link or a written release but no manifest is a damaged installation, not an
+absent role, and reports `MANIFEST_MISSING`. `ABSENT`
+never means the credential is absent, and it never says anything about a
+role on another host: a reader without a trusted binding to this host has no
+observation at all, and the `source_binding` field stays `NOT_ATTESTED`.
+
+`requested` carries the provider and model identifiers derived from the
+existing role catalog; `provenance` carries the upstream SHA, the release id
+and the manifest/profile/config digests. No credential name, credential
+digest, credential value, private path or raw error text is ever returned.
+The `proof` block always reports `credentials_read: false`,
+`provider_called: false`, `service_observed: false`,
+`served_model_verified: false` and `credential_enrollment: "UNVERIFIED"`.
+Run each command under the role's own login and point `--state` at that
+role's own state directory.
+
+`hermesctl status` is the incumbent operator summary and is deliberately
+lenient about a damaged installation: it keeps reporting `INSTALLED` for a
+root whose profile drifted or whose manifest was replaced by a symlink. A
+consumer that must not report a damaged install as healthy reads
+`role-metadata` instead, which returns `UNAVAILABLE` for those states. The
+two commands answer the same question differently on purpose; the difference
+is pinned by a test so neither can drift into the other unnoticed.
+
 ## Install
 
 From the approved readable repo root on ubuntu1, run the Secretary block
