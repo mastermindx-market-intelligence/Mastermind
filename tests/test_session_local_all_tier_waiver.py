@@ -72,10 +72,24 @@ def test_optional_review_availability_is_not_a_default_delegation():
     assert "a CRITICAL label alone creates no such child requirement" in table
 
 
-def test_source_candidate_cannot_pretend_to_be_installed():
+def test_protected_release_cannot_pretend_to_be_project_installation():
     s = policy()
-    assert "SOURCE CANDIDATE" in s
-    assert "until its own protected merge" in s
+    status = next(line for line in s.splitlines() if line.startswith("**Status:**"))
+    assert "#2030" in status and "protected-merged" in status
+    assert "68e3b816c95930f6996dbcc10403a6ad694e6889" in status
+    assert "SOURCE CANDIDATE" not in status
     assert "does not install ChatGPT Project settings" in s
     assert "Distinguish source, installed instructions" in s
     assert "No self-merge" in s
+
+
+def test_signed_machine_risk_status_separates_merged_waiver_from_unverified_install():
+    risk = (ROOT / "docs/REVIEW_RISK_POLICY.md").read_text(encoding="utf-8")
+    status = next(line for line in risk.splitlines() if line.startswith("**Status:**"))
+    assert "#1989" in status and "#2030" in status
+    assert "protected-merged" in status
+    assert "source candidate" not in status.lower()
+    assert "ChatGPT Project settings" in status and "NOT_PROVEN" in status
+    assert "AUTOMATIC" in status and "OFF" in status
+    for term in ("FAST", "STANDARD", "CRITICAL", "CODEOWNERS"):
+        assert term in risk
