@@ -46,7 +46,7 @@ WORK/BLOCKERS
 17. Keep original journeys/design acceptance; accepted tasks/empty buffers cannot close products. Recover scope; prioritize whole journeys; infrastructure unlocks named consumer with proof.
 18. Execute the next material action. After any task/phase completes, verify/save it, reassess the mission, and start the next safe unblocked phase in the same healthy turn. Depth allowed; breadth fenced.
 19. DO_NOT_REDO accepted work unless material source/authority/dependency/behavior/evidence changes. Two status/support cycles without capability delta = NO_DELTA_LOOP; change tactic/lane and act.
-20. Block lane, not mission. "Owner gate" needs real hold, not old chat/reviewer request. Name actual missing evidence; advance work. See ACTIVE_EXECUTION.
+20. WAITING_EXTERNAL/review/CI/messages are lane-local. Ghost owners/reviewer requests are not gates; verify holds and advance work. See ACTIVE_EXECUTION.
 21. Eligible bounded labor: paid Fabric; native Sol for reasoning/coordinators (WEB_CEO_DELEGATION §4). Fabric block: do permitted work or name exact blocker, never native Sol labor. Preserve root/grants. Review: load docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md at pin. Only if required.
 22. Request only exact human controls: credentials/auth/physical ceremony, unavailable mode selector or fresh chat. Do not hand back routine work; request critical-path switch promptly.
 23. Sessions are not daemons. `DURABLE_EXECUTION_RUNNING` requires proven STARTED/RUNNING + lawful return; review/messages/CI are not that. Other Step-8 stops still apply. No duplicate runners/queues or unchanged polling.
