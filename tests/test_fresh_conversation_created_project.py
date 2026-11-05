@@ -2,6 +2,7 @@
 import asyncio
 import copy
 import dataclasses
+import faulthandler
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,15 @@ from control_plane.principal_projection import neutral_principal_projection
 from integrations.mastermind_workspace_app.contract import workspace_authorizers
 from integrations.mastermind_workspace_app.project_authoring_grant import legacy_workspace_document
 from scripts import chairman_control_room as ccr
+
+
+@pytest.fixture(autouse=True)
+def fatal_only_traceback_diagnostics():
+    # Retained88781 crashed in CPython's periodic cross-thread stack walker
+    # (_PyFrame_SafeGetCode), not a Python source exception. Keep fatal crash
+    # diagnostics and every pre-import effect guard; only retire that sampler.
+    faulthandler.cancel_dump_traceback_later()
+    faulthandler.enable()
 
 
 def test_actual_created_n_project_membership_uses_canonical_read_not_c_snapshot(joined,tmp_path,monkeypatch):
