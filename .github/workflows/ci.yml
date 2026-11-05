@@ -60,10 +60,12 @@ jobs:
   # Ordinary PRs get rapid, bounded feedback while the exact merge-group
   # candidate still executes *all* canonical discovery-first pytest shards.
   # The stable protected status context is still the final job named 'test'.
+  # Heavy work must stop when this same-PR run is superseded/cancelled.
+  # Keep the small final test gate on always() so cancellation cannot look green.
   pr_fast:
     name: PR fast checks
     needs: [pr_scope]
-    if: ${{ always() && github.event_name == 'pull_request' && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     permissions:
@@ -118,7 +120,7 @@ jobs:
     # All critical/unqualified PRs still run full pytest. Ordinary PRs use
     # pr_fast; *every* merge-group and master push runs all six canonical
     # shards (with the existing exact merge-group proof-reuse logic on push).
-    if: ${{ always() && (github.event_name != 'pull_request' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}
     # Only the test-shard job needs read-only workflow-run evidence.
     permissions:
       contents: read
@@ -217,8 +219,9 @@ jobs:
         working-directory: integrations/studio_direct_mcp
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
-          node --test gateway-modern-fabric.test.mjs gateway.test.mjs gateway-shared-backend.test.mjs gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs
+          node --test gateway-modern-fabric.test.mjs gateway-fleet-git-failure.test.mjs gateway.test.mjs gateway-shared-backend.test.mjs gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs
           python -m unittest discover -s . -p 'private_service*test.py'
+          python -m unittest discover -s . -p 'control_bundle*test.py'
 
       - name: Compile source
         if: matrix.index == 0

@@ -222,9 +222,9 @@
       "source": "candidate/go_lease_capability.py"
     },
     "ext/go_lease_gateway.py": {
-      "bytes": 17920,
+      "bytes": 27855,
       "installed_preimage_sha256": "7b1e1d48933218135771c770a1d25c994aa0332bc6bc8461c5b9d625ef8a7658",
-      "sha256": "a0bc2be5171c4af339ed7d5ba91050633038759fc50d3bfd2dd9ed4ecdeb6f1b",
+      "sha256": "19f4276840361a1efafd329f72e919a2b9d4d898c9eb67ee5fddaaf3b8a27c03",
       "source": "candidate/go_lease_gateway.py"
     },
     "ext/go_remote_capsule.py": {
@@ -294,9 +294,9 @@
       "source": "candidate/lane_runtime.py"
     },
     "ext/lease_broker.py": {
-      "bytes": 121032,
+      "bytes": 142062,
       "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
-      "sha256": "a1acb11f66c111f079926ec15ac316e1cbbf8992b834294950bbc169e8244248",
+      "sha256": "2d2104cb2fcf1eda9dc161776c5a0d326c4207504721e58b2aadde8e44d6e0d4",
       "source": "candidate/lease_broker.py"
     },
     "ext/linux_process_identity.py": {
@@ -516,9 +516,9 @@
       "source": "candidate/paid_yaml_runtime.py"
     },
     "ext/pick.py": {
-      "bytes": 129395,
+      "bytes": 169718,
       "installed_preimage_sha256": "0f5cbc32504680e09055b77cffdea81adea734388b7b061fcf77d017b7715cb2",
-      "sha256": "747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132",
+      "sha256": "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892",
       "source": "candidate/pick.py"
     },
     "ext/placement_view.py": {
@@ -528,9 +528,9 @@
       "source": "source/placement_view.py"
     },
     "ext/pool_ledger.py": {
-      "bytes": 85784,
+      "bytes": 87567,
       "installed_preimage_sha256": "85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e",
-      "sha256": "34be52eca114c32f44538254b3675ce2d0a79dc420ebda2f42702c6be56ad6cc",
+      "sha256": "a9ba8724ad1d6f9a78944cd87f95c1cb70a0832d71612402565111fb04100ef2",
       "source": "candidate/pool_ledger.py"
     },
     "ext/pool_status.py": {
@@ -540,15 +540,15 @@
       "source": "source/pool_status.py"
     },
     "ext/provider_outcome.py": {
-      "bytes": 30786,
+      "bytes": 30928,
       "installed_preimage_sha256": null,
-      "sha256": "22b5ae9325118327b8b0734514c6f5711e39ae919f0e04426f7fac182895bf24",
+      "sha256": "ff909ac6fb0a734ce0ea1aa78c2b04e992c170e5be413c1b7778e6ffd7c7907e",
       "source": "candidate/provider_outcome.py"
     },
     "ext/quota_circuit.py": {
-      "bytes": 28768,
+      "bytes": 28888,
       "installed_preimage_sha256": null,
-      "sha256": "0962d638a0a5655a71ea7a6eeb83088ad60af30f4a26e9c5bc47a92c3ab77945",
+      "sha256": "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303",
       "source": "candidate/quota_circuit.py"
     },
     "ext/quota_remote.py": {

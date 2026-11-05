@@ -22,7 +22,7 @@ MODULES = (
     "native_runtime_bindings", "commission_deadline", "provider_outcome",
     "quota_circuit", "model_tier", "pool_status", "lease_broker",
     "go_lease_capability", "go_lease_gateway", "paid_yaml_runtime", "go_application_handler",
-    "fabric_policy_snapshot",
+    "fabric_policy_snapshot", "pool_ledger", "pick",
 )
 HTTP_MEMBERS = frozenset({"ext/application_http_transports.py",
     "ext/application_http_realm_projection.py", "ext/application_http_realms.v1.json"})
@@ -124,6 +124,7 @@ class Startup:
     http_transports: object = None
     bailian_keys: object = None
     http_projection_sha256: str | None = None
+    handler_sha256: str | None = None
 
 
 def inspect(*, verified_root, verified_metadata):
@@ -165,6 +166,8 @@ def inspect(*, verified_root, verified_metadata):
         "helper": owner("glm_shim") / "glm_shim.py",
         "db_path": owner("broker/leases.sqlite"), "lock_path": owner("broker/leases.lock"),
         "accounts_path": binding.owner_path(root / "orch/fabric/accounts.yaml", here),
+        "policy_path": binding.owner_path(root / "orch/fabric/pools.yaml", here),
+        "ledger_path": binding.owner_path(root / "orch/fabric/ledger.jsonl", here),
         "status_json": binding.owner_path(root / "orch/fabric/status.json", here),
         "hosts_path": owner("hosts.json"), "grok_marker": owner("GROK_EXHAUSTED"),
     }
@@ -225,7 +228,8 @@ def inspect(*, verified_root, verified_metadata):
         recipes = tuple(rows)
     return Startup(handler, broker, paths, root.name, yaml_runtime,
                    yaml_bytes[0], yaml_bytes[1], yaml_check, sys.modules["fabric_policy_snapshot"],
-                   http_projection, recipes, http_transports, bailian_keys, http_digest)
+                   http_projection, recipes, http_transports, bailian_keys, http_digest,
+                   files["ext/go_application_handler.py"])
 
 
 SERVICE_SCHEMA = "mastermind.native_go_application_service.v1"
@@ -234,6 +238,12 @@ SERVICE_RECEIPT_SCHEMA = "native-go-service-enrollment-completed.v1"
 SERVICE_HTTP_SCHEMA = "mastermind.native_go_application_service.v2"
 SERVICE_HTTP_ENROLLMENT_SCHEMA = "native-go-service-enrollment.v2"
 SERVICE_HTTP_RECEIPT_SCHEMA = "native-go-service-enrollment-completed.v2"
+SERVICE_SELECTED_SCHEMA = "mastermind.native_go_application_service.v3"
+SERVICE_SELECTED_ENROLLMENT_SCHEMA = "native-go-service-enrollment.v3"
+SERVICE_SELECTED_RECEIPT_SCHEMA = "native-go-service-enrollment-completed.v3"
+SERVICE_ADMIN_SCHEMA = "mastermind.native_go_application_service.v4"
+SERVICE_ADMIN_ENROLLMENT_SCHEMA = "native-go-service-enrollment.v4"
+SERVICE_ADMIN_RECEIPT_SCHEMA = "native-go-service-enrollment-completed.v4"
 SERVICE_CREDENTIAL_REF = "MACRO_FABRIC_APPLICATION_TOKEN"
 SERVICE_SCOPE_FIELDS = frozenset({"principal_id", "caller_host", "native_host", "workload",
     "credential_ref", "capability_lane", "workload_profile", "account_profile"})
@@ -361,10 +371,13 @@ def validate_application_service_document(startup, document):
     fields = {"schema", "operation_id", "plan_digest", "source_generation", "ingress_digest",
               "scope", "owners", "credential"}
     http = type(document) is dict and document.get("schema") == SERVICE_HTTP_SCHEMA
+    admin = type(document) is dict and document.get("schema") == SERVICE_ADMIN_SCHEMA
+    selected = type(document) is dict and document.get("schema") in (SERVICE_SELECTED_SCHEMA, SERVICE_ADMIN_SCHEMA)
     if http:
         fields |= {"application_recipe", "application_accounts"}
     if (type(document) is not dict or set(document) != fields
-            or document["schema"] != (SERVICE_HTTP_SCHEMA if http else SERVICE_SCHEMA)
+            or document["schema"] != (SERVICE_HTTP_SCHEMA if http else SERVICE_ADMIN_SCHEMA if admin else
+                                      SERVICE_SELECTED_SCHEMA if selected else SERVICE_SCHEMA)
             or document["owners"] != application_service_owners(startup, application_http=http)):
         raise ValueError("native application service projection refused")
     for key in ("plan_digest", "source_generation", "ingress_digest"):
@@ -373,8 +386,13 @@ def validate_application_service_document(startup, document):
     if type(document["operation_id"]) is not str or IDENTITY.fullmatch(document["operation_id"]) is None:
         raise ValueError("native application service operation refused")
     scope = document["scope"]
-    if type(scope) is not dict or set(scope) != SERVICE_SCOPE_FIELDS:
+    expected_scope = SERVICE_SCOPE_FIELDS | {"selection_purpose"} if selected else SERVICE_SCOPE_FIELDS
+    if admin:
+        expected_scope |= {"admin_pool_view"}
+    if type(scope) is not dict or set(scope) != expected_scope:
         raise ValueError("native application service scope refused")
+    if admin and type(scope["admin_pool_view"]) is not bool:
+        raise ValueError("native application metadata permission refused")
     for key in ("principal_id", "caller_host", "native_host", "workload", "credential_ref"):
         if type(scope[key]) is not str or IDENTITY.fullmatch(scope[key]) is None:
             raise ValueError("native application service identity refused")
@@ -387,7 +405,11 @@ def validate_application_service_document(startup, document):
     if not profile.is_absolute() or ".." in profile.parts:
         raise ValueError("native application service profile refused")
     binding = startup.handler.ApplicationServiceBinding(scope["principal_id"], scope["caller_host"],
-        scope["workload"], scope["credential_ref"], document["credential"], **({"pool": "bailian"} if http else {}))
+        scope["workload"], scope["credential_ref"], document["credential"],
+        **({"pool": "bailian"} if http else {}),
+        **({"selection_purpose": startup.handler.ApplicationSelectionPurpose(scope["selection_purpose"])}
+           if selected else {}),
+        **({"admin_pool_view": scope["admin_pool_view"]} if admin else {}))
     if http:
         recipe, accounts = document["application_recipe"], document["application_accounts"]
         if (type(recipe) is not dict or scope["workload"] != "site_interactive"
@@ -426,13 +448,19 @@ def load_completed_application_startup(startup):
     document, intent, receipt = map(_service_json, (raw, intent_raw, receipt_raw))
     result = validate_application_service_document(startup, document)
     http = document["schema"] == SERVICE_HTTP_SCHEMA
+    admin = document["schema"] == SERVICE_ADMIN_SCHEMA
+    selected = document["schema"] in (SERVICE_SELECTED_SCHEMA, SERVICE_ADMIN_SCHEMA)
     intent_fields = {"schema", "operation_id", "plan_digest", "source_generation", "ingress_digest", "bundle"}
     receipt_fields = {"schema", "operation_id", "plan_digest", "source_generation", "ingress_digest",
                       "scope", "binding_sha256", "binding_identity", "accounts_sha256", "accounts_identity"}
     if http:
         receipt_fields |= {"application_recipe_digest", "source_projection_sha256", "provider_profile_identity"}
-    if (set(intent) != intent_fields or intent["schema"] != (SERVICE_HTTP_ENROLLMENT_SCHEMA if http else SERVICE_ENROLLMENT_SCHEMA)
-            or set(receipt) != receipt_fields or receipt["schema"] != (SERVICE_HTTP_RECEIPT_SCHEMA if http else SERVICE_RECEIPT_SCHEMA)
+    if (set(intent) != intent_fields or intent["schema"] != (SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
+            SERVICE_ADMIN_ENROLLMENT_SCHEMA if admin else
+            SERVICE_SELECTED_ENROLLMENT_SCHEMA if selected else SERVICE_ENROLLMENT_SCHEMA)
+            or set(receipt) != receipt_fields or receipt["schema"] != (SERVICE_HTTP_RECEIPT_SCHEMA if http else
+                SERVICE_ADMIN_RECEIPT_SCHEMA if admin else
+                SERVICE_SELECTED_RECEIPT_SCHEMA if selected else SERVICE_RECEIPT_SCHEMA)
             or any(intent[key] != document[key] or receipt[key] != document[key]
                    for key in ("operation_id", "plan_digest", "source_generation", "ingress_digest"))
             or receipt["scope"] != document["scope"]
@@ -527,6 +555,24 @@ def main(*, verified_root, verified_metadata, application_services=(), applicati
     if (stat.S_IMODE(account_path.parent.stat().st_mode) != 0o700
             or stat.S_IMODE(account_path.stat().st_mode) != 0o600):
         raise ValueError("native Go original account profile custody refused")
+    selection_profile = None
+    if any(service.selection_purpose is not None for service in application_services):
+        # Compare only owner paths at startup. Original recovery must remain
+        # available when current policy or quality data is missing/revoked.
+        owner = sys.modules["native_runtime_bindings"].owner_path
+        here = Path(__file__).absolute().parent
+        configured_ledger = Path(os.path.abspath(sys.modules["pool_ledger"].LEDGER_PATH))
+        configured_policy = Path(os.path.abspath(sys.modules["pick"].POOLS_YAML))
+        if (owner(configured_ledger, here) != startup.paths["ledger_path"]
+                or owner(configured_policy, here) != startup.paths["policy_path"]):
+            raise ValueError("native application selection owner mapping differs")
+        # Keep the exact qualified original paths. An unrelated symlink alias
+        # is never adopted as another mutable route to the same data owner.
+        sys.modules["pool_ledger"].LEDGER_PATH = str(startup.paths["ledger_path"])
+        sys.modules["pick"].POOLS_YAML = str(startup.paths["policy_path"])
+        selection_profile = sys.modules["go_lease_gateway"].ApplicationSelectionProfile(
+            source_generation=startup.generation, ingress_digest=startup.handler_sha256,
+            account_profile=str(account_path))
     for key in ("lock_path",):
         if os.path.lexists(startup.paths[key]):
             _regular(startup.paths[key])
@@ -537,6 +583,7 @@ def main(*, verified_root, verified_metadata, application_services=(), applicati
         if before != _existing_database(startup.paths["db_path"]):
             raise ValueError("native Go original database changed during startup")
         return startup.handler.main(application_broker=broker, application_services=application_services,
+            **({"application_selection_profile": selection_profile} if selection_profile is not None else {}),
             **({"application_http_binding": _application_http_binding(startup, http_projection)}
                if http_projection is not None else {}))
 

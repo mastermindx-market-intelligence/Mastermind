@@ -68,6 +68,20 @@ def http_service_owner(service_owner, monkeypatch):
     return case
 
 
+def test_http_v2_rejects_selected_purpose_before_enrollment(http_service_owner):
+    case = http_service_owner
+    assert case.specification["schema"] == installer.SERVICE_HTTP_SPEC_SCHEMA
+    case.specification["scope"]["selection_purpose"] = {
+        "purpose_id": "fixture-admin-text", "source_ref": "fixture:qualified-purpose",
+        "task": {"task_class": "mechanical", "route_key": "fixture-admin-text",
+                 "task_complexity": "C1_ROUTINE_BOUNDED", "needs": []}}
+    with pytest.raises(ValueError, match="invalid service enrollment scope"):
+        prepare(case)
+    assert not case.service_bundle.exists()
+    assert not case.intent.exists() and not case.binding.exists() and not case.service_receipt.exists()
+    unchanged_ingress(case)
+
+
 def test_http_build_adds_only_closed_three_and_keeps_historical_evidence_inert(builds):
     baseline = json.loads((builds.application / "native-manifest.json").read_bytes())
     manifest = json.loads((builds.http / "native-manifest.json").read_bytes())

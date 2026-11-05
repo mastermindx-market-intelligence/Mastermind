@@ -113,8 +113,13 @@ def test_default_build_stays_exact_reviewed_102_and_go_adds_only_the_fixed_pair(
     captured = {name: g.digest((ROOT / "candidate" / name).read_bytes())
                 for name in builder.GO_APPLICATION_DEPENDENCIES}
     builder.validate_go_base_manifest(default, captured)
+    assert default["ext/pick.py"] == builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]
     historical = dict(default)
     historical.update({"ext/" + name: value for name, value in builder.GO_BASE_DEPENDENCIES.items()})
+    historical["ext/pick.py"] = builder.GO_BASE_PICKER_SHA256
+    historical.update({"ext/" + name: value for name, value in builder.GO_SELECTION_SUPPORT_PREIMAGES.items()})
+    assert default["ext/provider_outcome.py"] == builder.GO_PROTECTED_PROVIDER_OUTCOME_SHA256
+    historical["ext/provider_outcome.py"] = builder.GO_BASE_PROVIDER_OUTCOME_SHA256
     assert g.digest((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) == builder.GO_BASE_MANIFEST_SHA256
     assert {k: v for k, v in application.items() if k in default} == default
     assert set(application) - set(default) == {g.GO_ENTRY, g.GO_HANDLER}
@@ -129,7 +134,29 @@ def test_default_build_stays_exact_reviewed_102_and_go_adds_only_the_fixed_pair(
         assert len(raw) == inventory["files"][path]["bytes"]
 
 
-@pytest.mark.parametrize("corruption", ["handler", "dependency", "base", "entry-symlink"])
+def test_exact_historical_picker_remains_a_valid_base_but_no_arbitrary_fourth_member(builds):
+    manifest = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    historical = dict(manifest)
+    historical["ext/pick.py"] = builder.GO_BASE_PICKER_SHA256
+    builder.validate_go_base_manifest(historical, captured)
+    for digest in (builder.GO_BASE_PROVIDER_OUTCOME_SHA256,
+                   builder.GO_PROTECTED_PROVIDER_OUTCOME_SHA256):
+        exact = dict(manifest)
+        exact["ext/provider_outcome.py"] = digest
+        builder.validate_go_base_manifest(exact, captured)
+    for member in ("ext/pick.py", "ext/model_tier.py", "ext/quota_circuit.py",
+                   "ext/pool_ledger.py", "ext/provider_outcome.py"):
+        bad = dict(manifest)
+        bad[member] = "f" * 64
+        with pytest.raises(ValueError):
+            builder.validate_go_base_manifest(bad, captured)
+    bad = dict(manifest, unexpected="f" * 64)
+    with pytest.raises(ValueError):
+        builder.validate_go_base_manifest(bad, captured)
+
+
+@pytest.mark.parametrize("corruption", ["handler", "dependency", "base", "picker", "provider-outcome", "other-member", "entry-symlink"])
 def test_closed_component_drift_refuses_before_go_pair_creation(builds, tmp_path, corruption):
     output = tmp_path / "copy"
     shutil.copytree(builds.default, output)
@@ -143,6 +170,12 @@ def test_closed_component_drift_refuses_before_go_pair_creation(builds, tmp_path
         component["native_stage_dependencies"]["lease_broker.py"] = "0" * 64
     elif corruption == "base":
         manifest["ext/lease_broker.py"] = "0" * 64
+    elif corruption == "picker":
+        manifest["ext/pick.py"] = "0" * 64
+    elif corruption == "provider-outcome":
+        manifest["ext/provider_outcome.py"] = "0" * 64
+    elif corruption == "other-member":
+        manifest["ext/model_tier.py"] = "0" * 64
     else:
         root = tmp_path / "source"
         (root / "candidate").mkdir(parents=True)

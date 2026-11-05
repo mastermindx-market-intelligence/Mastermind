@@ -106,6 +106,9 @@ def _cleanup(temp):
 
 
 APPLICATION_PREIMAGES = {
+    # Retained f7 candidate bytes keep both historical95/102 transitions exact.
+    'ext/quota_circuit.py': ('rollout/preimages/quota_circuit_b119865.py', 28768,
+        '0962d638a0a5655a71ea7a6eeb83088ad60af30f4a26e9c5bc47a92c3ab77945'),
     'ext/lease_broker.py': ('rollout/preimages/lease_broker_f1059fe.py', 73321,
         'a2847a29abe590cb168c2cd8ae34e0b1c3222b6e92ab4c00f252a342d56e6406'),
     'ext/go_lease_capability.py': ('source/go_lease_capability.py', 9456,

@@ -859,6 +859,8 @@ def reconcile_go(bundle):
 
 SERVICE_SPEC_SCHEMA = "native-go-service-enrollment-specification.v1"
 SERVICE_HTTP_SPEC_SCHEMA = "native-go-service-enrollment-specification.v2"
+SERVICE_SELECTED_SPEC_SCHEMA = "native-go-service-enrollment-specification.v3"
+SERVICE_ADMIN_SPEC_SCHEMA = "native-go-service-enrollment-specification.v4"
 _SERVICE_PLAN_FIELDS = frozenset({"schema", "operation_id", "go_ingress_bundle", "ingress_digest",
     "source_generation", "store", "selection", "installer_sha256", "entry_sha256", "scope",
     "owners", "owner_identities", "accounts_before", "accounts_after_sha256", "grant_sha256", "digest"})
@@ -971,18 +973,31 @@ def _service_specification(entry, specification, startup=None):
         specification = _successor_json(Path(specification))
     fields = {"schema", "operation_id", "scope", "grant"}
     http = type(specification) is dict and specification.get("schema") == SERVICE_HTTP_SPEC_SCHEMA
+    admin = type(specification) is dict and specification.get("schema") == SERVICE_ADMIN_SPEC_SCHEMA
+    selected = type(specification) is dict and specification.get("schema") in (SERVICE_SELECTED_SPEC_SCHEMA, SERVICE_ADMIN_SPEC_SCHEMA)
     if http:
         fields.add("application_recipe")
     if (type(specification) is not dict or set(specification) != fields
-            or specification["schema"] != (SERVICE_HTTP_SPEC_SCHEMA if http else SERVICE_SPEC_SCHEMA)
+            or specification["schema"] != (SERVICE_HTTP_SPEC_SCHEMA if http else
+                SERVICE_ADMIN_SPEC_SCHEMA if admin else
+                SERVICE_SELECTED_SPEC_SCHEMA if selected else SERVICE_SPEC_SCHEMA)
             or type(specification["operation_id"]) is not str
             or entry.IDENTITY.fullmatch(specification["operation_id"]) is None):
         raise ValueError("invalid service enrollment specification")
     # Freeze an owned JSON value, rejecting nonfinite numbers and aliases.
     specification = generation.unique_json(generation.canonical(specification))
     scope, grant = specification["scope"], specification["grant"]
-    if type(scope) is not dict or set(scope) != entry.SERVICE_SCOPE_FIELDS or type(grant) is not dict:
+    scope_fields = entry.SERVICE_SCOPE_FIELDS | {"selection_purpose"} if selected else entry.SERVICE_SCOPE_FIELDS
+    if admin:
+        scope_fields |= {"admin_pool_view"}
+    if type(scope) is not dict or set(scope) != scope_fields or type(grant) is not dict:
         raise ValueError("invalid service enrollment scope")
+    if admin and type(scope["admin_pool_view"]) is not bool:
+        raise ValueError("invalid service metadata permission")
+    if selected:
+        if startup is None:
+            raise ValueError("selected service requires verified startup")
+        startup.broker_module._application_selection_purpose(scope["selection_purpose"])
     for name in ("principal_id", "caller_host", "native_host", "workload", "credential_ref"):
         if type(scope[name]) is not str or entry.IDENTITY.fullmatch(scope[name]) is None:
             raise ValueError("invalid service enrollment identity")
@@ -1043,6 +1058,8 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
         ingress, selection, metadata, entry, startup = context
         specification = _service_specification(entry, specification, startup)
         http = specification["schema"] == SERVICE_HTTP_SPEC_SCHEMA
+        admin = specification["schema"] == SERVICE_ADMIN_SPEC_SCHEMA
+        selected = specification["schema"] in (SERVICE_SELECTED_SPEC_SCHEMA, SERVICE_ADMIN_SPEC_SCHEMA)
         paths = entry.application_enrollment_paths(startup)
         if any(os.path.lexists(path) for path in paths.values()):
             raise ValueError("service enrollment already has an original artifact")
@@ -1062,7 +1079,9 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
         if (_service_snapshot(entry, startup.paths["accounts_path"]) != (before, identity)
                 or _service_owner_identities(entry, startup, profile, application_http=http) != owners):
             raise ValueError("service owners changed during preparation")
-        plan = {"schema": entry.SERVICE_HTTP_ENROLLMENT_SCHEMA if http else entry.SERVICE_ENROLLMENT_SCHEMA,
+        plan = {"schema": entry.SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
+                entry.SERVICE_ADMIN_ENROLLMENT_SCHEMA if admin else
+                entry.SERVICE_SELECTED_ENROLLMENT_SCHEMA if selected else entry.SERVICE_ENROLLMENT_SCHEMA,
             "operation_id": specification["operation_id"], "go_ingress_bundle": str(go_ingress_bundle),
             "ingress_digest": ingress["digest"], "source_generation": startup.generation,
             "store": str(store), "selection": selection,
@@ -1220,9 +1239,17 @@ def _service_transaction(bundle, *, reconcile_only=False):
         ingress, selection, metadata, entry, startup = context
         specification = _service_specification(entry, specification, startup)
         http = specification["schema"] == SERVICE_HTTP_SPEC_SCHEMA
-        enrollment_schema = entry.SERVICE_HTTP_ENROLLMENT_SCHEMA if http else entry.SERVICE_ENROLLMENT_SCHEMA
-        service_schema = entry.SERVICE_HTTP_SCHEMA if http else entry.SERVICE_SCHEMA
-        receipt_schema = entry.SERVICE_HTTP_RECEIPT_SCHEMA if http else entry.SERVICE_RECEIPT_SCHEMA
+        admin = specification["schema"] == SERVICE_ADMIN_SPEC_SCHEMA
+        selected = specification["schema"] in (SERVICE_SELECTED_SPEC_SCHEMA, SERVICE_ADMIN_SPEC_SCHEMA)
+        enrollment_schema = (entry.SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
+            entry.SERVICE_ADMIN_ENROLLMENT_SCHEMA if admin else
+            entry.SERVICE_SELECTED_ENROLLMENT_SCHEMA if selected else entry.SERVICE_ENROLLMENT_SCHEMA)
+        service_schema = (entry.SERVICE_HTTP_SCHEMA if http else
+            entry.SERVICE_ADMIN_SCHEMA if admin else
+            entry.SERVICE_SELECTED_SCHEMA if selected else entry.SERVICE_SCHEMA)
+        receipt_schema = (entry.SERVICE_HTTP_RECEIPT_SCHEMA if http else
+            entry.SERVICE_ADMIN_RECEIPT_SCHEMA if admin else
+            entry.SERVICE_SELECTED_RECEIPT_SCHEMA if selected else entry.SERVICE_RECEIPT_SCHEMA)
         projection = ({"application_recipe": specification["application_recipe"],
             "application_accounts": specification["grant"]["accounts"]} if http else {})
         paths = entry.application_enrollment_paths(startup)

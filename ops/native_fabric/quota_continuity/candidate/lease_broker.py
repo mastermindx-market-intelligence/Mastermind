@@ -50,6 +50,41 @@ class ApplicationAdmissionError(ValueError):
         super().__init__("application admission refused: " + code)
 
 
+class ApplicationSelectionError(ApplicationAdmissionError):
+    """A selection condition failed before allocation; no new turn was admitted."""
+
+
+def _application_selection_purpose(value):
+    """Validate the trusted enrollment projection, never an HTTP authority field."""
+    if type(value) is not dict or set(value) != {"purpose_id", "source_ref", "task"}:
+        raise ApplicationSelectionError("purpose_invalid")
+    _application_id(value["purpose_id"])
+    reference = value["source_ref"]
+    if (type(reference) is not str or not reference.strip() or len(reference) > 512
+            or any(ord(c) < 32 for c in reference)):
+        raise ApplicationSelectionError("purpose_source_invalid")
+    task = value["task"]
+    required = {"task_class", "route_key"}
+    optional = {"task_complexity", "needs", "subject_pool", "escalation_reason"}
+    if type(task) is not dict or not required <= set(task) or set(task) - required - optional:
+        raise ApplicationSelectionError("purpose_task_invalid")
+    for key in required:
+        _application_id(task[key])
+    for key in ("task_complexity", "subject_pool"):
+        if task.get(key) is not None:
+            _application_id(task[key])
+    if "needs" in task and (type(task["needs"]) is not list or len(task["needs"]) > 32
+            or any(type(n) is not str or re.fullmatch(r"[a-z][a-z0-9_]{0,63}", n) is None
+                   for n in task["needs"])):
+        raise ApplicationSelectionError("purpose_needs_invalid")
+    witness = task.get("escalation_reason")
+    if witness is not None and (type(witness) is not str or len(witness) > 2048
+            or any(ord(c) < 32 for c in witness)):
+        raise ApplicationSelectionError("purpose_witness_invalid")
+    encoded = _application_json(value)
+    return encoded, hashlib.sha256(encoded.encode()).hexdigest()
+
+
 def _application_id(value):
     if not isinstance(value, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", value) is None:
         raise ApplicationAdmissionError("invalid_identity")
@@ -584,12 +619,28 @@ class Broker:
         # Add commitments to the existing owner rows in this same migration
         # transaction. Historical Go rows stay NULL and retain their v1 proof.
         for table, additions in (
-                ("application_turns", ("recipe_json", "recipe_digest")),
+                ("application_turns", ("recipe_json", "recipe_digest", "selection_json", "selection_digest")),
                 ("application_requests", ("recipe_digest", "logical_payload_digest", "wire_body_digest"))):
             columns = {row[1] for row in conn.execute("PRAGMA table_info(" + table + ")")}
             for column in additions:
                 if column not in columns:
                     conn.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " TEXT")
+        conn.execute("""CREATE TRIGGER IF NOT EXISTS application_selection_binding_v1
+            BEFORE UPDATE ON application_turns WHEN
+                NEW.selection_json IS NOT OLD.selection_json
+                OR NEW.selection_digest IS NOT OLD.selection_digest
+                OR (OLD.selection_digest IS NOT NULL AND (
+                    NEW.principal_id IS NOT OLD.principal_id OR NEW.turn_id IS NOT OLD.turn_id
+                    OR NEW.grant_id IS NOT OLD.grant_id OR NEW.grant_digest IS NOT OLD.grant_digest
+                    OR NEW.caller_host IS NOT OLD.caller_host OR NEW.workload IS NOT OLD.workload
+                    OR NEW.admission_root IS NOT OLD.admission_root OR NEW.pool IS NOT OLD.pool
+                    OR NEW.account IS NOT OLD.account OR NEW.model IS NOT OLD.model
+                    OR NEW.lease_id IS NOT OLD.lease_id OR NEW.created_at IS NOT OLD.created_at
+                    OR NEW.expires_at IS NOT OLD.expires_at OR NEW.max_steps IS NOT OLD.max_steps))
+            BEGIN SELECT RAISE(IGNORE); END""")
+        conn.execute("""CREATE TRIGGER IF NOT EXISTS application_selection_delete_v1
+            BEFORE DELETE ON application_turns WHEN OLD.selection_digest IS NOT NULL
+            BEGIN SELECT RAISE(IGNORE); END""")
         conn.execute("""CREATE TRIGGER IF NOT EXISTS application_http_turn_binding_v1
             BEFORE UPDATE ON application_turns WHEN OLD.pool='bailian' AND (
                 NEW.principal_id IS NOT OLD.principal_id OR NEW.turn_id IS NOT OLD.turn_id
@@ -834,9 +885,11 @@ class Broker:
             total += min(maximum, ceiling, cores)
         return total
 
-    def account_cap(self, pool: str, acct: Dict[str, Any]) -> Optional[int]:
+    def account_cap(self, pool: str, acct: Dict[str, Any], conn=None) -> Optional[int]:
         import quota_circuit
-        return quota_circuit.account_cap(self, pool, acct, self._base_account_cap(pool, acct))
+        base = self._base_account_cap(pool, acct)
+        return (quota_circuit.account_cap(self, pool, acct, base) if conn is None
+                else quota_circuit.account_cap(self, pool, acct, base, conn=conn))
 
     def _base_account_cap(self, pool: str, acct: Dict[str, Any]) -> Optional[int]:
         """Effective cap, or None if the account must not be granted."""
@@ -913,13 +966,13 @@ class Broker:
             ).fetchone()
         return int(row["n"] if row else 0)
 
-    def grantable_accounts(self, pool: str) -> List[Dict[str, Any]]:
+    def grantable_accounts(self, pool: str, conn=None) -> List[Dict[str, Any]]:
         spec = self.provider(pool)
         if spec.get("enabled") is False:
             return []
         out = []
         for acct in spec.get("accounts") or []:
-            cap = self.account_cap(pool, acct)
+            cap = self.account_cap(pool, acct) if conn is None else self.account_cap(pool, acct, conn=conn)
             if cap is None or cap <= 0:
                 continue
             row = dict(acct)
@@ -1723,6 +1776,13 @@ class Broker:
     def _application_grant(self, principal_id, caller_host, workload, pool, model,
                            expected_credential_ref=None, expected_recipe_digest=None):
         document = _read_application_accounts(self.accounts_path)
+        return self._application_grant_from_document(document, principal_id, caller_host,
+            workload, pool, model, expected_credential_ref, expected_recipe_digest)
+
+    def _application_grant_from_document(self, document, principal_id, caller_host,
+                                         workload, pool, model,
+                                         expected_credential_ref=None, expected_recipe_digest=None):
+        """Match one already validated owner reading; admission still reads fresh."""
         now = _application_time(self.now())
         matches = [g for g in document["application_grants"]
                    if g["enabled"] and g["expires_at"] > now
@@ -1746,6 +1806,221 @@ class Broker:
             raise ApplicationAdmissionError("recipe_mismatch")
         digest = hashlib.sha256(_application_json(grant).encode()).hexdigest()
         return document, grant, digest
+
+    def application_selection_facts(self, conn, *, principal_id, caller_host,
+                                    workload, pool, model, credential_ref, transport_accounts):
+        """Read existing Go ledger room; no admission, GC, secret or provider I/O.
+
+        This is concurrency evidence, not a provider-quota observation. B keeps
+        its existing post-admission quota/auth/frontier reservation unchanged.
+        The supplied read-only snapshot also owns every cooldown lookup.
+        """
+        if pool != "go":
+            raise ApplicationSelectionError("selection_transport_unqualified")
+        document, grant, digest = self._application_grant(
+            principal_id, caller_host, workload, pool, model, credential_ref)
+        room = self._application_go_room(conn, document, grant, model, transport_accounts)
+        return grant, digest, {"source": "broker-ledger-room", "observed_at": self.now(),
+            "fresh_s": 5.0, "cooldown": False, "model_room": {model: room},
+            "host": caller_host, "mode": "go"}
+
+    def _application_go_room(self, conn, document, grant, model, transport_accounts):
+        """The incumbent exact-model Go room calculation on one ledger snapshot."""
+        pool = "go"
+        allowed = frozenset(grant["accounts"]) & frozenset(transport_accounts)
+        token = _APPLICATION_ACCOUNTS.set(document)
+        try:
+            import quota_circuit
+            room = 0
+            for account in self.grantable_accounts(pool, conn=conn):
+                name = account["name"]
+                if (name not in allowed or account.get("enabled") is False
+                        or not quota_circuit.admission_room(self, conn, pool, account)):
+                    continue
+                available = max(0, account["_eff_cap"] - self._account_held(conn, pool, name))
+                model_cap = self.account_model_cap(pool, account, model)
+                if model_cap is not None:
+                    available = min(available, max(0, model_cap - self._account_model_held(conn, pool, name, model)))
+                room += available
+        finally:
+            _APPLICATION_ACCOUNTS.reset(token)
+        return room
+
+    def application_pool_view(self, conn, *, principal_id, caller_host, workload,
+                              credential_ref, bound_pool, transports, source):
+        """Bounded metadata over the retained owner, never snapshot()/GC/admission.
+
+        The gateway supplies its read-only transaction and source-bound transport
+        declarations. Unknown application effects remain counted as held. Only Go
+        has a qualified no-effect room observer here; external quota, host lanes
+        and provider health are deliberately not inferred from configured caps.
+        """
+        from pick import _APPLICATION_POOL_ORDER
+
+        observed = _application_time(self.now())
+        document = _read_application_accounts(self.accounts_path)
+        providers = document["providers"]
+        rows = []
+        for pool in _APPLICATION_POOL_ORDER:
+            spec = providers.get(pool)
+            configured = enabled = configured_accounts = enabled_accounts = None
+            basis, blockers = "unobserved", []
+            if spec is None:
+                blockers.append("account_inventory_unobserved")
+            else:
+                if (type(spec) is not dict or type(spec.get("enabled")) is not bool
+                        or type(spec.get("accounts")) is not list or len(spec["accounts"]) > 1024):
+                    raise ApplicationAdmissionError("admin_inventory_invalid")
+                names = set()
+                for account in spec["accounts"]:
+                    if type(account) is not dict:
+                        raise ApplicationAdmissionError("admin_inventory_invalid")
+                    _application_id(account.get("name"))
+                    if (account["name"] in names
+                            or "enabled" in account and type(account["enabled"]) is not bool):
+                        raise ApplicationAdmissionError("admin_inventory_invalid")
+                    names.add(account["name"])
+                    cap = account.get("per_account_cap")
+                    if cap is not None and (type(cap) is not int or not 0 <= cap <= 4096):
+                        raise ApplicationAdmissionError("admin_inventory_invalid")
+                configured, enabled = True, spec["enabled"]
+                configured_accounts = len(names)
+                enabled_accounts = sum(a.get("enabled", True) is True for a in spec["accounts"])
+                policy = spec.get("capacity_policy", "account")
+                basis = {"account": "account_concurrency", "host_admitted": "host_admitted"}.get(policy, "unobserved")
+                if not enabled:
+                    blockers.append("pool_disabled")
+                if not configured_accounts:
+                    blockers.append("no_configured_accounts")
+            held = conn.execute("SELECT COUNT(*) FROM leases WHERE pool=? AND state IN ('held','rented')",
+                                (pool,)).fetchone()[0]
+            models = []
+            for declaration in transports.get(pool, ()):
+                model = declaration["model"]
+                state, model_blockers, room = "unqualified", [], None
+                if declaration["qualified"] is not True:
+                    model_blockers.append("application_transport_unqualified")
+                elif pool != bound_pool:
+                    state = "held"
+                    model_blockers.append("service_pool_mismatch")
+                elif spec is None:
+                    state = "unobserved"
+                    model_blockers.append("account_inventory_unobserved")
+                elif not enabled or not enabled_accounts:
+                    state = "held"
+                    model_blockers.append("pool_disabled" if not enabled else "no_enabled_accounts")
+                else:
+                    try:
+                        _, grant, _ = self._application_grant_from_document(document,
+                            principal_id, caller_host, workload, pool, model, credential_ref,
+                            declaration.get("recipe_digest"))
+                        if not set(grant["accounts"]) & set(declaration["accounts"]):
+                            raise ApplicationAdmissionError("transport_accounts_unavailable")
+                        state = "configured"
+                        if pool == "go":
+                            room = self._application_go_room(conn, document, grant,
+                                model, declaration["accounts"])
+                    except ApplicationAdmissionError as exc:
+                        state = "held"
+                        model_blockers.append(exc.code if exc.code in {
+                            "grant_unavailable", "grant_ambiguous", "credential_ref_mismatch",
+                            "recipe_mismatch", "transport_accounts_unavailable"} else "application_grant_unavailable")
+                if room == 0:
+                    model_blockers.append("broker_room_exhausted")
+                models.append({"model": model, "protocol": declaration["protocol"],
+                    "capabilities": dict(declaration["capabilities"]),
+                    "transport_state": "qualified" if declaration["qualified"] else "unqualified",
+                    "application_state": state, "ledger_room": room,
+                    "capacity_state": "broker_ledger_only" if room is not None else "unobserved",
+                    "blockers": model_blockers})
+            states = {m["application_state"] for m in models}
+            if not models:
+                blockers.append("application_transport_unqualified")
+            application_state = ("configured" if "configured" in states
+                else "held" if "held" in states else "unobserved" if "unobserved" in states else "unqualified")
+            rows.append({"pool": pool, "configured": configured, "enabled": enabled,
+                "configured_accounts": configured_accounts, "enabled_accounts": enabled_accounts,
+                "capacity_basis": basis, "held_leases": held, "application_state": application_state,
+                "models": models, "model_coverage": "bound_transport" if models else "unobserved",
+                "blockers": blockers})
+        provenance = dict(source)
+        provenance["accounts_sha256"] = hashlib.sha256(_application_json(document).encode()).hexdigest()
+        return {"schema": "mastermind.fabric_admin_pool_view.v1", "observed_at": observed,
+            "stale_after": observed + 5.0, "execution_authorized": False,
+            "requires_fresh_admission": True, "scope": {"workload": workload, "bound_pool": bound_pool},
+            "coverage": {"inventory": "canonical_accounts", "ledger": "held_rows",
+                         "transports": "application_gateway", "provider_quota": "unobserved"},
+            "source": provenance, "pools": rows}
+
+    def _application_check_selection(self, record, *, pool, model, caller_host, grant, grant_digest,
+                                     expected_purpose, expected_profile, expected_task,
+                                     existing=False):
+        """Conditional admission in A's current transaction; never select again."""
+        try:
+            import pick
+            fields = {"schema", "purpose", "purpose_digest", "profile", "profile_digest",
+                      "identity", "commitments", "quality_records_sha256", "fresh_s"}
+            if (type(record) is not dict or set(record) != fields
+                    or record["schema"] != "mastermind.application_turn_selection.v1"
+                    or pool != "go"):
+                raise ValueError("invalid selection")
+            encoded = _application_json(record)
+            if len(encoded.encode()) > 32768:
+                raise ValueError("selection exceeds bound")
+            purpose_json, purpose_digest = _application_selection_purpose(expected_purpose)
+            profile_json = _application_json(expected_profile)
+            profile_digest = hashlib.sha256(profile_json.encode()).hexdigest()
+            if (record["purpose_digest"] != purpose_digest
+                    or _application_json(record["purpose"]) != purpose_json
+                    or record["profile_digest"] != profile_digest
+                    or _application_json(record["profile"]) != profile_json):
+                raise ValueError("purpose or source changed")
+            identity, commitments = record["identity"], record["commitments"]
+            if type(identity) is not dict or type(commitments) is not dict:
+                raise ValueError("selection identity unavailable")
+            comparison_task = dict(expected_task)
+            if existing:
+                original_task = identity.get("task")
+                if (type(original_task) is not dict or type(original_task.get("needs")) is not list
+                        or not set(comparison_task["needs"]) <= set(original_task["needs"])):
+                    raise ValueError("new step widens selected capability needs")
+                # A follow-up may need less than its original turn. Preserve
+                # that immutable commitment; never add a capability mid-turn.
+                comparison_task["needs"] = original_task["needs"]
+            expected = {"pool": pool, "model": model, "mode": expected_profile["mode"],
+                "protocol": expected_profile["protocol"], "streaming": False,
+                "driver": expected_profile["driver"], "profile": expected_profile["profile"],
+                "source": expected_profile["source"], "capabilities": expected_profile["capabilities"],
+                "grant_ref": {"grant_id": grant["grant_id"], "digest": grant_digest},
+                "qualification_ref": grant["qualification_ref"],
+                "application_permission_ref": grant["application_permission_ref"],
+                "max_turn_seconds": grant["max_turn_seconds"], "max_steps": grant["max_steps"],
+                "task": comparison_task, "host": caller_host, "observation_source": "broker-ledger-room"}
+            if any(identity.get(key) != value for key, value in expected.items()):
+                raise ValueError("selection binding changed")
+            if commitments.get("task_digest") != hashlib.sha256(pick._diagnostic_json(comparison_task)).hexdigest():
+                raise ValueError("selection task changed")
+            policy = pick.read_application_policy()
+            wanted = {"policy_bytes_sha256": policy.bytes_sha256,
+                      "policy_text_sha256": policy.text_sha256,
+                      "policy_parsed_sha256": policy.parsed_sha256,
+                      "policy_critical_sha256": policy.critical_sha256}
+            if (any(commitments.get(key) != value for key, value in wanted.items())
+                    or identity.get("policy") != {"parsed_sha256": policy.parsed_sha256,
+                                                   "critical_sha256": policy.critical_sha256}):
+                raise ValueError("selection policy changed")
+            _application_digest(record["quality_records_sha256"])
+            if not existing:
+                selected_at = _application_time(commitments["now_epoch"])
+                if type(record["fresh_s"]) not in (int, float) or record["fresh_s"] != 5.0:
+                    raise ValueError("selection freshness invalid")
+                if not self.now() - record["fresh_s"] <= selected_at <= self.now():
+                    raise ValueError("selection expired")
+            return encoded, hashlib.sha256(encoded.encode()).hexdigest()
+        except ApplicationSelectionError:
+            raise
+        except Exception:
+            raise ApplicationSelectionError("selection_condition_changed") from None
 
     @staticmethod
     def _application_unsettled(conn, turn):
@@ -1780,12 +2055,14 @@ class Broker:
                     disposition = "effect_unknown"
                     result["disposition"] = disposition
             result.update(recipe_digest=turn["recipe_digest"], recipe_json=turn["recipe_json"])
+        result.update(selection_json=turn["selection_json"], selection_digest=turn["selection_digest"])
         return result
 
     def begin_application_turn(self, *, principal_id, caller_host, workload, turn_id,
                                pool, model, deadline_ns=None, transport_accounts=None,
                                expected_credential_ref=None, application_recipe=None,
-                               expected_recipe_digest=None):
+                               expected_recipe_digest=None, expected_selection=None,
+                               selection_purpose=None, selection_profile=None, selection_task=None):
         for value in (principal_id, caller_host, workload, turn_id):
             _application_id(value)
         _application_model(model)
@@ -1817,9 +2094,33 @@ class Broker:
                 recovered = self._application_binding(conn, prior)
                 if recovered["disposition"] != "existing":
                     return recovered
-            document, grant, digest = self._application_grant(
-                principal_id, caller_host, workload, pool, model, expected_credential_ref,
-                expected_recipe_digest)
+            selected = expected_selection
+            if prior is not None:
+                if prior["selection_json"] is not None:
+                    try:
+                        if hashlib.sha256(prior["selection_json"].encode()).hexdigest() != prior["selection_digest"]:
+                            raise ValueError("stored selection changed")
+                        selected = json.loads(prior["selection_json"])
+                    except Exception:
+                        raise ApplicationSelectionError("stored_selection_invalid") from None
+                elif expected_selection is not None or selection_purpose is not None:
+                    raise ApplicationSelectionError("legacy_turn_purpose_changed")
+            elif selection_purpose is not None and selected is None:
+                raise ApplicationSelectionError("selection_required")
+            try:
+                document, grant, digest = self._application_grant(
+                    principal_id, caller_host, workload, pool, model, expected_credential_ref,
+                    expected_recipe_digest)
+            except ApplicationAdmissionError:
+                if selected is not None:
+                    raise ApplicationSelectionError("selection_grant_unavailable") from None
+                raise
+            selection_json = selection_digest = None
+            if selected is not None:
+                selection_json, selection_digest = self._application_check_selection(selected,
+                    pool=pool, model=model, caller_host=caller_host, grant=grant, grant_digest=digest,
+                    expected_purpose=selection_purpose, expected_profile=selection_profile,
+                    expected_task=selection_task, existing=prior is not None)
             if prior is not None:
                 if prior["grant_digest"] != digest:
                     raise ApplicationAdmissionError("grant_changed")
@@ -1847,10 +2148,12 @@ class Broker:
                 raise ApplicationAdmissionError("grant_expired")
             conn.execute("INSERT INTO application_turns (principal_id,turn_id,grant_id,grant_digest,"
                          "caller_host,workload,admission_root,pool,account,model,lease_id,created_at,"
-                         "expires_at,max_steps,recipe_json,recipe_digest,state) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open')",
+                         "expires_at,max_steps,recipe_json,recipe_digest,selection_json,selection_digest,state) "
+                         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open')",
                          (principal_id, turn_id, grant["grant_id"], digest, caller_host, workload,
                           grant["admission_root"], pool, result.account, model, result.lease_id,
-                          lease["granted_at"], expires, grant["max_steps"], recipe_json, recipe_digest))
+                          lease["granted_at"], expires, grant["max_steps"], recipe_json, recipe_digest,
+                          selection_json, selection_digest))
             return self._application_binding(conn, self._application_turn(conn, principal_id, turn_id),
                                              disposition="admitted")
 
@@ -1884,6 +2187,28 @@ class Broker:
         with self._application_transaction() as conn:
             turn = self._application_turn(conn, principal_id, turn_id)
             return self._application_prior_request(conn, turn, request_id, request_digest)
+
+    def recover_application_context(self, *, principal_id, caller_host, workload, turn_id,
+                                    model, request_id, request_digest, expected_recipe_digest, connection):
+        """One owner snapshot distinguishes absence, replay and a new turn step."""
+        self._application_request_identity(principal_id, turn_id, request_id, request_digest)
+        _application_id(caller_host)
+        _application_id(workload)
+        _application_model(model)
+        # The gateway supplies its existing mode=ro connection with BEGIN.
+        # Original recovery does not wait for an admission flock or write data.
+        turn = connection.execute("SELECT * FROM application_turns WHERE principal_id=? AND turn_id=?",
+                                  (principal_id, turn_id)).fetchone()
+        if turn is None:
+            return {"kind": "turn_absent"}
+        if (turn["caller_host"] != caller_host or turn["workload"] != workload
+                or turn["model"] != model or turn["recipe_digest"] != expected_recipe_digest):
+            raise ApplicationAdmissionError("recovery_context_conflict")
+        request = self._application_prior_request(connection, turn, request_id, request_digest)
+        binding = self._application_binding(connection, turn)
+        if request is not None:
+            return {"kind": "request_present", "turn": binding, "request": request}
+        return {"kind": "turn_present_new_step", "turn": binding}
 
     def prepare_application_request(self, *, principal_id, turn_id, request_id, request_digest,
                                     transport_commitment=None):

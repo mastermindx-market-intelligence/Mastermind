@@ -8,7 +8,7 @@ these pins are not learned or refreshed by the tests.
 
 REVIEWED_FILES = {
     # Reviewed application HTTP statuses, permission modes and bounded limits.
-    # These exact 49 spans contain no account/principal identity. Byte drift
+    # These exact 51 spans contain no account/principal identity. Byte drift
     # exposes the source to the original guard again.
     'app/main.py': {
         "sha256": 'dea65255815d2a906f1b2108e889e5fbb087389b4508ce68c179037a7457513b',
@@ -18,44 +18,46 @@ REVIEWED_FILES = {
         ),
     },
     'ops/native_fabric/quota_continuity/candidate/go_shim.py': {
-        "sha256": '46020c3cd89c32cd5bc151ac504bf38bacee52fbf617df2a7594e2ddbe7e714c',
+        "sha256": '5adee31dce9355257cdef88353f83142e86ccd4a80e2c544522a9567298bbbbf',
         "sites": (
-            (1264, 32, 37, 'int', '0o700'),
-            (1615, 140, 143, 'int', '900'),
-            (1617, 33, 36, 'int', '900'),
-            (1680, 22, 25, 'int', '429'),
-            (1913, 79, 82, 'int', '500'),
-            (1991, 34, 37, 'int', '400'),
-            (2006, 33, 36, 'int', '500'),
-            (2026, 34, 37, 'int', '502'),
-            (2247, 92, 95, 'int', '400'),
-            (2254, 99, 102, 'int', '503'),
-            (2257, 80, 83, 'int', '409'),
-            (2262, 91, 94, 'int', '401'),
-            (2266, 96, 99, 'int', '400'),
-            (2282, 113, 116, 'int', '512'),
-            (2286, 94, 97, 'int', '400'),
-            (2294, 106, 109, 'int', '503'),
-            (2304, 96, 99, 'int', '400'),
-            (2312, 103, 106, 'int', '503'),
-            (2315, 96, 99, 'int', '429'),
-            (2325, 102, 105, 'int', '429'),
-            (2355, 103, 106, 'int', '503'),
-            (2373, 74, 77, 'int', '502'),
-            (2474, 23, 26, 'int', '400'),
-            (2521, 35, 38, 'int', '429'),
-            (2550, 37, 40, 'int', '404'),
-            (2581, 27, 30, 'int', '400'),
-            (2584, 27, 30, 'int', '400'),
-            (2587, 27, 30, 'int', '400'),
-            (2593, 31, 34, 'int', '400'),
-            (2600, 31, 34, 'int', '429'),
+            (1437, 32, 37, 'int', '0o700'),
+            (1788, 140, 143, 'int', '900'),
+            (1790, 33, 36, 'int', '900'),
+            (1853, 22, 25, 'int', '429'),
+            (2036, 79, 82, 'int', '500'),
+            (2114, 34, 37, 'int', '400'),
+            (2129, 33, 36, 'int', '500'),
+            (2149, 34, 37, 'int', '502'),
+            (2382, 92, 95, 'int', '400'),
+            (2389, 99, 102, 'int', '503'),
+            (2392, 80, 83, 'int', '409'),
+            (2397, 91, 94, 'int', '401'),
+            (2401, 96, 99, 'int', '400'),
+            (2421, 113, 116, 'int', '512'),
+            (2425, 94, 97, 'int', '400'),
+            (2433, 106, 109, 'int', '503'),
+            (2454, 109, 112, 'int', '400'),
+            (2458, 96, 99, 'int', '400'),
+            (2467, 103, 106, 'int', '503'),
+            (2470, 96, 99, 'int', '429'),
+            (2480, 102, 105, 'int', '503'),
+            (2488, 106, 109, 'int', '429'),
+            (2524, 103, 106, 'int', '503'),
+            (2543, 74, 77, 'int', '502'),
+            (2644, 23, 26, 'int', '400'),
+            (2691, 35, 38, 'int', '429'),
+            (2720, 37, 40, 'int', '404'),
+            (2751, 27, 30, 'int', '400'),
+            (2754, 27, 30, 'int', '400'),
+            (2757, 27, 30, 'int', '400'),
+            (2763, 31, 34, 'int', '400'),
+            (2770, 31, 34, 'int', '429'),
         ),
     },
     'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {
-        "sha256": '81784a033dda52be8f1a2643e38da0e8a4922906c48e01a0890534ba8a667273',
+        "sha256": 'e76377447df0c0f3466a61097e81cbf2ef5d3eeb513dfb0a761c7ba16934ec26',
         "sites": (
-            (394, 60, 65, 'int', '0o700'),
+            (527, 60, 65, 'int', '0o700'),
         ),
     },
     'ops/native_fabric/quota_continuity/source/go_shim.py': {
@@ -572,7 +574,16 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Journal source-only read composition: exact unchanged action-handler AST and
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '5f6e043f3f8f525670f51c7f27a9e6ea7f17e7508489e13f661ea69007e840ff', 'sites': ((857, 71, 74, 'int', '400'), (868, 71, 74, 'int', '403'), (876, 71, 74, 'int', '400'), (882, 79, 82, 'int', '400'), (891, 71, 74, 'int', '400'), (901, 71, 74, 'int', '403'), (906, 76, 79, 'int', '503'), (912, 71, 74, 'int', '403'))}
+# 2026-11-05 Mission-result composition re-pin (attended parent source review
+# under the current Chairman waiver, NOT an independent/formal review): the
+# original eight action-refusal status tokens are byte-identical and each moves
+# exactly +1 line (the new _MISSION_RESULT_ROUTE constant above them); the
+# action-handler AST itself is unchanged. Only the exact full-source digest and
+# the eight whole-token coordinates move. Previous source SHA
+# 5f6e043f3f8f525670f51c7f27a9e6ea7f17e7508489e13f661ea69007e840ff. These are
+# HTTP response statuses, never account/UID/GID values, grants or admission
+# decisions; any changed byte/site restores ordinary D8.
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'e0d13427d248043ec0116cffb49f3b8ae2e5dcff50e65e4fa63d8fd6b9f53715', 'sites': ((858, 71, 74, 'int', '400'), (869, 71, 74, 'int', '403'), (877, 71, 74, 'int', '400'), (883, 79, 82, 'int', '400'), (892, 71, 74, 'int', '400'), (902, 71, 74, 'int', '403'), (907, 76, 79, 'int', '503'), (913, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.

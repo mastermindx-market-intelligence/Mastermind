@@ -23,19 +23,31 @@ from unittest.mock import patch
 
 from brain import translate
 
+# Forward fixture epoch: selected application admission composed over
+# native HTTP f7d72b740103bdf7a817ae0b00474f65cc2d828d. Exact candidate blobs follow.
+# Keep exact source validation; the prior 8af gate cannot describe the reviewed
+# A/B/codec and HTTP realm composition now exercised by this repository's CI.
 PINS = {
     "candidate/commission_deadline.py": "fade630ed75c1b93334a5711a6df7a554fbd24ee",
-    "candidate/go_shim.py": "2c7bb5a9719f4a94bd57a30b5c1bc90d171573df",
-    "candidate/lease_broker.py": "166930f1b91753b764c4f6561ec309830f2cb332",
-    "candidate/go_lease_gateway.py": "b9fa884e88481e9f0e80a18b19dd79d343130bd1",
-    "candidate/go_lease_capability.py": "4224b4988a7b13e1a3b703f2e3fe7ddbbac88a03",
+    "candidate/go_shim.py": "97deba9fc1f68458670b16a21cb410575a7466f8",
+    "candidate/lease_broker.py": "ba24989ca437617b69330c0560f6e8adc24c271d",
+    "candidate/go_lease_gateway.py": "7eb74e2a9a18d3c6a1ad1f51ed198bd0e32bcdeb",
+    "candidate/go_lease_capability.py": "13e6b2d43cbb2933512e6e46d27a431e7813af88",
+    "candidate/application_http_transports.py": "b0b8404b45dd0a3e73a34430c2ef3a28b1edbf6d",
     "candidate/provider_outcome.py": "4236303eb3abfa7c9dcad4d3e1a5454f15600c98",
-    "candidate/quota_circuit.py": "b119865ba77908eaf971e86e923075d7da365ffc",
+    "candidate/quota_circuit.py": "1583a6ba773e56dbc3f295b65ffc08dea2d31d48",
     "source/model_tier.py": "96093c2747d2dda69b3f2255cb84e656355c87ea",
     "source/pool_status.py": "02922043357d63b4bcfa3791899df27a5c42be12",
+    "source/application_http_transports.py.preimage": "a116d8c671594552dd5c14f46f91981cd7c15f43",
+    "rollout/application_http_realm_projection.py": "684c54d5c9d8dbdd5bc046d123af31d20fc99dd1",
     "tests/_offline_boundary.py": "e511ab65fe1cd30bf4d2addac6700ca43c3468da",
     "tests/test_go_application_handler_composition.py": "13ebd6bcee5167926807d7ccdc63bcabed0cf1b1",
     "tests/test_application_turn_admission.py": "efe876eec40dc8885dbc0059915f2401146be969",
+}
+REALM_PINS = {
+    "control_plane/codex_provider_realm.py": "eeea4c0fafc7e6df5c534c731cb6046bbe4d3f37",
+    "control_plane/provider_protocols.py": "92452237ac3956e8104e45ab9ee386c2fa016b76",
+    "control_plane/fs_security.py": "16617789dc115b5748a3e72cc0d9a53fbc368918",
 }
 MODEL = "fixture-model"
 
@@ -105,12 +117,14 @@ class FabricTranslationCompositionTests(unittest.TestCase):
         cls.config_paths = [expected / "config" / name for name in (
             "provider_production_modes.v1.json", "provider_workloads.v1.json", "capability_manifest.yml")]
         cls.originals = {p: p.read_bytes() if p.exists() else None for p in cls.config_paths}
-        root = Path(__file__).resolve().parents[2] / "ops/native_fabric/quota_continuity"
-        for relative, expected_blob in PINS.items():
-            raw = (root / relative).read_bytes()
-            actual = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
-            if actual != expected_blob:
-                raise AssertionError("Native source mismatch: " + relative)
+        repository = Path(__file__).resolve().parents[2]
+        root = repository / "ops/native_fabric/quota_continuity"
+        for source_root, pins in ((root, PINS), (repository, REALM_PINS)):
+            for relative, expected_blob in pins.items():
+                raw = (source_root / relative).read_bytes()
+                actual = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
+                if actual != expected_blob:
+                    raise AssertionError("Native source mismatch: " + relative)
         cls.old_path = list(sys.path)
         sys.path[:0] = [str(root / "tests"), str(root / "candidate"), str(root / "source")]
         spec = importlib.util.spec_from_file_location("_translation_native_fixture",

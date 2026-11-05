@@ -77,6 +77,114 @@ def prepare(case):
     case.service_plan = installer.prepare_go_service_enrollment(case.go_bundle, case.specification, case.service_bundle)
     return case.service_plan
 
+def selected_purpose(case):
+    """Explicit fixture qualification; workload names supply no task class."""
+    purpose = {"purpose_id": "fixture-admin-text", "source_ref": "fixture:qualified-purpose",
+        "task": {"task_class": "mechanical", "route_key": "fixture-admin-text",
+                 "task_complexity": "C1_ROUTINE_BOUNDED", "needs": []}}
+    case.specification["schema"] = installer.SERVICE_SELECTED_SPEC_SCHEMA
+    case.specification["scope"]["selection_purpose"] = copy.deepcopy(purpose)
+    return purpose
+
+
+@pytest.mark.parametrize("allowed", [True, False])
+def test_admin_v4_permission_is_committed_by_existing_owner(service_owner, allowed):
+    case = service_owner
+    purpose = selected_purpose(case)
+    case.specification["schema"] = installer.SERVICE_ADMIN_SPEC_SCHEMA
+    case.specification["scope"]["admin_pool_view"] = allowed
+    plan = prepare(case)
+    receipt = installer.apply_go_service_enrollment(case.service_bundle)
+    assert plan["schema"] == "native-go-service-enrollment.v4"
+    assert receipt["schema"] == "native-go-service-enrollment-completed.v4"
+    document = json.loads(case.binding.read_bytes())
+    assert document["schema"] == "mastermind.native_go_application_service.v4"
+    assert document["scope"] == plan["scope"] == receipt["scope"]
+    assert document["scope"]["admin_pool_view"] is allowed
+    assert document["scope"]["selection_purpose"] == purpose
+    with loaded_entry(case.published) as entry:
+        startup = entry.inspect(verified_root=case.published.release, verified_metadata=case.published.meta)
+        bindings, _, _ = entry.load_completed_application_startup(startup)
+        assert bindings[0].admin_pool_view is allowed
+    # Changing only the private permission cannot survive the original receipt.
+    document["scope"]["admin_pool_view"] = not allowed
+    case.binding.write_text(json.dumps(document))
+    with loaded_entry(case.published) as entry:
+        startup = entry.inspect(verified_root=case.published.release, verified_metadata=case.published.meta)
+        with pytest.raises(ValueError):
+            entry.load_completed_application_startup(startup)
+    unchanged_ingress(case)
+
+
+@pytest.mark.parametrize("fault", ["v1", "v3", "nonbool", "missing", "no-purpose"])
+def test_admin_permission_cannot_be_inferred_or_smuggled_into_old_schema(service_owner, fault):
+    case = service_owner
+    selected_purpose(case)
+    case.specification["schema"] = installer.SERVICE_ADMIN_SPEC_SCHEMA
+    case.specification["scope"]["admin_pool_view"] = True
+    if fault == "v1":
+        case.specification["schema"] = installer.SERVICE_SPEC_SCHEMA
+        del case.specification["scope"]["selection_purpose"]
+    elif fault == "v3":
+        case.specification["schema"] = installer.SERVICE_SELECTED_SPEC_SCHEMA
+    elif fault == "nonbool":
+        case.specification["scope"]["admin_pool_view"] = 1
+    elif fault == "missing":
+        del case.specification["scope"]["admin_pool_view"]
+    else:
+        del case.specification["scope"]["selection_purpose"]
+    with pytest.raises(ValueError):
+        prepare(case)
+    assert not case.service_bundle.exists() and not case.intent.exists() and not case.binding.exists()
+
+
+def test_selected_purpose_uses_existing_plan_private_binding_and_completion_receipt(service_owner):
+    case = service_owner
+    purpose = selected_purpose(case)
+    plan = prepare(case)
+    assert plan["schema"] == "native-go-service-enrollment.v3"
+    assert plan["scope"]["selection_purpose"] == purpose
+    # Mutation of a caller's input after prepare cannot alter its sealed plan.
+    case.specification["scope"]["selection_purpose"]["task"]["needs"].append("vision")
+    original = installer.secrets.token_urlsafe
+    with mock.patch.object(installer.secrets, "token_urlsafe", wraps=original) as secret:
+        receipt = installer.apply_go_service_enrollment(case.service_bundle)
+        assert secret.call_count == 1
+        assert installer.reconcile_go_service_enrollment(case.service_bundle) == receipt
+        assert secret.call_count == 1
+    binding = json.loads(case.binding.read_bytes())
+    assert binding["schema"] == "mastermind.native_go_application_service.v3"
+    assert binding["scope"]["selection_purpose"] == purpose
+    assert receipt["schema"] == "native-go-service-enrollment-completed.v3"
+    assert receipt["scope"] == binding["scope"] == plan["scope"]
+    assert receipt["binding_sha256"] == g.digest(case.binding.read_bytes())
+    unchanged_ingress(case)
+
+
+@pytest.mark.parametrize("fault", ["missing", "requested-model", "unknown", "workload-alias",
+    "malformed-needs", "legacy-v1"])
+def test_selected_purpose_is_closed_and_never_inserted_into_legacy_scope(service_owner, fault):
+    case = service_owner
+    selected_purpose(case)
+    purpose = case.specification["scope"]["selection_purpose"]
+    if fault == "missing":
+        del case.specification["scope"]["selection_purpose"]
+    elif fault == "requested-model":
+        purpose["task"]["requested_model"] = "different-model"
+    elif fault == "unknown":
+        purpose["task"]["caller_permission"] = True
+    elif fault == "workload-alias":
+        del purpose["task"]["task_class"]
+    elif fault == "malformed-needs":
+        purpose["task"]["needs"] = {"tools": True}
+    elif fault == "legacy-v1":
+        case.specification["schema"] = installer.SERVICE_SPEC_SCHEMA
+    with pytest.raises(ValueError):
+        prepare(case)
+    assert not case.intent.exists() and not case.binding.exists() and not case.service_receipt.exists()
+    assert not case.service_bundle.exists()
+    unchanged_ingress(case)
+
 
 def unchanged_ingress(case):
     assert_history(case)

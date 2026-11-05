@@ -72,12 +72,11 @@ def test_fast_skip_is_typed_no_job_no_visibility_and_preserves_exact_source():
 
 
 @pytest.mark.parametrize("path", [
-    "server/api/handler.py",
     ".github/workflows/ci.yml",
     "tests/conftest.py",
     "docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md",
 ])
-def test_standard_or_critical_stays_on_original_single_command(path):
+def test_critical_stays_on_original_single_command(path):
     source = ExistingApp(path)
     ledger = Ledger()
     outcome = ready(source, ledger)
@@ -87,7 +86,7 @@ def test_standard_or_critical_stays_on_original_single_command(path):
 
 
 def test_auto_existing_job_not_hidden_by_later_fast_classification():
-    source = ExistingApp("server/api/handler.py")
+    source = ExistingApp("security/handler.py")
     ledger = Ledger()
     first = ready(source, ledger)
     assert first.state is AdmissionState.ADMITTED
@@ -145,3 +144,14 @@ def test_budget_expiry_fences_admission():
         ready(source, ledger, budget=expired)
     assert ledger.calls == 0
     assert source.calls == []
+
+
+def test_standard_skip_creates_no_job_and_manual_request_still_admits():
+    source, ledger = ExistingApp("server/api/handler.py"), Ledger()
+    skipped = ready(source, ledger)
+    assert skipped.state is AdmissionState.SKIPPED
+    assert ledger.calls == 0 and ledger.jobs == {}
+    manual = intent(source=IntentSource.REVIEW_REQUESTED, policy=False)
+    admitted = ready(source, ledger, chosen=manual)
+    assert admitted.state is AdmissionState.ADMITTED
+    assert ledger.calls == 1 and len(ledger.jobs) == 1

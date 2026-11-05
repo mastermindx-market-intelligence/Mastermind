@@ -16,9 +16,47 @@ class LeaseGatewayError(ValueError):
     """A generic, secret-free lease gateway refusal."""
 
 
+class ApplicationSelectionRefused(LeaseGatewayError):
+    """Known selection-condition refusal before a new admission effect."""
+
+
+class ApplicationSelectionProfile:
+    """Source-owned Go transport metadata supplied by verified startup.
+
+    This identifies the existing buffered chat implementation. It creates no
+    H recipe, qualification, credential or alternative transport. Grants remain
+    the sole source of qualification and ordinary application permission.
+    """
+    __slots__ = ("_encoded",)
+
+    def __init__(self, *, source_generation, ingress_digest, account_profile):
+        for value in (source_generation, ingress_digest):
+            if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                raise LeaseGatewayError("application selection source unavailable")
+        path = Path(account_profile)
+        if not path.is_absolute() or ".." in path.parts:
+            raise LeaseGatewayError("application selection profile unavailable")
+        # The handler carries chat tool declarations/results without changing
+        # their wire identity. Media remains outside this selected profile.
+        document = {"pool": "go", "mode": "go", "protocol": "chat", "streaming": False,
+            "driver": "go-http-v1", "profile": "go-application-chat-v1",
+            "source": "native-" + ingress_digest, "capabilities": {"tools": True, "vision": False},
+            "source_generation": source_generation, "ingress_digest": ingress_digest,
+            "account_owner_digest": hashlib.sha256(str(path).encode()).hexdigest()}
+        object.__setattr__(self, "_encoded", json.dumps(document, sort_keys=True, separators=(",", ":")))
+
+    def __setattr__(self, name, value):
+        raise AttributeError("application selection profile is immutable")
+
+    @property
+    def document(self):
+        return json.loads(self._encoded)
+
+
 class GoLeaseGateway:
     def __init__(self, db_path, accounts, models, *, clock=time.time, signing_key=None,
-                 application_broker=None, application_http_recipes=(), application_http_accounts=()):
+                 application_broker=None, application_http_recipes=(), application_http_accounts=(),
+                 application_selection_profile=None):
         db_path = Path(db_path)
         if not db_path.is_absolute():
             raise LeaseGatewayError("lease capability refused")
@@ -46,6 +84,9 @@ class GoLeaseGateway:
             raise LeaseGatewayError("application transport refused")
         self._clock = clock
         self._application_broker = application_broker
+        if application_selection_profile is not None and type(application_selection_profile) is not ApplicationSelectionProfile:
+            raise LeaseGatewayError("application selection profile unavailable")
+        self._application_selection_profile = application_selection_profile
         self._application_db_identity = None
         if application_broker is not None:
             from lease_broker import Broker
@@ -201,8 +242,118 @@ class GoLeaseGateway:
         recipe, digest = self.application_recipe(pool, model)
         return self._application_http_accounts, recipe, digest
 
+    def application_pool_view(self, *, principal_id, host, workload, credential_ref,
+                              bound_pool, source, go_models):
+        """Observe the original DB inode through mode=ro; never construct an owner."""
+        try:
+            broker = self._application_owner()
+            profile = self._application_selection_profile
+            if type(go_models) is not frozenset:
+                raise LeaseGatewayError("application metadata transport unavailable")
+            transports = {"go": [{"model": model, "protocol": "chat",
+                "capabilities": {"text": True, "tools": bool(profile), "vision": False,
+                                 "upstream_streaming": False},
+                "qualified": profile is not None and model in go_models, "accounts": self._accounts}
+                for model in sorted(self._models)]}
+            for (pool, model), (_, digest) in sorted(self._application_http_recipes.items()):
+                recipe, _ = self.application_recipe(pool, model)
+                transports.setdefault(pool, []).append({"model": model,
+                    "protocol": recipe["protocol"], "qualified": True,
+                    "capabilities": {"text": True, "tools": False, "vision": False,
+                                     "upstream_streaming": False},
+                    "accounts": self._application_http_accounts, "recipe_digest": digest})
+            if sum(len(rows) for rows in transports.values()) > 128:
+                raise LeaseGatewayError("application metadata bound exceeded")
+            connection = self._connection()
+            try:
+                connection.row_factory = sqlite3.Row
+                connection.execute("BEGIN")
+                result = broker.application_pool_view(connection, principal_id=principal_id,
+                    caller_host=host, workload=workload, credential_ref=credential_ref,
+                    bound_pool=bound_pool, transports=transports, source=source)
+                self._application_owner()
+            finally:
+                connection.close()
+            return result
+        except Exception:
+            raise LeaseGatewayError("application metadata unavailable") from None
+
+    @staticmethod
+    def application_selection_task(purpose, payload):
+        """Derive capability needs; the caller cannot supply routing authority."""
+        from lease_broker import _application_selection_purpose
+        encoded, _ = _application_selection_purpose(purpose)
+        task = json.loads(encoded)["task"]
+        needs = set(task.get("needs") or [])
+        if payload.get("tools") or payload.get("tool_choice") or payload.get("parallel_tool_calls"):
+            needs.add("tools")
+        for message in payload["messages"]:
+            if type(message) is not dict:
+                raise ApplicationSelectionRefused("application selection payload refused")
+            if message.get("tool_calls") or message.get("role") == "tool" or message.get("tool_call_id"):
+                needs.add("tools")
+            content = message.get("content")
+            if type(content) is list:
+                if any(type(part) is not dict or part.get("type") != "text" for part in content):
+                    needs.add("vision")
+            elif content is not None and type(content) is not str:
+                raise ApplicationSelectionRefused("application selection payload refused")
+        return {"task_class": task["task_class"].lower(),
+            "route_key": task["route_key"], "task_complexity": str(task.get("task_complexity") or "").upper(),
+            "needs": sorted(needs), "subject_pool": task.get("subject_pool"),
+            "escalation_reason": str(task.get("escalation_reason") or ""),
+            "requested_model": payload["model"]}
+
+    def select_application(self, request, *, principal_id, host, credential_ref, purpose, payload):
+        """Produce fresh owner inputs for the incumbent pure selector, once per new turn attempt."""
+        try:
+            import pick
+            import pool_ledger
+            from lease_broker import _application_json, _application_selection_purpose
+            broker = self._application_owner()
+            if request["pool"] != "go" or self._application_selection_profile is None:
+                raise ValueError("unqualified selection transport")
+            profile = self._application_selection_profile.document
+            task = self.application_selection_task(purpose, payload)
+            policy = pick.read_application_policy()
+            quality = pool_ledger.read_recent(limit=10000, strict=True)
+            connection = self._connection()
+            try:
+                connection.row_factory = sqlite3.Row
+                connection.execute("BEGIN")
+                grant, grant_digest, observation = broker.application_selection_facts(connection,
+                    principal_id=principal_id, caller_host=host, workload=request["workload"],
+                    pool=request["pool"], model=request["model"], credential_ref=credential_ref,
+                    transport_accounts=self._accounts)
+            finally:
+                connection.close()
+            recipe = {key: profile[key] for key in
+                ("mode", "protocol", "streaming", "driver", "profile", "source", "capabilities")}
+            recipe.update(model=request["model"], order_rank=0,
+                max_turn_seconds=grant["max_turn_seconds"], max_steps=grant["max_steps"],
+                qualification_ref=grant["qualification_ref"],
+                application_permission_ref=grant["application_permission_ref"],
+                grant_ref={"grant_id": grant["grant_id"], "digest": grant_digest})
+            catalogue = {"schema": "mastermind.fabric_application_catalogue.v1", "pool_order": ["go"],
+                "pools": {"go": {"enabled": True, "recipes": [recipe]}}}
+            selected = pick.select_application(task, policy=policy, catalogue=catalogue,
+                observations={"go": observation}, quality_records=quality, now=self._clock(),
+                expected_identity={"pool": "go", "model": request["model"], "source": profile["source"]})
+            if not selected["ok"]:
+                raise ValueError("selection refused")
+            purpose_json, purpose_digest = _application_selection_purpose(purpose)
+            return {"schema": "mastermind.application_turn_selection.v1",
+                "purpose": json.loads(purpose_json), "purpose_digest": purpose_digest,
+                "profile": profile, "profile_digest": hashlib.sha256(_application_json(profile).encode()).hexdigest(),
+                "identity": selected["identity"], "commitments": selected["commitments"],
+                "quality_records_sha256": hashlib.sha256(_application_json(quality).encode()).hexdigest(),
+                "fresh_s": 5.0}
+        except Exception:
+            raise ApplicationSelectionRefused("application selection unavailable") from None
+
     def begin_application(self, request, *, principal_id, host, deadline_ns=None,
-                          expected_credential_ref=None, expected_recipe_digest=None):
+                          expected_credential_ref=None, expected_recipe_digest=None,
+                          expected_selection=None, selection_purpose=None, selection_payload=None):
         """Internal authenticated service context; never caller-supplied identity."""
         try:
             broker = self._application_owner()
@@ -211,11 +362,17 @@ class GoLeaseGateway:
             accounts, recipe, digest = self._application_scope(request["pool"], request["model"])
             if digest != expected_recipe_digest:
                 raise LeaseGatewayError("application recipe refused")
+            selection_args = {}
+            if expected_selection is not None or selection_purpose is not None:
+                selection_args = dict(expected_selection=expected_selection, selection_purpose=selection_purpose,
+                    selection_profile=(self._application_selection_profile.document
+                        if self._application_selection_profile is not None else None),
+                    selection_task=self.application_selection_task(selection_purpose, selection_payload))
             result = broker.begin_application_turn(principal_id=principal_id, caller_host=host,
                 workload=request["workload"], turn_id=request["turn_id"], pool=request["pool"],
                 model=request["model"], deadline_ns=deadline_ns, transport_accounts=accounts,
                 expected_credential_ref=expected_credential_ref, application_recipe=recipe,
-                expected_recipe_digest=expected_recipe_digest)
+                expected_recipe_digest=expected_recipe_digest, **selection_args)
             if not result["ok"] or result["disposition"] not in {"admitted", "existing"}:
                 return result
             connection = self._connection()
@@ -229,11 +386,14 @@ class GoLeaseGateway:
             return {**result, "token": token}
         except LeaseGatewayError:
             raise
-        except Exception:
+        except Exception as error:
+            from lease_broker import ApplicationSelectionError
+            if isinstance(error, ApplicationSelectionError):
+                raise ApplicationSelectionRefused("application selection condition refused") from None
             raise LeaseGatewayError("application admission refused") from None
 
     def recover_application(self, request, *, principal_id, host, request_id, path, payload,
-                            expected_recipe_digest=None):
+                            expected_recipe_digest=None, include_turn=False):
         """Recover through the same authenticated service after handler restart.
 
         The handler supplies principal and host from its private authentication
@@ -253,23 +413,21 @@ class GoLeaseGateway:
                              ensure_ascii=False, allow_nan=False).encode("utf-8")
             if len(raw) > 1024 * 1024:
                 raise LeaseGatewayError("application recovery refused")
-            connection = self._connection()
-            try:
-                connection.row_factory = sqlite3.Row
-                turn = connection.execute("SELECT * FROM application_turns WHERE principal_id=? AND turn_id=?",
-                                          (principal_id, request["turn_id"])).fetchone()
-            finally:
-                connection.close()
-            if turn is None:
-                return None
-            if (turn["caller_host"] != host
-                    or any(turn[key] != request[key] for key in ("workload", "model"))
-                    or turn["recipe_digest"] != expected_recipe_digest):
+            if type(include_turn) is not bool:
                 raise LeaseGatewayError("application recovery refused")
             # Use the original pool and recipe after authentication, even if
             # today's service projection has rotated. Recovery grants no send.
-            return broker.recover_application_request(principal_id=principal_id, turn_id=request["turn_id"],
-                request_id=request_id, request_digest=hashlib.sha256(raw).hexdigest())
+            connection = self._connection()
+            try:
+                connection.row_factory = sqlite3.Row
+                connection.execute("BEGIN")
+                context = broker.recover_application_context(principal_id=principal_id,
+                    caller_host=host, workload=request["workload"], turn_id=request["turn_id"],
+                    model=request["model"], request_id=request_id, request_digest=hashlib.sha256(raw).hexdigest(),
+                    expected_recipe_digest=expected_recipe_digest, connection=connection)
+            finally:
+                connection.close()
+            return context if include_turn else context.get("request")
         except LeaseGatewayError:
             raise
         except Exception:

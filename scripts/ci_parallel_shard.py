@@ -18,8 +18,8 @@ from typing import Sequence
 from scripts import ci_pytest
 
 
-_REQUIRED_SHARDS_IF = "${{ always() && (github.event_name != 'pull_request' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}"
-_REQUIRED_PR_FAST_IF = "${{ always() && github.event_name == 'pull_request' && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}"
+_REQUIRED_SHARDS_IF = "${{ !cancelled() && (github.event_name != 'pull_request' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}"
+_REQUIRED_PR_FAST_IF = "${{ !cancelled() && github.event_name == 'pull_request' && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}"
 
 
 _EXPECTED_SCOPE_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 0, 'persist-credentials': False}},
@@ -343,8 +343,9 @@ def validate_parallel_workflow(text: str) -> None:
     )
     fabric_commands = [
         "npm ci --ignore-scripts --no-audit --no-fund",
-        "node --test gateway-modern-fabric.test.mjs gateway.test.mjs gateway-shared-backend.test.mjs gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs",
+        "node --test gateway-modern-fabric.test.mjs gateway-fleet-git-failure.test.mjs gateway.test.mjs gateway-shared-backend.test.mjs gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs",
         "python -m unittest discover -s . -p 'private_service*test.py'",
+        "python -m unittest discover -s . -p 'control_bundle*test.py'",
     ]
     actual_commands = fabric_step.get("run")
     if (

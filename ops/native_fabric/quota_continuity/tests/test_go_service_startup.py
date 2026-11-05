@@ -11,7 +11,7 @@ import pytest
 from test_go_native_stage import builds, native_stage, ROOT, g, installer, loaded_entry
 from test_go_native_install import go_owner
 from test_native_launcher_successor_transition import source_owners, owner
-from test_go_service_enrollment import service_owner, prepare, unchanged_ingress
+from test_go_service_enrollment import service_owner, prepare, unchanged_ingress, selected_purpose
 
 
 def environment(monkeypatch, case):
@@ -28,6 +28,70 @@ def inspect(entry, case):
 
 def boot(entry, case):
     return entry.main(verified_root=case.published.release, verified_metadata=case.published.meta)
+
+def test_selected_completed_enrollment_reaches_actual_main_without_current_selection_reads(service_owner, monkeypatch):
+    case = service_owner
+    purpose = selected_purpose(case)
+    prepare(case)
+    installer.apply_go_service_enrollment(case.service_bundle)
+    environment(monkeypatch, case)
+    with loaded_entry(case.published, clean_yaml=True) as entry:
+        startup = inspect(entry, case)
+        def original_main(*, application_broker, application_services, application_selection_profile):
+            assert type(application_broker) is startup.broker_module.Broker
+            assert Path(application_broker.db_path) == case.ext / "broker/leases.sqlite"
+            assert application_services[0].selection_purpose.document == purpose
+            view = application_services[0].selection_purpose.document
+            view["task"]["needs"].append("vision")
+            assert application_services[0].selection_purpose.document == purpose
+            profile = application_selection_profile.document
+            assert profile["source_generation"] == startup.generation
+            assert profile["ingress_digest"] == case.published.meta["files"]["ext/go_application_handler.py"]
+            assert profile["pool"] == "go" and profile["protocol"] == "chat"
+            return 43
+        with mock.patch.object(startup.handler, "main", side_effect=original_main) as main, \
+             mock.patch.object(sys.modules["pick"], "read_application_policy", side_effect=AssertionError("startup policy")), \
+             mock.patch.object(sys.modules["pool_ledger"], "read_recent", side_effect=AssertionError("startup quality")):
+            assert boot(entry, case) == 43
+            assert boot(entry, case) == 43
+            assert main.call_count == 2
+    unchanged_ingress(case)
+
+
+def test_selected_completed_purpose_cannot_be_overridden_in_explicit_startup(service_owner, monkeypatch):
+    case = service_owner
+    purpose = selected_purpose(case)
+    prepare(case)
+    installer.apply_go_service_enrollment(case.service_bundle)
+    environment(monkeypatch, case)
+    with loaded_entry(case.published, clean_yaml=True) as entry:
+        startup = inspect(entry, case)
+        completed = entry.load_completed_application_startup(startup)
+        service = completed[0][0]
+        purpose["purpose_id"] = "different-purpose"
+        changed = startup.handler.ApplicationServiceBinding(service.principal_id, service.host,
+            service.workload, service.credential_ref, service.credential,
+            selection_purpose=startup.handler.ApplicationSelectionPurpose(purpose))
+        with mock.patch.object(startup.handler, "main", side_effect=AssertionError("override started service")), pytest.raises(ValueError):
+            entry.main(verified_root=case.published.release, verified_metadata=case.published.meta,
+                application_services=(changed,), application_host=completed[1], application_account_path=completed[2])
+
+
+def test_selected_quality_owner_rejects_an_undeclared_parent_symlink_alias(service_owner, monkeypatch):
+    case = service_owner
+    selected_purpose(case)
+    prepare(case)
+    installer.apply_go_service_enrollment(case.service_bundle)
+    environment(monkeypatch, case)
+    alias = case.root / "unqualified-quality-alias"
+    alias.symlink_to(case.accounts.parent, target_is_directory=True)
+    monkeypatch.setenv("POOL_LEDGER_PATH", str(alias / "ledger.jsonl"))
+    with loaded_entry(case.published, clean_yaml=True) as entry:
+        startup = inspect(entry, case)
+        with mock.patch.object(startup.handler, "main", side_effect=AssertionError("alias started service")), \
+             mock.patch.object(startup.broker_module, "Broker", side_effect=AssertionError("alias constructed owner")), \
+             pytest.raises(ValueError, match="selection owner mapping"):
+            boot(entry, case)
 
 
 def test_actual_inspection_never_reads_enrolled_credential_or_constructs_broker(service_owner):

@@ -36,6 +36,7 @@ HTTP_REQUIRED = frozenset({"ext/application_http_transports.py",
     "ext/application_http_realm_projection.py", "ext/application_http_realms.v1.json"})
 _GO_ENTRY_MODULE = None
 GO_REQUIRED = frozenset({GO_ENTRY, GO_HANDLER,
+    "ext/pick.py", "ext/pool_ledger.py",
     "ext/native_runtime_bindings.py", "ext/lease_broker.py",
     "ext/go_lease_gateway.py", "ext/go_lease_capability.py",
     "ext/commission_deadline.py", "ext/quota_circuit.py",

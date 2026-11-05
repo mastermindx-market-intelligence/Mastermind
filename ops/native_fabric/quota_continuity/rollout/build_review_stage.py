@@ -65,7 +65,7 @@ GROK47_MERGED_SOURCE_DIGESTS = {
 # closed composed candidate bytes; neither source may silently replace the other.
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
     'remote_sub_exec.py': '9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1',
-    'pick.py': '747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132',
+    'pick.py': '5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892',
     'remote_sub.sh': 'a1e271170778f992cf07c780234620c22d17f6242581311c414e30dd428ade40',
     'remote_sub_helpers.py': '3a4efaefd63244e77cee385d83da0bb4e53b86a0e83a183601f2fa80ec4d602b',
     'sub.sh': '4956942c77421b9d1015889995ebf0419399ea62c16de608765a0795b5fb551f',
@@ -89,6 +89,11 @@ GO_APPLICATION_DEPENDENCIES = ("lease_broker.py", "go_lease_capability.py", "go_
 # Actual102 closure after protected51e9 and application A3 composition: the B dependencies
 # are unchanged; remote_sub retains the protected fast-observation and terminal-replay fixes.
 GO_BASE_MANIFEST_SHA256 = "395b1af90c815125a92c81c8b72ec61065002f4f9e66ad53618794ec790ce429"
+GO_BASE_PICKER_SHA256 = "747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132"
+# Protected47dc keeps diagnostic false distinct from unproved cleanup (76).
+# Admit only that exact provider outcome delta while retaining actual395b.
+GO_BASE_PROVIDER_OUTCOME_SHA256 = "22b5ae9325118327b8b0734514c6f5711e39ae919f0e04426f7fac182895bf24"
+GO_PROTECTED_PROVIDER_OUTCOME_SHA256 = "ff909ac6fb0a734ce0ea1aa78c2b04e992c170e5be413c1b7778e6ffd7c7907e"
 GO_BASE_DEPENDENCIES = {
     "lease_broker.py": "b785ff1d83c6e2c6b77c8bd349e37a8624c9055e5fce8aa2307c09b8302d12eb",
     "go_lease_capability.py": "4d0f9aa423afc56dd29d955beaaab06a6ed9082ea503bdbea352af6c99a6e4df",
@@ -97,13 +102,27 @@ GO_BASE_DEPENDENCIES = {
 HTTP_GENERATION_MEMBERS = frozenset({"ext/application_http_transports.py",
     "ext/application_http_realm_projection.py", "ext/application_http_realms.v1.json"})
 
+# Exact same-owner helpers for application selection. These are two existing
+# members, not an open-ended allowance for another source/manifest epoch.
+GO_SELECTION_SUPPORT_PREIMAGES = {
+    "pool_ledger.py": "34be52eca114c32f44538254b3675ce2d0a79dc420ebda2f42702c6be56ad6cc",
+    "quota_circuit.py": "0962d638a0a5655a71ea7a6eeb83088ad60af30f4a26e9c5bc47a92c3ab77945",
+}
+GO_SELECTION_SUPPORT_DIGESTS = {
+    "pool_ledger.py": "a9ba8724ad1d6f9a78944cd87f95c1cb70a0832d71612402565111fb04100ef2",
+    "quota_circuit.py": "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303",
+}
+
 
 def validate_go_base_manifest(manifest, dependency_hashes):
-    """Accept the historical102 closure plus exactly the captured A3 update.
+    """Accept historical102, captured A3, and exact selection compositions.
 
     Both the builder and installer compare A3 with their reviewed source
-    component first. All other members and their hashes stay bound to the
-    actual395b artifact; a changed key set or fourth changed member refuses.
+    component first. The picker successor is independently source-pinned by
+    the existing Grok composition owner. Normalize only that exact successor
+    (or the unchanged historical picker), plus the two closed same-owner
+    support changes and the exact protected diagnostic outcome correction.
+    Every other member/key stays bound to actual395b.
     """
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     if (type(manifest) is not dict or set(manifest) != expected
@@ -115,6 +134,18 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         if manifest["ext/" + name] != dependency_hashes[name]:
             raise ValueError("native Go base differs from captured application dependency")
         historical["ext/" + name] = original
+    if manifest["ext/pick.py"] not in {
+            GO_BASE_PICKER_SHA256, GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]}:
+        raise ValueError("native Go base picker is not the exact composed source")
+    historical["ext/pick.py"] = GO_BASE_PICKER_SHA256
+    for name, original in GO_SELECTION_SUPPORT_PREIMAGES.items():
+        if manifest["ext/" + name] not in {original, GO_SELECTION_SUPPORT_DIGESTS[name]}:
+            raise ValueError("native Go selection support is not the exact composed source")
+        historical["ext/" + name] = original
+    if manifest["ext/provider_outcome.py"] not in {
+            GO_BASE_PROVIDER_OUTCOME_SHA256, GO_PROTECTED_PROVIDER_OUTCOME_SHA256}:
+        raise ValueError("native Go provider outcome is not the exact protected source")
+    historical["ext/provider_outcome.py"] = GO_BASE_PROVIDER_OUTCOME_SHA256
     if sha((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) != GO_BASE_MANIFEST_SHA256:
         raise ValueError("native Go base closure is not the reviewed protected composition")
 
