@@ -176,3 +176,41 @@ Separate requested profile, observed mode/model and tools. Profiles grant no min
 Sustained delivery continues safe units without per-milestone Continue. Bounded execution uses targeted proof and saves before risky/slow/high-output work, not invented deadlines. Concentrated judgment must be decision-ready, with primary evidence, alternatives, strongest counterargument, uncertainty/falsifiers and discriminating acceptance. A first outline is not completion; research-only scope is not delivery permission, nor finished research shipped product.
 
 ACTIVE_EXECUTION alone defines `CHECKPOINTED_CONTINUATION`. No checkpoint-as-stop or duration-as-quality. Existing fresh-session evaluation retains observed identity and distinguishes context, transport, quota, denial and voluntary stopping; source tests/labels prove no native adoption.
+
+## 9. Parallel fanout, bounded observation and independent consumption
+
+Apply the owners above; this section creates no new owner. READY means that the
+unit has known inputs, source custody, exclusive output paths and checkable
+acceptance. Dispatch independent ready siblings promptly under one conserved root
+and actual immediate parent, subject to real capacity, budget and result-consumption
+capacity. Review is reserved when actually required; Web has no blanket independent
+technical/source-review prerequisite. Freeze shared interfaces before dependents.
+
+Give each worker the complete permitted investigate/build/check/repair loop, a
+numbered repair ceiling, time and budget bounds, exact inputs and a retained return.
+Use a unique run-derived worktree on shared hosts. Packet ceilings express requested
+behavior unless the actual installed adapter enforces them. No event grants scope,
+retry, spend, publication, merge or release authority.
+
+Consume each ready return independently. Delivery, START, terminal return, consumed
+result and acceptance are different facts. Missing/oversized bytes require recovery
+of that original run or artifact, not duplicate execution. An ordinary finite leaf
+needs no invented STOP, heartbeat or disarm. Preserve original unknown effects and
+leases until the incumbent owner reconciles them.
+
+Use a qualified finite deterministic helper for economical short waits on timers,
+CI, review or allowlisted service evidence. It makes no model call per sample but
+still occupies its paid worker. Long waits belong to an admitted observation gate
+in the existing Executive Runtime/COO tick and dependency consumer when that exact
+source is installed and armed; no new daemon, scheduler, queue or state owner.
+Retained Wake obligations alone do not prove consumer START or a Web parent wake.
+Observation events require fresh source/authority checks before action; timeout,
+cancellation and unavailable-source outcomes are not material events or approval.
+
+The account-neutral orchestration skill and recipes live at
+`integrations/studio_direct_mcp/fabric_plugin_source/skills/orchestrate-fabric-workflows/`,
+beside the unchanged low-level `use-subagent-fabric/SKILL.md` contract. Shared source,
+each account's app release, fresh skill load, request/START/result/acceptance and
+real product proof require distinct receipts. Preserve each account's own enrolled
+app binding and grants; do not copy another account's connection identity. The
+bootstrap source route remains usable when the convenience skill is absent.

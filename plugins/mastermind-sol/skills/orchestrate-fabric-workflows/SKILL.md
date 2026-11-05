@@ -13,8 +13,8 @@ a material governing change. Load `docs/sol_skills/INDEX.md` and the relevant
 companions from that same exact commit. Without a verified compatible pin,
 modifying workflow is unavailable for actions depending on that procedure.
 A failed refresh does not erase a usable pin for independent unaffected work.
-Read `../../references/authority-boundaries.md` once; this skill grants no new
-runtime, credential, retry, provider, publication or release authority.
+Read `../../references/authority-boundaries.md` before interpreting any app, record, or action as authority.
+This skill grants no new runtime, credential, retry, provider, publication or release authority.
 
 ## Load the existing workflow contract
 

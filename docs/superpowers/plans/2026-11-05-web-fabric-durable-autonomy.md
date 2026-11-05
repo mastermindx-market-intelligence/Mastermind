@@ -28,12 +28,12 @@ Completion requires source tests, protected release where required, installed-ve
 | ID | Dependencies | Outcome / acceptance | Current label |
 |---|---|---|---|
 | P1 | none | Recover incumbent observation, Wake, Fabric admission, plan/fanout and plugin distribution interfaces; identify minimum real missing join and source custody | both paid inventories accepted; architecture decision recorded |
-| P2 | P1 | Implement the smallest complete trigger-to-existing-owner integration, with stable original root/parent/event identity and truthful capability reporting | finite attended worker slice in progress; unattended route qualification held |
-| P2.T1 | P1 | Bind exact repo/PR/head/check identities; suppress unchanged/duplicate samples and reject stale or mismatched observations | paid finite-watch implementation submitted |
-| P2.T2 | P2.T1 | Route material triggers through existing persisted Wake/Runtime owner; prove response-loss/restart/cancel semantics without creating a new store | paid CI-to-Wake persistence implementation submitted; dispatch remains separate |
-| P2.T3 | P1 | Expose supported timer/API/review hooks using typed closed profiles and existing process/admission owner; unsupported profiles refuse honestly | same finite-watch source unit; existing worker consumes events |
+| P2 | P1 | Implement the smallest complete trigger-to-existing-owner integration, with stable original root/parent/event identity and truthful capability reporting | finite source repair pending; durable timer-gate implementation owned by principal; activation held |
+| P2.T1 | P1 | Bind exact repo/PR/head/check identities; suppress unchanged/duplicate samples and reject stale or mismatched observations | initial candidate tested; seven source-review findings assigned to original paid repair |
+| P2.T2 | P2.T1 | Route material triggers through existing persisted Wake/Runtime owner; prove response-loss/restart/cancel semantics without creating a new store | Wake persistence integrated, tested and accepted; downstream dispatch remains separate |
+| P2.T3 | P1 | Expose supported timer/API/review hooks using typed closed profiles and existing process/admission owner; unsupported profiles refuse honestly | finite observer candidate supports closed sources; repair and real canary remain |
 | P3 | P1 | Make independent bounded fanout practical: stable child identities, conserved budgets, backpressure, compact returns and no all-children barrier | proposed |
-| P4 | P2,P3 | Add versioned Web orchestration/continuation skills and compact bootstrap/project guidance, separating source/install/loading/START/proof | paid guidance source unit submitted; shared CEO wrapper and current-account plugin update prepared |
+| P4 | P2,P3 | Add versioned Web orchestration/continuation skills and compact bootstrap/project guidance, separating source/install/loading/START/proof | reviewed additive source guidance integrated; account plugin release prepared |
 | P5 | P2,P3,P4 | Adversarial integration tests; publish the same source carrier; resolve actual required CI/release gates | proposed |
 | P6 | P5 | Install accepted versions through existing owners and run exact-source real trigger/Fabric/return and account-adoption canaries | proposed |
 
@@ -69,7 +69,7 @@ Fabric run commissions (all stable originals; no duplicate retries):
 | `inventory-20261105-c3-01` | Existing CI/Wake/consumer owner census | terminal rc0; complete retained response 6,372 bytes; manual parent review; accepted digest `19e5b0becdb045b27cfc45d15c7c99bafca8f8e7c09760eacff46fd314da044c` |
 | `wake-join-20261105-c3-01` | Validated CI continuation persistence through existing Wake ledger | terminal rc0; exact patch retrieved and tested; accepted retained response `70e66fa1b53c959af6317da9508cb005abc436daee003d985587df962c7c6ef7` after C3 integration corrections |
 | `finite-watch-20261105-c3-01` | Executable finite timer/CI/review/health observation + focused tests | terminal rc0; complete patch integrated as candidate, 86 focused tests pass; substantive source findings require repair; not accepted |
-| `guidance-20261105-c3-01` | Source AGENTS/delegation and account-neutral operating skill | original controller 34220; observed existing provider lease wait; no worker START yet |
+| `guidance-20261105-c3-01` | Source AGENTS/delegation and account-neutral operating skill | original execution rc1; controller EFFECT_UNKNOWN; terminated-writer source recovered and parent-reviewed; original run unaccepted |
 
 These are finite leaf commissions, not reciprocal dialogue watchers. Controller
 creation and retained launch logs are not canonical worker START. Parent C3 work
@@ -105,9 +105,9 @@ repository and run attempt; review baselines must detect same-ID dismissal and
 strictly bound response identity. No installation or source-result acceptance is
 claimed. The next repair must add discriminating offline cases for these findings.
 
-The Wake adapter returned a test report without its promised unified diff. That
-return remains unaccepted until the exact artifact is retrieved, reviewed, and
-verified in the parent workspace. Its reported initial workspace collision was
+The Wake adapter initially returned a test report without its promised unified
+diff. It remained unaccepted at that point; the later exact-artifact recovery and
+acceptance proof appears below. Its reported initial workspace collision was
 recovered by the worker in a unique isolated worktree; future packets require a
 run-derived unique worktree and no sibling workspace reuse.
 
@@ -138,3 +138,67 @@ Finite-observer repair commission `web-fabric-autonomy-finite-repair-20261105-c3
 uses the same original root/parent and exact candidate `adb8de6fc78104ced88cd217030a193a63219438`.
 Controller 67756 is reserved on Ubuntu3 and was observed waiting for existing
 MiniMax capacity. No worker START, reroute, duplicate or acceptance is claimed.
+
+## Guidance recovery and long-wait implementation frontier
+
+The original guidance run returned a provider transport error (rc1), not usable
+stdout. Fabric retains `EFFECT_UNKNOWN` with lease `d7800b64337e`; it was not
+accepted, relaunched, rehomed or manually released. The original process receipt
+independently proves process/group 92370 ended at 2026-11-05T05:57:30.701Z,
+identity-verified census with zero residual processes and completed stream capture.
+That qualifies read-only recovery of its terminated filesystem writer, not a
+rewrite of the controller/accounting outcome.
+
+Its original Ubuntu0 diagnostic capture, SHA256
+`0484a4fcc6b92274ba1369493abad1524d71ab1864f34bda14397e7abfe639a7`,
+identified the unique workspace
+`/home/ubuntu0/web-fabric-autonomy-guidance-20261105-c3-01/src`.
+Read-only recovery verified protected HEAD, exactly four assigned paths and stable
+regular-file bytes. C3 parent integration preserved the entire existing delegation
+law, added only the new fanout section/AGENTS paragraph, and corrected the worker's
+request schema, unsupported override claims, blanket review requirement, fictitious
+finite-leaf STOP, event/outcome distinction, paid-wait cost and account-identity
+guidance. The original run remains unaccepted; source recovery and accounting
+reconciliation are separate facts.
+
+The finite helper alone cannot meet the long-wait efficiency goal because it
+occupies a provider lease. The specification now defines a source-level timer gate
+inside existing Runtime events, plan admission, dependency materialization, worker
+input and COO tick. No second scheduler/store/queue is proposed. External reader
+qualification and production activation remain explicit unfinished work.
+
+A bounded paid implementation was submitted as
+`web-fabric-autonomy-runtime-gates-20261105-c3-01`, same original root/parent,
+exact candidate `458132f20fbc0a7f071504e2ba410b1023c3c3ae`, controller 73294.
+The original carrier reported `REQUEST_REFUSED_BEFORE_LAUNCH`; controller exited
+75 in 2.28 seconds with no worker START/result. The inner retained-request projection
+reports absence, while the outer facade still reports absence unproven. No repeat,
+replacement or worker/source acceptance is claimed. Qualify the original refusal
+before any potentially duplicating implementation; source architecture and disjoint
+guidance/package work continue.
+
+## Qualified prelaunch refusal and direct source ownership
+
+The original retained refusal is `mastermind.fabric_request_refusal.v1`, exact
+run/root/parent, `launch_attempted:false`, reason `prelaunch_ProcessCensusError`.
+Its request SHA256 `4de8c3f838d23ecb5a35e6ed633ce7a274d17385a087d1c00799d289a13c26a9`
+matches the sibling retained request bytes. The native status has already qualified
+prelaunch worker absence; the facade outer false is a conservative fixed envelope,
+not evidence of a launched worker. Refusal artifact SHA256 is
+`ab484041c1ddbbce2390ceb1b19a0b0575cf7acf0d71a78ff220ada729b80532`.
+No explicit permission/safety denial was observed. No worker, request or lease is
+replayed or replaced.
+
+The principal retains this bounded source implementation under
+`NO_ELIGIBLE_PRE_EFFECT_WORKER`, with the same original managed workspace and source
+authorization. This is not a claim that every Fabric route is unavailable. No native
+labor child is substituted. Timer-gate ownership is the eight named existing owner
+modules plus focused new tests from the refused commission; finite observer files
+remain exclusively assigned to repair controller 67756.
+
+Guidance package validation: the source validator returned PASS. The full 124-case
+package suite exposed one missing authority-loading phrase in the new thin CEO
+wrapper; all other cases passed. The wrapper now explicitly loads the existing
+authority reference before interpreting any app, record or action as authority;
+the exact failed case was rerun successfully. No existing protection test was
+weakened. Skill frontmatter and account app/presentation preservation checks pass.

@@ -80,6 +80,22 @@ Agent/Task or Codex spawn_agent workers are not silently equivalent to paid Fabr
 fallback, model downgrade or inherited frontier worker is authorized here.
 Existing Executive/Capacity grants and provider/host controls stay controlling.
 
+**Parallel bounded fanout.** Dispatch independent READY outcomes as concurrent
+Fabric siblings within admitted capacity, conserved budget and exclusive source
+ownership; consume each ready return without an all-children barrier. Preserve
+one original root and the actual immediate assigning parent. Commission the full
+bounded investigate/build/check/repair loop with explicit ceilings so workers can
+act without per-command Web prompts. Reserve independent review only when the
+current source/release rules actually require it.
+The practical account-neutral guide is
+`integrations/studio_direct_mcp/fabric_plugin_source/skills/orchestrate-fabric-workflows/SKILL.md`,
+under the sole routing owner `docs/sol_skills/WEB_CEO_DELEGATION.md`; an absent
+convenience skill does not block an otherwise qualified request. Short finite
+observations still occupy their worker; long waits require a qualified admitted
+observation gate through the existing Runtime/COO owner. Source publication,
+account installation, worker START, acceptance and production proof differ.
+Never add another watcher, queue or daemon to imitate an absent return path.
+
 Commission only real independent ready outcomes, not empty 114-lane targets.
 The worker owns its permitted bounded implementation/test/repair loop and
 returns **compact** source hashes, evidence, result, gaps, effects and next

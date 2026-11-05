@@ -57,10 +57,20 @@ Dependency manifests establish predecessor identity and readiness, not automatic
 
 ## Replay, identity and failure rules
 
+The private Wake persistence join accepts only the trusted host owner's
+continuation object. It reconstructs binding fields to check projection
+consistency; it cannot independently authenticate the original root, account or
+grant. The existing host must establish that provenance before calling it. It
+is not exposed as a model-writable endpoint. A coherently different binding is
+not inherently invalid on a fresh ledger; after the first canonical write, the
+existing ledger rejects conflicting correlation and preserves the original row.
+Receipt flags describe what this call performed, not the current delivery or
+acknowledgement state of an older obligation.
+
 | Boundary | Required behavior |
 |---|---|
 | Duplicate exact CI material observation | One existing Wake obligation/command; return the immutable canonical record, including across Runtime reopen. |
-| Tampered decision, digest or binding | Reject before a write. A wrapper is not a way to bless inconsistent evidence. |
+| Tampered decision, digest or internally inconsistent binding | Reject before a write. Canonical self-consistency does not authenticate the caller or independently prove original root/grant provenance. |
 | Source head moves during observation | Return stale/unavailable evidence; no repair, approval or release claim for the old head. |
 | Process interruption after an effect | Reconcile the same operation/carrier. Never infer absence, blindly replay or switch accounts. |
 | Gateway restart | Re-read the original retained task/result through its owner; do not reconstruct authority from lost in-memory handles. |
@@ -81,7 +91,7 @@ The shared Project kernel remains under the active parity repair in #2064; the b
 
 Focused tests must distinguish malformed/stale evidence, duplicate material events, Runtime reopen, cancellation, finite exhaustion, changed CI heads, partial pagination, unavailable/auth-failed sources and secret-free errors. Pure imports must not start work or write state.
 
-A real admitted Fabric canary must load the exact candidate implementation, execute a finite observer, continue its bounded task, return retained evidence and be consumed by the principal. That is proof of the attended worker workflow only.
+A real admitted Fabric canary must load the exact candidate implementation, execute a finite observer, continue its bounded task, return retained evidence and be consumed by the principal. The concrete canary uses an actual UTC timer due three seconds later with real monotonic time, and gates focused validation on its TIMER_DUE result inside the same admitted worker. A separate authorized single current-PR CI sample reports its actual outcome; it cannot substitute selected-run completion for required-policy success. A synthetic clock/unit test alone is not this proof. No production test writes or fabricated failures are needed. That is proof of the attended worker workflow only.
 
 The production durable path additionally requires a qualified capable route, real installed/armed Executive consumer, admission/START, exact returned source evidence, post-restart reconciliation and parent/COO consumption. The existing #1893 protected original administrator-result hold blocks the dependent activation lane. Do not read the denied result through another carrier, restart services or imply this source change resolves that hold.
 
@@ -90,3 +100,107 @@ Original scope remains open until account rollout and the production consumer pr
 ## Primary research
 
 Anthropic's current public design separates [deterministic lifecycle hooks](https://code.claude.com/docs/en/hooks), [scheduled/session tasks](https://code.claude.com/docs/en/scheduled-tasks) and [subagent execution](https://code.claude.com/docs/en/sub-agents). That separation informs this design: a trigger carries evidence to an existing execution owner; it is not a new authority or persistence mechanism. These external product capabilities do not grant capabilities to ChatGPT Web or Mastermind.
+
+## Durable observation gate inside the existing COO
+
+The finite helper is useful for short attended waits, but occupies its provider
+lease while pending. The long-wait requirement therefore needs a second source
+slice inside the incumbent Runtime/COO owner, not another process or queue.
+The first slice is a timer-gated, already-admitted leaf step. External CI/review/
+service acquisition remains separately unqualified until a trusted source owner
+and bounded reader are composed; a timer implementation must not advertise those
+sources as installed.
+
+### Versioned contracts and source authority
+
+Add explicit `mastermind.execution_plan/v6` using the V3 leaf topology plus a
+required `observation_gate` field on every step (null or a closed object). Preserve
+V3/V4/V5 defaults and their producer pins. V6 has at most eight steps, backward
+prerequisites and exact provider-realm/quota-class placement; its first form adds
+no nested coordination or manual-model selection. A V3-bound producer cannot
+return V6 or retrofit an admitted plan.
+
+The first closed gate is `mastermind.coo_observation_gate/v1` with exactly:
+`schema_version`, `source={kind:"timer",due_at_ms:int}`, `deadline_at_ms:int`,
+`max_samples:1`, `min_interval_ms:0`, `sample_timeout_ms:0`,
+`max_api_calls:0` and `max_response_bytes:0`. Exact integers reject booleans,
+floats, unknown keys, nonfinite values and duplicate JSON members. Require
+`due_at_ms < deadline_at_ms`, an unexpired acquisition deadline and bounded canonical
+bytes. An already-due timer is allowed; delayed admission never moves its due time.
+Do not reserve authority by accepting unimplemented source variants.
+
+The existing service composes the trusted host. A private observation-host protocol
+provides source scope/current-binding checks and a future bounded-reader seam;
+a type, hash or scope object does not authenticate its caller. Runtime independently
+revalidates the canonical root, sealed planner result, producer binding, plan digest,
+persisted READ authority and current Executive authority policy, workstream and
+finite-control fences. Persist the effective acquisition deadline bounded by the requested deadline,
+the trusted host maximum horizon and an existing finite-control expiry when present.
+Ordinary roots do not need a fabricated finite arm or expiry. Missing or disarmed composition refuses before mutation.
+
+Use the existing `COO_PLAN_ADMITTED` event with a new
+`mastermind.coo_plan_admission/v4`. Each reservation adds `observation`, null or
+an admission binding the root, plan Attempt/digest/step, root creation event,
+authority-policy hash, trusted source reference/digest, original admission time,
+gate spec and complete gate digest. All fields except the spec derive from
+canonical Runtime or trusted host state. Replay retains the first admission time.
+Reserve normal work/review/repair allowances, but defer a step with prerequisites
+**or a non-null gate** without creating its work Job.
+
+### One transaction and a real downstream consumer
+
+`JobRegistry.advance_cycle_observation(root_job_id, plan_step_id,
+observation_host=...)` uses the existing store and deterministic command IDs.
+Before due time it returns pending with zero writes, claims, sleeps or network/
+model calls. At due time one transaction rechecks admission, root cancellation,
+authority, host binding and absolute acquisition deadline, then commits one material
+timer record. A material record committed in time remains historical evidence after
+that acquisition deadline; downstream execution still obeys its current root gates. At/after deadline it records expiry and cannot satisfy the gate.
+
+A closed observation record binds the root, plan Attempt/digest/step, gate digest,
+sample index, authoritative start/finish times, disposition, exact timer snapshot
+and canonical snapshot/evidence digests. Timer sample index is one, reservation
+command and previous snapshot are null. Only MATERIAL satisfies the gate.
+The snapshot is exactly `{kind:"timer",due_at_ms,observed_at_ms}`; Runtime's clock
+supplies observed time. Cancellation, stale authority and expiry never manufacture
+material evidence. Runtime reopen preserves the original deadline and record.
+An uncertain commit reconciles its original command, never a new event identity.
+Historical readback and exact duplicate reconciliation remain available after
+authority drift; fresh effects do not rewrite admitted hashes to conceal drift.
+
+Use `mastermind.work_dependency_manifest/v3` for V6, retaining existing accepted
+revision fields and adding `observation=null | {gate_digest,event_id,evidence_digest}`.
+Derive this binding only from the exact committed material record. Both dependency
+projection and `create_cycle_work` rederive it through the existing root-open and
+reserved-child admission checks; a caller-supplied digest or Wake ID cannot admit
+work. A gate-only deferred step must follow the same materialization path.
+
+The Runtime observation-input reader joins actual child creation, current Attempt,
+exact dependency manifest and original evidence event. The supervisor adds those
+bounded retained bytes to the worker prompt as
+`mastermind.coo_observation_input/v1`, labeled evidence data. Old jobs receive no
+suffix. A manifest hash alone is not consumption, and timer evidence does not
+grant new effects.
+
+### Existing tick composition and honest waiting
+
+The existing `ExecutiveControlService._coo_tick_loop` remains the only periodic
+driver. An additive `ServiceConfig.coo_observations_armed=False` and existing
+READY/autonomy/current-host/custody gates control timer composition. Installed
+configuration and the original #1893 activation hold remain unchanged.
+
+The COO preserves uncertain-dispatch reconciliation first and independent ready
+siblings. Advance at most one due observation per turn; never sleep inside the
+COO lock. Preserve exact/live/READ frontier fences when other work is active.
+The no-living-child/missing-step path must recognize legitimate pending gates
+instead of aggregating early or durably blocking the root. A terminal unsatisfied
+gate remains explicit while independent authorized work may continue.
+
+The focused proof must exercise sealed plans and real inert owner boundaries:
+zero work Job/Attempt/provider start while pending; independent sibling progress;
+one evidence record then one reserved Job and ordinary dispatch; reopen before due
+and between evidence and Job creation; no premature root block; cancellation and
+expiry; missing READ/current-policy drift or missing/disarmed host; exact replay
+versus conflicting evidence; wrong-root/step/Attempt refusal; actual prompt bytes;
+unchanged legacy schemas and all existing capacity/review/release gates.
+These source proofs are not installed-service or unattended production acceptance.
