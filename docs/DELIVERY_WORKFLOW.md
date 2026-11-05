@@ -35,9 +35,30 @@ worktree and move only the task's deliberate edits there.
 
 ## Complete a change
 
-### Chairman Web waiver: no mandatory independent reviewer handoff
+### One qualification, normal protected release
 
-Under the explicit Chairman Web-session waiver, the accepted [REVIEW_RISK_POLICY.md](REVIEW_RISK_POLICY.md) risk tiers FAST, STANDARD and CRITICAL each require **zero additional independent technical reviews and zero additional non-author approvals from this policy**. Risk tiers still select proportionate CI, adversarial security and real-path evidence; source verification failure remains HOLD, not an exemption. The native GitHub ruleset, CODEOWNERS, required CI, binding security/release holds, source custody and authority constraints always prevail. Neither a classifier result nor the absence of a reviewer grants self-approval, self-merge or a native-rule bypass. The optional automatic review host remains OFF; an uninstalled reviewer host is **not** a reason to demand review for ordinary CEO work. Explicitly authorized manual review remains available but never becomes the default per-PR step. This attended instruction policy does not lower the separate signed AUTOMATIC machine counts or activate its default-OFF host.
+Ordinary reversible FAST/STANDARD changes use the same session: implement, self-check
+the coherent diff, run affected checks, publish and use the existing protected release
+automation. No independent technical review, formal approval, separate release operator,
+new task form or handoff is required by internal habit. Small changes should finish in
+one healthy turn when checks and tools permit. Required hosted checks still gate merge.
+
+Consequential security/auth/permission, irreversible data and exactly-once changes in
+native or automated work receive **one** distinct native/Fabric technical review of the
+relevant risk. Repair findings and review only the affected delta. The existing attended
+CEO-Web all-tier self-review waiver remains: a CRITICAL label alone adds no reviewer
+handoff there. Stronger consequences still need stronger tests and real-path evidence.
+An explicit current assignment or actually enforced repository/security requirement can
+require review; identify that requirement rather than inventing a universal gate.
+
+A technical review is not a formal GitHub approval. Obtain an authenticated non-author
+`APPROVED` only when an actual repository rule or specific binding hold requires it.
+Never impersonate a reviewer, self-approve, bypass enforced checks or clear a recorded
+hold by inference. The assigned session may request ordinary automated release of its
+own qualified PR; using the normal protected controller/queue is not an independent
+review claim. No additional non-author arming ceremony follows a completed qualification.
+The optional automatic review host remains OFF until separately enabled; its absence
+adds no manual review. See [session review policy](SESSION_LOCAL_REVIEW_POLICY.md).
 
 1. Run the smallest relevant local test set while iterating. Publish a truthful
    candidate once its scoped source is stable and the relevant local qualification passes.
@@ -66,12 +87,16 @@ Under the explicit Chairman Web-session waiver, the accepted [REVIEW_RISK_POLICY
    becomes Ready. Continue path-disjoint tests, integration and repair while CI
    and any actually required non-author reviewer advance; never duplicate a refused Fabric
    review or move an unreconciled worker effect to another carrier.
-5. Offload the wait to one existing Class-E or Class-T observer through the current
-   process/CI owner. Bind repository, PR, exact head SHA and workflow run IDs; retain the
+5. Reuse one existing observer when it reduces a genuinely long wait; a short check
+   may be consumed in this same healthy foreground session. Do not create an observer
+   or a second operator just to complete a routine change. Bind repository, PR, exact head SHA and workflow run IDs; retain the
    process/run handle and return location in the existing checkpoint. Reuse an observer rather
    than creating one per check or chat. No merge/deploy action belongs in the observer.
    Consume only the matching candidate's results; a changed head invalidates stale observations.
-   Queued CI is not a failing build, and do not push empty/rebase-only commits to restart CI.
+   Queued CI is not a failing build; do not push empty/rebase-only commits to restart CI.
+   A substantive qualified update may use normal configured CI supersession; retain
+   the old run disposition and qualify the new exact head. Never manually cancel
+   another writer’s checks or replay an uncertain side effect.
    Without a usable observer, continue useful foreground work and check once at the next real
    integration boundary. Never claim a background Web turn or automatic wake that does not exist.
 6. After required PR-head checks and all **actually required** reviews pass and queue entry is authorized, use the
@@ -139,30 +164,21 @@ GitHub state, not a pasted handoff:
    `HOLD-RELEASED` protocol applies, the qualifying release must be newer
    than all binding hold comments. **A label or CI-green state never releases
    a recorded hold.** Do not blanket-label, re-home or silently un-draft.
-3. Verify **one genuinely independent formal GitHub APPROVED review** on the
-   exact current PR head and current source qualification. A Fabric technical
-   `SOURCE_PASS`, reviewer request, or green hosted CI is **not** approval.
-   A newer `CHANGES_REQUESTED`, dismissal, materially changed head or
-   indeterminate reviewer identity invalidates the release evidence. Check
-   actual review author against PR/commit authors; changing account inside
-   the same reasoning session does not establish independent scrutiny.
-   **Current interim gate:** Macro's sweeper does not yet read native PR
-   reviews, so the eligible independent release/arming actor must verify
-   this evidence before applying the opt-in label. Do not claim that
-   `merge-on-green` alone enforces review, or use a shared author account
-   to circumvent the no-self-approval/no-self-merge rule.
+3. Apply only the review actually required for this candidate under the shared policy
+   above and current enforced rules. Ordinary reversible changes need no internal
+   independent reviewer or formal approval. Consequential native/automated changes need
+   one genuine independent technical review; Fabric or a distinct native child qualifies.
+   A technical `SOURCE_PASS` is not GitHub `APPROVED`, and an approval is needed only
+   where enforced or specifically held. Preserve blocking findings, review revocation
+   and original review effects. Do not switch logins to manufacture independence.
    **Cross-repository command boundary:** every CLI command below must bind
-   `--repo mastermindx-market-intelligence/macro`; never rely on the current
-   shell checkout or a previously selected repository to identify the PR.
-4. Only when release is **actually authorized**, the head checks are
-   concluded clean, and no hold/merge gate remains, the eligible release
-   operator may opt in by adding the **single existing label** under the
-   **current interim non-author release fence**:
+   `--repo mastermindx-market-intelligence/macro`; never infer the target repository.
+4. Once the required checks, applicable review and holds are satisfied, the assigned
+   session may opt its own qualified PR into the existing automation:
    `gh pr edit <number> --repo mastermindx-market-intelligence/macro --add-label merge-on-green`
-   (or the additive GitHub issue-label action). Record exact
-   repo/PR/head, reviewer identity/decision and check/run evidence on the
-   existing source-linked release record. Do not substitute
-   `main-red-repair` (a separately justified exception) or touch
+   (or the additive GitHub issue-label action). No second non-author release/arming
+   actor is an internal prerequisite. Preserve exact repo/PR/head and useful existing
+   evidence; no new release receipt stage. Do not substitute `main-red-repair` or touch
    `merge-refresh-in-flight` (controller-owned lease state).
 5. Reconcile the **existing controller** and PR after arming:
    `gh run list --repo mastermindx-market-intelligence/macro --workflow merge-on-green.yml --limit 10`,
@@ -177,27 +193,21 @@ GitHub state, not a pasted handoff:
    spam workflows, push empty commits, cancel another lane's CI, or raise the
    workload cap merely to force progress.
 
-### Review once, release automatically — only after machine enforcement
+### Qualify once, release automatically
 
-The Chairman's target is **one independent source review, then an automatic
-protected release**, not a second standing human release ceremony. The target is
-**not yet live authority**: Macro's existing sweeper does not check formal
-GitHub review state, and Mastermind's active native queue ruleset must not be
-assumed to require review merely because a merge queue is configured.
+The existing controller is responsible for machine enforcement. Do not treat source
+policy as proof that a changed controller is installed. Until a prospective controller
+change is installed and read back, preserve its actual enforced behavior and diagnose
+its concrete verdict; do not bypass it or add an imaginary human gate around it.
 
-Before dropping the interim non-author arming/release fence, the *incumbent*
-controller or protected repository policy must enforce an exact-head formal
-approval from a reviewer genuinely independent of source authors, review
-revocation/CHANGES_REQUESTED, binding CI and current integrated proof, explicit
-HOLD/STOP release order, branch conflicts and unavailable API data. Prove
-negative tests for absent, stale, revoked, self-authored and unreadable reviews,
-plus hold, red CI, stale-base and race conditions. Only after the existing
-machine gate is **installed, independently qualified and read back** may the
-existing release automation admit a reviewed, CI-green, unheld candidate
-without an additional non-author release operator. The author must still not
-self-merge through REST or an admin bypass, and the `merge-on-green` label
-remains an opt-in, never proof of approval. A source change or successful
-controller run does not establish production adoption.
+For ordinary reversible changes the target is zero independent reviews; for consequential
+native/automated changes it is one independent technical review, then normal automation.
+Enforce real CI, current source/integration compatibility, explicit HOLD/STOP, conflicts,
+and any actually required review. Missing or unreadable enforcement data must fail closed
+for its dependent effect. Formal approval and a separate non-author arming decision are
+not blanket prerequisites. Negative tests should cover the actual required review's absent,
+stale, revoked and conflicting findings, plus hold, red CI and head races. Reuse valid
+qualification until relevant source or requirements change. Never use REST/admin bypass.
 
 `merge-blocked` is a refusal/diagnostic to investigate, **not** approval to
 clear a hold. Record `ARMED`, `REFRESH_DEFERRED`, `CHECKS_PENDING`,

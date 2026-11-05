@@ -8,7 +8,24 @@ An attended ChatGPT Web, Codex, Claude, Grok or eligible other seat can request 
 
 ## First gate: which review obligation actually applies?
 
-Under protected-accepted and actually loaded attended CEO-Web instructions, FAST, STANDARD and CRITICAL alone do not create a mandatory independent reviewer handoff or additional formal approval. The session still performs source self-check, consequence-appropriate tests, required CI and applicable security/production proof. Native GitHub rules, CODEOWNERS, separately binding security requirements, explicit release holds and authorized independent release controls remain binding. A separately authorized manual or genuinely required independent review uses the existing routes below. The signed AUTOMATIC GitHub/Executive policy remains distinct: FAST0/0, STANDARD1/1, CRITICAL2/1, with its host OFF unless separately authorized and enabled. Source text does not prove installation. Other execution surfaces retain their applicable review requirements.
+Ordinary reversible FAST/STANDARD source work in Web, native Codex/Claude and admitted
+workers uses author self-check, affected tests and normal protected automation. Do not
+open this routing procedure as a mandatory per-PR stage. Consequential native/automated
+security/auth/permission, irreversible data or exactly-once work needs one distinct
+technical review of that risk; use an eligible native child or admitted Fabric reviewer.
+The attended CEO-Web all-tier self-review waiver remains: a CRITICAL label alone does
+not create a reviewer handoff. Explicitly assigned reviews and actually enforced native
+GitHub/CODEOWNERS/security requirements remain binding. Source text does not prove
+installation of a changed machine policy or activate the default-OFF review host.
+
+One technical review and its finding disposition are sufficient; repair review covers
+only the changed risk. No separate formal GitHub approval or non-author release/arming
+actor is added unless an actual enforced rule or specific binding hold requires it.
+No outside chat, Dot, Secretary or reviewer host is needed for ordinary work. A missing
+review surface holds only a release that genuinely owes distinct review; keep other
+permitted work moving. These reviewer START/commission canaries apply only to an actual
+review assignment; ordinary-waiver canaries prove no unwanted Fabric/Dot review operation
+is created. Actual CI, holds, denials, source custody and EFFECT_UNKNOWN remain fenced.
 
 ## Before dispatch: immutable review identity
 

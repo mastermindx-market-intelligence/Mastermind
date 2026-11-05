@@ -221,16 +221,34 @@ universal procedure owner. Read it before creating or relying on a temporary wat
   proves ACK, START, execution, or reusable capacity. Preserve those states separately until the
   accepted RuntimeBinding/Wake path proves them.
 
-### Session-owned review for every assigned session
+### Session-owned review and ordinary release
 
-Before a PR/source review, load [session-local review policy](docs/SESSION_LOCAL_REVIEW_POLICY.md) from the same protected pin. The **working session** performs the author adversarial pass and, if truly warranted, manages its **own native reviewer subagent**. An exposed Web Pro native child, Codex native child, Claude native child or admitted Fabric child can conduct distinct-context read-only technical review; no separate top-level ChatGPT conversation or third-party account is organizationally required. Do not invent native subagents or START receipts. Once the attended CEO-Web instruction waiver is protected-accepted and loaded, risk tier alone does not require an independent reviewer handoff in that session. This does not depend on #2018 or automatic-review-host enrollment. Signed machine policy and actually binding review, security, approval and release requirements remain separate and unchanged.
+Load [session-local review policy](docs/SESSION_LOCAL_REVIEW_POLICY.md) at the same
+protected pin. Ordinary reversible FAST/STANDARD changes use this session's self-check,
+affected tests and the normal protected controller/queue. No mandatory independent
+review, formal approval, outside chat or non-author release/arming operator arises from
+internal process. The assigned session may request automated release of its own qualified
+change. Preserve actual required CI, native GitHub/CODEOWNERS protections and specific holds.
 
-Only when a separately commissioned reviewer is actually needed, load [external review routing](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md) and reconcile the existing exact review before any dispatch. Distinguish `SELF_REVIEWED`, `INDEPENDENT_TECHNICAL_REVIEW` by a real child, and formal GitHub `APPROVED` by an authenticated eligible non-author. A native child does not submit formal GitHub approval for the parent. Historical reviewer login is a placement clue, not a chat-wait gate; do not switch GitHub accounts in the same reasoning context to fake independent review. Existing GitHub review ingress/Runtime, author and coauthor conflicts, branch rules, holds, current-head CI, denied/uncertain effects and source/release protections remain authoritative. Never self-approve, self-merge or claim a Project instruction was installed merely because this file was edited.
+Consequential native/automated security/auth/permission, irreversible data or exactly-once
+changes use one genuinely distinct read-only native/Fabric technical reviewer; consume its
+real exact-head result and adjudicate findings here. Review a repair's affected delta only.
+The existing attended CEO-Web all-tier self-review waiver remains; a CRITICAL label alone
+adds no reviewer handoff. No review-host enrollment or different top-level chat is needed.
+An author second pass is `SELF_REVIEWED`; a child result is technical assurance, not formal
+GitHub `APPROVED`. Formal approval requires an eligible actual non-author event only when
+an enforced rule or binding hold requires it. Never impersonate a reviewer or self-approve.
+Use [external review routing](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md) only for an actual
+separate review assignment; preserve active/denied/uncertain review effects on their carrier.
+Source publication proves neither instruction installation nor changed machine enforcement.
 
+**Finish the actual PR, not its draft.** Own the same branch through repair, required CI,
+Ready, applicable review, protected automation, exact merge readback and owed installed/user-
+path proof. A Draft, comment or checkpoint is not delivery. Short checks stay in the same
+healthy turn; pending CI does not justify a replacement PR or an archived-owner handback.
+See [finish-to-release contract](docs/SESSION_LOCAL_REVIEW_POLICY.md#finish-to-release-ownership-a-pr-is-an-intermediate-artifact).
 
-**Finish the actual PR, not its draft.** The assigned session owns the same original branch/PR through source repair, hosted CI failure diagnosis, Ready when reviewable, genuinely required review, authorized protected merge/queue, merge-SHA readback and owed installed/user-path proof. A PR, Draft, comment or checkpoint is NOT delivery. Do not stop because CI is pending, wait for an archived reviewer chat, or open a replacement PR to escape the original. Continue safe steps in the same turn; keep unresolved holds, non-author approvals, source/effect custody and no self-merge intact. See [finish-to-release contract](docs/SESSION_LOCAL_REVIEW_POLICY.md#finish-to-release-ownership-a-pr-is-an-intermediate-artifact).
-
-A historically named GitHub reviewer login is a **placement preference, not an owner wait**, unless an actual current exact-seat instruction or repository rule binds it. The active assigned principal checks the review's exact PR/head, connected authenticated login, commit/author/coauthor independence and existing review/effect state under `docs/sol_skills/REVIEW_RETURN.md`; it may request a different eligible **genuinely independent** reviewer through GitHub's existing review path. Switching the same reasoning session between two GitHub accounts is not independent substantive review. No impersonation, author self-review, duplicate/denied-effect reroute, self-approval or self-merge. Keep executing other permitted work while the real review is pending.
+A historically named GitHub reviewer login is a **placement preference, not an owner wait**, unless an actual current exact-seat instruction or repository rule binds it. The active assigned principal checks the review's exact PR/head, connected authenticated login, commit/author/coauthor independence and existing review/effect state under `docs/sol_skills/REVIEW_RETURN.md`; it may request a different eligible **genuinely independent** reviewer through GitHub's existing review path. Switching the same reasoning session between two GitHub accounts is not independent substantive review. No impersonation, false independent-review claim, duplicate/denied-effect reroute, self-approval or protected-release bypass. Keep executing other permitted work while the real review is pending.
 
 ## Agent OS — the organizational knowledge plane
 
