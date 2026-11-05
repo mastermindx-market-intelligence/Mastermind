@@ -1098,12 +1098,89 @@ def test_malformed_json_never_retains_raw_payload_in_exception_chain(tmp_path: P
     assert "CREDENTIAL-SENTINEL" not in repr(auth_raised.value)
 
     (tmp_path / "mode").write_text("malformed-sentinel", encoding="utf-8")
-    async def malformed() -> CollectionReceipt:
-        return await adapter.collect_result(await adapter.start(_workspace_and_spec(tmp_path)))
+    # This case qualifies output handling after an admitted start. Keep the real
+    # fixture PID alive through identity/attestation, without relaxing the
+    # adapter's separate fail-closed tests for an already-exited process. The
+    # malformed fixture prints its payload and exits immediately, so without
+    # this barrier the fixture PID can be gone before the adapter inspects the
+    # real launch identity. The FIFO is released only once start has returned.
+    gate = tmp_path / "launch-release"
+    os.mkfifo(gate, 0o600)
+    gate_fd = os.open(gate, os.O_RDWR | os.O_NONBLOCK)
 
-    receipt = asyncio.run(malformed())
+    async def malformed() -> CollectionReceipt:
+        ref = await adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=5))
+        assert os.write(gate_fd, b"release\n") == len(b"release\n")
+        return await adapter.collect_result(ref)
+
+    try:
+        receipt = asyncio.run(malformed())
+    finally:
+        os.close(gate_fd)
+
     assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
     assert "CREDENTIAL-SENTINEL" not in str(receipt.result.error)
+
+
+def test_malformed_json_delayed_first_identity_inspection_still_redacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bounded deliberate delay before the first identity read must not change
+    the malformed-output contract.
+
+    The delay lets an ungated fixture exit before the parent performs its first
+    identity read. With the launch-release FIFO in place the real fixture PID is
+    still alive, the real inspector still qualifies it, and the malformed
+    payload is still redacted. The delay delegates to the original inspector and
+    is a discriminator only; the FIFO, not the delay, supplies the ordering.
+    """
+    binary = _fixture_claude_binary(tmp_path)
+    adapter = _adapter(tmp_path, binary)
+    (tmp_path / "mode").write_text("malformed-sentinel", encoding="utf-8")
+    real_inspect = claude_worker.LocalProcessInspector.inspect
+    first_inspection = True
+
+    def delayed_inspect(self: object, pid: int) -> object:
+        nonlocal first_inspection
+        if first_inspection:
+            first_inspection = False
+            # Exercise a child scheduled before the parent's first identity
+            # read. The FIFO, not this delay, supplies the launch ordering.
+            time.sleep(0.2)
+            # Reap this one owned fixture child only if it has already exited,
+            # so the real inspector observes the same absent-PID condition the
+            # hosted CI observed. A gated fixture is still alive at this point,
+            # so the probe reaps nothing and the real inspection is unchanged.
+            try:
+                os.waitpid(pid, os.WNOHANG)
+            except ChildProcessError:
+                pass
+        return real_inspect(self, pid)
+
+    monkeypatch.setattr(claude_worker.LocalProcessInspector, "inspect", delayed_inspect)
+
+    gate = tmp_path / "launch-release"
+    os.mkfifo(gate, 0o600)
+    gate_fd = os.open(gate, os.O_RDWR | os.O_NONBLOCK)
+
+    async def malformed() -> CollectionReceipt:
+        ref = await adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=5))
+        assert os.write(gate_fd, b"release\n") == len(b"release\n")
+        return await adapter.collect_result(ref)
+
+    try:
+        receipt = asyncio.run(malformed())
+    finally:
+        os.close(gate_fd)
+
+    assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
+    assert "CREDENTIAL-SENTINEL" not in str(receipt.result.error)
+    for path in (
+        Path(receipt.process_ref.stdout_path),
+        Path(receipt.process_ref.stderr_path),
+        Path(receipt.process_ref.result_path),
+    ):
+        assert "CREDENTIAL-SENTINEL" not in path.read_text(encoding="utf-8")
 
 
 def test_foreground_environment_is_private_and_closed(
