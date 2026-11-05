@@ -31,14 +31,7 @@ def _sections(source: str) -> tuple[str, str]:
 
 def _assert_release_contract(release: str) -> None:
     source = " ".join(release.split())
-    for required in (
-        "The assigned session owns this routine release request",
-        "No additional non-author arming ceremony",
-    ):
-        # No extra review or release-operator gate can be invented.
-        if required == "No additional non-author arming ceremony":
-            continue  # Source expresses this as "do not introduce a second"
-        assert required in source, required
+    assert "The assigned session owns this routine release request" in source
     for required in (
         "do not introduce a second non-author arming ceremony",
         "re-read the exact GitHub repository",
@@ -111,6 +104,9 @@ def test_removing_a_binding_native_release_gate_fails_closed(required: str) -> N
 ])
 def test_native_command_mutation_is_rejected(removed: str) -> None:
     release, _ = _sections(DELIVERY.read_text(encoding="utf-8"))
-    assert removed in release
+    before, separator, fenced_and_after = release.partition("```bash")
+    assert separator and removed in fenced_and_after
+    # Mutate the actual command, not a preceding narrative repository mention.
+    damaged = before + separator + fenced_and_after.replace(removed, "", 1)
     with pytest.raises(AssertionError):
-        _assert_release_contract(release.replace(removed, "", 1))
+        _assert_release_contract(damaged)
