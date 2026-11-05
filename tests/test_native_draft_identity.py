@@ -107,5 +107,7 @@ def test_real_registered_outer_to_signed_owner_is_zero_selector_and_non_effectfu
         s.slots["profiles"]["web"]["enabled"]=False
         assert client.get(ROUTE,headers=headers).status_code == 403
     from ops.executive_os.os_public_edge import GET_ROUTES,POST_ROUTES,TRANSITION_ROUTE_PROFILES,PRE_NATIVE_DRAFT_GET_ROUTES,PRE_NATIVE_DRAFT_POST_ROUTES
+    assert GET_ROUTES == PRE_NATIVE_DRAFT_GET_ROUTES + (ROUTE,)
+    assert POST_ROUTES == PRE_NATIVE_DRAFT_POST_ROUTES
     assert ROUTE in GET_ROUTES and ROUTE not in POST_ROUTES
     assert (PRE_NATIVE_DRAFT_GET_ROUTES,PRE_NATIVE_DRAFT_POST_ROUTES) in TRANSITION_ROUTE_PROFILES

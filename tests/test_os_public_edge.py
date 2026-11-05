@@ -62,6 +62,7 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/workspace/source-operation/options",
         "/workspace/resources/host-observation/current",
         "/workspace/mission-result/current",
+        "/workspace/native-draft-identity/current",
         "/workspace/instruction-admission/current",
         "/workspace/instruction-admission/operation",
     }
