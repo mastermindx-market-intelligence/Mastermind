@@ -165,12 +165,13 @@ def test_pair_requires_stable_pid1_source_and_consistent_publisher_clocks(mutati
 
 
 async def test_missing_installed_source_refuses_before_unit_or_private_io(monkeypatch):
+    """No held release and no approved installation input: refuse first."""
     monkeypatch.setattr(observer.sys, "platform", "linux")
-    assert observer._installed_source_identity(IMPLEMENTATION) is None
     def forbidden(*args, **kwargs):
         raise AssertionError("source gate must precede host reads")
     monkeypatch.setattr(observer, "_boot_id", forbidden)
     monkeypatch.setattr(observer, "_query_fixed_pid1", forbidden)
+    monkeypatch.setattr(observer, "inspect_linux_process_image", forbidden)
     instance = observer.HermesRoleMetadataObserver(host_binding_sha256=BINDING,
                                                   implementation_sha=IMPLEMENTATION)
     with pytest.raises(status.RoleStatusError, match="SOURCE_UNAVAILABLE"):

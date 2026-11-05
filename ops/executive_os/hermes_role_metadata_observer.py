@@ -1,14 +1,20 @@
 """Fixed PID1 observation for the two Hermes roles on the existing MH1 host.
 
-Pure qualification is separate from acquisition. The installed source owner
-does not yet expose the required root-custodied producer/interpreter binding;
-the production acquisition boundary therefore refuses before reading a unit.
-An implementation SHA in configuration or StatusText cannot clear that gate.
+Pure qualification is separate from acquisition. The request-scoped held
+qualification context owns the immutable release, the manifest-approved
+runtime installation input and the two root unit fragments; the acquisition
+joins that approved source to the live PID1 unit and to the actual role
+process. Nothing here attests a provider, an authentication, a served turn
+or a credential.
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import os
 import re
+import stat
 import sys
 import time
 from pathlib import Path
@@ -16,6 +22,16 @@ from pathlib import Path
 from common.hermes_role_status_contract import (
     MAX_SAFE_INTEGER, ROLES, UNITS, RoleStatusError, decode_status_text,
     project_observation, validate_observation, validate_source_pins,
+)
+# The release owner is the same package; its held-source class and manifest
+# validator are the single authority for the installed source and the approved
+# installation input.
+from ops.executive_os.release_manifest import (
+    ReleaseManifestError, _HeldReleaseSources, linux_release_root,
+)
+# The incumbent process identity helper is reused, never copied.
+from ops.native_fabric.quota_continuity.candidate.linux_process_identity import (
+    LinuxProcessIdentityError, inspect_linux_process_image,
 )
 
 _HEX64 = re.compile(r"[0-9a-f]{64}")
@@ -26,20 +42,16 @@ _SNAPSHOT_KEYS = frozenset({"host_boot_id", "implementation_sha", "source_identi
 _ROW_KEYS = frozenset({"role", "unit", "main_pid", "main_start_monotonic_us",
                       "invocation_id", "status", "notify_access", "active_state", "sub_state"})
 _PROPERTIES = ("Id", "MainPID", "ExecMainStartTimestampMonotonic", "InvocationID",
-               "NotifyAccess", "ActiveState", "SubState", "StatusText")
+               "NotifyAccess", "ActiveState", "SubState", "StatusText",
+               "FragmentPath", "DropInPaths", "NeedDaemonReload", "LoadState",
+               "Transient", "User", "Group", "Type", "WorkingDirectory", "ExecStart")
 _MAX_PID1_BYTES = 16_384
-
-
-def _installed_source_identity(expected_implementation_sha: str) -> str | None:
-    """Reserved seam for the existing Linux release/unit custody owner.
-
-    No configured claim, publisher field, mutable checkout HEAD, bare release
-    manifest or caller boolean is accepted as this identity. Packaging the
-    first-party modules alone does not qualify the interpreter, import roots
-    and effective root unit. That incumbent-owner integration remains owed.
-    No role-private directory or credential is accessed to fill the gap.
-    """
-    return None
+_UNIT_DIRECTORY = Path("/etc/systemd/system")
+# The effective ExecStart rendering of one simple command. Only the path and
+# the joined argv are read; the volatile timing fields are not interpreted.
+_EXEC_START = re.compile(
+    r"^\{ path=(?P<path>[^;]*) ; argv\[\]=(?P<argv>.*?) ; ignore_errors=[^;]* ; "
+    r"start_time=\[[^]]*\] ; stop_time=\[[^]]*\] ; pid=[^;]* ; code=[^;]* ; status=[^;]* \}$")
 
 
 def _boot_id() -> str:
@@ -91,7 +103,7 @@ def _decode_pid1(raw: bytes) -> list[dict]:
                      "invocation_id": value["InvocationID"],
                      "status": decode_status_text(value["StatusText"], expected_role=role),
                      "notify_access": value["NotifyAccess"], "active_state": value["ActiveState"],
-                     "sub_state": value["SubState"]})
+                     "sub_state": value["SubState"], "unit_properties": value})
     return rows
 
 
@@ -123,6 +135,227 @@ async def _query_fixed_pid1() -> list[dict]:
                 process.kill()
             except ProcessLookupError:
                 pass
+
+
+def _expected_exec_start(unit_text: str) -> tuple[str, str]:
+    """The one ExecStart of the expected unit: its executable and its argv."""
+    lines = [line for line in unit_text.splitlines() if line.startswith("ExecStart=")]
+    if len(lines) != 1:
+        raise RoleStatusError()
+    argv = lines[0][len("ExecStart="):]
+    executable, separator, _ = argv.partition(" ")
+    if not separator or not executable:
+        raise RoleStatusError()
+    return executable, argv
+
+
+def _live_exec_start(value: str) -> tuple[str, str]:
+    match = _EXEC_START.fullmatch(value)
+    if match is None:
+        raise RoleStatusError()
+    path, argv = match.group("path"), match.group("argv")
+    if not path or not argv or argv.split(" ", 1)[0] != path:
+        raise RoleStatusError()
+    return path, argv
+
+
+class _HeldRoleQualification:
+    """Request-scoped held release, approved runtime input and root fragments.
+
+    The context owns physical custody: the immutable release descriptors, the
+    manifest-approved installation input and the two root-owned unit
+    fragments. It never reads a role profile, a secret or an environment.
+    """
+
+    def __init__(self, implementation_sha: str) -> None:
+        self.implementation_sha = implementation_sha
+        self.release: _HeldReleaseSources | None = None
+        self.installation: dict | None = None
+        self.expected_units: dict[str, str] = {}
+        self.fragment_paths: dict[str, Path] = {}
+        self._fragment_fds: dict[str, int] = {}
+        self._fragment_bytes: dict[str, bytes] = {}
+        self._closed = False
+
+    def __enter__(self) -> "_HeldRoleQualification":
+        try:
+            root = linux_release_root() / self.implementation_sha
+            try:
+                self.release = _HeldReleaseSources(root)
+            except ReleaseManifestError as exc:
+                raise RoleStatusError() from exc
+            installation = self.release.hermes_runtime_input()
+            if installation is None:
+                raise RoleStatusError()
+            self.installation = installation
+            from integrations.hermes_runtime.errors import RuntimeRefusal
+            from integrations.hermes_runtime.system_service import (
+                render_role_units_from_installation,
+            )
+            try:
+                self.expected_units = render_role_units_from_installation(
+                    installation, release_commit=self.implementation_sha)
+            except RuntimeRefusal as exc:
+                raise RoleStatusError() from exc
+            for role in ROLES:
+                path = _UNIT_DIRECTORY / f"hermes-runtime-{role}.service"
+                self.fragment_paths[role] = path
+                self._fragment_fds[role] = self._hold_fragment(path)
+                self._fragment_bytes[role] = self._read_fragment(self._fragment_fds[role])
+            self.check()
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
+        return self
+
+    def __exit__(self, *ignored: object) -> bool:
+        self._closed = True
+        for descriptor in self._fragment_fds.values():
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        self._fragment_fds.clear()
+        self._fragment_bytes.clear()
+        if self.release is not None:
+            self.release.close()
+            self.release = None
+        return False
+
+    @staticmethod
+    def _hold_fragment(path: Path) -> int:
+        try:
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        except OSError as exc:
+            raise RoleStatusError() from exc
+        try:
+            info = os.fstat(descriptor)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+                    or info.st_mode & 0o022 or info.st_nlink != 1
+                    or not 0 < info.st_size <= 64 * 1024):
+                raise RoleStatusError()
+        except BaseException:
+            os.close(descriptor)
+            raise
+        return descriptor
+
+    @staticmethod
+    def _read_fragment(descriptor: int) -> bytes:
+        info = os.fstat(descriptor)
+        raw = os.pread(descriptor, info.st_size, 0)
+        if len(raw) != info.st_size:
+            raise RoleStatusError()
+        return raw
+
+    def check(self) -> None:
+        """Re-check the held custody: the release and both root fragments."""
+        if self._closed or self.release is None:
+            raise RoleStatusError()
+        self.release.check()
+        for role, descriptor in self._fragment_fds.items():
+            path = self.fragment_paths[role]
+            try:
+                current = os.stat(path, follow_symlinks=False)
+            except OSError as exc:
+                raise RoleStatusError() from exc
+            held = os.fstat(descriptor)
+            if (current.st_dev, current.st_ino) != (held.st_dev, held.st_ino):
+                raise RoleStatusError()
+            if self._read_fragment(descriptor) != self._fragment_bytes[role]:
+                raise RoleStatusError()
+
+    def role_facts(self, role: str, properties: dict, boot_id: str) -> dict:
+        """Join the approved source, the live unit and the actual role process."""
+        if self.installation is None:
+            raise RoleStatusError()
+        rows = {row["role"]: row for row in self.installation["roles"]}
+        approved = rows.get(role)
+        if approved is None:
+            raise RoleStatusError()
+        unit = f"hermes-runtime-{role}.service"
+        expected_unit = self.expected_units.get(role)
+        if expected_unit is None:
+            raise RoleStatusError()
+        # The live root fragment must be exactly the rendered expected unit: an
+        # alternate root, image, execution prefix or command cannot hide here.
+        if self._fragment_bytes.get(role) != expected_unit.encode("utf-8"):
+            raise RoleStatusError()
+        expected_executable, expected_argv = _expected_exec_start(expected_unit)
+        live_executable, live_argv = _live_exec_start(properties["ExecStart"])
+        if (live_executable != expected_executable or live_argv != expected_argv
+                or properties["FragmentPath"] != str(self.fragment_paths[role])
+                or properties["DropInPaths"] != ""
+                or properties["NeedDaemonReload"] != "no"
+                or properties["LoadState"] != "loaded"
+                or properties["Transient"] != "no"
+                or properties["User"] != role or properties["Group"] != role
+                or properties["Type"] != "simple"
+                or properties["WorkingDirectory"] != approved["state_dir"]
+                or properties["NotifyAccess"] != "main"):
+            raise RoleStatusError()
+        identity = self._process_identity(
+            properties["MainPID"], approved, boot_id,
+            self.installation["launch_python"]["sha256"])
+        return {
+            "role": role,
+            "unit": unit,
+            "fragment_path": properties["FragmentPath"],
+            "fragment_sha256": hashlib.sha256(self._fragment_bytes[role]).hexdigest(),
+            "exec_start": live_argv,
+            "main_pid": identity["pid"],
+            "main_start_monotonic_us": int(properties["ExecMainStartTimestampMonotonic"]),
+            "invocation_id": properties["InvocationID"],
+            "boot_id": identity["boot_id"],
+            "start_ticks": identity["start_ticks"],
+            "real_uid": identity["real_uid"],
+            "effective_uid": identity["effective_uid"],
+            "real_gid": identity["real_gid"],
+            "effective_gid": identity["effective_gid"],
+            "image_sha256": identity["image_sha256"],
+            "image_device": identity["image_device"],
+            "image_inode": identity["image_inode"],
+            "image_mtime_ns": identity["image_mtime_ns"],
+            "image_ctime_ns": identity["image_ctime_ns"],
+        }
+
+    @staticmethod
+    def _process_identity(main_pid: str, approved: dict, boot_id: str,
+                          approved_image_sha256: str) -> dict:
+        """The actual role process: principals, boot and executed image."""
+        if type(main_pid) is not str or _DECIMAL.fullmatch(main_pid) is None:
+            raise RoleStatusError()
+        pid = int(main_pid)
+        if not 0 < pid <= 2_147_483_647:
+            raise RoleStatusError()
+        try:
+            identity = inspect_linux_process_image(pid)
+        except LinuxProcessIdentityError as exc:
+            raise RoleStatusError() from exc
+        if (type(identity) is not dict or identity.get("boot_id") != boot_id
+                or identity.get("effective_uid") != approved["uid"]
+                or identity.get("real_uid") != approved["uid"]
+                or identity.get("effective_gid") != approved["gid"]
+                or identity.get("real_gid") != approved["gid"]):
+            raise RoleStatusError()
+        image_sha256 = identity.get("sha256")
+        if type(image_sha256) is not str or _HEX64.fullmatch(image_sha256) is None:
+            raise RoleStatusError()
+        if image_sha256 != approved_image_sha256:
+            raise RoleStatusError()
+        return {
+            "pid": pid,
+            "boot_id": identity["boot_id"],
+            "start_ticks": identity["start_identity"],
+            "real_uid": identity["real_uid"],
+            "effective_uid": identity["effective_uid"],
+            "real_gid": identity["real_gid"],
+            "effective_gid": identity["effective_gid"],
+            "image_sha256": image_sha256,
+            "image_device": identity["device"],
+            "image_inode": identity["inode"],
+            "image_mtime_ns": identity["mtime_ns"],
+            "image_ctime_ns": identity["ctime_ns"],
+        }
 
 
 def qualify_pair(before, after, *, host_binding_sha256: str, implementation_sha: str,
@@ -191,18 +424,25 @@ class HermesRoleMetadataObserver:
         self.host_binding_sha256 = host_binding_sha256
         self.implementation_sha = implementation_sha
 
-    async def _read_fixed_snapshot(self) -> dict:
+    async def _read_fixed_snapshot(self, held: _HeldRoleQualification) -> dict:
         if sys.platform != "linux":
             raise RoleStatusError()
-        source = _installed_source_identity(self.implementation_sha)
-        if source is None:
-            raise RoleStatusError()
+        held.check()
         boot = _boot_id()
         rows = await _query_fixed_pid1()
-        if boot != _boot_id() or source != _installed_source_identity(self.implementation_sha):
+        facts = []
+        for row in rows:
+            facts.append(held.role_facts(row["role"], row["unit_properties"], boot))
+        held.check()
+        if boot != _boot_id():
             raise RoleStatusError("SOURCE_CHANGED")
+        identity = hashlib.sha256(json.dumps(
+            facts, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+            allow_nan=False).encode("utf-8")).hexdigest()
         return {"host_boot_id": boot, "implementation_sha": self.implementation_sha,
-                "source_identity": source, "roles": rows,
+                "source_identity": identity,
+                "roles": [{key: value for key, value in row.items()
+                           if key != "unit_properties"} for row in rows],
                 "observed_at_ms": time.time_ns() // 1_000_000,
                 "observed_monotonic_ms": time.monotonic_ns() // 1_000_000}
 
@@ -211,13 +451,14 @@ class HermesRoleMetadataObserver:
             loop = asyncio.get_running_loop()
             deadline = loop.time() + 4.0
             async with asyncio.timeout_at(deadline):
-                before = await self._read_fixed_snapshot()
-                after = await self._read_fixed_snapshot()
-                result = qualify_pair(before, after, host_binding_sha256=self.host_binding_sha256,
-                    implementation_sha=self.implementation_sha, now_ms=time.time_ns() // 1_000_000,
-                    now_monotonic_ms=time.monotonic_ns() // 1_000_000)
-                if loop.time() >= deadline:
-                    raise RoleStatusError()
-                return result
-        except (OSError, asyncio.TimeoutError):
+                with _HeldRoleQualification(self.implementation_sha) as held:
+                    before = await self._read_fixed_snapshot(held)
+                    after = await self._read_fixed_snapshot(held)
+                    result = qualify_pair(before, after, host_binding_sha256=self.host_binding_sha256,
+                        implementation_sha=self.implementation_sha, now_ms=time.time_ns() // 1_000_000,
+                        now_monotonic_ms=time.monotonic_ns() // 1_000_000)
+                    if loop.time() >= deadline:
+                        raise RoleStatusError()
+                    return result
+        except (OSError, asyncio.TimeoutError, ReleaseManifestError):
             raise RoleStatusError() from None

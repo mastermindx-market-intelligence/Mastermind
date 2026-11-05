@@ -25,6 +25,52 @@ ROOT = Path(__file__).resolve().parents[1]
 ENTRY = ROOT / "ops/executive_os/release_manifest.py"
 YAML_ROOT = "ops/native_fabric/quota_continuity/candidate"
 
+# The parent's first approved installation input. It is fixture DATA for the
+# documented boundary, never this repository's self-attestation.
+INSTALLATION = {
+    "schema": "mastermind.hermes_runtime_installation/v1",
+    "bootstrap_python": {
+        "path": "/usr/bin/python3.12", "real_path": "/usr/bin/python3.12",
+        "sha256": "e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f"},
+    "launch_python": {
+        "path": "/usr/bin/python3.12", "real_path": "/usr/bin/python3.12",
+        "sha256": "e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f"},
+    "startup": {
+        "profile": "cpython-3.12-linux-root-prefix-nosite.v1", "prefix": "/usr",
+        "exec_prefix": "/usr", "base_prefix": "/usr", "base_exec_prefix": "/usr"},
+    "roles": [
+        {"role": "mmmeta", "uid": 993, "gid": 980,
+         "state_dir": "/home/mmmeta/.local/state/hermes-runtime-mmmeta",
+         "restart_sec": 2, "start_limit_burst": 5, "start_limit_interval_sec": 60},
+        {"role": "mmsecretary", "uid": 994, "gid": 981,
+         "state_dir": "/home/mmsecretary/.local/state/hermes-runtime-mmsecretary",
+         "restart_sec": 2, "start_limit_burst": 5, "start_limit_interval_sec": 60},
+    ],
+}
+
+# The shared runtime custody is owned by a separate lane and is not composed
+# here. This hermetic double stands in for it inside the test archive only.
+CUSTODY_DOUBLE = '''"""Hermetic double for the not-yet-composed shared runtime custody."""
+
+
+class _Held:
+    def __init__(self, **options):
+        self.options = options
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *ignored):
+        return False
+
+
+def held_runtime_custody(*, bootstrap_python, launch_python, startup, boundary_check=None):
+    if boundary_check is None:
+        raise AssertionError("runtime custody must receive the release boundary check")
+    boundary_check()
+    return _Held()
+'''
+
 
 def owner_module():
     spec = importlib.util.spec_from_file_location("_held_hermes_entry_test", ENTRY)
@@ -49,7 +95,7 @@ def root_info(info, ancestors):
     return SimpleNamespace(**fields)
 
 
-def manifest(root):
+def manifest(root, hermes_runtime=None):
     entries = []
     for path in sorted(root.rglob("*")):
         if path.name == ".executive-release-manifest.json":
@@ -65,10 +111,13 @@ def manifest(root):
             raw = path.read_bytes()
             item.update(type="file", size=len(raw), sha256=hashlib.sha256(raw).hexdigest())
         entries.append(item)
-    (root / ".executive-release-manifest.json").write_text(json.dumps(dict(
+    document = dict(
         schema_version="mastermind.executive_release_manifest/v1",
         commit_sha=root.name, tree_sha="b" * 40, entries=entries,
-    )))
+    )
+    if hermes_runtime is not None:
+        document["hermes_runtime"] = hermes_runtime
+    (root / ".executive-release-manifest.json").write_text(json.dumps(document))
 
 
 @pytest.fixture
@@ -278,7 +327,12 @@ def test_actual_archive_runs_closed_hermes_modes_with_held_yaml(tmp_path, comman
                      "integrations/hermes_runtime/system_service.py",
                      "scripts/enroll_linux_secondary_worker.py"):
         (root / relative).write_bytes((ROOT / relative).read_bytes())
-    manifest(root)
+    # The shared runtime custody is owned by a separate lane; stand in for it
+    # inside this archive only.
+    custody = root / YAML_ROOT / "paid_initializer.py"
+    custody.parent.mkdir(parents=True, exist_ok=True)
+    custody.write_text(CUSTODY_DOUBLE, encoding="utf-8")
+    manifest(root, hermes_runtime=INSTALLATION)
     poison = tmp_path / "poison"
     poison.mkdir()
     (poison / "yaml.py").write_text("raise AssertionError('ambient yaml')\n")
