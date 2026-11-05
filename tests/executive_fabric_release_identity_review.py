@@ -559,8 +559,8 @@ REVIEWED_FILES['integrations/hermes_secretary/tab_sweep.py'] = {
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
 REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/post_failure_observation.py'] = {
-    'sha256': '2a78630ccaf574da752c77d7b8f821723ccb264b970e2fe38b1976d886ca97a0',
-    'sites': ((293, 79, 84, 'int', '0o700'),),
+    'sha256': '80fc9d95068099fb797c9e7a05981a9650d50ec170935d748d92a8e7bcd04337',
+    'sites': ((294, 79, 84, 'int', '0o700'),),
 }
 
 
