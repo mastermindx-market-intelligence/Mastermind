@@ -567,6 +567,7 @@ _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES: tuple[str, ...] = (
 )
 _WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
     "/workspace/fabric/catalog/current",
+    "/workspace/byok/roles/current",
 )
 _WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES: tuple[str, ...] = (
     "/workspace/project-admission/pause",

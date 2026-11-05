@@ -15,6 +15,7 @@ import dataclasses
 import inspect
 import json
 import time
+from http import HTTPStatus
 from collections.abc import Callable, Mapping
 from typing import Any
 from types import MappingProxyType
@@ -62,6 +63,7 @@ _ACTIVITY_ROUTE = "/workspace/operator/activity/current"
 _FABRIC_CATALOG_ROUTE = "/workspace/fabric/catalog/current"
 _FABRIC_STATUS_ROUTE = "/workspace/fabric/status/current"
 _ACTIVITY_QUERY_KEYS = frozenset({"work_ref", "root_job_id", "job_id", "attempt_id"})
+_BYOK_ROLES_ROUTE = "/workspace/byok/roles/current"
 _CCR_STATE_ROUTE = "/workspace/control-room/state/current"
 _CCR_DISCOVER_ROUTE = "/workspace/control-room/discover/current"
 _CCR_ACTION_ROUTES = MappingProxyType({
@@ -703,6 +705,51 @@ async def mission_current(
     except Exception:
         return _refuse_json(403, "access_denied")
     return _envelope_response(envelope)
+
+
+async def byok_roles_current(request: Request, *, config: WorkspaceAppConfig) -> Response:
+    """One fixed metadata read; no body, selection, credential or action input."""
+    from common import workspace_byok_read_contract as wire
+    principal = await _authenticate(request, config.authenticator, clock=config.now)
+    if isinstance(principal, JSONResponse):
+        return _with_no_store(principal)
+    refused = await _reject_any_body(request)
+    if refused is not None:
+        return refused
+    if request.scope.get("query_string"):
+        return _refuse_json(HTTPStatus.BAD_REQUEST, "invalid_input")
+    authorizer, client = config.authorize_principal, config.client
+    try:
+        stamps = _control_room_permissions((authorizer,), principal)
+        frame = wire.validate_frame({"schema": wire.FRAME_SCHEMA, "operation": wire.OPERATION,
+                                     "principal": contract.principal_frame(principal)})
+    except Exception:
+        return _refuse_json(HTTPStatus.FORBIDDEN, "access_denied")
+    try:
+        envelope = await client.request(frame)
+    except Exception:
+        return _refuse_json(HTTPStatus.SERVICE_UNAVAILABLE, "source_unavailable")
+    try:
+        if (config.authorize_principal is not authorizer or config.client is not client
+                or _control_room_permissions((authorizer,), principal) != stamps):
+            raise ValueError("access_denied")
+        instant = config.now()
+        if type(instant) is not int or not 0 <= instant < principal.expires_at:
+            raise ValueError("access_denied")
+    except Exception:
+        return _refuse_json(HTTPStatus.FORBIDDEN, "access_denied")
+    if type(envelope) is dict and envelope.get("ok") is False:
+        return _envelope_response(envelope)
+    try:
+        if type(envelope) is not dict or set(envelope) != {"ok", "result"} or envelope["ok"] is not True:
+            raise ValueError("source_unavailable")
+        body = wire.validate_body(envelope["result"])
+        if not wire.current(body, now_ms=instant * 1000):
+            body = wire.unavailable("SOURCE_STALE")
+        raw = contract.bounded_canonical(body, limit=wire.MAX_RESPONSE_BYTES - 1)
+    except Exception:
+        raw = contract.canonical(wire.unavailable())
+    return Response(raw, media_type="application/json", headers={"Cache-Control": "no-store"})
 
 
 async def control_room_current(
@@ -1467,6 +1514,7 @@ class _RawPathFence:
         _RESOURCE_CAPACITY_ROUTE,
         _FABRIC_CATALOG_ROUTE,
         _FABRIC_STATUS_ROUTE,
+        _BYOK_ROLES_ROUTE,
         _CCR_STATE_ROUTE,
         _CCR_DISCOVER_ROUTE,
     )
@@ -1578,6 +1626,9 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         from common.executive_workspace_fabric_contract import STATUS_OPERATION
         return await fabric_current(request, config=config, operation=STATUS_OPERATION)
 
+    async def byok_roles_endpoint(request: Request) -> Response:
+        return await byok_roles_current(request, config=config)
+
     async def ccr_state_endpoint(request: Request) -> JSONResponse:
         return await control_room_current(request, config=config, operation="state")
 
@@ -1585,6 +1636,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         return await control_room_current(request, config=config, operation="discover")
 
     routes = [
+        Route(_BYOK_ROLES_ROUTE, byok_roles_endpoint, methods=["GET"]),
         Route(_PROGRAMS_ROUTE, programs_endpoint, methods=["GET"]),
         Route(_WORK_ROUTE, work_endpoint, methods=["GET"]),
         Route(_MISSION_ROUTE, mission_endpoint, methods=["GET"]),

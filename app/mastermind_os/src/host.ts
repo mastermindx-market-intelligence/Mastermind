@@ -1,3 +1,4 @@
+import { decodeByokRolesRead, type ByokRolesRead } from "./meta-ceo/byok-roles-read";
 import { projectAdmissionHostMethods, projectAdmissionPublicRequest, type ProjectAdmissionRawMethods, type ProjectAdmissionHostMethods } from "./admission/project-admission-host";
 import { decodeProjectAssociation, normalizeProjectAssociationSelection, type ProjectAssociationSelection, type ProjectAssociationDocument } from "./conversations/project-association";
 import { decodeResourceCapacityRead, validResourceCapacitySelection, type ResourceCapacityReadSelection, type ResourceCapacityRead } from "./resources/resource-capacity-read";
@@ -97,6 +98,8 @@ export interface RawClient extends Partial<ProjectAdmissionRawMethods> {
   readPrograms(request: { signal: AbortSignal }): Promise<unknown>;
   /** Fixed authenticated one-cache Control Room state; no operator writes. */
   readControlRoomState?(request: { signal: AbortSignal }): Promise<unknown>;
+  /** Fixed secret-free role-pair metadata; no enrollment or provider operation. */
+  readByokRoles?(request: { signal: AbortSignal }): Promise<unknown>;
   /** Independent read with a separately sealed Discovery grant; never an action grant. */
   readControlRoomDiscovery?(request: { signal: AbortSignal }): Promise<unknown>;
   /** Each original mutation has one fixed, optional host method and one owner. */
@@ -171,6 +174,7 @@ export interface MissionHost extends Partial<ProjectAdmissionHostMethods> {
   readAttendedFabricCatalog?: (request: { signal: AbortSignal }) => Promise<FabricCatalog>;
   readPrograms?: ProgramRead;
   readControlRoomState?: (request: { signal: AbortSignal }) => Promise<ControlRoomRead>;
+  readByokRoles?: (request: { signal: AbortSignal }) => Promise<ByokRolesRead>;
   readControlRoomDiscovery?: (request: { signal: AbortSignal }) => Promise<ControlRoomDiscovery>;
   openControlRoomSurface?: (request: { payload: Record<string, unknown>; signal: AbortSignal }) => Promise<ControlRoomActionResult>;
   bindControlRoomSurface?: (request: { payload: Record<string, unknown>; signal: AbortSignal }) => Promise<ControlRoomActionResult>;
@@ -547,6 +551,29 @@ export function bindMissionHost(
       check(signal, started);
       return decodeProgramsEnvelope(raw);
     },
+    ...(client.readByokRoles && client.invalidationGeneration ? {
+      async readByokRoles({ signal }: { signal: AbortSignal }) {
+        const started = epoch;
+        const source = client.invalidationGeneration!();
+        const read = client.readByokRoles!;
+        const generation = client.invalidationGeneration!;
+        const verify = () => {
+          check(signal, started);
+          if (!Number.isSafeInteger(source) || generation !== client.invalidationGeneration ||
+              source !== generation.call(client) || read !== client.readByokRoles)
+            throw new Error("READ_CANCELLED");
+          const state = client.getState();
+          if (state.status !== "signed_in" || !state.acquisition)
+            throw new Error("BYOK_READ_UNAUTHORIZED");
+        };
+        verify();
+        const raw = await read.call(client, { signal });
+        verify();
+        const result = decodeByokRolesRead(raw);
+        verify();
+        return result;
+      },
+    } : {}),
     ...(client.readControlRoomState ? {
       async readControlRoomState({ signal }: { signal: AbortSignal }) {
         const started = epoch;
@@ -817,6 +844,7 @@ export async function createNativeClient(
   async function read(
     command:
       | "read_programs"
+      | "read_byok_roles"
       | "read_work"
       | "read_mission"
       | "read_mission_v3"
@@ -911,6 +939,7 @@ export async function createNativeClient(
       if (ticket === control && started === epoch) update(result);
     },
     readPrograms: ({ signal }) => read("read_programs", signal),
+    readByokRoles: ({ signal }) => read("read_byok_roles", signal),
     readWork: ({ signal }) => read("read_work", signal),
     readAttendedFabricCatalog: ({ signal }) => read("read_fabric_catalog", signal),
     readAttendedFabric: ({ rootId, runId, signal }) => {

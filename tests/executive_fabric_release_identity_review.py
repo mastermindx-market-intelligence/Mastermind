@@ -509,7 +509,7 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # 5f6e043f3f8f525670f51c7f27a9e6ea7f17e7508489e13f661ea69007e840ff. These are
 # HTTP response statuses, never account/UID/GID values, grants or admission
 # decisions; any changed byte/site restores ordinary D8.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'e0d13427d248043ec0116cffb49f3b8ae2e5dcff50e65e4fa63d8fd6b9f53715', 'sites': ((858, 71, 74, 'int', '400'), (869, 71, 74, 'int', '403'), (877, 71, 74, 'int', '400'), (883, 79, 82, 'int', '400'), (892, 71, 74, 'int', '400'), (902, 71, 74, 'int', '403'), (907, 76, 79, 'int', '503'), (913, 71, 74, 'int', '403'))}
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '83a01fca9bd1db859b9173e852559d6a440aa7d791a36c10d79d3b8962dd1272', 'sites': ((905, 71, 74, 'int', '400'), (916, 71, 74, 'int', '403'), (924, 71, 74, 'int', '400'), (930, 79, 82, 'int', '400'), (939, 71, 74, 'int', '400'), (949, 71, 74, 'int', '403'), (954, 76, 79, 'int', '503'), (960, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -554,3 +554,6 @@ REVIEWED_FILES['integrations/hermes_secretary/tab_sweep.py'] = {
     'sha256': '12d2c8f059f941eb908cc9d7ec3651763f8102832e05435118ce8e1385d5fd46',
     'sites': ((19, 77, 80, 'int', '443'),),
 }
+
+# BYOK metadata READ re-pin: same eight action literals and unchanged action AST.
+# Attended parent source check under the current Chairman waiver; no formal approval claim.

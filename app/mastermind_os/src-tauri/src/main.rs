@@ -79,6 +79,7 @@ fn main() {
             auth::sign_in,
             auth::sign_out,
             auth::read_programs,
+            auth::read_byok_roles,
             auth::read_work,
             auth::read_mission,
             auth::read_mission_v3,

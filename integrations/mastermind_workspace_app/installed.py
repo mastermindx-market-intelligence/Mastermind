@@ -62,7 +62,11 @@ class CeoIngressWorkspaceClient:
         from common import workspace_project_direction_contract as direction_wire
         from common import workspace_autonomy_read_contract as autonomy_wire
         from common import workspace_resource_capacity_contract as capacity_wire
-        if isinstance(frame, dict) and frame.get("schema") == direction_wire.FRAME_SCHEMA:
+        from common import workspace_byok_read_contract as byok_wire
+        if isinstance(frame, dict) and frame.get("schema") == byok_wire.FRAME_SCHEMA:
+            byok_wire.validate_frame(frame)
+            ceiling = byok_wire.MAX_RESPONSE_BYTES
+        elif isinstance(frame, dict) and frame.get("schema") == direction_wire.FRAME_SCHEMA:
             direction_wire.validate_frame(frame)
             ceiling = direction_wire.MAX_RESPONSE_BYTES
         elif isinstance(frame, dict) and frame.get("schema") == capacity_wire.FRAME_SCHEMA:

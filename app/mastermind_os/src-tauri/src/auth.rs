@@ -945,6 +945,28 @@ async fn read(
     Ok(value)
 }
 #[tauri::command]
+pub async fn read_byok_roles(app: AppHandle) -> Result<Value> {
+    let url = Url::parse(&format!("{ORIGIN}/workspace/byok/roles/current"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = bounded_json(response, 8192).await;
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if !value.is_object() || value.get("schema").and_then(Value::as_str)
+        != Some("mastermind.workspace_byok_roles.v1") {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // Both native and web release through the same closed frontend decoder.
+    Ok(value)
+}
+
+#[tauri::command]
 pub async fn read_programs(app: AppHandle) -> Result<Value> {
     read(
         app,
