@@ -227,7 +227,7 @@ describe("readable workspace shell", () => {
   });
   it("uses translated primary labels and supplied display controls without changing route IDs", () => {
     render(<App locale="zh-CN" theme="light" preferencesControl={<button>设置</button>} />);
-    const company = screen.getByRole("navigation", { name: "Company navigation" });
+    const company = screen.getByRole("navigation", { name: "公司导航" });
     for (const name of ["今天", "项目", "收件箱", "对话", "知识"])
       expect(within(company).getByRole("button", { name })).toBeTruthy();
     expect(document.querySelector(".shell")?.getAttribute("data-active-route")).toBe("Today");

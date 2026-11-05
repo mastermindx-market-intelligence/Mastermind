@@ -235,8 +235,8 @@ button:disabled {
   min-width: 0;
 }
 .nav-advanced > summary {
-  display: flex;
-  align-items: center;
+  display: list-item;
+  list-style-position: inside;
   width: 100%;
   min-height: 44px;
   padding: 8px 12px;
@@ -1074,4 +1074,24 @@ main .launch-orchestrator-composer .form-actions { justify-content: flex-end; ma
   padding: var(--sp-2) var(--sp-3);
   text-align: start;
   flex-shrink: 0;
+}
+
+/* Keep the original controls reachable in a short mobile drawer. */
+@media (max-width: 959px) and (max-height: 700px) {
+  .shell > aside[data-open="true"] {
+    padding-block: 12px;
+    gap: 8px;
+  }
+  .nav-top,
+  .nav-bottom {
+    gap: 8px;
+  }
+  .nav-bottom .display-preferences {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+  .shell > aside[data-open="true"] .navigation-close {
+    top: 12px;
+  }
 }
