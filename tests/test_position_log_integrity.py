@@ -628,3 +628,90 @@ def test_canonical_boolean_lifecycle_states_remain_readable_and_writable(ledger)
     assert reopened["still_open"] is True
     assert reopened["history"][:len(closed["history"])] == closed["history"]
     assert pl.status()["open_count"] == 1
+
+
+@pytest.mark.parametrize("operation", ["status", "open", "closed", "entry",
+                                        "update", "manual", "close"])
+def test_invalid_utf8_is_typed_unavailable_and_preserves_evidence(ledger, operation):
+    """Decode failure belongs to the same preserve-and-freeze contract as corrupt JSON."""
+    from portfolio import position_log as pl
+
+    ledger.write_bytes(b'{"conviction:AAA":\xff}')
+    before = ledger.read_bytes()
+    calls = {
+        "open": pl.open_positions,
+        "closed": pl.closed_positions,
+        "entry": lambda: pl.get_entry_info("conviction", "AAA"),
+        "update": lambda: pl.update([], "2026-02-02"),
+        "manual": lambda: pl.record_manual("AAA", "conviction", event="open", weight=0.05),
+        "close": lambda: pl.close_position("conviction", "AAA", "2026-02-02"),
+    }
+    if operation == "status":
+        state = pl.status()
+        assert state["state"] == "unavailable"
+        assert state["kind"] == "unreadable"
+        assert state["open_count"] is None
+    else:
+        with pytest.raises(pl.LedgerUnavailable) as caught:
+            calls[operation]()
+        assert caught.value.kind == "unreadable"
+    assert ledger.read_bytes() == before
+
+
+def test_distribution_escalation_reports_invalid_utf8_as_unavailable(ledger):
+    """The actual consumer must not swallow decoding failure as a clean no-tells result."""
+    derisk = _derisk_module()
+    ledger.write_bytes(b'{"conviction:AAA":\xff}')
+    before = ledger.read_bytes()
+
+    bump, reason, unavailable = derisk._distribution_escalation("flagship")
+
+    assert unavailable is True
+    assert bump == 0
+    assert "unavailable" in reason.lower()
+    assert ledger.read_bytes() == before
+
+
+@pytest.mark.parametrize("field", ["ticker", "sleeve"])
+@pytest.mark.parametrize("value, present", [
+    (None, False), (None, True), ("", True), (" ", True),
+    (0, True), (1, True), ([], True), ({}, True),
+    (["AAA"], True), ({"name": "AAA"}, True),
+], ids=["missing", "null", "empty", "blank", "zero", "one",
+        "empty-list", "empty-mapping", "list", "mapping"])
+def test_unusable_required_identity_freezes_reads_and_writes(ledger, field, value, present):
+    """Readers require both identity fields; their absence must not permit a lifecycle rewrite."""
+    from portfolio import position_log as pl
+
+    entry = _open_entry("AAA")
+    if present:
+        entry[field] = value
+    else:
+        del entry[field]
+    _seed(ledger, {"conviction:AAA": entry})
+    before = ledger.read_bytes()
+
+    state = pl.status()
+    assert state["state"] == "unavailable"
+    assert state["open_count"] is None
+    assert state["quarantined"] == ["conviction:AAA"]
+    for read in (pl.open_positions, pl.closed_positions,
+                 lambda: pl.get_entry_info("conviction", "AAA")):
+        with pytest.raises(pl.LedgerUnavailable):
+            read()
+        assert ledger.read_bytes() == before
+
+    for write in (
+        lambda: pl.update([], "2026-02-02"),
+        lambda: pl.record_manual("AAA", "conviction", event="open", weight=0.05),
+        lambda: pl.close_position("conviction", "AAA", "2026-02-02"),
+    ):
+        with pytest.raises(pl.LedgerUnavailable):
+            write()
+        assert ledger.read_bytes() == before
+
+    bump, reason, unavailable = _derisk_module()._distribution_escalation("flagship")
+    assert unavailable is True
+    assert bump == 0
+    assert "unavailable" in reason.lower()
+    assert ledger.read_bytes() == before

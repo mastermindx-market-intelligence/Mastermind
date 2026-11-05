@@ -144,14 +144,17 @@ class LedgerUnavailable(RuntimeError):
 
 
 def _is_lifecycle_entry(entry: Any) -> bool:
-    """Require a reportable ticker and an explicit Boolean lifecycle state.
+    """Require reader identity fields and an explicit Boolean lifecycle state.
 
-    Missing or non-Boolean ``still_open`` is ambiguous held-risk evidence, not a closed
-    position. Refuse it before readers report a flat book or writers reopen the record
-    and replace its original lifecycle.
+    Missing or unusable ticker/sleeve identity, or non-Boolean ``still_open``, is
+    ambiguous held-risk evidence. Refuse it before readers fail or report a flat book,
+    or writers replace the original lifecycle. Optional lifecycle metadata stays optional.
     """
     return (isinstance(entry, dict)
-            and bool(str(entry.get("ticker") or "").strip())
+            and isinstance(entry.get("ticker"), str)
+            and bool(entry["ticker"].strip())
+            and isinstance(entry.get("sleeve"), str)
+            and bool(entry["sleeve"].strip())
             and isinstance(entry.get("still_open"), bool))
 
 
@@ -171,7 +174,7 @@ def _read_ledger(path: Path) -> dict[str, Any]:
         if not path.exists():
             return {}
         raw = path.read_text()
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         raise LedgerUnavailable(f"{exc!r}"[:240],
                                 path=path, kind="unreadable") from exc
     try:
