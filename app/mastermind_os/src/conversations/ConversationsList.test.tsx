@@ -26,12 +26,23 @@ it("keeps a genuine conversation distinct from eight source-ordered project shor
   expect(screen.queryByText("Project 8")).toBeNull();
   expect(screen.getByText("Unsent draft")).toBeTruthy(); expect(screen.queryByText(/Draft saved/)).toBeNull();
   expect(screen.queryByRole("button", { name: "New conversation" })).toBeNull();
+  expect(screen.getByRole("heading", { level: 2, name: "Current conversation" })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Recent" })).toBeNull();
+  const projectRow = screen.getByRole("button", { name: "Open project Project 0" }).closest("article")!;
+  expect(projectRow.textContent).not.toContain("WS:P0");
+  expect(screen.getByText("WS:P0").closest("details")).toBeTruthy();
   expect(p.onOpenCurrent).not.toHaveBeenCalled(); expect(p.onOpenProject).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Open conversation: Original topic" }));
   expect(p.onOpenCurrent).toHaveBeenCalledWith(p.model.recent[0].locator);
   fireEvent.click(screen.getByRole("button", { name: "Open project Project 0" }));
   expect(p.onOpenProject).toHaveBeenCalledWith(p.model.projects[0].locator);
   fireEvent.click(screen.getByRole("button", { name: "Show all 10 matching projects" })); expect(p.onShowAllProjects).toHaveBeenCalledOnce();
+});
+it("keeps titleless project rows distinguishable using their exact source reference", () => {
+  const p = props(), first = { ...p.model.projects[0], title: null };
+  render(<ConversationsList {...p} model={{ ...p.model, projects: [first] }} />);
+  expect(screen.getByRole("heading", { level: 3, name: "WS:P0" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Open project WS:P0" })).toBeTruthy();
 });
 it("filters only supplied metadata and preserves the controlled query and source order", () => {
   const p = props(); const view = render(<ConversationsList {...p} query="exact authored" />);

@@ -63,7 +63,7 @@ export function ConversationsList(props: ConversationListProps) {
     {refused ? <p className="conversations-list__notice" role="status">{t("This source is no longer current. Refresh this view before opening it.", "此来源已不是当前状态。请刷新此视图后再打开。")}</p> : null}
     {noMatches ? <p role="status">{t("No matches in the available records.", "可用记录中没有匹配项。")}</p> : null}
     <section className="conversations-list__section" aria-labelledby="conversations-list-recent">
-      <h2 id="conversations-list-recent">{t("Recent", "最近")}</h2>
+      <h2 id="conversations-list-recent">{t("Current conversation", "当前对话")}</h2>
       {props.model.recentState !== "CURRENT" ? <p role="status">{unavailable(props.model.recentState)}</p>
         : !props.model.recent.length ? <p>{t("No current conversation is listed here.", "此处暂未列出当前对话。")}</p> : null}
       {recent.map(row => {
@@ -72,7 +72,7 @@ export function ConversationsList(props: ConversationListProps) {
           <div className="conversations-list__row-copy">
             <p className="conversations-list__project">{row.projectTitle ?? row.locator.workRef}</p>
             <h3>{title}</h3>
-            <p>{t("The current observed conversation is available.", "可以查看当前已观测到的对话。")}</p>
+            <p>{t("Conversation available.", "可以查看对话。")}</p>
             <div className="conversations-list__meta"><span>{t("Observed", "观测时间")} <time dateTime={row.observedAt}>{row.observedAt}</time></span>
               {row.unsentDraft ? <span>{t("Unsent draft", "未发送草稿")}</span> : null}</div>
           </div>
@@ -90,9 +90,8 @@ export function ConversationsList(props: ConversationListProps) {
       {props.model.projectsState !== "CURRENT" ? <p role="status">{unavailable(props.model.projectsState, true)}</p>
         : !props.model.projects.length ? <p>{t("No projects are listed in this view.", "此视图中暂未列出项目。")}</p> : null}
       {shownProjects.map(row => <article className="conversations-list__row" key={row.key} data-conversation-key={row.key}>
-        <div className="conversations-list__row-copy"><h3>{row.title ?? t("Project name unavailable", "项目名称暂不可用")}</h3>
-          <p>{t("You can open this project's workspace.", "您可以打开此项目的工作区。")}</p>
-          <code className="conversations-list__reference">{row.locator.workRef}</code></div>
+        <div className="conversations-list__row-copy"><h3>{row.title ?? row.locator.workRef}</h3>
+          <p>{t("You can open this project's workspace.", "您可以打开此项目的工作区。")}</p></div>
         <button type="button" ref={element => remember(row.key, element)} aria-label={t(`Open project ${row.title ?? row.locator.workRef}`, `打开项目 ${row.title ?? row.locator.workRef}`)}
           onClick={() => { const current = live.current; try {
             if (!isListedConversationProject(current.model, row.locator) || !current.onOpenProject(row.locator)) failed();
@@ -107,7 +106,7 @@ export function ConversationsList(props: ConversationListProps) {
       <button type="button" onClick={() => live.current.onOpenMetaCeo()}>{t("Open Meta-CEO", "打开 Meta-CEO")}</button>
     </footer>
     <details className="conversations-list__sources"><summary>{t("List sources", "列表来源")}</summary>
-      <p>{t("Recent contains the one currently associated window. Projects keep the supplied catalogue order. Retained conversation history has not been enumerated.", "“最近”仅包含当前确认关联的窗口。项目保持所提供目录的顺序，尚未枚举已保留的对话历史。")}</p>
+      <p>{t("Current conversation contains the one currently associated window. Projects keep the supplied catalogue order. Retained conversation history has not been enumerated.", "“当前对话”仅包含当前确认关联的窗口。项目保持所提供目录的顺序，尚未枚举已保留的对话历史。")}</p>
       <p>{t("Search covers the current Mission title and the project titles and authored next actions shown in this source.", "搜索覆盖当前任务标题，以及此来源中的项目标题和已记录的下一步行动。")}</p>
       <dl>{props.model.sources.map(source => {
         const state = source.owner === "CURRENT_WINDOW" ? props.model.recentState : props.model.projectsState;
@@ -116,6 +115,7 @@ export function ConversationsList(props: ConversationListProps) {
             {state !== "WITHHELD" && source.observedAt ? <p>{t("Read observation", "读取观测")} <time dateTime={source.observedAt}>{source.observedAt}</time></p> : null}
             {state !== "WITHHELD" && source.revision ? <code>{source.revision}</code> : null}</dd></div>;
       })}</dl>
+      {projects.length ? <ul>{projects.map(row => <li key={row.key}>{row.title ? <span>{row.title} — </span> : null}<code>{row.locator.workRef}</code></li>)}</ul> : null}
     </details>
   </section>;
 }

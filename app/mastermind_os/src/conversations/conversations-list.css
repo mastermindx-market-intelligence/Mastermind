@@ -47,7 +47,6 @@
 .conversations-list__project { font-size: 13px; line-height: 20px; }
 .conversations-list__row-copy h3 + p { margin-top: var(--sp-1); }
 .conversations-list__meta { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); color: var(--faint); font-size: 12px; line-height: 20px; }
-.conversations-list__reference { color: var(--faint); font-size: 12px; }
 .conversations-list__scope { max-width: 660px; }
 .conversations-list__more { margin-top: var(--sp-4); }
 .conversations-list__footer { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); margin-block: var(--sp-7); }
