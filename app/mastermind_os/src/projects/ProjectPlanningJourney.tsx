@@ -110,6 +110,8 @@ export interface ProjectPlanningJourneyProps {
   selection: ProjectJourneySelection | null;
   goal: string;
   onGoalChange: (value: string) => void;
+  goalReadOnly?: boolean;
+  onGoalFocus?: () => void;
   /** Parent-qualified proposal controls; rendered only for a readable project. */
   proposalControls?: ReactNode;
   /** Parent-qualified compare panel; rendered only for a readable project. */
@@ -2003,6 +2005,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
       headingLevel={1}
       locale={locale}
       goal={goal}
+      goalReadOnly={props.goalReadOnly} onGoalFocus={props.onGoalFocus}
       onGoalChange={onGoalChange}
       optionsPanel={optionsPanel}
       feedbackPanel={feedback}

@@ -68,13 +68,14 @@ it("explicit logout clears the facet immediately even if native logout fails",as
   await act(async()=>{await expect(h.raw.signOut()).rejects.toThrow("KEYCHAIN_UNAVAILABLE");});
   expect(h.result.current.journey.goal).toBe("");expect(h.result.current.journey.retainedGoal).toBeNull();unsubscribe();
 });
-it("missing previous identity stays hidden and discard clears text only without touching the original pointer",async()=>{
+it("unbound previous identity clears on withdrawal without touching the original pointer",async()=>{
   const h=await setup();h.set(metadata("UNQUALIFIED","OWNER_UNQUALIFIED"));await act(async()=>h.result.current.recovery.beforeEdit());act(()=>h.result.current.journey.onGoalChange("unbound private"));
   const href=location.href;const original={operationKey:"mmos-launch-"+"1".repeat(40),kind:"launch" as const,targetKey:"WS:Original.Work-1"};
   const factory=new IDBFactory(),store=createIndexedDbPendingPointerStore(factory);
   await store.reserve("d".repeat(64),original);
   await h.notify({status:"signed_out",reason:null,acquisition:false,content:false},metadata("UNQUALIFIED","OWNER_UNQUALIFIED"));
-  expect(h.result.current.recovery.quarantine).toBe(true);expect(h.result.current.recovery.canRecover).toBe(false);
+  expect(h.result.current.recovery.quarantine).toBe(false);expect(h.result.current.recovery.canRecover).toBe(false);
+  expect(h.result.current.journey.retainedGoal).toBeNull();
   act(()=>h.result.current.recovery.discard());expect(h.result.current.journey.retainedGoal).toBeNull();expect(location.href).toBe(href);expect(await createIndexedDbPendingPointerStore(factory).read("d".repeat(64))).toEqual(original);
 });
 it("public owner-shaped callbacks and a foreign original scope cannot authorize incumbent draft restore",async()=>{
@@ -119,4 +120,22 @@ it("a genuinely issued different native Host facet cannot restore this Host's sa
   expect(h.result.current.journey.goal).toBe("");expect(h.result.current.recovery.quarantine).toBe(true);
   await act(async()=>expect(await h.result.current.recovery.recover()).toBe(true));
   expect(h.result.current.journey.goal).toBe("private exact Host");
+});
+
+it.each(["BOUND","UNBOUND"])("withdraws %s private text before an unavailable replacement native facet can enter UNBOUND fallback",async mode=>{
+  const h=await setup();if(mode==="UNBOUND")h.set(nativeSequence.expired);
+  await act(async()=>h.result.current.recovery.beforeEdit());
+  act(()=>h.result.current.journey.onGoalChange("Private original facet text"));
+  const staleFocus=h.result.current.recovery.beforeEdit;
+  const otherRaw=await createNativeClient((async(command:string)=>command==="read_native_draft_continuity"?nativeSequence.expired:command==="executive_auth_status"?{generation:0,available:false}:signed) as never,async()=>()=>{});
+  const otherHost=bindMissionHost(otherRaw);expect(otherHost.nativeDraftRecovery).not.toBe(h.host.nativeDraftRecovery);
+  // Actual different issuer, same Host object and native/auth epoch. This is
+  // adversarial mutation of the readonly surface, not a forged owner DTO.
+  Reflect.set(h.host,"nativeDraftRecovery",otherHost.nativeDraftRecovery);h.rerender();
+  expect(h.result.current.recovery.quarantine).toBe(true);
+  expect(h.result.current.recovery.canEdit).toBe(false);
+  await act(async()=>staleFocus());
+  expect(h.result.current.journey.goal).toBe("");
+  expect(h.result.current.journey.retainedGoal).toBeNull();
+  expect(h.result.current.recovery.canRecover).toBe(false);
 });

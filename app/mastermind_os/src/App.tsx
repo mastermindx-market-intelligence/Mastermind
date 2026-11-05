@@ -32,6 +32,8 @@ import { qualifyExecutiveOfficeSession, SESSION_TARGET_REF } from "./meta-ceo/se
 import { Projects } from "./projects/Projects";
 import { ProjectPlanningJourney } from "./projects/ProjectPlanningJourney";
 import { useProjectJourneyState } from "./projects/useProjectJourneyState";
+import { useNativeProjectGoalRecovery } from "./auth-recovery/useNativeProjectGoalRecovery";
+import { NativeDraftRecoveryNotice } from "./auth-recovery/NativeDraftRecoveryNotice";
 import { readProjectJourneyLocation } from "./projects/project-journey-location";
 import { ProjectArchiveBrowser } from "./projects/archive/ProjectArchiveBrowser";
 import { ProjectWorkspace } from "./projects/ProjectWorkspace";
@@ -1630,6 +1632,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   authRevisionRef.current = authRevision;
   const projectJourney = useProjectJourneyState({host: window.MastermindMissionHost ?? null,
     authRevision, currentAuthRevision: () => authRevisionRef.current});
+  const nativeGoal = useNativeProjectGoalRecovery({native,
+    owner: window.MastermindMissionHost?.nativeDraftRecovery,
+    journey: projectJourney, authGeneration: authRevision});
+  const nativeGoalRef = useRef(nativeGoal);
+  nativeGoalRef.current = nativeGoal;
   const projectJourneyRef = useRef(projectJourney);
   projectJourneyRef.current = projectJourney;
   const openProjectJourney = () => {
@@ -2182,6 +2189,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         previousHostGeneration.current = generation;
         // Invalidate old surface presentation at notification time while the
         // App-owned pending/unknown action continues to retain its own result.
+        // Quarantine the incumbent native goal before withdrawing its old actor.
+        const nativeGoalHeld = nativeGoalRef.current.onAuthChange(
+          explicitLogoutRecorded() || state.reason === "USER_SIGNED_OUT");
         controlRoomAuthEpoch.current += 1;
         if (passiveLoss && hasUnsentUserText.current)
           passiveExpiryHold.current = true;
@@ -2196,7 +2206,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           setRetainedComposerDrafts(blank);
         }
         freshDraftRef.current.invalidateAuth(passiveLoss);
-        projectJourney.invalidateAuth(passiveLoss);
+        if (!native || !nativeGoalHeld) projectJourneyRef.current.invalidateAuth(passiveLoss);
         office.invalidateAuth(passiveLoss);
         observedConversation.invalidateAuth(passiveLoss);
         commandSlot.current?.controller.invalidate();
@@ -3373,6 +3383,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                         ),
                       );
                     }
+                    if (native) nativeGoalRef.current.onAuthChange(signingOut);
                     try {
                       const request = signingOut
                         ? auth.signOut()
@@ -4623,7 +4634,18 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     pendingLegacyTabFocus.current = tab;
     setProjectTab(tab);
   };
-  const retainedProjectGoal = projectJourney.retainedGoal &&
+  const nativeGoalQuarantined = nativeGoal.quarantine ||
+    (native && projectJourney.retainedGoal?.passivelyHeld === true);
+  const nativeGoalNotice = nativeGoalQuarantined ? <NativeDraftRecoveryNotice locale={locale}
+    checking={nativeGoal.phase === "CHECKING"} canRecover={nativeGoal.canRecover}
+    onRecover={() => {
+      if (!projectJourney.isHostCurrent()) return;
+      void nativeGoal.recover().then(restored => {
+      if (restored && projectJourney.isHostCurrent()) {
+        setCatalogueProject(null);setProjectTab(null);setActive("Projects");
+      }
+    }); }} onDiscard={nativeGoal.discard}/> : null;
+  const retainedProjectGoal = !nativeGoalQuarantined && projectJourney.retainedGoal &&
     (!projectJourney.retainedGoal.passivelyHeld || passiveExpiryHold.current) ?
     <section className="card" aria-label={locale === "zh-CN" ? "保留的项目目标" : "Retained project goal"}>
       <h2>{locale === "zh-CN" ? "未发送的项目目标" : "Unsent project goal"}</h2>
@@ -4657,7 +4679,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       {projectJourney.invalidLink ? <section className="card"><h1>{locale === "zh-CN" ? "项目设置链接不可用" : "Project setup link unavailable"}</h1>
         <p>{locale === "zh-CN" ? "请使用原始项目设置链接，或明确打开项目设置。" : "Use the original project setup link, or explicitly open project setup."}</p>
         <button type="button" onClick={openProjectJourney}>{locale === "zh-CN" ? "打开项目设置" : "Open project setup"}</button></section>
-      : commandBinding ? <ProjectPlanningJourney key={`project-journey:${authRevision}`} locale={locale}
+      : nativeGoalQuarantined ? null : commandBinding ? <ProjectPlanningJourney key={`project-journey:${authRevision}`} locale={locale}
         host={window.MastermindMissionHost ?? null} store={commandBinding.store}
         executiveOwner={() => {
           if (!projectJourney.isHostCurrent() || window.MastermindMissionHost?.commandBinding !== commandBinding) return null;
@@ -4665,7 +4687,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           return live && live.principalScope === ownerContext?.principalScope && live.generation === ownerContext?.generation ? live : null;
         }}
         isHostCurrent={projectJourney.isHostCurrent} selection={projectJourney.selection}
-        onSelection={projectJourney.onSelection} goal={projectJourney.goal} onGoalChange={projectJourney.onGoalChange}/>
+        onSelection={value => {projectJourney.onSelection(value);void nativeGoal.beforeEdit();}}
+        goal={projectJourney.goal} goalReadOnly={native && !nativeGoal.canEdit}
+        onGoalFocus={() => {void nativeGoal.beforeEdit();}}
+        onGoalChange={text => {if (nativeGoal.canEdit) projectJourney.onGoalChange(text);}}/>
       : <section className="card"><h1>{locale === "zh-CN" ? "项目设置暂不可用" : "Project setup unavailable"}</h1>
         <p>{locale === "zh-CN" ? "当前来源未提供项目操作接口。" : "The current source has not supplied the project operation interface."}</p></section>}
       {retainedProjectGoal}
@@ -5173,7 +5198,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       authState.reason === "POPUP_CLOSED" ? copy.popupClosed :
       authState.reason.includes("EXPIRED") || authState.reason.includes("TIMEOUT") ? copy.signInTimeout : copy.signInFailed
     }</p> : undefined}
-    protectedWork={((passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.session || office.draft.text || observedConversation.draft || projectJourney.retainedGoal?.text || freshDraft.retainedDraft?.text)) || showCheckStatus) ? <>
+    protectedWork={(nativeGoalQuarantined || (passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.session || office.draft.text || observedConversation.draft || projectJourney.retainedGoal?.text || freshDraft.retainedDraft?.text)) || showCheckStatus) ? <>
+      {nativeGoalNotice}
       {passiveExpiryHold.current ? retainedProjectGoal : null}
       {passiveExpiryHold.current ? retainedFreshMessage : null}
       {passiveExpiryHold.current && office.draft.text ? <section className="card">
@@ -5326,6 +5352,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             {!directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" || newProjectRoute ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" && !newProjectRoute ? <State value={headerState} /> : null}</summary>{newProjectRoute ? <p>{locale === "zh-CN" ? "工作区项目列表与现有任务" : "Workspace project list and existing tasks"}</p> : null}{active === "Conversations" || newProjectRoute ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} /> : null}
           </div>
         </header>
+        {nativeGoalNotice}
         {!native && authState && authState.status === "signed_out" &&
          passiveExpiryHold.current && hasUnsentUserText.current ? (
           <section className="notice" aria-label={copy.unsentProtected}>

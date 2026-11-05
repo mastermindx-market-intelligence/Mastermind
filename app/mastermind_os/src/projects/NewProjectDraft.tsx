@@ -7,6 +7,8 @@ export interface NewProjectDraftProps {
   headingLevel?: 1 | 2;
   goal: string;
   onGoalChange: (value: string) => void;
+  goalReadOnly?: boolean;
+  onGoalFocus?: () => void;
   attachmentsControl?: ReactNode;
   optionsPanel?: ReactNode;
   /** The actual creation owner controls admission, pending effects and recovery. */
@@ -17,7 +19,7 @@ export interface NewProjectDraftProps {
 
 /** Controlled unsent composition. This view neither creates nor addresses a project. */
 export function NewProjectDraft({ locale, goal, onGoalChange, attachmentsControl,
-  optionsPanel, startControl, feedbackPanel, startNote, headingLevel = 2 }: NewProjectDraftProps) {
+  optionsPanel, startControl, feedbackPanel, startNote, headingLevel = 2, goalReadOnly = false, onGoalFocus }: NewProjectDraftProps) {
   const zh = locale === "zh-CN";
   const Heading = headingLevel === 1 ? "h1" : "h2";
   const text = (en: string, cn: string) => zh ? cn : en;
@@ -39,7 +41,7 @@ export function NewProjectDraft({ locale, goal, onGoalChange, attachmentsControl
     </header>
     <div className="mm-new-project-goal">
       <label htmlFor={goalId}>{text("Your goal", "你的目标")}</label>
-      <textarea id={goalId} value={goal} onChange={event => onGoalChange(event.target.value)}
+      <textarea id={goalId} value={goal} readOnly={goalReadOnly} onFocus={onGoalFocus} onChange={event => onGoalChange(event.target.value)}
         rows={6} />
       <div className="mm-new-project-tools">
         {attachmentsControl ?? <button type="button" disabled>{text("Add files", "添加文件")}</button>}
