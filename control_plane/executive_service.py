@@ -5656,7 +5656,7 @@ class ExecutiveControlService:
                     try:
                         validate_mission_result_frame(parsed)
                     except (TypeError, ValueError):
-                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST),
                                                              response_ceiling=ceiling)
                         return
                 elif parsed.get("schema") == FRAME_SCHEMA_V2:
