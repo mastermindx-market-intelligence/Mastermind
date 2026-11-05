@@ -1,10 +1,17 @@
 """Offline two-organization isolation, capacity, cost and no-replay tests."""
 import json
+import threading
 
 import httpx
 import pytest
 
 from brain import client, explabs_client, explabs_pool
+
+
+_ORIGINS = {"fake-key-a": "http://127.0.0.1:18401",
+            "fake-key-b": "http://127.0.0.1:18402"}
+_TOKENS = {"fake-key-a": "fixture-scoped-gateway-a-0123456789",
+           "fake-key-b": "fixture-scoped-gateway-b-0123456789"}
 
 
 def _env(monkeypatch):
@@ -16,25 +23,40 @@ def _env(monkeypatch):
     monkeypatch.setenv("EXPLABS_ACCOUNT_1_ORG_SLUG", "org-a")
     monkeypatch.setenv("EXPLABS_ACCOUNT_1_MAX_INFLIGHT", "2")
     monkeypatch.setenv("EXPLABS_ACCOUNT_1_DAILY_CAP_USD", "10")
-    monkeypatch.setenv("EXPLABS_API_KEY", "fake-key-a")
+    monkeypatch.delenv("EXPLABS_API_KEY", raising=False)
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_TRANSPORT", "shared_gateway")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_GATEWAY_ORIGIN", _ORIGINS["fake-key-a"])
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_GATEWAY_TOKEN", _TOKENS["fake-key-a"])
     monkeypatch.setenv("EXPLABS_ACCOUNT_2_ENABLED", "1")
     monkeypatch.setenv("EXPLABS_ACCOUNT_2_SERVING_VERIFIED", "1")
     monkeypatch.setenv("EXPLABS_ACCOUNT_2_ORG_SLUG", "org-b")
     monkeypatch.setenv("EXPLABS_ACCOUNT_2_MAX_INFLIGHT", "2")
     monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "10")
-    monkeypatch.setenv("EXPLABS_API_KEY_2", "fake-key-b")
+    monkeypatch.delenv("EXPLABS_API_KEY_2", raising=False)
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_TRANSPORT", "shared_gateway")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_GATEWAY_ORIGIN", _ORIGINS["fake-key-b"])
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_GATEWAY_TOKEN", _TOKENS["fake-key-b"])
 
 
-def _transport(*, response=None, orgs=None, remaining=None, limits=None, seen_gets=None, expected_max_tokens=1500):
+def _transport(*, response=None, orgs=None, remaining=None, limits=None, seen_gets=None,
+               expected_max_tokens=1500, on_request=None):
     calls = []
     orgs = orgs or {"fake-key-a": ("id-a", "org-a"), "fake-key-b": ("id-b", "org-b")}
     remaining = remaining or {"fake-key-a": 5.0, "fake-key-b": 5.0}
     limits = limits if limits is not None else {"fake-key-a": 10.0, "fake-key-b": 10.0}
 
     def serve(request):
-        key = request.headers["Authorization"].removeprefix("Bearer ")
+        token = request.headers["Authorization"].removeprefix("Bearer ")
+        key = next((label for label, value in _TOKENS.items() if value == token), None)
+        assert key is not None
+        assert str(request.url).startswith(_ORIGINS[key] + "/")
+        assert request.headers["Authorization"] == "Bearer " + _TOKENS[key]
         assert key in orgs
         path = request.url.path
+        if on_request is not None:
+            override = on_request(request, key)
+            if override is not None:
+                return override
         if request.method == "GET":
             if seen_gets is not None:
                 seen_gets.append((key, path))
@@ -72,7 +94,114 @@ def _transport(*, response=None, orgs=None, remaining=None, limits=None, seen_ge
                       "cost": 0.0001, "is_byok": False},
             "provider": "experiential_cloud",
         })
-    return httpx.Client(transport=httpx.MockTransport(serve)), calls
+    return httpx.Client(transport=httpx.MockTransport(serve),
+                        trust_env=False, follow_redirects=False), calls
+
+
+def _thread_call(pool, name):
+    result, done = [], threading.Event()
+
+    def run():
+        try:
+            result.append(pool.complete("", "one independent task"))
+        except Exception as exc:
+            result.append(exc)
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=run, name=name, daemon=True)
+    thread.start()
+    return thread, done, result
+
+
+def test_slow_b_metadata_does_not_block_status_or_verified_a(monkeypatch):
+    _env(monkeypatch)
+    entered, release = threading.Event(), threading.Event()
+    armed = [False]
+    observed = []
+
+    def block_b(request, key):
+        observed.append((threading.current_thread().name, request.method, key, request.url.path))
+        if (armed[0] and key == "fake-key-b" and request.method == "GET"
+                and request.url.path == "/api/v1/key"
+                and threading.current_thread().name == "slow-b"):
+            entered.set()
+            assert release.wait(5)
+
+    http, posts = _transport(on_request=block_b)
+    pool = explabs_pool.AccountPool(http_client=http)
+    pool.complete("", "one independent task")
+    armed[0] = True
+    slow = _thread_call(pool, "slow-b")
+    fast = None
+    diagnostics, diagnostic_done = [], threading.Event()
+
+    def status():
+        diagnostics.append(pool.status())
+        diagnostic_done.set()
+
+    diagnostic = None
+    try:
+        assert entered.wait(5)
+        diagnostic = threading.Thread(target=status, daemon=True)
+        diagnostic.start()
+        assert diagnostic_done.wait(3), "one slot's GET held the global status lock"
+        assert diagnostics[0]["2"]["metadata_busy"] is True
+        fast = _thread_call(pool, "healthy-a")
+        assert fast[1].wait(3), "one slot's GET blocked the healthy peer"
+        assert isinstance(fast[2][0], explabs_client.Completion)
+        assert fast[2][0].account_slot == "1"
+        assert [(method, key, path) for name, method, key, path in observed
+                if name == "healthy-a"] == [
+            ("GET", "fake-key-a", "/api/v1/key"),
+            ("POST", "fake-key-a", "/v1/chat/completions"),
+        ]
+        assert posts == ["fake-key-a", "fake-key-a"]
+    finally:
+        release.set()
+        for pending in [slow] + ([fast] if fast is not None else []):
+            pending[0].join(5)
+            assert not pending[0].is_alive()
+        if diagnostic is not None:
+            diagnostic.join(5)
+            assert not diagnostic.is_alive()
+        http.close()
+    assert isinstance(slow[2][0], explabs_client.Completion)
+    assert slow[2][0].account_slot == "2"
+    assert all(state["inflight"] == 0 and not state["metadata_busy"]
+               for state in pool.status().values())
+
+
+def test_initial_all_org_barrier_survives_a_busy_reader(monkeypatch):
+    _env(monkeypatch)
+    entered, release = threading.Event(), threading.Event()
+
+    def block_b(request, key):
+        if key == "fake-key-b" and request.url.path == "/api/whoami":
+            entered.set()
+            assert release.wait(5)
+
+    http, posts = _transport(on_request=block_b)
+    pool = explabs_pool.AccountPool(http_client=http)
+    initial = _thread_call(pool, "initial-verification")
+    independent = None
+    try:
+        assert entered.wait(5)
+        independent = _thread_call(pool, "independent-before-barrier")
+        assert independent[1].wait(3)
+        assert isinstance(independent[2][0], explabs_client.ExperientialError)
+        assert "initial_verification_required" in str(independent[2][0])
+        assert posts == []
+    finally:
+        release.set()
+        for pending in [initial] + ([independent] if independent is not None else []):
+            pending[0].join(5)
+            assert not pending[0].is_alive()
+        http.close()
+    assert isinstance(initial[2][0], explabs_client.Completion)
+    assert len(posts) == 1
+    assert all(state["inflight"] == 0 and not state["metadata_busy"]
+               for state in pool.status().values())
 
 
 def test_pool_disabled_by_default_even_with_a_key(monkeypatch):
@@ -85,7 +214,7 @@ def test_pool_disabled_by_default_even_with_a_key(monkeypatch):
 
 def test_missing_second_key_rejects_without_any_network(monkeypatch):
     _env(monkeypatch)
-    monkeypatch.delenv("EXPLABS_API_KEY_2")
+    monkeypatch.delenv("EXPLABS_ACCOUNT_2_GATEWAY_TOKEN")
     http, calls = _transport()
     pool = explabs_pool.AccountPool(http_client=http)
     with pytest.raises(explabs_client.ExperientialError, match="explabs_pool_disabled"):
@@ -273,7 +402,7 @@ def test_credentials_cannot_change_under_a_live_pool(monkeypatch):
     http, calls = _transport()
     pool = explabs_pool.AccountPool(http_client=http)
     pool.complete("", "one independent task")
-    monkeypatch.setenv("EXPLABS_API_KEY_2", "fake-key-rotated")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_GATEWAY_TOKEN", "fixture-rotated-scoped-token-0123456789")
     with pytest.raises(explabs_client.ExperientialError, match="key_rotation_requires_restart"):
         pool.complete("", "one independent task")
     assert calls == ["fake-key-a"]
