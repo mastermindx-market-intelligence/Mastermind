@@ -938,11 +938,11 @@ function ProjectSearchBody(props: ProjectSearchBodyProps) {
                         ? strings.savedReplyTitle
                         : row.file?.displayName ?? ''}
                     </p>
-                    <p className="project-search__rowMeta">
-                      {row.source === 'saved'
-                        ? row.saved?.reference.requested_at ?? ''
-                        : row.file?.source.path ?? ''}
-                    </p>
+                    {row.source === 'saved' ? (
+                      <p className="project-search__rowMeta">
+                        {row.saved?.reference.requested_at ?? ''}
+                      </p>
+                    ) : null}
                     <p className="project-search__rowExcerpt">{row.source === 'saved' ? row.saved?.excerpt : row.file?.excerpt}</p>
                     {row.source === 'saved' && row.saved ? (
                       <details className="project-search__details">
