@@ -94,15 +94,31 @@ proof obligation; it must not freeze unrelated permitted implementation or diagn
 
 ## Session-owned review: no required third-party chat
 
-Before any review routing, load [SESSION_LOCAL_REVIEW_POLICY.md](SESSION_LOCAL_REVIEW_POLICY.md) from the same protected pin and apply the actually accepted risk tier. The active session owns the adversarial diff check, test evidence and finding disposition. Ordinary FAST/STANDARD work does not need an independent outside session when the zero-external-review policy is accepted. A separate top-level ChatGPT Web conversation, account or historical reviewer is never an internal procedural requirement.
+Before any review routing, load [SESSION_LOCAL_REVIEW_POLICY.md](SESSION_LOCAL_REVIEW_POLICY.md)
+from the same protected pin. Ordinary reversible FAST/STANDARD changes across assigned
+Web, native Codex/Claude and workers use session self-check, affected tests and normal
+protected automation. No independent reviewer, formal approval, outside chat, Secretary,
+extra receipt or non-author release/arming actor is an internal prerequisite. Complete
+small changes in one healthy turn when tools/checks permit. FAST/STANDARD/CRITICAL
+attended CEO Web work has no blanket independent technical/source-review prerequisite;
+risk alone does not require a handoff. Stronger consequences still need stronger proof.
 
-Where independent technical scrutiny is owed, a verified **native review subagent spawned within this same parent session** can supply a genuinely distinct-context review: ChatGPT Web Pro when an actual native spawn capability is exposed, native Codex/Claude subagents, or an admitted Fabric review worker under its real root/parent/budget. Use read-only exact-head input, check child START/return and adjudicate its independent findings. If only the author performs a second pass, report `SELF_REVIEWED`; do not assert that an independent child ran. If native tools are unavailable, only the affected review gate stays held; do not stop other work or demand another Web chat by habit.
+Consequential native/automated changes mean the CRITICAL row in REVIEW_RISK_POLICY.md:
+auth/security/permissions, source authority, review/release automation, privileged CI, financial execution, irreversible data and exactly-once. They receive one genuinely distinct read-only native/Fabric technical review.
+Verify actual exact-head return and adjudicate findings; review repairs only where their
+changed risk warrants it. A second author pass is SELF_REVIEWED, never independent.
+If that review surface is unavailable, only its dependent release stays held. Preserve
+actual enforced approvals/CI, source custody, specific holds, refusals and EFFECT_UNKNOWN.
 
-Use [SESSION_INDEPENDENT_REVIEW_ROUTING.md](SESSION_INDEPENDENT_REVIEW_ROUTING.md) **only when a genuinely separate review avenue is required and lawful**. A Dot or cross-account reviewer is optional, never the default. Preserve existing live/denied/uncertain operations on their original carrier. A technical subagent verdict is not GitHub's formal non-author `APPROVED`; satisfy actual branch protection, required CI, source holds and protected merge independently.
+Use [SESSION_INDEPENDENT_REVIEW_ROUTING.md](SESSION_INDEPENDENT_REVIEW_ROUTING.md)
+only for a real separate review assignment. A technical PASS is not formal GitHub
+APPROVED. Obtain actual non-author approval only when a repository rule or binding hold
+requires it; never impersonate independence or self-approve. The assigned session may
+request its own qualified candidate through the normal protected release automation.
 
 ### Native Codex/Claude instruction refresh
 
-The existing on-demand `scripts/project_execution_brief.py` is the **only** source-owned normal account-brief installer for these native Markdown instruction files. Preview before applying; require authorized host, exact file/preimage, no conflicting writer, preserved host-specific content, backup and post-write readback. When replacing the bounded `mastermind-active-owner-takeover-20261102` instruction installed on Ubuntu0/4 or M1/Ubuntu3, retire that now-superseded managed block rather than leaving duplicate owner rules. The older M2 `mastermind-leadership-continuity-20261024` block is separately preserved unless its exact user-approved replacement and equivalence are established. Running a source installer is not proof that a live Codex/Claude session reloaded the instructions.
+The existing on-demand `scripts/project_execution_brief.py` is the **only** source-owned normal account-brief installer for these native Markdown instruction files. Preview before applying; require authorized host, exact file/preimage, no conflicting writer, preserved host-specific content, backup and post-write readback. When replacing the bounded `mastermind-active-owner-takeover-20261102` instruction installed on Ubuntu0/4 or M1/Ubuntu3, retire that now-superseded managed block rather than leaving duplicate owner rules. The older `mastermind-leadership-continuity-20261024` block is preserved except for its exact superseded blanket review/no-self-merge sentence, which the installer replaces with the current session-local policy; preserve its host-specific and safety controls. Running a source installer is not proof that a live Codex/Claude session reloaded the instructions.
 
 For formal GitHub review, a historical reviewer login is **preferred placement, not a permanent owner** unless an actual exact-seat requirement applies. The assigned principal recovers the review's current identity and requests an independently eligible **different reasoning reviewer**. Changing GitHub login within the same underlying source-building session does not qualify as independent review; require actual non-author scrutiny, exact-head native review readback and normal release gates. Do not re-route denied or EFFECT_UNKNOWN reviews through another account, carrier or provider.
 
@@ -186,25 +202,18 @@ path before relying on it; never promise that a finished Web turn keeps working.
 
 ## Cross-repository PR auto-merge discipline
 
-For any source release, first read the same-pinned
-[`docs/DELIVERY_WORKFLOW.md`](DELIVERY_WORKFLOW.md). In particular, **Macro**
-`main` uses its existing `merge-on-green` label-driven sweeper; native GitHub
-auto-merge is **not** a safe shortcut where binding checks are not protected.
-The label is an opt-in, not a reviewer verdict, hold release or proof of merge.
-Check current PR/head, binding CI, genuine independent formal GitHub review,
-title/body/comments for recorded holds and repository source/lease gates
-**before** adding the label. **Until the incumbent controller or protected
-policy actually enforces those gates and is proven live**, retain the current
-independent non-author arming/release decision. **After** that machine guard
-is installed and verified, review once and let existing automation perform
-the protected release without a second human operator. Never auto-arm all
-open PRs, mistake a technical `SOURCE_PASS` for approval, or self-merge
-through a shared author account or REST/admin bypass. A full successful sweeper run may still defer a PR because
-`main` changed CI definitions, active CI workload exceeds the controller
-refresh cap, or the branch conflicts; read the exact PR verdict, not the workflow
-success badge. Mastermind `master` retains its separate protected merge-queue
-path. An updated repository source pointer is not evidence that the live ChatGPT
-Project setting has been installed or freshly consumed.
+For any source release first read same-pinned
+[`docs/DELIVERY_WORKFLOW.md`](DELIVERY_WORKFLOW.md). Macro `main` uses its existing
+`merge-on-green` controller; native GitHub auto-merge is unsafe where binding checks
+are not protected. The label is an opt-in, not approval or proof of merge. The assigned session checks current PR/head, binding CI, applicable review, recorded holds and source
+custody, then may arm its own qualified PR. Ordinary reversible changes require no
+internal independent/formal review or second non-author armer. Consequential native/
+automated work gets one distinct technical review, then existing automation releases.
+Preserve the controller's actual enforced behavior until a prospective change is installed
+and verified; never bypass it. Do not bulk-arm or clear a real hold by inference.
+Mastermind `master` keeps its protected merge queue; other repositories use their own
+actual protected path. No REST/admin bypass, reviewer impersonation or self-approval.
+An updated source pointer proves neither installed Project setting nor fresh consumption.
 
 ## Preserve real controls and prove the result
 

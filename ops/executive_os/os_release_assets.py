@@ -462,6 +462,9 @@ def _decode_launch_bindings(parsed):
                 ["research_only"], ["research_only", "native_research_only"])
                 or values["workstream"] in workstreams):
             return None
+        # Match the incumbent native-pair publisher without changing legacy v1 decoding.
+        if len(profiles) == 2 and values.get("validation", {}) != {}:
+            return None
         workstreams.add(values["workstream"])
         templates += len(profiles)
         result.append(values)

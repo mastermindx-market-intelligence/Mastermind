@@ -91,6 +91,19 @@ def test_v2_rejects_ambiguous_or_broader_enrollment(fault):
         assets.decode_launch_manifest(assets._canonical(value))
 
 
+@pytest.mark.parametrize("validation", [
+    {"pytest_targets": []}, {"compileall_paths": []}, {"git_diff_check": False},
+])
+def test_v2_native_pair_refuses_inert_nonempty_validation_without_changing_v1(validation):
+    value = manifest()
+    value["bindings"][0]["validation"] = validation
+    assert assets._decode_launch_bindings(value) is None
+    with pytest.raises(ValueError):
+        assets.decode_launch_manifest(assets._canonical(value))
+    legacy = {"v": 1, **{key: item for key, item in value["bindings"][0].items() if key != "label"}}
+    assert assets._decode_launch_bindings(legacy) == (legacy,)
+
+
 def test_v2_template_and_byte_limits_are_independent_and_unchanged():
     entry = {"label": "A", "workstream": "WS:W0", "priority": 0,
              "projects": [{"ref": "aa", "label": "A"}],

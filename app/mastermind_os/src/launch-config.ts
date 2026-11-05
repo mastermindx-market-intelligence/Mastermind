@@ -88,6 +88,9 @@ export function decodeLaunchBindingConfig(raw: unknown): LaunchConfiguration | n
         !(binding.profiles.length === 1 && binding.profiles[0].ref === "research_only" ||
           binding.profiles.length === 2 && binding.profiles[0].ref === "research_only" &&
           binding.profiles[1].ref === "native_research_only")) return null;
+    // The incumbent publisher accepts only absent or exactly empty validation for a native pair.
+    if (binding.profiles.length === 2 && binding.validation !== undefined &&
+        Object.keys(binding.validation).length !== 0) return null;
     seen.add(binding.workstream);
     templates += binding.profiles.length;
     bindings.push(Object.freeze({ ...binding, label }));

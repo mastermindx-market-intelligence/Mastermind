@@ -83,6 +83,19 @@ describe("closed finite workstream enrollment", () => {
       }
       expect(decodeLaunchBindingConfig(JSON.stringify(value))).toBeNull();
     });
+  it.each([{ pytest_targets: [] }, { compileall_paths: [] }, { git_diff_check: false }])(
+    "refuses nonempty inert validation in a v2 native pair: %j", validation => {
+      const value = manifest();
+      Object.assign(value.bindings[0], { validation });
+      expect(decodeLaunchBindingConfig(JSON.stringify(value))).toBeNull();
+      const { label: _label, ...leaf } = value.bindings[0];
+      expect(decodeLaunchBindingConfig(JSON.stringify({ v: 1, ...leaf }))).not.toBeNull();
+    });
+  it("preserves exactly empty validation in a v2 native pair", () => {
+    const value = manifest(); Object.assign(value.bindings[0], { validation: {} });
+    const decoded = decodeLaunchBindingConfig(JSON.stringify(value)) as LaunchEnrollmentConfig;
+    expect(decoded.bindings[0].validation).toEqual({});
+  });
   it("keeps legacy payload and operation key identical when its workstream is explicit", () => {
     const row = config().bindings[0];
     const { label: _label, ...leaf } = row;
