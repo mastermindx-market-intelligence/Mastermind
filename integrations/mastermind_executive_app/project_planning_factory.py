@@ -96,6 +96,8 @@ class ProjectPlanningAppFactory:
                 or proof.seal is not installed._CANONICAL_CODE_CAPTURE or proof.owner is not collector
                 or proof.binding!=collector._canonical_code_capture_binding()
                 or proof.view is not view or proof.view_identity!=view._owner._view_identity(view)
+                or type(proof.observations) is not tuple or len(proof.observations)!=4
+                or type(proof.macro_snapshot) is not installed._VerifiedRepositorySnapshot
                 or proof.observations[0]!=self.service.config.proof_base_sha
                 or proof.observations[1]!=view.code_commit
                 or proof.macro_snapshot.root!=collector._macro_root
