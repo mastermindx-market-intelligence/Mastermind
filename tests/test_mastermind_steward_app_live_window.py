@@ -82,9 +82,15 @@ CONFIG_FIELDS = (
     "allowed_origin",
     "audit_sink",
     "source_kind",
+    "observation_binding",
 )
+# source_kind has its own closed literal; observation_binding is the one
+# genuinely optional field (absent binding is the generic v1 shape, not an
+# incomplete configuration).
 COMPLETENESS_FIELDS = tuple(
-    name for name in CONFIG_FIELDS if name != "source_kind"
+    name
+    for name in CONFIG_FIELDS
+    if name not in ("source_kind", "observation_binding")
 )
 
 
@@ -938,6 +944,62 @@ def test_non_configuration_object_cannot_be_a_mount_option():
     assert {field.name for field in dataclasses.fields(LiveWindowConfig)} == set(
         CONFIG_FIELDS
     )
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [
+        {"job_id": "JOB-1", "attempt_id": "ATT-" + "a" * 32},
+        ("JOB-1", "ATT-" + "a" * 32),
+        ["JOB-1", "ATT-" + "a" * 32],
+        "JOB-1/ATT-" + "a" * 32,
+        7,
+    ],
+)
+def test_malformed_observation_binding_cannot_be_mounted(binding):
+    mount = _mount()
+    config = dataclasses.replace(mount.config, observation_binding=binding)
+    with pytest.raises(ValueError, match="invalid observation binding"):
+        _steward_app(live_window=config)
+
+
+@pytest.mark.parametrize(
+    "job_id,attempt_id",
+    [
+        ("JOB-not-canonical", "ATT-" + "a" * 32),
+        ("JOB-1", "ATT-invalid"),
+        ("JOB-" + "0" * 10, "ATT-" + "a" * 32),
+    ],
+)
+def test_grammatically_invalid_typed_binding_cannot_be_mounted(job_id, attempt_id):
+    from integrations.mastermind_window_reader.owner_read_resource import (
+        ObservationBinding,
+    )
+
+    with pytest.raises(ValueError, match="invalid observation binding"):
+        ObservationBinding(job_id=job_id, attempt_id=attempt_id)
+
+
+def test_valid_typed_observation_binding_is_copied_into_the_reader():
+    from integrations.mastermind_window_reader.owner_read_resource import (
+        ObservationBinding,
+    )
+
+    mount = _mount()
+    binding = ObservationBinding(job_id="JOB-42", attempt_id="ATT-" + "b" * 32)
+    config = dataclasses.replace(mount.config, observation_binding=binding)
+    app = _steward_app(live_window=config)
+    token = _content_token(mount.key)
+    status, _, raw, _ = _call(app, path=WINDOW_PATH, headers=_headers(token=token))
+    assert status == 200
+    document = json.loads(raw)
+    assert document["schema"] == "mastermind.workspace.window_read_candidate.v2"
+    assert document["observation_binding"] == {
+        "job_id": "JOB-42",
+        "attempt_id": "ATT-" + "b" * 32,
+    }
+    # The mount never aliases the caller's object.
+    assert config.observation_binding is binding
 
 
 @pytest.mark.parametrize("source_kind", ["recorded", "native-lane", "live_window"])

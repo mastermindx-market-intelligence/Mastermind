@@ -209,12 +209,52 @@ def test_typed_auth_refusal_returns_none_and_emits_one_redacted_event(
     ]
 
 
+def test_redacted_result_preserves_typed_refusal_for_closed_composition() -> None:
+    verifier, authenticator, sink = _verifier(
+        AuthError(AuthErrorCode.RESOURCE_REFUSED)
+    )
+
+    access, code = _run(verifier.verify_token_with_code(RAW_TOKEN))
+
+    assert access is None
+    assert code is AuthErrorCode.RESOURCE_REFUSED
+    assert authenticator.calls == [(RAW_TOKEN, NOW)]
+    assert sink.events == [
+        AuthAuditEvent(
+            schema=AUTH_AUDIT_SCHEMA,
+            policy_id=_policy().policy_id,
+            code=AuthErrorCode.RESOURCE_REFUSED.value,
+            accepted=False,
+        )
+    ]
+
+
 def test_unexpected_authenticator_failure_is_closed_as_internal_error() -> None:
     verifier, authenticator, sink = _verifier(
         RuntimeError("secret provider exception")
     )
 
     assert _run(verifier.verify_token(RAW_TOKEN)) is None
+    assert authenticator.calls == [(RAW_TOKEN, NOW)]
+    assert sink.events == [
+        AuthAuditEvent(
+            schema=AUTH_AUDIT_SCHEMA,
+            policy_id=_policy().policy_id,
+            code=AuthErrorCode.INTERNAL_ERROR.value,
+            accepted=False,
+        )
+    ]
+
+
+def test_redacted_result_classifies_unexpected_failure_as_internal() -> None:
+    verifier, authenticator, sink = _verifier(
+        RuntimeError("secret provider exception")
+    )
+
+    access, code = _run(verifier.verify_token_with_code(RAW_TOKEN))
+
+    assert access is None
+    assert code is AuthErrorCode.INTERNAL_ERROR
     assert authenticator.calls == [(RAW_TOKEN, NOW)]
     assert sink.events == [
         AuthAuditEvent(
@@ -298,6 +338,20 @@ def test_refusal_audit_failure_still_returns_none_without_exception() -> None:
     )
 
     assert _run(verifier.verify_token(RAW_TOKEN)) is None
+    assert authenticator.calls == [(RAW_TOKEN, NOW)]
+    assert sink.events == []
+
+
+def test_refusal_audit_failure_is_terminal_for_closed_composition() -> None:
+    sink = _Sink(fail=True)
+    verifier, authenticator, _sink = _verifier(
+        AuthError(AuthErrorCode.RESOURCE_REFUSED), sink=sink
+    )
+
+    access, code = _run(verifier.verify_token_with_code(RAW_TOKEN))
+
+    assert access is None
+    assert code is AuthErrorCode.INTERNAL_ERROR
     assert authenticator.calls == [(RAW_TOKEN, NOW)]
     assert sink.events == []
 

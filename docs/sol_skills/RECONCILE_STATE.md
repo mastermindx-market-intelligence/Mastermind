@@ -92,17 +92,23 @@ When protected master advances after a semantic review:
 2. compare protected movement against candidate-owned paths;
 3. perform a `material-source comparison` over the governing Skillpack, architecture/authority law,
    imported interfaces, dependency closure and proof contract;
-4. obtain `latest-base merge-ref proof` or an equivalent immutable integrated-candidate result;
-5. read current CI/security, reviews, unresolved threads and capability claims;
+4. obtain `latest-base merge-ref proof` (compatible identity/conflict-free composition) or an
+   equivalent immutable integrated-candidate result;
+5. read head CI/security, reviews, unresolved threads and capability claims. If native GitHub
+   merge queue admission is permitted, required `merge_group` CI runs on its integrated candidate
+   **after entry and before merge**; absence of checks on a prequeue synthetic merge ref is not an
+   independent hold or a reason to create a new source commit;
 6. classify review reuse according to
    `docs/superpowers/specs/2026-09-02-autonomy-release-compatibility-review-reuse.md`.
 
 Do not merge protected master into the carrier merely to make `behind_by=0`.
 
 When candidate-owned blobs and paths remain byte-identical, governing material source is unchanged,
-protected movement is path/dependency-disjoint, the current merge ref is green and no blocker or
-stronger capability claim appears, `semantic review may be reused`. Refresh the compatibility receipt
-only; leave the source branch and substantive review intact.
+protected movement is path/dependency-disjoint, the current merge ref is conflict-free and no blocker
+or stronger capability claim appears, `semantic review may be reused` **before queue admission**.
+Required integrated checks still must pass on the native `merge_group` candidate before the protected
+merge; do not require nonexistent prequeue merge-ref check runs or falsely claim release readiness.
+Refresh the compatibility receipt only; leave the source branch and substantive review intact.
 
 When candidate semantics, governing source, dependency behavior, authority/security/effect/retry or
 persistence meaning changes, obtain a new immutable semantic head and full review.
@@ -132,6 +138,18 @@ Then:
 
 Never interpret client timeout/cancellation as proof the underlying synchronous mutation stopped.
 Never auto-failover to another carrier.
+
+## Step 4A — Reported terminal, protected result still outstanding
+
+An original process may have a terminal `rc=0` or an outcome digest while the canonical release checkpoint still requires an original privileged administrator-result reconciliation. These are **two distinct facts**, not a contradiction to resolve by choosing the more optimistic report.
+
+1. Bind the existing operation/request ID and its original authorized carrier, observed terminal receipt/digest, canonical checkpoint/revision, result-read authorization and any explicit denial. A historical owner or ChatGPT thread is a provenance pointer, not proof that the old conversation remains alive or is the only person who can ever lead recovery.
+2. Where current authority actually permits **consuming the already-requested result on its original carrier**, reconcile through the existing original operation's authorized result/status interface, without issuing a new operation or reader. Require the canonical checkpoint owner to record/read back the resulting disposition.
+3. When that exact protected read was explicitly denied or the present session lacks its required authority, do **not** reattempt, invoke an alternate privileged reader, change account/tool/provider, copy credentials, infer release from a message, or restart services to sidestep the hold. Keep the dependent modification held. The current assigned session still owns nonprivileged diagnosis, truthful existing-issue/handoff updates and all provably disjoint authorized work.
+4. A genuine human-only gate describes a specific unavailable credential, physical ceremony or nondelegable control, the permitted resolver function and original result identity. "Original author/administrator/chat must act" alone is not a human-control proof. If unrelated ready work exists, this is a held **lane**, not an `EXACT_HUMAN_GATE` finalization of the entire mission.
+5. If successor authority cannot presently be proven, record the missing **capability**, not a new owner registry or invented lease transfer. Await the lawful existing installer/runtime/credential decision while retaining the original operation and no-duplicate-effect invariants.
+
+The active turn and its stopping criteria remain owned by `ACTIVE_EXECUTION.md`; this section adds no retry or modification authority.
 
 ## Step 5 — Duplicate/conflict semantics
 
