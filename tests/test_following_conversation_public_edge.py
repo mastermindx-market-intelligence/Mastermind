@@ -32,8 +32,9 @@ def test_whole_predecessor_and_current_profiles_transition_without_mutating_inpu
     live = fixtures.fullconfig()
     fixtures.get_paths_of(live)[:] = sorted(set(fixed) | set(edge.asset_routes(fixtures.OLD)))
     fixtures.post_paths_of(live)[:] = list(posts)
-    if fixed == edge.GET_ROUTES:
-        fixtures.expect_source_upgrade(fixtures.inner_of(live))
+    # Every one of these profiles already owns source-operation/operation,
+    # and therefore retains its dedicated, separately bounded POST branch.
+    fixtures.expect_source_upgrade(fixtures.inner_of(live))
     before = copy.deepcopy(live)
     planned, prepared, final = fixtures.transition_values(live)
     assert live == before

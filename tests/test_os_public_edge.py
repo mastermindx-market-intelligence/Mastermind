@@ -59,6 +59,8 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/workspace/project-source/current",
         "/workspace/source-operation/context",
         "/workspace/source-operation/operation",
+        "/workspace/source-operation/options",
+        "/workspace/resources/host-observation/current",
         "/workspace/instruction-admission/current",
         "/workspace/instruction-admission/operation",
     }
@@ -70,6 +72,26 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/workspace/project-admission/pause",
         "/workspace/project-admission/resume",
         "/workspace/instruction-admission/pause",
+        "/os/executive/project-planning/submit",
+        "/os/executive/project-planning/status",
+        "/os/executive/project-planning/result",
+        "/os/executive/project-planning/consume",
+        "/os/executive/project-planning/prepare_proposal",
+        "/os/executive/session/history-context",
+        "/os/executive/session/conversations",
+        "/os/executive/session/conversation-read",
+        "/os/executive/session/fresh-conversations",
+        "/os/executive/session/fresh-conversation-read",
+        "/os/executive/conversation/preview",
+        "/os/executive/conversation/create",
+        "/os/executive/conversation/status",
+        "/os/executive/conversation/read",
+        "/os/executive/conversation/consume",
+        "/os/executive/conversation/turn",
+        "/os/executive/conversation/turn/status",
+        "/os/executive/conversation/turn/read",
+        "/os/executive/conversation/consume/status",
+        "/os/executive/conversation/turn/preview",
     }
     assert set(GET_ROUTES) == set(INCUMBENT_GET_ROUTES) | expected_get
     assert set(POST_ROUTES) == set(INCUMBENT_POST_ROUTES) | expected_post
@@ -406,8 +428,9 @@ def test_instruction_read_profile_preserves_old_exact_profile_and_adds_only_get(
 
 
 def test_project_access_adds_one_fixed_read_and_preserves_full_instruction_predecessor():
-    from ops.executive_os.os_public_edge import PRE_PROJECT_ACCESS_GET_ROUTES,TRANSITION_ROUTE_PROFILES
-    assert GET_ROUTES==PRE_PROJECT_ACCESS_GET_ROUTES+('/workspace/project-access/current',)
-    assert (PRE_PROJECT_ACCESS_GET_ROUTES,POST_ROUTES) in TRANSITION_ROUTE_PROFILES
+    from ops.executive_os.os_public_edge import (PRE_PROJECT_ACCESS_GET_ROUTES,TRANSITION_ROUTE_PROFILES,
+        PRE_JOURNEY_GET_ROUTES,PRE_JOURNEY_POST_ROUTES)
+    assert PRE_JOURNEY_GET_ROUTES==PRE_PROJECT_ACCESS_GET_ROUTES+('/workspace/project-access/current',)
+    assert (PRE_PROJECT_ACCESS_GET_ROUTES,PRE_JOURNEY_POST_ROUTES) in TRANSITION_ROUTE_PROFILES
     assert '/workspace/project-access/current' not in POST_ROUTES
     assert not any('/workspace/project-access/pause' in routes for profile in TRANSITION_ROUTE_PROFILES for routes in profile)
