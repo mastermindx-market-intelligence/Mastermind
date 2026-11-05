@@ -4039,6 +4039,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     context: observedConversation.projection.context, port: genuineProjectDraft});
   projectDraftOwner.current = {host: retainedResultHost, generation: archiveHostGeneration,
     context: observedConversation.projection.context, port: genuineProjectDraft};
+  // An explicit guarded source return may focus the existing notes owner once.
+  const projectDraftReturnFocus = useRef<{
+    witness: NonNullable<ReturnType<ProjectSourceDraftPort["readWitness"]>>;
+    host: typeof retainedResultHost;
+    authRevision: number;
+  } | null>(null);
   const projectDraftMethods = useMemo(() => {
     const readWitness: ProjectSourceDraftPort["readWitness"] = () => {
       const owner = projectDraftOwner.current, host = owner.host, auth = host?.auth;
@@ -4067,10 +4073,36 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         return !!witness && witness.revision === revision && projectDraftOwner.current === owner &&
           owner.port.undo(identity, revision);
       }) as ProjectSourceDraftPort["undo"],
-      edit: () => { if (readWitness()) projectDraftOwner.current.port.edit?.(); }};
+      edit: () => {
+        const witness = readWitness();
+        if (!witness) return;
+        projectDraftReturnFocus.current = {witness, host: projectDraftOwner.current.host,
+          authRevision: authRevisionRef.current};
+        projectDraftOwner.current.port.edit?.();
+      }};
   }, []);
   const projectSourceDraftPort: ProjectSourceDraftPort = {text: genuineProjectDraft.text,
     revision: genuineProjectDraft.revision, insertion: genuineProjectDraft.insertion, ...projectDraftMethods};
+
+  useLayoutEffect(() => {
+    const intent = projectDraftReturnFocus.current;
+    if (!intent) return;
+    // A passive render cannot create or revive a consumed gesture.
+    projectDraftReturnFocus.current = null;
+    const current = projectDraftMethods.readWitness();
+    if (active !== "Conversations" || intent.host !== projectDraftOwner.current.host ||
+        intent.authRevision !== authRevisionRef.current || !current ||
+        current.workRef !== intent.witness.workRef || current.binding !== intent.witness.binding ||
+        current.revision !== intent.witness.revision) return;
+    // Scope the unique mounted window without adding a layout wrapper.
+    const windows = document.getElementById("content")?.querySelectorAll<HTMLElement>(".conversation-window");
+    if (!windows || windows.length !== 1) return;
+    const region = windows[0];
+    const target = region.querySelector<HTMLElement>(".conversation-notes textarea") ??
+      region.querySelector<HTMLElement>(".conversation-notes-trigger");
+    target?.focus();
+    target?.scrollIntoView?.({block: "center"});
+  });
 
   const [knowledgeMode, setKnowledgeMode] = useState<"project" | "retained">("project");
   const [projectSearchSelected, setProjectSearchSelected] = useState(true);

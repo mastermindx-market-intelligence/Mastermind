@@ -152,6 +152,28 @@ it('appends and undoes an actual Library source in the genuine mounted unsent dr
  expect(screen.getByRole('textbox',{name:'Unsent notes'})).toHaveProperty('value','Original current App draft');
  expect(e.invoke.mock.calls.some(([name])=>/submit|prepare|send|create|source_operation/.test(name))).toBe(false);
 });
+it('returns to original notes only after the explicit guarded source gesture',async()=>{
+ const e=await openFileWithGenuineDraft();
+ fireEvent.click(screen.getByRole('button',{name:'Add excerpt to draft'}));
+ fireEvent.click(within(screen.getByRole('heading',{level:1}).closest('article')!).getByRole('button',{name:'Back'}));
+ fireEvent.click(within(screen.getByText('Uploaded file').closest('.knowledge-library-row')! as HTMLElement).getByRole('button',{name:'Open'}));
+ fireEvent.click(await screen.findByRole('button',{name:'Open original conversation'}));
+ const notes=await screen.findByRole('button',{name:'Unsent notes'});
+ expect(document.activeElement).toBe(notes);
+ expect(e.invoke.mock.calls.some(([name])=>/submit|prepare|send|create|source_operation/.test(name))).toBe(false);
+});
+it.each(['content','generation'] as const)('refuses a stale original return after no-render %s loss',async(kind)=>{
+ const e=await openFileWithGenuineDraft();
+ fireEvent.click(screen.getByRole('button',{name:'Add excerpt to draft'}));
+ fireEvent.click(within(screen.getByRole('heading',{level:1}).closest('article')!).getByRole('button',{name:'Back'}));
+ fireEvent.click(within(screen.getByText('Uploaded file').closest('.knowledge-library-row')! as HTMLElement).getByRole('button',{name:'Open'}));
+ const control=await screen.findByRole('button',{name:'Open original conversation'});
+ if(kind==='content')vi.spyOn(e.host.auth!,'getState').mockReturnValue({...signed,content:false} as never);
+ else vi.spyOn(e.host,'invalidationGeneration').mockReturnValue(e.host.invalidationGeneration!()+1);
+ fireEvent.click(control);
+ expect(screen.queryByRole('button',{name:'Unsent notes'})).toBeNull();
+ expect(e.invoke.mock.calls.some(([name])=>/submit|prepare|send|create|source_operation/.test(name))).toBe(false);
+});
 it('refuses a stale Library append when actual Content permission disappears without a React notification',async()=>{
  const e=await openFileWithGenuineDraft(),oldAdd=screen.getByRole('button',{name:'Add excerpt to draft'});
  vi.spyOn(e.host.auth!,'getState').mockReturnValue({...signed,content:false} as never);
