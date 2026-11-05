@@ -1,6 +1,6 @@
 import { useId, type ReactNode } from "react";
 import type { OperationState } from "../../orchestration/operation-controller";
-import type { FreshConversationTurnData } from "./fresh-conversation-turn";
+import type { FreshConversationTurnData, FreshConversationTurnConsumption } from "./fresh-conversation-turn";
 import { FreshConversationInitialResponse } from "./NewConversationOutcome";
 import "./fresh-conversation-turn-panel.css";
 
@@ -8,6 +8,8 @@ export interface FreshConversationTurnPanelProps {
   locale: "en" | "zh-CN";
   /** Parent-decoded follow-up window; null until a confirmed read exists. */
   data: FreshConversationTurnData | null;
+  /** Actual current reader's receipt; no synthetic turn DATA is constructed. */
+  initialConsumption?: FreshConversationTurnConsumption | null;
   /** Live controller observation; null when the controller holds no state here. */
   operationState: OperationState | null;
   /** Actual caller-side await activity; never a provider state. */
@@ -113,7 +115,7 @@ function sourceRows(zh: boolean, operationState: OperationState | null,
  * decoded window and every guarded action; this component renders the handed
  * state, forwards exact draft text and never mints or infers a permission. */
 export function FreshConversationTurnPanel({ locale, data, operationState, activity, message,
-  onMessageChange, readOnly, keepControl, sendControl, checkControl, feedback, originalTurnMessage }: FreshConversationTurnPanelProps) {
+  onMessageChange, readOnly, keepControl, sendControl, checkControl, feedback, originalTurnMessage, initialConsumption = null }: FreshConversationTurnPanelProps) {
   const inputId=useId();
   const zh = locale === "zh-CN";
   const text = (en: string, cn: string) => zh ? cn : en;
@@ -122,7 +124,7 @@ export function FreshConversationTurnPanel({ locale, data, operationState, activ
   const unresolved = status?.key === "unresolved";
   const recorded = status?.key === "recorded";
   const absent = status?.key === "absent";
-  const receipt = data?.initial_consumption ?? null;
+  const receipt = data?.initial_consumption ?? initialConsumption;
   const result = data?.result ?? null;
   /** An absent turn is a hold, not clearance: neither slot is offered for replay. */
   const holdActions = busy || unresolved || recorded || absent || status?.key === "refused";
