@@ -245,3 +245,37 @@ def test_workspace_update_requires_single_immutable_source_commit():
     with pytest.raises(ValueError, match='EXACT_SOURCE_COMMIT_REQUIRED'):
         p.assemble_existing_workspace_update(
             inputs(),'main',current_manifest_bytes=existing_workspace_manifest())
+
+
+# Retained regression evidence from the closed-unmerged role-packaging donor
+# (#1649), against this implementation's spelling.
+def test_existing_pool_source_closure_does_not_grow_for_plugin_role_assets():
+    from pathlib import Path
+    import subprocess
+    from ops.fabric_launch.install import source_files
+    root=Path(__file__).resolve().parent.parent
+    sha=subprocess.run(['git','rev-parse','HEAD'],cwd=root,capture_output=True,text=True,check=True).stdout.strip()
+    default=source_files(root,sha)
+    opt_in=source_files(root,sha,include_orchestration=True)
+    names={n for n in opt_in if n.startswith('skills/mastermind-fabric-orchestration/')}
+    assert not any(n.startswith('skills/mastermind-fabric-orchestration/') for n in default)
+    assert names=={'skills/mastermind-fabric-orchestration/'+role for role in p.ORCHESTRATION_ROLE_FILES}
+    assert set(opt_in)-set(default)==names
+    assert all(opt_in[n]==default[n] for n in default)
+    with pytest.raises(ValueError,match='SOURCE_SELECTOR_INVALID'):
+        source_files(root,sha,include_orchestration='yes')
+
+
+def test_build_manifest_binds_all_six_roles_to_one_immutable_commit():
+    import hashlib
+    data=inputs()
+    artifact=p.assemble(data,'b'*40)
+    build=json.loads(artifact['BUILD.json'])
+    recorded=build['canonical_source_files']
+    for relative in p.ORCHESTRATION_ROLE_FILES:
+        path='skills/mastermind-fabric-orchestration/'+relative
+        assert recorded[path]['path']==path
+        assert recorded[path]['sha256']==hashlib.sha256(data[path]).hexdigest()
+    assert build['source_commit']=='b'*40
+    assert build['native_skill_attested'] is False
+    assert build['execution_authority'] is False

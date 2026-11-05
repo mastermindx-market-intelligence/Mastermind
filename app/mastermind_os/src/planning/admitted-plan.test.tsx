@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { planObservationFixture } from "./plan-observation.fixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 afterEach(() => cleanup());
@@ -12,8 +13,7 @@ function fixture() {
     schema: "mastermind.workspace_admitted_execution_plan.v1",
     selection: { ...selection },
     availability: "AVAILABLE", reason_codes: [],
-    source_observation: { schema: "mastermind.workspace_plan_observation.v1",
-      selection: { ...selection }, state: "SAME", control_room: {}, runtime: {} },
+    source_observation: planObservationFixture(selection),
     plan: {
       schema: "mastermind.admitted_execution_plan_view.v1",
       plan_schema_version: "mastermind.execution_plan/v3",
@@ -33,7 +33,7 @@ function fixture() {
 const unavailable = () => {
   const x = fixture();
   return { ...x, availability: "UNAVAILABLE", reason_codes: ["ADMISSION_NOT_ESTABLISHED"],
-    source_observation: { ...x.source_observation, state: "UNKNOWN" }, plan: null };
+    source_observation: { ...x.source_observation, state: "UNKNOWN", control_room: null, runtime: null }, plan: null };
 };
 
 describe("authenticated admitted-plan contract", () => {

@@ -293,7 +293,7 @@ def _publish_file(path, data):
 
 
 _LAUNCH_ROOT_KEYS = frozenset(("v", "workstream", "priority", "projects", "profiles",
-                               "attemptLimit", "allowedWritePaths", "validation"))
+                               "attemptLimit", "allowedWritePaths", "validation", "frontierModels"))
 _LAUNCH_VALIDATION_KEYS = frozenset(("pytest_targets", "compileall_paths", "git_diff_check"))
 
 
@@ -342,7 +342,7 @@ def _launch_choices(value, *, profile):
         if _launch_string(choice["label"], 120) is None or _launch_string(choice["ref"], 64) is None:
             return None
         if profile:
-            if choice["ref"] not in ("research_only", "bounded_code_change"):
+            if choice["ref"] not in ("research_only", "bounded_code_change", "native_research_only"):
                 return None
         elif re.fullmatch(r"[a-z][a-z0-9._-]{1,63}", choice["ref"]) is None:
             return None
@@ -350,6 +350,23 @@ def _launch_choices(value, *, profile):
     if len(set(refs)) != len(refs):
         return None
     return value
+
+
+def _launch_frontier_choices(value):
+    if type(value) is not list or not 0 < len(value) <= 16:
+        return None
+    refs = []
+    for choice in value:
+        if (type(choice) is not dict
+                or not {"ref", "label"} <= set(choice) <= {"ref", "label", "unavailableReason"}
+                or _launch_string(choice["label"], 120) is None
+                or type(choice["ref"]) is not str
+                or re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", choice["ref"]) is None
+                or ("unavailableReason" in choice
+                    and _launch_string(choice["unavailableReason"], 256) is None)):
+            return None
+        refs.append(choice["ref"])
+    return value if len(set(refs)) == len(refs) else None
 
 
 def _decode_launch_binding(parsed):
@@ -371,6 +388,8 @@ def _decode_launch_binding(parsed):
         return None
     if _launch_choices(parsed["profiles"], profile=True) is None:
         return None
+    if "frontierModels" in parsed and _launch_frontier_choices(parsed["frontierModels"]) is None:
+        return None
     if "attemptLimit" in parsed:
         limit = parsed["attemptLimit"]
         if type(limit) is not int or limit not in (1, 2, 3):
@@ -391,12 +410,67 @@ def _decode_launch_binding(parsed):
     validation = parsed.get("validation") or {}
     has_validation = bool(validation.get("pytest_targets") or validation.get("compileall_paths")
                           or validation.get("git_diff_check"))
+    if any(p["ref"] == "native_research_only" for p in parsed["profiles"]):
+        if (len(parsed["projects"]) != 1 or
+                [p["ref"] for p in parsed["profiles"]] != ["research_only", "native_research_only"]):
+            return None
     for profile in parsed["profiles"]:
-        if profile["ref"] == "research_only" and (write_count or has_validation):
+        if profile["ref"] in ("research_only", "native_research_only") and (write_count or has_validation):
+            return None
+        if profile["ref"] == "native_research_only" and parsed.get("attemptLimit") != 1:
             return None
         if profile["ref"] == "bounded_code_change" and (not write_count or not has_validation):
             return None
     return parsed
+
+
+def _decode_launch_bindings(parsed):
+    """Validate v1 or the finite v2 enrollment; return v1-shaped bindings.
+
+    Labels/default selection are presentation DATA. The sealed receipt retains
+    the original manifest bytes, and each derived binding keeps optional-field
+    presence exactly. This does not choose a runtime principal or grant.
+    """
+    if type(parsed) is not dict or type(parsed.get("v")) is not int:
+        return None
+    if parsed["v"] == 1:
+        try:
+            return (parsed,) if _decode_launch_binding(parsed) is not None else None
+        except (KeyError, TypeError):
+            return None
+    if parsed["v"] != 2 or set(parsed) != {"v", "defaultWorkstream", "bindings"}:
+        return None
+    bindings = parsed["bindings"]
+    if type(bindings) is not list or not 1 <= len(bindings) <= 16:
+        return None
+    if _launch_string(parsed["defaultWorkstream"], 72) is None:
+        return None
+    allowed = (_LAUNCH_ROOT_KEYS - {"v"}) | {"label"}
+    result, workstreams, templates = [], set(), 0
+    for binding in bindings:
+        if (type(binding) is not dict or not set(binding) <= allowed
+                or _launch_string(binding.get("label"), 120) is None):
+            return None
+        values = {"v": 1, **{key: value for key, value in binding.items() if key != "label"}}
+        try:
+            if _decode_launch_binding(values) is None:
+                return None
+        except (KeyError, TypeError):
+            return None
+        profiles = [profile["ref"] for profile in values["profiles"]]
+        if (len(values["projects"]) != 1 or profiles not in (
+                ["research_only"], ["research_only", "native_research_only"])
+                or values["workstream"] in workstreams):
+            return None
+        # Match the incumbent native-pair publisher without changing legacy v1 decoding.
+        if len(profiles) == 2 and values.get("validation", {}) != {}:
+            return None
+        workstreams.add(values["workstream"])
+        templates += len(profiles)
+        result.append(values)
+    if parsed["defaultWorkstream"] not in workstreams or templates > 16:
+        return None
+    return tuple(result)
 
 
 def _reject_duplicate_keys(pairs):
@@ -444,7 +518,7 @@ def decode_launch_manifest(raw):
     _no_surrogates(parsed)
     if raw != _canonical(parsed):
         raise ValueError("launch manifest bytes are not the canonical JSON encoding")
-    if _decode_launch_binding(parsed) is None:
+    if _decode_launch_bindings(parsed) is None:
         raise ValueError("launch manifest refused by the incumbent Launch decoder law")
     return raw
 

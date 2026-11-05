@@ -1,0 +1,357 @@
+"""Provider-free six-seat native Codex ranker security regression tests.
+
+No credentials, subscriptions, network, leases, or actual grants. Business
+inclusion requires independently supplied, current owner-qualified metadata.
+"""
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import sys
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from codex_pool_policy import AccountObservation, select_account
+
+NOW = datetime(2026, 10, 18, 8, 0, tzinfo=timezone.utc)
+ASTRA = "gpt-6-astra"
+SOL = "gpt-6.1-sol"
+MODELS = frozenset((ASTRA, SOL))
+
+
+def row(alias, pct, *, workspace="a"*64, user="b"*64,
+        entitlement="business_premium_included", models=MODELS,
+        active=0, cap=1, age=0, reset_hours=144):
+    return AccountObservation(
+        alias=alias, remaining_pct=pct,
+        observed_at=NOW-timedelta(minutes=age),
+        reset_at=NOW+timedelta(hours=reset_hours),
+        reset_credits=None, active_leases=active, lease_cap=cap,
+        auth_ready=True, binding_verified=True,
+        account_id_sha256=workspace, user_id_sha256=user,
+        entitlement_class=entitlement, qualified_models=models,
+    )
+
+
+def pick(rows, *, strategy="conserve_resets", model=ASTRA, sticky=None):
+    return select_account(rows, now=NOW, strategy=strategy,
+                          requested_model=model, sticky_account=sticky)
+
+
+def test_two_distinct_business_users_same_workspace_are_independent_candidates():
+    rows=[row("B1", 88, workspace="a"*64, user="1"*64),
+          row("B2", 96, workspace="a"*64, user="2"*64)]
+    assert pick(rows).alias == "B2"
+
+
+@pytest.mark.parametrize("strategy", [
+    "conserve_resets", "single_account_heavy", "timer_priority",
+])
+def test_duplicate_business_user_in_same_workspace_is_excluded(strategy):
+    rows=[row("B1", 100, user="1"*64), row("B2", 100, user="1"*64),
+          row("C3", 62, workspace="c"*64, user="3"*64,
+              entitlement="personal_pro", models=MODELS)]
+    result=pick(rows, strategy=strategy, sticky="B2")
+    assert result is not None and result.alias == "C3"
+
+
+def test_single_duplicate_business_identity_without_alternative_cannot_run():
+    rows=[row("B1", 100, user="1"*64), row("B2", 100, user="1"*64)]
+    assert pick(rows) is None
+
+
+@pytest.mark.parametrize("invalid", [None, "", "a"*63, "Z"*64, True, {}, 0])
+def test_business_user_identity_is_mandatory_and_well_formed(invalid):
+    assert pick([row("B1", 100, user=invalid)]) is None
+
+
+@pytest.mark.parametrize("invalid", [None, "", "a"*63, "Z"*64, False, []])
+def test_business_workspace_identity_is_mandatory_and_well_formed(invalid):
+    assert pick([row("B1", 100, workspace=invalid)]) is None
+
+
+@pytest.mark.parametrize("tier", [
+    None, "", "business_standard_included", "business_workspace_shared_credits",
+    "personal_pro",
+])
+def test_unproven_business_premium_entitlement_is_ineligible(tier):
+    assert pick([row("B1", 100, entitlement=tier)]) is None
+
+
+def test_workspace_credits_cannot_be_counted_once_per_business_member():
+    rows=[row("B1", 100, entitlement="business_workspace_shared_credits", user="1"*64),
+          row("B2", 100, entitlement="business_workspace_shared_credits", user="2"*64)]
+    assert pick(rows) is None
+
+
+def test_same_person_different_personal_and_business_quota_realms_are_distinct():
+    rows=[row("C2", 78, workspace="c"*64, user="2"*64,
+              entitlement="personal_pro"),
+          row("B2", 100, workspace="a"*64, user="2"*64)]
+    assert pick(rows).alias=="B2"
+
+
+@pytest.mark.parametrize("model", [ASTRA, SOL])
+def test_business_model_must_be_explicitly_qualified_for_request(model):
+    assert pick([row("B1", 80, models=frozenset({model}))],model=model).alias=="B1"
+    other=SOL if model==ASTRA else ASTRA
+    assert pick([row("B1", 80, models=frozenset({other}))],model=model) is None
+
+
+def test_business_selector_never_prefers_model_blind_row():
+    assert pick([row("B1", 100, models=None)]) is None
+    assert select_account([row("B1", 100)],now=NOW) is None
+
+
+@pytest.mark.parametrize("strategy", [
+    "conserve_resets", "single_account_heavy", "timer_priority",
+])
+def test_business_expired_quota_observation_or_lease_cannot_use_sticky(strategy):
+    rows=[row("B2",100,age=11),row("B1",95,active=1,cap=1),
+          row("C1",45,workspace="d"*64,user="4"*64,
+              entitlement="personal_pro")]
+    assert pick(rows,strategy=strategy,sticky="B2").alias=="C1"
+    assert pick([row("B1",100,reset_hours=-1)],strategy=strategy,sticky="B1") is None
+
+
+def test_account_decision_still_never_mints_a_lease_or_grant():
+    result=pick([row("B1",100)])
+    assert result is not None
+    assert result.alias=="B1"
+    assert not hasattr(result,"lease") and not hasattr(result,"provider_home")
+    assert not hasattr(result,"admission_granted")
+
+
+def native_sample(*, workspace="a"*64, user="b"*64,
+                  plan="self_serve_business_prolite", pct=95, age=0):
+    seen=NOW-timedelta(minutes=age)
+    return {
+        "state":"NATIVE_READS_COMPLETED",
+        "api_fallback":False,
+        "stop":{"private_group_empty":True},
+        "home_identity":{
+            "account_id_sha256":workspace,
+            "user_id_sha256":user,
+        },
+        "model_visibility":{
+            "state":"OBSERVED",
+            "supported_models":[ASTRA,SOL],
+            "source":"model/list",
+            "admission_granted":False,
+        },
+        "account":{
+            "observed_at_unix":seen.timestamp(),
+            "auth_state":"MANAGED_CHATGPT_OBSERVED",
+            "capacity_state":"AVAILABLE_OBSERVED",
+            "limit_id":"codex",
+            "plan_type":plan,
+            "window_states":{"primary":"OBSERVED","secondary":"NOT_APPLICABLE"},
+            "windows":{"primary":{
+                "remaining_percent":pct,"used_percent":100-pct,
+                "window_minutes":10080,
+                "resets_at":int((NOW+timedelta(days=7)).timestamp()),
+            }},
+        },
+    }
+
+
+def project(alias, sample, *, entitled=True, binding=True, models=MODELS, cap=1):
+    from codex_pool_policy import project_native_account_observation
+    return project_native_account_observation(
+        alias, sample, now=NOW, binding_verified=binding,
+        entitlement_class=("business_premium_included" if entitled else None)
+            if alias.startswith("B") else "personal_pro",
+        qualified_models=models, active_leases=0, lease_cap=cap,
+    )
+
+
+def test_native_probe_to_selector_separates_two_business_users_same_workspace():
+    b1=project("B1",native_sample(user="1"*64,pct=82))
+    b2=project("B2",native_sample(user="2"*64,pct=93))
+    assert pick([b1,b2]).alias=="B2"
+
+
+def test_native_probe_to_selector_distinct_personal_and_business_realms():
+    c2=project("C2",native_sample(workspace="c"*64,user="2"*64,plan="pro",pct=72))
+    b2=project("B2",native_sample(workspace="a"*64,user="2"*64,pct=96))
+    assert pick([c2,b2]).alias=="B2"
+
+
+@pytest.mark.parametrize("bad", [
+    "bad_cleanup", "fallback", "no_user", "unknown_sibling",
+    "multiple_windows", "plan_wrong", "expired", "identity_invalid",
+    "quota_state_unknown", "models_missing", "models_unknown",
+    "models_wrong_source", "models_unrecognized",
+    "models_admission_forged", "models_duplicate",
+])
+def test_native_probe_projection_fails_closed_for_untrusted_evidence(bad):
+    sample=native_sample()
+    if bad=="bad_cleanup":sample["stop"]["private_group_empty"]=False
+    elif bad=="fallback":sample["api_fallback"]=True
+    elif bad=="no_user":sample["home_identity"].pop("user_id_sha256")
+    elif bad=="unknown_sibling":sample["account"]["window_states"]["secondary"]="UNKNOWN"
+    elif bad=="multiple_windows":
+        sample["account"]["window_states"]["secondary"]="OBSERVED"
+        sample["account"]["windows"]["secondary"]=dict(sample["account"]["windows"]["primary"])
+    elif bad=="plan_wrong":sample["account"]["plan_type"]="pro"
+    elif bad=="expired":sample["account"]["windows"]["primary"]["resets_at"]=int((NOW-timedelta(minutes=1)).timestamp())
+    elif bad=="identity_invalid":sample["home_identity"]["account_id_sha256"]="ZZZ"
+    elif bad=="quota_state_unknown":sample["account"]["capacity_state"]="UNKNOWN"
+    elif bad=="models_missing":sample.pop("model_visibility")
+    elif bad=="models_unknown":sample["model_visibility"]["state"]="UNKNOWN"
+    elif bad=="models_wrong_source":sample["model_visibility"]["source"]="caller"
+    elif bad=="models_unrecognized":sample["model_visibility"]["supported_models"]=["gpt-6-luna"]
+    elif bad=="models_admission_forged":sample["model_visibility"]["admission_granted"]=True
+    elif bad=="models_duplicate":sample["model_visibility"]["supported_models"]=[ASTRA,ASTRA]
+    with pytest.raises(ValueError,match="native_observation"):
+        project("B1",sample)
+
+
+def test_native_projection_has_no_lease_or_reset_credit_authority():
+    raw=native_sample()
+    raw["account"]["reset_credits"]={"state":"COUNT_OBSERVED","available_count":7}
+    result=project("B1",raw,cap=0)
+    assert result.reset_credits is None
+    assert result.lease_cap==0
+    assert pick([result]) is None
+
+
+def test_native_projection_requires_verified_business_premium_seat_type():
+    result=project("B1",native_sample(),entitled=False)
+    assert pick([result]) is None
+
+
+def test_native_projection_requires_explicit_model_at_selection():
+    result=project("B1",native_sample(),models=frozenset({SOL}))
+    assert pick([result],model=ASTRA) is None
+    assert pick([result],model=SOL).alias=="B1"
+
+
+def test_native_personal_projection_maintains_backwards_account_shape():
+    raw=native_sample(workspace="c"*64,user="2"*64,plan="pro",pct=60)
+    raw["home_identity"].pop("user_id_sha256")
+    result=project("C2",raw)
+    assert result.account_id_sha256=="c"*64
+    assert result.user_id_sha256 is None
+    assert pick([result]).alias=="C2"
+
+
+def test_native_provided_catalog_restricts_caller_supplied_model_set():
+    sample=native_sample()
+    sample["model_visibility"]["supported_models"]=[SOL]
+    with pytest.raises(ValueError,match="native_observation"):
+        project("B1",sample,models=frozenset({ASTRA}))
+
+
+def test_native_provided_catalog_can_project_without_caller_model_overrides():
+    sample=native_sample()
+    from codex_pool_policy import project_native_account_observation
+    row=project_native_account_observation(
+        "B1",sample,now=NOW,binding_verified=True,
+        entitlement_class="business_premium_included",
+        qualified_models=None,active_leases=0,lease_cap=1)
+    assert row.qualified_models==frozenset((ASTRA,SOL))
+    assert pick([row],model=ASTRA).alias=="B1"
+
+
+def test_native_model_mismatch_remains_ineligible_even_when_quota_available():
+    sample=native_sample()
+    sample["model_visibility"]["supported_models"]=[SOL]
+    row=project("B1",sample,models=None)
+    assert row.remaining_pct == 95
+    assert pick([row],model=ASTRA) is None
+    assert pick([row],model=SOL).alias=="B1"
+
+
+
+@pytest.mark.parametrize("strategy", [
+    "conserve_resets", "single_account_heavy", "timer_priority",
+])
+def test_two_personal_aliases_cannot_represent_same_workspace_even_if_member_or_tier_differs(strategy):
+    # A duplicate Personal subscription with different supplied entitlements
+    # cannot be treated as two independently metered seats. Business requires
+    # member identity, whereas a Personal subscription is unique per workspace.
+    rows=[
+        row("C1",99,workspace="c"*64,user="1"*64,
+            entitlement="personal_pro"),
+        row("C2",97,workspace="c"*64,user="2"*64,
+            entitlement=None),
+        row("C4",75,workspace="d"*64,user="4"*64,
+            entitlement="personal_pro"),
+    ]
+    selected=pick(rows,strategy=strategy,sticky="C2")
+    assert selected is not None and selected.alias=="C4"
+
+
+def test_same_personal_subscription_without_other_realms_fails_closed():
+    c1=row("C1",95,workspace="c"*64,user=None,entitlement="personal_pro")
+    c2=row("C2",92,workspace="c"*64,user="2"*64,entitlement=None)
+    assert pick([c1,c2]) is None
+
+
+def test_personal_and_business_same_member_distinct_workspace_remain_independent():
+    rows=[
+        row("C2",83,workspace="c"*64,user="2"*64,entitlement=None),
+        row("B2",99,workspace="a"*64,user="2"*64,
+            entitlement="business_premium_included"),
+    ]
+    assert pick(rows).alias=="B2"
+
+
+def test_personal_same_user_two_distinct_subscription_workspaces_are_not_collapsed():
+    rows=[
+        row("C1",88,workspace="a"*64,user="1"*64,entitlement=None),
+        row("C3",92,workspace="c"*64,user="1"*64,entitlement=None),
+    ]
+    assert pick(rows).alias=="C3"
+
+
+@pytest.mark.parametrize("strategy", [
+    "conserve_resets", "single_account_heavy", "timer_priority",
+])
+@pytest.mark.parametrize("invalid", [None, "", "a"*63, "Z"*64, True, {}])
+def test_model_bound_personal_workspace_must_be_verified_even_for_sticky(
+    strategy, invalid,
+):
+    # Direct model-bound selector callers may supply AccountObservation rows.
+    # Never turn a missing/malformed workspace into another paid subscription.
+    ambiguous=row("C2", 100, workspace=invalid, user="2"*64,
+                  entitlement="personal_pro")
+    valid=row("C4", 75, workspace="d"*64, user="4"*64,
+              entitlement="personal_pro")
+    assert pick([ambiguous], strategy=strategy, sticky="C2") is None
+    chosen=pick([ambiguous, valid], strategy=strategy, sticky="C2")
+    assert chosen is not None and chosen.alias == "C4"
+
+
+def test_model_bound_personal_two_distinct_verified_workspaces_remain_eligible():
+    first=row("C1", 90, workspace="1"*64, entitlement="personal_pro")
+    second=row("C2", 80, workspace="2"*64, entitlement="personal_pro")
+    assert pick([first, second]).alias == "C1"
+
+
+@pytest.mark.parametrize("strategy", [
+    "conserve_resets", "single_account_heavy", "timer_priority",
+])
+@pytest.mark.parametrize("alias", ["C1", "B1", "B2"])
+@pytest.mark.parametrize("offered,requested", [
+    (frozenset({"gpt-6-luna"}), "gpt-6-luna"),
+    (frozenset({ASTRA, "gpt-6-luna"}), ASTRA),
+    (frozenset({SOL, "gpt-6.7-forged"}), SOL),
+])
+def test_public_selector_rejects_unapproved_model_catalog_even_if_claimed_qualified(
+    strategy, alias, offered, requested,
+):
+    # Direct callers can construct otherwise valid observations without the
+    # trusted native projector; never let them widen the approved model set.
+    candidate=row(alias, 99, workspace="a"*64, user="1"*64,
+                  entitlement=("personal_pro" if alias.startswith("C")
+                               else "business_premium_included"),
+                  models=offered)
+    assert pick([candidate], strategy=strategy, model=requested,
+                sticky=alias) is None
+
+
+def test_approved_native_models_still_select_with_exact_subject_binding():
+    assert pick([row("B1", 100, models=frozenset({SOL}))], model=SOL).alias == "B1"
+    assert pick([row("C1", 80, entitlement="personal_pro",
+                     models=frozenset({ASTRA}))], model=ASTRA).alias == "C1"

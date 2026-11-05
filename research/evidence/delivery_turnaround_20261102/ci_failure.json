@@ -1,0 +1,12 @@
+{
+  "repository": "mastermindx-market-intelligence/Mastermind",
+  "pr": 1924,
+  "head_sha": "d46299fe0dc7cd87043c96afe55872e95790adf6",
+  "run_id": 41399700873,
+  "job_id": 125129685512,
+  "step": "Run repository test shard",
+  "failure": "step timed out after 45 minutes",
+  "log_sha256": "cb9be71f02089ed3b6afad0fed321024148fe0f0ad30894d18b28fba61b6ec99",
+  "assertion_failure_observed": false,
+  "repair_owner": "incumbent #1616 / #1956; no duplicate or blind rerun"
+}
