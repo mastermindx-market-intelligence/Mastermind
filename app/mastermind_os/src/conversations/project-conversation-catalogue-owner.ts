@@ -1,5 +1,7 @@
 import { decodeProjectConversationCatalogue, decodeProjectConversationRead, validateProjectConversationSelection,
   type ProjectConversationCatalogue } from './project-conversation-catalogue-contract';
+import {decodeFreshConversationCatalogue,decodeFreshConversationReference,decodeFreshConversationWindow,
+  type FreshConversationCatalogue,type FreshConversationReference,type FreshConversationWindow} from './fresh-conversation-reference';
 
 export interface ProjectConversationReadScope { readonly workRef:string; readonly principalScope:string; readonly generation:string; }
 export interface ProjectConversationCatalogueTransport {
@@ -12,6 +14,10 @@ export interface ProjectConversationCatalogueTransport {
   refreshContext?():Promise<void>;
   catalogue(selection:{work_ref:string;cursor?:string},signal:AbortSignal):Promise<unknown>;
   read(selection:ReturnType<typeof validateProjectConversationSelection>,signal:AbortSignal):Promise<unknown>;
+  /** Separate actual S34 READ owner. The identity context's old reply booleans
+   * authorize neither callback. Absence remains a partial source population. */
+  freshReferences?(selection:{work_ref:string},signal:AbortSignal):Promise<unknown>;
+  readFreshReference?(reference:FreshConversationReference,signal:AbortSignal):Promise<unknown>;
 }
 
 /** One selected-project acquisition owner. No effects on mount, no global
@@ -20,15 +26,22 @@ export function createProjectConversationCatalogueOwner(input:{transport:Project
   workRef:()=>string|null;selectionGeneration:()=>string}) {
   const transport=input.transport;
   const methods={context:transport.context,auth:transport.authGeneration,available:transport.available,
-    subscribe:transport.subscribe,refresh:transport.refreshContext,catalogue:transport.catalogue,read:transport.read};
+    subscribe:transport.subscribe,refresh:transport.refreshContext,catalogue:transport.catalogue,read:transport.read,
+    freshReferences:transport.freshReferences,readFreshReference:transport.readFreshReference};
   let retired=false,epoch=0,pageTicket=0;
   let members=new Map<string,ProjectConversationCatalogue['conversations'][number]>();
   let membershipContext:ReturnType<typeof capture>=null;
+  let freshTicket=0,freshContext:ReturnType<typeof capture>=null;
+  let freshMembers=new Map<string,FreshConversationCatalogue['entries'][number]>();
+  let freshReadEpoch=0;
+  let lastFreshRead:{window:FreshConversationWindow;context:NonNullable<ReturnType<typeof capture>>;
+    pageTicket:number;row:FreshConversationCatalogue['entries'][number]}|null=null;
   const pending=new Set<AbortController>(),listeners=new Set<()=>void>();
-  const fail=():never=>{throw new Error('PROJECT_CONVERSATION_UNAVAILABLE');};
+  function fail():never{throw new Error('PROJECT_CONVERSATION_UNAVAILABLE');}
   function sameMethods(){return transport.context===methods.context&&transport.authGeneration===methods.auth&&
     transport.available===methods.available&&transport.subscribe===methods.subscribe&&transport.refreshContext===methods.refresh&&
-    transport.catalogue===methods.catalogue&&transport.read===methods.read;}
+    transport.catalogue===methods.catalogue&&transport.read===methods.read&&
+    transport.freshReferences===methods.freshReferences&&transport.readFreshReference===methods.readFreshReference;}
   function capture(){
     try{
       const context=methods.context.call(transport),auth=methods.auth.call(transport),selection=input.selectionGeneration();
@@ -40,7 +53,9 @@ export function createProjectConversationCatalogueOwner(input:{transport:Project
   function current(captured:ReturnType<typeof capture>){const now=capture();return !!now&&!!captured&&
     now.workRef===captured.workRef&&now.principalScope===captured.principalScope&&now.generation===captured.generation&&
     now.auth===captured.auth&&now.selection===captured.selection&&now.epoch===captured.epoch;}
-  function invalidate(){epoch++;pageTicket++;members.clear();membershipContext=null;for(const c of pending)c.abort();pending.clear();for(const listener of listeners)listener();}
+  function invalidateFreshRead(){freshReadEpoch++;lastFreshRead=null;for(const listener of listeners)listener();}
+  function invalidate(){epoch++;pageTicket++;freshTicket++;members.clear();membershipContext=null;freshMembers.clear();freshContext=null;
+    freshReadEpoch++;lastFreshRead=null;for(const c of pending)c.abort();pending.clear();for(const listener of listeners)listener();}
   const unsubscribe=methods.subscribe.call(transport,invalidate);
   async function bounded<T>(signal:AbortSignal,operation:(signal:AbortSignal)=>Promise<T>){
     if(signal.aborted)fail();const controller=new AbortController();pending.add(controller);
@@ -52,6 +67,10 @@ export function createProjectConversationCatalogueOwner(input:{transport:Project
     context:capture,
     current,
     subscribe(listener:()=>void){listeners.add(listener);return()=>{listeners.delete(listener);};},
+    /** Data-currentness only. Neither an acknowledgement nor a write grant. */
+    currentFresh(window:FreshConversationWindow){const value=lastFreshRead;return !!value&&value.window===window&&
+      current(value.context)&&value.pageTicket===freshTicket&&freshMembers.get(window.reference.root_job_id)===value.row;},
+    invalidateFreshRead,
     async refresh(){
       const work=input.workRef(),selection=input.selectionGeneration(),auth=methods.auth.call(transport);
       invalidate();
@@ -75,6 +94,25 @@ export function createProjectConversationCatalogueOwner(input:{transport:Project
       const value=await bounded(signal,async child=>decodeProjectConversationRead(await methods.read.call(transport,requested,child),
         {workRef:requested.work_ref,conversationRef:requested.conversation_ref,revision:requested.revision,requests:requested.requests}));
       if(!current(captured)||ticket!==pageTicket||members.get(requested.conversation_ref)!==row)fail();return value;
+    },
+    async freshCatalogue(args:{workRef:string;signal:AbortSignal}){
+      const captured=capture(),ticket=++freshTicket;freshMembers.clear();freshContext=null;freshReadEpoch++;lastFreshRead=null;
+      if(!captured||args.workRef!==captured.workRef||!methods.freshReferences||!methods.readFreshReference)fail();
+      const page=await bounded(args.signal,async signal=>decodeFreshConversationCatalogue(
+        await methods.freshReferences!.call(transport,{work_ref:args.workRef},signal),args.workRef));
+      if(ticket!==freshTicket||!current(captured))fail();
+      freshMembers=new Map(page.entries.map(row=>[row.reference.root_job_id,row]));freshContext=captured;return page;
+    },
+    async readFresh(reference:unknown,signal:AbortSignal){
+      const captured=freshContext;
+      if(!captured||!current(captured)||!methods.readFreshReference)fail();
+      const requested=decodeFreshConversationReference(reference,captured.workRef),row=freshMembers.get(requested.root_job_id),ticket=freshTicket;
+      if(!row||JSON.stringify(row.reference)!==JSON.stringify(requested))fail();
+      const readEpoch=++freshReadEpoch;lastFreshRead=null;
+      const result=await bounded(signal,async child=>decodeFreshConversationWindow(
+        await methods.readFreshReference!.call(transport,requested,child),requested));
+      if(!current(captured)||ticket!==freshTicket||readEpoch!==freshReadEpoch||freshMembers.get(requested.root_job_id)!==row||result.initial_message!==row.initial_message)fail();
+      lastFreshRead={window:result,context:captured,pageTicket:ticket,row};return result;
     },
     dispose(){if(retired)return;retired=true;invalidate();unsubscribe();listeners.clear();},
   });
