@@ -30,7 +30,7 @@ from brain import translate
 PINS = {
     "candidate/commission_deadline.py": "fade630ed75c1b93334a5711a6df7a554fbd24ee",
     "candidate/go_shim.py": "97deba9fc1f68458670b16a21cb410575a7466f8",
-    "candidate/lease_broker.py": "ba24989ca437617b69330c0560f6e8adc24c271d",
+    "candidate/lease_broker.py": "9b22048111a2bb3112c65b0abfb57f0870126ed6",
     "candidate/go_lease_gateway.py": "7eb74e2a9a18d3c6a1ad1f51ed198bd0e32bcdeb",
     "candidate/go_lease_capability.py": "13e6b2d43cbb2933512e6e46d27a431e7813af88",
     "candidate/application_http_transports.py": "b0b8404b45dd0a3e73a34430c2ef3a28b1edbf6d",
