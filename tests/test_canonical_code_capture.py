@@ -44,7 +44,7 @@ def test_current_generation_refuses_mutation_after_verified_capture(ready,tmp_pa
     assert _CANONICAL_CODE_CAPTURE not in view._verified_facts
 
 
-@pytest.mark.parametrize('forgery',['foreign_view','foreign_collector','dict','changed_binding'])
+@pytest.mark.parametrize('forgery',['foreign_view','foreign_collector','dict','changed_binding','changed_principal'])
 def test_snapshot_cannot_transfer_to_another_view_collector_or_binding(ready,tmp_path,forgery):
     f=ready;collector=configured(f,tmp_path);capture=collector._capture_canonical_code();view=f.observe()
     collector._bind_canonical_code_capture(capture,view)
@@ -54,6 +54,9 @@ def test_snapshot_cannot_transfer_to_another_view_collector_or_binding(ready,tmp
     elif forgery=='foreign_collector':
         collector=replace_capture_owner(collector,tmp_path/'foreign',f)
     elif forgery=='dict':view._verified_facts[_CANONICAL_CODE_CAPTURE]={'observations':capture.observations}
+    elif forgery=='changed_principal':
+        original=view._operation.principal
+        view._operation.principal=type(original)(original.subject)
     else:collector._runner=lambda *args,**kwargs:None
     with pytest.raises(ValueError):take(collector,view)
 

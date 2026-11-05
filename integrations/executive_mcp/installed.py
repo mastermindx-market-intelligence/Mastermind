@@ -664,6 +664,7 @@ class _CanonicalCodeCapture:
     observations: tuple
     macro_snapshot: _VerifiedRepositorySnapshot
     view: object = None
+    view_identity: tuple | None = None
 
 
 @dataclass(frozen=True)
@@ -2274,13 +2275,14 @@ class InstalledBootPacketCollector:
         from control_plane.project_canonical_data import CanonicalProjectDataView
         if (type(capture) is not _CanonicalCodeCapture or capture.seal is not _CANONICAL_CODE_CAPTURE
                 or capture.owner is not self or capture.binding!=self._canonical_code_capture_binding()
-                or capture.view is not None or type(view) is not CanonicalProjectDataView
+                or capture.view is not None or capture.view_identity is not None
+                or type(view) is not CanonicalProjectDataView
                 or capture.observations[1]!=view.code_commit or capture.macro_snapshot.root!=self._macro_root):
             raise ValueError('CANONICAL_DATA_UNAVAILABLE')
         view._owner._validate_view(view)
         view._owner._permission_guard(view._operation)
         view._verified_facts[_CANONICAL_CODE_CAPTURE]=_CanonicalCodeCapture(capture.seal,self,
-            capture.binding,capture.observations,capture.macro_snapshot,view)
+            capture.binding,capture.observations,capture.macro_snapshot,view,view._owner._view_identity(view))
 
     def _discard_canonical_code_capture(self,view):
         view._verified_facts.pop(_CANONICAL_CODE_CAPTURE,None)
@@ -2292,6 +2294,7 @@ class InstalledBootPacketCollector:
         if capture is None:return None
         if (type(capture) is not _CanonicalCodeCapture or capture.seal is not _CANONICAL_CODE_CAPTURE
                 or capture.owner is not self or capture.view is not view
+                or capture.view_identity!=view._owner._view_identity(view)
                 or capture.binding!=self._canonical_code_capture_binding()
                 or capture.observations[1]!=view.code_commit):
             raise ValueError('CANONICAL_DATA_UNAVAILABLE')
