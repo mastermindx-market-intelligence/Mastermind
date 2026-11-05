@@ -67,6 +67,18 @@ def reserve(case,role='reviewer_1',slot=2):
  return p,hashlib.sha256(canonical(p['binding'])).hexdigest()
 
 
+def test_accepted_memory_public_contract_fixtures_are_byte_exact():
+ manifest=json.loads((FIXTURE/'SOURCE.json').read_bytes())
+ assert manifest['repository']=='mastermindx-market-intelligence/macro'
+ assert manifest['commit']=='a6c07e2d3a6e26076fbeabbce409e135582c9f75'
+ assert set(manifest['files'])=={
+  'engine/research_factory/market_memory_e0_review_metadata_v2.py',
+  'contracts/market_memory/e0_review_metadata.v2.schema.json',
+  'contracts/market_memory/e0_reviewer_plan.v1.schema.json'}
+ for name,item in manifest['files'].items():
+  raw=(FIXTURE/name).read_bytes()
+  assert len(raw)==item['bytes'] and hashlib.sha256(raw).hexdigest()==item['sha256']
+
 def test_unbound_old_child_cannot_be_backfilled_or_read(case):
  o=case['owner'];o.reserve(case['cap']['token'],case['request'])
  with mock.patch.object(fabric_task,'inspect_run',side_effect=AssertionError('must not read original')):
