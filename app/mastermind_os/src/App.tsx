@@ -1,3 +1,4 @@
+import {PlanAdoptionWorkflow} from "./planning/PlanAdoptionWorkflow";
 import { appCopy } from "./app-copy";
 import { ProductAcceptancePanel } from "./product-acceptance/ProductAcceptancePanel";
 import type { AuthState, MissionHost } from "./host";
@@ -4311,6 +4312,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const recordedProjectJournal = projectWorkRef ? <ProjectJournalReader selection={{workRef: projectWorkRef}}
       read={projectReaders.journal} generation={projectReaders.generation?.() ?? "SOURCE_UNAVAILABLE"}
       authGeneration={authRevision} canRead={projectReaders.canRead} locale={locale}/> : null;
+  const planAdoptionHostCurrent = useMemo(() => {
+    const host=retainedResultHost,revision=authRevision;
+    return () => !!host && window.MastermindMissionHost===host && authRevisionRef.current===revision;
+  },[retainedResultHost,authRevision]);
   const projectPlanProps = {selection: projectWorkRef ? {work_ref: projectWorkRef} : null,
     read: projectReaders.plan, sourceGeneration: projectReaders.generation,
     canRead: projectReaders.canRead, locale};
@@ -4644,7 +4649,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         {retainedProjectGoal}
         {programsRefreshControl}
         {!directSelected && projectWorkRef && (catalogueWorkRef || projectTab === "Conversation") ? (
-          <ProjectPlanPanel {...projectPlanProps} renderWorkspace={({objective, panel}) => <ProjectWorkspace headingLevel={1} headingRef={projectHeading} locale={locale}
+          <ProjectPlanPanel {...projectPlanProps} renderWorkspace={({objective, panel, inspection}) => <ProjectWorkspace headingLevel={1} headingRef={projectHeading} locale={locale}
             scopeKey={JSON.stringify([authRevision, projectWorkRef,
               projectConversationActive ? selection?.rootJobId : null, sessionTargetKey])}
             title={currentProjectCards[0].title || projectWorkRef} goal={objective}
@@ -4668,7 +4673,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               </details>
             </> : undefined}
             detailsPanel={<>
-              {panel}{recordedDirection}{projectAdmissionPanel}
+              {panel}{retainedResultHost ? <PlanAdoptionWorkflow workRef={projectWorkRef} inspection={inspection}
+                host={retainedResultHost} isHostCurrent={planAdoptionHostCurrent} locale={locale}/> : null}
+              {recordedDirection}{projectAdmissionPanel}
               {projectDetailsControls.instructions}{projectDetailsControls.access}
               <details className="reason-details"><summary>{locale === "zh-CN" ? "项目历史与来源证据" : "Project history and source evidence"}</summary>
               {projectConversationHistory.panel}
