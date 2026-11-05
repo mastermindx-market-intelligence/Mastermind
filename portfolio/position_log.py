@@ -144,13 +144,15 @@ class LedgerUnavailable(RuntimeError):
 
 
 def _is_lifecycle_entry(entry: Any) -> bool:
-    """A record is readable as a lifecycle entry only if it is a mapping carrying a ticker.
+    """Require a reportable ticker and an explicit Boolean lifecycle state.
 
-    ``ticker`` is the one field every reader dereferences unconditionally (``open_positions`` and
-    ``closed_positions`` both do ``e["ticker"]``), so a record without one cannot be reported at
-    all — and a record that cannot be reported is a record whose ``still_open`` risk is invisible.
+    Missing or non-Boolean ``still_open`` is ambiguous held-risk evidence, not a closed
+    position. Refuse it before readers report a flat book or writers reopen the record
+    and replace its original lifecycle.
     """
-    return isinstance(entry, dict) and bool(str(entry.get("ticker") or "").strip())
+    return (isinstance(entry, dict)
+            and bool(str(entry.get("ticker") or "").strip())
+            and isinstance(entry.get("still_open"), bool))
 
 
 def _read_ledger(path: Path) -> dict[str, Any]:

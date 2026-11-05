@@ -554,3 +554,77 @@ def test_dashboard_trades_read_is_unchanged_on_a_healthy_ledger(dashboard_ledger
 
     assert not data.get("error"), data.get("error")
     assert [row["ticker"] for row in data["open"]] == ["AAA"]
+
+
+@pytest.mark.parametrize("value, present", [
+    (None, False),
+    (None, True),
+    (0, True),
+    (1, True),
+    ("false", True),
+    ("true", True),
+    ("", True),
+    ([], True),
+    ({}, True),
+], ids=["missing", "null", "zero", "one", "false-string", "true-string",
+        "empty-string", "list", "mapping"])
+def test_ambiguous_lifecycle_state_freezes_reads_and_writes(ledger, value, present):
+    """An unreadable open/closed state must never become flat or a new lifecycle."""
+    from portfolio import position_log as pl
+
+    entry = _open_entry("AAA")
+    if present:
+        entry["still_open"] = value
+    else:
+        del entry["still_open"]
+    _seed(ledger, {"conviction:AAA": entry})
+    before = ledger.read_bytes()
+
+    state = pl.status()
+    assert state["state"] == "unavailable"
+    assert state["open_count"] is None
+    assert state["quarantined"] == ["conviction:AAA"]
+    for read in (pl.open_positions, pl.closed_positions,
+                 lambda: pl.get_entry_info("conviction", "AAA")):
+        with pytest.raises(pl.LedgerUnavailable):
+            read()
+        assert ledger.read_bytes() == before
+
+    # The same-ticker update is the original destructive-reopen discriminator.
+    for write in (
+        lambda: pl.update([{"ticker": "AAA", "sleeve": "conviction",
+                           "weight": 0.05, "entry_price": 999.0}], "2026-02-02"),
+        lambda: pl.record_manual("AAA", "conviction", event="open", weight=0.05),
+        lambda: pl.close_position("conviction", "AAA", "2026-02-02"),
+    ):
+        with pytest.raises(pl.LedgerUnavailable):
+            write()
+        assert ledger.read_bytes() == before, "ambiguous lifecycle evidence was overwritten"
+
+
+def test_canonical_boolean_lifecycle_states_remain_readable_and_writable(ledger):
+    """Both Boolean states created by the real writers retain their existing contract."""
+    from portfolio import position_log as pl
+
+    pl.record_manual("AAA", "conviction", event="open", weight=0.05, price=100.0)
+    opened = json.loads(ledger.read_text())["conviction:AAA"]
+    assert opened["still_open"] is True
+    assert pl.status()["state"] == "populated"
+    assert pl.status()["open_count"] == 1
+    assert [row["ticker"] for row in pl.open_positions()] == ["AAA"]
+    assert pl.closed_positions() == []
+
+    pl.close_position("conviction", "AAA", "2026-02-02", reason="manual")
+    closed = json.loads(ledger.read_text())["conviction:AAA"]
+    assert closed["still_open"] is False
+    assert pl.status()["state"] == "populated"
+    assert pl.status()["open_count"] == 0
+    assert pl.open_positions() == []
+    assert [row["ticker"] for row in pl.closed_positions()] == ["AAA"]
+    assert closed["history"][0] == opened["history"][0]
+
+    pl.record_manual("AAA", "conviction", event="open", weight=0.04, price=110.0)
+    reopened = json.loads(ledger.read_text())["conviction:AAA"]
+    assert reopened["still_open"] is True
+    assert reopened["history"][:len(closed["history"])] == closed["history"]
+    assert pl.status()["open_count"] == 1
