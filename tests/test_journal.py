@@ -4,7 +4,7 @@ No LLM, no vendor data. Every test isolates data/journal/ to a tmp dir (monkeypa
 the real journal is never touched. We prove the four sub-tasks of the design (§1):
 
   (a) AUTO-DRAFTS   — deterministic drafting from graded rows; bad→unresolved, good→skipped;
-                      idempotent by draft id; planes_at_entry pulled from a dated market_view.
+                      idempotent by draft id; entry evidence requires a trusted decision-time receipt.
   (b) CONSCIOUS DUTY — pending_for surfaces the last-N bad drafts; complete() records valid
                       lessons, ACCEPTS-and-logs incomplete ones (never rejects), ignores unknowns.
   (c) PINNING       — top-K by grade-weighted recurrence; a pinned rule carries a falsifier and
@@ -70,8 +70,8 @@ def test_draft_missing_rows_is_noop(monkeypatch):
     assert journal.draft_resolutions("autonomous", ASOF, rows=[]) == 0
 
 
-def test_planes_at_entry_from_dated_view(monkeypatch, tmp_path):
-    """The draft records planes_at_entry from that date's market_view artifact when present."""
+def test_date_only_view_does_not_attest_entry_planes(monkeypatch, tmp_path):
+    """A date-only artifact cannot establish which intraday publication a decision saw."""
     mv = tmp_path / "mv"
     mv.mkdir()
     (mv / "2026-07-01.json").write_text(json.dumps({
@@ -80,11 +80,12 @@ def test_planes_at_entry_from_dated_view(monkeypatch, tmp_path):
                    "mtf_signals": {"direction": "risk_on"},
                    "absent_plane": {"direction": None}}}))
     monkeypatch.setattr(journal, "_ROOT", tmp_path, raising=False)
-    # _planes_at_entry reads _ROOT/data/market_view; relink via a data/ dir
+    # Place the legacy artifact where the old date-only lookup would have found it
     (tmp_path / "data").mkdir(exist_ok=True)
     (tmp_path / "data" / "market_view").symlink_to(mv)
     got = journal._planes_at_entry("2026-07-01")
-    assert got == {"risk_radar": "risk_off", "mtf_signals": "risk_on"}   # None-direction dropped
+    # A later same-day file cannot attest the input supplied to an earlier decision.
+    assert got is None
 
 
 # ───────────────────────────── (b) CONSCIOUS DUTY ─────────────────────────────

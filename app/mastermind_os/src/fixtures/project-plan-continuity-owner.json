@@ -1,0 +1,334 @@
+{
+  "provenance": {
+    "producer_revision": "c75a817f5d37bfee920c5587bee228895c900c5f",
+    "owner_revision": "138a2c5cdc391b6319c797d9206bc66faa635cdc",
+    "records": "Synthetic typed records through actual captured Macro owner; not installed/authenticated runtime proof"
+  },
+  "cases": {
+    "available_pending": {
+      "schema": "mastermind.project_plan_continuity.v1",
+      "work_ref": "WS:PLAN-TEST",
+      "adoption": {
+        "state": "AVAILABLE",
+        "decision_ref": "DEC:PLAN-FIRST",
+        "decision_source": {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "agentos/decisions/DEC-PLAN-FIRST.md",
+          "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "content_sha256": "1e8b858fc52986327beb62ec4632f63d3029a7cea876a9c780df0220e07f28cf"
+        },
+        "adoption": {
+          "schema": "agentos.project_plan_adoption.v1",
+          "work_ref": "WS:PLAN-TEST",
+          "adopted_source": {
+            "repository": "mastermindx-market-intelligence/macro",
+            "path": "planning/base.md",
+            "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content_sha256": "c0059c8c00caec3155606af4f273d83ab8d2a3b6a15a1aee73f66449b33908e0"
+          },
+          "predecessor": null,
+          "proposal_source": null,
+          "display_revision": null
+        },
+        "decided_by": "fixture-owner",
+        "decided_at": "2026-11-04",
+        "content": "# Recorded baseline\n"
+      },
+      "proposals": {
+        "state": "AVAILABLE",
+        "items": [
+          {
+            "proposal_source": {
+              "repository": "mastermindx-market-intelligence/macro",
+              "path": "planning/proposal.md",
+              "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "content_sha256": "6e7f0f607d1c3ff0710b3d27df8edea14c687f879b72f8a7d564969bd1189c2b"
+            },
+            "state": "RECORDED_PROPOSAL",
+            "schema": "agentos.project_plan_proposal.v1",
+            "proposal_id": "PLAN-PROPOSAL",
+            "work_ref": "WS:PLAN-TEST",
+            "base_adoption": "DEC:PLAN-FIRST",
+            "base_source": {
+              "repository": "mastermindx-market-intelligence/macro",
+              "path": "planning/base.md",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "content_sha256": "c0059c8c00caec3155606af4f273d83ab8d2a3b6a15a1aee73f66449b33908e0"
+            },
+            "candidate_sha256": "cf279f760c59148dfadfe65be4a879b17d09d0660e6ff703534dc4e4951d4e18",
+            "rationale": "A concrete proposed change.",
+            "evidence": [],
+            "adoption_relation": "UNASSOCIATED_WITH_CURRENT_DECISION",
+            "comparison": {
+              "state": "AVAILABLE",
+              "base_source": {
+                "repository": "mastermindx-market-intelligence/macro",
+                "path": "planning/base.md",
+                "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "content_sha256": "c0059c8c00caec3155606af4f273d83ab8d2a3b6a15a1aee73f66449b33908e0"
+              },
+              "candidate_sha256": "cf279f760c59148dfadfe65be4a879b17d09d0660e6ff703534dc4e4951d4e18",
+              "base_text": "# Recorded baseline\n",
+              "candidate_text": "# Improved candidate\n",
+              "diff": "--- recorded-base\n+++ proposal-candidate\n@@ -1 +1 @@\n-# Recorded baseline\n+# Improved candidate\n",
+              "identical": false,
+              "added_lines": 1,
+              "removed_lines": 1
+            },
+            "comparison_basis": "ADOPTED_CONTENT"
+          }
+        ],
+        "coverage": "CAPTURED_ASSOCIATIONS_ONLY"
+      }
+    },
+    "declared_source_unavailable": {
+      "schema": "mastermind.project_plan_continuity.v1",
+      "work_ref": "WS:PLAN-TEST",
+      "adoption": {
+        "state": "UNAVAILABLE",
+        "reason": "SOURCE_UNAVAILABLE",
+        "declared_decision": {
+          "decision_ref": "DEC:PLAN-FIRST",
+          "decision_source": {
+            "repository": "mastermindx-market-intelligence/macro",
+            "path": "agentos/decisions/DEC-PLAN-FIRST.md",
+            "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "content_sha256": "1e8b858fc52986327beb62ec4632f63d3029a7cea876a9c780df0220e07f28cf"
+          },
+          "adoption": {
+            "schema": "agentos.project_plan_adoption.v1",
+            "work_ref": "WS:PLAN-TEST",
+            "adopted_source": {
+              "repository": "mastermindx-market-intelligence/macro",
+              "path": "planning/base.md",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "content_sha256": "c0059c8c00caec3155606af4f273d83ab8d2a3b6a15a1aee73f66449b33908e0"
+            },
+            "predecessor": null,
+            "proposal_source": null,
+            "display_revision": null
+          },
+          "decided_by": "fixture-owner",
+          "decided_at": "2026-11-04"
+        }
+      },
+      "proposals": {
+        "state": "AVAILABLE",
+        "items": [
+          {
+            "proposal_source": {
+              "repository": "mastermindx-market-intelligence/macro",
+              "path": "planning/proposal.md",
+              "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "content_sha256": "6e7f0f607d1c3ff0710b3d27df8edea14c687f879b72f8a7d564969bd1189c2b"
+            },
+            "state": "RECORDED_PROPOSAL",
+            "schema": "agentos.project_plan_proposal.v1",
+            "proposal_id": "PLAN-PROPOSAL",
+            "work_ref": "WS:PLAN-TEST",
+            "base_adoption": "DEC:PLAN-FIRST",
+            "base_source": {
+              "repository": "mastermindx-market-intelligence/macro",
+              "path": "planning/base.md",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "content_sha256": "c0059c8c00caec3155606af4f273d83ab8d2a3b6a15a1aee73f66449b33908e0"
+            },
+            "candidate_sha256": "cf279f760c59148dfadfe65be4a879b17d09d0660e6ff703534dc4e4951d4e18",
+            "rationale": "A concrete proposed change.",
+            "evidence": [],
+            "adoption_relation": "UNASSOCIATED_WITH_CURRENT_DECISION",
+            "comparison": {
+              "state": "UNAVAILABLE",
+              "reason": "SOURCE_UNAVAILABLE"
+            },
+            "comparison_basis": "DECLARED_ADOPTION_SOURCE"
+          }
+        ],
+        "coverage": "CAPTURED_ASSOCIATIONS_ONLY"
+      }
+    },
+    "recorded_source_only": {
+      "schema": "mastermind.project_plan_continuity.v1",
+      "work_ref": "WS:PLAN-TEST",
+      "adoption": {
+        "state": "UNAVAILABLE",
+        "reason": "NOT_DECLARED"
+      },
+      "proposals": {
+        "state": "AVAILABLE",
+        "items": [
+          {
+            "proposal_source": {
+              "repository": "mastermindx-market-intelligence/macro",
+              "path": "planning/proposal.md",
+              "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "content_sha256": "6b6efbfe09e60a60d43a118425162cb5ffdbec064556b839b57bb7673d2ebd93"
+            },
+            "state": "RECORDED_PROPOSAL",
+            "schema": "agentos.project_plan_proposal.v1",
+            "proposal_id": "PLAN-PROPOSAL",
+            "work_ref": "WS:PLAN-TEST",
+            "base_adoption": null,
+            "base_source": {
+              "repository": "mastermindx-market-intelligence/macro",
+              "path": "planning/base.md",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "content_sha256": "c0059c8c00caec3155606af4f273d83ab8d2a3b6a15a1aee73f66449b33908e0"
+            },
+            "candidate_sha256": "cf279f760c59148dfadfe65be4a879b17d09d0660e6ff703534dc4e4951d4e18",
+            "rationale": "A concrete proposed change.",
+            "evidence": [],
+            "adoption_relation": "UNASSOCIATED_WITH_CURRENT_DECISION",
+            "comparison": {
+              "state": "AVAILABLE",
+              "base_source": {
+                "repository": "mastermindx-market-intelligence/macro",
+                "path": "planning/base.md",
+                "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "content_sha256": "c0059c8c00caec3155606af4f273d83ab8d2a3b6a15a1aee73f66449b33908e0"
+              },
+              "candidate_sha256": "cf279f760c59148dfadfe65be4a879b17d09d0660e6ff703534dc4e4951d4e18",
+              "base_text": "# Recorded baseline\n",
+              "candidate_text": "# Improved candidate\n",
+              "diff": "--- recorded-base\n+++ proposal-candidate\n@@ -1 +1 @@\n-# Recorded baseline\n+# Improved candidate\n",
+              "identical": false,
+              "added_lines": 1,
+              "removed_lines": 1
+            },
+            "comparison_basis": "RECORDED_SOURCE"
+          }
+        ],
+        "coverage": "CAPTURED_ASSOCIATIONS_ONLY"
+      }
+    },
+    "current_references_proposal": {
+      "schema": "mastermind.project_plan_continuity.v1",
+      "work_ref": "WS:PLAN-TEST",
+      "adoption": {
+        "state": "AVAILABLE",
+        "decision_ref": "DEC:PLAN-SECOND",
+        "decision_source": {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "agentos/decisions/DEC-PLAN-SECOND.md",
+          "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "content_sha256": "3a74a13725f5977c1ca7685f152edeb3c7587567cd7bb829f530852944c65cb5"
+        },
+        "adoption": {
+          "schema": "agentos.project_plan_adoption.v1",
+          "work_ref": "WS:PLAN-TEST",
+          "adopted_source": {
+            "repository": "mastermindx-market-intelligence/macro",
+            "path": "planning/adopted.md",
+            "commit": "cccccccccccccccccccccccccccccccccccccccc",
+            "content_sha256": "cf279f760c59148dfadfe65be4a879b17d09d0660e6ff703534dc4e4951d4e18"
+          },
+          "predecessor": "DEC:PLAN-FIRST",
+          "proposal_source": {
+            "repository": "mastermindx-market-intelligence/macro",
+            "path": "planning/proposal.md",
+            "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "content_sha256": "6e7f0f607d1c3ff0710b3d27df8edea14c687f879b72f8a7d564969bd1189c2b"
+          },
+          "display_revision": null
+        },
+        "decided_by": "fixture-owner",
+        "decided_at": "2026-11-04",
+        "content": "# Improved candidate\n"
+      },
+      "proposals": {
+        "state": "AVAILABLE",
+        "items": [
+          {
+            "proposal_source": {
+              "repository": "mastermindx-market-intelligence/macro",
+              "path": "planning/proposal.md",
+              "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "content_sha256": "6e7f0f607d1c3ff0710b3d27df8edea14c687f879b72f8a7d564969bd1189c2b"
+            },
+            "state": "RECORDED_PROPOSAL",
+            "schema": "agentos.project_plan_proposal.v1",
+            "proposal_id": "PLAN-PROPOSAL",
+            "work_ref": "WS:PLAN-TEST",
+            "base_adoption": "DEC:PLAN-FIRST",
+            "base_source": {
+              "repository": "mastermindx-market-intelligence/macro",
+              "path": "planning/base.md",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "content_sha256": "c0059c8c00caec3155606af4f273d83ab8d2a3b6a15a1aee73f66449b33908e0"
+            },
+            "candidate_sha256": "cf279f760c59148dfadfe65be4a879b17d09d0660e6ff703534dc4e4951d4e18",
+            "rationale": "A concrete proposed change.",
+            "evidence": [],
+            "adoption_relation": "CURRENT_DECISION_REFERENCES_PROPOSAL",
+            "comparison": {
+              "state": "AVAILABLE",
+              "base_source": {
+                "repository": "mastermindx-market-intelligence/macro",
+                "path": "planning/base.md",
+                "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "content_sha256": "c0059c8c00caec3155606af4f273d83ab8d2a3b6a15a1aee73f66449b33908e0"
+              },
+              "candidate_sha256": "cf279f760c59148dfadfe65be4a879b17d09d0660e6ff703534dc4e4951d4e18",
+              "base_text": "# Recorded baseline\n",
+              "candidate_text": "# Improved candidate\n",
+              "diff": "--- recorded-base\n+++ proposal-candidate\n@@ -1 +1 @@\n-# Recorded baseline\n+# Improved candidate\n",
+              "identical": false,
+              "added_lines": 1,
+              "removed_lines": 1
+            },
+            "comparison_basis": "RECORDED_PREDECESSOR"
+          }
+        ],
+        "coverage": "CAPTURED_ASSOCIATIONS_ONLY"
+      }
+    },
+    "lineage_invalid": {
+      "schema": "mastermind.project_plan_continuity.v1",
+      "work_ref": "WS:PLAN-TEST",
+      "adoption": {
+        "state": "UNAVAILABLE",
+        "reason": "LINEAGE_INVALID"
+      },
+      "proposals": {
+        "state": "UNAVAILABLE",
+        "reason": "LINEAGE_INVALID",
+        "coverage": "CAPTURED_ASSOCIATIONS_ONLY"
+      }
+    },
+    "no_captured_proposal": {
+      "schema": "mastermind.project_plan_continuity.v1",
+      "work_ref": "WS:PLAN-TEST",
+      "adoption": {
+        "state": "AVAILABLE",
+        "decision_ref": "DEC:PLAN-FIRST",
+        "decision_source": {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "agentos/decisions/DEC-PLAN-FIRST.md",
+          "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "content_sha256": "1e8b858fc52986327beb62ec4632f63d3029a7cea876a9c780df0220e07f28cf"
+        },
+        "adoption": {
+          "schema": "agentos.project_plan_adoption.v1",
+          "work_ref": "WS:PLAN-TEST",
+          "adopted_source": {
+            "repository": "mastermindx-market-intelligence/macro",
+            "path": "planning/base.md",
+            "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content_sha256": "c0059c8c00caec3155606af4f273d83ab8d2a3b6a15a1aee73f66449b33908e0"
+          },
+          "predecessor": null,
+          "proposal_source": null,
+          "display_revision": null
+        },
+        "decided_by": "fixture-owner",
+        "decided_at": "2026-11-04",
+        "content": "# Recorded baseline\n"
+      },
+      "proposals": {
+        "state": "AVAILABLE",
+        "items": [],
+        "coverage": "CAPTURED_ASSOCIATIONS_ONLY"
+      }
+    }
+  }
+}

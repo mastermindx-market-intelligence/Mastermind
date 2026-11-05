@@ -121,6 +121,7 @@ let actualFingerprint = A;
 let currentWindow = 10;
 let active = false;
 let focused = false;
+let composerAvailable = true;
 let activationCount = 0;
 let activatedWindows = [];
 let results = [];
@@ -134,7 +135,7 @@ function probe() {
       schema: "mastermind.web_sol_surface_probe.v1",
       target_present: true, exact_conversation_loaded: true,
       page_responsive: true, document_ready_state: "complete", visibility: "visible",
-      composer_available: true, generation_state: "idle", auth_required: false,
+      composer_available: composerAvailable, generation_state: "idle", auth_required: false,
       provider_error_present: false,
     },
   };
@@ -153,14 +154,14 @@ const chrome = {
     async get(id) { return {id, focused}; },
     async update(id, change) {
       activatedWindows.push(id);
-      focused = scenario !== "false-focus";
+      focused = scenario !== "false-focus" && scenario !== "typed-reentry-false-focus-blocker";
       return {id, focused};
     },
   },
   alarms: {onAlarm: event(), create() {}, async clear() {}},
 };
 const context = vm.createContext({chrome, Date, Map, Set, Number, Array, Object, String,
-  Promise, URL, TextEncoder, crypto: webcrypto, console, setTimeout, clearTimeout,
+  Boolean, RegExp, Promise, URL, TextEncoder, crypto: webcrypto, console, setTimeout, clearTimeout,
   importScripts() {}});
 vm.runInContext(source, context, {filename: "background.js"});
 const request = {
@@ -172,6 +173,12 @@ const request = {
   expires_at: new Date(Date.now() + 30000).toISOString(),
   nonce: "fixture-nonce-0123456789",
 };
+const typedReentry = Object.assign({}, request, {
+  action: "TYPED_REENTRY",
+  operation_id: "e".repeat(64),
+  result_digest: "f".repeat(64),
+  obligation_digest: "1".repeat(64),
+});
 (async () => {
   context.recordProbe(probe(), {tab: {id: 7, windowId: 10}});
   if (scenario === "false-focus") {
@@ -194,6 +201,40 @@ const request = {
     await context.handleNativeRequest(request, port);
     assert.equal(activationCount, 0, "expired foreground performed a browser effect");
     assert.equal(results.at(-1).status, "REQUEST_EXPIRED");
+  } else if (scenario === "typed-reentry-consumed-once") {
+    const first = await context.handleNativeRequest(typedReentry, port);
+    assert.equal(first.status, "CONSUMED");
+    assert.equal(first.conversation_fingerprint, A);
+    const second = await context.handleNativeRequest(typedReentry, port);
+    assert.equal(second.status, "TYPED_REENTRY_BLOCKED");
+    assert.equal(second.conversation_fingerprint, A);
+    assert.equal(activationCount, 1);
+    const documents = results.filter((document) => document.schema === "mastermind.web_sol_surface_receipt.v1");
+    console.log(JSON.stringify(documents));
+  } else if (scenario === "typed-reentry-closed-conversation-blocker") {
+    actualFingerprint = B;
+    const blocked = await context.handleNativeRequest(typedReentry, port);
+    assert.equal(blocked.status, "CONVERSATION_CLOSED");
+    assert.equal(blocked.conversation_fingerprint, A);
+    assert.equal(activationCount, 0);
+    console.log(JSON.stringify(blocked));
+  } else if (scenario === "typed-reentry-composer-unavailable") {
+    composerAvailable = false;
+    const blocked = await context.handleNativeRequest(typedReentry, port);
+    assert.equal(blocked.status, "NOT_CONSUMED");
+    assert.equal(blocked.conversation_fingerprint, A);
+    assert.equal(activationCount, 0);
+    console.log(JSON.stringify(blocked));
+  } else if (scenario === "typed-reentry-false-focus-blocker") {
+    const blocked = await context.handleNativeRequest(typedReentry, port);
+    assert.notEqual(blocked.status, "FOREGROUNDED_VERIFIED");
+    assert.equal(blocked.conversation_fingerprint, A);
+    console.log(JSON.stringify(blocked));
+  } else if (scenario === "typed-reentry-unknown-schema") {
+    const changed = {...typedReentry, extra: "forbidden"};
+    const result = await context.handleNativeRequest(changed, port);
+    assert.equal(result, undefined);
+    assert.equal(results.length, 0);
   } else {
     throw new Error("unknown test scenario");
   }
@@ -203,7 +244,17 @@ const request = {
 
 @pytest.mark.parametrize(
     "scenario",
-    ["false-focus", "moved-window", "route-change", "expired-action"],
+    [
+        "false-focus",
+        "moved-window",
+        "route-change",
+        "expired-action",
+        "typed-reentry-consumed-once",
+        "typed-reentry-closed-conversation-blocker",
+        "typed-reentry-composer-unavailable",
+        "typed-reentry-false-focus-blocker",
+        "typed-reentry-unknown-schema",
+    ],
 )
 def test_actual_extension_reliability_behaviors(scenario):
     node = shutil.which("node")
@@ -222,3 +273,59 @@ def test_actual_extension_reliability_behaviors(scenario):
         check=False,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+DIGEST_FIELDS = ("operation_id", "result_digest", "obligation_digest")
+
+
+def _run_extension_scenario(scenario: str) -> subprocess.CompletedProcess:
+    node = shutil.which("node")
+    assert (
+        node is not None
+    ), "Node is required for real extension behavior tests; do not skip this gate"
+    background = (
+        ROOT
+        / "integrations/chairman_surfaces/web_sol_extension/background.js"
+    )
+    return subprocess.run(
+        [node, "-e", NODE_HARNESS, scenario, str(background)],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+
+def _extension_built_document(scenario: str):
+    completed = _run_extension_scenario(scenario)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    return json.loads(completed.stdout)
+
+
+def test_typed_reentry_extension_receipts_pass_host_validate_receipt():
+    consumed_docs = _extension_built_document("typed-reentry-consumed-once")
+    by_kind = {
+        "CONSUMED": consumed_docs[0],
+        "TYPED_REENTRY_BLOCKED": consumed_docs[1],
+        "CONVERSATION_CLOSED": _extension_built_document(
+            "typed-reentry-closed-conversation-blocker"
+        ),
+        "NOT_CONSUMED": _extension_built_document(
+            "typed-reentry-composer-unavailable"
+        ),
+    }
+    for kind, document in by_kind.items():
+        assert document["status"] == kind
+        accepted = wsp.validate_receipt(document)
+        for field in DIGEST_FIELDS:
+            assert field in accepted
+            assert accepted[field] == document[field]
+
+
+def test_typed_reentry_failed_foreground_receipt_is_host_legal():
+    document = _extension_built_document("typed-reentry-false-focus-blocker")
+    accepted = wsp.validate_receipt(document)
+    assert accepted["status"] in {"TYPED_REENTRY_BLOCKED", "NOT_CONSUMED"}
+    for field in DIGEST_FIELDS:
+        assert field in accepted
+        assert accepted[field] == document[field]

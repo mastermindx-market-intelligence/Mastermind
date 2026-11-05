@@ -1,0 +1,29 @@
+{
+  "at": "2026-10-13T21:38:35.531999+00:00",
+  "state": "INSTALLED_READBACK_VERIFIED",
+  "files": [
+    {
+      "file": "run_observation.py",
+      "before": "1292043bc05fd8e41e40a6f1e2194b80959f934e727fd002e585ef5d6af8a59b",
+      "installed": "7a041b0b1496bd886f0675d75834da6f024c00180f99452664de55d66f3fd4fd",
+      "mode": "0o644"
+    },
+    {
+      "file": "run_observation_delivery.py",
+      "before": "7cd94dd2452862bd32f2c15a028881742845c9325c2a46146cf0ad85b0ee456b",
+      "installed": "479e6c50947f6961c1cb6e50fec0e8390c0eaf824ac455b24c2b06b9d7d33d92",
+      "mode": "0o644"
+    }
+  ],
+  "review": "native_acceptance_adjudication exact-source PASS",
+  "tests": "2 original RED;31 candidate PASS",
+  "adapter_sha256": "bfa5fcdc3df04d76d6c3b0b2dda2dac17ab4539253ec3ffb86fca4e2c4c13207",
+  "controller_sha256": "e2ec7dfe2efa0680b4bf961ac73ce916adf5f1dc90e510f6c8ff6ed50e069deb",
+  "remote_observation_performed": false,
+  "worker_or_lease_mutation": false,
+  "limits": [
+    "One bounded original-parent read only",
+    "No progress or lease-health claim",
+    "No retry, replay, cancellation or acceptance"
+  ]
+}

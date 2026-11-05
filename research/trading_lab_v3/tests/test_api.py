@@ -1,8 +1,11 @@
 import json
+import logging
 import pytest
 from fastapi.testclient import TestClient
 from backend.server import app
 from backend.fixtures import SAMPLE_PLAN
+from backend.preflight import ContractError
+import backend.server as server_module
 
 client=TestClient(app)
 
@@ -51,3 +54,44 @@ def test_api_amount_change_rechecks_economics_without_repeating_thesis_review():
     assert new['preview']['value']=='5045.10'
     changed=client.post('/api/preflight',json={'plan':{**SAMPLE_PLAN,'thesis':'A different mechanism'},'case':'reviewed_example'}).json()
     assert changed['state']=='REVIEW_NEEDED'
+
+
+# Regression for the raw-exception disclosure finding on POST /api/preflight.
+# EXCEPTION_MARKER is a unique synthetic, non-secret stand-in for any internal
+# detail an unexpected exception could carry. The handler must never echo it in
+# the response body, and the repair must not merely move the same text elsewhere.
+EXCEPTION_MARKER='PR566_C1_SYNTHETIC_MARKER_7f3a9c2b'
+
+
+def _raise_marker(exc_type):
+    def _boom(*args,**kwargs):
+        raise exc_type(EXCEPTION_MARKER)
+    return _boom
+
+
+@pytest.mark.parametrize('exc_type',[ContractError, ValueError, TypeError, KeyError])
+def test_preflight_never_discloses_raw_exception_text(monkeypatch,caplog,exc_type):
+    monkeypatch.setattr(server_module,'evaluate',_raise_marker(exc_type))
+    with caplog.at_level(logging.DEBUG):
+        r=client.post('/api/preflight',json={'plan':SAMPLE_PLAN})
+    assert r.status_code==422
+    body=r.json()
+    assert body['error']=='INVALID_INPUT'
+    assert body['execution_authority'] is False
+    assert EXCEPTION_MARKER not in r.text,'raw exception text disclosed in response body: %s' % r.text
+    assert exc_type.__name__ not in r.text,'exception class disclosed in response body: %s' % r.text
+    assert 'Traceback' not in r.text
+    assert EXCEPTION_MARKER not in caplog.text,'raw exception text logged: %s' % caplog.text
+    detail=body.get('detail')
+    assert isinstance(detail,str) and detail
+    assert r.headers['cache-control']=='no-store'
+
+
+def test_preflight_error_response_is_stable_across_caught_exception_classes(monkeypatch):
+    bodies=[]
+    for exc_type in (ContractError, ValueError, TypeError, KeyError):
+        monkeypatch.setattr(server_module,'evaluate',_raise_marker(exc_type))
+        r=client.post('/api/preflight',json={'plan':SAMPLE_PLAN})
+        assert r.status_code==422
+        bodies.append(r.text)
+    assert len(set(bodies))==1,'error response is not stable across exception classes: %r' % (bodies,)

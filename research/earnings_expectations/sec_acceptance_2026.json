@@ -1,0 +1,98 @@
+{
+  "schema": "earnings.sec_acceptance_casebook.research.v1",
+  "as_of": "2026-10-13",
+  "clock_contract": "These are SEC filing-detail ACCEPTED display timestamps, not independently verified first public earnings release timestamps. SEC page does not make timezone explicit in inspected text; do not convert display clocks to UTC without authoritative timezone check.",
+  "first_public_release_clocks_verified": 0,
+  "events": [
+    {
+      "issuer_ref": "CIK:1652044",
+      "ticker_context": "GOOGL/GOOG",
+      "fiscal_target": "2025Q4",
+      "sec_accession": "0001652044-26-000012",
+      "sec_accepted_display": "2026-02-04 16:01:37",
+      "sec_index_url": "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000012/0001652044-26-000012-index.html",
+      "first_publication_utc": null,
+      "first_publication_clock_status": "SEC_ACCEPTANCE_ONLY"
+    },
+    {
+      "issuer_ref": "CIK:1652044",
+      "ticker_context": "GOOGL/GOOG",
+      "fiscal_target": "2026Q1",
+      "sec_accession": "0001652044-26-000043",
+      "sec_accepted_display": "2026-04-29 16:01:35",
+      "sec_index_url": "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000043/0001652044-26-000043-index.html",
+      "first_publication_utc": null,
+      "first_publication_clock_status": "SEC_ACCEPTANCE_ONLY"
+    },
+    {
+      "issuer_ref": "CIK:1652044",
+      "ticker_context": "GOOGL/GOOG",
+      "fiscal_target": "2026Q2",
+      "sec_accession": "0001652044-26-000066",
+      "sec_accepted_display": "2026-07-22 16:01:36",
+      "sec_index_url": "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000066/0001652044-26-000066-index.html",
+      "first_publication_utc": null,
+      "first_publication_clock_status": "SEC_ACCEPTANCE_ONLY"
+    },
+    {
+      "issuer_ref": "CIK:1018724",
+      "ticker_context": "AMZN",
+      "fiscal_target": "2025Q4",
+      "sec_accession": "0001018724-26-000002",
+      "sec_accepted_display": "2026-02-05 16:25:12",
+      "sec_index_url": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000002/0001018724-26-000002-index.html",
+      "first_publication_utc": null,
+      "first_publication_clock_status": "SEC_ACCEPTANCE_ONLY"
+    },
+    {
+      "issuer_ref": "CIK:1018724",
+      "ticker_context": "AMZN",
+      "fiscal_target": "2026Q1",
+      "sec_accession": "0001018724-26-000012",
+      "sec_accepted_display": "2026-04-29 16:18:55",
+      "sec_index_url": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000012/0001018724-26-000012-index.html",
+      "first_publication_utc": null,
+      "first_publication_clock_status": "SEC_ACCEPTANCE_ONLY"
+    },
+    {
+      "issuer_ref": "CIK:1018724",
+      "ticker_context": "AMZN",
+      "fiscal_target": "2026Q2",
+      "sec_accession": "0001018724-26-000024",
+      "sec_accepted_display": "2026-07-30 16:06:23",
+      "sec_index_url": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000024/0001018724-26-000024-index.html",
+      "first_publication_utc": null,
+      "first_publication_clock_status": "SEC_ACCEPTANCE_ONLY"
+    },
+    {
+      "issuer_ref": "CIK:789019",
+      "ticker_context": "MSFT",
+      "fiscal_target": "FY2026Q2",
+      "sec_accession": "0001193125-26-027198",
+      "sec_accepted_display": "2026-01-28 16:04:38",
+      "sec_index_url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526027198/0001193125-26-027198-index.html",
+      "first_publication_utc": null,
+      "first_publication_clock_status": "SEC_ACCEPTANCE_ONLY"
+    },
+    {
+      "issuer_ref": "CIK:789019",
+      "ticker_context": "MSFT",
+      "fiscal_target": "FY2026Q3",
+      "sec_accession": "0001193125-26-191457",
+      "sec_accepted_display": "2026-04-29 16:03:31",
+      "sec_index_url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526191457/0001193125-26-191457-index.html",
+      "first_publication_utc": null,
+      "first_publication_clock_status": "SEC_ACCEPTANCE_ONLY"
+    },
+    {
+      "issuer_ref": "CIK:789019",
+      "ticker_context": "MSFT",
+      "fiscal_target": "FY2026Q4",
+      "sec_accession": "0001193125-26-323632",
+      "sec_accepted_display": "2026-07-29 16:04:53",
+      "sec_index_url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526323632/0001193125-26-323632-index.html",
+      "first_publication_utc": null,
+      "first_publication_clock_status": "SEC_ACCEPTANCE_ONLY"
+    }
+  ]
+}

@@ -20,6 +20,9 @@ from typing import Any, Callable, Sequence
 
 
 _SCRIPT_DIRECTORY = Path(__file__).resolve().parent
+_RELEASE_ROOT = _SCRIPT_DIRECTORY.parents[1]
+if os.fspath(_RELEASE_ROOT) not in sys.path:
+    sys.path.insert(0, os.fspath(_RELEASE_ROOT))
 if __package__ in {None, ""} and str(_SCRIPT_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIRECTORY))
 
@@ -49,11 +52,20 @@ STATUS_FIELDS = frozenset(
 _SAFE_REFUSAL = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
+class WorkerStatusVisibilityError(RuntimeError):
+    """A protected slot cannot be inspected; absence was NOT established."""
+
+
 def _lstat_present(path: Path) -> bool:
     try:
         path.lstat()
-    except OSError:
+    except FileNotFoundError:
         return False
+    except OSError:
+        # EACCES, EPERM, ENOTDIR and other observation errors are NOT
+        # evidence that an Executive credential/home is missing. Never leak
+        # the underlying protected path or error message through this CLI.
+        raise WorkerStatusVisibilityError("worker_slot_visibility_unavailable") from None
     return True
 
 
@@ -86,13 +98,19 @@ def _credential_metadata_valid(
     return True
 
 
-def _receipt_metadata_valid(path: Path) -> bool:
+def _receipt_metadata_valid(
+    path: Path, *, workspace_binding_class: str, worker_gid: int
+) -> bool:
     try:
+        expected_uid, expected_gid, expected_mode = readiness.receipt_storage_contract(
+            workspace_binding_class=workspace_binding_class,
+            worker_gid=worker_gid,
+        )
         readiness.lstat_identity(
             path,
-            expected_uid=0,
-            expected_gid=0,
-            expected_mode=0o400,
+            expected_uid=expected_uid,
+            expected_gid=expected_gid,
+            expected_mode=expected_mode,
             require_nonempty=True,
         )
     except (OSError, readiness.ReadinessError):
@@ -137,7 +155,9 @@ def inspect_slot(
         slot.auth_path, worker_uid=slot.worker_uid, worker_gid=slot.worker_gid
     )
     receipt_valid = receipt_present and _receipt_metadata_valid(
-        slot.readiness_receipt
+        slot.readiness_receipt,
+        workspace_binding_class=slot.workspace_binding_class,
+        worker_gid=slot.worker_gid,
     )
 
     readiness_state = "not_ready"
@@ -209,8 +229,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.slot_id is not None
         else worker_slots.all_slots()
     )
+    try:
+        observations = [inspect_slot(slot) for slot in slots]
+    except WorkerStatusVisibilityError:
+        # Never emit a partial roster or pretend an unreadable root-owned
+        # realm is absent. The caller must use authorized root inspection.
+        print("worker_slot_visibility_unavailable", file=sys.stderr)
+        return 2
     json.dump(
-        [inspect_slot(slot) for slot in slots],
+        observations,
         sys.stdout,
         sort_keys=True,
         separators=(",", ":"),

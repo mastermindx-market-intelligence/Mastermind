@@ -1,0 +1,15 @@
+{
+  "name": "mastermind-executive",
+  "version": "0.2.0",
+  "description": "Mastermind Executive OS context and role-correct COO orchestration workflow for Claude/Fable using the existing authenticated Executive COO edge.",
+  "author": {
+    "name": "MastermindX"
+  },
+  "repository": "https://github.com/mastermindx-market-intelligence/Mastermind",
+  "keywords": [
+    "mastermind",
+    "executive-os",
+    "orchestration",
+    "coo"
+  ]
+}

@@ -7,7 +7,9 @@ import os
 import plistlib
 import stat
 import subprocess
+import sys
 from dataclasses import dataclass
+from unittest import mock
 
 import pytest
 
@@ -19,6 +21,11 @@ TREE = "b" * 40
 
 def subject():
     return importlib.import_module(MODULE)
+
+
+@pytest.fixture(autouse=True)
+def installed_filesystem_acl_observer(monkeypatch):
+    monkeypatch.setattr(subject(), "has_macos_acl", lambda _path: False)
 
 
 def snapshot(**changes):
@@ -74,6 +81,21 @@ def test_canonical_receipt_is_finite_sorted_compact_utf8_with_one_newline():
         with pytest.raises(module.PreimageRefusal) as error:
             module.canonical_receipt({"value": nonfinite})
         assert error.value.code == "NONFINITE_RECEIPT"
+
+
+def test_legacy_and_durable_agent_socket_share_pinned_identity_contract():
+    module = subject()
+    legacy = module._metadata_contract("/var/run/mastermind-agent-relay/agent-relay.sock")
+    durable = module._metadata_contract("/var/db/mastermind-agent-relay/socket/agent-relay.sock")
+    assert legacy == durable == {
+        "type": "socket",
+        "uid": 457,
+        "gid": 457,
+        "mode": 0o660,
+        "required_mode": 0,
+        "forbidden_mode": 0,
+        "link_count": None,
+    }
 
 
 def test_public_contract_enums_are_closed():
@@ -156,11 +178,17 @@ def test_command_adapter_has_exact_allowlist_and_nonmutating_subprocess_contract
 
     def runner(argv, **kwargs):
         calls.append((tuple(argv), kwargs))
+        if tuple(argv)[:3] == ("/usr/bin/stat", "-f", "%Sp"):
+            return Completed(stdout=b"srw-rw---- \n")
         return Completed(stdout=b"disabled services = {\n}\n")
 
     adapter = module.CommandAdapter(runner=runner)
     result = adapter.run(("/bin/launchctl", "print-disabled", "system"))
     assert result == {"status": "ok", "stdout": "disabled services = {\n}\n"}
+    socket_result = adapter.run(
+        ("/usr/bin/stat", "-f", "%Sp", module.SOCKET_METADATA_PATHS[0])
+    )
+    assert socket_result == {"status": "ok", "stdout": "srw-rw---- \n"}
     argv, kwargs = calls[0]
     assert argv == ("/bin/launchctl", "print-disabled", "system")
     assert kwargs == {
@@ -178,12 +206,13 @@ def test_command_adapter_has_exact_allowlist_and_nonmutating_subprocess_contract
         ("/bin/launchctl", "kickstart", "system/com.mastermind.executive.control"),
         ("/bin/ps", "aux"),
         ("/usr/bin/stat", "-f", "%Sp", "/tmp/not-frozen"),
+        ("/usr/bin/stat", "-f", "%Sp", module.CONTROL_CONFIG),
     )
     for argv in forbidden:
         with pytest.raises(module.PreimageRefusal) as error:
             adapter.run(argv)
         assert error.value.code == "COMMAND_REFUSED"
-    assert len(calls) == 1
+    assert len(calls) == 2
 
 
 @pytest.mark.parametrize(
@@ -261,6 +290,68 @@ def test_launchd_and_process_parsers_are_closed_and_reject_ambiguity():
         assert error.value.code == "MALFORMED_PROCESS"
 
 
+def test_launchd_parser_uses_service_fields_not_nested_coalition_fields():
+    output = """system/com.mastermind.executive.control = {
+    state = running
+    pid = 412
+    program = /Library/Application Support/Executive/python
+    arguments = {
+        /Library/Application Support/Executive/python
+        -I
+    }
+    resource coalition = {
+        state = active
+        pid = 999
+        program = /foreign/python
+        arguments = {
+            /foreign/python
+        }
+    }
+    jetsam coalition = {
+        state = active
+    }
+}
+"""
+    assert subject().parse_launchd_state(
+        output,
+        expected_program="/Library/Application Support/Executive/python",
+        expected_arguments=["/Library/Application Support/Executive/python", "-I"],
+    ) == {
+        "active": True, "pid": 412, "state": "running",
+        "program_matches": True, "arguments_match": True,
+    }
+
+
+@pytest.mark.parametrize("body", [
+    "state = running\npid = 1\nstate = running\n",
+    "state = running\npid = 1\npid = 2\n",
+    "nested = {\nstate = running\npid = 1\n}\n",
+    "state = running\nnested = {\npid = 1\n}\n",
+    "state = running\npid = 1\nnested = {\n",
+    "state = running\npid = 1\n}\n",
+])
+def test_launchd_parser_rejects_ambiguous_or_unbalanced_service_body(body):
+    module = subject()
+    with pytest.raises(module.PreimageUnsettled) as error:
+        module.parse_launchd_state("system/service = {\n" + body + "}\n")
+    assert error.value.code == "MALFORMED_LAUNCHD"
+
+
+@pytest.mark.parametrize("fields", [
+    "nested = {\nprogram = /python\narguments = {\n/python\n}\n}\n",
+    "program = /python\nprogram = /python\narguments = {\n/python\n}\n",
+    "program = /python\narguments = {\n/python\n}\narguments = {\n/python\n}\n",
+])
+def test_launchd_parser_requires_unique_top_level_program_and_arguments(fields):
+    module = subject()
+    with pytest.raises(module.PreimageUnsettled) as error:
+        module.parse_launchd_state(
+            "state = running\npid = 1\n" + fields,
+            expected_program="/python", expected_arguments=["/python"],
+        )
+    assert error.value.code == "MALFORMED_LAUNCHD"
+
+
 def test_metadata_projection_contains_no_content_or_hash():
     module = subject()
     info = os.stat_result((stat.S_IFREG | 0o400, 2, 3, 1, 450, 450, 99, 1, 2, 3))
@@ -330,6 +421,25 @@ def test_cli_refuses_arguments_platform_and_euid_before_collection(monkeypatch, 
     assert module.main(args, _platform="darwin", _euid=501) == 64
     assert capsysbinary.readouterr().out == b""
     assert called is False
+
+
+def test_isolated_cli_describe_bootstraps_repository_import_path():
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script = os.path.join(repo_root, "ops", "executive_os", "c1_private_preimage.py")
+    completed = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", script, "--describe"],
+        cwd="/",
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    described = json.loads(completed.stdout)
+    assert described["schema"] == "mastermind.c1_private_preimage/v1"
+    assert described["mutation_count"] == 0
 
 
 def test_describe_is_static_and_does_not_collect(monkeypatch, capsysbinary):
@@ -479,16 +589,77 @@ def test_acl_marker_requires_stable_identity_and_closed_marker():
             return dict(metadata)
 
     class Commands:
-        def __init__(self, marker):
-            self.marker = marker
+        calls = []
 
         def run(self, _argv):
+            self.calls.append(tuple(_argv))
+            return {"status": "ok", "stdout": ""}
+
+    with mock.patch.object(
+        module, "has_macos_acl", return_value=False
+    ) as observer:
+        assert module.inspect_acl(FS(), Commands(), module.CONTROL_CONFIG) is False
+    with mock.patch.object(
+        module, "has_macos_acl", return_value=True
+    ) as observer:
+        assert module.inspect_acl(FS(), Commands(), module.CONTROL_CONFIG) is True
+    observer.assert_called_once_with(module.CONTROL_CONFIG)
+    assert Commands.calls == [("/usr/bin/true",), ("/usr/bin/true",)]
+    with pytest.raises(module.PreimageUnsettled) as error:
+        with mock.patch.object(
+            module,
+            "has_macos_acl",
+            side_effect=module.FilesystemSecurityError("observer fixture"),
+        ):
+            module.inspect_acl(FS(), Commands(), module.CONTROL_CONFIG)
+    assert error.value.code == "ACL_UNKNOWN"
+
+
+def test_socket_acl_uses_bounded_stat_marker_and_never_file_acl_observer():
+    module = subject()
+    path = module.SOCKET_METADATA_PATHS[0]
+    metadata = {
+        "path": path,
+        "exists": True,
+        "type": "socket",
+        "device": 4,
+        "inode": 9,
+    }
+
+    class FS:
+        def metadata(self, observed_path):
+            assert observed_path == path
+            return dict(metadata)
+
+    class Commands:
+        def __init__(self, marker):
+            self.marker = marker
+            self.calls = []
+
+        def run(self, argv):
+            self.calls.append(tuple(argv))
             return {"status": "ok", "stdout": self.marker}
 
-    assert module.inspect_acl(FS(), Commands("-rw-r--r-- \n"), module.CONTROL_CONFIG) is False
-    assert module.inspect_acl(FS(), Commands("-rw-r--r--+\n"), module.CONTROL_CONFIG) is True
+    no_acl = Commands("srw-rw---- \n")
+    with mock.patch.object(
+        module,
+        "has_macos_acl",
+        side_effect=AssertionError("socket path must not use file ACL observer"),
+    ):
+        assert module.inspect_acl(FS(), no_acl, path) is False
+    assert no_acl.calls == [("/usr/bin/stat", "-f", "%Sp", path)]
+
+    with_acl = Commands("srw-rw----+\n")
+    with mock.patch.object(
+        module,
+        "has_macos_acl",
+        side_effect=AssertionError("socket path must not use file ACL observer"),
+    ):
+        assert module.inspect_acl(FS(), with_acl, path) is True
+
+    malformed = Commands("not-a-mode\n")
     with pytest.raises(module.PreimageUnsettled) as error:
-        module.inspect_acl(FS(), Commands("unknown\n"), module.CONTROL_CONFIG)
+        module.inspect_acl(FS(), malformed, path)
     assert error.value.code == "ACL_UNKNOWN"
 
 
@@ -601,7 +772,7 @@ def test_loaded_program_expectation_covers_every_frozen_label():
     } == expected
 
 
-def test_disabled_state_parser_requires_one_closed_boolean_per_frozen_label():
+def test_disabled_state_parser_preserves_legacy_boolean_values():
     module = subject()
     lines = ["disabled services = {"]
     for index, label in enumerate(module.LABELS):
@@ -612,9 +783,104 @@ def test_disabled_state_parser_requires_one_closed_boolean_per_frozen_label():
     assert set(parsed) == set(module.LABELS)
     assert parsed[module.LABELS[0]] is False
     with pytest.raises(module.PreimageUnsettled):
-        module.parse_disabled_state("disabled services = {\n}\n")
-    with pytest.raises(module.PreimageUnsettled):
         module.parse_disabled_state("\n".join(lines + [f'"{module.LABELS[0]}" => true']) + "\n")
+
+
+def test_disabled_state_parser_accepts_native_macos_words_and_ignores_other_services():
+    module = subject()
+    output = '''
+    disabled services = {
+        "com.mastermind.executive.control" => disabled
+        "com.mastermind.executive.worker.codex" => enabled
+        "com.mastermind.executive.worker.codex-pro-01" => disabled
+        "com.apple.example" => enabled
+    }
+'''
+    observed = module.parse_disabled_state(output)
+    assert set(observed) == set(module.LABELS)
+    assert observed[module.LABELS[0]] is True
+    assert observed[module.LABELS[1]] is False
+    assert all(observed[label] is None for label in module.LABELS[2:])
+
+
+def test_disabled_state_parser_keeps_absent_overrides_unknown():
+    module = subject()
+    assert module.parse_disabled_state("disabled services = {\n}\n") == {
+        label: None for label in module.LABELS
+    }
+
+
+@pytest.mark.parametrize("output", [
+    "",
+    "unrelated = {\n}\n",
+    "disabled services = {\n",
+    'disabled services = {\n"com.mastermind.executive.control" => maybe\n}\n',
+    'disabled services = {\n"com.mastermind.executive.control" => disabled\n'
+    '"com.mastermind.executive.control" => true\n}\n',
+    'disabled services = {\n"com.mastermind.executive.control" => disabled\n}\nextra',
+])
+def test_disabled_state_parser_refuses_malformed_or_duplicate_state(output):
+    module = subject()
+    with pytest.raises(module.PreimageUnsettled) as error:
+        module.parse_disabled_state(output)
+    assert error.value.code == "MALFORMED_LAUNCHD"
+
+
+@pytest.mark.parametrize("document", ["worker", "attestation"])
+def test_installed_codex_document_uses_the_installer_destination(document):
+    module = subject()
+    filesystem = InstalledFilesystem(module)
+    path = module.WORKER_CONFIG if document == "worker" else module.CODEX_ATTESTATION
+    value = json.loads(filesystem.payloads[path])
+    field = "codex_binary" if document == "worker" else "path"
+    value[field] = "/Library/Application Support/MastermindExecutive/bin/codex-0.159.2"
+    _, observed = module.parse_content_document(
+        path, json.dumps(value).encode(), manifest_path=filesystem.manifest_path,
+        expected_release_sha=SHA, expected_tree_sha=TREE,
+    )
+    assert observed[field] == value[field]
+
+
+@pytest.mark.parametrize("document", ["worker", "attestation"])
+@pytest.mark.parametrize("wrong_binary", [
+    "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/"
+    "@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+    "/Library/Application Support/MastermindExecutive/bin/codex-0.146.0",
+])
+def test_codex_document_rejects_source_or_wrong_version_binary(document, wrong_binary):
+    module = subject()
+    filesystem = InstalledFilesystem(module)
+    path = module.WORKER_CONFIG if document == "worker" else module.CODEX_ATTESTATION
+    value = json.loads(filesystem.payloads[path])
+    value["codex_binary" if document == "worker" else "path"] = wrong_binary
+    with pytest.raises(module.PreimageRefusal) as error:
+        module.parse_content_document(
+            path, json.dumps(value).encode(), manifest_path=filesystem.manifest_path,
+            expected_release_sha=SHA, expected_tree_sha=TREE,
+        )
+    assert error.value.code == "MALFORMED_TRUSTED_DOCUMENT"
+
+
+def test_missing_disable_overrides_return_facts_without_admitting_installation():
+    module = subject()
+
+    class MissingOverrides(InstalledCommands):
+        def run(self, argv):
+            if tuple(argv) == ("/bin/launchctl", "print-disabled", "system"):
+                return {"status": "ok", "stdout": "disabled services = {\n}\n"}
+            return super().run(argv)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA, expected_tree_sha=TREE,
+        filesystem=InstalledFilesystem(module), commands=MissingOverrides(),
+        principals=InstalledPrincipals(), clock=lambda: "2026-09-13T19:18:27+00:00",
+        platform="darwin", uid=0, euid=0,
+    )
+    assert receipt["state"] == "FACTS"
+    assert receipt["classification"] == "EFFECT_UNKNOWN"
+    assert receipt["facts"]["documents"]
+    assert all(service["disabled"] is None for service in receipt["facts"]["services"])
+    assert receipt["mutation_count"] == 0
 
 
 class InstalledFilesystem:
@@ -666,7 +932,7 @@ class InstalledFilesystem:
                     "-B",
                     f"{release_root}/scripts/slack_agent_dialogue_service.py",
                     "--socket-path",
-                    "/var/run/mastermind-agent-relay/agent-relay.sock",
+                    "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
                     "--token-file",
                     f"{module.SYSTEM_ROOT}/config/agent-relay.token",
                     "--workspace-id",
@@ -752,8 +1018,11 @@ class InstalledCommands:
     def run(self, argv):
         module = subject()
         command = tuple(argv)
+        if command == ("/usr/bin/true",):
+            return {"status": "ok", "stdout": ""}
         if command[:3] == ("/usr/bin/stat", "-f", "%Sp"):
-            return {"status": "ok", "stdout": "-r--r----- \n"}
+            assert command[3] in module.SOCKET_METADATA_PATHS
+            return {"status": "ok", "stdout": "srw-rw---- \n"}
         if command == ("/bin/launchctl", "print-disabled", "system"):
             entries = "".join(f'    "{label}" => true\n' for label in module.LABELS)
             return {"status": "ok", "stdout": f"disabled services = {{\n{entries}}}\n"}
@@ -993,6 +1262,273 @@ def test_collect_coherent_older_documents_without_expected_manifest_is_stale():
     assert missing_principals["classification"] == "EFFECT_UNKNOWN"
 
 
+def _stale_prepared_only_agent_relay_fixture(module):
+    stale_sha = "d" * 40
+    filesystem = InstalledFilesystem(module)
+    control = json.loads(filesystem.payloads[module.CONTROL_CONFIG])
+    control.update(
+        {
+            "proof_base_sha": stale_sha,
+            "proof_source_repository": (
+                f"{module.RUNTIME_ROOT}/control/admin-checkout/{stale_sha}"
+            ),
+        }
+    )
+    filesystem.payloads[module.CONTROL_CONFIG] = json.dumps(control).encode()
+
+    stale_root = f"{module.SYSTEM_ROOT}/releases/{stale_sha}"
+    agent_label = "com.mastermind.executive.agent-relay"
+    agent_plist = module.PLISTS[module.LABELS.index(agent_label)]
+    for label, path in zip(module.LABELS, module.PLISTS, strict=True):
+        if label == agent_label:
+            continue
+        value = plistlib.loads(filesystem.payloads[path])
+        value["WorkingDirectory"] = stale_root
+        value["ProgramArguments"] = module.expected_program_arguments(label, stale_sha)
+        filesystem.payloads[path] = plistlib.dumps(value)
+
+    filesystem.payloads.pop(agent_plist)
+    filesystem.present.remove(agent_plist)
+    filesystem.payloads.pop(filesystem.manifest_path)
+    filesystem.present.remove(filesystem.manifest_path)
+    filesystem.present.remove(f"{module.SYSTEM_ROOT}/releases/{SHA}")
+    return filesystem
+
+
+def test_missing_agent_relay_plist_requires_explicit_prepared_only_evidence():
+    module = subject()
+    documents = module.expected_document_fixture(SHA, TREE)
+    agent_plist = module.PLISTS[
+        module.LABELS.index("com.mastermind.executive.agent-relay")
+    ]
+    documents.pop(agent_plist)
+
+    default = module.evaluate_installation(documents, SHA, TREE)
+    assert default["effect_unknown"] is True
+    assert default["matching_installation"] is False
+
+    prepared = module.evaluate_installation(
+        documents, SHA, TREE, agent_relay_prepared_only=True
+    )
+    assert prepared["effect_unknown"] is False
+    assert prepared["matching_installation"] is True
+
+
+@pytest.mark.parametrize("explicitly_disabled", [False, True])
+def test_collect_stale_exec_accepts_inert_prepared_only_agent_relay(explicitly_disabled):
+    module = subject()
+    filesystem = _stale_prepared_only_agent_relay_fixture(module)
+
+    class PreparedOnlyCommands(InstalledCommands):
+        def run(self, argv):
+            if tuple(argv) == ("/bin/launchctl", "print-disabled", "system"):
+                entries = "".join(
+                    f'    "{label}" => true\n'
+                    for label in module.LABELS
+                    if explicitly_disabled or label != "com.mastermind.executive.agent-relay"
+                )
+                return {
+                    "status": "ok",
+                    "stdout": f"disabled services = {{\n{entries}}}\n",
+                }
+            return super().run(argv)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=PreparedOnlyCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-18T23:45:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["state"] == "FACTS"
+    assert receipt["classification"] == "STALE_STOPPED"
+    agent = next(
+        service
+        for service in receipt["facts"]["services"]
+        if service["label"] == "com.mastermind.executive.agent-relay"
+    )
+    assert agent["loaded"] is False
+    assert agent["disabled"] is (True if explicitly_disabled else None)
+    assert receipt["mutation_count"] == 0
+
+
+def test_prepared_only_agent_relay_explicitly_enabled_remains_effect_unknown():
+    module = subject()
+    filesystem = _stale_prepared_only_agent_relay_fixture(module)
+
+    class EnabledRelayCommands(InstalledCommands):
+        def run(self, argv):
+            if tuple(argv) == ("/bin/launchctl", "print-disabled", "system"):
+                entries = "".join(
+                    f'    "{label}" => {"false" if label == "com.mastermind.executive.agent-relay" else "true"}\n'
+                    for label in module.LABELS
+                )
+                return {
+                    "status": "ok",
+                    "stdout": f"disabled services = {{\n{entries}}}\n",
+                }
+            return super().run(argv)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=EnabledRelayCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-18T23:45:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["classification"] == "EFFECT_UNKNOWN"
+    assert receipt["mutation_count"] == 0
+
+
+def _stale_core_with_enrolled_sol_state_relay_fixture(module):
+    filesystem = _stale_prepared_only_agent_relay_fixture(module)
+    relay_sha = "c" * 40
+    relay_label = "com.mastermind.executive.sol-state-relay"
+    relay_path = module.PLISTS[module.LABELS.index(relay_label)]
+    value = plistlib.loads(filesystem.payloads[relay_path])
+    relay_root = f"{module.SYSTEM_ROOT}/releases/{relay_sha}"
+    value["WorkingDirectory"] = relay_root
+    value["ProgramArguments"] = module.expected_program_arguments(
+        relay_label, relay_sha
+    )
+    filesystem.payloads[relay_path] = plistlib.dumps(value)
+
+    relay_config = f"{module.SYSTEM_ROOT}/config/sol-state-relay.json"
+    relay_token = f"{module.SYSTEM_ROOT}/config/sol-state-relay.token"
+    filesystem.present.update({relay_config, relay_token})
+    filesystem.metadata_overrides[relay_config] = metadata_fixture(
+        uid=0, gid=452, mode=0o440
+    )
+    filesystem.metadata_overrides[relay_token] = metadata_fixture(
+        uid=452, gid=452, mode=0o400
+    )
+    return filesystem
+
+
+def test_stale_enrolled_sol_state_relay_allows_coherent_stopped_core():
+    module = subject()
+    filesystem = _stale_core_with_enrolled_sol_state_relay_fixture(module)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=InstalledCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-19T03:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+
+    assert receipt["state"] == "FACTS"
+    assert receipt["classification"] == "STALE_STOPPED"
+    relay = next(
+        service
+        for service in receipt["facts"]["services"]
+        if service["label"] == "com.mastermind.executive.sol-state-relay"
+    )
+    assert relay["active"] is False
+    assert relay["loaded"] is False
+    assert relay["disabled"] is True
+    assert receipt["mutation_count"] == 0
+
+
+def test_stale_sol_state_relay_explicitly_enabled_remains_effect_unknown():
+    module = subject()
+    filesystem = _stale_core_with_enrolled_sol_state_relay_fixture(module)
+
+    class EnabledSolStateRelay(InstalledCommands):
+        def run(self, argv):
+            if tuple(argv) == ("/bin/launchctl", "print-disabled", "system"):
+                entries = "".join(
+                    f'    "{label}" => {"false" if label == "com.mastermind.executive.sol-state-relay" else "true"}\n'
+                    for label in module.LABELS
+                )
+                return {
+                    "status": "ok",
+                    "stdout": f"disabled services = {{\n{entries}}}\n",
+                }
+            return super().run(argv)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=EnabledSolStateRelay(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-19T03:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["classification"] == "EFFECT_UNKNOWN"
+    assert receipt["mutation_count"] == 0
+
+
+@pytest.mark.parametrize("missing", ("config", "token"))
+def test_stale_sol_state_relay_requires_complete_enrollment_metadata(missing):
+    module = subject()
+    filesystem = _stale_core_with_enrolled_sol_state_relay_fixture(module)
+    path = (
+        f"{module.SYSTEM_ROOT}/config/sol-state-relay.json"
+        if missing == "config"
+        else f"{module.SYSTEM_ROOT}/config/sol-state-relay.token"
+    )
+    filesystem.present.remove(path)
+    filesystem.metadata_overrides.pop(path, None)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=InstalledCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-19T03:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["classification"] == "EFFECT_UNKNOWN"
+    assert receipt["mutation_count"] == 0
+
+
+def test_stale_sol_state_relay_does_not_hide_a_mixed_core_generation():
+    module = subject()
+    filesystem = _stale_core_with_enrolled_sol_state_relay_fixture(module)
+    worker_label = "com.mastermind.executive.worker.codex"
+    worker_path = module.PLISTS[module.LABELS.index(worker_label)]
+    value = plistlib.loads(filesystem.payloads[worker_path])
+    foreign_sha = "b" * 40
+    value["WorkingDirectory"] = f"{module.SYSTEM_ROOT}/releases/{foreign_sha}"
+    value["ProgramArguments"] = module.expected_program_arguments(
+        worker_label, foreign_sha
+    )
+    filesystem.payloads[worker_path] = plistlib.dumps(value)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=InstalledCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-19T03:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["classification"] == "EFFECT_UNKNOWN"
+    assert receipt["mutation_count"] == 0
+
+
 @pytest.mark.parametrize(
     ("exception", "state", "classification"),
     [
@@ -1148,8 +1684,8 @@ def test_command_adapter_is_joined_to_active_service_ownership(
 
     def runner(argv, **_kwargs):
         command = tuple(argv)
-        if command[:3] == ("/usr/bin/stat", "-f", "%Sp"):
-            return Completed(stdout=b"-r--r-----\n")
+        if command == ("/usr/bin/true",):
+            return Completed(stdout=b"")
         if command == ("/bin/launchctl", "print-disabled", "system"):
             entries = b"".join(
                 f'    "{label}" => true\n'.encode() for label in module.LABELS
@@ -1423,6 +1959,125 @@ def test_metadata_observation_closes_over_var_alias_ancestor_identity(
         adapter.metadata(path)
     assert error.value.code == "FILESYSTEM_TORN"
     assert validated_paths == [path, path]
+
+
+def _runtime_parent_filesystem(
+    monkeypatch, *, parent_uid=0, parent_gid=1, parent_mode=0o775,
+    child_mode=0o755, parent_type=stat.S_IFDIR, replacement_inode=None,
+):
+    """Model the macOS 26.5 runtime parent without changing real host paths."""
+    module = subject()
+    socket_roots = (
+        "/var/run/mastermind-executive",
+        "/var/run/mastermind-dialogue-observation",
+        "/var/run/mastermind-agent-relay",
+        "/var/run/unapproved",
+    )
+
+    def info(mode, inode, uid=0, gid=0):
+        return os.stat_result((mode, inode, 1, 1, uid, gid, 0, 1, 1, 1))
+
+    directories = {
+        "/private/var": info(stat.S_IFDIR | 0o755, 10),
+        "/private/var/run": info(
+            parent_type | parent_mode, 11, parent_uid, parent_gid
+        ),
+    }
+    for inode, path in enumerate(socket_roots, 12):
+        directories["/private" + path] = info(stat.S_IFDIR | child_mode, inode)
+    descriptors = {}
+
+    def lstat(path):
+        path = os.fspath(path)
+        if path == "/var":
+            return info(stat.S_IFLNK | 0o755, 9)
+        physical = "/private" + path if path.startswith("/var/") else path
+        if physical not in directories:
+            raise FileNotFoundError(path)
+        return directories[physical]
+
+    def open_directory(path, flags):
+        assert flags & os.O_NOFOLLOW and flags & os.O_DIRECTORY
+        descriptor = len(descriptors) + 100
+        descriptors[descriptor] = directories[os.fspath(path)]
+        if os.fspath(path) == "/private/var/run" and replacement_inode is not None:
+            descriptors[descriptor] = info(
+                parent_type | parent_mode, replacement_inode, parent_uid, parent_gid
+            )
+        return descriptor
+
+    monkeypatch.setattr(module.os, "lstat", lstat)
+    monkeypatch.setattr(module.os, "readlink", lambda path: "private/var")
+    monkeypatch.setattr(module.os, "open", open_directory)
+    monkeypatch.setattr(module.os, "fstat", lambda fd: descriptors[fd])
+    monkeypatch.setattr(module.os, "close", lambda fd: None)
+    return module.FilesystemAdapter(expected_release_sha=SHA)
+
+
+@pytest.mark.parametrize("path", [
+    "/var/run/mastermind-executive/ceo-ingress.sock",
+    "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
+    "/var/run/mastermind-agent-relay/agent-relay.sock",
+])
+def test_frozen_socket_metadata_accepts_macos_runtime_parent(monkeypatch, path):
+    # Rejecting the installed root:daemon 0775 parent must not prevent even
+    # metadata-only observation of these fixed, separately owned socket roots.
+    with monkeypatch.context() as patch:
+        adapter = _runtime_parent_filesystem(patch)
+        observed = adapter.metadata(path)
+    assert observed == {"path": path, "exists": False}
+
+
+@pytest.mark.parametrize("changes", [
+    {"parent_uid": 501},
+    {"parent_gid": 20},
+    {"parent_mode": 0o777},
+    {"parent_mode": 0o1775},
+    {"child_mode": 0o775},
+    {"parent_type": stat.S_IFLNK},
+    {"parent_type": stat.S_IFREG},
+])
+def test_runtime_parent_compatibility_does_not_admit_unsafe_metadata(
+    monkeypatch, changes
+):
+    module = subject()
+    with monkeypatch.context() as patch:
+        adapter = _runtime_parent_filesystem(patch, **changes)
+        with pytest.raises(module.PreimageRefusal) as error:
+            adapter.metadata("/var/run/mastermind-executive/ceo-ingress.sock")
+    assert error.value.code == "UNSAFE_ANCESTOR"
+
+
+def test_runtime_parent_compatibility_rejects_replaced_directory(monkeypatch):
+    module = subject()
+    with monkeypatch.context() as patch:
+        adapter = _runtime_parent_filesystem(patch, replacement_inode=99)
+        with pytest.raises(module.PreimageUnsettled) as error:
+            adapter.metadata("/var/run/mastermind-executive/ceo-ingress.sock")
+    assert error.value.code == "FILESYSTEM_TORN"
+
+
+@pytest.mark.parametrize("path", [
+    "/var/run/mastermind-executive/ceo-ingress.sock",
+    "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
+    "/var/run/mastermind-agent-relay/agent-relay.sock",
+])
+def test_runtime_parent_compatibility_does_not_allow_socket_content(monkeypatch, path):
+    module = subject()
+    with monkeypatch.context() as patch:
+        adapter = _runtime_parent_filesystem(patch)
+        with pytest.raises(module.PreimageRefusal) as error:
+            adapter.read(path)
+    assert error.value.code == "PATH_ESCAPE"
+
+
+def test_runtime_parent_compatibility_is_not_a_generic_path_exception(monkeypatch):
+    module = subject()
+    with monkeypatch.context() as patch:
+        adapter = _runtime_parent_filesystem(patch)
+        with pytest.raises(module.PreimageRefusal) as error:
+            adapter._validate_ancestors("/var/run/unapproved/content.json")
+    assert error.value.code == "UNSAFE_ANCESTOR"
 
 
 def test_collector_binds_initial_metadata_identity_into_content_read():

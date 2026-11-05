@@ -1,11 +1,11 @@
 ---
 name: bootstrap-mastermind
-description: Use when entering any substantial Mastermind task, fresh Sol chat, architecture review, modifying CEO action, or material closeout.
+description: Use when starting unfamiliar Mastermind mission entry, recovery without a verified procedure pin, or a material governing-procedure change.
 ---
 
 # Bootstrap Mastermind
 
-Use for every substantial Mastermind task, fresh Sol chat, program recovery, architecture review, modifying CEO action, or material closeout.
+Bootstrap once at unfamiliar mission entry or recovery without a verified compatible pin. Reuse the mission frontier; ordinary tools, worker returns, phase completion and closeout do not restart bootstrap.
 
 ## Required package reference
 
@@ -19,6 +19,8 @@ Read `../../references/authority-boundaries.md` before interpreting any app, rec
 
 ## Mandatory current-source gate
 
+When no usable pin is held:
+
 1. Read protected Mastermind `master` from `mastermindx-market-intelligence/Mastermind`.
 2. Record the exact commit returned by the protected branch.
 3. Load `docs/sol_skills/INDEX.md` from that same exact commit.
@@ -27,7 +29,7 @@ Read `../../references/authority-boundaries.md` before interpreting any app, rec
 6. Never combine INDEX from one revision with a procedure from another revision.
 7. Never substitute a pasted or manual copy and call it current procedure.
 
-If protected Git read or compatibility cannot be established, read-only investigation may continue with an explicit warning; modifying workflow is unavailable.
+If no verified compatible pin can be established, read-only investigation may continue with an explicit warning; modifying workflow is unavailable. A failed refresh does not invalidate an already verified pin for independent work whose governing constraints are unaffected.
 
 ## Procedure
 
@@ -62,4 +64,4 @@ exact next action
 
 ## Stop conditions
 
-Stop modifying work when current procedure, required authority, exact identity, fresh grounding, one-carrier binding, app path, Executive gate, or effect reconciliation is unavailable.
+Hold only the action whose actual procedure, resource permission, conflicting writer or unresolved effect prevents it. Missing runtime/app/transport gates do not freeze independent source work. Follow INDEX modification scoping and instruction precedence.

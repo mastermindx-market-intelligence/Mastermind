@@ -75,10 +75,10 @@ async def serve(config_path: str | Path) -> None:
 
     try:
         await service.recover()
-        await service.poll_once(checked_at=_utc_now())
+        await service.poll_once(now=_utc_now)
         while True:
             await asyncio.sleep(config.poll_seconds)
-            await service.poll_once(checked_at=_utc_now())
+            await service.poll_once(now=_utc_now)
     finally:
         await slack.aclose()
 

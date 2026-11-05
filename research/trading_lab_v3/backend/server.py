@@ -14,6 +14,10 @@ from backend.fixtures import NOW, SAMPLE_PLAN, CASES, context
 ROOT = Path(__file__).resolve().parent.parent
 app = FastAPI(title='Trading Lab preflight integration harness', version='0.1.0')
 
+# Stable, generic client-facing text for a rejected preflight request. The
+# handler never echoes exception text, tracebacks, paths or exception objects.
+INVALID_INPUT_DETAIL = 'The request could not be processed as a valid preflight plan.'
+
 
 @app.middleware('http')
 async def boundary(request: Request, call_next):
@@ -90,8 +94,8 @@ async def preflight(request: Request):
                 raise ContractError('Previous preview must be an object.')
             out['previous_still_current'] = verify_preview(data['previous'], p, c, now=NOW)
         return out
-    except (ContractError, ValueError, TypeError, KeyError) as exc:
-        return JSONResponse({'error': 'INVALID_INPUT', 'detail': str(exc), 'execution_authority': False}, status_code=422)
+    except (ContractError, ValueError, TypeError, KeyError):
+        return JSONResponse({'error': 'INVALID_INPUT', 'detail': INVALID_INPUT_DETAIL, 'execution_authority': False}, status_code=422)
 
 
 @app.post('/api/execute')

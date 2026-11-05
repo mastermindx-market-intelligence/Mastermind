@@ -70,6 +70,14 @@ class ProjectReadRefused(Exception):
 
 
 ReadPort = Callable[[ReadCaller, Mapping[str, Any]], Awaitable[Mapping[str, Any]]]
+# Explicit request-local final-authorization contract: factory captures the
+# stable grant/binding before the awaited read and returns a synchronous
+# revalidator invoked after the LAST authorization await, before buffered return.
+# No default/no-op is provided; callers must inject a real contract.
+FinalAuthorizationFactory = Callable[
+    [ReadCaller, Mapping[str, Any]],
+    Callable[[], None],
+]
 
 
 def _error(code: str) -> CallToolResult:
@@ -93,6 +101,7 @@ def create_authenticated_read_server(
     *, authenticator: JwtAuthenticator, policy: ResourcePolicy,
     now: Callable[[], int], audit_sink: AuthAuditSink,
     read_port: ReadPort, output_schema: Mapping[str, Any],
+    final_authorization: FinalAuthorizationFactory,
     allowed_hosts: tuple[str, ...], allowed_origins: tuple[str, ...] = (),
 ) -> FastMCP:
     """Create an inert SDK server. The caller owns any explicit HTTP lifecycle.
@@ -105,8 +114,9 @@ def create_authenticated_read_server(
     selected_policy = validate_resource_policy(policy)
     if selected_policy.required_scopes != ("workbench.read",):
         raise ValueError("a dedicated workbench.read policy is required")
-    if not callable(now) or not callable(read_port) or not allowed_hosts:
-        raise ValueError("explicit clock, read port and host policy required")
+    if (not callable(now) or not callable(read_port) or not callable(final_authorization)
+        or not allowed_hosts):
+        raise ValueError("explicit clock, read port, final authorization and host policy required")
     schema = _json_snapshot(dict(output_schema), 65536)
     Draft202012Validator.check_schema(schema)
     input_schema = _json_snapshot(INPUT_SCHEMA, 8192)
@@ -183,6 +193,19 @@ def create_authenticated_read_server(
         except Exception:
             return _error("INVALID_REQUEST")
         try:
+            # Capture the original stable grant/binding before any awaited read.
+            # Factory failure is closed; a missing contract is rejected at construction.
+            revalidate_binding = final_authorization(caller, request)
+            # Contract is Callable[[], None]: refuse async factories and non-callables.
+            if (not callable(revalidate_binding)
+                    or inspect.iscoroutinefunction(revalidate_binding)
+                    or inspect.isasyncgenfunction(revalidate_binding)):
+                return _error("READ_BINDING_CHANGED")
+        except ProjectReadRefused as error:
+            return _error(error.code)
+        except Exception:
+            return _error("READ_BINDING_CHANGED")
+        try:
             result = read_port(caller, request)
             if not inspect.isawaitable(result):
                 return _error("READ_PORT_UNAVAILABLE")
@@ -202,6 +225,22 @@ def create_authenticated_read_server(
                 or str(current_access.resource) != caller.resource
                 or tuple(current_access.scopes) != caller.scopes):
                 return _error("AUTHENTICATION_CHANGED")
+            # Synchronous SAME-binding fence after the LAST authorization await.
+            # No await may follow this decisive check before buffered return.
+            try:
+                outcome = revalidate_binding()
+            except ProjectReadRefused as error:
+                return _error(error.code)
+            except Exception:
+                return _error("READ_BINDING_CHANGED")
+            # Declared contract returns None. Dispose any awaitable without running it;
+            # never await after this decisive fence.
+            if inspect.isawaitable(outcome):
+                if inspect.iscoroutine(outcome):
+                    outcome.close()
+                return _error("READ_BINDING_CHANGED")
+            if outcome is not None:
+                return _error("READ_BINDING_CHANGED")
             data = _json_snapshot(dict(observed), MAX_RESULT_BYTES // 3)
             output_validator.validate(data)
             if data.get("status") == "OK":
