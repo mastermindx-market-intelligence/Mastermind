@@ -151,11 +151,12 @@ def main():
         sort_keys=True, separators=(",", ":"),
     )
     packet = encoded.encode("utf-8")
-    if len(packet) > RESULT_LIMIT:
-        _refuse()
-    # One explicit canonical UTF-8 protocol frame, including its LF delimiter.
-    # Compiler diagnostics remain suppressed above; no capture is logged.
+    # Bound the complete wire frame, including its LF delimiter, against the
+    # unchanged installed collector cap before emitting any private bytes.
     frame = packet + b"\n"
+    if len(frame) > RESULT_LIMIT:
+        _refuse()
+    # Compiler diagnostics remain suppressed above; no capture is logged.
     if output.write(frame) != len(frame):
         _refuse()
     output.flush()

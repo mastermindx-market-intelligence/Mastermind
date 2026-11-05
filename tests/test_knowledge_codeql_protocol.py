@@ -196,3 +196,42 @@ def test_real_fixed_child_uses_actual_bounded_pipe_consumer(tmp_path):
     restored=bounded_subprocess_runner(argv,cwd=ROOT,timeout=15,max_bytes=524288,input_bytes=json.dumps(frame).encode())
     assert restored['code']==0 and restored['stderr']==''
     assert json.loads(restored['stdout'])['recipe']==capture['recipe']
+
+
+@pytest.mark.parametrize('excess',[0,1],ids=['complete-frame-exact-limit','complete-frame-one-byte-over'])
+def test_real_pipe_complete_frame_limit_includes_lf(excess):
+    from control_plane.ceo_boot_packet import bounded_subprocess_runner
+    # This synthetic compiler payload tests transport only; it issues no
+    # nominal source proof. The actual entry writer and installed bounded
+    # consumer run as real subprocess/pipe endpoints with the unchanged cap.
+    harness=r'''
+import importlib.util,json,sys
+from pathlib import Path
+root=Path(sys.argv[1]);excess=int(sys.argv[2])
+spec=importlib.util.spec_from_file_location('boundary_entry',root/'scripts/agentos_project_knowledge_recipe_entry.py')
+entry=importlib.util.module_from_spec(spec);spec.loader.exec_module(entry)
+from control_plane import agentos_project_knowledge_recipe as engine
+payload={'schema':'mastermind.project_knowledge_recipe_capture.v1','recipe':{},'initial_snapshot':{'padding':''},'source_binding':{}}
+base=len((json.dumps(payload,ensure_ascii=False,allow_nan=False,sort_keys=True,separators=(',',':'))+'\n').encode())
+payload['initial_snapshot']['padding']='x'*(entry.RESULT_LIMIT-base+excess)
+engine.compile_project_knowledge_recipe=lambda **kwargs:payload
+sys.argv=['entry','--macro-root','/never-compiled','--expected-macro-sha','a'*40,'--mode','prepare']
+try:raise SystemExit(entry.main())
+except SystemExit:raise
+except BaseException:entry._refuse()
+'''
+    frame={'schema':'mastermind.project_knowledge_recipe_capture_request.v1','request':{},'trusted':{
+        'actor_ref':'workspace:'+'a'*64,'permission_binding_digest':'b'*64,'decision_date':'2026-11-05'}}
+    result=bounded_subprocess_runner([sys.executable,'-I','-c',harness,str(ROOT),str(excess)],
+        cwd=ROOT,timeout=15,max_bytes=524288,input_bytes=json.dumps(frame).encode())
+    assert not any(result.get(k) for k in ('timed_out','limit_exceeded','invalid_utf8'))
+    if excess:
+        assert result['code']==2 and result['stdout']==''
+        assert result['stderr']=='project_knowledge_recipe_unavailable\n'
+    else:
+        assert result['code']==0 and result['stderr']==''
+        wire=result['stdout'].encode('utf-8')
+        assert len(wire)==524288 and wire.endswith(b'\n') and wire.count(b'\n')==1
+        value=json.loads(wire)
+        assert set(value)=={'schema','recipe','initial_snapshot','source_binding'}
+        assert value['schema']=='mastermind.project_knowledge_recipe_capture.v1'
