@@ -21,6 +21,8 @@ export interface NewConversationOutcomeProps {
   onCheck: () => void;
   onOpen: () => void;
   onBack: () => void;
+  /** Independently qualified attended controls; absent keeps this view read-only. */
+  continuation?: ReactNode;
 }
 
 type OutcomeKey = "submitting" | "checking" | "unconfirmed" | "admitted" | "absent"
@@ -124,7 +126,7 @@ function sourceRows(zh: boolean, operationState: OperationState | null,
 /** Controlled request-status/initial-result view. The parent owns the controller,
  * binding and currentness; this component only renders what it is handed. */
 export function NewConversationOutcome({ locale, data, operationState, originalMessage,
-  projectTitle, opened, busy, activity = null, canOpen, onCheck, onOpen, onBack }: NewConversationOutcomeProps) {
+  projectTitle, opened, busy, activity = null, canOpen, onCheck, onOpen, onBack, continuation }: NewConversationOutcomeProps) {
   const zh = locale === "zh-CN";
   const text = (en: string, cn: string) => zh ? cn : en;
   const status = activity === "creating" ? {key:"submitting" as const,title:text("Creating conversation…","正在创建对话…")}
@@ -151,7 +153,7 @@ export function NewConversationOutcome({ locale, data, operationState, originalM
     {opened && <FreshConversationInitialResponse locale={locale} result={result} originalMessage={originalMessage}
       caption={result != null && data?.parent_consumed === false
         ? text("Reading this result does not acknowledge it.", "查看此结果并不表示已确认接收。") : null}
-      continuation={<p className="mm-new-conversation-outcome-caption">{text("Further messages are not available in this view yet.", "此视图暂不支持继续发送消息。")}</p>}/>}
+      continuation={continuation??<p className="mm-new-conversation-outcome-caption">{text("Further messages are not available in this view yet.", "此视图暂不支持继续发送消息。")}</p>}/>}
     <footer className="mm-new-conversation-outcome-footer">
       <div className="mm-new-conversation-outcome-actions">
         <button type="button" disabled={busy} onClick={onCheck}>

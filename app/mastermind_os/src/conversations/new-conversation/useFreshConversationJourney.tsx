@@ -1,11 +1,18 @@
-import {useEffect,useLayoutEffect,useRef,useState} from "react";
+import {useEffect,useLayoutEffect,useMemo,useRef,useState,type ReactNode} from "react";
 import type {OperationPointer,OperationState,OwnerContext} from "../../orchestration/operation-controller";
 import {NewConversationDraft} from "./NewConversationDraft";
 import {NewConversationOutcome} from "./NewConversationOutcome";
-import {decodeFreshConversationResult,decodeFreshConversationInitialResult,validateFreshConversationRequest,type FreshConversationData} from "./fresh-conversation";
+import {decodeFreshConversationResult,decodeFreshConversationInitialResult,validateFreshConversationRequest,type FreshConversationData,type FreshConversationPayload,type FreshConversationLocator} from "./fresh-conversation";
 import {sameConversationOwner,type ConversationPreviewRequest,type ConversationRequestSelection,type ConversationProjectChoice,type FreshConversationBinding} from "./fresh-conversation-binding";
 import "./new-conversation-journey.css";
 
+export interface FreshConversationInitialRead {
+  readonly selection:ConversationRequestSelection;
+  readonly result:FreshConversationPayload;
+  readonly locator:FreshConversationLocator;
+  /** Exact current readonly body/owner witness, never continuation authority. */
+  current():boolean;
+}
 export interface FreshConversationJourneyProps {
   locale:"en"|"zh-CN";
   /** This hook stays mounted at App lifetime; route Back only hides its panel. */
@@ -29,6 +36,8 @@ export interface FreshConversationJourneyProps {
    * Read once per actual owner/host scope, after the pending store wins. */
   originalLookup?:{selection:ConversationRequestSelection;owner:OwnerContext}|null;
   onBack:()=>void;
+  /** Pure optional mount of separately qualified attended owner controls. */
+  renderContinuation?:(read:FreshConversationInitialRead)=>ReactNode;
 }
 type Original=ConversationRequestSelection&{message?:string};
 type Preview={request:ConversationPreviewRequest;data:FreshConversationData;projectTitle:string|null};
@@ -223,6 +232,17 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
   previewControl={<button type="button" disabled={!actualOwner||!ownsDraft||!validDraft||!!view.busy||view.discovering||!!view.retained||view.other}
    onClick={()=>void preview()}>{view.busy==="preview"?t("Reviewing…","正在预览…"):t("Review conversation","预览对话")}</button>}/>;
  const prepared=view.preview;
+ const initialRead=useMemo<FreshConversationInitialRead|null>(()=>{
+  const data=view.data,original=view.original,c=capture();
+  if(!data?.result||!data.locator||!original||!c)return null;
+  const selection={work_ref:original.work_ref,operation_key:original.operation_key};
+  return {selection,result:data.result,locator:data.locator,current:()=>{
+   const visible=current.current;
+   return root.current?.isConnected===true&&live(c)&&latest.current.active&&visible.scope===c.scope&&visible.phase==="outcome"&&visible.opened&&
+    !visible.busy&&visible.data===data&&!!visible.original&&sameSelection(visible.original,selection);
+  }};
+ },[scope,view.data,view.original?.work_ref,view.original?.operation_key,actualOwner?.principalScope,actualOwner?.generation]);
+ const continuation=initialRead&&view.opened&&props.active?props.renderContinuation?.(initialRead):undefined;
  const panel=<div ref={root} className="new-conversation-journey" lang={props.locale}>
   {view.phase==="draft"?draft:view.phase==="preview"&&prepared?
    <section className="new-conversation-preview"><header><h1>{t("Review new conversation","预览新对话")}</h1>
@@ -239,7 +259,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
    </section>:<>{feedback}<NewConversationOutcome locale={props.locale} data={view.data} operationState={view.operation}
     originalMessage={view.original&&"message"in view.original?view.original.message??null:null} projectTitle={view.projectTitle}
     opened={view.opened} busy={!!view.busy||view.discovering||view.other} activity={view.busy==="operation"?"creating":view.busy==="read"?"checking":null} canOpen={canOpen(view.data)&&!view.other&&!!actualOwner}
-    onCheck={()=>void check()} onOpen={()=>void check(true)} onBack={back}/></>}
+    onCheck={()=>void check()} onOpen={()=>void check(true)} onBack={back} continuation={continuation}/></>}
  </div>;
  return {panel,start,hasUnresolvedOriginal:!!view.retained||view.other||view.lookup&&!canOpen(view.data)};
 }

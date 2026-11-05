@@ -3,7 +3,7 @@
 // the principal/host and atomic store are explicitly inert test seams.
 import {afterEach,expect,it,vi} from "vitest";
 import {cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
-import {useFreshConversationJourney,type FreshConversationJourneyProps} from "./useFreshConversationJourney";
+import {useFreshConversationJourney,type FreshConversationJourneyProps,type FreshConversationInitialRead} from "./useFreshConversationJourney";
 import {createFreshConversationBinding} from "./fresh-conversation-command-binding";
 import type {OperationPointer,OwnerContext,PendingPointerStore} from "../../orchestration/operation-controller";
 import fixture from "./fixtures/fresh-conversation-owner.json";
@@ -58,4 +58,24 @@ it("does not expose a lookup from another owner, and masks an issued lookup imme
  mounted.rerender(<Harness {...fresh.props} binding={null} draftOwner={null} authGeneration={2}/>);
  expect(screen.queryByText("An original conversation request is selected. Check its status to reopen it.")).toBeNull();
  expect(screen.queryByText(fixture.request.operation_key)).toBeNull();expect(transport.create).not.toHaveBeenCalled();
+});
+
+it("supplies one stable actual initial-read witness, never authority, and retires it on reread or unmount",async()=>{
+ const {props,transport}=setup();const issued:FreshConversationInitialRead[]=[];
+ props.renderContinuation=read=>{issued.push(read);return <p>Inert independently supplied controls</p>;};
+ const view=render(<Harness {...props}/>);
+ await screen.findByText("An original conversation request is selected. Check its status to reopen it.");
+ fireEvent.click(screen.getByRole("button",{name:"Check original request"}));
+ await screen.findByRole("button",{name:"Open initial response"});expect(issued).toHaveLength(0);
+ fireEvent.click(screen.getByRole("button",{name:"Open initial response"}));
+ await screen.findByText("Inert independently supplied controls");const first=issued[0]!;
+ expect(first.current()).toBe(true);expect(first.selection).toEqual(props.originalLookup!.selection);
+ expect(first.result).toEqual(fixture.read.data.result);expect(first.locator).toEqual(fixture.read.data.locator);
+ view.rerender(<Harness {...props} locale="zh-CN"/>);expect(issued.at(-1)).toBe(first);
+ expect(first.current()).toBe(true);fireEvent.click(screen.getByRole("button",{name:"查看原请求状态"}));
+ expect(first.current()).toBe(false);
+ await waitFor(()=>expect(transport.read).toHaveBeenCalledTimes(3));
+ await waitFor(()=>expect(issued.at(-1)).not.toBe(first));const second=issued.at(-1)!;
+ expect(second.current()).toBe(true);view.unmount();expect(second.current()).toBe(false);
+ expect(transport.create).not.toHaveBeenCalled();expect(transport.preview).not.toHaveBeenCalled();
 });
