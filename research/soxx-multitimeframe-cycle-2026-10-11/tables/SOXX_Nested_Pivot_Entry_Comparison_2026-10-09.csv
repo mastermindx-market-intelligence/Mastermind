@@ -1,0 +1,15 @@
+<PARSED TEXT FOR SHEET: 1 / 1 TABS
+TAB NAME: SOXX_Nested_Pivot_Entry_Comparison_2026-10-09.csv>
+index,profile,lower_params,state,trigger,risk,prior_n,prior_mean,n,win_pct,mean_pct,cum_pct,hour_close_mdd_pct
+0,3h_medium,balanced,armed,stoch20,tight,5,0.4997,10,40.0,-0.2513,-2.635,-7.291
+1,union,balanced,armed,stoch20,tight,8,0.0606,14,57.14,0.3631,4.974,-4.875
+2,3h_medium,balanced,armed,pivot_turn,tight,4,1.0244,10,80.0,1.1835,12.371,-2.555
+3,union,balanced,armed,pivot_turn,tight,5,0.3917,12,75.0,1.0112,12.674,-2.555
+4,3h_medium,balanced,armed,macd_cross,tight,5,-0.2,10,50.0,0.1274,1.122,-6.63
+5,union,balanced,armed,macd_cross,tight,7,0.3997,12,50.0,0.1311,1.395,-7.084
+6,3h_medium,balanced,turn,stoch20,tight,0,,2,100.0,1.899,3.834,-0.435
+7,union,balanced,turn,stoch20,tight,0,,3,66.67,0.7329,2.173,-1.599
+8,3h_medium,balanced,turn,pivot_turn,tight,2,0.1499,3,100.0,1.899,5.806,-0.99
+9,union,balanced,turn,pivot_turn,tight,4,1.0244,5,80.0,1.1994,6.091,-2.874
+10,3h_medium,balanced,turn,macd_cross,tight,4,-0.7247,4,75.0,1.0244,4.114,-2.617
+11,union,balanced,turn,macd_cross,tight,6,0.1499,8,50.0,0.1218,0.851,-7.755

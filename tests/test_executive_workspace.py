@@ -596,6 +596,83 @@ def test_terminal_assignment_seal_fails_closed_for_unowned_or_world_boundary(
     assert stat.S_IMODE(run_dir.stat().st_mode) == 0o700
 
 
+def test_assignment_seal_binds_original_snapshot_and_retains_content(tmp_path):
+    from control_plane.executive_workspace import _seal_identity
+
+    root = tmp_path / "assignment"
+    root.mkdir(mode=0o750)
+    (root / "result").write_text("retained")
+    before = _seal_identity(root, root.stat())
+    receipt = seal_control_owned_paths(
+        {"run": root}, expected_identities={"run": before}
+    )
+    assert receipt["paths"]["run"]["before"] == before
+    assert stat.S_IMODE(root.stat().st_mode) == 0o700
+    assert (root / "result").read_text() == "retained"
+
+
+def test_assignment_seal_rejects_replacement_before_chmod(tmp_path):
+    from control_plane.executive_workspace import _seal_identity
+
+    root = tmp_path / "assignment"
+    root.mkdir(mode=0o750)
+    before = _seal_identity(root, root.stat())
+    root.rename(tmp_path / "original")
+    root.mkdir(mode=0o750)
+    with pytest.raises(AssignmentSealError, match="failed closed"):
+        seal_control_owned_paths({"run": root}, expected_identities={"run": before})
+    assert stat.S_IMODE(root.stat().st_mode) == 0o750
+
+
+@pytest.mark.parametrize("edge", ["label", "path", "bool_inode", "missing"])
+def test_assignment_seal_malformed_snapshot_has_no_effect(tmp_path, edge):
+    from control_plane.executive_workspace import _seal_identity
+
+    root = tmp_path / "assignment"
+    root.mkdir(mode=0o750)
+    snapshot = {"run": _seal_identity(root, root.stat())}
+    if edge == "label":
+        snapshot["foreign"] = snapshot.pop("run")
+    elif edge == "path":
+        snapshot["run"]["path"] = str(tmp_path / "other")
+    elif edge == "bool_inode":
+        snapshot["run"]["inode"] = True
+    else:
+        snapshot["run"].pop("inode")
+    with pytest.raises(AssignmentSealError, match="snapshot"):
+        seal_control_owned_paths({"run": root}, expected_identities=snapshot)
+    assert stat.S_IMODE(root.stat().st_mode) == 0o750
+
+
+@pytest.mark.parametrize("replace_at", ["open", "chmod"])
+def test_assignment_seal_refuses_path_swap_around_pinned_fd(tmp_path, monkeypatch, replace_at):
+    import control_plane.executive_workspace as module
+
+    root = tmp_path / "assignment"
+    root.mkdir(mode=0o750)
+    original_open, original_chmod = os.open, os.fchmod
+
+    def swap():
+        root.rename(tmp_path / "original")
+        root.mkdir(mode=0o750)
+
+    def swapped_open(path, flags, *args, **kwargs):
+        fd = original_open(path, flags, *args, **kwargs)
+        if Path(path) == root:
+            swap()
+        return fd
+
+    def swapped_chmod(fd, mode):
+        original_chmod(fd, mode)
+        swap()
+
+    monkeypatch.setattr(module.os, "open" if replace_at == "open" else "fchmod",
+                        swapped_open if replace_at == "open" else swapped_chmod)
+    with pytest.raises(AssignmentSealError, match="failed closed"):
+        seal_control_owned_paths({"run": root})
+    assert stat.S_IMODE(root.stat().st_mode) == 0o750
+
+
 # ---------------------------------------------------------------------------
 # A failed preparation must not leave a corpse behind.
 #
@@ -1082,6 +1159,34 @@ def test_linked_workspace_shares_git_store_and_reuses_exact_operation(tmp_path: 
     assert reused.reused is True
 
 
+def test_linked_workspace_hydration_has_a_finite_large_repo_budget(
+    tmp_path: Path, monkeypatch,
+):
+    """Only new worktree hydration needs extra time for a large sparse index.
+
+    An observed Macro checkout with >100k tracked paths exceeded the normal
+    60s git read-tree budget; other Git operations retain their 60s bound.
+    """
+    source, base_sha = _repository(tmp_path)
+    original_run = executive_workspace._run
+    observed: list[int] = []
+
+    def capture(argv, *, cwd, env, **kwargs):
+        if list(argv) == ["git", "read-tree", "-mu", "HEAD"]:
+            observed.append(kwargs.get("timeout_seconds", 60))
+        return original_run(argv, cwd=cwd, env=env, **kwargs)
+
+    monkeypatch.setattr(executive_workspace, "_run", capture)
+    receipt = executive_workspace.prepare_linked_worktree(
+        source, tmp_path / "agent-workspaces",
+        operation_id="hydration-budget-001", lane="web",
+        base_sha=base_sha, branch="sol/hydration-budget-001",
+    )
+    assert observed == [240], f"hydration timeout drift: {observed}"
+    assert Path(receipt.workspace_path).is_dir()
+    assert _git(Path(receipt.workspace_path), "status", "--porcelain=v1") == ""
+
+
 def test_linked_workspace_release_removes_clean_base_but_keeps_branch(tmp_path: Path):
     source, base_sha = _repository(tmp_path)
     root = tmp_path / "agent-workspaces"
@@ -1236,6 +1341,51 @@ def test_linked_workspace_release_accepts_head_published_to_origin_branch(tmp_pa
     assert released.removed is True
     assert not workspace.exists()
     assert _git(source, "rev-parse", "refs/heads/sol/web-op-006") == head
+
+
+@pytest.mark.parametrize("kind", ["tracked", "untracked", "ignored", "mixed"])
+def test_linked_release_explains_hidden_untracked_without_removing_files(tmp_path: Path, kind: str):
+    source, _base = _repository(tmp_path)
+    (source / ".gitignore").write_text(".pytest_cache/\n", encoding="utf-8")
+    _git(source, "add", ".gitignore")
+    _git(source, "commit", "-qm", "ignore generated test cache")
+    base = _git(source, "rev-parse", "HEAD")
+    root = tmp_path / "workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source, root, operation_id="dirty-explanation", lane="web", base_sha=base,
+        branch="sol/web-dirty-explanation",
+    )
+    workspace = Path(receipt.workspace_path)
+    payloads = {}
+    if kind in {"tracked", "mixed"}:
+        payloads["README.md"] = b"uncommitted source must survive\n"
+    if kind in {"untracked", "mixed"}:
+        payloads["private-filename-marker.txt"] = b"untracked evidence must survive\n"
+    if kind == "ignored":
+        payloads[".pytest_cache/private-filename-marker"] = b"ignored evidence is not automatically disposable\n"
+    for relative, payload in payloads.items():
+        target = workspace / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+    if kind == "ignored":
+        assert _git(workspace, "status", "--porcelain=v1") == ""
+    observed = executive_workspace.release_linked_worktree(
+        source, root, workspace, expected_operation_id="dirty-explanation",
+    )
+    assert observed.state == "PRESERVED_DIRTY"
+    assert observed.dirty is True and observed.removed is False
+    assert "including ignored files" in observed.reason
+    assert f"tracked_changes={'present' if kind in {'tracked', 'mixed'} else 'absent'}" in observed.reason
+    assert f"all_untracked={'absent' if kind == 'tracked' else 'present'}" in observed.reason
+    assert "git ls-files --others -z" in observed.reason
+    assert "retain needed source and evidence" in observed.reason
+    assert "No files were removed" in observed.reason
+    assert "private-filename-marker" not in observed.reason
+    assert len(observed.reason.encode("utf-8")) < 600
+    assert _git(workspace, "rev-parse", "HEAD") == base
+    for relative, payload in payloads.items():
+        assert (workspace / relative).read_bytes() == payload
+
 
 def test_linked_workspace_release_accepts_explicit_existing_pr_publication_branch(tmp_path: Path):
     source, base_sha = _repository(tmp_path)
@@ -1494,3 +1644,52 @@ def test_linked_workspace_pull_ref_evidence_is_exact_and_unambiguous(tmp_path: P
             published_branch="sol/other",
             published_pull_request=819,
         )
+
+
+@pytest.mark.parametrize("control", ["\x00", "\x01", "\x1b", "\x7f"], ids=["NUL", "SOH", "ESC", "DEL"])
+def test_publication_control_bytes_are_typed_refusals_before_ref_lookup_or_removal(
+    tmp_path: Path, monkeypatch, control: str
+):
+    source, base_sha = _repository(tmp_path)
+    root = tmp_path / "workspaces"
+    operation = "publication-control-byte"
+    created = executive_workspace.prepare_linked_worktree(
+        source, root, operation_id=operation, lane="web", base_sha=base_sha,
+        branch=f"sol/web-{operation}",
+    )
+    workspace = Path(created.workspace_path)
+    (workspace / "README.md").write_text("retain this local commit\n", encoding="utf-8")
+    _git(workspace, "add", "README.md")
+    _git(workspace, "commit", "-qm", "local unpublished source")
+    before_bytes = (workspace / "README.md").read_bytes()
+    before_registration = _git(source, "worktree", "list", "--porcelain")
+    before_git_file = (workspace / ".git").read_bytes()
+    admin = Path(_git(workspace, "rev-parse", "--absolute-git-dir"))
+    before_lock = (admin / "locked").read_bytes()
+    invalid = f"sol/bad{control}branch"
+    publication_reads, removals = [], []
+    real_status, real_run = executive_workspace._run_status, executive_workspace._run
+
+    def record_status(argv, **kwargs):
+        if f"refs/remotes/origin/{invalid}" in argv:
+            publication_reads.append(tuple(argv))
+        return real_status(argv, **kwargs)
+
+    def record_run(argv, **kwargs):
+        if "worktree" in argv and "remove" in argv:
+            removals.append(tuple(argv))
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(executive_workspace, "_run_status", record_status)
+    monkeypatch.setattr(executive_workspace, "_run", record_run)
+    with pytest.raises(WorkspaceError, match="published branch is invalid"):
+        executive_workspace.release_linked_worktree(
+            source, root, workspace, expected_operation_id=operation,
+            published_branch=invalid,
+        )
+    assert publication_reads == []
+    assert removals == []
+    assert (workspace / "README.md").read_bytes() == before_bytes
+    assert (workspace / ".git").read_bytes() == before_git_file
+    assert (admin / "locked").read_bytes() == before_lock
+    assert _git(source, "worktree", "list", "--porcelain") == before_registration

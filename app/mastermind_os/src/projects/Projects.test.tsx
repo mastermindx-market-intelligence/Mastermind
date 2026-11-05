@@ -2,17 +2,35 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProgramCard } from "../mission";
+import { programsFromControlRoom } from "../mission";
+import { controlRoomFixture } from "../test-fixtures";
 import type { OfficeProjection, SourceState } from "../meta-ceo/projection";
 import { Projects } from "./Projects";
 
 afterEach(cleanup);
-const one: ProgramCard = { workRef: "WS:ONE", title: "Shared title", state: "In review", nextAction: "Inspect returned evidence", rootJobId: "JOB-1", rootState: "RESOLVED", rootCandidates: ["JOB-1"] };
+const one: ProgramCard = { workRef: "WS:ONE", title: "Shared title", state: "In review", nextAction: "Inspect returned evidence", nextActionWithheld: false, rootJobId: "JOB-1", rootState: "RESOLVED", rootCandidates: ["JOB-1"] };
 const two: ProgramCard = { ...one, workRef: "WS:TWO", rootJobId: "JOB-2", rootCandidates: ["JOB-2"] };
 function read(state: SourceState = "CURRENT", programs = [one, two]): OfficeProjection["programs"] {
   return { source: { owner: "AGENT_OS", ref: "control:projects", revision: "rev:1", observed_at: "2026-10-04T05:00:00Z", state, coverage: "SUPPLIED_SCOPE" }, value: { programs, state: "AVAILABLE", reason: "AVAILABLE" }, reason: null };
 }
 
 describe("Atelier Projects", () => {
+  it.each(["CURRENT", "STALE"] as const)("shows withheld next-action text without losing %s projects or navigation", state => {
+    const raw = controlRoomFixture(), unsafe = "Inspect https://example.invalid/private-note";
+    raw.work[0].agent_os.next_action = unsafe;
+    const programs = programsFromControlRoom(raw);
+    const navigate = vi.fn();
+    const source = read(state); source.value = programs;
+    render(<Projects programs={source} onNavigateMission={navigate} />);
+    expect(screen.getByText("2 projects supplied")).toBeTruthy();
+    expect(screen.getByText("Next action withheld")).toBeTruthy();
+    expect(screen.getByText("Open Beta program")).toBeTruthy();
+    expect(document.body.innerHTML).not.toContain(unsafe);
+    fireEvent.click(screen.getByRole("button", {
+      name: state === "CURRENT" ? "Open project Alpha program" : "Inspect retained history for Alpha program",
+    }));
+    expect(navigate).toHaveBeenCalledExactlyOnceWith({ workRef: "WS:ALPHA", rootJobId: "JOB-A" }, state === "CURRENT" ? "current" : "history");
+  });
   it("shows supplied scope, exact identities and provenance without promoting a company total", () => {
     render(<Projects programs={read()} />);
     expect(screen.getByRole("heading", { name: "Your projects, in perspective." })).toBeTruthy();
@@ -125,4 +143,42 @@ describe("Atelier Projects", () => {
     expect(screen.queryByRole("region", { name: "Selected project" })).toBeNull();
     expect(screen.getAllByRole("article")).toHaveLength(2);
   });
+});
+
+
+describe("rootless catalogue read navigation", () => {
+  it("opens a current canonical project without minting a Mission root", () => {
+    const open = vi.fn(), navigate = vi.fn();
+    render(<Projects programs={read("CURRENT", [{...one, rootJobId:null, rootState:"UNKNOWN", rootCandidates:[]}])}
+      onOpenProject={open} onNavigateMission={navigate}/>);
+    fireEvent.click(screen.getByRole("button", {name:"Open project Shared title"}));
+    expect(open).toHaveBeenCalledExactlyOnceWith("WS:ONE");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+  it.each(["STALE", "UNAVAILABLE", "UNKNOWN"] as const)("never opens a current project from %s", state => {
+    const open = vi.fn();
+    render(<Projects programs={read(state, [{...one, rootJobId:null, rootState:"UNKNOWN", rootCandidates:[]}])} onOpenProject={open}/>);
+    expect(screen.queryByRole("button", {name:/Open project/})).toBeNull();
+    expect(open).not.toHaveBeenCalled();
+  });
+  it("rejects an invalid rootless work reference", () => {
+    const open = vi.fn();
+    render(<Projects programs={read("CURRENT", [{...one,workRef:"../private",rootJobId:null,rootState:"UNKNOWN",rootCandidates:[]}])} onOpenProject={open}/>);
+    expect(screen.queryByRole("button", {name:/Open project/})).toBeNull();
+    expect(open).not.toHaveBeenCalled();
+  });
+});
+
+
+it("localizes current rootless project navigation and retains the search draft across language changes",()=>{
+  const open=vi.fn(),programs=read("CURRENT",[{...one,rootJobId:null,rootState:"UNKNOWN",rootCandidates:[]}]);
+  const view=render(<Projects programs={programs} onOpenProject={open}/>);
+  fireEvent.change(screen.getByRole("searchbox"),{target:{value:"Shared"}});
+  view.rerender(<Projects programs={programs} onOpenProject={open} locale="zh-CN"/>);
+  expect(screen.getByRole("heading",{name:"纵览你的项目。"})).toBeTruthy();
+  expect(screen.getByRole("searchbox",{name:"查找已提供的项目"})).toHaveProperty("value","Shared");
+  expect(screen.getByText("根任务未知；未推断任何任务")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button",{name:"打开项目Shared title"}));
+  expect(open).toHaveBeenCalledExactlyOnceWith("WS:ONE");
+  expect(screen.queryByText("Next step")).toBeNull();
 });

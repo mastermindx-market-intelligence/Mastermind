@@ -180,10 +180,11 @@ def test_failed_python_owner_prevents_any_runtime_mutation(tmp_path, monkeypatch
     assert list(tmp_path.iterdir()) == []
 
 
-def test_sdk_exec_uses_only_exact_venv_isolated_interpreter(runtime, monkeypatch):
+@pytest.mark.parametrize("command,child_command", [("stdio", "sdk-stdio"), ("native-stdio", "native-sdk-stdio"), ("acceptance-stdio", "acceptance-sdk-stdio")])
+def test_sdk_exec_uses_only_exact_venv_isolated_interpreter(runtime, monkeypatch, command, child_command):
     root, config, _ = runtime
     monkeypatch.setattr(edge, "read_config", lambda: config)
-    monkeypatch.setattr(edge.sys, "flags", SimpleNamespace(isolated=1))
+    monkeypatch.setattr(edge.sys, "flags", SimpleNamespace(**({k: getattr(edge.sys.flags, k) for k in dir(edge.sys.flags) if isinstance(getattr(edge.sys.flags, k), int)} | {"isolated": 1})))
     monkeypatch.setattr(edge.sys, "dont_write_bytecode", True)
     monkeypatch.setattr(edge.os, "geteuid", lambda: config["worker_uid"])
     calls = []
@@ -194,12 +195,12 @@ def test_sdk_exec_uses_only_exact_venv_isolated_interpreter(runtime, monkeypatch
         raise Executed()
     monkeypatch.setattr(edge.os, "execve", execute)
     with pytest.raises(Executed):
-        edge.main(["stdio"])
+        edge.main([command])
     python = root / "bin/python3.12"
-    assert calls == [(python, [str(python), "-I", "-B", edge.__file__, "sdk-stdio"], edge.ENV)]
+    assert calls == [(python, [str(python), "-I", "-B", edge.__file__, child_command], edge.ENV)]
     monkeypatch.setattr(edge.os, "geteuid", lambda: 452)
     with pytest.raises(edge.EdgeError, match="worker UID"):
-        edge.main(["stdio"])
+        edge.main([command])
     assert len(calls) == 1
 
 

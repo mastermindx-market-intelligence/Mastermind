@@ -1,0 +1,42 @@
+{
+  "mission": "SOXX cycle-failure research: frozen cross-asset and entry-price validation",
+  "mission_complete": false,
+  "protected_pin": "326c8469a21d7f50fc9ecb1848196bf1c6e66685",
+  "scope": "Offline research only: no trades, credentials, repository or production changes",
+  "latest_phase": "v11 frozen 13-asset comparison; risk-compatible limits; stop timing; ATR controls",
+  "results_sha256": "3be3085bee0bb6b06408c941b38fd30a1d617a24f2fdbc81dd36649e9302c681",
+  "proof_sha256": "62750fe1acd54563da701763473da40d429993b64341900982a9ce3bdcbb581b",
+  "accepted": {
+    "peer_matched": 53,
+    "peer_early_guard_lift_pp": -0.31811,
+    "peer_fast_weak_lift_pp": -0.18102,
+    "peer_momentum_reset_lift_pp": -0.12036,
+    "peer_losses_at_stop": 48,
+    "stop_first_hour": 14,
+    "stop_by_3RTH_hours": 26,
+    "initial_stop_less_1ATR": "40 of 55 signals",
+    "SOXX_clean_limit_open_two_bars": 2,
+    "SOXX_clean_touch_unproven": 1,
+    "SOXX_no_clean_limit_entry": 7,
+    "ATR1_cap3_positive": "9/50",
+    "ATR1_cap3_mean_pct": 1.274,
+    "fixed1p5_positive": "5/53",
+    "fixed1p5_mean_pct": 0.196
+  },
+  "limitations": [
+    "SOXX period repeatedly studied; not independent out-of-sample",
+    "Closely related semiconductor stocks share shock days",
+    "Historical hourly OHLC cannot establish quote fills or intrabar sequence",
+    "No full-year actual 15/30-minute or BOATS feed yet; some source session gaps",
+    "No evidence that broader stops or cycle-failure rules are reliably superior"
+  ],
+  "DO_NOT_REDO": [
+    "Do not optimize new thresholds using the same 13-asset retrospective sample",
+    "Do not equate limit touches with filled orders or unmatched per-trade returns with portfolio returns",
+    "Do not treat calendar-week samples as independent across ETFs and constituents",
+    "Never automatically widen a live stop or infer position sizing from these simulations"
+  ],
+  "pending_effects": [],
+  "next_action": "Validate true 15/30-minute and BOATS candles plus time-stamped venue quotes. Evaluate frozen entries, matched-time horizons, unfilled orders, original-pivot vs later-higher-low failure, and untouched independent sample.",
+  "no_background_execution": true
+}

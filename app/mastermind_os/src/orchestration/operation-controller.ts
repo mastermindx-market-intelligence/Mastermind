@@ -53,7 +53,7 @@ import {
 
 // ── Frozen UI-local contract types ────────────────────────────────────────────
 
-export type OperationKind = "launch" | "message" | "stop";
+export type OperationKind = "launch" | "message" | "stop" | "consume" | "project_pause" | "project_resume" | "project_create" | "project_adopt" | "direction_accept";
 
 export interface CommandIntent {
   readonly kind: OperationKind;
@@ -84,6 +84,8 @@ export interface EffectReceipt {
   readonly missionSelection?: MissionSelection;
   /** Opaque producer text; never surfaced verbatim to the UI. */
   readonly reason?: string;
+  /** Qualified nonterminal witness for explicit same-original ADOPT advance. */
+  readonly advance?: Readonly<{ phase_receipt_digest: string }>;
 }
 
 /** Allow in-memory test stores to return values directly; controllers always await. */
@@ -100,6 +102,7 @@ export interface FiniteCommandPort {
     intent: CommandIntent,
     signal: AbortSignal,
   ): Promise<EffectReceipt>;
+  advanceOperation?(pointer: OperationPointer, phaseReceiptDigest: string, signal: AbortSignal): Promise<EffectReceipt>;
   readOperation(
     pointer: OperationPointer,
     signal: AbortSignal,
@@ -187,6 +190,7 @@ type SafeReason =
   | "SELECTION_NOT_ALLOWED"
   | "EPOCH_CHANGED"
   | "TRANSPORT_ERROR"
+  | "READY_FOR_ADVANCE"
   | "UNKNOWN_RECEIPT"
   | "ACCEPTED"
   | "REFUSED";
@@ -238,11 +242,12 @@ export interface UnknownState {
   readonly status: "unknown";
   readonly pointer: OperationPointer;
   readonly reason: SafeReason;
+  readonly advance?: Readonly<{ phase_receipt_digest: string }>;
 }
 
 // ── Validation helpers ────────────────────────────────────────────────────────
 
-const VALID_KINDS: ReadonlySet<string> = new Set(["launch", "message", "stop"]);
+const VALID_KINDS: ReadonlySet<string> = new Set(["launch", "message", "stop", "consume", "project_pause", "project_resume", "project_create", "project_adopt", "direction_accept"]);
 
 const POINTER_KEYS: ReadonlySet<string> = new Set([
   "operationKey",
@@ -257,6 +262,7 @@ const RECEIPT_KEYS: ReadonlySet<string> = new Set([
   "disposition",
   "missionSelection",
   "reason",
+  "advance",
 ]);
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -292,8 +298,30 @@ function isValidPointer(p: unknown): p is OperationPointer {
  * `SELECTION_NOT_ALLOWED`). Decoding here would collapse the two into one
  * indistinguishable bucket.
  */
+function validAdvanceWitness(value: unknown): value is Readonly<{phase_receipt_digest:string}> {
+  if (!isPlainObject(value)) return false;
+  const keys=Reflect.ownKeys(value), descriptor=Object.getOwnPropertyDescriptor(value,"phase_receipt_digest");
+  return keys.length===1 && keys[0]==="phase_receipt_digest" && descriptor!==undefined && "value" in descriptor
+    && typeof descriptor.value==="string" && /^[0-9a-f]{64}$/.exec(descriptor.value)?.[0]===descriptor.value;
+}
+function qualifiedAdvance(receipt: EffectReceipt, pointer: OperationPointer): string | null {
+  const fields=Object.getOwnPropertyDescriptors(receipt);
+  const names=["operationKey","kind","targetKey","disposition","reason","advance"];
+  if(names.some(name=>!fields[name] || !("value" in fields[name])))return null;
+  if(receipt.kind!=="project_adopt" || pointer.kind!=="project_adopt"
+    || /^mmos-project-adopt-[0-9a-f]{40}$/.exec(pointer.operationKey)?.[0]!==pointer.operationKey
+    || receipt.operationKey!==pointer.operationKey || receipt.targetKey!==pointer.targetKey
+    || receipt.disposition!=="unknown" || receipt.reason!=="READY_FOR_ADVANCE" || !validAdvanceWitness(receipt.advance))return null;
+  return receipt.advance.phase_receipt_digest;
+}
+
 function isValidReceipt(r: unknown): r is EffectReceipt {
   if (!isPlainObject(r) || !hasOnlyKeys(r, RECEIPT_KEYS)) return false;
+  if(Object.hasOwn(r,"advance")) {
+    const fields=Object.getOwnPropertyDescriptors(r);
+    if(Reflect.ownKeys(r).some(key=>typeof key!=="string")
+      || ["operationKey","kind","targetKey","disposition","reason","advance"].some(key=>!fields[key] || !("value" in fields[key])))return false;
+  }
   return (
     typeof r.operationKey === "string" &&
     isValidKind(r.kind) &&
@@ -302,7 +330,8 @@ function isValidReceipt(r: unknown): r is EffectReceipt {
       r.disposition === "refused" ||
       r.disposition === "unknown") &&
     (r.missionSelection === undefined || isPlainObject(r.missionSelection)) &&
-    (r.reason === undefined || typeof r.reason === "string")
+    (r.reason === undefined || typeof r.reason === "string") &&
+    (r.advance === undefined || (r.kind==="project_adopt" && r.disposition==="unknown" && r.reason==="READY_FOR_ADVANCE" && validAdvanceWitness(r.advance)))
   );
 }
 
@@ -540,6 +569,57 @@ export class OperationController {
     }, abort);
   }
 
+  /** Explicit mutation of the SAME original adoption after a fresh phase read.
+   * No payload/key/second pointer is created; recover() remains observation only.
+   */
+  async advance(): Promise<OperationState> {
+    const ctx=this._port.context();
+    if(!ctx)return this._idle("OWNER_ABSENT");
+    if(this._inflight) {
+      const tracked=this._tracked;
+      return tracked && ctx.principalScope===tracked.scope && ctx.generation===tracked.generation ? this._inflight : this._busy();
+    }
+    const scope=ctx.principalScope,generation=ctx.generation,epoch=++this._epoch,abort=new AbortController();
+    return this._startInflight(async()=>{
+      const stored=await this._readStoredAsync(scope,abort.signal);
+      if(this._stale(epoch,scope,generation))return this._state;
+      if(!stored.ok)return this._idle(stored.reason);
+      if(!stored.pointer)return this._idle("RECOVER_NO_POINTER");
+      const pointer=stored.pointer,op=this._track(pointer,scope,generation,epoch,abort);
+      if(pointer.kind!=="project_adopt")return this._retain(op,"UNKNOWN_RECEIPT");
+      this._state={status:"checking",pointer,reason:"CHECKING"};
+      let status:unknown;
+      try {status=await this._port.readOperation(pointer,abort.signal);}
+      catch {return await this._applyFailure(op,"RECOVER_FAILED");}
+      if(this._stale(epoch,scope,generation))return this._state;
+      // Advance is for a potentially partial original operation. A refusal
+      // cannot erase a phase already committed, including on status preflight.
+      if(isValidReceipt(status) && status.disposition==="refused")return this._retain(op,"UNKNOWN_RECEIPT");
+      const result=await this._applyReceipt(status,op);
+      if(this._stale(epoch,scope,generation))return this._state;
+      if(result.status!=="unknown" || !result.advance || !isValidReceipt(status))return result;
+      const witness=qualifiedAdvance(status,pointer);
+      if(witness===null || result.advance.phase_receipt_digest!==witness)return this._retain(op,"UNKNOWN_RECEIPT");
+      let invoke:FiniteCommandPort["advanceOperation"];
+      try {invoke=this._port.advanceOperation;}catch {return this._retain(op,"UNKNOWN_RECEIPT");}
+      if(typeof invoke!=="function")return result;
+      // Another controller may have reconciled/replaced the hint while status
+      // was in flight. Compare all original fields once more before the effect.
+      const current=await this._readStoredAsync(scope,abort.signal);
+      if(this._stale(epoch,scope,generation))return this._state;
+      if(!current.ok || !current.pointer || current.pointer.operationKey!==pointer.operationKey
+        || current.pointer.kind!==pointer.kind || current.pointer.targetKey!==pointer.targetKey)return this._retain(op,"PENDING_POINTER");
+      this._track(pointer,scope,generation,epoch,abort);
+      this._state={status:"checking",pointer,reason:"CHECKING"};
+      let receipt:unknown;
+      try {receipt=await invoke.call(this._port,pointer,witness,abort.signal);}
+      catch {return await this._applyFailure(op,"TRANSPORT_ERROR");}
+      if(this._stale(epoch,scope,generation))return this._state;
+      if(isValidReceipt(receipt) && receipt.disposition==="refused")return this._retain(op,"UNKNOWN_RECEIPT");
+      return await this._applyReceipt(receipt,op);
+    },abort);
+  }
+
   /**
    * Void the currently visible operation epoch.
    *
@@ -717,6 +797,13 @@ export class OperationController {
     // pointer so a later recover() can re-read the operation.
     if (receipt.kind === "launch" && receipt.disposition === "accepted") {
       return Promise.resolve(this._retain(op, "SELECTION_INVALID"));
+    }
+
+    const witness=qualifiedAdvance(receipt,op.pointer);
+    if(witness!==null) {
+      this._state={status:"unknown",pointer:op.pointer,reason:"READY_FOR_ADVANCE",advance:{phase_receipt_digest:witness}};
+      this._tracked=null;
+      return Promise.resolve(this._state);
     }
 
     switch (receipt.disposition) {

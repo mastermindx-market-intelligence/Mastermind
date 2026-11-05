@@ -155,3 +155,23 @@ def test_placement_law_applies_to_every_project_seat() -> None:
     assert "Account-neutral enforcement" in skill
     assert "No ChatGPT, Codex, Claude, Fable, Grok or another surface is exempt" in kernel
     assert "No ChatGPT, Codex, Claude, Fable, Grok or another surface" in index
+
+
+def test_cross_account_source_linked_delivery_keeps_real_owner_and_installed_proof():
+    source = _read("docs/sol_skills/WORKER_AVENUE_ROUTING.md")
+    account = _read("docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md")
+    kernel = _read("docs/sol_skills/BOOTSTRAP_KERNEL.md")
+    assert source.count("## 10. Source-linked cross-account recovery and Project instruction delivery") == 1
+    for phrase in (
+        "current eligible receiver owns the next authorized executable action",
+        "HANDOFF_SOURCE_LINK_V1",
+        "reviewed GitHub source",
+        "DELIVERED from actual PICKUP_ACK, START and verified result",
+        "actual authorized Project owner/editor",
+        "per-account fresh-chat behavioral proof",
+        "human-active",
+        "EFFECT_UNKNOWN",
+    ):
+        assert phrase in source
+    assert "HANDOFF_SOURCE_LINK_V1" in kernel
+    assert "preserving newer valid Project-specific rules" in account

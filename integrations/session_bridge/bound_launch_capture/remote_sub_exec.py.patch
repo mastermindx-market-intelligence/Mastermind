@@ -1,0 +1,374 @@
+--- a/remote_sub_exec.py
++++ b/remote_sub_exec.py
+@@ -10,0 +11 @@
++import asyncio
+@@ -29,0 +31,7 @@
++    begin_owned_process,
++    abort_owned_process,
++    start_owned_process_finisher,
++    retain_owned_start_bytes,
++    validate_owned_capture_live,
++    owned_capture_paths,
++    _launch_receipt_directory,
+@@ -112,0 +121,306 @@
++def _run_lease_process(*, lease, state, key, receipt, arguments, at_boundary=None):
++    """Shared incumbent process/capture/cleanup path. Never acquire a new lease.
++
++    Called while the original controller owns its existing lease/context. This
++    is execution mechanics, not an admission producer or separate lifecycle.
++    """
++    install_signal_cleanup(on_unproven=lease.hold_for_reconciliation)
++    try:
++        if at_boundary is not None:
++            at_boundary()
++        state["started"] = True
++        return run_owned_process(label=key, receipt_path=receipt,
++                                 timeout_returncode=124, **arguments)
++    except OwnedProcessStartError:
++        state["started"] = False
++        raise
++    finally:
++        _retain_original_cleanup_hold(lease=lease, state=state, key=key, receipt=receipt)
++
++
++def _verify_reserved_realm_observation(*, prepared, preparation,
++                                     credential_loader, credential_realm_owner, credential_physical_binding,
++                                     credential_bindings_document=None,
++                                     credential_profiles_document=None):
++    """Observe the existing fixed realm owner, never issue task authority.
++
++    Ordinary Control/Runtime authority and the independently verified run-bound
++    secret canary remain separate. An interactive canary is not a task grant.
++    """
++    from control_plane.fabric_control_start import ControlStartRefused
++    from control_plane.codex_provider_realm import SubscriptionRealmOwner
++    from control_plane.executive_fabric_adapter import FabricHostBinding
++    if not callable(credential_loader):
++        raise ControlStartRefused('realm_credential_loader_required')
++    if type(credential_realm_owner) is not SubscriptionRealmOwner:
++        raise ControlStartRefused('realm_owner_required')
++    if type(credential_physical_binding) is not FabricHostBinding:
++        raise ControlStartRefused('realm_physical_owner_required')
++    from control_plane.claude_subscription_worker import _resolve_catalog_pair
++    from control_plane.subscription_catalog import compose_catalog_digest
++    verification_failed = False
++    try:
++        observed = credential_realm_owner.observe()
++        fields = {'worker_id', 'control_uid', 'binding_id', 'profile_id', 'adapter_id',
++                  'realm_config_sha256', 'realm_generation', 'catalog_digest'}
++        if type(observed) is not dict or set(observed) != fields:
++            raise ControlStartRefused('realm_observation_invalid')
++        binding, profile, _ = _resolve_catalog_pair(observed['binding_id'],
++            bindings_document=credential_bindings_document,
++            profiles_document=credential_profiles_document)
++        descriptor = prepared.descriptor
++        physical = credential_physical_binding
++        policy = preparation['policy']
++        catalog_digest = compose_catalog_digest(
++            bindings_document=credential_bindings_document,
++            profiles_document=credential_profiles_document)
++        if (physical.digest != preparation['correlation']['runtime_binding']['physical_binding_sha256']
++                or observed['worker_id'] != descriptor.worker_id
++                or type(observed['control_uid']) is not int
++                or observed['control_uid'] != preparation['policy'].control_uid
++                or observed['realm_config_sha256'] != physical.worker_source_config_digest
++                or observed['worker_id'] != physical.worker_id
++                or policy.worker_uid != physical.worker_uid or policy.worker_gid != physical.worker_gid
++                or physical.bridge_uid != physical.worker_uid
++                or os.getuid() != physical.worker_uid or os.geteuid() != physical.worker_uid
++                or os.getgid() != physical.worker_gid or os.getegid() != physical.worker_gid
++                or Path(policy.provider_home) != Path(physical.provider_home)
++                or type(observed['realm_generation']) is not int
++                or observed['realm_generation'] < 1
++                or observed['catalog_digest'] != catalog_digest
++                or binding != preparation['binding'] or profile != preparation['profile']
++                or observed['binding_id'] != descriptor.binding_id
++                or observed['profile_id'] != descriptor.profile_id
++                or observed['adapter_id'] != descriptor.adapter_id
++                or descriptor.model_class != preparation['model_class']
++                or descriptor.model != binding.model_for(profile, preparation['model_class'])
++                or descriptor.endpoint != binding.effective_base_url):
++            raise ControlStartRefused('realm_credential_binding_changed')
++    except Exception:
++        verification_failed = True
++    if verification_failed:
++        # No opaque observer error or sensitive context crosses the boundary.
++        raise ControlStartRefused('realm_observation_unqualified') from None
++    return observed
++
++
++def _prepare_reserved_attended_under_lease(*, payload, authority, preparation,
++                                       lease, state, key, receipt, nice,
++                                       check_original_owner, credential_loader=None,
++                                       credential_realm_owner=None, credential_physical_binding=None,
++                                       credential_bindings_document=None,
++                                       credential_profiles_document=None):
++    """Private composition seam, not exposed by CLI, RPC or environment.
++
++    Only the existing authenticated owner may call this inside its original
++    O_EXCL reservation and live lease. check_original_owner is a private
++    composition/test seam: it must raise unless the actual current realm,
++    canary, attendance, binary, schema and assignment isolation are qualified.
++    A callable, boolean or this helper's result does NOT establish those facts.
++    No production factory is enabled by adding this function. The public bound
++    path remains refused until that concrete owner composition is reviewed.
++    """
++    from control_plane.fabric_control_start import ControlStartAuthority, ControlStartRefused
++    from fabric_reserved_attended_launch import prepare_reserved_attended_launch
++    if type(authority) is not ControlStartAuthority or not callable(check_original_owner):
++        raise ControlStartRefused("authenticated_original_owner_required")
++    original = json.loads(json.dumps(payload, ensure_ascii=False, allow_nan=False))
++    authority.require(original)
++    prepared = prepare_reserved_attended_launch(original, **preparation)
++    if prepared.descriptor.run_id != key:
++        raise ControlStartRefused("original_owner_run_mismatch")
++    credential_inputs = dict(prepared=prepared, preparation=preparation,
++        credential_loader=credential_loader, credential_realm_owner=credential_realm_owner,
++        credential_physical_binding=credential_physical_binding,
++        credential_bindings_document=credential_bindings_document,
++        credential_profiles_document=credential_profiles_document)
++    original_realm = _verify_reserved_realm_observation(**credential_inputs)
++    arguments = prepared.lane_runtime_arguments()
++    if arguments['env'] != dict(prepared.descriptor.environment):
++        raise ControlStartRefused('realm_nonsecret_environment_changed')
++    arguments['nice'] = nice
++    credential_attempted = False
++
++    def at_boundary():
++        nonlocal credential_attempted
++        if credential_attempted:
++            raise ControlStartRefused('realm_credential_boundary_already_consumed')
++        # The callback checks actual owner evidence; its return is never a seal.
++        if check_original_owner(prepared) is not None:
++            raise ControlStartRefused("owner_check_must_not_issue_authority")
++        # A slow check or wait must not extend the existing Control command.
++        authority.require(original)
++        if _verify_reserved_realm_observation(**credential_inputs) != original_realm:
++            raise ControlStartRefused('realm_observation_changed')
++        from control_plane.claude_subscription_worker import _safe_credential
++        if arguments['env'] != dict(prepared.descriptor.environment):
++            raise ControlStartRefused('realm_nonsecret_environment_changed')
++        credential_attempted = True
++        load_failed = False
++        try:
++            credential = _safe_credential(credential_loader)
++        except Exception:
++            load_failed = True
++        if load_failed:
++            # Raise outside the handler so a hostile exception is not retained
++            # as __context__ even when an outer owner records the refusal.
++            raise ControlStartRefused('realm_credential_unavailable') from None
++        try:
++            # Loading can be slow; re-read original filesystem/binary owners too.
++            if check_original_owner(prepared) is not None:
++                raise ControlStartRefused('owner_check_must_not_issue_authority')
++            authority.require(original)
++            if _verify_reserved_realm_observation(**credential_inputs) != original_realm:
++                raise ControlStartRefused('realm_observation_changed')
++            arguments['env']['ANTHROPIC_AUTH_TOKEN'] = credential
++        finally:
++            credential = None
++
++    return prepared, arguments, at_boundary
++
++
++def _run_reserved_attended_under_lease(**kwargs):
++    prepared, arguments, at_boundary = _prepare_reserved_attended_under_lease(**kwargs)
++    try:
++        result = _run_lease_process(lease=kwargs['lease'], state=kwargs['state'],
++            key=kwargs['key'], receipt=kwargs['receipt'], arguments=arguments, at_boundary=at_boundary)
++        return result, prepared.validation_commands
++    finally:
++        arguments['env'].pop('ANTHROPIC_AUTH_TOKEN', None)
++
++
++def _retain_original_cleanup_hold(*, lease, state, key, receipt):
++    if state.get("started"):
++        proven = False
++        try:
++            row = json.loads(receipt.read_text().splitlines()[-1])
++            proven = row.get("label") == key and cleanup_receipt_is_proven(row.get("cleanup", {}))
++        except (OSError, ValueError, IndexError):
++            pass
++        if not proven:
++            lease.hold_for_reconciliation("worker_cleanup_unproven")
++
++
++def _begin_lease_process(*, lease, state, key, receipt, arguments, at_boundary):
++    """Original main-thread controller keeps its lease after START mechanics.
++
++    The caller must already own the reservation and lease for this entire
++    controller lifetime. This helper never enters/exits/releases that context.
++    The same runtime finisher retains capture/cleanup; the done callback merely
++    applies this original controller's existing terminal hold check.
++    """
++    asyncio.get_running_loop()  # Refuse missing event-loop owner before effects.
++    install_signal_cleanup(on_unproven=lease.hold_for_reconciliation)
++    owner = None
++    try:
++        at_boundary()
++        state['started'] = True
++        owner = begin_owned_process(label=key, receipt_path=receipt,
++                                    timeout_returncode=124, **arguments)
++        finisher = start_owned_process_finisher(owner)
++        # The resources stay strongly retained even if the successful START
++        # handler returns. This is the original lease, never a new acquisition.
++        owner._original_lease = lease
++        def settled(task):
++            try:
++                if not task.cancelled():
++                    task.exception()  # Retained on owner; suppress unobserved-task log.
++            finally:
++                _retain_original_cleanup_hold(lease=lease, state=state, key=key, receipt=receipt)
++        finisher.add_done_callback(settled)
++        return owner
++    except OwnedProcessStartError:
++        state['started'] = False
++        raise
++    except BaseException as exc:
++        if owner is not None and owner.result is None and owner.failure is None:
++            try:
++                abort_owned_process(owner, exc)
++            finally:
++                _retain_original_cleanup_hold(lease=lease, state=state, key=key, receipt=receipt)
++        else:
++            _retain_original_cleanup_hold(lease=lease, state=state, key=key, receipt=receipt)
++        raise
++
++
++def _begin_reserved_attended_under_lease(*, owned_capture=False, **kwargs):
++    """Source-only private composition, not a CLI/RPC/public admission bypass.
++
++    The returned resource is NOT a full START. The qualified original Backend
++    must separately observe the independently pinned executed image and retain
++    complete launch/assignment evidence before exposing native START.
++
++    With owned_capture=True the reserved-attended begin opts into the fixed
++    private file capture: run_dir and the result schema come only from this
++    exact real prepared descriptor, the three pinned files are reserved before
++    Popen, and their actual identities are bound on the original handle. The
++    integrated assembler must still require the live pinned files through
++    lane_runtime.validate_owned_capture_live(owner) before START; binding
++    claims live bound output ownership, never a completed result.
++    """
++    from control_plane.executive_fabric_bridge_broker import start_request_sha256
++    original = json.loads(json.dumps(kwargs['payload'], ensure_ascii=False, allow_nan=False))
++    prepared, arguments, at_boundary = _prepare_reserved_attended_under_lease(**kwargs)
++    if start_request_sha256(original) != prepared.request_sha256:
++        raise LaneRuntimeError('owned_start_original_request_changed')
++    # The original controller selects the carrier before any spawn. Existing
++    # bytes are unknown prior publication, never positive first-use proof.
++    start_path = Path(kwargs['receipt']).with_suffix('.start.json')
++    if not start_path.is_absolute():
++        raise LaneRuntimeError('owned_start_original_carrier_required')
++    _launch_receipt_directory(start_path)
++    if os.path.lexists(start_path):
++        raise LaneRuntimeError('owned_start_original_carrier_exists')
++    if type(owned_capture) is not bool:
++        raise LaneRuntimeError('owned_capture_option_invalid')
++    capture_opt_in = owned_capture
++    if capture_opt_in:
++        # The finite executor takes run_dir and the result schema only from
++        # this exact real prepared descriptor, never from caller arguments.
++        descriptor = prepared.descriptor
++        if (type(descriptor.run_dir) is not str or not descriptor.run_dir
++                or type(descriptor.result_schema_json) is not str
++                or not descriptor.result_schema_json):
++            raise LaneRuntimeError('owned_capture_descriptor_unqualified')
++        arguments = dict(arguments)
++        arguments['owned_capture_run_dir'] = descriptor.run_dir
++        arguments['owned_capture_result_schema_json'] = descriptor.result_schema_json
++        # This is the exact request's admitted filesystem observation, not a
++        # serialized Control authority. The original at_boundary check remains.
++        manifest = original['launch_spec']['isolation_manifest']
++        run_entries = [entry['identity'] for entry in manifest['entries']
++                       if entry['disposition'] == 'CURRENT_RUN']
++        stores = [entry for entry in manifest['roots']
++                  if entry['path'] == str(kwargs['preparation']['policy'].run_root)]
++        if len(run_entries) != 1 or len(stores) != 1:
++            raise LaneRuntimeError('owned_capture_assignment_invalid')
++        arguments['owned_capture_assignment'] = dict(run=run_entries[0], store=stores[0],
++            control_uid=kwargs['preparation']['policy'].control_uid, worker_gid=kwargs['preparation']['policy'].worker_gid)
++    try:
++        owner = _begin_lease_process(lease=kwargs['lease'], state=kwargs['state'],
++            key=kwargs['key'], receipt=kwargs['receipt'], arguments=arguments, at_boundary=at_boundary)
++    finally:
++        # The original generator shares this mapping. Popen copied it for the
++        # child; remove the parent copy before returning the original handle.
++        arguments['env'].pop('ANTHROPIC_AUTH_TOKEN', None)
++    owner._original_preparation = prepared.descriptor
++    owner._original_start_receipt_path = start_path
++    owner._original_start_context = dict(binding=original['binding'],
++        physical_binding_sha256=original['physical_binding_sha256'],
++        request_sha256=prepared.request_sha256)
++    if capture_opt_in:
++        # Bind the actual pinned reservation created inside begin_owned_process;
++        # caller path strings never establish capture ownership for START.
++        try:
++            owner._capture_reservation.expected_identity = {
++                key: original['launch_spec'][key] for key in ('run_id', 'job_id', 'worker_id')}
++            owner._original_capture_paths = owned_capture_paths(owner)
++            validate_owned_capture_live(owner)
++        except BaseException:
++            kwargs['lease'].hold_for_reconciliation('owned_capture_binding_unconfirmed')
++            raise
++    return owner, prepared.validation_commands
++
++
++
++
+@@ -136,0 +451,15 @@
++
++    # Optional correlation is read outside the prompt, before physical admission.
++    # It does not change Runtime, provider or host admission requirements.
++    try:
++        from fabric_launch_transport import remote_launch_arguments
++        launch_arguments = remote_launch_arguments(Path.home(), key, os.environ)
++    except (OSError, ValueError, TypeError):
++        return _fail("BOUND_LAUNCH_CONTEXT_REFUSED before_spawn=1", 78)
++
++    # V2 carries correlation only. The legacy sub.sh command below cannot
++    # enforce the original WorkerLaunchSpec or attest its isolated provider.
++    # Refuse before physical admission, handler changes or provider effects;
++    # an early gate receipt must never make that legacy path a native START.
++    if launch_arguments or "FABRIC_LAUNCH_SNAPSHOT_SHA256" in os.environ:
++        return _fail("BOUND_ATTENDED_EXECUTOR_UNAVAILABLE before_admission=1 before_spawn=1", 78)
+@@ -233,28 +562,6 @@
+-            install_signal_cleanup(on_unproven=lease.hold_for_reconciliation)
+-            try:
+-                state["started"] = True
+-                result = run_owned_process(
+-                    command,
+-                    cwd=cwd,
+-                    timeout=timeout,
+-                    env=child_env,
+-                    nice=config.nice,
+-                    label=key,
+-                    receipt_path=receipt,
+-                    timeout_returncode=124,
+-                    receipt_diagnostics=diagnostic_reader,
+-                )
+-            except OwnedProcessStartError as exc:
+-                state["started"] = False
+-                number = str(exc.error_number) if exc.error_number is not None else "unknown"
+-                return _fail("REMOTE_SUB_EXEC_NOT_STARTED errno=" + number, 78)
+-            finally:
+-                if state["started"]:
+-                    proven = False
+-                    try:
+-                        row = json.loads(receipt.read_text().splitlines()[-1])
+-                        proven = row.get("label") == key and cleanup_receipt_is_proven(row.get("cleanup", {}))
+-                    except (OSError, ValueError, IndexError):
+-                        pass
+-                    if not proven:
+-                        lease.hold_for_reconciliation("worker_cleanup_unproven")
++            result = _run_lease_process(
++                lease=lease, state=state, key=key, receipt=receipt,
++                arguments=dict(command=command, cwd=cwd, timeout=timeout,
++                               env=child_env, nice=config.nice,
++                               receipt_diagnostics=diagnostic_reader,
++                               **launch_arguments))
+@@ -296,0 +604,3 @@
++    except OwnedProcessStartError as exc:
++        number = str(exc.error_number) if exc.error_number is not None else "unknown"
++        return _fail("REMOTE_SUB_EXEC_NOT_STARTED errno=" + number, 78)

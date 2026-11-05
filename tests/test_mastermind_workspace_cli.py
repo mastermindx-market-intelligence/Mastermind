@@ -387,6 +387,60 @@ def test_storage_policy_accepts_bounded_inert_rationale_metadata(storage_cli, ca
     assert not root.exists()
 
 
+def _overflow_member():
+    return {
+        "mount_point": "/Volumes/Secondary", "root": "/Volumes/Secondary/workspaces",
+        "volume_uuid": "BDB7D9BA-7145-4115-B6BA-EB9B54896B67", "min_free_bytes": 100,
+    }
+
+
+@pytest.mark.parametrize("free,state,allowed", [(100, "READY", True), (99, "LOW_SPACE", False)])
+def test_existing_pool_metadata_preserves_primary_admission(
+    storage_cli, monkeypatch, capsys, free, state, allowed,
+):
+    cli, root, policy, data = storage_cli
+    data.update(overflow_volumes=[_overflow_member()], _pool_note="existing pool policy")
+    payload = json.dumps(data)
+    policy.write_text(payload)
+    monkeypatch.setattr(cli, "_storage_free_bytes", lambda p: free, raising=False)
+    code, result = _call_storage_cli(cli, capsys, "storage")
+    assert code == 0
+    receipt = result["receipt"]
+    assert receipt["state"] == state
+    assert receipt["admission_allowed"] is allowed
+    assert receipt["workspace_root"] == str(root)
+    assert receipt["mount_point"] == data["mount_point"]
+    assert receipt["volume_uuid"] == data["volume_uuid"]
+    assert receipt["min_free_bytes"] == 100
+    import hashlib
+    assert receipt["policy_sha256"] == hashlib.sha256(payload.encode()).hexdigest()
+    assert result["effect"] == "NOT_APPLIED"
+    assert not root.exists()
+
+
+@pytest.mark.parametrize("change", [
+    {"_pool_note": None}, {"_pool_note": True}, {"_pool_note": ""},
+    {"_pool_note": "x" * 8193}, {"overflow_volumes": None},
+    {"overflow_volumes": {}}, {"overflow_volumes": [False]},
+    {"overflow_volumes": [_overflow_member()] * 9},
+    {"overflow_volumes": [{**_overflow_member(), "unknown_switch": True}]},
+    {"overflow_volumes": [{**_overflow_member(), "mount_point": "relative"}]},
+    {"overflow_volumes": [{**_overflow_member(), "root": "/Volumes/Bad\x00root"}]},
+    {"overflow_volumes": [{**_overflow_member(), "volume_uuid": "not-a-uuid"}]},
+    {"overflow_volumes": [{**_overflow_member(), "min_free_bytes": True}]},
+    {"overflow_volumes": [{**_overflow_member(), "min_free_bytes": -1}]},
+])
+def test_malformed_pool_metadata_is_refused(storage_cli, capsys, change):
+    cli, root, policy, data = storage_cli
+    data.update(change)
+    policy.write_text(json.dumps(data))
+    code, result = _call_storage_cli(cli, capsys, "storage")
+    assert code == 2
+    assert "STORAGE_POLICY_INVALID" in result["error"]
+    assert result["effect"] == "NOT_APPLIED"
+    assert not root.exists()
+
+
 @pytest.mark.parametrize("why", [None, True, 7, ["text"], {"note": "text"}, "x" * 8193])
 def test_storage_policy_rejects_malformed_rationale_metadata(storage_cli, capsys, why):
     cli, root, policy, data = storage_cli
@@ -642,6 +696,30 @@ def test_installation_profile_keeps_required_mount_without_fallback(storage_cli,
     assert selected["mount_point"] == data["mount_point"]
 
 
+def test_cli_release_explains_ignored_cache_when_git_status_looks_clean(tmp_path: Path):
+    source, _base = _repository(tmp_path)
+    (source / ".gitignore").write_text(".pytest_cache/\n", encoding="utf-8")
+    _git(source, "add", ".gitignore")
+    _git(source, "commit", "-qm", "ignore generated test cache")
+    base = _git(source, "rev-parse", "HEAD")
+    root = tmp_path / "workspaces"
+    code, acquired = _run_cli(source, root, "acquire", "--operation-id", "cli-dirty-explanation", "--base-sha", base)
+    assert code == 0
+    workspace = Path(acquired["receipt"]["workspace_path"])
+    payload = workspace / ".pytest_cache" / "keep-until-qualified"
+    payload.parent.mkdir()
+    payload.write_text("do not automatically delete ignored evidence", encoding="utf-8")
+    assert _git(workspace, "status", "--porcelain=v1") == ""
+    code, observed = _run_cli(source, root, "release", "--operation-id", "cli-dirty-explanation")
+    assert code == 0 and observed["effect"] == "NOT_APPLIED"
+    assert observed["receipt"]["state"] == "PRESERVED_DIRTY"
+    assert "tracked_changes=absent" in observed["receipt"]["reason"]
+    assert "all_untracked=present" in observed["receipt"]["reason"]
+    assert "including ignored files" in observed["receipt"]["reason"]
+    assert "git ls-files --others -z" in observed["receipt"]["reason"]
+    assert payload.read_text(encoding="utf-8") == "do not automatically delete ignored evidence"
+
+
 def test_cli_release_accepts_explicit_existing_pr_publication_branch(tmp_path: Path):
     source, base_sha = _repository(tmp_path)
     remote = tmp_path / "remote.git"
@@ -773,3 +851,93 @@ def test_cli_release_accepts_deleted_source_branch_via_exact_pull_ref(tmp_path: 
     assert released["effect"] == "APPLIED"
     assert released["receipt"]["state"] == "REMOVED"
     assert not workspace.exists()
+
+
+@pytest.mark.parametrize("selector", ["branch", "pull"])
+def test_cli_publication_status_preserves_bounded_registration_and_release_custody(
+    storage_cli, tmp_path: Path, monkeypatch, capsys, selector: str
+):
+    from control_plane import executive_workspace as workspace_owner
+
+    cli, root, _, _ = storage_cli
+    source, base_sha = _repository(tmp_path)
+    monkeypatch.setenv("MASTERMIND_SOURCE_REPO", str(source))
+    monkeypatch.delenv("MASTERMIND_WORKSPACE_REPOSITORIES", raising=False)
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True,
+                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    _git(source, "remote", "add", "origin", str(remote))
+    _git(source, "push", "-u", "origin", "master")
+    operation = "bounded-publication-status"
+    code, created = _call_storage_cli(
+        cli, capsys, "acquire", "--operation-id", operation, "--base-sha", base_sha,
+    )
+    assert code == 0, created
+    workspace = Path(created["receipt"]["workspace_path"])
+    (workspace / "README.md").write_text("published source\n", encoding="utf-8")
+    _git(workspace, "add", "README.md")
+    _git(workspace, "commit", "-qm", "published candidate")
+    head = _git(workspace, "rev-parse", "HEAD")
+    if selector == "branch":
+        _git(workspace, "push", "origin", "HEAD:refs/heads/sol/publication-status")
+        arguments = ["--published-branch", "sol/publication-status"]
+        expected = "HEAD_PUBLISHED_TO_DECLARED_ORIGIN_BRANCH"
+    else:
+        _git(workspace, "push", "origin", "HEAD:refs/pull/818/head")
+        arguments = ["--published-pull-request", "818"]
+        expected = "HEAD_PUBLISHED_TO_PULL_REQUEST_REF"
+    before_registration = _git(source, "worktree", "list", "--porcelain")
+    scans = []
+    real_records = workspace_owner._worktree_records
+
+    def observe_full_scan(*args, **kwargs):
+        scans.append(args)
+        return real_records(*args, **kwargs)
+
+    monkeypatch.setattr(workspace_owner, "_worktree_records", observe_full_scan)
+    code, status = _call_storage_cli(
+        cli, capsys, "status", "--operation-id", operation, *arguments,
+    )
+    assert code == 0, status
+    assert status["effect"] == "NOT_APPLIED"
+    assert status["receipt"]["state"] == "RELEASABLE"
+    assert status["receipt"]["recoverability"] == expected
+    assert status["receipt"]["head_sha"] == head
+    assert status["receipt"]["removed"] is False
+    assert scans == []
+    assert _git(source, "worktree", "list", "--porcelain") == before_registration
+    code, released = _call_storage_cli(
+        cli, capsys, "release", "--operation-id", operation, *arguments,
+    )
+    assert code == 0, released
+    assert released["effect"] == "APPLIED"
+    assert released["receipt"]["state"] == "REMOVED"
+    assert len(scans) >= 2  # Full inspection and the final pre-unlock custody read.
+    assert not workspace.exists()
+
+
+def test_cli_in_process_nul_publication_selector_returns_typed_no_effect(
+    storage_cli, tmp_path: Path, monkeypatch, capsys
+):
+    cli, root, _, _ = storage_cli
+    source, base_sha = _repository(tmp_path)
+    monkeypatch.setenv("MASTERMIND_SOURCE_REPO", str(source))
+    monkeypatch.delenv("MASTERMIND_WORKSPACE_REPOSITORIES", raising=False)
+    operation = "nul-publication-selector"
+    code, created = _call_storage_cli(
+        cli, capsys, "acquire", "--operation-id", operation, "--base-sha", base_sha,
+    )
+    assert code == 0, created
+    workspace = Path(created["receipt"]["workspace_path"])
+    before_bytes = (workspace / "README.md").read_bytes()
+    before_registration = _git(source, "worktree", "list", "--porcelain")
+    # NUL is passed to Python main directly; an external argv cannot contain it.
+    code, refused = _call_storage_cli(
+        cli, capsys, "release", "--operation-id", operation,
+        "--published-branch", "sol/nul\x00branch",
+    )
+    assert code == 2
+    assert refused["effect"] == "NOT_APPLIED"
+    assert refused["error"] == "published branch is invalid"
+    assert (workspace / "README.md").read_bytes() == before_bytes
+    assert _git(source, "worktree", "list", "--porcelain") == before_registration
