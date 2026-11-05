@@ -555,3 +555,11 @@ REVIEWED_FILES['integrations/hermes_secretary/tab_sweep.py'] = {
     'sha256': '12d2c8f059f941eb908cc9d7ec3651763f8102832e05435118ce8e1385d5fd46',
     'sites': ((19, 77, 80, 'int', '443'),),
 }
+
+# NEXT accepted source: callback input bound / existing HTTP permission denial,
+# never an OS identity. Exact whole-source hash and token sites only.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'sha256': '721dd74cbd6a4e534b13a27166b2ab005af33b5693d982ee6725d7a7959ba3ee', 'sites': ((731, 49, 52, 'int', '512'),)}
+
+# NEXT accepted source: callback input bound / existing HTTP permission denial,
+# never an OS identity. Exact whole-source hash and token sites only.
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '6d7fc6e04b43006e3f5cd87d8a157b28938c73e11e375353de4f7066dbe5ee21', 'sites': ((703, 93, 96, 'int', '403'), (705, 56, 59, 'int', '403'), (712, 46, 49, 'int', '403'), (713, 56, 59, 'int', '403'))}
