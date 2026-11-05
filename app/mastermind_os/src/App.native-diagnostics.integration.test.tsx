@@ -49,6 +49,6 @@ it('withdraws a delayed native diagnostic result on actual native auth loss',asy
  await act(async()=>button().click());
  await act(async()=>f.handlers.get('mastermind-auth-state')!({payload:{status:'signed_out',reason:null,acquisition:false,content:false}}));
  await act(async()=>resolve(raw()));
- expect(container.textContent).toContain('Sign in to your workspace.');expect(container.textContent).not.toContain('CURRENT_LOCAL_METADATA');
+ expect(container.textContent).toContain('Sign in to your workspace.');expect(container.textContent).not.toContain('LAST_EXPLICIT_LOCAL_READ');
  expect(f.invoke.mock.calls.filter(([c])=>c==='sign_in'||c==='executive_context')).toHaveLength(0);
 });

@@ -127,7 +127,7 @@ export function TransportDiagnosticFields(props: {
   const native = observed?.phase === "ready" ? observed.value : undefined;
   const closed = (value: unknown, allowed: readonly string[]) => typeof value === "string" && allowed.includes(value) ? value : "UNKNOWN";
   if (native) rows.push(
-    {term: zh ? "本地原生观察" : "Local native observation", code: native.wire === "v1" ? "CURRENT_LOCAL_METADATA" : "LEGACY_METADATA"},
+    {term: zh ? "最近本地原生观察" : "Last local native observation", code: native.wire === "v1" ? "LAST_EXPLICIT_LOCAL_READ" : "LEGACY_METADATA"},
     {term: zh ? "本地 Executive 配置" : "Local Executive configured", code: booleanCode(typeof native.configured === "boolean" ? native.configured : null, zh)},
     {term: zh ? "本地 Executive 可用性" : "Local Executive availability", code: booleanCode(typeof native.available === "boolean" ? native.available : null, zh)},
     {term: zh ? "本地 Executive 原因" : "Local Executive reason", code: closed(native.reason, ["UNCONFIGURED","NOT_ESTABLISHED","AUTHORIZING","EXCHANGING","AVAILABLE","EXPIRED","AUTHORIZATION_REFUSED","TOKEN_EXCHANGE_FAILED","TOKEN_RESPONSE_INVALID","AUTH_BROWSER_UNAVAILABLE","AUTH_TRANSACTION_EXPIRED","GENERATION_EXHAUSTED"])},
