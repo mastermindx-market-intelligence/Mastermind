@@ -18,6 +18,8 @@ export interface NewConversationOutcomeProps {
   activity?: "creating" | "checking" | null;
   /** Parent permission gate: server data alone never enables the open control. */
   canOpen: boolean;
+  /** A selected lookup has not yet been read; no availability conclusion. */
+  awaitingCheck?: boolean;
   onCheck: () => void;
   onOpen: () => void;
   onBack: () => void;
@@ -26,7 +28,7 @@ export interface NewConversationOutcomeProps {
 }
 
 type OutcomeKey = "submitting" | "checking" | "unconfirmed" | "admitted" | "absent"
-  | "created" | "settled" | "refused" | "unavailable";
+  | "created" | "settled" | "refused" | "unavailable" | "awaiting";
 
 /** A created claim needs a real session binding AND a real locator, never either alone. */
 function createdConfirmed(data: FreshConversationData | null): boolean {
@@ -126,12 +128,14 @@ function sourceRows(zh: boolean, operationState: OperationState | null,
 /** Controlled request-status/initial-result view. The parent owns the controller,
  * binding and currentness; this component only renders what it is handed. */
 export function NewConversationOutcome({ locale, data, operationState, originalMessage,
-  projectTitle, opened, busy, activity = null, canOpen, onCheck, onOpen, onBack, continuation }: NewConversationOutcomeProps) {
+  projectTitle, opened, busy, activity = null, canOpen, awaitingCheck = false, onCheck, onOpen, onBack, continuation }: NewConversationOutcomeProps) {
   const zh = locale === "zh-CN";
   const text = (en: string, cn: string) => zh ? cn : en;
   const status = activity === "creating" ? {key:"submitting" as const,title:text("Creating conversation…","正在创建对话…")}
     : activity === "checking" ? {key:"checking" as const,title:text("Checking original request…","正在查看原请求…")}
-    : outcomeStatus(zh, operationState, data);
+    : awaitingCheck && data == null && operationState == null
+      ? {key:"awaiting" as const,title:text("Check the original request to view its status.", "请查看原请求以了解其状态。")}
+      : outcomeStatus(zh, operationState, data);
   const result = data?.result ?? null;
   const responseOpenable = canOpen && (createdConfirmed(data) || settledWithLocator(data));
   const backAnnotated = status.key === "submitting" || status.key === "checking"

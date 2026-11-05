@@ -397,3 +397,11 @@ it.each(["en","zh-CN"] as const)("labels a genuine caller-selected follow-up bod
  expect(screen.getByText(unitResult.envelope.summary,{normalizer:value=>value}).textContent).toBe(unitResult.envelope.summary);
  expect(screen.queryByText(locale==="en"?"Your first message":"你的首条消息")).toBeNull();
 });
+
+it.each([['en','Check the original request to view its status.'],['zh-CN','请查看原请求以了解其状态。']] as const)("does not call an unread selected original unavailable (%s)",(locale,copy)=>{
+  const {rerender}=render(<NewConversationOutcome locale={locale} data={null} operationState={null} originalMessage={null} projectTitle={null} opened={false} busy={false} canOpen={false} awaitingCheck onCheck={()=>{}} onOpen={()=>{}} onBack={()=>{}}/>);
+  expect(screen.getByText(copy)).toBeTruthy();
+  expect(screen.queryByText(/Conversation status is unavailable here|此处暂时无法查看对话状态/)).toBeNull();
+  rerender(<NewConversationOutcome locale={locale} data={null} operationState={null} originalMessage={null} projectTitle={null} opened={false} busy={false} canOpen={false} awaitingCheck={false} onCheck={()=>{}} onOpen={()=>{}} onBack={()=>{}}/>);
+  expect(screen.getByText(locale==='en'?'Conversation status is unavailable here.':'此处暂时无法查看对话状态。')).toBeTruthy();
+});

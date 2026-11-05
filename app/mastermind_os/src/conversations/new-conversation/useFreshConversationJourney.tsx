@@ -284,6 +284,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
     <details><summary>{t("Sources and access","来源与访问")}</summary><dl>{Object.entries(prepared.data.preview??{}).map(([key,value])=>
      <div key={key}><dt>{key}</dt><dd><code>{typeof value==="object"?JSON.stringify(value):String(value)}</code></dd></div>)}</dl></details>
    </section>:<>{feedback}<NewConversationOutcome locale={props.locale} data={view.data} operationState={view.operation}
+    awaitingCheck={view.lookup&&!view.data&&!view.operation&&!view.busy&&!view.error}
     originalMessage={view.original&&"message"in view.original?view.original.message??null:null} projectTitle={view.projectTitle}
     opened={view.opened} busy={!!view.busy||view.discovering||view.other} activity={view.busy==="operation"?"creating":view.busy==="read"?"checking":null} canOpen={canOpen(view.data)&&!view.other&&!!actualOwner}
     onCheck={()=>void check()} onOpen={()=>void check(true)} onBack={back} continuation={continuation}/></>}
