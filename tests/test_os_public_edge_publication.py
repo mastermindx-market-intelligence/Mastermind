@@ -20,7 +20,8 @@ from ops.executive_os import executive_mcp_entry as entry
 from ops.executive_os import os_public_edge_publication as m
 from ops.executive_os import os_release_assets as assets
 from ops.executive_os import release_manifest as seals
-from ops.executive_os.os_public_edge import HOST, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES, GET_ROUTES, POST_ROUTES, asset_routes
+from ops.executive_os.os_public_edge import (HOST, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES,
+    GET_ROUTES, POST_ROUTES, SOURCE_POST_ROUTES, MCP_METADATA_ROUTE, MCP_ROUTES, asset_routes)
 
 
 def git(repo, *args):
@@ -57,25 +58,43 @@ def make_dist(app, tag, *, noir_notices=False):
     return {"operator_uid": 501, "tools": {"/fixture/node": "a" * 64, "/fixture/npm": "b" * 64}}
 
 
-def fullconfig(manifest):
-    # The handler `caddy adapt` emits for the rendered OS branches; the planner now
+def _proxy(host):
+    # The handler `caddy adapt` emits for the rendered OS branches; the planner
     # requires every branch proxy to equal it, so a bare upstream is refused.
-    proxy = {"handler": "reverse_proxy", "upstreams": [{"dial": "127.0.0.1:49152"}],
-             "headers": {"request": {
-                 "delete": ["Forwarded", "X-Forwarded-Host", "X-Forwarded-Port", "X-Real-IP",
-                            "CF-Connecting-IP", "EO-Connecting-IP", "EO-Client-IP"],
-                 "set": {"Host": [HOST], "X-Forwarded-For": ["127.0.0.1"],
-                         "X-Forwarded-Proto": ["https"]}}}}
+    return {"handler": "reverse_proxy", "upstreams": [{"dial": "127.0.0.1:49152"}],
+            "headers": {"request": {
+                "delete": ["Forwarded", "X-Forwarded-Host", "X-Forwarded-Port", "X-Real-IP",
+                           "CF-Connecting-IP", "EO-Connecting-IP", "EO-Client-IP"],
+                "set": {"Host": [host], "X-Forwarded-For": ["127.0.0.1"],
+                        "X-Forwarded-Proto": ["https"]}}}}
+
+
+ABORT_BRANCH = {"handle": [{"handler": "static_response", "abort": True}]}
+
+
+def os_branches(manifest):
+    """The complete rendered OS subroute: five proxy branches plus the abort."""
+    return [
+        {"match": [{"method": ["GET"], "path": sorted(set(GET_ROUTES) | set(asset_routes(manifest)))}],
+         "handle": [_proxy(HOST)]},
+        {"match": [{"method": ["POST"], "path": list(POST_ROUTES)}],
+         "handle": [{"handler": "request_body", "max_size": 64000}, _proxy(HOST)]},
+        {"match": [{"method": ["POST"], "path": list(SOURCE_POST_ROUTES)}],
+         "handle": [{"handler": "request_body", "max_size": 98304}, _proxy(HOST)]},
+        {"match": [{"method": ["GET"], "path": [MCP_METADATA_ROUTE]}],
+         "handle": [_proxy(HOST)]},
+        {"match": [{"method": ["POST"], "path": list(MCP_ROUTES)}],
+         "handle": [{"handler": "request_body", "max_size": 64000}, _proxy("127.0.0.1")]},
+        dict(ABORT_BRANCH),
+    ]
+
+
+def fullconfig(manifest):
     return {"admin": {"listen": "127.0.0.1:2019"}, "apps": {
         "tls": {"automation": {"policies": [{"subjects": ["other.example.invalid"]}]}},
         "http": {"servers": {"srv0": {"listen": [":443"], "routes": [{
             "match": [{"host": [HOST]}], "terminal": True,
-            "handle": [{"handler": "subroute", "routes": [
-                {"match": [{"method": ["GET"], "path": sorted(set(GET_ROUTES) | set(asset_routes(manifest)))}],
-                 "handle": [copy.deepcopy(proxy)]},
-                {"match": [{"method": ["POST"], "path": list(POST_ROUTES)}],
-                 "handle": [{"handler": "request_body", "max_size": 64000}, copy.deepcopy(proxy)]},
-                {"handle": [{"handler": "static_response", "abort": True}]}]}]},
+            "handle": [{"handler": "subroute", "routes": os_branches(manifest)}]},
             {"match": [{"host": ["other.example.invalid"]}],
              "handle": [{"handler": "static_response", "body": "retained"}]}]}}}}}
 
@@ -119,10 +138,13 @@ def inputs(tmp_path, monkeypatch, request):
     live = tmp_path / "live.json"
     config = fullconfig(manifest)
     if retired_edge_profile:
-        # Current production edge initially has no Control Room routes.
+        # The retired production edge predates the Control Room routes, the
+        # dedicated source branch and the public MCP entrypoints: the complete
+        # legacy three-branch predecessor profile, not a partial list.
         branches = config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
         branches[0]["match"][0]["path"] = sorted(set(LEGACY_GET_ROUTES) | set(asset_routes(manifest)))
         branches[1]["match"][0]["path"] = list(LEGACY_POST_ROUTES)
+        del branches[2:5]
     live.write_bytes(m.canonical(config))
     return dict(old_root=old, old_sha="a" * 40, old_tree="b" * 40,
                 new_bundle=bundle, source_repo=repo, new_sha=sha, new_tree=tree,
@@ -209,17 +231,30 @@ def test_legacy_edge_publication_adds_closed_control_room_routes_before_switch(s
     route = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
     assert route[0]["match"][0]["path"] == sorted(set(LEGACY_GET_ROUTES) | set(asset_routes(entry.build_os_asset_manifest(i["old_root"]))))
     assert route[1]["match"][0]["path"] == list(LEGACY_POST_ROUTES)
+    assert route[1]["handle"][0]["max_size"] == 64000
+    assert len(route) == 3 and route[2] == ABORT_BRANCH
     assert publish(staged)["state"] == "PREPARED"
     route = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
     assert set(GET_ROUTES) <= set(route[0]["match"][0]["path"])
     assert route[1]["match"][0]["path"] == list(POST_ROUTES)
     assert route[1]["handle"][0]["max_size"] == 64000
+    # The dedicated source-operation branch is inserted at its canonical
+    # position with its own 98304-byte cap and the public HOST proxy; the
+    # legacy POST branch keeps 64KB and the abort stays terminal.
+    assert route[2]["match"][0]["path"] == list(SOURCE_POST_ROUTES)
+    assert route[2]["handle"][0]["max_size"] == 98304
+    assert route[2]["handle"][1] == _proxy(HOST)
+    assert len(route) == 4 and route[3] == ABORT_BRANCH
     assert ready(staged)["state"] == "CUTOVER_READY"
     relay.selected = "new"
     assert publish(staged, "finalize")["state"] == "FINAL"
     assert route[1]["match"][0]["path"] == list(POST_ROUTES)
-    assert relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][2] == {
-        "handle": [{"handler": "static_response", "abort": True}]}
+    route = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+    assert set(GET_ROUTES) <= set(route[0]["match"][0]["path"])
+    assert "/os/assets/index-old.js" not in route[0]["match"][0]["path"]
+    assert route[2]["match"][0]["path"] == list(SOURCE_POST_ROUTES)
+    assert route[2]["handle"][0]["max_size"] == 98304
+    assert len(route) == 4 and route[3] == ABORT_BRANCH
 
 
 def test_real_consumer_two_phase_order_and_single_selected_release(staged):
