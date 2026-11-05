@@ -146,6 +146,30 @@ Use `docs/sol_skills/ACTIVE_EXECUTION.md` for the shared recovery procedure; thi
 runtime authority, required form, new watcher or extra human approval. Existing exact grants,
 source custody, effect reconciliation, review and release controls remain in force.
 
+### Standing authorization: saved credentials for assigned website access
+
+The Chairman authorizes an actively assigned Mastermind engineering/operations session to use
+**already-provisioned saved credentials** and existing authenticated browser sessions to log into
+the legitimate website/service required by that assignment. This includes browser/password-manager
+autofill and any macOS Keychain or other secure-store access that the current OS/tool permissions
+actually allow. **Do not request separate Chairman permission for each routine in-scope
+saved-password use or website login**; try the permitted route, then verify the resulting
+signed-in state. This is standing task-scoped consent, not permission to access arbitrary
+accounts.
+
+Verify the exact website origin, intended account, and relation to the current task before
+supplying a credential. Prefer autofill or another secret-preserving path; never write plaintext
+passwords, tokens, recovery codes, or cookies to transcripts, prompts, argv, logs, source, memory,
+or handoffs. Do not bulk-extract/export a vault, copy secrets to another host/account, or use
+unrelated personal accounts. A saved secret is not independent authority for account/security
+changes, spending, money movement, trading, production deployment, or other reserved actions.
+
+This instruction does not override OS/tool permissions, site controls, explicit access refusals,
+fresh user-consent requirements, passkey/Touch ID or other user-presence checks, MFA, or CAPTCHA.
+If a genuine human-only step remains, name that exact gate once and continue independent
+authorized work. Do not treat an ordinary login page as an administrative approval gate when a
+legitimate, permitted saved credential is already available.
+
 ### Session lifetime and acceptance scope
 
 A role is not a persistent conversation. ChatGPT Web sessions are ephemeral and may be
@@ -188,6 +212,9 @@ Within an assigned nonterminal job, the current session retains responsibility f
 - A dead or missing runtime/session is a reconciliation/succession problem for the existing canonical owner; it never grants this session automatic modifying authority.
 - A named "original administrator," publisher, reviewer, host owner, or ChatGPT conversation may identify provenance or the immutable effect/result carrier; it is not permanent staffing. Resolve exact operation/request identity, original authorized carrier, canonical pending result, live writer/lease, prior read/refusal and next lawful action. The currently assigned session owns this recovery triage, not a missing historical chat.
 - If an old operation reportedly exited successfully but its protected result is not canonically reconciled, do not infer PASS from rc0, a Slack report or a historical owner claim. Do not rerun the operation, trigger a second protected read, switch tools/accounts/credentials or activate a held service. An explicit safety/permission denial ends that action; preserve its original carrier and release hold, and advance genuinely independent authorized work.
+- A requested GitHub reviewer is metadata, not itself a mandatory approval. Check exact-head branch rules, CODEOWNERS and active release holds; a permission-limited read is UNKNOWN, not proof of a required approval or waiver. Never self-approve or self-merge.
+- A disabled Executive Control service with an unreconciled protected result is a real action-scoped admission hold, not evidence that an archived original chat owns the project. Do not restart or replay the denied result; advance disjoint permitted work.
+- Apply ACTIVE_EXECUTION's "Prove an owner gate before using it to stop" before naming another owner as the only next action. Give the exact target, original-carrier effects, live writer/lease, denied or permitted action and addressable next step.
 - `EXACT_HUMAN_GATE` requires a demonstrated unavailable human credential/control, its exact action and evidence that other useful independent lanes are exhausted. "Ask the original owner/chat" or a conceptual department is not that proof. If useful independent work exists, the mission remains `MORE_WORK_EXISTS`; save the accurate blocker in the existing canonical checkpoint, never in a new owner registry.
 <!-- MMX_RESPONSIBILITY_CONTINUITY_END -->
 

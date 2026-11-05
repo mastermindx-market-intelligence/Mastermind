@@ -1,7 +1,7 @@
 import {
   createExecutiveLaunchBinding,
   type ExecutiveToolEnvelope,
-  type LaunchBindingConfig,
+  type LaunchConfiguration,
 } from "./executive-launch-command-port";
 import type { OwnerContext, PendingPointerStore } from "./operation-controller";
 import type { DirectNativeTransport, DirectSelection, DirectTerminalSelection } from "../direct-native-result";
@@ -54,7 +54,7 @@ export function decodeExecutiveContext(value: unknown, nowMs: number): VerifiedC
  * older principal. Persistence and operation identity remain their existing owners.
  */
 export function createOsExecutiveHost(
-  config: LaunchBindingConfig,
+  config: LaunchConfiguration,
   transport: OsExecutiveTransport,
   store: PendingPointerStore,
   now: () => number = Date.now,

@@ -447,15 +447,15 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # review; this does not authorize publication, runtime admission or release.
 # No generic numeric exception is added: source/path/site drift exposes all
 # literals again through the existing D8 scanner.
-# The bounded admission probe catches TimeoutExpired and returns a failed
-# read. That handler is six lines above the later sites, so those line
-# numbers moved. The same four literals stay exact whole tokens.
+# Finite-workstream template derivation changes only _gateway_templates.
+# The same four whole Constant tokens, relative AST paths and complete
+# enclosing identity owners remain unchanged; later lines shift by one.
 REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': 'deea6a99f70c0583ffeec82d3b8ef3e80ddcedc9742e4c4e2458abb07e89bbc2',
+    'sha256': '93cb7727512d1922461272e8d0b4a2557fa39d51d9a88e18597401f1731ea83a',
     'sites': ((335, 24, 27, 'int', '501'),
-              (6557, 35, 37, 'int', '80'),
-              (6558, 50, 55, 'int', '0o755'),
-              (7095, 41, 46, 'int', '0o644')),
+              (6556, 35, 37, 'int', '80'),
+              (6557, 50, 55, 'int', '0o755'),
+              (7094, 41, 46, 'int', '0o644')),
 }
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
@@ -500,7 +500,7 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Journal source-only read composition: exact unchanged action-handler AST and
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '44d7d3a597ba82b3758b832c580278a529b10f7d2c9a1a2b1efddfe72e67f870', 'sites': ((877, 71, 74, 'int', '400'), (888, 71, 74, 'int', '403'), (896, 71, 74, 'int', '400'), (902, 79, 82, 'int', '400'), (911, 71, 74, 'int', '400'), (921, 71, 74, 'int', '403'), (926, 76, 79, 'int', '503'), (932, 71, 74, 'int', '403'))}
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'fd62f0d885bd1267c21a98f10268caff5bcde7d1d0165816da67b16648117aef', 'sites': ((877, 71, 74, 'int', '400'), (888, 71, 74, 'int', '403'), (896, 71, 74, 'int', '400'), (902, 79, 82, 'int', '400'), (911, 71, 74, 'int', '400'), (921, 71, 74, 'int', '403'), (926, 76, 79, 'int', '503'), (932, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -562,4 +562,31 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 
 # NEXT accepted source: callback input bound / existing HTTP permission denial,
 # never an OS identity. Exact whole-source hash and token sites only.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '6aa29e5d5d4569cbc542d86009f8521fe976084c67cd76b5318850a8eda66b73', 'sites': ((703, 93, 96, 'int', '403'), (705, 56, 59, 'int', '403'), (712, 46, 49, 'int', '403'), (713, 56, 59, 'int', '403'))}
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': 'f103f1fdb7ec1533479ae5610a5df93d2333d3264d26a4035dbfe515606b384d', 'sites': ((704, 93, 96, 'int', '403'), (706, 56, 59, 'int', '403'), (713, 46, 49, 'int', '403'), (714, 56, 59, 'int', '403'))}
+
+# S14 reviewed private-directory comparison (Root + independent89cb). This
+# single permission check grants no identity or chmod capability. Any path,
+# token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
+REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/post_failure_observation.py'] = {
+    'sha256': '2a78630ccaf574da752c77d7b8f821723ccb264b970e2fe38b1976d886ca97a0',
+    'sites': ((293, 79, 84, 'int', '0o700'),),
+}
+
+
+# PR1890 attended parent classification under the current Chairman source waiver:
+# two CSS dimensions and five graph coordinates, never identities or grants.
+# Each complete token is on an ASCII physical line. Exact final HTML bytes and
+# seven spans only; every source/context/path change restores ordinary D8.
+# This pin is not independent/formal review or a CodeQL finding disposition.
+REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/account_network_interactive.html'] = {
+    'sha256': '62492c23f2d6a21d389268e51823f6b2f130e2e47a64f17bcfc38e886e9cc3d8',
+    'sites': (
+        (8, 77, 80, 'int', '680'),
+        (37, 17, 20, 'int', '900'),
+        (70, 45, 48, 'int', '495'),
+        (70, 51, 54, 'int', '535'),
+        (72, 45, 48, 'int', '720'),
+        (74, 10, 13, 'int', '922'),
+        (79, 56, 59, 'int', '800'),
+    ),
+}

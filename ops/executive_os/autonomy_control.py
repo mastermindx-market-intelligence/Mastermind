@@ -5890,75 +5890,74 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
         return receipt_bytes, document, bundle_digest
 
     def _gateway_templates(self, launch_config: str) -> tuple[dict[str, Any], ...]:
-        """Derive the closed legacy choice or ordered READ-only H2 pair.
+        """Derive exact templates for the sealed v1 or finite v2 enrollment.
 
         All fields and optional-field presence come from the same qualified
         Launch receipt. Profile selection never supplies new grant authority.
         """
         from control_plane import ceo_request
+        from ops.executive_os.os_release_assets import _decode_launch_bindings
 
         try:
-            values = json.loads(launch_config)
-        except (TypeError, json.JSONDecodeError) as exc:
+            bindings = _decode_launch_bindings(json.loads(launch_config))
+        except (TypeError, ValueError) as exc:
             raise GatewayPublicationError("gateway_template_refused") from exc
-        projects = values.get("projects") if type(values) is dict else None
-        profiles = values.get("profiles") if type(values) is dict else None
-        if (
-            type(projects) is not list
-            or len(projects) != 1
-            or type(projects[0]) is not dict
-            or type(profiles) is not list
-            or len(profiles) not in (1, 2)
-            or any(type(profile) is not dict for profile in profiles)
-        ):
+        if bindings is None:
             raise GatewayPublicationError("gateway_template_refused")
-        profile_refs = [profile.get("ref") for profile in profiles]
-        if profile_refs not in (
-            ["research_only"], ["research_only", "native_research_only"]
-        ):
-            raise GatewayPublicationError("gateway_template_refused")
-        if len(profile_refs) == 2 and (
-            type(values.get("attemptLimit")) is not int
-            or values["attemptLimit"] != 1
-            or values.get("allowedWritePaths", []) != []
-            or values.get("validation", {}) != {}
-        ):
-            raise GatewayPublicationError("gateway_template_refused")
-        priority = values.get("priority")
-        from ops.executive_os.os_release_assets import _decode_launch_binding
-
-        try:
-            if _decode_launch_binding(values) is None:
-                raise ValueError("invalid sealed Launch form")
-        except (KeyError, TypeError, ValueError) as exc:
-            raise GatewayPublicationError("gateway_template_refused") from exc
-        attempt_limit = values.get("attemptLimit", ceo_request.DEFAULT_ATTEMPT_LIMIT)
-        template = {
-            "workstream": values["workstream"],
-            "department": projects[0]["ref"],
-            "execution_profile": "research_only",
-            "priority": priority,
-        }
-        # Match the actual browser form exactly, including optional presence.
-        for source, target in (
-            ("attemptLimit", "attempt_limit"),
-            ("allowedWritePaths", "allowed_write_paths"),
-            ("validation", "validation"),
-        ):
-            if source in values:
-                template[target] = copy.deepcopy(values[source])
-        if (
-            any(profile not in ceo_request.EXECUTION_PROFILES for profile in profile_refs)
-            or type(priority) is not int
-            or not ceo_request.MIN_PRIORITY <= priority <= ceo_request.MAX_PRIORITY
-            or type(attempt_limit) is not int
-            or not ceo_request.MIN_ATTEMPT_LIMIT
-            <= attempt_limit
-            <= ceo_request.MAX_ATTEMPT_LIMIT
-        ):
-            raise GatewayPublicationError("gateway_template_refused")
-        return tuple({**copy.deepcopy(template), "execution_profile": profile}
-                     for profile in profile_refs)
+        templates = []
+        for values in bindings:
+            projects = values.get("projects") if type(values) is dict else None
+            profiles = values.get("profiles") if type(values) is dict else None
+            if (
+                type(projects) is not list
+                or len(projects) != 1
+                or type(projects[0]) is not dict
+                or type(profiles) is not list
+                or len(profiles) not in (1, 2)
+                or any(type(profile) is not dict for profile in profiles)
+            ):
+                raise GatewayPublicationError("gateway_template_refused")
+            profile_refs = [profile.get("ref") for profile in profiles]
+            if profile_refs not in (
+                ["research_only"], ["research_only", "native_research_only"]
+            ):
+                raise GatewayPublicationError("gateway_template_refused")
+            if len(profile_refs) == 2 and (
+                type(values.get("attemptLimit")) is not int
+                or values["attemptLimit"] != 1
+                or values.get("allowedWritePaths", []) != []
+                or values.get("validation", {}) != {}
+            ):
+                raise GatewayPublicationError("gateway_template_refused")
+            priority = values.get("priority")
+            attempt_limit = values.get("attemptLimit", ceo_request.DEFAULT_ATTEMPT_LIMIT)
+            template = {
+                "workstream": values["workstream"],
+                "department": projects[0]["ref"],
+                "execution_profile": "research_only",
+                "priority": priority,
+            }
+            # Match the actual browser form exactly, including optional presence.
+            for source, target in (
+                ("attemptLimit", "attempt_limit"),
+                ("allowedWritePaths", "allowed_write_paths"),
+                ("validation", "validation"),
+            ):
+                if source in values:
+                    template[target] = copy.deepcopy(values[source])
+            if (
+                any(profile not in ceo_request.EXECUTION_PROFILES for profile in profile_refs)
+                or type(priority) is not int
+                or not ceo_request.MIN_PRIORITY <= priority <= ceo_request.MAX_PRIORITY
+                or type(attempt_limit) is not int
+                or not ceo_request.MIN_ATTEMPT_LIMIT
+                <= attempt_limit
+                <= ceo_request.MAX_ATTEMPT_LIMIT
+            ):
+                raise GatewayPublicationError("gateway_template_refused")
+            templates.extend({**copy.deepcopy(template), "execution_profile": profile}
+                             for profile in profile_refs)
+        return tuple(templates)
 
     def _gateway_template(self, launch_config: str) -> dict[str, Any]:
         """Compatibility entry for the unchanged single-choice form only."""

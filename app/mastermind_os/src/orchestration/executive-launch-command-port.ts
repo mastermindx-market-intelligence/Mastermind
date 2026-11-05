@@ -79,6 +79,26 @@ export interface LaunchBindingConfig {
   readonly frontierModels?: readonly LaunchChoice[];
 }
 
+export interface LaunchEnrollmentConfig {
+  readonly v: 2;
+  readonly defaultWorkstream: string;
+  readonly bindings: readonly (LaunchBindingConfig & { readonly label: string })[];
+}
+export type LaunchConfiguration = LaunchBindingConfig | LaunchEnrollmentConfig;
+
+/** Resolve one exact enrollment; only an omitted legacy selection uses the default. */
+export function resolveLaunchBinding(
+  config: LaunchConfiguration,
+  workstreamRef?: string,
+): LaunchBindingConfig | null {
+  if (workstreamRef !== undefined && (typeof workstreamRef !== "string" || !validWorkstream(workstreamRef))) return null;
+  if ("bindings" in config) {
+    return config.bindings.find(binding =>
+      binding.workstream === (workstreamRef ?? config.defaultWorkstream)) ?? null;
+  }
+  return workstreamRef === undefined || workstreamRef === config.workstream ? config : null;
+}
+
 export interface ExecutiveLaunchViewSource {
   context(): OwnerContext | null;
   readonly store: PendingPointerStore;
@@ -93,7 +113,7 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     return !!owner && this.directJobs.has(JSON.stringify([owner.principalScope,owner.generation,selection.workRef,selection.rootJobId]));
   }
   constructor(
-    private readonly config: LaunchBindingConfig,
+    private readonly config: LaunchConfiguration,
     private readonly client: ExecutiveToolClient,
     private readonly owner: () => OwnerContext | null,
   ) {}
@@ -107,7 +127,7 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     if (!ctx) return null;
     const payload = this._payloadFromForm(form, ctx.principalScope);
     if (!payload) return null;
-    return { kind: "launch", targetKey: this.config.workstream, payload };
+    return { kind: "launch", targetKey: payload.workstream as string, payload };
   }
 
   prepare(intent: CommandIntent): OperationPointer {
@@ -195,29 +215,30 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     form: LaunchForm,
     principalScope: string,
   ): Record<string, unknown> | null {
-    if (!validGoal(form.goal)) return null;
+    const config = resolveLaunchBinding(this.config, form.workstreamRef);
+    if (!config || !validGoal(form.goal)) return null;
     if (!DEPARTMENT_RE.test(form.projectRef)) return null;
-    if (!listedChoice(this.config.projects, form.projectRef)) return null;
+    if (!listedChoice(config.projects, form.projectRef)) return null;
     if (!PROFILES.has(form.profileRef)) return null;
-    if (!listedChoice(this.config.profiles, form.profileRef)) return null;
+    if (!listedChoice(config.profiles, form.profileRef)) return null;
     if (form.profileRef === "native_research_only") {
       if (form.frontierModelAlias !== undefined) return null;
-    } else if (this.config.frontierModels !== undefined) {
+    } else if (config.frontierModels !== undefined) {
       if (typeof form.frontierModelAlias !== "string" ||
           !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(form.frontierModelAlias) ||
           /[^a-z0-9._-]/.test(form.frontierModelAlias) ||
-          !listedChoice(this.config.frontierModels, form.frontierModelAlias)) return null;
+          !listedChoice(config.frontierModels, form.frontierModelAlias)) return null;
     } else if (form.frontierModelAlias !== undefined) return null;
-    if (!validWorkstream(this.config.workstream)) return null;
-    if (!validPriority(this.config.priority)) return null;
+    if (!validWorkstream(config.workstream)) return null;
+    if (!validPriority(config.priority)) return null;
 
-    const writePaths = this.config.allowedWritePaths;
-    const validation = this.config.validation;
+    const writePaths = config.allowedWritePaths;
+    const validation = config.validation;
     const writeCount = writePaths?.length ?? 0;
     const validationCount = validationEntries(validation);
     if (form.profileRef === "research_only" || form.profileRef === "native_research_only") {
       if (writeCount > 0 || validationCount > 0) return null;
-      if (form.profileRef === "native_research_only" && this.config.attemptLimit !== 1) return null;
+      if (form.profileRef === "native_research_only" && config.attemptLimit !== 1) return null;
     } else {
       if (writeCount < 1 || validationCount < 1) return null;
       if (!writePaths || !validWritePaths(writePaths)) return null;
@@ -226,29 +247,29 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     const payload: Record<string, unknown> = {
       operation_key: operationKeyForLaunch({
         principalScope,
-        workstream: this.config.workstream,
+        workstream: config.workstream,
         department: form.projectRef,
         execution_profile: form.profileRef,
         ...(form.frontierModelAlias !== undefined ? { frontier_model_alias: form.frontierModelAlias } : {}),
         objective: form.goal,
-        priority: this.config.priority,
+        priority: config.priority,
         ...(writePaths !== undefined ? { allowed_write_paths: writePaths } : {}),
         ...(validation !== undefined ? { validation } : {}),
-        ...(this.config.attemptLimit !== undefined
-          ? { attempt_limit: this.config.attemptLimit }
+        ...(config.attemptLimit !== undefined
+          ? { attempt_limit: config.attemptLimit }
           : {}),
       }),
       objective: form.goal,
       department: form.projectRef,
-      priority: this.config.priority,
+      priority: config.priority,
       execution_profile: form.profileRef,
-      workstream: this.config.workstream,
+      workstream: config.workstream,
     };
     if (form.frontierModelAlias !== undefined) payload.frontier_model_alias = form.frontierModelAlias;
     if (writePaths !== undefined) payload.allowed_write_paths = [...writePaths];
     if (validation !== undefined) payload.validation = copyValidation(validation);
-    if (this.config.attemptLimit !== undefined) {
-      payload.attempt_limit = this.config.attemptLimit;
+    if (config.attemptLimit !== undefined) {
+      payload.attempt_limit = config.attemptLimit;
     }
     return payload;
   }
@@ -444,7 +465,7 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
 }
 
 export function createExecutiveLaunchBinding(
-  config: LaunchBindingConfig,
+  config: LaunchConfiguration,
   client: ExecutiveToolClient,
   viewSource: ExecutiveLaunchViewSource,
   direct?: { port: FiniteCommandPort; capability: Omit<NonNullable<OrchestratorCommandBinding["directNative"]>, "isDirectSelection"> },
@@ -462,10 +483,19 @@ export function createExecutiveLaunchBinding(
     store: viewSource.store,
     getView(): OrchestratorCommandView {
       const session = viewSource.getSession();
+      const selected = resolveLaunchBinding(config);
       return {
-        projects: config.projects,
-        profiles: config.profiles,
-        ...(config.frontierModels !== undefined ? { frontierModels: config.frontierModels } : {}),
+        projects: selected?.projects ?? [],
+        profiles: selected?.profiles ?? [],
+        ...(selected?.frontierModels !== undefined ? { frontierModels: selected.frontierModels } : {}),
+        ...("bindings" in config ? {
+          defaultWorkstream: config.defaultWorkstream,
+          workstreams: config.bindings.map(binding => ({
+            ref: binding.workstream, label: binding.label,
+            projects: binding.projects, profiles: binding.profiles,
+            ...(binding.frontierModels !== undefined ? { frontierModels: binding.frontierModels } : {}),
+          })),
+        } : {}),
         session: session ? presentSession(session) : null,
       };
     },
@@ -495,12 +525,14 @@ function presentSession(
 }
 
 function formFromPayload(payload: Readonly<Record<string, unknown>>): LaunchForm | null {
+  if (typeof payload.workstream !== "string") return null;
   if (typeof payload.objective !== "string") return null;
   if (typeof payload.department !== "string") return null;
   if (typeof payload.execution_profile !== "string") return null;
   if (payload.frontier_model_alias !== undefined && typeof payload.frontier_model_alias !== "string") return null;
   return {
     goal: payload.objective,
+    workstreamRef: payload.workstream,
     projectRef: payload.department,
     profileRef: payload.execution_profile,
     ...(typeof payload.frontier_model_alias === "string" ? { frontierModelAlias: payload.frontier_model_alias } : {}),

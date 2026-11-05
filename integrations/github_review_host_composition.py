@@ -18,6 +18,7 @@ from control_plane.github_review_runtime_adapter import ExecutiveReviewJobAdmiss
 from integrations.github_review_socket_client import ExecutiveReviewSocketClient
 from integrations.github_review_api import GitHubReviewAPI
 from integrations.github_review_risk_consumer import GitHubReviewRiskConsumer
+from integrations.github_pr_delivery_consumer import GitHubPRDeliveryConsumer
 from integrations.github_review_app_token import GitHubAppInstallationTokens
 from integrations.github_review_ingress_asgi import GitHubReviewReceiver
 from integrations.github_review_slack_visibility import SlackReviewVisibility
@@ -112,4 +113,5 @@ def compose_github_review_host(
         visibility=visibility,
         reconciliation_guard=reconciliation_guard,
         risk_consumer=GitHubReviewRiskConsumer(github=github, repository=repository),
+        delivery_consumer=GitHubPRDeliveryConsumer(github=github, repository=repository),
     )
