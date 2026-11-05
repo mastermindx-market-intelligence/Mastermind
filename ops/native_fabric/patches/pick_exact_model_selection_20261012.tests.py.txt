@@ -1,0 +1,96 @@
+"""Isolated new exact-model contract checks; existing 146 policy tests also run."""
+import pytest
+import pick
+
+
+@pytest.fixture(autouse=True)
+def _qualified_synthetic_route(monkeypatch):
+    monkeypatch.setattr(pick,"policy_allows",lambda *a,**k:(True,"ok"))
+    monkeypatch.setattr(pick,"_needs_ok",lambda *a,**k:(True,"ok"))
+    monkeypatch.setattr(pick,"_subject_ok",lambda *a,**k:(True,"ok"))
+    monkeypatch.setattr(pick,"hard_filter",lambda *a,**k:(True,"ok"))
+    monkeypatch.setattr(pick,"floor_demotes",lambda *a,**k:False)
+    monkeypatch.setattr(pick,"launch_policy",lambda *a,**k:{"allowed":True})
+    monkeypatch.setattr(pick,"glm_peak_active",lambda *a,**k:False)
+    monkeypatch.setattr(pick,"_glm_pick_model",lambda tc,doc=None:
+                        ("glm-5.3" if tc=="review" else "glm-5.3-flash",False))
+    monkeypatch.setattr(pick,"_emit",lambda pool,why,tc,doc,**kw:
+                        "POOL="+pool+" MODEL="+(kw.get("model") or pick._selection_model(pool,tc,doc)[0]))
+    monkeypatch.setattr(pick,"_slot_concurrent",lambda *a,**k:0)
+
+
+@pytest.mark.parametrize("task,pool,model",[
+    ("review","grok","grok-4.6"),
+    ("execute","minimax","MiniMax-M3"),
+    ("review","bailian","qwen3.8-max"),
+])
+def test_explicit_default_model_in_qualified_pool(task,pool,model):
+    line=pick._format_pick(task,pool=pool,requested_model=model)
+    assert line.lower()=="pool="+pool+" model="+model.lower()
+
+
+@pytest.mark.parametrize("task,model,pool",[
+    ("review","grok-4.6","grok"),
+    ("execute","MiniMax-M3","minimax"),
+    ("review","qwen3.8-max","bailian"),
+])
+def test_unscoped_registered_unique_worker_model_infers_only_existing_pool(task,model,pool):
+    line=pick._format_pick(task,requested_model=model)
+    assert line.lower().startswith("pool="+pool+" model=")
+
+
+@pytest.mark.parametrize("task,pool,model",[
+    ("build","bailian","qwen3.8-max"),
+    ("review","grok","MiniMax-M3"),
+    ("execute","minimax","grok-4.6"),
+])
+def test_wrong_task_or_provider_model_refused(task,pool,model):
+    line=pick._format_pick(task,pool=pool,requested_model=model)
+    assert line.startswith("NONE reason=requested model not admitted")
+
+
+@pytest.mark.parametrize("model",[
+    "unregistered-premium", "grok-4.6 --ignore-policy", "bailian-max",
+])
+def test_unknown_model_does_not_create_unregistered_pool(model):
+    line=pick._format_pick("review",requested_model=model)
+    assert line.startswith("NONE reason=unknown requested_model")
+
+
+def test_implicit_glm_flash_upgrade_still_requires_old_narrow_contract():
+    assert pick._format_pick("build",requested_model="glm-5.3-flash",
+                             task_complexity="C2_COMPLEX_BOUNDED",
+                             escalation_reason="Prior qualified cheaper model failed or was unavailable"
+                            )=="NONE reason=requested model/complexity escalation not admitted"
+
+
+def test_explicit_pool_allows_only_glm_model_that_class_already_selected():
+    assert pick._format_pick("build",pool="glm",requested_model="glm-5.3-flash"
+                            ).startswith("POOL=glm MODEL=glm-5.3-flash")
+    assert pick._format_pick("review",pool="glm",requested_model="glm-5.3"
+                            ).startswith("POOL=glm MODEL=glm-5.3")
+
+
+def test_stronger_glm_build_still_has_narrow_class_requirement():
+    assert pick._format_pick("build",pool="glm",requested_model="glm-5.3",
+                             task_complexity="C1_ROUTINE_BOUNDED",
+                             escalation_reason="no escalation witness"
+                            )=="NONE reason=requested model/complexity escalation not admitted"
+
+
+def test_subject_pool_independence_is_not_bypassed(monkeypatch):
+    monkeypatch.setattr(pick,"_subject_ok",lambda *a,**k:(False,"reviewer_same_pool"))
+    assert pick._format_pick("review",pool="grok",requested_model="grok-4.6",
+                             subject_pool="grok"
+                            )=="NONE reason=reviewer_same_pool"
+
+
+def test_explicit_model_does_not_override_host_policy(monkeypatch):
+    monkeypatch.setattr(pick,"_eligible_host_routes",lambda *a,**k:{})
+    line=pick.format_pick("review",host="ubuntu9",pool="grok",requested_model="grok-4.6")
+    assert line.startswith("NONE reason=no eligible remote mode")
+
+
+def test_glm_model_cannot_override_different_pool():
+    assert pick._format_pick("build",pool="minimax",requested_model="glm-5.3"
+                            )=="NONE reason=requested_model contradicts pool='minimax'"

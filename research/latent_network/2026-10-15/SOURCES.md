@@ -1,0 +1,13 @@
+# Primary sources and scope of the new experiment
+
+Accessed October 15, 2026. The experiment is original implementation for this commission, not a replication of the cited studies. No source establishes that the present Mastermind model has forecast value.
+
+**Kenneth French: 49 Industry Portfolios.** The provider assigns NYSE, AMEX and Nasdaq stocks to industries at the end of June using contemporaneously selected SIC classifications and constructs subsequent July–June returns. The retrieved page covers daily data through August31,2026. This reduces dependence on a current-stock universe, but the downloaded CRSP-vintage series is reconstructed history, not original release-time availability. Source: https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/Data_Library/det_49_ind_port.html
+
+**Menzly and Ozbas (2010): Market Segmentation and Cross-predictability of Returns.** The primary abstract reports cross-predictability among economically related supplier/customer industries and discusses information diffusion under investor specialization. This motivates a propagation hypothesis but does not convert a correlation-based graph into verified economic links. Primary abstract, not independent replication: https://doi.org/10.1111/j.1540-6261.2010.01578.x
+
+**Zeng and Atta Mills (online2021, issue2023): Can economic links explain lead–lag relations across firms?** Their abstract reports that conventional factors explain most estimated cross-firm lead–lag links in their study. This is contrary evidence against attributing a statistical network automatically to economic transmission. It motivates the current factor/common-context and relabeling controls; it does not prove any particular link in this dataset is spurious. https://doi.org/10.1002/ijfe.2480
+
+**Zhou and coauthors (2025): DeltaLag.** The authors test dynamic pair-specific lags using US equities, with training2010–2018, validation2019–2021 and test2022–2023. Their article emphasizes that fixed, precomputed lead–lag relations may be unstable. The current study instead tests a deliberately economical annual graph and ridge baseline; a negative result would not refute their different model or datasets. The inspected text does not establish our operating costs or source admission. https://arxiv.org/abs/2511.00390
+
+The source-derived statements above are distinct from this project's graph formula, fixed controls, timing rules, rank targets and observed results. Statistical lead asymmetry is not causal discovery, institutional inventory, measured capital migration or a trade instruction. The mission's existing `rotation_calls.v1` seam is unchanged.
