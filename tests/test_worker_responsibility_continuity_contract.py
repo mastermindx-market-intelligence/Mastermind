@@ -133,19 +133,35 @@ class WorkerResponsibilityContinuityContractTests(unittest.TestCase):
 
     def test_gate_triage_has_action_level_release_and_owner_controls(self) -> None:
         active = (ROOT / "docs/sol_skills/ACTIVE_EXECUTION.md").read_text()
+        reconcile = (ROOT / "docs/sol_skills/RECONCILE_STATE.md").read_text()
         cold = (ROOT / "docs/sol_skills/COLD_START.md").read_text()
         clients = (ROOT / "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md").read_text()
         kernel = (ROOT / "docs/sol_skills/BOOTSTRAP_KERNEL.md").read_text()
+        self.assertIn("**Prove an owner gate before using it to stop:**", active)
+        self.assertIn("**Responsibility survives a chat; a chat does not own work forever.**", active)
+        self.assertEqual(active.count("`RECONCILE_STATE.md` Step 4B"), 1)
+        self.assertIn("## Step 4B — Owner-gate triage and takeover discipline", reconcile)
+        self.assertEqual(reconcile.count("### Prove an owner gate before using it to stop"), 1)
         for phrase in (
+            "A factual/source owner",
+            "Separate role, receiver and lease",
+            "The active assigned session owns the next recovery action",
+            "Name the exact blocked action",
+            "Check effective execution/custody",
             "Prove an owner gate before using it to stop",
             "current session executes now",
             "Requested GitHub reviewer is not mandatory approval",
             "A 403/unknown read does not prove approval is required",
             "Disabled or protected runtime is an action gate, not a ghost owner",
+            "Do not obtain the same denied effect via another",
+            "Exit with an executable action, not a department",
             "EXACT_HUMAN_GATE",
             "another safe phase remains",
+            "no gate state, approval, account, queue, lease, retry path or release",
+            "Do not reopen an already-denied protected-result operation",
         ):
-            self.assertIn(phrase, active)
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, reconcile)
         self.assertIn('a requested reviewer, a historical author or a disabled runtime service', cold)
         self.assertIn("a requested login alone is not an enforced approval", clients)
         self.assertIn("requested reviewer != required approval", kernel.lower())

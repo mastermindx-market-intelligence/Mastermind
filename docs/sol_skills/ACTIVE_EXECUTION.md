@@ -35,39 +35,7 @@ These are action checks for all assigned provider sessions, not additional forms
 
 **Responsibility survives a chat; a chat does not own work forever.** Separate role, receiver and lease. Inspect fresh live claim, source-writer custody and pending effects once through their owners; unknown is not expired. Old authors/titles/chats are not liveness. Preserve live/uncertain modifiers; actual lease replacement needs existing CAS/fencing and successor admission. With assignment and no displaced writer/effect, act without a ghost ACK. The active assigned session owns the next recovery action: incumbent reconciliation, independent work, or exact unavailable recovery capability and reachable resolver. This does not transfer STARTed work.
 
-### Prove an owner gate before using it to stop
-
-A factual/source owner is a **place to retrieve evidence or perform an effect**, not
-a permanent human/session staffing assignment. For an assigned continuing
-mission, run this bounded **owner-gate triage** once before telling the Chairman
-that another session, reviewer or team must act:
-
-1. **Name the exact blocked action** and its target/operation/PR/head. Distinguish
-   a past assistant's "owner must act" claim from an actual tool receipt, native
-   rule, live writer/lease, permission refusal or unreconciled effect.
-2. **Check effective execution/custody**: current assignment, exposed action/tool,
-   source writer, original carrier/effect, and genuine remaining review/release
-   rules. No live competing writer/effect and a permitted action means the
-   **current session executes now**, even if the previous chat is archived.
-3. **Requested GitHub reviewer is not mandatory approval.** Check actual
-   branch protection, CODEOWNERS, active rulesets and binding explicit holds
-   at the current head. A 403/unknown read does not prove approval is required
-   *or* waived. Preserve real non-author approvals and no-self-merge.
-4. **Disabled or protected runtime is an action gate, not a ghost owner.**
-   A disabled Control service plus an unresolved protected administrator result
-   cannot be restarted merely to bypass the hold. Keep the original operation
-   intact, inspect its lawful readback once where permitted, and advance
-   genuinely disjoint work. Do not obtain the same denied effect via another
-   account, reader or carrier.
-5. **Exit with an executable action, not a department.** If a real human-only
-   credential, physical ceremony, admin permission or mandatory non-author
-   release control is demonstrated, identify exactly that control and an
-   addressable way to obtain it. Mark only the dependent lane held; do not
-   claim whole-mission `EXACT_HUMAN_GATE` while another safe phase remains.
-
-This is a diagnostic ordering inside existing ownership and Step 8 rules.
-It creates no gate state, approval, account, queue, lease, retry path or release
-permission. Do not reopen an already-denied protected-result operation.
+**Prove an owner gate before using it to stop:** Apply `RECONCILE_STATE.md` Step 4B. Check actual review rules and protected holds, not ghost owners; never replay denied results or self-merge.
 
 Protected results: use `RECONCILE_STATE.md` Step 4A.
 
@@ -184,11 +152,11 @@ QUEUED, delivered, ACK, STARTED/RUNNING, completed and accepted are distinct. A 
 
 ## Step 7A — Preserve operational continuity before interruption
 
-Save material decisions and accepted capability changes at coherent milestones and before a long/risky action could lose the last known effect; not after each read/edit/test. Maintain one cumulative frontier in existing Runtime/Agent OS/artifact owners: mission/scope/authority, exact source/operation/carrier, last verified effect, accepted work/DO_NOT_REDO, rejected approaches/reasons, hypotheses/falsifiers, decisions, children/returns, uncertainty, evidence and next action. Unknown stays unknown. Do not defer all persistence to the final response or create historical handoff chains. Never overwrite an immutable prepared Attempt capsule with this mutable working checkpoint.
+Save material decisions and accepted capability changes at coherent milestones, not after each read/edit/test. Save before risky effects to existing Runtime/Agent OS: mission, authority, source/carrier/effects, DO_NOT_REDO, blockers, decisions, children, uncertainty and next action. Never defer saves, chain handoffs or overwrite immutable prepared Attempt capsules.
 
 A checkpoint/new chat transfers no lease, source writer or STARTed operation. Execution stays within its grant; judgment stays with its lawful owner/successor. Verify original-parent consumption: delivery/tab names are not proof. No supported continuation means a held result, not an invented wake. Apply Step 1B; separate requested work profile, observed model/mode and tools: hidden reasoning budgets and unexposed deadlines remain UNKNOWN, and route-local payload is not total context. No fixed 20-minute Web deadline, invented token counter or minimum run. Actual deadlines require landing reserve; otherwise use bounded units and proactive saves. Server reminders cannot interrupt hidden reasoning.
 
-Through existing evaluators measure accepted capability progress per Pro turn, worker spend per accepted outcome, avoidable repair, backlog and completion/continuation reliability. Compare like tasks with actual observed surface/version/task; separate waiting, early success, premature stop and platform failure. Neither elapsed time nor source tests prove hidden reasoning or fresh-model behavior. Revise task-fit preferences only on attributable evidence.
+Through existing evaluators measure accepted capability progress per Pro turn and cost/repair for comparable tasks; separate waiting, early success, premature stop and platform failure. Neither elapsed time nor source tests prove hidden reasoning or fresh-model behavior. Change task fit only on attributable evidence.
 
 The recovery gap, not duration: unrecoverable accepted work must not exceed its coherent phase. At a **PHASE BARRIER**, verify/save and reassess: when the next unit is critical-path, bounded, authorized, effects reconciled and surface remains healthy, **start that next phase in the same turn**. `MORE_WORK_EXISTS` does not await another Continue. Material continuity pressure uses Step 8's same-chat continuation; the exact surface is `ROTATION_REQUIRED` only under the reliability law. Healthy output pressure alone does not require a turn boundary; retrieve selectively.
 
@@ -255,11 +223,11 @@ Without an observed canonical durable executor, never claim post-response work. 
 
 These are specifications, not model receipts; adoption needs the existing fresh-session evaluator, exact policy and observed surface.
 
-- Whole-delivery Astra: design is not completion; continue or make a lawful consumed transfer. Bounded-design Astra: close only on actual acceptance, not parent completion or padded runtime.
-- Routine implementation to Sol: delegate qualified outcomes; do useful integration. Consume returned workers without an artificial all-workers-finished barrier.
-- Disarmed cheap provider: preserve denial; alternative pre-effect routing needs owner eligibility, not credential reads or cost-as-admission.
-- Repeated failed worker loop: new evidence/hypothesis or lawful reassessment, not time/test rewards.
-- Missing Fabric submit: exact gap and independent permitted work; local artifacts are not dispatch/publication.
+- Whole-delivery Astra: design is not completion; reach accepted outcome or lawful consumed transfer. Bounded design ends at scoped acceptance, not runtime padding.
+- Routine implementation to Sol: delegate and integrate. Consume returned workers without an artificial all-workers-finished barrier.
+- Disarmed cheap provider: preserve denial; eligible pre-effect alternatives, never credential reads or cost-as-admission.
+- Repeated failed worker loop: change evidence/hypothesis or replan; no rewarded retries.
+- Missing Fabric submit: name gap, continue permitted independent work; artifacts do not prove dispatch.
 
 ## K5 pass criteria
 
