@@ -66,7 +66,7 @@ class NetworkGuard:
 
         def check(address):
             host = address[0] if isinstance(address, tuple) else str(address)
-            if host not in {"127.0.0.1", "::1", "localhost"}:
+            if host not in {"127.0.0.1", "127.0.0.2", "127.0.0.3", "::1", "localhost"}:
                 self.blocked.append(host)
                 raise AssertionError(f"live network call to {host}")
 
@@ -320,8 +320,8 @@ class HarnessEndToEnd(unittest.TestCase):
 
     def _assert_boot(self, stack, secrets: Path) -> None:
         runtime = stack.runtime
-        self.assertEqual(runtime.gateway.host, "127.0.0.1")
-        code, body = http_get(f"http://127.0.0.1:{runtime.gateway.port}/api/health", TOKEN)
+        self.assertEqual(runtime.gateway.host, "127.0.0.2")
+        code, body = http_get(f"http://{runtime.gateway.host}:{runtime.gateway.port}/api/health", TOKEN)
         self.assertEqual(code, 200)
         payload = json.loads(body)
         self.assertEqual(payload["status"], "ok")
