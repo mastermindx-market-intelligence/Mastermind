@@ -1573,11 +1573,14 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # freezes the combined candidate, not independent review or release authority.
     # P16 READ composition adds only the qualified Plan/Journal reader factories;
     # the exact installed event-loop AST below and all dispatch guards stay fixed.
+    # BYOK host-reader injection changes only factory wiring; parent compared
+    # the exact installed event-loop AST to protected 766e06f and found no change.
+    # This source pin records that composition, not new runtime/release authority.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'a81cdea9e79374fa3e95c10c3dcf6922f92fdf816e899c8c9abff0aab018f57c'):
+            '072610c765ab1dffbf1a76e358633c2f61b1d9d0c3a8963f2519ec9cf137bd96'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
