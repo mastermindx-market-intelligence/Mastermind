@@ -373,7 +373,7 @@ describe('App selected-session composition',()=>{
 });
 
 it('opens the genuine Executive-only session source without a Window read and refuses detached entry owners',async()=>{
- const f=fixture(pointer,false,false);render(<App/>);
+ const f=fixture(pointer,false,false);const view=render(<App/>);
  fireEvent.click(screen.getByRole('button',{name:'Conversations'}));
  const open=await screen.findByRole('button',{name:'Open session requests'});
  const host=window.MastermindMissionHost!;
@@ -384,7 +384,14 @@ it('opens the genuine Executive-only session source without a Window read and re
  const changed=vi.spyOn(f.host.binding.port,'context').mockReturnValue(context);
  fireEvent.click(open);expect(document.querySelector('.conversations-list')).not.toBeNull();
  expect(f.transport.reply).not.toHaveBeenCalled();expect(f.transport.send).not.toHaveBeenCalled();expect(f.saved()).toEqual(pointer);
- changed.mockRestore();fireEvent.click(open);await screen.findByLabelText('Session continuation');
+ // An intervening committed render may capture the temporary getter. Restore
+ // alone must not authorize that stale callback; qualify the current owner.
+ view.rerender(<App/>);
+ changed.mockRestore();fireEvent.click(open);
+ expect(document.querySelector('.conversations-list')).not.toBeNull();
+ expect(f.transport.reply).not.toHaveBeenCalled();expect(f.transport.send).not.toHaveBeenCalled();expect(f.saved()).toEqual(pointer);
+ view.rerender(<App/>);
+ fireEvent.click(screen.getByRole('button',{name:'Open session requests'}));await screen.findByLabelText('Session continuation');
  expect(f.readCurrentWindow).not.toHaveBeenCalled();expect(f.transport.reply).not.toHaveBeenCalled();expect(f.saved()).toEqual(pointer);
  fireEvent.click(screen.getByRole('button',{name:'Back to conversations'}));
  await waitFor(()=>expect(document.activeElement).toBe(screen.getByRole('button',{name:'Open session requests'})));
