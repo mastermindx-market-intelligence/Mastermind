@@ -59,7 +59,7 @@ it.each(["en", "zh-CN"] as const)("shows an explicit signed-out cue with the ori
  const signIn=vi.fn(async()=>{});
  window.MastermindMissionHost={auth:{getState:()=>({status:"signed_out",reason:null,acquisition:false,content:false}),subscribe:()=>()=>{},signIn,signOut:vi.fn(async()=>{})}};
  render(<App locale={locale}/>);
- expect(screen.getByRole("heading",{name:locale==="zh-CN"?"登录以继续":"Sign in to continue"})).toBeTruthy();
+ expect(screen.getByRole("heading",{name:locale==="zh-CN"?"欢迎回来。":"Welcome back."})).toBeTruthy();
  expect(screen.queryByText(locale==="zh-CN"?"暂时无法获取待决策事项。":"Decision information is unavailable right now.")).toBeNull();
  fireEvent.click(screen.getByRole("button",{name:locale==="zh-CN"?"登录":"Sign in"}));
  expect(signIn).toHaveBeenCalledTimes(1);
@@ -76,7 +76,7 @@ it("keeps the unsent Today goal protected before the explicit expired-auth cue",
  render(<App locale="en"/>);
  fireEvent.change(screen.getByLabelText("Goal"),{target:{value:"Literal unsent Today goal"}});
  await act(async()=>{signedIn=false;notify(window.MastermindMissionHost!.auth!.getState());});
- expect(screen.getByRole("heading",{name:"Sign in to continue"})).toBeTruthy();
+ expect(screen.getByRole("heading",{name:"Welcome back."})).toBeTruthy();
  expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Literal unsent Today goal");
  expect(screen.getByLabelText("Goal").closest("section")?.textContent).toContain("expired");
  expect(screen.queryByText("Decision information is unavailable right now.")).toBeNull();

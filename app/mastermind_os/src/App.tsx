@@ -12,6 +12,8 @@ import {
 } from "./auth-navigation-guard";
 import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
 import { Today } from "./today/Today";
+import { AuthEntry } from "./auth-entry/AuthEntry";
+import privateEntryArt from "./auth-entry/private-entry.jpg";
 import { AttendedFabricWorkspace } from "./fabric/AttendedFabricWorkspace";
 import { qualifyWorkerResultRef } from "./fabric/mission-worker-result";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
@@ -4583,6 +4585,40 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   else if (active === "Connections") content = <Connections d={d} />;
   else if (active === "Evidence") content = <><Evidence d={d} />{productAcceptancePanel}</>;
   else content = <Conversation locale={locale} />;
+  const privateEntryState = authState && !authState.acquisition && !authState.content &&
+    (authState.status === "signed_out" || authState.status === "signing_in" ||
+      authState.status === "error" || authState.status === "unconfigured") ? authState.status : null;
+  if (privateEntryState) return <AuthEntry state={privateEntryState} locale={locale} theme={theme}
+    illustrationSrc={privateEntryArt} authenticationControl={authenticationControl}
+    preferencesControl={preferencesControl}
+    feedback={authState?.reason && privateEntryState !== "signing_in" && privateEntryState !== "unconfigured" ? <p role="alert">{
+      authState.reason === "POPUP_BLOCKED" ? copy.allowPopup :
+      authState.reason === "POPUP_CLOSED" ? copy.popupClosed :
+      authState.reason.includes("EXPIRED") || authState.reason.includes("TIMEOUT") ? copy.signInTimeout : copy.signInFailed
+    }</p> : undefined}
+    protectedWork={((passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.session || office.draft.text || observedConversation.draft)) || showCheckStatus) ? <>
+      {passiveExpiryHold.current && office.draft.text ? <section className="card">
+        <h2>{locale === "zh-CN" ? "未发送的指示" : "Unsent direction"}</h2>
+        <p>{copy.expiredUnsent}</p>
+        <label htmlFor="entry-office-draft">{locale === "zh-CN" ? "给 Meta-CEO 的指示" : "Direction to Meta-CEO"}</label>
+        <textarea id="entry-office-draft" value={office.draft.text} onChange={event => office.changeDraft(event.target.value)} rows={4}/>
+        <button type="button" onClick={() => office.changeDraft("")}>{locale === "zh-CN" ? "丢弃指示" : "Discard direction"}</button>
+      </section> : null}
+      {passiveExpiryHold.current && observedConversation.draft ? <section className="card">
+        <h2>{locale === "zh-CN" ? "未发送的对话草稿" : "Unsent conversation draft"}</h2>
+        <p>{copy.expiredUnsent}</p>
+        <label htmlFor="entry-conversation-draft">{locale === "zh-CN" ? "消息" : "Message"}</label>
+        <textarea id="entry-conversation-draft" value={observedConversation.draft} onChange={event => observedConversation.changeDraft(event.target.value)} rows={4}/>
+        <button type="button" onClick={observedConversation.discardDraft}>{locale === "zh-CN" ? "丢弃消息" : "Discard message"}</button>
+      </section> : null}
+      {passiveExpiryHold.current && retainedComposerDrafts.launch ? commandPanel : null}
+      {passiveExpiryHold.current && retainedComposerDrafts.session ? sessionPanel : null}
+      {showCheckStatus ? <section className="card">
+        <h2>{locale === "zh-CN" ? "先前请求" : "Previous request"}</h2>
+        <p>{locale === "zh-CN" ? "请检查原请求，不要重新发送。" : "Check the original request. Do not send it again."}</p>
+        {checkStatusControl}
+      </section> : null}
+    </> : undefined} />;
   return (
     <div className="shell" data-theme={theme} data-active-route={active} lang={locale}>
       <a className="skip" href="#content" onClick={event => {
