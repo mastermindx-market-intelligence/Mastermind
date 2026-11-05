@@ -7,7 +7,7 @@ Recorded 2026-11-05. This document is a consumer design and source-evidence map;
 
 ## Product and ownership
 
-GB1 is the intended Meta-CEO decision owner. Secretary 2 retains the secretary role. Both should see the same authorized mission, while each action continues to carry that caller's real, independently enrolled identity and current grant. A shared view does not make the principals interchangeable. A role label, Slack user ID, workstream selector or root string grants no access.
+GB1 is the intended Meta-CEO decision owner. Secretary 2 retains the secretary role. The connected Slack directory verified GB1 as U0BTCHX8HMF and Grok Secretary 2 as U0CE04DHLFN; these are routing/contact facts, not Runtime or OAuth enrollment. Both should see the same authorized mission, while each action continues to carry that caller's real, independently enrolled identity and current grant. A shared view does not make the principals interchangeable. A role label, Slack user ID, workstream selector or root string grants no access.
 
 The Chairman excludes Y7 Elevate Retail **Audit BYOK Harness System**. Y7 retains Hermes/BYOK harness forward motion, runtime service integration, credentials, isolation and installation. This project consumes those contracts on new Secretary-facing paths. It does not edit `integrations/hermes_delegate/`, `integrations/hermes_secretary/`, #1966 or #2080. The unrelated application-inference work under #983 retains its own writers.
 
@@ -95,6 +95,17 @@ The desired always-on property belongs to existing supervised execution and atte
 Fingerprint equality is view equality, not an event cursor or wake grant. Ignore per-observation timestamp/key/row-order churn, but preserve source identity and qualified snapshot, lifecycle times, currentness/freshness class, permissions, native status, coverage, acceptance and result changes. An unchanged PARTIAL/stale view remains PARTIAL/stale in every response. Detail suppression must show the current row/count/omission information.
 
 The existing reply-subscription owner caps requested TTL at seven days and also caps it by the authenticated principal and original-request expiry. Therefore a seven-day requested TTL does not prove seven-day availability. Renewal, expiry/revocation, durable restart and catch-up need acceptance through the existing host. Do not build a consumer credential refresher or duplicate subscription store.
+
+
+### Event and audience limits
+
+The existing `session.reply_committed` event is an original-request reply notification. [RuntimeSessionReturn](../integrations/session_bridge/runtime_return.py) verifies the stored request principal; a trusted READ/submit pair preserves issuer, subject and client. Secretary 2's shared Workspace read does not grant a subscription to GB1's original replies. The webhook contract and Grok opaque-nudge contract are distinct; a receiver adapter belongs in the existing host if necessary.
+
+The [Wake router](../control_plane/wake_router.py) intentionally produces NO_WAKE for generic Job completion; review-required and existing canonical Inbox/Dialogue/consultation/CI attention have their own producers. [Session targets](../control_plane/session_targets.py) select one actual seat/root target, and [obligation identity](../control_plane/wake_events.py) does not permit duplicate same-source obligations just to fan out to another role. Do not invent a secretary routing seat or turn fingerprint changes into new Wake authority.
+
+The accepted immediate design is selective original-request/owed-turn attention, followed by each role's own canonical Mission read. A lossless feed of material mission changes to both roles would require an existing-owner producer and independently qualified audience extension. That capability is not established by this client.
+
+The [existing delivery composition](EXECUTIVE_REPLY_DELIVERY_COMPOSITION.md) records a crash-before-notification-start gap: the post-COMMIT service task is not a durable outbox. Event cursor is null. The incumbent `session_reply_references` read supports bounded original-principal recovery (page size at most 32), but cursors are process-local and restart-invalid. On a legitimate reconnect, begin a fresh authorized traversal and separately read current Mission state. This can recover visibility without claiming lossless intermediate-event replay. Runtime/Wake remains the owner of any needed durability repair.
 
 ## Source verification and real-path acceptance
 
