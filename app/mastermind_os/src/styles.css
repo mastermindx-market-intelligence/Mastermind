@@ -1082,10 +1082,9 @@ main .launch-orchestrator-composer .form-actions { justify-content: flex-end; ma
     padding-block: 12px;
     gap: 8px;
   }
-  .nav-top,
-  .nav-bottom {
-    gap: 8px;
-  }
+  .nav-top { gap: 4px; }
+  .nav-bottom { gap: 8px; }
+  .mission-nav > .nav-section-label { display: none; }
   .nav-bottom .display-preferences {
     padding: 0;
     border: 0;
