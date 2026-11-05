@@ -1,0 +1,43 @@
+{
+  "actual_quote_fills_proven": false,
+  "by_trading_date_completed_30m": {
+    "2026-10-08": 5,
+    "2026-10-09": 7
+  },
+  "capture_day_utc": "2026-10-11",
+  "full_24h_eligible": false,
+  "market_data_rows_emitted": 0,
+  "nightly_coverage": [
+    {
+      "complete_24h_proven": false,
+      "complete_overnight": false,
+      "expected_minutes": 480,
+      "marketable_quote_replay_proven": false,
+      "missing_minutes": 255,
+      "night_start_et": "2026-10-07",
+      "observed_minutes": 225
+    },
+    {
+      "complete_24h_proven": false,
+      "complete_overnight": false,
+      "expected_minutes": 480,
+      "marketable_quote_replay_proven": false,
+      "missing_minutes": 18,
+      "night_start_et": "2026-10-08",
+      "observed_minutes": 462
+    }
+  ],
+  "no_duplicate_collector_or_archive": true,
+  "point_in_time_eligible": false,
+  "redistribution_authorized": false,
+  "research_retrospective_only": true,
+  "source": "macro-tiingo-dataos-read_research_view",
+  "source_receipt_id": "94ddd8b9b82c5c55c8aa372b3a14b4db10550e5656bf2ad6cf5218bd8a9ca073",
+  "source_rows": 687,
+  "source_sha256": "e279bcc1ffe5230a5d1bdb40d6ec1e5ac3e0302f8997a2def0848db7d4a7ed85",
+  "status": "EXISTING_ARCHIVE_READ_ONLY_CONSUMED",
+  "strict_complete_30m_bars": 12,
+  "symbol": "AAPL",
+  "venue_scope": "single_ats",
+  "withheld_partial_30m_buckets": 12
+}

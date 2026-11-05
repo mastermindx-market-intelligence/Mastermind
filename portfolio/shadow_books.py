@@ -485,9 +485,11 @@ def run(asof: str, prices: dict | None = None, inputs: list | None = None) -> di
     targets_by_book = {p["id"]: apply_policy(p, inputs)
                        for p in POLICIES if not p.get("synthetic")}
     # ── W-L / L1 synthetic arms — targets are NOT derived from decision inputs ──
-    # do_nothing: carry whatever this arm already holds (targets == current held weights → no trade,
-    #             just a forward mark). On a fresh book with no positions it stays all-cash until it
-    #             inherits prod's inception snapshot on its first non-empty run.
+    # do_nothing: carry whatever this arm already holds. Its target weights are symbol/thesis
+    #             plumbing only — the arm's ONE trade edge is its cold-start inception, after which
+    #             run() bypasses _rebalance entirely and only re-marks forward. On a fresh book with
+    #             no positions it stays all-cash until it inherits prod's inception snapshot on its
+    #             first non-empty run.
     # defensive:  a static equal-weight basket, rebalanced back to EW each run.
     for p in POLICIES:
         syn = p.get("synthetic")
@@ -533,6 +535,11 @@ def run(asof: str, prices: dict | None = None, inputs: list | None = None) -> di
             # position exists, price drift or new signals must never alter shares or cash; only marks
             # may change NAV. Previously it rebalanced every run to avg-cost-derived weights, creating
             # the very churn this counterfactual is supposed to measure against.
+            #
+            # "Seeded" means the book actually HOLDS something — NOT that its account file exists, NOT
+            # inception_date, NOT NAV-history length. An all-cash / non-confirmed run stamps
+            # inception_date while positions stay empty, so such a book must stay ELIGIBLE for the
+            # first usable allocation.
             frozen_carry = (p.get("synthetic") == "do_nothing"
                             and bool(_load_account(bid).get("positions")))
             if not frozen_carry and (targets or _has_inputs):
