@@ -8,6 +8,8 @@ Only this typed project namespace uses the fixed protected commission.
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
+from pathlib import Path
 import dataclasses
 import hashlib
 import json
@@ -79,27 +81,88 @@ class ProjectPlanningAppFactory:
             raise ValueError('canonical planning installed source owners differ')
         return data
 
+    def _accept_new_canonical_view(self,data,view,*,workspace,work_ref):
+        """Consume only the immediate installed producer's genuine issued proof.
+
+        Mode.observe has just completed its full current postcheck. This is not
+        a reusable grant or a new deadline: even this immediate handoff refuses
+        an expired view, and the consumer's capture retains full pre/post checks.
+        """
+        from integrations.executive_mcp import installed
+        from control_plane.project_canonical_data import CanonicalProjectDataView
+        if type(view) is not CanonicalProjectDataView:raise ValueError('canonical planning issued view unavailable')
+        collector=data.collector
+        proof=view._verified_facts.pop(installed._CANONICAL_CODE_CAPTURE,None)
+        if (type(proof) is not installed._CanonicalCodeCapture
+                or proof.seal is not installed._CANONICAL_CODE_CAPTURE or proof.owner is not collector
+                or proof.binding!=collector._canonical_code_capture_binding()
+                or proof.view is not view or proof.view_identity!=view._owner._view_identity(view)
+                or type(proof.observations) is not tuple or len(proof.observations)!=4
+                or type(proof.macro_snapshot) is not installed._VerifiedRepositorySnapshot
+                or proof.observations[0]!=self.service.config.proof_base_sha
+                or proof.observations[1]!=view.code_commit
+                or proof.macro_snapshot.root!=collector._macro_root
+                or proof.macro_snapshot.head!=view.code_commit
+                or collector._source_root!=self.service.config.proof_source_repository
+                or view._code_root!=collector._macro_root
+                or view._root!=Path(data.identity.binding.worktree)
+                or view._operation.selected_work_ref!=work_ref
+                or view._witness.get('canonical_data_commit')!=view.data_commit
+                or view._witness.get('executable_macro_commit')!=view.code_commit
+                or dataclasses.asdict(view._operation.principal)!=dataclasses.asdict(workspace)
+                or view._owner.events is not data.events
+                or view._owner.publisher._binding!=data.identity.binding):
+            raise ValueError('canonical planning issued CODE proof differs')
+        view._owner._validate_view(view)
+        view._owner._permission_guard(view._operation)
+        return view
+
     def _canonical_view(self,workspace,work_ref,*,verify_source=True):
         data=self._canonical_data()
         if data is None:return None
         invocation=current_foreground_operation()
         identity=(data,dataclasses.asdict(workspace),work_ref,data.context_binding())
         saved=getattr(invocation,'_planning_data_view',None)
+        issued=False
         if saved is None:
             view=data.view(workspace,work_ref=work_ref)
             if view is None:raise ValueError('canonical planning DATA permission unavailable')
-            data.collector._discard_canonical_code_capture(view)
+            view=self._accept_new_canonical_view(data,view,workspace=workspace,work_ref=work_ref)
+            issued=True
             invocation._planning_data_view=(identity,view)
         else:
             if saved[0]!=identity:raise ValueError('canonical planning source owner changed')
             view=saved[1]
             view._owner._validate_view(view)
-            if verify_source or time.monotonic()>=view._operation.read_deadline:
+            from control_plane.project_canonical_data import _CAPTURE
+            capture=_CAPTURE.get()
+            if capture is not None:
+                active=capture.view
+                if active is not view:
+                    # A genuine basis may retain its earlier issued view while
+                    # an intervening strict guard reobserved the same C/N.
+                    # Only that installed owner's nominal live capture rejoins;
+                    # a DTO, foreign issuer/principal/work/source cannot do so.
+                    mode=active._owner
+                    seams=dict(authorize_read=data._can_read,read_stamp=data._read_stamp,
+                        authorize_data=data._can_latest,data_stamp=data._latest_stamp)
+                    if (mode.events is not data.events or mode.seams!=seams
+                            or mode.publisher._binding!=data.identity.binding
+                            or active._code_root!=data.collector._macro_root
+                            or dataclasses.asdict(active._operation.principal)!=dataclasses.asdict(workspace)
+                            or active._operation.selected_work_ref!=work_ref
+                            or (active.code_commit,active.data_commit)!=(view.code_commit,view.data_commit)):
+                        raise ValueError('canonical planning capture owner differs')
+                    active._check_capture(capture)
+                    view=active
+                view.check()
+            if capture is None and (verify_source or time.monotonic()>=view._operation.read_deadline):
                 renewed=data.view(workspace,work_ref=work_ref)
-                if renewed is not None:data.collector._discard_canonical_code_capture(renewed)
+                if renewed is not None:renewed=self._accept_new_canonical_view(data,renewed,workspace=workspace,work_ref=work_ref)
                 if renewed is None or (renewed.code_commit,renewed.data_commit)!=(view.code_commit,view.data_commit):
                     raise ValueError('original planning source changed; no rebase')
-                view=renewed;invocation._planning_data_view=(identity,view)
+                view=renewed;issued=True;invocation._planning_data_view=(identity,view)
+        if issued:return view
         # Nested access/Event fences recheck current grants; the separate
         # Source.check observation performs the full current Git/seal check.
         # A later independent read may recapture only the SAME immutable C/N.
@@ -110,12 +173,39 @@ class ProjectPlanningAppFactory:
             return view
         from integrations.executive_mcp.installed import _installed_child_env
         collector=data.collector
+        view._owner._permission_guard(view._operation)
         observed=collector._snapshot_pair(_installed_child_env(code_root=collector._code_root,
             macro_root=collector._macro_root),deadline=min(time.monotonic()+15,view._operation.read_deadline))
         if observed[0]!=self.service.config.proof_base_sha or observed[1]!=view.code_commit:
             raise ValueError('canonical planning CODE changed')
         view.check()
         return view
+
+    @contextmanager
+    def canonical_read_scope(self,*,principal,operation_key,work_ref):
+        """Pure original-record reads only; never enclose a write/effect.
+
+        The incumbent nominal capture brackets DATA/default/Event/config and
+        permission observations. Nested checks keep current grants and CODE;
+        an expired or changed capture refuses without returning partial DATA.
+        """
+        invocation=current_foreground_operation()
+        if not callable(self.app_binding.source_operation_provider_factory):
+            # Incumbent supplier without canonical DATA retains all of its
+            # original strict checks; no capture or fallback authority is added.
+            yield None
+            return
+        if invocation._project_planning_operation not in {'status','result','consume','prepare_proposal'}:
+            raise ValueError('original planning read scope requires a read phase')
+        self._current(principal,invocation,operation_key,work_ref)
+        workspace=VerifiedPrincipal(**dataclasses.asdict(invocation._project_workspace_principal))
+        view=self._canonical_view(workspace,work_ref)
+        if view is None:raise ValueError('canonical planning read unavailable')
+        with view.capture_scope():
+            yield view
+        # This executes before the caller receives captured DATA or may effect
+        # anything else. A nested same-view scope keeps its outer full bracket.
+        self._current(principal,invocation,operation_key,work_ref)
 
     def _canonical_plan(self,workspace,work_ref,*,current_only=False):
         view=self._canonical_view(workspace,work_ref,verify_source=not current_only)
@@ -148,6 +238,28 @@ class ProjectPlanningAppFactory:
             value=copy.deepcopy(saved[2])
         invocation._require_live()
         return value
+
+    def _fixed_planning_code(self,invocation):
+        """Commit-addressed policy/commission bytes, never live permission truth.
+
+        The same foreground invocation cannot rebase its configured source.
+        Current CODE/default/Event/config and grants retain their independent
+        checks; repeated nested SQL guards need not rerun git-show for the same
+        immutable objects. No value survives into another request/invocation.
+        """
+        invocation._require_live()
+        key=(self,self.service.config.proof_source_repository,self.service.config.proof_base_sha)
+        saved=getattr(invocation,'_planning_fixed_code',None)
+        if saved is None:
+            policy=PlanningPolicy.load(key[1],key[2])
+            commission=read_protected_blob(key[1],key[2],COMMISSION_PATH)
+            if not commission or len(commission)>16384:
+                raise ValueError('project planning fixed commission unavailable')
+            saved=(key,policy,commission)
+            invocation._planning_fixed_code=saved
+        elif saved[0]!=key:
+            raise ValueError('project planning configured CODE changed; no rebase')
+        return saved[1],saved[2]
 
     def _current(self,principal,invocation,operation_key,work_ref,*,current_only=False):
         service=self.service
@@ -188,15 +300,12 @@ class ProjectPlanningAppFactory:
         except Exception:
             raise ValueError("project planning existing Executive admission refused") from None
         invocation._require_live()
-        policy=PlanningPolicy.load(service.config.proof_source_repository,service.config.proof_base_sha)
+        policy,commission=self._fixed_planning_code(invocation)
         from control_plane.agentos_project_plan import AgentOsProjectPlanReader
         from common.workspace_project_plan_contract import validate_body
         plan=validate_body(self._canonical_plan(workspace,work_ref,current_only=current_only))
         if plan['availability']!='AVAILABLE' or plan['selection']!={'work_ref':work_ref}:
             raise ValueError('project planning current canonical goal unavailable')
-        commission=read_protected_blob(service.config.proof_source_repository,service.config.proof_base_sha,COMMISSION_PATH)
-        if not commission or len(commission)>16384:
-            raise ValueError("project planning fixed commission unavailable")
         from control_plane.model_router import ModelRouter
         _quota,_registration,recipe=service._paid_subject_review_registration(ModelRouter.load(),direct_native=True)
         binding=native.normalize_binding({key:(service.config.proof_base_sha if key=="base_sha"
@@ -280,7 +389,9 @@ class ProjectPlanningAppFactory:
         owner=planning._issue_source(reader=self.reader,executive=execution,context=context,
             authority_guard=authority,input_owner=input_owner,events=self.events,publication_guard=publication_guard,
             canonical_source_reader=(None if not callable(self.app_binding.source_operation_provider_factory) else
-                lambda:self._canonical_creation(principal,invocation,operation_key,work_ref,project_source)))
+                lambda:self._canonical_creation(principal,invocation,operation_key,work_ref,project_source)),
+            read_scope=(None if not callable(self.app_binding.source_operation_provider_factory) else
+                lambda:self.canonical_read_scope(principal=principal,operation_key=operation_key,work_ref=work_ref)))
         return owner,executive
 
     def submit(self, *, principal, operation_key, stage, work_ref, project_source,
@@ -381,9 +492,11 @@ def build_ingress_owner(factory):
                 host_guard=host_current,principal=workspace,basis=basis,result=result)
             current();host_current()
         elif frame['operation']=='status':
-            receipt=factory.original(principal=principal,**args)
+            with factory.canonical_read_scope(principal=principal,**args):
+                receipt=factory.original(principal=principal,**args)
         elif frame['operation'] in {'result','consume'}:
-            original,access=factory.qualified_original(principal=principal,operation_key=args['operation_key'],work_ref=args['work_ref'])
+            with factory.canonical_read_scope(principal=principal,operation_key=args['operation_key'],work_ref=args['work_ref']):
+                original,access=factory.qualified_original(principal=principal,operation_key=args['operation_key'],work_ref=args['work_ref'])
             runtime=factory.service._require_runtime()
             from control_plane.runtime_namespace_custody import ServiceRuntimeNamespaceCustody
             custody=factory.service._namespace_custody
@@ -394,8 +507,9 @@ def build_ingress_owner(factory):
                 selection.update(result_digest=args['result_digest'],operation_key=args['consumption_operation_key'])
                 acknowledged=runtime.consume_direct_native_result(selection,access=access)
             read_selection={key:selection[key] for key in ('work_ref','job_id','attempt_id')}
-            receipt=bound.read_direct_native_result_bounded(read_selection,access=access)
-            bound.store.read_binding.validate_before_core_return()
+            with factory.canonical_read_scope(principal=principal,operation_key=args['operation_key'],work_ref=args['work_ref']):
+                receipt=bound.read_direct_native_result_bounded(read_selection,access=access)
+                bound.store.read_binding.validate_before_core_return()
             if frame['operation']=='consume' and (receipt['availability']!='AVAILABLE' or receipt['consumption']!=acknowledged):
                 raise ValueError('original Runtime consumption return is uncertain')
         else:

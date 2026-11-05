@@ -34,6 +34,15 @@ def _canonical(value):
 
 
 def _observe(runtime, *, result_reader, selection, source, executive_admission):
+    if type(source) is not planning.ProjectPlanningSource:raise PlanResultUnavailable()
+    # All operations in this body are original-record reads. The nominal owner
+    # completes its full outer postcheck before any captured result escapes.
+    with source.read_scope():
+        return _observe_in_scope(runtime,result_reader=result_reader,selection=selection,
+            source=source,executive_admission=executive_admission)
+
+
+def _observe_in_scope(runtime, *, result_reader, selection, source, executive_admission):
     if (type(runtime) is not Runtime or type(result_reader) is not Runtime or type(source) is not planning.ProjectPlanningSource
             or type(executive_admission) is not native.DirectNativeAdmission):
         raise PlanResultUnavailable()

@@ -97,6 +97,8 @@ export interface ProjectJourneySelection {
 }
 
 export interface ProjectPlanningJourneyProps {
+  /** App supplies exact live global Host/auth identity, including no-render replacement. */
+  readonly isHostCurrent?: () => boolean;
   locale?: "en" | "zh-CN";
   host: MissionHost | null;
   /** Genuine current owner identity from the existing command binding. */
@@ -989,10 +991,19 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
   const live = useRef(props);
   live.current = props;
 
+  const callerCurrent = () => {
+    try { const check=live.current.isHostCurrent; return check === undefined || check() === true; } catch { return false; }
+  };
+
   const radioName = useId();
   const requestIdLabel = useId();
 
-  const requestIdentity = useRef(selection?.createRequestId ?? null);
+  const selectedIdentity = (value: ProjectJourneySelection | null) => value === null ? "null" : canonicalJson(value);
+  const expectedSelection = useRef(selectedIdentity(selection));
+  const emitSelection = (value: ProjectJourneySelection) => {
+    expectedSelection.current=selectedIdentity(value);
+    live.current.onSelection(value);
+  };
   const boundHost = useRef(props.host);
   const sourceIdentity = useRef<{
     host: MissionHost; generation: number; source: SourceOperationTransport;
@@ -1000,6 +1011,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
   } | null>(null);
   const sourceOwner = (): OwnerContext | null => {
     const saved=sourceIdentity.current,host=live.current.host;
+    if (!callerCurrent()) return null;
     if (!saved || !host || saved.host!==host || saved.source!==host.sourceOperations ||
         saved.readContext!==host.readSourceOperationContext || saved.generation!==host.invalidationGeneration?.()) return null;
     const auth=host.auth?.getState();
@@ -1020,6 +1032,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
   const [profileId, setProfileId] = useState<string | null>(null);
   const [preview, setPreview] = useState<JourneyPreview | null>(null);
   const [createDispatched, setCreateDispatched] = useState(false);
+  const [previewUnknown, setPreviewUnknown] = useState(selection !== null);
   const [status, setStatus] = useState<SourceOperationStatus | null>(null);
   const [control, setControl] = useState<OperationState>({ status: "idle", pointer: null, reason: "IDLE" });
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -1109,18 +1122,18 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
   // Own preview records its new id before navigation, so that one normal
   // null→id transition does not invalidate its in-flight preparation.
   useLayoutEffect(() => {
-    const next = selection?.createRequestId ?? null;
-    if (requestIdentity.current === next && boundHost.current === props.host) return;
-    requestIdentity.current = next; boundHost.current = props.host;
+    const next = selectedIdentity(selection);
+    if (expectedSelection.current === next && boundHost.current === props.host) return;
+    expectedSelection.current = next; boundHost.current = props.host;
     sourceIdentity.current = null;
     abort.current?.abort(); ++sequence.current; busyRef.current = null;
     controller.invalidate(); createController.invalidate();
     Object.assign(record.current, {createStatus:null, planningKey:null, planningJob:null, keptDigest:null});
     setOptions(null); setProfileId(null); setPreview(null); setStatus(null);
     setResult(null); setPlanRequest(null); setPlanStage(null); setBusy(null);
-    setCreateDispatched(false); setNotice(null);
+    setCreateDispatched(false); setPreviewUnknown(selection !== null); setNotice(null);
     setControl({status:"idle", pointer:null, reason:"IDLE"});
-  }, [selection?.createRequestId, props.host]);
+  }, [selection?.createRequestId, selection?.workRef, selection?.planningOperationKey, selection?.jobId, props.host]);
 
   // Unmount only: no read, no write and no navigation happens on mount.
   useEffect(() => () => {
@@ -1141,7 +1154,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
   // ── session fence: auth state, generation and transport identity ──────────
   const fence = () => {
     const host = live.current.host;
-    if (!host) return null;
+    if (!host || !callerCurrent()) return null;
     const auth = host.auth?.getState();
     if (!auth || auth.status !== "signed_in" || !auth.acquisition) return null;
     const generation = host.invalidationGeneration?.();
@@ -1155,7 +1168,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
     signal: AbortSignal,
   ): boolean => {
     const host = live.current.host;
-    if (!host || host !== captured.host || signal.aborted) return false;
+    if (!host || !callerCurrent() || host !== captured.host || signal.aborted) return false;
     const auth = host.auth?.getState();
     if (!auth || auth.status !== "signed_in" || !auth.acquisition) return false;
     if (host.invalidationGeneration?.() !== captured.generation) return false;
@@ -1207,9 +1220,10 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
         (current.workRef !== null && observed.selection.work_ref !== current.workRef)) return;
     setStatus(observed);
     if (observed.disposition !== "accepted") return;
+    setPreviewUnknown(false);
     const workRef = observed.selection.work_ref;
     if (!WORK_REF.test(workRef) || current.workRef === workRef) return;
-    live.current.onSelection({ ...current, workRef });
+    emitSelection({ ...current, workRef });
   };
 
   const syncPlanning = (state: OperationState) => {
@@ -1220,7 +1234,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
     if (workRef !== current.workRef) return;
     record.current.planningJob = { jobId: rootJobId, jobStatus: "ACCEPTED" };
     if (current.jobId === rootJobId) return;
-    live.current.onSelection({ ...current, jobId: rootJobId });
+    emitSelection({ ...current, jobId: rootJobId });
   };
 
   // ── explicit actions ──────────────────────────────────────────────────────
@@ -1237,8 +1251,10 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
       return;
     }
     run("options", async (signal) => {
+      let scope: string;
+      try { scope = await bindSourceIdentity(captured,signal); }
+      catch { if (!signal.aborted && stillFenced(captured,signal)) setNotice("CONTEXT"); return; }
       try {
-        const scope = await bindSourceIdentity(captured,signal);
         const raw = await readOptions.call(captured.source, signal);
         if (!stillFenced(captured, signal)) return;
         const decoded = decodeCreationOptions(raw);
@@ -1284,7 +1300,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
       return;
     }
     const pending = pointerOf(control);
-    if (createDispatched || (pending !== null && pending.kind === CREATE_KIND)) {
+    if (previewUnknown || createDispatched || (pending !== null && pending.kind === CREATE_KIND)) {
       setNotice("CREATE_BUSY");
       return;
     }
@@ -1296,8 +1312,8 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
     // Identity is minted once per explicit gesture, synchronously before the
     // prepare effect, and the parent selection is told first.
     const requestId = mintCreateRequestId();
-    requestIdentity.current = requestId;
-    live.current.onSelection({
+    setPreviewUnknown(true);
+    emitSelection({
       createRequestId: requestId,
       workRef: null,
       planningOperationKey: null,
@@ -1336,6 +1352,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
           setNotice("PREVIEW_UNAVAILABLE");
           return;
         }
+        setPreviewUnknown(false);
         setPreview(verified);
         setNotice(null);
       } catch {
@@ -1512,7 +1529,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
       return;
     }
     // The planning key is recorded on the shared selection BEFORE dispatch.
-    live.current.onSelection({ ...current, planningOperationKey: composed.operationKey });
+    emitSelection({ ...current, planningOperationKey: composed.operationKey });
     record.current.planningKey = composed.operationKey;
     run("plan", async () => {
       const state = await controller.begin(composed.intent);
@@ -1630,7 +1647,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
 
   const authorized = (() => {
     const auth = props.host?.auth?.getState();
-    return Boolean(auth && auth.status === "signed_in" && auth.acquisition);
+    return Boolean(callerCurrent() && auth && auth.status === "signed_in" && auth.acquisition);
   })();
   const planningAvailable = planningTransportOf(props.host) !== null;
   const observed =
@@ -1704,6 +1721,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
     if (previewLive !== null) {
       return pair("Preview verified. Publishing records the source record.", "预览已核对。发布将记录来源记录。");
     }
+    if (previewUnknown && selection !== null) return pair("Check the original source request before continuing.", "继续前请查询原始来源请求。");
     if (options !== null) return pair("Choose a project profile.", "请选择项目配置。");
     return pair("Draft goal. Load the project options to continue.", "目标为草稿。载入项目选项后继续。");
   })();
@@ -1759,9 +1777,9 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
         {selection !== null && (
           <>
             {" "}
-            <button type="button" onClick={checkSource} disabled={disabled}>
+            {!previewUnknown && <button type="button" onClick={checkSource} disabled={disabled}>
               {busy === "source-read" ? copy(["Checking…", "查询中…"]) : copy(["Check source status", "查询来源状态"])}
-            </button>
+            </button>}
             {createPending !== null && (
               <>
                 {" "}
@@ -1773,7 +1791,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
           </>
         )}
       </p>
-      {readable && (
+      {(readable || (selection?.workRef != null && selection.planningOperationKey !== null)) && (
         <section aria-label={copy(["Initial planning", "初始规划"])}>
           <h3>{copy(["Initial planning", "初始规划"])}</h3>
           {selection?.planningOperationKey != null ? (
@@ -1949,12 +1967,14 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
       feedbackPanel={feedback}
       startControl={observed !== null ? <span>{copy(["Project source recorded", "项目来源已记录"])}</span> :
         createDispatched ? <span>{copy(["Check the original publication above", "请在上方查询原始发布"])}</span> :
+        previewUnknown ? <button type="button" onClick={checkSource} disabled={disabled || !authorized}>{copy(["Check source status", "查询来源状态"])}</button> :
         previewLive !== null ? <button type="button" onClick={publish} disabled={disabled}>
           {busy === "publish" ? copy(["Publishing…", "发布中…"]) : copy(["Publish project", "发布项目"])}</button> :
         <button type="button" onClick={preparePreview} disabled={disabled || !authorized || options === null}>
           {busy === "preview" ? copy(["Preparing…", "准备中…"]) : copy(["Prepare preview", "准备预览"])}</button>}
       startNote={copy(observed !== null ? ["Initial planning is a separate action above.", "初始规划是上方独立的操作。"] :
         createDispatched ? ["The original source publication is retained for checking.", "原始来源发布已保留，可供查询。"] :
+        previewUnknown ? ["Keep the original request identity while its response is unavailable.", "响应不可用时，请保留原始请求标识。"] :
         previewLive !== null ? ["Publishing records this project in the company source. It does not open a conversation.", "发布将在公司来源中记录该项目，不会打开对话。"] :
         ["Choose the supplied profile and verify a preview before publishing.", "请选择提供的配置，并在发布前核对预览。"]) }
     />
