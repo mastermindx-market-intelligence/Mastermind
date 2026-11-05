@@ -60,6 +60,21 @@ RELEASE_PATHS = (
     "ops/executive_os",
     "scripts/executive_os_linux_worker.py",
     "scripts/executive_os_remote_worker_gateway.py",
+    # First-party runtime/native-BYOK source and role data only. This does not
+    # install third-party dependencies, enroll credentials, attest a running
+    # interpreter/unit, or package the broader hermesctl delegation CLI.
+    "common",
+    "integrations/__init__.py",
+    "integrations/hermes_runtime",
+    "integrations/hermes_harness",
+    "integrations/hermes_models",
+    "integrations/hermes_steward",
+    "integrations/hermes_qualification",
+    "integrations/business_mcp_auth/__init__.py",
+    "integrations/business_mcp_auth/claims.py",
+    "integrations/business_mcp_auth/contracts.py",
+    "integrations/mastermind_secretary_mcp/__init__.py",
+    "integrations/mastermind_secretary_mcp/schemas.py",
 )
 CENTRAL_UNITS = (
     "mastermind-executive-control.service",
