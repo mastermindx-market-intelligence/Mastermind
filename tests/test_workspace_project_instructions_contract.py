@@ -13,6 +13,32 @@ def body(rows=None, declaration="SUPPLIED"):
         "declaration":declaration,"instructions":[] if rows is None else rows,"reason_codes":[]}
 
 
+def test_public_recovery_identity_is_versioned_and_does_not_change_canonical_content_contract():
+    identity={'principal_scope':'f'*64};private=body();public=wire.public_body(private,recovery_identity=identity)
+    assert public['schema']==wire.PUBLIC_BODY_SCHEMA and public['recovery_identity']==identity
+    assert wire.validate_public_body(public,SELECTED)==public and wire.validate_body(private,SELECTED)==private
+    with pytest.raises(ValueError):wire.validate_body(public,SELECTED)
+    with pytest.raises(ValueError):wire.validate_public_body({**private,'recovery_identity':identity},SELECTED)
+    for forged in [None,{'principal_scope':'f'*64,'permission':True},{'principal_scope':'f'*64+'\n'}]:
+        with pytest.raises(ValueError):wire.public_body(private,recovery_identity=forged)
+
+
+def test_unavailable_public_content_never_retains_recovery_identity():
+    public=wire.public_body(wire.unavailable(SELECTED['work_ref']),recovery_identity={'principal_scope':'f'*64})
+    assert public['recovery_identity'] is None
+    with pytest.raises(ValueError):wire.validate_public_body({**public,'recovery_identity':{'principal_scope':'f'*64}},SELECTED)
+
+
+def test_added_recovery_metadata_cannot_expand_the_existing_utf8_ceiling():
+    rows=[wire.authored_instruction({'instruction_ref':f'INS:ITEM-{i}','text':'x'*3900}) for i in range(8)]
+    value=body(rows);size=len(canonical({'ok':True,'result':value}))+1
+    delta=32740-size
+    assert 0<delta<196
+    rows[-1]=wire.authored_instruction({'instruction_ref':rows[-1]['instruction_ref'],'text':'x'*(3900+delta)})
+    assert wire.validate_body(body(rows),SELECTED)
+    with pytest.raises(ValueError):wire.public_body(body(rows),recovery_identity={'principal_scope':'f'*64})
+
+
 def test_absent_explicit_empty_and_unavailable_are_distinct_and_detached():
     absent=body(declaration="NOT_DECLARED");empty=body();unavailable=wire.unavailable(SELECTED["work_ref"])
     assert wire.validate_body(absent,SELECTED)!=wire.validate_body(empty,SELECTED)

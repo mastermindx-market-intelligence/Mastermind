@@ -172,5 +172,30 @@
       "path": "agentos/workstreams/WS-ONE.md",
       "repository": "mastermindx-market-intelligence/macro"
     }
+  },
+  "project_current": {
+    "availability": "AVAILABLE",
+    "declaration": "SUPPLIED",
+    "instructions": [
+      {
+        "instruction_ref": "INS:DAILY-ONE",
+        "revision": "42c3404e00c7096f58946dac5512d7f67deb9dd25e56c4721f04f6f2653871b3",
+        "text": "Review the project carefully."
+      }
+    ],
+    "reason_codes": [],
+    "recovery_identity": {
+      "principal_scope": "417ddeea77c2508740ecaa5f3fb54530e41964d15c80befc6a4060bbe86d0a6f"
+    },
+    "schema": "mastermind.workspace_project_instructions.v2",
+    "selection": {
+      "work_ref": "WS:ONE"
+    },
+    "source": {
+      "commit": "cf4c7fbfa3bf97b6ed70b06d97af5caf0edb6c4b",
+      "content_sha256": "35b3869994c8a31cd9a02843c36bb1be1f9c6514df9139c2f1630951e4c46d59",
+      "path": "agentos/workstreams/WS-ONE.md",
+      "repository": "mastermindx-market-intelligence/macro"
+    }
   }
 }
