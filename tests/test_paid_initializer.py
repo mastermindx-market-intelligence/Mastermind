@@ -573,7 +573,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='a3547ff16ce14c80169e4aa61568e953b51b9853e0303a1edd75f9899a32bd23'
+    assert hashlib.sha256(current_raw).hexdigest()=='d39361263b97ef269413c9e2b4a1d52a1b2145246527e76e128dbb97bf516ff1'
     current=json.loads(current_raw)
     assert len(before)==95 and len(current)==104
     assert set(before)<=set(current)

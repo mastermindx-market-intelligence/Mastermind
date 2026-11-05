@@ -35,6 +35,7 @@ def project_bindings(selected="member-0", grant=GRANT):
         slot["direction_acceptance"] = None
         slot["project_file_add"] = None
         slot["project_preference_set"] = None
+        slot["instruction_admission_suspend"] = None
     if selected is not None:
         source["profiles"][selected]["project_authoring"] = grant
     return policy, source
@@ -63,15 +64,15 @@ def test_v4_extends_the_compiled_v3_owner_without_touching_shared_auth():
     projected = contract.validate_workspace_bindings(
         {"schema": contract.ACTION_BINDINGS_SCHEMA,
          "profiles": {name: {key: item for key, item in bound.items()
-                             if key not in {"project_authoring", "project_admission_suspend", "project_admission_resume", "plan_adoption", "direction_acceptance", "project_file_add", "project_preference_set"}}
+                             if key not in {"project_authoring", "project_admission_suspend", "project_admission_resume", "plan_adoption", "direction_acceptance", "project_file_add", "project_preference_set", "instruction_admission_suspend"}}
                       for name, bound in source["profiles"].items()},
          "primary_profile": source["primary_profile"]}, policy)
     assert result == {"schema": V4, "primary_profile": projected["primary_profile"],
                       "profiles": {name: dict(bound, project_authoring=GRANT if name == "member-0" else None,
                                                project_admission_suspend=None, project_admission_resume=None,
-                                               plan_adoption=None, direction_acceptance=None, project_file_add=None, project_preference_set=None)
+                                               plan_adoption=None, direction_acceptance=None, project_file_add=None, project_preference_set=None, instruction_admission_suspend=None)
                                    for name, bound in projected["profiles"].items()}}
-    assert all(set(bound) == {"enabled", "binding", "control_room_actions", "project_authoring", "project_admission_suspend", "project_admission_resume", "plan_adoption", "direction_acceptance", "project_file_add", "project_preference_set"}
+    assert all(set(bound) == {"enabled", "binding", "control_room_actions", "project_authoring", "project_admission_suspend", "project_admission_resume", "plan_adoption", "direction_acceptance", "project_file_add", "project_preference_set", "instruction_admission_suspend"}
                for bound in result["profiles"].values())
     # Detached closed bytes: mutating the result cannot change the input.
     result["profiles"]["member-0"]["project_authoring"] = "9" * 64

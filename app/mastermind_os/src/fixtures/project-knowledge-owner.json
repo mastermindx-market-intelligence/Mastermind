@@ -1,0 +1,198 @@
+{
+  "catalogue": {
+    "availability": "AVAILABLE",
+    "project": {
+      "coverage": {
+        "files": {
+          "declared": 2,
+          "listed": 2,
+          "omitted": 0,
+          "state": "COMPLETE"
+        },
+        "records": {
+          "invalid": 0,
+          "matched": 5,
+          "omitted": 0,
+          "scanned": 5,
+          "state": "BOUNDED_SAMPLE"
+        }
+      },
+      "files": [
+        {
+          "content_sha256": null,
+          "display_name": "notes.md",
+          "media_type": "text/markdown",
+          "origin": {
+            "actor_ref": null,
+            "kind": "DECLARED_ARTIFACT",
+            "request_sha256": null
+          },
+          "path": "research/notes.md",
+          "repository": "macro",
+          "revision": "a54d2ed0ffdec68baef4a22369267150fd76a9d1",
+          "source_ref": "project-file.v1.3a310430e74fc16991f75ee5d231497898eb0abcc6b284efbc03788fdd605035",
+          "state": "READABLE",
+          "viewer_relation": "UNKNOWN"
+        },
+        {
+          "content_sha256": "b3e331893dce4824d57f5d39e153074f3222a07e1d9a98a0c64b30cd493d87f7",
+          "display_name": "notes.md",
+          "media_type": "text/markdown",
+          "origin": {
+            "actor_ref": "workspace:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "kind": "PRINCIPAL_UPLOAD",
+            "request_sha256": "e91fa45428bdb0149253b8b28e090b07f711f008b93a7c87825f2a14a5c69458"
+          },
+          "path": "agentos/project-files/WS-ALPHA/e3379aa112115365ec88766d2a004546049c9bdf257d8b8dbc2445aa2e51c105.md",
+          "repository": "macro",
+          "revision": "1ba9a646e04c642f3d7d0699704e198f464b54f0",
+          "source_ref": "project-file.v1.cd0abe0c380ff2adffeb5ac03833342cfaa5e0fefb0a88e1b4b336db8177e37d",
+          "state": "READABLE",
+          "viewer_relation": "UNKNOWN"
+        }
+      ],
+      "memory": {
+        "revision": "b11a2cd5e404875fae98fb6c12b76c4f899eb74b",
+        "source_ref": "project-record.v1.bc983b58d00776459fc98402d26da229822756c30d7461f81e6ca785a37c4ec1",
+        "state": "AVAILABLE"
+      },
+      "records": [
+        {
+          "authored_at": null,
+          "committed_at": "2026-02-01T06:30:00Z",
+          "kind": "WORKSTREAM",
+          "path": "agentos/workstreams/WS-ALPHA.md",
+          "revision": "b6349416d3f7910bc1a062abb9c14c58ab694f01",
+          "source_ref": "project-record.v1.1c14128e97057aa8fbdf674513d15fd7f8a6627250430d4feec1e25e1d3725f9",
+          "title": "Project knowledge capture"
+        },
+        {
+          "authored_at": "2026-01-10",
+          "committed_at": "2026-02-01T06:30:00Z",
+          "kind": "DECISION",
+          "path": "agentos/decisions/DEC-EARLIER-CALL.md",
+          "revision": "4b84e2d4940c149b50a58153e5cfa1af1045ca33",
+          "source_ref": "project-record.v1.24201c94731a9788a1cf1733c6ef6c304ed1136c5eeb038069805a9079e2976f",
+          "title": "Which repo hosts the store?"
+        },
+        {
+          "authored_at": "2026-01-20",
+          "committed_at": "2026-02-01T06:30:00Z",
+          "kind": "PROJECT_PREFERENCE",
+          "path": "agentos/decisions/DEC-PROJECT-COMMUNICATION-PREFERENCE-ALPHA.md",
+          "revision": "b11a2cd5e404875fae98fb6c12b76c4f899eb74b",
+          "source_ref": "project-record.v1.bc983b58d00776459fc98402d26da229822756c30d7461f81e6ca785a37c4ec1",
+          "title": "How should this project communicate with its owner?"
+        },
+        {
+          "authored_at": "2026-01-15",
+          "committed_at": "2026-02-01T06:30:00Z",
+          "kind": "DISCOVERY",
+          "path": "agentos/discoveries/DSC-PARSER-LANDMINE.md",
+          "revision": "a26432a86d4390a09854b8eff88a72b7bf70b96c",
+          "source_ref": "project-record.v1.db1d0371b0c22dd197114dbd0d7db5eda0c61127b0cc672af4031dd653e980ee",
+          "title": "The captured parser validates canonical records."
+        },
+        {
+          "authored_at": null,
+          "committed_at": "2026-02-01T06:30:00Z",
+          "kind": "HANDOFF",
+          "path": "agentos/handoffs/HND-ALPHA-2026-02-01.md",
+          "revision": "d7a11162dd42372b203dcb5ff0f7228db07fa078",
+          "source_ref": "project-record.v1.86af979d0c41df7a2d461f93b7ebcec02449855843707217ac02e5988bbc308a",
+          "title": "Repair the readers."
+        }
+      ],
+      "title": "Project knowledge capture"
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_knowledge.v1",
+    "selection": {
+      "work_ref": "WS:ALPHA"
+    },
+    "source": {
+      "commit": "579ef67e8b387a1c40c6393e93eeaeafe98bec45",
+      "repository": "mastermindx-market-intelligence/macro",
+      "workstream_sha256": "9089d60a0e9b3ce0a59b2c60f77c4a3f77a5f9101808e3cb8d5e6fe6d8392f13"
+    }
+  },
+  "fixture_scope": "SYNTHETIC_TEMP_GIT_WITH_ACTUAL_MACRO_PARSER_AND_RECIPES",
+  "memory": {
+    "availability": "AVAILABLE",
+    "memory": {
+      "last_edit": {
+        "actor_ref": "workspace:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "request_sha256": "7a22dbd13b7337aa0397ffbaa1ae8986bc846f6297ab2e333943ff29c07e8f59"
+      },
+      "origin": {
+        "actor_ref": "workspace:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "kind": "USER_EDIT",
+        "source_ref": null,
+        "source_revision": null
+      },
+      "value": "以后请用中文写周报。"
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_preference.v1",
+    "selection": {
+      "work_ref": "WS:ALPHA"
+    },
+    "source": {
+      "commit": "579ef67e8b387a1c40c6393e93eeaeafe98bec45",
+      "committed_at": "2026-02-01T06:30:00Z",
+      "content_sha256": "726c6e67a0cb30b222a769d16c6fc9f875dca7482a4fd55f2a5611299c932346",
+      "path": "agentos/decisions/DEC-PROJECT-COMMUNICATION-PREFERENCE-ALPHA.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "b11a2cd5e404875fae98fb6c12b76c4f899eb74b"
+    }
+  },
+  "sources": {
+    "project-file.v1.3a310430e74fc16991f75ee5d231497898eb0abcc6b284efbc03788fdd605035": {
+      "availability": "AVAILABLE",
+      "document": {
+        "content_sha256": "c8a2dd6f09e76ffb0a04eb7afe22220badeba7c718daaa3b0ac39d5414865fa1",
+        "content_utf8": "# notes\n\ncaptured artifact body.\n",
+        "media_type": "text/markdown",
+        "title": "notes.md"
+      },
+      "reason_codes": [],
+      "schema": "mastermind.workspace_project_source.v1",
+      "selection": {
+        "source_ref": "project-file.v1.3a310430e74fc16991f75ee5d231497898eb0abcc6b284efbc03788fdd605035",
+        "work_ref": "WS:ALPHA"
+      },
+      "source": {
+        "commit": "579ef67e8b387a1c40c6393e93eeaeafe98bec45",
+        "committed_at": "2026-02-01T06:30:00Z",
+        "content_sha256": "c8a2dd6f09e76ffb0a04eb7afe22220badeba7c718daaa3b0ac39d5414865fa1",
+        "path": "research/notes.md",
+        "repository": "mastermindx-market-intelligence/macro",
+        "revision": "a54d2ed0ffdec68baef4a22369267150fd76a9d1"
+      }
+    },
+    "project-file.v1.cd0abe0c380ff2adffeb5ac03833342cfaa5e0fefb0a88e1b4b336db8177e37d": {
+      "availability": "AVAILABLE",
+      "document": {
+        "content_sha256": "b3e331893dce4824d57f5d39e153074f3222a07e1d9a98a0c64b30cd493d87f7",
+        "content_utf8": "# uploaded notes\n\n中文 body line.\n",
+        "media_type": "text/markdown",
+        "title": "notes.md"
+      },
+      "reason_codes": [],
+      "schema": "mastermind.workspace_project_source.v1",
+      "selection": {
+        "source_ref": "project-file.v1.cd0abe0c380ff2adffeb5ac03833342cfaa5e0fefb0a88e1b4b336db8177e37d",
+        "work_ref": "WS:ALPHA"
+      },
+      "source": {
+        "commit": "579ef67e8b387a1c40c6393e93eeaeafe98bec45",
+        "committed_at": "2026-02-01T06:30:00Z",
+        "content_sha256": "b3e331893dce4824d57f5d39e153074f3222a07e1d9a98a0c64b30cd493d87f7",
+        "path": "agentos/project-files/WS-ALPHA/e3379aa112115365ec88766d2a004546049c9bdf257d8b8dbc2445aa2e51c105.md",
+        "repository": "mastermindx-market-intelligence/macro",
+        "revision": "1ba9a646e04c642f3d7d0699704e198f464b54f0"
+      }
+    }
+  },
+  "work_ref": "WS:ALPHA"
+}

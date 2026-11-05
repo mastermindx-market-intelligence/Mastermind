@@ -162,8 +162,11 @@ describe("Programs collection manual recovery", () => {
     await act(async () => { root!.unmount(); }); root = null;
     const read = vi.fn(async () => qualified()); sourceHost(read); const auth = authHost();
     // Start admitted, then revoke to exercise notification and loader fences.
-    await projects(); await auth.change(false); control = button("Refresh Projects");
-    expect(control.disabled).toBe(true); await click("Refresh Projects"); expect(read).toHaveBeenCalledTimes(1);
+    await projects(); await auth.change(false);
+    // Sign-out hands the shell to private entry: the loader is unmounted, so
+    // the revoked acquisition cannot start a read or an auth action.
+    expect(container.textContent).toContain("Sign in to your workspace.");
+    expect(read).toHaveBeenCalledTimes(1);
     expect(auth.auth.signIn).not.toHaveBeenCalled(); expect(auth.auth.signOut).not.toHaveBeenCalled();
   });
 
@@ -171,8 +174,15 @@ describe("Programs collection manual recovery", () => {
     const read = vi.fn(async () => qualified()); sourceHost(read);
     const state: AuthState = { status, reason: null, acquisition: false, content: false };
     window.MastermindMissionHost!.auth = { getState: () => state, subscribe: () => () => {}, signIn: vi.fn(async () => {}), signOut: vi.fn(async () => {}) };
-    await projects(); expect(button("Refresh Projects").disabled).toBe(true);
-    await click("Refresh Projects"); expect(read).not.toHaveBeenCalled();
+    await mount();
+    if (status === "signed_out") {
+      // Private entry owns the shell; the Projects loader is not mounted.
+      expect(container.textContent).toContain("Sign in to your workspace.");
+    } else {
+      await click("Projects"); expect(button("Refresh Projects").disabled).toBe(true);
+      await click("Refresh Projects");
+    }
+    expect(read).not.toHaveBeenCalled();
   });
 
   it.each(["success", "rejection"] as const)("aborts on unmount and tolerates late retry %s", async settlement => {
@@ -189,7 +199,11 @@ describe("Programs collection manual recovery", () => {
     const { readMission } = sourceHost(read); const auth = authHost(); await projects(); await click("Refresh Projects");
     const signal = read.mock.calls[1][0].signal as AbortSignal; await auth.change(false); expect(signal.aborted).toBe(true);
     await act(async () => { if (settlement === "success") wait.resolve(qualified()); else wait.reject(new Error("old principal")); });
-    expect(button("Refresh Projects").disabled).toBe(true); expect(findButton("Open project Beta program")).toBeUndefined();
+    // Sign-out hands the shell to private entry; the late retry must never
+    // resurface the old principal's observation or start another read.
+    expect(container.textContent).toContain("Sign in to your workspace.");
+    expect(findButton("Open project Beta program")).toBeUndefined();
+    expect(container.textContent).not.toContain("Beta program");
     expect(read).toHaveBeenCalledTimes(2); expect(readMission).not.toHaveBeenCalled();
   });
 

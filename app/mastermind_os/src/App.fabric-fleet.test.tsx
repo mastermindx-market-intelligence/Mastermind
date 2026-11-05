@@ -122,7 +122,8 @@ describe("Fleet route — separate Fabric observation and Capacity truth", () =>
     await screen.findByRole("button", { name: /fabric-selected-run · TERMINAL/ });
     owner.authChanged();
     await waitFor(() => expect(screen.queryByRole("button", { name: /fabric-selected-run · TERMINAL/ })).toBeNull());
-    expect(screen.getByRole("button", { name: "Load runs" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("Sign in to your workspace.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Load runs" })).toBeNull();
     expect(owner.catalogRead).toHaveBeenCalledTimes(1);
     expect(owner.statusRead).not.toHaveBeenCalled();
   });

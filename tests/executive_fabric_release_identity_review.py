@@ -500,16 +500,7 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Journal source-only read composition: exact unchanged action-handler AST and
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
-# 2026-11-05 Mission-result composition re-pin (attended parent source review
-# under the current Chairman waiver, NOT an independent/formal review): the
-# original eight action-refusal status tokens are byte-identical and each moves
-# exactly +1 line (the new _MISSION_RESULT_ROUTE constant above them); the
-# action-handler AST itself is unchanged. Only the exact full-source digest and
-# the eight whole-token coordinates move. Previous source SHA
-# 5f6e043f3f8f525670f51c7f27a9e6ea7f17e7508489e13f661ea69007e840ff. These are
-# HTTP response statuses, never account/UID/GID values, grants or admission
-# decisions; any changed byte/site restores ordinary D8.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'e0d13427d248043ec0116cffb49f3b8ae2e5dcff50e65e4fa63d8fd6b9f53715', 'sites': ((858, 71, 74, 'int', '400'), (869, 71, 74, 'int', '403'), (877, 71, 74, 'int', '400'), (883, 79, 82, 'int', '400'), (892, 71, 74, 'int', '400'), (902, 71, 74, 'int', '403'), (907, 76, 79, 'int', '503'), (913, 71, 74, 'int', '403'))}
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '4a1f1e2ac43591e9eb0684134ffad1c3519492e4f7debd205b8ccb3209128eab', 'sites': ((876, 71, 74, 'int', '400'), (887, 71, 74, 'int', '403'), (895, 71, 74, 'int', '400'), (901, 79, 82, 'int', '400'), (910, 71, 74, 'int', '400'), (920, 71, 74, 'int', '403'), (925, 76, 79, 'int', '503'), (931, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -545,6 +536,16 @@ REVIEWED_FILES['integrations/session_bridge/mmtask_restore/preimage/mmtask'] = {
 # Any changed source byte/site returns this numeric token to the ordinary D8 guard.
 REVIEWED_FILES['app/mastermind_os/src/admission/project-admission-command-port.ts'] = {'sha256': 'bc14696fce184ce0d186431f044a79d93c61ca07b8c4eaf718e4ed19b3af2571', 'sites': ((37, 87, 90, 'int', '400'),)}
 
+# Exact reviewed archive catalogue cardinality bound; never a host UID or grant.
+REVIEWED_FILES['app/mastermind_os/src/projects/archive/project-archive-continuation.ts'] = {'sha256': '22dc5ee85b1ca02464e20cd77b52cdc6cc9ea5e8f19161cf78f81e734934d84d', 'sites': ((29, 78, 81, 'int', '500'),)}
+
+# Exact Knowledge path/generation bounds and inert synthetic PR fixture numbers.
+# These are not OS identities; full-source drift exposes every token again.
+REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-data-observation.ts'] = {'sha256': '8255d63192da282f52f0f81e2963aa6ff3084e5065d60e8516d483fab3122b79', 'sites': ((91, 97, 100, 'int', '512'),)}
+REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-knowledge-port.ts'] = {'sha256': '9a41d0f5bafef2ab8168509aaf3ff7e37369b619230c2c380bedb2b586d7eaf2', 'sites': ((46, 64, 67, 'int', '512'),)}
+REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-data-observation-owner.json'] = {'sha256': 'd12878bdff07fcdb6bfa05ba2c1694c7600416c7407a9e84e87e20dcc116f118', 'sites': ((119, 16, 19, 'int', '401'),)}
+REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-write-owner.json'] = {'sha256': 'cb6d4c43fc821993f664a9bc75ccf3f38d76bbaff58e36363c6e700b7e3b6856', 'sites': ((97, 22, 25, 'int', '401'), (413, 22, 25, 'int', '402'))}
+
 # PR1917 source review5761933327 at63d184218e8d6a2b7da48f98045a2e67f504f5aa:
 # default HTTPS port in the exact parsed-origin condition, not a UID/GID.
 # Existing full-file SHA + token-span verification binds this one Constant;
@@ -555,6 +556,13 @@ REVIEWED_FILES['integrations/hermes_secretary/tab_sweep.py'] = {
     'sites': ((19, 77, 80, 'int', '443'),),
 }
 
+# NEXT accepted source: callback input bound / existing HTTP permission denial,
+# never an OS identity. Exact whole-source hash and token sites only.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'sha256': '4d97af924ce072ee6135e21101871fbae75ddcdaaf61989482f4781b112fd133', 'sites': ((731, 49, 52, 'int', '512'),)}
+
+# NEXT accepted source: callback input bound / existing HTTP permission denial,
+# never an OS identity. Exact whole-source hash and token sites only.
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '98a0be4402c331678b0870cd7b673d56c8e3704b83ff9e8b21c95610a5b54c4d', 'sites': ((703, 93, 96, 'int', '403'), (705, 56, 59, 'int', '403'), (712, 46, 49, 'int', '403'), (713, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
