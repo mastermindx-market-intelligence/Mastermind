@@ -1,0 +1,15 @@
+{
+  "reviewer": "native_acceptance_adjudication",
+  "state": "PASS_SCOPED_SOURCE",
+  "findings": [],
+  "reviewed": {
+    "run_observation.py": "7a041b0b1496bd886f0675d75834da6f024c00180f99452664de55d66f3fd4fd",
+    "run_observation_delivery.py": "479e6c50947f6961c1cb6e50fec0e8390c0eaf824ac455b24c2b06b9d7d33d92"
+  },
+  "execution_evidence": "parent-owned 2 baseline failures;31 candidate pass",
+  "limitations": [
+    "No remote read performed by reviewer",
+    "Partial log or metadata race may return unavailable",
+    "No progress, lease-health, acceptance or retry claim"
+  ]
+}

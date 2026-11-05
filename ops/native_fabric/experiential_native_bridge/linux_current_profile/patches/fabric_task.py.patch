@@ -1,0 +1,138 @@
+diff --git a/fabric_task.py b/fabric_task.py
+--- a/fabric_task.py
++++ b/fabric_task.py
+@@ -286,26 +286,73 @@
+     escalation_reason: str | None = None,
+     requested_model: str | None = None,
+     artifact_names: list[str] | None = None,
++    experiential_retention_acknowledged: bool = False,
++    experiential_sensitive_data_opt_in: bool = False,
++    experiential_proprietary_code: bool = False,
++    experiential_code_exposure_opt_in: bool = False,
++    strict_manual_pin: bool = False,
+ ) -> int:
+     rid = validate_run_id(run_id)
+     if bool(packet) == bool(stdin_bytes is not None):
+         raise ValueError("provide exactly one of packet or stdin")
+     env = os.environ.copy()
++    observed_root = (
++        root_id or env.get("POOL_ORCHESTRATOR_ID")
++        or env.get("CODEX_SESSION_ID") or env.get("CLAUDE_SESSION_ID")
++    )
++    experiential_active = (isinstance(pool, str)
++                            and pool.strip().casefold() == "experiential")
++    if (experiential_retention_acknowledged or experiential_sensitive_data_opt_in
++            or experiential_proprietary_code or experiential_code_exposure_opt_in
++            or strict_manual_pin) and not experiential_active:
++        raise FabricTaskError("EXPERIENTIAL_OPTIONS_REFUSED_NONEXPERIENTIAL_POOL")
++    if experiential_active:
++        import experiential_bridge
++        try:
++            experiential_bridge.request_gate(
++                run_id=rid, task_class=task_class, pool=pool,
++                model=requested_model, root_id=observed_root,
++                parent_run_id=parent_run_id, runtime_root=HERE,
++                strict_manual_pin=strict_manual_pin,
++                retention_acknowledged=experiential_retention_acknowledged,
++                sensitive_data_opt_in=experiential_sensitive_data_opt_in,
++                proprietary_code=experiential_proprietary_code,
++                code_exposure_opt_in=experiential_code_exposure_opt_in,
++            )
++        except experiential_bridge.ExperientialBridgeRefused as exc:
++            raise FabricTaskError(str(exc)) from exc
+     # Explicit empty arguments clear inherited values; None uses the existing
+     # economic metadata. Selection and launch see the same exact witness.
+     complexity = task_complexity if task_complexity is not None else env.get("POOL_TASK_COMPLEXITY", "")
+     reason = escalation_reason if escalation_reason is not None else env.get("POOL_ESCALATION_REASON", "")
+-    route = _parse_route(pick.format_pick(
+-        task_class, prefer=prefer, host="auto", pool=pool,
+-        task_complexity=complexity, escalation_reason=reason,
+-        requested_model=requested_model,
+-    ))
+-    guard = pick.launch_policy(
+-        route["MODE"], task_class, route["MODEL"],
+-        escalation_reason=reason, task_complexity=complexity,
+-    )
+-    if not guard.get("allowed"):
+-        raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(guard.get("reason")))
++    if experiential_active:
++        import experiential_bridge
++        try:
++            qualified = experiential_bridge.qualified_route(
++                run_id=rid, task_class=task_class, runtime_root=HERE)
++            route = {key: str(qualified[key]) for key in ("POOL", "MODEL", "HOST", "MODE")}
++            experiential_bridge.launch_policy_witness(
++                route["MODE"], task_class, route["MODEL"])
++        except experiential_bridge.ExperientialBridgeRefused as exc:
++            raise FabricTaskError(str(exc)) from exc
++        env["POOL_RUN_ID"] = rid
++        env["EXPERIENTIAL_RETENTION_ACKNOWLEDGED"] = "1" if experiential_retention_acknowledged else "0"
++        env["EXPERIENTIAL_SENSITIVE_DATA_OPT_IN"] = "1" if experiential_sensitive_data_opt_in else "0"
++        env["EXPERIENTIAL_PROPRIETARY_CODE"] = "1" if experiential_proprietary_code else "0"
++        env["EXPERIENTIAL_CODE_EXPOSURE_OPT_IN"] = "1" if experiential_code_exposure_opt_in else "0"
++        env["EXPERIENTIAL_STRICT_MANUAL_PIN"] = "1" if strict_manual_pin else "0"
++    else:
++        route = _parse_route(pick.format_pick(
++            task_class, prefer=prefer, host="auto", pool=pool,
++            task_complexity=complexity, escalation_reason=reason,
++            requested_model=requested_model,
++        ))
++        guard = pick.launch_policy(
++            route["MODE"], task_class, route["MODEL"],
++            escalation_reason=reason, task_complexity=complexity,
++        )
++        if not guard.get("allowed"):
++            raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(guard.get("reason")))
+     env["POOL_TASK_CLASS"] = task_class
+     if task_complexity is not None or "POOL_TASK_COMPLEXITY" in env:
+         env["POOL_TASK_COMPLEXITY"] = complexity
+@@ -412,6 +459,24 @@
+     p_request.add_argument("--task-complexity")
+     p_request.add_argument("--escalation-reason")
+     p_request.add_argument("--model", dest="requested_model")
++    # MANUAL-only Experiential Labs consent flags (experiential pool only;
++    # refused on every other pool). Recognizable via `request --help`.
++    p_request.add_argument("--experiential-retention-acknowledged", action="store_true",
++                           help="Experiential Labs only: acknowledge the provider retains prompt/response even after settings-off or account deletion")
++    p_request.add_argument("--experiential-sensitive-data-opt-in", action="store_true",
++                           help="Experiential Labs only: explicit sensitive-data disclosure opt-in")
++    p_request.add_argument("--experiential-proprietary-code", action="store_true",
++                           help="Experiential Labs only: declare proprietary code may be present")
++    p_request.add_argument("--experiential-code-exposure-opt-in", action="store_true",
++                           help="Experiential Labs only: explicit code-exposure opt-in (proprietary code is never exposed automatically)")
++    p_request.add_argument("--strict-manual-pin", action="store_true",
++                           help="Experiential Labs only: require the exact experiential/glm-5.3-uncensored manual pin")
++
++    p_preview = sub.add_parser("preview", help="Read-only experiential route/pin preflight; JSON PREVIEW_ONLY or typed refusal; never a lease, packet or worker")
++    p_preview.add_argument("--id", required=True)
++    p_preview.add_argument("--class", dest="task_class", required=True)
++    p_preview.add_argument("--pool")
++    p_preview.add_argument("--model", dest="requested_model")
+ 
+     p_status = sub.add_parser("status")
+     p_status.add_argument("run_id")
+@@ -499,7 +564,24 @@
+                 task_complexity=args.task_complexity,
+                 escalation_reason=args.escalation_reason,
+                 requested_model=args.requested_model,
++                experiential_retention_acknowledged=args.experiential_retention_acknowledged,
++                experiential_sensitive_data_opt_in=args.experiential_sensitive_data_opt_in,
++                experiential_proprietary_code=args.experiential_proprietary_code,
++                experiential_code_exposure_opt_in=args.experiential_code_exposure_opt_in,
++                strict_manual_pin=args.strict_manual_pin,
+             )
++        if args.cmd == "preview":
++            import experiential_bridge
++            try:
++                _json(experiential_bridge.preview_command(
++                    run_id=args.id, task_class=args.task_class,
++                    pool=args.pool, model=args.requested_model,
++                    runtime_root=HERE,
++                ))
++                return 0
++            except experiential_bridge.ExperientialBridgeRefused as exc:
++                print(str(exc), file=sys.stderr)
++                return 78
+         if args.cmd == "status":
+             _json(inspect_run(args.run_id))
+             return 0

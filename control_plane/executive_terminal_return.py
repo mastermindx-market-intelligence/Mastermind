@@ -55,6 +55,16 @@ class TerminalReturnProjectionError(RuntimeError):
 
 
 @dataclasses.dataclass(frozen=True)
+class TerminalReviewFinding:
+    """One already-validated review finding safe for bounded return projection."""
+
+    code: str
+    severity: str
+    message: str
+    evidence_digests: tuple[str, ...] = ()
+
+
+@dataclasses.dataclass(frozen=True)
 class TerminalReturnCandidate:
     """The complete, bounded pure projection of one terminal direct child."""
 
@@ -76,6 +86,8 @@ class TerminalReturnCandidate:
     message_key: str
     summary: str
     review_verdict: str | None
+    next_actions: tuple[str, ...] = ()
+    review_findings: tuple[TerminalReviewFinding, ...] = ()
     dialogue_source: ExecutiveDialogueSource | None = None
 
     @property
@@ -96,6 +108,62 @@ _TERMINAL_STATUS_MAP = {
 }
 def _refuse(code: str) -> None:
     raise TerminalReturnError(code)
+
+
+def _text_tuple(value: Any, *, code: str = "EVIDENCE_REFUSED") -> tuple[str, ...]:
+    if not isinstance(value, list):
+        _refuse(code)
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item:
+            _refuse(code)
+        if item in result:
+            _refuse(code)
+        result.append(item)
+    return tuple(result)
+
+
+def _review_findings(value: Any) -> tuple[TerminalReviewFinding, ...]:
+    if not isinstance(value, list):
+        _refuse("EVIDENCE_REFUSED")
+    result: list[TerminalReviewFinding] = []
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {
+            "code", "severity", "message", "evidence_digests"
+        }:
+            _refuse("EVIDENCE_REFUSED")
+        code = item["code"]
+        severity = item["severity"]
+        message = item["message"]
+        evidence = item["evidence_digests"]
+        if (
+            not isinstance(code, str)
+            or not code
+            or severity not in {"info", "warning", "blocking"}
+            or not isinstance(message, str)
+            or not message
+            or not isinstance(evidence, list)
+        ):
+            _refuse("EVIDENCE_REFUSED")
+        digests: list[str] = []
+        for digest in evidence:
+            if (
+                not isinstance(digest, str)
+                or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+                or digest in digests
+            ):
+                _refuse("EVIDENCE_REFUSED")
+            digests.append(digest)
+        finding = TerminalReviewFinding(
+            code=code,
+            severity=severity,
+            message=message,
+            evidence_digests=tuple(digests),
+        )
+        if finding in result:
+            _refuse("EVIDENCE_REFUSED")
+        result.append(finding)
+    return tuple(result)
 
 
 def _terminal_utc(value: Any) -> str:
@@ -158,6 +226,7 @@ def reduce_terminal_return(
     try:
         digests = {name: terminal_receipt[name] for name in digest_names}
         summary = envelope["summary"]
+        next_actions = _text_tuple(envelope["next_actions"])
     except (KeyError, TypeError):
         _refuse("EVIDENCE_REFUSED")
     if (
@@ -176,6 +245,7 @@ def reduce_terminal_return(
     ):
         _refuse("EVIDENCE_REFUSED")
     review_verdict: str | None = None
+    review_findings: tuple[TerminalReviewFinding, ...] = ()
     if job.orchestration_role == "review":
         role_result = envelope.get("role_result")
         if not isinstance(role_result, dict):
@@ -184,6 +254,7 @@ def reduce_terminal_return(
         if not isinstance(verdict, str) or verdict not in ("approve", "reject"):
             _refuse("EVIDENCE_REFUSED")
         review_verdict = verdict
+        review_findings = _review_findings(role_result.get("findings"))
     return TerminalReturnCandidate(
         job_id=job.job_id,
         attempt_id=attempt.attempt_id,
@@ -203,5 +274,7 @@ def reduce_terminal_return(
         message_key=f"asd-exec-result-{digests['terminal_evidence_digest']}",
         summary=summary,
         review_verdict=review_verdict,
+        next_actions=next_actions,
+        review_findings=review_findings,
         dialogue_source=material.dialogue_source,
     )

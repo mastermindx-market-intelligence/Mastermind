@@ -32,7 +32,7 @@ from control_plane import ceo_intent
 from control_plane import executive_ceo_ingress as ceo_ingress
 from control_plane.executive_authority import AuthorityDenied
 from control_plane.executive_runtime import Runtime
-from control_plane.executive_service import ExecutiveControlService, ServiceConfig
+from control_plane.executive_service import ExecutiveControlService, ServiceConfig, ServiceError
 
 
 # ---------------------------------------------------------------------------
@@ -1274,36 +1274,58 @@ def test_paused_submit_survives_client_disconnect_and_close_holds_lock_until_ter
         monkeypatch.setattr(ceo_intent, "submit_intent", paused_submit_intent)
 
         reader, writer = await asyncio.open_unix_connection(str(service.ceo_ingress_socket_path))
-        writer.write(_submit_bytes(observed_grounding=GROUNDING_A, request=_research_request()))
-        await writer.drain()
-        await asyncio.wait_for(entered.wait(), timeout=2)
-
-        # BLOCKER 1 (7a): the live handler task is tracked in the §14.1
-        # drain set WHILE the canonical mutation is paused mid-flight -- a
-        # proof independent of ``Server.wait_closed()`` semantics.
-        assert len(service._ceo_ingress_tasks) == 1
-
-        # Disconnect the client while the mutation is paused mid-flight.
-        writer.close()
         try:
-            await writer.wait_closed()
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-            pass
+            writer.write(_submit_bytes(observed_grounding=GROUNDING_A, request=_research_request()))
+            await writer.drain()
+            await asyncio.wait_for(entered.wait(), timeout=2)
 
-        # Trigger service close while submit is paused: listeners stop
-        # accepting, but close() must NOT release the lock/marker until this
-        # admission reaches a real terminal outcome.
-        close_task = asyncio.create_task(service.close())
-        await asyncio.sleep(0.05)
-        assert not close_task.done()
-        assert service.running_marker_path.exists()
+            # BLOCKER 1 (7a): the live handler task is tracked in the §14.1
+            # drain set WHILE the canonical mutation is paused mid-flight -- a
+            # proof independent of ``Server.wait_closed()`` semantics.
+            assert len(service._ceo_ingress_tasks) == 1
 
-        release.set()
-        await asyncio.wait_for(close_task, timeout=2)
+            # Disconnect the client while the mutation is paused mid-flight.
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
 
-        assert not service.running_marker_path.exists()
-        jobs = service.runtime.jobs.list_jobs()
-        assert len(jobs) == 1  # committed exactly once despite the disconnect
+            # Trigger service close while submit is paused: listeners stop
+            # accepting, but close() must NOT release the lock/marker until this
+            # admission reaches a real terminal outcome.
+            close_task = asyncio.create_task(service.close())
+            # The fixture's 200 ms grace must expire while the worker is still
+            # deliberately paused.  A retained-custody refusal is the intended
+            # outcome, independent of the real commit's latency under runner load.
+            with pytest.raises(
+                ServiceError,
+                match="^physical service work has not drained; custody retained$",
+            ):
+                await asyncio.wait_for(close_task, timeout=2)
+            assert service.running_marker_path.exists()
+            assert len(service._ceo_ingress_tasks) == 1
+            assert not next(iter(service._ceo_ingress_tasks)).done()
+
+            release.set()
+            await _wait_until(lambda: not service._ceo_ingress_tasks)
+            await service.close()
+
+            assert not service.running_marker_path.exists()
+            jobs = service.runtime.jobs.list_jobs()
+            assert len(jobs) == 1  # committed exactly once despite the disconnect
+
+        finally:
+            # Always unblock the physical worker, including failed assertions,
+            # so asyncio.run() cannot hang while shutting down its executor.
+            release.set()
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
+            await _wait_until(lambda: not service._ceo_ingress_tasks)
+            await service.close()
 
         # After terminal drain, a fresh service can restart cleanly and its
         # dedicated status readback recovers the exact canonical receipt (no
@@ -1526,13 +1548,17 @@ def test_close_holds_lock_even_when_server_wait_closed_is_a_no_op(
         loop = asyncio.get_running_loop()
         entered = asyncio.Event()
         release = asyncio.Event()
-        real_submit_intent = ceo_intent.submit_intent
-
         def paused_submit_intent(runtime, payload, *, workspace_root=None):
+            # This test proves the handler/physical-worker drain boundary, not
+            # durable CEO-intent commit latency.  The neighboring disconnect
+            # test owns the real submit/commit/restart path.  Keep this worker
+            # physically blocked until release, then return the minimum valid
+            # ingress receipt so hosted-runner load cannot consume the fixture's
+            # deliberately tiny 200 ms shutdown grace.
             loop.call_soon_threadsafe(entered.set)
             fut = asyncio.run_coroutine_threadsafe(release.wait(), loop)
             fut.result()
-            return real_submit_intent(runtime, payload, workspace_root=workspace_root)
+            return {"dispatched": False}
 
         monkeypatch.setattr(ceo_intent, "submit_intent", paused_submit_intent)
 
