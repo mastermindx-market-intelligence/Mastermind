@@ -167,6 +167,21 @@ class Leaders(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "membership interval"):
             leader_panel(d, m, Rules(min_universe=2, min_adv_dollars=1))
 
+    def test_one_session_membership_includes_only_its_inclusive_date(self):
+        d, m, days = make_daily(n=76)
+        day = date(2026, 9, 25)
+        m.loc[m.symbol == "A", "start_date"] = day
+        m.loc[m.symbol == "A", "end_date"] = day.isoformat()
+        panel = leader_panel(d, m, Rules(min_universe=2, min_adv_dollars=1,
+                                        rs_top_fraction=.5))
+        index = days.index(day)
+        self.assertEqual(panel[day]["expected"], 3)
+        self.assertIn("A", panel[day]["leaders"])
+        for adjacent in (days[index - 1], days[index + 1]):
+            with self.subTest(day=adjacent):
+                self.assertEqual(panel[adjacent]["expected"], 2)
+                self.assertNotIn("A", panel[adjacent]["leaders"])
+
     def test_delisted_membership_asof(self):
         d, m, days = make_daily()
         m.loc[m.symbol == "C", "end_date"] = str(days[-2])
@@ -326,6 +341,7 @@ class Oscillator(unittest.TestCase):
 
     def test_corrupt_indicator_export_is_not_no_cross(self):
         b = self.b.copy()
+        b["osc_fast"] = b["osc_fast"].astype(object)
         b.loc[3, "osc_fast"] = "bad"
         with self.assertRaisesRegex(ValueError, "invalid supplied oscillator"):
             evaluate(b, leaders(), Rules())

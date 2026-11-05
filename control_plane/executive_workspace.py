@@ -454,7 +454,10 @@ def _git_env(home: Path) -> dict[str, str]:
     }
 
 
-def _run(argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]) -> str:
+def _run(
+    argv: Sequence[str], *, cwd: Path | None, env: dict[str, str],
+    timeout_seconds: int = 60,
+) -> str:
     try:
         completed = subprocess.run(
             list(argv),
@@ -464,7 +467,7 @@ def _run(argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]) -> str:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=60,
+            timeout=timeout_seconds,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise WorkspaceError(f"workspace command could not run: {argv[0]}: {exc}") from exc
@@ -1951,6 +1954,64 @@ def _worktree_record(
     return None
 
 
+
+def _registered_linked_worktree_status_record(
+    source: Path, destination: Path, *, env: dict[str, str]
+) -> dict[str, str] | None:
+    """Verify ONE locked linked-worktree registration without enumerating the fleet.
+
+    Status reads run on hosts with thousands of other worktrees; repository-wide
+    `git worktree list --porcelain` may exceed the publisher's bounded precheck.
+    Git's own .git -> common/worktrees/<id> -> gitdir reciprocal registration and
+    the exact managed lock are sufficient for this *read-only* status lookup.
+    The regular release, removal and acquisition paths keep the existing fleet
+    enumeration and safety rules. No worktree registry is created here.
+    """
+    try:
+        dot_git = destination / ".git"
+        if dot_git.is_symlink() or not dot_git.is_file():
+            return None
+        if dot_git.stat().st_size > 4096:
+            return None
+        pointer = dot_git.read_text(encoding="utf-8")
+        if not pointer.startswith("gitdir: ") or pointer.count("\n") > 1:
+            return None
+        value = pointer[len("gitdir: "):].strip()
+        if not value or any(c in value for c in "\r\n\x00"):
+            return None
+        raw_admin = Path(value)
+        if not raw_admin.is_absolute():
+            raw_admin = destination / raw_admin
+        if raw_admin.is_symlink():
+            return None
+
+        common = _common_git_dir(source, env=env)
+        common_worktrees = common / "worktrees"
+        if common_worktrees.is_symlink():
+            return None
+        owner_dir = common_worktrees.resolve(strict=True)
+        admin = raw_admin.resolve(strict=True)
+        if admin.parent != owner_dir or not admin.is_dir():
+            return None
+
+        backref, lock = admin / "gitdir", admin / "locked"
+        if (backref.is_symlink() or lock.is_symlink()
+                or not backref.is_file() or not lock.is_file()
+                or backref.stat().st_size > 4096 or lock.stat().st_size > 2048):
+            return None
+        back = backref.read_text(encoding="utf-8").strip()
+        if (not Path(back).is_absolute() or any(c in back for c in "\r\n\x00")
+                or Path(back).resolve(strict=True) != dot_git.resolve(strict=True)):
+            return None
+        reason = lock.read_text(encoding="utf-8").strip()
+        if ("\n" in reason or "\r" in reason
+                or not reason.startswith(LINKED_WORKTREE_LOCK_PREFIX + " ")):
+            return None
+        return {"worktree": str(destination.resolve()), "locked": reason}
+    except (OSError, UnicodeError, RuntimeError, ValueError):
+        return None
+
+
 def _run_status(
     argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]
 ) -> tuple[int, str, str]:
@@ -1993,8 +2054,13 @@ def _require_linked_identity(
     *,
     env: dict[str, str],
     expected_lock_reason: str | None = None,
+    status_direct_registration: bool = False,
 ) -> tuple[dict[str, str], str, str, Path]:
-    record = _worktree_record(source, destination, env=env)
+    record = (
+        _registered_linked_worktree_status_record(source, destination, env=env)
+        if status_direct_registration
+        else _worktree_record(source, destination, env=env)
+    )
     if record is None:
         raise WorkspaceError("workspace is not registered to the source repository")
     reason = record.get("locked", "")
@@ -2140,8 +2206,12 @@ def prepare_linked_worktree(
         created = True
         _configure_new_sparse_workspace(destination, sparse_directories, env=env)
         # Hydrate the admitted HEAD without detaching its operation-bound branch.
-        # The destination is new and locked; existing workspaces returned above.
-        _run(["git", "read-tree", "-mu", "HEAD"], cwd=destination, env=env)
+        # A large sparse index on an occupied host can exceed the normal 60s
+        # Git read limit. Extend only this new-worktree hydration to a finite
+        # 240s budget; reads, identity checks and other Git calls keep 60s.
+        # Failed hydration still follows the existing exact-branch cleanup.
+        _run(["git", "read-tree", "-mu", "HEAD"], cwd=destination, env=env,
+             timeout_seconds=240)
         _, head, actual_branch, common = _require_linked_identity(
             source, destination, env=env, expected_lock_reason=expected_lock
         )
@@ -2202,6 +2272,9 @@ def inspect_linked_worktree(
     workspace_path: str | Path,
     *,
     expected_operation_id: str | None = None,
+    status_direct_registration: bool = False,
+    published_branch: str | None = None,
+    published_pull_request: int | None = None,
 ) -> LinkedWorkspaceReleaseReceipt:
     """Classify whether a managed linked worktree can be removed without data loss."""
 
@@ -2215,13 +2288,46 @@ def inspect_linked_worktree(
     if destination == root:
         raise WorkspaceError("managed workspace may not be the workspace root itself")
     env = _git_env(root / ".control-home")
-    record, head, branch, _ = _require_linked_identity(source, destination, env=env)
+    record, head, branch, _ = _require_linked_identity(
+        source, destination, env=env,
+        status_direct_registration=status_direct_registration,
+    )
     lock_reason = record.get("locked", "")
     if expected_operation_id is not None:
         observed_operation = _lock_value(lock_reason, "operation")
         if observed_operation != expected_operation_id:
             raise WorkspaceError("workspace operation identity does not match the release request")
     base = _lock_value(lock_reason, "base") or ""
+    if published_branch is not None and published_pull_request is not None:
+        raise WorkspaceError("publication evidence selectors are mutually exclusive")
+    declared_publication_branch: str | None = None
+    if published_branch is not None:
+        if (
+            type(published_branch) is not str
+            or not published_branch
+            or published_branch != published_branch.strip()
+            or len(published_branch) > 256
+            or published_branch.startswith(("-", "/", ".", "refs/"))
+            or published_branch.endswith(("/", ".", ".lock"))
+            or ".." in published_branch
+            or "//" in published_branch
+            or "@{" in published_branch
+            or any(
+                character.isspace()
+                or ord(character) < 32
+                or ord(character) == 127
+                or character in "\\~^:?*["
+                for character in published_branch
+            )
+        ):
+            raise WorkspaceError("published branch is invalid")
+        declared_publication_branch = published_branch
+    if published_pull_request is not None and (
+        type(published_pull_request) is not int
+        or published_pull_request < 1
+        or published_pull_request > 2_147_483_647
+    ):
+        raise WorkspaceError("published pull request is invalid")
     cleanliness = observe_launch_cleanliness(
         lambda arguments: _run_bytes(
             ["git", *arguments], cwd=destination, env=git_observation_env(env)
@@ -2273,10 +2379,46 @@ def inspect_linked_worktree(
             )
             if remote_code == 0:
                 remote_head = remote_value
+        declared_remote_head = ""
+        if declared_publication_branch is not None:
+            declared_code, declared_value, _ = _run_status(
+                [
+                    "git",
+                    "-C",
+                    str(source),
+                    "rev-parse",
+                    f"refs/remotes/origin/{declared_publication_branch}",
+                ],
+                cwd=None,
+                env=env,
+            )
+            if declared_code == 0:
+                declared_remote_head = declared_value
+        pull_remote_head = ""
+        if published_pull_request is not None:
+            pull_ref = f"refs/pull/{published_pull_request}/head"
+            pull_code, pull_value, _ = _run_status(
+                ["git", "-C", str(source), "ls-remote", "--refs", "origin", pull_ref],
+                cwd=None,
+                env=env,
+            )
+            rows = pull_value.splitlines() if pull_code == 0 else []
+            if len(rows) == 1:
+                observed_sha, separator, observed_ref = rows[0].partition("\t")
+                if (
+                    separator
+                    and observed_ref == pull_ref
+                    and _EXACT_SHA_RE.fullmatch(observed_sha)
+                ):
+                    pull_remote_head = observed_sha
         if ancestor_code == 0:
             recoverability = "HEAD_REACHABLE_FROM_ORIGIN_MASTER"
         elif remote_head.lower() == head.lower():
             recoverability = "HEAD_PUBLISHED_TO_ORIGIN_BRANCH"
+        elif declared_remote_head.lower() == head.lower():
+            recoverability = "HEAD_PUBLISHED_TO_DECLARED_ORIGIN_BRANCH"
+        elif pull_remote_head.lower() == head.lower():
+            recoverability = "HEAD_PUBLISHED_TO_PULL_REQUEST_REF"
         else:
             return LinkedWorkspaceReleaseReceipt(
                 source_repository=str(source),
@@ -2287,7 +2429,7 @@ def inspect_linked_worktree(
                 dirty=False,
                 recoverability="LOCAL_HEAD_NOT_RECOVERABLE_FROM_OBSERVED_ORIGIN_REFS",
                 removed=False,
-                reason="clean workspace has commits not observed on origin/master or origin branch",
+                reason="clean workspace has commits not observed on admitted origin publication refs",
             )
 
     return LinkedWorkspaceReleaseReceipt(
@@ -2309,6 +2451,8 @@ def release_linked_worktree(
     workspace_path: str | Path,
     *,
     expected_operation_id: str | None = None,
+    published_branch: str | None = None,
+    published_pull_request: int | None = None,
 ) -> LinkedWorkspaceReleaseReceipt:
     """Remove a managed linked worktree only after fail-closed recoverability checks."""
 
@@ -2317,6 +2461,8 @@ def release_linked_worktree(
         workspace_root,
         workspace_path,
         expected_operation_id=expected_operation_id,
+        published_branch=published_branch,
+        published_pull_request=published_pull_request,
     )
     if inspection.state != "RELEASABLE":
         return inspection

@@ -107,6 +107,23 @@ def publish_for_install(expected_sha):
     return _publish(expected_sha, allow_publication=True)
 
 
+def publish_for_macro_adoption(held):
+    """Publish only inside the actual live, locked offline adoption interval.
+
+    The exact type alone is insufficient: the owner re-proves process-local
+    creation, its held canonical marker inode/flock, durable publication phase,
+    stopped/quiescent Runtime custody and exact installed source/config bytes.
+    No serialized receipt or caller digest can construct that interval.
+    """
+    from ops.executive_os.macro_adoption import _HeldAdoption
+    if type(held) is not _HeldAdoption:
+        raise owner.TransactionEffectUnknown()
+    expected_sha, config_sha256 = held.observation_publication_binding()
+    _source(expected_sha)
+    return _publish(expected_sha, allow_publication=True,
+                    control_sha256=config_sha256)
+
+
 def publish_for_transaction(host, transaction):
     """Consume this process's actual held original owner, never serialized data."""
     try:

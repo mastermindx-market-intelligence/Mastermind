@@ -1164,6 +1164,35 @@ def test_truncated_or_tampered_receipts_are_rejected(mutate):
     assert document["cards"] == []
 
 
+@pytest.mark.parametrize(
+    "field,foreign",
+    [
+        ("workstreams", "WS:TARGET"),
+        ("workstreams", ["WS:TARGET", "invalid"]),
+        ("linear", "MAS-6"),
+        ("repositories", MASTER),
+        ("operation_key", []),
+        ("requires_executive", "false"),
+    ],
+)
+def test_foreign_receipt_scope_fails_the_authoritative_shape_gate(field, foreign):
+    receipt = _receipt()
+    receipt["scope"][field] = foreign
+    document = view.build_cross_plane_view(receipt)
+    assert document["state"] == "REJECTED"
+    assert document["cards"] == []
+    with pytest.raises(SessionTruthContractError, match="scope"):
+        view.build_cross_plane_view(receipt, strict=True)
+
+
+def test_foreign_receipt_scope_rejects_undeclared_fields():
+    receipt = _receipt()
+    receipt["scope"]["extra_actor"] = "source_bypass"
+    assert view.build_cross_plane_view(receipt)["state"] == "REJECTED"
+    with pytest.raises(SessionTruthContractError, match="scope"):
+        view.build_cross_plane_view(receipt, strict=True)
+
+
 def test_finding_with_an_invalid_severity_is_rejected():
     receipt = _receipt()
     receipt["findings"].append(

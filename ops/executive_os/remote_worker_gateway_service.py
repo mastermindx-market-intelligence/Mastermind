@@ -240,6 +240,7 @@ def _closed_json(raw: bytes) -> dict[str, Any]:
         CONFIG_FIELDS
         | {"assignment_control", "broker_target", "expected_broker_peer_uid"},
     )
+    loader_fields += tuple(fields | {"hermes_role_metadata_read"} for fields in loader_fields)
     if type(value) is not dict or set(value) not in loader_fields:
         _refuse("GATEWAY_CONFIG_INVALID")
     return value
@@ -279,6 +280,8 @@ def _canonical_config(config: RemoteWorkerGatewayConfig) -> bytes:
         # existing default-target digest stays byte-identical.
         value["broker_target"] = config.broker_target
         value["expected_broker_peer_uid"] = config.expected_broker_peer_uid
+    if config.hermes_role_metadata_read is not None:
+        value["hermes_role_metadata_read"] = config.hermes_role_metadata_read.to_wire()
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
 
 
@@ -388,6 +391,8 @@ def load_remote_worker_gateway_config(
         if isinstance(peer_uid, bool) or not isinstance(peer_uid, int) or peer_uid <= 0:
             _refuse("GATEWAY_CONFIG_INVALID")
     try:
+        from ops.executive_os.remote_worker_gateway_config import HermesRoleMetadataReadBinding
+
         return RemoteWorkerGatewayConfig(
             schema=document["schema"],
             host_ref=document["host_ref"],
@@ -406,6 +411,8 @@ def load_remote_worker_gateway_config(
                                 if "assignment_control" in document else None),
             broker_target=document.get("broker_target", WORKER_BROKER_TARGET),
             expected_broker_peer_uid=document.get("expected_broker_peer_uid"),
+            hermes_role_metadata_read=(HermesRoleMetadataReadBinding.from_wire(document["hermes_role_metadata_read"])
+                                      if "hermes_role_metadata_read" in document else None),
         )
     except (TypeError, ValueError):
         raise RemoteWorkerGatewayServiceError("GATEWAY_CONFIG_INVALID") from None
@@ -612,6 +619,13 @@ async def serve_remote_worker_gateway(
     endpoint_identity = _fabric_socket_identity if fabric else _broker_socket_identity
     broker_identity = endpoint_identity(config.broker_socket_path)
     gateway = gateway_factory(config)
+    if config.hermes_role_metadata_read is not None:
+        from ops.executive_os.hermes_role_metadata_observer import HermesRoleMetadataObserver
+
+        gateway._host_observer = HermesRoleMetadataObserver(
+            host_binding_sha256=remote_worker_gateway_config_digest(config),
+            implementation_sha=config.hermes_role_metadata_read.implementation_sha,
+        )
     if endpoint_identity(config.broker_socket_path) != broker_identity:
         _refuse("GATEWAY_BROKER_SOCKET_INVALID")
     if not fabric:

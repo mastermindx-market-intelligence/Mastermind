@@ -361,5 +361,213 @@ class PairedTests(unittest.TestCase):
         self.assertLessEqual(b["lower"], b["upper"])
 
 
+class UnavailableMetadataTests(unittest.TestCase):
+    """Owner references preserve missing observations, never qualify market data."""
+
+    def missing(self, feature="leader", row=0):
+        p, o = inputs()
+        p["eligible"] = p["eligible"].astype(object)
+        p["signal"] = p["signal"].astype(object)
+        p.loc[row, ["eligible", "signal"]] = [None, None]
+        p["source_unavailability"] = pd.Series([{}, {}], dtype=object)
+        p.at[row, "source_unavailability"] = {
+            feature: f"macro-owner:synthetic-unavailability/{feature}/{row}"}
+        fields = {"bar": ("bar_known_at_utc",),
+                  "leader": ("leader_known_at_utc", "leader_asof_session"),
+                  "regime": ("regime_known_at_utc",)}
+        for field in fields[feature]:
+            p[field] = p[field].astype(object)
+            p.at[row, field] = None
+        mask = o.opportunity_id == p.at[row, "opportunity_id"]
+        o.loc[mask, ["status", "net_r", "outcome_end_utc", "outcome_known_at_utc"]] = [
+            "UNAVAILABLE", None, None, None]
+        return p, o
+
+    def run_pair(self, p, o, **kwargs):
+        return evaluate_paired(p, o, PairedProtocol(candidate="pivot", **kwargs))
+
+    def test_absent_leader_metadata_keeps_population_and_provenance(self):
+        p, o = self.missing()
+        result = self.run_pair(p, o)
+        self.assertEqual(result["denominator"], {
+            "all_predeclared": 2, "eligible": 1, "ineligible": 0, "eligibility_unknown": 1})
+        self.assertEqual(result["splits"]["DEVELOPMENT"]["paired_supported"], 1)
+        self.assertEqual(result["splits"]["DEVELOPMENT"]["signal_unknown"], 0)
+        row = result["paired_opportunities"][0]
+        self.assertEqual(row["input_sha256"], SHA)
+        self.assertEqual(row["source_unavailability"], p.at[0, "source_unavailability"])
+        self.assertEqual(row["missing_feature_fields"],
+                         ["leader_known_at_utc", "leader_asof_session"])
+        for field in ("candidate_r", "baseline_r", "delta_r"):
+            self.assertIsNone(row[field])
+        self.assertFalse(row["paired_supported"])
+        self.assertEqual(result["source_admission"], "NOT_ATTESTED_BY_THIS_EVALUATOR")
+
+    def test_absent_bar_or_regime_is_retained_only_as_unavailable(self):
+        for feature, field in (("bar", "bar_known_at_utc"), ("regime", "regime_known_at_utc")):
+            with self.subTest(feature=feature):
+                p, o = self.missing(feature)
+                result = self.run_pair(p, o)
+                self.assertEqual(result["denominator"]["all_predeclared"], 2)
+                row = result["paired_opportunities"][0]
+                self.assertEqual(row["missing_feature_fields"], [field])
+                self.assertEqual(row["candidate_status"], "UNAVAILABLE")
+                self.assertEqual(row["baseline_status"], "UNAVAILABLE")
+                self.assertIsNone(row["delta_r"])
+
+    def test_genuine_scalar_nulls_do_not_require_fabricated_clocks(self):
+        for null in (None, pd.NA, pd.NaT, float("nan")):
+            with self.subTest(null=repr(null)):
+                p, o = self.missing()
+                p.at[0, "leader_known_at_utc"] = null
+                p.at[0, "leader_asof_session"] = "2026-10-04"
+                result = self.run_pair(p, o)
+                self.assertEqual(result["paired_opportunities"][0]["missing_feature_fields"],
+                                 ["leader_known_at_utc"])
+
+    def test_recorded_unknown_with_actual_clocks_is_distinct_from_absence(self):
+        p, o = self.missing()
+        original, _ = inputs()
+        p.at[0, "leader_known_at_utc"] = original.at[0, "leader_known_at_utc"]
+        p.at[0, "leader_asof_session"] = original.at[0, "leader_asof_session"]
+        row = self.run_pair(p, o)["paired_opportunities"][0]
+        self.assertEqual(row["missing_feature_fields"], [])
+        self.assertEqual(row["source_unavailability"], p.at[0, "source_unavailability"])
+        self.assertIsNone(row["eligible"])
+        self.assertIsNone(row["delta_r"])
+
+    def test_known_eligible_unknown_bar_retains_signal_denominator(self):
+        p, o = self.missing("bar")
+        p.at[0, "eligible"] = True
+        result = self.run_pair(p, o)
+        self.assertEqual(result["denominator"]["eligible"], 2)
+        self.assertEqual(result["denominator"]["eligibility_unknown"], 0)
+        self.assertEqual(result["splits"]["DEVELOPMENT"]["signal_unknown"], 1)
+        self.assertEqual(result["splits"]["DEVELOPMENT"]["paired_supported"], 1)
+
+    def test_absence_requires_its_own_source_reference(self):
+        for refs in (None, {}, {"bar": "macro-owner:synthetic-bar-receipt"}):
+            with self.subTest(refs=refs):
+                p, o = self.missing()
+                p.at[0, "source_unavailability"] = refs
+                with self.assertRaisesRegex(ValueError, "corresponding leader owner receipt"):
+                    self.run_pair(p, o)
+        p, o = self.missing()
+        with self.assertRaisesRegex(ValueError, "corresponding leader owner receipt"):
+            self.run_pair(p.drop(columns=["source_unavailability"]), o)
+
+    def test_malformed_reference_mapping_is_not_an_availability_receipt(self):
+        for refs in ("UNAVAILABLE", [], {"leader": ""}, {"leader": "  "},
+                     {"leader": None}, {"other": "macro-owner:synthetic-receipt"}):
+            with self.subTest(refs=refs):
+                p, o = self.missing()
+                p.at[0, "source_unavailability"] = refs
+                with self.assertRaises(ValueError):
+                    self.run_pair(p, o)
+
+    def test_references_cannot_override_known_eligibility_and_signal(self):
+        p, o = self.missing()
+        p.loc[0, ["eligible", "signal"]] = [True, False]
+        with self.assertRaisesRegex(ValueError, "requires unknown eligibility or signal"):
+            self.run_pair(p, o)
+
+    def test_supplied_feature_clocks_always_validate_despite_unavailability(self):
+        for field in ("bar_known_at_utc", "leader_known_at_utc", "regime_known_at_utc"):
+            for value in ("2026-10-05T16:00:00Z", "2026-10-05T14:00:00", "not-a-clock", ""):
+                with self.subTest(field=field, value=value):
+                    p, o = self.missing()
+                    p.at[0, field] = value
+                    with self.assertRaises(ValueError):
+                        self.run_pair(p, o)
+
+    def test_supplied_leader_date_cannot_be_current_future_or_malformed(self):
+        for value in ("2026-10-05", "2026-10-06", "2026-99-99", ""):
+            with self.subTest(value=value):
+                p, o = self.missing()
+                p.at[0, "leader_asof_session"] = value
+                with self.assertRaises(ValueError):
+                    self.run_pair(p, o)
+
+    def test_unknown_rows_keep_mandatory_identity_decision_split_and_digest(self):
+        for field in ("opportunity_id", "symbol", "episode_id", "session_date",
+                      "decision_utc", "split", "input_sha256"):
+            with self.subTest(field=field):
+                p, o = self.missing()
+                p.at[0, field] = None
+                with self.assertRaises(ValueError):
+                    self.run_pair(p, o)
+        p, o = self.missing()
+        with self.assertRaisesRegex(ValueError, "missing opportunities columns"):
+            self.run_pair(p.drop(columns=["leader_known_at_utc"]), o)
+
+    def test_missing_source_still_requires_both_unavailable_policy_rows(self):
+        for policy in ("pivot", "leader_reference"):
+            with self.subTest(policy=policy):
+                p, o = self.missing()
+                o.loc[(o.opportunity_id == "op-000") & (o.policy == policy), "status"] = "NO_ENTRY"
+                with self.assertRaisesRegex(ValueError, "both policy outcomes unavailable"):
+                    self.run_pair(p, o)
+
+    def test_unknown_rows_keep_frozen_common_policy_contract(self):
+        for field in ("common_policy_clock_utc", "common_episode_end_utc",
+                      "common_risk_unit_sha256", "common_cost_model_sha256"):
+            with self.subTest(field=field):
+                p, o = self.missing()
+                o.at[0, field] = None
+                with self.assertRaises(ValueError):
+                    self.run_pair(p, o)
+
+    def test_unknown_first_holdout_decision_still_controls_registration(self):
+        p, o = self.missing(row=1)
+        p.at[1, "split"] = "HOLDOUT"
+        with self.assertRaisesRegex(ValueError, "registration postdates"):
+            self.run_pair(p, o, embargo_calendar_days=0,
+                          registered_at_utc=p.at[1, "decision_utc"])
+
+    def test_unknown_target_split_still_enforces_embargo(self):
+        for split in ("CALIBRATION", "HOLDOUT"):
+            with self.subTest(split=split):
+                p, o = self.missing(row=1)
+                p.at[1, "split"] = split
+                with self.assertRaisesRegex(ValueError, "overlaps .* embargo"):
+                    self.run_pair(p, o, embargo_calendar_days=9)
+
+    def test_unknown_rows_still_anchor_chronological_partitions(self):
+        p, o = self.missing()
+        p.at[0, "split"] = "HOLDOUT"
+        with self.assertRaisesRegex(ValueError, "interleaved"):
+            self.run_pair(p, o)
+        p, o = self.missing()
+        p.at[0, "session_date"] = p.at[1, "session_date"]
+        p.at[0, "decision_utc"] = p.at[1, "decision_utc"]
+        p.at[0, "split"] = "HOLDOUT"
+        with self.assertRaisesRegex(ValueError, "same calendar session"):
+            self.run_pair(p, o)
+
+    def test_all_unknown_population_retains_null_estimates(self):
+        p, o = self.missing()
+        p.loc[1, ["eligible", "signal"]] = [None, None]
+        o.loc[o.opportunity_id == "op-001",
+              ["status", "net_r", "outcome_end_utc", "outcome_known_at_utc"]] = [
+                  "UNAVAILABLE", None, None, None]
+        result = self.run_pair(p, o)
+        self.assertEqual(result["denominator"]["all_predeclared"], 2)
+        self.assertEqual(result["denominator"]["eligibility_unknown"], 2)
+        summary = result["splits"]["DEVELOPMENT"]
+        for key in ("eligible", "paired_supported", "signal_unknown"):
+            self.assertEqual(summary[key], 0)
+        for key in ("paired_mean_incremental_r", "paired_median_incremental_r",
+                    "date_block_bootstrap"):
+            self.assertIsNone(summary[key])
+
+    def test_unknown_outcome_boundary_remains_subject_to_analysis_cutoff(self):
+        p, o = self.missing()
+        p = p.iloc[:1]
+        o = o[o.opportunity_id == "op-000"].copy()
+        o.loc[o.policy == "pivot", "outcome_end_utc"] = "2026-10-05T16:30:00Z"
+        with self.assertRaisesRegex(ValueError, "censoring boundary after analysis as-of"):
+            self.run_pair(p, o, analysis_asof_utc="2026-10-05T16:00:00Z")
+
+
 if __name__ == "__main__":
     unittest.main()

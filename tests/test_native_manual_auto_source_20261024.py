@@ -6,6 +6,9 @@ selection is accessed. Source is recreated in a disposable isolated review stage
 from __future__ import annotations
 
 import hashlib
+import base64
+import json
+import zlib
 import os
 from pathlib import Path
 import re
@@ -18,6 +21,11 @@ ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "ops/native_fabric/quota_continuity"
 PATCH = ROOT / "ops/native_fabric/patches/native_generation_manual_preview_20261022.patch"
 FIXTURE = ROOT / "ops/native_fabric/qualification/native_manual_preview_fixture.py"
+HISTORICAL_TASK = ROOT / "research/proposals/fabric_refusal_diagnostics_20261102/fabric_task.py.base"
+PRE_LONG_HORIZON_TASK_SHA = "ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88"
+PRE_POLL255_TASK_SHA = "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b"
+PRE_POLL255_WITH_UBUNTU4_TASK_SHA = "36fbd16469befa0f4ade8d75fe15b3384a042b726668879c59ae03c82d194058"
+CURRENT_TASK_SHA = "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd"
 SOURCE = {
     "ext/fabric_task.py": ("fabric_task.py", "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b"),
     "ext/pick.py": ("pick.py", "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee"),
@@ -28,6 +36,76 @@ AFTER = {
     "ext/pick.py": "9bbb96c8da84e38bbd802fdd373a0e8ba386395abc5a80bc8628b49d5afd8174",
     "pool": "12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679",
 }
+COMPOSED_PICK = "747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132"
+
+
+def _preobserver_picker():
+    """Keep F1/R28's exact protected predecessor; S9 is prospective only."""
+    value = json.loads((ROOT / "tests/fixtures/fabric-selection-preobserver-pick-9f65957e.json").read_bytes())
+    assert value["schema"] == "fabric.selection-preobserver-source.v1"
+    assert value["commit"] == "9f65957e29eba92245d78609f032aaea523b7cb4"
+    assert value["path"] == "ops/native_fabric/quota_continuity/candidate/pick.py"
+    assert value["blob"] == "dd542dbc5bb746c0ad1428b177b25a98b7a02536"
+    raw = zlib.decompress(base64.b64decode(value["zlib_base64"], validate=True))
+    assert len(raw) == value["bytes"] == 118474
+    assert hashlib.sha256(raw).hexdigest() == value["sha256"] == "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b"
+    return raw
+
+
+def _pre_ubuntu4_task(value: bytes) -> bytes:
+    """Undo only the three Ubuntu4 hunks before the frozen F1 inverse."""
+    pairs = (
+        (b'{"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3", "ubuntu4"}',
+         b'{"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3"}'),
+        (b'host=(?P<host>ubuntu[0-4])', b'host=(?P<host>ubuntu[0-3])'),
+        (b'(Grok on Mac or Ubuntu4, MiniMax on M1 or Ubuntu4)',
+         b'(Grok on Mac, MiniMax on M1 or Ubuntu4)'),
+    )
+    for newer, older in pairs:
+        assert value.count(newer) == 1
+        value = value.replace(newer, older, 1)
+    assert hashlib.sha256(value).hexdigest() == "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b"
+    return value
+
+
+def _inverse_manual_member(value: bytes, member: str) -> bytes:
+    """Undo only SHA-bound reviewed F1 hunks in disposable source bytes."""
+    blob = PATCH.read_bytes()
+    heading = ("diff --git a/" + member + " b/" + member + "\n").encode()
+    assert blob.count(heading) == 1
+    section = blob.split(heading, 1)[1].split(b"\ndiff --git ", 1)[0]
+    groups = []
+    group = None
+    for line in section.splitlines(keepends=True):
+        if line.startswith(b"@@ "):
+            group = []
+            groups.append(group)
+        elif group is not None and line[:1] in (b" ", b"+", b"-"):
+            group.append(line)
+    assert groups
+    for group in reversed(groups):
+        newer = b"".join(x[1:] for x in group if x[:1] in (b" ", b"+"))
+        older = b"".join(x[1:] for x in group if x[:1] in (b" ", b"-"))
+        assert value.count(newer) == 1
+        value = value.replace(newer, older, 1)
+    return value
+
+
+def _inverse_judgment(value: bytes) -> bytes:
+    """Preserve R28 review routing in release while testing its pre-F1 base."""
+    pairs = (
+        (b'"operator", "reviewer", "review", "adjudicate", "decompose", "audit", "repair",',
+         b'"operator", "reviewer", "adjudicate", "decompose", "audit", "repair",'),
+        (b'    # Independent review/audit remain judgment even when legacy execute_classes includes them.\n'
+         b'    # Preserve explicit-pool gates above; do not score implicit reviewers into Qwen.\n'
+         b'    if tc not in {"review", "audit"} and (is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30):\n',
+         b'    if is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30:\n'),
+    )
+    for newer, older in pairs:
+        assert value.count(newer) == 1
+        value = value.replace(newer, older, 1)
+    assert hashlib.sha256(value).hexdigest() == AFTER["ext/pick.py"]
+    return value
 
 
 COMPOSED_JUDGMENT_PICK = "4008caca8c6a0e2145e7cb90965740ce24445e3300a8e3693d7a96130df236df"
@@ -68,12 +146,49 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
     stage = built / "native-code-stage"
     for relative, (name, original_sha) in SOURCE.items():
         source = NATIVE / "candidate" / name
+        # Current source includes later routing and namespace-bound readers.
+        # Reconstruct the exact historical F1 epoch only in this private stage.
+        current = source.read_bytes()
+        assert (stage / relative).read_bytes() == current
         if relative == "ext/pick.py":
-            historical = _restore_historical_picker(source.read_bytes())
-            (stage / relative).write_bytes(historical)
+            assert sha(source) == COMPOSED_PICK
+            current = _inverse_judgment(_preobserver_picker())
+        elif relative == "ext/fabric_task.py":
+            assert sha(source) == CURRENT_TASK_SHA
+            # Restore the exact pre-poll-qualifier epoch first. The historical
+            # manual-auto fixture and every subsequent inverse stay immutable.
+            latest = source.read_bytes()
+            start = b'# These reviewed wrapper bytes classify normal SSH255 as controller uncertainty\n'
+            end = b'def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]:\n'
+            hook = (b'    if state == "EFFECT_UNKNOWN" and _qualify_completed_poll255(rid, original_log, **owner):\n'
+                    b'        state, rc, signal = "TERMINAL", 0, "ok"\n\n')
+            assert latest.count(start) == latest.count(end) == latest.count(hook) == 1
+            first, last = latest.index(start), latest.index(end)
+            assert first < last
+            pre_poll = (latest[:first] + latest[last:]).replace(hook, b'', 1)
+            assert hashlib.sha256(pre_poll).hexdigest() == PRE_POLL255_WITH_UBUNTU4_TASK_SHA
+            # Preserve the independent Ubuntu4 boundary before the frozen history.
+            pre_poll = _pre_ubuntu4_task(pre_poll)
+            assert hashlib.sha256(pre_poll).hexdigest() == PRE_POLL255_TASK_SHA
+            # Only the two finite budget constants differ at this boundary.
+            assert pre_poll.count(b'request_remaining_seconds <= 14400') == 1
+            assert pre_poll.count(b'time.monotonic_ns() + 14400 * 1_000_000_000') == 1
+            precursor = pre_poll.replace(
+                b'request_remaining_seconds <= 14400',
+                b'request_remaining_seconds <= 7200', 1,
+            ).replace(
+                b'time.monotonic_ns() + 14400 * 1_000_000_000',
+                b'time.monotonic_ns() + 7200 * 1_000_000_000', 1,
+            )
+            assert precursor != pre_poll
+            assert hashlib.sha256(precursor).hexdigest() == PRE_LONG_HORIZON_TASK_SHA
+            assert sha(HISTORICAL_TASK) == AFTER[relative]
+            current = HISTORICAL_TASK.read_bytes()
         else:
-            assert sha(source) == original_sha
-            shutil.copy2(source, stage / relative)
+            assert sha(source) == AFTER[relative]
+        historical = _inverse_manual_member(current, relative)
+        assert hashlib.sha256(historical).hexdigest() == original_sha
+        (stage / relative).write_bytes(historical)
     for action in ("--check", None):
         args = ["git", "apply"] + ([action] if action else []) + [str(PATCH)]
         proc = subprocess.run(args, cwd=stage, capture_output=True, text=True, timeout=18)
@@ -89,8 +204,11 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
                           env=env, capture_output=True, text=True, timeout=35)
     assert proc.returncode == 0, (proc.stdout + proc.stderr)[-3800:]
     assert re.search(r"Ran 14 tests", proc.stderr) and "\nOK\n" in proc.stderr
-    # Native source code may be staged/reviewed, but never installed by this test.
+    # The historical F1 regression is preserved; independently verify R28
+    # judgment routing stays present in the CURRENT composed native source.
     assert all(sha(stage / name) == digest for name, digest in AFTER.items())
-
-
-# Reviewed judgment routing is preserved in the current native release source.
+    assert sha(NATIVE / "candidate/pick.py") == COMPOSED_PICK
+    assert sha(NATIVE / "candidate/fabric_task.py") == CURRENT_TASK_SHA
+    assert b'if tc not in {"review", "audit"}' in (
+        NATIVE / "candidate/pick.py").read_bytes()
+    # Neither stage nor source is published/selected by this test.

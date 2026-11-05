@@ -27,6 +27,11 @@ OUT_COLUMNS = frozenset({
     "common_episode_end_utc", "common_risk_unit_sha256", "common_cost_model_sha256",
 })
 SPLITS = ("DEVELOPMENT", "CALIBRATION", "HOLDOUT")
+FEATURE_FIELDS = {
+    "bar": ("bar_known_at_utc",),
+    "leader": ("leader_known_at_utc", "leader_asof_session"),
+    "regime": ("regime_known_at_utc",),
+}
 
 
 def _sha(value: Any) -> bool:
@@ -109,6 +114,22 @@ def _nullable_bool(value: Any) -> bool | None:
     raise ValueError("eligibility/signal must be genuine bool or source-unknown null")
 
 
+def _missing_feature(value: Any) -> bool:
+    return (value is None or value is pd.NA or value is pd.NaT or
+            isinstance(value, (float, np.floating)) and math.isnan(value))
+
+
+def _source_unavailability(value: Any) -> dict[str, str]:
+    """Retain caller-supplied owner references; this does not authenticate them."""
+    if _missing_feature(value):
+        return {}
+    if not isinstance(value, dict) or set(value) - set(FEATURE_FIELDS):
+        raise ValueError("source_unavailability must map bar/leader/regime to owner receipt references")
+    if any(not isinstance(ref, str) or not ref.strip() for ref in value.values()):
+        raise ValueError("nonblank owner refusal/availability receipt reference required")
+    return dict(value)
+
+
 def _prepared_opportunities(frame: pd.DataFrame) -> pd.DataFrame:
     if OPP_COLUMNS - set(frame.columns):
         raise ValueError(f"missing opportunities columns {sorted(OPP_COLUMNS - set(frame.columns))}")
@@ -136,15 +157,41 @@ def _prepared_opportunities(frame: pd.DataFrame) -> pd.DataFrame:
                            index=a.index, dtype=object)
     if not a.split.isin(SPLITS).all():
         raise ValueError("unknown split")
-    for col in ("decision_utc", "bar_known_at_utc", "leader_known_at_utc", "regime_known_at_utc"):
-        a[col] = a[col].map(_clock)
+    a["decision_utc"] = a.decision_utc.map(_clock)
     a["session_date"] = a.session_date.map(_day)
-    a["leader_asof_session"] = a.leader_asof_session.map(_day)
-    if (a["leader_asof_session"] >= a["session_date"]).any():
-        raise ValueError("daily leader context must come from a prior session")
-    for col in ("bar_known_at_utc", "leader_known_at_utc", "regime_known_at_utc"):
-        if (a[col] > a["decision_utc"]).any():
-            raise ValueError("future feature or late source receipt")
+    if "source_unavailability" not in a.columns:
+        a["source_unavailability"] = None
+    a["source_unavailability"] = a.source_unavailability.map(_source_unavailability)
+    prepared = {field: [] for fields in FEATURE_FIELDS.values() for field in fields}
+    absent_fields = []
+    for row in a.itertuples(index=False):
+        unknown = row.eligible is None or row.signal is None
+        if row.source_unavailability and not unknown:
+            raise ValueError("source unavailability requires unknown eligibility or signal")
+        absent = []
+        for feature, fields in FEATURE_FIELDS.items():
+            for field in fields:
+                value = getattr(row, field)
+                if _missing_feature(value):
+                    if not unknown or feature not in row.source_unavailability:
+                        raise ValueError(
+                            f"absent {field} requires unknown eligibility/signal and "
+                            f"the corresponding {feature} owner receipt reference")
+                    parsed = None
+                    absent.append(field)
+                elif field == "leader_asof_session":
+                    parsed = _day(value)
+                    if parsed >= row.session_date:
+                        raise ValueError("daily leader context must come from a prior session")
+                else:
+                    parsed = _clock(value)
+                    if parsed > row.decision_utc:
+                        raise ValueError("future feature or late source receipt")
+                prepared[field].append(parsed)
+        absent_fields.append(absent)
+    for field, values in prepared.items():
+        a[field] = pd.Series(values, index=a.index, dtype=object)
+    a["missing_feature_fields"] = pd.Series(absent_fields, index=a.index, dtype=object)
     et_day = a.decision_utc.dt.tz_convert("America/New_York").dt.date
     if (et_day != a.session_date).any():
         raise ValueError("decision/session ET date mismatch")
@@ -285,6 +332,9 @@ def evaluate_paired(opportunities: pd.DataFrame, outcomes: pd.DataFrame,
         details.append({"opportunity_id": row.opportunity_id, "symbol": row.symbol,
                         "session_date": row.session_date.isoformat(), "split": row.split,
                         "eligible": row.eligible, "signal": row.signal,
+                        "input_sha256": row.input_sha256,
+                        "source_unavailability": row.source_unavailability,
+                        "missing_feature_fields": row.missing_feature_fields,
                         "candidate_status": c.status, "baseline_status": b.status,
                         "candidate_r": float(c["_r"]) if pd.notna(c["_r"]) else None,
                         "baseline_r": float(b["_r"]) if pd.notna(b["_r"]) else None,

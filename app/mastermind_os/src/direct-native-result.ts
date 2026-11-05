@@ -11,12 +11,13 @@ export type DirectConsumption =
   | { state: "UNCONSUMED"; receipt_digest: null }
   | { state: "CONSUMED"; receipt_digest: string };
 export type DirectResult = {
-  schema: "mastermind.direct_native_result_response.v1";
+  schema: "mastermind.direct_native_result_response.v1" | "mastermind.direct_native_result_response.cancelled.v1";
   selection: DirectSelection;
   availability: "AVAILABLE" | "UNAVAILABLE";
   reason_codes: string[];
   result: null | {
     result_digest: string;
+    terminal_status?: "CANCELLED";
     summary: string;
     current_state: string;
     completed_steps: string[];
@@ -25,6 +26,7 @@ export type DirectResult = {
   consumption: DirectConsumption | null;
 };
 export interface DirectNativeTransport {
+  correction?(request:Record<string,unknown>,signal:AbortSignal):Promise<unknown>;
   read(selection: DirectSelection, signal: AbortSignal): Promise<unknown>;
   consume(
     request: DirectTerminalSelection & {
@@ -100,7 +102,7 @@ export function decodeDirectNativeResult(
         "result",
         "consumption",
       ]) ||
-      value.schema !== "mastermind.direct_native_result_response.v1"
+      (value.schema !== "mastermind.direct_native_result_response.v1" && value.schema !== "mastermind.direct_native_result_response.cancelled.v1")
     )
       return null;
     const selection = normalizeDirectSelection(value.selection);
@@ -127,7 +129,9 @@ export function decodeDirectNativeResult(
           "current_state",
           "completed_steps",
           "next_actions",
+          ...(value.schema === "mastermind.direct_native_result_response.cancelled.v1" ? ["terminal_status"] : []),
         ]) ||
+        (value.schema === "mastermind.direct_native_result_response.cancelled.v1" && r.terminal_status!=="CANCELLED") ||
         !hash(r.result_digest) ||
         !text(r.summary, 4096, true) ||
         !text(r.current_state, 4096, true) ||
@@ -145,7 +149,7 @@ export function decodeDirectNativeResult(
         )
       )
         return null;
-    } else if (value.availability === "UNAVAILABLE") {
+    } else if (value.availability === "UNAVAILABLE" && value.schema === "mastermind.direct_native_result_response.v1") {
       const r = value.reason_codes;
       if (
         !r.length ||

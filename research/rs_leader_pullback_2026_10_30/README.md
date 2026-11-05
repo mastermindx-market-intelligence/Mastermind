@@ -1,6 +1,6 @@
 # RS-Leader Pullback: research-only event study
 
-**Status: BUILT_NOT_PROVEN (local synthetic tests only).** This is an original research prototype, not the precise proprietary TradingView MACD-RSI formula, not a funded-portfolio backtest, and not a live Mastermind signal.
+**Status: BUILT_NOT_PROVEN (synthetic conformance only).** This is an original research prototype, not the precise proprietary TradingView MACD-RSI formula, not a funded-portfolio backtest, and not a live Mastermind signal.
 
 ## What it implements
 
@@ -64,15 +64,52 @@ Their **actual exit times** may differ but may not exceed the common
 episode terminal; differing risk units or cost-model digests are refused,
 not treated as comparable net returns. These digests are supplied
 consistency identifiers and do not authenticate a real quote/broker fill.
-Each opportunity specifies symbol, unique episode, ET session date, strictly
-timezone-qualified decision / bar / previous-daily-leader / regime known-at
-clocks, previous leader session, input digest, eligibility, signal and
-chronological split. Each policy outcome supplies `RESOLVED`, `NO_ENTRY`,
+Each opportunity must specify symbol, unique episode, ET session date, a strictly
+timezone-qualified decision, input digest, eligibility, signal and chronological
+split. Bar / previous-daily-leader / regime known-at clocks and the previous
+leader session are required columns; supplied values always validate as-of the
+decision. Genuine null feature cells have the narrow exception below.
+Each policy outcome supplies `RESOLVED`, `NO_ENTRY`,
 `CENSORED` or `UNAVAILABLE`, with resolved net risk-unit return and actual
 outcome/availability clocks. A missing paired policy or mismatched population
 is an error, never an implicit zero or an unpaired favorable survivor.
 Explicit nullable PIT eligibility or signal remains in the predeclared
 coverage population, but **both policy outcomes must be UNAVAILABLE**.
+
+When a feature observation is absent, the opportunity must also carry
+`source_unavailability`: a mapping from its source name to a nonblank,
+caller-supplied incumbent Macro owner refusal/availability receipt reference.
+Only the corresponding cells may be null:
+
+| Source key | Permitted null feature cells |
+| --- | --- |
+| `bar` | `bar_known_at_utc` |
+| `leader` | `leader_known_at_utc`, `leader_asof_session` |
+| `regime` | `regime_known_at_utc` |
+
+At least one of `eligible` or `signal` must remain genuinely unknown; the
+evaluator does not infer or overwrite either value. Missing/empty mappings,
+unknown source keys and blank/non-string references do not grant an exception.
+A reference for one source cannot excuse another source's absent metadata.
+Malformed strings, naive/future clocks and same/future leader sessions still
+fail, even with a valid reference. Identity, decision/session, split, input
+digest and the complete common policy/risk/cost contract remain mandatory.
+
+An owner may instead record an unknown value with an actual receipt clock;
+retain and validate that supplied clock rather than forcing it null. The
+row-level report retains `source_unavailability`, `input_sha256` and the
+specific `missing_feature_fields`, without inventing dates or timestamps.
+These opaque references are consistency links, not authenticated source
+admission. A tool-access refusal explains this study's missing evidence; it
+does not establish that market observations were absent at a historical
+decision. Never substitute the prior private-data access denial for PIT
+provenance or replay that denied read.
+
+Unknown rows still anchor chronological split, cutoff, registration and
+embargo checks before eligible/supported cohorts are selected.
+`signal_unknown` counts unknown signals **only among known-eligible rows**.
+Supported-pair estimates remain conditional on observed support; retained
+missingness does not remove selection bias or establish strategy quality.
 A definitive no-signal candidate must be `NO_ENTRY` rather than a
 censored trade; a censoring boundary after the analysis cutoff is refused.
 A scheduled `TIME` exit requires an owner-confirmed completed final
@@ -111,13 +148,13 @@ The owner must establish source entitlement, PIT issuer/epoch, consistent
 execution costs, and actual forward issuance before any edge claim.
 
 Tests: `python -m pytest -q research/rs_leader_pullback_2026_10_30/tests`
-(the latest local source candidate passed **97 synthetic conformance tests**,
-plus five successful unittest subtests; this is not CI or empirical proof).
+The suite contains **116 synthetic conformance cases**, including the CSV/JSON
+round trip and the unavailable-source and inclusive-membership regressions.
 The canonical hosted shard discovers only top-level `tests/test_*.py`.
-New `tests/test_rs_leader_pullback_research_gate.py` executes all three
-research test files through a bounded subprocess and fails if fewer than 97
-tests run; it was locally smoke-tested. Hosted exact-head CI acceptance is
-separately required.
+`tests/test_rs_leader_pullback_research_gate.py` executes all three research
+test files through a bounded subprocess, propagates failures, and requires
+at least 116 passing cases. Hosted exact-head CI acceptance is separately
+required; a synthetic pass establishes no empirical market result.
 
 ## Required historical research before signal promotion
 
@@ -130,4 +167,4 @@ separately required.
 
 ## Honest limits
 
-The 97 locally passing synthetic tests demonstrate computational invariants, not trading performance. This tool cannot independently prove a vendor archive's historic point-in-time quality, whether the supplied indicator repaints, a real fill, or alpha. The current conversation's connected Studio Direct and Executive read paths were unavailable at the data-acquisition attempt, and this execution container had no historical intraday CSV dataset or network access. Thus **no cross-equity historical win rate, return or comparison is claimed**. Mastermind PR #1338 is related *exit* research, not our entry-study validation, and must not be treated as a completed substitute.
+The synthetic conformance tests exercise computational invariants, not trading performance. This tool cannot independently prove a vendor archive's historic point-in-time quality, whether the supplied indicator repaints, a real fill, or alpha. The current conversation's connected Studio Direct and Executive read paths were unavailable at the data-acquisition attempt, and this execution container had no historical intraday CSV dataset or network access. Thus **no cross-equity historical win rate, return or comparison is claimed**. Mastermind PR #1338 is related *exit* research, not our entry-study validation, and must not be treated as a completed substitute.

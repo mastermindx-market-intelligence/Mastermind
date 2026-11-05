@@ -181,8 +181,8 @@ def leader_panel(daily: pd.DataFrame, memberships: pd.DataFrame, rules: Rules) -
             raise ValueError("invalid PIT end date: nonblank null")
         return parsed.date()
     m["end_date"] = m["end_date"].map(_end_date)
-    if any(end is not None and end <= start for start, end in zip(m.start_date, m.end_date)):
-        raise ValueError("invalid PIT membership interval; end must follow start")
+    if any(end is not None and end < start for start, end in zip(m.start_date, m.end_date)):
+        raise ValueError("invalid PIT membership interval; end cannot precede start")
     if d["date"].isna().any() or m["start_date"].isna().any():
         raise ValueError("invalid as-of date")
     spy = d[d.symbol == "SPY"].set_index("date").sort_index()["close"]

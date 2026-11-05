@@ -3,6 +3,49 @@
 # Packet content is transported by scp and read remotely; it is never argv.
 set -u
 
+# bash >=5.1 writes a heredoc/here-string below its pipe size (64 KiB) into a
+# pipe before the reader starts; on 2026-10-13 a 777-byte heredoc blocked there
+# forever on M2 (TERM then misreported ENOSPC). Level 50 restores temp-file
+# heredocs and is exported to local child bash; bash 3.2 ignores it.
+export BASH_COMPAT=50
+
+# Read-only heredoc transport proof: no reservation, lease, trap or worker launch.
+if [ "${1:-}" = "--selftest-heredoc" ]; then
+  selftest_out=$(mktemp "${TMPDIR:-/tmp}/remote_sub_heredoc.XXXXXX") || exit 70
+  selftest_doc=$(printf '%04096d' 0)
+  (
+    if [ -p /dev/stdin ]; then selftest_kind=pipe
+    elif [ -f /dev/stdin ]; then selftest_kind=file
+    else selftest_kind=other
+    fi
+    printf '%s %s\n' "$selftest_kind" "$(wc -c | tr -d ' ')" > "$selftest_out"
+  ) <<HEREDOC_SELFTEST &
+$selftest_doc
+HEREDOC_SELFTEST
+  selftest_pid=$!
+  selftest_ticks=0
+  while kill -0 "$selftest_pid" 2>/dev/null; do
+    if [ "$selftest_ticks" -ge 100 ]; then
+      kill -TERM "$selftest_pid" 2>/dev/null
+      wait "$selftest_pid" 2>/dev/null
+      rm -f "$selftest_out"
+      echo "HEREDOC_SELFTEST_FAIL reason=timeout bash=$BASH_VERSION compat=${BASH_COMPAT:-unset}" >&2
+      exit 124
+    fi
+    sleep 0.1
+    selftest_ticks=$((selftest_ticks + 1))
+  done
+  wait "$selftest_pid" 2>/dev/null
+  selftest_result=$(cat "$selftest_out" 2>/dev/null)
+  rm -f "$selftest_out"
+  if [ "$selftest_result" = "file 4097" ]; then
+    echo "HEREDOC_SELFTEST_OK transport=file bytes=4097 bash=$BASH_VERSION compat=${BASH_COMPAT:-unset}"
+    exit 0
+  fi
+  echo "HEREDOC_SELFTEST_FAIL reason=transport result=${selftest_result:-none} bash=$BASH_VERSION compat=${BASH_COMPAT:-unset}" >&2
+  exit 1
+fi
+
 # Read/export only: enter before any reservation, lease, trap or worker launch.
 if [ "${1:-}" = "--collect-existing" ]; then
   shift
@@ -383,8 +426,13 @@ commission_run() {
 }
 
 commission_refresh_runtime() {
-  local stage seconds
+  local stage seconds actual_observation_poll
   stage="$1"
+  # The adaptive same-run observer never sleeps more than 30s, even when
+  # configured POLL_SECS is higher. Reserve two *actual* observation periods,
+  # not a needlessly large value that truncates a healthy long-horizon worker.
+  actual_observation_poll="$POLL_SECS"
+  [ "$actual_observation_poll" -le 30 ] || actual_observation_poll=30
   if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
     seconds=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$MAX_SECS") || {
       RC=$?; log "COMMISSION_TIME_EXHAUSTED stage=$stage"; return "$RC";
@@ -393,15 +441,26 @@ commission_refresh_runtime() {
       RC=75; log "COMMISSION_TIME_EXHAUSTED stage=$stage"; return "$RC"
     fi
     MAX_SECS="$seconds"
+    # Do not start a new remote effect with too little original commission
+    # time left to publish and observe its terminal RC. A <=4-second launch
+    # opportunity becomes a clean pre-task refusal, not EFFECT_UNKNOWN with
+    # an indefinitely retained provider lease. This is not a retry or a
+    # longer deadline; a prior observed terminal still follows the existing
+    # same-run admission-refusal collection branch.
+    if [ "$stage" = launch ] && [ "$MAX_SECS" -lt 5 ]; then
+      RC=75
+      log "COMMISSION_TIME_EXHAUSTED stage=launch observation_reserve=5"
+      return "$RC"
+    fi
   fi
   # Leave two complete poll intervals for remote child startup, bounded
   # cleanup/RC publication and a final in-deadline controller observation.
   # This narrows the worker only; it never extends the MAX_SECS fuse, broker
   # lease, provider budget, or commission deadline.
-  if [ "$MAX_SECS" -gt $((2 * POLL_SECS)) ]; then
-    CHILD_TIMEOUT=$((MAX_SECS - 2 * POLL_SECS))
-  elif [ "$MAX_SECS" -gt "$POLL_SECS" ]; then
-    CHILD_TIMEOUT=$((MAX_SECS - POLL_SECS))
+  if [ "$MAX_SECS" -gt $((2 * actual_observation_poll)) ]; then
+    CHILD_TIMEOUT=$((MAX_SECS - 2 * actual_observation_poll))
+  elif [ "$MAX_SECS" -gt "$actual_observation_poll" ]; then
+    CHILD_TIMEOUT=$((MAX_SECS - actual_observation_poll))
   else
     CHILD_TIMEOUT=$MAX_SECS
   fi
@@ -820,9 +879,9 @@ print(alias, cores, max_active, load_gate, min_free_mem, thermal_limit,
 }
 load_host_registry || exit "$RC"
 if [ -n "$NEW_MACRO_COMMIT" ]; then
-  # This initial implementation covers the four Linux fleet hosts only.
+  # Registered Linux fleet hosts; enrollment and donor custody remain separate.
   case "$HOST_ARG" in
-    ubuntu0|ubuntu1|ubuntu2|ubuntu3) ;;
+    ubuntu0|ubuntu1|ubuntu2|ubuntu3|ubuntu4) ;;
     *) log "FABRIC_NEW_MACRO_LINUX_HOST_REFUSED before_lease=1"; exit 78 ;;
   esac
 fi
@@ -923,8 +982,64 @@ else
 fi
 case "$POLL_SECS" in ''|*[!0-9]*|0) echo "invalid REMOTE_SUB_POLL_SECS" >&2; RC=2; exit "$RC";; esac
 case "$MAX_SECS" in ''|*[!0-9]*|0) echo "invalid REMOTE_SUB_MAX_SECS" >&2; RC=2; exit "$RC";; esac
-if [ "$MAX_SECS" -gt 7200 ]; then
-  echo "REMOTE_SUB_MAX_SECS must not exceed 7200" >&2
+# Validate before numeric arithmetic: 00 is also zero, and unbounded
+# decimal input can overflow Bash/test and silently bypass a guard.
+# This changes no valid 1..14400 second configured observation/runtime.
+if [ "${#POLL_SECS}" -gt 5 ] || [ "$POLL_SECS" -eq 0 ] ||
+   [ "$POLL_SECS" -gt 14400 ] ||
+   [ "${POLL_SECS#0}" != "$POLL_SECS" ]; then
+  echo "invalid REMOTE_SUB_POLL_SECS" >&2
+  RC=2; exit "$RC"
+fi
+if [ "${#MAX_SECS}" -gt 5 ] || [ "$MAX_SECS" -eq 0 ] ||
+   [ "${MAX_SECS#0}" != "$MAX_SECS" ]; then
+  echo "invalid REMOTE_SUB_MAX_SECS" >&2
+  RC=2; exit "$RC"
+fi
+# Completion visibility is fastest just after launch, with a hard bounded
+# number of additional SSH observations per job. A transport/protocol failure
+# uses backoff; it never triggers a second launch, provider switch or lease loss.
+# The caller's validated POLL_SECS remains the maximum and the original fuse
+# still owns expiration, heartbeat, collection and EFFECT_UNKNOWN handling.
+fabric_poll_delay() {
+  local observed_elapsed="$1" remaining_seconds="$2" failed_reads="$3"
+  local proposed="$POLL_SECS"
+  if [ "$observed_elapsed" -lt 30 ]; then
+    proposed=2
+  elif [ "$observed_elapsed" -lt 120 ]; then
+    proposed=5
+  elif [ "$observed_elapsed" -lt 600 ]; then
+    proposed=10
+  fi
+  # Outages can only slow observations, never accelerate them.
+  if [ "$failed_reads" -ge 3 ]; then
+    proposed="$POLL_SECS"
+  elif [ "$failed_reads" -eq 2 ] && [ "$proposed" -lt 10 ]; then
+    proposed=10
+  elif [ "$failed_reads" -eq 1 ] && [ "$proposed" -lt 5 ]; then
+    proposed=5
+  fi
+  # A caller's large observation interval must not leave the lease owner
+  # asleep beyond the 30-second heartbeat duty. The configured value is a
+  # maximum, not permission to delay live-liveness observations for hours.
+  [ "$proposed" -le "$POLL_SECS" ] || proposed="$POLL_SECS"
+  [ "$proposed" -le 30 ] || proposed=30
+  [ "$proposed" -le "$remaining_seconds" ] || proposed="$remaining_seconds"
+  FABRIC_POLL_DELAY_S="$proposed"
+}
+
+# The faster first-minute completion observations must not multiply provider
+# broker-heartbeat writes. Keep at least the old caller-selected heartbeat
+# cadence, bounded to 30s even when a caller selects a longer result interval.
+# The original lease and its separate slot-heartbeat remain authoritative.
+fabric_poll_heartbeat_due() {
+  local heartbeat_age="$1" heartbeat_interval="$POLL_SECS"
+  [ "$heartbeat_interval" -le 30 ] || heartbeat_interval=30
+  [ "$heartbeat_age" -ge "$heartbeat_interval" ]
+}
+
+if [ "$MAX_SECS" -gt 14400 ]; then
+  echo "REMOTE_SUB_MAX_SECS must not exceed 14400" >&2
   RC=2
   exit "$RC"
 fi
@@ -937,14 +1052,14 @@ fi
 # A caller-supplied short deadline must not silently collapse a task that was
 # already classified as long bounded work. Complexity is an existing economic
 # classification, not a new lifecycle plane. C2 gets at least one hour; C3 gets
-# the full two-hour fabric fuse. The special go-codex profile remains short by
+# a four-hour finite fabric fuse. The special go-codex profile remains short by
 # design and is not lifted here.
 RUNTIME_FLOOR_SECS=0
 if [ "$MODE" != go-codex ]; then
   case "${POOL_TASK_COMPLEXITY:-}" in
     C0_MECHANICAL|C1_ROUTINE_BOUNDED) RUNTIME_FLOOR_SECS=0 ;;
-    C2_COMPLEX_BOUNDED) RUNTIME_FLOOR_SECS=3600 ;;
-    C3_FRONTIER_JUDGMENT) RUNTIME_FLOOR_SECS=7200 ;;
+    C2_COMPLEX_BOUNDED) RUNTIME_FLOOR_SECS=7200 ;;
+    C3_FRONTIER_JUDGMENT) RUNTIME_FLOOR_SECS=14400 ;;
     "")
       # Legacy callers predate complexity tagging. Treat a stale short override
       # as unsafe for real worker labor; short probes must opt into C0/C1.
@@ -964,13 +1079,24 @@ if [ -n "${POOL_COMMISSION_REMAINING_SECONDS:-}" ]; then
   case "$POOL_COMMISSION_REMAINING_SECONDS" in
     ''|*[!0-9]*|0*) log "COMMISSION_TIME_INVALID"; RC=2; exit "$RC" ;;
   esac
-  if [ "${#POOL_COMMISSION_REMAINING_SECONDS}" -gt 4 ] || [ "$POOL_COMMISSION_REMAINING_SECONDS" -gt 7200 ]; then
+  if [ "${#POOL_COMMISSION_REMAINING_SECONDS}" -gt 5 ] || [ "$POOL_COMMISSION_REMAINING_SECONDS" -gt 14400 ]; then
     log "COMMISSION_TIME_INVALID"; RC=2; exit "$RC"
   fi
   if [ "$POOL_COMMISSION_REMAINING_SECONDS" -lt "$POLL_SECS" ]; then
     log "COMMISSION_TIME_EXHAUSTED"; RC=75; exit "$RC"
   fi
   [ "$MAX_SECS" -le "$POOL_COMMISSION_REMAINING_SECONDS" ] || MAX_SECS="$POOL_COMMISSION_REMAINING_SECONDS"
+fi
+
+
+# The separate signed GLM shim capability gateway still enforces <=7500s.
+# Do not request a four-hour window on a two-hour-capability generation.
+# This is a visible prelease narrowing, not a new provider retry or entitlement.
+if [ "$MODE" = glm-codex ] || [ "$CANONICAL_PAID_ACTIVE" -eq 1 ]; then
+  if [ "$MAX_SECS" -gt 7200 ]; then
+    log "GLM_CAPABILITY_WINDOW_NARROWED requested=$MAX_SECS supported=7200"
+    MAX_SECS=7200
+  fi
 fi
 
 ADMISSION_WAIT_SECS="${REMOTE_SUB_ADMISSION_WAIT_SECS:-20}"
@@ -1004,7 +1130,7 @@ fi
 # if the controller loses the terminal receipt.
 PROVIDER_LEASE_TTL=$((CHILD_TIMEOUT + 300))
 [ "$PROVIDER_LEASE_TTL" -lt 900 ] && PROVIDER_LEASE_TTL=900
-[ "$PROVIDER_LEASE_TTL" -gt 7500 ] && PROVIDER_LEASE_TTL=7500
+[ "$PROVIDER_LEASE_TTL" -gt 15000 ] && PROVIDER_LEASE_TTL=15000
 
 # A healthy SSH/tool host is not necessarily ready for this task's worktree.
 # Validate task-specific source roots before reserving scarce provider slots.
@@ -1085,7 +1211,7 @@ if [ "${POOL_CALLER_NOT_BEFORE+x}" = x ]; then
 fi
 LEASE_WAIT_SECS="${REMOTE_SUB_LEASE_WAIT:-3600}"
 if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
-  LEASE_WAIT_SECS=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$LEASE_WAIT_SECS") || {
+  LEASE_WAIT_SECS=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$LEASE_WAIT_SECS" broker) || {
     RC=$?; log "COMMISSION_TIME_EXHAUSTED stage=broker_acquire"; exit "$RC";
   }
   BROKER_DEADLINE_ARGS=(--deadline-ns "$POOL_COMMISSION_DEADLINE_NS")
@@ -1256,7 +1382,7 @@ SUPPORT_FILES=(
 )
 # The v2 executor imports this explicit sealed dependency only for bound roots.
 [ "$REMOTE_PHYSICAL_ROOT" = "-" ] || SUPPORT_FILES+=(artifact_delivery.py)
-[ "$CANONICAL_PAID_ACTIVE" -eq 0 ] || SUPPORT_FILES+=(paid_glm_model_client.py paid_model_owner.py linux_process_identity.py)
+[ "$CANONICAL_PAID_ACTIVE" -eq 0 ] || SUPPORT_FILES+=(paid_glm_model_client.py paid_model_owner.py linux_process_identity.py paid_provider_entry.py paid_initializer.py paid_initializer_token_data.py paid_initializer_nested_data.py)
 SUPPORT_MANIFEST="$LOG_DIR/${ID}.support.json"
 REMOTE_SUPPORT_SOURCE="$REMOTE_LANE_TRANSFER/tmp/$ID.support-src"
  # Retain the exact per-run manifest as the pre-task control-flow identity.
@@ -1525,6 +1651,9 @@ if [ "$PLAIN_PHYSICAL_OWNER" -eq 1 ]; then
   # frozen owner's interpreter precedence, preserving other host PATH order.
   HOST_ENV="$HOST_ENV; export PATH=$REMOTE_LANES_Q/venv/bin:\$PATH"
 fi
+# Only the explicit canonical model profile uses the qualified initializer.
+# Never source a mutable hook in this branch or fall back to the old shell.
+if [ "$CANONICAL_PAID_ACTIVE" -eq 1 ]; then HOST_ENV=:; fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
   show_args "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" "<launch: $REMOTE_PACKET -> $(basename "$REMOTE_PACKET")>"
@@ -1725,6 +1854,15 @@ if [ "$REMOTE_PHYSICAL_ROOT" != "-" ]; then
     lane-root-launch-command "$LANE_ROOT_LAYOUT_TOKEN" "$ID") || exit 78
   REMOTE_OUTPUT_REDIRECT='>/dev/null 2>&1'
 fi
+if [ "$CANONICAL_PAID_ACTIVE" -eq 1 ]; then
+  REMOTE_OUTPUT_SETUP=:
+  REMOTE_OUTPUT_REDIRECT='>/dev/null 2>&1'
+  REMOTE_LAUNCH_EXEC=$(commission_run canonical-entry-command "$REMOTE_SUB_PYTHON" \
+    -I -S -B "$HERE/paid_provider_entry.py" executor-command \
+    "$GLM_CAP_LOCAL" "$SUPPORT_MANIFEST" "$HERE") || {
+      RC=78; log 'CANONICAL_PAID_ENTRY_REFUSED before_launch=1'; exit "$RC";
+    }
+fi
 ADMISSION_FILE="$STATE_HERE/lanes/${ID}.admission"
 if [ "$DRY_RUN" -ne 1 ]; then SCRATCH_PATHS+=("$ADMISSION_FILE"); fi
 ADMISSION_WAIT_STARTED_SECONDS=""
@@ -1768,14 +1906,18 @@ while true; do
   WAIT_STARTED_SECONDS=$SECONDS
   RC=""
   poll_count=0
+  POLL_FAILURE_STREAK=0
+  LAST_POLL_BROKER_HEARTBEAT=$((SECONDS - POLL_SECS))
   CANONICAL_LAUNCH_RELAYED=0
   while [ $((SECONDS - WAIT_STARTED_SECONDS)) -lt "$MAX_SECS" ]; do
     if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
       commission_poll_remaining=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$MAX_SECS") || break
       [ "$commission_poll_remaining" -gt 0 ] || break
     fi
-    if [ -n "$LEASE_ID" ]; then
+    if [ -n "$LEASE_ID" ] &&
+       fabric_poll_heartbeat_due "$((SECONDS - LAST_POLL_BROKER_HEARTBEAT))"; then
       broker heartbeat "$LEASE_ID" >/dev/null 2>&1 || true
+      LAST_POLL_BROKER_HEARTBEAT=$SECONDS
     fi
     poll_count=$((poll_count + 1))
     elapsed=$((SECONDS - WAIT_STARTED_SECONDS))
@@ -1801,19 +1943,21 @@ while true; do
         log "RC value=$RC poll=$poll_count"
         break
       elif [ "$POLL_VALUE" = "__REMOTE_SUB_PENDING__" ]; then
+        POLL_FAILURE_STREAK=0
         log "POLL_PENDING poll=$poll_count"
       else
+        [ "$POLL_FAILURE_STREAK" -ge 3 ] || POLL_FAILURE_STREAK=$((POLL_FAILURE_STREAK + 1))
         log "POLL_PROTOCOL_INVALID poll=$poll_count bytes=$(wc -c < "$POLL_FILE" 2>/dev/null || echo 0)"
       fi
     else
+      [ "$POLL_FAILURE_STREAK" -ge 3 ] || POLL_FAILURE_STREAK=$((POLL_FAILURE_STREAK + 1))
       log "POLL_TRANSPORT_FAILED rc=$poll_rc poll=$poll_count"
     fi
     elapsed=$((SECONDS - WAIT_STARTED_SECONDS))
     remaining=$((MAX_SECS - elapsed))
     [ "$remaining" -gt 0 ] || break
-    sleep_for="$POLL_SECS"
-    [ "$sleep_for" -le "$remaining" ] || sleep_for="$remaining"
-    commission_run poll-sleep sleep "$sleep_for" || break
+    fabric_poll_delay "$elapsed" "$remaining" "$POLL_FAILURE_STREAK"
+    commission_run poll-sleep sleep "$FABRIC_POLL_DELAY_S" || break
   done
 
   if [ -z "$RC" ]; then
@@ -2014,8 +2158,18 @@ else
   [ "$RECEIPT_SAVED" -eq 1 ] && CLEAN_RECEIPT=" $REMOTE_LANES_Q/ext/lanes/${ID}.process.jsonl"
   CLEAN_USAGE=''
   [ "$USAGE_SAVED" -eq 1 ] && CLEAN_USAGE=" $REMOTE_LANES_Q/ext/lanes/${ID}.usage.json"
+  CLEAN_PACKET=" $REMOTE_LANES_Q/tmp/${ID}.txt"
+  CLEAN_RC=" $REMOTE_LANES_Q/ext/$REMOTE_RC"
+  # Prospective only: retain this failed operation's original proof beside its
+  # already-private capture. No old evidence reconstruction or capture export.
+  if [ "$PROVIDER_SAVED" -eq 1 ] && [ "$RC" -ne 0 ] &&
+      commission_run diagnostic-retention "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
+        "python3 $REMOTE_LANES_Q/support-releases/$SUPPORT_DIGEST/ext/provider_outcome.py retained-diagnostic-ready $REMOTE_LANES_Q '$ID' '$ORCH_ID'" >/dev/null 2>&1; then
+    CLEAN_PACKET=''; CLEAN_RC=''; CLEAN_RECEIPT=''
+    log "DIAGNOSTIC_PROOFS_RETAINED same_operation=1 acceptance=0"
+  fi
   if "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
-      "rm -f $REMOTE_LANES_Q/tmp/${ID}.txt $REMOTE_LANES_Q/ext/$REMOTE_RC $REMOTE_LANES_Q/ext/$REMOTE_STDOUT$CLEAN_RECEIPT$CLEAN_USAGE && rm -rf -- $REMOTE_LANES_Q/tmp/${ID}.support-src"; then
+      "rm -f$CLEAN_PACKET$CLEAN_RC $REMOTE_LANES_Q/ext/$REMOTE_STDOUT$CLEAN_RECEIPT$CLEAN_USAGE && rm -rf -- $REMOTE_LANES_Q/tmp/${ID}.support-src"; then
     log "REMOTE_CLEANED transport=1 receipt_saved=$RECEIPT_SAVED usage_saved=$USAGE_SAVED"
   else
     log "REMOTE_CLEANUP_FAILED; completed work remains reconciled"

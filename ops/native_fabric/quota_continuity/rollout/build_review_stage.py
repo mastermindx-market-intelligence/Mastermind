@@ -34,11 +34,12 @@ quota_remote.py qwen_exec.sh remote_sub.sh remote_sub_exec.py remote_sub_helpers
 run_observation.py run_observation_delivery.py slot.py studio_mcp_projection.sh
 sub.sh support_bundle.py host_pull_probe.template yes
 """.split())
-ADDITIONS = frozenset({"recovery_artifacts.py", "fabric_continuation.py", "quota_circuit.py",
+ADDITIONS = frozenset({"host_pull_daemon.sh", "host_pull_launchd.plist.template", "paid_provider_entry.py", "paid_host_readiness.py", "recovery_artifacts.py", "fabric_continuation.py", "quota_circuit.py",
                       "capacity_preflight.py", "provider_outcome.py", "native_runtime_bindings.py",
                       "paid_controller_channel.py", "paid_glm_model_client.py", "paid_model_owner.py",
-                      "linux_process_identity.py", "paid_controller_spawn.py", "paid_incumbent_state.py", "paid_host_qualification.py", "paid_yaml_runtime.py", "paid_pyyaml_6_0_3.zip", "paid_pyyaml_provenance.json",
-                      "commission_deadline.py", "current_source_observation.py", "native_plain_packet_check.py", "native_plain_packet_reconcile.py"})
+                      "linux_process_identity.py", "paid_controller_spawn.py", "paid_incumbent_state.py", "paid_host_qualification.py", "paid_initializer.py", "paid_initializer_token_data.py", "paid_initializer_nested_data.py", "paid_yaml_runtime.py", "paid_pyyaml_6_0_3.zip", "paid_pyyaml_provenance.json",
+                      "commission_deadline.py", "current_source_observation.py", "native_plain_packet_check.py", "native_plain_packet_reconcile.py",
+                      "post_failure_observation.py", "post_failure_observation_delivery.py"})
 # The retired credential-to-stdout helper is audit evidence only. It must never
 # be importable from source/ or selected as a runtime fallback. Its exact bytes
 # still have to match the installed preimage before the secure overlay is used.
@@ -59,17 +60,20 @@ GROK47_MERGED_SOURCE_DIGESTS = {
     'sub.sh': '7ceaba75dc4375bb05742b779967ade294afcc969358f610ecdb43041fa2f7d2',
 }
 
-# PR #1797 composes the existing Qwen/Grok-forward picker with a two-hunk
-# judgment review-routing repair. The protected Grok overlay digest above is
-# unchanged; the source-owned candidate postimage is pinned independently below.
-# Former Qwen/Grok-forward candidate pick SHA256: a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee.
-# Three exact forward compositions preserve protected Qwen fresh-usage and
-# caller UTC narrowing. Qualify their accepted Grok bases above as well as the
+# Four exact forward compositions preserve protected Qwen fresh-usage and
+# caller UTC narrowing plus canonical provider entry. Qualify their accepted
+# Grok bases above as well as the
 # closed composed candidate bytes; neither source may silently replace the other.
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
-    'pick.py': '4008caca8c6a0e2145e7cb90965740ce24445e3300a8e3693d7a96130df236df',
-    'remote_sub.sh': '09e000db51b2eca4fadd2e3d1a201f4027b4ea725359d1b42ef4d3baf92fe5d7',
-    'remote_sub_helpers.py': '0d5f5c38b60eeef70cc7cefe37ee64bd69d56d3e3bdd32644871279fc0e88556',
+    'artifact_delivery.py': '81749610b8afd7151dbadb4cbcedbef853fc18ad9de9364fd3b2b1d747d535b1',
+    'remote_sub_exec.py': '9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1',
+    'pick.py': '747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132',
+    'remote_sub.sh': '0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c',
+    'remote_sub_helpers.py': 'f7d62e9bdfa7388b7f86c0f968a021bf3949141ddcc8515103075ed3a1da2f93',
+    'sub.sh': '4956942c77421b9d1015889995ebf0419399ea62c16de608765a0795b5fb551f',
+    'native_remote.py': '2beef7dd4de1dab2908970bed48cfd3fdfd99da2d99bc8de72a92d2a1b2418b6',
+    'fabric_operator_contract.py': 'e6b32fd1547402c1184f826f74c253f34384cb6e32306e55b84449a892d19b5e',
+
 }
 
 EXTRA_PREIMAGES = {

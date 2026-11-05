@@ -32,11 +32,18 @@ function fixture() {
   const client: RawClient = { executive: transport,
     getState: () => ({ status: signed ? "signed_in" : "signed_out", reason: null, acquisition: signed, content: signed }),
     subscribe: () => () => {}, signIn: async () => {}, signOut: async () => {},
-    readPrograms: async () => ({}), readWork: async () => ({}), readMission: async () => ({}), readCurrentWindow: async () => ({}) };
+    readPrograms: vi.fn(async () => ({})), readWork: async () => ({}), readMission: async () => ({}), readCurrentWindow: async () => ({}) };
   return { client, transport, listeners, signIn() { signed = true; generation++; listeners.forEach((l) => l()); } };
 }
-function mount(client: RawClient, factory: IDBFactory, configured = true) {
-  const c = composeMissionHost(client, configured ? config : null, factory); disposals.push(c.dispose); return c;
+function mount(client: RawClient, factory: IDBFactory, configured = true,
+  hostKind: "native" | "web" | "unknown" = "unknown") {
+  const c = composeMissionHost(client, configured ? config : null, factory, hostKind); disposals.push(c.dispose); return c;
+}
+/** Sets the build-time Executive resource input for one synchronous read. */
+function withExecutiveResource<T>(value: string, run: () => T): T {
+  vi.stubEnv("VITE_MM_EXECUTIVE_RESOURCE", value);
+  try { return run(); }
+  finally { vi.unstubAllEnvs(); }
 }
 describe("actual app host composition", () => {
   it("does not invent a launch manifest or absent Executive transport", () => {
@@ -67,5 +74,75 @@ describe("actual app host composition", () => {
     expect(f.transport.status).toHaveBeenCalledExactlyOnceWith(
       { intent_id: intentIdForOperationKey(pointer.operationKey) }, expect.any(AbortSignal));
     expect(await next.store.read("a".repeat(64))).toBeNull();
+  });
+});
+
+describe("composition diagnostics", () => {
+  it("reports only zero-effect composition facts without any extra context, invoke or read call", async () => {
+    const f = fixture(), factory = new IDBFactory(), c = mount(f.client, factory);
+    await c.ready;
+    const listenersBefore = f.listeners.size;
+    const contextBefore = vi.mocked(f.transport.context).mock.calls.length;
+    const statusBefore = vi.mocked(f.transport.status).mock.calls.length;
+    const submitBefore = vi.mocked(f.transport.submit).mock.calls.length;
+    const first = c.host.diagnostics!();
+    expect(first.hostKind).toBe("unknown");
+    expect(first.launchConfigured).toBe(true);
+    expect(first.nativeResourceConfigured).toBeNull();
+    expect(first.executiveAvailable).toBeNull();
+    expect(["unknown", "not_requested", "pending", "auth_unavailable",
+      "transport_failure", "invalid_response", "expired", "ready",
+    ]).toContain(first.executiveContextPhase);
+    expect(withExecutiveResource("https://executive.example/os/executive",
+      () => c.host.diagnostics!().frontendResourceConfigured)).toBe(true);
+    expect(withExecutiveResource("http://executive.example",
+      () => c.host.diagnostics!().frontendResourceConfigured)).toBe(false);
+    expect(withExecutiveResource("",
+      () => c.host.diagnostics!().frontendResourceConfigured)).toBe(false);
+    expect(vi.mocked(f.transport.context).mock.calls.length).toBe(contextBefore);
+    f.signIn();
+    const contextAfterSignIn = vi.mocked(f.transport.context).mock.calls.length;
+    expect(contextAfterSignIn).toBe(contextBefore + 1); // original refresh, not a diagnostic read
+    const second = c.host.diagnostics!();
+    expect(second.acquisitionAvailable).toBe(true);
+    expect(second.contentAvailable).toBe(true);
+    // Signed-in workspace state never implies an Executive grant.
+    expect(second.executiveAvailable).toBeNull();
+    expect(c.host.diagnostics!()).toEqual(second);
+    expect(f.listeners.size).toBe(listenersBefore);
+    expect(vi.mocked(f.transport.context).mock.calls.length).toBe(contextAfterSignIn);
+    expect(vi.mocked(f.transport.status).mock.calls.length).toBe(statusBefore);
+    expect(vi.mocked(f.transport.submit).mock.calls.length).toBe(submitBefore);
+    expect(f.client.readPrograms).not.toHaveBeenCalled();
+  });
+
+  it("reads Executive availability only from the transport diagnostics, even while signed in", async () => {
+    const f = fixture(), factory = new IDBFactory(), c = mount(f.client, factory);
+    await c.ready; f.signIn();
+    expect(c.host.diagnostics!().executiveAvailable).toBeNull();
+    f.transport.diagnostics = () => ({ kind: "native", authAvailable: false, phase: "auth_unavailable" });
+    expect(c.host.diagnostics!().executiveAvailable).toBe(false);
+    expect(c.host.diagnostics!().executiveTransportPhase).toBe("auth_unavailable");
+    f.transport.diagnostics = () => ({ kind: "web", authAvailable: null, phase: "ready" });
+    expect(c.host.diagnostics!().executiveAvailable).toBeNull();
+    f.transport.diagnostics = () => ({ kind: "web", authAvailable: true, phase: "ready" });
+    expect(c.host.diagnostics!().executiveAvailable).toBe(true);
+  });
+
+  it("distinguishes the actual mount surface and never infers native resource configuration", () => {
+    const f = fixture(), factory = new IDBFactory();
+    const native = mount(f.client, factory, true, "native");
+    expect(native.host.diagnostics!().hostKind).toBe("native");
+    expect(native.host.diagnostics!().nativeResourceConfigured).toBeNull();
+    native.dispose();
+    const web = mount(f.client, factory, true, "web");
+    expect(web.host.diagnostics!().hostKind).toBe("web");
+    expect(web.host.diagnostics!().nativeResourceConfigured).toBeNull();
+    web.dispose();
+    const unconfigured = mount(f.client, factory, false);
+    const unconfiguredSnapshot = unconfigured.host.diagnostics!();
+    expect(unconfiguredSnapshot.launchConfigured).toBe(false);
+    expect(unconfiguredSnapshot.executiveContextPhase).toBe("not_requested");
+    unconfigured.dispose();
   });
 });

@@ -79,3 +79,43 @@ def test_current_disabled_catalogue_refuses_before_host_read(tmp_path, monkeypat
     monkeypatch.setattr(cli, '_load_control_environment_attestation', lambda *a, **kw: pytest.fail('disabled route reached host read'))
     with pytest.raises(RoutingPolicyError, match='attended model alias refused'):
         asyncio.run(cli._serve_from_config(tmp_path/'control.json', attended_work_placements=(selected(),)))
+
+
+@pytest.mark.parametrize('configured', [False, True])
+def test_startup_composes_byok_host_reader_without_attended_admission(tmp_path, monkeypatch, root_stats, configured):
+    import hashlib
+    import json
+    from test_fabric_remote_composition import observation_document
+    from control_plane.remote_worker_broker_client import RemoteWorkerBrokerClient
+    from common import workspace_byok_read_contract as wire
+    raw, _, captured = setup_startup(tmp_path, monkeypatch, probe=False)
+    if configured:
+        data = observation_document(tmp_path)
+        contents = json.dumps(data).encode()
+        path = tmp_path / 'hermes-bindings.json'; path.write_bytes(contents); path.chmod(0o600)
+        raw.update(fabric_bindings_path=str(path), fabric_bindings_sha256=hashlib.sha256(contents).hexdigest())
+    calls = []
+    async def read(client):
+        calls.append(client)
+        return wire.unavailable()
+    monkeypatch.setattr(RemoteWorkerBrokerClient, 'read_hermes_roles', read)
+    asyncio.run(cli._serve_from_config(tmp_path / 'control.json'))
+    assert captured['served'] and captured['fabric_worker_binding_source'] is None
+    assert captured['attended_work_placements'] == ()
+    assert calls == []
+    reader = captured['byok_roles_reader']
+    if configured:
+        assert asyncio.run(reader()) == wire.unavailable()
+        assert len(calls) == 1
+    else:
+        assert reader is None
+
+
+def test_byok_source_does_not_widen_paid_and_attended_composition(tmp_path, monkeypatch, root_stats):
+    from control_plane import executive_paid_fabric_composition as paid
+    setup_startup(tmp_path, monkeypatch, probe=False)
+    monkeypatch.setattr(paid, 'installed_paid_source', lambda *a, **kw: object())
+    monkeypatch.setattr(cli, '_load_control_environment_attestation',
+                        lambda *a, **kw: pytest.fail('mixed source reached host attestation'))
+    with pytest.raises(cli.ServiceError, match='cannot replace or mix'):
+        asyncio.run(cli._serve_from_config(tmp_path / 'control.json'))

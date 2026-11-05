@@ -21,13 +21,13 @@ def test_rs_leader_pullback_research_synthetic_suite() -> None:
     env = os.environ.copy()
     env.pop("PYTEST_CURRENT_TEST", None)
     completed = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", *(str(path) for path in modules)],
+        [sys.executable, "-m", "pytest", "-o", "addopts=", "-q", *(str(path) for path in modules)],
         cwd=study, env=env, text=True, stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, timeout=150, check=False,
     )
     assert completed.returncode == 0, f"RS research tests failed:\n{completed.stdout[-5000:]}"
     match = re.search(r"\b(\d+) passed\b", completed.stdout)
-    assert match is not None and int(match.group(1)) >= 97, (
+    assert match is not None and int(match.group(1)) >= 116, (
         "root CI runner did not actually execute the frozen research suite:\n"
         + completed.stdout[-5000:]
     )
