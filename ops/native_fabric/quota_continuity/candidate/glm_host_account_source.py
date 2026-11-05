@@ -51,9 +51,12 @@ def owned_bytes(path, *, maximum=MAX_BYTES):
 
 
 def filter_observed_accounts(accounts, *, host, model, now, preferred=None,
-                             hosts_path=None, state_dir=None, validator_path=None, mode="glm"):
+                             hosts_path=None, state_dir=None, validator_path=None, mode="glm",
+                             require_qualified_context=False):
     """Intersect existing candidates only. Failure never grants/falls back."""
     from glm_host_account_readiness import filter_glm_host_accounts, filter_bailian_host_accounts
+    if type(require_qualified_context) is not bool or require_qualified_context and mode!="glm":
+        return [], "qualified_context_mode_invalid"
     if mode not in ("glm", "qwen"):
         return [], "host_account_mode_invalid"
     validator_name = "glm_keys.py" if mode == "glm" else "bailian_keys.py"
@@ -80,6 +83,25 @@ def filter_observed_accounts(accounts, *, host, model, now, preferred=None,
             return [], 'host_account_mode_not_admitted'
         document = json.loads(owned_bytes(Path(state_dir or HERE/'state/hosts')/(host+'.json')))
         digest = hashlib.sha256(owned_bytes(validator_path or HERE/validator_name)).hexdigest()
+        envelope=document.get('glm_local_account_readiness')
+        qualified=(mode=='glm' and (require_qualified_context or type(envelope)is dict
+            and envelope.get('schema')=='mastermind.glm_qualified_account_readiness/v1'))
+        if qualified:
+            import paid_host_readiness
+            with paid_host_readiness.open_installed_context() as context:
+                binding=context.binding
+                if hashlib.sha256(owned_bytes(hosts_path or HERE/'hosts.json')).hexdigest()!=binding['registry_sha256']:
+                    return [], 'qualified_registry_changed'
+                identity=envelope.get('config_identity') if type(envelope)is dict else None
+                if type(envelope)is dict and envelope.get('status')=='known':
+                    account=context.initializer_commitment['account']
+                    if type(identity)is not list or identity[3:5]!=[account['uid'],account['gid']]:
+                        return [], 'qualified_config_owner_changed'
+                ready,reason=paid_host_readiness.filter_accounts(accounts,document,
+                    binding=binding,host=host,transport_alias=entry['ssh_alias'],model=model,
+                    validator_sha256=digest,now=now,preferred=preferred)
+                context.check()
+                return ready,reason
         predicate = filter_glm_host_accounts if mode == "glm" else filter_bailian_host_accounts
         ready, reason = predicate(accounts, document, host=host,
             transport_alias=entry['ssh_alias'], mode=mode, model=model, candidate_model=model,
@@ -98,5 +120,5 @@ def filter_observed_accounts(accounts, *, host, model, now, preferred=None,
                 return [], "host_account_cooldown_invalid"
             rank = {row["name"]: (2 if row["name"] in flags else 0) for row in ready}
         return [dict(row, _host_qwen_429_rank=rank[row["name"]]) for row in ready], reason
-    except (OSError, ValueError, KeyError, TypeError, OverflowError):
+    except (OSError, ValueError, KeyError, TypeError, OverflowError, ImportError):
         return [], 'glm_host_account_source_unavailable'

@@ -1434,7 +1434,8 @@ def read_fabric_view_v2_from_runtime(
     )
 
 
-def _project_retained_root_snapshot(snapshot, root_job_id, *, creation_event_reader, notes, runtime):
+def _project_retained_root_snapshot(snapshot, root_job_id, *, creation_event_reader, notes, runtime,
+                                    expected_work_ref=None):
     """Project one already-acquired root snapshot.
 
     ``notes`` is composed locally and returned. Callers must consume that
@@ -1466,6 +1467,14 @@ def _project_retained_root_snapshot(snapshot, root_job_id, *, creation_event_rea
     root_validated = False
     provenance, warning = _bounded_provenance(
         runtime, root_job, creation_event_reader=creation_event_reader)
+    # Explicit retained-root navigation must join the selected
+    # workstream inside this SAME bounded observation. The CCR
+    # candidate vector does not replace immutable Runtime evidence.
+    if expected_work_ref is not None and (
+        not isinstance(provenance, Mapping)
+        or provenance.get("workstream") != expected_work_ref
+    ):
+        raise ValueError("bounded Runtime workstream membership invalid")
     if isinstance(provenance, Mapping) and provenance.get("workstream"):
         joined.add(root_job.job_id)
         root_validated = True
@@ -1555,7 +1564,7 @@ def _project_retained_root_snapshot(snapshot, root_job_id, *, creation_event_rea
     }
 
 
-def _observe_bounded_root(runtime, root_job_id, *, notes, present):
+def _observe_bounded_root(runtime, root_job_id, *, notes, present, expected_work_ref=None):
     from control_plane import executive_runtime
 
     generation = None
@@ -1572,6 +1581,7 @@ def _observe_bounded_root(runtime, root_job_id, *, notes, present):
                     snapshot, root_job_id,
                     creation_event_reader=read.get_creation_event_by_command_id,
                     notes=notes, runtime=runtime,
+                    expected_work_ref=expected_work_ref,
                 )
                 jobs = projected["jobs"]
                 attempts_by_job = projected["attempts_by_job"]
@@ -1839,11 +1849,13 @@ def read_fabric_view_v3_from_runtime(
     *,
     armed: Mapping[str, Any],
     runtime_identity: Mapping[str, Any],
+    expected_work_ref: str | None = None,
 ) -> dict[str, Any]:
     """Same bounded root observation as v2, plus a pure result-reference index."""
     root_job_id = str(root_job_id)
     present = runtime_identity.get("db_present") is True
-    observed = _observe_bounded_root(runtime, root_job_id, notes=[], present=present)
+    observed = _observe_bounded_root(runtime, root_job_id, notes=[], present=present,
+                                     expected_work_ref=expected_work_ref)
     fabric_view = _document_observed_fabric_view_v2(
         root_job_id, armed=armed, runtime_identity=runtime_identity, observed=observed,
     )

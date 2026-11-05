@@ -15,6 +15,7 @@ from pathlib import Path
 import stat
 import sys
 import time
+import math
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 URL = 'http://127.0.0.1:4141/v1/responses'
@@ -130,7 +131,7 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def execute(body_raw, capsule_raw, model):
+def execute(body_raw, capsule_raw, model, *, timeout_seconds=None):
     validate_body(body_raw, model)
     capsule = parse(capsule_raw)
     if type(capsule) is not dict:
@@ -154,7 +155,12 @@ def execute(body_raw, capsule_raw, model):
     # Disable ambient proxy settings and redirects; the signed capability can
     # reach only the existing lane-loopback controller transport. One POST.
     opener = build_opener(ProxyHandler({}), _NoRedirect())
-    with opener.open(request, timeout=min(7000, expiry - time.time())) as response:
+    timeout=min(7000,expiry-time.time())
+    if timeout_seconds is not None:
+        if (type(timeout_seconds) not in (int,float) or not math.isfinite(timeout_seconds)
+                or timeout_seconds<=0):raise ModelOnlyRefused('model_only_budget_refused')
+        timeout=min(timeout,timeout_seconds)
+    with opener.open(request, timeout=timeout) as response:
         if response.status != 200:
             raise ModelOnlyRefused('model_only_transport_refused')
         raw = response.read(MAX_RESPONSE + 1)

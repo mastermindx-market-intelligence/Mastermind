@@ -20,6 +20,8 @@ export function ResearchEvidence({ itemId, transport, signOut, locale = "en", th
   const invalidate = useRef<() => void>(() => {});
   const retry = useRef<() => void>(() => {});
   const mounted = useRef(true);
+  // Local presentation identity only; the transport still owns all auth state.
+  const pendingSignIn = useRef<object | null>(null);
   const t = (en: string, zh: string) => locale === "zh-CN" ? zh : en;
 
   useEffect(() => {
@@ -33,7 +35,7 @@ export function ResearchEvidence({ itemId, transport, signOut, locale = "en", th
       if (!alive) return;
       if (!transport || !itemId || !validEvidenceId(itemId)) { setState("unavailable"); return; }
       if (document.visibilityState === "hidden") { setState("signin"); return; }
-      if (!transport.available()) { setState("signin"); return; }
+      if (!transport.available()) { setState(pendingSignIn.current ? "loading" : "signin"); return; }
       const token = ticket, generation = transport.authGeneration();
       request = new AbortController();
       const controller = request;
@@ -67,7 +69,7 @@ export function ResearchEvidence({ itemId, transport, signOut, locale = "en", th
     retry.current = read;
     read();
     return () => {
-      mounted.current = false; alive = false; clear(); unsubscribe?.(); invalidate.current = () => {}; retry.current = () => {};
+      mounted.current = false; pendingSignIn.current = null; alive = false; clear(); unsubscribe?.(); invalidate.current = () => {}; retry.current = () => {};
       document.removeEventListener("visibilitychange", visibility);
       window.removeEventListener("pagehide", hide);
       window.removeEventListener("pageshow", show);
@@ -75,14 +77,22 @@ export function ResearchEvidence({ itemId, transport, signOut, locale = "en", th
   }, [itemId, transport]);
 
   const login = async () => {
+    if (pendingSignIn.current) return;
+    const attempt = {};
+    pendingSignIn.current = attempt;
     invalidate.current(); setState("loading");
     try {
       if (!transport) throw new Error();
       await transport.signIn();
-      if (mounted.current && !transport.available()) setState("unavailable");
-    } catch { if (mounted.current) setState("unavailable"); }
+      if (mounted.current && pendingSignIn.current === attempt && !transport.available()) setState("unavailable");
+    } catch {
+      if (mounted.current && pendingSignIn.current === attempt) setState("unavailable");
+    } finally {
+      if (pendingSignIn.current === attempt) pendingSignIn.current = null;
+    }
   };
   const logout = async () => {
+    pendingSignIn.current = null;
     invalidate.current(); setState("signin");
     await signOut().catch(() => {});
   };

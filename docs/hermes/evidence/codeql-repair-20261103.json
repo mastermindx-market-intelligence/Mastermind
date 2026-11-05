@@ -1,0 +1,84 @@
+{
+  "changes": [
+    "Exact parsed HTTP(S) ChatGPT origin, no substring/path/query/userinfo trust",
+    "Closed synthetic credential scenarios, private creation before bytes are written",
+    "Unique owned profile temporary directories, no shared-tree deletion",
+    "Closed typed public CLI projection, unexpected field/code/authority refusal, no raw config output"
+  ],
+  "effects": {
+    "credentials_read": false,
+    "provider_called": false,
+    "services_installed": false,
+    "slack_bot_activated": false,
+    "source_only": true
+  },
+  "environment": "M2 macOS, Python 3.12.13, synthetic/offline tests",
+  "focused": {
+    "failed": 0,
+    "log_sha256": "5260c5a123c0830c8fb5ac11c6afd184de6ba0899d55b718b2b37752237f383e",
+    "passed": 50,
+    "skipped": 0,
+    "total": 50
+  },
+  "formal_independent_review": "NOT_PROVEN",
+  "next": "Publish the bounded repair to original #1917 branch, consume unchanged CodeQL/current-head Linux CI, obtain independent review, then requalify downstream composition; no self-release.",
+  "operation": "hermes-1917-codeql-source-repair-20261103-sol-001",
+  "original_codeql_check_id": 125819141113,
+  "overlap_note": "Focused cases overlap package suites; counts are not added together.",
+  "package_suites": {
+    "hermes_harness": {
+      "failed": 0,
+      "log_sha256": "f26a1a154c2b04c1f09d5d5bd29338d20054a106859bba949549a1719fc6bbe9",
+      "passed": 51,
+      "skipped": 0
+    },
+    "hermes_models": {
+      "failed": 0,
+      "log_sha256": "7f45b6d327cf2ba7d1cb1b8732e8d78196256db5931459e0f1dee83f2a013721",
+      "passed": 22,
+      "skipped": 0
+    },
+    "hermes_qualification": {
+      "failed": 0,
+      "log_sha256": "6e9be955d30b6635668f85d19dbe47f093900822d88c2893c7e3120a09a96d34",
+      "passed": 48,
+      "skipped": 0
+    },
+    "hermes_secretary": {
+      "failed": 0,
+      "log_sha256": "4bf7881da3e20f5e63e23a7a6a584b3424f46f1da2cb212f41bbd851d6927880",
+      "passed": 53,
+      "skipped": 0
+    },
+    "hermes_steward": {
+      "failed": 0,
+      "log_sha256": "393b5247c7eda93b689e06b69d8b98c273df2373cfd5c673350d994aa2f1e6ed",
+      "passed": 47,
+      "skipped": 0
+    }
+  },
+  "parent_program": "meta-ceo-open-harness-convergence-20261024-sol-001",
+  "preserved_operation": {
+    "replayed": false,
+    "root": "web-github-release-triage-20261102",
+    "run": "triage1917-codeql-repair-20261103-c2",
+    "terminal_result": "provider_error rc1",
+    "worker_credit_claimed": false
+  },
+  "procedure_pin": "910803421beca53ca25145392725ab2d84c7a8e9",
+  "production_acceptance": "NOT_PROVEN",
+  "protected_release": "NOT_PROVEN",
+  "recorded_at": "2026-11-04T01:08:50.176820+00:00",
+  "schema": "mastermind.hermes_codeql_repair_source_evidence.v1",
+  "security_scanner": "UNCHANGED; new-head CodeQL result pending; no alert suppression/dismissal",
+  "source_base": "7e5ae8f0ad483fcd5af3d511546f96aeab1145ef",
+  "source_sha256": {
+    "integrations/hermes_harness/tests/test_native_doctor_private_credential.py": "e5b0d6bcd8772fc1f0612a3076064630c221c39467871626d5c58c6c6b08265d",
+    "integrations/hermes_harness/tests/test_native_model_credentials.py": "9e35b22596c5af7437f4f55ff5297f96c11ac38e0df16ad98e45bcf18fed6f27",
+    "integrations/hermes_runtime/tests/test_profile_pin.py": "62505fd098a410bd82f71a6bac323e3e4689dd9450eb6f66798d9fbac5d595ae",
+    "integrations/hermes_secretary/tab_sweep.py": "12d2c8f059f941eb908cc9d7ec3651763f8102832e05435118ce8e1385d5fd46",
+    "integrations/hermes_secretary/tests/test_sessions.py": "2dfccd3d3d3c9bc8af110cc84b47b56f01a2ad28f33e8c8131bdf5af39c0fbf9",
+    "integrations/hermes_steward/config_guard.py": "8e9c82a832439480434fc867ed5529552734e80256be44c6f2111f4eea7bbdf2",
+    "integrations/hermes_steward/tests/test_config_guard.py": "f5cc07d561ef2491364ee3f48e01330d5063941d029b77d67ecae8722e00ef12"
+  }
+}

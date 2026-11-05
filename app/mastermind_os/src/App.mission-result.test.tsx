@@ -315,10 +315,19 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+async function openProjectOverview(user: ReturnType<typeof userEvent.setup>) {
+  // The current product opens a project catalogue from the project list, so the
+  // exact Mission root is selected from the Programs workspace and the project
+  // Overview section then exposes the same qualified result references.
+  await user.click(screen.getByRole("button", { name: "Programs workspace" }));
+  await user.click(await screen.findByRole("button", { name: /Mission JOB-001/ }));
+  await user.click(await screen.findByRole("button", { name: "Project details" }));
+  await user.click(await screen.findByRole("tab", { name: "Overview" }));
+}
+
 async function openProject() {
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "Projects" }));
-  await user.click(await screen.findByRole("button", { name: "Open project One" }));
+  await openProjectOverview(user);
   return user;
 }
 
@@ -331,7 +340,7 @@ function sourceRow(name: string) {
 }
 
 async function expectOfficeHalvesEmpty(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: "Today" }));
+  await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
   expect(screen.getByText("The current operating answer is not yet available.")).toBeTruthy();
   expect(screen.getByText("No exactly associated return has been qualified for this view.")).toBeTruthy();
   expect(screen.queryByText("bounded typed fixture result")).toBeNull();
@@ -359,15 +368,14 @@ describe("App compound Mission/Result consumption", () => {
     ui.rerender(<App />);
     await act(async () => { await flush(); });
     expect(e.calls("/workspace/mission-result/current")).toHaveLength(before + 1);
-    await user.click(screen.getByRole("button", { name: "Today" }));
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     const returns = document.getElementById("office-returns-title")?.closest("section");
     if (!returns) throw new Error("Returns to review is missing");
     expect(within(returns).getByText("bounded typed fixture result")).toBeTruthy();
     expect(within(returns).getByText("JOB-004")).toBeTruthy();
     expect(within(returns).getByText(/NOT_PROJECTED/)).toBeTruthy();
     expect(e.calls("/workspace/mission-result/current")).toHaveLength(before + 1);
-    await user.click(screen.getByRole("button", { name: "Projects" }));
-    await user.click(await screen.findByRole("button", { name: "Open project One" }));
+    await openProjectOverview(user);
     await user.click(await screen.findByRole("button", { name: /JOB-004/ }));
     await screen.findByText("bounded typed fixture result");
     expect(e.calls("/workspace/mission-result/current")).toHaveLength(before + 2);
@@ -412,7 +420,7 @@ describe("App compound Mission/Result consumption", () => {
     expect(await screen.findByText("bounded typed fixture result")).toBeTruthy();
     expect(e.calls("/workspace/mission-result/current")).toHaveLength(0);
     expect(e.calls("/workspace/result/current")).toHaveLength(1);
-    await user.click(screen.getByRole("button", { name: "Today" }));
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     const returns = document.getElementById("office-returns-title")?.closest("section");
     if (!returns) throw new Error("Returns to review is missing");
     expect(within(returns).getByText(/No exactly associated return/)).toBeTruthy();
@@ -436,7 +444,7 @@ describe("App compound Mission/Result consumption", () => {
     await again.click(await screen.findByRole("button", { name: /JOB-004/ }));
     expect(await screen.findByText("SOURCE_CHANGED")).toBeTruthy();
     expect(unavailable.calls("/workspace/result/current")).toHaveLength(0);
-    await again.click(screen.getByRole("button", { name: "Today" }));
+    await again.click(screen.getByRole("button", { name: "Meta-CEO" }));
     const returns = document.getElementById("office-returns-title")?.closest("section");
     expect(returns?.textContent).toMatch(/No exactly associated return/);
     expect(returns?.textContent).not.toMatch(/bounded typed fixture result/);
@@ -477,7 +485,7 @@ describe("App compound Mission/Result consumption", () => {
     const user = await openProject();
     await user.click(await screen.findByRole("button", { name: /JOB-004/ }));
     expect(await screen.findByText(/Content omitted by owner/)).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Today" }));
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     const returns = document.getElementById("office-returns-title")?.closest("section");
     expect(within(returns!).getByText("JOB-004")).toBeTruthy();
     expect(within(returns!).getByText(/Content is withheld or outside the bounded response/)).toBeTruthy();
@@ -701,7 +709,7 @@ describe.skipIf(positiveDir === undefined)("App fresh mounted positive export", 
     const summary = loaded.parsed.role_result.result?.content?.summary;
     if (!summary) throw new Error("fresh positive summary missing");
     expect(await screen.findByText(summary)).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Today" }));
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     const returns = document.getElementById("office-returns-title")?.closest("section");
     if (!returns) throw new Error("Returns to review is missing");
     expect(within(returns).getByText(summary)).toBeTruthy();
@@ -722,7 +730,7 @@ describe.skipIf(fallbackDir === undefined)("App fresh mounted content fallback",
     expect(loaded.parsed.role_result.result?.content).toBeNull();
     expect(await screen.findByText(/Content omitted by owner/)).toBeTruthy();
     expect(screen.queryByText("bounded typed fixture result")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Today" }));
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     const returns = document.getElementById("office-returns-title")?.closest("section");
     if (!returns) throw new Error("Returns to review is missing");
     expect(within(returns).getByText(loaded.selection.jobId)).toBeTruthy();

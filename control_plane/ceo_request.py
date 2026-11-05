@@ -89,6 +89,7 @@ __all__ = [
     "derive_branch",
     "derive_worktree",
     "mcp_intent_id",
+    "normalize_app_request",
     "normalize_automated_request",
     "normalize_high_level_request",
     "slack_intent_id",
@@ -189,7 +190,7 @@ OPTIONAL_FIELDS = frozenset(
 AUTOMATED_REQUIRED_FIELDS = frozenset(
     {"objective", "department", "priority", "execution_profile"}
 )
-AUTOMATED_OPTIONAL_FIELDS = OPTIONAL_FIELDS
+AUTOMATED_OPTIONAL_FIELDS = OPTIONAL_FIELDS | frozenset({'frontier_model_alias'})
 VALIDATION_KEYS = frozenset({"pytest_targets", "compileall_paths", "git_diff_check"})
 
 #: Shared profile law, including the explicit authenticated App native choice.
@@ -491,6 +492,13 @@ def normalize_automated_request(payload: Any) -> dict[str, Any]:
         AUTOMATED_OPTIONAL_FIELDS,
     )
     compatible = dict(payload)
+    selection = {}
+    if "frontier_model_alias" in compatible:
+        from control_plane.frontier_selection import validate_alias, FrontierSelectionError
+        try:
+            selection["frontier_model_alias"] = validate_alias(compatible.pop("frontier_model_alias"))
+        except FrontierSelectionError as exc:
+            raise CeoRequestInvalid(str(exc)) from exc
     compatible["operation_key"] = "automated-request-placeholder"
     normalized = normalize_high_level_request(compatible)
     # The authenticated OS app may encode a versioned *requirements* section
@@ -502,7 +510,19 @@ def normalize_automated_request(payload: Any) -> dict[str, Any]:
     except AcceptanceCriteriaError as exc:
         raise CeoRequestInvalid("objective has a malformed acceptance-criteria section") from exc
     del normalized["operation_key"]
+    normalized.update(selection)
     return normalized
+
+
+def normalize_app_request(payload: Any) -> dict[str, Any]:
+    """Authenticated OS request extension; legacy MCP/Slack shapes stay frozen."""
+    if not isinstance(payload, Mapping) or "frontier_model_alias" not in payload:
+        return normalize_high_level_request(payload)
+    operation_key = _validated_operation_key(payload.get("operation_key"))
+    semantic = normalize_automated_request({
+        key: value for key, value in payload.items() if key != "operation_key"
+    })
+    return {"operation_key": operation_key, **semantic}
 
 
 def build_validation_commands(validation: Mapping[str, Any] | None) -> list[list[str]]:

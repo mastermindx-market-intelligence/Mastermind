@@ -99,7 +99,7 @@ class GlmLeaseGateway:
             ttl = request["ttl"]
             if (
                 type(ttl) is not int
-                or not 1 <= ttl <= 7500
+                or not 1 <= ttl <= 15000
                 or request["model"] not in self._models
             ):
                 raise LeaseGatewayError("lease capability refused")
@@ -173,7 +173,7 @@ class GlmLeaseGateway:
             derived = json.loads(raw)
             if _canonical_json_bytes(request_body) != raw:
                 raise _canonical_refuse()
-            if (type(ttl) is not int or not 1 <= ttl <= 7500
+            if (type(ttl) is not int or not 1 <= ttl <= 15000
                     or derived['model'] not in self._models
                     or not _canonical_identifier(lease_id)):
                 raise _canonical_refuse()

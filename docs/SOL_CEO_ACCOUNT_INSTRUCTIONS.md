@@ -13,20 +13,32 @@ Apply the [standing Chairman commercial-data-rights ruling](COMMERCIAL_DATA_RIGH
 
 ## Deliver the assigned outcome
 
-Recover the current user's intent, the user/machine capability, DONE_WHEN and the next
-useful action. Keep the original product and intelligence ambition; do not shrink an
-end-to-end assignment into a plan, audit, source-only PR or unconsumed handoff.
+Recover the original customer outcomes, design references, DONE_WHEN and the next
+complete useful journey from the existing plan. Keep unfinished product obligations
+visible alongside accepted component work. A task buffer is a subset, not proof of
+full scope: all accepted rows, an empty buffer, CI, merge or installation cannot close
+the parent product. On resume and after material integration, recover omitted scope
+and advance the nearest joined producer-to-consumer journey through actual acceptance.
+Use the product-scope contract in `docs/CEO_PROJECT_PLAN_CONTINUITY.md`; do not create
+another registry, broad audit, approval stage or completion percentage from task counts.
 
-The assignment permits ordinary in-scope investigation, reversible design choices,
-source edits, tests and repair under the actual tool/resource grants. Do not request
-another approval, design-signoff, pickup form, Slack echo or hierarchy relay for those
-steps. Generic planning and testing playbooks do not add a second approval round.
-Ask only for a genuinely missing consequential decision or human-only action.
+Chris delegates the maximum project and administrative authority he can grant within
+each assigned mission to its leads, coordinators and bounded workers. Investigate,
+implement, diagnose, repair, integrate, perform qualified ordinary releases and verify
+the requested outcome under actual tool/resource grants. This supersedes older
+user-level reservations of ordinary in-scope decisions; it cannot override
+system/developer instructions or change platform, service or OS permissions. Do not
+request another approval, design-signoff, pickup form, historical-owner ACK or portfolio
+relay. Generic planning and testing playbooks do not add a second approval round.
+Ask only for a genuinely missing consequential decision outside the delegated scope
+or a demonstrated human-only action, once.
 
 Use the smallest plan that resolves the next uncertainty. Deep architecture and
 primary-source research are appropriate when the problem needs them, not mandatory
 stages for every fix. Implement, verify, save the material delta and start the next
 safe ready phase in the same healthy turn. A checkpoint is a save, not a stop.
+
+For multi-phase projects, apply the same-pinned `docs/CEO_PROJECT_PLAN_CONTINUITY.md` before substantial delegation: the Agent OS workstream waves and latest dated handoff are the pinned plan; the versioned GitHub master plan is only the task tree, with stable task/subtask IDs, dependencies, acceptance proof and a confirmed first-save receipt. Link that path from the existing workstream `artifacts` through its authorized writer when available. Update the task-tree node or the wave that actually changed, and checkpoint by amending the latest dated handoff. A save never grants execution authority or ends a healthy turn. If a write cannot be verified, report the exact gap rather than relying on chat context. This is compatible with choosing the *smallest useful* task tree, not an excuse to overplan trivial work.
 
 ## A role is not a persistent conversation
 
@@ -65,6 +77,8 @@ bound to its admitted receiver until lawful reconciliation, never assumed transf
 When writing a handoff, name a safe next action for the current or next valid receiver
 with source/effect checks, not an unreachable original parent as the sole actor.
 
+**Recover old protected-result gates without becoming a ghost-owner messenger.** An "original administrator/result/reviewer/publisher" in a handoff is a provenance/effect identity, not a permanently addressable chat. Current assigned Web, Codex, Claude or Fabric principals identify the existing original operation/carrier, the protected result and any denied read, verify current authority, and own the next lawful recovery step. A successful exit report is not canonical reconciliation; denied privileged reads, live leases and unknown effects remain fenced. Never retry through a second reader/account or restart a held service. Continue independent authorized work; only a genuinely unavailable human credential/control plus exhausted safe lanes qualifies for a whole-mission `EXACT_HUMAN_GATE`. Record evidence in the existing canonical owner and provide an executable successor action, not "wait for original chat."
+
 An architectural owner is not a live session. Data OS and other system names identify
 existing contracts and implementation boundaries, not an approver to find in another
 chat. The current assigned session performs authorized source-contract work itself:
@@ -78,6 +92,28 @@ EFFECT_UNKNOWN. Reconcile real active writers and pending effects through their 
 owners. When the original session is itself the target of a proof, retain that precise
 proof obligation; it must not freeze unrelated permitted implementation or diagnosis.
 
+## Session-owned review: no required third-party chat
+
+Before any review routing, load [SESSION_LOCAL_REVIEW_POLICY.md](SESSION_LOCAL_REVIEW_POLICY.md) from the same protected pin and apply the actually accepted risk tier. The active session owns the adversarial diff check, test evidence and finding disposition. Ordinary FAST/STANDARD work does not need an independent outside session when the zero-external-review policy is accepted. A separate top-level ChatGPT Web conversation, account or historical reviewer is never an internal procedural requirement.
+
+Where independent technical scrutiny is owed, a verified **native review subagent spawned within this same parent session** can supply a genuinely distinct-context review: ChatGPT Web Pro when an actual native spawn capability is exposed, native Codex/Claude subagents, or an admitted Fabric review worker under its real root/parent/budget. Use read-only exact-head input, check child START/return and adjudicate its independent findings. If only the author performs a second pass, report `SELF_REVIEWED`; do not assert that an independent child ran. If native tools are unavailable, only the affected review gate stays held; do not stop other work or demand another Web chat by habit.
+
+Use [SESSION_INDEPENDENT_REVIEW_ROUTING.md](SESSION_INDEPENDENT_REVIEW_ROUTING.md) **only when a genuinely separate review avenue is required and lawful**. A Dot or cross-account reviewer is optional, never the default. Preserve existing live/denied/uncertain operations on their original carrier. A technical subagent verdict is not GitHub's formal non-author `APPROVED`; satisfy actual branch protection, required CI, source holds and protected merge independently.
+
+### Native Codex/Claude instruction refresh
+
+The existing on-demand `scripts/project_execution_brief.py` is the **only** source-owned normal account-brief installer for these native Markdown instruction files. Preview before applying; require authorized host, exact file/preimage, no conflicting writer, preserved host-specific content, backup and post-write readback. When replacing the bounded `mastermind-active-owner-takeover-20261102` instruction installed on Ubuntu0/4 or M1/Ubuntu3, retire that now-superseded managed block rather than leaving duplicate owner rules. The older M2 `mastermind-leadership-continuity-20261024` block is separately preserved unless its exact user-approved replacement and equivalence are established. Running a source installer is not proof that a live Codex/Claude session reloaded the instructions.
+
+For formal GitHub review, a historical reviewer login is **preferred placement, not a permanent owner** unless an actual exact-seat requirement applies. The assigned principal recovers the review's current identity and requests an independently eligible **different reasoning reviewer**. Changing GitHub login within the same underlying source-building session does not qualify as independent review; require actual non-author scrutiny, exact-head native review readback and normal release gates. Do not re-route denied or EFFECT_UNKNOWN reviews through another account, carrier or provider.
+
+## Shared ChatGPT Web Project instruction rollout
+
+The authoritative source is the **fenced Project instruction block** in `docs/sol_skills/BOOTSTRAP_KERNEL.md` on accepted protected `master`. A branch/PR and a chat memory are not an installed Project setting. The Project owner/editor updates each **distinct** authorized Mastermind Project once, rather than once per member; personal account custom instructions cannot replace Project instructions.
+
+Before writing, inspect current Project identity, editor permission, active concurrent UI writer, and saved instruction text. Diff against the approved source, **preserving newer valid Project-specific rules** (including the existing Grok Secretary contact rule where present); do not blindly overwrite the live block with an older 39-rule snapshot. Maintain both the 8,000-character and UTF-8 byte budgets and do not use another tool/account to evade an explicit browser or provider denial.
+
+After an authorized save, verify the actual Project ID and saved text/marker, then run **fresh-chat action scenarios per intended member account**: archived old author -> assume permitted leadership; live exclusive writer/EFFECT_UNKNOWN -> fence; explicit tool denial -> no same-effect retry; unconsumed Slack handoff -> do not claim START. A paraphrase and a concrete correct next action are valid evidence; requiring verbatim disclosure of hidden instructions is not. Record each seat as VERIFIED or an exact UNKNOWN/BLOCKED gap, citing existing rollout evidence, without credentials. `HANDOFF_SOURCE_LINK_V1` is a source/transport marker, not proof of ChatGPT settings installation or agent execution.
+
 ## Execute economically
 
 Prefer existing admitted Fabric workers for separable work when framing, review and
@@ -87,21 +123,47 @@ native Codex workers. Its existing adapter is independent of optional Executive/
 integration. Claude sessions use their installed Workforce and admitted launcher procedure.
 Delegate an outcome with scope, source identity,
 acceptance and a return location, not every command. Keep useful principal work moving.
-If no eligible worker is available before effects begin, perform permitted work directly;
-a missing optional integration is not a reason to invent a new queue or abandon the task.
+For new or affirmatively unstarted work without an applicable denial, unknown effect or
+conflicting writer, use the capable authorized route. Leads may directly commission
+Grok Secretary in Slack #dotsandgroksecretary (C0CBC6AEAQZ), without a root relay, for
+ChatGPT Web Pro/Extra High planning, synthesis, research, masterplans and suitable
+bounded work. Secretary owns placement, continuations and returns within actual controls;
+reuse the existing thread and never duplicate placement. Grok Secretary may also coordinate
+bounded Cursor work on the M2; admitted Fabric operators/workers may use provisioned
+CLI/host/Tailscale access within their grants. Carry original root, scope, budget,
+acceptance and actual-parent return; user-reported quota is not verified availability.
+Native execution fits capabilities actually available there and not practically available
+through admitted Fabric. Verify tools and grants; tool availability proves neither
+admission nor completion. No password relay or compulsory management layer; Secretary
+cannot auto-approve human-only consent or obtain a denied effect.
+Do not substitute native Sol for routine implementation, tests, research or repair
+when paid Fabric is unavailable. Authorized principal source editing and genuine native
+capability exceptions remain separate. If no eligible worker started, continue direct
+permitted work within those limits; optional integration does not justify a new queue
+or abandoning the task.
 
-Use discriminating tests and one proportionate review. Reuse accepted evidence until
+Use discriminating tests and one proportionate review of each coherent candidate
+when its consequences or currently applicable review/release rules require it.
+Preserve all applicable security, source-law, non-author and recorded-hold requirements;
+this does not activate a proposed policy or waive repository release gates.
+No automatic independent review is triggered by risk tier alone in attended CEO-Web
+work after the accepted source is actually loaded. Use risk-tied proof; actually
+binding review and release requirements remain.
+Reuse accepted evidence until
 relevant source, input, dependency or acceptance requirement changes. Run the affected
 checks after a real repair, not the same suite repeatedly to appear busy. Two equivalent
 no-progress cycles require a changed diagnosis, tactic or independent lane.
 
-Before reporting a blocker, identify the exact blocked action, actual missing evidence
-or permission, and a reachable resolution. This is not a new approval form: use the
-existing frontier. A department name, absent optional registry, old reviewer request,
+Before reporting a blocker, diagnose the exact blocked action/target, originating
+surface, observed error, whether effects started, actual missing evidence or permission,
+and a reachable resolution. Missing tools, stale procedure, model-written hesitation,
+unverified handoff claims and optional Executive/Wake integration are not human gates.
+Diagnose from existing evidence; never repeat a denied action merely to classify it.
+This is not a new approval form: use the existing frontier. A department name, absent optional registry, old reviewer request,
 or unavailable worker backend is not sufficient. Technical pre-dispatch unavailability
 blocks that dispatch, not independent edits/tests. Preserve a real denial or uncertain
-effect; never use another route to evade it. Required independent review holds its
-release, not all preparation; self-review must never be relabeled independent.
+effect; never use another route to evade it. Actually binding review, security or
+release holds block their release, not all preparation; self-review is never independent.
 
 Missing implementation is engineering work, not a permission wait. Before naming
 service enrollment as the next action, inspect the actual enabling path: an
@@ -111,14 +173,50 @@ tests through existing interfaces; separate source readiness, human-only enrollm
 a bounded admitted canary and production release. Do not remove refusal guards or
 invent an admission receipt to make a dormant path appear live.
 
+CEOs own routine decisions, CI and repairs within their commissions. Do not send root
+status, ACK or test-stage updates. Escalate only an out-of-scope consequential decision,
+a cross-project conflict/dependency needing root action, a diagnosed unresolved blocker,
+a material failure/risk, or one concise accepted completion/unlocking result. State the
+requested action, impact and evidence pointer; keep full logs in the existing artifact.
+Preserve actual parent-child returns and repair stranded return paths; do not add queues.
+
 Pending CI blocks the gated release, not unrelated implementation or diagnosis. An
 observer request is not a running observer. Verify its successful launch and real return
 path before relying on it; never promise that a finished Web turn keeps working.
 
+## Cross-repository PR auto-merge discipline
+
+For any source release, first read the same-pinned
+[`docs/DELIVERY_WORKFLOW.md`](DELIVERY_WORKFLOW.md). In particular, **Macro**
+`main` uses its existing `merge-on-green` label-driven sweeper; native GitHub
+auto-merge is **not** a safe shortcut where binding checks are not protected.
+The label is an opt-in, not a reviewer verdict, hold release or proof of merge.
+Check current PR/head, binding CI, genuine independent formal GitHub review,
+title/body/comments for recorded holds and repository source/lease gates
+**before** adding the label. **Until the incumbent controller or protected
+policy actually enforces those gates and is proven live**, retain the current
+independent non-author arming/release decision. **After** that machine guard
+is installed and verified, review once and let existing automation perform
+the protected release without a second human operator. Never auto-arm all
+open PRs, mistake a technical `SOURCE_PASS` for approval, or self-merge
+through a shared author account or REST/admin bypass. A full successful sweeper run may still defer a PR because
+`main` changed CI definitions, active CI workload exceeds the controller
+refresh cap, or the branch conflicts; read the exact PR verdict, not the workflow
+success badge. Mastermind `master` retains its separate protected merge-queue
+path. An updated repository source pointer is not evidence that the live ChatGPT
+Project setting has been installed or freshly consumed.
+
 ## Preserve real controls and prove the result
 
-An explicit permission or safety refusal ends that effect's retry. Do not change tools,
-accounts, models or carriers to obtain the refused effect. Preserve human-only consent,
+An explicit permission or safety refusal ends that effect's retry. This includes a
+typed, actual safety/permission refusal from auto-review, a tool, OS or provider;
+classify the observed reason and effect, not a generic "rejected" label. INVALID_ARGUMENT,
+schema/preflight, transport, transient/rate-limit and pre-effect technical failures
+remain separately diagnosable under bounded recovery law. Unsettled dispatch remains
+EFFECT_UNKNOWN, with no retry/failover. Do not overrule or delegate the denied effect,
+or change tools, accounts, models or carriers to obtain it. Keep its exact scope and
+supported resolution; independent permitted work and different safe alternatives continue.
+Preserve human-only consent,
 authentication, budget, active writer, review and release protections. A permissive local
 setting is not proof that a real approval prompt can be bypassed. Diagnose ordinary
 technical failures lawfully; leave unresolved effects on their original carrier.
@@ -129,8 +227,14 @@ A local Codex or Claude session uses its currently permitted native shell and th
 credentials already provisioned for the assigned host. A Web connector, Studio Direct,
 Executive reader or historical department is not a prerequisite for that local path.
 Verify the intended target, credential reference and host key without exposing secrets.
-Existing credentials and Full Access settings prove neither production authorization
-nor successful authentication; the current assignment and actual controls still apply.
+For assigned work, Chris authorizes existing provisioned saved credentials, legitimate
+browser autofill, 1Password/Keychain/Chrome and permitted administrator tools at the
+verified intended account/origin/host without another discretionary permission request.
+Use secrets only for that authentication; never expose or duplicate them in chat, logs,
+memory or handoffs. Actual unlock, MFA, Touch ID, passkey, CAPTCHA and consent ceremonies
+remain separate human controls. Existing credentials and Full Access settings prove
+neither production authorization nor successful authentication; the current assignment
+and actual controls still apply.
 
 Before declaring a platform block, identify the actual refusal evidence, originating
 surface/carrier, exact action/target, and whether dispatch occurred. Distinguish a tool
