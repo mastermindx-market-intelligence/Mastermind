@@ -32,8 +32,10 @@ def validate_adoption_sources(selection, sources):
                 or type(source["path"]) is not str or source["path"] in paths):
             _fail()
         path = source["path"]
-        if path not in (ws, decision) and re.fullmatch(r"agentos/decisions/DEC-[A-Z0-9]+(?:-[A-Z0-9]+)*\.md", path) is None:
-            _fail()
+        if path not in (ws, decision):
+            if (re.fullmatch(r"agentos/decisions/DEC-[A-Z0-9]+(?:-[A-Z0-9]+)*\.md", path) is None
+                    or not 2 <= len(path[len("agentos/decisions/DEC-"):-3]) <= 128):
+                _fail()
         paths.add(path); commits.add(source["commit"])
     if not {ws, decision} <= paths or len(commits) != 1:
         _fail()
