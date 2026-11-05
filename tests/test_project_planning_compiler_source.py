@@ -17,8 +17,11 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 import types
 import zlib
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -26,6 +29,7 @@ import pytest
 from control_plane.project_planning_compiler_source import (
     CAPTURE_SCHEMA,
     REPOSITORY,
+    CapturedProjectPlanningCompilers,
     ProjectPlanningCompilerSourceChanged,
     ProjectPlanningCompilerUnavailable,
     capture_project_planning_compilers,
@@ -913,3 +917,545 @@ def test_capture_at_head_as_code_commit_is_allowed(repo, runner):
     captured = _capture(repo, runner, code_commit=repo["head"])
     assert captured.creation_source_binding["owner"]["content_sha256"] == _sha(OWNER_CURRENT)
     captured.check()
+
+
+# ------------------------------------------------- concurrent alias windows
+# Deterministic window-overlap tests for the two process-global alias mutation
+# brackets (capture exec and compiler-call scope).  The exec'd/called bytes are
+# test-authored race stand-ins that rendezvous through a probe registered in
+# ``sys.modules``, so the overlap itself -- not the existence of a lock -- is
+# what is asserted.
+
+class _WindowRaceProbe:
+    """Rendezvous two alias windows and record whether they ever overlapped.
+
+    ``arrive(label, phase)`` is called from inside an alias window by the
+    test-authored stand-in bytes.  The wait is satisfied only by the peer's
+    arrival for the SAME (label, phase) window, so a stale arrival from an
+    earlier window can never let the second arriver skip its blocking wait:
+    one thread genuinely parks inside its window (releasing the GIL) until the
+    peer's window opens, which is what makes the overlap deterministic.
+    """
+
+    def __init__(self, peer, wait_seconds=2.5):
+        self.peer = dict(peer)
+        self.wait_seconds = wait_seconds
+        self.hold_timeout = 30.0
+        self.max_inside = 0
+        self.arrivals = []
+        self.notes = {}
+        self.hold_ready = threading.Event()
+        self.hold_release = threading.Event()
+        self._inside = 0
+        self._lock = threading.Lock()
+        self._condition = threading.Condition(self._lock)
+        self._open = set()
+
+    def arrive(self, label, phase):
+        with self._condition:
+            self._inside += 1
+            self.max_inside = max(self.max_inside, self._inside)
+            self.arrivals.append((label, phase))
+            self._open.add((label, phase))
+            target = self.peer[(label, phase)]
+            deadline = time.monotonic() + self.wait_seconds
+            while target not in self._open:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._condition.wait(remaining)
+            saw_peer = target in self._open
+            self._open.discard((label, phase))
+            self._inside -= 1
+            self.arrivals.append((label, phase, "saw_peer=" + str(saw_peer)))
+            self._condition.notify_all()
+        return saw_peer
+
+    def note(self, label, value):
+        with self._condition:
+            self.notes[label] = value
+
+    def hold_enter(self):
+        """Enter a window and hold it until the test releases the holder."""
+        with self._lock:
+            self._inside += 1
+            self.max_inside = max(self.max_inside, self._inside)
+            self.arrivals.append("hold")
+        self.hold_ready.set()
+        self.hold_release.wait(self.hold_timeout)
+        with self._lock:
+            self._inside -= 1
+
+
+class _WindowStartGate:
+    """Hold every party at one Git call until all have arrived, then open."""
+
+    def __init__(self, parties):
+        self.arrived = threading.Event()
+        self._open = threading.Event()
+        self._barrier = threading.Barrier(parties, action=self.arrived.set)
+
+    def arrive_and_wait(self, timeout=30.0):
+        try:
+            self._barrier.wait(timeout)
+        except threading.BrokenBarrierError:
+            pass
+        self._open.wait(timeout)
+
+    def open(self):
+        self._open.set()
+
+
+class _GatedRunner:
+    """RecordingRunner that holds one armed, identified Git call at the gate."""
+
+    def __init__(self, trigger, gate, armed=False):
+        self._runner = RecordingRunner()
+        self._trigger = trigger
+        self._gate = gate
+        self._armed = bool(armed)
+        self._held = False
+
+    @property
+    def calls(self):
+        return self._runner.calls
+
+    def arm(self):
+        self._armed = True
+
+    def __call__(self, argv, **kwargs):
+        result = self._runner(argv, **kwargs)
+        if self._armed and not self._held and self._trigger(self._runner.calls[-1]["argv"]):
+            self._held = True
+            self._gate.arrive_and_wait()
+        return result
+
+
+_RACE_PROGRAMMES_PATH = "config/mastermind_programs.yml"
+
+
+def _programmes_show_trigger(argv):
+    # the last bounded read before the capture exec window opens
+    return argv[5] == "show" and any(
+        type(arg) is str and arg.endswith(_RACE_PROGRAMMES_PATH) for arg in argv[6:]
+    )
+
+
+def _programmes_ls_tree_trigger(argv):
+    # the last bounded read of a wrapper requalification before the scope opens
+    return argv[5] == "ls-tree" and any(
+        type(arg) is str and arg == _RACE_PROGRAMMES_PATH for arg in argv[6:]
+    )
+
+
+@contextmanager
+def _race_probe_module(probe):
+    """Expose the probe to the exec'd race stand-in bytes as a plain module."""
+    module = types.ModuleType("_ppc_race_probe")
+    module.arrive = probe.arrive
+    module.note = probe.note
+    module.hold_enter = probe.hold_enter
+    saved = sys.modules.get("_ppc_race_probe")
+    sys.modules["_ppc_race_probe"] = module
+    try:
+        yield probe
+    finally:
+        if saved is None:
+            sys.modules.pop("_ppc_race_probe", None)
+        else:
+            sys.modules["_ppc_race_probe"] = saved
+
+
+def _race_owner_code(label, hold=False):
+    """Race owner stand-in bytes: hook the capture window, record the sibling."""
+    arrival = (
+        "_probe.hold_enter()"
+        if hold
+        else "_probe.arrive(" + repr(label) + ", 'capture')"
+    )
+    return (
+        '"""Test-only race owner stand-in (' + label + '); never production bytes."""\n'
+        "import re\n"
+        "import sys\n\n"
+        "import yaml\n\n"
+        "import _ppc_race_probe as _probe\n\n"
+        "OWNER_SOURCE_MARKER = 'captured-owner-race-" + label + "'\n"
+        "PROGRAMMES_SOURCE_PATH = 'config/mastermind_programs.yml'\n"
+        "OWNER_ARRIVAL = " + arrival + "\n"
+        "OWNER_SAW_CONTRACT_MODULE = sys.modules.get('scripts.agentos_project_plan_contract')\n"
+        "_FRONT_MATTER = re.compile(r\"---\\n(.*?)\\n---[ \\t]*\\n?(.*)\", re.DOTALL)\n"
+        "\n\n"
+        "class _OwnerLawError(ValueError):\n"
+        "    pass\n\n\n"
+        "def _load_programs():\n"
+        "    names = yaml.safe_load(_PROGRAMS.read_text(encoding='utf-8'))\n"
+        "    if type(names) is not dict or not names:\n"
+        "        raise _OwnerLawError('INVALID_PROGRAMMES')\n"
+        "    return set(names)\n"
+    )
+
+
+def _race_contract_code(label):
+    """Race contract stand-in bytes carrying a per-commit marker."""
+    return (
+        '"""Test-only race contract stand-in (' + label + '); never production bytes."""\n'
+        "import copy\n"
+        "import hashlib\n\n"
+        "import _ppc_race_probe as _probe\n\n"
+        "_probe.note('contract:" + label + "', True)\n"
+        "CONTRACT_SOURCE_MARKER = 'captured-contract-race-" + label + "'\n"
+        "_REF_KEYS = {'repository', 'path', 'commit', 'content_sha256'}\n"
+    )
+
+
+def _race_creation_code(label):
+    """Race creation stand-in bytes: hook the compile window, live-resolve."""
+    return (
+        '"""Test-only race creation stand-in (' + label + '); never production bytes."""\n'
+        "import hashlib\n"
+        "import json\n\n"
+        "import _ppc_race_probe as _probe\n\n"
+        "from scripts.agentos import OWNER_SOURCE_MARKER, PROGRAMMES_SOURCE_PATH\n\n"
+        "OUTPUT_SCHEMA = 'agentos.project_proposal.v1'\n"
+        "DRAFT_STATE = 'DRAFT_ONLY'\n"
+        "WORKSTREAM_DIR = 'agentos/workstreams'\n"
+        "REQUEST_KEYS = frozenset({'request_id', 'record', 'expected_commit'})\n"
+        "COMPILER_MARKER = 'captured-creation-race-" + label + "'\n\n\n"
+        "def _canonical(value):\n"
+        "    return json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False,\n"
+        "                      separators=(',', ':')).encode('utf-8')\n\n\n"
+        "def compile_proposal(request, *, programs):\n"
+        "    import scripts.agentos as _live_owner\n"
+        "    _probe.arrive(" + repr(label) + ", 'compile')\n"
+        "    _probe.note(" + repr(label) + ", _live_owner.OWNER_SOURCE_MARKER)\n"
+        "    if (type(request) is not dict or set(request) != REQUEST_KEYS\n"
+        "            or type(programs) not in (set, frozenset) or not programs\n"
+        "            or OWNER_SOURCE_MARKER != 'captured-owner-race-" + label + "'):\n"
+        "        raise ValueError('INVALID_COMPILER_REQUEST')\n"
+        "    key = request['record']['key']\n"
+        "    body = 'objective: ' + str(request['record'].get('objective', '')) + '\\n'\n"
+        "    return {\n"
+        "        'schema': OUTPUT_SCHEMA,\n"
+        "        'state': DRAFT_STATE,\n"
+        "        'request_id': request['request_id'],\n"
+        "        'request_sha256': hashlib.sha256(_canonical(request)).hexdigest(),\n"
+        "        'expected_commit': request['expected_commit'],\n"
+        "        'work_ref': 'WS:' + key,\n"
+        "        'path': WORKSTREAM_DIR + '/WS-' + key + '.md',\n"
+        "        'content_utf8': body,\n"
+        "        'content_sha256': hashlib.sha256(body.encode('utf-8')).hexdigest(),\n"
+        "    }\n"
+    )
+
+
+def _race_files(label, *, hold_owner=False, broken_contract=False):
+    payload = {
+        "scripts/agentos.py": _race_owner_code(label, hold=hold_owner).encode("utf-8"),
+        "scripts/agentos_project_plan_contract.py": (
+            "import _ppc_race_probe as _probe\n_probe.arrive("
+            + repr(label) + ", 'capture')\n"
+            "raise RuntimeError('broken race contract module')\n"
+        ).encode("utf-8") if broken_contract else _race_contract_code(label).encode("utf-8"),
+        "scripts/agentos_project_proposal.py": _race_creation_code(label).encode("utf-8"),
+        "config/mastermind_programs.yml": PROGRAMMES_YAML.encode("utf-8"),
+    }
+    payload.update(_fixture_bytes())
+    return payload
+
+
+def _race_repository(
+    tmp_path, name="race-macro", *, labels=("first", "second"),
+    hold_owner=False, broken_contract=False,
+):
+    """One repo, two qualified code commits with genuinely different modules."""
+    root = tmp_path / name
+    root.mkdir()
+    _git(root, "init", "-q")
+    (root / "README.md").write_bytes(b"race fixture base\n")
+    _git(root, "add", "-A", "-f")
+    _git(root, "commit", "-q", "-m", "Base")
+    commits = []
+    for label in labels:
+        for path, raw in _race_files(
+            label, hold_owner=hold_owner, broken_contract=broken_contract
+        ).items():
+            target = root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(raw)
+        _git(root, "add", "-A", "-f")
+        _git(root, "commit", "-q", "-m", "Qualified code commit " + label)
+        commits.append(_git(root, "rev-parse", "HEAD").decode().strip())
+    # Advance current DATA without rewriting either code commit.
+    (root / "agentos/data").mkdir(parents=True, exist_ok=True)
+    (root / "agentos/data/ledger.txt").write_bytes(b"race data advance\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "Race DATA advance")
+    head = _git(root, "rev-parse", "HEAD").decode().strip()
+    assert len(set(commits + [head])) == len(commits) + 1
+    return {"root": root, "codes": commits, "head": head}
+
+
+def _race_capture(repo, code, runner, **overrides):
+    args = {
+        "macro_root": repo["root"],
+        "expected_macro_sha": repo["head"],
+        "code_commit": code,
+        "runner": runner,
+    }
+    args.update(overrides)
+    return capture_project_planning_compilers(**args)
+
+
+def _race_creation_request(code):
+    return {
+        "request_id": "mmos-project-create-" + "a" * 40,
+        "record": {"key": "PLAN-TEST", "objective": "Race the captured compile windows."},
+        "expected_commit": code,
+    }
+
+
+def test_concurrent_captures_serialize_the_alias_window(tmp_path):
+    repo = _race_repository(tmp_path)
+    saved = {name: sys.modules.get(name) for name in _ALIAS_NAMES}
+    gate = _WindowStartGate(2)
+    probe = _WindowRaceProbe({
+        ("first", "capture"): ("second", "capture"),
+        ("second", "capture"): ("first", "capture"),
+    })
+    runner_first = _GatedRunner(_programmes_show_trigger, gate, armed=True)
+    runner_second = _GatedRunner(_programmes_show_trigger, gate, armed=True)
+    outcomes = {}
+
+    def capture(label, code, runner):
+        try:
+            outcomes[label] = _race_capture(repo, code, runner)
+        except BaseException as error:  # recorded, never silently dropped
+            outcomes[label] = error
+
+    with _race_probe_module(probe):
+        threads = [
+            threading.Thread(target=capture, args=("first", repo["codes"][0], runner_first)),
+            threading.Thread(target=capture, args=("second", repo["codes"][1], runner_second)),
+        ]
+        for thread in threads:
+            thread.start()
+        try:
+            assert gate.arrived.wait(30.0), "capturers never reached the alias window"
+        finally:
+            gate.open()
+        for thread in threads:
+            thread.join(60.0)
+            assert not thread.is_alive()
+    _assert_scope_clean(saved)
+    first, second = outcomes["first"], outcomes["second"]
+    assert type(first) is CapturedProjectPlanningCompilers
+    assert type(second) is CapturedProjectPlanningCompilers
+    # the two exec windows never overlapped
+    assert probe.max_inside == 1
+    # each capture's own window resolved its own captured sibling modules
+    assert first.owner.OWNER_SAW_CONTRACT_MODULE is first.owner._project_plan_contract()
+    assert second.owner.OWNER_SAW_CONTRACT_MODULE is second.owner._project_plan_contract()
+    assert first.owner.OWNER_SOURCE_MARKER == "captured-owner-race-first"
+    assert second.owner.OWNER_SOURCE_MARKER == "captured-owner-race-second"
+    assert first.creation_compiler.OWNER_SOURCE_MARKER == "captured-owner-race-first"
+    assert second.creation_compiler.OWNER_SOURCE_MARKER == "captured-owner-race-second"
+
+
+def test_concurrent_compile_scopes_serialize_the_alias_window(tmp_path):
+    repo = _race_repository(tmp_path)
+    saved = {name: sys.modules.get(name) for name in _ALIAS_NAMES}
+    gate = _WindowStartGate(2)
+    probe = _WindowRaceProbe({
+        # sequential preliminary captures rendezvous with themselves (no wait)
+        ("first", "capture"): ("first", "capture"),
+        ("second", "capture"): ("second", "capture"),
+        ("first", "compile"): ("second", "compile"),
+        ("second", "compile"): ("first", "compile"),
+    })
+    runner_first = _GatedRunner(_programmes_ls_tree_trigger, gate)
+    runner_second = _GatedRunner(_programmes_ls_tree_trigger, gate)
+    outcomes = {}
+
+    def compile_creation(label, captured, code):
+        try:
+            outcomes[label] = captured.compile_creation(_race_creation_request(code))
+        except BaseException as error:  # recorded, never silently dropped
+            outcomes[label] = error
+
+    with _race_probe_module(probe):
+        # both captures complete first, so the race below is compile-scope only
+        first = _race_capture(repo, repo["codes"][0], runner_first)
+        second = _race_capture(repo, repo["codes"][1], runner_second)
+        runner_first.arm()
+        runner_second.arm()
+        threads = [
+            threading.Thread(target=compile_creation, args=("first", first, repo["codes"][0])),
+            threading.Thread(target=compile_creation, args=("second", second, repo["codes"][1])),
+        ]
+        for thread in threads:
+            thread.start()
+        try:
+            assert gate.arrived.wait(30.0), "compilers never reached the alias window"
+        finally:
+            gate.open()
+        for thread in threads:
+            thread.join(60.0)
+            assert not thread.is_alive()
+    _assert_scope_clean(saved)
+    draft_first, draft_second = outcomes["first"], outcomes["second"]
+    assert draft_first["state"] == "DRAFT_ONLY" and draft_second["state"] == "DRAFT_ONLY"
+    # the two compiler scopes never overlapped
+    assert probe.max_inside == 1
+    # each in-call live import resolved its own capture's owner module
+    assert probe.notes["first"] == "captured-owner-race-first"
+    assert probe.notes["second"] == "captured-owner-race-second"
+
+
+def test_concurrent_capture_and_compile_windows_stay_disjoint(tmp_path):
+    repo = _race_repository(tmp_path)
+    saved = {name: sys.modules.get(name) for name in _ALIAS_NAMES}
+    gate = _WindowStartGate(2)
+    # probe labels are the race stand-in labels: the fresh capture is "first",
+    # while both the "second" capture window and the "second" compile window
+    # rendezvous against "first"
+    probe = _WindowRaceProbe({
+        # the preliminary capture of "second" rendezvous with itself (no wait);
+        # the fresh capture window rendezvous against the concurrent compile
+        # window of the other commit, and vice versa
+        ("second", "capture"): ("second", "capture"),
+        ("first", "capture"): ("second", "compile"),
+        ("second", "compile"): ("first", "capture"),
+    })
+    runner_capture = _GatedRunner(_programmes_show_trigger, gate, armed=True)
+    runner_compile = _GatedRunner(_programmes_ls_tree_trigger, gate)
+    outcomes = {}
+
+    def capture_action():
+        try:
+            return _race_capture(repo, repo["codes"][0], runner_capture)
+        except BaseException as error:  # recorded, never silently dropped
+            return error
+
+    def compile_action():
+        try:
+            return existing.compile_creation(_race_creation_request(repo["codes"][1]))
+        except BaseException as error:  # recorded, never silently dropped
+            return error
+
+    with _race_probe_module(probe):
+        # the compile side's capture completes first, so the race below mixes
+        # one fresh capture window against one compiler-call window
+        existing = _race_capture(repo, repo["codes"][1], runner_compile)
+        runner_compile.arm()
+        threads = [
+            threading.Thread(target=lambda: outcomes.update(capture=capture_action())),
+            threading.Thread(target=lambda: outcomes.update(compile=compile_action())),
+        ]
+        for thread in threads:
+            thread.start()
+        try:
+            assert gate.arrived.wait(30.0), "windows never opened together"
+        finally:
+            gate.open()
+        for thread in threads:
+            thread.join(60.0)
+            assert not thread.is_alive()
+    _assert_scope_clean(saved)
+    captured, draft = outcomes["capture"], outcomes["compile"]
+    assert type(captured) is CapturedProjectPlanningCompilers
+    assert draft["state"] == "DRAFT_ONLY"
+    assert probe.max_inside == 1
+    assert captured.owner.OWNER_SAW_CONTRACT_MODULE is captured.owner._project_plan_contract()
+    assert probe.notes["second"] == "captured-owner-race-second"
+
+
+def test_failed_capture_window_releases_and_leaves_the_peer_exact(tmp_path):
+    good = _race_repository(tmp_path, name="good-macro", labels=("peer",))
+    broken = _race_repository(
+        tmp_path, name="broken-macro", labels=("broken",), broken_contract=True
+    )
+    saved = {name: sys.modules.get(name) for name in _ALIAS_NAMES}
+    gate = _WindowStartGate(2)
+    probe = _WindowRaceProbe({
+        ("broken", "capture"): ("peer", "capture"),
+        ("peer", "capture"): ("broken", "capture"),
+    })
+    runner_broken = _GatedRunner(_programmes_show_trigger, gate, armed=True)
+    runner_peer = _GatedRunner(_programmes_show_trigger, gate, armed=True)
+    outcomes = {}
+
+    def capture(label, repo, code, runner):
+        try:
+            outcomes[label] = _race_capture(repo, code, runner)
+        except BaseException as error:  # recorded, never silently dropped
+            outcomes[label] = error
+
+    with _race_probe_module(probe):
+        threads = [
+            threading.Thread(target=capture,
+                             args=("broken", broken, broken["codes"][0], runner_broken)),
+            threading.Thread(target=capture,
+                             args=("peer", good, good["codes"][0], runner_peer)),
+        ]
+        for thread in threads:
+            thread.start()
+        try:
+            assert gate.arrived.wait(30.0), "capturers never reached the alias window"
+        finally:
+            gate.open()
+        for thread in threads:
+            thread.join(60.0)
+            assert not thread.is_alive()
+    _assert_scope_clean(saved)
+    # the failing capture surfaces its own untranslated failure ...
+    assert type(outcomes["broken"]) is RuntimeError
+    # ... while the peer still captured its own modules exactly, and the
+    # failed window released the alias lock for it
+    peer = outcomes["peer"]
+    assert type(peer) is CapturedProjectPlanningCompilers
+    assert probe.max_inside == 1
+    assert peer.owner.OWNER_SAW_CONTRACT_MODULE is peer.owner._project_plan_contract()
+    assert peer.owner.OWNER_SOURCE_MARKER == "captured-owner-race-peer"
+
+
+def test_window_wait_is_bounded_by_the_capture_deadline(tmp_path):
+    holder_repo = _race_repository(
+        tmp_path, name="holder-macro", labels=("hold",), hold_owner=True
+    )
+    peer_repo = _race_repository(tmp_path, name="peer-macro")
+    saved = {name: sys.modules.get(name) for name in _ALIAS_NAMES}
+    probe = _WindowRaceProbe({
+        ("first", "capture"): ("first", "capture"),
+        ("second", "capture"): ("second", "capture"),
+    })
+    outcomes = {}
+
+    with _race_probe_module(probe):
+        holder_thread = threading.Thread(
+            target=lambda: outcomes.update(
+                hold=_race_capture(holder_repo, holder_repo["codes"][0], RecordingRunner())
+            )
+        )
+        holder_thread.start()
+        try:
+            assert probe.hold_ready.wait(30.0), "holder never entered its alias window"
+            # the window is held past this second capture's deadline: the wait
+            # must refuse closed, never block unboundedly
+            with pytest.raises(ProjectPlanningCompilerUnavailable):
+                _race_capture(peer_repo, peer_repo["codes"][0], RecordingRunner(), timeout=1.0)
+        finally:
+            probe.hold_release.set()
+        holder_thread.join(60.0)
+        assert not holder_thread.is_alive()
+    _assert_scope_clean(saved)
+    holder = outcomes["hold"]
+    assert type(holder) is CapturedProjectPlanningCompilers
+    assert probe.max_inside == 1
+
+
+def test_free_alias_lock_refuses_an_already_expired_deadline():
+    from control_plane import project_planning_compiler_source as source
+    with pytest.raises(ProjectPlanningCompilerUnavailable):
+        source._acquire_scope_lock(time.monotonic()-1)
+    assert source._SCOPE_LOCK.acquire(blocking=False)
+    source._SCOPE_LOCK.release()

@@ -28,6 +28,15 @@ BOUNDARY -- what this module is NOT:
   that standing obligation.
 * Not a registry, lifecycle or cache.  Nothing is stored between calls, no
   capture is retained anywhere, and two captures share no state.
+* Not a global import coordinator.  ``sys.modules``/``sys.path`` are process
+  globals, so the two alias mutation windows below are serialized by one
+  private module re-entrant lock.  That lock covers exactly this module's own
+  capture-exec and compiler-call brackets: it is not a Python import lock, and
+  unrelated code that mutates ``sys.modules``/``sys.path`` on another thread
+  outside those brackets is not coordinated with it.  Waiting on the lock is
+  bounded by the already-running capture deadline (capture path) or the same
+  per-call ``timeout`` budget the wrapper requalifications already spend
+  (compile path); it never blocks unboundedly and never mints a renewed clock.
 
 Law:
 
@@ -57,6 +66,7 @@ import hashlib
 import json
 import re
 import sys
+import threading
 import time
 import types
 from contextlib import contextmanager
@@ -140,6 +150,32 @@ COMMIT_RE = re.compile(r"[0-9a-f]{40}")
 
 _UNAVAILABLE = "project_planning_compiler_unavailable"
 _SOURCE_CHANGED = "project_planning_compiler_source_changed"
+
+# The one private serialization point for the two process-global alias windows
+# below.  Re-entrant so a nested same-thread capture or compiler call inside an
+# open window stays legal (the inner bracket snapshots and restores the outer
+# window's aliases exactly); held for the whole window so a waiter can never
+# observe, install over, or restore across another window's half-installed
+# state.
+_SCOPE_LOCK = threading.RLock()
+
+
+def _acquire_scope_lock(deadline):
+    """Take the alias-window lock bounded by the caller's already-running clock.
+
+    Same-thread re-entry succeeds immediately; a contended lock is waited on
+    only until ``deadline`` and a timed-out wait refuses closed.  No new
+    timeout budget is minted and the wait is never unbounded.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ProjectPlanningCompilerUnavailable(_UNAVAILABLE)
+    if not _SCOPE_LOCK.acquire(blocking=False):
+        if not _SCOPE_LOCK.acquire(timeout=remaining):
+            raise ProjectPlanningCompilerUnavailable(_UNAVAILABLE)
+    if time.monotonic() >= deadline:
+        _SCOPE_LOCK.release()
+        raise ProjectPlanningCompilerUnavailable(_UNAVAILABLE)
 
 
 class ProjectPlanningCompilerUnavailable(ValueError):
@@ -346,13 +382,30 @@ class CapturedProjectPlanningCompilers:
                 raise ProjectPlanningCompilerSourceChanged(_SOURCE_CHANGED)
 
     @contextmanager
-    def _scope(self):
-        """The scoped captured-alias bracket around one actual compiler call."""
-        previous, old_path = _install_scope(self._objects)
+    def _scope(self, *, deadline=None):
+        """The scoped captured-alias bracket around one actual compiler call.
+
+        The whole bracket -- install, the actual call, restore -- holds the
+        private module alias lock, so two concurrent compiler calls (or a
+        concurrent capture's exec window) can never interleave their
+        ``sys.modules``/``sys.path`` mutations or observe each other's
+        aliases.  The wait is bounded by the same per-call ``timeout`` budget
+        the wrapper requalifications already spend; a contended wait that
+        outlives it refuses closed without installing anything.  Same-thread
+        nesting stays legal through the re-entrant lock, and any captured
+        failure still restores the exact prior state before the lock is
+        released.
+        """
+        if deadline is None:deadline = time.monotonic() + self._timeout
+        _acquire_scope_lock(deadline)
         try:
-            yield
+            previous, old_path = _install_scope(self._objects)
+            try:
+                yield
+            finally:
+                _restore_scope(previous, old_path)
         finally:
-            _restore_scope(previous, old_path)
+            _SCOPE_LOCK.release()
 
     # ------------------------------------------------------- compiler calls
 
@@ -364,11 +417,12 @@ class CapturedProjectPlanningCompilers:
         returned draft are detached deep copies.  The captured compiler's own
         refusals propagate unchanged.
         """
+        deadline=time.monotonic()+self._timeout
         self.check()
         if type(request) is not dict:
             raise ProjectPlanningCompilerUnavailable(_UNAVAILABLE)
         payload = deepcopy(request)
-        with self._scope():
+        with self._scope(deadline=deadline):
             draft = self.creation_compiler.compile_proposal(payload, programs=self.programs)
         if type(draft) is not dict:
             raise ProjectPlanningCompilerUnavailable(_UNAVAILABLE)
@@ -383,6 +437,7 @@ class CapturedProjectPlanningCompilers:
         is requalified before and after the call; inputs and the returned
         recipe are detached deep copies.
         """
+        deadline=time.monotonic()+self._timeout
         self.check()
         payload = (
             deepcopy(request),
@@ -390,7 +445,7 @@ class CapturedProjectPlanningCompilers:
             deepcopy(planning_result),
             deepcopy(actor),
         )
-        with self._scope():
+        with self._scope(deadline=deadline):
             recipe = self.proposal_compiler.compile_proposal_recipe(
                 *payload, owner=self.owner, declaration_owner=self.declaration
             )
@@ -433,6 +488,12 @@ def capture_project_planning_compilers(
     :class:`CapturedProjectPlanningCompilers`; the caller must bracket the
     actual engine call with the parent-owned outer collector seals, which this
     capture neither performs nor records.
+
+    The captured-exec alias window holds the private module alias lock for its
+    whole bracket, bounded by the remaining capture deadline: a concurrent
+    capture or compiler call serializes behind it instead of installing its
+    own aliases over this one, and a wait that outlives the remaining
+    deadline refuses closed without installing anything.
     """
     try:
         root = Path(macro_root)
@@ -492,43 +553,47 @@ def capture_project_planning_compilers(
         module.__file__ = str(root / _FIXED_ROLE_KEYS[key])
         modules[name] = module
 
-    previous, old_path = _install_scope(modules)
+    _acquire_scope_lock(deadline)
     try:
-        for key in ("owner", "contract", "creation_compiler", "declaration", "proposal_compiler"):
-            module = modules[_MODULE_FOR_KEY[key]]
-            exec(compile(texts[key], module.__file__, "exec"), module.__dict__)
-        owner = modules["scripts.agentos"]
-        contract = modules["scripts.agentos_project_plan_contract"]
-        # Bind the captured contract into the captured owner exactly as the
-        # existing canonical-basis capture does: the pin's own lazy contract
-        # import would otherwise resolve outside the captured alias scope
-        # after restoration.
-        owner._project_plan_contract = lambda: contract
-        owner._PROGRAMS = _CapturedProgrammes(texts["programs"])
-        programs = owner._load_programs()
-        if (
-            type(programs) not in (set, frozenset)
-            or not programs
-            or any(type(name) is not str or not name for name in programs)
+        previous, old_path = _install_scope(modules)
+        try:
+            for key in ("owner", "contract", "creation_compiler", "declaration", "proposal_compiler"):
+                module = modules[_MODULE_FOR_KEY[key]]
+                exec(compile(texts[key], module.__file__, "exec"), module.__dict__)
+            owner = modules["scripts.agentos"]
+            contract = modules["scripts.agentos_project_plan_contract"]
+            # Bind the captured contract into the captured owner exactly as the
+            # existing canonical-basis capture does: the pin's own lazy contract
+            # import would otherwise resolve outside the captured alias scope
+            # after restoration.
+            owner._project_plan_contract = lambda: contract
+            owner._PROGRAMS = _CapturedProgrammes(texts["programs"])
+            programs = owner._load_programs()
+            if (
+                type(programs) not in (set, frozenset)
+                or not programs
+                or any(type(name) is not str or not name for name in programs)
+            ):
+                raise ProjectPlanningCompilerUnavailable(_UNAVAILABLE)
+        except ProjectPlanningCompilerUnavailable:
+            raise
+        except (
+            SyntaxError,
+            ValueError,
+            TypeError,
+            KeyError,
+            AttributeError,
+            ImportError,
+            OSError,
+            UnicodeError,
+            RecursionError,
+            OverflowError,
         ):
-            raise ProjectPlanningCompilerUnavailable(_UNAVAILABLE)
-    except ProjectPlanningCompilerUnavailable:
-        raise
-    except (
-        SyntaxError,
-        ValueError,
-        TypeError,
-        KeyError,
-        AttributeError,
-        ImportError,
-        OSError,
-        UnicodeError,
-        RecursionError,
-        OverflowError,
-    ):
-        raise ProjectPlanningCompilerUnavailable(_UNAVAILABLE) from None
+            raise ProjectPlanningCompilerUnavailable(_UNAVAILABLE) from None
+        finally:
+            _restore_scope(previous, old_path)
     finally:
-        _restore_scope(previous, old_path)
+        _SCOPE_LOCK.release()
 
     captured = CapturedProjectPlanningCompilers(
         creation_compiler=modules["scripts.agentos_project_proposal"],
