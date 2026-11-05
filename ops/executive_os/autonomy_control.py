@@ -73,6 +73,13 @@ STATUS_SCHEMA_VERSION = "mastermind.executive_autonomy_status/v1"
 OPERATION_SCHEMA_VERSION = "mastermind.executive_autonomy_operation/v1"
 SYSTEM_ROOT = Path("/Library/Application Support/MastermindExecutive")
 CONFIG_ROOT = SYSTEM_ROOT / "config"
+# The expected owner of the installed configuration root and of every
+# canonical artifact this owner publishes under it.  They are the root
+# principal on the installed host.  The constants exist so the qualification
+# is stated exactly once and so an unprivileged hermetic test can bind the
+# SAME publication primitive to a private temporary root.
+_CONFIG_ROOT_UID = 0
+_CONFIG_ROOT_GID = 0
 RUNTIME_ROOT = Path("/var/db/mastermind-executive")
 CONTROL_CONFIG = CONFIG_ROOT / "control.json"
 WORKER_CONFIG = CONFIG_ROOT / "worker-codex.json"
@@ -439,6 +446,31 @@ _COMPONENT_ARCHIVES = (
     "prior-component-ceo-submit-receipt.json",
     "prior-component-receipt.json",
 )
+# The coordinated archives of ONE Hermes host-read selection.  They exist
+# only for a transaction that sealed a selection, so the legacy transaction
+# format is preserved exactly when the operation carries none.
+_COMPONENT_BINDING_ARCHIVES = (
+    "prior-component-binding-selection.json",
+    "prior-component-hermes-read-input.json",
+    "component-binding-candidate.json",
+)
+# The closed shape of the OPTIONAL nested selection member of a component
+# marker.  It is a STRUCTURED member, not a digest: it carries hashes,
+# EXPLICIT presence, the derived destination and the ordered effect.
+_COMPONENT_BINDING_MANIFEST_KEYS = frozenset(
+    {
+        "input_sha256",
+        "candidate_sha256",
+        "destination",
+        "destination_present",
+        "prior_selector_present",
+        "prior_binding_sha256",
+        "bindings_count",
+        "remote_transports_count",
+        "execution_present",
+        "effect",
+    }
+)
 _COMPONENT_MANIFEST_FIELDS = frozenset(
     {
         "component_plan_sha256",
@@ -463,6 +495,10 @@ _COMPONENT_MANIFEST_FIELDS = frozenset(
         "component_prior_worker_launchd_disabled",
     }
 )
+# The OPTIONAL selection member of a component marker.  It is absent for a
+# transaction that carries no selection, and the legacy marker format is
+# preserved exactly in that case.
+_COMPONENT_OPTIONAL_MANIFEST_FIELDS = frozenset({"component_binding"})
 _COMPONENT_DIGEST_MANIFEST_FIELDS = frozenset(
     _COMPONENT_MANIFEST_FIELDS
     - {
@@ -498,6 +534,13 @@ _COMPONENT_PHASES = frozenset(
         "CONTROL_COMPONENT_TARGETS_PROVEN",
         "CONTROL_COMPONENT_RECEIPT_REPLACED",
         "CONTROL_OBSERVATION_PUBLICATION_STARTED",
+        # The two ACTUAL binding phases of the same component vocabulary.
+        # They record the ONE immutable Fabric-binding publication this
+        # operation may dispatch.  They NEVER authorize re-entering the
+        # canonical publication: a reconciliation proves the retained
+        # postimage and never publishes again.
+        "CONTROL_COMPONENT_BINDING_PUBLICATION_STARTED",
+        "CONTROL_COMPONENT_BINDING_PROVEN",
         # The phase the component publication path actually records.  It is a
         # RECOVERABLE phase: an interruption after the observation was
         # published must be reconciled by an exact-byte readback, never by a
@@ -1066,6 +1109,30 @@ def _absolute_path(value: str) -> Path:
     return path
 
 
+def _canonical_absolute_path(value: str) -> str:
+    """One canonical, absolute input path.
+
+    The path is only ever a QUALIFIED INPUT the operator staged: it is read
+    through the incumbent's own bounded, no-follow, identity-joined pinned
+    read and bound to the exact digest supplied beside it.  It is never a
+    destination, never an output path and never caller-selected.
+    """
+
+    if type(value) is not str or not value or "\x00" in value:
+        raise argparse.ArgumentTypeError("an exact absolute path is required")
+    path = Path(value)
+    if (
+        not path.is_absolute()
+        or ".." in path.parts
+        or str(path) != value
+        or "//" in value
+    ):
+        raise argparse.ArgumentTypeError(
+            "the path must be a canonical absolute path"
+        )
+    return value
+
+
 def _a2_restore_digest(value: str) -> str:
     if re.fullmatch(r"[0-9a-f]{64}", value) is None:
         raise argparse.ArgumentTypeError("exact lower-case SHA-256 witness required")
@@ -1241,6 +1308,22 @@ def _parser() -> argparse.ArgumentParser:
     component_plan.add_argument(
         "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
     )
+    # The PAIRED Hermes host-read selection.  Both coordinates are one
+    # selection: the exact qualified input path and the exact digest of its
+    # raw bytes.  Both absent preserve the existing source-only behaviour
+    # byte-for-byte; exactly one of them refuses.
+    component_plan.add_argument(
+        "--hermes-role-metadata-read-input",
+        type=_canonical_absolute_path,
+        action=_StoreOnce,
+        default=None,
+    )
+    component_plan.add_argument(
+        "--hermes-role-metadata-read-sha256",
+        type=_exact_digest,
+        action=_StoreOnce,
+        default=None,
+    )
     component_apply = sub.add_parser(
         "apply-control-component",
         help="Publish exactly the approved Control component plan.",
@@ -1250,6 +1333,18 @@ def _parser() -> argparse.ArgumentParser:
     )
     component_apply.add_argument(
         "--plan-sha256", type=_exact_digest, action=_StoreOnce, required=True
+    )
+    component_apply.add_argument(
+        "--hermes-role-metadata-read-input",
+        type=_canonical_absolute_path,
+        action=_StoreOnce,
+        default=None,
+    )
+    component_apply.add_argument(
+        "--hermes-role-metadata-read-sha256",
+        type=_exact_digest,
+        action=_StoreOnce,
+        default=None,
     )
     component_reconcile = sub.add_parser(
         "reconcile-control-component",
@@ -3530,8 +3625,8 @@ class ProductionTransactionHost(ProductionArmHost):
         if (
             stat.S_ISLNK(info.st_mode)
             or not stat.S_ISDIR(info.st_mode)
-            or info.st_uid != 0
-            or info.st_gid != 0
+            or info.st_uid != _CONFIG_ROOT_UID
+            or info.st_gid != _CONFIG_ROOT_GID
             or stat.S_IMODE(info.st_mode) != 0o755
             or _has_acl(CONFIG_ROOT)
         ):
@@ -3702,6 +3797,10 @@ class ProductionTransactionHost(ProductionArmHost):
                     or (value.get("component_mode") == _COMPONENT_OFFLINE_MODE)
                     != (value.get("component_prior_control_launchd_disabled") is True)):
                 raise TransactionEffectUnknown()
+            # The OPTIONAL selection member is STRUCTURED: it has its own
+            # closed validator and is never read as a digest string.
+            if value.get("component_binding") is not None:
+                _require_component_binding_member(value["component_binding"])
             required |= _COMPONENT_MANIFEST_FIELDS
         elif value.get("operation") == CONTROL_COMPONENT_UPDATE:
             # A component marker is never valid without its own closed fields.
@@ -3716,12 +3815,26 @@ class ProductionTransactionHost(ProductionArmHost):
                 raise TransactionEffectUnknown()
         keys = set(value)
         allowed_with_control_preimage = required | {_CONTROL_LAUNCHD_PREIMAGE_FIELD}
+        # The OPTIONAL selection member is part of a component marker only
+        # when that marker carries a selection.  A component marker without
+        # one keeps the legacy key set exactly.
+        allowed_sets = {
+            frozenset(required),
+            frozenset(allowed_with_control_preimage),
+        }
+        if value.get("operation") == CONTROL_COMPONENT_UPDATE:
+            allowed_sets.add(
+                frozenset(required | _COMPONENT_OPTIONAL_MANIFEST_FIELDS))
+            allowed_sets.add(
+                frozenset(
+                    required
+                    | _COMPONENT_OPTIONAL_MANIFEST_FIELDS
+                    | {_CONTROL_LAUNCHD_PREIMAGE_FIELD}
+                )
+            )
         if (
             frozenset(keys)
-            not in {
-                frozenset(required),
-                frozenset(allowed_with_control_preimage),
-            }
+            not in allowed_sets
             or value.get("schema_version") != _TRANSACTION_SCHEMA
             or value.get("operation") not in _TRANSACTION_OPERATIONS
             or not isinstance(value.get("phase"), str)
@@ -3792,6 +3905,10 @@ class ProductionTransactionHost(ProductionArmHost):
             value.update({key: current[key] for key in _GATEWAY_MANIFEST_FIELDS})
         if current is not None and set(current) & _COMPONENT_MANIFEST_FIELDS:
             value.update({key: current[key] for key in _COMPONENT_MANIFEST_FIELDS})
+        if current is not None and "component_binding" in current:
+            # The OPTIONAL selection member is carried forward unchanged: it
+            # is part of the retained identity of this operation.
+            value["component_binding"] = current["component_binding"]
         _atomic_file(
             self._manifest_path(),
             _encoded_json(value),
@@ -4463,8 +4580,11 @@ class ProductionTransactionHost(ProductionArmHost):
             expected.add(_GATEWAY_GRANT_ARCHIVE)
             archives.append(AUTONOMY_TRANSACTION / _GATEWAY_GRANT_ARCHIVE)
         if set(manifest) & _COMPONENT_MANIFEST_FIELDS:
-            expected.update(_COMPONENT_ARCHIVES)
-            archives.extend(AUTONOMY_TRANSACTION / name for name in _COMPONENT_ARCHIVES)
+            component_archives = _component_archive_names(manifest)
+            expected.update(component_archives)
+            archives.extend(
+                AUTONOMY_TRANSACTION / name for name in component_archives
+            )
         if manifest.get("operation") in DIALOGUE_CANARY_OPERATIONS:
             expected.add(_CANARY_RECEIPT_ARCHIVE)
             archives.append(AUTONOMY_TRANSACTION / _CANARY_RECEIPT_ARCHIVE)
@@ -7664,6 +7784,11 @@ _COMPONENT_REFUSAL_CODES = frozenset(
         "control_component_owner_not_quiescent",
         "control_component_service_uids_live",
         "control_component_plan_digest_mismatch",
+        "control_component_hermes_read_selector_incomplete",
+        "control_component_hermes_read_input_invalid",
+        "control_component_hermes_read_binding_invalid",
+        "control_component_hermes_read_binding_conflict",
+        "control_component_binding_config_not_switched",
     }
 )
 # The phases from which a same-operation reconciliation may still perform the
@@ -7692,6 +7817,62 @@ def _component_refusal(code: str) -> ComponentUpdateRefused:
     if code not in _COMPONENT_REFUSAL_CODES:
         raise ValueError("unknown control component refusal")
     return ComponentUpdateRefused(code)
+
+
+def _component_archive_names(manifest: Mapping[str, Any]) -> tuple[str, ...]:
+    """The sealed archives of one component transaction.
+
+    The legacy transaction format is preserved exactly when the operation
+    carries no selection: the three coordinated selection archives exist
+    only for a transaction that sealed them.
+    """
+
+    names = list(_COMPONENT_ARCHIVES)
+    if type(manifest.get("component_binding")) is dict:
+        names.extend(_COMPONENT_BINDING_ARCHIVES)
+    return tuple(names)
+
+
+def _require_component_binding_member(value: Any) -> None:
+    """One closed selection member of a component marker.
+
+    It is a STRUCTURED member, not a digest: it carries hashes, EXPLICIT
+    presence, the derived destination and the ordered effect.  Every field
+    is checked against its own closed shape, and the destination must be the
+    one DERIVED from the candidate digest, so a marker can never name an
+    artifact this operation did not compose.
+    """
+
+    from ops.executive_os import control_component_update as compiler
+
+    if type(value) is not dict or set(value) != _COMPONENT_BINDING_MANIFEST_KEYS:
+        raise TransactionEffectUnknown()
+    for field in ("destination_present", "prior_selector_present", "execution_present"):
+        if type(value.get(field)) is not bool:
+            raise TransactionEffectUnknown()
+    for field in ("bindings_count", "remote_transports_count"):
+        count = value.get(field)
+        if type(count) is not int or type(count) is bool or count < 0:
+            raise TransactionEffectUnknown()
+    for field in ("input_sha256", "candidate_sha256"):
+        if re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))) is None:
+            raise TransactionEffectUnknown()
+    if value.get("prior_selector_present"):
+        if re.fullmatch(r"[0-9a-f]{64}", str(value.get("prior_binding_sha256", ""))) is None:
+            raise TransactionEffectUnknown()
+    elif value.get("prior_binding_sha256") != "":
+        raise TransactionEffectUnknown()
+    destination = value.get("destination")
+    if type(destination) is not str:
+        raise TransactionEffectUnknown()
+    try:
+        derived = compiler.binding_destination(str(value.get("candidate_sha256")))
+    except Exception as exc:
+        raise TransactionEffectUnknown() from exc
+    if destination != derived:
+        raise TransactionEffectUnknown()
+    if value.get("effect") != compiler.binding_effect(destination):
+        raise TransactionEffectUnknown()
 
 
 def _component_receipt_payload(raw: bytes, *, code: str) -> dict[str, Any]:
@@ -7922,6 +8103,14 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         # with the installed peer's own local budget in exact integer
         # nanoseconds; when absent the peer's own 25 s budget is used.
         self._component_operation_deadline_monotonic_ns: int | None = None
+        # The OPTIONAL Hermes host-read selection of this operation.  Every
+        # member is None for a source-only update, and the historical
+        # behaviour is then byte-for-byte unchanged.
+        self._component_binding_metadata: dict[str, Any] | None = None
+        self._component_binding_candidate_bytes: bytes | None = None
+        self._component_binding_input: tuple[str, str] | None = None
+        self._component_binding_prior_raw: bytes = b""
+        self._component_binding_prior_selector_present: bool = False
 
     # -- fixed installed reads ------------------------------------------------
 
@@ -8374,12 +8563,175 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             preimages[name] = (present, sha256_bytes(raw), raw)
         return preimages
 
-    def observe_control_component_update(self, *, target_sha: str) -> dict[str, Any]:
+    # -- the ONE Hermes host-read selection ----------------------------------
+
+    @staticmethod
+    def _component_binding_bytes(path: Path) -> tuple[bool, bytes]:
+        """The EXACT bytes of one published binding artifact.
+
+        The read is the incumbent's own root-file proof: a regular file,
+        root owned, root grouped, mode 0444, one link, no ACL and no
+        symlink.  Its ABSENCE is proven by an explicit FileNotFoundError and
+        is never inferred from the byte length, so an empty artifact stays
+        present and distinct from a missing one.
+        """
+
+        try:
+            raw, _info = _read_root_file(
+                path,
+                modes=frozenset({0o444}),
+                uid=_CONFIG_ROOT_UID,
+                gid=_CONFIG_ROOT_GID,
+            )
+        except FileNotFoundError:
+            return False, b""
+        except HostControlError as exc:
+            if isinstance(exc.__cause__, FileNotFoundError):
+                return False, b""
+            raise _component_refusal(
+                "control_component_hermes_read_binding_conflict"
+            ) from exc
+        return True, raw
+
+    def _component_binding_selection(
+        self, hermes_read: tuple[str, str], control: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Qualify ONE Hermes host-read selection and compose its candidate.
+
+        The input is read through the incumbent's own bounded, no-follow,
+        identity-joined pinned read and is bound to the EXACT digest the
+        caller supplied.  The read member is qualified by the incumbent's own
+        validator and the prior selected binding -- when the Control
+        configuration carries BOTH selector coordinates -- by the incumbent
+        v1/v2/v3 parser.  Nothing here writes, exports or transmits a
+        credential, an endpoint or a key.
+        """
+
+        from control_plane import executive_fabric_composition as composition
+        from ops.executive_os import control_component_update as compiler
+
+        input_path, input_sha256 = hermes_read
+        try:
+            input_raw, _identity = composition._read_pinned(
+                composition._absolute_path(input_path), input_sha256
+            )
+            input_document = composition._document(input_raw)
+            if type(input_document) is not dict:
+                raise composition.FabricCompositionError(
+                    "Hermes host observation differs from its closed schema"
+                )
+            # The EXISTING validator qualifies the read member: its schema,
+            # its host reference, its source pins and its TLS transport.
+            # There is no second validator here.
+            composition.HermesHostObservationBinding.from_document(input_document)
+        except (composition.FabricCompositionError, OSError, ValueError) as exc:
+            raise _component_refusal(
+                "control_component_hermes_read_input_invalid"
+            ) from exc
+
+        selector_present = (
+            "fabric_bindings_path" in control or "fabric_bindings_sha256" in control
+        )
+        prior_bindings: tuple[Mapping[str, Any], ...] = ()
+        prior_transports: tuple[Mapping[str, Any], ...] = ()
+        prior_raw = b""
+        prior_binding_sha256 = ""
+        if selector_present:
+            if (
+                "fabric_bindings_path" not in control
+                or "fabric_bindings_sha256" not in control
+            ):
+                # A PARTIAL selector is a refusal, never an absence.
+                raise _component_refusal(
+                    "control_component_hermes_read_binding_invalid"
+                )
+            prior_path = control["fabric_bindings_path"]
+            prior_digest = control["fabric_bindings_sha256"]
+            if (
+                type(prior_path) is not str
+                or type(prior_digest) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", prior_digest) is None
+            ):
+                raise _component_refusal(
+                    "control_component_hermes_read_binding_invalid"
+                )
+            try:
+                prior_raw, _prior_identity = composition._read_pinned(
+                    composition._absolute_path(prior_path), prior_digest
+                )
+                # The incumbent v1/v2/v3 parser qualifies the prior binding.
+                composition._composition(prior_raw)
+                prior_document = composition._document(prior_raw)
+            except (composition.FabricCompositionError, OSError, ValueError) as exc:
+                raise _component_refusal(
+                    "control_component_hermes_read_binding_invalid"
+                ) from exc
+            prior_bindings = tuple(prior_document.get("bindings") or ())
+            prior_transports = tuple(prior_document.get("remote_transports") or ())
+            prior_binding_sha256 = sha256_bytes(prior_raw)
+            if "canonical_paid_fabric" in control and (
+                prior_bindings or prior_transports
+            ):
+                # The installed paid source cannot replace or mix an
+                # EXECUTION owner.  The existing exclusion is preserved and
+                # rows are never deleted to satisfy it.
+                raise _component_refusal(
+                    "control_component_hermes_read_binding_conflict"
+                )
+
+        composed = compiler.compose_binding_candidate(
+            input_document=input_document,
+            prior_bindings=prior_bindings,
+            prior_remote_transports=prior_transports,
+        )
+        try:
+            # The composed document is proved loadable by the incumbent v3
+            # parser: the Control's own loader will read exactly these bytes.
+            composition._composition(composed)
+        except composition.FabricCompositionError as exc:
+            raise _component_refusal(
+                "control_component_hermes_read_binding_conflict"
+            ) from exc
+        candidate_sha256 = sha256_bytes(composed)
+        destination = compiler.binding_destination(candidate_sha256)
+        if os.fspath(CONFIG_ROOT) != compiler.CONFIG_ROOT_PATH:
+            raise _component_refusal(
+                "control_component_hermes_read_binding_conflict"
+            )
+        present, existing = self._component_binding_bytes(Path(destination))
+        if present and existing != composed:
+            # The derived destination exists with DIFFERENT bytes.  It is
+            # never overwritten and never adopted.
+            raise _component_refusal(
+                "control_component_hermes_read_binding_conflict"
+            )
+        return {
+            "input_document": input_document,
+            "input_raw": input_raw,
+            "input_sha256": input_sha256,
+            "prior_bindings": prior_bindings,
+            "prior_remote_transports": prior_transports,
+            "prior_raw": prior_raw,
+            "prior_binding_sha256": prior_binding_sha256,
+            "prior_selector_present": selector_present,
+            "destination_present": present,
+            "candidate_bytes": composed,
+            "candidate_sha256": candidate_sha256,
+            "destination": destination,
+        }
+
+    def observe_control_component_update(
+        self, *, target_sha: str, hermes_read: tuple[str, str] | None = None
+    ) -> dict[str, Any]:
         """Read-only observation: the plan and the exact candidate it binds.
 
         Every precondition is proved here, before any marker, installed file,
         receipt or launchd effect exists.  A false precondition is a typed
         refusal with zero cutover.
+
+        The OPTIONAL Hermes host-read selection is qualified here as well:
+        the input, the prior selected binding and the composed candidate are
+        all proved while the operation is still read-only.
         """
 
         from ops.executive_os import control_component_update as compiler
@@ -8494,6 +8846,19 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         mode, control_disabled, worker_disabled = self._component_mode()
 
         try:
+            selection = None
+            binding = None
+            if hermes_read is not None:
+                binding = self._component_binding_selection(hermes_read, control)
+                selection = compiler.BindingSelectionInputs(
+                    input_document=binding["input_document"],
+                    prior_bindings=binding["prior_bindings"],
+                    prior_remote_transports=binding["prior_remote_transports"],
+                    input_sha256=binding["input_sha256"],
+                    prior_binding_sha256=binding["prior_binding_sha256"],
+                    prior_selector_present=binding["prior_selector_present"],
+                    destination_present=binding["destination_present"],
+                )
             candidate = compiler.compile_candidate(
                 control_raw,
                 control_plist_bytes,
@@ -8503,6 +8868,7 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
                 worker_config_sha256=worker_digest,
                 prior_release_root=prior_release_root,
                 target_release_root=target_release_root,
+                selection=selection,
             )
         except compiler.ComponentError as exc:
             raise _component_refusal(
@@ -8557,6 +8923,7 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         return {
             "plan": document,
             "candidate": candidate,
+            "binding": binding,
             "prior_configs": configs,
             "candidate_configs": CandidateConfigs(
                 control=json.loads(candidate.control_config_after.decode("utf-8")),
@@ -8646,6 +9013,11 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
                 self._component_worker_launchd_disabled
             ),
         )
+        if self._component_binding_metadata is not None:
+            # The OPTIONAL structured selection member.  It is absent for a
+            # source-only update, and the legacy marker format is preserved
+            # exactly in that case.
+            value["component_binding"] = dict(self._component_binding_metadata)
         value["phase"] = phase
         return value
 
@@ -8662,7 +9034,12 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         ProductionTransactionHost._seal_generation(
             self, generation, transaction, operation=operation
         )
-        for name in _COMPONENT_ARCHIVES:
+        archives = list(_COMPONENT_ARCHIVES)
+        if "component-binding-candidate.json" in self._component_prior_archives:
+            # The coordinated selection archives exist only for a
+            # transaction that sealed a selection.
+            archives.extend(_COMPONENT_BINDING_ARCHIVES)
+        for name in archives:
             _atomic_file(
                 generation / name,
                 self._component_prior_archives.get(name, b""),
@@ -8682,7 +9059,7 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         )
         _fsync_directory(generation)
 
-    def _component_archives(self) -> dict[str, bytes]:
+    def _component_archives(self, manifest: Mapping[str, Any]) -> dict[str, bytes]:
         """Read back the sealed preimages of this operation, exactly."""
 
         archives: dict[str, bytes] = {}
@@ -8691,7 +9068,7 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
                 AUTONOMY_TRANSACTION / name, modes=frozenset({0o400}), uid=0, gid=0
             )
             archives[name] = raw
-        for name in _COMPONENT_ARCHIVES:
+        for name in _component_archive_names(manifest):
             raw, _info = _read_root_file(
                 AUTONOMY_TRANSACTION / name, modes=frozenset({0o400}), uid=0, gid=0
             )
@@ -8776,8 +9153,78 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             # same state as an explicit "enabled" row.
             if bool(self._component_disabled_override(label)) is not manifest[field]:
                 raise TransactionEffectUnknown()
+        # The OPTIONAL selection preimages are rechecked too: the input, the
+        # prior selected binding and the derived destination.
+        member = manifest.get("component_binding")
+        if type(member) is dict:
+            self._recheck_component_binding_preimages(member)
         # The target source is re-proved under the claimed transaction.
         self._recheck_component_target_source(transaction)
+
+    def _recheck_component_binding_preimages(self, member: Mapping[str, Any]) -> None:
+        """Every sealed selection preimage must still be exactly the sealed one.
+
+        The qualified input, the prior selected binding and the derived
+        destination are all compared against the SEALED bytes.  A binding
+        that moved after the seal is never adopted and a destination that
+        appeared after the approved observation is never overwritten.
+        """
+
+        from control_plane import executive_fabric_composition as composition
+
+        payload = self._component_binding_candidate_bytes
+        if payload is None:
+            raise TransactionEffectUnknown()
+        if sha256_bytes(payload) != member["candidate_sha256"]:
+            raise TransactionEffectUnknown()
+        # The exact qualified input must still be the sealed input.
+        selector = self._component_binding_input
+        if selector is None:
+            raise TransactionEffectUnknown()
+        input_path, input_sha256 = selector
+        try:
+            input_raw, _identity = composition._read_pinned(
+                composition._absolute_path(input_path), input_sha256
+            )
+        except (composition.FabricCompositionError, OSError, ValueError) as exc:
+            raise TransactionEffectUnknown() from exc
+        if sha256_bytes(input_raw) != member["input_sha256"]:
+            raise TransactionEffectUnknown()
+        # The prior selected binding must still be exactly the sealed bytes.
+        if bool(member["prior_selector_present"]):
+            try:
+                prior_raw, _prior_identity = composition._read_pinned(
+                    composition._absolute_path(self._component_binding_prior_path()),
+                    str(member["prior_binding_sha256"]),
+                )
+            except (composition.FabricCompositionError, OSError, ValueError) as exc:
+                raise TransactionEffectUnknown() from exc
+            if sha256_bytes(prior_raw) != member["prior_binding_sha256"]:
+                raise TransactionEffectUnknown()
+        # The derived destination is either still absent, or still the exact
+        # sealed identity and bytes.
+        present, raw = self._component_binding_bytes(
+            Path(str(member["destination"]))
+        )
+        if bool(member["destination_present"]):
+            if not present or raw != payload:
+                raise TransactionEffectUnknown()
+        elif present:
+            # The destination appeared after the approved observation: it is
+            # never overwritten and never adopted.
+            raise TransactionEffectUnknown()
+
+    def _component_binding_prior_path(self) -> str:
+        """The path of the prior selected binding, as the Control names it."""
+
+        try:
+            _control, _worker, _cd, _wd, _cr, _wr = self._configs()
+        except (HostControlError, KeyError, OSError) as exc:
+            raise TransactionEffectUnknown() from exc
+        path = _control.get("fabric_bindings_path")
+        if type(path) is not str:
+            raise TransactionEffectUnknown()
+        return path
 
     def _recheck_component_target_source(self, transaction: TransactionContext) -> None:
         """The target source must still be sealed and still present.
@@ -8797,6 +9244,197 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         if self._component_admin_checkout(str(transaction.expected_sha)) != (
             str(transaction.expected_sha)
         ):
+            raise TransactionEffectUnknown()
+
+    def _publish_component_binding_artifact(
+        self, destination: Path, payload: bytes
+    ) -> None:
+        """Publish ONE immutable binding artifact under the qualified root.
+
+        The publication is a no-replace rename of a privately staged file
+        into the qualified configuration root, taken under the current
+        configuration publication mutex.  It never replaces an existing
+        name, never copies, never deletes and never emulates the exclusive
+        rename: an occupied destination is a refusal, not a repair.
+
+        The owner is the incumbent ``capacity_host_artifacts._rename_exclusive``
+        and the ancestors are the incumbent qualified chain, so the artifact
+        is published exactly the way every other canonical installed file is
+        published.
+        """
+
+        from control_plane import executive_fabric_composition as composition
+        from ops.executive_os.capacity_host_artifacts import (
+            CapacityHostArtifactError,
+            _rename_exclusive,
+        )
+
+        parent = -1
+        stage = ""
+        stage_ino: int | None = None
+        created = False
+        renamed = False
+        try:
+            self._config_root_safe()
+            try:
+                composition._trusted_parent_chain(CONFIG_ROOT)
+            except composition.FabricCompositionError as exc:
+                raise TransactionEffectUnknown() from exc
+            parent = os.open(
+                CONFIG_ROOT,
+                os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0),
+            )
+            try:
+                fcntl.flock(parent, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except (BlockingIOError, OSError) as exc:
+                # The current configuration publication mutex is occupied.
+                raise TransactionEffectUnknown() from exc
+            held = os.fstat(parent)
+            visible = CONFIG_ROOT.lstat()
+            if (
+                (held.st_dev, held.st_ino) != (visible.st_dev, visible.st_ino)
+                or held.st_uid != _CONFIG_ROOT_UID
+                or held.st_gid != _CONFIG_ROOT_GID
+                or not stat.S_ISDIR(held.st_mode)
+            ):
+                raise TransactionEffectUnknown()
+            name = os.fspath(destination)
+            if os.path.dirname(name) != os.fspath(CONFIG_ROOT):
+                raise TransactionEffectUnknown()
+            base = os.path.basename(name)
+            stage = f".{base}.{os.getpid()}.{secrets.token_hex(8)}.stage"
+            descriptor = os.open(
+                stage,
+                os.O_RDWR
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=parent,
+            )
+            created = True
+            try:
+                pending = memoryview(payload)
+                while pending:
+                    count = os.write(descriptor, pending)
+                    if count <= 0:
+                        raise OSError("short binding artifact write")
+                    pending = pending[count:]
+                os.fchown(descriptor, _CONFIG_ROOT_UID, _CONFIG_ROOT_GID)
+                os.fchmod(descriptor, 0o444)
+                os.fsync(descriptor)
+                info = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(info.st_mode)
+                    or info.st_uid != _CONFIG_ROOT_UID
+                    or info.st_gid != _CONFIG_ROOT_GID
+                    or stat.S_IMODE(info.st_mode) != 0o444
+                    or info.st_nlink != 1
+                ):
+                    raise TransactionEffectUnknown()
+                stage_ino = info.st_ino
+                # The staged bytes are observed on the SAME descriptor.
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                observed = os.read(descriptor, len(payload) + 1)
+                if observed != payload:
+                    raise TransactionEffectUnknown()
+            finally:
+                os.close(descriptor)
+            # The ONE exclusive, no-replace rename.  A destination that
+            # appeared after the approved observation refuses here: it is
+            # never overwritten and never adopted.
+            _rename_exclusive(parent, stage, parent, base)
+            renamed = True
+            os.fsync(parent)
+        except CapacityHostArtifactError as exc:
+            raise TransactionEffectUnknown() from exc
+        except TransactionEffectUnknown:
+            raise
+        except Exception as exc:
+            raise TransactionEffectUnknown() from exc
+        finally:
+            if created and not renamed and parent >= 0 and stage:
+                # The private stage is removed ONLY when it is provably still
+                # this operation's own private file and the canonical
+                # destination is still absent.  A publication whose effect
+                # cannot be proven is never repaired by a second write.
+                try:
+                    staged = os.stat(
+                        stage, dir_fd=parent, follow_symlinks=False
+                    )
+                    if stage_ino is not None and staged.st_ino == stage_ino:
+                        try:
+                            occupied = os.stat(
+                                os.path.basename(str(destination)),
+                                dir_fd=parent,
+                                follow_symlinks=False,
+                            ).st_ino
+                        except FileNotFoundError:
+                            occupied = None
+                        if occupied != staged.st_ino:
+                            os.unlink(stage, dir_fd=parent)
+                            os.fsync(parent)
+                except OSError:
+                    pass
+            if parent >= 0:
+                os.close(parent)
+
+    def _publish_component_binding(self, transaction: TransactionContext) -> None:
+        """Publish the ONE immutable binding artifact, or adopt an identical one.
+
+        A destination that was already observed and sealed as present is
+        ADOPTED without a write: no new filename, no retry rename, no
+        overwrite and no second publication.  A destination that appears
+        after the approved observation refuses without overwrite and without
+        adoption.
+        """
+
+        self._recheck_component_bound(transaction)
+        manifest = self._manifest()
+        member = manifest.get("component_binding")
+        payload = self._component_binding_candidate_bytes
+        if type(member) is not dict or payload is None:
+            raise TransactionEffectUnknown()
+        if sha256_bytes(payload) != member["candidate_sha256"]:
+            raise TransactionEffectUnknown()
+        destination = Path(str(member["destination"]))
+        if bool(member["destination_present"]):
+            present, raw = self._component_binding_bytes(destination)
+            if not present or raw != payload:
+                raise TransactionEffectUnknown()
+            return
+        self._publish_component_binding_artifact(destination, payload)
+        # The exact postimage is qualified after the publication.
+        present, raw = self._component_binding_bytes(destination)
+        if not present or raw != payload:
+            raise TransactionEffectUnknown()
+
+    def _component_requalify_binding(self) -> None:
+        """The installed Control configuration must name the published binding.
+
+        The selected binding is re-read through the SAME qualified artifact
+        owner that published it, so a binding that drifted after the
+        publication prevents completion instead of being discovered later.
+        """
+
+        manifest = self._manifest()
+        member = manifest.get("component_binding")
+        if type(member) is not dict:
+            return
+        try:
+            _control, _worker, _cd, _wd, _cr, _wr = self._configs()
+        except (HostControlError, KeyError, OSError) as exc:
+            raise TransactionEffectUnknown() from exc
+        control = json.loads(_cr.decode("utf-8")) if _cr else {}
+        if (
+            control.get("fabric_bindings_path") != member["destination"]
+            or control.get("fabric_bindings_sha256") != member["candidate_sha256"]
+        ):
+            raise TransactionEffectUnknown()
+        present, raw = self._component_binding_bytes(
+            Path(str(member["destination"]))
+        )
+        if not present or sha256_bytes(raw) != member["candidate_sha256"]:
             raise TransactionEffectUnknown()
 
     def _component_service_uids_quiescent(self) -> None:
@@ -9188,6 +9826,7 @@ def execute_control_component_update(
     *,
     target_sha: str,
     plan_sha256: str,
+    hermes_read: tuple[str, str] | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Publish exactly the approved Control component plan.
@@ -9195,16 +9834,21 @@ def execute_control_component_update(
     The plan is recompiled from the LIVE installed state and its digest must
     match the operator's digest exactly.  The marker is then claimed on the
     ONE existing global owner, the preimages are sealed, and the effects are
-    dispatched in the fixed order: one Control bootout, the bounded target
-    publications and the validated receipt correlations, one Control bootstrap
-    of the verified new plist, the wrapper-attested consumed-config proof,
-    and the control observation published by the SAME held owner.
+    dispatched in the fixed order: one Control bootout, the stopped-boundary
+    proof, the ONE immutable binding publication when the operation carries
+    a Hermes host-read selection, the bounded target publications and the
+    validated receipt correlations, one Control bootstrap of the verified new
+    plist, the wrapper-attested consumed-config proof, the requalification of
+    the selected binding, and the control observation published by the SAME
+    held owner.
     """
 
     from ops.executive_os import control_component_update as compiler
 
     host.effective_uid()
-    observation = host.observe_control_component_update(target_sha=target_sha)
+    observation = host.observe_control_component_update(
+        target_sha=target_sha, hermes_read=hermes_read
+    )
     document = observation["plan"]
     if compiler.plan_digest(document) != plan_sha256:
         raise _component_refusal("control_component_plan_digest_mismatch")
@@ -9263,6 +9907,30 @@ def execute_control_component_update(
         "prior-control-plist.plist": observation["prior_control_plist"],
         "prior-worker-plist.plist": observation["prior_worker_plist"],
     }
+    # The OPTIONAL selection: its qualified input, the ORIGINAL bytes of the
+    # prior selected binding and the exact merged candidate are sealed with
+    # the rest of the preimages, before the canonical marker can become
+    # visible.
+    binding = observation["binding"]
+    if binding is not None:
+        if candidate.selection is None:  # pragma: no cover - the closed pair
+            raise TransactionEffectUnknown()
+        host._component_binding_metadata = dict(candidate.selection.document())
+        host._component_binding_candidate_bytes = binding["candidate_bytes"]
+        host._component_binding_input = (
+            hermes_read if hermes_read is not None else None
+        )
+        host._component_binding_prior_raw = binding["prior_raw"]
+        host._component_binding_prior_selector_present = bool(
+            binding["prior_selector_present"]
+        )
+        host._component_prior_archives.update(
+            {
+                "prior-component-binding-selection.json": binding["prior_raw"],
+                "prior-component-hermes-read-input.json": binding["input_raw"],
+                "component-binding-candidate.json": binding["candidate_bytes"],
+            }
+        )
     # The one receipt this update owes is derived from the retained manifest
     # and the recompiled candidate, so it is byte-identical to the document
     # the original operation owed.
@@ -9308,6 +9976,15 @@ def execute_control_component_update(
                 raise TransactionEffectUnknown()
         host._recheck_component_quiescence(transaction)
         host._persist_phase(transaction, "CONTROL_ABSENT_PROVEN")
+        if host._component_binding_metadata is not None:
+            # The ONE immutable binding publication.  It happens AFTER the
+            # stopped-boundary proof and BEFORE the Control configuration may
+            # name it, and it is published exactly once.
+            host._persist_phase(
+                transaction, "CONTROL_COMPONENT_BINDING_PUBLICATION_STARTED"
+            )
+            host._publish_component_binding(transaction)
+            host._persist_phase(transaction, "CONTROL_COMPONENT_BINDING_PROVEN")
         # The bounded target publications and the validated receipt
         # correlations.
         host._replace_component_target(
@@ -9343,6 +10020,10 @@ def execute_control_component_update(
         host.prove_control_admission_bound(
             target_sha, candidate.control_config_after_sha256
         )
+        # The selected binding is requalified through the SAME qualified
+        # pinned read the Control's own loader uses: a binding that drifted
+        # after the publication prevents completion.
+        host._component_requalify_binding()
         host._persist_phase(transaction, "CONTROL_COMPONENT_TARGETS_PROVEN")
         receipt = _component_receipt_document(
             transaction_id=transaction.transaction_id,
@@ -9451,7 +10132,61 @@ def _reconcile_control_component_update(
 
     from ops.executive_os import control_component_update as compiler
 
-    archives = host._component_archives()
+    archives = host._component_archives(manifest)
+    # The OPTIONAL selection is reconstructed from the SEALED bytes of the
+    # original operation.  A reconciliation never takes a replacement input
+    # and never reads a new external selection.
+    member = manifest.get("component_binding")
+    selection = None
+    binding_payload: bytes | None = None
+    if type(member) is dict:
+        from control_plane import executive_fabric_composition as composition
+
+        try:
+            input_raw = archives["prior-component-hermes-read-input.json"]
+            prior_raw = archives["prior-component-binding-selection.json"]
+            input_document = composition._document(input_raw)
+            if type(input_document) is not dict:
+                raise composition.FabricCompositionError(
+                    "Hermes host observation differs from its closed schema"
+                )
+            if prior_raw:
+                prior_document = composition._document(prior_raw)
+                prior_bindings = tuple(prior_document.get("bindings") or ())
+                prior_transports = tuple(
+                    prior_document.get("remote_transports") or ()
+                )
+            else:
+                prior_bindings = ()
+                prior_transports = ()
+            binding_payload = compiler.compose_binding_candidate(
+                input_document=input_document,
+                prior_bindings=prior_bindings,
+                prior_remote_transports=prior_transports,
+            )
+        except (composition.FabricCompositionError, KeyError, OSError, ValueError) as exc:
+            raise TransactionEffectUnknown() from exc
+        if sha256_bytes(binding_payload) != member["candidate_sha256"]:
+            raise TransactionEffectUnknown()
+        if compiler.binding_destination(str(member["candidate_sha256"])) != member[
+            "destination"
+        ]:
+            raise TransactionEffectUnknown()
+        selection = compiler.BindingSelectionInputs(
+            input_document=input_document,
+            prior_bindings=prior_bindings,
+            prior_remote_transports=prior_transports,
+            input_sha256=str(member["input_sha256"]),
+            prior_binding_sha256=str(member["prior_binding_sha256"]),
+            prior_selector_present=bool(member["prior_selector_present"]),
+            destination_present=bool(member["destination_present"]),
+        )
+        host._component_binding_metadata = dict(member)
+        host._component_binding_candidate_bytes = binding_payload
+        host._component_binding_prior_raw = prior_raw
+        host._component_binding_prior_selector_present = bool(
+            member["prior_selector_present"]
+        )
     prior_control_plist = archives["prior-control-plist.plist"]
     prior_worker_plist = archives["prior-worker-plist.plist"]
     prior_control_config = archives["prior-control.json"]
@@ -9483,6 +10218,14 @@ def _reconcile_control_component_update(
     except (HostControlError, KeyError, OSError, ValueError) as exc:
         raise TransactionEffectUnknown() from exc
     if control_digest != manifest["target_control_sha256"]:
+        if type(member) is dict:
+            # The immutable binding artifact was published, but the Control
+            # configuration was never switched to it.  The ORIGINAL operation
+            # is INCOMPLETE: the artifact stays inert, nothing is resumed,
+            # nothing is republished and no lifecycle effect is dispatched.
+            raise ComponentUpdateRefused(
+                "control_component_binding_config_not_switched"
+            )
         raise TransactionEffectUnknown()
     if worker_digest != manifest["target_worker_sha256"]:
         raise TransactionEffectUnknown()
@@ -9498,6 +10241,7 @@ def _reconcile_control_component_update(
             worker_config_sha256=worker_digest,
             prior_release_root=prior_release_root,
             target_release_root=target_release_root,
+            selection=selection,
         )
     except compiler.ComponentError as exc:
         raise TransactionEffectUnknown() from exc
@@ -9536,6 +10280,29 @@ def _reconcile_control_component_update(
         )
         if sha256_bytes(raw) != manifest[field]:
             raise TransactionEffectUnknown()
+    if type(member) is dict:
+        # The ONE immutable binding artifact is proved at its ORIGINAL
+        # derived destination.  A reconciliation NEVER re-enters the
+        # canonical publication: it inspects the original destination and
+        # the exact retained postimage, and nothing else.
+        present, raw = host._component_binding_bytes(
+            Path(str(member["destination"]))
+        )
+        phase = str(manifest.get("phase"))
+        if not present:
+            if phase == "CONTROL_COMPONENT_BINDING_PUBLICATION_STARTED":
+                # The publication was never completed: the ORIGINAL operation
+                # is INCOMPLETE and nothing is republished.
+                raise ComponentUpdateRefused(
+                    "control_component_hermes_read_binding_conflict"
+                )
+            raise TransactionEffectUnknown()
+        if raw != binding_payload:
+            # A conflicting postimage is never adopted and never overwritten.
+            raise TransactionEffectUnknown()
+        # The selected binding is requalified through the SAME qualified
+        # pinned read the Control's own loader uses.
+        host._component_requalify_binding()
     autonomy_raw, _info = _read_root_file(
         AUTONOMY_RECEIPT, modes=frozenset({0o444}), uid=0, gid=0
     )
@@ -9722,15 +10489,41 @@ def _run_control_component_command(
 
     try:
         if args.command == "plan-control-component":
-            document = compiler.plan(host, target_sha=args.expected_sha)
+            document = compiler.plan(
+                host,
+                target_sha=args.expected_sha,
+                hermes_read_input=getattr(
+                    args, "hermes_role_metadata_read_input", None
+                ),
+                hermes_read_sha256=getattr(
+                    args, "hermes_role_metadata_read_sha256", None
+                ),
+            )
         elif args.command == "apply-control-component":
             document = compiler.apply(
                 host,
                 target_sha=args.expected_sha,
                 plan_sha256=args.plan_sha256,
+                hermes_read_input=getattr(
+                    args, "hermes_role_metadata_read_input", None
+                ),
+                hermes_read_sha256=getattr(
+                    args, "hermes_role_metadata_read_sha256", None
+                ),
             )
         else:
             document = compiler.reconcile(host, target_sha=args.expected_sha)
+    except compiler.ComponentError as exc:
+        # A supplied or observed state that cannot produce this component
+        # update.  It is a typed refusal with zero cutover.
+        print(
+            json.dumps(
+                {"ok": False, "outcome": "REFUSED", "code": exc.code},
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        return 1
     except ComponentUpdateRefused as exc:
         if exc.incomplete:
             # The original transaction was already claimed: this is NOT a

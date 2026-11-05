@@ -30,6 +30,7 @@ usage() {
   /bin/echo "reconcile-os-gateway requires --expected-sha <40 lowercase hex> --expected-bundle-digest <64 lowercase hex> --transaction-id autonomy-<12 lowercase hex>" >&2
   /bin/echo "plan-mcp-component requires --expected-sha <40 lowercase hex> and optionally --set-public-mcp-resource; apply-mcp-component additionally requires --plan-sha256 <64 lowercase hex>; reconcile-mcp-component requires only --expected-sha" >&2
   /bin/echo "plan-control-component and reconcile-control-component require --expected-sha <40 lowercase hex>; apply-control-component additionally requires --plan-sha256 <64 lowercase hex>" >&2
+  /bin/echo "plan-control-component and apply-control-component optionally accept the PAIRED --hermes-role-metadata-read-input <absolute canonical path> and --hermes-role-metadata-read-sha256 <64 lowercase hex>; both or neither" >&2
   exit 64
 }
 
@@ -633,8 +634,38 @@ dispatch_mcp_component() {
 # placed in the argv.
 CONTROL_COMPONENT_ARGV=()
 CONTROL_COMPONENT_EXPECTED_SHA=""
+
+# The PAIRED Hermes host-read selection.  The input path is only ever a
+# QUALIFIED INPUT the operator staged: it is read through the incumbent's own
+# bounded, no-follow, identity-joined pinned read and bound to the exact
+# digest supplied beside it.  It is never a destination and never an output
+# path.  The path is validated here as a canonical absolute path with no
+# traversal, no empty component and no character outside the closed set, so
+# the rebuilt argv carries one validated value and no caller text.
+valid_component_input_path() {
+  local candidate="$1" part
+  case "$candidate" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  case "$candidate" in
+    *//*) return 1 ;;
+  esac
+  case "$candidate" in
+    *[!A-Za-z0-9/._-]*) return 1 ;;
+  esac
+  local IFS='/'
+  for part in $candidate; do
+    if [ "$part" = ".." ]; then
+      return 1
+    fi
+  done
+  return 0
+}
+
 control_component_args() {
   local verb="$1" flag value seen="" sha="" plan="" helper_verb
+  local hermes_input="" hermes_sha=""
   shift
   while [ "$#" -gt 0 ]; do
     flag="$1"
@@ -645,6 +676,9 @@ control_component_args() {
     case "$flag" in
       --expected-sha) ;;
       --plan-sha256) [ "$verb" = "apply-control-component" ] || return 1 ;;
+      --hermes-role-metadata-read-input|--hermes-role-metadata-read-sha256)
+        [ "$verb" = "plan-control-component" ] || [ "$verb" = "apply-control-component" ] || return 1
+        ;;
       *) return 1 ;;
     esac
     [ "$#" -ge 1 ] || return 1
@@ -656,6 +690,14 @@ control_component_args() {
         [[ "$value" =~ ^[0-9a-f]{40}$ ]] || return 1
         sha="$value"
         ;;
+      --hermes-role-metadata-read-input)
+        valid_component_input_path "$value" || return 1
+        hermes_input="$value"
+        ;;
+      --hermes-role-metadata-read-sha256)
+        [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
+        hermes_sha="$value"
+        ;;
       *)
         [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
         plan="$value"
@@ -663,6 +705,12 @@ control_component_args() {
     esac
   done
   [ -n "$sha" ] || return 1
+  # The selection is PAIRED: one coordinate alone is a refusal, never an
+  # absent selection.
+  if [ -n "$hermes_input" ] || [ -n "$hermes_sha" ]; then
+    [ -n "$hermes_input" ] || return 1
+    [ -n "$hermes_sha" ] || return 1
+  fi
   case "$verb" in
     plan-control-component) helper_verb="plan-control-component" ;;
     apply-control-component)
@@ -673,6 +721,10 @@ control_component_args() {
   esac
   CONTROL_COMPONENT_ARGV=("$helper_verb" --expected-sha "$sha")
   [ -z "$plan" ] || CONTROL_COMPONENT_ARGV+=(--plan-sha256 "$plan")
+  if [ -n "$hermes_input" ]; then
+    CONTROL_COMPONENT_ARGV+=(--hermes-role-metadata-read-input "$hermes_input")
+    CONTROL_COMPONENT_ARGV+=(--hermes-role-metadata-read-sha256 "$hermes_sha")
+  fi
   CONTROL_COMPONENT_EXPECTED_SHA="$sha"
   return 0
 }
