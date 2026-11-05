@@ -216,8 +216,70 @@ def observe_metadata(base, request, artifact):
  return original
 
 
+def _private_read_one(files, path, remaining, expected_private):
+    """Phase-local composition of incumbent bounds/codec on one checked FD.
+
+    Only snapshot_artifact invokes this; no endpoint or request parameter selects
+    it. Its caller already resolved the original packet-declared file name.
+    The canonical reader and every historical helper stay byte-exact.
+    """
+    os, stat = files["os"], files["stat"]
+    validate_path, identity = files["validate_path"], files["identity"]
+    MAX_FILE = files["MAX_FILE"]
+    import base64
+    directory, name = validate_path(path)
+    fds = []
+    try:
+        tmp = os.open("/tmp", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        fds.append(tmp)
+        parent = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=tmp)
+        fds.append(parent)
+        before_parent = os.fstat(parent)
+        if before_parent.st_uid != os.getuid() or before_parent.st_mode & 0o022:
+            raise ValueError("directory_owner_or_mode")
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        fds.append(fd)
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid() or before.st_mode & 0o002:
+            raise ValueError("file_owner_mode_or_type")
+        if (identity(before) != expected_private
+                or stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1):
+            raise ValueError("private_snapshot_custody")
+        if before.st_size > MAX_FILE or before.st_size > remaining:
+            raise ValueError("size_limit")
+        chunks = []
+        budget = min(MAX_FILE, remaining) + 1
+        while budget:
+            chunk = os.read(fd, min(budget, 65536))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            budget -= len(chunk)
+        raw = b"".join(chunks)
+        after_parent = os.stat(directory, dir_fd=tmp, follow_symlinks=False)
+        if (identity(before) != identity(os.fstat(fd))
+                or identity(before) != identity(os.stat(name, dir_fd=parent, follow_symlinks=False))
+                or identity(before_parent) != identity(after_parent)
+                or len(raw) != before.st_size):
+            raise ValueError("changed_during_read")
+        return {"path": path, "status": "RETRIEVED", "bytes": len(raw),
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "data_base64": base64.b64encode(raw).decode(),
+                "observed_file": {"device": before.st_dev, "inode": before.st_ino,
+                                  "mtime_ns": before.st_mtime_ns, "uid": before.st_uid,
+                                  "mode": stat.S_IMODE(before.st_mode)}}
+    except FileNotFoundError:
+        return {"path": path, "status": "NOT_FOUND", "reason": "missing_at_read"}
+    except (OSError, ValueError) as exc:
+        return {"path": path, "status": "UNAVAILABLE",
+                "reason": str(exc) if isinstance(exc, ValueError) else "filesystem_refused"}
+    finally:
+        for fd in reversed(fds):
+            os.close(fd)
+
+
 def snapshot_artifact(files, path, remaining):
- """Stricter metadata guard around the SAME unchanged byte reader.
+ """Phase-local stricter composition; canonical byte reader stays unchanged.
 
  Hold the private single-link inode before/after its one stable content read.
  No second content read, chmod, rename, cleanup, alternative path or retry.
@@ -235,7 +297,7 @@ def snapshot_artifact(files, path, remaining):
   if (not stat.S_ISREG(before.st_mode) or before.st_uid!=os.getuid()
       or stat.S_IMODE(before.st_mode)!=0o600 or before.st_nlink!=1):
    raise ValueError('private_snapshot_custody')
-  item=files['read_one'](path,remaining)
+  item=_private_read_one(files,path,remaining,files['identity'](before))
   if item.get('status')!='RETRIEVED':return item
   meta=item.get('observed_file',{})
   if (files['identity'](before)!=files['identity'](os.fstat(fd))

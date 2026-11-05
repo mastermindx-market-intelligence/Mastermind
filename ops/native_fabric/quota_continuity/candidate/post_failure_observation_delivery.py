@@ -200,9 +200,14 @@ def code_for_request(request, *, expected_sources):
  proof = qualify(request)
  if expected_sources != proof['source_sha256']:
   raise ValueError('post_failure_observer_source_changed')
- sources = {name:delivery.local_file(delivery.HERE/name,65536).decode() for name in expected_sources}
- if set(sources) != {'run_observation.py','post_failure_observation.py','artifact_reader.py'}:
+ source_bytes = {name:delivery.local_file(delivery.HERE/name,65536) for name in expected_sources}
+ if set(source_bytes) != {'run_observation.py','post_failure_observation.py','artifact_reader.py'}:
   raise ValueError('post_failure_code_scope')
+ if (any(delivery.digest(raw)!=expected_sources[name] for name,raw in source_bytes.items())
+     or expected_sources['artifact_reader.py']!=delivery._ORIGINAL_READER_SHA256):
+  raise ValueError('post_failure_exact_code_bytes_changed')
+ # Keep these EXACT checked byte strings; no later path reread constructs code.
+ sources={name:raw.decode() for name,raw in source_bytes.items()}
  return ('import sys,json,hashlib\nbase={"__name__":"_original_metadata_reader"}\n'
   'exec('+repr(sources['run_observation.py'])+',base)\n'
   'phase={"__name__":"_post_failure_projection"}\n'

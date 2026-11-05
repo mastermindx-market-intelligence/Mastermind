@@ -24,7 +24,7 @@ WITNESS=json.loads((Path(__file__).parent/'fixtures/post-failure-routing-observa
 def inert_content_reader(request,monkeypatch):
     # Parser/transport tests use inert declared-file bytes. Separate tests below
     # exercise the actual held-inode wrapper and unchanged existing byte reader.
-    if request.node.name.startswith(('test_same_artifact_reader','test_private_single_link')):return
+    if request.node.name.startswith(('test_same_artifact_reader','test_private_single_link','test_actual_content_fd')):return
     monkeypatch.setattr(phase,'snapshot_artifact',lambda files,path,remaining:files['read_one'](path,remaining))
 
 
@@ -225,3 +225,72 @@ def test_publication_failure_is_never_retried(tmp_path,monkeypatch):
     monkeypatch.setattr(owner.delivery,'publish_receipt',publish)
     with pytest.raises(ValueError):owner.observe(request,tmp_path)
     assert publish.call_count==1
+
+
+@pytest.mark.parametrize('name',['run_observation.py','post_failure_observation.py','artifact_reader.py'])
+def test_exact_executable_bundle_race_stops_before_any_ssh(monkeypatch,name):
+    request,_,_=fixture()
+    root=NATIVE/'candidate'
+    raw={n:(root/n if (root/n).exists() else NATIVE/'source'/n).read_bytes() for n in ('run_observation.py','post_failure_observation.py','artifact_reader.py')}
+    expected={n:hashlib.sha256(v).hexdigest() for n,v in raw.items()}
+    monkeypatch.setattr(owner,'qualify',lambda req:{'source_sha256':expected})
+    def changed(path,*args):
+        data=raw[Path(path).name]
+        return data+b'\nUNQUALIFIED_CODE_CANARY' if Path(path).name==name else data
+    monkeypatch.setattr(owner.delivery,'local_file',changed)
+    popen=mock.Mock(side_effect=AssertionError('SSH must not start'))
+    monkeypatch.setattr(owner.delivery.subprocess,'Popen',popen)
+    with pytest.raises(ValueError,match='exact_code_bytes_changed'):
+        owner.delivery.transport('fixture-only',request,current_sources_sha256=expected)
+    popen.assert_not_called()
+
+
+def test_command_consumes_one_retained_qualified_byte_bundle(monkeypatch):
+    request,_,_=fixture();root=NATIVE/'candidate'
+    raw={n:(root/n if (root/n).exists() else NATIVE/'source'/n).read_bytes() for n in ('run_observation.py','post_failure_observation.py','artifact_reader.py')}
+    expected={n:hashlib.sha256(v).hexdigest() for n,v in raw.items()}
+    monkeypatch.setattr(owner,'qualify',lambda req:{'source_sha256':expected})
+    reads=[]
+    def once(path,*args):
+        name=Path(path).name;reads.append(name)
+        if reads.count(name)>1:return b'UNQUALIFIED_CODE_CANARY'
+        return raw[name]
+    monkeypatch.setattr(owner.delivery,'local_file',once)
+    command=owner.code_for_request(request,expected_sources=expected)
+    assert reads==list(expected)
+    assert 'UNQUALIFIED_CODE_CANARY' not in command
+    compile(command,'inert_generated_reader','exec')  # not executed
+
+
+@pytest.mark.parametrize('fault',['swap','mode','links'])
+def test_actual_content_fd_is_checked_before_any_disallowed_read(tmp_path,monkeypatch,fault):
+    files=owner.reader;directory=tmp_path/'fabric-inert';directory.mkdir(mode=0o700)
+    target=directory/'routing.patch';target.write_bytes(b'ORIGINAL_INERT');target.chmod(0o600)
+    proxy=types.SimpleNamespace(**vars(os));original_open=os.open;original_read=os.read
+    opened=[];read_spy=[]
+    def open_race(path,*args,**kwargs):
+        if path=='routing.patch':
+            opened.append(path)
+            if len(opened)==2:
+                if fault=='swap':
+                    target.rename(directory/'held-original.patch')
+                    target.write_bytes(b'FOREIGN_INERT_CANARY');target.chmod(0o600)
+                elif fault=='mode':target.chmod(0o644)
+                else:os.link(target,directory/'other.patch')
+        return original_open(tmp_path if path=='/tmp' else path,*args,**kwargs)
+    def read(fd,n):
+        read_spy.append(fd);return original_read(fd,n)
+    proxy.open=open_race;proxy.read=read;monkeypatch.setattr(files,'os',proxy)
+    item=phase.snapshot_artifact(vars(files),'/tmp/fabric-inert/routing.patch',1024)
+    assert item['status']=='UNAVAILABLE' and 'data_base64' not in item
+    assert len(opened)==2 and read_spy==[]
+
+
+def test_canonical_reader_and_historical_consumers_are_byte_exact():
+    import subprocess
+    paths=['ops/native_fabric/quota_continuity/source/'+name for name in
+           ('artifact_reader.py','operator_stdout_delivery.py','current_failed_artifact_evidence.py')]
+    for path in paths:
+        assert (ROOT/path).read_bytes()==subprocess.check_output(['git','show','HEAD:'+path],cwd=ROOT)
+    assert hashlib.sha256(Path(owner.reader.__file__).read_bytes()).hexdigest()==owner.delivery._ORIGINAL_READER_SHA256
+    assert not (NATIVE/'candidate/artifact_reader.py').exists()
