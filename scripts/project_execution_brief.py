@@ -24,6 +24,7 @@ MEMORY_MARKER = 'mastermind-execution-memory-advisory-v1'
 LEGACY_BLOCKS = (
     'mastermind-ceo-forward-execution',
     'mastermind-ghost-owner-recovery-v1',
+    'mastermind-active-owner-takeover-20261102',
     'mastermind-autonomous-blocker-self-remedy-v1',
 )
 CODEX_SECTIONS = {
@@ -40,7 +41,7 @@ a new session needs real creation and assignment. Preserve actual active writers
 exact-session proof obligations and unresolved effects on their original carrier.
 
 Prefer verified end-to-end delivery, the shallowest useful admitted delegation,
-one proportionate review and reuse of unchanged relevant evidence. Checkpoints
+risk-tied proof without mandatory independent review, and reuse unchanged evidence. Checkpoints
 are saves followed by the next safe ready phase, not automatic stops. Do not
 reconstruct the whole history, repeat routine approvals or tests, or wait for a
 historical named owner when current assigned work can proceed safely. Old model

@@ -1603,3 +1603,440 @@ def test_shared_relay_runbook_orders_rebind_before_scope_migration_and_a2():
     assert "never run the ceremony from an operator" in sequencing
     assert sequencing.count('cd "$RELEASE_ROOT"') == 3
     assert sequencing.count("python3.12 -I -S -B") == 3
+
+
+# --- canonical optional Control launchd sockets (installer-derived) ---
+
+WORKER_UID = 460
+WORKER_GID = 461
+ROOM_SOCKET_PATH = "/var/run/mastermind-executive/workspace-control-room.sock"
+COMPANY_SOCKET_PATH = "/var/run/mastermind-executive/company-consultation.sock"
+
+
+def _arm_optional_sockets(
+    host: _Host,
+    *,
+    room: bool = False,
+    company: bool = False,
+    native_return: bool = False,
+) -> dict[str, object]:
+    """Re-stamp the prepared host exactly as the installer does with optionals.
+
+    The optional launchd socket stanzas are produced by the real canonical
+    factories from the same already-parsed Control document the installer
+    consumes, so a hand-written stanza can never masquerade as installer
+    output inside a test.
+    """
+
+    from scripts.executive_os_phase1c import (
+        company_consultation_launchd_entry,
+        workspace_control_room_launchd_entry,
+    )
+
+    control_uid = host.control_config.stat().st_uid
+    control_gid = host.control_config.stat().st_gid
+    control = json.loads(host.control_config.read_text(encoding="utf-8"))
+    control["control_uid"] = control_uid
+    control["worker_uid"] = WORKER_UID
+    control["worker_gid"] = WORKER_GID
+    if room:
+        control["workspace_control_room"] = {
+            "transport": "unix",
+            "socket_path": ROOM_SOCKET_PATH,
+            "launchd_socket_name": "WorkspaceControlRoom",
+            "allowed_peer_uids": [control_uid],
+        }
+    if company:
+        control["company_consultation"] = {
+            "armed": True,
+            "socket_path": COMPANY_SOCKET_PATH,
+            "launchd_socket_name": "CompanyConsultation",
+            "native_return_armed": native_return,
+        }
+    host.overwrite(
+        host.control_config, json.dumps(control).encode("utf-8"), mode=0o440
+    )
+
+    document = plistlib.loads(host.control_plist.read_bytes())
+    sockets = document["Sockets"]
+    produced: dict[str, object] = {}
+    room_entry = workspace_control_room_launchd_entry(control, control_gid=control_gid)
+    company_entry = company_consultation_launchd_entry(control)
+    if room_entry is not None:
+        sockets["WorkspaceControlRoom"] = room_entry
+        produced["WorkspaceControlRoom"] = room_entry
+    if company_entry is not None:
+        sockets["CompanyConsultation"] = company_entry
+        produced["CompanyConsultation"] = company_entry
+    host.overwrite(
+        host.control_plist, plistlib.dumps(document), mode=0o644
+    )
+    return produced
+
+
+def _rebind_host_with_armed_optionals(
+    monkeypatch, tmp_path, *, room: bool = True, company: bool = False
+) -> _Host:
+    host = _install_host(monkeypatch, tmp_path)
+    _arm_optional_sockets(host, room=room, company=company)
+    return host
+
+
+def _rewrite_control_sockets(host: _Host, mutate) -> None:
+    document = plistlib.loads(host.control_plist.read_bytes())
+    mutate(document["Sockets"])
+    host.overwrite(host.control_plist, plistlib.dumps(document), mode=0o644)
+
+
+def _assert_rebind_refused_before_any_pair_write(
+    host: _Host, match: str = "C1_ENROLLMENT_HOST_REFUSED"
+) -> None:
+    with pytest.raises(host.enrollment.C1EnrollmentError, match=match):
+        asyncio.run(host.rebind())
+    assert host.writes == []
+    assert host.plist_release() == OLD_RELEASE
+    assert host.config_release() == OLD_RELEASE
+
+
+@pytest.mark.parametrize(
+    ("room", "company", "native_return"),
+    (
+        (True, False, False),
+        (False, True, False),
+        (True, True, False),
+        (True, True, True),
+    ),
+)
+def test_rebind_accepts_installer_canonical_optional_control_sockets(
+    monkeypatch, tmp_path, room, company, native_return
+):
+    host = _install_host(monkeypatch, tmp_path)
+    produced = _arm_optional_sockets(
+        host, room=room, company=company, native_return=native_return
+    )
+    control_uid = host.control_config.stat().st_uid
+    control_gid = host.control_config.stat().st_gid
+
+    receipt = asyncio.run(host.rebind())
+
+    assert receipt == {
+        "action": "rebound",
+        "bot_user_id": BOT,
+        "release_sha": NEW_RELEASE,
+    }
+    assert host.writes == [host.relay_plist, host.config_path]
+    assert host.plist_release() == NEW_RELEASE
+    assert host.config_release() == NEW_RELEASE
+    sockets = plistlib.loads(host.control_plist.read_bytes())["Sockets"]
+    if company:
+        entry = produced["CompanyConsultation"]
+        assert entry == {
+            "SockPathName": COMPANY_SOCKET_PATH,
+            "SockType": "stream",
+            "SockPassive": True,
+            "SockPathOwner": control_uid,
+            "SockPathGroup": WORKER_GID,
+            "SockPathMode": 0o660,
+        }
+        assert sockets["CompanyConsultation"] == entry
+        # The worker principal is the canonical service contract from the
+        # Control document, never the caller-selected Control peer group.
+        assert sockets["CompanyConsultation"]["SockPathGroup"] != control_gid
+    else:
+        assert "CompanyConsultation" not in sockets
+    if room:
+        entry = produced["WorkspaceControlRoom"]
+        assert entry == {
+            "SockPathName": ROOM_SOCKET_PATH,
+            "SockType": "stream",
+            "SockPassive": True,
+            "SockPathOwner": control_uid,
+            "SockPathGroup": control_gid,
+            "SockPathMode": 0o600,
+        }
+        assert sockets["WorkspaceControlRoom"] == entry
+    else:
+        assert "WorkspaceControlRoom" not in sockets
+    if native_return:
+        control = json.loads(host.control_config.read_text(encoding="utf-8"))
+        assert control["company_consultation"]["native_return_armed"] is True
+
+
+def test_rebind_still_accepts_the_bare_core_control_socket_set(monkeypatch, tmp_path):
+    host = _rebind_host_with_armed_optionals(monkeypatch, tmp_path, room=False)
+
+    receipt = asyncio.run(host.rebind())
+
+    assert receipt["action"] == "rebound"
+    sockets = plistlib.loads(host.control_plist.read_bytes())["Sockets"]
+    assert set(sockets) == {"Operator", "CeoIngress", "DialogueObservation"}
+
+
+def test_rebind_refuses_an_armed_optional_socket_missing_from_the_host(
+    monkeypatch, tmp_path
+):
+    host = _rebind_host_with_armed_optionals(monkeypatch, tmp_path)
+    _rewrite_control_sockets(
+        host, lambda sockets: sockets.pop("WorkspaceControlRoom")
+    )
+
+    _assert_rebind_refused_before_any_pair_write(host)
+
+
+def test_rebind_refuses_a_spurious_optional_socket_absent_from_the_control_document(
+    monkeypatch, tmp_path
+):
+    host = _rebind_host_with_armed_optionals(monkeypatch, tmp_path, room=False)
+    _rewrite_control_sockets(
+        host,
+        lambda sockets: sockets.update(
+            {
+                "WorkspaceControlRoom": {
+                    "SockPathName": ROOM_SOCKET_PATH,
+                    "SockType": "stream",
+                    "SockPassive": True,
+                    "SockPathOwner": host.control_config.stat().st_uid,
+                    "SockPathGroup": host.control_config.stat().st_gid,
+                    "SockPathMode": 0o600,
+                }
+            }
+        ),
+    )
+
+    _assert_rebind_refused_before_any_pair_write(host)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "path",
+        "owner",
+        "group",
+        "mode",
+        "type",
+        "passive_false",
+        "passive_int",
+        "extra_key",
+        "missing_key",
+    ),
+)
+def test_rebind_refuses_drifted_optional_stanza_fields(
+    monkeypatch, tmp_path, mutation
+):
+    host = _rebind_host_with_armed_optionals(monkeypatch, tmp_path)
+
+    def mutate(sockets):
+        stanza = dict(sockets["WorkspaceControlRoom"])
+        if mutation == "path":
+            stanza["SockPathName"] = "/var/run/mastermind-executive/decoy.sock"
+        elif mutation == "owner":
+            stanza["SockPathOwner"] = stanza["SockPathOwner"] + 1
+        elif mutation == "group":
+            stanza["SockPathGroup"] = WORKER_GID
+        elif mutation == "mode":
+            stanza["SockPathMode"] = 0o660
+        elif mutation == "type":
+            stanza["SockType"] = "dgram"
+        elif mutation == "passive_false":
+            stanza["SockPassive"] = False
+        elif mutation == "passive_int":
+            stanza["SockPassive"] = 1
+        elif mutation == "extra_key":
+            stanza["SockPathOwnerLabel"] = "control"
+        elif mutation == "missing_key":
+            del stanza["SockPassive"]
+        sockets["WorkspaceControlRoom"] = stanza
+
+    _rewrite_control_sockets(host, mutate)
+
+    _assert_rebind_refused_before_any_pair_write(host)
+
+
+def test_rebind_refuses_an_unknown_extra_control_socket_name(monkeypatch, tmp_path):
+    host = _rebind_host_with_armed_optionals(monkeypatch, tmp_path)
+
+    def mutate(sockets):
+        sockets["LegacyTcp"] = {
+            "SockPathName": "/var/run/mastermind-executive/legacy.sock",
+            "SockType": "stream",
+            "SockPassive": True,
+            "SockPathOwner": host.control_config.stat().st_uid,
+            "SockPathGroup": host.control_config.stat().st_gid,
+            "SockPathMode": 0o600,
+        }
+
+    _rewrite_control_sockets(host, mutate)
+
+    _assert_rebind_refused_before_any_pair_write(host)
+
+
+def test_rebind_refuses_a_company_socket_left_installed_while_disabled(
+    monkeypatch, tmp_path
+):
+    host = _rebind_host_with_armed_optionals(
+        monkeypatch, tmp_path, room=False, company=True
+    )
+    control = json.loads(host.control_config.read_text(encoding="utf-8"))
+    control["company_consultation"]["armed"] = False
+    host.overwrite(
+        host.control_config, json.dumps(control).encode("utf-8"), mode=0o440
+    )
+    # The factory now derives None for the disabled optional, so the installer
+    # would have written no such socket; a leftover stanza is host drift.
+
+    _assert_rebind_refused_before_any_pair_write(host)
+
+
+def test_rebind_refuses_a_legacy_tcp_workspace_control_room_document(
+    monkeypatch, tmp_path
+):
+    host = _install_host(monkeypatch, tmp_path)
+    control_uid = host.control_config.stat().st_uid
+    control = json.loads(host.control_config.read_text(encoding="utf-8"))
+    control["control_uid"] = control_uid
+    control["worker_uid"] = WORKER_UID
+    control["worker_gid"] = WORKER_GID
+    control["workspace_control_room"] = {"port": 9443}
+    host.overwrite(
+        host.control_config, json.dumps(control).encode("utf-8"), mode=0o440
+    )
+
+    _assert_rebind_refused_before_any_pair_write(host)
+
+
+def test_rebind_refuses_a_legacy_tcp_workspace_control_room_stanza(
+    monkeypatch, tmp_path
+):
+    host = _rebind_host_with_armed_optionals(monkeypatch, tmp_path)
+
+    def mutate(sockets):
+        sockets["WorkspaceControlRoom"] = {"port": 9443}
+
+    _rewrite_control_sockets(host, mutate)
+
+    _assert_rebind_refused_before_any_pair_write(host)
+
+
+def test_rebind_refuses_a_type_permissive_company_producer_flag(
+    monkeypatch, tmp_path
+):
+    host = _rebind_host_with_armed_optionals(
+        monkeypatch, tmp_path, room=False, company=True
+    )
+    control = json.loads(host.control_config.read_text(encoding="utf-8"))
+    control["company_consultation"]["native_return_armed"] = 1
+    host.overwrite(
+        host.control_config, json.dumps(control).encode("utf-8"), mode=0o440
+    )
+
+    _assert_rebind_refused_before_any_pair_write(host)
+
+
+def test_rebind_refuses_an_unknown_company_document_key(monkeypatch, tmp_path):
+    host = _rebind_host_with_armed_optionals(
+        monkeypatch, tmp_path, room=False, company=True
+    )
+    control = json.loads(host.control_config.read_text(encoding="utf-8"))
+    control["company_consultation"]["peer_uid"] = WORKER_UID
+    host.overwrite(
+        host.control_config, json.dumps(control).encode("utf-8"), mode=0o440
+    )
+
+    _assert_rebind_refused_before_any_pair_write(host)
+
+
+def test_rebind_refuses_a_workspace_peer_vector_that_exceeds_the_control_owner(
+    monkeypatch, tmp_path
+):
+    host = _rebind_host_with_armed_optionals(monkeypatch, tmp_path)
+    control = json.loads(host.control_config.read_text(encoding="utf-8"))
+    control["workspace_control_room"]["allowed_peer_uids"] = [
+        control["workspace_control_room"]["allowed_peer_uids"][0],
+        WORKER_UID,
+    ]
+    host.overwrite(
+        host.control_config, json.dumps(control).encode("utf-8"), mode=0o440
+    )
+
+    _assert_rebind_refused_before_any_pair_write(host)
+
+
+def test_rebind_refuses_an_optional_owner_that_is_not_the_actual_control_uid(
+    monkeypatch, tmp_path
+):
+    host = _install_host(monkeypatch, tmp_path)
+    control_uid = host.control_config.stat().st_uid
+    control_gid = host.control_config.stat().st_gid
+    from scripts.executive_os_phase1c import workspace_control_room_launchd_entry
+
+    control = json.loads(host.control_config.read_text(encoding="utf-8"))
+    drifted_uid = control_uid + 1
+    control["control_uid"] = drifted_uid
+    control["worker_uid"] = WORKER_UID
+    control["worker_gid"] = WORKER_GID
+    control["workspace_control_room"] = {
+        "transport": "unix",
+        "socket_path": ROOM_SOCKET_PATH,
+        "launchd_socket_name": "WorkspaceControlRoom",
+        "allowed_peer_uids": [drifted_uid],
+    }
+    host.overwrite(
+        host.control_config, json.dumps(control).encode("utf-8"), mode=0o440
+    )
+    # The installed stanza is exactly what this drifted document produces, so
+    # only the actual existing Control identity can expose the forgery.
+    document = plistlib.loads(host.control_plist.read_bytes())
+    document["Sockets"]["WorkspaceControlRoom"] = (
+        workspace_control_room_launchd_entry(control, control_gid=control_gid)
+    )
+    host.overwrite(
+        host.control_plist, plistlib.dumps(document), mode=0o644
+    )
+
+    _assert_rebind_refused_before_any_pair_write(host)
+
+
+def test_rebind_refuses_a_company_group_swapped_for_a_caller_selected_peer(
+    monkeypatch, tmp_path
+):
+    host = _rebind_host_with_armed_optionals(
+        monkeypatch, tmp_path, room=False, company=True
+    )
+
+    def mutate(sockets):
+        stanza = dict(sockets["CompanyConsultation"])
+        stanza["SockPathGroup"] = host.control_config.stat().st_gid
+        sockets["CompanyConsultation"] = stanza
+
+    _rewrite_control_sockets(host, mutate)
+
+    _assert_rebind_refused_before_any_pair_write(host)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("operator_mode", "operator_owner", "ceo_group", "dialogue_name"),
+)
+def test_rebind_still_refuses_drifted_core_control_sockets(
+    monkeypatch, tmp_path, mutation
+):
+    host = _rebind_host_with_armed_optionals(monkeypatch, tmp_path)
+    control_uid = host.control_config.stat().st_uid
+
+    def mutate(sockets):
+        if mutation == "operator_mode":
+            sockets["Operator"]["SockPathMode"] = 0o600
+        elif mutation == "operator_owner":
+            sockets["Operator"]["SockPathOwner"] = control_uid + 1
+        elif mutation == "ceo_group":
+            sockets["CeoIngress"]["SockPathGroup"] = (
+                sockets["CeoIngress"]["SockPathGroup"] + 1
+            )
+        elif mutation == "dialogue_name":
+            sockets["DialogueObservation"]["SockPathName"] = (
+                "/var/run/mastermind-dialogue-observation/decoy.sock"
+            )
+
+    _rewrite_control_sockets(host, mutate)
+
+    _assert_rebind_refused_before_any_pair_write(host)

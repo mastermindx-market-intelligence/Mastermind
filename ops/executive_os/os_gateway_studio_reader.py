@@ -484,7 +484,11 @@ def _make_dispatch_dir_policy(
 
 
 _PREFIX_DIRECTORY_LIMIT = 512
-_DIRECTORY_CUSTODY_FIELDS = _IDENTITY_FIELDS[:-2]
+# Only explicitly watched, nonenumerated traversal prefixes use this projection.
+# Child entries alter directory nlink/size/timestamps without replacing the
+# selected directory. Its held+named object/custody and vnode history remain
+# exact; registration/ACL brackets and every strict namespace still use all9.
+_DIRECTORY_CUSTODY_FIELDS = _IDENTITY_FIELDS[:5]
 
 
 def _require_directory_custody(pre: os.stat_result, post: os.stat_result) -> None:

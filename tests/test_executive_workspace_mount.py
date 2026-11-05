@@ -105,6 +105,16 @@ def test_asset_manifest_and_callback_headers(static_source,settings):
                 assert [tokens for tokens in directives if tokens and tokens[0] == 'connect-src'] == [
                     ['connect-src', "'self'", 'https://dev-eo0jf8us5mup7wd5.us.auth0.com']
                 ]
+                assert [tokens for tokens in directives if tokens and tokens[0] == 'frame-src'] == [
+                    ['frame-src', "'self'", 'https://dev-eo0jf8us5mup7wd5.us.auth0.com']
+                ]
+                ancestors = [tokens for tokens in directives if tokens and tokens[0] == 'frame-ancestors']
+                assert ancestors == [['frame-ancestors', "'self'" if path.startswith('/os/auth/callback')
+                                      else "'none'"]]
+            # The callback can be framed only by its own origin; no broad framing grant
+            # is allowed to reach the app shell, static assets, or bearer APIs.
+            assert "frame-ancestors 'none'" in index.headers['content-security-policy']
+            assert "frame-ancestors 'none'" in (await client.get('/os/assets/index-def.js')).headers['content-security-policy']
             assert (await client.get('/os/assets/index-def.js')).headers['content-type']=='text/javascript; charset=utf-8'
             for path in ('/os/?x=1','/os/?work_ref=WS:ONE','/os/auth/callback?code=a&code=b',
                          '/os/auth/callback?next=https://evil.example','/os/assets/index-def.js?x=1',

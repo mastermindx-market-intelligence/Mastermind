@@ -22,13 +22,18 @@ def norm(path: Path) -> str:
 
 def test_index_mandates_same_pin_paper_domain_skill():
     text = norm(INDEX)
-    assert "skills/paper-design-workflow/SKILL.md" in text
-    assert "Mandatory domain companion" in text
-    assert "same pinned repository commit" in text
-    assert "generic Studio filesystem/process tools do not prove Paper unavailable" in text
-    assert "Remote Desktop Commander" in text
-    assert "Studio Direct absence or degradation grants **no** Desktop Commander authority" in text
-    assert "independently authorizes that exact host carrier" in text
+    for clause in (
+        "skills/paper-design-workflow/SKILL.md",
+        "Mandatory for Paper inspection/edit/upgrade/review/migration/extraction",
+        "same pinned repository commit",
+        "Discover exact Paper actions, not generic Studio proxies",
+        "Remote Desktop Commander",
+        "Its absence/degradation grants **no** Desktop Commander authority",
+        "requires independently authorized exact host/action",
+        "observed permission, no denial and no uncertain modifying effect",
+        "`EFFECT_UNKNOWN` never permits cross-carrier replay",
+    ):
+        assert clause in text
 
 
 def test_skill_discovers_exact_paper_family_before_negative_claim():
@@ -232,3 +237,30 @@ def test_paper_concurrency_is_target_scoped_not_file_leased():
     ):
         assert forbidden.lower() not in combined.lower()
 
+
+
+def test_publication_drift_uses_current_same_app_refresh_lifecycle():
+    skill = norm(SKILL)
+    connection = norm(CONNECTION)
+    integration = norm(INTEGRATION)
+    runbook = norm(ROOT / "docs/PAPER_DIRECT_CHATGPT.md")
+
+    for text in (skill, connection, runbook):
+        assert "developer-mode MCP connection" in text
+        assert "Refresh" in text
+        assert "start a new conversation" in text
+
+    for text in (skill, connection, runbook, integration):
+        assert "Plugin Directory" in text
+        assert "custom workspace MCP app" in text
+        assert "Business and Enterprise/Edu" in text
+        assert "Refresh" in text
+        assert "recreate + republish is required" not in text
+    assert "Enterprise/Edu Action control" in connection
+    assert "Enterprise/Edu Action control" in runbook
+    assert "reusing the existing tunnel/backend" in connection
+    assert "reusing the existing tunnel/backend" in runbook
+    assert "parallel duplicate" in connection
+    assert "parallel duplicate" in runbook
+    assert "Add custom MCP server" in runbook
+    assert "Developer Mode is not" in runbook
