@@ -173,13 +173,13 @@ def actual_installed_owner(installed_inputs,hosted,rsa_key,monkeypatch,tmp_path)
     return locals()
 
 
-def test_current_installed_factory_rejoins_one_fresh_pure_phase(actual_installed_owner):
+def test_current_installed_factory_rejoins_one_fresh_pure_phase(actual_installed_owner,tmp_path):
     from control_plane.fresh_conversation_membership import _project_validation_phase,_PHASE
     a=actual_installed_owner
     f,host,owner,principal,workspace,issued=(a[k]for k in ('f','host','owner','principal','workspace','issued'))
-    output=Path(os.environ['S34_FACTORY_LIFETIME_OUTPUT'])
+    output=Path(os.environ['S34_FACTORY_LIFETIME_OUTPUT']) if 'S34_FACTORY_LIFETIME_OUTPUT' in os.environ else tmp_path/'installed-reader-lifetime.json'
     diagnostic=dict(schema='mastermind.s34.installed_reader_lifetime_discriminator.v1',
-        source_revision=os.environ['S34_SOURCE_REVISION'],seams=['actual owned AF_UNIX constructor, no host start/serve',
+        source_revision=os.environ.get('S34_SOURCE_REVISION'),seams=['actual owned AF_UNIX constructor, no host start/serve',
             'published-cache lifecycle/namespace/Root seal/credential/physical-child fixture seams',
             'actual current installed SourceOperations.read_bindings and workspace_provider_factory',
             'actual signed RS256 principal pair; no Fresh modifying call or provider'])

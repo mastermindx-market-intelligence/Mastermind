@@ -31,7 +31,6 @@ from control_plane.executive_service import ExecutiveControlService, CeoIngressA
 from control_plane.workspace_source_operations import SourceOperationEvents
 from control_plane.workspace_read_service import WorkspaceReadService
 from tests.test_executive_mcp_app_composition import Sink
-from ops.executive_os.capacity_source_contract import PYTHON_BINARY
 from tests.test_project_discovery_installed_plan import actual_child
 
 
@@ -39,9 +38,7 @@ def test_signed_installed_adoption_two_phases_and_current_compare(
         actual_adoption_installed, tmp_path, monkeypatch, rsa_key, short_socket_root, settings):
     j = actual_adoption_installed
     f = j.f
-    # The actual installed -I child needs the existing qualified CF1 source
-    # executable. The parent JWT pytest venv is not that child capability.
-    assert Path(PYTHON_BINARY).is_file(), 'qualified installed source Python required'
+    # actual_child qualifies the selected interpreter under real -I before use.
     # Reuse the supplier's declared synthetic Mastermind-seal fixture
     # normalization. It preserves REAL Macro generation and the literal
     # installed materialization/isolated Plan child, never a reader override.

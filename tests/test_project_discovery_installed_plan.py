@@ -5,6 +5,8 @@ source-snapshot and GitHub identity seams. The physical_plan override is
 explicitly removed: these tests execute the real installed child boundary.
 No live host, provider, credentials, Git remote or service is contacted.
 """
+import json
+import subprocess
 import types
 from pathlib import Path
 import sys
@@ -18,12 +20,39 @@ from tests.test_project_creation_source_owner import owner, env, isolated_git_en
 from tests.test_installed_source_git_identity import identity
 
 
+def _qualified_source_python():
+    from ops.executive_os.capacity_source_contract import PYTHON_BINARY
+    configured = Path(PYTHON_BINARY)
+    selected = configured if configured.is_file() else Path(sys.executable)
+    # The CI interpreter is eligible only after its REAL isolated import
+    # succeeds. A selected runtime failure is not repaired by another route.
+    subprocess.run([str(selected), '-I', '-B', '-c',
+        'import yaml; assert yaml.safe_load("a: 1") == {"a": 1}'],
+        capture_output=True, check=True, timeout=10)
+    return selected
+
+
+def test_linux_source_child_uses_actual_isolated_python_when_configured_path_absent(monkeypatch, tmp_path):
+    from ops.executive_os import capacity_source_contract
+    monkeypatch.setattr(capacity_source_contract, 'PYTHON_BINARY', tmp_path / 'absent-configured-python')
+    assert _qualified_source_python() == Path(sys.executable)
+
+
+def test_selected_source_runtime_failure_does_not_fall_back(monkeypatch, tmp_path):
+    from ops.executive_os import capacity_source_contract
+    selected = tmp_path / 'selected-python'
+    selected.write_text('#!/bin/sh\nexit 7\n')
+    selected.chmod(0o700)
+    monkeypatch.setattr(capacity_source_contract, 'PYTHON_BINARY', selected)
+    with pytest.raises(subprocess.CalledProcessError) as failure:
+        _qualified_source_python()
+    assert failure.value.returncode == 7
+    assert failure.value.cmd[0] == str(selected)
+
+
 def actual_child(j, monkeypatch, *, after=lambda: None):
     collector = j['collector']
-    from ops.executive_os.capacity_source_contract import PYTHON_BINARY
-    # Existing provisioned CF1 source runtime owns PyYAML under -I. The
-    # separate HTTP/JWT fixture venv intentionally does not provide it.
-    monkeypatch.setattr(collector, '_python', Path(PYTHON_BINARY) if Path(PYTHON_BINARY).exists() else Path(sys.executable))
+    monkeypatch.setattr(collector, '_python', _qualified_source_python())
     monkeypatch.setattr(collector, 'read_project_plan',
         types.MethodType(InstalledBootPacketCollector.read_project_plan, collector))
     original = collector._runner
@@ -292,14 +321,13 @@ def test_actual_create_default_reload_programs_and_explicit_runtime_mission(full
 
 
 def test_actual_fixed_child_reads_code_from_c_when_shallow_n_lacks_c_object(joined, tmp_path):
-    from ops.executive_os.capacity_source_contract import PYTHON_BINARY
     from tests.test_workspace_project_git_publisher import git
     j = joined
     root = tmp_path / 'shallow-data'
     git(tmp_path, 'clone', '--depth=1', j['o']['env'].origin.as_uri(), str(root))
     absent = subprocess.run(['git', '-C', str(root), 'cat-file', '-e', j['code'] + '^{commit}'], capture_output=True)
     assert absent.returncode != 0
-    argv = [str(PYTHON_BINARY if Path(PYTHON_BINARY).exists() else sys.executable), '-I', '-B',
+    argv = [str(_qualified_source_python()), '-I', '-B',
         str(Path(__file__).parents[1] / 'scripts/agentos_project_plan_entry.py'),
         '--macro-root', str(root), '--expected-macro-sha', j['current'],
         '--code-root', str(j['code_root']), '--code-commit', j['code'],
