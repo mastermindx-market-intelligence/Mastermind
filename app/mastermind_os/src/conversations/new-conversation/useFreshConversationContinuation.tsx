@@ -25,6 +25,8 @@ export interface FreshConversationContinuationProps {
   message:string;
   draftOwner:OwnerContext|null;
   onMessageChange:(message:string)=>void;
+  /** Qualified original receipt/read settled; request local hint refresh only. */
+  onOriginalSettled?:()=>void;
   draftSubmission?:Pick<FreshConversationTurnDraftState,"captureSubmission"|"submissionFor"|"settleSubmission"|"submittedTurnKey">;
 }
 type Busy="keeping"|"sending"|"checking"|"reviewing"|null;
@@ -122,6 +124,12 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
       if(draft&&token)draft.settleSubmission(token,raw);
     }
     patch({data:decoded.data,error:null});
+    const settled=kind==="consume"?decoded.data.state==="CONSUMED"&&decoded.data.initial_consumption!==null
+      :decoded.data.state==="RECORDED"&&decoded.data.result!==null;
+    if(settled&&decoded.data.effect==="COMMITTED"&&c.b.controller.getState().status==="accepted"&&
+      valid(c)&&latest.current.read===c.read&&c.read.current()===true){
+      try{latest.current.onOriginalSettled?.();}catch{ /* A local hint observer cannot undo the actual receipt. */ }
+    }
   }
   function enter(requireRead:boolean){
     if(latch.current===scope)return null;

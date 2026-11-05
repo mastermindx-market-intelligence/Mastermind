@@ -226,3 +226,11 @@ it("native before-edit readonly remains focusable, rejects changes, and does not
  mounted.rerender(<Harness config={h.props}/>);expect((screen.getByRole('textbox',{name:'Your next message'}) as HTMLTextAreaElement).readOnly).toBe(false);
  expect(h.transport.consume).toHaveBeenCalledTimes(1);
 });
+
+it("notifies local-hint refresh only after accepted original receipt/read, never unknown or unmount",async()=>{
+ const h=setup(),settled=vi.fn();h.props.onOriginalSettled=settled;
+ const mounted=render(<Harness config={h.props}/>);await readyKeep();
+ fireEvent.click(screen.getByRole("button",{name:"Keep first response"}));await screen.findByText("The original request needs a status check. Don’t send it again.");expect(settled).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole("button",{name:"Check original request"}));await screen.findByText("First response kept");expect(settled).toHaveBeenCalledTimes(1);
+ mounted.unmount();expect(settled).toHaveBeenCalledTimes(1);expect(h.transport.consume).toHaveBeenCalledTimes(1);
+});
