@@ -66,6 +66,10 @@ RELEASE_PATHS = (
     "common",
     "integrations/__init__.py",
     "integrations/hermes_runtime",
+    # Exact existing pure-YAML closure; no third-party installation or ambient site.
+    "ops/native_fabric/quota_continuity/candidate/paid_yaml_runtime.py",
+    "ops/native_fabric/quota_continuity/candidate/paid_pyyaml_6_0_3.zip",
+    "ops/native_fabric/quota_continuity/candidate/paid_pyyaml_provenance.json",
     "integrations/hermes_harness",
     "integrations/hermes_models",
     "integrations/hermes_steward",

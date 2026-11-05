@@ -255,7 +255,8 @@ def test_supervise_context_refusal_precedes_secret_read_and_child_start(tmp_path
 def test_root_unit_only_adds_main_process_notification_and_explicit_source_label(tmp_path):
     profile = _profile(tmp_path)
     kwargs = dict(runtime_user=profile.role, runtime_group=profile.role,
-                  python_executable="/usr/bin/python3", repo_root=tmp_path / "repo")
+                  python_executable="/usr/bin/python3.12",
+                  repo_root=Path("/opt/mastermind-executive/releases") / SHA)
     legacy = render_host_unit(profile, **kwargs)
     enabled = render_host_unit(profile, **kwargs, implementation_sha=SHA)
     assert "NotifyAccess=main\n" in legacy and "Type=simple\n" in legacy
@@ -264,3 +265,12 @@ def test_root_unit_only_adds_main_process_notification_and_explicit_source_label
     for invalid in ("", "A" * 40, "a" * 40 + "\nNotifyAccess=all", True):
         with pytest.raises(RuntimeRefusal, match="ROOT_UNIT_IMPLEMENTATION_LABEL_INVALID"):
             render_host_unit(profile, **kwargs, implementation_sha=invalid)
+
+
+def test_root_unit_refuses_label_for_another_release(tmp_path):
+    profile = _profile(tmp_path)
+    with pytest.raises(RuntimeRefusal, match="ROOT_UNIT_IMPLEMENTATION_LABEL_MISMATCH"):
+        render_host_unit(profile, runtime_user=profile.role, runtime_group=profile.role,
+                         python_executable="/usr/bin/python3.12",
+                         repo_root=Path("/opt/mastermind-executive/releases") / SHA,
+                         implementation_sha=("b" * 40 if SHA != "b" * 40 else "c" * 40))

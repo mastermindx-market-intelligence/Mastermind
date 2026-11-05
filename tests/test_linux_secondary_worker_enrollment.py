@@ -188,6 +188,9 @@ def test_real_git_archive_preserves_runtime_byok_modules_and_role_data(tmp_path:
     (repo / "common/untracked-private.txt").write_bytes(b"untracked fixture\n")
     required = (
         "common/__init__.py", "integrations/__init__.py",
+        "ops/native_fabric/quota_continuity/candidate/paid_yaml_runtime.py",
+        "ops/native_fabric/quota_continuity/candidate/paid_pyyaml_6_0_3.zip",
+        "ops/native_fabric/quota_continuity/candidate/paid_pyyaml_provenance.json",
         "integrations/hermes_runtime/supervisor.py", "integrations/hermes_harness/native_byok.py",
         "integrations/hermes_runtime/profile.py", "integrations/hermes_models/profile_config.py",
         "integrations/hermes_steward/client.py", "integrations/hermes_steward/hermes.mcp.yaml",

@@ -632,3 +632,31 @@ From each final service prove an unrelated wildcard TCP listener is denied
 through the role's OWN alias, and synthetic sibling-file reads are denied.
 A skipped Linux test or source-only mock is not host proof. TCP restrictions
 do not claim UDP/Unix IPC containment, TLS, billing, or Slack acceptance.
+
+
+## Isolated runtime source entry
+
+The root-managed unit selects
+`/opt/mastermind-executive/releases/<40-character-commit>/ops/executive_os/release_manifest.py`
+with CPython 3.12 and `-I -S -B`. The fixed `hermes-runtime` entry admits the
+existing `supervise` and separately authorized `canary` commands. The renderer
+refuses other release-root shapes and a supplied implementation label that
+differs from the selected release directory.
+
+Before importing Hermes, the existing release owner holds the physical source
+ancestry, manifest and imported files. It refuses writable or non-root-owned
+objects, links, ACLs, changed descriptors, unlisted imports and changed source
+bytes. It compiles manifest-matched source snapshots and uses the existing
+pinned pure PyYAML closure. It adds no repository or site-package import path.
+The held context stays with the existing CLI process; there is no second
+supervisor, lifecycle owner or retry service.
+
+Linux enrollment includes exactly `paid_yaml_runtime.py`,
+`paid_pyyaml_6_0_3.zip` and `paid_pyyaml_provenance.json` from the current native
+Fabric source owner. It does not install packages or enable a role.
+
+This closes the source-loading recipe. Interpreter/stdlib/native-library
+qualification, effective-unit and current-process binding, credentials and
+kernel isolation still belong to their existing host owners. The BYOK observer
+continues to report its installed source as unbound until those facts are
+qualified. A rendered unit or implementation label does not establish them.

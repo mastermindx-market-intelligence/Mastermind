@@ -86,6 +86,8 @@ def render_host_unit(
     role_tcp_ports(profile)
     exe = _safe_absolute(python_executable)
     root = _safe_absolute(repo_root)
+    if re.fullmatch(r"/opt/mastermind-executive/releases/[0-9a-f]{40}", root) is None:
+        raise RuntimeRefusal("ROOT_UNIT_RELEASE_PATH_INVALID")
     state = _safe_absolute(profile.state_dir)
     secrets = _safe_absolute(profile.secrets_file)
     if (state == "/" or secrets == "/" or root == "/"
@@ -98,6 +100,8 @@ def render_host_unit(
         type(implementation_sha) is not str or re.fullmatch(r"[0-9a-f]{40}", implementation_sha) is None
     ):
         raise RuntimeRefusal("ROOT_UNIT_IMPLEMENTATION_LABEL_INVALID")
+    if implementation_sha is not None and implementation_sha != Path(root).name:
+        raise RuntimeRefusal("ROOT_UNIT_IMPLEMENTATION_LABEL_MISMATCH")
     implementation_line = ("" if implementation_sha is None else
                            f"Environment=MM_HERMES_IMPLEMENTATION_SHA={implementation_sha}\n")
     seconds = int(profile.restart_sec) if float(profile.restart_sec).is_integer() else profile.restart_sec
@@ -120,10 +124,9 @@ NotifyAccess=main
 User={runtime_user}
 Group={runtime_group}
 WorkingDirectory={state}
-ExecStart={exe} -P -m integrations.hermes_runtime supervise --profile {state}/current/profile.yaml --hermes-bin {state}/current/bin/hermes
+ExecStart={exe} -I -S -B {root}/ops/executive_os/release_manifest.py hermes-runtime supervise --profile {state}/current/profile.yaml --hermes-bin {state}/current/bin/hermes
 # Operator-only provider-charged canary: requires separate authorization.
-ExecReload={exe} -P -m integrations.hermes_runtime canary --profile {state}/current/profile.yaml --hermes-bin {state}/current/bin/hermes
-Environment=PYTHONPATH={root}
+ExecReload={exe} -I -S -B {root}/ops/executive_os/release_manifest.py hermes-runtime canary --profile {state}/current/profile.yaml --hermes-bin {state}/current/bin/hermes
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONNOUSERSITE=1
 {implementation_line}Restart=on-failure
