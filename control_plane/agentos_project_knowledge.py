@@ -121,6 +121,7 @@ _MACRO_DIR_PATH = re.compile(
 # Regular 100644 blob members only; the sentinel marks symlinks, gitlinks,
 # executable or otherwise irregular tree entries, which are never read.
 _IRREGULAR = object()
+_IMMUTABLE_CAPTURE = object()
 
 _PARSE_FAULTS = (ValueError, TypeError, KeyError, AttributeError, RecursionError, SyntaxError)
 
@@ -232,7 +233,7 @@ class _Session:
     canonical default and grants instead of claiming a different filesystem HEAD.
     """
 
-    def __init__(self, macro_root, expected_macro_sha, work_ref, runner, timeout, canonical_data_view=None, code_root=None, code_commit=None):
+    def __init__(self, macro_root, expected_macro_sha, work_ref, runner, timeout, canonical_data_view=None, code_root=None, code_commit=None, immutable_capture=None):
         validate_selection(work_ref)
         if (
             not isinstance(macro_root, (str, Path))
@@ -248,6 +249,9 @@ class _Session:
         self.root = Path(macro_root)
         self.commit = expected_macro_sha
         self._data_view = canonical_data_view
+        if immutable_capture is not None and immutable_capture is not _IMMUTABLE_CAPTURE:
+            raise _CaptureFailure("SOURCE_UNAVAILABLE")
+        self._immutable_capture = immutable_capture
         self.code_commit, self.code_root = self.commit, self.root
         if code_root is not None or code_commit is not None:
             if (canonical_data_view is not None or not isinstance(code_root, (str, Path))
@@ -275,7 +279,7 @@ class _Session:
         self._runner = runner
         self.commands = []
 
-    def git(self, *args, limit=_DEFAULT_LIMIT, soft=False, _code=False):
+    def git(self, *args, limit=_DEFAULT_LIMIT, soft=False, _code=False, input_bytes=None):
         """One bounded immutable Git read; ``soft`` turns an output-limit trip
         into a None the caller counts, instead of failing the whole capture."""
         remaining = self.deadline - time.monotonic()
@@ -299,6 +303,7 @@ class _Session:
                 timeout=remaining,
                 max_bytes=limit,
                 env=local_git_environment(),
+                **({} if input_bytes is None else {'input_bytes':input_bytes}),
             )
         except (OSError, ValueError, TypeError) as exc:
             raise _CaptureFailure("SOURCE_UNAVAILABLE") from exc
@@ -321,6 +326,12 @@ class _Session:
         return value
 
     def head(self):
+        if self._immutable_capture is _IMMUTABLE_CAPTURE:
+            # Internal comparison of immutable objects, bracketed by the
+            # canonical owner. It supplies no default observation or grant.
+            if self.git("rev-parse", "HEAD", limit=128, _code=True).strip() != self.code_commit:
+                raise _CaptureFailure("SOURCE_CHANGED")
+            return self.commit
         if (self.code_root != self.root or self.code_commit != self.commit) and self.git("rev-parse", "HEAD", limit=128, _code=True).strip() != self.code_commit:
             raise _CaptureFailure("SOURCE_CHANGED")
         if self._data_view is not None:
@@ -804,7 +815,7 @@ def _preference(session, module, workstream, key, pref_hits):
     }
 
 
-def _capture_index(macro_root, expected_macro_sha, work_ref, runner, timeout, canonical_data_view=None, code_root=None, code_commit=None):
+def _capture_index(macro_root, expected_macro_sha, work_ref, runner, timeout, canonical_data_view=None, code_root=None, code_commit=None, immutable_capture=None):
     """Regenerate the exact current catalogue metadata and member index.
 
     No file or record body is read here beyond the records the bounded sample
@@ -812,7 +823,7 @@ def _capture_index(macro_root, expected_macro_sha, work_ref, runner, timeout, ca
     blob SHA-1 only.  HEAD is verified before the first and after the last Git
     read, so a source change mid-capture fails closed with no private payload.
     """
-    session = _Session(macro_root, expected_macro_sha, work_ref, runner, timeout, canonical_data_view, code_root, code_commit)
+    session = _Session(macro_root, expected_macro_sha, work_ref, runner, timeout, canonical_data_view, code_root, code_commit, immutable_capture)
     if session.head() != session.commit:
         raise _CaptureFailure("SOURCE_CHANGED")
     parser_text = session.captured("scripts/agentos.py", limit=_PARSER_LIMIT, soft=True)
@@ -894,6 +905,65 @@ def _capture_index(macro_root, expected_macro_sha, work_ref, runner, timeout, ca
         "preference": preference,
         "rows_by_ref": rows_by_ref,
     }
+
+
+def capture_selected_project_data_closure(*, macro_root, code_root, code_commit,
+                                        data_commit, work_ref, deadline):
+    """Compare the actual finite reader inputs at C/N, never a path-prefix guess.
+
+    Both index discovery passes use the configured parser and existing bounds.
+    The plan reader records its own selected adoption/proposal/content captures.
+    Missing members and literal tree entries preserve additions, deletions,
+    renames and modes; generated commit-bound source references are excluded.
+    The caller owns live permission/default/code fences. This returns DATA only.
+    """
+    stop=min(deadline,time.monotonic()+10.0)
+    consumed=0
+    manifests=[]
+    for commit in (code_commit,data_commit):
+        remaining=stop-time.monotonic()
+        if remaining<=0:
+            raise _CaptureFailure("SOURCE_UNAVAILABLE")
+        index=_capture_index(macro_root,commit,work_ref,None,remaining,
+            code_root=code_root,code_commit=code_commit,immutable_capture=_IMMUTABLE_CAPTURE)
+        session=index['session']
+        # All passes, including plan continuity, share this one original bound.
+        session.deadline=stop
+        paths={session.ws_path,session.preference_path}
+        paths.update(row['path'] for row in index['files'] if row['repository']=='macro' and row['path'] is not None)
+        paths.update(row['path'] for row in index['records'])
+        members=[]
+        for path in sorted(paths):
+            if not _safe_macro_path(path):
+                raise _CaptureFailure("SOURCE_INVALID")
+            members.append([path,session.git('--literal-pathspecs','ls-tree','-z',commit,'--',path,limit=16384)])
+        audit={}
+        with _parser_session(session,session.captured('scripts/agentos.py',limit=_PARSER_LIMIT)) as owner:
+            from control_plane.agentos_plan_continuity_capture import capture_plan_continuity
+            capture_plan_continuity(owner=owner,git=lambda *args,**kw:session.git(*args,**kw),
+                work_ref=work_ref,macro_sha=commit,
+                workstream_source={'repository':REPOSITORY,'commit':commit,'path':session.ws_path,
+                    'content_sha256':hashlib.sha256(index['ws_text'].encode()).hexdigest()},
+                workstream_bytes=index['ws_text'].encode(),executable_macro_sha=code_commit,
+                _data_closure=audit)
+        if audit.get('state') not in ('CAPTURED','FIXED_READER_UNAVAILABLE'):
+            raise _CaptureFailure("SOURCE_UNAVAILABLE")
+        def without_issued_refs(value):
+            if type(value) is list:return [without_issued_refs(v) for v in value]
+            if type(value) is dict:
+                return {k:without_issued_refs(v) for k,v in value.items() if k not in ('source_ref','source')}
+            return value
+        material=dict(members=members,workstream_sha256=hashlib.sha256(index['ws_text'].encode()).hexdigest(),
+            files=without_issued_refs(index['files']),records=without_issued_refs(index['records']),
+            file_coverage=index['file_coverage'],record_coverage=index['record_coverage'],
+            preference=without_issued_refs(index['preference']),plan=audit)
+        consumed+=session.consumed
+        if consumed>_TOTAL_BUDGET or session.head()!=commit or time.monotonic()>=stop:
+            raise _CaptureFailure("CONTENT_OVER_BUDGET")
+        manifests.append(json.dumps(material,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode())
+    if manifests[0]!=manifests[1]:
+        raise _CaptureFailure("SOURCE_CHANGED")
+    return hashlib.sha256(manifests[0]).hexdigest()
 
 
 def _capture(macro_root, expected_macro_sha, work_ref, runner, timeout, unavailable, canonical_data_view=None, code_root=None, code_commit=None):
