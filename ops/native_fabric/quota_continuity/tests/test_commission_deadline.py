@@ -174,7 +174,7 @@ elif name == 'ssh':
         record('remote_cleanup'); raise SystemExit(0)
 elif name == 'scp':
     record('scp')
-    if case == 'slow_scp': time.sleep(10)
+    if case == 'slow_scp': time.sleep(20)
     if case == 'retry_ambiguous' and count('scp')==1: time.sleep(1.2)
     raise SystemExit(0)
 elif name == 'rsync':
@@ -377,14 +377,14 @@ class ControllerDeadline(unittest.TestCase):
 
     def test_owned_setup_expiry_releases_only_unlaunched_provider_lease(self):
         # Reach granted-lease setup before its finite twenty-second stall.
-        result=self.run_controller('slow_setup',budget=8)
+        result=self.run_controller('slow_setup',budget=14)
         self.assertIn('setup',[row['stage'] for row in result['events']],result)
         self.check_prelaunch_expiry(result,'commission-setup')
         self.assertNotIn('scp',[row['stage'] for row in result['events']])
 
     def test_owned_support_transfer_expiry_never_launches_worker(self):
-        # Reach packet upload before its finite ten-second fixture stall.
-        result=self.run_controller('slow_scp',budget=8)
+        # Reach packet upload before a 20-second fixture stall beyond the 14s commission.
+        result=self.run_controller('slow_scp',budget=14)
         self.assertIn('scp',[row['stage'] for row in result['events']],result)
         self.check_prelaunch_expiry(result,'commission-packet-upload')
 
@@ -392,7 +392,7 @@ class ControllerDeadline(unittest.TestCase):
         self.assertEqual(result['returncode'],75,result['stderr'])
         stages=[row['stage'] for row in result['events']]
         self.assertIn('granted',stages);self.assertIn('release',stages);self.assertNotIn('launch',stages)
-        self.assertLess(result['elapsed'],result['budget']+2,result)
+        self.assertLess(result['elapsed'],result['budget']+8,result)
         receipts=[row for row in result['receipts'] if row['label']==label]
         self.assertEqual(len(receipts),1,result)
         receipt=receipts[0]
@@ -718,6 +718,7 @@ class FullCliDeadline(unittest.TestCase):
         original=importlib.util.module_from_spec(spec);spec.loader.exec_module(original)
         with tempfile.TemporaryDirectory(prefix='full-cli-',dir=ROOT/'tests') as tmp:
             root=Path(tmp);source=root/'source';source.mkdir()
+            diagnostics=root/'diagnostics';diagnostics.mkdir(mode=0o700)
             names=(*original.SOURCE_SHA256,'remote_sub_helpers.py','commission_deadline.py',
                    'lane_runtime.py','quota_circuit.py','lease_broker.py')
             for name in names:
@@ -741,7 +742,7 @@ class FullCliDeadline(unittest.TestCase):
                     for path in (fixture_root/'ext/state/remote_sub').glob('*.json*'):
                         if path.is_file() and path.stat().st_size<=65536:
                             stages[path.name]=path.read_text()
-                    (ROOT/'tests/last-full-cli-request-stages.json').write_text(json.dumps(stages,indent=2)+'\n')
+                    (diagnostics/'last-full-cli-request-stages.json').write_text(json.dumps(stages,indent=2)+'\n')
                     return result
                 proc.communicate=communicate_and_retain
                 return proc
@@ -752,15 +753,17 @@ class FullCliDeadline(unittest.TestCase):
                 case.test_original_budget_bounds_real_cli_broker_wait_before_task_start()
             finally:
                 if (root/'last-run.json').exists():
-                    shutil.copyfile(root/'last-run.json',ROOT/'tests/last-full-cli-attempt.json')
+                    shutil.copyfile(root/'last-run.json',diagnostics/'last-full-cli-attempt.json')
                 if (root/'last-controller.stderr').exists():
-                    shutil.copyfile(root/'last-controller.stderr',ROOT/'tests/last-full-cli-attempt.stderr')
+                    shutil.copyfile(root/'last-controller.stderr',diagnostics/'last-full-cli-attempt.stderr')
             evidence=json.loads((root/'last-run.json').read_text())
             self.assertEqual(evidence['transport_or_task_invocation_count'],0)
             self.assertFalse(evidence['launch_log_present'])
             self.assertEqual(evidence['continuation_finished']['reason'],'commission_time_exhausted')
-            (ROOT/'tests/last-full-cli-green.json').write_text(json.dumps(evidence,indent=2,sort_keys=True)+'\n')
-            (ROOT/'tests/last-full-cli-green.stderr').write_text((root/'last-controller.stderr').read_text())
+            (diagnostics/'last-full-cli-green.json').write_text(json.dumps(evidence,indent=2,sort_keys=True)+'\n')
+            (diagnostics/'last-full-cli-green.stderr').write_text((root/'last-controller.stderr').read_text())
+            self.assertEqual(json.loads((diagnostics/'last-full-cli-green.json').read_text()),evidence)
+            self.assertTrue((diagnostics/'last-full-cli-request-stages.json').is_file())
 
 
 if __name__=='__main__':

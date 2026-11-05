@@ -439,7 +439,12 @@ def assess_draft_readiness(facts: DraftReadinessFacts) -> DraftReadinessAssessme
         return _draft_assessment(DraftReadinessVerdict.KEEP_DRAFT, DraftReadinessIssue.DRAFT_HELD)
     if facts.source_writer_active is None:
         return _draft_assessment(DraftReadinessVerdict.RECONCILE_REQUIRED, DraftReadinessIssue.WRITER_STATE_UNKNOWN)
-    if facts.source_writer_active or pr.work_state is WorkState.ACTIVE:
+    # WorkState.ACTIVE is live programme work, not an active source edit lease.
+    # A source-qualified Draft inside an ACTIVE programme stays reviewable, so
+    # only the distinct source_writer_active fact (or its unknown state, which
+    # is reconciled above) holds a Draft in place.  Requiring a terminal work
+    # state before Ready would recreate a Draft/release deadlock.
+    if facts.source_writer_active:
         return _draft_assessment(DraftReadinessVerdict.KEEP_DRAFT, DraftReadinessIssue.SOURCE_WRITER_ACTIVE)
     if facts.scope_complete is None:
         return _draft_assessment(DraftReadinessVerdict.RECONCILE_REQUIRED, DraftReadinessIssue.SCOPE_COMPLETENESS_UNKNOWN)
