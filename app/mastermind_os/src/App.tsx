@@ -4387,7 +4387,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       setProjectTab("More"); setActive("Projects"); return true;
     }}
     onOpenMetaCeo={() => setActive("Meta-CEO")} onSourcesAndAccess={() => setActive("Sources")}
-    onRefresh={() => {setProgramRevision(n => n + 1);setWindowRevision(n => n + 1);}} />;
+    onRefresh={() => {
+      const owner = captureListReadOwner(retainedResultHost);
+      if (!owner || owner.hostGeneration !== retainedHostGeneration || !conversationListOwnerCurrent(owner, false)) return;
+      setProgramRevision(n => n + 1);setWindowRevision(n => n + 1);
+    }} />;
   const currentConversationPanel = (
       <>
         <ConversationWindow
