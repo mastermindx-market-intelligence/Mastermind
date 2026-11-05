@@ -4306,7 +4306,9 @@ function renderEquityCurve() {
   }
 
   if (!series.length) {
-    wrap.innerHTML = '<div class="mm-empty" style="padding:40px 0"><span class="mm-empty-icon">◌</span>' + t('ec.no_data') + '</div><div class="mm-ec-tooltip" id="ec-tooltip"></div>';
+    var emptyMsg = p && p.availability && p.availability.status === 'unavailable'
+      ? _unavailHtml() : t('ec.no_data');
+    wrap.innerHTML = '<div class="mm-empty" style="padding:40px 0"><span class="mm-empty-icon">◌</span>' + emptyMsg + '</div><div class="mm-ec-tooltip" id="ec-tooltip"></div>';
     return;
   }
 
