@@ -17,6 +17,8 @@ from control_plane.github_review_host_config import DeliverySecretSource, Review
 from control_plane.github_review_runtime_adapter import ExecutiveReviewJobAdmission
 from integrations.github_review_socket_client import ExecutiveReviewSocketClient
 from integrations.github_review_api import GitHubReviewAPI
+from integrations.github_review_risk_consumer import GitHubReviewRiskConsumer
+from integrations.github_pr_delivery_consumer import GitHubPRDeliveryConsumer
 from integrations.github_review_app_token import GitHubAppInstallationTokens
 from integrations.github_review_ingress_asgi import GitHubReviewReceiver
 from integrations.github_review_slack_visibility import SlackReviewVisibility
@@ -36,6 +38,7 @@ def compose_github_review_host(
     webhook_secret_source: DeliverySecretSource,
     runtime: Runtime | None = None,
     admission_guard: Callable[[], None] | None = None,
+    reconciliation_guard: Callable[[str], None] | None = None,
     socket_client: ExecutiveReviewSocketClient | None = None,
     relay_client: SlackWebApiDialogueClient,
     publisher_login: str,
@@ -54,6 +57,9 @@ def compose_github_review_host(
 
     if not isinstance(settings, ReviewHostSettings):
         raise GitHubReviewHostCompositionUnavailable("REVIEW_SETTINGS_UNBOUND")
+    if len(settings.repositories) != 1:
+        raise GitHubReviewHostCompositionUnavailable("REVIEW_REPOSITORY_BINDING_INVALID")
+    repository = next(iter(settings.repositories))
     # A dedicated public webhook host never receives Runtime or its database.
     # It sends bounded frames only to the existing authenticated Executive
     # socket. The in-process port remains solely for existing kernel tests.
@@ -74,12 +80,12 @@ def compose_github_review_host(
     token_source = GitHubAppInstallationTokens(
         app_id=app_id,
         installation_id=settings.installation_id,
-        repository=next(iter(settings.repositories)) if len(settings.repositories) == 1 else "",
+        repository=repository,
         private_key_source=private_key_source,
         client=app_token_http_client,
     )
     github = GitHubReviewAPI(
-        repository=next(iter(settings.repositories)),
+        repository=repository,
         installation_id=settings.installation_id,
         token_source=token_source,
         publisher_login=publisher_login,
@@ -105,4 +111,7 @@ def compose_github_review_host(
         actors=github,
         fabric=admission,
         visibility=visibility,
+        reconciliation_guard=reconciliation_guard,
+        risk_consumer=GitHubReviewRiskConsumer(github=github, repository=repository),
+        delivery_consumer=GitHubPRDeliveryConsumer(github=github, repository=repository),
     )

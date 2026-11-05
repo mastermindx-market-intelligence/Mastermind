@@ -120,6 +120,27 @@ def validate_tool_arguments(tool_name: str, arguments: Any) -> dict[str, Any]:
     raise BridgeError("not_found", "unknown tool")
 
 
+def validate_installed_summon_arguments(arguments: Any) -> dict[str, Any]:
+    """Private App research extension; the public MCP summon stays frozen.
+
+    The already authenticated App carries its requested catalogue alias. Only
+    canonical ingress can resolve/freeze it; this syntax grants no provider,
+    account, placement or execution authority.
+    """
+    if not isinstance(arguments, Mapping) or "frontier_model_alias" not in arguments:
+        return validate_tool_arguments("session_summon", arguments)
+    if arguments.get("execution_profile") != "research_only":
+        raise BridgeError("invalid_input", "App frontier summon requires research_only")
+    from integrations.executive_mcp import schemas as executive
+    try:
+        normalized = executive.validate_app_submit_arguments(arguments)
+    except executive.GatewayError as exc:
+        raise BridgeError(exc.code, exc.message) from None
+    if "workstream" not in normalized:
+        raise BridgeError("invalid_input", "strict Executive admission requires workstream")
+    return normalized
+
+
 def summon_input_schema() -> dict[str, Any]:
     """Reuse Executive requested-scope syntax; strict-v2 additionally needs source identity."""
     import copy

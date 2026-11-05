@@ -1055,14 +1055,19 @@ def test_unexpected_package_fifo_is_refused_without_opening_it(tmp_path: Path) -
 
 
 @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix-domain sockets are unavailable")
-def test_unexpected_package_socket_is_refused_without_opening_it() -> None:
+def test_unexpected_package_socket_is_refused_without_opening_it(monkeypatch: pytest.MonkeyPatch) -> None:
     """A validator must classify a socket node without treating it as package text."""
     root = Path(tempfile.mkdtemp(prefix="cortex-v9-", dir=os.path.realpath(tempfile.gettempdir())))
     _copy_package(root)
     path = root / "plugins/mastermind-cortex/references/hidden.sock"
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        listener.bind(str(path))
+        # AF_UNIX limits the supplied pathname, not the resolved filesystem path.
+        # Bind relative to the owned fixture only, then restore cwd before validation.
+        with monkeypatch.context() as local:
+            local.chdir(path.parent)
+            listener.bind(path.name)
+        assert path.is_socket(), "the invalid package entry must be a real socket"
         assert "PACKAGE_FILESYSTEM_INVALID" in _codes_without_exception(root)
     finally:
         listener.close()

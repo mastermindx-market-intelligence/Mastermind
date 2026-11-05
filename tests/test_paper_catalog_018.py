@@ -71,10 +71,12 @@ class PaperCatalog018Tests(unittest.TestCase):
         self.assertTrue(b.schema_receipt(c, CURRENT)["accepted_for_write"])
         changed = copy.deepcopy(CURRENT)
         changed["set_text_content"]["inputSchema"]["properties"]["updates"]["items"]["properties"]["html"]["type"] = "number"
-        self.assertFalse(b.schema_receipt(c, changed)["accepted_for_write"])
+        receipt = b.schema_receipt(c, changed)
+        self.assertTrue(receipt["accepted_for_write"])
+        self.assertNotIn("set_text_content", receipt["compatible_write_tools"])
         changed = copy.deepcopy(CURRENT)
         changed["archive_resources"]["description"] += " drift"
-        self.assertFalse(b.schema_receipt(c, changed)["accepted_for_write"])
+        self.assertTrue(b.schema_receipt(c, changed)["accepted_for_write"])
         self.assertFalse(b.schema_receipt(c, CURRENT, catalog_pin="0"*64)["accepted_for_write"])
         c.server["name"] = "other-server"
         self.assertFalse(b.schema_receipt(c, CURRENT)["accepted_for_write"])

@@ -1,0 +1,201 @@
+{
+  "provenance": {
+    "kind": "isolated actual sealed canonical reader + current eighth grant + Runtime event; nominal VerifiedPrincipal recovery identity. Signed HTTP/socket proof is separate, no installed/live proof.",
+    "canonical_parser_sha256": "acf3d970decb0b0c79b536bcc4e64cca93adace078321156fa72ff29c73f64a3",
+    "helper_sha256": "020942abf1b3faf5c7982269744c3869b0750dc3c3ad0e3ca740d9a6d6a8ea84"
+  },
+  "current": {
+    "availability": "AVAILABLE",
+    "current_receipt": null,
+    "instruction_revision": "42c3404e00c7096f58946dac5512d7f67deb9dd25e56c4721f04f6f2653871b3",
+    "owner_context": {
+      "principal_scope": "417ddeea77c2508740ecaa5f3fb54530e41964d15c80befc6a4060bbe86d0a6f"
+    },
+    "permission": {
+      "pause": true
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_instruction_admission_control.v1",
+    "selection": {
+      "instruction_ref": "INS:DAILY-ONE",
+      "work_ref": "WS:ONE"
+    },
+    "source": {
+      "commit": "cf4c7fbfa3bf97b6ed70b06d97af5caf0edb6c4b",
+      "content_sha256": "35b3869994c8a31cd9a02843c36bb1be1f9c6514df9139c2f1630951e4c46d59",
+      "path": "agentos/workstreams/WS-ONE.md",
+      "repository": "mastermindx-market-intelligence/macro"
+    },
+    "state": "NOT_SUSPENDED"
+  },
+  "unknown": {
+    "disposition": "EFFECT_UNKNOWN",
+    "reason_codes": [
+      "OWNER_OUTCOME_UNCONFIRMED"
+    ],
+    "receipt": null,
+    "schema": "mastermind.workspace_instruction_admission_action_result.v1",
+    "selection": {
+      "command_id": "mmos-instruction-pause-1111111111111111111111111111111111111111",
+      "instruction_ref": "INS:DAILY-ONE",
+      "work_ref": "WS:ONE"
+    }
+  },
+  "status": {
+    "reason_codes": [],
+    "receipt": {
+      "command_id": "mmos-instruction-pause-1111111111111111111111111111111111111111",
+      "committed_at_ms": 1793796815004,
+      "event_id": 2,
+      "instruction_ref": "INS:DAILY-ONE",
+      "request_digest": "9880c2fc1c1c493d06d20468aa108f65a9ddd40c5965f6eae7d464257d939341",
+      "revision": "42c3404e00c7096f58946dac5512d7f67deb9dd25e56c4721f04f6f2653871b3",
+      "schema": "mastermind.instruction_admission_suspension_receipt.v1",
+      "source": {
+        "commit": "cf4c7fbfa3bf97b6ed70b06d97af5caf0edb6c4b",
+        "content_sha256": "35b3869994c8a31cd9a02843c36bb1be1f9c6514df9139c2f1630951e4c46d59",
+        "path": "agentos/workstreams/WS-ONE.md",
+        "repository": "mastermindx-market-intelligence/macro"
+      },
+      "state": "PAUSED",
+      "work_ref": "WS:ONE"
+    },
+    "schema": "mastermind.workspace_instruction_admission_status_result.v1",
+    "selection": {
+      "command_id": "mmos-instruction-pause-1111111111111111111111111111111111111111",
+      "instruction_ref": "INS:DAILY-ONE",
+      "work_ref": "WS:ONE"
+    },
+    "state": "OBSERVED"
+  },
+  "paused": {
+    "availability": "AVAILABLE",
+    "current_receipt": {
+      "command_id": "mmos-instruction-pause-1111111111111111111111111111111111111111",
+      "committed_at_ms": 1793796815004,
+      "event_id": 2,
+      "instruction_ref": "INS:DAILY-ONE",
+      "request_digest": "9880c2fc1c1c493d06d20468aa108f65a9ddd40c5965f6eae7d464257d939341",
+      "revision": "42c3404e00c7096f58946dac5512d7f67deb9dd25e56c4721f04f6f2653871b3",
+      "schema": "mastermind.instruction_admission_suspension_receipt.v1",
+      "source": {
+        "commit": "cf4c7fbfa3bf97b6ed70b06d97af5caf0edb6c4b",
+        "content_sha256": "35b3869994c8a31cd9a02843c36bb1be1f9c6514df9139c2f1630951e4c46d59",
+        "path": "agentos/workstreams/WS-ONE.md",
+        "repository": "mastermindx-market-intelligence/macro"
+      },
+      "state": "PAUSED",
+      "work_ref": "WS:ONE"
+    },
+    "instruction_revision": "42c3404e00c7096f58946dac5512d7f67deb9dd25e56c4721f04f6f2653871b3",
+    "owner_context": {
+      "principal_scope": "417ddeea77c2508740ecaa5f3fb54530e41964d15c80befc6a4060bbe86d0a6f"
+    },
+    "permission": {
+      "pause": true
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_instruction_admission_control.v1",
+    "selection": {
+      "instruction_ref": "INS:DAILY-ONE",
+      "work_ref": "WS:ONE"
+    },
+    "source": {
+      "commit": "cf4c7fbfa3bf97b6ed70b06d97af5caf0edb6c4b",
+      "content_sha256": "35b3869994c8a31cd9a02843c36bb1be1f9c6514df9139c2f1630951e4c46d59",
+      "path": "agentos/workstreams/WS-ONE.md",
+      "repository": "mastermindx-market-intelligence/macro"
+    },
+    "state": "PAUSED"
+  },
+  "removed": {
+    "availability": "UNAVAILABLE",
+    "current_receipt": null,
+    "instruction_revision": null,
+    "owner_context": {
+      "principal_scope": "417ddeea77c2508740ecaa5f3fb54530e41964d15c80befc6a4060bbe86d0a6f"
+    },
+    "permission": null,
+    "reason_codes": [
+      "INSTRUCTION_NOT_SUPPLIED"
+    ],
+    "schema": "mastermind.workspace_instruction_admission_control.v1",
+    "selection": {
+      "instruction_ref": "INS:DAILY-ONE",
+      "work_ref": "WS:ONE"
+    },
+    "source": null,
+    "state": null
+  },
+  "removed_status": {
+    "reason_codes": [],
+    "receipt": {
+      "command_id": "mmos-instruction-pause-1111111111111111111111111111111111111111",
+      "committed_at_ms": 1793796815004,
+      "event_id": 2,
+      "instruction_ref": "INS:DAILY-ONE",
+      "request_digest": "9880c2fc1c1c493d06d20468aa108f65a9ddd40c5965f6eae7d464257d939341",
+      "revision": "42c3404e00c7096f58946dac5512d7f67deb9dd25e56c4721f04f6f2653871b3",
+      "schema": "mastermind.instruction_admission_suspension_receipt.v1",
+      "source": {
+        "commit": "cf4c7fbfa3bf97b6ed70b06d97af5caf0edb6c4b",
+        "content_sha256": "35b3869994c8a31cd9a02843c36bb1be1f9c6514df9139c2f1630951e4c46d59",
+        "path": "agentos/workstreams/WS-ONE.md",
+        "repository": "mastermindx-market-intelligence/macro"
+      },
+      "state": "PAUSED",
+      "work_ref": "WS:ONE"
+    },
+    "schema": "mastermind.workspace_instruction_admission_status_result.v1",
+    "selection": {
+      "command_id": "mmos-instruction-pause-1111111111111111111111111111111111111111",
+      "instruction_ref": "INS:DAILY-ONE",
+      "work_ref": "WS:ONE"
+    },
+    "state": "OBSERVED"
+  },
+  "project_only_empty": {
+    "availability": "AVAILABLE",
+    "declaration": "SUPPLIED",
+    "instructions": [],
+    "reason_codes": [],
+    "recovery_identity": {
+      "principal_scope": "417ddeea77c2508740ecaa5f3fb54530e41964d15c80befc6a4060bbe86d0a6f"
+    },
+    "schema": "mastermind.workspace_project_instructions.v2",
+    "selection": {
+      "work_ref": "WS:ONE"
+    },
+    "source": {
+      "commit": "aef977411d4a072881c1da94d3d8d8c3af03b920",
+      "content_sha256": "ab59a173c4a67683bbe391fe733c204cabd28aba0b07ca1ff3765f53073e2d0f",
+      "path": "agentos/workstreams/WS-ONE.md",
+      "repository": "mastermindx-market-intelligence/macro"
+    }
+  },
+  "project_current": {
+    "availability": "AVAILABLE",
+    "declaration": "SUPPLIED",
+    "instructions": [
+      {
+        "instruction_ref": "INS:DAILY-ONE",
+        "revision": "42c3404e00c7096f58946dac5512d7f67deb9dd25e56c4721f04f6f2653871b3",
+        "text": "Review the project carefully."
+      }
+    ],
+    "reason_codes": [],
+    "recovery_identity": {
+      "principal_scope": "417ddeea77c2508740ecaa5f3fb54530e41964d15c80befc6a4060bbe86d0a6f"
+    },
+    "schema": "mastermind.workspace_project_instructions.v2",
+    "selection": {
+      "work_ref": "WS:ONE"
+    },
+    "source": {
+      "commit": "cf4c7fbfa3bf97b6ed70b06d97af5caf0edb6c4b",
+      "content_sha256": "35b3869994c8a31cd9a02843c36bb1be1f9c6514df9139c2f1630951e4c46d59",
+      "path": "agentos/workstreams/WS-ONE.md",
+      "repository": "mastermindx-market-intelligence/macro"
+    }
+  }
+}

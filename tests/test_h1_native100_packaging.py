@@ -22,9 +22,14 @@ def test_explicit_new_pair_in_native100_and_all_old_base_checks_retained():
         assert hashlib.sha256((ROOT/'ops/native_fabric/grok47/overlay'/name).read_bytes()).hexdigest()==expected
 
 
-def test_four_exact_forward_compositions_include_actual_executor():
+def test_historical_four_plus_three_exact_bounded_forward_compositions():
     m=builder()
-    assert set(m.GROK47_CANDIDATE_COMPOSITION_DIGESTS)=={'pick.py','remote_sub.sh','remote_sub_exec.py','remote_sub_helpers.py'}
+    historical_four={'pick.py','remote_sub.sh','remote_sub_exec.py','remote_sub_helpers.py'}
+    added_bounded={'sub.sh','native_remote.py','fabric_operator_contract.py'}
+    s14_forward={'artifact_delivery.py'}
+    assert set(m.GROK47_CANDIDATE_COMPOSITION_DIGESTS)==historical_four|added_bounded|s14_forward
+    assert m.GROK47_CANDIDATE_COMPOSITION_DIGESTS['artifact_delivery.py']=='81749610b8afd7151dbadb4cbcedbef853fc18ad9de9364fd3b2b1d747d535b1'
+    assert m.GROK47_MERGED_SOURCE_DIGESTS['artifact_delivery.py']=='447ab9d65264f46acfe5662d60e38c1f4db97198afc9113c2717109e298db9c3'
     for name,expected in m.GROK47_CANDIDATE_COMPOSITION_DIGESTS.items():
         assert hashlib.sha256((DRAFT.parent/'candidate'/name).read_bytes()).hexdigest()==expected
 

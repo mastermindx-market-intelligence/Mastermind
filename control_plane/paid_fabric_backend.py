@@ -129,7 +129,12 @@ def qualify_paid_startup(release_root, *, config):
                 'paid_incumbent_state.py','host_pull.sh','host_pull_backend.py',
                 'host_pull_probe.template','paid_host_qualification.py',
                 'paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py',
-                'paid_provider_entry.py','paid_host_readiness.py')
+                'paid_provider_entry.py','paid_host_readiness.py',
+                'fabric_task.py','pool_ledger.py','pick.py','remote_sub_helpers.py',
+                'artifact_delivery.py','native_runtime_bindings.py','quota_circuit.py',
+                'provider_outcome.py','a04_terminal_reconcile.py',
+                'native_completion_reconcile.py','native_prestart_reconcile.py',
+                'native_preexec_reconcile.py','native_host_review_controller_reconcile.py')
     manifest = json.loads(_root_source(root / '.executive-release-manifest.json'))
     if (type(manifest) is not dict
             or set(manifest) != {'schema_version', 'commit_sha', 'tree_sha', 'entries'}
@@ -875,6 +880,42 @@ class CanonicalPaidBackend:
                         start_state='NO_RETAINED_START')
         if not starts:
             _refuse()
+        if operation == 'native-fabric-status':
+            # The authenticated Control reader has already joined the current
+            # principal/root to this exact immutable original paid launch. Its
+            # selectors alone cannot substitute a successor or another process.
+            original = starts[0]
+            if (original['request_sha256'] != payload['start_request_sha256']
+                    or digest(original['process_ref']) != payload['process_ref_sha256']):
+                _refuse()
+            before = self._installed_source()
+            rows = [row for row in before['bindings']
+                    if digest(row['physical_binding']) == payload['physical_binding_sha256']]
+            if len(rows) != 1:
+                _refuse()
+            self._require_source_data(rows[0]['physical_binding'], rows[0]['source_config'])
+            import fabric_task
+            if Path(fabric_task.__file__).resolve() != self._startup.native_ext / 'fabric_task.py':
+                _refuse()
+            # This is the actual incumbent status/ledger reader, using fixed
+            # original-owner data. It does not collect, adjudicate or refresh.
+            from control_plane.workspace_owned_task import await_owned
+            status = await await_owned(asyncio.create_task(asyncio.to_thread(
+                fabric_task.inspect_run, payload['run_id'], owner_ext=self._startup.owner_ext)))
+            if self._installed_source() != before:
+                _refuse()
+            self._require_source_data(rows[0]['physical_binding'], rows[0]['source_config'])
+            self.require_gateway(self._gateway)
+            # Re-read the HMAC journal after the native observation. Appending
+            # an original collection is fine; replacing its start is not.
+            after = [r['value'] for r in self._records(payload) if r['kind'] == 'start']
+            if after != [original]:
+                _refuse()
+            from common.executive_workspace_fabric_contract import status_metadata
+            status = status_metadata(status, run_id=payload['run_id'], root_id=payload['binding']['root_id'],
+                                     parent_run_id=payload['parent_run_id'])
+            return dict(common, status=status, request_sha256=payload['start_request_sha256'],
+                        process_ref_sha256=payload['process_ref_sha256'])
         if operation == 'status':
             collections = [r['value'] for r in records if r['kind'] == 'collection']
             if len(collections) > 1:

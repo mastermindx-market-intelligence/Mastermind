@@ -42,13 +42,121 @@ def source_owners(tmp_path_factory):
     spec = importlib.util.spec_from_file_location('successor_old_d044_fixture', path)
     old = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(old)
-    # Build the actual candidate; no model-generated count or placeholder files.
+    # Build current source first, then restore the exact historical B11 target.
+    # Later ordinary generations must not relabel that one finite transition.
     target = root / 'current'
     with mock.patch.object(sys, 'argv', ['builder', '--output', str(target)]), \
             contextlib.redirect_stdout(io.StringIO()):
         builder.main()
-    manifest = json.loads((target / 'native-manifest.json').read_bytes())
-    assert g.digest((target / 'native-manifest.json').read_bytes()) == installer.SUCCESSOR_MANIFEST
+    current_raw = (target / 'native-manifest.json').read_bytes()
+    assert current_raw == (ROLLOUT / 'native-manifest.json').read_bytes()
+    manifest = json.loads(current_raw)
+    import base64, zlib
+    fixture = ROLLOUT.parents[3] / 'tests/fixtures/native-catalog-predecessor102-0be933.json'
+    retained_raw = fixture.read_bytes()
+    assert g.digest(retained_raw) == '1df5d35c48678fea337238cf23aca6a68e3a16169192259873f7f48c36212fb9'
+    retained = json.loads(retained_raw)
+    assert retained['schema'] == 'mastermind.test_native_catalog_predecessor102/v1'
+    assert retained['source_commit'] == '58083bf128fdac2d8eab374641c78bb403e7d18c'
+    historical_manifest = retained['manifest']
+    added = {'ext/post_failure_observation.py', 'ext/post_failure_observation_delivery.py'}
+    assert set(manifest) == set(historical_manifest) | added
+    # Remove only the two reviewed S14 additions inside this disposable102
+    # inverse, after proving each is the actual current staged payload.
+    for name in added:
+        path = target / 'native-code-stage' / name
+        assert g.digest(path.read_bytes()) == manifest[name]
+        path.unlink()
+    manifest = {name: digest for name, digest in manifest.items() if name not in added}
+    # S7 changed three additional members of the CURRENT closure. Restore
+    # their exact protected predecessor bytes in this historical B11 fixture;
+    # the immutable original fixture and paired-upgrade target stay unchanged.
+    diagnostic_raw = (ROLLOUT.parents[3] / 'tests/fixtures/native-diagnostic-predecessors-e5f49cf4.json').read_bytes()
+    assert g.digest(diagnostic_raw) == 'fcc3ab7de9a8f517ca59d94cf745c1d894fc14478f399e7d18f198f0679233df'
+    diagnostic = json.loads(diagnostic_raw)
+    assert diagnostic['schema'] == 'mastermind.test_native_diagnostic_predecessors/v1'
+    assert diagnostic['source_commit'] == 'e5f49cf4dbe8d06382c1d6f32368e9e9fb51c63d'
+    assert set(retained['files']) == {'ext/fabric_task.py', 'ext/pool_ledger.py'}
+    assert set(diagnostic['files']) == {'ext/original_delivery_collector.py',
+                                      'ext/provider_outcome.py', 'ext/remote_sub.sh'}
+    # The 2026-11-03 finite long-horizon source extension legitimately changes
+    # ten more CURRENT members than this immutable B11 historical102 snapshot.
+    # Restore exact predecessor *bytes* only in the disposable source fixture,
+    # with independent protected commit and historical SHA readback, rather
+    # than relabeling the old release or ignoring changed-member differences.
+    long_path = (ROLLOUT.parents[3] /
+                 'tests/fixtures/native-long-horizon-predecessors-20261103.json')
+    long_raw = long_path.read_bytes()
+    assert g.digest(long_raw) == 'bb924475a501aa732ca0c5b1f05f9428c100c546bcbfb5d3e0c2ceaf268d6f19'
+    long_retained = json.loads(long_raw)
+    long_names = {'ext/commission_deadline.py','ext/fabric_continuation.py',
+                  'ext/remote_sub_exec.py','ext/remote_sub_helpers.py','ext/slot.py'}
+    assert (long_retained['schema'] ==
+            'mastermind.test_native_long_horizon_predecessors102/v1')
+    assert long_retained['source_commit'] == '9f65957e29eba92245d78609f032aaea523b7cb4'
+    assert set(long_retained['files']) == long_names
+    base_paths = {
+        'ext/artifact_delivery.py':
+            ROLLOUT.parents[1] / 'grok47/overlay/artifact_delivery.py',
+        'ext/fabric_operator_contract.py':
+            ROLLOUT.parents[1] / 'grok47/overlay/fabric_operator_contract.py',
+        'ext/fabric_operator_owner.py':
+            ROLLOUT.parent / 'source/fabric_operator_owner.py',
+        'ext/native_remote.py':
+            ROLLOUT.parents[1] / 'grok47/overlay/native_remote.py',
+        'ext/oc_free_exec.sh':
+            ROLLOUT.parent / 'source/oc_free_exec.sh',
+        'ext/sub.sh':
+            ROLLOUT.parents[1] / 'grok47/overlay/sub.sh',
+        # Protected899ac broker blob b39e1fbcebe88513ee9c1dd756c56a9c68ff72b1.
+        # Restore only this disposable historical102 payload, not CURRENT.
+        'ext/lease_broker.py':
+            fixture.with_name('native-lease-broker-pre-fair-share-899ac3a9.py.txt'),
+    }
+    new_names = long_names | set(base_paths)
+    # S9 also changes the CURRENT picker. Bind its authentic protected
+    # pre-observer bytes; never widen the immutable B11 transition target.
+    selection_raw = (ROLLOUT.parents[3] / 'tests/fixtures/fabric-selection-preobserver-pick-9f65957e.json').read_bytes()
+    assert g.digest(selection_raw) == 'b8792950a718d9b7628a8d3917f3ce11c567cfb87fdaa0e917dc6e7fb8c5866c'
+    selection = json.loads(selection_raw)
+    assert selection['schema'] == 'fabric.selection-preobserver-source.v1'
+    assert selection['commit'] == '9f65957e29eba92245d78609f032aaea523b7cb4'
+    assert selection['blob'] == 'dd542dbc5bb746c0ad1428b177b25a98b7a02536'
+    assert selection['path'] == 'ops/native_fabric/quota_continuity/candidate/pick.py'
+    # Reuse the exact protected observer bytes already checked against the
+    # immutable95 and102 maps; source/ preimages belong to another epoch.
+    observer_raw = (ROLLOUT.parents[3] / 'tests/fixtures/native-observer-historical95-48ca.json').read_bytes()
+    assert g.digest(observer_raw) == '0dd81a279641b9c456ef94439d519d97f7670ec18831f5bd78f69bcdd710b3b2'
+    observer = json.loads(observer_raw)
+    assert observer['schema'] == 'mastermind.test_native_observer_historical95/v1'
+    assert observer['source_commit'] == '48ca51f882338c58e377a0acf16931066c703384'
+    assert set(observer['files']) == {'ext/run_observation.py', 'ext/run_observation_delivery.py'}
+    predecessor_files = {**retained['files'], **diagnostic['files'],
+                         **observer['files'], 'ext/pick.py': selection}
+    assert {name for name in manifest if manifest[name] != historical_manifest[name]} == (
+        set(predecessor_files) | new_names
+    )
+    for name, digest in manifest.items():
+        assert g.digest((target / 'native-code-stage' / name).read_bytes()) == digest
+    for name, item in predecessor_files.items():
+        raw = zlib.decompress(base64.b64decode(item['zlib_base64'], validate=True))
+        assert len(raw) == item['bytes']
+        assert g.digest(raw) == item['sha256'] == historical_manifest[name]
+        (target / 'native-code-stage' / name).write_bytes(raw)
+    for name, item in long_retained['files'].items():
+        payload = zlib.decompress(base64.b64decode(item['zlib_base64'], validate=True))
+        assert len(payload) == item['bytes']
+        assert g.digest(payload) == item['sha256'] == historical_manifest[name]
+        (target / 'native-code-stage' / name).write_bytes(payload)
+    for name, predecessor in base_paths.items():
+        payload = predecessor.read_bytes()
+        assert g.digest(payload) == historical_manifest[name]
+        (target / 'native-code-stage' / name).write_bytes(payload)
+    manifest = historical_manifest
+    historical_raw = (json.dumps(manifest, sort_keys=True, indent=2) + '\n').encode()
+    assert g.digest(historical_raw) == retained['manifest_sha256'] == installer.SUCCESSOR_MANIFEST
+    for name, digest in manifest.items():
+        assert g.digest((target / 'native-code-stage' / name).read_bytes()) == digest
     assert len(manifest) == installer.SUCCESSOR_MEMBER_COUNT
     assert 'ext/host_pull_launchd.plist.template' in manifest
     # The historical fixture alone receives the authentic old verifier.

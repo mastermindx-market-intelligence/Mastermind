@@ -34,8 +34,11 @@ import urllib.request
 from enum import Enum
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from control_plane.terminal_original_input_artifacts import TerminalOriginalInputReference
 
 from control_plane.worker_execution_contract import (
     CleanupPolicy,
@@ -553,7 +556,9 @@ def worker_result_schema(
     effective_grant_digest: str | None = None,
     orchestration_role: str | None = None,
     root_job_id: str | None = None,
+    plan_schema_version: str = "mastermind.execution_plan/v1",
     aggregation_schema_version: str = "mastermind.aggregation_result/v1",
+    coordinator_job_id: str | None = None,
 ) -> dict[str, Any]:
     """Return the strict final-output contract for one immutable attempt."""
 
@@ -570,11 +575,17 @@ def worker_result_schema(
             run_id=run_id,
             worker_id=worker_id,
             root_job_id=root_job_id,
+            plan_schema_version=plan_schema_version,
             aggregation_schema_version=aggregation_schema_version,
+            coordinator_job_id=coordinator_job_id,
         )
         result["x-mastermind-effective-grant-digest"] = effective_grant_digest
         return result
 
+    if coordinator_job_id is not None:
+        raise SupervisorError("coordinator binding requires the V5 planner role")
+    if plan_schema_version != "mastermind.execution_plan/v1":
+        raise SupervisorError("versioned plan schema requires the planner role")
     if aggregation_schema_version != "mastermind.aggregation_result/v1":
         raise SupervisorError("aggregation producer schema requires an aggregation role")
     string_list = {"type": "array", "items": {"type": "string"}}
@@ -1614,6 +1625,98 @@ class ExecutiveSupervisor:
     def _run_dir(self, attempt_id: str) -> Path:
         return self.runs_root / attempt_id
 
+    def lookup_terminal_original_input(self, *, command_id: str, issuer_scope_sha256: str):
+        """Private same-command lookup only; no public input-ref authority."""
+        from control_plane.terminal_original_input_artifacts import TerminalInputError, TerminalOriginalInputArtifacts
+        if (type(command_id) is not str or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", command_id) is None
+                or type(issuer_scope_sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", issuer_scope_sha256) is None):
+            raise TerminalInputError("TERMINAL_INPUT_INVALID")
+        if self.runtime.store.find_event_by_command_id(command_id) is not None:
+            return None  # existing original command reconciles before artifact access
+        try:
+            self.runs_root.lstat()
+        except FileNotFoundError:
+            return None
+        return TerminalOriginalInputArtifacts(self.runs_root).lookup_original(
+            command_id=command_id, issuer_scope_sha256=issuer_scope_sha256)
+
+    def prepare_terminal_original_input(
+        self,
+        *,
+        command_id: str,
+        issuer_scope_sha256: str,
+        fingerprint_sha256: str,
+        payload: bytes,
+    ) -> TerminalOriginalInputReference | None:
+        """Prepare private source input before a NEW original Job insertion.
+
+        This is a private controller composition seam, not an ingress tool,
+        authority issuer, or source validator. The authenticated command owner
+        supplies its actual issuer scope and already validated typed producer
+        input; credentials must never enter the payload. An existing command
+        returns None BEFORE filesystem preparation so the caller must reconcile
+        that original operation through the existing sink, without retrofitting
+        resource input. A prepared reference proves custody only.
+
+        The original command owner must bind the returned immutable digest in
+        its Job insertion, and preserve its original carrier if that insertion
+        has an ambiguous outcome. This helper never inserts or dispatches a Job.
+        """
+        from control_plane.terminal_original_input_artifacts import (
+            TerminalInputError,
+            TerminalOriginalInputArtifacts,
+        )
+
+        if (
+            type(command_id) is not str
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", command_id) is None
+            or type(issuer_scope_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", issuer_scope_sha256) is None
+            or type(fingerprint_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", fingerprint_sha256) is None
+            or type(payload) is not bytes
+            or not 0 < len(payload) <= 256 * 1024
+        ):
+            raise TerminalInputError("TERMINAL_INPUT_INVALID")
+        if self.runtime.store.find_event_by_command_id(command_id) is not None:
+            return None
+
+        # runs_root already belongs to this Supervisor. This is the minimal
+        # new pre-Job allocator; incumbent _write_schema allocates after claim.
+        # Never create arbitrary ancestors or repair an unexpected directory.
+        try:
+            if not self.runs_root.exists():
+                flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+                descriptor = os.open(self.runs_root.parent, flags)
+                try:
+                    parent = os.fstat(descriptor)
+                    if (
+                        not stat.S_ISDIR(parent.st_mode)
+                        or parent.st_uid != os.geteuid()
+                        or stat.S_IMODE(parent.st_mode) & 0o022
+                    ):
+                        raise TerminalInputError("TERMINAL_INPUT_UNAVAILABLE")
+                    try:
+                        os.mkdir(self.runs_root.name, mode=0o700, dir_fd=descriptor)
+                    except FileExistsError:
+                        pass  # The immutable artifact owner checks the winner.
+                    os.fsync(descriptor)
+                    current = self.runs_root.parent.lstat()
+                    if (current.st_dev, current.st_ino) != (parent.st_dev, parent.st_ino):
+                        raise TerminalInputError("TERMINAL_INPUT_UNAVAILABLE")
+                finally:
+                    os.close(descriptor)
+            return TerminalOriginalInputArtifacts(self.runs_root).prepare(
+                command_id=command_id,
+                issuer_scope_sha256=issuer_scope_sha256,
+                fingerprint_sha256=fingerprint_sha256,
+                payload=payload,
+            )
+        except TerminalInputError:
+            raise
+        except Exception:
+            raise TerminalInputError("TERMINAL_INPUT_UNAVAILABLE") from None
+
     @staticmethod
     def _isolation_manifest(
         roots: Sequence[Path], *, workspace: Path, run_dir: Path
@@ -2165,7 +2268,10 @@ class ExecutiveSupervisor:
             isolation_denied_paths=isolation_denied,
             isolation_manifest=isolation_manifest,
             isolation_manifest_sha256=isolation_manifest_sha256,
-            forbidden_paths=(self.runtime.store.path,),
+            forbidden_paths=(
+                self.runtime.store.path,
+                self.runs_root / "terminal-original-input",
+            ),
             expected_worker_uid=self.worker_uid,
             expected_worker_gid=self.worker_gid,
             shared_run_gid=self.shared_run_gid,
@@ -2788,6 +2894,8 @@ class ExecutiveSupervisor:
     async def _collect_with_heartbeats(self, active: ActiveRun) -> CollectionReceipt:
         task = asyncio.create_task(self.adapter.collect_result(active.process_ref))
         attempt = active.lease.attempt
+        direct=_is_direct_native_job(self._job(attempt.job_id))
+        cancel_entered=False
         try:
             while True:
                 done, _ = await asyncio.wait(
@@ -2797,15 +2905,34 @@ class ExecutiveSupervisor:
                     return task.result()
                 job = self._job(attempt.job_id)
                 if job.status == JobStatus.CANCEL_REQUESTED:
-                    await self.adapter.cancel(active.process_ref, "durable cancellation request")
-                    return await task
+                    if not direct:
+                        await self.adapter.cancel(active.process_ref, "durable cancellation request")
+                        return await task
+                    if not cancel_entered:
+                        cancel_entered=True
+                        first=self.runtime.reserve_direct_native_cancel_call(attempt.attempt_id,
+                            fence_generation=attempt.fence_generation,lease_token=active.lease.lease_token)
+                        if first:
+                            try:
+                                await self.adapter.cancel(active.process_ref,"durable direct cancellation request")
+                            except Exception as exc:
+                                # No fallback kill or second adapter send. Keep the
+                                # original collection and lease until actual exit.
+                                self.runtime.record_direct_native_cancel_unavailable(attempt.attempt_id,
+                                    fence_generation=attempt.fence_generation,lease_token=active.lease.lease_token,
+                                    unsupported=isinstance(exc,NotImplementedError))
                 self.runtime.attempts.heartbeat_attempt(
                     attempt.attempt_id,
                     fence_generation=attempt.fence_generation,
                     lease_token=active.lease.lease_token,
                 )
         except Exception:
-            if not task.done():
+            if not task.done() and direct and cancel_entered:
+                # The original cancel may have executed. Do not use generic
+                # ownership-loss cleanup to issue that same effect a second time.
+                task.cancel()
+                await asyncio.gather(task,return_exceptions=True)
+            elif not task.done():
                 try:
                     await self.adapter.cancel(active.process_ref, "supervisor ownership lost")
                 finally:
@@ -3799,6 +3926,18 @@ class ExecutiveSupervisor:
                 )
             return seal_path
 
+        async def acknowledge_cancel():
+            current=self._job(attempt.job_id)
+            terminal=None
+            if _is_direct_native_job(current):
+                from control_plane.direct_native_correction import build_terminal
+                terminal=build_terminal(current,attempt,
+                    self.runtime.jobs.direct_native_provenance(current.job_id),
+                    self._read_private_receipt(receipt_path,name='direct cancellation collection'),
+                    self._read_private_receipt(await ensure_sealed(),name='direct cancellation assignment'))
+            return self.runtime.attempts.acknowledge_cancel(attempt.attempt_id,
+                fence_generation=fence,lease_token=token,direct_terminal=terminal)
+
         if receipt.result.exit_code is None:
             raise SupervisorError(
                 "recovered local worker has no truthful durable OS exit code; "
@@ -3830,9 +3969,7 @@ class ExecutiveSupervisor:
         if job.status == JobStatus.CANCEL_REQUESTED:
             await self._settle_recovered_terminal_owner(active)
             await ensure_sealed()
-            cancelled = self.runtime.attempts.acknowledge_cancel(
-                attempt.attempt_id, fence_generation=fence, lease_token=token
-            )
+            cancelled = await acknowledge_cancel()
             return cancelled, (), None, await ensure_sealed()
         output = receipt.result.structured_output
         direct = _is_direct_native_job(job)
@@ -3863,11 +4000,7 @@ class ExecutiveSupervisor:
                     job = self._job(attempt.job_id)
                     if job.status == JobStatus.CANCEL_REQUESTED:
                         await ensure_sealed()
-                        cancelled = self.runtime.attempts.acknowledge_cancel(
-                            attempt.attempt_id,
-                            fence_generation=fence,
-                            lease_token=token,
-                        )
+                        cancelled = await acknowledge_cancel()
                         return (
                             cancelled,
                             validation_receipts,
@@ -3915,11 +4048,7 @@ class ExecutiveSupervisor:
                 return failed, validation_receipts, validation_path, await ensure_sealed()
             except _ValidationCancelled:
                 await ensure_sealed()
-                cancelled = self.runtime.attempts.acknowledge_cancel(
-                    attempt.attempt_id,
-                    fence_generation=fence,
-                    lease_token=token,
-                )
+                cancelled = await acknowledge_cancel()
                 return cancelled, validation_receipts, validation_path, await ensure_sealed()
             except TerminalAssignmentSealError:
                 raise
@@ -3930,11 +4059,7 @@ class ExecutiveSupervisor:
                 current = self._job(attempt.job_id)
                 if current.status == JobStatus.CANCEL_REQUESTED:
                     await ensure_sealed()
-                    cancelled = self.runtime.attempts.acknowledge_cancel(
-                        attempt.attempt_id,
-                        fence_generation=fence,
-                        lease_token=token,
-                    )
+                    cancelled = await acknowledge_cancel()
                     return (
                         cancelled,
                         validation_receipts,
@@ -3946,11 +4071,7 @@ class ExecutiveSupervisor:
                 current = self._job(attempt.job_id)
                 if current.status == JobStatus.CANCEL_REQUESTED:
                     await ensure_sealed()
-                    cancelled = self.runtime.attempts.acknowledge_cancel(
-                        attempt.attempt_id,
-                        fence_generation=fence,
-                        lease_token=token,
-                    )
+                    cancelled = await acknowledge_cancel()
                     return (
                         cancelled,
                         validation_receipts,
@@ -3974,11 +4095,7 @@ class ExecutiveSupervisor:
                     if current.status != JobStatus.CANCEL_REQUESTED:
                         raise
                     await ensure_sealed()
-                    failed = self.runtime.attempts.acknowledge_cancel(
-                        attempt.attempt_id,
-                        fence_generation=fence,
-                        lease_token=token,
-                    )
+                    failed = await acknowledge_cancel()
                 return failed, validation_receipts, validation_path, await ensure_sealed()
         await ensure_sealed()
         failed = self.runtime.attempts.fail_attempt(

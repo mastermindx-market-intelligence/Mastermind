@@ -29,11 +29,31 @@ def materialized_proposal(tmp_path_factory):
     manifest = json.loads((PROPOSAL / 'manifest.json').read_text())
     tree = tmp_path_factory.mktemp('network-prospective-source')
     quota = 'ops/native_fabric/quota_continuity'
-    provenance = json.loads((ROOT / quota / 'candidate/paid_pyyaml_provenance.json').read_text())
+    active_paths = (
+        quota + '/source/fabric_operator_owner.py',
+        quota + '/candidate/fabric_operator_owner.py',
+        quota + '/candidate/fabric_task.py',
+        quota + '/rollout/build_review_stage.py',
+        quota + '/rollout/native-manifest.json',
+        quota + '/rollout/native-source-inventory.json',
+        'tests/executive_identity_review.py',
+        'tests/executive_fabric_release_identity_review.py',
+        'tests/test_executive_a2_identity_review.py',
+    )
+    active_preimages = {
+        path: (ROOT / path).read_bytes() if (ROOT / path).exists() else None
+        for path in active_paths
+    }
+    provenance = json.loads(subprocess.check_output([
+        'git', '-C', str(ROOT), 'show',
+        f"{manifest['base']}:{quota}/candidate/paid_pyyaml_provenance.json",
+    ]))
     archive = subprocess.check_output(['git', '-C', str(ROOT), 'archive', manifest['base'],
         quota, 'ops/native_fabric/grok47/overlay', provenance['lock_path']])
     with tarfile.open(fileobj=io.BytesIO(archive)) as source:
         source.extractall(tree, filter='data')
+    # Compare prospective output with its own immutable generation.
+    baseline = json.loads((tree / quota / 'rollout/native-manifest.json').read_text())
     for target, row in manifest['files'].items():
         original = tree / row['base_source']
         assert hashlib.sha256(original.read_bytes()).hexdigest() == row['preimage_sha256']
@@ -51,11 +71,16 @@ def materialized_proposal(tmp_path_factory):
     # The unchanged builder verifies original preimages and writes only this copy.
     subprocess.run([sys.executable, str(tree / quota / 'rollout/build_review_stage.py'),
                     '--output', str(tree / quota / 'rollout')], cwd=tree, check=True)
-    baseline = json.loads((ROOT / quota / 'rollout/native-manifest.json').read_text())
     staged = json.loads((tree / quota / 'rollout/native-manifest.json').read_text())
     assert len(baseline) == len(staged) == 102
     assert sorted(k for k in set(baseline) | set(staged) if baseline.get(k) != staged.get(k)) == ['ext/fabric_operator_owner.py', 'ext/fabric_task.py']
-    return tree
+    try:
+        yield tree
+    finally:
+        # The historical fixture must leave the current generation and D8 owner intact.
+        for path, before in active_preimages.items():
+            after = (ROOT / path).read_bytes() if (ROOT / path).exists() else None
+            assert after == before, path
 
 
 def load_owner(path):
@@ -365,7 +390,10 @@ def test_actual_materialized_manual_bytes_retain_only_inherited_d8_findings(mate
     from tests.test_ceo_submit_armed_composition import _scan_added_identity_diff
     manifest = json.loads((PROPOSAL / 'manifest.json').read_text())
     path = 'ops/native_fabric/quota_continuity/candidate/fabric_task.py'
-    original = (ROOT / path).read_text()
+    original = subprocess.check_output([
+        'git', '-C', str(ROOT), 'show',
+        f"{manifest['base']}:{manifest['files'][path]['base_source']}",
+    ]).decode('utf-8')
     prospective = (materialized_proposal / path).read_text()
     assert hashlib.sha256(prospective.encode()).hexdigest() == manifest['files'][path]['postimage_sha256']
     assert hashlib.sha256(original.encode()).hexdigest() == manifest['files'][path]['preimage_sha256']

@@ -16,7 +16,7 @@ def deadline_init():
     deadline = read_deadline_ns()
     raw = os.environ.get('POOL_COMMISSION_REMAINING_SECONDS')
     if raw is not None:
-        if not re.fullmatch(r'[1-9][0-9]{0,3}', raw) or int(raw) > 7200:
+        if not re.fullmatch(r'[1-9][0-9]{0,4}', raw) or int(raw) > 14400:
             raise ValueError('commission_duration_invalid')
         if deadline is None:
             deadline = narrow_deadline_ns(None, int(raw))
@@ -32,9 +32,46 @@ def deadline_seconds():
     deadline = read_deadline_ns()
     if deadline is None:
         raise ValueError('commission_deadline_missing')
-    # Whole seconds are conservative on the Bash/broker/worker wire. The
-    # process owner below retains fractional time for the actual local fuse.
-    print(min(int(cap), int(require_remaining(deadline))))
+    # Only broker acquisition reserves two seconds for local process cleanup.
+    # Other callers retain the old conservative whole-second deadline. Never
+    # allow a caller-supplied negative reserve or a new deadline authority.
+    selector = sys.argv[2] if len(sys.argv) == 3 else ''
+    if len(sys.argv) > 3 or selector not in ('', 'broker'):
+        raise ValueError('commission_duration_invalid')
+    reserve = 2.0 if selector == 'broker' else 0.0
+    remaining = require_remaining(deadline)
+    # Short admitted attempts retain the immediate-acquire path; with less
+    # than two seconds to spare, the broker may not queue or wait.
+    print(min(int(cap), max(0, int(remaining - reserve))))
+
+
+def _normal_poll_transport_failure(stage, result):
+    """Recognize only a completed read-only SSH poll, not an interruption.
+
+    SSH uses255 for a transport failure. The controller reserves128+ for
+    uncertain owned-process effects, so preserve255 in the process receipt
+    while reporting an ordinary failed observation to its existing poll loop.
+    This never qualifies a launch, a worker return, or a lease release.
+    """
+    from lane_runtime import cleanup_receipt_is_proven
+    cleanup = result.cleanup
+    return (
+        stage == 'poll'
+        and type(result.returncode) is int and result.returncode == 255
+        and result.timed_out is False
+        and result.stdout_truncated is False and result.stderr_truncated is False
+        and type(result.stdout_bytes) is int and result.stdout_bytes == 0
+        and result.stdout == ''
+        and isinstance(cleanup, dict) and cleanup_receipt_is_proven(cleanup)
+        and type(cleanup.get('residual_count')) is int
+        and cleanup.get('status') == 'not_needed'
+        and cleanup.get('reason') == 'normal_completion'
+        and all(cleanup.get(k) is False for k in ('sigterm_sent', 'sigkill_sent'))
+        and all(cleanup.get(k) is True for k in (
+            'stdout_capture_complete', 'stderr_capture_complete', 'stdin_delivery_complete'))
+        and all(k in cleanup and cleanup[k] is None for k in (
+            'error_code', 'stdout_capture_error', 'stderr_capture_error', 'stdin_delivery_error'))
+    )
 
 
 def deadline_command():
@@ -100,6 +137,8 @@ def deadline_command():
         raise SystemExit(76)
     if result.timed_out:
         print('COMMISSION_TIME_EXHAUSTED stage=' + stage, file=sys.stderr)
+    if _normal_poll_transport_failure(stage, result):
+        raise SystemExit(1)
     raise SystemExit(result.returncode if result.returncode >= 0 else 128 - result.returncode)
 
 
@@ -170,7 +209,7 @@ def native_window():
     from lease_broker import default_broker
     lease,root,account,host,timeout,pool=sys.argv[2:]
     timeout=int(timeout)
-    assert 1 <= timeout <= 7200
+    assert 1 <= timeout <= 14400
     b=default_broker()
     assert b.heartbeat(lease)
     v=next(x for x in b.snapshot()['leases'] if x['id']==lease)

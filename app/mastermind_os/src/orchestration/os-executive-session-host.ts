@@ -26,10 +26,28 @@ import type {
  * target read the UI presents truthfully. The getter is observation only:
  * it never mints, selects or looks up a target.
  */
+/** Read-only original-owner correlation, never a DSH or company-session ID. */
+export interface CurrentExecutiveSessionObservation {
+  readonly targetRef: string;
+  readonly selection: MissionSelection;
+  readonly principalScope: string;
+  readonly generation: string;
+}
 export type SessionCommandPort = FiniteCommandPort & {
   readonly currentTargetRef: () => string | null;
+  /** Optional for old mounts; absence cannot be treated as a bound session. */
+  readonly currentObservation?: () => CurrentExecutiveSessionObservation | null;
   readonly readOriginalReferences?: (selection: MissionSelection, signal: AbortSignal,
                                      cursor?: string) => Promise<unknown>;
+  /** Bounded same-project saved history, independent of the selected root's
+   * current window. Its owner remains the existing authenticated Session Bridge. */
+  readonly projectHistory?: {
+    context(): ReturnType<FiniteCommandPort["context"]>;
+    authGeneration(): number;
+    readReferences(request: { workRef: string; pageSize: 4; cursor?: string;
+                              signal: AbortSignal }): Promise<unknown>;
+    readAnswer(pointer: OperationPointer, signal: AbortSignal): Promise<QualifiedSessionAnswerRead>;
+  };
   /** Existing native READ operation; optional only for older injected hosts. */
   readonly readQualifiedAnswer?: (pointer: OperationPointer, signal: AbortSignal) =>
     Promise<QualifiedSessionAnswerRead>;
@@ -70,6 +88,37 @@ export function createOsExecutiveSessionHost(
       submit: (pointer, intent, signal) => original.submit(pointer, intent, signal),
       readOperation: (pointer, signal) => original.readOperation(pointer, signal),
       readQualifiedAnswer: (pointer, signal) => original.readQualifiedAnswer(pointer, signal),
+      projectHistory: transport.projectReferences ? {
+        context: () => original.context(),
+        authGeneration: () => transport.authGeneration(),
+        readAnswer: (pointer, signal) => original.readQualifiedAnswer(pointer, signal),
+        readReferences: async ({ workRef, pageSize, cursor, signal }) => {
+          const state = handle.sessionState();
+          const owner = original.context();
+          const authGeneration = transport.authGeneration();
+          const read = transport.projectReferences;
+          if (!state || !owner || !state.capabilities.reply_read || !read || signal.aborted ||
+              workRef !== state.selection.workRef || pageSize !== 4 ||
+              (cursor !== undefined && (typeof cursor !== "string" ||
+                !/^[A-Za-z0-9_=-]{1,2048}$/.test(cursor) || cursor.includes("\n")))) {
+            throw new Error("session_references_unavailable");
+          }
+          // Omit root_job_id entirely. This is the existing owner-authorized
+          // project reference API, never a guessed root, provider history or SEND.
+          const raw = await read({ work_ref: state.selection.workRef, page_size: 4,
+            ...(cursor !== undefined ? { cursor } : {}) }, signal);
+          const after = handle.sessionState();
+          const afterOwner = original.context();
+          if (signal.aborted || !after || !afterOwner || !after.capabilities.reply_read ||
+              transport.projectReferences !== read || transport.authGeneration() !== authGeneration ||
+              afterOwner.principalScope !== owner.principalScope || afterOwner.generation !== owner.generation ||
+              after.selection.workRef !== state.selection.workRef ||
+              after.selection.rootJobId !== state.selection.rootJobId) {
+            throw new Error("session_references_unavailable");
+          }
+          return raw;
+        },
+      } : undefined,
       readOriginalReferences: transport.references ? async (selected, signal, cursor) => {
         // This READ lives under the *same* verified Session owner as the
         // qualified native reply. A stale/unverified or foreign selection
@@ -103,6 +152,22 @@ export function createOsExecutiveSessionHost(
       currentTargetRef: () => {
         const state = handle.sessionState();
         return state?.capabilities.send ? state.target?.target_ref ?? null : null;
+      },
+      currentObservation: () => {
+        // SessionState is the existing canonical response, decoded against the
+        // exact refresh selection and owner epoch. Do not infer association
+        // from a target digest or the visible session title alone.
+        const state = handle.sessionState();
+        const owner = original.context();
+        if (!state || state.selectionState !== "RESOLVED" ||
+            !state.capabilities.send || !state.target || !owner ||
+            state.principalScope !== owner.principalScope) return null;
+        return {
+          targetRef: state.target.target_ref,
+          selection: { ...state.selection },
+          principalScope: owner.principalScope,
+          generation: owner.generation,
+        };
       },
     },
   };
@@ -162,6 +227,13 @@ export function completeExecutiveSessionBinding(
     !isFn(store.clearIfEqual)
   )
     return null;
+  if (port.projectHistory !== undefined) {
+    const history = port.projectHistory;
+    if (!isPlainObject(history) || Object.keys(history).sort().join(",") !==
+        "authGeneration,context,readAnswer,readReferences" || !isFn(history.context) ||
+        !isFn(history.authGeneration) || !isFn(history.readReferences) || !isFn(history.readAnswer)) return null;
+  }
+  if ("currentObservation" in port && !isFn(port.currentObservation)) return null;
   if (port.readQualifiedAnswer !== undefined && !isFn(port.readQualifiedAnswer)) return null;
   if (port.readOriginalReferences !== undefined && !isFn(port.readOriginalReferences)) return null;
   if (isFn((store as Record<string, unknown>).write)) return null;

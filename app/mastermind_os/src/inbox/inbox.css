@@ -75,3 +75,18 @@
   .inbox-evidence dd { margin-bottom: 10px; }
   .inbox-footer { margin-top: 24px; }
 }
+
+/* Current Paper Inbox keeps explicit requests primary; Mission scope is retained below. */
+ .atelier-inbox[data-sharing-inbox="true"] {
+  --inbox-primary: var(--text); --inbox-secondary: var(--muted); --inbox-muted: var(--muted);
+  --inbox-line: var(--border); --inbox-accent: var(--brass);
+  max-width: 960px; padding: 0; background: transparent; font-family: var(--font-ui);
+}
+.atelier-inbox[data-sharing-inbox="true"] h1 { font-family: var(--font-display); }
+.atelier-inbox[data-sharing-inbox="true"] :is(button, summary, [tabindex]):focus-visible { outline-color: var(--focus); }
+.inbox-workspace-warning { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); margin-block: 16px; }
+
+.inbox-mission-context { margin-top: 32px; border-top: 1px solid var(--inbox-line); }
+.inbox-mission-context > summary { min-height: 44px; padding-block: 12px; cursor: pointer; color: var(--inbox-secondary); }
+
+.atelier-inbox[data-sharing-inbox="true"] :is(.inbox-selected, .inbox-detail, .inbox-evidence) { background: var(--panel); }

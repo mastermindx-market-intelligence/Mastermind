@@ -342,8 +342,16 @@ class FakeIndex:
         with self.lock:
             return frozenset(self.ids)
 
+    def has_publication_claim(self, *, publication_command_id, repository,
+                              pull_number, head_sha, event, body):
+        with self.lock:
+            prior = self.claims.get(publication_command_id)
+            if prior is not None and prior != (repository, pull_number, head_sha, event, body):
+                raise ing.ReviewVerificationRefused("publication claim identity mismatch")
+            return prior is not None
+
     def reserve_publication(self, *, publication_command_id, repository,
-                            pull_number, head_sha, event, body):
+                            pull_number, head_sha, event, body, preflight_deadline=None):
         identity = (repository, pull_number, head_sha, event, body)
         with self.lock:
             prior = self.claims.get(publication_command_id)
@@ -504,7 +512,7 @@ class TestUnsupportedChannel:
 
     def test_unsupported_action_is_refused_without_a_read(self) -> None:
         parsed = json.loads(_label_body())
-        parsed["action"] = "opened"
+        parsed["action"] = "closed"
         reads = FakePullRequests()
         outcome = _admit(json.dumps(parsed).encode(), pull_requests=reads)
         assert outcome.decision.refusal is gri.ReviewIntentRefusal.ACTION_NOT_SUPPORTED
@@ -1273,7 +1281,7 @@ class TestCurrentHeadIndependentSecurityFindings:
         assert all(x in {"review-real", "EFFECT_UNKNOWN"} for x in outputs)
         assert len(ledger.claims) == 1
 
-    def test_effect_claim_is_sticky_if_readback_unavailable(self):
+    def test_unavailable_preflight_does_not_create_an_effect_claim(self):
         class BrokenReadback(SuccessTransport):
             def read_reviews(self, **kwargs):
                 raise OSError("repository API timeout")
@@ -1285,10 +1293,10 @@ class TestCurrentHeadIndependentSecurityFindings:
             head_sha=HEAD_SHA, event="COMMENT", body="review",
         )
         for _ in range(2):
-            with pytest.raises(ing.PublicationEffectUnknown):
+            with pytest.raises(ing.PublicationPreflightUnavailable):
                 adapter.publish_review(**fields)
         assert tx.submits == 0
-        assert len(ledger.claims) == 1
+        assert len(ledger.claims) == 0
 
     def test_concrete_post_unknown_and_readback_failure_remain_effect_unknown(self):
         class LostReadback(SuccessTransport):
@@ -1422,7 +1430,7 @@ class TestAuthorBoundReadbackAndFinalEffectGuard:
         assert outcome.refusal == reason
         assert tx.submits == 0
         assert pulls.reads == 2
-        assert len(ledger.claims) == 1
+        assert len(ledger.claims) == 0
 
     def test_publisher_id_and_login_both_required(self):
         expected = _review_fact(
