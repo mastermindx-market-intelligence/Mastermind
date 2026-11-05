@@ -89,3 +89,14 @@ describe("NewProjectDraft", () => {
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
   });
 });
+
+it("keeps embedded h2 by default and supplies one route h1 on request",()=>{
+ const change=vi.fn();
+ const view=render(<NewProjectDraft locale="en" goal="Retained goal" onGoalChange={change}/>);
+ const textarea=screen.getByRole("textbox");
+ expect(screen.getByRole("heading",{level:2,name:"What would you like done?"})).toBeTruthy();
+ expect(screen.queryByRole("heading",{level:1})).toBeNull();
+ view.rerender(<NewProjectDraft headingLevel={1} locale="en" goal="Retained goal" onGoalChange={change}/>);
+ expect(screen.getAllByRole("heading",{level:1})).toHaveLength(1);
+ expect(screen.getByRole("textbox")).toBe(textarea);expect(change).not.toHaveBeenCalled();
+});

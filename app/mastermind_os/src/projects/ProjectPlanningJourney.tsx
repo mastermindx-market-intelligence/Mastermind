@@ -61,6 +61,7 @@ import {
 import { DirectNativeCommandPort } from "../orchestration/direct-native-command-port";
 import {
   decodeDirectNativeResult,
+  parseDirectNativeJson,
   type DirectNativeTransport,
   type DirectResult,
   type DirectTerminalSelection,
@@ -334,6 +335,29 @@ function decodeCreationOptions(value: unknown): JourneyOptions | null {
     profiles,
     grounding,
   };
+}
+
+/** Presentation classification only, never a plan/publication/adoption proof.
+ * Ordinary prose and malformed/foreign declarations stay readable as returned.
+ * Exact raw declaration remains available in the existing closed Source details.
+ */
+function isExplicitPlanDeclaration(text: string, workRef: string): boolean {
+  if (text.length > 4096) return false;
+  try {
+    const value=fields(parseDirectNativeJson(text),["schema","work_ref","base_source","base_adoption","plan","rationale","evidence"]);
+    if(!value || value.schema!=="mastermind.project_plan_candidate.v1" || value.work_ref!==workRef) return false;
+    const source=fields(value.base_source,["repository","commit","path","content_sha256"]);
+    const plan=fields(value.plan,["objective","waves","next_action","body"]);
+    return Boolean(source && source.repository==="mastermindx-market-intelligence/macro" && hex(source.commit,HEX40) &&
+      bounded(source.path,512)!==null && hex(source.content_sha256,HEX64) &&
+      (value.base_adoption===null || typeof value.base_adoption==="string" && /^DEC:[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(value.base_adoption)) &&
+      bounded(value.rationale,4096)!==null && Array.isArray(value.evidence) && value.evidence.length<=32 && plan &&
+      bounded(plan.objective,4096)!==null && bounded(plan.next_action,4096)!==null && bounded(plan.body,4096)!==null &&
+      Array.isArray(plan.waves) && plan.waves.length<=32 && plan.waves.every(wave=>{
+        const row=fields(wave,["id","title","status"]);
+        return row!==null && bounded(row.id,128)!==null && bounded(row.title,1024)!==null && bounded(row.status,64)!==null;
+      }));
+  } catch {return false;}
 }
 
 // ── Source identity context (scope binding) ──────────────────────────────────
@@ -1677,6 +1701,9 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
   const consumePending = pendingPointer !== null && pendingPointer.kind === "consume" ? pendingPointer : null;
   const observedJobId = selection?.jobId ?? record.current.planningJob?.jobId ?? null;
   const requestText = planRequest ?? goal;
+  const returnedDeclaration=authorized && result?.result && result.selection.work_ref===selection?.workRef &&
+    result.selection.job_id===observedJobId && isExplicitPlanDeclaration(result.result.current_state,result.selection.work_ref)
+      ? result.result.current_state : null;
 
   const planningBlock: Notice | null = (() => {
     if (!readable) return "PLANNING_UNAVAILABLE_SOURCE";
@@ -1693,12 +1720,15 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
     return null;
   })();
 
+  const planningRecovery=selection?.planningOperationKey != null && result===null &&
+    (observed===null || control.status==="unknown" || control.status==="checking");
   const stateLine: readonly [string, string] = (() => {
     const pair = (en: string, cn: string): readonly [string, string] => [en, cn];
     if (!authorized) return NOTICE_COPY.AUTH;
     if (control.status === "submitting") return pair("Working…", "执行中…");
     if (control.status === "checking") return pair("Checking the recorded state…", "正在查询记录的状态…");
     if (control.status === "refused") return pair("The source refused this request.", "来源拒绝了此请求。");
+    if (planningRecovery) return pair("Check the original planning request. Do not send it again.", "请查询原始规划请求，不要重新发送。");
     if (control.status === "unknown") {
       return pair(
         "The outcome is not known yet. The original record is kept for a later check.",
@@ -1794,6 +1824,10 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
       {(readable || (selection?.workRef != null && selection.planningOperationKey !== null)) && (
         <section aria-label={copy(["Initial planning", "初始规划"])}>
           <h3>{copy(["Initial planning", "初始规划"])}</h3>
+          {planningRecovery && previewUnknown && <p>
+            <button type="button" onClick={checkSource} disabled={disabled || !authorized}>
+              {copy(["Check source status", "查询来源状态"])}</button>
+          </p>}
           {selection?.planningOperationKey != null ? (
             <p>{copy(["Use the original planning request below.", "请使用下方原始规划请求。"] )}</p>
           ) : planningBlock !== null ? (
@@ -1856,7 +1890,9 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
         <section aria-label={copy(["Planning result", "规划结果"])}>
           <h3>{copy(["Planning result", "规划结果"])}</h3>
           <p>{result.result.summary}</p>
-          <p>{result.result.current_state}</p>
+          {returnedDeclaration === null ? <p>{result.result.current_state}</p> :
+            <p>{copy(["This result includes a suggested plan. Its declaration is in Source details; it has not been published or adopted.",
+              "此结果包含建议计划。原始声明位于来源详情中，尚未发布或采纳。"] )}</p>}
           {result.result.completed_steps.length > 0 && (
             <section><h4>{copy(["Completed steps", "已完成的步骤"])}</h4><ul>
               {result.result.completed_steps.map((step, index) => <li key={index}>{step}</li>)}
@@ -1896,6 +1932,10 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
       )}
       <details>
         <summary>{copy(["Source details", "来源详情"])}</summary>
+        {returnedDeclaration !== null && <section>
+          <h4>{copy(["Suggested plan declaration — not published or adopted", "建议计划声明 — 尚未发布或采纳"])}</h4>
+          <pre>{returnedDeclaration}</pre>
+        </section>}
         <dl>
           {selection !== null && (
             <>
@@ -1960,19 +2000,21 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
 
   return (
     <NewProjectDraft
+      headingLevel={1}
       locale={locale}
       goal={goal}
       onGoalChange={onGoalChange}
       optionsPanel={optionsPanel}
       feedbackPanel={feedback}
-      startControl={observed !== null ? <span>{copy(["Project source recorded", "项目来源已记录"])}</span> :
+      startControl={planningRecovery ? <button type="button" className="primary" onClick={checkPlanning} disabled={disabled || !authorized}>
+        {copy(["Check original planning request", "查询原始规划请求"])}</button> : observed !== null ? <span>{copy(["Project source recorded", "项目来源已记录"])}</span> :
         createDispatched ? <span>{copy(["Check the original publication above", "请在上方查询原始发布"])}</span> :
-        previewUnknown ? <button type="button" onClick={checkSource} disabled={disabled || !authorized}>{copy(["Check source status", "查询来源状态"])}</button> :
-        previewLive !== null ? <button type="button" onClick={publish} disabled={disabled}>
+        previewUnknown ? <button type="button" className="primary" onClick={checkSource} disabled={disabled || !authorized}>{copy(["Check source status", "查询来源状态"])}</button> :
+        previewLive !== null ? <button type="button" className="primary" onClick={publish} disabled={disabled}>
           {busy === "publish" ? copy(["Publishing…", "发布中…"]) : copy(["Publish project", "发布项目"])}</button> :
-        <button type="button" onClick={preparePreview} disabled={disabled || !authorized || options === null}>
+        <button type="button" className="primary" onClick={preparePreview} disabled={disabled || !authorized || options === null}>
           {busy === "preview" ? copy(["Preparing…", "准备中…"]) : copy(["Prepare preview", "准备预览"])}</button>}
-      startNote={copy(observed !== null ? ["Initial planning is a separate action above.", "初始规划是上方独立的操作。"] :
+      startNote={copy(planningRecovery ? ["Check the original planning request. Do not send it again.", "请查询原始规划请求，不要重新发送。"] : observed !== null ? ["Initial planning is a separate action above.", "初始规划是上方独立的操作。"] :
         createDispatched ? ["The original source publication is retained for checking.", "原始来源发布已保留，可供查询。"] :
         previewUnknown ? ["Keep the original request identity while its response is unavailable.", "响应不可用时，请保留原始请求标识。"] :
         previewLive !== null ? ["Publishing records this project in the company source. It does not open a conversation.", "发布将在公司来源中记录该项目，不会打开对话。"] :

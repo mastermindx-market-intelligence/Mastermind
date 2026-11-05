@@ -3,6 +3,8 @@ import "./new-project-draft.css";
 
 export interface NewProjectDraftProps {
   locale: "en" | "zh-CN";
+  /** The containing route chooses the page heading; embedded callers keep h2. */
+  headingLevel?: 1 | 2;
   goal: string;
   onGoalChange: (value: string) => void;
   attachmentsControl?: ReactNode;
@@ -15,8 +17,9 @@ export interface NewProjectDraftProps {
 
 /** Controlled unsent composition. This view neither creates nor addresses a project. */
 export function NewProjectDraft({ locale, goal, onGoalChange, attachmentsControl,
-  optionsPanel, startControl, feedbackPanel, startNote }: NewProjectDraftProps) {
+  optionsPanel, startControl, feedbackPanel, startNote, headingLevel = 2 }: NewProjectDraftProps) {
   const zh = locale === "zh-CN";
+  const Heading = headingLevel === 1 ? "h1" : "h2";
   const text = (en: string, cn: string) => zh ? cn : en;
   const goalId = useId();
   const optionsId = useId();
@@ -31,7 +34,7 @@ export function NewProjectDraft({ locale, goal, onGoalChange, attachmentsControl
   return <section className="mm-new-project" lang={zh ? "zh-CN" : "en"}>
     <header className="mm-new-project-heading">
       <p className="mm-new-project-eyebrow">{text("New project", "新项目")}</p>
-      <h2>{text("What would you like done?", "你希望完成什么？")}</h2>
+      <Heading>{text("What would you like done?", "你希望完成什么？")}</Heading>
       <p>{text("Start with the outcome. I’ll work out the steps.", "从期望的结果开始。我会梳理具体步骤。")}</p>
     </header>
     <div className="mm-new-project-goal">

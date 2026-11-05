@@ -23,7 +23,7 @@
 import { useState } from "react";
 import sourceIssued from "../fixtures/project-journey-source-issued-388205.json";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { RenderResult } from "@testing-library/react";
 import { ProjectPlanningJourney, type ProjectJourneySelection } from "./ProjectPlanningJourney";
 import { canonicalJson, sha256Hex } from "../orchestration/operation-key";
@@ -1074,4 +1074,52 @@ it.each(["legacy", "mixed", "extra", "missing", "nontext"])("refuses %s installe
   await screen.findByText("The supplied project options are unavailable right now.");
   expect(screen.queryByRole("radio",{name:"Mastermind OS delivery"})).toBeNull();
   expect(h.calls.prepare).not.toHaveBeenCalled();
+});
+
+it.each(["en","zh-CN"] as const)("keeps the exact explicit plan declaration in closed Source details in %s",async locale=>{
+  const recorded=sourceIssued.samples[8].response;
+  const data=recorded.data! as unknown as ReturnType<typeof resultDocument>;
+  const h=makeHarness({locale,selection:{createRequestId:sourceIssued.identities.creation_request_id,
+    workRef:data.selection.work_ref,jobId:data.selection.job_id,
+    planningOperationKey:sourceIssued.identities.planning_operation_key}});
+  harnessRef=h;h.responses.planning.result=recorded;
+  fireEvent.click(screen.getByRole("button",{name:locale==="en"?"Read planning result":"读取规划结果"}));
+  await screen.findByText(data.result!.summary);
+  const resultRegion=screen.getByRole("region",{name:locale==="en"?"Planning result":"规划结果"});
+  expect(within(resultRegion).queryByText(data.result!.current_state)).toBeNull();
+  const raw=screen.getByText(data.result!.current_state,{exact:true});
+  const details=raw.closest("details")!;
+  expect(details).not.toBeNull();expect(details.open).toBe(false);
+  expect(details.querySelector("summary")?.textContent).toBe(locale==="en"?"Source details":"来源详情");
+  expect(screen.getByRole("button",{name:locale==="en"?"Keep result":"保留结果"})).toBeTruthy();
+  expect(h.calls.planning.mock.calls.map(row=>row[0])).toEqual(["result"]);
+});
+it.each(["ordinary prose","foreign declaration","malformed declaration","duplicate declaration"])("keeps %s current state readable",async variant=>{
+  const recorded=structuredClone(sourceIssued.samples[8].response);
+  const data=recorded.data! as unknown as ReturnType<typeof resultDocument>;
+  const declaration=JSON.parse(data.result!.current_state);
+  const text=variant==="ordinary prose"?"The returned research still needs review.":variant==="foreign declaration"?
+    JSON.stringify({...declaration,work_ref:"WS:FOREIGN"}):variant==="duplicate declaration"?
+    data.result!.current_state.replace('"work_ref":','"work_ref":"WS:FOREIGN","work_ref":') : "{invalid declaration";
+  data.result!.current_state=text;
+  const h=makeHarness({selection:{createRequestId:sourceIssued.identities.creation_request_id,
+    workRef:data.selection.work_ref,jobId:data.selection.job_id,planningOperationKey:sourceIssued.identities.planning_operation_key}});
+  harnessRef=h;h.responses.planning.result=recorded;
+  fireEvent.click(screen.getByRole("button",{name:"Read planning result"}));
+  const raw=await screen.findByText(text,{exact:true});expect(raw.closest("details")).toBeNull();
+  expect(h.calls.planning.mock.calls.map(row=>row[0])).toEqual(["result"]);
+});
+
+it("reopens the original planning request with its existing read action first",async()=>{
+  const row=sourceIssued.samples[7];
+  const h=makeHarness({selection:{createRequestId:sourceIssued.identities.creation_request_id,
+    workRef:sourceIssued.identities.work_ref,jobId:null,planningOperationKey:sourceIssued.identities.planning_operation_key}});
+  harnessRef=h;h.owner.current={principalScope:sourceIssued.identities.executive_context.principal_scope,generation:"fixture"};
+  h.responses.planning.status=row.response;
+  expect(h.calls.planning).not.toHaveBeenCalled();
+  expect(screen.getAllByText("Check the original planning request. Do not send it again.").length).toBeGreaterThan(0);
+  fireEvent.click(screen.getByRole("button",{name:"Check original planning request"}));
+  await waitFor(()=>expect(h.calls.planning.mock.calls.map(row=>row[0])).toEqual(["status"]));
+  expect(h.calls.planning.mock.calls[0][1]).toEqual(row.request.arguments);
+  expect(h.calls.prepare).not.toHaveBeenCalled();expect(h.calls.submit).not.toHaveBeenCalled();
 });
