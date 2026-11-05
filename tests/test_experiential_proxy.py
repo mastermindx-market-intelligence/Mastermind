@@ -471,6 +471,10 @@ async def test_local_status_requires_token_and_reports_no_credentials(tmp_path):
         lambda req: streamed_json({"ok": True})
     ))
     async with app.router.lifespan_context(app):
+        # Status/auth assertions use one admission time; CI scheduling must not
+        # expire this test's 70 ms window before its final snapshot.
+        frozen_now = app.state.admissions.clock()
+        app.state.admissions.clock = lambda: frozen_now
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as session:
             assert (await session.get("/statusz")).status_code == 401
             headers = {"Authorization": f"Bearer {TOKEN}"}

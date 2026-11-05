@@ -56,15 +56,28 @@ same-run observer. The 102-member rebuilt closure verifies in full:
 - Manifest: `abbf5173b43b61144b0b77568d72884f28847f40d842a0d2697bd0c40c0990c3`.
 - Inventory: `659fccd12936a53b000e98ca4dc2dcb98dd95d87f9c03b695eb1979193dcdc12`.
 
-The preceding published head `61562fa130c7d405f3872499beed72726659bb66` passed five
-hosted pytest shards. Its sixth shard failed only the unrelated local-status fixture
-whose 70 ms admission window can expire before its status assertion. The original
-bounded paid repair child `u4-ci-status-clock-repair-20261105-c3-b` is retained on its
-single carrier. All 106 focused composition tests pass with zero failures, errors or skips,
-including the observer, Ubuntu4 request/qualification/reclaim and historical-release
-fixtures. Shell syntax and the scoped diff check pass. The CI child's exact findings
-remain pending before final hosted qualification. No CI rerun, approval, protected merge,
-native selection, Ubuntu4 provider START or hold promotion is claimed here.
+The composed source was published as
+`d55cb09d9b7216ea0dcaf750d5894ceb06fc6a75` and made Ready for Review. All 106 focused
+composition tests pass with zero failures, errors or skips, including the observer,
+Ubuntu4 request/qualification/reclaim and historical-release fixtures. Shell syntax
+and the scoped diff check pass. The Web waiver does not make a pending diagnostic
+child a prerequisite for safe parent-owned source repair.
+
+The previous hosted CI's sole failure was the unrelated local-status test's 70 ms
+admission window. A controlled 120 ms snapshot delay reproduces the exact failure
+(assert0 versus1). The parent freezes only that status test's existing injected
+admission clock; the same delayed check then passes. The complete proxy module
+passes26cases, with2optional OpenAI-SDK checks skipped because that dependency
+is absent from the M2 test environment, and no failures/errors. Production quota logic,
+shared test-window defaults and expiry tests are unchanged. The native payload is
+unchanged from d55cb09d; its106passing checks and102-member closure remain applicable.
+
+Paid diagnostic child `u4-ci-status-clock-repair-20261105-c3-b` remains on its original
+single carrier, last observed waiting for seven occupied MiniMax slots. It has no
+ownership of the source branch. Its eventual result must still be consumed and
+reconciled; no worker START, replay or replacement is inferred. Current exact-head
+hosted CI remains a separate release gate. No approval, protected merge, native
+selection, Ubuntu4 provider START or hold promotion is claimed here.
 
 ## Historical pre-reboot recovery frontier — 2026-11-05
 
