@@ -34,6 +34,7 @@ import type { ProjectMemoryDocument, KnowledgeLibrarySourceContext } from "./kno
 import { ProjectKnowledgeLibrary } from "./knowledge/library/ProjectKnowledgeLibrary";
 import type { KnowledgeLibraryProps } from "./knowledge/library/knowledge-library-contract";
 import { ProjectSearchWorkspace } from "./discovery/ProjectSearchWorkspace";
+import { projectReadingPresentation } from "./knowledge/project-reading-presentation";
 import { SavedConversationReader, createSavedConversationNavigation, type SavedConversationNavigation } from "./discovery/SavedConversationReader";
 import { DiscoveryWorkspace } from "./discovery/DiscoveryWorkspace";
 import { projectDiscovery } from "./discovery/projection";
@@ -4011,6 +4012,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const quietHeader = active === "Inbox" || active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
     active === "Projects" && !directRoute && (!projectTab ||
       Boolean(projectWorkRef && (projectTab === "Conversation" || catalogueWorkRef)));
+  const independentProjectRead =
+    (active === "Knowledge" && hasProjectLibrary && knowledgeMode === "project") ||
+    (active === "Search" && hasProjectSearch && projectSearchSelected);
+  const reading = projectReadingPresentation({
+    active, locale, independentProjectRead, notice: visibleNotice,
+  });
   const projectReadGeneration = JSON.stringify([authRevision, retainedHostGeneration, selectionSeq.current]);
   const discoveryView = projectDiscovery({projection: office.projection,
     conversation: observedConversation.projection, controlRoom: currentControlRoom});
@@ -4750,7 +4757,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             {!quietHeader && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : headerSummary}</p>}
           </div>
           <div className="facts">
-            {!directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Inbox" ? (locale === "zh-CN" ? "工作区来源" : "Workspace source") : (locale === "zh-CN" ? "来源状态" : "Source status")} <State value={headerState} /></summary><p>{headerSummary}</p><p role="status">{visibleNotice}</p><p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} /> : null}
+            {!directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{reading.qualificationLabel} <State value={headerState} /></summary><p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} /> : null}
           </div>
         </header>
         {!native && authState && authState.status === "signed_out" &&
@@ -4767,7 +4774,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           </section>
         ) : null}
         {active !== "Control Room" && active !== "Today" && !directRoute &&
-          !(active === "Inbox" && visibleNotice === "Choose a Program with one resolved mission before opening the workspace.") ? (
+          !(active === "Inbox" && visibleNotice === "Choose a Program with one resolved mission before opening the workspace.") &&
+          !reading.suppressBodyNotice ? (
           <div className="notice" role="status">{visibleNotice === "Choose a Program with one resolved mission before opening the workspace."
             ? locale === "zh-CN" ? "选择一个项目，查看其工作。" : "Choose a project to view its work."
             : visibleNotice}</div>
