@@ -216,7 +216,18 @@ def _grants(document):
         encoded = canonical(grant)
         require(encoded not in seen, "publication grants must be unique")
         seen.append(encoded)
-        scopes.setdefault(grant["principal_scope"], []).append(grant)
+        scope_workstream = (grant["principal_scope"], template["workstream"])
+        scopes.setdefault(scope_workstream, []).append(grant)
+    # Only READ-only enrollment may span workstreams for one principal.
+    # Keep the incumbent bounded-code singleton/distinct-principal language.
+    principal_groups = {}
+    for grant in grants:
+        principal_groups.setdefault(grant["principal_scope"], []).append(grant["template"])
+    for templates in principal_groups.values():
+        if len({template["workstream"] for template in templates}) > 1:
+            require(all(template["execution_profile"] in (
+                "research_only", "native_research_only") for template in templates),
+                "multi-workstream publication must be READ-only")
     for group in scopes.values():
         profiles = [grant["template"]["execution_profile"] for grant in group]
         if len(group) == 1:
