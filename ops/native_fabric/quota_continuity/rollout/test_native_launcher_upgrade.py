@@ -148,6 +148,9 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 'ext/sub.sh': native_root.parent / 'grok47/overlay/sub.sh',
                 'ext/oc_free_exec.sh': native_root / 'source/oc_free_exec.sh',
                 'ext/fabric_operator_owner.py': native_root / 'source/fabric_operator_owner.py',
+                # Protected899ac broker blob b39e1fbcebe88513ee9c1dd756c56a9c68ff72b1.
+                # Historical95 retains its pinned bytes; CURRENT fair-share stays unchanged.
+                'ext/lease_broker.py': fixture.with_name('native-lease-broker-pre-fair-share-899ac3a9.py.txt'),
             }
             for name, predecessor in baseline_sources.items():
                 original = predecessor.read_bytes()

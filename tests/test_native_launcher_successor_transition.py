@@ -98,6 +98,10 @@ def source_owners(tmp_path_factory):
             ROLLOUT.parent / 'source/oc_free_exec.sh',
         'ext/sub.sh':
             ROLLOUT.parents[1] / 'grok47/overlay/sub.sh',
+        # Protected899ac broker blob b39e1fbcebe88513ee9c1dd756c56a9c68ff72b1.
+        # Restore only this disposable historical102 payload, not CURRENT.
+        'ext/lease_broker.py':
+            fixture.with_name('native-lease-broker-pre-fair-share-899ac3a9.py.txt'),
     }
     new_names = long_names | set(base_paths)
     # S9 also changes the CURRENT picker. Bind its authentic protected
