@@ -38,6 +38,27 @@ export const FLEET_BACKEND_TOOL_NAMES = Object.freeze([
 
 const FLEET_BACKEND_TOOL_SET = new Set(FLEET_BACKEND_TOOL_NAMES);
 
+/** Stable, non-secret reasons for a refused host-selection *preflight*.
+ * The wrapped MCP/HTTP error can contain URLs, response text or credentials;
+ * never forward its raw message, stack, cause or remote tool/schema data.
+ * This categorizes no permission grant and never dispatches another call. */
+const PUBLIC_PREFLIGHT_REASONS = new Set([
+  'FLEET_ROUTE_CLOSED',
+  'FLEET_ROUTE_HOST_REF_INVALID',
+  'FLEET_ROUTE_HOST_NOT_CONFIGURED',
+  'FLEET_ROUTE_LOCAL_CONTRACT_UNAVAILABLE',
+  'FLEET_ROUTE_CATALOG_INVALID',
+  'FLEET_ROUTE_CONTRACT_MISMATCH',
+  'FLEET_ROUTE_CLIENT_INVALID',
+]);
+
+export function fleetPreflightReason(error) {
+  const message = error?.message === 'FLEET_ROUTE_PREFLIGHT_REFUSED'
+    ? error?.cause?.message : error?.message;
+  return PUBLIC_PREFLIGHT_REASONS.has(message)
+    ? message : 'FLEET_ROUTE_TRANSPORT_OR_BACKEND_UNAVAILABLE';
+}
+
 export const STUDIO_SELECT_HOST_TOOL = Object.freeze({
   name: 'studio_select_host',
   title: 'Select Studio Fleet Host',
