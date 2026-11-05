@@ -11,6 +11,7 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
+pub mod instruction_admission;
 use url::Url;
 
 const ISSUER: &str = "https://dev-eo0jf8us5mup7wd5.us.auth0.com/";
