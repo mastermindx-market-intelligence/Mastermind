@@ -89,6 +89,11 @@ async function prepare(e:Awaited<ReturnType<typeof setup>>){
  fireEvent.change(project,{target:{value:actual.request.work_ref}});
  fireEvent.change(screen.getByRole('textbox',{name:'First message'}),{target:{value:actual.request.message}});
  vi.spyOn(crypto,'getRandomValues').mockImplementation(value=>{for(let i=0;i<20;i++)(value as Uint8Array)[i]=i+1;return value;});
+ // The real IDB owner must finish its pending-first lookup before Review.
+ // A disabled click is deliberately inert; source data/field readiness alone
+ // does not prove this original-operation check has settled.
+ await waitFor(()=>expect(screen.getByRole('button',{name:'Review conversation'})).toHaveProperty('disabled',false));
+ expect(e.calls('preview')).toHaveLength(0);expect(e.calls('create')).toHaveLength(0);
  fireEvent.click(screen.getByRole('button',{name:'Review conversation'}));
  await screen.findByRole('button',{name:'Create conversation'});
  expect(e.calls('preview')).toHaveLength(1);expect(e.calls('create')).toHaveLength(0);
