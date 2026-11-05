@@ -21,7 +21,8 @@ slice: R2A (local mission tree) — NOT full R2; networked path HELD on producer
 **Date:** 2026-09-16 · **v3, repaired** against exact-head reviews 5228415542 and
 [5228672592](https://github.com/mastermindx-market-intelligence/Mastermind/pull/704#pullrequestreview-5228672592)
 (REQUEST_CHANGES at `8b941411…` then `c09672fc…`).
-**Parent:** Mastermind #702 (candidate `091592da`, six additive paths).
+**Parent:** Mastermind #702 (candidate `091592da`, six additive paths) — the original
+historical parent candidate; a later #702 source is not automatically consumed by this record.
 
 **What this record adds to #702.** #702 §7 fixes *which questions* to close at each
 existing owner and §15 names the next boundary as "obtain the incumbent producer
@@ -68,7 +69,7 @@ current protected head. Re-verified at the v3 repair.
 | `scripts/chairman_control_room.py` | `9260d006c2bf…` |
 | `app/static/chairman_control/control_room.js` | `c95f9befdc4c…` |
 | DF1 plan (open Draft #523) | commit `bf9484a0` at v3 repair, not merged |
-| #702 candidate | commit `091592da`, not merged |
+| #702 candidate | commit `091592da`, not merged — the original historical parent candidate; a later #702 source is not automatically consumed by this record |
 
 The review's own receipts — module blob `c69e44785e28…` and source projection blob
 `77a23ad9…` — equal the values above, so the two readings corroborate independently.
@@ -1052,7 +1053,7 @@ Completion
 ## Sources
 
 Read at inspected commit `bf843961c0e1b5bd45fa481f0138c71f2a87d4e2`; all cited blobs
-verified identical at current protected `e8803ba3d3ee928d150d7dcac1a1e2bad2dc0d48` (§0).
+verified identical at protected `5ee11ab1e993616f3568cfca4069cb21fa61fd8f` (v3 verification epoch, §0).
 
 - `control_plane/fabric_job_view.py`, `docs/FABRIC_JOB_VIEW.md`
 - `control_plane/chairman_control_room.py`, `scripts/chairman_control_room.py`,
@@ -1069,6 +1070,6 @@ verified identical at current protected `e8803ba3d3ee928d150d7dcac1a1e2bad2dc0d4
 - `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md`, `docs/OPERATION_LIVENESS_SOUNDNESS_LAW.md`
 - `docs/superpowers/specs/2026-09-07-chairman-control-room-decision-first-experience-design.md`
   (merged, `185dc742`) and its H1A supersession addendum
-- DF1 plan at `bf9484a0` (open Draft #523, moved from the earlier `3c0a933b`); Mastermind #702 at `091592da`
+- DF1 plan at `bf9484a0` (open Draft #523, moved from the earlier `3c0a933b`); Mastermind #702 at `091592da` — the original historical parent candidate; a later #702 source is not automatically consumed by this record
 - Macro `agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md` at `0f62daf54571`
 - Review 5228415542 at `8b94141106200f0c48b6d033cca19a8007ef0031`; review 5228672592 at `c09672fc50a5895e7552936d3e585455424d85ae` (file blob `7261e61b582d12a1045a2ef12ba598f4b2e24ee8`)

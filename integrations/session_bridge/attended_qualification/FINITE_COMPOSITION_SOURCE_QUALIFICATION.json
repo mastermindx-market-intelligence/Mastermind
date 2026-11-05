@@ -1,0 +1,59 @@
+{
+  "observed_at": "2026-10-14T01:41:51.991255+00:00",
+  "scope": "Preserving local composition of 5b931d045025262e20df9dcd6e1d41a25a87fb0f and foreign3b81a63d91e0319bf4de39544cb9eda22cc5016a; finite workspace/run/credential joins.",
+  "verdict": "SCOPED_SOURCE_PASS",
+  "independent_reviewers": [
+    "/root/native_activation_adjudication",
+    "NativeCore foreign-followon review2299cb6e"
+  ],
+  "source_sha256": {
+    "control_plane/codex_provider_realm.py": "e78604408604970ab36ce616d7501b2fbad190d80ec12825184308244fc898ba",
+    "ops/executive_os/subscription_provider_credential.py": "82bf0e5910a098bc2dbc326079df57528b286b9f9c7b2b1d773449f1cb11958b",
+    "control_plane/fabric_attended_assignment.py": "7eabff78bf4e3c3b5945a41264674d8f03f986102798fc56e2dd8cf1a890a265",
+    "control_plane/executive_fabric_adapter.py": "9d3aae75b91768542e24b3956c94b8c8ab9b144afba4c02484ea0e31ace90de0",
+    "control_plane/fabric_attended_canary.py": "3de6ebe0dca48135d29dfcd1295c4101dc05b0ba1cf6a1c502b4da1436ab58e8",
+    "scripts/executive_os_phase1c.py": "ad19bcbf96efd3c772f81cfa3d8664ed0f83f0d03bf0f3bdbe3dd2592488d76b",
+    "scripts/executive_os_phase1c_worker.py": "94301644fa25805d5bb28da5610722d974027d6ca5f15ba280a3d4d0d4d0f5b3",
+    "ops/executive_os/attended_worker_definition.py": "70945f8985dea680c3e9c097820ffd916e4c7347bbc9015476643bbade92edff",
+    "tests/test_attended_assignment.py": "b85dc82628567ba00c9e9bf1fd916c8bfae749b29ceb6614b9686be735daf87c",
+    "tests/test_fabric_attended_probe_join.py": "8d2601af22a93f0e788093f47a8841b26be789133286bde1fa6f4a6af377a70c",
+    "tests/test_attended_principal_join.py": "391ae225daa281cb8c04f44cc5f6de9045f07babdd92a3b92d7054e70a3bef8e",
+    "tests/test_fabric_attended_factory_placement.py": "bae68f40586e9e45a23174b0900bcc4a6e0beef6847ef78efcbf9e18a207b21d",
+    "tests/test_fabric_remote_recovery_integration.py": "eaf6b877fa6e8a8b58ef6317f996c2d2c697693a5f84deb658ad26de0541d262",
+    "tests/test_mixed_startup_activation.py": "e3580d5167e85186674ff9e31629ef4678c5445ec3d48d3fd5e487421c0a47a1",
+    "tests/test_attended_control_startup.py": "4cf0b0f54ef0cecd17b6e35f15579c2d18e32534d35cdd7c3f15b9d62060484f",
+    "tests/test_finite_credential_target.py": "eef4c17601e00933b8f63ef33562644b39db8fe3a0a0a782c95c0035b75060ba"
+  },
+  "tests": {
+    "distinct_final_case_identities": 236,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "reports_sha256": {
+      "FINITE_CREDENTIAL_FINAL.xml": "8b20c4898b5d2c9550d5f2add0460135c17fbd1fd1aa53189d1b06a6665485e5",
+      "FINITE_FACTORY_FINAL.xml": "67ae5b25defd206816f422ea0559d87fbe1d671558f4383b72fb8515654e9942",
+      "FINITE_COMPOSITION_FINAL.xml": "aebb03e3a3cb7e7f7251b9e89455a37df4aee9107156af1671d0c78bba34b010",
+      "FINITE_ADMISSION_JOIN_FINAL.xml": "989ce6f4f462878b410889b06b42f919173e9ce3c1ba2afa30525c8ea5816b11"
+    },
+    "method": "Union of (classname,name), later affected result supersedes earlier case. Counts overlap, not additive.",
+    "retained_reds": [
+      "FINITE_CREDENTIAL_CHECK.xml: one new test reused consumed stdin, corrected between distinct CLI calls",
+      "FINITE_COMPOSITION_FINAL.xml: obsolete unknown-profile expectation corrected to actual enabled READ capability plus disabled ordinary provider route",
+      "FINITE_ADMISSION_JOIN.xml: stale policy-version assertion and shared fixture signature corrected"
+    ]
+  },
+  "paid_return": {
+    "id": "fabric-finite-credential-build-01a11e90-v1",
+    "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+    "parent": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+    "result_sha256": "3431ebb2388e696a0d968bc5782b39238bcb376ef621af8a1ee26324b9dccb6e",
+    "result_bytes": 4047,
+    "acceptance": "ACCEPTED/VALIDATED_OUTCOME/reviewer once, separately read back"
+  },
+  "limitations": [
+    "Uninstalled source only; no provider enrollment or service effect",
+    "Solehost owns secondary bootstrap, exact Control group acceptance and actual host qualification",
+    "Original authenticated native operation remains NOT_SUBMITTED; READ is not SUBMIT",
+    "Original Auth0 and issuer EFFECT_UNKNOWN and all refusals preserved"
+  ]
+}

@@ -4,6 +4,12 @@ The sink owns independently opened directory and file descriptions.  Every
 append revalidates the named file before and after one write plus fsync.  Any
 identity, flag, size, write, or durability uncertainty poisons the instance;
 there is no retry, rotation, replacement descriptor, or second event schema.
+
+The same instance is the only reader of its own ledger.  A read proves the
+identical continuity an append proves (owned identity, owned size, owner
+lock) and decodes every line back through the exact event encoders, so a
+torn, foreign, or off-policy line is uncertainty rather than data.  Reads
+never append, never poison, and never reopen admission.
 """
 
 from __future__ import annotations
@@ -15,7 +21,10 @@ import os
 import re
 import stat
 import threading
+from collections.abc import Iterable
 from typing import Any
+
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
 
 from .contracts import (
     AUTH_AUDIT_SCHEMA,
@@ -41,9 +50,46 @@ _CHANNEL_TOOLS = frozenset(
         "run_project_command",
         "read_action_result",
         "reconcile_action",
+        "prepare_browser_resource",
+        "start_browser_resource",
+        "reconcile_browser_resource",
+        "browser_console_messages",
+        "browser_network_requests",
+        "browser_snapshot",
+        "browser_take_screenshot",
+        "browser_wait_for",
+        "prepare_browser_click",
+        "prepare_browser_close",
+        "prepare_browser_fill_form",
+        "prepare_browser_hover",
+        "prepare_browser_navigate",
+        "prepare_browser_press_key",
+        "prepare_browser_select_option",
+        "prepare_browser_tabs",
+        "prepare_browser_type",
+        "run_browser_action",
+        "reconcile_browser_action",
+    }
+)
+# Modifying tools are the only admissions that can precede an effect
+# dispatch. Read/prepare/reconcile admissions never claim or publish anything.
+_CHANNEL_MODIFYING_TOOLS = frozenset(
+    {
+        "commit_text_patch",
+        "run_project_command",
+        "start_browser_resource",
+        "run_browser_action",
     }
 )
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+_CHANNEL_LINE_KEYS = frozenset(
+    {"accepted", "action_digest", "channel_ref", "code", "policy_id", "schema", "tool"}
+)
+_OAUTH_LINE_KEYS = frozenset({"accepted", "code", "policy_id", "schema"})
+ADMISSION_REFUSED_ONLY = "REFUSED_ONLY"
+ADMISSION_ACCEPTED = "ACCEPTED"
+ADMISSION_ABSENT = "ABSENT"
+ADMISSION_UNCERTAIN = "UNCERTAIN"
 _DEFAULT_MAX_LINE_BYTES = 4096
 _DEFAULT_MAX_FILE_BYTES = 16 * 1024 * 1024
 
@@ -165,6 +211,7 @@ class DurableAuthAuditSink:
             cls._check_directory_stat(owned_stat)
             if _directory_identity(owned_stat) != _directory_identity(host_stat):
                 raise AuditSinkPoisoned("audit directory identity changed")
+            cls._check_directory_acl(owned_directory, owned_stat)
             if os.get_inheritable(owned_directory):
                 raise AuditSinkPoisoned("audit directory descriptor is inheritable")
 
@@ -182,6 +229,7 @@ class DurableAuthAuditSink:
             cls._check_file_stat(named_stat)
             if _identity(file_stat) != _identity(named_stat):
                 raise AuditSinkPoisoned("audit file identity changed during open")
+            cls._check_file_acl(audit_fd, named_stat)
             if file_stat.st_size > file_budget:
                 raise AuditSinkPoisoned("audit file exceeds its fixed budget")
             cls._check_file_flags(audit_fd)
@@ -225,6 +273,23 @@ class DurableAuthAuditSink:
             raise AuditSinkPoisoned("audit directory security refused")
 
     @staticmethod
+    def _check_directory_acl(directory_fd: int, directory_stat: os.stat_result) -> None:
+        """Refuse a Darwin extended ACL on the verified directory descriptor.
+
+        Its access-control state is independent of POSIX mode bits. Reuse the
+        same descriptor-bound observer as the named audit file and fail closed
+        if that observation is unavailable or uncertain.
+        """
+        try:
+            extended_acl = has_macos_acl(
+                ".", expected_identity=directory_stat, descriptor=directory_fd
+            )
+        except FilesystemSecurityError as error:
+            raise AuditSinkPoisoned("audit directory ACL observation refused") from error
+        if extended_acl:
+            raise AuditSinkPoisoned("audit directory extended ACL refused")
+
+    @staticmethod
     def _check_file_stat(value: os.stat_result) -> None:
         if (
             not stat.S_ISREG(value.st_mode)
@@ -233,6 +298,23 @@ class DurableAuthAuditSink:
             or value.st_nlink != 1
         ):
             raise AuditSinkPoisoned("audit file security refused")
+
+    @staticmethod
+    def _check_file_acl(audit_fd: int, named_stat: os.stat_result) -> None:
+        """Refuse a Darwin ACL on the already-verified named audit descriptor.
+
+        Never reopen via a pathname: the existing directory and file identity
+        checks establish the trusted object, and the shared ACL observer binds
+        its check to that same open descriptor. Off Darwin this is inert.
+        """
+        try:
+            extended_acl = has_macos_acl(
+                _AUDIT_NAME, expected_identity=named_stat, descriptor=audit_fd
+            )
+        except FilesystemSecurityError as error:
+            raise AuditSinkPoisoned("audit file ACL observation refused") from error
+        if extended_acl:
+            raise AuditSinkPoisoned("audit file extended ACL refused")
 
     @staticmethod
     def _check_file_flags(audit_fd: int) -> None:
@@ -333,6 +415,7 @@ class DurableAuthAuditSink:
             or _directory_identity(relative_directory) != self._directory_identity
         ):
             raise AuditSinkPoisoned("audit directory identity changed")
+        self._check_directory_acl(self._directory_fd, relative_directory)
 
         opened = os.fstat(self._audit_fd)
         named = os.stat(_AUDIT_NAME, dir_fd=self._directory_fd, follow_symlinks=False)
@@ -345,6 +428,7 @@ class DurableAuthAuditSink:
             or named.st_size != expected_size
         ):
             raise AuditSinkPoisoned("named audit file identity or size changed")
+        self._check_file_acl(self._audit_fd, named)
         self._check_file_flags(self._audit_fd)
         self._prove_owner_lock(expected_size=expected_size)
 
@@ -451,6 +535,108 @@ class DurableAuthAuditSink:
                     raise
                 raise AuditSinkPoisoned("durable audit append is uncertain") from error
 
+    def read_channel_admissions(self, action_digest: str) -> tuple[ChannelAuditEvent, ...]:
+        """Return every durable channel admission fact for one exact action digest.
+
+        The ledger is read through an independently opened read-only description
+        of the same named file, gated by the same continuity proof an append
+        uses: the named file must still carry the owned identity at the owned
+        size with the owner lock held, before and after the bytes are taken.
+        Every line is decoded and re-encoded through the exact event encoders
+        and must round-trip byte-for-byte, so a torn, foreign, or off-policy line
+        refuses the whole read.  The read never appends, never poisons the
+        instance, and never reopens effect admission.
+        """
+
+        if type(action_digest) is not str or _HEX64_RE.fullmatch(action_digest) is None:
+            raise AuditSinkPoisoned("audit action digest is invalid")
+        nofollow, _directory, cloexec = _platform_flags()
+        with self._gate:
+            if self._closed or self._poisoned:
+                raise AuditSinkPoisoned("audit sink is not live")
+            expected_size = self._expected_size
+            self._validate_live(expected_size=expected_size)
+            reader = -1
+            try:
+                reader = os.open(
+                    _AUDIT_NAME,
+                    os.O_RDONLY | nofollow | cloexec,
+                    dir_fd=self._directory_fd,
+                )
+                opened = os.fstat(reader)
+                self._check_file_stat(opened)
+                if _identity(opened) != self._file_identity or opened.st_size != expected_size:
+                    raise AuditSinkPoisoned("audit read identity or size changed")
+                chunks: list[bytes] = []
+                remaining = expected_size
+                while remaining > 0:
+                    chunk = os.read(reader, min(remaining, 65536))
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    remaining -= len(chunk)
+                if remaining != 0 or os.read(reader, 1):
+                    raise AuditSinkPoisoned("audit read was short or ambiguous")
+                closing = os.fstat(reader)
+                if _identity(closing) != self._file_identity or closing.st_size != expected_size:
+                    raise AuditSinkPoisoned("audit read identity or size changed")
+            except AuditSinkPoisoned:
+                raise
+            except BaseException as error:
+                raise AuditSinkPoisoned("durable audit read is uncertain") from error
+            finally:
+                if reader >= 0:
+                    try:
+                        os.close(reader)
+                    except BaseException as error:
+                        raise AuditSinkPoisoned("audit read close is uncertain") from error
+            self._validate_live(expected_size=expected_size)
+        raw = b"".join(chunks)
+        if raw and not raw.endswith(b"\n"):
+            raise AuditSinkPoisoned("audit ledger is torn")
+        matched: list[ChannelAuditEvent] = []
+        for line in raw.split(b"\n")[:-1] if raw else ():
+            event = self._decode_line(line)
+            if type(event) is ChannelAuditEvent and event.action_digest == action_digest:
+                matched.append(event)
+        return tuple(matched)
+
+    def _decode_line(self, line: bytes) -> AuthAuditEvent | ChannelAuditEvent:
+        # One closed dispatch back through the exact encoders: the decoded
+        # event must re-encode to the identical bytes or the line is refused.
+        if len(line) + 1 > self._max_line_bytes:
+            raise AuditSinkPoisoned("audit line exceeds its fixed line budget")
+        try:
+            payload = json.loads(line.decode("ascii"))
+        except (UnicodeError, ValueError, RecursionError) as error:
+            raise AuditSinkPoisoned("audit line is not decodable") from error
+        if type(payload) is not dict:
+            raise AuditSinkPoisoned("audit line contract refused")
+        keys = frozenset(payload)
+        event: AuthAuditEvent | ChannelAuditEvent
+        if keys == _CHANNEL_LINE_KEYS:
+            event = ChannelAuditEvent(
+                schema=payload["schema"],
+                policy_id=payload["policy_id"],
+                code=payload["code"],
+                accepted=payload["accepted"],
+                channel_ref=payload["channel_ref"],
+                tool=payload["tool"],
+                action_digest=payload["action_digest"],
+            )
+        elif keys == _OAUTH_LINE_KEYS:
+            event = AuthAuditEvent(
+                schema=payload["schema"],
+                policy_id=payload["policy_id"],
+                code=payload["code"],
+                accepted=payload["accepted"],
+            )
+        else:
+            raise AuditSinkPoisoned("audit line contract refused")
+        if self._encode(event) != line + b"\n":
+            raise AuditSinkPoisoned("audit line contract refused")
+        return event
+
     def close(self) -> None:
         with self._gate:
             if self._closed:
@@ -482,8 +668,68 @@ class DurableAuthAuditSink:
                 raise AuditSinkPoisoned("audit close is uncertain")
 
 
+def classify_channel_admissions(
+    events: Iterable[ChannelAuditEvent],
+    *,
+    action_digest: str,
+    channel_ref: str,
+    policy_id: str,
+    modifying_tool: str,
+) -> str:
+    """Closed pre-dispatch admission verdict for one exact action digest.
+
+    ``REFUSED_ONLY``: this channel durably refused ``modifying_tool`` for the
+    digest before dispatch at least once, and no modifying tool was ever
+    accepted for the digest by any channel in this ledger.  ``ACCEPTED``: some
+    modifying admission was accepted, so a dispatch may have crossed the
+    effect boundary.  ``ABSENT``: no modifying admission exists for the digest.
+    ``UNCERTAIN``: a fact for the digest is off-contract for this policy or
+    channel, so the ledger cannot be trusted to speak for this action.  Only
+    ``REFUSED_ONLY`` may ever support ``NOT_APPLIED``; every other verdict
+    leaves the effect unknown.
+    """
+
+    if (
+        type(action_digest) is not str
+        or _HEX64_RE.fullmatch(action_digest) is None
+        or type(channel_ref) is not str
+        or _HEX64_RE.fullmatch(channel_ref) is None
+        or type(policy_id) is not str
+        or _POLICY_ID_RE.fullmatch(policy_id) is None
+        or modifying_tool not in _CHANNEL_MODIFYING_TOOLS
+    ):
+        return ADMISSION_UNCERTAIN
+    refused = False
+    for event in events:
+        if type(event) is not ChannelAuditEvent or event.action_digest != action_digest:
+            continue
+        if (
+            event.schema != CHANNEL_AUDIT_SCHEMA
+            or event.policy_id != policy_id
+            or event.code not in _CHANNEL_CODES
+            or type(event.accepted) is not bool
+            or event.accepted != (event.code == "accepted")
+            or event.tool not in _CHANNEL_TOOLS
+        ):
+            return ADMISSION_UNCERTAIN
+        if event.tool not in _CHANNEL_MODIFYING_TOOLS:
+            continue
+        if event.accepted:
+            return ADMISSION_ACCEPTED
+        if event.code != "channel_refused" or event.channel_ref != channel_ref:
+            return ADMISSION_UNCERTAIN
+        if event.tool == modifying_tool:
+            refused = True
+    return ADMISSION_REFUSED_ONLY if refused else ADMISSION_ABSENT
+
+
 __all__ = [
+    "ADMISSION_ABSENT",
+    "ADMISSION_ACCEPTED",
+    "ADMISSION_REFUSED_ONLY",
+    "ADMISSION_UNCERTAIN",
     "AuditAcquisitionUncertain",
     "AuditSinkPoisoned",
     "DurableAuthAuditSink",
+    "classify_channel_admissions",
 ]

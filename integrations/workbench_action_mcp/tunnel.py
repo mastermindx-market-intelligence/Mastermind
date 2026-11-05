@@ -7,7 +7,10 @@ borrowed protected Read port.  The tunnel association authenticates the channel,
 cryptographically attested end user, so no ``JwtAuthenticator``,
 ``ResourcePolicy``, token verifier, or OAuth-accepted audit row exists on this
 path.  Channel admission is durably audited before dispatch, and an audit
-failure blocks the effect.  It creates no new auth service, credential,
+failure blocks the effect.  The same durable admission ledger is the only
+evidence that lets a reconcile classify an artifact-less action as
+``NOT_APPLIED``: a modifying call refused before dispatch and never accepted
+for that exact reference.  It creates no new auth service, credential,
 process/lifecycle registry, queue, or retry state, and the model can never
 supply the channel, lease, key, or any location bound here.
 """
@@ -42,7 +45,11 @@ from integrations.workbench_stdio_boundary import (
 from mcp.types import CallToolResult, ServerResult, TextContent, Tool, ToolAnnotations
 
 from common.bounded_sync_executor import SyncExecutionTimeout
-from integrations.business_mcp_auth.audit import AuditSinkPoisoned, DurableAuthAuditSink
+from integrations.business_mcp_auth.audit import (
+    AuditSinkPoisoned,
+    DurableAuthAuditSink,
+    classify_channel_admissions,
+)
 from integrations.business_mcp_auth.contracts import CHANNEL_AUDIT_SCHEMA, ChannelAuditEvent
 from integrations.workbench_read_mcp.runtime import (
     RuntimeCloseIncomplete,
@@ -231,7 +238,7 @@ _COMMAND_EFFECT_OUTPUT = _closed_schema(
         "status": {"const": "OK"},
         "effect_state": {
             "type": "string",
-            "enum": ["APPLIED", "EFFECT_UNKNOWN"],
+            "enum": ["NOT_APPLIED", "APPLIED", "EFFECT_UNKNOWN"],
         },
         "isError": {"const": False},
         "project_ref": _REFERENCE_SCHEMA,
@@ -703,8 +710,16 @@ def _bind_command_host(runtime: WorkbenchActionRuntime, config: TunnelConfig) ->
     )
 
 
+def load_private_json(path: str, *, maximum: int = MAX_CONFIG_BYTES) -> dict[str, object]:
+    """Read one same-UID private configuration document with tunnel hardening."""
+
+    if type(maximum) is not int or not 1 <= maximum <= 4 * 1024 * 1024:
+        _refuse()
+    return _secure_json(path, maximum=maximum)
+
+
 def load_tunnel_config(path: str) -> TunnelConfig:
-    return parse_tunnel_config(_secure_json(path, maximum=MAX_CONFIG_BYTES))
+    return parse_tunnel_config(load_private_json(path))
 
 
 def _secure_action_key(path: str) -> bytes:
@@ -946,6 +961,27 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
         raise ValueError("FIXED_COMMAND_HOST_REQUIRED")
     read_composition = create_bound_read_composition(runtime)
     token_codec = ActionTokenCodec(services.action_token_key)
+
+    def admission_evidence_for(modifying_tool: str):
+        # The durable channel audit written before every dispatch is the only
+        # admission owner on this path, so it is the only evidence that can
+        # prove a modifying call never crossed the effect boundary.  The
+        # digest is the same SHA-256 of the exact action reference the
+        # admission rows carry; nothing here reopens admission or retries.
+        def admission_evidence(action_ref: object) -> str:
+            digest = _action_digest(action_ref)
+            if digest is None:
+                raise ValueError("action reference digest unavailable")
+            return classify_channel_admissions(
+                runtime.read_channel_admissions(digest),
+                action_digest=digest,
+                channel_ref=services.channel_ref,
+                policy_id=services.audit_policy_id,
+                modifying_tool=modifying_tool,
+            )
+
+        return admission_evidence
+
     prepare, commit, reconcile = create_text_patch_port(
         resolve_binding=runtime.resolve_binding,
         clock_ms=services.clock_ms,
@@ -954,6 +990,7 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
         artifact_store=services.artifact_store,
         host=services.host_binding,
         action_ttl_ms=services.action_ttl_ms,
+        admission_evidence=admission_evidence_for(COMMIT_TOOL),
     )
     (
         prepare_project_command,
@@ -969,6 +1006,7 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
         host=command_host,
         inspector=ProcessInspector(),
         action_ttl_ms=services.action_ttl_ms,
+        admission_evidence=admission_evidence_for(RUN_COMMAND_TOOL),
     )
     prepare_validator = Draft202012Validator(_PREPARE_INPUT)
     ref_validator = Draft202012Validator(_ACTION_REF_INPUT)
@@ -1476,14 +1514,27 @@ async def _serve_modern_stdio(server: Server, first_line: str) -> None:
         line = await read_bounded_stdio_line()
 
 
-async def run_stdio(runtime: WorkbenchActionRuntime, *, close_timeout_seconds: float) -> None:
-    """Serve one fixed channel over stdio and always close the runtime owner."""
+async def run_server_stdio(
+    runtime: WorkbenchActionRuntime,
+    *,
+    server_factory,
+    close_timeout_seconds: float,
+) -> None:
+    """Serve one fixed-channel MCP server and always close the runtime owner.
+
+    The caller selects only the model-facing tool server. Runtime/lease/audit/
+    artifact/process ownership remains the existing Workbench runtime.
+    """
 
     if not isinstance(runtime, WorkbenchActionRuntime):
         raise ValueError("WORKBENCH_ACTION_RUNTIME_REQUIRED")
+    if not callable(server_factory):
+        raise ValueError("WORKBENCH_STDIO_SERVER_FACTORY_REQUIRED")
     primary: BaseException | None = None
     try:
-        server = create_tunnel_action_server(runtime)
+        server = server_factory(runtime)
+        if not isinstance(server, Server):
+            raise ValueError("WORKBENCH_STDIO_SERVER_REQUIRED")
         options = server.create_initialization_options(
             notification_options=NotificationOptions(),
             experimental_capabilities={},
@@ -1509,6 +1560,16 @@ async def run_stdio(runtime: WorkbenchActionRuntime, *, close_timeout_seconds: f
             if primary is None:
                 raise
             raise close_error from primary
+
+
+async def run_stdio(runtime: WorkbenchActionRuntime, *, close_timeout_seconds: float) -> None:
+    """Serve the existing Action fixed-channel surface over stdio."""
+
+    await run_server_stdio(
+        runtime,
+        server_factory=create_tunnel_action_server,
+        close_timeout_seconds=close_timeout_seconds,
+    )
 
 
 async def _serve(config: TunnelConfig) -> int:
@@ -1545,8 +1606,10 @@ __all__ = [
     "TunnelConfigurationError",
     "create_runtime_channel",
     "create_tunnel_action_server",
+    "load_private_json",
     "load_tunnel_config",
     "parse_tunnel_config",
     "run_configured_stdio",
+    "run_server_stdio",
     "run_stdio",
 ]

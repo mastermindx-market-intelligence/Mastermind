@@ -1,0 +1,133 @@
+/* Knowledge + retained-result source reading (Paper AT05 heading and
+   collections, KD01 bright document beside quiet dark companion, SA01 partial
+   source context with a return point). Every rule is scoped to the Knowledge
+   view: element-level selectors carry .atelier-knowledge and every other
+   selector uses knowledge-owned class names, so the shared shell is untouched.
+   Tokens only; no palette literals, no accent stripe. */
+
+.atelier-knowledge { color: var(--text); background: var(--bg); padding: 40px 48px 56px; font-family: var(--font-ui); line-height: 1.55; overflow-wrap: anywhere; }
+.atelier-knowledge * { box-sizing: border-box; min-width: 0; }
+.atelier-knowledge h1, .atelier-knowledge h2, .atelier-knowledge h3 { font-family: var(--font-display); font-weight: 500; margin: 0; }
+.atelier-knowledge p { margin: 0 0 12px; }
+.knowledge-heading { position: relative; padding-right: 300px; margin-bottom: 32px; }
+.knowledge-heading h1 { font-size: 44px; line-height: 1.18; letter-spacing: -.04em; margin: 12px 0 20px; }
+.knowledge-heading > p:last-of-type { color: var(--muted); font-size: 18px; }
+.knowledge-eyebrow { color: var(--brass); text-transform: uppercase; letter-spacing: .12em; font-size: 11px; }
+.knowledge-search { position: absolute; right: 0; bottom: 0; width: 270px; }
+.knowledge-search label { display: block; color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+.atelier-knowledge input, .atelier-knowledge button { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; min-height: 44px; padding: 10px 16px; }
+.atelier-knowledge input { width: 100%; }
+.atelier-knowledge button { cursor: pointer; }
+.atelier-knowledge button:hover:not(:disabled) { background: var(--raised); }
+.atelier-knowledge button:disabled { cursor: default; color: var(--faint); }
+.atelier-knowledge :focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
+.knowledge-source { display: flex; gap: 16px; align-items: baseline; color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+.knowledge-source > span { font-size: 11px; letter-spacing: .08em; }
+.knowledge-collections { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-bottom: 20px; }
+.knowledge-collections section, .knowledge-companion { background: var(--panel); border: 1px solid var(--border); border-radius: 20px; padding: 28px; }
+.knowledge-collections h2 { font-size: 25px; line-height: 1.3; margin: 12px 0 24px; }
+.knowledge-collections section > p:last-child, .knowledge-muted { color: var(--faint); font-size: 13px; }
+
+/* Retained-result band: supplied records list plus source context. */
+.knowledge-sources { margin: 8px 0 32px; }
+.knowledge-sources-empty { background: var(--panel); border: 1px solid var(--border); border-radius: 20px; padding: 24px 28px; }
+.knowledge-sources .card { background: var(--panel); border: 1px solid var(--border); border-radius: 20px; padding: 24px 28px; box-shadow: 0 1px 0 var(--border); }
+.knowledge-sources .section-title { font-family: var(--font-display); font-weight: 500; font-size: 22px; margin: 0 0 8px; }
+.knowledge-sources .muted { color: var(--muted); font-size: 13px; }
+.knowledge-sources .button { min-height: 44px; }
+.knowledge-sources .items { list-style: none; padding: 0; margin: 12px 0; }
+.knowledge-sources .items li { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.knowledge-sources .items small { color: var(--faint); font-size: 12px; }
+.knowledge-sources .items code { font-family: var(--font-ui); font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.knowledge-sources details { margin: 8px 0; }
+.knowledge-sources summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--muted); font-size: 13px; }
+.knowledge-sources dl { margin: 12px 0; }
+.knowledge-sources dt { color: var(--faint); font-size: 12px; }
+.knowledge-sources dd { margin: 4px 0 12px; font-size: 13px; overflow-wrap: anywhere; }
+
+/* KD01: neutral bright paper document beside a quiet dark companion. */
+.knowledge-result { display: grid; grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr); gap: 24px; align-items: start; margin-top: 20px; }
+.knowledge-result-document { background: var(--mx-light-panel); color: var(--mx-light-text); border: 1px solid var(--mx-light-line); border-radius: 16px; padding: 28px; box-shadow: 0 1px 0 var(--border); }
+.knowledge-result-title { font-size: 24px; line-height: 1.3; margin: 10px 0 16px; }
+.knowledge-result-note { font-size: 14px; margin-bottom: 8px; }
+.knowledge-result-codes { color: var(--red); font-size: 12px; letter-spacing: .04em; }
+.knowledge-result-summary { font-size: 15px; margin: 12px 0; }
+.knowledge-result-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .1em; margin: 16px 0 8px; }
+.knowledge-result-actions { list-style: none; padding: 0; margin: 0 0 12px; }
+.knowledge-result-actions li { padding: 8px 0; border-bottom: 1px solid var(--mx-light-line); font-size: 14px; }
+.knowledge-result-document details { margin: 12px 0; }
+.knowledge-result-document summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--muted); font-size: 13px; }
+.knowledge-result-document pre { margin: 12px 0 4px; padding: 16px; border: 1px solid var(--mx-light-line); border-radius: 10px; overflow-wrap: anywhere; white-space: pre-wrap; font-family: var(--font-ui); font-size: 12px; line-height: 1.5; }
+.knowledge-draft-note { border-top: 1px solid var(--mx-light-line); margin: 16px 0 0; padding-top: 16px; color: var(--muted); font-size: 13px; }
+.knowledge-result-companion { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
+.knowledge-result-companion dl { border-block: 1px solid var(--border); padding-block: 12px; }
+.knowledge-result-companion .knowledge-muted { margin: 12px 0 0; }
+
+.atelier-knowledge [data-state="CURRENT"] { color: var(--green); }
+.atelier-knowledge [data-state="STALE"] { color: var(--brass); }
+.atelier-knowledge [data-state="UNAVAILABLE"] { color: var(--red); }
+.knowledge-history { color: var(--brass); }
+
+.knowledge-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); gap: 36px; align-items: start; margin-top: 32px; }
+.knowledge-section-title { display: flex; gap: 16px; align-items: baseline; justify-content: space-between; margin-bottom: 24px; }
+.knowledge-section-title h2 { font-size: 22px; }
+.knowledge-section-title > p { font-size: 13px; color: var(--muted); }
+.knowledge-list ul { list-style: none; padding: 0; margin: 0; }
+.knowledge-list li { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 24px 0; border-bottom: 1px solid var(--border); }
+.knowledge-list h3 { font-size: 22px; margin-bottom: 10px; }
+.knowledge-ref { color: var(--faint); font-size: 13px; }
+.knowledge-row-action { display: flex; flex-direction: column; align-items: end; gap: 12px; flex-shrink: 0; font-size: 12px; }
+.knowledge-companion h2 { font-size: 28px; line-height: 1.2; margin: 14px 0 20px; }
+.knowledge-companion p { color: var(--muted); }
+.knowledge-companion dl { border-block: 1px solid var(--border); padding-block: 20px; }
+.knowledge-companion dt { color: var(--faint); font-size: 12px; }
+.knowledge-companion dd { margin: 4px 0 16px; font-size: 13px; }
+.knowledge-companion .knowledge-boundary { border-top: 1px solid var(--border); margin: 24px 0 0; padding-top: 24px; font-size: 13px; }
+.knowledge-empty { padding: 28px 0; color: var(--muted); }
+.knowledge-empty h3 { margin-bottom: 16px; }
+
+@media (max-width: 1100px) { .knowledge-heading { padding-right: 0; } .knowledge-search { position: static; width: min(100%, 420px); margin-top: 24px; } .knowledge-layout { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .atelier-knowledge { padding: 24px; } .knowledge-heading h1 { font-size: 30px; line-height: 1.2; } .knowledge-heading > p:last-of-type { font-size: 16px; } .knowledge-collections { grid-template-columns: 1fr; gap: 12px; } .knowledge-collections section { padding: 20px; } .knowledge-collections h2 { font-size: 22px; margin-bottom: 12px; } .knowledge-list li { align-items: start; flex-direction: column; gap: 12px; } .knowledge-row-action { flex-direction: row; align-items: center; justify-content: space-between; width: 100%; } .knowledge-companion { padding: 20px; } .knowledge-section-title, .knowledge-source { flex-wrap: wrap; } .knowledge-result { grid-template-columns: 1fr; } .knowledge-result-document, .knowledge-result-companion, .knowledge-sources .card { padding: 20px; } }
+
+/* KD01 integration: the document is bright paper in both deliberate art
+   directions. Rebind the existing semantic aliases locally so all inherited
+   Markdown code, tables, links and focus ink remain readable on that paper. */
+.atelier-knowledge .knowledge-result { max-width: 1272px; grid-template-columns: minmax(0, 840fr) minmax(280px, 408fr); }
+.atelier-knowledge .knowledge-result-document {
+  --bg: var(--mx-light-panel); --panel: var(--mx-light-panel2); --raised: var(--mx-light-panel2);
+  --text: var(--mx-light-text); --muted: var(--mx-light-muted); --faint: var(--mx-light-muted);
+  --border: var(--mx-light-line); --brass: var(--mx-light-ink-link); --focus: var(--mx-light-ink-link);
+  --red: var(--mx-light-ink-down); --green: var(--mx-light-ink-up);
+  background: var(--noir-text-primary); color: var(--text); padding: 40px; border-radius: 18px; box-shadow: none;
+}
+.atelier-knowledge .knowledge-result-document .knowledge-eyebrow { color: var(--muted); }
+.atelier-knowledge .knowledge-result-document .source-markdown blockquote { border-inline-start: 0; padding-inline-start: 0; }
+.atelier-knowledge .knowledge-result-summary { white-space: pre-wrap; overflow-wrap: anywhere; }
+.atelier-knowledge .knowledge-result-companion { border-radius: 18px; }
+.atelier-knowledge .knowledge-draft-companion { border-top: 1px solid var(--border); margin-top: 24px; padding-top: 24px; }
+.atelier-knowledge .knowledge-draft-companion h2 { font-size: 24px; line-height: 1.3; margin-bottom: 16px; }
+.atelier-knowledge .knowledge-draft-companion blockquote { margin: 16px 0; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--raised); white-space: pre-wrap; overflow-wrap: anywhere; }
+.atelier-knowledge .knowledge-draft-companion button { width: 100%; min-height: 44px; margin-top: 12px; }
+.shell[data-theme="light"] .atelier-knowledge .knowledge-result-document { background: var(--mx-light-panel); box-shadow: 0 12px 32px color-mix(in srgb, var(--mx-light-text) 10%, transparent); }
+.shell[data-theme="light"] .atelier-knowledge .knowledge-result-companion,
+.shell[data-theme="light"] .atelier-knowledge .knowledge-collections section { box-shadow: 0 3px 10px color-mix(in srgb, var(--mx-light-text) 6%, transparent); }
+@media (max-width: 1000px) { .atelier-knowledge .knowledge-result { grid-template-columns: 1fr; gap: 16px; } }
+@media (max-width: 760px) {
+  .atelier-knowledge .knowledge-sources .card { padding: 0; border: 0; background: transparent; box-shadow: none; }
+  .atelier-knowledge .knowledge-result-document { padding: 24px; }
+  .atelier-knowledge .knowledge-result-companion { padding: 24px; }
+}
+
+/* Shell owns horizontal page gutters. Source reading focuses the existing
+   detail view without moving its index, query, selection or draft owners. */
+.atelier-knowledge { max-width: 1272px; margin-inline: auto; padding-inline: 0; }
+.atelier-knowledge.knowledge-reader-active > :is(.knowledge-heading, .knowledge-source, .knowledge-collections, .knowledge-muted, .knowledge-layout) { display: none; }
+.atelier-knowledge.knowledge-reader-active .knowledge-sources > .card { padding: 0; border: 0; background: transparent; box-shadow: none; }
+.atelier-knowledge.knowledge-reader-active .knowledge-sources > .card > :is(h2, p, button) { display: none; }
+.atelier-knowledge.knowledge-reader-active #retained-results-panel > :is(p, button, ul, details) { display: none; }
+/* Keep the owner's return-focus heading mounted and focusable during the
+   layout cleanup, then restore it with the list when the source closes. */
+.atelier-knowledge.knowledge-reader-active #retained-results-panel > h3 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.atelier-knowledge:lang(zh-CN) .knowledge-eyebrow { letter-spacing: 0; text-transform: none; }
+.atelier-knowledge .knowledge-result-document .knowledge-result-title { font-size: 32px; line-height: 1.2; margin-bottom: 20px; }
+@media (max-width: 760px) { .atelier-knowledge { padding-inline: 0; } .atelier-knowledge .knowledge-result-document .knowledge-result-title { font-size: 28px; } }

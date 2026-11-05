@@ -180,9 +180,16 @@ def build_row(
     surface; user_ref is the constant "bot" — no human, nothing to hash; citations
     stay []). seat/book/role/armed/backend/run_id/key_id are additive bot keys the
     admin preserves and can filter on."""
-    provider = "claude_api" if str(model).startswith("claude") else (
-        "openai" if str(model).startswith(("gpt-", "o")) else (
-            "deepseek" if "deepseek" in str(model).lower() else None))
+    # Provider label from the model name. Claude Code aliases (opus/sonnet/haiku,
+    # optionally "[...]"-suffixed or "-<variant>") are claude_code, not "openai" —
+    # the old startswith("o") check mislabelled the "opus" alias on backends that
+    # don't set the sdk/cli/codex overrides (e.g. backend "none").
+    _m = str(model)
+    _alias = _m.lower().split("[", 1)[0].split("-", 1)[0]
+    provider = "claude_api" if _m.startswith("claude") else (
+        "claude_code" if _alias in ("opus", "sonnet", "haiku") else (
+            "openai" if _m.startswith("gpt-") or (_m[:1] == "o" and _m[1:2].isdigit()) else (
+                "deepseek" if "deepseek" in _m.lower() else None)))
     if backend == "codex":
         provider = "openai_codex"
     elif backend in ("sdk", "cli"):
