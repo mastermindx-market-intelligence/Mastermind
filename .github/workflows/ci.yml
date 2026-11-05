@@ -338,7 +338,7 @@ jobs:
         # for setup/cleanup opportunity, not a guaranteed future bound.
         # Slow setup or runner loss can still prevent artifact delivery.
         timeout-minutes: 45
-        run: python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}
+        run: python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }} --workers 4
 
       - name: Upload fixed test diagnostics
         if: always()

@@ -281,31 +281,57 @@ def _h1_metadata_is_safe(value):
         and (value['errno'] is None or type(value['errno'])is int and 0<=value['errno']<=4096))
 
 
+def _module_of(nodeid):
+    return nodeid.split("::", 1)[0]
+
+
+def _worker_key(report):
+    # pytest-xdist stamps every report relayed to the controller with the
+    # WorkerController that produced it; a serial run has no such attribute.
+    node = getattr(report, "node", None)
+    if node is None:
+        return None
+    gateway = getattr(node, "gateway", None)
+    return getattr(gateway, "id", None) or id(node)
+
+
 class ModuleTiming:
-    def __init__(self, reporter, diagnostics=None):
+    """Per-module CI_MODULE start/summary records.
+
+    Serial runs see modules one after another, so a new module's first test
+    closes the previous module. Under pytest-xdist (``--dist loadfile``) the
+    controller receives interleaved events from several workers; every module
+    still runs on exactly one worker, so a worker's first report for a
+    different module closes that worker's previous module, and the session
+    end closes whatever is still open. Records are diagnostics only; every
+    pytest exit status still governs.
+    """
+
+    def __init__(self, reporter, diagnostics=None, *, parallel=False):
         self.reporter = reporter
         self.diagnostics = diagnostics
+        self.parallel = bool(parallel)
         self.module = None
-        self.cases_started = 0
-        self.cases_finished = 0
-        self.reported_seconds = 0.0
+        self._open = {}
+        self._worker_module = {}
 
-    def _emit(self, event, **fields):
+    def _emit(self, event, module, **fields):
         # Pytest's quiet progress dots can leave an unterminated line. Keep
         # each record independently parseable without touching that output.
         self.reporter.write_line("\nCI_MODULE " + json.dumps(
-            {"event": event, "module": self.module, **fields}, sort_keys=True,
+            {"event": event, "module": module, **fields}, sort_keys=True,
         ))
         if self.diagnostics is not None:
-            try:self.diagnostics.progress_record(event,self.module,**fields)
+            try:self.diagnostics.progress_record(event,module,**fields)
             except Exception:pass
 
-    def _summarize(self):
-        if self.module is not None:
+    def _summarize(self, module):
+        state = self._open.pop(module, None)
+        if state is not None:
             self._emit(
-                "summary", cases_started=self.cases_started,
-                cases_finished=self.cases_finished,
-                reported_seconds=round(self.reported_seconds, 6),
+                "summary", module, cases_started=state["cases_started"],
+                cases_finished=state["cases_finished"],
+                reported_seconds=round(state["reported_seconds"], 6),
             )
 
     def _h1_failure(self,nodeid,phase,*,error=None,crash=None):
@@ -350,29 +376,56 @@ class ModuleTiming:
             pass
 
     def pytest_runtest_logstart(self, nodeid, location):
-        module = nodeid.split("::", 1)[0]
-        if module != self.module:
-            self._summarize()
-            self.module = module
-            self.cases_started = self.cases_finished = 0
-            self.reported_seconds = 0.0
-            self._emit("start")
-        self.cases_started += 1
+        module = _module_of(nodeid)
+        if module not in self._open:
+            if not self.parallel:
+                for previous in list(self._open):
+                    self._summarize(previous)
+            self._open[module] = {
+                "cases_started": 0, "cases_finished": 0, "reported_seconds": 0.0,
+            }
+            self._emit("start", module)
+        self._open[module]["cases_started"] += 1
+        self.module = module
 
     def pytest_runtest_logreport(self, report):
-        if report.nodeid.split("::", 1)[0] == self.module:
-            self.reported_seconds += report.duration
+        module = _module_of(report.nodeid)
+        state = self._open.get(module)
+        if state is not None:
+            state["reported_seconds"] += report.duration
+        if self.parallel:
+            worker = _worker_key(report)
+            if worker is not None:
+                previous = self._worker_module.get(worker)
+                if previous is not None and previous != module:
+                    self._summarize(previous)
+                self._worker_module[worker] = module
+            # Workers do not run this plugin's makereport wrapper for the
+            # controller; keep the fixed failure metadata from the relayed
+            # report (no live exception object is available here).
+            try:
+                if report.failed:
+                    self._h1_failure(report.nodeid, report.when)
+            except Exception:
+                pass
 
     def pytest_runtest_logfinish(self, nodeid, location):
-        if nodeid.split("::", 1)[0] == self.module:
-            self.cases_finished += 1
+        state = self._open.get(_module_of(nodeid))
+        if state is not None:
+            state["cases_finished"] += 1
 
     def pytest_sessionfinish(self, session, exitstatus):
-        self._summarize()
+        for module in list(self._open):
+            self._summarize(module)
 
 
 def pytest_sessionstart(session):
-    reporter = session.config.pluginmanager.getplugin("terminalreporter")
+    config = session.config
+    if hasattr(config, "workerinput"):
+        # pytest-xdist worker: its terminal output is not relayed, and every
+        # test event reaches the controller's registration below instead.
+        return
+    reporter = config.pluginmanager.getplugin("terminalreporter")
     if reporter is not None:
         diagnostics=None
         if os.environ.get('MMX_CI_FIXED_DIAGNOSTICS_DIR'):
@@ -382,4 +435,7 @@ def pytest_sessionstart(session):
                 diagnostics=FixedDiagnostics(PublicCatalog(Path(__file__).resolve().parents[1]),
                     os.environ['MMX_CI_FIXED_DIAGNOSTICS_DIR'])
             except Exception:pass
-        session.config.pluginmanager.register(ModuleTiming(reporter,diagnostics), "ci-module-timing")
+        parallel = bool(getattr(config.option, "numprocesses", None))
+        config.pluginmanager.register(
+            ModuleTiming(reporter, diagnostics, parallel=parallel), "ci-module-timing"
+        )

@@ -291,7 +291,7 @@ def validate_parallel_workflow(text: str) -> None:
         or set(runner) != {"name", "if", "run", "timeout-minutes"}
         or type(runner.get("timeout-minutes")) is not int
         or runner.get("timeout-minutes") != 45
-        or runner.get("run") != "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}"
+        or runner.get("run") != "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }} --workers 4"
         or runner.get("if") != "${{ steps.previous_ci.outputs.reuse != 'true' }}"
     ):
         raise ci_pytest.PolicyError("prior merged CI proof must fail closed before every shard")
@@ -412,6 +412,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--index", type=int, required=True)
     parser.add_argument("--root", default=None)
     parser.add_argument("--plan-only", action="store_true")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help="pytest-xdist workers inside this shard (0 = one serial interpreter)",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
     root = Path(args.root).resolve() if args.root else ci_pytest.repo_root()
 
@@ -422,6 +428,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         gate, selected, digest = shard_plan(
             root, jobs=args.jobs, index=args.index
         )
+        shard_argv = ci_pytest.pytest_argv(
+            selected, progress=True, workers=args.workers
+        )
     except ci_pytest.PolicyError as error:
         print(f"ci_parallel_shard policy error: {error}", file=sys.stderr)
         return 2
@@ -429,14 +438,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(ci_pytest.format_plan(gate["plan"]), flush=True)
     print(
         f"parallel_shard={args.index + 1}/{args.jobs} "
-        f"modules={len(selected)} included_sha256={digest}",
+        f"modules={len(selected)} included_sha256={digest} workers={args.workers}",
         flush=True,
     )
     if args.plan_only:
         return 0
     # No hand-written selectors, mutating retry, positive allowlist or shell.
     completed = subprocess.run(
-        ci_pytest.pytest_argv(selected, progress=True),
+        shard_argv,
         cwd=root,
         check=False,
     )

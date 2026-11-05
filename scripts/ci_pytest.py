@@ -195,8 +195,15 @@ def format_plan(plan: Mapping[str, int], *, shards: Sequence[Sequence[str]] | No
     return rendered
 
 
+MAX_SHARD_WORKERS = 16
+
+
 def pytest_argv(
-    included: Sequence[str], *, python: str | None = None, progress: bool = False,
+    included: Sequence[str],
+    *,
+    python: str | None = None,
+    progress: bool = False,
+    workers: int = 0,
 ) -> list[str]:
     # Observability only: report bounded slowest setup/call/teardown durations
     # without dropping a test, changing its order, or creating new CI contexts.
@@ -206,7 +213,18 @@ def pytest_argv(
     prefix.extend(["-m", "pytest"])
     if progress:
         prefix.extend(["-p", "scripts.ci_pytest_timing"])
-    return [*prefix, "--durations=25", "-q", *included]
+    argv = [*prefix, "--durations=25", "-q"]
+    if workers:
+        # In-shard parallelism (pytest-xdist). `--dist loadfile` keeps every
+        # module on one worker so module-level fixtures, ordering and the
+        # per-module timing records are unchanged; `--max-worker-restart 0`
+        # turns a crashed worker into a failed run instead of a silent retry.
+        # The module set, exclusions and placement are untouched: this only
+        # changes how many interpreters execute the already-selected shard.
+        if type(workers) is not int or not 0 < workers <= MAX_SHARD_WORKERS:
+            raise PolicyError(f"shard workers must be an int in 1..{MAX_SHARD_WORKERS}")
+        argv.extend(["-n", str(workers), "--dist", "loadfile", "--max-worker-restart", "0"])
+    return [*argv, *included]
 
 
 _MEASURED_THREE_JOB_PLACEMENT = {

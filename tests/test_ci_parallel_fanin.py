@@ -91,8 +91,8 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
         ),
         ("exit 1\n            fi", "echo \"not stopping\"\n            fi\n            exit 1"),
         (
-            "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}",
-            "python -m scripts.ci_parallel_shard --jobs 6 --index 0",
+            "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }} --workers 4",
+            "python -m scripts.ci_parallel_shard --jobs 6 --index 0 --workers 4",
         ),
         ("if: matrix.index == 0", "if: matrix.index == 1"),
         (
@@ -199,6 +199,39 @@ def test_worker_executes_only_its_exact_canonical_shard_and_preserves_status(
     assert recorded == [
         (cip.pytest_argv(expected, progress=True), tmp_path.resolve(), False),
     ]
+    assert "-n" not in recorded[0][0]  # workers default to one serial interpreter
+
+
+def test_worker_count_is_an_argv_only_change_to_the_same_exact_shard(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    included = _stub_gate(monkeypatch)
+    workflow = tmp_path / ".github" / "workflows"
+    workflow.mkdir(parents=True)
+    (workflow / "ci.yml").write_text("fixture", encoding="utf-8")
+    recorded: list[list[str]] = []
+
+    def fake_run(args, *, cwd, check):
+        recorded.append(list(args))
+        return subprocess.CompletedProcess(args=args, returncode=0)
+
+    monkeypatch.setattr(fan.subprocess, "run", fake_run)
+    assert fan.main(["--jobs", "6", "--index", "1", "--root", str(tmp_path), "--workers", "4"]) == 0
+    expected = cip.partition_modules(included, jobs=6)[1]
+    serial = cip.pytest_argv(expected, progress=True)
+    [parallel] = recorded
+    assert parallel == cip.pytest_argv(expected, progress=True, workers=4)
+    # Same interpreter, plugin, diagnostics and exact module list; only the
+    # xdist flags are inserted between the fixed options and the modules.
+    assert parallel[: serial.index("-q") + 1] == serial[: serial.index("-q") + 1]
+    assert parallel[-len(expected):] == list(expected) == serial[-len(expected):]
+    assert parallel[serial.index("-q") + 1 : -len(expected)] == [
+        "-n", "4", "--dist", "loadfile", "--max-worker-restart", "0",
+    ]
+    # An out-of-range worker count is a policy error before any execution.
+    recorded.clear()
+    assert fan.main(["--jobs", "6", "--index", "1", "--root", str(tmp_path), "--workers", "99"]) == 2
+    assert recorded == []
 
 
 @pytest.mark.parametrize(
@@ -263,7 +296,7 @@ def test_same_sha_reuse_is_step_scoped_and_required_fanin_stays_unconditional() 
         "name": "Run repository test shard",
         "if": "${{ steps.previous_ci.outputs.reuse != 'true' }}",
         "timeout-minutes": 45,
-        "run": "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}",
+        "run": "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }} --workers 4",
     }
     assert "env" not in shard_step  # Do not expose the Actions token to pytest.
     assert data["jobs"]["test"]["if"] == "${{ always() }}"
