@@ -225,6 +225,21 @@ class FreshConversationOwner:
             service._require_initial_coo_workspace(root)
             current()
 
+    def _require_fresh_original(self, root, principal, request, command):
+        from control_plane.fresh_conversation_admission import read_creation_restriction
+        if root is None:
+            raise ConversationRefusal("original_operation_mismatch")
+        try:
+            material = read_creation_restriction(self._runtime, root)
+        except Exception:
+            raise ConversationRefusal("original_operation_mismatch") from None
+        if (material is None or material["command_id"] != command
+                or material["work_ref"] != request["work_ref"]
+                or material["principal_scope_sha256"] != wire.canonical_digest(
+                    {key: getattr(principal, key) for key in _IDENTITY})):
+            raise ConversationRefusal("original_operation_mismatch")
+        return material
+
     async def create(self, principal, request, *, workspace_principal):
         request = wire.validate_request(request, operation="create")
         self._current(principal)
@@ -241,6 +256,9 @@ class FreshConversationOwner:
         # Durable duplicate comparison is owned by the incumbent sink. A later
         # worker/profile arm cannot dispatch an old operation from this route.
         material = None
+        if existing is not None:
+            self._require_fresh_original(self._runtime.jobs.get_job(existing["job_id"]),
+                principal, request, command)
         if existing is None:
             preview, material = await self._preview(principal, request, workspace_principal)
             if preview["digest"] != request["preview_digest"]:
@@ -296,6 +314,8 @@ class FreshConversationOwner:
                     dialogue_source_provider=self._service._ceo_ingress_dialogue_source_provider,
                     admission_guard=current, fresh_admission_observer=admitted,
                     fresh_conversation_source=creation_source)
+                self._require_fresh_original(self._runtime.jobs.get_job(receipt["job_id"]),
+                    principal, request, command)
                 if receipt.get("duplicate") is False:
                     root_id = receipt["job_id"]
                     operation.require_root(root_id)
@@ -341,6 +361,7 @@ class FreshConversationOwner:
                 or root.orchestration_provenance.get("command_id") != command
                 or root.parent_job_id is not None or root.root_job_id != root.job_id):
             raise ConversationRefusal("original_operation_mismatch")
+        self._require_fresh_original(root, principal, request, command)
         child_command = f"coo-cycle:{root.job_id}:create-interactive:0"
         child_event = self._runtime.store.find_event_by_command_id(child_command)
         child = self._runtime.jobs.get_job(child_event["job_id"]) if child_event is not None else None

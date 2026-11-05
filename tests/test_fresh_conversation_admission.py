@@ -154,3 +154,35 @@ def test_nominal_creation_copy_and_changed_intent_rejected_before_insert(tmp_pat
         finally:
             await cleanup(service)
     asyncio.run(run())
+
+
+def test_fresh_route_never_adopts_unmarked_generic_namespace_lookalike(tmp_path, monkeypatch):
+    async def run():
+        from control_plane.fresh_conversation import ConversationRefusal
+        service, runtime, owner, principal, request, adapters = case(tmp_path)
+        prepared = await preview(owner, principal, request)
+        original = runtime.jobs.create_v2_orchestration_root
+        # Deliberately create an ordinary strict-v2 root through its real
+        # incumbent producer, with the computed command namespace and matching
+        # prompt data, but WITHOUT the private fresh creation source.
+        def generic(intent, **kwargs):
+            kwargs.pop("_fresh_conversation_source")
+            return original(intent, **kwargs)
+        monkeypatch.setattr(runtime.jobs, "create_v2_orchestration_root", generic)
+        with pytest.raises(ConversationRefusal):
+            await create(owner, principal, request, prepared)
+        root, = runtime.jobs.list_jobs()
+        assert read_creation_restriction(runtime, root) is None
+        assert not runtime.attempts.list_attempts() and not adapters
+        before = runtime.events.list_events()
+        monkeypatch.setattr(runtime.jobs, "create_v2_orchestration_root", original)
+        selected = {key: request[key] for key in ("work_ref", "operation_key")}
+        for operation in (owner.status, owner.read):
+            with pytest.raises(ConversationRefusal, match="original_operation_mismatch"):
+                await operation(principal, selected)
+        with pytest.raises(ConversationRefusal):
+            await create(owner, principal, request, prepared)
+        assert runtime.events.list_events() == before
+        assert len(runtime.jobs.list_jobs()) == 1 and not runtime.attempts.list_attempts() and not adapters
+        await cleanup(service)
+    asyncio.run(run())
