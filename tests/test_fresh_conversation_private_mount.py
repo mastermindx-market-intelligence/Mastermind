@@ -53,7 +53,13 @@ def test_real_private_kernel_peer_and_foreground_creation_mount(tmp_path, rsa_ke
                 consume = {**selected, "initial_digest": initial_digest}
                 code, consumed = await post(app, "consume", consume, token, workspace_token)
                 assert code == 200 and consumed["ok"] and consumed["data"]["state"] == "CONSUMED"
+                code, consumption_status = await post(app, "consume_status", consume, token)
+                assert code == 200 and consumption_status["ok"] and consumption_status["data"]["state"] == "CONSUMED"
+                assert consumption_status["data"]["can_send"] is False
                 turn = {**consume, "turn_key": "owned-private-turn-1", "message": "Explain this bounded result."}
+                code, preflight = await post(app, "turn_preview", turn, token, workspace_token)
+                assert code == 200 and preflight["ok"] and preflight["data"]["state"] == "TURN_READY"
+                turn = {**turn, "preview_digest": preflight["data"]["preview_digest"]}
                 code, second = await post(app, "turn", turn, token, workspace_token)
                 assert code == 200 and second["ok"] and second["data"]["state"] == "RECORDED"
                 original_turn = {**selected, "turn_key": turn["turn_key"]}
