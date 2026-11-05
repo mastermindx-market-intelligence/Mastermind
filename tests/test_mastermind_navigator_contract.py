@@ -1364,3 +1364,76 @@ def test_fresh_session_source_and_safety_refusal_cases_preserve_owner_boundaries
     assert "preserve EFFECT_UNKNOWN" in refused["owner_native_action"]
     assert "do not retry" in refused["owner_native_action"].lower()
     assert "Do not rephrase the denied effect or switch account, plugin, connector, worker, device, model, provider, or generic tool" in refused["owner_native_action"]
+
+
+def local_route():
+    return next(r for r in _load("references/owner-routing.json")["routes"]
+                if r["capability_class"] == "local_machine_process")
+
+def cases():
+    return {c["id"]: c for c in _load("fixtures/fresh-session-routing-cases.json")["cases"]}
+
+def test_pure_file_read_has_explicit_typed_initial_route():
+    route = local_route()
+    assert route.get("local_artifact_read_route") == ["read_file", "read_multiple_files"]
+    assert route.get("local_artifact_read_optional_preflight") == "get_file_info"
+    assert route.get("pure_read_generic_shell_fallback") is False
+    conditions = route.get("local_artifact_read_conditions", "")
+    for term in ("initial", "offset", "length", "authorization", "filesystem"):
+        assert term in conditions.lower(), term
+
+def test_distinct_output_objects_keep_their_incumbent_readers():
+    route = local_route()
+    assert route.get("retained_output_read_route") == "studio_output_page"
+    assert route.get("existing_process_output_read_route") == "read_process_output"
+    assert route["generic_shell_scope"] == "GENUINE_BOUND_HOST_PROCESS_ONLY"
+    assert "computation" in route.get("genuine_process_effects", "")
+    assert "transformation" in route.get("genuine_process_effects", "")
+
+def test_initial_read_fixture_is_read_only_and_not_a_replay():
+    case = cases().get("local-artifact-read-no-generic-shell")
+    assert case is not None, "Missing initial local-file READ fixture"
+    assert case["requested_action_class"] == "READ"
+    assert case["capability_class"] == "local_machine_process"
+    assert case["expected_tool_family"] == "studio-direct"
+    assert case["expected_schema_loads"] == ["studio-direct"]
+    assert case["does_not_claim_live_before_probe"] is True
+    action = case["owner_native_action"]
+    for phrase in ("Initial route only", "read_file", "read_multiple_files", "offset", "length",
+                   "get_file_info", "optional", "no prior safety or permission refusal"):
+        assert phrase in action, phrase
+    assert case["expected_disposition"] == "TYPED_PAGED_FILE_READ"
+
+def test_read_refusal_fixture_never_suggests_alternate_reader():
+    case = cases().get("local-read-safety-refusal-preserves-carrier")
+    assert case is not None, "Missing READ refusal fixture"
+    assert case["requested_action_class"] == "READ"
+    assert case["expected_disposition"] == "ACTION_SCOPED_REFUSAL_NO_RETRY_NO_FAILOVER"
+    action = case["owner_native_action"]
+    for phrase in ("do not retry", "do not reroute", "TOOL_DEGRADED / EFFECT_NONE",
+                   "EFFECT_UNKNOWN", "same carrier"):
+        assert phrase in action, phrase
+    for tool in ("read_file", "read_multiple_files", "start_process", "interact_with_process"):
+        assert tool not in action, "A denied-read fixture must not nominate a replacement reader"
+
+@pytest.mark.parametrize("relative", [
+    "skills/navigate-mastermind-universe/SKILL.md",
+    "references/navigator-boundary.md",
+])
+def test_refusal_language_covers_read_actions(relative):
+    text = (PACKAGE / relative).read_text(encoding="utf-8")
+    assert "including read-only" in text.lower()
+    assert "for a modifying action" not in text
+    assert "original modifying operation" not in text
+
+def test_read_route_cannot_relax_existing_refusal_or_binding_fences():
+    route = local_route()
+    assert route.get("platform_refusal_action_scope") == "ALL_ACTION_CLASSES_INCLUDING_READ"
+    assert route["platform_refusal_retry_policy"] == "NO_RETRY_AFTER_SAFETY_OR_PERMISSION_DENIAL"
+    assert route["platform_refusal_pre_dispatch_effect"] == "TOOL_DEGRADED / EFFECT_NONE"
+    assert route["platform_refusal_ambiguous_dispatch_effect"] == "EFFECT_UNKNOWN"
+    assert route["static_liveness_claim"] is False
+    assert route["selected_project_source_fallback"] is False
+    assert route["binding_requirements"] == [
+        "host identity", "process or workspace identity", "current host authorization"
+    ]

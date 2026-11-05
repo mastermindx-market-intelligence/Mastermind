@@ -2,15 +2,26 @@ import { createHash } from 'node:crypto';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
-import { mkdtemp, realpath as realpathDefault, rm } from 'node:fs/promises';
+import { mkdtemp, open, readFile, realpath as realpathDefault, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 const execFileDefault = promisify(execFileCallback);
 
 const OPERATION_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const SHA_RE = /^[0-9a-f]{40}$/;
+const SHA256_RE = /^[0-9a-f]{64}$/;
+const COMMISSION_PATH = 'research/executive_commissions/COMMISSION.md';
+const COMMISSION_COMMIT_MESSAGE = 'chore: prepare Executive commission';
+const MAX_COMMISSION_BYTES = 512 * 1024;
 const BRANCH_RE = /^sol\/web-[A-Za-z0-9._-]+$/;
 const ALLOWED_LANE = 'web';
+const CLOSED_REPOSITORY_ALIASES = Object.freeze(['mastermind', 'macro', 'terminal']);
+// The installed repository owner fixes these branches; callers select no ref.
+const PROTECTED_TRACKING_REFS = Object.freeze({
+  mastermind: 'refs/remotes/origin/master', macro: 'refs/remotes/origin/main',
+  terminal: 'refs/remotes/origin/master',
+});
+const NOT_REGISTERED = 'workspace is not registered to the source repository';
 const MAX_STDIO_BYTES = 1024 * 1024;
 const DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
 const DEFAULT_PUSH_TIMEOUT_MS = 60_000;
@@ -55,7 +66,9 @@ export const STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL = Object.freeze({
     'Create exactly one local commit from all current committable changes in one existing Mastermind ' +
     'attended Web workspace. The host resolves the workspace and branch from canonical mmx-workspace ' +
     'registration. The caller supplies only the operation id, exact expected current HEAD and a bounded ' +
-    'single-line commit message. Ignored files stay uncommitted. A private temporary index prevents ' +
+    'single-line commit message, with an optional exact protected-base and prepared-tree merge fence. ' +
+    'Merge mode checks the host-fixed local tracking ref and preserves both ordered parents. ' +
+    'Ignored files stay uncommitted. A private temporary index prevents ' +
     'pre-commit staging side effects; after the fenced ref update is known applied, the real index is ' +
     'synchronized to that exact commit. Compare-and-swap ref update prevents stale-head publication. ' +
     'This operation is local-only; its schema has no capability to contact origin, push, accept paths, change remotes, or accept shell commands.',
@@ -76,6 +89,15 @@ export const STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL = Object.freeze({
         type: 'string',
         minLength: 1,
         maxLength: 240,
+      },
+      merge: {
+        type: 'object',
+        properties: {
+          expected_protected_base_sha: { type: 'string', pattern: '^[0-9a-f]{40}$' },
+          expected_tree_sha: { type: 'string', pattern: '^[0-9a-f]{40}$' },
+        },
+        required: ['expected_protected_base_sha', 'expected_tree_sha'],
+        additionalProperties: false,
       },
     },
     required: ['operation_id', 'expected_head_sha', 'message'],
@@ -98,9 +120,11 @@ export const STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL = Object.freeze({
     'Push exactly the current HEAD of one existing clean Mastermind attended Web workspace to its ' +
     'same host-resolved sol/web-* origin branch without force, tags, branch selection or credential input. ' +
     'Requires the caller to fence the action with the exact expected local HEAD. If the remote already ' +
-    'equals that HEAD, no push is issued. A failure after push starts is EFFECT_UNKNOWN unless remote ' +
-    'readback proves the exact HEAD is applied. EFFECT_UNKNOWN remains unresolved and carries no retry authority; ' +
-    'studio_git_publish_status exposes read-only reconciliation state for any later decision.',
+    'equals that HEAD, no push is issued. Readback of the exact pinned ref proves successful publication. ' +
+    'A Git porcelain one-ref rejection with the remote ref unchanged returns NOT_APPLIED for that ref, ' +
+    'but never grants retry or alternative-carrier permission; diagnose its unknown cause read-only on ' +
+    'the original carrier. All other unresolved push failures remain EFFECT_UNKNOWN and fenced. ' +
+    'studio_git_publish_status provides read-only reconciliation.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -161,16 +185,73 @@ export function resolveGitPublishConfig(value) {
   if (typeof value !== 'object' || Array.isArray(value)) {
     throw new TypeError('config.gitPublish must be an object, false, or absent');
   }
+  if (Object.hasOwn(value, 'repositories')) {
+    assertExactKeys(value, new Set([
+      'enabled', 'workspaceCli', 'gitBinary', 'repositories',
+      'commandTimeoutMs', 'pushTimeoutMs',
+    ]), 'config.gitPublish');
+    if (value.enabled !== true || !Array.isArray(value.repositories) ||
+        value.repositories.length !== CLOSED_REPOSITORY_ALIASES.length) {
+      throw new TypeError('config.gitPublish requires the exact closed repository profile');
+    }
+    const names = new Set();
+    const sources = new Set();
+    const remotes = new Set();
+    const profiles = value.repositories.map((profile) => {
+      if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
+        throw new TypeError('repository profile must be an object');
+      }
+      assertExactKeys(profile, new Set(['repository', 'sourceRepository', 'allowedRemoteUrls']),
+        'config.gitPublish.repositories[]');
+      if (!CLOSED_REPOSITORY_ALIASES.includes(profile.repository) || names.has(profile.repository)) {
+        throw new TypeError('repository profile alias must be unique and closed');
+      }
+      if (profile.allowedRemoteUrls?.length !== 1 ||
+          sources.has(profile.sourceRepository) || remotes.has(profile.allowedRemoteUrls[0])) {
+        throw new TypeError('closed repository profile requires distinct source and remote bindings');
+      }
+      names.add(profile.repository);
+      sources.add(profile.sourceRepository);
+      remotes.add(profile.allowedRemoteUrls[0]);
+      return resolveGitPublishConfig({
+        enabled: true,
+        workspaceCli: value.workspaceCli,
+        gitBinary: value.gitBinary,
+        repository: profile.repository,
+        sourceRepository: profile.sourceRepository,
+        allowedRemoteUrls: profile.allowedRemoteUrls,
+        commandTimeoutMs: value.commandTimeoutMs,
+        pushTimeoutMs: value.pushTimeoutMs,
+      });
+    });
+    if (!CLOSED_REPOSITORY_ALIASES.every((alias) => names.has(alias))) {
+      throw new TypeError('repository profile missing a closed alias');
+    }
+    const resolved = Object.freeze({
+      enabled: true,
+      workspaceCli: requireAbsoluteString(value.workspaceCli, 'config.gitPublish.workspaceCli'),
+      gitBinary: requireAbsoluteString(value.gitBinary, 'config.gitPublish.gitBinary'),
+      commandTimeoutMs: clampTimeout(value.commandTimeoutMs, DEFAULT_COMMAND_TIMEOUT_MS, 'config.gitPublish.commandTimeoutMs'),
+      pushTimeoutMs: clampTimeout(value.pushTimeoutMs, DEFAULT_PUSH_TIMEOUT_MS, 'config.gitPublish.pushTimeoutMs'),
+      repositories: Object.freeze(CLOSED_REPOSITORY_ALIASES.map((name) =>
+        profiles.find((profile) => profile.repository === name))),
+    });
+    RESOLVED_CONFIGS.add(resolved);
+    return resolved;
+  }
   assertExactKeys(
     value,
     new Set([
       'enabled', 'workspaceCli', 'gitBinary', 'sourceRepository', 'allowedRemoteUrls',
-      'commandTimeoutMs', 'pushTimeoutMs',
+      'commandTimeoutMs', 'pushTimeoutMs', 'repository',
     ]),
     'config.gitPublish',
   );
   if (value.enabled !== true) {
     throw new TypeError('config.gitPublish.enabled must be true when gitPublish is configured');
+  }
+  if (value.repository !== undefined && !['mastermind', 'macro', 'terminal'].includes(value.repository)) {
+    throw new TypeError('config.gitPublish.repository is not a closed repository alias');
   }
   const allowedRemoteUrls = value.allowedRemoteUrls;
   if (!Array.isArray(allowedRemoteUrls) || allowedRemoteUrls.length < 1 || allowedRemoteUrls.length > 8) {
@@ -193,6 +274,7 @@ export function resolveGitPublishConfig(value) {
     sourceRepository: requireAbsoluteString(value.sourceRepository, 'config.gitPublish.sourceRepository'),
     allowedRemoteUrls: Object.freeze(normalizedRemotes),
     lane: ALLOWED_LANE,
+    ...(value.repository !== undefined ? { repository: value.repository } : {}),
     commandTimeoutMs: clampTimeout(value.commandTimeoutMs, DEFAULT_COMMAND_TIMEOUT_MS, 'config.gitPublish.commandTimeoutMs'),
     pushTimeoutMs: clampTimeout(value.pushTimeoutMs, DEFAULT_PUSH_TIMEOUT_MS, 'config.gitPublish.pushTimeoutMs'),
   });
@@ -207,11 +289,30 @@ function validateOperationId(value) {
   return value;
 }
 
+function validateExpectedContentSha256(value) {
+  if (typeof value !== 'string' || !SHA256_RE.test(value)) {
+    throw new TypeError('expected_content_sha256 is invalid');
+  }
+  return value;
+}
+
 function validateExpectedHead(value) {
   if (typeof value !== 'string' || !SHA_RE.test(value)) {
     throw new TypeError('expected_head_sha is invalid');
   }
   return value;
+}
+
+function validateMerge(args) {
+  if (!Object.hasOwn(args, 'merge')) return null;
+  const value = args.merge;
+  const keys = ['expected_protected_base_sha', 'expected_tree_sha'];
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).length !== keys.length ||
+      !keys.every((key) => Object.hasOwn(value, key) && typeof value[key] === 'string' && SHA_RE.test(value[key]))) {
+    throw new TypeError('merge requires only exact protected-base and tree SHA fences');
+  }
+  return Object.freeze(Object.fromEntries(keys.map((key) => [key, value[key]])));
 }
 
 function validateCommitMessage(value) {
@@ -246,12 +347,26 @@ function actionRef(operationId, branch, head) {
     .digest('hex');
 }
 
-function commitActionRef(operationId, branch, oldHead, tree, message) {
-  return createHash('sha256')
-    .update('mastermind.studio_git_commit_current_changes.v1\0')
-    .update(operationId).update('\0').update(branch).update('\0').update(oldHead)
-    .update('\0').update(tree).update('\0').update(message)
-    .digest('hex');
+function commitActionRef(operationId, branch, oldHead, tree, message, protectedBase = null) {
+  const hash = createHash('sha256')
+    .update(protectedBase === null ? 'mastermind.studio_git_commit_current_changes.v1\0'
+      : 'mastermind.studio_git_commit_current_changes.merge.v1\0')
+    .update(operationId).update('\0').update(branch).update('\0').update(oldHead);
+  if (protectedBase !== null) hash.update('\0').update(protectedBase);
+  return hash.update('\0').update(tree).update('\0').update(message).digest('hex');
+}
+
+// A rejected *one-ref* push and a lost push response are different effects.
+// Inspect only Git's machine-readable porcelain status for this exact pinned
+// destination, never untrusted remote prose or a generic exit code.
+function explicitlyRejectedExactRef(error, ref) {
+  if (error?.code !== 1 || error?.killed === true || error?.signal) return false;
+  const output = [error?.stdout, error?.stderr]
+    .filter((value) => typeof value === 'string').join('\n');
+  return output.split(/\r?\n/).some((line) => {
+    const match = line.match(/^!\t([^\t\r\n]+)\t\[remote rejected\](?:\s*\([^\r\n]*\))?\s*$/);
+    return match !== null && match[1].endsWith(`:${ref}`);
+  });
 }
 
 function publicStatus(state) {
@@ -266,19 +381,88 @@ function publicStatus(state) {
   };
 }
 
+function createClosedRepositoryPublisher(cfg, dependencies) {
+  const execFile = dependencies.execFile ?? execFileDefault;
+  const publishers = new Map(cfg.repositories.map((profile) =>
+    [profile.repository, createGitPublisher(profile, dependencies)]));
+  async function select(operationId) {
+    const operation = validateOperationId(operationId);
+    let selected = null;
+    for (const profile of cfg.repositories) {
+      let stdout;
+      try {
+        ({stdout} = await execFile(cfg.workspaceCli,
+          ['status', '--operation-id', operation, '--lane', ALLOWED_LANE,
+            '--repository', profile.repository],
+          {
+            timeout: cfg.commandTimeoutMs, maxBuffer: MAX_STDIO_BYTES, encoding: 'utf8',
+            env: {
+              PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+              HOME: process.env.HOME ?? '',
+              USER: process.env.USER ?? '',
+              LOGNAME: process.env.LOGNAME ?? '',
+              LANG: 'C', LC_ALL: 'C', GIT_TERMINAL_PROMPT: '0',
+              GIT_ASKPASS: '/usr/bin/false', SSH_ASKPASS: '/usr/bin/false',
+            },
+          }));
+      } catch (error) {
+        // The installed mmx-workspace CLI emits its exact NOT_REGISTERED
+        // read-only refusal as JSON on stderr and exits 2. Only this one
+        // typed absence is a non-match; every other error remains a refusal.
+        if (error?.code !== 2 || String(error.stdout ?? '').trim() ||
+            typeof error.stderr !== 'string') throw error;
+        const result = parseJson(error.stderr, 'closed mmx-workspace refusal');
+        const exactKeys = ['action', 'effect', 'error', 'repository', 'schema_version'];
+        if (result?.action === 'status' && result.effect === 'NOT_APPLIED' &&
+            result.error === NOT_REGISTERED && result.repository === profile.repository &&
+            result.schema_version === 'mastermind.workspace_cli/v2' &&
+            Object.keys(result).length === exactKeys.length &&
+            exactKeys.every((key) => Object.hasOwn(result, key))) continue;
+        throw error;
+      }
+      const result = parseJson(stdout, 'closed mmx-workspace status');
+      if (result?.action !== 'status' ||
+          result.schema_version !== 'mastermind.workspace_cli/v2' ||
+          result.effect !== 'NOT_APPLIED' || result.repository !== profile.repository) {
+        throw new Error('closed workspace registry returned an invalid repository receipt');
+      }
+      // A successful stdout response can never report absence: only the exit
+      // code 2 typed stderr refusal above is canonical non-registration. Any
+      // error field here is malformed evidence and fails closed.
+      if (result.error !== undefined || !result.receipt || typeof result.receipt !== 'object') {
+        throw new Error('closed workspace registry returned an unexpected result');
+      }
+      if (selected !== null) throw new Error('operation ID is registered in more than one repository');
+      selected = publishers.get(profile.repository);
+    }
+    if (!selected) throw new Error('operation is not registered in the closed repository profile');
+    return selected;
+  }
+  const dispatch = (method) => async (args) => {
+    const publisher = await select(args?.operation_id);
+    return publisher[method](args);
+  };
+  return Object.freeze({
+    status: dispatch('status'),
+    commit: dispatch('commit'),
+    push: dispatch('push'),
+  });
+}
+
 export function createGitPublisher(config, dependencies = {}) {
   const cfg = resolveGitPublishConfig(config);
   if (!cfg) throw new TypeError('git publish is not configured');
+  if (cfg.repositories) return createClosedRepositoryPublisher(cfg, dependencies);
   const execFile = dependencies.execFile ?? execFileDefault;
   const realpath = dependencies.realpath ?? realpathDefault;
   const remove = dependencies.rm ?? rm;
 
-  async function run(file, args, { cwd, timeoutMs = cfg.commandTimeoutMs, envExtra = {} } = {}) {
+  async function run(file, args, { cwd, timeoutMs = cfg.commandTimeoutMs, envExtra = {}, encoding = 'utf8' } = {}) {
     return execFile(file, args, {
       cwd,
       timeout: timeoutMs,
       maxBuffer: MAX_STDIO_BYTES,
-      encoding: 'utf8',
+      encoding,
       env: {
         PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
         HOME: process.env.HOME ?? '',
@@ -300,6 +484,78 @@ export function createGitPublisher(config, dependencies = {}) {
 
   async function gitWithIndex(cwd, args, indexPath, options = {}) {
     return git(cwd, args, { ...options, envExtra: { GIT_INDEX_FILE: indexPath } });
+  }
+
+  async function gitQuiet(cwd, args, options = {}) {
+    try {
+      await git(cwd, args, options);
+      return true;
+    } catch (error) {
+      if (error?.code === 1) return false;
+      throw error;
+    }
+  }
+
+  async function seedPrivateIndex(workspacePath, indexPath) {
+    const {stdout} = await git(workspacePath, ['rev-parse', '--git-path', 'index']);
+    const realIndexPath = path.resolve(workspacePath, oneLine(stdout, 'real index path'));
+    // Bind bytes and metadata to one inode even if Git replaces the pathname.
+    // The existing real-index byte comparisons still fence concurrent writers.
+    const source = await open(realIndexPath, 'r');
+    let originalIndex;
+    let originalMtimeNs;
+    try {
+      originalMtimeNs = (await source.stat({bigint: true})).mtimeNs;
+      originalIndex = await source.readFile();
+    } finally {
+      await source.close();
+    }
+
+    // A newer copy can hide a same-size edit in a racily clean cached entry.
+    // Floor integer nanoseconds before conversion so floating-point rounding
+    // cannot advance the private index into the following second.
+    const nsPerSecond = 1_000_000_000n;
+    let seconds = originalMtimeNs / nsPerSecond;
+    if (originalMtimeNs < 0n && originalMtimeNs % nsPerSecond !== 0n) seconds -= 1n;
+    const timestamp = Number(seconds);
+    if (!Number.isSafeInteger(timestamp)) {
+      throw new Error('real index timestamp is outside the supported range');
+    }
+    await writeFile(indexPath, originalIndex);
+    await utimes(indexPath, timestamp, timestamp);
+    if ((await stat(indexPath, {bigint: true})).mtimeNs > originalMtimeNs) {
+      throw new Error('private index timestamp advanced during preparation');
+    }
+    return {realIndexPath, originalIndex};
+  }
+
+  async function syncRealIndex(realIndexPath, originalIndex, stagedIndexPath) {
+    // read-tree after a successful commit also destroys sparse skip-worktree
+    // metadata. The private staged index already encodes the exact committed
+    // tree; install those bytes with Git's normal exclusive index.lock protocol.
+    // Never clobber a concurrent index writer. A sync failure after update-ref
+    // is APPLIED/PARTIAL, never a denial or replay of the committed ref.
+    const lockPath = realIndexPath + '.lock';
+    let handle = null;
+    let ownsLock = false;
+    try {
+      handle = await open(lockPath, 'wx', 0o600);
+      ownsLock = true;
+      if (!(await readFile(realIndexPath)).equals(originalIndex)) {
+        throw new Error('real index changed before post-commit synchronization');
+      }
+      const stagedIndex = await readFile(stagedIndexPath);
+      await handle.writeFile(stagedIndex);
+      await handle.sync();
+      await handle.close();
+      handle = null;
+      await rename(lockPath, realIndexPath);
+      ownsLock = false;
+    } finally {
+      if (handle !== null) await handle.close().catch(() => {});
+      // A failed exclusive open never grants ownership of someone else's lock.
+      if (ownsLock) await rm(lockPath, {force: true}).catch(() => {});
+    }
   }
 
   async function verifyDestinationBinding(binding) {
@@ -358,10 +614,15 @@ export function createGitPublisher(config, dependencies = {}) {
     const operation = validateOperationId(operationId);
     const { stdout } = await run(
       cfg.workspaceCli,
-      ['status', '--operation-id', operation, '--lane', cfg.lane],
+      ['status', '--operation-id', operation, '--lane', cfg.lane,
+        ...(cfg.repository === undefined ? [] : ['--repository', cfg.repository])],
       { timeoutMs: cfg.commandTimeoutMs },
     );
     const result = parseJson(stdout, 'mmx-workspace status');
+    if (cfg.repository !== undefined && (result?.schema_version !== 'mastermind.workspace_cli/v2' ||
+        result?.repository !== cfg.repository || result?.effect !== 'NOT_APPLIED')) {
+      throw new Error('workspace repository binding does not match the selected repository');
+    }
     const receipt = result?.receipt;
     if (result?.action !== 'status' || !receipt || typeof receipt !== 'object') {
       throw new Error('mmx-workspace status receipt is invalid');
@@ -378,12 +639,25 @@ export function createGitPublisher(config, dependencies = {}) {
     const workspacePath = await realpath(rawWorkspacePath);
     const branch = oneLine(receipt.branch, 'workspace branch');
     if (!BRANCH_RE.test(branch)) throw new Error('workspace branch is outside the sol/web-* publication boundary');
+    if (cfg.repository !== undefined && branch !== `sol/web-${operation.toLowerCase()}`) {
+      throw new Error('workspace repository binding has a foreign operation branch');
+    }
 
-    const [{ stdout: topOut }, { stdout: branchOut }, { stdout: headOut }, { stdout: statusOut }, { stdout: remoteOut }] = await Promise.all([
+    // Avoid the high-level status refresh on very large linked worktrees.
+    // These three read-only probes preserve the same repository/global ignore,
+    // attribute and filter semantics as commit while optional locks prevent
+    // observation from rewriting the shared index.
+    const observationOptions = Object.freeze({envExtra: {GIT_OPTIONAL_LOCKS: '0'}});
+    const [
+      { stdout: topOut }, { stdout: branchOut }, { stdout: headOut },
+      worktreeClean, indexClean, { stdout: untrackedOut }, { stdout: remoteOut },
+    ] = await Promise.all([
       git(workspacePath, ['rev-parse', '--show-toplevel']),
       git(workspacePath, ['symbolic-ref', '--quiet', '--short', 'HEAD']),
       git(workspacePath, ['rev-parse', 'HEAD']),
-      git(workspacePath, ['status', '--porcelain=v1', '--untracked-files=all']),
+      gitQuiet(workspacePath, ['diff-files', '--quiet', '--'], observationOptions),
+      gitQuiet(workspacePath, ['diff-index', '--cached', '--quiet', 'HEAD', '--'], observationOptions),
+      git(workspacePath, ['ls-files', '--others', '--exclude-standard', '-z'], observationOptions),
       remoteBinding ? Promise.resolve({stdout: remoteBinding.remoteUrl}) : git(workspacePath, ['remote', 'get-url', 'origin']),
     ]);
     const top = await realpath(oneLine(topOut, 'workspace top level'));
@@ -421,9 +695,46 @@ export function createGitPublisher(config, dependencies = {}) {
       branch,
       localHead,
       ...(observeRemote ? { remoteHead, remoteBinding: binding } : {}),
-      clean: String(statusOut ?? '') === '',
+      clean: worktreeClean && indexClean && String(untrackedOut ?? '') === '',
       remoteUrl,
       ref,
+    };
+  }
+
+
+  async function committedCommissionDigest(workspacePath, revision) {
+    const {stdout: entryOut} = await git(workspacePath, ['ls-tree', revision, '--', COMMISSION_PATH]);
+    const entry = String(entryOut ?? '').trim();
+    const match = entry.match(/^100644 blob ([0-9a-f]{40})\tresearch\/executive_commissions\/COMMISSION\.md$/);
+    if (!match) return null;
+    const blob = match[1];
+    const {stdout: sizeOut} = await git(workspacePath, ['cat-file', '-s', blob]);
+    const size = Number(oneLine(sizeOut, 'commission blob size'));
+    if (!Number.isSafeInteger(size) || size < 0 || size > MAX_COMMISSION_BYTES) return null;
+    const {stdout: blobBytes} = await run(cfg.gitBinary, ['cat-file', 'blob', blob], {
+      cwd: workspacePath, encoding: 'buffer',
+    });
+    if (!Buffer.isBuffer(blobBytes) || blobBytes.length !== size) throw new Error('commission blob read is invalid');
+    return createHash('sha256').update(blobBytes).digest('hex');
+  }
+
+  // Internal-only, read-only reconciliation record. It is deliberately absent
+  // from STUDIO_GIT_PUBLISH_TOOLS and does not disclose document bytes or paths.
+  async function commissionStatus(args) {
+    if (!args || typeof args !== 'object' || Array.isArray(args) ||
+        Object.keys(args).some((key) => key !== 'operation_id')) {
+      throw new TypeError('internal commission status arguments are invalid');
+    }
+    const observed = await workspace(args.operation_id);
+    const contentSha256 = await committedCommissionDigest(observed.workspacePath, observed.localHead);
+    return {
+      schema: 'mastermind.studio_git_commission_status.v1',
+      operation_id: observed.operationId,
+      branch: observed.branch,
+      local_head_sha: observed.localHead,
+      remote_head_sha: observed.remoteHead,
+      clean: observed.clean,
+      ...(contentSha256 === null ? {} : {commission_content_sha256: contentSha256}),
     };
   }
 
@@ -439,13 +750,25 @@ export function createGitPublisher(config, dependencies = {}) {
 
   async function commit(args) {
     if (!args || typeof args !== 'object' || Array.isArray(args) ||
-        Object.keys(args).some((key) => !['operation_id', 'expected_head_sha', 'message'].includes(key))) {
+        Object.keys(args).some((key) => !['operation_id', 'expected_head_sha', 'message', 'merge'].includes(key))) {
       throw new TypeError('studio_git_commit_current_changes arguments are invalid');
     }
     const operationId = validateOperationId(args.operation_id);
     const expectedHead = validateExpectedHead(args.expected_head_sha);
     const message = validateCommitMessage(args.message);
+    const merge = validateMerge(args);
     const before = await workspace(operationId, { observeRemote: false });
+    const refuseMerge = (code) => ({
+      schema: 'mastermind.studio_git_commit_result.v1', status: 'REFUSED', effect_state: 'NOT_APPLIED',
+      code, operation_id: operationId, branch: before.branch, local_head_sha: before.localHead,
+    });
+    const protectedRef = PROTECTED_TRACKING_REFS[cfg.repository ?? 'mastermind'];
+    async function protectedBaseMatches() {
+      try {
+        const { stdout } = await git(before.workspacePath, ['rev-parse', '--verify', `${protectedRef}^{commit}`]);
+        return oneLine(stdout, 'protected tracking commit') === merge.expected_protected_base_sha;
+      } catch { return false; }
+    }
     if (before.localHead !== expectedHead) {
       return {
         schema: 'mastermind.studio_git_commit_result.v1',
@@ -459,19 +782,54 @@ export function createGitPublisher(config, dependencies = {}) {
       };
     }
 
+    if (merge !== null) {
+      if (!(await protectedBaseMatches())) return refuseMerge('PROTECTED_BASE_MISMATCH_OR_UNAVAILABLE');
+      if (merge.expected_protected_base_sha === expectedHead) return refuseMerge('DUPLICATE_MERGE_PARENT');
+      try {
+        await git(before.workspacePath, ['merge-base', '--is-ancestor', merge.expected_protected_base_sha, expectedHead]);
+        return refuseMerge('PROTECTED_BASE_ALREADY_CONTAINED');
+      } catch (error) {
+        if (error.code !== 1) throw error;
+      }
+      try {
+        const { stdout } = await git(before.workspacePath, ['merge-base', expectedHead, merge.expected_protected_base_sha]);
+        if (!SHA_RE.test(oneLine(stdout, 'shared merge base'))) return refuseMerge('PROTECTED_BASE_NOT_RELATED');
+      } catch { return refuseMerge('PROTECTED_BASE_NOT_RELATED'); }
+    }
+
     const scratch = await mkdtemp(path.join(tmpdir(), 'studio-git-commit-'));
     const indexPath = path.join(scratch, 'index');
     let refUpdateAttempted = false;
     try {
-      await gitWithIndex(before.workspacePath, ['read-tree', expectedHead], indexPath);
+      // read-tree into a fresh GIT_INDEX_FILE loses linked-worktree sparse
+      // skip-worktree metadata. On a large sparse checkout that produces
+      // phantom deletions and makes git add -A exceed its bounded timeout.
+      // Snapshot the actual index into the private staging index instead.
+      // Neither the real index nor the source ref is modified at this step.
+      const {realIndexPath, originalIndex} = await seedPrivateIndex(before.workspacePath, indexPath);
       await gitWithIndex(before.workspacePath, ['add', '-A', '--', '.'], indexPath);
       const { stdout: treeOut } = await gitWithIndex(before.workspacePath, ['write-tree'], indexPath);
       const tree = oneLine(treeOut, 'candidate tree');
       if (!SHA_RE.test(tree)) throw new Error('candidate tree is invalid');
+      // A competing index writer must not be silently overwritten. The
+      // original source ref is still untouched, so this refusal is NOT_APPLIED.
+      if (!(await readFile(realIndexPath)).equals(originalIndex)) {
+        return {
+          schema: 'mastermind.studio_git_commit_result.v1',
+          status: 'REFUSED',
+          effect_state: 'NOT_APPLIED',
+          code: 'REAL_INDEX_CHANGED_DURING_PREPARATION',
+          operation_id: operationId,
+          branch: before.branch,
+          local_head_sha: expectedHead,
+        };
+      }
       const { stdout: baseTreeOut } = await git(before.workspacePath, ['rev-parse', `${expectedHead}^{tree}`]);
       const baseTree = oneLine(baseTreeOut, 'base tree');
-      const ref = commitActionRef(operationId, before.branch, expectedHead, tree, message);
-      if (tree === baseTree) {
+      if (merge !== null && tree !== merge.expected_tree_sha) return refuseMerge('EXPECTED_TREE_MISMATCH');
+      const ref = commitActionRef(operationId, before.branch, expectedHead, tree, message,
+        merge?.expected_protected_base_sha ?? null);
+      if (tree === baseTree && merge === null) {
         return {
           schema: 'mastermind.studio_git_commit_result.v1',
           status: 'REFUSED',
@@ -486,11 +844,22 @@ export function createGitPublisher(config, dependencies = {}) {
 
       const { stdout: commitOut } = await gitWithIndex(
         before.workspacePath,
-        ['commit-tree', tree, '-p', expectedHead, '-m', message],
+        ['commit-tree', tree, '-p', expectedHead,
+          ...(merge === null ? [] : ['-p', merge.expected_protected_base_sha]), '-m', message],
         indexPath,
       );
       const commitHead = oneLine(commitOut, 'commit HEAD');
       if (!SHA_RE.test(commitHead)) throw new Error('commit HEAD is invalid');
+      if (merge !== null) {
+        const { stdout } = await git(before.workspacePath, ['show', '-s', '--format=%T%n%P', commitHead]);
+        const identity = stdout.trim().split('\n');
+        if (identity.length !== 2 || identity[0] !== tree ||
+            identity[1] !== `${expectedHead} ${merge.expected_protected_base_sha}`) {
+          return refuseMerge('MERGE_COMMIT_IDENTITY_MISMATCH');
+        }
+        // A concurrent source refresh requires a new explicit reviewed fence.
+        if (!(await protectedBaseMatches())) return refuseMerge('PROTECTED_BASE_CHANGED_DURING_PREPARATION');
+      }
 
       async function finishKnownApplied(successCode) {
         let indexSynced = true;
@@ -498,7 +867,7 @@ export function createGitPublisher(config, dependencies = {}) {
           // The private index protects the caller from pre-commit staging side
           // effects. Once the fenced ref update is known applied, align the
           // real index with that exact commit without touching the worktree.
-          await git(before.workspacePath, ['read-tree', commitHead]);
+          await syncRealIndex(realIndexPath, originalIndex, indexPath);
         } catch {
           indexSynced = false;
         }
@@ -549,7 +918,7 @@ export function createGitPublisher(config, dependencies = {}) {
         try {
           const observed = await workspace(operationId, { observeRemote: false });
           if (observed.localHead === commitHead) {
-            return finishKnownApplied('APPLIED_AFTER_AMBIGUOUS_UPDATE_RETURN');
+            return await finishKnownApplied('APPLIED_AFTER_AMBIGUOUS_UPDATE_RETURN');
           }
         } catch {
           // Preserve uncertainty from a lost ref-update response.
@@ -567,7 +936,7 @@ export function createGitPublisher(config, dependencies = {}) {
         };
       }
 
-      return finishKnownApplied('APPLIED');
+      return await finishKnownApplied('APPLIED');
     } finally {
       try {
         await remove(scratch, { recursive: true, force: true });
@@ -578,6 +947,142 @@ export function createGitPublisher(config, dependencies = {}) {
         // source truth with a synthetic NOT_APPLIED gateway precheck result.
         if (!refUpdateAttempted) throw error;
       }
+    }
+  }
+
+
+  // Internal-only fixed-path primitive for the commissioned preparation endpoint.
+  // It is deliberately absent from STUDIO_GIT_PUBLISH_TOOLS and accepts no path,
+  // branch, remote, repository, or command selector.
+  async function commitCommission(args) {
+    if (!args || typeof args !== 'object' || Array.isArray(args) ||
+        Object.keys(args).some((key) => !['operation_id', 'expected_head_sha', 'expected_content_sha256'].includes(key))) {
+      throw new TypeError('internal commission commit arguments are invalid');
+    }
+    const operationId = validateOperationId(args.operation_id);
+    const expectedHead = validateExpectedHead(args.expected_head_sha);
+    const expectedContentSha256 = validateExpectedContentSha256(args.expected_content_sha256);
+    const message = COMMISSION_COMMIT_MESSAGE;
+    const before = await workspace(operationId, { observeRemote: false });
+    if (before.localHead !== expectedHead) {
+      return {
+        schema: 'mastermind.studio_git_commit_result.v1',
+        status: 'REFUSED', effect_state: 'NOT_APPLIED', code: 'EXPECTED_HEAD_MISMATCH',
+        operation_id: operationId, branch: before.branch,
+        expected_head_sha: expectedHead, local_head_sha: before.localHead,
+      };
+    }
+
+    const {stdout: statusOut} = await git(before.workspacePath,
+      ['status', '--porcelain=v1', '--untracked-files=all']);
+    const statusLines = String(statusOut ?? '').split(/\r?\n/).filter(Boolean);
+    if (statusLines.length !== 1 || statusLines[0].slice(3) !== COMMISSION_PATH) {
+      return {
+        schema: 'mastermind.studio_git_commit_result.v1',
+        status: 'REFUSED', effect_state: 'NOT_APPLIED', code: 'FOREIGN_WORKTREE_CHANGES',
+        operation_id: operationId, branch: before.branch, local_head_sha: expectedHead,
+      };
+    }
+
+    const scratch = await mkdtemp(path.join(tmpdir(), 'studio-git-commission-'));
+    const indexPath = path.join(scratch, 'index');
+    let refUpdateAttempted = false;
+    let commitHead = null;
+    let ref = null;
+    try {
+      const {realIndexPath, originalIndex} = await seedPrivateIndex(before.workspacePath, indexPath);
+      await gitWithIndex(before.workspacePath, ['add', '--', COMMISSION_PATH], indexPath);
+      const {stdout: treeOut} = await gitWithIndex(before.workspacePath, ['write-tree'], indexPath);
+      const tree = oneLine(treeOut, 'commission candidate tree');
+      if (!SHA_RE.test(tree)) throw new Error('commission candidate tree is invalid');
+      ref = commitActionRef(operationId, before.branch, expectedHead, tree, message);
+
+      const {stdout: pathsOut} = await git(before.workspacePath,
+        ['diff-tree', '--no-commit-id', '--name-only', '-r', expectedHead, tree]);
+      if (String(pathsOut ?? '').trim() !== COMMISSION_PATH) {
+        return {
+          schema: 'mastermind.studio_git_commit_result.v1',
+          status: 'REFUSED', effect_state: 'NOT_APPLIED', code: 'COMMISSION_PATHSET_MISMATCH',
+          action_ref: ref, operation_id: operationId, branch: before.branch,
+          local_head_sha: expectedHead,
+        };
+      }
+      const actualContentSha256 = await committedCommissionDigest(before.workspacePath, tree);
+      if (actualContentSha256 === null) {
+        return {
+          schema: 'mastermind.studio_git_commit_result.v1',
+          status: 'REFUSED', effect_state: 'NOT_APPLIED', code: 'COMMISSION_ENTRY_NOT_REGULAR_BLOB',
+          action_ref: ref, operation_id: operationId, branch: before.branch,
+          local_head_sha: expectedHead,
+        };
+      }
+      if (actualContentSha256 !== expectedContentSha256) {
+        return {
+          schema: 'mastermind.studio_git_commit_result.v1',
+          status: 'REFUSED', effect_state: 'NOT_APPLIED', code: 'COMMISSION_CONTENT_SHA256_MISMATCH',
+          action_ref: ref, operation_id: operationId, branch: before.branch,
+          local_head_sha: expectedHead,
+        };
+      }
+
+      if (!(await readFile(realIndexPath)).equals(originalIndex)) {
+        return {
+          schema: 'mastermind.studio_git_commit_result.v1',
+          status: 'REFUSED', effect_state: 'NOT_APPLIED',
+          code: 'REAL_INDEX_CHANGED_DURING_PREPARATION',
+          operation_id: operationId, branch: before.branch, local_head_sha: expectedHead,
+        };
+      }
+      const {stdout: commitOut} = await gitWithIndex(before.workspacePath,
+        ['commit-tree', tree, '-p', expectedHead, '-m', message], indexPath);
+      commitHead = oneLine(commitOut, 'commission commit HEAD');
+      if (!SHA_RE.test(commitHead)) throw new Error('commission commit HEAD is invalid');
+
+      refUpdateAttempted = true;
+      try {
+        await git(before.workspacePath, ['update-ref', before.ref, commitHead, expectedHead]);
+      } catch {
+        try {
+          if ((await workspace(operationId, {observeRemote: false})).localHead === commitHead) {
+            return await finishCommissionApplied('APPLIED_AFTER_AMBIGUOUS_UPDATE_RETURN');
+          }
+        } catch { /* retain uncertainty */ }
+        return {
+          schema: 'mastermind.studio_git_commit_result.v1',
+          status: 'UNKNOWN', effect_state: 'EFFECT_UNKNOWN', code: 'LOCAL_REF_UPDATE_UNCERTAIN',
+          action_ref: ref, operation_id: operationId, branch: before.branch,
+          previous_head_sha: expectedHead, commit_head_sha: commitHead,
+        };
+      }
+      return await finishCommissionApplied('APPLIED');
+
+      async function finishCommissionApplied(successCode) {
+        let indexSynced = true;
+        try { await syncRealIndex(realIndexPath, originalIndex, indexPath); } catch { indexSynced = false; }
+        let observed = null;
+        try { observed = await workspace(operationId, {observeRemote: false}); } catch { /* known applied */ }
+        if (!observed) {
+          return {
+            schema: 'mastermind.studio_git_commit_result.v1',
+            status: 'PARTIAL', effect_state: 'APPLIED',
+            code: indexSynced ? 'APPLIED_READBACK_FAILED' : 'APPLIED_INDEX_SYNC_AND_READBACK_FAILED',
+            action_ref: ref, operation_id: operationId, branch: before.branch,
+            previous_head_sha: expectedHead, commit_head_sha: commitHead, index_synced: indexSynced,
+          };
+        }
+        const current = observed.localHead === commitHead;
+        return {
+          schema: 'mastermind.studio_git_commit_result.v1',
+          status: current && indexSynced ? 'OK' : 'PARTIAL', effect_state: 'APPLIED',
+          code: current && indexSynced ? successCode : (current ? 'APPLIED_INDEX_SYNC_FAILED' : 'APPLIED_BUT_SUPERSEDED'),
+          action_ref: ref, operation_id: observed.operationId, branch: observed.branch,
+          previous_head_sha: expectedHead, commit_head_sha: commitHead,
+          local_head_sha: observed.localHead, clean: observed.clean, index_synced: indexSynced,
+        };
+      }
+    } finally {
+      try { await remove(scratch, {recursive: true, force: true}); }
+      catch (error) { if (!refUpdateAttempted) throw error; }
     }
   }
 
@@ -646,6 +1151,26 @@ export function createGitPublisher(config, dependencies = {}) {
             ...publicStatus(afterFailure),
           };
         }
+        // Do not turn an explicit porcelain ref rejection into EFFECT_UNKNOWN
+        // when the same pinned destination is authoritatively unchanged.
+        // This classifies the requested ref only; it does not classify the
+        // host's reason or authorize an automatic retry or carrier switch.
+        if (explicitlyRejectedExactRef(error, before.ref) &&
+            afterFailure.remoteHead === before.remoteHead) {
+          return {
+            schema: 'mastermind.studio_git_push_result.v1',
+            status: 'REFUSED',
+            effect_state: 'NOT_APPLIED',
+            code: 'REMOTE_REF_REJECTED_UNCHANGED',
+            action_ref: ref,
+            push_attempted: true,
+            retry_allowed: false,
+            diagnostic_scope: 'SAME_CARRIER_READ_ONLY',
+            rejection_reason: 'UNDETERMINED',
+            ...publicStatus(afterFailure),
+            ready_to_push: false, // A rejected write is not automatically re-admitted.
+          };
+        }
       } catch {
         // The attempted remote write remains ambiguous. Do not replace the
         // original effect uncertainty with a readback failure.
@@ -693,7 +1218,7 @@ export function createGitPublisher(config, dependencies = {}) {
     };
   }
 
-  return Object.freeze({ status, commit, push });
+  return Object.freeze({ status, commit, push, commitCommission, commissionStatus });
 }
 
 export function toolResult(value, isError = false) {

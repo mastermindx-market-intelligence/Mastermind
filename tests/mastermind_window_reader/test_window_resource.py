@@ -48,3 +48,78 @@ def test_real_signature_and_actual_source_composed():
     status,_,body=asyncio.run(call());assert status==200 and not json.loads(body)['view']['terminal']
     s.owner.revoke_grant(s.grant)
     status,_,body=asyncio.run(call());assert status==401 and b'Nonterminal text' not in body and state['reads']==1
+
+
+JOB='JOB-12'
+ATT='ATT-'+'ab'*16
+V1='mastermind.workspace.window_read_candidate.v1'
+V2='mastermind.workspace.window_read_candidate.v2'
+
+
+def test_default_live_window_remains_exact_v1():
+    s=Source();s.publish('a','Current response');o=Owner(s);app=make(o)
+    status,_,body=asyncio.run(request(app))
+    d=json.loads(body)
+    assert status==200 and set(d)=={'schema','selection_ref','mode','view'}
+    assert d['schema']==V1 and 'observation_binding' not in d
+
+
+def test_qualified_binding_emits_closed_v2_tuple_before_final_authorize():
+    from integrations.mastermind_window_reader.owner_read_resource import ObservationBinding
+    s=Source();s.publish('a','Bound response');o=Owner(s)
+    app=make(o,observation_binding=ObservationBinding(job_id=JOB,attempt_id=ATT))
+    status,_,body=asyncio.run(request(app))
+    d=json.loads(body)
+    assert status==200
+    assert set(d)=={'schema','selection_ref','mode','view','observation_binding'}
+    assert d['schema']==V2
+    assert d['observation_binding']=={'job_id':JOB,'attempt_id':ATT}
+    assert set(d['observation_binding'])=={'job_id','attempt_id'}
+    assert d['view']['items'][0]['text']=='Bound response'
+    assert o.reads==1
+
+
+@pytest.mark.parametrize('kwargs', [
+    {'job_id':'job','attempt_id':ATT},
+    {'job_id':'JOB-','attempt_id':ATT},
+    {'job_id':'JOB-1234567890','attempt_id':ATT},
+    {'job_id':JOB,'attempt_id':'attempt'},
+    {'job_id':JOB,'attempt_id':'ATT-'+'AB'*16},
+    {'job_id':JOB,'attempt_id':'ATT-'+'a'*31},
+    {'job_id':' JOB-12','attempt_id':ATT},
+    {'job_id':JOB+' ','attempt_id':ATT},
+])
+def test_malformed_binding_fails_closed_never_v1(kwargs):
+    from integrations.mastermind_window_reader.owner_read_resource import ObservationBinding
+    s=Source();s.publish('a','secret-visible')
+    with pytest.raises((TypeError,ValueError)):
+        ObservationBinding(**kwargs)
+    with pytest.raises((TypeError,ValueError)):
+        make(Owner(s),observation_binding=kwargs)
+    with pytest.raises((TypeError,ValueError)):
+        make(Owner(s),observation_binding=object())
+
+
+def test_dict_or_extra_binding_never_falls_back_to_v1():
+    s=Source();s.publish('a','secret-visible')
+    with pytest.raises((TypeError,ValueError)):
+        make(Owner(s),observation_binding={'job_id':JOB,'attempt_id':ATT,'root':'JOB-1'})
+    with pytest.raises((TypeError,ValueError)):
+        make(Owner(s),observation_binding={'job_id':JOB})
+
+
+def test_revocation_before_final_release_does_not_leak_tuple_or_content():
+    from integrations.mastermind_window_reader.owner_read_resource import ObservationBinding
+    s=Source();s.publish('a','Nonterminal secret');o=Owner(s)
+    original=o.authorize
+    async def authorize(*args):
+        ticket=await original(*args)
+        o.allowed=False
+        return ticket
+    o.authorize=authorize
+    app=make(o,observation_binding=ObservationBinding(job_id=JOB,attempt_id=ATT))
+    status,_,body=asyncio.run(request(app))
+    assert status==403
+    assert JOB.encode() not in body and ATT.encode() not in body
+    assert b'Nonterminal secret' not in body
+    assert b'observation_binding' not in body

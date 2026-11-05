@@ -90,6 +90,19 @@ sandbox_mode = "read-only"
 
 [features]
 apps = false
+auth_elicitation = false
+browser_use_external = false
+browser_use_full_cdp_access = false
+daemon_auto_start = false
+enable_mcp_apps = false
+mcp_2026_07_28 = false
+multi_agent_v2 = false
+shell_snapshot = false
+shell_snapshot_v2 = false
+skill_mcp_dependency_install = false
+skill_search = false
+tool_call_mcp_elicitation = false
+workspace_dependencies = false
 
 [skills.bundled]
 enabled = false
@@ -118,7 +131,7 @@ def render_minimal_surface_config(
     return MINIMAL_SURFACE_TOML.format(model=model, mcp_block=mcp_block)
 
 
-# Version-specific 0.147.0 keys, verified by config parse:
+# Version-specific 0.159.2 keys, verified by config parse:
 #   [features] apps = false            accepted
 #   [skills.bundled] enabled = false   accepted
 #   [skills] bundled = false           rejected (expected BundledSkillsConfig)

@@ -1,0 +1,61 @@
+--- a/fabric_task.py
++++ b/fabric_task.py
+@@ -575,6 +575,11 @@
+     p_request.add_argument("--escalation-reason")
+     p_request.add_argument("--model", dest="requested_model")
+ 
++    p_mac_return = sub.add_parser("recover-mac-policy")
++    p_mac_return.add_argument("run_id")
++    p_mac_return.add_argument("--root", required=True)
++    p_mac_return.add_argument("--destination", required=True)
++
+     p_status = sub.add_parser("status")
+     p_status.add_argument("run_id")
+ 
+@@ -664,6 +669,11 @@
+         import native_host_review_delivery
+         return native_host_review_delivery.main([args.run_id, "--root", args.root,
+                                                 "--destination", args.destination])
++    if args.cmd == "recover-mac-policy":
++        command = ["/bin/bash", str(HERE / "remote_sub.sh"), "--read-artifacts",
++                   "--mac-policy-return", args.run_id, "--root", args.root,
++                   "--destination", args.destination]
++        return subprocess.run(command).returncode
+     if args.cmd == "current-output":
+         command = ["/bin/bash", str(HERE / "remote_sub.sh"), "--read-artifacts", "--current-output",
+                    args.run_id, "--root", args.root, "--destination", args.destination]
+--- a/artifact_delivery.py
++++ b/artifact_delivery.py
+@@ -748,7 +748,11 @@
+ def transport(alias, request, *, observer_source_hash=None, current_sources_sha256=None):
+     # Fixed code, fixed interpreter, validated registry alias; paths travel in stdin.
+     response_limit = reader.MAX_RESPONSE
+-    if type(request) is dict and request.get("schema") == "mastermind.original_result_current_read_request.v1":
++    if type(request) is dict and request.get("schema") == "mastermind.mac_policy_original_return.v1":
++        import mac_policy_return
++        code = mac_policy_return.code_for_request(request, expected_hashes=current_sources_sha256)
++        response_limit = mac_policy_return.MAX_RESPONSE
++    elif type(request) is dict and request.get("schema") == "mastermind.original_result_current_read_request.v1":
+         import original_result_read
+         code = original_result_read.code_for_request(request, expected_hashes=current_sources_sha256)
+         response_limit = original_result_read.MAX_RESPONSE
+@@ -1097,6 +1101,19 @@
+ 
+ 
+ def main():
++    if sys.argv[1:2] == ["--mac-policy-return"]:
++        import mac_policy_return
++        p = argparse.ArgumentParser(description="Original mac-policy retained evidence only")
++        p.add_argument("run_id"); p.add_argument("--root", required=True)
++        p.add_argument("--destination", required=True)
++        args = p.parse_args(sys.argv[2:])
++        try:
++            receipt = mac_policy_return.recover(args.run_id, args.root, args.destination)
++            print(reader.canonical(receipt).decode())
++            return 0 if receipt['state'] == 'RETAINED_ORIGINAL_RESULT' else 76
++        except (OSError, ValueError, TypeError, KeyError, RecursionError, sqlite3.Error):
++            print('{"state":"REFUSED","reason":"original_mac_policy_recovery_unconfirmed"}')
++            return 75
+     if sys.argv[1:2] == ["--current-output"]:
+         import original_result_delivery
+         return original_result_delivery.main(sys.argv[2:])

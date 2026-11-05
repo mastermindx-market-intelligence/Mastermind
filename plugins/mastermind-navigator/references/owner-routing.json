@@ -110,7 +110,8 @@
       "forbidden_substitutions": [
         "assumed local host",
         "new fleet scheduler",
-        "selected-project source, Git, build, or test work disguised as a local process command"
+        "selected-project source, Git, build, or test work disguised as a local process command",
+        "generic shell emulation of a pure existing-file inspection when typed file reading suffices"
       ],
       "static_liveness_claim": false,
       "generic_shell_scope": "GENUINE_BOUND_HOST_PROCESS_ONLY",
@@ -118,7 +119,18 @@
       "platform_refusal_policy": "ACTION_SCOPED_NO_RETRY_NO_FAILOVER_WITH_DISPATCH_RECONCILIATION",
       "platform_refusal_pre_dispatch_effect": "TOOL_DEGRADED / EFFECT_NONE",
       "platform_refusal_ambiguous_dispatch_effect": "EFFECT_UNKNOWN",
-      "platform_refusal_retry_policy": "NO_RETRY_AFTER_SAFETY_OR_PERMISSION_DENIAL"
+      "platform_refusal_retry_policy": "NO_RETRY_AFTER_SAFETY_OR_PERMISSION_DENIAL",
+      "local_artifact_read_route": [
+        "read_file",
+        "read_multiple_files"
+      ],
+      "local_artifact_read_optional_preflight": "get_file_info",
+      "local_artifact_read_conditions": "Initial route only for permitted inspection of an existing local text or JSON artifact: preserve exact host/workspace binding, current authorization and filesystem bounds; page with offset and length. No prior safety or permission refusal may be retried or rerouted.",
+      "pure_read_generic_shell_fallback": false,
+      "retained_output_read_route": "studio_output_page",
+      "existing_process_output_read_route": "read_process_output",
+      "genuine_process_effects": "Generic process actions remain available for separately authorized genuine computation or transformation, not shell emulation of a pure file read.",
+      "platform_refusal_action_scope": "ALL_ACTION_CLASSES_INCLUDING_READ"
     },
     {
       "capability_class": "worker_browser",

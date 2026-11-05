@@ -79,7 +79,7 @@ def run_cli(module, capsys, http, *, kind="checkpoint", runner=None):
     return exit_code, json.loads(captured.out)
 
 
-@pytest.mark.parametrize("count", [1, 100, 143, 200, 256, 409, 419, 450])
+@pytest.mark.parametrize("count", [1, 100, 143, 200, 256, 409, 419, 450, 451, 457, 458, 465, 470, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490])
 @pytest.mark.parametrize("kind", ["checkpoint", "remote-complete"])
 def test_real_main_completes_bounded_estate(count, kind, capsys, monkeypatch):
     module = fx._cli_module()
@@ -94,7 +94,7 @@ def test_real_main_completes_bounded_estate(count, kind, capsys, monkeypatch):
     assert payload["collision_state"] == ("NONE" if count == 1 else "DISJOINT")
 
 
-@pytest.mark.parametrize("count", [451, 1000])
+@pytest.mark.parametrize("count", [491, 1000])
 def test_over_ceiling_refuses_before_foreign_files(count, capsys, monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
@@ -307,10 +307,35 @@ def test_exact_call_and_byte_limit_remains_successful(capsys, monkeypatch):
 
 def test_budget_constants_are_closed_and_raw_response_cap_is_unchanged():
     module = fx._cli_module()
-    assert (module._MAX_COLLISION_PRS, module._MAX_HTTP_CALLS) == (450, 1152)
-    assert module._MAX_HTTP_NORMALIZED_BYTES == 96 * 1024 * 1024
+    assert (module._MAX_COLLISION_PRS, module._MAX_HTTP_CALLS) == (490, 1152)
+    assert module._MAX_HTTP_NORMALIZED_BYTES == 128 * 1024 * 1024
     assert module._HTTP_READ_BUDGET_SECONDS == 300.0
     assert module._MAX_HTTP_BODY_BYTES == 5_000_000
+
+
+def test_current_macro_estate_payload_fits_successor_byte_budget(monkeypatch):
+    """Measured current census payload must fit without changing any other ceiling."""
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", Clock())
+    bounded = module._BoundedHTTPGet(lambda *_args, **_kwargs: None)
+    bounded._bytes = 104_630_037
+
+    assert bounded._bytes > 96 * 1024 * 1024
+    assert bounded._bytes < 128 * 1024 * 1024
+    bounded.check()
+
+
+def test_normalized_byte_budget_accepts_exact_128_mib_and_refuses_one_over(monkeypatch):
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", Clock())
+    bounded = module._BoundedHTTPGet(lambda *_args, **_kwargs: None)
+
+    bounded._bytes = 128 * 1024 * 1024
+    bounded.check()
+
+    bounded._bytes += 1
+    with pytest.raises(module._ReadBudgetExceeded):
+        bounded.check()
 
 
 def test_single_get_rejects_accounting_overrun_before_return(monkeypatch):
