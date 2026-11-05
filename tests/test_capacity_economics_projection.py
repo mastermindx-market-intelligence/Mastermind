@@ -1,0 +1,165 @@
+import copy
+
+import pytest
+
+from control_plane.capacity_economics_projection import (
+    CapacityEconomicsProjectionError,
+    project_quota_preference,
+)
+
+TIERS = (
+    {"tier_id": "implementation.routine.primary", "model_aliases": ["fast.engineering", "standard.engineering"]},
+    {"tier_id": "implementation.routine.fallback", "model_aliases": ["fallback.engineering"]},
+)
+
+
+def preview():
+    return {
+        "schema": "mastermind.quota_economics_preview/v1",
+        "as_of": "2026-09-13T17:00:00+00:00",
+        "authority": "NONE_PREVIEW_ONLY",
+        "binding_verification": "NOT_PERFORMED",
+        "live_admission": False,
+        "claim_time_revalidation_required": True,
+        "status": "PREVIEW_READY",
+        "suggested_option": "grok.fast",
+        "selected_tier": "implementation.routine.primary",
+        "options": [
+            {
+                "option_id": "grok.fast",
+                "provider": "xai",
+                "model_alias": "fast.engineering",
+                "eligible_in_preview": True,
+                "reasons": [],
+                "estimated_startable_jobs": 6,
+                "suggested_parallelism": 4,
+                "expiry_pressure_jobs_per_hour": "1.250000",
+                "forecasts": [],
+            }
+        ],
+        "warnings": [],
+    }
+
+
+def test_projects_only_first_tier_preview_as_non_commitment():
+    result = project_quota_preference(TIERS, preview())
+    assert result.model_alias == "fast.engineering"
+    assert result.provider == "xai"
+    assert result.selection_is_commitment is False
+    assert result.claim_time_revalidation_required is True
+    assert result.to_dict()["schema"] == "mastermind.capacity_economics_projection/v1"
+
+
+def test_refuses_lower_tier_promotion():
+    doc = preview()
+    doc["selected_tier"] = "implementation.routine.fallback"
+    doc["options"][0]["model_alias"] = "fallback.engineering"
+    with pytest.raises(CapacityEconomicsProjectionError, match="first lawful suitability tier"):
+        project_quota_preference(TIERS, doc)
+
+
+def test_refuses_later_tier_selection_while_option_remains_in_first_tier():
+    doc = preview()
+    doc["selected_tier"] = "implementation.routine.fallback"
+    with pytest.raises(CapacityEconomicsProjectionError, match="first lawful suitability tier"):
+        project_quota_preference(TIERS, doc)
+
+
+def test_refuses_preview_that_claims_live_admission_or_skips_revalidation():
+    doc = preview()
+    doc["live_admission"] = True
+    with pytest.raises(CapacityEconomicsProjectionError, match="live admission"):
+        project_quota_preference(TIERS, doc)
+    doc = preview()
+    doc["claim_time_revalidation_required"] = False
+    with pytest.raises(CapacityEconomicsProjectionError, match="revalidation"):
+        project_quota_preference(TIERS, doc)
+
+
+def test_refuses_ineligible_or_ambiguous_suggested_option():
+    doc = preview()
+    doc["options"][0]["eligible_in_preview"] = False
+    with pytest.raises(CapacityEconomicsProjectionError, match="not eligible"):
+        project_quota_preference(TIERS, doc)
+    doc = preview()
+    doc["options"].append(copy.deepcopy(doc["options"][0]))
+    with pytest.raises(CapacityEconomicsProjectionError, match="exactly one"):
+        project_quota_preference(TIERS, doc)
+
+
+def test_refuses_parallelism_larger_than_available_startable_jobs():
+    doc = preview()
+    doc["options"][0]["suggested_parallelism"] = 7
+    with pytest.raises(CapacityEconomicsProjectionError, match="cannot exceed"):
+        project_quota_preference(TIERS, doc)
+
+
+@pytest.mark.parametrize("starts,parallelism", [(0, 0), (4, 0)])
+def test_refuses_zero_actionable_capacity_even_when_preview_claims_eligibility(starts, parallelism):
+    doc = preview()
+    row = doc["options"][0]
+    row["estimated_startable_jobs"] = starts
+    row["suggested_parallelism"] = parallelism
+    before = copy.deepcopy(doc)
+    with pytest.raises(CapacityEconomicsProjectionError, match="positive actionable capacity"):
+        project_quota_preference(TIERS, doc)
+    assert doc == before
+
+
+def test_one_startable_job_remains_an_advisory_preference_not_a_claim():
+    doc = preview()
+    doc["options"][0]["estimated_startable_jobs"] = 1
+    doc["options"][0]["suggested_parallelism"] = 1
+    before = copy.deepcopy(doc)
+    result = project_quota_preference(TIERS, doc)
+    assert result.estimated_startable_jobs == 1
+    assert result.suggested_parallelism == 1
+    assert result.claim_time_revalidation_required is True
+    assert result.selection_is_commitment is False
+    assert doc == before
+
+
+@pytest.mark.parametrize(
+    "provider,alias",
+    [("byteplus", "byteplus.attended"), ("xai", "byteplus.attended"),
+     ("byteplus", "fast.engineering"), ("BytePlus", "fast.engineering"),
+     ("BYTEPLUS", "fast.engineering"), ("xai", "BYTEPLUS.ATTENDED"),
+     ("xai", "BytePlus.Attended"),
+     ("BytePlusTrusted", "fast.engineering"),
+     ("byteplus-coding-plan-personal", "fast.engineering"),
+     ("xai", "byteplus.attended.back"),
+     ("xai", "byteplus.attendedX"),
+     ("xai", "mybyteplus.attended"),
+     ("xai", "byte.plus.attended"),
+     ("byte_plus", "fast.engineering"),
+     ("byte.plus", "fast.engineering")],
+)
+def test_rejects_byteplus_personal_plan_even_if_preview_forces_positive_capacity(provider, alias):
+    # A quota-preview producer can never mint use rights or account-backed
+    # subscription capacity by asserting a non-zero parallelism estimate.
+    # The spoofed casing must remain rejected EVEN IF a caller's supplied
+    # first-tier aliases use that exact casing.
+    tiers = ({"tier_id": "implementation.routine.primary",
+              "model_aliases": [alias]},)
+    doc = preview()
+    doc["options"][0]["provider"] = provider
+    doc["options"][0]["model_alias"] = alias
+    doc["options"][0]["estimated_startable_jobs"] = 25
+    doc["options"][0]["suggested_parallelism"] = 8
+    frozen = copy.deepcopy(doc)
+    with pytest.raises(CapacityEconomicsProjectionError, match="personal BytePlus Coding Plan"):
+        project_quota_preference(tiers, doc)
+    assert doc == frozen
+
+
+
+@pytest.mark.parametrize("ordinary_provider", ["xai", "codex", "glm", "qwen", "minimax", "alibaba"])
+def test_byteplus_label_guard_does_not_reject_unrelated_first_tier(ordinary_provider):
+    doc = preview()
+    doc["options"][0]["provider"] = ordinary_provider
+    frozen = copy.deepcopy(doc)
+    result = project_quota_preference(TIERS, doc)
+    assert result.provider == ordinary_provider
+    assert result.selection_is_commitment is False
+    assert result.claim_time_revalidation_required is True
+    assert doc == frozen

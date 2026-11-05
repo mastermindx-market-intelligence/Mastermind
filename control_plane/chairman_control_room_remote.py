@@ -44,6 +44,7 @@ REQUIRED_RUNTIME_PATHS = frozenset({
     "control_plane/chairman_control_room.py",
     "control_plane/chairman_control_room_remote.py",
     "control_plane/executive_inbox.py",
+    "control_plane/frontier_selection.py",
     "control_plane/strategic_state.py",
     "control_plane/surface_bindings.py",
     "ops/control_room_remote/mastermind-control-room-remote.service",

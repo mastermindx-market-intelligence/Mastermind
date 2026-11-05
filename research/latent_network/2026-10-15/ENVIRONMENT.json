@@ -1,0 +1,8 @@
+{
+  "python": "3.14.7",
+  "numpy": "2.5.2",
+  "pandas": "3.0.5",
+  "scipy": "1.18.0",
+  "platform": "M2 macOS; threads limited to1 for BLAS/OpenMP",
+  "data_scope": "Existing public French archives only; no new subscription or purchase"
+}

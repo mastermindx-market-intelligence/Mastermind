@@ -112,14 +112,6 @@ if [[ "${1:-}" == "--check-ssi-only" ]]; then
   printf '%s\n' not_armed
   exit 1
 fi
-if [[ "${1:-}" == "--ensure-ssi-only" ]]; then
-  if ensure_ssi_armed; then
-    printf '%s\n' armed
-    exit 0
-  fi
-  printf '%s\n' not_armed
-  exit 1
-fi
 
 [[ "$(id -u)" == "0" ]] || fail "run as root on the authoritative VPS"
 [[ -n "${DD_API_KEY:-}" ]] || fail "DD_API_KEY is required in the process environment"
@@ -191,6 +183,16 @@ rollback_on_exit() {
   exit "$rc"
 }
 trap 'rollback_on_exit $?' EXIT
+
+# This mode can mutate host instrumentation. Keep it behind the same root,
+# release and health preflight and compensation trap as the normal installer.
+if [[ "${1:-}" == "--ensure-ssi-only" ]]; then
+  if ensure_ssi_armed; then
+    printf '%s\n' armed
+    exit 0
+  fi
+  fail "Datadog host SSI-only instrumentation failed; reconciling through rollback"
+fi
 
 log "installing/updating Agent 7 with Python Single Step Instrumentation"
 if ! DD_API_KEY="$DD_API_KEY" \
