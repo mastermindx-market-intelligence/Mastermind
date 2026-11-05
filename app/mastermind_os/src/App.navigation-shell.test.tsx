@@ -47,6 +47,12 @@ describe("readable workspace shell", () => {
       expect(within(company).getByRole("button", { name })).toBeTruthy();
     const search = within(pane as HTMLElement).getByRole("button", { name: "Search" });
     expect(search.getAttribute("aria-current")).toBeNull();
+    const create = within(pane as HTMLElement).getByRole("button", { name: "New conversation" });
+    expect(create.closest('.nav-top')).toBe(pane.querySelector('.nav-top'));
+    expect(create.previousElementSibling).toBe(pane.querySelector('.brand'));
+    expect(create.nextElementSibling).toBe(search);
+    // A sidebar affordance never manufactures an Executive owner/port.
+    expect(create.hasAttribute('disabled')).toBe(true);
     // The incumbent advanced nav is wrapped by the disclosure, not duplicated.
     expect(details.querySelector("nav")?.getAttribute("aria-label")).toBe("Mission navigation");
     expect(details.contains(search)).toBe(false);

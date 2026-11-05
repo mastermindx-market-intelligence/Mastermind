@@ -4498,6 +4498,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   freshOriginalHeld.current = freshJourney.hasUnresolvedOriginal;
   const openFreshConversation = () => {
     if (!freshDraft.open(freshJourney.hasUnresolvedOriginal ? "resume" : "new")) return;
+    // Close the mobile drawer before the Journey captures this explicit
+    // gesture's focus origin. Its owned field/outcome focus can then proceed.
+    if (navigationOpen) closeNavigation();
     freshJourney.start();setActive("Conversations");
   };
   const conversationListPanel = <ConversationsList model={conversationListModel} locale={locale} theme={theme}
@@ -5170,6 +5173,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               mastermind<small>EXECUTIVE OS</small>
             </span>
           </div>
+          <button type="button" className="sidebar-search sidebar-new-conversation"
+            disabled={!freshHost?.freshConversation || !freshExecutiveOwner()} onClick={openFreshConversation}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            {locale === "zh-CN" ? "新建对话" : "New conversation"}
+          </button>
           <button type="button" className="sidebar-search" aria-current={active === "Search" ? "page" : undefined}
             onClick={() => {setProjectTab(null);setActive("Search");if (navigationOpen) closeNavigation();}}>
             <NavigationIcon view="Search"/>{locale === "zh-CN" ? "搜索" : "Search"}
