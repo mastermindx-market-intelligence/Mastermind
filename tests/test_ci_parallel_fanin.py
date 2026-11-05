@@ -284,16 +284,16 @@ def test_same_sha_reuse_is_step_scoped_and_required_fanin_stays_unconditional() 
             "      - name: Verify exact prior merge-group CI\n        if: false\n        id: previous_ci",
         ),
         (
-            "if: ${{ steps.previous_ci.outputs.reuse != 'true' }}",
-            "if: true",
+            "      - name: Run repository test shard\n        if: ${{ steps.previous_ci.outputs.reuse != 'true' }}",
+            "      - name: Run repository test shard\n        if: true",
         ),
         (
-            "if: ${{ steps.previous_ci.outputs.reuse != 'true' }}",
-            "if: ${{ github.event_name == 'push' }}",
+            "      - name: Run repository test shard\n        if: ${{ steps.previous_ci.outputs.reuse != 'true' }}",
+            "      - name: Run repository test shard\n        if: ${{ github.event_name == 'push' }}",
         ),
         (
-            "if: ${{ steps.previous_ci.outputs.reuse != 'true' }}",
-            "if: ${{ steps.previous_ci.outputs.reuse == 'true' }}",
+            "      - name: Run repository test shard\n        if: ${{ steps.previous_ci.outputs.reuse != 'true' }}",
+            "      - name: Run repository test shard\n        if: ${{ steps.previous_ci.outputs.reuse == 'true' }}",
         ),
         (
             "      - name: Run repository test shard\n        if:",
