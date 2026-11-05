@@ -1251,8 +1251,10 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
       return;
     }
     run("options", async (signal) => {
+      let scope: string;
+      try { scope = await bindSourceIdentity(captured,signal); }
+      catch { if (!signal.aborted && stillFenced(captured,signal)) setNotice("CONTEXT"); return; }
       try {
-        const scope = await bindSourceIdentity(captured,signal);
         const raw = await readOptions.call(captured.source, signal);
         if (!stillFenced(captured, signal)) return;
         const decoded = decodeCreationOptions(raw);
@@ -1789,7 +1791,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
           </>
         )}
       </p>
-      {readable && (
+      {(readable || (selection?.workRef != null && selection.planningOperationKey !== null)) && (
         <section aria-label={copy(["Initial planning", "初始规划"])}>
           <h3>{copy(["Initial planning", "初始规划"])}</h3>
           {selection?.planningOperationKey != null ? (
