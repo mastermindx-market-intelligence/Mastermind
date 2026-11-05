@@ -7,7 +7,7 @@ root, listener, credential, executor, lifecycle, queue, or retry plane itself.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 from dataclasses import dataclass
 
@@ -44,6 +44,8 @@ class RuntimeServices:
     call_receipt_sink: Callable[[Mapping[str, Any]], None] | None = None
     allowed_origins: tuple[str, ...] = ()
     action_ttl_ms: int = MAX_ACTION_TTL_MS
+    resolve_recovery_binding: ActionBindingResolver | None = None
+    run_recovery_io: Callable[[str, Callable[[], object]], Awaitable[object]] | None = None
 
 
 def create_deployment(services: RuntimeServices):

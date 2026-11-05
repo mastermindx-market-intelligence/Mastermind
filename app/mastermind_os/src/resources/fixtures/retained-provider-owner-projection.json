@@ -1,0 +1,41 @@
+{
+  "age_ms": 0,
+  "attempt_id": "ATT-73f07300b419444ebfd9bf2ca5185565",
+  "begin_event_id": 27,
+  "boot_ref": "boot-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "can_place_work": false,
+  "claim_event_id": 28,
+  "claim_recorded_at_ms": 1793774265000,
+  "cooling": {
+    "active": false,
+    "kind": null,
+    "reset_at": null
+  },
+  "current_eligibility": "NOT_EVALUATED",
+  "host_ref": "host-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "job_id": "JOB-003",
+  "observation_kind": "RETAINED_CLAIM",
+  "observed_at_ms": 1793774265806,
+  "provider": "minimax",
+  "provider_enabled": true,
+  "provider_health": {
+    "error_class": null,
+    "state": "healthy"
+  },
+  "quota_horizons": [
+    {
+      "limit": 10,
+      "name": "subscription",
+      "remaining": 1,
+      "reset_at": "2026-11-04T06:38:45.806Z"
+    }
+  ],
+  "realm_auth": {
+    "source_quality": "native_provider",
+    "state": "authenticated"
+  },
+  "root_job_id": "JOB-001",
+  "schema": "mastermind.retained_provider_capacity.v1",
+  "source_release_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "source_snapshot_sha256": "125141575b9498c26e081a4764c2b96d8d3440be5e0067a869ac9930571b0942"
+}

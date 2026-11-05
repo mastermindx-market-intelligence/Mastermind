@@ -1,0 +1,53 @@
+{
+  "base": "e1f61048c3682bdb898a3159194edcc47ca5fae0",
+  "scope": "Explicit typed Control startup propagation and separate existing Fabric owners with pinned numeric principal. No host installation or profile admission.",
+  "files": {
+    "scripts/executive_os_phase1c.py": "df04fafe1be12c7236627f5a5cf297da6a901e358bd66894b3eccc08e3a7aec1",
+    "tests/test_executive_fabric_phase1c.py": "c367609ac9192f20574078b64eb4b585713abb0ae8d0755412b925df63ef7a50",
+    "tests/test_attended_control_startup.py": "e53c7f42dbb1127105f30b72d101e930ab4e6e9c269ac43c13a4822d91ae3085"
+  },
+  "reports": {
+    "ATTENDED_STARTUP_FINAL.xml": {
+      "sha256": "d806a25e4b2ac0adb9388a12d8f6f9b144c70707b860ef6562242aa8425900b6",
+      "counts": [
+        {
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "46"
+        }
+      ]
+    },
+    "FABRIC_OWNER_PRINCIPAL_BASE.xml": {
+      "sha256": "c9cc515aac197d0d06ae20f72b25b8daf7a9ab3416af022f93fc0151425df0ee",
+      "counts": [
+        {
+          "errors": "0",
+          "failures": "3",
+          "skipped": "0",
+          "tests": "27"
+        }
+      ]
+    },
+    "FABRIC_OWNER_PRINCIPAL_FINAL.xml": {
+      "sha256": "93293ea45cf7b7692843987a804898f18cc404e9a91684babad9b4622777899f",
+      "counts": [
+        {
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "114"
+        }
+      ]
+    }
+  },
+  "reviewer": "native_activation_adjudication",
+  "disposition": "PASS at exact file hashes",
+  "limitations": [
+    "Default main has no paid selection; actual fixed owner inputs still required.",
+    "Remote username/shared group must match its existing policy. Control local file group is unchanged; no identity translation or credential enrollment.",
+    "A downstream policy refusal may occur after Runtime claim/input materialization; no zero-whole-operation-effect or retry claim.",
+    "Current probe is Darwin/same-host and fixed to one worker definition; no Ubuntu qualification inferred.",
+    "Current1391 published e1f610 release is unchanged; this successor remains local until separate qualification/publication."
+  ]
+}
