@@ -109,6 +109,7 @@ def args_for(profile=None):
         peer_file=Path('/srv/hermes/mmmeta/state/qualification/synthetic.txt'), peer_report=None,
         qualification_id='unit-q1', peer_profile_sha256=None, peer_report_sha256=None,
         denied_port=None, report=None, connect_timeout=0.1, only='', list_cases=False,
+        external_address_fixtures=False,
         _provenance=provenance(profile.role), _context_stable=True,
         _observational_recheck={'observed_identity': identity(profile.role),
             'guards': [{'name': n, 'status': 'PASS', 'code': None} for n in probe.GUARD_ORDER[:3]],
@@ -570,6 +571,190 @@ class OrchestrationTests(unittest.TestCase):
         self.assertFalse(write.call_args.args[0]['qualified'])
 
 
+class ExternalAddressFixtureTests(unittest.TestCase):
+    """The closed --external-address-fixtures mode for the two address cases."""
+
+    BASE = ['--profile', '/p', '--role', 'mmsecretary', '--own-file', '/o',
+            '--peer-file', '/x', '--qualification-id', 'q1']
+
+    def run_probe(self, *, external=False, connect_result=(errno.EPERM, 'refused_immediately')):
+        """Run the orchestration with every host effect mocked out."""
+        profile, args = make_profile(), args_for()
+        args.external_address_fixtures = external
+        spawned, reports = [], []
+
+        def spawn(host, port):
+            spawned.append((host, port))
+            return 500 + len(spawned), {'bound': True, 'bind_host': host, 'bind_port': port}
+
+        guards = [{'name': n, 'status': 'PASS', 'code': None} for n in probe.GUARD_ORDER[:3]]
+        with mock.patch.object(probe, '_capture_provenance', return_value=provenance()), \
+             mock.patch.object(probe, 'load_profile', return_value=profile), \
+             mock.patch.object(probe, '_identity_facts', return_value=identity()), \
+             mock.patch.object(probe, '_run_guards', return_value=(guards, True)), \
+             mock.patch.object(probe, '_spawn_listener', side_effect=spawn), \
+             mock.patch.object(probe, '_pre_landlock_baseline', return_value={'reached': False}), \
+             mock.patch.object(probe, '_listener_current', return_value={'sufficient': False}), \
+             mock.patch.object(probe, '_exec_probe', return_value=('error', None)), \
+             mock.patch.object(probe, '_ephemeral_bind', return_value=(errno.EACCES, None)), \
+             mock.patch.object(probe, 'enforce_role_tcp_ports'), \
+             mock.patch.object(probe, '_file_outcome', return_value=probe._Outcome(probe.OBSERVED_UNAVAILABLE)), \
+             mock.patch.object(probe, '_terminate_children', return_value=True), \
+             mock.patch.object(probe, '_connect', return_value=connect_result) as connect, \
+             mock.patch.object(probe, '_write_report', side_effect=lambda report, path: reports.append(report)):
+            code = probe._run_probe(args)
+        return spawned, connect, reports, code
+
+    def outcome(self, case_id, code, symptom):
+        case = case_by_id(case_id)
+        with mock.patch.object(probe, '_connect', return_value=(code, symptom)) as connect:
+            result = probe._tcp_outcome(case, {}, {}, frozenset({8765, 8766, 18651}), 0.1,
+                                        external_address_fixtures=True)
+        return case, result, connect
+
+    def test_flag_is_a_closed_boolean_that_defaults_false(self):
+        self.assertIs(probe._parse_args(self.BASE).external_address_fixtures, False)
+        self.assertIs(probe._parse_args(self.BASE + ['--external-address-fixtures']).external_address_fixtures, True)
+        for value in ('yes', 'true', '1'):
+            with self.subTest(value=value), contextlib.redirect_stderr(io.StringIO()), \
+                 self.assertRaises(SystemExit):
+                probe._parse_args(self.BASE + ['--external-address-fixtures=' + value])
+
+    def test_flag_supplies_no_host_port_path_command_or_authority(self):
+        plain = probe._parse_args(self.BASE)
+        flagged = probe._parse_args(self.BASE + ['--external-address-fixtures'])
+        self.assertEqual(set(vars(flagged)), set(vars(plain)))
+        changed = {name for name in vars(plain) if vars(plain)[name] != vars(flagged)[name]}
+        self.assertEqual(changed, {'external_address_fixtures'})
+        self.assertIs(vars(flagged)['external_address_fixtures'], True)
+
+    def test_external_mode_covers_exactly_the_two_address_cases(self):
+        catalog = {case.case_id: case for case in probe._case_catalog()}
+        self.assertEqual(set(probe.EXTERNAL_ADDRESS_CASES),
+                         {'tcp.sibling_alias.gateway_port', 'tcp.shared_loopback.gateway_port'})
+        for case_id, listener_key in probe.EXTERNAL_ADDRESS_CASES.items():
+            self.assertEqual(catalog[case_id].listener, listener_key)
+            self.assertEqual(catalog[case_id].expected, probe.OBSERVED_REFUSED)
+        for case_id, case in catalog.items():
+            if case_id not in probe.EXTERNAL_ADDRESS_CASES:
+                self.assertNotIn(case.listener or '', probe.EXTERNAL_ADDRESS_LISTENERS, case_id)
+
+    def test_default_invocation_keeps_every_internal_fixture_listener(self):
+        spawned, connect, reports, code = self.run_probe(external=False)
+        self.assertEqual(spawned, [
+            ('127.0.0.2', 45151),   # denied-port fixture, before Landlock
+            ('127.0.0.3', 8765),    # sibling alias gateway fixture, before Landlock
+            ('127.0.0.1', 8765),    # shared loopback gateway fixture, before Landlock
+            ('127.0.0.2', 8765),    # own gateway fixture, after Landlock
+            ('127.0.0.2', 8766),    # own backend fixture, after Landlock
+        ])
+        connect.assert_not_called()
+        report = reports[0]
+        self.assertFalse(report['external_address_fixtures'])
+        for key in ('wildcard_denied', 'sibling_gateway', 'shared_loopback_gateway',
+                    'own_gateway', 'own_backend'):
+            self.assertIn(key, report['listeners'], key)
+
+    def test_external_mode_omits_only_the_two_external_listeners(self):
+        spawned, connect, reports, code = self.run_probe(external=True)
+        self.assertEqual(spawned, [
+            ('127.0.0.2', 45151),   # denied-port fixture, before Landlock
+            ('127.0.0.2', 8765),    # own gateway fixture, after Landlock
+            ('127.0.0.2', 8766),    # own backend fixture, after Landlock
+        ])
+        report = reports[0]
+        self.assertTrue(report['external_address_fixtures'])
+        self.assertNotIn('sibling_gateway', report['listeners'])
+        self.assertNotIn('shared_loopback_gateway', report['listeners'])
+        for key in ('wildcard_denied', 'own_gateway', 'own_backend'):
+            self.assertIn(key, report['listeners'], key)
+
+    def test_external_mode_attempts_both_negative_cases_on_the_exact_fixed_targets(self):
+        spawned, connect, reports, code = self.run_probe(external=True)
+        self.assertEqual([call.args[:2] for call in connect.call_args_list],
+                         [('127.0.0.3', 8765), ('127.0.0.1', 8765)])
+        matrix = {row['case_id']: row for row in reports[0]['matrix']}
+        for case_id, target in (('tcp.sibling_alias.gateway_port', {'host': '127.0.0.3', 'port': 8765}),
+                                ('tcp.shared_loopback.gateway_port', {'host': '127.0.0.1', 'port': 8765})):
+            row = matrix[case_id]
+            self.assertEqual(row['target'], target)
+            self.assertEqual(row['errno'], errno.EPERM)
+            self.assertEqual(row['errno_name'], 'EPERM')
+            self.assertEqual(row['symptom'], 'refused_immediately')
+            self.assertEqual(row['status'], probe.STATUS_UNAVAILABLE)
+            self.assertFalse(row['witness']['sufficient'])
+            self.assertTrue(row['witness']['external_positive_required'])
+
+    def test_external_report_stays_incomplete_and_never_qualified(self):
+        spawned, connect, reports, code = self.run_probe(external=True)
+        self.assertEqual(reports[0]['status'], 'INCOMPLETE')
+        self.assertFalse(reports[0]['qualified'])
+        self.assertEqual(code, probe.CONFIG_EXIT)
+
+    def test_forbidden_success_is_fail(self):
+        for case_id in ('tcp.sibling_alias.gateway_port', 'tcp.shared_loopback.gateway_port'):
+            with self.subTest(case_id=case_id):
+                case, result, _ = self.outcome(case_id, None, 'connected')
+                self.assertEqual(result.observed, probe.OBSERVED_ALLOWED)
+                self.assertEqual(probe._status_for(case, result), probe.STATUS_FAIL)
+
+    def test_expected_refusal_without_the_external_bracket_is_unavailable(self):
+        for code, symptom in ((errno.EPERM, 'refused_immediately'), (errno.EACCES, 'refused_immediately'),
+                              (errno.EAGAIN, 'timed_out'), (errno.ETIMEDOUT, 'timed_out')):
+            with self.subTest(code=code, symptom=symptom):
+                case, result, _ = self.outcome('tcp.sibling_alias.gateway_port', code, symptom)
+                self.assertEqual(probe._status_for(case, result), probe.STATUS_UNAVAILABLE)
+                self.assertIs(result.witness['sufficient'], False)
+                self.assertNotEqual(result.attribution, 'CGROUP_IP_POLICY')
+
+    def test_missing_listener_unrelated_errno_and_timeout_never_pass(self):
+        for code, symptom in ((errno.ECONNREFUSED, 'refused_immediately'),
+                              (errno.EIO, 'refused_immediately'),
+                              (errno.ENETUNREACH, 'refused_immediately'),
+                              (errno.EMFILE, 'refused_immediately'),
+                              (errno.EAGAIN, 'timed_out'),
+                              (errno.ETIMEDOUT, 'timed_out')):
+            with self.subTest(code=code, symptom=symptom):
+                case, result, _ = self.outcome('tcp.shared_loopback.gateway_port', code, symptom)
+                self.assertNotEqual(probe._status_for(case, result), probe.STATUS_PASS)
+
+    def test_external_mode_invents_no_positive_baseline_and_no_attribution(self):
+        case, result, _ = self.outcome('tcp.sibling_alias.gateway_port', errno.EPERM, 'refused_immediately')
+        self.assertEqual(result.witness['kind'], 'external_address_fixture')
+        self.assertIs(result.witness['sufficient'], False)
+        self.assertTrue(result.witness['external_positive_required'])
+        self.assertTrue(result.witness['external_bracket_required'])
+        self.assertNotIn('pre_landlock_reached', result.witness)
+
+    def test_default_mode_still_requires_the_owned_listener_before_connecting(self):
+        for case_id in ('tcp.sibling_alias.gateway_port', 'tcp.shared_loopback.gateway_port'):
+            with self.subTest(case_id=case_id):
+                case = case_by_id(case_id)
+                with mock.patch.object(probe, '_listener_current', return_value={'sufficient': False}), \
+                     mock.patch.object(probe, '_connect') as connect:
+                    result = probe._tcp_outcome(case, {}, {}, frozenset({8765}), 0.1)
+                connect.assert_not_called()
+                self.assertEqual(result.observed, probe.OBSERVED_UNAVAILABLE)
+
+    def test_the_flag_is_inert_for_every_other_case(self):
+        for case_id in ('tcp.own_alias.gateway_port', 'tcp.own_alias.backend_port',
+                        'tcp.own_alias.denied_port'):
+            with self.subTest(case_id=case_id):
+                case = case_by_id(case_id)
+                now = current(case)
+                baseline = {case.listener: {'reached': True, 'target': f'{case.host}:{case.port}',
+                                             'listener': now}}
+                with mock.patch.object(probe, '_listener_current', return_value=now), \
+                     mock.patch.object(probe, '_connect', return_value=(errno.EACCES, 'refused_immediately')):
+                    plain = probe._tcp_outcome(case, {case.listener: {}}, baseline,
+                                               frozenset({8765, 8766}), 0.1)
+                    flagged = probe._tcp_outcome(case, {case.listener: {}}, baseline,
+                                                frozenset({8765, 8766}), 0.1,
+                                                external_address_fixtures=True)
+                self.assertEqual(probe._case_record(case, plain, selected=True),
+                                 probe._case_record(case, flagged, selected=True))
+
+
 @unittest.skipUnless(sys.platform.startswith('linux'), 'actual Linux proc/socket fixture only')
 class LinuxListenerTests(unittest.TestCase):
     def test_owned_pid_start_inode_and_exact_address_are_required_and_reaped(self):
@@ -584,6 +769,25 @@ class LinuxListenerTests(unittest.TestCase):
         finally:
             self.assertTrue(probe._terminate_children([listener]))
         self.assertFalse(probe._listener_current(listener, '127.0.0.1', listener['bind_port'])['sufficient'])
+
+    def test_external_fixture_attempt_really_connects_to_the_exact_target(self):
+        # No mock: the external mode uses the ordinary bounded connect path.
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(('127.0.0.1', 0))
+            listener.listen(4)
+            port = listener.getsockname()[1]
+            case = probe._Case('tcp.shared_loopback.gateway_port', 'tcp', 'external fixture',
+                               probe.OBSERVED_REFUSED, host='127.0.0.1', port=port)
+            outcome = probe._tcp_outcome(case, {}, {}, frozenset({port}), 1.0,
+                                         external_address_fixtures=True)
+            self.assertEqual(outcome.observed, probe.OBSERVED_ALLOWED)
+            self.assertEqual(outcome.target, {'host': '127.0.0.1', 'port': port})
+            self.assertEqual(probe._status_for(case, outcome), probe.STATUS_FAIL)
+        outcome = probe._tcp_outcome(case, {}, {}, frozenset({port}), 1.0,
+                                     external_address_fixtures=True)
+        self.assertEqual(outcome.observed, probe.OBSERVED_UNAVAILABLE)
+        self.assertEqual(outcome.errno, errno.ECONNREFUSED)
+        self.assertEqual(probe._status_for(case, outcome), probe.STATUS_UNAVAILABLE)
 
     def test_cleanup_kills_only_owned_child_that_ignores_term_with_finite_deadline(self):
         readfd, writefd = os.pipe(); pid = os.fork()
