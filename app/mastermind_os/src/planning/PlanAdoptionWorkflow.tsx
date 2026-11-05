@@ -25,12 +25,15 @@ export interface PlanAdoptionWorkflowProps {
   workRef: string;
   inspection: PlanAdoptionInspection | null;
   host: PlanAdoptionWorkflowHost;
+  /** Caller-owned live host/auth identity; absence preserves component compatibility. */
+  isHostCurrent?: () => boolean;
   locale?: "en" | "zh-CN";
   store?: PendingPointerStore;
   crypto?: Pick<Crypto, "getRandomValues">;
 }
 interface Frame {
   host: PlanAdoptionWorkflowHost;
+  isHostCurrent: PlanAdoptionWorkflowProps["isHostCurrent"];
   workRef: string;
   epoch: number;
   transport: PlanAdoptionTransport;
@@ -124,6 +127,7 @@ export function PlanAdoptionWorkflow(props: PlanAdoptionWorkflowProps) {
   const frame = useMemo<Frame | null>(
     () =>
       validProjectPlanSelection({ work_ref: props.workRef }) &&
+      (props.isHostCurrent === undefined || permits(props.isHostCurrent)) &&
       signed &&
       currentEpoch !== null &&
       transport &&
@@ -131,6 +135,7 @@ export function PlanAdoptionWorkflow(props: PlanAdoptionWorkflowProps) {
       typeof readContext === "function"
         ? {
             host: props.host,
+            isHostCurrent: props.isHostCurrent,
             workRef: props.workRef,
             epoch: currentEpoch,
             transport,
@@ -141,6 +146,7 @@ export function PlanAdoptionWorkflow(props: PlanAdoptionWorkflowProps) {
         : null,
     [
       props.host,
+      props.isHostCurrent,
       props.host.auth,
       props.host.invalidationGeneration,
       props.workRef,
@@ -154,6 +160,8 @@ export function PlanAdoptionWorkflow(props: PlanAdoptionWorkflowProps) {
     const now = latest.current;
     return (
       now.host === captured.host &&
+      now.isHostCurrent === captured.isHostCurrent &&
+      (captured.isHostCurrent === undefined || permits(captured.isHostCurrent)) &&
       now.workRef === captured.workRef &&
       now.host.sourceOperations === captured.transport &&
       now.host.readSourceOperationContext === captured.read &&
@@ -186,6 +194,7 @@ export function PlanAdoptionWorkflow(props: PlanAdoptionWorkflowProps) {
     let active = true;
     void (async () => {
       try {
+        if (!frameCurrent(frame)) return;
         const raw = await frame.read.call(frame.host, {
           action: "ADOPT_PLAN",
           workRef: frame.workRef,

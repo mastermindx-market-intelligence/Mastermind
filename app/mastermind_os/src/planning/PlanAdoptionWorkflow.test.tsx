@@ -530,3 +530,83 @@ it("does not describe an unavailable pointer-store read as no pending operation"
   expect(document.body.textContent).not.toContain("PRIVATE_STORE_FAILURE");
   expect(f.transport.readSourceOperation).not.toHaveBeenCalled();
 });
+
+it.each(["false", "throw"] as const)("caller host guard %s refuses initial context acquisition", async (mode) => {
+  const f = fixtureHost();
+  const isHostCurrent = () => { if (mode === "throw") throw Error("inert stale owner"); return false; };
+  render(<PlanAdoptionWorkflow workRef={workRef} inspection={f.inspection} host={f.host}
+    store={f.store} crypto={f.crypto} isHostCurrent={isHostCurrent}/>);
+  await act(async () => {});
+  expect(f.host.readSourceOperationContext).not.toHaveBeenCalled();
+  expect(button("Review adoption").disabled).toBe(true);
+  expect(f.transport.readSourceOperation).not.toHaveBeenCalled();
+});
+
+it.each(["false", "throw"] as const)("caller host guard %s fences a prepared submission without render", async (invalidMode) => {
+  const f = fixtureHost();
+  let mode: "current" | "false" | "throw" = "current";
+  const isHostCurrent = vi.fn(() => { if (mode === "throw") throw Error("inert stale owner"); return mode === "current"; });
+  render(<PlanAdoptionWorkflow workRef={workRef} inspection={f.inspection} host={f.host}
+    store={f.store} crypto={f.crypto} isHostCurrent={isHostCurrent}/>);
+  await review();
+  await waitFor(() => expect(button("Check original operation").disabled).toBe(false));
+  const adopt = button("Adopt this plan");
+  mode = invalidMode; // no notify, rerender, host object or generation change
+  isHostCurrent.mockClear();
+  fireEvent.click(adopt);
+  await act(async () => {});
+  expect(isHostCurrent).toHaveBeenCalled();
+  expect(f.transport.submitSourceOperation).not.toHaveBeenCalled();
+  expect(await f.store.read(scope)).toBeNull();
+});
+
+it("caller host guard preserves the original across refused Check/Advance and permits only current recovery", async () => {
+  const f = fixtureHost();
+  let mode: "current" | "false" | "throw" = "current";
+  const isHostCurrent = vi.fn(() => { if (mode === "throw") throw Error("inert stale owner"); return mode === "current"; });
+  render(<PlanAdoptionWorkflow workRef={workRef} inspection={f.inspection} host={f.host}
+    store={f.store} crypto={f.crypto} isHostCurrent={isHostCurrent}/>);
+  await review();fireEvent.click(button("Adopt this plan"));
+  await screen.findByText(/original adoption outcome is not known yet/);
+  const original = await f.store.read(scope);
+  expect(original?.kind).toBe("project_adopt");
+  const beforeRead = vi.mocked(f.transport.readSourceOperation).mock.calls.length;
+  mode = "false";
+  fireEvent.click(button("Check original operation"));await act(async () => {});
+  expect(f.transport.readSourceOperation).toHaveBeenCalledTimes(beforeRead);
+  expect(f.transport.reconcileSourceOperation).not.toHaveBeenCalled();
+  expect(await f.store.read(scope)).toEqual(original);
+  mode = "current";
+  fireEvent.click(button("Check original operation"));
+  await waitFor(() => expect(button("Continue original adoption").disabled).toBe(false));
+  expect(f.transport.reconcileSourceOperation).toHaveBeenCalledTimes(1);
+  mode = "throw";
+  fireEvent.click(button("Continue original adoption"));await act(async () => {});
+  expect(f.transport.advanceSourceOperation).not.toHaveBeenCalled();
+  expect(await f.store.read(scope)).toEqual(original);
+  mode = "current";
+  fireEvent.click(button("Continue original adoption"));
+  await waitFor(() => expect(f.transport.advanceSourceOperation).toHaveBeenCalledTimes(1));
+  await waitFor(async () => expect(await f.store.read(scope)).toBeNull());
+  expect(f.transport.submitSourceOperation).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(f.transport.advanceSourceOperation!).mock.calls[0][0].request_id).toBe(original?.operationKey);
+});
+
+it.each(["false", "throw"] as const)("caller host guard %s withholds a late settlement and preserves its pending original", async (invalidMode) => {
+  const f = fixtureHost();
+  let mode: "current" | "false" | "throw" = "current";
+  const isHostCurrent = vi.fn(() => { if (mode === "throw") throw Error("inert stale owner"); return mode === "current"; });
+  let settle!: (value: unknown) => void;
+  vi.mocked(f.transport.submitSourceOperation).mockImplementation(() => new Promise(resolve => { settle = resolve; }));
+  render(<PlanAdoptionWorkflow workRef={workRef} inspection={f.inspection} host={f.host}
+    store={f.store} crypto={f.crypto} isHostCurrent={isHostCurrent}/>);
+  await review();fireEvent.click(button("Adopt this plan"));
+  await waitFor(() => expect(f.transport.submitSourceOperation).toHaveBeenCalledTimes(1));
+  const original = await f.store.read(scope);
+  expect(original?.kind).toBe("project_adopt");
+  mode = invalidMode;
+  await act(async () => settle(f.status(original!.operationKey, true)));
+  expect(screen.queryByText(/Publication of the original adoption is confirmed/)).toBeNull();
+  expect(await f.store.read(scope)).toEqual(original);
+  expect(f.transport.submitSourceOperation).toHaveBeenCalledTimes(1);
+});
