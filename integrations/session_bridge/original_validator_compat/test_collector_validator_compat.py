@@ -119,6 +119,116 @@ class VersionBoundCollectorTests(unittest.TestCase):
                               'observed_file': {'device': 1, 'inode': 2, 'mtime_ns': 3, 'uid': 1000, 'mode': 384}}]}
         return request, stdout, canonical(process), canonical(row), manifest
 
+    def write_artifact_v2_log(self, events, suffix=b"", *, truncate=False):
+        raw = "".join(
+            f"2026-10-13T00:00Z [remote_sub id={RUN} host={HOST}] {event}\n"
+            for event in events).encode() + suffix
+        if truncate:
+            raw = raw[:-1]
+        self.files[str(self.log_path)] = raw
+        outer = json.loads(self.files[str(self.binding_path)])
+        outer["sources"]["log"]["sha256"] = digest(raw)
+        self.files[str(self.binding_path)] = canonical(outer)
+
+    def artifact_v2_fixture(self, acquisition_pool="glm-frontier"):
+        manifest = dict(self.manifest)
+        manifest["artifact_production.py"] = digest(self.future)
+        self.replace_support(manifest)
+        outer = json.loads(self.files[str(self.binding_path)])
+        outer["requested_model"] = "glm-5.3"
+        self.files[str(self.binding_path)] = canonical(outer)
+        lease_id, account = "a" * 12, "account-one"
+        acquired = f"LEASE={lease_id} ACCOUNT={account}\n".encode("ascii")
+        record = {
+            "schema": "mastermind.fabric_launch_binding.v2",
+            "run_id": RUN, "root": ROOT, "parent": PARENT, "host": HOST,
+            "mode": "glm", "requested_model": "glm-5.3",
+            "pool": "glm", "acquisition_pool": acquisition_pool,
+            "lease_id": lease_id, "account": account,
+            "packet_sha256": digest(self.files[str(self.packet_path)]),
+            "support_digest": self.support_digest,
+            "acquire_response_sha256": digest(acquired),
+            "source": "controller_original_acquire_return", "phase": "PRE_LAUNCH",
+        }
+        events = [
+            "RUN_RESERVED explicit=1", "LEASE_OK pool=" + acquisition_pool,
+            "SUPPORT_VERSION_READY digest=" + self.support_digest + " policy=" + "1" * 64,
+            "LAUNCH_BINDING " + canonical(record).decode(),
+            f"LAUNCH stdout=lanes_{RUN}.stdout rc_file=ext/lanes_{RUN}.rc cwd=~",
+            "LAUNCH_ATTEMPT attempt=1",
+        ]
+        self.write_artifact_v2_log(events)
+        return record, events
+
+    def test_artifact_v2_frontier_and_fallback_load_binding(self):
+        for acquisition_pool in ("glm-frontier", "glm"):
+            with self.subTest(acquisition_pool=acquisition_pool):
+                self.artifact_v2_fixture(acquisition_pool)
+                loaded = collector.load_binding(
+                    self.binding_path, run_id=RUN, root=ROOT, parent=PARENT)
+                self.assertEqual(loaded[3], self.contract)
+                self.assertIsNone(loaded[6])
+                request, _, _, response, _ = self.response()
+                collector.validate_response(
+                    response, request, "glm", original_validator=loaded[6])
+
+    def test_artifact_v2_rejects_repinned_semantic_and_sequence_faults(self):
+        # Malformed v2 must not fall back through an otherwise ordinary tag.
+        record, events = self.artifact_v2_fixture("glm")
+        collector.load_binding(self.binding_path, run_id=RUN, root=ROOT, parent=PARENT)
+        baseline_files = dict(self.files)
+        changes = {
+            "root": {"root": "foreign-root"}, "parent": {"parent": "foreign-parent"},
+            "host": {"host": "foreign-host"}, "mode": {"mode": "qwen"},
+            "model": {"requested_model": "glm-5.3-flash"},
+            "logical_pool": {"pool": "glm-frontier"},
+            "acquisition_pool": {"acquisition_pool": "bailian"},
+            "packet": {"packet_sha256": "e" * 64},
+            "support": {"support_digest": "e" * 64},
+            "acquire_digest": {"acquire_response_sha256": "e" * 64},
+            "account": {"account": "different-account"}, "lease": {"lease_id": "d" * 12},
+            "unknown_schema": {"schema": "mastermind.fabric_launch_binding.v9"},
+            "downgrade_with_tag": {"schema": "mastermind.fabric_launch_binding.v1"},
+            "extra_field": {"unexpected": "field"},
+        }
+        faults = list(changes) + [
+            "missing_tag", "duplicate_key", "wrong_order", "duplicate_binding",
+            "wrong_lease_event", "foreign_line", "truncated", "prelaunch_failure",
+            "postlaunch_binding",
+        ]
+        for fault in faults:
+            with self.subTest(fault=fault):
+                self.files = dict(baseline_files)
+                changed = dict(record)
+                changed.update(changes.get(fault, {}))
+                if fault == "missing_tag":
+                    del changed["acquisition_pool"]
+                payload = canonical(changed).decode()
+                if fault == "duplicate_key":
+                    payload = payload[:-1] + ',"acquisition_pool":"glm"}'
+                changed_events = list(events)
+                changed_events[3] = "LAUNCH_BINDING " + payload
+                if fault == "wrong_order":
+                    changed_events[1], changed_events[2] = changed_events[2], changed_events[1]
+                elif fault == "duplicate_binding":
+                    changed_events.insert(3, changed_events[3])
+                elif fault == "wrong_lease_event":
+                    changed_events[1] = "LEASE_OK pool=glm-frontier"
+                elif fault == "prelaunch_failure":
+                    changed_events.insert(3, "TRANSPORT_FAILED rc=78")
+                elif fault == "postlaunch_binding":
+                    changed_events.append(changed_events.pop(3))
+                self.write_artifact_v2_log(changed_events,
+                    suffix=b"foreign diagnostic\n" if fault == "foreign_line" else b"",
+                    truncate=fault == "truncated")
+                with patch.object(delivery, "transport") as transport, \
+                     patch.object(delivery, "reserve_destination") as reserve:
+                    with self.assertRaises(ValueError):
+                        collector.collect(self.binding_path, run_id=RUN, root=ROOT,
+                            parent=PARENT, destination=HERE / "NEVER_CREATED")
+                    transport.assert_not_called()
+                    reserve.assert_not_called()
+
     def test_historical_binding_qualifies_using_exact_original_source(self):
         loaded = collector.load_binding(self.binding_path, run_id=RUN, root=ROOT, parent=PARENT)
         self.assertEqual(loaded[3], self.contract)
@@ -277,7 +387,10 @@ class VersionBoundCollectorTests(unittest.TestCase):
 
 
     def test_secure_local_read_rejects_symlink_and_writable_original_before_transport(self):
-        with tempfile.TemporaryDirectory(prefix='validator-inert-', dir=HERE) as folder:
+        # The real custody reader requires private physical ancestry; the
+        # repository mount may legitimately be group-writable.
+        base = os.environ.get('NATIVE_ROLLOUT_TEST_ROOT', str(Path.home()))
+        with tempfile.TemporaryDirectory(prefix='validator-inert-', dir=base) as folder:
             root = Path(folder)
             original = root / 'original.py'; original.write_bytes(self.original); original.chmod(0o600)
             unchanged_reader = root / 'reader.py'; unchanged_reader.write_bytes(self.reader); unchanged_reader.chmod(0o600)
@@ -294,9 +407,11 @@ class VersionBoundCollectorTests(unittest.TestCase):
                 tripwire.assert_not_called()
                 original.chmod(0o600)
                 target = root / 'target.py'; original.rename(target); original.symlink_to(target.name)
-                with patch.object(delivery, 'transport') as tripwire, self.assertRaises(OSError):
+                with patch.object(delivery, 'transport') as tripwire, \
+                     self.assertRaises(collector.LocalBindingRefused) as refused:
                     collector.collect(self.binding_path, run_id=RUN, root=ROOT, parent=PARENT,
                         destination=HERE / 'NEVER_CREATED')
+                self.assertIsInstance(refused.exception.__cause__, OSError)
                 tripwire.assert_not_called()
                 original.unlink(); target.rename(original)
                 unchanged_reader.chmod(0o602)

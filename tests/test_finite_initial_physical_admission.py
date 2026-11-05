@@ -1,6 +1,6 @@
 """Negative and race proofs for the sealed finite physical admission composer.
 
-The Runtime, SQLite schema candidate, ResourceBroker and evaluator are real;
+The Runtime, reviewed SQLite schema, ResourceBroker and evaluator are real;
 only owner probe seams and the foreground principal are synthetic (see
 tests.test_finite_initial_transaction).
 """
@@ -67,11 +67,11 @@ def dispatcher(unbegun,composed,monkeypatch):
 
 # --- production default stays closed -------------------------------------
 
-def test_production_policy_and_schema_and_caller_fail_closed(tmp_path):
+def test_production_policy_and_caller_stay_closed_with_admitted_schema(tmp_path):
     _refused('POLICY_UNARMED',adm.load_admitted_policy)
     runtime=rt.Runtime.at(tmp_path/'prod')
     with runtime.store.read() as c:
-        _refused('RESOURCE_SCHEMA_UNADMITTED',adm.require_physical_schema,c)
+        adm.require_physical_schema(c)
     for ctx in (None,{'owner_id':'forged'}):
         out=runtime.broker.reserve_physical({'command_id':'x'},caller_context=ctx)
         assert out['admitted'] is False and out['code']=='CALLER_BINDING_UNAVAILABLE'

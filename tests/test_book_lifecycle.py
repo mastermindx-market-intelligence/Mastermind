@@ -14,6 +14,12 @@ All inputs are INJECTED (fixture review_history + book_curves) — nothing pins 
 """
 from __future__ import annotations
 
+import math
+import sys
+import types
+import unittest
+from unittest.mock import patch
+
 import pytest
 
 import bot  # noqa: F401 — bootstraps vendor/macro (for the Newey-West helper)
@@ -347,3 +353,139 @@ def test_regional_review_history_tolerates_malformed_leaderboard_rows():
     # the call must complete without AttributeError and return a well-formed dict
     assert isinstance(result, dict), "regional_review must return a dict on malformed input"
     assert "grades" in result
+
+
+# Missing observations must not count as lifecycle evidence, with or without vendor.
+class BookLifecycleMissingValues(unittest.TestCase):
+    def setUp(self):
+        self.defaults = patch.object(BL, "_cfg", return_value={})
+        self.defaults.start()
+        self.addCleanup(self.defaults.stop)
+
+    def test_forced_fallback_ignores_missing_values(self):
+        # Force the optional engine to be absent even in a vendored CI checkout.
+        with patch.dict(sys.modules, {"engine": None, "engine.validation": None}):
+            for n in (2, 7, 8, 12):
+                for lag in (0, 3, 50):
+                    clean = [-0.01 - (i % 4) * 0.005 for i in range(n)]
+                    missing = clean[:1] + [None, float("nan")] + clean[1:]
+                    with self.subTest(n=n, lag=lag):
+                        actual = BL._hac(missing, lag)
+                        self.assertEqual(actual, BL._hac(clean, lag))
+                        self.assertEqual(actual["n"], n)
+                        self.assertEqual(actual["lags"], min(lag, n-1) if n >= 8 else None)
+
+    def test_consumer_does_not_count_missing_review(self):
+        with patch.dict(sys.modules, {"engine": None, "engine.validation": None}):
+            for n in (7, 8):
+                with self.subTest(valid_reviews=n):
+                    clean = [-0.02] * n
+                    actual = BL._loss_significance(clean + [float("nan")])
+                    self.assertEqual(actual, BL._loss_significance(clean))
+                    self.assertEqual(actual["effective_n"], n)
+                    self.assertEqual(actual["reviews_remaining"], max(0, 8-n))
+                    self.assertEqual(actual["status"], "insufficient-n" if n < 8 else "scoring")
+
+    def test_reachable_history_nan_is_not_an_eighth_review(self):
+        history = [{"books": {"autonomous": -0.02}, "bogeys": {"spy": 0.0}} for _ in range(7)]
+        history.append({"books": {"autonomous": float("nan")}, "bogeys": {"spy": 0.0}})
+        active = BL._active_series(history, "autonomous", "spy")
+        self.assertTrue(math.isnan(active[-1]))
+        with patch.dict(sys.modules, {"engine": None, "engine.validation": None}):
+            actual = BL._loss_significance(active)
+        self.assertEqual(actual["effective_n"], 7)
+        self.assertEqual(actual["reviews_remaining"], 1)
+        self.assertEqual(actual["status"], "insufficient-n")
+        self.assertFalse(actual["significant"])
+
+    def test_existing_short_result_shape_is_preserved(self):
+        with patch.dict(sys.modules, {"engine": None, "engine.validation": None}):
+            for sample in ([], [None], [-0.02], [None, -0.02]):
+                clean = [x for x in sample if x is not None]
+                with self.subTest(sample=sample):
+                    self.assertEqual(BL._hac(sample, 3), {
+                        "n": len(clean), "mean": clean[0] if clean else None, "t": 0.0, "se": None,
+                    })
+
+
+    def test_preferred_helper_receives_only_valid_samples(self):
+        engine = types.ModuleType("engine")
+        validation = types.ModuleType("engine.validation")
+        calls = []
+        expected = {"mean": -0.02, "se": 0.002, "t": -10.0, "p": 0.0,
+                    "n": 8, "lags": 7, "lags_requested": 50}
+
+        def helper(samples, *, lags):
+            calls.append((samples, lags))
+            return expected
+
+        validation.newey_west_tstat = helper
+        engine.validation = validation
+        with patch.dict(sys.modules, {"engine": engine, "engine.validation": validation}):
+            actual = BL._hac([-0.02] * 4 + [None, float("nan")] + [-0.02] * 4, 50)
+        self.assertIs(actual, expected)
+        self.assertEqual(calls, [([-0.02] * 8, 50)])
+
+    def test_grade_book_missing_history_keeps_the_real_loss_gate(self):
+        for helper_present in (False, True):
+            for n in (7, 8):
+                calls = []
+                engine = types.ModuleType("engine")
+                validation = types.ModuleType("engine.validation")
+
+                def helper(samples, *, lags):
+                    calls.append((samples, lags))
+                    self.assertEqual(samples, [-0.02] * 8)
+                    return {"mean": -0.02, "se": 0.002, "t": -10.0, "p": 0.0,
+                            "n": 8, "lags": 3, "lags_requested": lags}
+
+                validation.newey_west_tstat = helper
+                engine.validation = validation
+                modules = {"engine": engine, "engine.validation": validation} if helper_present else {
+                    "engine": None, "engine.validation": None,
+                }
+                history = [{"books": {"autonomous": -0.02},
+                            "bogeys": {"spy": 0.0, "regime_max": 0.0}} for _ in range(n)]
+                history.extend([
+                    {"books": {"autonomous": None}, "bogeys": {"spy": 0.0, "regime_max": 0.0}},
+                    {"books": {"autonomous": float("nan")},
+                     "bogeys": {"spy": 0.0, "regime_max": 0.0}},
+                ])
+                with self.subTest(helper_present=helper_present, valid_reviews=n):
+                    active = BL._active_series(history, "autonomous", "regime_max")
+                    self.assertEqual(len(active), n + 1)
+                    self.assertTrue(math.isnan(active[-1]))
+                    with patch.dict(sys.modules, modules):
+                        grade = BL.grade_book("autonomous", history, book_curves={})
+                    loss = grade["loss_test"]
+                    self.assertEqual(loss["effective_n"], n)
+                    self.assertEqual(loss["reviews_remaining"], max(0, 8 - n))
+                    self.assertEqual(grade["reviews_remaining"], max(0, 8 - n))
+                    self.assertEqual(loss["status"], "insufficient-n" if n < 8 else "scoring")
+                    self.assertEqual(loss["mean"], -0.02)
+                    self.assertEqual(loss["losing"], n >= 8)
+                    self.assertEqual(loss["significant"], n >= 8)
+                    self.assertEqual(len(calls), 1 if helper_present and n >= 8 else 0)
+
+    def test_zero_and_infinity_are_not_missing_observations(self):
+        with patch.dict(sys.modules, {"engine": None, "engine.validation": None}):
+            self.assertEqual(BL._hac([0.0] * 8 + [None, float("nan")], 3), {
+                "mean": 0.0, "se": 0.0, "t": 0.0, "p": 1.0,
+                "n": 8, "lags": 3, "lags_requested": 3,
+            })
+            actual = BL._hac([-0.02] * 8 + [float("inf")], 3)
+            self.assertEqual(actual["n"], 9)
+            self.assertEqual(actual["mean"], float("inf"))
+            self.assertTrue(math.isnan(actual["t"]))
+            self.assertEqual(BL._loss_significance([-0.02] * 7 + [float("inf")])["effective_n"], 8)
+
+    def test_missing_only_and_single_valid_keep_legacy_shape(self):
+        with patch.dict(sys.modules, {"engine": None, "engine.validation": None}):
+            for sample, clean in (
+                ([None, float("nan")], []),
+                ([None, float("nan"), -0.02], [-0.02]),
+            ):
+                with self.subTest(valid_count=len(clean)):
+                    self.assertEqual(BL._hac(sample, 3), {
+                        "n": len(clean), "mean": clean[0] if clean else None, "t": 0.0, "se": None,
+                    })

@@ -1,0 +1,3755 @@
+{
+  "kind": "source_census_evidence",
+  "production_coverage_proven": false,
+  "method": "pinned blob verification and static AST call-site extraction; no project imports",
+  "summary": {
+    "files": 173,
+    "verified": 173,
+    "files_with_calls": 73,
+    "calls": 254,
+    "categories": {
+      "provider_client_construction": 28,
+      "sdk_completion_or_stream": 69,
+      "shared_provider_construction": 60,
+      "shared_provider_execution_or_selection": 59,
+      "brain_model_or_chat_entry": 31,
+      "custom_endpoint_execution": 5,
+      "native_harness_invocation": 2
+    }
+  },
+  "files": [
+    {
+      "repository": "macro",
+      "path": "engine/llm_auth.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "7294dec2759716416059155ba727392064ab99aa",
+      "bytes": 71580,
+      "blob_verified": true,
+      "computed_blob": "7294dec2759716416059155ba727392064ab99aa",
+      "calls": [
+        {
+          "line": 1109,
+          "function": "build_providers._mk_oauth_provider",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 1280,
+          "function": "build_providers",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 1319,
+          "function": "build_providers",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        }
+      ],
+      "reference_tags": [
+        "direct_anthropic",
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/news_llm.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "bd5872ed8134a693f8a243a26eb1a53931710258",
+      "bytes": 13071,
+      "blob_verified": true,
+      "computed_blob": "bd5872ed8134a693f8a243a26eb1a53931710258",
+      "calls": [
+        {
+          "line": 139,
+          "function": "_client",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 142,
+          "function": "_client",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 143,
+          "function": "_client",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 193,
+          "function": "_summarise_batch_raw",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 251,
+          "function": "annotate",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 273,
+          "function": "annotate",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "direct_anthropic",
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/key_pool_probe.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "545dd79baf45ed0621876f0c9611748f99a1bd7a",
+      "bytes": 4210,
+      "blob_verified": true,
+      "computed_blob": "545dd79baf45ed0621876f0c9611748f99a1bd7a",
+      "calls": [
+        {
+          "line": 55,
+          "function": "probe_env",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 63,
+          "function": "probe_env.call_fn",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 70,
+          "function": "probe_env",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/provider_waterfall.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "aa8704b2c21a2430fb20073c1e11053edc4711cf",
+      "bytes": 10651,
+      "blob_verified": true,
+      "computed_blob": "aa8704b2c21a2430fb20073c1e11053edc4711cf",
+      "calls": [],
+      "reference_tags": [
+        "native_harness",
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/influence/extract.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "3d900184f983dd6d2c362655324923652c24325a",
+      "bytes": 10971,
+      "blob_verified": true,
+      "computed_blob": "3d900184f983dd6d2c362655324923652c24325a",
+      "calls": [
+        {
+          "line": 85,
+          "function": "_call",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 96,
+          "function": "_call._call_fn",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 106,
+          "function": "_call",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 240,
+          "function": "run",
+          "call": "_llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/metabolism_agenda.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "6231d42e17af30a9c16a1bc1e71b0e90eca6b4b3",
+      "bytes": 3814,
+      "blob_verified": true,
+      "computed_blob": "6231d42e17af30a9c16a1bc1e71b0e90eca6b4b3",
+      "calls": [
+        {
+          "line": 45,
+          "function": "_load_providers",
+          "call": "build_providers",
+          "category": "shared_provider_construction"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/press/research_veto.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "c9d4e8af69e5096d0efb40eeaef983a70715bd57",
+      "bytes": 14515,
+      "blob_verified": true,
+      "computed_blob": "c9d4e8af69e5096d0efb40eeaef983a70715bd57",
+      "calls": [
+        {
+          "line": 194,
+          "function": "_default_call",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 208,
+          "function": "_default_call._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 218,
+          "function": "_default_call",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/metabolism_dream.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "e50868369d04800c5db095b6c56a70f10046d7c1",
+      "bytes": 7116,
+      "blob_verified": true,
+      "computed_blob": "e50868369d04800c5db095b6c56a70f10046d7c1",
+      "calls": [
+        {
+          "line": 110,
+          "function": "_request_llm_summary",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 129,
+          "function": "_request_llm_summary._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 136,
+          "function": "_request_llm_summary",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/check_extraction_drift.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "f0971b6f406399018aedf91a5933f076fd793ff0",
+      "bytes": 16610,
+      "blob_verified": true,
+      "computed_blob": "f0971b6f406399018aedf91a5933f076fd793ff0",
+      "calls": [
+        {
+          "line": 144,
+          "function": "_call_model._call_fn",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 156,
+          "function": "_call_model",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 185,
+          "function": "_get_providers_and_model",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 297,
+          "function": "full_check",
+          "call": "_call_model",
+          "category": "brain_model_or_chat_entry"
+        },
+        {
+          "line": 321,
+          "function": "light_check",
+          "call": "_call_model",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/metabolism_attention.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "b94c70800075f3ccf1616c21b2502b4811daaac5",
+      "bytes": 5367,
+      "blob_verified": true,
+      "computed_blob": "b94c70800075f3ccf1616c21b2502b4811daaac5",
+      "calls": [
+        {
+          "line": 45,
+          "function": "_load_providers",
+          "call": "build_providers",
+          "category": "shared_provider_construction"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/commodity_news.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "7154de61e8f409b779d81b45873edc6725c9bf8a",
+      "bytes": 12266,
+      "blob_verified": true,
+      "computed_blob": "7154de61e8f409b779d81b45873edc6725c9bf8a",
+      "calls": [
+        {
+          "line": 191,
+          "function": "_classify_cause",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 199,
+          "function": "_classify_cause._call_fn",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 208,
+          "function": "_classify_cause",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/risk_brain.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "083dd979f137bdff4812a319853e3c5f47ccf2bf",
+      "bytes": 20292,
+      "blob_verified": true,
+      "computed_blob": "083dd979f137bdff4812a319853e3c5f47ccf2bf",
+      "calls": [
+        {
+          "line": 119,
+          "function": "_make_call",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 129,
+          "function": "_make_call.call._call_fn",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 146,
+          "function": "_make_call.call",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/marketing/copy_auditor.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "df7b7b9f941888a459ed304ce47b3753d3cb3098",
+      "bytes": 16465,
+      "blob_verified": true,
+      "computed_blob": "df7b7b9f941888a459ed304ce47b3753d3cb3098",
+      "calls": [
+        {
+          "line": 154,
+          "function": "_providers",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 319,
+          "function": "audit_batch._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 333,
+          "function": "audit_batch",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/provider_health.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "2447897c9a9ae146431a6da976261b86f45a8671",
+      "bytes": 13108,
+      "blob_verified": true,
+      "computed_blob": "2447897c9a9ae146431a6da976261b86f45a8671",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "admin/prophet.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "9324523e6306984cccbf02c2a79bd99a64bd83f5",
+      "bytes": 15143,
+      "blob_verified": true,
+      "computed_blob": "9324523e6306984cccbf02c2a79bd99a64bd83f5",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "lib/ai_costs.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "87e15773e8e235ddf8fd11d39d142301c0c5424e",
+      "bytes": 27961,
+      "blob_verified": true,
+      "computed_blob": "87e15773e8e235ddf8fd11d39d142301c0c5424e",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/marketing/copy_critic.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "81c2d0a800df7ed220184d0df3dafd6f99248881",
+      "bytes": 23480,
+      "blob_verified": true,
+      "computed_blob": "81c2d0a800df7ed220184d0df3dafd6f99248881",
+      "calls": [
+        {
+          "line": 360,
+          "function": "_providers",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 441,
+          "function": "cold_read_verdict._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 454,
+          "function": "cold_read_verdict",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/narrative_brain.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "cd699ed8ecfafc7c1c63572b8485cdc7831b7109",
+      "bytes": 21340,
+      "blob_verified": true,
+      "computed_blob": "cd699ed8ecfafc7c1c63572b8485cdc7831b7109",
+      "calls": [
+        {
+          "line": 148,
+          "function": "_make_call",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 166,
+          "function": "_make_call.call._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 177,
+          "function": "_make_call.call",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/risk_radar_review.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "22d727f7ca297eb6ac1b5a2b0b9acded44f3223a",
+      "bytes": 19804,
+      "blob_verified": true,
+      "computed_blob": "22d727f7ca297eb6ac1b5a2b0b9acded44f3223a",
+      "calls": [
+        {
+          "line": 132,
+          "function": "_make_call",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 143,
+          "function": "_make_call.call._call_fn",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 154,
+          "function": "_make_call.call",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/uk_policy_brain.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "318b292fb039932c5a09cdd68e5e0cde5d564c81",
+      "bytes": 34435,
+      "blob_verified": true,
+      "computed_blob": "318b292fb039932c5a09cdd68e5e0cde5d564c81",
+      "calls": [
+        {
+          "line": 496,
+          "function": "_call_model",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 536,
+          "function": "_call_model._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 551,
+          "function": "_call_model",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 630,
+          "function": "evaluate",
+          "call": "_call_model",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/marketing/cold_read.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "0350a7b4ee76b533d9a074ef1a8e84115494dc3d",
+      "bytes": 19735,
+      "blob_verified": true,
+      "computed_blob": "0350a7b4ee76b533d9a074ef1a8e84115494dc3d",
+      "calls": [
+        {
+          "line": 273,
+          "function": "_providers",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 300,
+          "function": "_default_call._do",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 311,
+          "function": "_default_call",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/neuralweb/trade_memory.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "163a9bf45747439057b71b79d40c7fc7d90d0b1d",
+      "bytes": 26721,
+      "blob_verified": true,
+      "computed_blob": "163a9bf45747439057b71b79d40c7fc7d90d0b1d",
+      "calls": [
+        {
+          "line": 570,
+          "function": "invoke_autopsy",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 579,
+          "function": "invoke_autopsy._call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 593,
+          "function": "invoke_autopsy",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 599,
+          "function": "invoke_autopsy",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 605,
+          "function": "invoke_autopsy",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/metabolism/propose.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "fb4998005b5b8d53823f664d516dd13d26bf26aa",
+      "bytes": 54766,
+      "blob_verified": true,
+      "computed_blob": "fb4998005b5b8d53823f664d516dd13d26bf26aa",
+      "calls": [
+        {
+          "line": 650,
+          "function": "_invoke_llm",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 662,
+          "function": "_invoke_llm._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 691,
+          "function": "_invoke_llm",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 706,
+          "function": "_invoke_llm",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 711,
+          "function": "_invoke_llm",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 725,
+          "function": "_invoke_llm",
+          "call": "_la2.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 731,
+          "function": "_invoke_llm",
+          "call": "_la2.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/marketing/copy_review.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "2ac7627f2c9b747c8d2ba035efe6b2652b7b5a32",
+      "bytes": 15691,
+      "blob_verified": true,
+      "computed_blob": "2ac7627f2c9b747c8d2ba035efe6b2652b7b5a32",
+      "calls": [
+        {
+          "line": 231,
+          "function": "review_posts_llm",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 281,
+          "function": "review_posts_llm._call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 288,
+          "function": "review_posts_llm",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/metabolism/audit.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "c031d98a81ecfd79eb8e9704995376b8eb537671",
+      "bytes": 28516,
+      "blob_verified": true,
+      "computed_blob": "c031d98a81ecfd79eb8e9704995376b8eb537671",
+      "calls": [
+        {
+          "line": 355,
+          "function": "_call_llm_auditor",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 366,
+          "function": "_call_llm_auditor._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 380,
+          "function": "_call_llm_auditor",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/whitehouse_brain.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "d0ecd3b6b24534a399a4ff57f3732a3f80a102fa",
+      "bytes": 28915,
+      "blob_verified": true,
+      "computed_blob": "d0ecd3b6b24534a399a4ff57f3732a3f80a102fa",
+      "calls": [
+        {
+          "line": 236,
+          "function": "_client",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 239,
+          "function": "_client",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 242,
+          "function": "_client",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 293,
+          "function": "_call_model",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 311,
+          "function": "_call_model._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 327,
+          "function": "_call_model",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 529,
+          "function": "evaluate",
+          "call": "_call_model",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": [
+        "direct_anthropic",
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/press/writer.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "fce284a7209187a614390b1ad5dacd50fb060a46",
+      "bytes": 52695,
+      "blob_verified": true,
+      "computed_blob": "fce284a7209187a614390b1ad5dacd50fb060a46",
+      "calls": [
+        {
+          "line": 910,
+          "function": "write",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 929,
+          "function": "write",
+          "call": "llm_auth.first_usable",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 965,
+          "function": "write._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 978,
+          "function": "write",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/altdata_brain.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "a1d0c7f971a4b915623e709497aa0ca06685a82d",
+      "bytes": 42309,
+      "blob_verified": true,
+      "computed_blob": "a1d0c7f971a4b915623e709497aa0ca06685a82d",
+      "calls": [
+        {
+          "line": 213,
+          "function": "_make_call",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 220,
+          "function": "_make_call.call._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 231,
+          "function": "_make_call.call",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/run_causal_brainstorm.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "40b2c7c86dc93ffea011ab1e2bf343edccc364c8",
+      "bytes": 34829,
+      "blob_verified": true,
+      "computed_blob": "40b2c7c86dc93ffea011ab1e2bf343edccc364c8",
+      "calls": [
+        {
+          "line": 152,
+          "function": "_build_scheduled_providers",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 164,
+          "function": "_build_operator_providers",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 248,
+          "function": "_llm_call._call_fn",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 264,
+          "function": "_llm_call",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/preflight_claude_auth.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "2fb19cebbfa6e5b98d2c62738d48812f7fc2036b",
+      "bytes": 12207,
+      "blob_verified": true,
+      "computed_blob": "2fb19cebbfa6e5b98d2c62738d48812f7fc2036b",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/research_intelligence/extractor.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "5ba4516ebf87042a72aac84cd29089185b273d9c",
+      "bytes": 12117,
+      "blob_verified": true,
+      "computed_blob": "5ba4516ebf87042a72aac84cd29089185b273d9c",
+      "calls": [
+        {
+          "line": 184,
+          "function": "_default_call",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 192,
+          "function": "_default_call.do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 201,
+          "function": "_default_call",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "app/deploy/update.sh",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "6a2da74baab5a4913a098e3137f663f3dac08189",
+      "bytes": 163096,
+      "blob_verified": true,
+      "computed_blob": "6a2da74baab5a4913a098e3137f663f3dac08189",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/earnings_qual.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "64d9281d9c1c87b064a1306adfb4b2ce179753a9",
+      "bytes": 145183,
+      "blob_verified": true,
+      "computed_blob": "64d9281d9c1c87b064a1306adfb4b2ce179753a9",
+      "calls": [
+        {
+          "line": 611,
+          "function": "_call_openai_compat",
+          "call": "_call_openai_compat_detailed",
+          "category": "custom_endpoint_execution"
+        },
+        {
+          "line": 628,
+          "function": "_call_kimi",
+          "call": "_call_openai_compat",
+          "category": "custom_endpoint_execution"
+        },
+        {
+          "line": 655,
+          "function": "_call_llm_auth",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 667,
+          "function": "_call_llm_auth._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 684,
+          "function": "_call_llm_auth",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 709,
+          "function": "_dispatch",
+          "call": "_call_openai_compat",
+          "category": "custom_endpoint_execution"
+        }
+      ],
+      "reference_tags": [
+        "custom_endpoint",
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/master_brain.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "67bf21c6bb387505bd4c8b237804ba664181ff38",
+      "bytes": 142755,
+      "blob_verified": true,
+      "computed_blob": "67bf21c6bb387505bd4c8b237804ba664181ff38",
+      "calls": [
+        {
+          "line": 1655,
+          "function": "_client",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 1700,
+          "function": "_call_model",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 1746,
+          "function": "_call_model._make_do_call._do_call",
+          "call": "_client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 1749,
+          "function": "_call_model._make_do_call._do_call",
+          "call": "_client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 1779,
+          "function": "_call_model",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 1991,
+          "function": "synthesize",
+          "call": "_call_model",
+          "category": "brain_model_or_chat_entry"
+        },
+        {
+          "line": 1997,
+          "function": "synthesize",
+          "call": "_call_model",
+          "category": "brain_model_or_chat_entry"
+        },
+        {
+          "line": 2038,
+          "function": "synthesize",
+          "call": "_call_model",
+          "category": "brain_model_or_chat_entry"
+        },
+        {
+          "line": 2638,
+          "function": "_zh_batch",
+          "call": "_call_model",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": [
+        "direct_anthropic",
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/ollama_provider.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "5703930982326c17ebbe6a591f68f0b8b2c11f06",
+      "bytes": 11997,
+      "blob_verified": true,
+      "computed_blob": "5703930982326c17ebbe6a591f68f0b8b2c11f06",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/catalyst_tone.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "0540c15eefbff8944730c3ea6e1df1b9c5fe9b84",
+      "bytes": 31503,
+      "blob_verified": true,
+      "computed_blob": "0540c15eefbff8944730c3ea6e1df1b9c5fe9b84",
+      "calls": [
+        {
+          "line": 386,
+          "function": "_client",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 427,
+          "function": "_call_model._do_call",
+          "call": "_client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 430,
+          "function": "_call_model._do_call",
+          "call": "_client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 437,
+          "function": "_call_model",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 484,
+          "function": "digest_document",
+          "call": "_call_model",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": [
+        "direct_anthropic",
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/metabolism/agenda.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "21e6c7f918dd2667ca1b226edb6cd9294279978a",
+      "bytes": 32021,
+      "blob_verified": true,
+      "computed_blob": "21e6c7f918dd2667ca1b226edb6cd9294279978a",
+      "calls": [
+        {
+          "line": 461,
+          "function": "_call_llm._call_fn",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 470,
+          "function": "_call_llm",
+          "call": "make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/marketing_copy_dryrun.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "91d63f4149f91f08aeaac1cefd5eb50f9609fc2f",
+      "bytes": 15210,
+      "blob_verified": true,
+      "computed_blob": "91d63f4149f91f08aeaac1cefd5eb50f9609fc2f",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/news_translate.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "fd334ddea268070ad954a21d9f0debb79931f99e",
+      "bytes": 19994,
+      "blob_verified": true,
+      "computed_blob": "fd334ddea268070ad954a21d9f0debb79931f99e",
+      "calls": [
+        {
+          "line": 323,
+          "function": "_client",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 353,
+          "function": "_translate_batch",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 444,
+          "function": "_translate_batch_en",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        }
+      ],
+      "reference_tags": [
+        "direct_anthropic",
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/run_brain_eval.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "78434f949d363283edcc9c84f7eaa3156ee8794c",
+      "bytes": 16836,
+      "blob_verified": true,
+      "computed_blob": "78434f949d363283edcc9c84f7eaa3156ee8794c",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/neuralweb/cortex.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "65603662a1d5fa3257328286050cd3eb673a9e9b",
+      "bytes": 160382,
+      "blob_verified": true,
+      "computed_blob": "65603662a1d5fa3257328286050cd3eb673a9e9b",
+      "calls": [
+        {
+          "line": 241,
+          "function": "_build_providers",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 2810,
+          "function": "_single_call_fallback._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 2832,
+          "function": "_single_call_fallback",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 3018,
+          "function": "_run_tool_loop._make_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        }
+      ],
+      "reference_tags": [
+        "native_harness",
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/metabolism/adjudicate.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "c45e6aff9356aafc733c86b71f4541e5e754e0bf",
+      "bytes": 64333,
+      "blob_verified": true,
+      "computed_blob": "c45e6aff9356aafc733c86b71f4541e5e754e0bf",
+      "calls": [
+        {
+          "line": 882,
+          "function": "_invoke_role_llm",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 894,
+          "function": "_invoke_role_llm._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 918,
+          "function": "_invoke_role_llm",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 932,
+          "function": "_invoke_role_llm",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 937,
+          "function": "_invoke_role_llm",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 955,
+          "function": "_invoke_role_llm",
+          "call": "_la2.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 961,
+          "function": "_invoke_role_llm",
+          "call": "_la2.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/codex_provider.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "09f17919cf7ceaa55425394f1ac7dc6b397e0b05",
+      "bytes": 30985,
+      "blob_verified": true,
+      "computed_blob": "09f17919cf7ceaa55425394f1ac7dc6b397e0b05",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/ci/daily_standout_audit_us_commit.sh",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "e0add1b7955fbbb8acb5b9860e8d76e88b62b78f",
+      "bytes": 4514,
+      "blob_verified": true,
+      "computed_blob": "e0add1b7955fbbb8acb5b9860e8d76e88b62b78f",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/marketing/fomc_desk.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "e9e4488b4914e5af88462bdb43519305051112c8",
+      "bytes": 70646,
+      "blob_verified": true,
+      "computed_blob": "e9e4488b4914e5af88462bdb43519305051112c8",
+      "calls": [
+        {
+          "line": 740,
+          "function": "write_copy",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 768,
+          "function": "write_copy._caller._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 779,
+          "function": "write_copy",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 803,
+          "function": "write_copy",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/neuralweb/response_eval.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "95a750e30f7ce2b17c48dce52e4d6a2fe115d895",
+      "bytes": 96404,
+      "blob_verified": true,
+      "computed_blob": "95a750e30f7ce2b17c48dce52e4d6a2fe115d895",
+      "calls": [
+        {
+          "line": 892,
+          "function": "_one_shot",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 912,
+          "function": "_one_shot._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 924,
+          "function": "_one_shot",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/marketing/hot_tape_llm.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "1370ac49ea7a108a5748cd821f11db0f3d2847be",
+      "bytes": 54022,
+      "blob_verified": true,
+      "computed_blob": "1370ac49ea7a108a5748cd821f11db0f3d2847be",
+      "calls": [
+        {
+          "line": 1020,
+          "function": "phrase_or_fallback",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 1054,
+          "function": "phrase_or_fallback._caller._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 1071,
+          "function": "phrase_or_fallback",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 1103,
+          "function": "phrase_or_fallback",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/run_research_triage.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "f1b929e31ac6b7eeb8cf8843f747563a994734e3",
+      "bytes": 14225,
+      "blob_verified": true,
+      "computed_blob": "f1b929e31ac6b7eeb8cf8843f747563a994734e3",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/marketing/reply_voice.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "fd353aaf26fa91f65e4614cbc8082368daae12f3",
+      "bytes": 62828,
+      "blob_verified": true,
+      "computed_blob": "fd353aaf26fa91f65e4614cbc8082368daae12f3",
+      "calls": [
+        {
+          "line": 1048,
+          "function": "voice_or_fallback",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 1086,
+          "function": "voice_or_fallback._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 1099,
+          "function": "voice_or_fallback",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 1149,
+          "function": "voice_or_fallback._do_repair",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 1160,
+          "function": "voice_or_fallback",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/neuralweb/ask_brain.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "73573f8b270011854de68e03de078c1bc2a6beb6",
+      "bytes": 141040,
+      "blob_verified": true,
+      "computed_blob": "73573f8b270011854de68e03de078c1bc2a6beb6",
+      "calls": [
+        {
+          "line": 2860,
+          "function": "_run_ask_loop",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 2962,
+          "function": "_run_ask_loop_stream",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 3017,
+          "function": "_run_ask_loop_stream",
+          "call": "client.messages.stream",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 3137,
+          "function": "ask",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 3216,
+          "function": "ask_stream",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/metabolism/attention.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "fbe9d3b4869d207828906be60fe6a0b2ebbc2806",
+      "bytes": 33154,
+      "blob_verified": true,
+      "computed_blob": "fbe9d3b4869d207828906be60fe6a0b2ebbc2806",
+      "calls": [
+        {
+          "line": 190,
+          "function": "_call_llm._call_fn",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 199,
+          "function": "_call_llm",
+          "call": "make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/marketing/intelligence_llm.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "314567091b0191872ad817affd117d77d20fca85",
+      "bytes": 42514,
+      "blob_verified": true,
+      "computed_blob": "314567091b0191872ad817affd117d77d20fca85",
+      "calls": [
+        {
+          "line": 639,
+          "function": "_call_model",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 661,
+          "function": "_call_model._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 671,
+          "function": "_call_model",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 733,
+          "function": "phrase_packet",
+          "call": "_call_model",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/metabolism_adjudicate.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "3e37082f399acb88811d17e8cd2687a5f949b4b7",
+      "bytes": 26254,
+      "blob_verified": true,
+      "computed_blob": "3e37082f399acb88811d17e8cd2687a5f949b4b7",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/provider_capacity.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "68eda49254003956dd43193ad1284959a0a14593",
+      "bytes": 49702,
+      "blob_verified": true,
+      "computed_blob": "68eda49254003956dd43193ad1284959a0a14593",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/metabolism_propose.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "b1ddb686128bb5bc28e393fd848f91b48f73b8bb",
+      "bytes": 29230,
+      "blob_verified": true,
+      "computed_blob": "b1ddb686128bb5bc28e393fd848f91b48f73b8bb",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/metabolism/standout_auditor.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "640111e48c5b62a9287c38ced1e5ab26aab170ec",
+      "bytes": 90034,
+      "blob_verified": true,
+      "computed_blob": "640111e48c5b62a9287c38ced1e5ab26aab170ec",
+      "calls": [
+        {
+          "line": 837,
+          "function": "_invoke_auditor_llm",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 849,
+          "function": "_invoke_auditor_llm._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 863,
+          "function": "_invoke_auditor_llm",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 878,
+          "function": "_invoke_auditor_llm",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 884,
+          "function": "_invoke_auditor_llm",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 897,
+          "function": "_invoke_auditor_llm",
+          "call": "_la2.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 902,
+          "function": "_invoke_auditor_llm",
+          "call": "_la2.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 1729,
+          "function": "_invoke_autopsy_llm",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 1738,
+          "function": "_invoke_autopsy_llm._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 1755,
+          "function": "_invoke_autopsy_llm",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 1763,
+          "function": "_invoke_autopsy_llm",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 1769,
+          "function": "_invoke_autopsy_llm",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/run_signal_foundry_brainstorm.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "9d7120ae43bad45269e5de6aea3239212cc3aa2e",
+      "bytes": 45734,
+      "blob_verified": true,
+      "computed_blob": "9d7120ae43bad45269e5de6aea3239212cc3aa2e",
+      "calls": [
+        {
+          "line": 171,
+          "function": "_build_scheduled_providers",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 183,
+          "function": "_build_operator_providers",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 269,
+          "function": "_llm_call._call_fn",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 285,
+          "function": "_llm_call",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/news_impact/cascade.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "bd3708e2a2ac41c111b83c392804250450225336",
+      "bytes": 92260,
+      "blob_verified": true,
+      "computed_blob": "bd3708e2a2ac41c111b83c392804250450225336",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/research_intelligence_vault_head.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "674ebac711f6d3a083f47097ec10c13b5b1e823f",
+      "bytes": 7739,
+      "blob_verified": true,
+      "computed_blob": "674ebac711f6d3a083f47097ec10c13b5b1e823f",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/press/research_triage.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "dab8f4a4741ca3694a9c3190a3ba1aa83dcbbfab",
+      "bytes": 88243,
+      "blob_verified": true,
+      "computed_blob": "dab8f4a4741ca3694a9c3190a3ba1aa83dcbbfab",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/check_capability_redline.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "dba8879122e4772b567f8cd0f4736bc110b8029c",
+      "bytes": 28099,
+      "blob_verified": true,
+      "computed_blob": "dba8879122e4772b567f8cd0f4736bc110b8029c",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/marketing/breaking_summary.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "f0bb825581bf2a594aca02a518250f4f30794591",
+      "bytes": 74090,
+      "blob_verified": true,
+      "computed_blob": "f0bb825581bf2a594aca02a518250f4f30794591",
+      "calls": [
+        {
+          "line": 405,
+          "function": "_llm_summarize",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 478,
+          "function": "_llm_summarize._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 491,
+          "function": "_llm_summarize",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/metabolism_shadow_cycle.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "3d7ff94ffdfa1a0cc8d283dddddaf25d1cff0fe1",
+      "bytes": 51027,
+      "blob_verified": true,
+      "computed_blob": "3d7ff94ffdfa1a0cc8d283dddddaf25d1cff0fe1",
+      "calls": [
+        {
+          "line": 535,
+          "function": "_run_agenda",
+          "call": "build_providers",
+          "category": "shared_provider_construction"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/provider_production_modes.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "b237bbe123e18db3382de3ae311316e9cf274f9f",
+      "bytes": 47318,
+      "blob_verified": true,
+      "computed_blob": "b237bbe123e18db3382de3ae311316e9cf274f9f",
+      "calls": [
+        {
+          "line": 1001,
+          "function": "_minimax_transport",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 1002,
+          "function": "_minimax_transport",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        }
+      ],
+      "reference_tags": [
+        "direct_anthropic",
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/marketing/content_studio.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "6e20492071af9afaf5206cd40b44449367f04888",
+      "bytes": 357742,
+      "blob_verified": true,
+      "computed_blob": "6e20492071af9afaf5206cd40b44449367f04888",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/marketing/publish_time_content.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "294f7acf4130eb59f13c2ac04f48c83cbe212619",
+      "bytes": 158478,
+      "blob_verified": true,
+      "computed_blob": "294f7acf4130eb59f13c2ac04f48c83cbe212619",
+      "calls": [
+        {
+          "line": 1594,
+          "function": "phrase_or_template._attempt",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 1620,
+          "function": "phrase_or_template._attempt._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 1629,
+          "function": "phrase_or_template._attempt",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/company_intelligence/e3_shadow_compiler.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "c7122c8d9591977be97b1dd66e7a4d6214877ffc",
+      "bytes": 56626,
+      "blob_verified": true,
+      "computed_blob": "c7122c8d9591977be97b1dd66e7a4d6214877ffc",
+      "calls": [
+        {
+          "line": 895,
+          "function": "_attempt_qwen",
+          "call": "_call_openai_compat",
+          "category": "custom_endpoint_execution"
+        },
+        {
+          "line": 906,
+          "function": "_attempt_qwen",
+          "call": "_call_openai_compat",
+          "category": "custom_endpoint_execution"
+        },
+        {
+          "line": 973,
+          "function": "freeze_comparator_choice",
+          "call": "build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 1033,
+          "function": "_attempt_comparator.call_fn",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 1049,
+          "function": "_attempt_comparator",
+          "call": "make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "ops/executive_os/prepare-capacity-host.sh",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "c94a8f4595b94014a74f8aa8df9138e071b4a4a5",
+      "bytes": 52451,
+      "blob_verified": true,
+      "computed_blob": "c94a8f4595b94014a74f8aa8df9138e071b4a4a5",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "ops/executive_os/capacity_source_contract.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "e1acab16bee86c16c56d24736f668e05187bc581",
+      "bytes": 53224,
+      "blob_verified": true,
+      "computed_blob": "e1acab16bee86c16c56d24736f668e05187bc581",
+      "calls": [],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/translate.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "19a80d2d868ee831e2516c1b5249748125be574d",
+      "bytes": 6802,
+      "blob_verified": true,
+      "computed_blob": "19a80d2d868ee831e2516c1b5249748125be574d",
+      "calls": [
+        {
+          "line": 80,
+          "function": "_client",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 81,
+          "function": "_client",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 96,
+          "function": "_translate_one_batch",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        }
+      ],
+      "reference_tags": [
+        "direct_anthropic"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/client.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "f5caa87166abcbb9315b7da8106cbe80ad86657d",
+      "bytes": 9492,
+      "blob_verified": true,
+      "computed_blob": "f5caa87166abcbb9315b7da8106cbe80ad86657d",
+      "calls": [
+        {
+          "line": 79,
+          "function": "call_model",
+          "call": "cli_bridge.reason_sync",
+          "category": "brain_model_or_chat_entry"
+        },
+        {
+          "line": 96,
+          "function": "call_model",
+          "call": "codex_bridge.reason_sync",
+          "category": "brain_model_or_chat_entry"
+        },
+        {
+          "line": 113,
+          "function": "call_model",
+          "call": "cli_bridge.reason_sync",
+          "category": "brain_model_or_chat_entry"
+        },
+        {
+          "line": 126,
+          "function": "call_model",
+          "call": "anthropic.Anthropic().messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 126,
+          "function": "call_model",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        }
+      ],
+      "reference_tags": [
+        "direct_anthropic",
+        "native_harness"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/trumpflow/extract.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "d2d6c5a266289fc254c3d92b0ea558756b180b98",
+      "bytes": 10958,
+      "blob_verified": true,
+      "computed_blob": "d2d6c5a266289fc254c3d92b0ea558756b180b98",
+      "calls": [
+        {
+          "line": 221,
+          "function": "_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        }
+      ],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/china_news.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "431584da650851b68302852454d2137c62312e96",
+      "bytes": 74827,
+      "blob_verified": true,
+      "computed_blob": "431584da650851b68302852454d2137c62312e96",
+      "calls": [
+        {
+          "line": 1454,
+          "function": "news_brief",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 1455,
+          "function": "news_brief",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 1459,
+          "function": "news_brief",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        }
+      ],
+      "reference_tags": [
+        "direct_anthropic"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/macro_news.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "b2bf356a8cb90c3c2b7f98646ab2c33d58eda5d1",
+      "bytes": 83729,
+      "blob_verified": true,
+      "computed_blob": "b2bf356a8cb90c3c2b7f98646ab2c33d58eda5d1",
+      "calls": [
+        {
+          "line": 1573,
+          "function": "macro_brief",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 1574,
+          "function": "macro_brief",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 1580,
+          "function": "macro_brief",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        }
+      ],
+      "reference_tags": [
+        "direct_anthropic"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/qual_extraction.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "e593e41835e7b2494c277dc9b5510c195713ccbf",
+      "bytes": 33158,
+      "blob_verified": true,
+      "computed_blob": "e593e41835e7b2494c277dc9b5510c195713ccbf",
+      "calls": [
+        {
+          "line": 147,
+          "function": "_client",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 149,
+          "function": "_client",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 700,
+          "function": "_call_model",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 707,
+          "function": "_call_model",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 775,
+          "function": "extract",
+          "call": "_call_model",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": [
+        "direct_anthropic"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/catalyst_stock.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "3109a2495832af53374f62ef92519b4d95022f6e",
+      "bytes": 30519,
+      "blob_verified": true,
+      "computed_blob": "3109a2495832af53374f62ef92519b4d95022f6e",
+      "calls": [
+        {
+          "line": 360,
+          "function": "_call_model",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 505,
+          "function": "brief_for_ticker",
+          "call": "_call_model",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "admin/orchestrator_chat.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "14190a0734e9c032ce8dba347ac7c436abedbc64",
+      "bytes": 31338,
+      "blob_verified": true,
+      "computed_blob": "14190a0734e9c032ce8dba347ac7c436abedbc64",
+      "calls": [
+        {
+          "line": 213,
+          "function": "_build_client",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 215,
+          "function": "_build_client",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 458,
+          "function": "_run_loop",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        }
+      ],
+      "reference_tags": [
+        "direct_anthropic"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/china_news_intel.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "92596a431ee13f507f6f888851ac70b3067e8821",
+      "bytes": 50189,
+      "blob_verified": true,
+      "computed_blob": "92596a431ee13f507f6f888851ac70b3067e8821",
+      "calls": [
+        {
+          "line": 1024,
+          "function": "news_brief",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 1025,
+          "function": "news_brief",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 1028,
+          "function": "news_brief",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        }
+      ],
+      "reference_tags": [
+        "direct_anthropic"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "collectors/special_situations.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "5b4356c8f5a2b830c077e023f0647ac22ff45d51",
+      "bytes": 43075,
+      "blob_verified": true,
+      "computed_blob": "5b4356c8f5a2b830c077e023f0647ac22ff45d51",
+      "calls": [
+        {
+          "line": 561,
+          "function": "_llm_client",
+          "call": "anthropic.Anthropic",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 600,
+          "function": "_llm_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        }
+      ],
+      "reference_tags": [
+        "direct_anthropic"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "ops/native_fabric/experiential_proxy/worker_client.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "51f0494229780c0902294e451fb5b490391569f0",
+      "bytes": 1554,
+      "blob_verified": true,
+      "computed_blob": "51f0494229780c0902294e451fb5b490391569f0",
+      "calls": [
+        {
+          "line": 13,
+          "function": "new_client",
+          "call": "OpenAI",
+          "category": "provider_client_construction"
+        },
+        {
+          "line": 30,
+          "function": "<module>",
+          "call": "client.chat.completions.create",
+          "category": "sdk_completion_or_stream"
+        }
+      ],
+      "reference_tags": [
+        "direct_openai"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "ops/native_fabric/paid_canonical_glm/source/glm_shim.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "3a4151b7958a386a47c0d5c705589c8934616e80",
+      "bytes": 65508,
+      "blob_verified": true,
+      "computed_blob": "3a4151b7958a386a47c0d5c705589c8934616e80",
+      "calls": [],
+      "reference_tags": [
+        "custom_endpoint"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "ops/native_fabric/paid_canonical_glm/candidate/glm_shim.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "339b69633c0a3b54c234b350f1a0ff8e59524cd3",
+      "bytes": 76048,
+      "blob_verified": true,
+      "computed_blob": "339b69633c0a3b54c234b350f1a0ff8e59524cd3",
+      "calls": [],
+      "reference_tags": [
+        "custom_endpoint"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "scripts/translate_all.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "c5f8ae824f10b7b9e98eec3270aa639527bf5b18",
+      "bytes": 4994,
+      "blob_verified": true,
+      "computed_blob": "c5f8ae824f10b7b9e98eec3270aa639527bf5b18",
+      "calls": [],
+      "reference_tags": [
+        "native_harness"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "scripts/install_claude_cli.sh",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "584e87e44e58f4a8c3ffa0bb2fbfcd1f18221035",
+      "bytes": 1342,
+      "blob_verified": true,
+      "computed_blob": "584e87e44e58f4a8c3ffa0bb2fbfcd1f18221035",
+      "calls": [],
+      "reference_tags": [
+        "native_harness"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/cost_guard.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "d2926db6930a49a821325a743707477dda4b0eb8",
+      "bytes": 21971,
+      "blob_verified": true,
+      "computed_blob": "d2926db6930a49a821325a743707477dda4b0eb8",
+      "calls": [],
+      "reference_tags": [
+        "native_harness"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "control_plane/provider_protocols.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "92452237ac3956e8104e45ab9ee386c2fa016b76",
+      "bytes": 819,
+      "blob_verified": true,
+      "computed_blob": "92452237ac3956e8104e45ab9ee386c2fa016b76",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "admin/flags.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "06e1639d43fd679af4e8039a99c3b908fc8f5454",
+      "bytes": 8998,
+      "blob_verified": true,
+      "computed_blob": "06e1639d43fd679af4e8039a99c3b908fc8f5454",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "common/redaction.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "5fcb5604ab5a1c13e70c55fea3cdffa564821375",
+      "bytes": 8466,
+      "blob_verified": true,
+      "computed_blob": "5fcb5604ab5a1c13e70c55fea3cdffa564821375",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "ops/native_fabric/quota_continuity/source/glm_keys.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "d2c97617e60c85dfb463aaa8c03f09f7ffd37986",
+      "bytes": 18549,
+      "blob_verified": true,
+      "computed_blob": "d2c97617e60c85dfb463aaa8c03f09f7ffd37986",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/regime_snap_veto.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "0b42585f9d3f45bbbf7c660190540d81d030e202",
+      "bytes": 9191,
+      "blob_verified": true,
+      "computed_blob": "0b42585f9d3f45bbbf7c660190540d81d030e202",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "control_plane/fabric_attended_claude.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "8f4473d8836975f682c02238b9c0e34c7fc2bfaf",
+      "bytes": 30612,
+      "blob_verified": true,
+      "computed_blob": "8f4473d8836975f682c02238b9c0e34c7fc2bfaf",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/ai_desk.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "f171e4e61d5da2cb002e7d5be692ffa31e6f852f",
+      "bytes": 41592,
+      "blob_verified": true,
+      "computed_blob": "f171e4e61d5da2cb002e7d5be692ffa31e6f852f",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/translate_profiles.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "0b32339e09e9bddca679ece7cddc11b1bd759413",
+      "bytes": 4751,
+      "blob_verified": true,
+      "computed_blob": "0b32339e09e9bddca679ece7cddc11b1bd759413",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "control_plane/fabric_attended_routing.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "4ff1d11d56291d4997e9c97f03d3d574701d33f1",
+      "bytes": 12723,
+      "blob_verified": true,
+      "computed_blob": "4ff1d11d56291d4997e9c97f03d3d574701d33f1",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/cli_bridge.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "6ebc9e54c1d636d58dc5491c5826e75277ca1705",
+      "bytes": 69795,
+      "blob_verified": true,
+      "computed_blob": "6ebc9e54c1d636d58dc5491c5826e75277ca1705",
+      "calls": [
+        {
+          "line": 1058,
+          "function": "_via_sdk",
+          "call": "_sdk_query",
+          "category": "native_harness_invocation"
+        },
+        {
+          "line": 1375,
+          "function": "chat_stream",
+          "call": "_sdk_query",
+          "category": "native_harness_invocation"
+        }
+      ],
+      "reference_tags": [
+        "native_harness"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/stage_research.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "cf051848c2b6afd77788479dcb235956cae009a2",
+      "bytes": 13521,
+      "blob_verified": true,
+      "computed_blob": "cf051848c2b6afd77788479dcb235956cae009a2",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "app/main.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "64b3b5fe385313098e4606320eb9aeff2d7ed9c0",
+      "bytes": 143225,
+      "blob_verified": true,
+      "computed_blob": "64b3b5fe385313098e4606320eb9aeff2d7ed9c0",
+      "calls": [
+        {
+          "line": 1750,
+          "function": "brain_stream._gen",
+          "call": "gw.chat_stream",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/translate.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "0df707439637a648720a319b0c325d771ca2ff76",
+      "bytes": 18792,
+      "blob_verified": true,
+      "computed_blob": "0df707439637a648720a319b0c325d771ca2ff76",
+      "calls": [
+        {
+          "line": 195,
+          "function": "_call_haiku",
+          "call": "cli_bridge.reason_sync",
+          "category": "brain_model_or_chat_entry"
+        },
+        {
+          "line": 244,
+          "function": "_call_haiku_direct",
+          "call": "cli_bridge.reason_sync",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": [
+        "native_harness"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "control_plane/fabric_packet_inference.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "c27c7886bb62cb0cdac6101073a28d36afc772ee",
+      "bytes": 15536,
+      "blob_verified": true,
+      "computed_blob": "c27c7886bb62cb0cdac6101073a28d36afc772ee",
+      "calls": [],
+      "reference_tags": [
+        "fabric_reference"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/foresight_analyst.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "d3fd75b036cfc0d9650c0a141325f7aa28e085d5",
+      "bytes": 24478,
+      "blob_verified": true,
+      "computed_blob": "d3fd75b036cfc0d9650c0a141325f7aa28e085d5",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "admin/mastermind_logs.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "d63d83aad70fbb804f09342bf24471dd7c6dbedb",
+      "bytes": 44061,
+      "blob_verified": true,
+      "computed_blob": "d63d83aad70fbb804f09342bf24471dd7c6dbedb",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "ops/native_fabric/grok47/overlay/sub.sh",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "59d830d2c2d768df1f7dd678b0a7334d8628ad9f",
+      "bytes": 42698,
+      "blob_verified": true,
+      "computed_blob": "59d830d2c2d768df1f7dd678b0a7334d8628ad9f",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "ops/native_fabric/quota_continuity/candidate/capacity_preflight.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "e493b28b13567a16ce464697d1c575e408729ea5",
+      "bytes": 8087,
+      "blob_verified": true,
+      "computed_blob": "e493b28b13567a16ce464697d1c575e408729ea5",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/key_rotor.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "61b3c5ba331dec783c7e97c56d12e16c068338a1",
+      "bytes": 41148,
+      "blob_verified": true,
+      "computed_blob": "61b3c5ba331dec783c7e97c56d12e16c068338a1",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/launchd/theta_surface_accrual.sh",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "6f30f298cf5d85d565c74c7b2d8f010afee1c96c",
+      "bytes": 4438,
+      "blob_verified": true,
+      "computed_blob": "6f30f298cf5d85d565c74c7b2d8f010afee1c96c",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/run_press.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "26686e7c7cfea204322d32d02a8d6ab4e1ef0f45",
+      "bytes": 85870,
+      "blob_verified": true,
+      "computed_blob": "26686e7c7cfea204322d32d02a8d6ab4e1ef0f45",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "control_plane/attempt_inference_endpoint.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "6cd017f6d8119f7d0d5ee6ef1086f3d818ebc0af",
+      "bytes": 16421,
+      "blob_verified": true,
+      "computed_blob": "6cd017f6d8119f7d0d5ee6ef1086f3d818ebc0af",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "control_plane/opencode_go_stream.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "589160104acd41e97b9688de1d97858ef0730a71",
+      "bytes": 12464,
+      "blob_verified": true,
+      "computed_blob": "589160104acd41e97b9688de1d97858ef0730a71",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "ops/native_fabric/experiential_proxy/gateway.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "63287f3d5675b462fbe408f60bf8fcbb263906f9",
+      "bytes": 25020,
+      "blob_verified": true,
+      "computed_blob": "63287f3d5675b462fbe408f60bf8fcbb263906f9",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "control_plane/opencode_go_pooled_transport.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "929755b01c20982014b45babca5eff9a292b1ed3",
+      "bytes": 17868,
+      "blob_verified": true,
+      "computed_blob": "929755b01c20982014b45babca5eff9a292b1ed3",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "ops/native_fabric/experiential_native_bridge/test_experiential_native_bridge.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "18d08f3423258230068e657b1ec95c0bf1d5a596",
+      "bytes": 45356,
+      "blob_verified": true,
+      "computed_blob": "18d08f3423258230068e657b1ec95c0bf1d5a596",
+      "calls": [],
+      "reference_tags": [
+        "custom_endpoint",
+        "fabric_reference"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/strategist.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "dacf4043da1d442b9a4497895815e9ae5727dfd3",
+      "bytes": 17204,
+      "blob_verified": true,
+      "computed_blob": "dacf4043da1d442b9a4497895815e9ae5727dfd3",
+      "calls": [
+        {
+          "line": 276,
+          "function": "_reformat_to_json",
+          "call": "client.call_model",
+          "category": "brain_model_or_chat_entry"
+        },
+        {
+          "line": 301,
+          "function": "strategist_assess",
+          "call": "client.call_model",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/gate_officer.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "7a1f8f9426c070adee97ca65fd1bea973f721d29",
+      "bytes": 16833,
+      "blob_verified": true,
+      "computed_blob": "7a1f8f9426c070adee97ca65fd1bea973f721d29",
+      "calls": [
+        {
+          "line": 211,
+          "function": "_reformat_to_json",
+          "call": "client.call_model",
+          "category": "brain_model_or_chat_entry"
+        },
+        {
+          "line": 242,
+          "function": "gate_assess",
+          "call": "client.call_model",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/macro_risk.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "f9c329e09ab0a499216bae0ebdfcde5e5ccd9e60",
+      "bytes": 45571,
+      "blob_verified": true,
+      "computed_blob": "f9c329e09ab0a499216bae0ebdfcde5e5ccd9e60",
+      "calls": [
+        {
+          "line": 836,
+          "function": "_reformat_to_json",
+          "call": "client.call_model",
+          "category": "brain_model_or_chat_entry"
+        },
+        {
+          "line": 866,
+          "function": "macro_risk_assess",
+          "call": "client.call_model",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/committee.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "82be3aadb1756cd79aa95879f9f546f3cb60fb50",
+      "bytes": 33280,
+      "blob_verified": true,
+      "computed_blob": "82be3aadb1756cd79aa95879f9f546f3cb60fb50",
+      "calls": [
+        {
+          "line": 120,
+          "function": "sentinel_assess",
+          "call": "client.call_model",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/panel.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "f93b02a87e5e02d2993dbf31ebf4872fe1ea91c3",
+      "bytes": 2263,
+      "blob_verified": true,
+      "computed_blob": "f93b02a87e5e02d2993dbf31ebf4872fe1ea91c3",
+      "calls": [
+        {
+          "line": 35,
+          "function": "adjudicate",
+          "call": "client.call_model",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "scripts/dryrun_strat_raw.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "b914fa3dcc56311d614c93292529c1e4730c0767",
+      "bytes": 1280,
+      "blob_verified": true,
+      "computed_blob": "b914fa3dcc56311d614c93292529c1e4730c0767",
+      "calls": [
+        {
+          "line": 28,
+          "function": "<module>",
+          "call": "client.call_model",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/cio.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "e5320c4713e804e1e44d66e9720cae67231ce541",
+      "bytes": 25380,
+      "blob_verified": true,
+      "computed_blob": "e5320c4713e804e1e44d66e9720cae67231ce541",
+      "calls": [
+        {
+          "line": 484,
+          "function": "_narrate",
+          "call": "client.call_model",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/risk_officer.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "562df1123ea239350dfcbc9ced68b5e79617aa12",
+      "bytes": 14961,
+      "blob_verified": true,
+      "computed_blob": "562df1123ea239350dfcbc9ced68b5e79617aa12",
+      "calls": [
+        {
+          "line": 251,
+          "function": "risk_assess",
+          "call": "client.call_model",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/stock_desk.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "66a58873c8f7a2dbb409f77f10d4de26743472a0",
+      "bytes": 39212,
+      "blob_verified": true,
+      "computed_blob": "66a58873c8f7a2dbb409f77f10d4de26743472a0",
+      "calls": [
+        {
+          "line": 257,
+          "function": "synthesize",
+          "call": "master_brain._call_model",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "app/main.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "fdb22dc1a2650ff57d50a1c9c1cfebcf10521da4",
+      "bytes": 34012,
+      "blob_verified": true,
+      "computed_blob": "fdb22dc1a2650ff57d50a1c9c1cfebcf10521da4",
+      "calls": [
+        {
+          "line": 650,
+          "function": "chat.gen",
+          "call": "cli_bridge.chat_stream",
+          "category": "brain_model_or_chat_entry"
+        }
+      ],
+      "reference_tags": [
+        "native_harness"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/etf_mcp.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "48471f29b72472d03bac2d9c661655181148f961",
+      "bytes": 13632,
+      "blob_verified": true,
+      "computed_blob": "48471f29b72472d03bac2d9c661655181148f961",
+      "calls": [],
+      "reference_tags": [
+        "native_harness"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/codex_mcp_stdio.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "705a4ee133f6315e7ff40d6eaf9b8a84e4003ed2",
+      "bytes": 7539,
+      "blob_verified": true,
+      "computed_blob": "705a4ee133f6315e7ff40d6eaf9b8a84e4003ed2",
+      "calls": [],
+      "reference_tags": [
+        "native_harness"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/hk_mcp.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "6318c86203a8264843fbccfb0f844dce7394f109",
+      "bytes": 23243,
+      "blob_verified": true,
+      "computed_blob": "6318c86203a8264843fbccfb0f844dce7394f109",
+      "calls": [],
+      "reference_tags": [
+        "native_harness"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/china_mcp.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "d5b3d89cf6e8f4e3e1fe83cf7a777a30dcce49f7",
+      "bytes": 23020,
+      "blob_verified": true,
+      "computed_blob": "d5b3d89cf6e8f4e3e1fe83cf7a777a30dcce49f7",
+      "calls": [],
+      "reference_tags": [
+        "native_harness"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/bot_mcp.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "5e943ed908a3d1fd8818e45fa98fa69fc2d3e3ee",
+      "bytes": 47202,
+      "blob_verified": true,
+      "computed_blob": "5e943ed908a3d1fd8818e45fa98fa69fc2d3e3ee",
+      "calls": [],
+      "reference_tags": [
+        "native_harness"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/autonomous_mcp.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "fdaa736bb7a893294b4ed1ba5642638c5cd93a31",
+      "bytes": 16408,
+      "blob_verified": true,
+      "computed_blob": "fdaa736bb7a893294b4ed1ba5642638c5cd93a31",
+      "calls": [],
+      "reference_tags": [
+        "native_harness"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/heavyweight_mcp.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "b85cf374f946212dd318c0448cba5cad4bf4eec5",
+      "bytes": 17662,
+      "blob_verified": true,
+      "computed_blob": "b85cf374f946212dd318c0448cba5cad4bf4eec5",
+      "calls": [],
+      "reference_tags": [
+        "native_harness"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/flagship_desk_mcp.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "c1fe1f8d631abf59d4a9c4153b0f0ea8f659dffd",
+      "bytes": 13270,
+      "blob_verified": true,
+      "computed_blob": "c1fe1f8d631abf59d4a9c4153b0f0ea8f659dffd",
+      "calls": [],
+      "reference_tags": [
+        "native_harness"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "scripts/claude_operator_generation_helper.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "3ea31031daf8fb0a54d8c0e090ba97e573e8b828",
+      "bytes": 39409,
+      "blob_verified": true,
+      "computed_blob": "3ea31031daf8fb0a54d8c0e090ba97e573e8b828",
+      "calls": [],
+      "reference_tags": [
+        "native_harness"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "brain/bottleneck.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "f0ab5274df108cc7d56674c2c238eb2698ef7fdd",
+      "bytes": 2268,
+      "blob_verified": true,
+      "computed_blob": "f0ab5274df108cc7d56674c2c238eb2698ef7fdd",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "scripts/dryrun_diag.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "fb89073f7b24472877cdff26ef9679efeb1ff657",
+      "bytes": 2385,
+      "blob_verified": true,
+      "computed_blob": "fb89073f7b24472877cdff26ef9679efeb1ff657",
+      "calls": [],
+      "reference_tags": [
+        "native_harness"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/news_vector.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "09292f6017bd16db550d5bf0b5be39fe5a2337c5",
+      "bytes": 35757,
+      "blob_verified": true,
+      "computed_blob": "09292f6017bd16db550d5bf0b5be39fe5a2337c5",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/metabolism/budget_gate.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "3b4ba5a2ee35e5effbc1bc03051ac5ba04f5b21e",
+      "bytes": 22360,
+      "blob_verified": true,
+      "computed_blob": "3b4ba5a2ee35e5effbc1bc03051ac5ba04f5b21e",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/news_common.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "71e153136d66dad02239325a6927510a965d7026",
+      "bytes": 54397,
+      "blob_verified": true,
+      "computed_blob": "71e153136d66dad02239325a6927510a965d7026",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/neuralweb/brain_curve.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "d804a1c3f1b525110c44318da02ee2e2ebee7d9b",
+      "bytes": 26035,
+      "blob_verified": true,
+      "computed_blob": "d804a1c3f1b525110c44318da02ee2e2ebee7d9b",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/foresight_health.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "788ee577f26a8c57adb0c050d9ffe8e014f75419",
+      "bytes": 21050,
+      "blob_verified": true,
+      "computed_blob": "788ee577f26a8c57adb0c050d9ffe8e014f75419",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/policy_intent_desk.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "8ab5dc662c8f9b8ec1e2500e755ebdc8ba0c04c2",
+      "bytes": 48301,
+      "blob_verified": true,
+      "computed_blob": "8ab5dc662c8f9b8ec1e2500e755ebdc8ba0c04c2",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/neuralweb/key_pool.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "87a19b9794e19a32ac436ea8fbab7ecb2df528ff",
+      "bytes": 60639,
+      "blob_verified": true,
+      "computed_blob": "87a19b9794e19a32ac436ea8fbab7ecb2df528ff",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/neuralweb/brain_user_memory.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "95ae0b06a37eb08462ce1ed40f640aa292d5f3ee",
+      "bytes": 41602,
+      "blob_verified": true,
+      "computed_blob": "95ae0b06a37eb08462ce1ed40f640aa292d5f3ee",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/neuralweb/brain_analogues.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "d3a81cf86f001c8f7131acb7f42f61008cd3e518",
+      "bytes": 32162,
+      "blob_verified": true,
+      "computed_blob": "d3a81cf86f001c8f7131acb7f42f61008cd3e518",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/neuralweb/brain_market_intel.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "376d1045e6187926bea2fd4c83385d140174b817",
+      "bytes": 110272,
+      "blob_verified": true,
+      "computed_blob": "376d1045e6187926bea2fd4c83385d140174b817",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/marketing/copywriter.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "dd11794380df3cc1278830937c6b97878fd71de5",
+      "bytes": 476083,
+      "blob_verified": true,
+      "computed_blob": "dd11794380df3cc1278830937c6b97878fd71de5",
+      "calls": [
+        {
+          "line": 7374,
+          "function": "write_posts_llm",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 7411,
+          "function": "write_posts_llm._do_call",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 7422,
+          "function": "write_posts_llm",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 8823,
+          "function": "write_posts_llm_v2",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 9209,
+          "function": "_v2_write_one._messages_create",
+          "call": "client.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 9328,
+          "function": "_v2_write_one._one_more_rung",
+          "call": "llm_auth.first_usable",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 9329,
+          "function": "_v2_write_one._one_more_rung",
+          "call": "llm_auth.providers_after",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 9332,
+          "function": "_v2_write_one._one_more_rung",
+          "call": "llm_auth.first_usable",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 9347,
+          "function": "_v2_write_one._one_more_rung",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        },
+        {
+          "line": 9400,
+          "function": "_v2_write_one._call",
+          "call": "llm_auth.make_call",
+          "category": "shared_provider_execution_or_selection"
+        }
+      ],
+      "reference_tags": [
+        "direct_anthropic",
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/neuralweb/market_memory_experience_accrual.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "18f2f8b163951cefc4689faa289525548ad32931",
+      "bytes": 380522,
+      "blob_verified": true,
+      "computed_blob": "18f2f8b163951cefc4689faa289525548ad32931",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/options_sparse_selector.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "b7c74a27b71e2d0d4fdf00dba714c79389e0e719",
+      "bytes": 663278,
+      "blob_verified": true,
+      "computed_blob": "b7c74a27b71e2d0d4fdf00dba714c79389e0e719",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/sector_intelligence/contracts.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "4596db2298550a9afbc42b80299f403eedbc4854",
+      "bytes": 390917,
+      "blob_verified": true,
+      "computed_blob": "4596db2298550a9afbc42b80299f403eedbc4854",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/bench_capital_structure_serving.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "22ad21440bdd061522878009a2b145c2b64a66a5",
+      "bytes": 53082,
+      "blob_verified": true,
+      "computed_blob": "22ad21440bdd061522878009a2b145c2b64a66a5",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "admin/ai_cost.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "300a7cf3194533d212924b84457ea718c333ce46",
+      "bytes": 15729,
+      "blob_verified": true,
+      "computed_blob": "300a7cf3194533d212924b84457ea718c333ce46",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "admin/brain_guest.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "dd8d5a88d2cf5f8e56949c27f0fa1dd2a12513fd",
+      "bytes": 3254,
+      "blob_verified": true,
+      "computed_blob": "dd8d5a88d2cf5f8e56949c27f0fa1dd2a12513fd",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "app/brain_runs.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "2fb926c8eef88c5e8c1a4b9d1d3ba5132a056037",
+      "bytes": 15142,
+      "blob_verified": true,
+      "computed_blob": "2fb926c8eef88c5e8c1a4b9d1d3ba5132a056037",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "lib/chat_allowance.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "6fa5782318f884f79e427eec32b3c3616e194930",
+      "bytes": 7523,
+      "blob_verified": true,
+      "computed_blob": "6fa5782318f884f79e427eec32b3c3616e194930",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/neuralweb/brain_gateway.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "8524d63909acbf1bbdae0b679e25a82344b06ecb",
+      "bytes": 739361,
+      "blob_verified": true,
+      "computed_blob": "8524d63909acbf1bbdae0b679e25a82344b06ecb",
+      "calls": [
+        {
+          "line": 9724,
+          "function": "_build_lane_providers",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 9744,
+          "function": "_build_lane_providers",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 9760,
+          "function": "_build_lane_providers",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 9840,
+          "function": "_pro_degraded_providers",
+          "call": "llm_auth.build_providers",
+          "category": "shared_provider_construction"
+        },
+        {
+          "line": 10219,
+          "function": "_create_failover",
+          "call": "cl.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 12001,
+          "function": "_run_brain_loop_stream",
+          "call": "_cl.messages.create",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 12349,
+          "function": "_run_brain_loop_stream",
+          "call": "_cl.messages.stream",
+          "category": "sdk_completion_or_stream"
+        },
+        {
+          "line": 13556,
+          "function": "_instant_answer",
+          "call": "client.messages.stream",
+          "category": "sdk_completion_or_stream"
+        }
+      ],
+      "reference_tags": [
+        "shared_llm_auth"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/neuralweb/daily_brief.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "913e1446524a142d63d475e062be7707c8d98624",
+      "bytes": 48317,
+      "blob_verified": true,
+      "computed_blob": "913e1446524a142d63d475e062be7707c8d98624",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/neuralweb/capability_broker.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "b744dd39c5e025a1085d6865154aa0390197daff",
+      "bytes": 9924,
+      "blob_verified": true,
+      "computed_blob": "b744dd39c5e025a1085d6865154aa0390197daff",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "mastermind-terminal",
+      "path": "terminal/app/api/brain/[...path]/route.ts",
+      "commit": "494f75ad48aba86e0916cef21ffdacadef8fea28",
+      "blob_sha": "d74eb9b1e2e51f10aa3586da5e49cd47b1f0fd47",
+      "bytes": 17340,
+      "blob_verified": true,
+      "computed_blob": "d74eb9b1e2e51f10aa3586da5e49cd47b1f0fd47",
+      "calls": [],
+      "reference_tags": [
+        "gateway_proxy"
+      ]
+    },
+    {
+      "repository": "mastermind-terminal",
+      "path": "terminal/app/api/copilot/route.ts",
+      "commit": "494f75ad48aba86e0916cef21ffdacadef8fea28",
+      "blob_sha": "934089c8a24d45873213984daeb5a08ecb9a560a",
+      "bytes": 5289,
+      "blob_verified": true,
+      "computed_blob": "934089c8a24d45873213984daeb5a08ecb9a560a",
+      "calls": [],
+      "reference_tags": [
+        "gateway_proxy"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "lib/flow_score.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "2419dbcd767fc0078ce7e899d27fdd6006ca39c5",
+      "bytes": 31865,
+      "blob_verified": true,
+      "computed_blob": "2419dbcd767fc0078ce7e899d27fdd6006ca39c5",
+      "calls": [],
+      "reference_tags": [
+        "local_ml_library"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/d4_credit_flow_study.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "49759d3f43327b61e86fbef6f00cd4aaf78b6e2c",
+      "bytes": 13556,
+      "blob_verified": true,
+      "computed_blob": "49759d3f43327b61e86fbef6f00cd4aaf78b6e2c",
+      "calls": [],
+      "reference_tags": [
+        "local_ml_library"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/meta_label.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "4dceeb7cb229d6b354951072b7f71c38f0817ac6",
+      "bytes": 30029,
+      "blob_verified": true,
+      "computed_blob": "4dceeb7cb229d6b354951072b7f71c38f0817ac6",
+      "calls": [],
+      "reference_tags": [
+        "local_ml_library"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/slf031_edgar_pilot.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "dfeeaf87ff61ba09a5a648c08809e809a7f79242",
+      "bytes": 15681,
+      "blob_verified": true,
+      "computed_blob": "dfeeaf87ff61ba09a5a648c08809e809a7f79242",
+      "calls": [],
+      "reference_tags": [
+        "local_ml_library"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/oracle_onset_quality_w1.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "d9aa5e042ff7162abb492529af194d851d8dd1d5",
+      "bytes": 72842,
+      "blob_verified": true,
+      "computed_blob": "d9aa5e042ff7162abb492529af194d851d8dd1d5",
+      "calls": [],
+      "reference_tags": [
+        "local_ml_library"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/ops_train_flow_score.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "1d9400c30d19dbbe76d3d9063b7c879d2563a159",
+      "bytes": 62274,
+      "blob_verified": true,
+      "computed_blob": "1d9400c30d19dbbe76d3d9063b7c879d2563a159",
+      "calls": [],
+      "reference_tags": [
+        "local_ml_library"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/validate_claims_recession.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "10d2488098ee42de4db2ba624bec6734d1f9665b",
+      "bytes": 10657,
+      "blob_verified": true,
+      "computed_blob": "10d2488098ee42de4db2ba624bec6734d1f9665b",
+      "calls": [],
+      "reference_tags": [
+        "local_ml_library"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "scripts/research_top_anatomy_phase0.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "deb19c0acfb46dded03f9a760fd899cc405f8371",
+      "bytes": 302768,
+      "blob_verified": true,
+      "computed_blob": "deb19c0acfb46dded03f9a760fd899cc405f8371",
+      "calls": [],
+      "reference_tags": [
+        "local_ml_library"
+      ]
+    },
+    {
+      "repository": "macro",
+      "path": "engine/research_codegen/transport.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "33ce833e826bd0b17e3ea708a40a4d9216b2f11d",
+      "bytes": 40815,
+      "blob_verified": true,
+      "computed_blob": "33ce833e826bd0b17e3ea708a40a4d9216b2f11d",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/research_codegen/prefix_driver.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "bb56074c1ed7545a734696e801f9b89c98ea3b43",
+      "bytes": 25558,
+      "blob_verified": true,
+      "computed_blob": "bb56074c1ed7545a734696e801f9b89c98ea3b43",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "control_plane/model_router.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "177fe7f319c96b4af66ba86306d29caa28902ded",
+      "bytes": 53824,
+      "blob_verified": true,
+      "computed_blob": "177fe7f319c96b4af66ba86306d29caa28902ded",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "control_plane/executive_service_principal.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "d5fe39f71216cc4a728f59bcd36992be513eed5a",
+      "bytes": 40311,
+      "blob_verified": true,
+      "computed_blob": "d5fe39f71216cc4a728f59bcd36992be513eed5a",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "control_plane/paid_fabric_backend.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "ce2852df254cbf724a535e79cf4a2941543ee61f",
+      "bytes": 50619,
+      "blob_verified": true,
+      "computed_blob": "ce2852df254cbf724a535e79cf4a2941543ee61f",
+      "calls": [],
+      "reference_tags": [
+        "fabric_reference"
+      ]
+    },
+    {
+      "repository": "Mastermind",
+      "path": "control_plane/executive_paid_fabric_composition.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "282ee1d09aa540cd1969a57ff9f338bd2999e53b",
+      "bytes": 10642,
+      "blob_verified": true,
+      "computed_blob": "282ee1d09aa540cd1969a57ff9f338bd2999e53b",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "control_plane/external_pool_binding.py",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "bd5f5568135c7a851fe9265dc29594a34b4d0587",
+      "bytes": 21038,
+      "blob_verified": true,
+      "computed_blob": "bd5f5568135c7a851fe9265dc29594a34b4d0587",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "Mastermind",
+      "path": "config/subscription_provider_profiles.v1.json",
+      "commit": "8c417f6baf9ee19e7172efb9fea009e28ccf6769",
+      "blob_sha": "1c45eb4cc9b4f96f9db515556ab84084a115e541",
+      "bytes": 4137,
+      "blob_verified": true,
+      "computed_blob": "1c45eb4cc9b4f96f9db515556ab84084a115e541",
+      "calls": [],
+      "reference_tags": []
+    },
+    {
+      "repository": "macro",
+      "path": "engine/provider_native_capabilities.py",
+      "commit": "52abe2e183833a216267942a99513e6c9cbe062f",
+      "blob_sha": "8a78f0c3ce212d0719468e3a446feaaabe37ea7d",
+      "bytes": 16222,
+      "blob_verified": true,
+      "computed_blob": "8a78f0c3ce212d0719468e3a446feaaabe37ea7d",
+      "calls": [],
+      "reference_tags": []
+    }
+  ]
+}

@@ -221,3 +221,47 @@ def test_native_followup_refuses_bad_source_before_turn_intent_or_provider_io(tm
     with pytest.raises(StateConflict):
         asyncio.run(supervisor.run_native_continuation(retained, source=source, read_ref="fixture-read"))
     assert adapter.begin_turn_calls == 1 and runtime.events.list_events() == before
+
+
+@pytest.mark.parametrize("owner", ["capability", "coo"])
+@pytest.mark.parametrize("fault", ["overflow", "drift"])
+def test_bounded_policy_source_retained_harness_read_refuses_current_source_changes(
+    tmp_path, monkeypatch, owner, fault,
+):
+    import json
+    import control_plane.executive_agent_capabilities as capability_module
+    import control_plane.executive_coo_policy as coo_module
+    runtime, _supervisor, retained, adapter = _retained(tmp_path)
+    attempt_id = retained.session.attempt_id
+    expected = runtime.current_harness_binding_source(attempt_id)
+    before = (runtime.events.list_events(), runtime.jobs.list_jobs(),
+              runtime.attempts.list_attempts(), adapter.begin_turn_calls,
+              adapter.stop_calls, list(adapter.prompts))
+    module = capability_module if owner == "capability" else coo_module
+    attribute = "DEFAULT_CAPABILITY_POLICY_PATH" if owner == "capability" else "_POLICY_PATH"
+    raw = getattr(module, attribute).read_bytes()
+    if fault == "overflow":
+        limit = 2 * 1024 * 1024
+        assert len(raw) < limit
+        raw += b" " * (limit + 1 - len(raw))
+        reason = "source exceeds byte limit"
+    elif owner == "capability":
+        document = json.loads(raw)
+        document["policy_version"] = "bounded-policy-source-drift"
+        raw = json.dumps(document).encode("utf-8")
+        reason = "capability identity is stale"
+    else:
+        assert raw.count(b"  max_depth: 1") == 1
+        raw = raw.replace(b"  max_depth: 1", b"  max_depth: 2", 1)
+        reason = "max_depth must remain exactly 1"
+    selected = tmp_path / ("retained-capabilities.json" if owner == "capability" else "retained-authority.yml")
+    selected.write_bytes(raw)
+    error = StateConflict if owner == "capability" else coo_module.CooCyclePolicyError
+    with monkeypatch.context() as patch:
+        patch.setattr(module, attribute, selected)
+        with pytest.raises(error, match=reason):
+            runtime.current_harness_binding_source(attempt_id)
+    assert (runtime.events.list_events(), runtime.jobs.list_jobs(),
+            runtime.attempts.list_attempts(), adapter.begin_turn_calls,
+            adapter.stop_calls, list(adapter.prompts)) == before
+    assert runtime.current_harness_binding_source(attempt_id) == expected

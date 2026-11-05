@@ -1,74 +1,98 @@
 # Run-bound canonical stdout for new Macro Fabric workers
 
-**Status:** source-only draft, NOT INSTALLED, NO LIVE CANARY, NO AUTO-ACCEPTANCE.
+**Status: SOURCE_ONLY_NOT_INSTALLED.** This is an inert patch package for the
+existing Fabric controller. Source merge does not install it, run a worker,
+accept a result, settle a lease, or release a workspace.
 
-## Observed defect
-The installed controller supports a caller-selected `remote_sub.sh --out`, but its
-`fabric_task.py` status/result/acceptance reader observes only the exact
-`<ext>/lanes/<run-id>.remote.stdout` path. A bounded recent census found 64
-of 69 terminal rc0 sparse-Macro runs used custom output paths without that
-canonical file. This is *visibility* evidence, not evidence of accepted work.
-No historical result was rewritten, no run was replayed or accepted.
+## Defect and bounded correction
 
-## Tested correction
-This candidate patches exactly two incumbent files, preserving the controller,
-provider and original parent contracts. For **only** a new explicitly minted
-Macro worktree with observed worker rc0:
+The original incident record counted 64 of 69 terminal-rc0 sparse-Macro runs
+with custom output but no per-run canonical result. That historical visibility
+census is not evidence of accepted work. No historical run is backfilled,
+replayed, or accepted by this package.
 
-1. Refuse pre-existing custom/canonical destinations *before* leasing a worker.
-2. Transfer stdout into a unique private same-directory capture, not a fixed
-   output filename; reject capture setup or transfer failures.
-3. Reopen the captured regular file through a verified directory descriptor,
-   check owner/inode/size/stability, chmod private, then publish it at the
-   per-run canonical filename with an exclusive atomic link. Never overwrite.
-   A capture rejected after transfer remains for original-run reconciliation.
-4. If caller supplied custom `--out`, copy from that **already verified
-   canonical result** into the requested destination, under its own directory
-   descriptor with exclusive creation. Never overwrite another run's output.
-   Preserve the canonical bytes if custom publication fails; mark the controller
-   result unavailable instead of silently claiming successful delivery.
-5. A default canonical output, a nonzero worker, and non-Macro workers retain
-   their existing delivery semantics. A worker result becoming visible is
-   **not** acceptance, lease settlement, deletion, or publication authority.
+Only an explicitly minted new Macro worktree with observed worker rc0 uses
+the existing canonical-first path:
 
-The two-step canonical-first approach closes the cross-run collision where
-two worker IDs select the same custom filename. It additionally removes the
-fixed-canonical rsync symlink/overwrite race after the initial preflight check.
-Both file publications use no-replace directory-relative linking.
+1. Refuse pre-existing custom and canonical destinations before worker leasing.
+2. Transfer stdout into a private, unpredictable, same-directory capture.
+3. Verify and privatize the capture, then publish the per-run canonical path
+   through an exclusive directory-relative link.
+4. Derive a caller-selected custom output from the verified canonical result
+   using the existing exclusive scratch-and-link path.
+5. Keep non-Macro and nonzero-worker delivery behavior and explicit parent
+   acceptance unchanged.
 
-No scheduler, retry, credential, model, host, approval, or GC component added.
+The publication-identity correction keeps the verified capture or scratch
+descriptor open throughout publication. Immediately after linking, it opens
+the retained destination without following symlinks and checks the actual
+device/inode, owner, private mode, link count, size, stable metadata and bounded
+SHA256 content against that held descriptor and the verified digest. It checks
+the temporary name before removing it, fsyncs the directory, then verifies
+the retained destination again with its final single-link identity.
 
-## Verification
-Original on-M2 sources had the exact GitHub blobs and SHA256 checks recorded
-in `SOURCE_MANIFEST.json`; the source revision was protected Mastermind
-`2b3429d9aca0d539e7ac2b097a199fb86de2d329`. The combined patch passes
-`git apply --check` and produces exact candidate bytes from those preimages.
+Custom-copy failure preserves the original canonical bytes. Cleanup skips a
+known replacement of its temporary pathname. No failed verification prints a
+success receipt; a destination created before a later verification failure is
+unavailable evidence for original-run reconciliation, not permission to retry,
+overwrite it, or accept the worker.
 
-Inside the isolated M2 candidate `~/lanes/fabric_stdout_canonical_fix_20261020/ext`:
+These are point-in-time checks. Portable pathname operations do not provide
+immunity to an arbitrary same-UID writer after the final observation or between
+a pathname check and unlink. Exclusive controller writer/lease custody remains
+a runtime gate. Directory anchoring and no-replace linking retain their original
+scope; this correction does not create another publisher, reader, queue,
+retry, acceptance authority, or cleanup owner.
 
-```sh
-bash -n remote_sub.sh
-python3 -m py_compile remote_sub_helpers.py
-python3 -m pytest -q tests/test_macro_result_canonical.py \
-  tests/test_fabric_task.py tests/test_remote_sub.py
-```
+## Exact source and qualification
 
-**74 passed**; includes canonical promotion, same-run collision, symlink
-refusal, cross-worker custom collision, private-file custody, no autoaccept,
-default/non-Macro preservation, prelaunch refusal and incumbent regressions.
-This is isolated offline proof, not CI, merge, install, provider-call, or
-production acceptance.
+The frozen preimages in SOURCE_MANIFEST.json come from protected revision
+2b3429d9aca0d539e7ac2b097a199fb86de2d329. Both are still byte-identical at
+protected 88d16c0f587b129cf8b8c019cf6ab693eb21226c. The launcher candidate is
+unchanged; only the two helper publication functions and two internal checks
+change. Every other helper function remains unchanged.
 
-## Review and release boundary
-Original Fabric source publisher must verify current source pin, writer/lease
-and no effect-unknown collision, independently review the patch, publish through
-the existing guarded path, run hosted CI, and carry out a **fresh, admitted
-new-Macro worker canary** with custom output. Canary must prove exact-run
-canonical result visibility, unchanged custom output, no acceptance before
-original-parent review, and successful guarded reclaim only after explicit
-acceptance. Do not backfill the 64 historical runs by inference.
+Fresh principal qualification executes the exact helper and test function
+bodies in memory against real test-owned temporary files:
 
-Existing Mastermind #1651 draft PR is the single source carrier. Earlier
-version in the same branch is superseded by this canonical-first candidate.
-The Macro repository push guard is separate and remains untouched. Sparse
-creation PR #9194 was already merged; do not redo it or add another GC plane.
+- All 13 added cases pass: two ordinary successful publications and eleven
+  negative cases covering same-length temporary-name substitution before and
+  after link, same-inode content mutation, destination replacement after link
+  and during temporary unlink, and custom private-mode enforcement.
+- Running the same discriminators against the prior helper exposes ten
+  unqualified success receipts and one deletion of a replaced temporary name.
+  Both prior ordinary-success controls pass.
+- Exact preimage and prior-candidate hashes, helper/test syntax, unchanged
+  unrelated helper functions, strict patch reconstruction, and launcher
+  bash syntax are checked.
+
+All 22 existing candidate cases are retained, giving 35 total. The existing
+hosted gate tests/test_fabric_canonical_result_candidate.py recreates the
+reviewed public source closure, verifies preimage hashes, runs git apply
+--check, applies the patch, verifies candidate hashes, and executes the full
+35-case module. That full package run is pending at source publication; the
+exact-head GitHub qualification receipt records its subsequent result.
+The earlier 74-test receipt belongs to the previous candidate and is not
+carried forward as fresh proof for this correction.
+
+## Source disposition and runtime release boundary
+
+The repaired five-file source package is SELF_REVIEWED for protected GitHub
+source publication under the current Chairman assignment and attended-Web
+review policy. The source finding in PR1651 comment6649856602 is addressed by
+the actual identity/content discriminators and successful controls. No
+independent security review is claimed.
+
+Before installation or runtime use, the existing Fabric publisher must still
+qualify the installed generation and current preimages, security behavior,
+writer/lease custody and absence of uncertain effects; use its existing
+guarded rollout; and complete a fresh admitted custom-output worker canary.
+That canary must prove the exact run's canonical result availability, intact
+custom output and accepted=false until explicit parent review. Guarded
+workspace reclaim remains conditional on that acceptance.
+
+The historical 64 runs remain unaccepted and unreplayed. Macro's deliberately
+disabled push URL and the existing fleet holds remain untouched. Sparse
+minting PR9194 is already merged and must not be duplicated. PR1651 remains
+the single source carrier; no installed controller or original worker artifact
+is touched by this package or its inert tests.

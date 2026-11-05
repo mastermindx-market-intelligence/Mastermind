@@ -302,3 +302,220 @@ def test_macro_preflight_refuses_output_collisions_before_provider(tmp_path, col
         assert stored.read_text() == "old canonical output"
     else:
         assert requested.is_symlink()
+
+
+@pytest.fixture
+def publication_helper():
+    """Load the exact candidate helper so races occur inside its real functions."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("canonical_publication_candidate", HELPER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def publication_inputs(tmp_path, kind):
+    workspace(tmp_path)
+    payload = b"verified publication payload\n"
+    foreign = b"x" * len(payload)
+    if kind == "capture":
+        source_dir = tmp_path / "lanes"
+        staged = source_dir / (".macro-capture." + ID + ".abcdef04")
+        staged.write_bytes(payload)
+        staged.chmod(0o600)
+        target = canonical(tmp_path)
+    else:
+        source_dir = tmp_path
+        staged = None
+        canonical(tmp_path).write_bytes(payload)
+        canonical(tmp_path).chmod(0o600)
+        target = tmp_path / "caller.out"
+    return payload, foreign, source_dir, staged, target
+
+
+def invoke_publication(helper, monkeypatch, tmp_path, kind, staged, target, output):
+    import contextlib
+
+    monkeypatch.setattr(
+        helper.sys, "argv",
+        ["remote_sub_helpers.py", str(tmp_path), ID, str(staged or target)],
+    )
+    with contextlib.redirect_stdout(output):
+        if kind == "capture":
+            helper.publish_new_macro_canonical()
+        else:
+            helper.mirror_new_macro_result()
+
+
+def assert_no_publication_receipt(output):
+    assert "CANONICAL_RESULT_CAPTURED" not in output.getvalue()
+    assert "CUSTOM_RESULT_BOUND_FROM_CANONICAL" not in output.getvalue()
+
+
+@pytest.mark.parametrize("kind", ["capture", "custom"])
+def test_publication_binds_retained_descriptor_and_payload(
+        tmp_path, monkeypatch, publication_helper, kind):
+    import io
+
+    payload, _, _, staged, target = publication_inputs(tmp_path, kind)
+    output = io.StringIO()
+    invoke_publication(
+        publication_helper, monkeypatch, tmp_path, kind, staged, target, output,
+    )
+    assert target.read_bytes() == payload
+    assert target.stat().st_mode & 0o777 == 0o600
+    assert target.stat().st_nlink == 1
+    assert hashlib.sha256(payload).hexdigest() in output.getvalue()
+    expected = ("CANONICAL_RESULT_CAPTURED" if kind == "capture"
+                else "CUSTOM_RESULT_BOUND_FROM_CANONICAL")
+    assert expected in output.getvalue()
+    if kind == "capture":
+        assert not staged.exists()
+    else:
+        assert canonical(tmp_path).read_bytes() == payload
+        assert not list(tmp_path.glob(".macro-custom-*"))
+
+
+@pytest.mark.parametrize("kind", ["capture", "custom"])
+@pytest.mark.parametrize("phase", ["before_link", "after_link"])
+def test_same_length_temporary_name_substitution_cannot_report_success(
+        tmp_path, monkeypatch, publication_helper, kind, phase):
+    import io
+
+    payload, foreign, source_dir, staged, target = publication_inputs(tmp_path, kind)
+    original_link = os.link
+    held_original = source_dir / "held-original"
+    substituted = []
+
+    def substitute(source_name, target_name, **kwargs):
+        source_path = source_dir / source_name
+        if phase == "after_link":
+            original_link(source_name, target_name, **kwargs)
+        source_path.rename(held_original)
+        source_path.write_bytes(foreign)
+        source_path.chmod(0o600)
+        substituted.append(source_path)
+        if phase == "before_link":
+            original_link(source_name, target_name, **kwargs)
+
+    monkeypatch.setattr(os, "link", substitute)
+    output = io.StringIO()
+    with pytest.raises(ValueError):
+        invoke_publication(
+            publication_helper, monkeypatch, tmp_path, kind, staged, target, output,
+        )
+    assert_no_publication_receipt(output)
+    assert held_original.read_bytes() == payload
+    assert len(substituted) == 1
+    # Cleanup must not delete a known replacement of our temporary pathname.
+    assert substituted[0].is_file(), "known replacement temporary was deleted"
+    assert substituted[0].read_bytes() == foreign
+    if kind == "custom":
+        assert canonical(tmp_path).read_bytes() == payload
+
+
+@pytest.mark.parametrize("kind", ["capture", "custom"])
+def test_same_inode_content_change_cannot_report_original_digest(
+        tmp_path, monkeypatch, publication_helper, kind):
+    import io
+
+    payload, foreign, source_dir, staged, target = publication_inputs(tmp_path, kind)
+    original_link = os.link
+
+    def mutate(source_name, target_name, **kwargs):
+        source_path = source_dir / source_name
+        inode = source_path.stat().st_ino
+        source_path.write_bytes(foreign)
+        assert source_path.stat().st_ino == inode
+        original_link(source_name, target_name, **kwargs)
+
+    monkeypatch.setattr(os, "link", mutate)
+    output = io.StringIO()
+    with pytest.raises(ValueError, match="macro_result_publication_"):
+        invoke_publication(
+            publication_helper, monkeypatch, tmp_path, kind, staged, target, output,
+        )
+    assert_no_publication_receipt(output)
+    if kind == "custom":
+        assert canonical(tmp_path).read_bytes() == payload
+
+
+@pytest.mark.parametrize("kind", ["capture", "custom"])
+def test_destination_substitution_after_link_cannot_report_success(
+        tmp_path, monkeypatch, publication_helper, kind):
+    import io
+
+    payload, foreign, _, staged, target = publication_inputs(tmp_path, kind)
+    replacement = tmp_path / "replacement"
+    replacement.write_bytes(foreign)
+    replacement.chmod(0o600)
+    original_link = os.link
+
+    def replace_destination(source_name, target_name, **kwargs):
+        original_link(source_name, target_name, **kwargs)
+        os.replace(replacement, target)
+
+    monkeypatch.setattr(os, "link", replace_destination)
+    output = io.StringIO()
+    with pytest.raises(ValueError, match="macro_result_publication_"):
+        invoke_publication(
+            publication_helper, monkeypatch, tmp_path, kind, staged, target, output,
+        )
+    assert_no_publication_receipt(output)
+    assert target.read_bytes() == foreign
+    if kind == "custom":
+        assert canonical(tmp_path).read_bytes() == payload
+
+
+def test_custom_publication_requires_private_retained_mode(
+        tmp_path, monkeypatch, publication_helper):
+    import io
+
+    payload, _, source_dir, staged, target = publication_inputs(tmp_path, "custom")
+    original_link = os.link
+
+    def expose(source_name, target_name, **kwargs):
+        (source_dir / source_name).chmod(0o644)
+        original_link(source_name, target_name, **kwargs)
+
+    monkeypatch.setattr(os, "link", expose)
+    output = io.StringIO()
+    with pytest.raises(ValueError, match="macro_result_publication_"):
+        invoke_publication(
+            publication_helper, monkeypatch, tmp_path, "custom", staged, target, output,
+        )
+    assert_no_publication_receipt(output)
+    assert canonical(tmp_path).read_bytes() == payload
+
+
+@pytest.mark.parametrize("kind", ["capture", "custom"])
+def test_destination_substitution_during_temp_unlink_cannot_report_success(
+        tmp_path, monkeypatch, publication_helper, kind):
+    import io
+
+    payload, foreign, _, staged, target = publication_inputs(tmp_path, kind)
+    replacement = tmp_path / "replacement"
+    replacement.write_bytes(foreign)
+    replacement.chmod(0o600)
+    original_unlink = os.unlink
+    injected = []
+
+    def replace_during_cleanup(name, *args, **kwargs):
+        result = original_unlink(name, *args, **kwargs)
+        if str(name).startswith((".macro-capture.", ".macro-custom-")):
+            os.replace(replacement, target)
+            injected.append(True)
+        return result
+
+    monkeypatch.setattr(os, "unlink", replace_during_cleanup)
+    output = io.StringIO()
+    with pytest.raises(ValueError, match="macro_result_publication_"):
+        invoke_publication(
+            publication_helper, monkeypatch, tmp_path, kind, staged, target, output,
+        )
+    assert_no_publication_receipt(output)
+    assert injected == [True]
+    assert target.read_bytes() == foreign
+    if kind == "custom":
+        assert canonical(tmp_path).read_bytes() == payload

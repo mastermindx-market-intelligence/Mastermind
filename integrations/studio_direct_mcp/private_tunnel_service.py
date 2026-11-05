@@ -13,7 +13,20 @@ Gateway label stays com.mastermind.studio-direct-private.<account>.
 """
 from __future__ import annotations
 
+# The existing CLI remains the bootstrap trust boundary. Re-exec before any
+# path-searchable import; source library imports retain their existing behavior.
+import sys as _bootstrap_sys
+if __name__ == "__main__" and not (
+        _bootstrap_sys.flags.isolated and _bootstrap_sys.flags.no_site
+        and _bootstrap_sys.dont_write_bytecode):
+    import posix as _bootstrap_os
+    _bootstrap_os.execv(
+        _bootstrap_sys.executable,
+        [_bootstrap_sys.executable, "-I", "-S", "-B", __file__, *_bootstrap_sys.argv[1:]],
+    )
+
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -25,7 +38,67 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
-import private_service as gw
+def _load_gateway_bootstrap():
+    # This one adjacent source file is trusted bootstrap code, not a selectable
+    # dependency. Read bounded, stable regular bytes without following links.
+    # Its existing guard owns manifest validation and the process-scoped lock.
+    import importlib.util
+    path = Path(os.path.abspath(__file__)).with_name("private_service.py")
+    fd = None
+    try:
+        home = Path.home()
+        current = path.parent
+        while True:
+            info = current.lstat()
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) & 0o022):
+                raise ValueError("unsafe bootstrap parent")
+            if current == home or not path.is_relative_to(home):
+                break
+            current = current.parent
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        before = os.fstat(fd)
+        limit = 2 * 1024 * 1024
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+                or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) & 0o022
+                or before.st_size > limit):
+            raise ValueError("unsafe bootstrap source")
+        data = bytearray()
+        while len(data) <= limit:
+            part = os.read(fd, min(65536, limit + 1 - len(data)))
+            if not part:
+                break
+            data.extend(part)
+        identity = lambda item: (
+            item.st_dev, item.st_ino, item.st_mode, item.st_uid, item.st_nlink,
+            item.st_size, item.st_mtime_ns, item.st_ctime_ns)
+        if (len(data) > limit or identity(before) != identity(os.fstat(fd))
+                or identity(before) != identity(path.lstat())):
+            raise ValueError("bootstrap source changed")
+    except (OSError, ValueError):
+        raise SystemExit("CONTROL_BUNDLE_CLOSURE_REFUSED") from None
+    finally:
+        if fd is not None:
+            os.close(fd)
+    spec = importlib.util.spec_from_file_location("private_service", path)
+    module = importlib.util.module_from_spec(spec)
+    previous = sys.modules.get(spec.name)
+    sys.modules[spec.name] = module
+    try:
+        exec(compile(bytes(data), str(path), "exec"), module.__dict__)
+    except BaseException:
+        if previous is None:
+            sys.modules.pop(spec.name, None)
+        else:
+            sys.modules[spec.name] = previous
+        raise
+    return module
+
+if sys.flags.isolated:
+    gw = _load_gateway_bootstrap()
+else:
+    # Source-worktree library imports retain their original module identity.
+    import private_service as gw
 
 RESERVED_FUNNEL_PORT = gw.RESERVED_FUNNEL_PORT
 
@@ -35,6 +108,46 @@ PINNED_TUNNEL_CLIENT = (
 TRANSPORT_TTL = "5h"
 STARTUP_WAIT = "30s"
 MAX_CONCURRENT_REQUESTS = 4
+# Verified historical C2 Business tunnel is sealed at 8; new installs retain 4.
+LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS = 8
+# Exact original on-host sealed v1 tunnel manifest, not a new 8-request grant.
+C2_BUSINESS_LEGACY_TUNNEL_MANIFEST_SHA256 = (
+    "b6f511fc7d9c263914af0490ea0912c127979c85a0a3740e4834e12f716ee8fc"
+)
+# The other seven pre-existing eight-request seats are admitted only at their
+# exact previously observed v1 semantic AND raw manifest identities. This is
+# compatibility for already enrolled accounts, not a new 8-request grant.
+# New tunnel installations remain constrained to MAX_CONCURRENT_REQUESTS=4.
+LEGACY_PUBLIC_EIGHT_SEALS = {
+    "admin-business": (
+        "2dbbcfe81c561dc304aae2911a2828351de8d56d17b2d489ed76ad14ee9b4e00",
+        "c7cfae3f955144a12c4e6f611b459329c554d4a871f86d977efe2ef2f83ed827",
+    ),
+    "chatgpt1": (
+        "f505097d853ca471567fa54c7dbc1bfeb45e8dd2e41250cdf354153e3902897c",
+        "cfcd0578efe7a0a851ad48da6c9f6652f5ff95d4d81a226529c58ffab53cfdee",
+    ),
+    "chatgpt2-personal": (
+        "9b54addb78270eb1d47fce115a1d0f0c3be1af17d9739206177142e0ecd8e8c2",
+        "2e65e5f610a44a7717fccf34aee57df98a3689c115ec3b5073b71c71ada3e522",
+    ),
+    "chatgpt3": (
+        "9afad01b9b53b09096027bad15a865ce7173b669ac328f1f480546b857595093",
+        "b3fb25f4df0638a511ccfdf5c6d3427c6c814e07dd83dcba1615056efddcfb04",
+    ),
+    "chatgpt3-w570f6f34": (
+        "e8f688bd15f79ced968149abdc37469de167b767f8cc1d511edeefcbfa8d063e",
+        "8b7b908da1374d9c0cc50fc12917bf9c08f1cb65b0c6480560c996a5b39b178e",
+    ),
+    "chatgpt3-wa2a9e6f9": (
+        "66c23ef26dcd5077435f8ff4f6a2ae64db11aa4fd3397cd9387aed2241c847ab",
+        "bdb8e6fe6d099a606caaa76e0807df410cbb0f143cba13ddc620d5ea9c3399ac",
+    ),
+    "chatgpt4": (
+        "2b1a7fbea02a09d03c3807a0b2175da36a35343df51e737096d086cc283c4116",
+        "a86e709d5db144b0d7b6804d3d0155afb3017290e56819085c7bca21bb285d4e",
+    ),
+}
 CONTROL_PLANE_BASE_URL = "https://api.openai.com"
 # A historical successful poll is not evidence of a connected transport.
 # Allow two 30-second polls plus scheduling slack; never extend this on reads.
@@ -229,6 +342,8 @@ def _expected_argv(
     tunnel_client: Path,
     profile: Path,
     health_port: int,
+    *,
+    max_concurrent_requests: int = MAX_CONCURRENT_REQUESTS,
 ) -> list[str]:
     return [
         str(tunnel_client),
@@ -238,7 +353,7 @@ def _expected_argv(
         "--mcp.connection-max-ttl",
         TRANSPORT_TTL,
         "--mcp.max-concurrent-requests",
-        str(MAX_CONCURRENT_REQUESTS),
+        str(max_concurrent_requests),
         "--mcp.startup-wait-timeout",
         STARTUP_WAIT,
         "--health.listen-addr",
@@ -422,7 +537,21 @@ def _valid_manifest(data, account: str, label: str) -> bool:
         return False
     if data.get("transportTTL") != TRANSPORT_TTL:
         return False
-    if data.get("maxConcurrentRequests") != MAX_CONCURRENT_REQUESTS:
+    concurrency = data.get("maxConcurrentRequests")
+    legacy_c2 = (
+        account == "chatgpt2-business"
+        and data.get("version") == 1
+        and concurrency == LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS
+    )
+    legacy_public = (
+        data.get("version") == 1
+        and concurrency == LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS
+        and account in LEGACY_PUBLIC_EIGHT_SEALS
+        and hashlib.sha256(json.dumps(
+            data, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest() == LEGACY_PUBLIC_EIGHT_SEALS[account][0]
+    )
+    if concurrency != MAX_CONCURRENT_REQUESTS and not (legacy_c2 or legacy_public):
         return False
     if data.get("tunnelClient") != PINNED_TUNNEL_CLIENT:
         return False
@@ -453,11 +582,31 @@ def _read_manifest(
             raise SystemExit("not staged: tunnel manifest missing")
         return None
     try:
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        # Read and authenticate exactly the bytes that will be parsed. A
+        # pathname read followed by a second hash read admits a swap race.
+        with os.fdopen(os.open(
+            manifest_path, os.O_RDONLY | os.O_NOFOLLOW |
+            getattr(os, "O_CLOEXEC", 0) | os.O_NONBLOCK,
+        ), "rb") as reader:
+            info = os.fstat(reader.fileno())
+            if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= 65536:
+                raise ValueError("tunnel manifest is not a bounded regular file")
+            raw = reader.read(65537)
+        if len(raw) != info.st_size:
+            raise ValueError("tunnel manifest changed during capture")
+        data = json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError, UnicodeError):
         raise SystemExit("corrupt tunnel manifest")
     if not _valid_manifest(data, account, label):
         raise SystemExit("corrupt tunnel manifest")
+    if data.get("maxConcurrentRequests") == LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS:
+        expected = (
+            C2_BUSINESS_LEGACY_TUNNEL_MANIFEST_SHA256
+            if account == "chatgpt2-business" else
+            LEGACY_PUBLIC_EIGHT_SEALS.get(account, (None, None))[1]
+        )
+        if expected is None or hashlib.sha256(raw).hexdigest() != expected:
+            raise SystemExit("corrupt tunnel manifest")
     return data
 
 
@@ -578,7 +727,8 @@ def _verify_staged_install(account: str, label: str, roots: dict) -> dict:
     if plist is None or plist.get("Label") != label:
         raise SystemExit("plist is not our exact install")
     expected = _expected_argv(
-        tunnel_client, roots["profile"], int(manifest["healthPort"])
+        tunnel_client, roots["profile"], int(manifest["healthPort"]),
+        max_concurrent_requests=manifest["maxConcurrentRequests"],
     )
     if list(plist.get("ProgramArguments") or []) != expected:
         raise SystemExit("plist is not our exact install")

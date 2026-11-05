@@ -498,6 +498,15 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--operation-id", required=True)
         command.add_argument("--lane", choices=sorted(ALLOWED_LANES), default="web")
         command.add_argument("--repository", choices=sorted(_REPOSITORIES))
+        command.add_argument(
+            "--published-branch",
+            help="exact existing origin branch whose head equals this clean workspace HEAD",
+        )
+        command.add_argument(
+            "--published-pull-request",
+            type=int,
+            help="exact origin pull-request number whose refs/pull/<N>/head equals this clean workspace HEAD",
+        )
     return parser
 
 
@@ -652,8 +661,14 @@ def main(argv: list[str] | None = None) -> int:
                         or _repository_git(source, "rev-parse", "--verify", args.base_sha + "^{commit}") != args.base_sha):
                     raise WorkspaceError("REPOSITORY_BASE_INVALID: expected an available exact commit")
             # The enrolled policy names the host root, not a repository subroot.
-            if not _storage_status(host_root)["admission_allowed"]:
-                raise WorkspaceError("STORAGE_LOW_SPACE: available storage is below the host reserve")
+            # Storage policy and volume identity are ALWAYS observed: only the
+            # creation reserve may be waived, and only for an existing operation
+            # workspace that is re-used without any new allocation.
+            storage = _storage_status(host_root)
+            if not storage["admission_allowed"]:
+                requested_path = _workspace_path(root, args.lane, args.operation_id)
+                if not requested_path.exists():
+                    raise WorkspaceError("STORAGE_LOW_SPACE: available storage is below the host reserve")
             # Storage observation may block: re-observe the source at the effect boundary.
             if _selected_repository(alias, explicit=selected is not None) != source:
                 raise WorkspaceError("REPOSITORY_SOURCE_CHANGED: selected repository changed")
@@ -671,12 +686,21 @@ def main(argv: list[str] | None = None) -> int:
                 repository=selected,
             )
         if args.action == "status":
+            # The Git publisher calls this on every source-status/commit precheck.
+            # Verify the exact .git <-> common/worktrees registration and managed
+            # lock without enumerating unrelated worktrees. Release still uses
+            # the existing full-fleet identity/custody checks.
             receipt = inspect_linked_worktree(
                 source, root, destination, expected_operation_id=args.operation_id,
+                status_direct_registration=True,
+                published_branch=args.published_branch,
+                published_pull_request=args.published_pull_request,
             )
             return _emit("status", receipt, effect="NOT_APPLIED", repository=selected)
         receipt = release_linked_worktree(
             source, root, destination, expected_operation_id=args.operation_id,
+            published_branch=args.published_branch,
+            published_pull_request=args.published_pull_request,
         )
         return _emit(
             "release", receipt,

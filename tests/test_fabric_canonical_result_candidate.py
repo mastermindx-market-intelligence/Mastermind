@@ -79,4 +79,4 @@ def test_canonical_stdout_patch_exact_source_and_regressions(tmp_path):
         cwd=work, timeout=120, env=env,
     )
     assert result.returncode == 0, result.stdout[-2500:] + result.stderr[-2500:]
-    assert "22 passed" in result.stdout, result.stdout[-1000:]
+    assert "35 passed" in result.stdout, result.stdout[-1000:]

@@ -1,3 +1,4 @@
+import { appCopy } from "./app-copy";
 import { ProductAcceptancePanel } from "./product-acceptance/ProductAcceptancePanel";
 import type { AuthState, MissionHost } from "./host";
 import type {
@@ -6,12 +7,53 @@ import type {
 } from "./workspace-contract";
 import { observedMissionAssociation } from "./workspace-contract";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  canNavigateForAutomaticSignIn, explicitLogoutRecorded, registerUnsavedNavigationHold,
+} from "./auth-navigation-guard";
 import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
+import {
+  decideOfficeLaunchHandoff, officeLaunchWorkstreamAgrees, previewIsCurrent,
+  type DirectionPreview, type OfficeLaunchOutcome,
+} from "./meta-ceo/preview";
+import { readLaunchBindingConfig } from "./launch-config";
+import { resolveLaunchBinding } from "./orchestration/executive-launch-command-port";
+import { Today } from "./today/Today";
+import { AuthEntry } from "./auth-entry/AuthEntry";
+import privateEntryArt from "./auth-entry/private-entry.jpg";
+import { AttendedFabricWorkspace } from "./fabric/AttendedFabricWorkspace";
+import { qualifyWorkerResultRef } from "./fabric/mission-worker-result";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
+import { qualifyExecutiveOfficeSession, SESSION_TARGET_REF } from "./meta-ceo/session-context";
 import { Projects } from "./projects/Projects";
-import { Inbox } from "./inbox/Inbox";
+import { ProjectArchiveBrowser } from "./projects/archive/ProjectArchiveBrowser";
+import { ProjectWorkspace } from "./projects/ProjectWorkspace";
+import { ProjectConversationAssociation } from "./conversations/ProjectConversationAssociation";
+import { AcceptedDirectionPanel } from "./direction/AcceptedDirectionPanel";
+import { useProjectAdmissionWorkspace } from "./useProjectAdmissionWorkspace";
+import { useProjectDetailsControls } from "./projects/useProjectDetailsControls";
+import { InboxWorkspace } from "./inbox/InboxWorkspace";
 import { Knowledge } from "./knowledge/Knowledge";
+import { knowledgeDraftBinding, type KnowledgeDraftPort } from "./knowledge/KnowledgeDraftCompanion";
+import type { ProjectSourceDraftPort } from "./knowledge/library/project-source-draft";
+import { useProjectKnowledgeWorkspace } from "./knowledge/useProjectKnowledgeWorkspace";
+import { ProjectKnowledgeEditor } from "./knowledge/library/ProjectKnowledgeEditor";
+import type { ProjectMemoryDocument, KnowledgeLibrarySourceContext } from "./knowledge/library/knowledge-library-contract";
+import { ProjectKnowledgeLibrary } from "./knowledge/library/ProjectKnowledgeLibrary";
+import type { KnowledgeLibraryProps } from "./knowledge/library/knowledge-library-contract";
+import { ProjectSearchWorkspace } from "./discovery/ProjectSearchWorkspace";
+import { SavedConversationReader, createSavedConversationNavigation, type SavedConversationNavigation } from "./discovery/SavedConversationReader";
+import { DiscoveryWorkspace } from "./discovery/DiscoveryWorkspace";
+import { projectDiscovery } from "./discovery/projection";
+import { ProjectWorkDetail, ProjectEvidence, ProjectJournal } from "./workJourney";
 import { ConversationWindow } from "./conversations/ConversationWindow";
+import { HistoricalOriginalAnswers } from "./conversations/HistoricalOriginalAnswers";
+import { RetainedResults } from "./RetainedResults";
+import { RetainedRootChoice } from "./RetainedRootChoice";
+import { normalizeResultReferencesSelection } from "./result-references";
+import { parseDirectConsumeTarget } from "./direct-native-result";
+import { createAwaitingAnswerPort } from "./conversations/awaiting-answer-port";
+import { useQualifiedOriginalAnswer } from "./conversations/useQualifiedOriginalAnswer";
+import type { QualifiedSessionAnswer } from "./orchestration/executive-session-command-port";
 import { useObservedConversation } from "./conversations/useObservedConversation";
 import {
   OperationController,
@@ -37,6 +79,8 @@ import {
   type OrchestratorCommandBinding,
 } from "./orchestration/host-command-bindings";
 import { SelectedSessionContinuation } from "./orchestration/ui/SelectedSessionContinuation";
+import { DirectNativeResultPanel } from "./orchestration/ui/DirectNativeResultPanel";
+import { directLocationInput } from "./direct-native-location";
 import {
   completeExecutiveSessionBinding,
   readSessionOwnerContext,
@@ -46,17 +90,31 @@ import {
   allEvidence,
   decodeMission,
   decodeMissionv3,
-  locationSelectionInput,
   normalizeSelection,
   programsFromControlRoom,
   relationshipsForMission,
-  selectionFromLocation,
   unavailableMission,
   type MissionDocument,
   type MissionSelection,
   type Missionv3Document,
   type UnavailableMission,
 } from "./mission";
+import { controlRoomActionIsUncertain, type ControlRoomState } from "./control-room";
+import { ControlRoomPanel } from "./ControlRoomPanel";
+import { SessionEstate } from "./session-estate/SessionEstate";
+import { ResourcesSystemsPanel } from "./resources/ResourcesSystemsPanel";
+import { ResourceCapacityRead } from "./resources/ResourceCapacityRead";
+import { selectedCurrentCapacityAttempt } from "./resource-capacity-selection";
+import { SupervisionLedger } from "./supervision/SupervisionLedger";
+import { SupervisionTrace } from "./supervision/SupervisionTrace";
+import { ProjectPlanPanel } from "./planning/ProjectPlanPanel";
+import { ProjectJournalReader } from "./ProjectJournalReader";
+import { AutonomyPanel } from "./supervision/AutonomyPanel";
+import { ActivationReceipt } from "./activation/ActivationReceipt";
+import { WebSessionPreview } from "./activation/WebSessionPreview";
+import { readLaunchRequestPreview } from "./activation/LaunchRequestPreview";
+import { useControlRoomSurfaceControls } from "./useControlRoomSurfaceControls";
+import { ControlRoomSurfaceControls } from "./ControlRoomSurfaceControls";
 import {
   decodeResultEnvelope,
   normalizeResultSelection,
@@ -68,14 +126,22 @@ import {
   WORK_GROUP_ORDER,
   type WorkDocument,
 } from "./work";
+import { TransportDiagnosticFields } from "./TransportDiagnosticFields";
+import { closedReadFailurePhase, closedReadFailureReason, type DiagnosticPhase, type DiagnosticReadReason } from "./diagnostic-state";
 export const navigation = [
   "Today",
   "Projects",
   "Inbox",
   "Conversations",
   "Knowledge",
+  "Search",
+  "Sources",
+  "Tools",
+  "Meta-CEO",
   "Work",
   "Programs",
+  "Control Room",
+  "Session Estate",
   "Fleet & Capacity",
   "Mission Workspace",
   "Conversation",
@@ -91,7 +157,7 @@ const primaryNavigation: readonly View[] = [
   "Conversations",
   "Knowledge",
 ];
-type OperationalView = "Work" | "Programs" | "Fleet & Capacity";
+type OperationalView = "Work" | "Programs" | "Control Room" | "Fleet & Capacity";
 function OperationalNavigation({ label, onNavigate }: {
   label: string;
   onNavigate: (view: OperationalView) => void;
@@ -101,6 +167,7 @@ function OperationalNavigation({ label, onNavigate }: {
       <div className="segmented">
         <button type="button" onClick={() => onNavigate("Work")}>Work</button>
         <button type="button" onClick={() => onNavigate("Programs")}>Open Programs</button>
+        <button type="button" onClick={() => onNavigate("Control Room")}>Control Room</button>
         <button type="button" onClick={() => onNavigate("Fleet & Capacity")}>Fleet &amp; Capacity</button>
       </div>
     </nav>
@@ -113,23 +180,37 @@ const missionNavigation: readonly View[] = [
   "Connections",
   "Evidence",
 ];
-const projectTabs = ["Overview", "Plan", "Work", "Evidence", "More"] as const;
+const advancedNavigation: readonly View[] = ["Sources", "Tools", "Meta-CEO", "Work", "Programs", "Control Room", "Session Estate", "Fleet & Capacity", ...missionNavigation];
+const advancedLabel = (view: View, locale: "en" | "zh-CN") => locale === "zh-CN" ? navigationLabel(view, locale) :
+  view === "Work" ? "Work queue" : view === "Programs" ? "Programs workspace" :
+  view === "Control Room" ? "Control Room workspace" : view === "Fleet & Capacity" ? "Fleet & Capacity workspace" : view;
+const projectTabs = ["Conversation", "Overview", "Plan", "Work", "Evidence", "Journal", "More"] as const;
 type ProjectTab = (typeof projectTabs)[number];
-const navGlyph: Record<View, string> = {
-  Today: "⌂",
-  Projects: "◫",
-  Inbox: "▤",
-  Conversations: "◌",
-  Knowledge: "□",
-  Work: "▤",
-  Programs: "◫",
-  "Fleet & Capacity": "◇",
-  "Mission Workspace": "◎",
-  Conversation: "◌",
-  Activity: "↯",
-  Connections: "⌘",
-  Evidence: "□",
+const navigationPaths: Record<View, string> = {
+  Search: "M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14M15 15l6 6",
+  Sources: "M5 3h10l4 4v14H5zM14 3v5h5M8 12h8M8 16h5",
+  Tools: "M8 3h8v5H8zM4 12h5v8H4zM15 12h5v8h-5M12 8v3M6 11h12",
+
+  "Session Estate": "M4 4h16v12H4zM8 20h8M12 16v4",
+  Today: "M3 10 12 3l9 7v11H3zM9 21v-7h6v7",
+  Projects: "M3 6h6l2 2h10v12H3z", Inbox: "M3 5h18v15H3zM3 14h5l2 3h4l2-3h5",
+  Conversations: "M4 4h16v12H9l-5 4z", Knowledge: "M4 3h7v17H4zM14 3h6v17h-6z",
+  "Meta-CEO": "M12 3 3 8l9 5 9-5zM3 12l9 5 9-5M3 16l9 5 9-5",
+  Work: "M6 4h15v17H6zM2 8h8M2 13h8M2 18h8", Programs: "M3 4h18v16H3zM8 4v16M3 9h18",
+  "Control Room": "M4 5h16v14H4zM8 9h2M14 9h2M8 14h8", "Fleet & Capacity": "M3 4h18v6H3zM3 14h18v6H3zM7 7h.01M7 17h.01",
+  "Mission Workspace": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18M12 8v8M8 12h8",
+  Conversation: "M4 4h16v12H9l-5 4z", Activity: "M2 12h5l3-8 4 16 3-8h5",
+  Connections: "M9 8 5 12l4 4M15 8l4 4-4 4M10 12h4", Evidence: "M5 3h10l4 4v14H5zM14 3v5h5M8 12h8M8 16h6",
 };
+function NavigationIcon({ view }: { view: View }) {
+  return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={navigationPaths[view]} /></svg>;
+}
+function navigationLabel(view: View, locale: "en" | "zh-CN"): string {
+  if (locale === "en") return view;
+  const labels: Record<View, string> = { Search: "搜索", Sources: "来源", Tools: "工具", "Session Estate": "会话工作区", Today: "今天", Projects: "项目", Inbox: "收件箱", Conversations: "对话", Knowledge: "知识", "Meta-CEO": "Meta-CEO 办公室", Work: "工作", Programs: "工作流", "Control Room": "控制室", "Fleet & Capacity": "计算资源", "Mission Workspace": "任务工作区", Conversation: "当前对话", Activity: "活动", Connections: "连接", Evidence: "证据" };
+  return labels[view];
+}
+
 interface BuildReceipt {
   version: string;
   source_revision: string;
@@ -155,13 +236,19 @@ type WorkState =
 function isRetainedOperation(value: unknown): value is OperationPointer {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const pointer = value as Record<string, unknown>;
+  if (pointer.kind === "consume") {
+    return Object.keys(pointer).length === 3 &&
+      Object.keys(pointer).every(key => ["operationKey", "kind", "targetKey"].includes(key)) &&
+      typeof pointer.operationKey === "string" && /^mmos-consume-[0-9a-f]{40}$/.test(pointer.operationKey) &&
+      typeof pointer.targetKey === "string" && parseDirectConsumeTarget(pointer.targetKey) !== null;
+  }
   return Object.keys(pointer).every(key => ["operationKey", "kind", "targetKey"].includes(key)) &&
     typeof pointer.operationKey === "string" && pointer.operationKey.length > 0 &&
     typeof pointer.kind === "string" && ["launch", "message", "stop"].includes(pointer.kind) &&
     (pointer.targetKey === null || typeof pointer.targetKey === "string");
 }
 const SESSION_OPERATION_KEY = /^session-continue-[0-9a-f]{64}$/;
-const SESSION_TARGET_REF = /^fabric_attempt:[0-9a-f]{64}$/;
+// SESSION_TARGET_REF belongs to the same closed native-session proof adapter.
 // Only a session message pointer is restored from the session-exclusive
 // namespace; launch pointers live in their own store and are never adopted.
 function sessionStoreHold(state: OperationState): boolean {
@@ -1030,13 +1117,15 @@ function Evidence({ d }: { d: MissionDocument }) {
 function ProjectTabs({
   active,
   onChange,
+  tablistRef,
 }: {
   active: ProjectTab;
   onChange: (tab: ProjectTab) => void;
+  tablistRef?: React.Ref<HTMLDivElement>;
 }) {
   return (
     <nav className="card" aria-label="Project sections">
-      <div className="segmented" role="tablist" aria-label="Project workspace">
+      <div ref={tablistRef} className="segmented" role="tablist" aria-label="Project workspace">
         {projectTabs.map((tab) => (
           <button
             key={tab}
@@ -1158,6 +1247,7 @@ function Conversation({
   selection,
   association,
   contentAvailable,
+  locale = "en",
 }: {
   document?: WindowDocument | null;
   pending?: boolean;
@@ -1165,6 +1255,7 @@ function Conversation({
   selection?: MissionSelection | null;
   association?: ObservedMissionAssociation | null;
   contentAvailable?: boolean;
+  locale?: "en" | "zh-CN";
 }) {
   const refreshControl = (
     <button onClick={refresh} disabled={!!pending || !contentAvailable}>
@@ -1251,7 +1342,11 @@ function Conversation({
       </p>
       <Empty>
         {window.MastermindMissionHost?.readCurrentWindow
-          ? "Sign in with permitted conversation access, then open this view again."
+          ? contentAvailable
+            ? locale === "zh-CN"
+              ? "对话来源暂不可用。服务或来源恢复后，请刷新。"
+              : "The conversation source is unavailable. Refresh after the service or source becomes available."
+            : "Sign in with permitted conversation access, then open this view again."
           : "No conversation content is shown until a connected source is installed. Existing owner and effect boundaries remain unchanged."}
       </Empty>
       <details className="reason-details">
@@ -1267,10 +1362,64 @@ export interface AppProps {
   /** Explicit render inputs only; never inferred from auth, storage or OS preferences. */
   locale?: "en" | "zh-CN";
   theme?: "dark" | "light";
+  preferencesControl?: React.ReactNode;
 }
-export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
+export function App({ locale = "en", theme = "dark", preferencesControl }: AppProps = {}) {
+  const copy = appCopy(locale);
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const navigationPane = useRef<HTMLElement>(null);
+  const preferencesPane = useRef<HTMLDivElement>(null);
+  const [hasPreferencesNavigation, setHasPreferencesNavigation] = useState(false);
+  useLayoutEffect(() => {
+    setHasPreferencesNavigation(Boolean(preferencesPane.current?.querySelector("button.display-preferences__toggle")));
+  }, [preferencesControl]);
+  const openDisplayPreferences = () => {
+    if (window.matchMedia?.("(max-width: 959px)").matches) setNavigationOpen(true);
+    const open = () => {
+      const toggle = preferencesPane.current?.querySelector<HTMLButtonElement>("button.display-preferences__toggle");
+      if (!toggle) return;
+      if (toggle.getAttribute("aria-expanded") !== "true") toggle.click();
+      toggle.focus();
+    };
+    if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(open);
+    else queueMicrotask(open);
+  };
+  const navigationToggle = useRef<HTMLButtonElement>(null);
+  const closeNavigation = () => { setNavigationOpen(false); navigationToggle.current?.focus(); };
+  const advancedDisclosure = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (!navigationOpen) return;
+    const drawerMedia = window.matchMedia?.("(max-width: 959px)");
+    const leaveDrawerForDesktop = () => {
+      if (drawerMedia?.matches) return;
+      setNavigationOpen(false);
+      // The mobile toggle/close controls are hidden in the desktop layout.
+      document.getElementById("content")?.focus();
+    };
+    if (drawerMedia && !drawerMedia.matches) { leaveDrawerForDesktop(); return; }
+    drawerMedia?.addEventListener("change", leaveDrawerForDesktop);
+    const pane = navigationPane.current;
+    pane?.querySelector<HTMLButtonElement>("button")?.focus();
+    const handle = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); closeNavigation(); }
+      if (event.key !== "Tab" || !pane) return;
+      const items = Array.from(pane.querySelectorAll<HTMLElement>("button:not(:disabled), summary, a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex=\"0\"]"));
+      const visible = items.filter(element => {
+        const style = window.getComputedStyle(element);
+        return element.getClientRects().length > 0 && style.visibility !== "hidden" && style.display !== "none";
+      });
+      const first = visible[0], last = visible.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    document.addEventListener("keydown", handle);
+    return () => {
+      document.removeEventListener("keydown", handle);
+      drawerMedia?.removeEventListener("change", leaveDrawerForDesktop);
+    };
+  }, [navigationOpen]);
   const native = "__TAURI_INTERNALS__" in window,
-    initialLocation = useMemo(() => locationSelectionInput(), []),
+    initialLocation = useMemo(() => directLocationInput(), []),
     initial = useMemo(
       () =>
         initialLocation.hasIdentity
@@ -1279,14 +1428,38 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       [initialLocation],
     ),
     [selection, setSelection] = useState<MissionSelection | null>(initial),
-    [active, setActive] = useState<View>("Today"),
-    [projectTab, setProjectTab] = useState<ProjectTab | null>(null),
+    [active, setActive] = useState<View>(initial && new URL(window.location.href).searchParams.get("direct_native_job")===initial.rootJobId ? "Projects" : "Today"),
+    [projectTab, setProjectTab] = useState<ProjectTab | null>(initial && new URL(window.location.href).searchParams.get("direct_native_job")===initial.rootJobId ? "Overview" : null),
     [index, setIndex] = useState<ProgramIndex>({
       programs: [],
       state: "PENDING",
       reason: "SOURCE_READ_PENDING",
     }),
     [programRevision, setProgramRevision] = useState(0),
+    [programIndexEpoch, setProgramIndexEpoch] = useState(0),
+    // Observer-only Programs read phase for the diagnostic disclosures. It
+    // never gates a read and no read effect depends on it.
+    [programsReadPhase, setProgramsReadPhase] = useState<DiagnosticPhase>("unknown"),
+    [programsReadReason, setProgramsReadReason] = useState<DiagnosticReadReason>("UNKNOWN"),
+    // Pure disclosure tick: one re-render when a Technical details disclosure
+    // opens, so the observer snapshot is fresh. It starts no read.
+    [, setDiagnosticTick] = useState(0),
+    [catalogueProject, setCatalogueProject] = useState<{workRef: string; authRevision: number; epoch: number} | null>(null),
+    [retainedRoot, setRetainedRoot] = useState<{
+      pair: MissionSelection;
+      index: ProgramIndex;
+      epoch: number;
+      authRevision: number;
+      host: MissionHost | undefined;
+      hostGeneration: string | number;
+      missionWorkRef: string | null;
+      candidates: string;
+    } | null>(null),
+    [controlRoom, setControlRoom] = useState<ControlRoomState>({
+      state: "UNAVAILABLE", reason: "NOT_READ", ownerRevision: -1,
+    }),
+    [controlRoomRevision, setControlRoomRevision] = useState(0),
+    controlRoomAuthEpoch = useRef(0),
     [workState, setWorkState] = useState<WorkState>({ kind: "PENDING" }),
     [workRevision, setWorkRevision] = useState(0),
     [mission, setMission] = useState<MissionDocument | UnavailableMission>(() =>
@@ -1344,6 +1517,17 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     } | null>(null),
     [heldKind, setHeldKind] = useState<OperationKind | null>(null),
     [launchDraftDismissed, setLaunchDraftDismissed] = useState(false),
+    // The Office → existing launch owner handoff. It holds the exact frozen
+    // preview and the owner identity it was opened under, so the same
+    // captured context can be revalidated before a submission. It never
+    // carries a sessionRef and never owns a command.
+    [officeLaunchHandoff, setOfficeLaunchHandoff] = useState<{
+      preview: DirectionPreview;
+      workstreamRef: string;
+      binding: OrchestratorCommandBinding;
+      principalScope: string;
+      generation: string;
+    } | null>(null),
     // True only while a Check-status recover() is actually in flight. A
     // static checking/PENDING_POINTER hold (a persisted pointer with no
     // recovery promise) is NOT busy — its recovery control stays usable.
@@ -1353,6 +1537,16 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     previousAuth = useRef<string | null>(
       authState ? JSON.stringify(authState) : null,
     ),
+    previousAuthState = useRef<AuthState | null>(authState),
+    passiveExpiryHold = useRef(false),
+    // App already owns presentation state. These text-only snapshots survive
+    // an unmount during passive expiry, never a new principal or sign-out.
+    [retainedComposerDrafts, setRetainedComposerDrafts] = useState({ launch: "", session: "", launchWorkstream: "" }),
+    retainedComposerRef = useRef(retainedComposerDrafts),
+    retainedComposerScope = useRef<string | null>(null),
+    previousLiveComposerScope = useRef<string | null>(null),
+    hasUnsentUserText = useRef(false),
+    authRevisionRef = useRef(authRevision),
     previousHostGeneration = useRef(
       window.MastermindMissionHost?.invalidationGeneration?.() ?? 0,
     ),
@@ -1365,6 +1559,12 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     >(null),
     [resultState, setResultState] = useState<ResultState>({ kind: "IDLE" }),
     resultRequest = useRef(0),
+    compoundTicket = useRef(0),
+    compoundRetention = useRef<{
+      mission: Missionv3Document;
+      selection: MissionSelection | null;
+      authRevision: number;
+    } | null>(null),
     missionRequest = useRef(0),
     programRequest = useRef(0),
     programSelection = useRef(selection),
@@ -1387,12 +1587,33 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           program.rootState === "RESOLVED" &&
           program.rootJobId === selection.rootJobId,
       );
-  const office = useOfficeProjection(authRevision, selection);
+  // Auto-open the Advanced disclosure only while an actual advanced route is
+  // active. This never navigates and never closes the disclosure itself; the
+  // incumbent summary click keeps ownership of manual toggling.
+  const advancedRoute = advancedNavigation.includes(active);
+  useEffect(() => {
+    if (advancedRoute && advancedDisclosure.current && !advancedDisclosure.current.open)
+      advancedDisclosure.current.open = true;
+  }, [active, advancedRoute]);
+  const controlRoomSurfaceControls = useControlRoomSurfaceControls({
+    selection, selectionSeq, authEpoch: controlRoomAuthEpoch, authRevision,
+    active: active === "Control Room" || active === "Session Estate",
+  });
   const observedConversation = useObservedConversation(
     authRevision,
     selection,
     authState?.content,
   );
+  authRevisionRef.current = authRevision;
+  retainedComposerRef.current = retainedComposerDrafts;
+  // The currently authenticated command scope is checked below, after the
+  // qualified host identity has been read. Off-view Office text is inspected
+  // independently of whether its component is mounted.
+  const updateRetainedComposer = (kind: "launch" | "session" | "launchWorkstream", text: string) => {
+    const next = { ...retainedComposerRef.current, [kind]: text };
+    retainedComposerRef.current = next;
+    setRetainedComposerDrafts(next);
+  };
   // Separately mounted session capability: never the launch route, never
   // multiplexed through whichever screen happens to be current.
   const sessionBinding = completeExecutiveSessionBinding(
@@ -1443,6 +1664,26 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   const signedIn = authState?.status === "signed_in";
   const ownerContext =
     signedIn && commandBinding ? readOwnerContext(commandBinding.port) : null;
+  const liveComposerScope = ownerContext ? JSON.stringify([
+    ownerContext.principalScope, ownerContext.generation,
+    selection?.workRef, selection?.rootJobId, authRevision,
+  ]) : null;
+  // The App-level text snapshots are usable only by their originating
+  // selection/owner epoch, even when a mounted leaf is later replaced.
+  const presentedComposerDrafts = liveComposerScope &&
+    retainedComposerScope.current === liveComposerScope
+      ? retainedComposerDrafts : { launch: "", session: "", launchWorkstream: "" };
+  useEffect(() => {
+    if (!signedIn || !liveComposerScope) return;
+    if (previousLiveComposerScope.current !== null &&
+        previousLiveComposerScope.current !== liveComposerScope) {
+      const blank = { launch: "", session: "", launchWorkstream: "" };
+      retainedComposerRef.current = blank;
+      retainedComposerScope.current = null;
+      setRetainedComposerDrafts(blank);
+    }
+    previousLiveComposerScope.current = liveComposerScope;
+  }, [signedIn, liveComposerScope]);
   // The session owner context and host-projected target stay fenced on the
   // live signed-in state; the binding itself is read once per render above.
   const sessionOwner =
@@ -1450,6 +1691,38 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   const sessionTargetKey = sessionOwner && sessionBinding
     ? sessionBinding.port.currentTargetRef()
     : null;
+  // Read-only exact-session association from the existing Executive owner.
+  // Unknown/legacy/DSH/Grok native sessions stay UNBOUND, not guessed.
+  const officeSession = qualifyExecutiveOfficeSession(
+    signedIn, selection, sessionBinding,
+  );
+  const office = useOfficeProjection(authRevision, selection, officeSession);
+  // The Office draft is part of the unsent-text signal. It is read after the
+  // session-qualified projection exists, never before.
+  hasUnsentUserText.current = Boolean(office.draft.text ||
+    observedConversation.hasUnsentDraft() ||
+    (signedIn ? presentedComposerDrafts.launch || presentedComposerDrafts.session
+      : retainedComposerDrafts.launch || retainedComposerDrafts.session));
+  const projectConversationActive = active === "Projects" && projectTab === "Conversation" && !catalogueProject &&
+    missionSelectionState === "AVAILABLE" && office.projection.programs.source.state === "CURRENT" && !!selection &&
+    index.programs.filter(card => card.workRef === selection.workRef).length === 1 &&
+    index.programs.some(card => card.workRef === selection.workRef && card.rootState === "RESOLVED" &&
+      card.rootJobId === selection.rootJobId && card.rootCandidates.length === 1 &&
+      card.rootCandidates[0] === selection.rootJobId);
+  const answerView = useQualifiedOriginalAnswer();
+  // React may abandon an interrupted render. Only the committed layout
+  // publishes a current identity to the private reply acceptance fence.
+  useLayoutEffect(() => {
+    answerView.setCurrent(sessionBinding && sessionOwner && signedIn ? {
+      binding: sessionBinding,
+      principalScope: sessionOwner.principalScope,
+      generation: sessionOwner.generation,
+      selectionSeq: selectionSeq.current,
+      authRevision,
+      active: active === "Conversations" || projectConversationActive,
+    } : null);
+  }, [active, projectConversationActive, signedIn, sessionBinding, sessionOwner?.principalScope,
+    sessionOwner?.generation, authRevision, selection?.workRef, selection?.rootJobId]);
   const ownsSession = (binding: MountedExecutiveSessionBinding, ctx: { principalScope: string; generation: string }, sequence: number) => {
     const liveBinding = completeExecutiveSessionBinding(window.MastermindMissionHost?.sessionCommandBinding);
     const liveContext = liveBinding ? readSessionOwnerContext(liveBinding) : null;
@@ -1457,7 +1730,29 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
       liveContext?.principalScope === ctx.principalScope && liveContext.generation === ctx.generation;
   };
+  const makeSessionController = (
+    binding: MountedExecutiveSessionBinding,
+    ctx: { principalScope: string; generation: string },
+    sequence: number,
+  ): OperationController => {
+    const identity = { binding, principalScope: ctx.principalScope, generation: ctx.generation,
+      selectionSeq: sequence, authRevision };
+    // The real mounted host supplies the existing native qualified reader.
+    // An older unqualified fixture is fail-dark: it cannot clear an original
+    // hint by promoting a receipt without a validated answer.
+    const wrapper = createAwaitingAnswerPort<QualifiedSessionAnswer>({
+      port: binding.port,
+      readAnswer: (pointer, signal) => typeof binding.port.readQualifiedAnswer === "function"
+        ? binding.port.readQualifiedAnswer(pointer, signal)
+        : Promise.resolve({ receipt: { ...pointer, disposition: "unknown", reason: "UNKNOWN_RECEIPT" }, answer: null }),
+      isCurrent: () => ownsSession(binding, ctx, sequence) && answerView.isCurrent(identity),
+      onAdmission: () => { if (ownsSession(binding, ctx, sequence)) answerView.invalidate(); },
+      onAnswer: (pointer, answer) => answerView.stage(identity, pointer, answer),
+    });
+    return new OperationController(wrapper, binding.store);
+  };
   const invalidateSessionPresentation = () => {
+    answerView.invalidate();
     sessionSlot.current?.controller.invalidate();
     sessionSlot.current = null;
     const held = sessionPending.current;
@@ -1507,6 +1802,13 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     (commandRefusal.kind === "launch" ||
       (sessionExact && commandRefusal.sessionKey === commandView?.session?.sessionKey))
     ? commandRefusal : null;
+  // A retained command pointer is an effect-reconciliation obligation.
+  // Automatic OAuth navigation must not tear down an unresolved UI owner.
+  useEffect(() => registerUnsavedNavigationHold(() =>
+    pendingCommand.current !== null || heldKind !== null || recoverInFlight ||
+    (passiveExpiryHold.current && hasUnsentUserText.current)
+  ), [heldKind, recoverInFlight]);
+
   useEffect(() => {
     setCommandRefusal(null);
   }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation,
@@ -1584,12 +1886,12 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       return;
     if (cur) cur.controller.invalidate();
     sessionSlot.current = {
-      controller: new OperationController(sessionBinding.port, sessionBinding.store),
+      controller: makeSessionController(sessionBinding, sessionOwner, selectionSeq.current),
       binding: sessionBinding,
       principalScope: sessionOwner.principalScope,
       generation: sessionOwner.generation,
     };
-  }, [sessionBinding, sessionOwner?.principalScope, sessionOwner?.generation]);
+  }, [sessionBinding, sessionOwner?.principalScope, sessionOwner?.generation, authRevision]);
   useEffect(() => {
     // Discover the retained hint without invoking prepare, submit or even a
     // status request. This is available before any launch catalog is loaded.
@@ -1661,6 +1963,10 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     setSessionRefusal(null);
   }, [sessionBinding, sessionOwner?.principalScope, sessionOwner?.generation,
     selection?.workRef, selection?.rootJobId]);
+  useEffect(() => {
+    if (active !== "Conversations" && !projectConversationActive) answerView.leavePresentation();
+  }, [active, projectConversationActive]);
+
   useEffect(() => () => {
     commandSlot.current?.controller.invalidate();
     recoveryFlight.current++;
@@ -1671,8 +1977,21 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   }, []);
   const currentResultContext = useRef(resultContext);
   currentResultContext.current = resultContext;
+  const liveSelection = useRef(selection);
+  const liveAuthRevision = useRef(authRevision);
+  liveSelection.current = selection;
+  liveAuthRevision.current = authRevision;
   const resultController = useRef<AbortController | null>(null);
+  const compoundRetained = compoundRetention.current;
+  const compoundContextHeld = !!compoundRetained
+    && compoundRetained.mission === missionV3
+    && compoundRetained.selection === selection
+    && compoundRetained.authRevision === authRevision;
   useEffect(() => {
+    // A compound commit updates missionV3 inside the same pair. That update
+    // must not abort or clear the Result it just accepted. Every other
+    // context change still fences the standalone Result ticket.
+    if (compoundContextHeld) return;
     resultRequest.current++;
     resultController.current?.abort();
     setResultState({ kind: "IDLE" });
@@ -1680,12 +1999,21 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       resultRequest.current++;
       resultController.current?.abort();
     };
-  }, [resultContext]);
+  }, [resultContext, compoundContextHeld]);
+  useEffect(() => () => {
+    compoundTicket.current += 1;
+    resultController.current?.abort();
+  }, []);
+  const projectHeading = useRef<HTMLHeadingElement>(null);
+  const legacyProjectTabs = useRef<HTMLDivElement>(null);
+  const pendingLegacyTabFocus = useRef<ProjectTab | null>(null);
+  const pendingProjectHeadingFocus = useRef<HTMLElement | null>(null);
   const routeHeading = useRef<HTMLHeadingElement>(null),
     // Project tabs and data refreshes retain focus. Collection/detail and exact
     // project identity changes can remove the content action that held it.
     viewIdentity = JSON.stringify([
       active,
+      active === "Projects" && catalogueProject ? ["catalogue", catalogueProject.workRef] :
       active === "Projects" && projectTab && selection
         ? [selection.workRef, selection.rootJobId]
         : null,
@@ -1696,9 +2024,36 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     previousView.current = viewIdentity;
     // A removed content action leaves focus on body. Preserve connected
     // controls (including navigation), and never move focus for data refreshes.
-    if (!document.activeElement || document.activeElement === document.body)
-      routeHeading.current?.focus();
+    pendingProjectHeadingFocus.current = null;
+    if (!document.activeElement || document.activeElement === document.body) {
+      const target = projectHeading.current ?? routeHeading.current;
+      target?.focus();
+      if (active === "Projects" && projectTab === "Conversation" && !projectHeading.current)
+        pendingProjectHeadingFocus.current = target;
+    }
   }, [viewIdentity]);
+  useLayoutEffect(() => {
+    const pending = pendingProjectHeadingFocus.current;
+    if (!pending) return;
+    if (active !== "Projects" || ![pending, document.body].includes(document.activeElement as HTMLElement)) {
+      pendingProjectHeadingFocus.current = null;
+      return;
+    }
+    // Complete only the navigation handoff we initiated. A later source read
+    // must never move focus away from a control the user subsequently chose.
+    if (projectHeading.current) {
+      pendingProjectHeadingFocus.current = null;
+      projectHeading.current.focus();
+    }
+  });
+  useLayoutEffect(() => {
+    if (!pendingLegacyTabFocus.current) return;
+    pendingLegacyTabFocus.current = null;
+    if (document.activeElement === document.body) {
+      const selected = legacyProjectTabs.current?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]');
+      (selected ?? projectHeading.current)?.focus();
+    }
+  });
   useEffect(
     () =>
       window.MastermindMissionHost?.auth?.subscribe((state) => {
@@ -1710,10 +2065,38 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           generation === previousHostGeneration.current
         )
           return;
+        const before = previousAuthState.current;
+        // Losing a token without acquiring another credential is passive
+        // expiry only on the browser client (never infer this for native).
+        // An explicit/cross-tab logout always clears, even with a dirty draft.
+        const passiveLoss = !native && before !== null &&
+          ((before.acquisition && !state.acquisition) ||
+           (before.content && !state.content)) &&
+          (!state.acquisition || before.acquisition) &&
+          (!state.content || before.content) &&
+          state.reason !== "USER_SIGNED_OUT" &&
+          !explicitLogoutRecorded() &&
+          (!canNavigateForAutomaticSignIn() || hasUnsentUserText.current);
         previousAuth.current = serialized;
+        previousAuthState.current = state;
         previousHostGeneration.current = generation;
-        office.invalidateAuth();
-        observedConversation.invalidateAuth();
+        // Invalidate old surface presentation at notification time while the
+        // App-owned pending/unknown action continues to retain its own result.
+        controlRoomAuthEpoch.current += 1;
+        if (passiveLoss && hasUnsentUserText.current)
+          passiveExpiryHold.current = true;
+        else if (state.status === "signing_in" || state.acquisition ||
+                 state.content || state.reason === "USER_SIGNED_OUT" ||
+                 explicitLogoutRecorded())
+          passiveExpiryHold.current = false;
+        if (!passiveLoss) {
+          const blank = { launch: "", session: "", launchWorkstream: "" };
+          retainedComposerRef.current = blank;
+          retainedComposerScope.current = null;
+          setRetainedComposerDrafts(blank);
+        }
+        office.invalidateAuth(passiveLoss);
+        observedConversation.invalidateAuth(passiveLoss);
         commandSlot.current?.controller.invalidate();
         const pending = pendingCommand.current;
         if (pending) {
@@ -1725,6 +2108,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         setReopenedOperation(null);
         recoveryFlight.current++;
         setRecoverInFlight(false);
+        answerView.invalidate();
         sessionSlot.current?.controller.invalidate();
         const heldSession = sessionPending.current;
         if (heldSession) {
@@ -1742,6 +2126,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         workRequest.current++;
         missionRequest.current++;
         resultRequest.current++;
+        compoundTicket.current += 1;
+        compoundRetention.current = null;
         resultController.current?.abort();
         setIndex({
           programs: [],
@@ -1766,6 +2152,10 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         setWindowDocument(null);
         setAssociation(null);
         setMissionV3(null);
+        // Diagnostic side-state resets with the same source epoch; the
+        // Programs effect refines it on its immediate re-run.
+        setProgramsReadPhase("not_requested");
+        setProgramsReadReason("NONE");
         setResultState({ kind: "IDLE" });
       }),
     [],
@@ -1773,11 +2163,17 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   useEffect(() => {
     // Selection change clears result detail. The bounded read for the new
     // tuple must be reissued; we never carry stale detail across a click.
+    if (compoundRetention.current?.selection === selection) return;
+    compoundTicket.current += 1;
+    compoundRetention.current = null;
+    resultController.current?.abort();
     setResultState({ kind: "IDLE" });
   }, [selection]);
   useEffect(() => {
     // New result_refs revision (root/work_ref pair changed under the hood)
     // also clears any in-flight detail even if the user kept their click.
+    // The compound pair's own Mission commit is the same observation and stays.
+    if (compoundRetention.current?.mission === missionV3) return;
     setResultState({ kind: "IDLE" });
   }, [missionV3]);
   useEffect(() => {
@@ -1805,7 +2201,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       !controller.signal.aborted &&
       started === invalidation.current &&
       hostGeneration === (host?.invalidationGeneration?.() ?? 0);
-    if (active !== "Conversation" && active !== "Conversations")
+    if (active !== "Conversation" && active !== "Conversations" && !projectConversationActive)
       return () => {
         attached = false;
         controller.abort();
@@ -1857,6 +2253,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     };
   }, [
     active,
+    projectConversationActive,
     selection,
     authRevision,
     windowRevision,
@@ -1911,6 +2308,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       !window.MastermindMissionHost?.readPrograms &&
       !window.MastermindMissionHost?.readProgramsObservation
     ) {
+      setProgramsReadPhase("not_requested");
+      setProgramsReadReason("NONE");
       setIndex({
         programs: [],
         state: "UNAVAILABLE",
@@ -1924,6 +2323,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     // A refused owner read emits auth state. Re-reading on that notification
     // without acquisition authority creates a feedback loop while signed out.
     if (authState && !authState.acquisition) {
+      setProgramsReadPhase("auth_unavailable");
+      setProgramsReadReason("AUTHENTICATION_REQUIRED");
       setIndex({
         programs: [],
         state: "UNAVAILABLE",
@@ -1938,6 +2339,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     const readObservation =
       window.MastermindMissionHost?.readProgramsObservation;
     if (typeof read !== "function" && typeof readObservation !== "function") {
+      setProgramsReadPhase("not_requested");
+      setProgramsReadReason("NONE");
       setIndex({
         programs: [],
         state: "UNAVAILABLE",
@@ -1953,6 +2356,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       state: "PENDING",
       reason: "SOURCE_READ_PENDING",
     });
+    setProgramsReadPhase("pending");
+    setProgramsReadReason("UNKNOWN");
     Promise.resolve()
       .then(async () => {
         if (readObservation) {
@@ -1973,20 +2378,28 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           !controller.signal.aborted
         ) {
           setIndex(programsFromControlRoom(raw));
+          setProgramIndexEpoch(current);
+          setProgramsReadPhase("ready");
+          setProgramsReadReason("NONE");
           office.acceptPrograms(officeRead, observation);
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (
           attached &&
           programRequest.current === current &&
           !controller.signal.aborted
-        )
+        ) {
+          // The rendered reason stays SOURCE_UNAVAILABLE; the closed
+          // diagnostic phase records the failure class only.
+          setProgramsReadPhase(closedReadFailurePhase(error));
+          setProgramsReadReason(closedReadFailureReason(error));
           setIndex({
             programs: [],
             state: "UNAVAILABLE",
             reason: "SOURCE_UNAVAILABLE",
           });
+        }
       });
     return () => {
       attached = false;
@@ -1999,7 +2412,42 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     authState?.acquisition,
     selection?.workRef,
     selection?.rootJobId,
+    officeSession.sessionRef,
+    officeSession.bindingGeneration,
   ]);
+  useEffect(() => {
+    if (active !== "Control Room" && active !== "Session Estate" && active !== "Fleet & Capacity" && active !== "Sources" && active !== "Tools") return;
+    const host = window.MastermindMissionHost;
+    const read = host?.readControlRoomState;
+    const ownerRevision = authRevision;
+    if (!authState?.acquisition || typeof read !== "function") {
+      setControlRoom({
+        state: "UNAVAILABLE", ownerRevision,
+        reason: !authState?.acquisition ? "AUTHENTICATION_REQUIRED" : "SIGNED_CONTROL_ROOM_READ_UNAVAILABLE",
+      });
+      return;
+    }
+    let attached = true;
+    const controller = new AbortController();
+    setControlRoom({ state: "PENDING", ownerRevision });
+    Promise.resolve()
+      .then(() => read({ signal: controller.signal }))
+      .then((value) => {
+        if (attached && !controller.signal.aborted)
+          setControlRoom({ ...value, ownerRevision });
+      })
+      .catch(() => {
+        if (attached && !controller.signal.aborted)
+          setControlRoom({ state: "UNAVAILABLE", ownerRevision, reason: "SOURCE_UNAVAILABLE" });
+      });
+    return () => { attached = false; controller.abort(); };
+  }, [active, authRevision, authState?.acquisition, controlRoomRevision]);
+  // An old auth epoch's Control Room data may remain in state while another
+  // view is mounted, but must never render for the next signed-in account.
+  const currentControlRoom: ControlRoomState =
+    authState?.acquisition && controlRoom.ownerRevision === authRevision
+      ? controlRoom
+      : { state: "UNAVAILABLE", reason: "AUTHENTICATION_REQUIRED", ownerRevision: authRevision };
   useEffect(() => {
     let attached = true;
     const current = ++workRequest.current;
@@ -2062,7 +2510,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   }, [native, authRevision, authState?.acquisition, workRevision]);
   useEffect(() => {
     const restoreSelection = () => {
-      const next = selectionFromLocation();
+      const next = directLocationInput().selection;
       office.clearSelection(next);
       observedConversation.clear();
       selectionSeq.current += 1;
@@ -2082,7 +2530,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         ),
       );
       setSelection(next);
-      setProjectTab(next ? "Overview" : null);
+      setProjectTab(next ? "Conversation" : null);
       setActive("Projects");
     };
     window.addEventListener("popstate", restoreSelection);
@@ -2092,6 +2540,12 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     let attached = true;
     const current = ++missionRequest.current,
       controller = new AbortController();
+    // An independent Mission refresh supersedes both the standalone Mission
+    // ticket and any compound pair. A late compound accept cannot republish.
+    compoundTicket.current += 1;
+    compoundRetention.current = null;
+    resultController.current?.abort();
+    office.supersedePair();
     const officeRead = office.beginMission();
     if (
       native &&
@@ -2219,6 +2673,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     selectionRefused,
     authRevision,
     authState?.acquisition,
+    officeSession.sessionRef,
+    officeSession.bindingGeneration,
   ]);
   const candidate = isDoc(mission) ? mission : null,
     d =
@@ -2231,7 +2687,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         ? candidate
         : null,
     conversationActive =
-      active === "Conversation" || active === "Conversations",
+      active === "Conversation" || active === "Conversations" || projectConversationActive,
     legacyConversationState = windowPending
       ? "SOURCE_READ_PENDING"
       : association
@@ -2243,6 +2699,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       active === "Conversations"
         ? observedConversation.projection.conversation.source.state
         : legacyConversationState,
+    directSelected = !!selection && new URL(window.location.href).searchParams.get("direct_native_job")===selection.rootJobId,
+    directRoute = active === "Projects" && directSelected,
     headerState = conversationActive
       ? conversationState
       : active === "Inbox" || active === "Knowledge"
@@ -2259,6 +2717,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
                 : workState.kind === "DOCUMENT"
                   ? workState.document.availability
                   : "UNAVAILABLE"
+              : active === "Control Room" || active === "Session Estate"
+                ? currentControlRoom.state === "PENDING" ? "SOURCE_READ_PENDING" : currentControlRoom.state
               : active === "Fleet & Capacity"
                 ? "NOT_PROJECTED"
                 : (d?.read_state.state ?? "UNAVAILABLE"),
@@ -2275,7 +2735,9 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
               ? "A global current permitted window. No relationship to the selected Mission is proven."
               : "No Mission-linked conversation is currently established."
           : active === "Inbox"
-            ? "Owner-defined attention for the selected Mission; company-wide attention is not inferred."
+            ? locale === "zh-CN"
+              ? "Terminal 请求与任务负责人上下文分别跟随各自来源；全公司覆盖尚未建立。"
+              : "Terminal requests and Mission owner context follow their own sources. Company-wide coverage is not established."
             : active === "Knowledge"
               ? "Supplied Mission references retain exact provenance; canonical record content is not reconstructed."
               : active === "Projects"
@@ -2302,6 +2764,14 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
                           ? `${workState.document.coverage.count} Work roots from the bounded Executive observation.`
                           : "Work owner returned a typed unavailable observation; no empty queue is inferred."
                         : "Work source unavailable; no empty queue is inferred."
+                    : active === "Session Estate"
+                      ? (locale === "zh-CN" ? "查看已保存的工作区绑定及其来源状态。保存的绑定不代表会话正在运行。" : "Review saved workspace bindings and their source status. Saved bindings do not prove running sessions.")
+                    : active === "Control Room"
+                      ? currentControlRoom.state === "AVAILABLE"
+                        ? `${currentControlRoom.programs.length} programmes observed. Review the next step and its source.`
+                        : currentControlRoom.state === "PENDING"
+                          ? "Reading one authenticated incumbent Control Room cache."
+                          : "Authenticated Control Room source unavailable; no current operation is inferred."
                     : active === "Fleet & Capacity"
                       ? "Fleet health and placement require their canonical Capacity source."
                       : d
@@ -2339,7 +2809,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
             : active === "Fleet & Capacity"
               ? "Capacity source not connected. No host readiness was inferred."
               : notice,
-    open = (w: string, r: string | null) => {
+    open = (w: string, r: string | null, direct = false) => {
+      setCatalogueProject(null);
       if (r) {
         office.clearSelection({ workRef: w, rootJobId: r });
         observedConversation.clear();
@@ -2356,6 +2827,9 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           work_ref: next.workRef,
           root_job_id: next.rootJobId,
         }).toString();
+        // Read-selection hint only; the authenticated direct endpoint still
+        // proves the Job, original principal, receiver and terminal identity.
+        if(direct)location.searchParams.set("direct_native_job",r);
         window.history.pushState(
           null,
           "",
@@ -2365,7 +2839,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         setNotice("Reading the exact selected mission pair…");
         setSelection(next);
         void window.MastermindMissionHost?.session?.refresh(next);
-        setProjectTab("Overview");
+        setProjectTab(direct ? "Overview" : "Conversation");
         setActive("Projects");
       }
     };
@@ -2440,7 +2914,10 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       const sel = state.missionSelection
         ? normalizeSelection(state.missionSelection)
         : null;
-      if (sel) open(sel.workRef, sel.rootJobId);
+      // Only this owner-qualified accepted launch releases its Office handoff.
+      // A refusal or unknown effect keeps the frozen context and original hold.
+      setOfficeLaunchHandoff(null);
+      if (sel) open(sel.workRef, sel.rootJobId,bindingAtStart.directNative?.isDirectSelection(sel)===true);
     }
     pending.complete({ status: state.status });
     pendingCommand.current = null;
@@ -2560,7 +3037,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           // mission selection, including when initial discovery had failed.
           if (state.status === "accepted") {
             const next = state.missionSelection ? normalizeSelection(state.missionSelection) : null;
-            if (next) open(next.workRef, next.rootJobId);
+            if (next) open(next.workRef, next.rootJobId,binding.directNative?.isDirectSelection(next)===true);
           }
         } else {
           setReopenedOperation({ ...restored, pointer: state.pointer ?? restored.pointer, reason: state.reason });
@@ -2629,7 +3106,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       sessionSlot.current.generation !== ctx.generation
     ) {
       sessionSlot.current?.controller.invalidate();
-      controller = new OperationController(binding.port, binding.store);
+      controller = makeSessionController(binding, ctx, selectionSeq.current);
       sessionSlot.current = {
         controller,
         binding,
@@ -2728,17 +3205,156 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         onClick={checkCommandStatus}
         disabled={recoverInFlight}
       >
-        Check status
+        {copy.checkStatus}
       </button>
     </div>
   ) : null;
+  // Read only the current controller instance, never the last settled view
+  // from an earlier binding/auth epoch. Selection changes invalidate this same
+  // controller; recovery remains the existing guarded owner callback.
+  const currentControllerState = signedIn && authState?.acquisition && ownerContext &&
+    commandSlot.current?.binding === commandBinding &&
+    commandSlot.current.principalScope === ownerContext.principalScope &&
+    commandSlot.current.generation === ownerContext.generation
+      ? commandSlot.current.controller.getState() : null;
+  // Observer-only snapshot for the fallback disclosures. A throwing or
+  // absent getter degrades to null, which the fields render as unknown
+  // values; reading it triggers no request, refresh or subscription change.
+  const missionDiagnostics = (): unknown => {
+    try {
+      return window.MastermindMissionHost?.diagnostics?.() ?? null;
+    } catch {
+      return null;
+    }
+  };
+  const previewLaunchRequest = useMemo(() => (form: LaunchForm) => {
+    const binding = completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
+    const auth = window.MastermindMissionHost?.auth?.getState();
+    const owner = binding ? readOwnerContext(binding.port) : null;
+    if (authRevisionRef.current !== authRevision || auth?.status !== "signed_in" || !auth.acquisition ||
+        binding !== commandBinding || !owner || owner.principalScope !== ownerContext?.principalScope ||
+        owner.generation !== ownerContext?.generation) return {state: "UNAVAILABLE" as const};
+    return readLaunchRequestPreview(binding, form);
+  }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation, authRevision]);
+  // Presentation reuses the incumbent explicit auth action and its guards.
+  const authenticationControl = authState ? (
+                <button
+                  disabled={authState.status === "unconfigured"}
+                  onClick={() => {
+                    const auth = window.MastermindMissionHost?.auth;
+                    if (!auth) return;
+                    const signingOut =
+                      authState.acquisition ||
+                      authState.content ||
+                      authState.status === "signing_in";
+                    if (signingOut) {
+                      setWindowDocument(null);
+                      setMission(
+                        unavailableMission(
+                          selection,
+                          "AUTHENTICATION_REQUIRED",
+                        ),
+                      );
+                    }
+                    try {
+                      const request = signingOut
+                        ? auth.signOut()
+                        : auth.signIn();
+                      request.catch(() =>
+                        setNotice(
+                          "Sign-in could not complete. Please try again.",
+                        ),
+                      );
+                    } catch {
+                      setNotice(
+                        "Sign-in could not complete. Please try again.",
+                      );
+                    }
+                  }}
+                >
+                  {authState.status === "signing_in"
+                    ? copy.cancelSignIn
+                    : authState.acquisition || authState.content
+                      ? copy.signOut
+                      : copy.signIn}
+                </button>
+  ) : null;
+  const todayNeedsAuthentication = !!authState && !authState.acquisition &&
+    ["signed_out", "error", "signing_in", "unconfigured"].includes(authState.status);
+  const todayAuthenticationCue = todayNeedsAuthentication ? <section className="card" aria-label={locale === "zh-CN" ? "工作区登录" : "Workspace sign-in"}>
+    <h2>{authState?.status === "signing_in" ? (locale === "zh-CN" ? "正在登录…" : "Signing in…")
+      : authState?.status === "unconfigured" ? (locale === "zh-CN" ? "此处暂时无法登录。" : "Sign-in is unavailable here.")
+      : (locale === "zh-CN" ? "登录以继续" : "Sign in to continue")}</h2>
+    {authState?.status !== "signing_in" && authState?.status !== "unconfigured" &&
+      <p>{locale === "zh-CN" ? "登录以访问工作区。" : "Sign in to access your workspace."}</p>}
+    {authenticationControl}
+    {authState?.reason && <details><summary>{copy.technicalDetails}</summary><code>{authState.reason}</code></details>}
+  </section> : null;
+  // The Office → existing launch owner handoff. It re-reads the live host,
+  // binding and owner epoch at the moment of the request, refuses rather than
+  // replacing an existing unsent goal or a held original command, and only
+  // then hands the exact frozen text to the existing launch draft. It never
+  // prepares, submits, or carries a session reference.
+  const startOfficeLaunch = (preview: DirectionPreview): OfficeLaunchOutcome => {
+    const liveBinding = completeOrchestratorCommandBinding(
+      window.MastermindMissionHost?.commandBinding);
+    const liveAuth = window.MastermindMissionHost?.auth?.getState();
+    const liveOwner = liveBinding ? readOwnerContext(liveBinding.port) : null;
+    const frozenWorkstream = preview.context.selection?.workRef;
+    const config = readLaunchBindingConfig();
+    const enrolled = config && frozenWorkstream ? resolveLaunchBinding(config, frozenWorkstream) : null;
+    const launchAvailable = canLaunch && !!commandView && !!enrolled &&
+      liveBinding === commandBinding &&
+      liveAuth?.status === "signed_in" && !!liveOwner &&
+      liveOwner.principalScope === ownerContext?.principalScope &&
+      liveOwner.generation === ownerContext?.generation;
+    // Revisiting an open handoff is idempotent: the same frozen direction never
+    // places a second launch owner and never replaces its own goal.
+    const alreadyOpen = officeLaunchHandoff !== null &&
+      officeLaunchHandoff.preview.draft === preview.draft &&
+      previewIsCurrent(officeLaunchHandoff.preview, office.projection.context);
+    const outcome = decideOfficeLaunchHandoff(preview, office.projection.context, {
+      configuredWorkstream: enrolled?.workstream ?? null,
+      selectedWorkstream: office.projection.context.selection?.workRef ?? null,
+      launchAvailable,
+      retainedGoal: retainedComposerDrafts.launch,
+      commandHeld: pendingCommand.current?.kind === "launch" || heldKind === "launch",
+      handoffAlreadyOpen: alreadyOpen,
+    });
+    if (outcome.status !== "OPENED") return outcome;
+    if (alreadyOpen) return outcome;
+    retainedComposerScope.current = liveComposerScope;
+    updateRetainedComposer("launch", preview.draft);
+    updateRetainedComposer("launchWorkstream", frozenWorkstream!);
+    setLaunchDraftDismissed(false);
+    setOfficeLaunchHandoff({
+      preview,
+      workstreamRef: frozenWorkstream!,
+      binding: liveBinding!,
+      principalScope: liveOwner!.principalScope,
+      generation: liveOwner!.generation,
+    });
+    return outcome;
+  };
   const commandPanel =
-    canLaunch && commandView && launchDraftDismissed ? (
+    !signedIn && passiveExpiryHold.current && retainedComposerDrafts.launch ? (
+      <section className="card" aria-label={copy.retainedDraft}>
+        <h2>{copy.unsentGoal}</h2>
+        <p className="muted">{copy.expiredDraft}</p>
+        <label htmlFor="retained-launch-goal">{copy.goal}</label>
+        <textarea id="retained-launch-goal" value={retainedComposerDrafts.launch}
+          onChange={event => updateRetainedComposer("launch", event.target.value)}
+          rows={4} />
+        <button type="button" onClick={() => updateRetainedComposer("launch", "")}>
+          {copy.discardGoal}
+        </button>
+      </section>
+    ) : canLaunch && commandView && launchDraftDismissed ? (
       <section className="card">
         <div className="section-title">
-          <h2>Launch Orchestrator</h2>
+          <h2>{copy.startWork}</h2>
         </div>
-        <p className="muted">Launch draft dismissed.</p>
+        <p className="muted">{copy.draftDismissed}</p>
         <button
           type="button"
           onClick={() => {
@@ -2746,25 +3362,62 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
             routeHeading.current?.focus();
           }}
         >
-          New launch
+          {copy.newGoal}
         </button>
       </section>
     ) : commandReady && commandView ? (
       <>
         <LaunchOrchestrator
+          presentation={active === "Today" ? "composer" : "standard"}
+          previewRequest={previewLaunchRequest}
+          locale={locale}
           key={JSON.stringify([
             ownerContext?.principalScope,
             ownerContext?.generation,
           ])}
+          workstreams={commandView.workstreams}
+          defaultWorkstream={commandView.defaultWorkstream}
+          workstreamRef={officeLaunchHandoff?.workstreamRef || presentedComposerDrafts.launchWorkstream || undefined}
+          lockWorkstream={officeLaunchHandoff !== null}
+          onWorkstreamChange={workstream => {
+            const liveBinding = completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
+            const liveOwner = liveBinding ? readOwnerContext(liveBinding.port) : null;
+            if (!officeLaunchHandoff && authRevisionRef.current === authRevision &&
+                window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
+                liveBinding === commandBinding &&
+                liveOwner?.principalScope === ownerContext?.principalScope &&
+                liveOwner?.generation === ownerContext?.generation) {
+              retainedComposerScope.current = liveComposerScope;
+              updateRetainedComposer("launchWorkstream", workstream);
+            }
+          }}
           projects={commandView.projects}
           profiles={commandView.profiles}
+          frontierModels={commandView.frontierModels}
+          initialDraft={presentedComposerDrafts.launch}
+          onDraftChange={text => {
+            const liveBinding = completeOrchestratorCommandBinding(
+              window.MastermindMissionHost?.commandBinding);
+            const liveOwner = liveBinding ? readOwnerContext(liveBinding.port) : null;
+            if (authRevisionRef.current === authRevision &&
+                window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
+                liveBinding === commandBinding &&
+                liveOwner?.principalScope === ownerContext?.principalScope &&
+                liveOwner?.generation === ownerContext?.generation)
+            {
+              retainedComposerScope.current = liveComposerScope;
+              updateRetainedComposer("launch", text);
+              if (!retainedComposerRef.current.launchWorkstream && commandView.defaultWorkstream)
+                updateRetainedComposer("launchWorkstream", commandView.defaultWorkstream);
+            }
+          }}
           unavailableReason={
             canLaunch
               ? undefined
-              : "Launch choices are unavailable. Your draft is retained."
+              : copy.choicesUnavailable
           }
           submitting={heldKind === "launch" && commandBusy}
-          blocked={!!currentReopened}
+          blocked={!!currentReopened || heldKind === "consume"}
           error={
             currentRefusal?.kind === "launch"
               ? currentRefusal.reason
@@ -2780,7 +3433,46 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
               onComplete({ status: "refused" });
               return;
             }
+            // A handoff carries the exact frozen preview it was opened from.
+            // Revalidate it against the live owner before anything is
+            // prepared: a stale, changed or mismatched source refuses here
+            // and leaves the Office draft and the launch goal untouched.
+            if (officeLaunchHandoff) {
+              const liveOwner = readOwnerContext(binding.port);
+              const config = readLaunchBindingConfig();
+              const enrolled = config ? resolveLaunchBinding(config, officeLaunchHandoff.workstreamRef) : null;
+              const workstreamAgrees = officeLaunchWorkstreamAgrees(
+                officeLaunchHandoff.preview.context.selection?.workRef ?? null,
+                enrolled?.workstream ?? null) && form.workstreamRef === officeLaunchHandoff.workstreamRef;
+              if (!previewIsCurrent(officeLaunchHandoff.preview, office.projection.context) ||
+                  binding !== officeLaunchHandoff.binding ||
+                  liveOwner?.principalScope !== officeLaunchHandoff.principalScope ||
+                  liveOwner?.generation !== officeLaunchHandoff.generation ||
+                  !workstreamAgrees) {
+                setCommandRefusal({
+                  // The refusal is published against the live owner identity,
+                  // so it stays visible under exactly the route that would
+                  // have dispatched it.
+                  binding,
+                  principalScope: ctx.principalScope,
+                  generation: ctx.generation,
+                  kind: "launch", selectionSeq: selectionSeq.current, sessionKey: null,
+                  presentationSeq: commandPresentation.current.seq,
+                  reason: locale === "zh-CN"
+                    ? "方向交接已不再有效。未准备也未发送任何内容。"
+                    : "The direction handoff is no longer current. Nothing was prepared or sent.",
+                });
+                onComplete({ status: "refused" });
+                return;
+              }
+            }
             const intent = launchIntentFromBinding(binding, form);
+            if (officeLaunchHandoff && (!intent ||
+                intent.targetKey !== officeLaunchHandoff.workstreamRef ||
+                intent.payload.workstream !== officeLaunchHandoff.workstreamRef)) {
+              onComplete({ status: "refused" });
+              return;
+            }
             beginCommand("launch", intent, onComplete);
           }}
           onCancel={() => {
@@ -2790,7 +3482,11 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
               pendingCommand.current?.kind === "launch" ||
               heldKind === "launch"
             ) return;
+            updateRetainedComposer("launch", "");
             setLaunchDraftDismissed(true);
+            // The Office handoff closes with its own form. The Office draft
+            // itself is never cleared by a cancel.
+            setOfficeLaunchHandoff(null);
             routeHeading.current?.focus();
           }}
         />
@@ -2800,14 +3496,25 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       <section className="card">
         <div className="section-title">
           <div>
-            <h2>Launch Orchestrator</h2>
+            <h2>{copy.startWork}</h2>
           </div>
-          <span className="state state-unavailable">UNAVAILABLE</span>
+          <span className="state state-unavailable">{copy.unavailable}</span>
         </div>
-        <p className="muted">Command route is not available.</p>
-        <details className="reason-details">
-          <summary>Technical details</summary>
+        <p className="muted">{locale === "zh-CN" ? "暂时无法开始工作。" : "Starting work is unavailable right now."}</p>
+        <details
+          className="reason-details"
+          onToggle={(event) => {
+            if ((event.currentTarget as HTMLDetailsElement).open) setDiagnosticTick((n) => n + 1);
+          }}
+        >
+          <summary>{copy.technicalDetails}</summary>
           <code>{COMMAND_ROUTE_UNAVAILABLE}</code>
+          <TransportDiagnosticFields
+            snapshot={missionDiagnostics()}
+            programsPhase={programsReadPhase}
+            programsReason={programsReadReason}
+            locale={locale}
+          />
         </details>
         {heldKind === "launch" ? checkStatusControl : null}
       </section>
@@ -2835,14 +3542,36 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       <p className="muted">
         Session is unavailable for the exact selected mission.
       </p>
-      <details className="reason-details">
+      <details
+        className="reason-details"
+        onToggle={(event) => {
+          if ((event.currentTarget as HTMLDetailsElement).open) setDiagnosticTick((n) => n + 1);
+        }}
+      >
         <summary>Technical details</summary>
         <code>{COMMAND_ROUTE_UNAVAILABLE}</code>
+        <TransportDiagnosticFields
+          snapshot={missionDiagnostics()}
+          programsPhase={programsReadPhase}
+            programsReason={programsReadReason}
+          locale={locale}
+        />
       </details>
     </section>
   );
   const sessionLive =
     !!sessionBinding && signedIn && !!sessionOwner && !!sessionTargetKey;
+  // A qualified original READ is scoped to the current selected-session
+  // owner, even if the old target is now unavailable for NEW sends.
+  const presentedSessionAnswer = answerView.visible(
+    sessionBinding && sessionOwner && signedIn ? {
+      binding: sessionBinding,
+      principalScope: sessionOwner.principalScope,
+      generation: sessionOwner.generation,
+      selectionSeq: selectionSeq.current,
+      authRevision,
+    } : null,
+  );
   const sessionContinuationUnavailable =
     sessionBinding && !sessionLive ? "SESSION_UNAVAILABLE" : undefined;
   const sessionContinuationPanel = sessionBinding ? (
@@ -2873,7 +3602,20 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       } : undefined}
     />
   ) : null;
-  const sessionPanel = sessionBinding ? (
+  const sessionPanel = !signedIn && passiveExpiryHold.current &&
+    retainedComposerDrafts.session ? (
+    <section className="card" aria-label="Retained Session draft">
+      <h2>Unsent session message</h2>
+      <p className="muted">Authentication expired. Copy or discard this local draft; sending is disabled until sign-in.</p>
+      <label htmlFor="retained-session-message">Message</label>
+      <textarea id="retained-session-message" value={retainedComposerDrafts.session}
+        onChange={event => updateRetainedComposer("session", event.target.value)}
+        rows={4} />
+      <button type="button" onClick={() => updateRetainedComposer("session", "")}>
+        Discard session message
+      </button>
+    </section>
+  ) : sessionBinding ? (
     sessionContinuationPanel
   ) : commandBinding ? (
     sessionExact && commandView?.session ? (
@@ -2887,6 +3629,20 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           coverage={commandView.session.coverage}
           turnBusy={commandView.session.turnBusy}
           sending={heldKind === "message" && commandBusy}
+          initialDraft={presentedComposerDrafts.session}
+          onDraftChange={text => {
+            const liveBinding = completeOrchestratorCommandBinding(
+              window.MastermindMissionHost?.commandBinding);
+            const liveView = liveBinding ? readCommandView(liveBinding) : null;
+            if (authRevisionRef.current === authRevision &&
+                window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
+                liveBinding === commandBinding &&
+                liveView?.session?.sessionKey === commandView.session?.sessionKey)
+            {
+              retainedComposerScope.current = liveComposerScope;
+              updateRetainedComposer("session", text);
+            }
+          }}
           unavailableReason={commandView.session.unavailableReason}
           error={currentRefusal && currentRefusal.kind !== "launch"
             ? currentRefusal.reason : commandView.session.error}
@@ -2970,9 +3726,159 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     // unavailable code as Work, with no fabricated session or dispatch state.
     sessionUnavailableCard
   );
+  const directResultPanel = directSelected && selection ? <DirectNativeResultPanel
+    key={JSON.stringify([ownerContext?.principalScope,ownerContext?.generation,selection.workRef,selection.rootJobId,commandSelectionRevision])}
+    locale={locale} selection={{work_ref:selection.workRef,job_id:selection.rootJobId,attempt_id:null}}
+    read={commandReady ? commandBinding?.directNative?.read : undefined}
+    inspectCorrection={commandReady ? commandBinding?.directNative?.inspectCorrection : undefined}
+    onCorrect={(selected,fence,complete)=>{
+      const live=completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
+      const ctx=live ? readOwnerContext(live.port) : null;
+      if(commandSelectionRevision!==selectionSeq.current||!live||live!==commandBinding||!ctx||
+        ctx.principalScope!==ownerContext?.principalScope||ctx.generation!==ownerContext?.generation){complete({status:'refused'});return;}
+      beginCommand('stop',live.directNative?.makeCorrectionIntent?.(selected,fence)??null,complete);
+    }}
+    held={heldKind==="consume" || heldKind==="stop" || currentReopened?.pointer?.kind==="consume" || currentReopened?.pointer?.kind==="stop"}
+    recovery={heldKind==="consume" || heldKind==="stop" ? checkStatusControl : null}
+    onConsume={(selected,digest,complete)=>{
+      const live=completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
+      const ctx=live ? readOwnerContext(live.port) : null;
+      if(commandSelectionRevision!==selectionSeq.current||!live||live!==commandBinding||!ctx||
+        ctx.principalScope!==ownerContext?.principalScope||ctx.generation!==ownerContext?.generation){complete({status:"refused"});return;}
+      const intent=live.directNative?.makeConsumeIntent(selected,digest)??null;
+      beginCommand("consume",intent,complete);
+    }} /> : null;
   const pickResult = (sel: ResultSelection) => {
     const valid = normalizeResultSelection(sel);
     if (!valid) return;
+    const compoundRead = window.MastermindMissionHost?.readMissionResult;
+    if (compoundRead) {
+      resultController.current?.abort();
+      const ticket = ++compoundTicket.current;
+      missionRequest.current += 1;
+      resultRequest.current += 1;
+      const held = office.beginMissionResult();
+      const host = window.MastermindMissionHost;
+      const hostGeneration = host?.invalidationGeneration?.();
+      const selectionAtStart = liveSelection.current;
+      const authAtStart = liveAuthRevision.current;
+      setResultState({ kind: "PENDING", selection: valid });
+      const controller = new AbortController();
+      resultController.current = controller;
+      // A newer ticket, selection, or auth epoch owns the screen. Its
+      // callback must never clear the replacement ticket or Office pair.
+      const newerOwner = () => compoundTicket.current !== ticket
+        || liveSelection.current !== selectionAtStart
+        || liveAuthRevision.current !== authAtStart;
+      // Host identity/generation can drift without notifying the original
+      // subscription. That is still this ticket's cancellation, not a
+      // reason to strand its card in PENDING.
+      const hostChanged = () => window.MastermindMissionHost !== host
+        || host?.invalidationGeneration?.() !== hostGeneration;
+      const superseded = () => newerOwner() || hostChanged();
+      // The mounted typed method can be replaced without changing the raw
+      // client or the host object. Raw identity checks do not cover that.
+      const typedHeld = () => window.MastermindMissionHost?.readMissionResult === compoundRead;
+      const withholdOwned = (reason: string) => {
+        if (newerOwner()) return;
+        office.supersedePair();
+        compoundRetention.current = null;
+        setResultState({ kind: "UNAVAILABLE", selection: valid, reason });
+      };
+      Promise.resolve()
+        .then(() => {
+          if (superseded()) {
+            withholdOwned("READ_CANCELLED");
+            return undefined;
+          }
+          if (controller.signal.aborted || !typedHeld()) {
+            withholdOwned("READ_CANCELLED");
+            return undefined;
+          }
+          return compoundRead({ ...valid, signal: controller.signal });
+        })
+        .then((decoded) => {
+          if (decoded === undefined) return;
+          if (superseded()) {
+            withholdOwned("READ_CANCELLED");
+            return;
+          }
+          if (!typedHeld()) {
+            withholdOwned("READ_CANCELLED");
+            return;
+          }
+          // The host decoder already checks all five selection fields, but
+          // App must fail closed if a replaced typed host returns an otherwise
+          // well-formed pair belonging to a different selected Job/Attempt.
+          if (!decoded.selection
+            || decoded.selection.workRef !== valid.workRef
+            || decoded.selection.rootJobId !== valid.rootJobId
+            || decoded.selection.jobId !== valid.jobId
+            || decoded.selection.attemptId !== valid.attemptId
+            || decoded.selection.resultEnvelopeDigest !== valid.resultEnvelopeDigest) {
+            withholdOwned("MISSION_RESULT_RESPONSE_INVALID");
+            return;
+          }
+          if (decoded.availability !== "AVAILABLE" || !decoded.mission || !decoded.roleResult) {
+            withholdOwned(decoded.reasonCodes.join(", ") || "SOURCE_UNAVAILABLE");
+            return;
+          }
+          // The nested Result and its source observation each carry their own
+          // five-field selector. A substituted typed method could forge a
+          // matching compound selection around a sibling Job's actual Result.
+          const sameWireSelection = (
+            wire: ResultEnvelopeDigestShape["selection"] | null | undefined,
+          ) => !!wire
+            && wire.work_ref === valid.workRef
+            && wire.root_job_id === valid.rootJobId
+            && wire.job_id === valid.jobId
+            && wire.attempt_id === valid.attemptId
+            && wire.result_envelope_digest === valid.resultEnvelopeDigest;
+          const roleView = decoded.roleResult.result;
+          if (!sameWireSelection(decoded.roleResult.selection)
+            || !sameWireSelection(decoded.roleResult.source_observation?.selection)
+            || (roleView !== null && (!roleView?.selection
+              || roleView.selection.root_job_id !== valid.rootJobId
+              || roleView.selection.job_id !== valid.jobId
+              || roleView.selection.attempt_id !== valid.attemptId
+              || roleView.selection.result_envelope_digest !== valid.resultEnvelopeDigest))) {
+            withholdOwned("MISSION_RESULT_RESPONSE_INVALID");
+            return;
+          }
+          // No async boundary between these fences and the synchronous
+          // Office accept. Post-accept fences could leave a published pair.
+          const accepted = office.acceptMissionResult(
+            held, decoded.mission, decoded.roleResult, new Date().toISOString(),
+          );
+          if (accepted.kind !== "observed") {
+            withholdOwned(accepted.reason);
+            return;
+          }
+          compoundRetention.current = {
+            mission: decoded.mission,
+            selection: liveSelection.current,
+            authRevision: liveAuthRevision.current,
+          };
+          const { result_refs: _refs, ...body } = decoded.mission;
+          setMission({ ...body, schema: "mastermind.mission_workspace.v2" });
+          setMissionV3(decoded.mission);
+          setResultState({ kind: "READY", selection: valid, document: decoded.roleResult });
+        })
+        .catch((err: Error) => {
+          if (superseded()) {
+            withholdOwned("READ_CANCELLED");
+            return;
+          }
+          withholdOwned(
+            err?.message === "MISSION_RESULT_RESPONSE_INVALID"
+              ? "MISSION_RESULT_RESPONSE_INVALID"
+              : err?.message === "READ_CANCELLED"
+                ? "READ_CANCELLED"
+                : "RESULT_SOURCE_UNAVAILABLE",
+          );
+        });
+      return;
+    }
     if (!window.MastermindMissionHost?.readResult) {
       setResultState({
         kind: "UNAVAILABLE",
@@ -3037,6 +3943,44 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         });
       });
   };
+  // Open exactly the indexed worker return through the *existing* Result
+  // owner, never by manufacturing a URL, another read path or permission.
+  const workerResultHost = window.MastermindMissionHost;
+  const workerResultEpoch = workerResultHost?.invalidationGeneration?.();
+  const openOfficeWorkerResult = (input: ResultSelection) => {
+    const valid = normalizeResultSelection(input);
+    const host = window.MastermindMissionHost;
+    const user = host?.auth?.getState();
+    const source = office.projection.mission;
+    const indexed = missionV3 && isDocv3(missionV3) ? missionV3 : null;
+    if (!valid || !host?.readResult || host !== workerResultHost ||
+        workerResultEpoch === undefined ||
+        host.invalidationGeneration?.() !== workerResultEpoch ||
+        user?.status !== "signed_in" || !user.acquisition ||
+        authState?.status !== "signed_in" || !authState.acquisition ||
+        source.source.state !== "CURRENT" ||
+        source.value?.schema !== "mastermind.mission_workspace.v3" ||
+        !indexed || !selection ||
+        valid.workRef !== selection.workRef || valid.rootJobId !== selection.rootJobId ||
+        source.value.program.work_ref !== selection.workRef ||
+        source.value.mission.root_job_id !== selection.rootJobId ||
+        indexed.result_refs.snapshot_digest !== source.value.result_refs.snapshot_digest ||
+        JSON.stringify(indexed.result_refs.generation) !== JSON.stringify(source.value.result_refs.generation))
+      return;
+    const c = source.value.children.items.find(row =>
+      row.job_id === valid.jobId && row.latest_attempt?.attempt_id === valid.attemptId);
+    const exact = c ? qualifyWorkerResultRef(source.value, c) : null;
+    const stillIndexed = indexed.result_refs.refs.some(ref =>
+      ref.root_job_id === valid.rootJobId && ref.job_id === valid.jobId &&
+      ref.attempt_id === valid.attemptId && ref.result_envelope_digest === valid.resultEnvelopeDigest);
+    if (!exact || !stillIndexed ||
+        exact.resultEnvelopeDigest !== valid.resultEnvelopeDigest) return;
+    // This user interaction is the explicit permitted read. The Result owner
+    // rechecks identity, source and exact digest during the bounded acquisition.
+    setActive("Projects");
+    setProjectTab("Overview");
+    pickResult(exact);
+  };
   const resultRefs =
     d && missionV3 && isDocv3(missionV3) ? (
       <ResultRefs
@@ -3091,40 +4035,307 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       Refresh Work
     </button>
   );
-  let content: React.ReactNode;
-  if (active === "Today")
-    content = (
-      <>
-        <MetaCeoOffice
-          key={JSON.stringify([authRevision, selection])}
-          locale={locale}
-          projection={office.projection}
-          draft={office.draft}
-          onDraftChange={office.changeDraft}
-        />
-        <OperationalNavigation label="Company operations" onNavigate={navigateOperationalView} />
-      </>
-    );
-  else if (active === "Inbox")
-    content = (
-      <Inbox
-        projection={office.projection}
-        onNavigateMission={
-          office.projection.mission.source.state === "CURRENT"
-            ? (target, mode) => {
-                if (mode === "current") open(target.workRef, target.rootJobId);
-              }
-            : undefined
-        }
+  const retainedResultHost = window.MastermindMissionHost;
+  const retainedHostGeneration = retainedResultHost?.invalidationGeneration?.() ?? 0;
+  // Stable fixed READ ports. Each consumer also fences source/auth changes;
+  // callbacks recheck the actual currently installed host at acquisition time.
+  const projectReaders = useMemo(() => {
+    const host = retainedResultHost;
+    return {
+      canRead: () => {
+        const auth = host?.auth?.getState();
+        return window.MastermindMissionHost === host && authRevisionRef.current === authRevision &&
+          auth?.status === "signed_in" && Boolean(auth.acquisition);
+      },
+      generation: host?.invalidationGeneration ? () => host.invalidationGeneration!() : undefined,
+      plan: host?.readProjectPlan ? (request: Parameters<NonNullable<MissionHost["readProjectPlan"]>>[0]) => host.readProjectPlan!(request) : undefined,
+      journal: host?.readProjectJournal ? ({workRef, signal}: {workRef: string; signal: AbortSignal}) => host.readProjectJournal!({work_ref: workRef, signal}) : undefined,
+      archive: host?.readProjectArchive ? (request: Parameters<NonNullable<MissionHost["readProjectArchive"]>>[0]) => host.readProjectArchive!(request) : undefined,
+      archivePage: host?.readProjectArchivePage ? (request: Parameters<NonNullable<MissionHost["readProjectArchivePage"]>>[0]) => host.readProjectArchivePage!(request) : undefined,
+      direction: host?.readProjectDirection ? (request: Parameters<NonNullable<MissionHost["readProjectDirection"]>>[0]) => host.readProjectDirection!(request) : undefined,
+      association: host?.readProjectSessionAssociation ? (request: Parameters<NonNullable<MissionHost["readProjectSessionAssociation"]>>[0]) => host.readProjectSessionAssociation!(request) : undefined,
+      autonomy: host?.readAutonomyPolicy ? (request: Parameters<NonNullable<MissionHost["readAutonomyPolicy"]>>[0]) => host.readAutonomyPolicy!(request) : undefined,
+    };
+  }, [retainedResultHost, authRevision]);
+  let archiveHostGeneration: number | null = null;
+  try {
+    const value = projectReaders.generation?.();
+    if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) archiveHostGeneration = value;
+  } catch { /* Missing current owner cannot qualify an archive read. */ }
+  const archiveScopeKey = JSON.stringify([authRevision, archiveHostGeneration]);
+  const genuineProjectDraft: KnowledgeDraftPort = {projection: observedConversation.projection,
+    text: observedConversation.draft, revision: observedConversation.draftRevision,
+    insertion: observedConversation.draftInsertion, append: observedConversation.appendSource,
+    undo: observedConversation.undoSource, edit: () => setActive("Conversations")};
+  const projectDraftOwner = useRef({host: retainedResultHost, generation: archiveHostGeneration,
+    context: observedConversation.projection.context, port: genuineProjectDraft});
+  projectDraftOwner.current = {host: retainedResultHost, generation: archiveHostGeneration,
+    context: observedConversation.projection.context, port: genuineProjectDraft};
+  const projectDraftMethods = useMemo(() => {
+    const readWitness: ProjectSourceDraftPort["readWitness"] = () => {
+      const owner = projectDraftOwner.current, host = owner.host, auth = host?.auth;
+      const getState = auth?.getState, getGeneration = host?.invalidationGeneration;
+      try {
+        if (!host || !auth || !getState || !getGeneration || owner.generation === null ||
+            window.MastermindMissionHost !== host) return null;
+        const state = getState.call(auth), generation = getGeneration.call(host);
+        if (state.status !== "signed_in" || state.content !== true || generation !== owner.generation ||
+            owner.context.authGeneration !== authRevisionRef.current || projectDraftOwner.current !== owner ||
+            window.MastermindMissionHost !== host || host.auth !== auth || auth.getState !== getState ||
+            host.invalidationGeneration !== getGeneration) return null;
+        const binding = knowledgeDraftBinding(owner.context, owner.port);
+        return binding && owner.context.selection ? {workRef: owner.context.selection.workRef,
+          binding, revision: owner.port.revision} : null;
+      } catch { return null; }
+    };
+    return {readWitness,
+      append: ((source, revision) => {
+        const owner = projectDraftOwner.current, witness = readWitness();
+        return !!witness && witness.revision === revision && projectDraftOwner.current === owner &&
+          owner.port.append(source, revision);
+      }) as ProjectSourceDraftPort["append"],
+      undo: ((identity, revision) => {
+        const owner = projectDraftOwner.current, witness = readWitness();
+        return !!witness && witness.revision === revision && projectDraftOwner.current === owner &&
+          owner.port.undo(identity, revision);
+      }) as ProjectSourceDraftPort["undo"],
+      edit: () => { if (readWitness()) projectDraftOwner.current.port.edit?.(); }};
+  }, []);
+  const projectSourceDraftPort: ProjectSourceDraftPort = {text: genuineProjectDraft.text,
+    revision: genuineProjectDraft.revision, insertion: genuineProjectDraft.insertion, ...projectDraftMethods};
+
+  const [knowledgeMode, setKnowledgeMode] = useState<"project" | "retained">("project");
+  const [projectSearchSelected, setProjectSearchSelected] = useState(true);
+  const [requestedProjectFile, setRequestedProjectFile] = useState<KnowledgeLibraryProps["requestedFile"]>();
+  const [savedConversationNavigation, setSavedConversationNavigation] = useState<SavedConversationNavigation | null>(null);
+  const projectHistoryOwner = sessionBinding?.port.projectHistory;
+  const hasProjectLibrary = Boolean(retainedResultHost?.readProjectKnowledgeCatalogue);
+  const hasProjectSearch = Boolean(retainedResultHost?.projectFilesSearch || projectHistoryOwner);
+  const catalogueWorkRef = catalogueProject?.authRevision === authRevision &&
+    catalogueProject.epoch === programIndexEpoch ? catalogueProject.workRef : null;
+  const requestedProjectWorkRef = catalogueProject ? catalogueWorkRef : selection?.workRef ?? null;
+  const currentProjectCards = office.projection.programs.source.state === "CURRENT" &&
+    index.state === "AVAILABLE" && requestedProjectWorkRef
+      ? index.programs.filter(card => card.workRef === requestedProjectWorkRef) : [];
+  const projectWorkRef = currentProjectCards.length === 1 ? currentProjectCards[0].workRef : null;
+  const [knowledgeRefresh, setKnowledgeRefresh] = useState(0);
+  const knowledgePorts = useMemo(() => {
+    const host=retainedResultHost;
+    return {readContext:host?.readSourceOperationContext
+      ? (request:Parameters<NonNullable<MissionHost["readSourceOperationContext"]>>[0])=>host.readSourceOperationContext!(request):undefined,
+      transport:host?.sourceOperations};
+  },[retainedResultHost,authRevision]);
+  const knowledgePublication=useProjectKnowledgeWorkspace({workRef:projectWorkRef,
+    authGeneration:authRevision,hostGeneration:archiveHostGeneration,canRead:projectReaders.canRead,
+    readContext:knowledgePorts.readContext,transport:knowledgePorts.transport,store:commandBinding?.store,
+    onSourceObserved:()=>setKnowledgeRefresh(value=>value+1)});
+  const [knowledgeEditor,setKnowledgeEditor]=useState<{scope:string;mode:"file"|"preference";
+    context:KnowledgeLibrarySourceContext;requestId:string;memory:ProjectMemoryDocument|null}|null>(null);
+  const currentKnowledgeEditor=knowledgeEditor?.scope===knowledgePublication.scope?knowledgeEditor:null;
+  hasUnsentUserText.current ||= !!currentKnowledgeEditor;
+  useLayoutEffect(()=>{if(knowledgeEditor && !currentKnowledgeEditor)setKnowledgeEditor(null);},[knowledgeEditor,currentKnowledgeEditor]);
+  const knowledgeWriteAvailable=!!(commandBinding?.store && knowledgePorts.readContext && knowledgePorts.transport &&
+    projectWorkRef && projectReaders.canRead());
+  const openKnowledgeEditor=(mode:"file"|"preference",context:KnowledgeLibrarySourceContext,memory:ProjectMemoryDocument|null)=>{
+    if(!knowledgeWriteAvailable || context.workRef!==projectWorkRef ||
+      ["submitting","checking","unknown"].includes(knowledgePublication.controller?.getState().status??"idle"))return;
+    try {
+      knowledgePublication.currentSource(context);
+      if(!knowledgePublication.startDraft())return;
+      const bytes=new Uint8Array(20);globalThis.crypto.getRandomValues(bytes);
+      const suffix=Array.from(bytes,byte=>byte.toString(16).padStart(2,"0")).join("");
+      setKnowledgeEditor({scope:knowledgePublication.scope,mode,context:{...context},memory,
+        requestId:`mmos-project-${mode==="file"?"file-add":"preference-set"}-${suffix}`});
+    } catch { /* No current source or original identifier means no editor action. */ }
+  };
+  const knowledgePublicationPanel=<>
+    {currentKnowledgeEditor && (currentKnowledgeEditor.mode==="file"
+      ? <ProjectKnowledgeEditor key={currentKnowledgeEditor.requestId} mode="file"
+          sourceContext={currentKnowledgeEditor.context} requestId={currentKnowledgeEditor.requestId}
+          authGeneration={authRevision} hostGeneration={archiveHostGeneration} locale={locale}
+          current={knowledgePublication.currentSource} phase={knowledgePublication.phase}
+          onSubmitFile={knowledgePublication.prepare} onClose={()=>setKnowledgeEditor(null)}
+          onCheckOriginal={knowledgePublication.checkOriginal}/>
+      : <ProjectKnowledgeEditor key={currentKnowledgeEditor.requestId} mode="preference"
+          sourceContext={currentKnowledgeEditor.context} requestId={currentKnowledgeEditor.requestId}
+          authGeneration={authRevision} hostGeneration={archiveHostGeneration} locale={locale}
+          initialValue={currentKnowledgeEditor.memory?.value??""} expectedPreferenceRevision={currentKnowledgeEditor.memory?.revision??null}
+          current={knowledgePublication.currentSource} phase={knowledgePublication.phase}
+          onSubmitPreference={knowledgePublication.prepare} onClose={()=>setKnowledgeEditor(null)}
+          onCheckOriginal={knowledgePublication.checkOriginal}/>)}
+    {currentKnowledgeEditor && knowledgePublication.phase==="prepared" && knowledgePublication.prepared && <section className="card" aria-label={locale==="zh-CN"?"检查准备好的更改":"Review prepared changes"}>
+      <h2>{locale==="zh-CN"?"检查你的更改":"Review your changes"}</h2>
+      <p>{locale==="zh-CN"?"尚未发布。确认后才会提交这一次更改。":"Nothing has been published. Publish submits this original change once."}</p>
+      <pre className="visible-text">{"file" in knowledgePublication.prepared.request
+        ? `${knowledgePublication.prepared.request.file.display_name}\n${knowledgePublication.prepared.request.file.content_utf8}`
+        : knowledgePublication.prepared.request.value}</pre>
+      <button type="button" disabled={!knowledgePublication.canPublish} onClick={knowledgePublication.publish}>{locale==="zh-CN"?"发布更改":"Publish changes"}</button>
+    </section>}
+    {knowledgeWriteAvailable && <section className="card" aria-label={locale==="zh-CN"?"原始发布状态":"Original publication status"}>
+      {knowledgePublication.phase==="proposal-published" || knowledgePublication.phase==="unknown"
+        ? <p>{locale==="zh-CN"?"项目源尚未确认保存。请检查原始发布，不要重复提交。":"The project source has not confirmed this save. Check the original publication; do not submit it again."}</p>:null}
+      {knowledgePublication.phase==="publication-held"?<p>{locale==="zh-CN"?"之前的项目操作尚未确定。请使用它的原始控件检查；这些更改尚未提交。":"A previous project action is unresolved. Use its original controls; these changes have not been submitted."}</p>:null}
+      {knowledgePublication.phase==="source-published"?<p>{locale==="zh-CN"?"已保存到项目源。":"Saved to the project source."}</p>:null}
+      <button type="button" onClick={knowledgePublication.checkOriginal}>{locale==="zh-CN"?"检查发布状态":"Check publication status"}</button>
+    </section>}
+  </>;
+  // Admission gates address the canonical programme, not an inferred Runtime
+  // root. The owner independently brackets its exact Agent OS source and grant.
+  const admissionPorts = useMemo(() => {
+    const host=retainedResultHost;
+    return {
+      read: host?.readProjectAdmissionControl ? (request: Parameters<NonNullable<MissionHost["readProjectAdmissionControl"]>>[0]) => host.readProjectAdmissionControl!(request) : undefined,
+      transport: host?.pauseProjectAdmission && host.resumeProjectAdmission && host.readProjectAdmissionOperation ? {
+        pause: (request: Parameters<NonNullable<MissionHost["pauseProjectAdmission"]>>[0]) => host.pauseProjectAdmission!(request),
+        resume: (request: Parameters<NonNullable<MissionHost["resumeProjectAdmission"]>>[0]) => host.resumeProjectAdmission!(request),
+        status: (request: Parameters<NonNullable<MissionHost["readProjectAdmissionOperation"]>>[0]) => host.readProjectAdmissionOperation!(request),
+      } : undefined,
+    };
+  }, [retainedResultHost,authRevision,projectWorkRef,selectionSeq.current]);
+  const projectAdmissionPanel=useProjectAdmissionWorkspace({
+    selection:projectWorkRef ? {work_ref:projectWorkRef} : null,
+    authGeneration:authRevision,sourceGeneration:projectReaders.generation,canRead:projectReaders.canRead,
+    readCurrent:admissionPorts.read,transport:admissionPorts.transport,store:commandBinding?.store,locale,
+  });
+  // Observational association reads use the canonical catalogue pair, independently
+  // of the Mission/conversation-send selection. No association grants a send target.
+  const projectCard = currentProjectCards.length === 1 ? currentProjectCards[0] : null;
+  const projectAssociationSelection = projectWorkRef && projectReaders.canRead() &&
+    projectCard?.rootState === "RESOLVED" && projectCard.rootJobId &&
+    projectCard.rootCandidates.length === 1 && projectCard.rootCandidates[0] === projectCard.rootJobId
+      ? {workRef: projectWorkRef, rootJobId: projectCard.rootJobId} : null;
+  const directionConversation = projectConversationActive && projectWorkRef && selection?.workRef === projectWorkRef &&
+    observedConversation.projection.conversation.source.state === "CURRENT" &&
+    observedConversation.projection.context.selection?.workRef === projectWorkRef &&
+    observedConversation.projection.context.selection?.rootJobId === selection.rootJobId;
+  const instructionConversationCurrent = !!(projectWorkRef && selection?.workRef === projectWorkRef &&
+    authState?.content === true && projectReaders.canRead() &&
+    observedConversation.projection.conversation.source.state === "CURRENT" &&
+    observedConversation.projection.context.selection?.workRef === projectWorkRef &&
+    observedConversation.projection.context.selection?.rootJobId === selection.rootJobId);
+  const instructionDraftOwner = projectDraftOwner.current;
+  const instructionDraftWitness = instructionConversationCurrent ? projectDraftMethods.readWitness() : null;
+  const projectDetailsControls = useProjectDetailsControls({
+    selection: projectWorkRef ? {work_ref: projectWorkRef} : null,
+    host: retainedResultHost ?? null, authGeneration: authRevision,
+    sourceGeneration: projectReaders.generation, canRead: projectReaders.canRead,
+    store: commandBinding?.store, locale,
+    onChangeInConversation: instructionDraftWitness ? source => {
+      const current = projectDraftMethods.readWitness();
+      if (projectDraftOwner.current === instructionDraftOwner && current &&
+          current.workRef === projectWorkRef && current.workRef === instructionDraftWitness.workRef &&
+          current.binding === instructionDraftWitness.binding && current.revision === instructionDraftWitness.revision &&
+          projectDraftMethods.append(source, instructionDraftWitness.revision)) {
+        setActive("Conversations");
+      }
+    } : undefined,
+  });
+  const recordedDirection = <AcceptedDirectionPanel selection={projectWorkRef ? {work_ref:projectWorkRef} : null}
+    read={projectReaders.direction} sourceGeneration={projectReaders.generation} canRead={projectReaders.canRead} locale={locale}
+    onChangeDirection={directionConversation ? workRef => {
+      if (workRef === projectWorkRef && projectReaders.canRead()) setActive("Conversations");
+    } : undefined}/>;
+  const projectSessionEvidence = <ProjectConversationAssociation selection={projectAssociationSelection}
+    authGeneration={authRevision} hostGeneration={retainedResultHost?.invalidationGeneration?.() ?? null}
+    readAssociation={projectReaders.association} locale={locale}/>;
+  const recordedProjectJournal = projectWorkRef ? <ProjectJournalReader selection={{workRef: projectWorkRef}}
+      read={projectReaders.journal} generation={projectReaders.generation?.() ?? "SOURCE_UNAVAILABLE"}
+      authGeneration={authRevision} canRead={projectReaders.canRead} locale={locale}/> : null;
+  const projectPlanProps = {selection: projectWorkRef ? {work_ref: projectWorkRef} : null,
+    read: projectReaders.plan, sourceGeneration: projectReaders.generation,
+    canRead: projectReaders.canRead, locale};
+  const recordedProjectDetails = <><ProjectPlanPanel {...projectPlanProps}/>{recordedProjectJournal}</>;
+
+  const retainedProgram = retainedRoot && index.state === "AVAILABLE"
+    ? index.programs.filter(p => p.workRef === retainedRoot.pair.workRef)
+    : [];
+  // This is a separate read-only choice, never the Mission/action selection.
+  // Every new Programs read invalidates it, including A-B-A source changes.
+  const currentRetainedRoot = retainedRoot &&
+    retainedRoot.index === index && retainedRoot.epoch === programIndexEpoch &&
+    retainedRoot.epoch === programRequest.current &&
+    retainedRoot.authRevision === authRevision &&
+    retainedRoot.host === retainedResultHost &&
+    retainedRoot.hostGeneration === retainedHostGeneration &&
+    retainedRoot.missionWorkRef === (selection?.workRef ?? null) &&
+    (!authState || authState.acquisition) && retainedProgram.length === 1 &&
+    retainedProgram[0].rootState === "CONFLICT" &&
+    retainedProgram[0].rootCandidates.length > 1 &&
+    retainedRoot.candidates === JSON.stringify(retainedProgram[0].rootCandidates) &&
+    retainedProgram[0].rootCandidates.includes(retainedRoot.pair.rootJobId)
+      ? retainedRoot : null;
+  useLayoutEffect(() => {
+    if (retainedRoot && !currentRetainedRoot) setRetainedRoot(null);
+  }, [retainedRoot, currentRetainedRoot]);
+  const chooseRetainedRoot = (pair: MissionSelection) => {
+    const normalized = normalizeResultReferencesSelection(pair);
+    if (!normalized || index.state !== "AVAILABLE" ||
+        programIndexEpoch !== programRequest.current ||
+        (authState && !authState.acquisition)) return;
+    const programmes = index.programs.filter(p => p.workRef === normalized.workRef);
+    if (programmes.length !== 1 || programmes[0].rootState !== "CONFLICT" ||
+        programmes[0].rootCandidates.length < 2 ||
+        !programmes[0].rootCandidates.includes(normalized.rootJobId)) return;
+    setRetainedRoot({ pair: normalized, index, epoch: programIndexEpoch,
+      authRevision, host: retainedResultHost, hostGeneration: retainedHostGeneration,
+      missionWorkRef: selection?.workRef ?? null,
+      candidates: JSON.stringify(programmes[0].rootCandidates) });
+  };
+  const selectedHistoryPanel = currentRetainedRoot && retainedResultHost?.readResultReferences &&
+    retainedResultHost.readResult ? <RetainedResults
+      key={JSON.stringify([authRevision, programIndexEpoch, retainedHostGeneration,
+        currentRetainedRoot.pair])}
+      selection={currentRetainedRoot.pair} authGeneration={authRevision}
+      hostGeneration={retainedHostGeneration} locale={locale}
+      missionState="UNAVAILABLE"
+      readReferences={retainedResultHost.readResultReferences}
+      readResult={retainedResultHost.readResult}
+      renderResult={(selected, document) =>
+        <ResultCard state={{ kind: "READY", selection: selected, document }} />}
+    /> : null;
+  const retainedResultsPanel = selection && !directSelected &&
+    retainedResultHost?.readResultReferences && retainedResultHost.readResult &&
+    (!authState || authState.acquisition) ? (
+      <RetainedResults
+        key={JSON.stringify([authRevision, selectionSeq.current, selection,
+          retainedResultHost.invalidationGeneration?.() ?? 0])}
+        selection={selection}
+        authGeneration={authRevision}
+        hostGeneration={retainedResultHost.invalidationGeneration?.() ?? 0}
+        locale={locale}
+        missionState={d?.read_state.state ?? "UNAVAILABLE"}
+        readReferences={retainedResultHost.readResultReferences}
+        readResult={retainedResultHost.readResult}
+        renderResult={(selected, document) => (
+          <ResultCard state={{ kind: "READY", selection: selected, document }} />
+        )}
       />
-    );
-  else if (active === "Conversations")
-    content = (
+    ) : null;
+  const quietHeader = active === "Inbox" || active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
+    active === "Projects" && !directRoute && (!projectTab ||
+      Boolean(projectWorkRef && (projectTab === "Conversation" || catalogueWorkRef)));
+  const projectReadGeneration = JSON.stringify([authRevision, retainedHostGeneration, selectionSeq.current]);
+  const discoveryView = projectDiscovery({projection: office.projection,
+    conversation: observedConversation.projection, controlRoom: currentControlRoom});
+
+  const currentConversationPanel = (
       <>
         <ConversationWindow
           locale={locale}
-          continuation={sessionContinuationPanel}
+          continuation={active === "Projects" ? undefined : sessionContinuationPanel}
+          historicalAnswers={<HistoricalOriginalAnswers
+            binding={sessionBinding}
+            selection={selection}
+            principalScope={sessionOwner?.principalScope ?? null}
+            generation={sessionOwner?.generation ?? null}
+            authRevision={authRevision}
+            selectionSeq={selectionSeq.current}
+            activeReadRef={presentedSessionAnswer?.answer.readRef}
+          />}
+          qualifiedAnswer={presentedSessionAnswer}
+          onQualifiedAnswerCommitted={answerView.acknowledgeRender}
           notesPresentation="collapsed"
+          retainUnsentOnExpiry={passiveExpiryHold.current && authState?.content === false}
           projection={observedConversation.projection}
           draft={observedConversation.draft}
           onDraftChange={observedConversation.changeDraft}
@@ -3144,16 +4355,176 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         >
           Refresh observed window
         </button>
-        {!sessionBinding && sessionPanel}
+        {active !== "Projects" && ((!signedIn && retainedComposerDrafts.session) || !sessionBinding)
+          ? sessionPanel : null}
       </>
     );
+  const changeProjectTab = (tab: ProjectTab) => {
+    pendingLegacyTabFocus.current = tab;
+    setProjectTab(tab);
+  };
+  let content: React.ReactNode;
+  if (active === "Today")
+    content = <Today locale={locale} projection={office.projection} work={workState}
+      composer={commandPanel}
+      authenticationCue={todayAuthenticationCue}
+      retainComposerWithAuth={Boolean(passiveExpiryHold.current && retainedComposerDrafts.launch) || heldKind === "launch"}
+      onOpenInbox={() => { setProjectTab(null); setActive("Inbox"); }}
+      onOpenProjects={() => { setProjectTab(null); setActive("Projects"); }}
+      onOpenMission={(!authState || authState.acquisition) ? target => open(target.workRef, target.rootJobId) : undefined}
+    />;
+  else if (active === "Meta-CEO")
+    content = (
+      <>
+        <MetaCeoOffice
+          key={JSON.stringify([authRevision, selection, officeSession.sessionRef, officeSession.bindingGeneration])}
+          locale={locale}
+          projection={office.projection}
+          programmeDirection={{selection: projectWorkRef ? {work_ref: projectWorkRef} : null,
+            read: projectReaders.plan, sourceGeneration: projectReaders.generation, canRead: projectReaders.canRead}}
+          draft={office.draft}
+          onDraftChange={office.changeDraft}
+          onInspectWorkerResult={workerResultHost?.readResult ? openOfficeWorkerResult : undefined}
+          nativeContinuation={
+            officeSession.sessionRef !== null &&
+            officeSession.sessionRef === sessionTargetKey &&
+            office.projection.mission.source.state === "CURRENT"
+              ? sessionContinuationPanel
+              : null
+          }
+          onStartNewWork={canLaunch && commandView ? startOfficeLaunch : undefined}
+        />
+        {/* The one existing launch owner, mounted where the Office mounts it.
+            It is the same commandPanel element the other routes use, so only
+            one LaunchOrchestrator owner exists at a time. */}
+        {officeLaunchHandoff ? commandPanel : null}
+        <OperationalNavigation label="Company operations" onNavigate={navigateOperationalView} />
+      </>
+    );
+  else if (active === "Inbox")
+    content = (
+      <InboxWorkspace
+        locale={locale}
+        terminalHost={window.MastermindMissionHost?.terminalSharing}
+        projection={office.projection}
+        onNavigateMission={
+          office.projection.mission.source.state === "CURRENT"
+            ? (target, mode) => {
+                if (mode === "current") open(target.workRef, target.rootJobId);
+              }
+            : undefined
+        }
+      />
+    );
+  else if (active === "Conversations")
+    content = currentConversationPanel;
+  else if ((active === "Search" && (!hasProjectSearch || !projectSearchSelected)) || active === "Sources" || active === "Tools")
+    content = <DiscoveryWorkspace view={discoveryView} projection={office.projection}
+      mode={active} locale={locale} theme={theme}
+      sourceProps={{readResultReferences: retainedResultHost?.readResultReferences,
+        readResult: retainedResultHost?.readResult,
+        hostGeneration: retainedResultHost?.invalidationGeneration?.(),
+        draftPort: {projection: observedConversation.projection, text: observedConversation.draft,
+          revision: observedConversation.draftRevision, insertion: observedConversation.draftInsertion,
+          append: observedConversation.appendSource, undo: observedConversation.undoSource,
+          edit: () => setActive("Conversations")}}}
+      onModeChange={setActive}
+      onOpenProject={office.projection.programs.source.state === "CURRENT" && index.state === "AVAILABLE"
+        ? (target, mode) => {
+            if (mode !== "current" || office.projection.programs.source.state !== "CURRENT" || index.state !== "AVAILABLE") return;
+            const cards = index.programs.filter(card => card.workRef === target.workRef);
+            if (cards.length !== 1 || cards[0].rootState !== "RESOLVED" ||
+                cards[0].rootJobId !== target.rootJobId || cards[0].rootCandidates.length !== 1 ||
+                cards[0].rootCandidates[0] !== target.rootJobId) return;
+            open(target.workRef, target.rootJobId);
+          } : undefined}
+      onOpenConversation={() => setActive("Conversations")}
+      onOpenMetaCeo={() => setActive("Meta-CEO")}
+      onOpenKnowledge={() => setActive("Knowledge")}
+      onOpenPreferences={hasPreferencesNavigation ? openDisplayPreferences : undefined}
+      onRefreshSources={authState?.acquisition && typeof retainedResultHost?.readControlRoomState === "function"
+        ? () => setControlRoomRevision(revision => revision + 1) : undefined}/>
+  else if (active === "Search")
+    content = savedConversationNavigation ? <SavedConversationReader
+      selection={savedConversationNavigation} workRef={projectWorkRef} authGeneration={authRevision}
+      hostGeneration={archiveHostGeneration} owner={projectHistoryOwner} locale={locale} theme={theme} draftPort={projectSourceDraftPort}
+      onBack={() => setSavedConversationNavigation(null)}/> : null;
+  else if (active === "Knowledge" && hasProjectLibrary && knowledgeMode === "project")
+    content = <>{knowledgePublicationPanel}<ProjectKnowledgeLibrary host={retainedResultHost} workRef={projectWorkRef}
+      authGeneration={authRevision} hostGeneration={archiveHostGeneration} locale={locale} theme={theme}
+      requestedFile={requestedProjectFile} draftPort={projectSourceDraftPort} refreshKey={knowledgeRefresh}
+      onCurrentSourceOwner={knowledgePublication.registerSourceOwner}
+      readActions={knowledgeWriteAvailable?knowledgePublication.readActions:undefined}
+      onAddFiles={knowledgeWriteAvailable?context=>openKnowledgeEditor("file",context,null):undefined}
+      onEditPreference={knowledgeWriteAvailable?(context,memory)=>openKnowledgeEditor("preference",context,memory):undefined}
+      onReturnToSearch={() => { setRequestedProjectFile(undefined); setActive("Search"); setProjectSearchSelected(true); }}/></>
   else if (active === "Knowledge")
-    content = <Knowledge projection={office.projection} />;
+    content = <Knowledge projection={office.projection} locale={locale}
+      readResultReferences={retainedResultHost?.readResultReferences}
+      readResult={retainedResultHost?.readResult}
+      hostGeneration={retainedResultHost?.invalidationGeneration?.()}
+      draftPort={{ projection: observedConversation.projection, text: observedConversation.draft,
+        revision: observedConversation.draftRevision, insertion: observedConversation.draftInsertion,
+        append: observedConversation.appendSource, undo: observedConversation.undoSource,
+        edit: () => setActive("Conversations") }} />;
+  else if (directRoute)
+    content = <>
+      {directResultPanel}
+      <details className="reason-details">
+        <summary>{locale === "zh-CN" ? "任务范围与项目来源" : "Task scope and project source"}</summary>
+        <dl>
+          <dt>{locale === "zh-CN" ? "工作流" : "Workstream"}</dt><dd><code>{selection?.workRef}</code></dd>
+          <dt>Job</dt><dd><code>{selection?.rootJobId}</code></dd>
+          <dt>{locale === "zh-CN" ? "项目来源" : "Project source"}</dt><dd><State value={office.projection.programs.source.state} /></dd>
+        </dl>
+        <p>{visibleNotice}</p>
+        {programsRefreshControl}
+      </details>
+    </>;
   else if (active === "Projects")
     content = (
       <>
         {programsRefreshControl}
-        {projectTab && selection ? (
+        {!directSelected && projectWorkRef && (catalogueWorkRef || projectTab === "Conversation") ? (
+          <ProjectPlanPanel {...projectPlanProps} renderWorkspace={({objective, panel}) => <ProjectWorkspace headingLevel={1} headingRef={projectHeading} locale={locale}
+            scopeKey={JSON.stringify([authRevision, projectWorkRef,
+              projectConversationActive ? selection?.rootJobId : null, sessionTargetKey])}
+            title={currentProjectCards[0].title || projectWorkRef} goal={objective}
+            conversationPanel={projectConversationActive ? currentConversationPanel
+              : <p role="status">{locale === "zh-CN" ? "此项目尚无已确认关联的对话。" : "No qualified conversation is associated with this project here."}</p>}
+            composerPanel={projectConversationActive ? sessionContinuationPanel ?? sessionPanel
+              : <p>{locale === "zh-CN" ? "尚未提供此项目的对话发送入口。" : "A conversation send route is not supplied for this project."}</p>}
+            filesPanel={projectConversationActive ? retainedResultsPanel : undefined}
+            statusPanel={!catalogueProject && selection?.workRef === projectWorkRef ? <>
+              <div><small>{locale === "zh-CN" ? "任务来源" : "Mission source"}</small>
+                <State value={d?.read_state.state ?? ("reason" in mission &&
+                  (mission.reason === "SOURCE_READ_PENDING" || mission.reason === "PROGRAM_SELECTION_PENDING")
+                    ? "SOURCE_READ_PENDING" : "UNAVAILABLE")}/></div>
+              {projectConversationActive && d ? <div>
+                <small>{locale === "zh-CN" ? "执行观测" : "Execution observation"}</small>
+                <State value={d.execution.state}/>
+              </div> : null}
+              <details className="reason-details"><summary>{locale === "zh-CN" ? "任务范围与来源详情" : "Mission scope and source details"}</summary>
+                <dl><dt>{locale === "zh-CN" ? "所选根任务" : "Selected Mission root"}</dt><dd><code>{selection.rootJobId}</code></dd></dl>
+                {"reason" in mission ? <code>{mission.reason}</code> : null}
+              </details>
+            </> : undefined}
+            detailsPanel={<>
+              {panel}{recordedDirection}{projectAdmissionPanel}
+              {projectDetailsControls.instructions}{projectDetailsControls.access}
+              <details className="reason-details"><summary>{locale === "zh-CN" ? "项目历史与来源证据" : "Project history and source evidence"}</summary>
+                {projectSessionEvidence}{recordedProjectJournal}
+              </details>
+              {projectConversationActive ? <>
+                <AutonomyPanel selection={selection} read={projectReaders.autonomy}
+                  canRead={Boolean(projectReaders.generation) && projectReaders.canRead()}
+                  sourceGeneration={projectReaders.generation?.() ?? "SOURCE_UNAVAILABLE"} locale={locale}/>
+                <details className="reason-details"><summary>{locale === "zh-CN" ? "更多工作详情" : "More work details"}</summary>
+                  <ProjectTabs active="Conversation" onChange={changeProjectTab}/>
+                </details>
+              </> : null}
+            </>}/>}/>
+        ) : !catalogueProject && (projectTab || directSelected) && selection ? (
         <>
           <section className="hero">
             <div>
@@ -3185,8 +4556,9 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
               </div>
             </div>
           </section>
-          <ProjectTabs active={projectTab} onChange={setProjectTab} />
-          {!d ? (
+          {!directSelected ? <ProjectTabs tablistRef={legacyProjectTabs} active={projectTab ?? "Overview"} onChange={changeProjectTab} /> : null}
+          {retainedResultsPanel}
+          {directSelected ? directResultPanel : !d ? (
             <section className="card empty-panel">
               <h2>{projectTab}</h2>
               <State value="UNAVAILABLE" />
@@ -3201,6 +4573,11 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
                 </code>
               </details>
             </section>
+          ) : projectTab === "Conversation" ? (
+            <section className="card empty-panel">
+              <h2>{locale === "zh-CN" ? "项目对话" : "Project conversation"}</h2>
+              <p>{locale === "zh-CN" ? "当前来源尚未确认此项目与任务的关联，无法显示项目对话。" : "The current catalogue has not qualified this project’s Mission association. Its conversation is unavailable here."}</p>
+            </section>
           ) : projectTab === "Overview" ? (
             <>
               <Mission d={d} />
@@ -3211,20 +4588,59 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
             <ProjectPlan d={d} />
           ) : projectTab === "Work" ? (
             <>
-              {commandPanel}
-              {workRefreshControl}
+              <ProjectWorkDetail key={projectReadGeneration} document={d} selection={selection}
+                generation={projectReadGeneration} locale={locale}
+                resultPanel={<>{resultRefs}<ResultCard state={resultState}/></>}
+                activityPanel={<Activity d={d}/>}
+                actionPanel={<>{commandPanel}{workRefreshControl}</>}
+                onOpenEvidence={() => setProjectTab("Evidence")}
+                onOpenJournal={() => setProjectTab("Journal")} />
               <WorkQueue state={workState} rootJobId={selection.rootJobId} />
             </>
           ) : projectTab === "Evidence" ? (
-            <><Evidence d={d} />{productAcceptancePanel}</>
+            <><ProjectEvidence key={projectReadGeneration} document={d} selection={selection}
+              generation={projectReadGeneration} locale={locale}
+              resultPanel={<>{resultRefs}<ResultCard state={resultState}/></>}/>{productAcceptancePanel}</>
+          ) : projectTab === "Journal" ? (
+            <ProjectJournal key={projectReadGeneration} document={d} selection={selection}
+              generation={projectReadGeneration} locale={locale} activityPanel={<Activity d={d}/>} />
           ) : (
-            <ProjectMore d={d} sessionPanel={sessionPanel} onNavigate={navigateOperationalView} />
+            <><ProjectMore d={d} sessionPanel={sessionPanel} onNavigate={navigateOperationalView} />
+              {recordedProjectDetails}
+              <AutonomyPanel selection={selection} read={projectReaders.autonomy}
+                canRead={Boolean(projectReaders.generation) && projectReaders.canRead()}
+                sourceGeneration={projectReaders.generation?.() ?? "SOURCE_UNAVAILABLE"} locale={locale}/>
+            </>
           )}
         </>
       ) : (
-        <Projects
+        projectReaders.archive && projectReaders.archivePage && projectReaders.generation ?
+        <ProjectArchiveBrowser locale={locale} scopeKey={archiveScopeKey}
+          programs={office.projection.programs} read={projectReaders.archive} readPage={projectReaders.archivePage}
+          sourceGeneration={projectReaders.generation} canRead={projectReaders.canRead}
+          onOpenProject={workRef => {
+            if (office.projection.programs.source.state !== "CURRENT" || index.state !== "AVAILABLE") return;
+            const cards = index.programs.filter(card => card.workRef === workRef);
+            if (cards.length !== 1) return;
+            const card = cards[0];
+            // Current catalogue navigation preserves the existing conversation
+            // path only for its exact singleton root. Archived Open never calls
+            // this callback and remains the archive component's read-only view.
+            if (card.rootState === "RESOLVED" && card.rootJobId && card.rootCandidates.length === 1 && card.rootCandidates[0] === card.rootJobId) {
+              open(card.workRef, card.rootJobId); return;
+            }
+            setCatalogueProject({workRef, authRevision, epoch: programIndexEpoch});
+            setProjectTab("More");
+          }} /> :
+        <Projects locale={locale}
           programs={office.projection.programs}
           selectedProject={selection}
+          onOpenProject={workRef => {
+            if (office.projection.programs.source.state !== "CURRENT" || index.state !== "AVAILABLE" ||
+                index.programs.filter(card => card.workRef === workRef).length !== 1) return;
+            setCatalogueProject({workRef, authRevision, epoch: programIndexEpoch});
+            setProjectTab("More");
+          }}
           onNavigateMission={
             office.projection.programs.source.state === "CURRENT"
               ? (target, mode) => {
@@ -3254,8 +4670,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         ) : index.programs.length ? (
           <div className="programs">
             {index.programs.map((p) => (
+              <div key={p.workRef}>
               <button
-                key={p.workRef}
                 disabled={!p.rootJobId}
                 onClick={() => open(p.workRef, p.rootJobId)}
               >
@@ -3268,10 +4684,17 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
                   {p.rootJobId
                     ? `Mission ${p.rootJobId}`
                     : p.rootState === "CONFLICT"
-                      ? `Root conflict: ${p.rootCandidates.join(", ") || "multiple responsibility rows"}`
+                      ? (locale === "zh-CN" ? "任务根存在冲突：当前任务仍未确定。" : "Root conflict: the current Mission stays unresolved.")
                       : "Root unknown; no mission was guessed"}
                 </small>
               </button>
+              {p.rootState === "CONFLICT" && p.rootCandidates.length > 1 ? <RetainedRootChoice workRef={p.workRef} rootCandidates={p.rootCandidates}
+                rootState={p.rootState} locale={locale}
+                selectedRootJobId={currentRetainedRoot?.pair.workRef === p.workRef
+                  ? currentRetainedRoot.pair.rootJobId : null}
+                onChooseRoot={chooseRetainedRoot} /> : null}
+              {currentRetainedRoot?.pair.workRef === p.workRef ? selectedHistoryPanel : null}
+              </div>
             ))}
           </div>
         ) : index.state === "AVAILABLE" ? (
@@ -3292,6 +4715,42 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         ) : null}
       </section>
     );
+  else if (active === "Session Estate")
+    content = <><SessionEstate key={"estate:" + authRevision} state={currentControlRoom} locale={locale}
+      controlsHeld={controlRoomSurfaceControls.held}
+      canOpenSurface={controlRoomSurfaceControls.canAct && !controlRoomSurfaceControls.held
+        && controlRoomSurfaceControls.action.state !== "PENDING"
+        && !(controlRoomSurfaceControls.action.state === "WITHHELD" && controlRoomSurfaceControls.action.held)
+        && !(controlRoomSurfaceControls.action.state === "FAILURE" && controlRoomSurfaceControls.action.disposition === "EFFECT_UNKNOWN")
+        && !(controlRoomSurfaceControls.action.state === "RESULT" && controlRoomActionIsUncertain(controlRoomSurfaceControls.action.result))}
+      onOpenSurface={controlRoomSurfaceControls.onOpenSurface}
+      canRefresh={Boolean(authState?.acquisition) && typeof window.MastermindMissionHost?.readControlRoomState === "function"}
+      onRefresh={() => setControlRoomRevision(revision => revision + 1)} onOpenMission={open}>
+      <ControlRoomSurfaceControls key={"estate-controls:" + authRevision}
+        navigation={currentControlRoom.state === "AVAILABLE" ? currentControlRoom.navigation : null}
+        locale={locale} {...controlRoomSurfaceControls}/>
+    </SessionEstate>
+    <SupervisionLedger read={currentControlRoom.state === "AVAILABLE"
+      ? currentControlRoom.supervision ?? { state: "UNAVAILABLE", reason: "SOURCE_UNAVAILABLE" }
+      : { state: "UNAVAILABLE", reason: "SOURCE_UNAVAILABLE" }} locale={locale} onOpenMission={open}/>
+    <SupervisionTrace document={d} selection={selection} locale={locale}/>
+    <ActivationReceipt state={currentControllerState} locale={locale} onReadOriginalStatus={checkCommandStatus}/>
+    <WebSessionPreview key={authRevision} document={d} selection={selection} locale={locale}/></>;
+  else if (active === "Control Room")
+    content = (
+      <>
+        <ControlRoomPanel key={authRevision} state={currentControlRoom}
+          canRefresh={Boolean(authState?.acquisition) &&
+            typeof window.MastermindMissionHost?.readControlRoomState === "function"}
+          onRefresh={() => setControlRoomRevision(revision => revision + 1)}
+          onOpen={open} />
+        <ControlRoomSurfaceControls key={"surface-controls:" + authRevision}
+          navigation={currentControlRoom.state === "AVAILABLE"
+            ? currentControlRoom.navigation : null}
+          locale={locale}
+          {...controlRoomSurfaceControls} />
+      </>
+    );
   else if (active === "Work")
     content = (
       <>
@@ -3302,27 +4761,18 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     );
   else if (active === "Fleet & Capacity")
     content = (
-      <section className="card source-gap">
-        <div className="section-title">
-          <div>
-            <h2>Fleet & Capacity</h2>
-            <p className="muted">
-              Resource health and placement are separate from Mission lifecycle
-              and require their canonical Capacity source.
-            </p>
-          </div>
-          <State value="NOT_PROJECTED" />
-        </div>
-        <p>
-          This read-only app does not infer host readiness from browser,
-          provider, or Mission state. Capacity will appear here only when the
-          qualified fleet/placement feed is connected.
-        </p>
-        <details className="reason-details">
-          <summary>Technical details</summary>
-          <code>CAPACITY_SOURCE_NOT_CONNECTED</code>
-        </details>
-      </section>
+      <>
+      <ResourcesSystemsPanel controlRoom={currentControlRoom} work={workState} locale={locale}
+        onReviewSources={() => setActive("Sources")}/>
+      <ResourceCapacityRead host={retainedResultHost} locale={locale}
+        selection={selectedCurrentCapacityAttempt(office.projection, selection,
+          resultState.kind === "READY" ? resultState.selection : null, authRevision)}/>
+      <AttendedFabricWorkspace
+        key={`fleet:${authRevision}`}
+        host={window.MastermindMissionHost}
+        locale={locale}
+      />
+      </>
     );
   else if (active === "Conversation")
     content = (
@@ -3338,6 +4788,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           selection={selection}
           association={association}
           contentAvailable={!!authState?.content}
+          locale={locale}
         />
       </>
     );
@@ -3361,86 +4812,13 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   else if (active === "Mission Workspace")
     content = (
       <>
+        {directResultPanel}
         <Mission d={d} />
+        {retainedResultsPanel}
         {missionV3 && isDocv3(missionV3) ? (
           <ResultRefs
             d={missionV3}
-            onPick={(sel) => {
-              const valid = normalizeResultSelection(sel);
-              if (!valid) return;
-              if (!window.MastermindMissionHost?.readResult) {
-                setResultState({
-                  kind: "UNAVAILABLE",
-                  selection: valid,
-                  reason: "QUALIFIED_RESULT_READ_UNAVAILABLE",
-                });
-                return;
-              }
-              resultController.current?.abort();
-              const context = resultContext;
-              setResultState({ kind: "PENDING", selection: valid });
-              const current = ++resultRequest.current;
-              const controller = new AbortController();
-              resultController.current = controller;
-              let raceAborted = false;
-              Promise.resolve()
-                .then(() =>
-                  window.MastermindMissionHost!.readResult!({
-                    workRef: valid.workRef,
-                    rootJobId: valid.rootJobId,
-                    jobId: valid.jobId,
-                    attemptId: valid.attemptId,
-                    resultEnvelopeDigest: valid.resultEnvelopeDigest,
-                    signal: controller.signal,
-                  }),
-                )
-                .then((raw) => {
-                  if (
-                    resultRequest.current !== current ||
-                    raceAborted ||
-                    currentResultContext.current !== context ||
-                    controller.signal.aborted
-                  )
-                    return;
-                  // The host returns the decoded frozen envelope — including
-                  // the typed allowed 503 body as a validated UNAVAILABLE
-                  // envelope. No kind sniffing, no blind cast: the value is
-                  // re-validated against the exact selected tuple before it
-                  // is admitted for rendering.
-                  const decoded = decodeResultEnvelope(raw, valid);
-                  if (!decoded) {
-                    setResultState({
-                      kind: "UNAVAILABLE",
-                      selection: valid,
-                      reason: "RESULT_RESPONSE_INVALID",
-                    });
-                    return;
-                  }
-                  setResultState({
-                    kind: "READY",
-                    selection: valid,
-                    document: decoded,
-                  });
-                })
-                .catch((err: Error) => {
-                  if (
-                    resultRequest.current !== current ||
-                    raceAborted ||
-                    currentResultContext.current !== context ||
-                    controller.signal.aborted
-                  )
-                    return;
-                  if (err?.message === "READ_CANCELLED") {
-                    raceAborted = true;
-                    return;
-                  }
-                  setResultState({
-                    kind: "UNAVAILABLE",
-                    selection: valid,
-                    reason: "RESULT_SOURCE_UNAVAILABLE",
-                  });
-                });
-            }}
+            onPick={pickResult}
             selectedKey={
               resultState.kind === "READY" || resultState.kind === "PENDING"
                 ? `${resultState.selection.jobId}|${resultState.selection.attemptId}|${resultState.selection.resultEnvelopeDigest}`
@@ -3455,192 +4833,237 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   else if (active === "Activity") content = <Activity d={d} />;
   else if (active === "Connections") content = <Connections d={d} />;
   else if (active === "Evidence") content = <><Evidence d={d} />{productAcceptancePanel}</>;
-  else content = <Conversation />;
+  else content = <Conversation locale={locale} />;
+  const privateEntryState = authState && !authState.acquisition && !authState.content &&
+    (authState.status === "signed_out" || authState.status === "signing_in" ||
+      authState.status === "error" || authState.status === "unconfigured") ? authState.status : null;
+  useEffect(() => {
+    // Leaving the product shell must release its existing drawer focus owner.
+    if (privateEntryState) setNavigationOpen(false);
+  }, [privateEntryState]);
+  if (privateEntryState) return <AuthEntry state={privateEntryState} locale={locale} theme={theme}
+    illustrationSrc={privateEntryArt} authenticationControl={authenticationControl}
+    preferencesControl={preferencesControl}
+    feedback={authState?.reason && privateEntryState !== "signing_in" && privateEntryState !== "unconfigured" ? <p role="alert">{
+      authState.reason === "POPUP_BLOCKED" ? copy.allowPopup :
+      authState.reason === "POPUP_CLOSED" ? copy.popupClosed :
+      authState.reason.includes("EXPIRED") || authState.reason.includes("TIMEOUT") ? copy.signInTimeout : copy.signInFailed
+    }</p> : undefined}
+    protectedWork={((passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.session || office.draft.text || observedConversation.draft)) || showCheckStatus) ? <>
+      {passiveExpiryHold.current && office.draft.text ? <section className="card">
+        <h2>{locale === "zh-CN" ? "未发送的指示" : "Unsent direction"}</h2>
+        <p>{copy.expiredUnsent}</p>
+        <label htmlFor="entry-office-draft">{locale === "zh-CN" ? "给 Meta-CEO 的指示" : "Direction to Meta-CEO"}</label>
+        <textarea id="entry-office-draft" value={office.draft.text} onChange={event => office.changeDraft(event.target.value)} rows={4}/>
+        <button type="button" onClick={() => office.changeDraft("")}>{locale === "zh-CN" ? "丢弃指示" : "Discard direction"}</button>
+      </section> : null}
+      {passiveExpiryHold.current && observedConversation.draft ? <section className="card">
+        <h2>{locale === "zh-CN" ? "未发送的对话草稿" : "Unsent conversation draft"}</h2>
+        <p>{copy.expiredUnsent}</p>
+        <label htmlFor="entry-conversation-draft">{locale === "zh-CN" ? "消息" : "Message"}</label>
+        <textarea id="entry-conversation-draft" value={observedConversation.draft} onChange={event => observedConversation.changeDraft(event.target.value)} rows={4}/>
+        <button type="button" onClick={observedConversation.discardDraft}>{locale === "zh-CN" ? "丢弃消息" : "Discard message"}</button>
+      </section> : null}
+      {passiveExpiryHold.current && retainedComposerDrafts.launch ? commandPanel : null}
+      {passiveExpiryHold.current && retainedComposerDrafts.session ? sessionPanel : null}
+      {showCheckStatus ? <section className="card">
+        <h2>{locale === "zh-CN" ? "先前请求" : "Previous request"}</h2>
+        <p>{locale === "zh-CN" ? "请检查原请求，不要重新发送。" : "Check the original request. Do not send it again."}</p>
+        {checkStatusControl}
+      </section> : null}
+    </> : undefined} />;
   return (
-    <div className="shell" data-theme={theme} lang={locale}>
+    <div className="shell" data-theme={theme} data-active-route={active} lang={locale}>
       <a className="skip" href="#content" onClick={event => {
         event.preventDefault();
         document.getElementById("content")?.focus();
       }}>
-        Skip to workspace
+        {locale === "zh-CN" ? "跳至工作区" : "Skip to workspace"}
       </a>
-      <aside>
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            M
-          </span>
-          <span className="brand-copy">
-            mastermind<small>EXECUTIVE OS</small>
-          </span>
+      {navigationOpen && <button className="navigation-backdrop" aria-label={locale === "zh-CN" ? "关闭导航" : "Close navigation"} tabIndex={-1} onClick={closeNavigation} />}
+      <aside id="workspace-navigation" ref={navigationPane} data-open={navigationOpen ? "true" : "false"}>
+        <button type="button" className="navigation-close" onClick={closeNavigation}>{locale === "zh-CN" ? "关闭导航" : "Close navigation"}</button>
+        <div className="nav-top">
+          <div className="brand">
+            <span className="brand-mark" aria-hidden="true">
+              M
+            </span>
+            <span className="brand-copy">
+              mastermind<small>EXECUTIVE OS</small>
+            </span>
+          </div>
+          <button type="button" className="sidebar-search" aria-current={active === "Search" ? "page" : undefined}
+            onClick={() => {setProjectTab(null);setActive("Search");if (navigationOpen) closeNavigation();}}>
+            <NavigationIcon view="Search"/>{locale === "zh-CN" ? "搜索" : "Search"}
+          </button>
+          <div className="nav-section">
+            <span className="nav-section-label">{locale === "zh-CN" ? "公司" : "COMPANY"}</span>
+            <nav aria-label={locale === "zh-CN" ? "公司导航" : "Company navigation"}>
+              {primaryNavigation.map((x) => (
+                <button
+                  key={x}
+                  className={active === x ? "active" : ""}
+                  aria-label={navigationLabel(x, locale)}
+                  aria-current={active === x ? "page" : undefined}
+                  onClick={() => {
+                    setProjectTab(null);
+                    setActive(x);
+                    if (navigationOpen) closeNavigation();
+                  }}
+                >
+                  <span className="nav-glyph" aria-hidden="true">
+                    <NavigationIcon view={x} />
+                  </span>
+                  <span className="nav-label">{navigationLabel(x, locale)}</span>
+                </button>
+              ))}
+            </nav>
+          </div>
         </div>
-        <div className="nav-section">
-          <span className="nav-section-label">COMPANY</span>
-          <nav aria-label="Company navigation">
-            {primaryNavigation.map((x) => (
-              <button
-                key={x}
-                className={active === x ? "active" : ""}
-                aria-label={x}
-                aria-current={active === x ? "page" : undefined}
-                onClick={() => {
-                  setProjectTab(null);
-                  setActive(x);
-                }}
-              >
-                <span className="nav-glyph" aria-hidden="true">
-                  {navGlyph[x]}
-                </span>
-                <span className="nav-label">{x}</span>
-              </button>
-            ))}
-          </nav>
+        <div className="nav-scroll">
+          <div className="nav-section mission-nav">
+            <span className="nav-section-label">{locale === "zh-CN" ? "工作与上下文" : "WORK & CONTEXT"}</span>
+            {selection && d && d.read_state.state === "CURRENT" &&
+             d.mission.root_job_id === selection.rootJobId ? (
+              <div className="mission-context">
+                <b>{d.program.title || selection.workRef}</b>
+                <small>{copy.selectedWork}</small>
+              </div>
+            ) : null}
+            <details className="nav-advanced" ref={advancedDisclosure}>
+              <summary>{locale === "zh-CN" ? "高级工具" : "Advanced"}</summary>
+              <nav aria-label={copy.missionNavigation}>
+                {advancedNavigation.map((x) => (
+                  <button
+                    key={x}
+                    className={active === x ? "active" : ""}
+                    aria-label={advancedLabel(x, locale)}
+                    aria-current={active === x ? "page" : undefined}
+                    onClick={() => {
+                      setProjectTab(null);
+                      setActive(x);
+                      if (navigationOpen) closeNavigation();
+                    }}
+                  >
+                    <span className="nav-glyph" aria-hidden="true">
+                      <NavigationIcon view={x} />
+                    </span>
+                    <span className="nav-label">{navigationLabel(x, locale)}</span>
+                  </button>
+                ))}
+              </nav>
+            </details>
+          </div>
         </div>
-        <div className="nav-section mission-nav">
-          <span className="nav-section-label">CURRENT MISSION</span>
-          {selection ? (
-            <div className="mission-context">
-              <b>{d?.program.title || selection.workRef}</b>
-              <small>Exact mission selected</small>
+        <div className="nav-bottom">
+          <div ref={preferencesPane}>{preferencesControl}</div>
+          {authState ? (
+            <div className="nav-account">
+              <small>{copy.authStatus[authState.status]}</small>
+              {authState.reason && authState.status !== "unconfigured" ? (
+                <p className="muted">
+                  {authState.reason === "POPUP_BLOCKED"
+                    ? copy.allowPopup
+                    : authState.reason === "POPUP_CLOSED"
+                      ? copy.popupClosed
+                      : authState.reason.includes("EXPIRED") ||
+                          authState.reason.includes("TIMEOUT")
+                        ? copy.signInTimeout
+                        : authState.acquisition
+                          ? copy.conversationUnavailable
+                          : copy.signInFailed}
+                </p>
+              ) : null}
+              {active === "Today" && todayNeedsAuthentication ? null : authenticationControl}
             </div>
-          ) : (
-            <div className="mission-context mission-context-empty">
-              No exact mission selected
-            </div>
-          )}
-          <nav aria-label="Mission navigation">
-            {missionNavigation.map((x) => (
-              <button
-                key={x}
-                className={active === x ? "active" : ""}
-                aria-label={x}
-                aria-current={active === x ? "page" : undefined}
-                onClick={() => {
-                  setProjectTab(null);
-                  setActive(x);
-                }}
-              >
-                <span className="nav-glyph" aria-hidden="true">
-                  {navGlyph[x]}
-                </span>
-                <span className="nav-label">{x}</span>
-              </button>
-            ))}
-          </nav>
-        </div>
-        <div className="side-note">
-          <b>Source-qualified viewer</b>
-          <br />
-          Lifecycle, review, transport, acceptance and source freshness remain
-          separate facts.
+          ) : null}
         </div>
       </aside>
       <main id="content" tabIndex={-1}>
-        <header>
-          <div>
-            <span className="eyebrow">{active}</span>
-            <h1 ref={routeHeading} tabIndex={-1}>
-              {active}
-            </h1>
-            <p>{headerSummary}</p>
+        <header className={quietHeader ? "workspace-header workspace-header-quiet" : "workspace-header"}>
+          <div className="workspace-route">
+            <button ref={navigationToggle} type="button" className="navigation-toggle" aria-expanded={navigationOpen} aria-controls="workspace-navigation" aria-label={locale === "zh-CN" ? "打开导航" : "Open navigation"} onClick={() => setNavigationOpen(value => !value)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></button>
+            <span className="eyebrow">{directRoute ? (locale === "zh-CN" ? "单个只读任务" : "One read-only task") : navigationLabel(active, locale)}</span>
+            {quietHeader ? <h2 ref={routeHeading} tabIndex={-1}>{navigationLabel(active, locale)}</h2> : <h1 ref={routeHeading} tabIndex={-1}>
+              {directRoute ? (locale === "zh-CN" ? "原生任务" : "Native task") : navigationLabel(active, locale)}
+            </h1>}
+            {!quietHeader && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : headerSummary}</p>}
           </div>
           <div className="facts">
-            <State value={headerState} />
-            {authState ? (
-              <div>
-                <small>
-                  {authState.status === "unconfigured"
-                    ? "Sign-in setup pending"
-                    : authState.status.replaceAll("_", " ")}
-                </small>
-                {authState.reason && authState.status !== "unconfigured" ? (
-                  <p className="muted">
-                    {authState.reason === "POPUP_BLOCKED"
-                      ? "Allow the sign-in popup and try again."
-                      : authState.reason === "POPUP_CLOSED"
-                        ? "Sign-in window closed. Try again when ready."
-                        : authState.reason.includes("EXPIRED") ||
-                            authState.reason.includes("TIMEOUT")
-                          ? "Sign-in timed out. Please try again."
-                          : authState.acquisition
-                            ? "Workspace connected. Conversation access is unavailable."
-                            : "Sign-in could not complete. Please try again."}
-                  </p>
-                ) : null}
-                <button
-                  disabled={authState.status === "unconfigured"}
-                  onClick={() => {
-                    const auth = window.MastermindMissionHost?.auth;
-                    if (!auth) return;
-                    const signingOut =
-                      authState.acquisition ||
-                      authState.content ||
-                      authState.status === "signing_in";
-                    if (signingOut) {
-                      setWindowDocument(null);
-                      setMission(
-                        unavailableMission(
-                          selection,
-                          "AUTHENTICATION_REQUIRED",
-                        ),
-                      );
-                    }
-                    try {
-                      const request = signingOut
-                        ? auth.signOut()
-                        : auth.signIn();
-                      request.catch(() =>
-                        setNotice(
-                          "Sign-in could not complete. Please try again.",
-                        ),
-                      );
-                    } catch {
-                      setNotice(
-                        "Sign-in could not complete. Please try again.",
-                      );
-                    }
-                  }}
-                >
-                  {authState.status === "signing_in"
-                    ? "Cancel sign in"
-                    : authState.acquisition || authState.content
-                      ? "Sign out"
-                      : "Sign in"}
-                </button>
-              </div>
-            ) : null}
+            {!directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Inbox" ? (locale === "zh-CN" ? "工作区来源" : "Workspace source") : (locale === "zh-CN" ? "来源状态" : "Source status")} <State value={headerState} /></summary><p>{headerSummary}</p><p role="status">{visibleNotice}</p><p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} /> : null}
           </div>
         </header>
-        <div className="notice" role="status">
-          {visibleNotice}
-        </div>
+        {!native && authState && authState.status === "signed_out" &&
+         passiveExpiryHold.current && hasUnsentUserText.current ? (
+          <section className="notice" aria-label={copy.unsentProtected}>
+            <p>{copy.expiredUnsent}</p>
+            <button type="button" onClick={() => {
+              office.changeDraft("");
+              observedConversation.discardDraft();
+              updateRetainedComposer("launch", "");
+              updateRetainedComposer("session", "");
+              passiveExpiryHold.current = false;
+            }}>{copy.discardAll}</button>
+          </section>
+        ) : null}
+        {active !== "Control Room" && active !== "Today" && !directRoute &&
+          !(active === "Inbox" && visibleNotice === "Choose a Program with one resolved mission before opening the workspace.") ? (
+          <div className="notice" role="status">{visibleNotice === "Choose a Program with one resolved mission before opening the workspace."
+            ? locale === "zh-CN" ? "选择一个项目，查看其工作。" : "Choose a project to view its work."
+            : visibleNotice}</div>
+        ) : null}
         {build ? (
           <details className="build-details">
-            <summary>Build details</summary>
+            <summary>{copy.buildDetails}</summary>
             <dl>
-              <dt>Version</dt>
+              <dt>{copy.version}</dt>
               <dd>{build.version}</dd>
-              <dt>Source revision</dt>
+              <dt>{copy.sourceRevision}</dt>
               <dd>
                 <code>{build.source_revision}</code>
               </dd>
-              <dt>Build identity</dt>
+              <dt>{copy.buildIdentity}</dt>
               <dd>
                 <code>{build.build_identity}</code>
               </dd>
               {build.native_client_ref ? (
                 <>
-                  <dt>Native client reference</dt>
+                  <dt>{copy.nativeClient}</dt>
                   <dd>
                     <code>{build.native_client_ref}</code>
                   </dd>
                 </>
               ) : null}
-              <dt>Transport</dt>
+              <dt>{copy.transport}</dt>
               <dd>{`${build.transport} / ${build.state}`}</dd>
             </dl>
           </details>
         ) : null}
         {reopenedOperationControl}
+        {active === "Search" && hasProjectSearch && !savedConversationNavigation && <div role="group" aria-label={locale === "zh-CN" ? "搜索范围" : "Search scope"}>
+          <button type="button" aria-pressed={projectSearchSelected} onClick={() => setProjectSearchSelected(true)}>{locale === "zh-CN" ? "项目来源" : "Project sources"}</button>
+          <button type="button" aria-pressed={!projectSearchSelected} onClick={() => setProjectSearchSelected(false)}>{locale === "zh-CN" ? "公司引用" : "Company references"}</button>
+        </div>}
+        {active === "Knowledge" && hasProjectLibrary && <div role="group" aria-label={locale === "zh-CN" ? "知识来源" : "Knowledge sources"}>
+          <button type="button" aria-pressed={knowledgeMode === "project"} onClick={() => { setRequestedProjectFile(undefined); setKnowledgeMode("project"); }}>{locale === "zh-CN" ? "项目资料库" : "Project library"}</button>
+          <button type="button" aria-pressed={knowledgeMode === "retained"} onClick={() => setKnowledgeMode("retained")}>{locale === "zh-CN" ? "已保留的任务来源" : "Retained task sources"}</button>
+        </div>}
+        {hasProjectSearch && <section hidden={active !== "Search" || !projectSearchSelected || Boolean(savedConversationNavigation)} aria-hidden={active !== "Search" || !projectSearchSelected || Boolean(savedConversationNavigation)}>
+          <ProjectSearchWorkspace workRef={projectWorkRef} authGeneration={authRevision}
+            hostGeneration={archiveHostGeneration} locale={locale} theme={theme}
+            sessionHistory={projectHistoryOwner} projectFiles={retainedResultHost?.projectFilesSearch}
+            onOpenFile={match => {
+              if (!projectWorkRef || archiveHostGeneration === null || !projectReaders.canRead()) return;
+              setRequestedProjectFile(Object.freeze({match, workRef: projectWorkRef, authGeneration: authRevision, hostGeneration: archiveHostGeneration}));
+              setKnowledgeMode("project"); setActive("Knowledge");
+            }}
+            onOpenSaved={(match, page) => {
+              if (!projectWorkRef || archiveHostGeneration === null) return;
+              const navigation = createSavedConversationNavigation({workRef: projectWorkRef, authGeneration: authRevision,
+                hostGeneration: archiveHostGeneration, match, ...page}, projectHistoryOwner);
+              if (navigation) setSavedConversationNavigation(navigation);
+            }}/>
+        </section>}
         {content}
         {d && missionNavigation.includes(active) && !conversationActive && (
           <section className="card">

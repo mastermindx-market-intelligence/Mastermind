@@ -89,7 +89,22 @@ const SEND_ARGS = {
 };
 
 describe("fixed selected-session transport", () => {
-  it("sends exactly the three fixed POST routes with exact argument shapes", async () => {
+  it("uses the existing Executive private owner for a fixed four-item project history READ", async()=>{
+    const e=setup(); await e.login(); e.fetcher.mockClear();
+    e.fetcher.mockResolvedValue(response({ok:true}));
+    const read=e.client.executiveSession!.projectReferences!, signal=new AbortController().signal;
+    await read({work_ref:"WS:ONE",page_size:4,cursor:"YQ=="},signal);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    expect(e.fetcher.mock.calls[0][0]).toBe(`${ORIGIN}/os/executive/session/references`);
+    expect(JSON.parse(String(e.fetcher.mock.calls[0][1]?.body))).toEqual({arguments:{work_ref:"WS:ONE",page_size:4,cursor:"YQ=="}});
+    e.fetcher.mockClear();
+    await expect(read({work_ref:"WS:ONE",page_size:4,root_job_id:"JOB-1"} as never,signal)).rejects.toThrow("SESSION_REFERENCES_INVALID");
+    await e.client.signOut();
+    await expect(read({work_ref:"WS:ONE",page_size:4},signal)).rejects.toThrow("EXECUTIVE_AUTH_REQUIRED");
+    expect(e.fetcher).not.toHaveBeenCalled();
+  });
+
+  it("sends only the four fixed session POST routes with exact argument shapes", async () => {
     const e = setup();
     await e.login();
     expect(e.client.executiveSession!.available()).toBe(true);
@@ -99,13 +114,18 @@ describe("fixed selected-session transport", () => {
     await e.client.executiveSession!.context(SELECTION, signal);
     await e.client.executiveSession!.send(SEND_ARGS, signal);
     await e.client.executiveSession!.reply({ operation_key: SEND_ARGS.operation_key }, signal);
+    const args = {work_ref:"WS:ONE",root_job_id:"JOB-1",page_size:16,
+      cursor:"YWJjZA=="};
+    await e.client.executiveSession!.references!(args, signal);
     expect(e.fetcher.mock.calls.map(([url]) => url)).toEqual(
-      ["context", "send", "reply"].map((route) => `${ORIGIN}/os/executive/session/${route}`),
+      ["context", "send", "reply", "references"].map((route) => `${ORIGIN}/os/executive/session/${route}`),
     );
     expect(e.fetcher.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
       { selection: { work_ref: "WS:ONE", root_job_id: "JOB-1" } },
       { arguments: SEND_ARGS },
       { arguments: { operation_key: SEND_ARGS.operation_key } },
+      { arguments: {work_ref:"WS:ONE",root_job_id:"JOB-1",page_size:16,
+        cursor:"YWJjZA==" } },
     ]);
     for (const [, init] of e.fetcher.mock.calls)
       expect(init).toMatchObject({

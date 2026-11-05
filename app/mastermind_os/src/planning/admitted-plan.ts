@@ -48,6 +48,24 @@ export function validPlanSelection(value: unknown): value is PlanSelection {
     typeof value.root_job_id === "string" && /^JOB-[0-9]{1,9}$/.test(value.root_job_id);
 }
 
+function qualifiedSourceReceipts(observation: Record<string, unknown>): boolean {
+  const runtime = observation.runtime, controlRoom = observation.control_room;
+  return record(runtime) && record(controlRoom) &&
+    keys(runtime, ["schema", "state", "source_identity", "before", "after"]) &&
+    runtime.schema === "mastermind.runtime_read_observation.v1" && runtime.state === "SAME" &&
+    typeof runtime.source_identity === "string" && /^[0-9a-f]{32}$/.test(runtime.source_identity) &&
+    Number.isInteger(runtime.before) && Number(runtime.before) >= 0 &&
+    Number.isInteger(runtime.after) && runtime.before === runtime.after &&
+    keys(controlRoom, ["instance_before", "instance_after", "publication_before", "publication_after",
+      "document_digest", "source_validity_digest", "cache_currentness_digest"]) &&
+    typeof controlRoom.instance_before === "string" && controlRoom.instance_before.length > 0 &&
+    typeof controlRoom.instance_after === "string" && controlRoom.instance_before === controlRoom.instance_after &&
+    Number.isInteger(controlRoom.publication_before) && Number(controlRoom.publication_before) > 0 &&
+    Number.isInteger(controlRoom.publication_after) && controlRoom.publication_before === controlRoom.publication_after &&
+    isDigest(controlRoom.document_digest) && isDigest(controlRoom.source_validity_digest) &&
+    isDigest(controlRoom.cache_currentness_digest);
+}
+
 /** The caller already acquired an authorized owner document; never decode raw provider output. */
 export function decodeAdmittedPlan(value: unknown, expected: PlanSelection): PlanRead {
   if (!validPlanSelection(expected) || !record(value) ||
@@ -56,19 +74,20 @@ export function decodeAdmittedPlan(value: unknown, expected: PlanSelection): Pla
       value.selection.work_ref !== expected.work_ref || value.selection.root_job_id !== expected.root_job_id ||
       !Array.isArray(value.reason_codes) || !record(value.source_observation)) return refuse();
   const obs = value.source_observation;
-  if (obs.schema !== PLAN_OBSERVATION_SCHEMA || !validPlanSelection(obs.selection) ||
+  if (!keys(obs, ["schema", "state", "selection", "control_room", "runtime"]) ||
+      obs.schema !== PLAN_OBSERVATION_SCHEMA || !validPlanSelection(obs.selection) ||
       obs.selection.work_ref !== expected.work_ref || obs.selection.root_job_id !== expected.root_job_id ||
-      !["SAME", "UNKNOWN", "CONFLICT"].includes(String(obs.state))) return refuse();
+      typeof obs.state !== "string" || !["SAME", "UNKNOWN", "CONFLICT"].includes(obs.state)) return refuse();
   if (value.availability === "UNAVAILABLE") {
     if (value.plan !== null || value.reason_codes.length !== 1 ||
         !knownReasons.has(value.reason_codes[0]) ||
-        obs.state === "SAME" ||
+        obs.state === "SAME" || obs.control_room !== null || obs.runtime !== null ||
         (value.reason_codes[0] === "SOURCE_CHANGED") !== (obs.state === "CONFLICT")) return refuse();
     return { availability: "UNAVAILABLE", selection: { ...expected }, plan: null,
       observation: obs.state as "UNKNOWN" | "CONFLICT", reason_codes: [value.reason_codes[0]] };
   }
   if (value.availability !== "AVAILABLE" || value.reason_codes.length !== 0 ||
-      obs.state !== "SAME" || !record(value.plan)) return refuse();
+      obs.state !== "SAME" || !qualifiedSourceReceipts(obs) || !record(value.plan)) return refuse();
   const plan = value.plan;
   if (!keys(plan, ["schema", "plan_schema_version", "admission_schema_version",
       "root_job_id", "plan_attempt_id", "policy_sha", "plan_digest", "reservation_digest",
