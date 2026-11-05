@@ -54,8 +54,8 @@ Service owed returns first, then the six oldest-checked registry rows. Record th
 5. For a stall, recover once, then wait 30 minutes.
 6. For aging past the tier threshold, set `stalled_pending` and hand off. Do not keep nudging.
 7. Permission cards: open the Allow menu and choose `Allow <tool> for this conversation`. If that item is absent, stop. Do not choose Always allow or Allow once.
-8. Blocker ladder, in order: ask the chat to decide; get fresh eyes from a Dot; delegate one Fabric task under the Fabric skill; hand off to a local Codex or Cursor session. Do not self-approve or merge.
-9. Use Extra High for short or write-heavy work and Pro for big work. Business accounts have about 50 Pro turns a week.
+8. Choose the shortest authorized useful action: direct in-scope repair or a bounded delegation through an eligible avenue. Chat, Dot, Fabric and local sessions are choices, not a required relay. Apply existing grants, writer custody and binding review; use the Fabric skill for Fabric tasks. Hold only dependent work; never replay refusals or move uncertain effects to another carrier. Do not self-approve or merge.
+9. Use observed action capabilities, session health and current capacity evidence; a tier or account label does not establish tools or quota. Keep a working mode unless a concrete capability or quality need justifies a change under `docs/sol_skills/ACTIVE_EXECUTION.md` Step 1B. A mode/account change grants no authority and clears neither a refusal nor an uncertain effect.
 10. Pace like a casual user. Rotate across chats. Keep one ChatGPT tab per profile, plus a Tencent console tab or a genuine mid-login tab.
 
 ## Pitfalls
