@@ -67,6 +67,8 @@ class WorkspaceSourceOperationService:
             result=self._journey_recipes.options()
             if not permission.check() or not guarded_peer():raise PermissionError("SOURCE_OPERATION_UNAVAILABLE")
             result['owner_context']={'principal_scope':permission.principal_scope}
+            if len(canonical(result))+1>MAX_RESPONSE_BYTES or not guarded_peer():
+                raise PermissionError('SOURCE_OPERATION_UNAVAILABLE')
             return result
         if value["action"] == "publish_project_proposal":
             owner = self._create

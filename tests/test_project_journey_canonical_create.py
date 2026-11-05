@@ -68,7 +68,13 @@ def joined(owner,identity,tmp_path,monkeypatch):
     code_root=tmp_path/'configured-code';git(tmp_path,'clone',str(o['env'].origin),str(code_root));git(code_root,'checkout','--detach',code)
     collector=InstalledBootPacketCollector(source_root=source_root,macro_root=code_root,
         code_root=Path(__file__).parents[1],python_executable=Path(sys.executable),expected_source_sha=factory.service.config.proof_base_sha)
-    monkeypatch.setattr(collector,'_snapshot_pair',lambda *a,**kw:(factory.service.config.proof_base_sha,code,None,None))
+    from integrations.executive_mcp import installed as installed_module
+    def actual_macro_snapshot(env,*,deadline=None,snapshot_capture=None):
+        observed=installed_module._clean_git_snapshot(code_root,runner=collector._runner,env=env,
+            label='Macro source',content_scope='macro_brief',include_seal=True,deadline=deadline,
+            snapshot_capture=snapshot_capture,_allow_synthetic_fixture=True)
+        return factory.service.config.proof_base_sha,observed[0],'synthetic-test-Root-seal',observed[1]
+    monkeypatch.setattr(collector,'_snapshot_pair',actual_macro_snapshot)
     git_owner=identity[0];git_owner.binding=PublisherBinding(worktree=str(o['env'].clone),expected_origin=str(o['env'].origin),default_branch='main',publisher_identity='synthetic-fixed-service-identity')
     monkeypatch.setattr(git_owner,'qualify',lambda binding:binding==git_owner.binding)
     monkeypatch.setattr(git_owner,'find',o['pr'].find);monkeypatch.setattr(git_owner,'create',o['pr'].create)

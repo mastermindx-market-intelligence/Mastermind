@@ -142,10 +142,12 @@ class InstalledCanonicalProjectData:
         principal=_ReadPrincipal(self,encoded)
         view=self.view(principal,work_ref=selected['work_ref'])
         if view is None:return None
-        with view.capture_scope():
-            with self.collector.canonical_project_data_scope(view,work_ref=selected['work_ref']):
-                body=validate_body(self.collector.read_project_plan(**selected))
-            witness=view.witness()
+        try:
+            with view.capture_scope():
+                with self.collector.canonical_project_data_scope(view,work_ref=selected['work_ref']):
+                    body=validate_body(self.collector.read_project_plan(**selected))
+                witness=view.witness()
+        finally:self.collector._discard_canonical_code_capture(view)
         generation=hashlib.sha256(json.dumps({'code':view.code_commit,'data':view.data_commit,
             'witness':witness},sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()
         return body,view,generation

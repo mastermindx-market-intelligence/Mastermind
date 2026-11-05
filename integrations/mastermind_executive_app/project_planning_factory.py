@@ -88,6 +88,7 @@ class ProjectPlanningAppFactory:
         if saved is None:
             view=data.view(workspace,work_ref=work_ref)
             if view is None:raise ValueError('canonical planning DATA permission unavailable')
+            data.collector._discard_canonical_code_capture(view)
             invocation._planning_data_view=(identity,view)
         else:
             if saved[0]!=identity:raise ValueError('canonical planning source owner changed')
@@ -95,6 +96,7 @@ class ProjectPlanningAppFactory:
             view._owner._validate_view(view)
             if verify_source or time.monotonic()>=view._operation.read_deadline:
                 renewed=data.view(workspace,work_ref=work_ref)
+                if renewed is not None:data.collector._discard_canonical_code_capture(renewed)
                 if renewed is None or (renewed.code_commit,renewed.data_commit)!=(view.code_commit,view.data_commit):
                     raise ValueError('original planning source changed; no rebase')
                 view=renewed;invocation._planning_data_view=(identity,view)

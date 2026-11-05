@@ -89,7 +89,7 @@ POST_ROUTES = PRE_INSTRUCTION_ADMISSION_POST_ROUTES + ("/workspace/instruction-a
 PRE_JOURNEY_GET_ROUTES = GET_ROUTES
 PRE_JOURNEY_POST_ROUTES = POST_ROUTES
 GET_ROUTES = PRE_JOURNEY_GET_ROUTES + ("/workspace/source-operation/options",)
-PROJECT_PLANNING_POST_ROUTES = tuple("/os/executive/project-planning/"+name for name in ("submit","status","result","consume","prepare_proposal"))
+PROJECT_PLANNING_POST_ROUTES = tuple("/os/executive/project-planning/"+name for name in ("submit","status","result","consume"))
 POST_ROUTES = PRE_JOURNEY_POST_ROUTES + PROJECT_PLANNING_POST_ROUTES
 
 # Preserve exactly the profiles admitted by the two predecessor contracts.

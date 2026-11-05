@@ -20,7 +20,7 @@ mcp.mastermind-x.com {
     }
     @post {
       method POST
-      path /os/executive/context /os/executive/submit /os/executive/status /os/executive/session/context /os/executive/session/reply /os/executive/session/references /workspace/control-room/open /workspace/control-room/bind /workspace/control-room/unbind /workspace/control-room/refresh-builds /workspace/project-admission/pause /workspace/project-admission/resume /workspace/instruction-admission/pause /os/executive/project-planning/submit /os/executive/project-planning/status /os/executive/project-planning/result /os/executive/project-planning/consume /os/executive/project-planning/prepare_proposal
+      path /os/executive/context /os/executive/submit /os/executive/status /os/executive/session/context /os/executive/session/reply /os/executive/session/references /workspace/control-room/open /workspace/control-room/bind /workspace/control-room/unbind /workspace/control-room/refresh-builds /workspace/project-admission/pause /workspace/project-admission/resume /workspace/instruction-admission/pause /os/executive/project-planning/submit /os/executive/project-planning/status /os/executive/project-planning/result /os/executive/project-planning/consume
     }
     handle @post {
       request_body {
