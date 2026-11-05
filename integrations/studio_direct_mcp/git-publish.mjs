@@ -1044,7 +1044,7 @@ export function createGitPublisher(config, dependencies = {}) {
       } catch {
         try {
           if ((await workspace(operationId, {observeRemote: false})).localHead === commitHead) {
-            return finishCommissionApplied('APPLIED_AFTER_AMBIGUOUS_UPDATE_RETURN');
+            return await finishCommissionApplied('APPLIED_AFTER_AMBIGUOUS_UPDATE_RETURN');
           }
         } catch { /* retain uncertainty */ }
         return {
@@ -1054,7 +1054,7 @@ export function createGitPublisher(config, dependencies = {}) {
           previous_head_sha: expectedHead, commit_head_sha: commitHead,
         };
       }
-      return finishCommissionApplied('APPLIED');
+      return await finishCommissionApplied('APPLIED');
 
       async function finishCommissionApplied(successCode) {
         let indexSynced = true;

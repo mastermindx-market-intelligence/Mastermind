@@ -557,6 +557,25 @@ _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES: tuple[str, ...] = (
     "/workspace/control-room/refresh-builds",
 )
 
+# Fixed already-owned inner routes. These are transport classifications only;
+# the Workspace App retains each original READ/action principal and grant gate.
+_WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES: tuple[str, ...] = (
+    "/workspace/project-session/current",
+    "/workspace/project-admission/current",
+    "/workspace/project-admission/operation",
+    "/workspace/fabric/status/current",
+)
+_WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
+    "/workspace/fabric/catalog/current",
+)
+_WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES: tuple[str, ...] = (
+    "/workspace/project-admission/pause",
+    "/workspace/project-admission/resume",
+)
+_WORKSPACE_ACTION_ROUTES = (
+    _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES + _WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES
+)
+
 
 def _refuse_public_policies(settings: Any, builder: str) -> None:
     """Never admit the public ``/mcp`` audience at an unrestricted outer layer.
@@ -596,8 +615,9 @@ class _ExecutivePathFence:
                 "/workspace/plan/current",
                 "/workspace/project-plan/current",
                 "/workspace/project-journal/current",
+                "/workspace/project-direction/current",
                 "/workspace/autonomy/current",
-                "/workspace/operator/activity/current",
+                "/workspace/operator/activity/current", "/workspace/resources/capacity/current",
             ))
             # v2 routes carry a query string; the legacy v1 mission route does too.
             self._query_routes.update((
@@ -609,9 +629,12 @@ class _ExecutivePathFence:
                 "/workspace/plan/current",
                 "/workspace/project-plan/current",
                 "/workspace/project-journal/current",
+                "/workspace/project-direction/current",
                 "/workspace/autonomy/current",
-                "/workspace/operator/activity/current",
+                "/workspace/operator/activity/current", "/workspace/resources/capacity/current",
             ))
+            self._workspace_routes.update(_WORKSPACE_ADDITIONAL_GET_ROUTES)
+            self._query_routes.update(_WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES)
         if content_app is not None:
             self._workspace_routes.add("/workspace/window/current")
         self._routes.update({path: "GET" for path in self._workspace_routes})
@@ -619,9 +642,9 @@ class _ExecutivePathFence:
         if workspace_app is not None:
             # Fixed actions share the incumbent public credential/host fences
             # but must not be included in the preceding GET method expansion.
-            self._routes.update({path: "POST" for path in _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES})
-            self._workspace_routes.update(_WORKSPACE_CONTROL_ROOM_ACTION_ROUTES)
-            self._public_routes.update(_WORKSPACE_CONTROL_ROOM_ACTION_ROUTES)
+            self._routes.update({path: "POST" for path in _WORKSPACE_ACTION_ROUTES})
+            self._workspace_routes.update(_WORKSPACE_ACTION_ROUTES)
+            self._public_routes.update(_WORKSPACE_ACTION_ROUTES)
         if os_app is not None:
             if type(os_app) is not OsStaticApp:
                 raise ValueError("fixed OS static owner required")
@@ -752,11 +775,21 @@ async def _mounted_lifespan(app):
         await await_owned(asyncio.create_task(finish_owner()))
 
 
+_OS_AUTH0_ORIGIN = "https://dev-eo0jf8us5mup7wd5.us.auth0.com"
 _OS_RESPONSE_HEADERS = {
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; "
-        "connect-src 'self' https://dev-eo0jf8us5mup7wd5.us.auth0.com; "
+        f"connect-src 'self' {_OS_AUTH0_ORIGIN}; "
+        f"frame-src 'self' {_OS_AUTH0_ORIGIN}; "
         "img-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'none'",
+}
+# Only the OAuth callback can be framed by the OS origin. The app shell and
+# all other assets remain non-embeddable. Never permit arbitrary ancestors.
+_OS_CALLBACK_RESPONSE_HEADERS = {
+    **_OS_RESPONSE_HEADERS,
+    "Content-Security-Policy": _OS_RESPONSE_HEADERS["Content-Security-Policy"].replace(
+        "frame-ancestors 'none'", "frame-ancestors 'self'"
+    ),
 }
 
 
@@ -824,7 +857,8 @@ class OsStaticApp:
             return
         key = "/os/" if path == "/os/auth/callback" else path
         body, mime = self._assets[key]
-        headers = {**_OS_RESPONSE_HEADERS, "Content-Type": mime}
+        policy_headers = _OS_CALLBACK_RESPONSE_HEADERS if path == "/os/auth/callback" else _OS_RESPONSE_HEADERS
+        headers = {**policy_headers, "Content-Type": mime}
         await Response(body, headers=headers)(scope, receive, send)
 
 
@@ -1416,11 +1450,13 @@ def _build_profile_mcp_app(
                              "/workspace/plan/current",
                              "/workspace/project-plan/current",
                 "/workspace/project-journal/current",
+                "/workspace/project-direction/current",
                 "/workspace/autonomy/current",
-                             "/workspace/operator/activity/current"))
+                             "/workspace/operator/activity/current", "/workspace/resources/capacity/current")
+                             + _WORKSPACE_ADDITIONAL_GET_ROUTES)
         outer_routes.extend(
             Route(path, workspace_app, methods=["POST"])
-            for path in _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES
+            for path in _WORKSPACE_ACTION_ROUTES
         )
     if content_app is not None:
         outer_routes.append(Route("/workspace/window/current", content_app, methods=["GET"]))

@@ -93,6 +93,49 @@ class LongHorizonRuntimeTests(unittest.TestCase):
                 self.assertEqual(rc, 0, error)
                 self.assertEqual(output, expected)
 
+    def test_c3_controller_poll_stays_live_after_7200_seconds(self):
+        """Exercise the installed controller's real poll guard at the 2h boundary.
+
+        The real guard is verified in source, then its SECONDS clock token is
+        replaced with an inert scalar to avoid wall-clock tick flakiness.
+        The test never waits two hours, spawns a worker, polls SSH, or
+        acquires a provider/broker lease. This
+        protects the 4h C3 control fuse without claiming real-worker survival.
+        """
+        source = (CANDIDATE / "remote_sub.sh").read_text()
+        loop_guard = (
+            'while [ $((SECONDS - WAIT_STARTED_SECONDS)) -lt "$MAX_SECS" ]; do'
+        )
+        self.assertEqual(source.count(loop_guard), 1)
+        predicate = loop_guard[len("while "):-len("; do")]
+        clock_expression = "SECONDS - WAIT_STARTED_SECONDS"
+        self.assertEqual(predicate.count(clock_expression), 1)
+        predicate = predicate.replace(
+            clock_expression, "CLOCK_SECONDS - WAIT_STARTED_SECONDS")
+        for elapsed, deadline, should_continue in (
+            (7199, 14400, True),
+            (7200, 14400, True),
+            (7201, 14400, True),
+            (14339, 14400, True),
+            (14399, 14400, True),
+            (14400, 14400, False),
+            # A separate inherited 2h cap must still terminate at its limit.
+            (7201, 7200, False),
+        ):
+            with self.subTest(elapsed=elapsed, deadline=deadline):
+                shell = (
+                    f"WAIT_STARTED_SECONDS=0; MAX_SECS={deadline}; "
+                    f"CLOCK_SECONDS={elapsed}; "
+                    f"if {predicate}; then printf CONTINUE; else printf STOP; fi"
+                )
+                result = subprocess.run(
+                    ["bash", "-c", shell], text=True, capture_output=True,
+                    timeout=3, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout,
+                                 "CONTINUE" if should_continue else "STOP")
+
     def test_original_commission_remaining_narrows_c3_after_floor(self):
         rc, output, error = self._runtime_floor("C3_FRONTIER_JUDGMENT",
                                                 7200, original_remaining="1800")

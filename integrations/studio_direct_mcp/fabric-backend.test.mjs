@@ -619,6 +619,42 @@ test('real subprocess captures the exact native C2 policy refusal from STDERR, w
  } finally {await rm(dir,{recursive:true,force:true});}
 });
 
+test('exact native no-host stderr maps to closed refusal without request dispatch',async()=>{
+ const {mkdtemp,writeFile,rm}=await import('node:fs/promises');
+ const {tmpdir}=await import('node:os');
+ const {join}=await import('node:path');
+ const dir=await mkdtemp(join(tmpdir(),'mmx-fabric-nohost-stderr-'));
+ try {
+  const fixture=join(dir,'native-preview.py');
+  const cases=[
+   ['NONE reason=pool grok has no eligible mode on requested host\n','MANUAL_ROUTE_PREFLIGHT_REFUSED'],
+   ['NONE reason=pool unknown has no eligible mode on requested host\n','MANUAL_ROUTE_UNAVAILABLE'],
+   ['NONE reason=pool grok has no eligible mode on requested host\nOTHER_LINE','MANUAL_ROUTE_UNAVAILABLE'],
+   ['NONE reason=pool grok has no eligible mode on requested host;extra\n','MANUAL_ROUTE_UNAVAILABLE'],
+  ];
+  for(const [line,expected] of cases) {
+   await writeFile(fixture,[
+    'import json,sys',
+    'cmd=sys.argv[1]',
+    'if cmd=="request" and "--help" in sys.argv: print("usage: request --strict-manual-pin")',
+    'elif cmd=="status": print(json.dumps({"schema":"mastermind.fabric_task_status.v1","run_id":"web-fabric-001","root_id":None,"parent_run_id":None,"state":"NOT_FOUND","result_available":False,"accepted":None}))',
+    'elif cmd=="preview": sys.stderr.write('+JSON.stringify(line)+'); sys.exit(75)',
+    'else: sys.exit(66)',
+    ''
+   ].join('\n'));
+   const e=await makeRealSubprocessEngine(dir,fixture);
+   const result=unwrap(await api.createFabricFacade(e,{adapterPath:fixture,python:'python3',workerCwd:'~'}).call('fabric_request',manualPinned));
+   assert.equal(result.error,expected);
+   assert.equal(result.retry_allowed,false);
+   assert.equal(result.execution_absence_proven,false);
+   assert.equal(Object.hasOwn(result,'native_reason'),expected==='MANUAL_ROUTE_PREFLIGHT_REFUSED');
+   if(expected==='MANUAL_ROUTE_PREFLIGHT_REFUSED') assert.equal(result.native_reason,'no_eligible_host');
+   assert.equal(e.calls.length,3,'help, missing original run, one preview');
+   assert.equal(e.calls.filter(c=>c.arguments.command.includes("'request' '--id'")).length,0);
+  }
+ } finally {await rm(dir,{recursive:true,force:true});}
+});
+
 test('extra unverified native refusal fields cannot pass the capture boundary',async()=>{
  for(const reason of ['bad-hyphen','x'.repeat(81),'<malicious>']){
   const raw=JSON.stringify({exit_code:75,stdout_base64:'',stdout_bytes:0,stdout_sha256:digest(''),native_reason:reason});
@@ -697,6 +733,113 @@ test('manual request max-turn ceiling permits only admitted GLM/MiniMax modes',a
  const e3=engine([manualHelp,capturedJSON(absent),capturedJSON({...preview,mode:'glm-codex'})]);
  assert.equal(unwrap(await facade(e3).call('fabric_request',req)).error,'MANUAL_ROUTE_UNAVAILABLE');
  assert.equal(e3.calls.length,3);
+});
+
+// Experiential uncensored pool: manual exact pin, three explicit disclosure gates.
+// Native owns an independent worker-side recheck, not a metadata-only ACK.
+const experientialPinned={...packet,task_class:'mechanical',task_complexity:'C0_MECHANICAL',
+  pool:'experiential',model:'glm-5.3-uncensored',retention_opt_in:true,
+  sensitive_data_opt_in:true,code_exposure_opt_in:true};
+const experientialHelp=captured('usage: request --strict-manual-pin --experiential-retention-acknowledged --experiential-sensitive-data-opt-in --experiential-proprietary-code --experiential-code-exposure-opt-in');
+const experientialPreview={state:'PREVIEW_ONLY',reserved:false,selection_rechecked_at_request:true,
+  strict_pin_enforced_at_request:true,run_id:id.run_id,pool:'experiential',
+  model:'glm-5.3-uncensored',host:'ubuntu1',mode:'experiential'};
+
+test('experiential pool accepts only the exact uncensored slug with explicit retention opt-in',async()=>{
+ assert.deepEqual(api.FABRIC_TOOLS.find(t=>t.name==='fabric_request').inputSchema.properties.pool.enum,
+  ['grok','glm','minimax','bailian','cursor','ocfree','go','experiential']);
+ for(const consent of ['retention_opt_in','sensitive_data_opt_in','code_exposure_opt_in'])
+   assert.equal(api.FABRIC_TOOLS.find(t=>t.name==='fabric_request').inputSchema.properties[consent].type,'boolean');
+ const e=engine(),f=facade(e);
+ const noModel={...experientialPinned};delete noModel.model;
+ const variant=change=>({...experientialPinned,...change});
+ for(const args of [noModel,variant({model:'auto'}),variant({model:'glm-5.3-flash-uncensored'}),
+   variant({model:'GLM-5.3-Uncensored'}),variant({model:'glm-5.3'}),variant({retention_opt_in:false}),
+   variant({retention_opt_in:'yes'}),variant({sensitive_data_opt_in:false}),
+   variant({sensitive_data_opt_in:'yes'}),variant({code_exposure_opt_in:false}),
+   variant({code_exposure_opt_in:'yes'}),
+   variant({pool:'glm',model:'glm-5.3',retention_opt_in:true}),
+   variant({pool:'experiential',max_turns:12}),variant({task_class:'review'}),
+   variant({task_class:'audit'}),variant({task_class:'census'})]) {
+   const out=unwrap(await f.call('fabric_request',args));
+   assert.equal(out.error,'INVALID_ARGUMENT');assert.equal(out.retry_allowed,false);
+ }
+ // No opt-in flags may be supplied for AUTO or another provider.
+ for(const field of ['retention_opt_in','sensitive_data_opt_in','code_exposure_opt_in'])
+   assert.equal(unwrap(await f.call('fabric_request',{...packet,[field]:true})).error,'INVALID_ARGUMENT');
+ const missingDisclosure={...experientialPinned};delete missingDisclosure.sensitive_data_opt_in;
+ const missingCodeConsent={...experientialPinned};delete missingCodeConsent.code_exposure_opt_in;
+ for(const request of [missingDisclosure,missingCodeConsent])
+   assert.equal(unwrap(await f.call('fabric_request',request)).error,'INVALID_ARGUMENT');
+ assert.equal(e.calls.length,0,'every experiential rejection must precede any native or engine call');
+});
+
+test('experiential request refuses a native adapter without a qualified route before dispatch',async()=>{
+ const unqualified=(exit_code,body)=>finished(JSON.stringify({exit_code,
+   stdout_base64:Buffer.from(body).toString('base64'),
+   stdout_bytes:Buffer.byteLength(body),stdout_sha256:digest(body)}));
+ for(const refusal of [
+   // Nonzero native preview exit: no qualified Experiential route exists.
+   unqualified(3,'no experiential route qualified'),
+   captured('not-json'),
+   capturedJSON({...experientialPreview,state:'ROUTE_REFUSED'}),
+   capturedJSON({...experientialPreview,model:'glm-5.3-flash-uncensored'}),
+   capturedJSON({...experientialPreview,model:'GLM-5.3-UNCENSORED'}),
+   capturedJSON({...experientialPreview,pool:'glm'}),
+   capturedJSON({...experientialPreview,mode:'glm'}),
+   capturedJSON({...experientialPreview,mode:null}),
+   capturedJSON({...experientialPreview,host:''}),
+   capturedJSON({...experientialPreview,host:'host/invalid'}),
+   capturedJSON({...experientialPreview,selection_rechecked_at_request:false}),
+   capturedJSON({...experientialPreview,strict_pin_enforced_at_request:false}),
+   capturedJSON({...experientialPreview,reserved:true}),
+   capturedJSON({...experientialPreview,run_id:'another-run'}),
+ ]) {
+   const e=engine([experientialHelp,capturedJSON(absent),refusal]);
+   const out=unwrap(await facade(e).call('fabric_request',experientialPinned));
+   assert.equal(out.error,'MANUAL_ROUTE_UNAVAILABLE');assert.equal(out.retry_allowed,false);
+   assert.equal(out.controller_pid,undefined);assert.equal(e.calls.length,3,'preview refusal cannot create a controller');
+   assert.match(e.calls[2].arguments.command,/'preview' '--id' 'web-fabric-001' '--class' 'mechanical' '--pool' 'experiential' '--model' 'glm-5.3-uncensored'/);
+   assert.doesNotMatch(e.calls[2].arguments.command,/'--max-turns'/);
+ }
+});
+
+test('native missing independent consent flags refuses before any status or dispatch',async()=>{
+ for(const help of ['usage: request --strict-manual-pin',
+   'usage: request --strict-manual-pin --experiential-retention-acknowledged',
+   'usage: request --strict-manual-pin --experiential-retention-acknowledged --experiential-sensitive-data-opt-in --experiential-proprietary-code']) {
+   const e=engine([captured(help)]);
+   const out=unwrap(await facade(e).call('fabric_request',experientialPinned));
+   assert.equal(out.error,'MANUAL_ROUTE_UNAVAILABLE');
+   assert.equal(out.retry_allowed,false);
+   assert.equal(e.calls.length,1,'native consent support is preflighted before any effect');
+ }
+});
+
+test('synthetic exact experiential preview gates a strict manual request with no fallback or turns',async()=>{
+ const e=engine([experientialHelp,capturedJSON(absent),capturedJSON(experientialPreview),pending()]);
+ const out=unwrap(await continuingFacade(e).call('fabric_request',experientialPinned));
+ assert.equal(out.delivery,'CONTROLLER_CREATED');assert.equal(out.worker_started,null);
+ assert.equal(out.worker_start_proven,false);assert.equal(out.requested_pool,'experiential');
+ assert.equal(out.requested_model,'glm-5.3-uncensored');assert.equal(out.strict_manual_pin,true);
+ assert.equal(out.retention_opt_in,true);assert.equal(out.sensitive_data_opt_in,true);
+ assert.equal(out.code_exposure_opt_in,true);assert.equal(out.execution_absence_proven,false);
+ assert.equal(e.calls.length,4);
+ assert.match(e.calls[2].arguments.command,/'preview' '--id' 'web-fabric-001'/);
+ assert.match(e.calls[2].arguments.command,/'--pool' 'experiential' '--model' 'glm-5.3-uncensored'/);
+ assert.match(e.calls[3].arguments.command,/'--pool' 'experiential' '--strict-manual-pin' '--experiential-retention-acknowledged' '--experiential-sensitive-data-opt-in' '--experiential-proprietary-code' '--experiential-code-exposure-opt-in' '--model' 'glm-5.3-uncensored'/);
+ assert.doesNotMatch(e.calls[3].arguments.command,/'--quota-fallback'/);
+ assert.doesNotMatch(e.calls[3].arguments.command,/'--max-turns'/);
+ assert.doesNotMatch(e.calls[3].arguments.command,/flash/);
+});
+
+test('AUTO routing stays identical with no pool, model or retention field',async()=>{
+ const e=engine([capturedJSON(absent),pending()]);const out=unwrap(await facade(e).call('fabric_request',packet));
+ assert.equal(out.delivery,'CONTROLLER_CREATED');assert.equal(e.calls.length,2);
+ assert.equal(out.requested_pool,undefined);assert.equal(out.retention_opt_in,undefined);
+ assert.doesNotMatch(e.calls[1].arguments.command,/'--pool'/);
+ assert.doesNotMatch(e.calls[1].arguments.command,/'--strict-manual-pin'/);
+ assert.doesNotMatch(e.calls[1].arguments.command,/'--model'/);
 });
 
 test('advertise manual routing only with native preview AND strict request support',async()=>{

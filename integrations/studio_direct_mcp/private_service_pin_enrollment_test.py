@@ -464,6 +464,112 @@ class EnrollmentTests(unittest.TestCase):
         self.assertEqual(self.invoke()["effect"], "APPLIED")
         self.assertEqual(self.snapshot(), before)
 
+    def _select_paper_after_enrollment(self):
+        """Test-only exact Paper-v20 selection after one completed C4 enrollment."""
+        self.applied()
+        raw_c = (self.tx / "config.after").read_bytes()
+        raw_m = (self.tx / "manifest.after").read_bytes()
+        current = json.loads(raw_c)
+        current_manifest = json.loads(raw_m)
+        old_paper = copy.deepcopy(current["paperDesign"])
+        new_paper = {
+            "enabled": True,
+            "bridgeSha256": svc.PAPER_V20_BRIDGE_SHA256,
+            "bridgePath": str(self.home / ".local/share/mastermind-paper/runtime/v20/source/bridge.py"),
+            "pythonPath": str(self.home / ".local/share/mastermind-paper/runtime/v20/venv/bin/python"),
+            "appPath": str(self.home / "Applications/Paper.app"),
+            "commandTimeoutMs": 70000,
+        }
+        def paper(_home, *, rel=None, bridge_sha256=None):
+            if rel is None:
+                return old_paper
+            if rel != svc.PAPER_RUNTIME_V20_REL or bridge_sha256 != svc.PAPER_V20_BRIDGE_SHA256:
+                raise AssertionError("foreign Paper runtime request")
+            return new_paper
+        self.patch(svc, "_paper_design_config", paper)
+        after = copy.deepcopy(current)
+        after["paperDesign"] = new_paper
+        future = copy.deepcopy(current_manifest)
+        future["configHash"] = owner.digest(owner.encode(after))
+        new_config = owner.encode(after)
+        new_manifest = owner.encode(future)
+        self.patch(owner, "C4_ENROLLED_CONFIG_SHA256", owner.digest(raw_c))
+        self.patch(owner, "C4_ENROLLED_MANIFEST_SHA256", owner.digest(raw_m))
+        self.patch(owner, "C4_PAPER_V20_CONFIG_SHA256", owner.digest(new_config))
+        self.patch(owner, "C4_PAPER_V20_MANIFEST_SHA256", owner.digest(new_manifest))
+        svc._atomic_write_bytes(self.roots["config"], new_config)
+        svc._atomic_write_bytes(self.roots["manifest"], new_manifest)
+        return current, current_manifest, new_config, new_manifest
+
+    def test_post_enrollment_paper_v20_allows_only_existing_owner_start(self):
+        self._select_paper_after_enrollment()
+        frozen_original_pin = {x.name: x.read_bytes() for x in self.pin_path.iterdir()}
+        frozen_enrollment = {x.name: x.read_bytes() for x in self.tx.iterdir()}
+        before = self.snapshot()
+        self.assertFalse(self.loaded)
+        self.assertEqual(self.start()["started"], True)
+        self.assertEqual(self.native_operations[-1], "status")
+        self.assertEqual(before, {
+            key: value for key, value in self.snapshot().items()
+        })
+        self.assertEqual(frozen_original_pin, {
+            x.name: x.read_bytes() for x in self.pin_path.iterdir()})
+        self.assertEqual(frozen_enrollment, {
+            x.name: x.read_bytes() for x in self.tx.iterdir()})
+
+    def test_post_enrollment_paper_v20_status_is_readonly_and_reports_selected(self):
+        self._select_paper_after_enrollment()
+        self.args.operation = "status"
+        before = self.snapshot()
+        status = self.invoke()
+        self.assertEqual((status["effect"], status["phase"]), ("APPLIED", "COMPLETE"))
+        self.assertTrue(status["paperV20Selected"])
+        self.assertEqual(self.snapshot(), before)
+        self.args.operation = "reconcile"
+        with self.assertRaisesRegex(SystemExit, "FOREIGN_STATE"):
+            self.invoke()
+
+    def test_post_enrollment_paper_v20_requires_original_result_and_native_pool(self):
+        self._select_paper_after_enrollment()
+        receipt = self.tx / "result.json"
+        retained = receipt.read_bytes()
+        receipt.unlink()
+        with self.assertRaises(SystemExit):
+            self.start()
+        receipt.write_bytes(retained)
+        native_bytes = self.pool.read_bytes()
+        self.pool.write_bytes(b"unreviewed-pool")
+        with self.assertRaisesRegex(SystemExit, "ORIGINAL_PIN_REFUSED"):
+            self.start()
+        self.pool.write_bytes(native_bytes)
+        self.assertFalse(self.loaded)
+
+    def test_post_enrollment_paper_v20_refuses_config_and_module_drift(self):
+        _, _, after_c, after_m = self._select_paper_after_enrollment()
+        tampered = json.loads(after_c)
+        tampered["gitPublish"]["commandTimeoutMs"] = 10
+        svc._atomic_write_bytes(self.roots["config"], owner.encode(tampered))
+        with self.assertRaises(SystemExit):
+            self.start()
+        svc._atomic_write_bytes(self.roots["config"], after_c)
+        tampered = json.loads(after_m)
+        tampered["configHash"] = "0" * 64
+        svc._atomic_write_bytes(self.roots["manifest"], owner.encode(tampered))
+        with self.assertRaises(SystemExit):
+            self.start()
+        svc._atomic_write_bytes(self.roots["manifest"], after_m)
+        p = self.roots["base"] / "git-publish.mjs"
+        old = p.read_bytes()
+        svc._atomic_write_bytes(p, b"foreign publisher code")
+        with self.assertRaises(SystemExit):
+            self.start()
+        svc._atomic_write_bytes(p, old)
+        self.roots["config"].chmod(0o644)
+        with self.assertRaises(SystemExit):
+            self.start()
+        self.roots["config"].chmod(0o600)
+        self.assertFalse(self.loaded)
+
     def test_all_intent_files_precede_installation_writes(self):
         self.prepare()
         original = svc._atomic_write_bytes

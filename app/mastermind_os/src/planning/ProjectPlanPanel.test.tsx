@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 afterEach(() => cleanup());
 import { ProjectPlanPanel, type ProjectPlanReader } from "./ProjectPlanPanel";
-import type { ProjectPlanRead, ProjectPlanSelection } from "./project-plan";
+import { decodeProjectPlan, type ProjectPlanRead, type ProjectPlanSelection } from "./project-plan";
+import v2Fixture from "../fixtures/project-plan-v2-owner.json";
 
 const selection: ProjectPlanSelection = { work_ref: "WS:PLAN-VISIBILITY" };
 const commit0 = "a".repeat(40);
@@ -355,5 +356,28 @@ it("composes the objective from the same fenced reader without a second read or 
   view.rerender(<ProjectPlanPanel selection={selection} read={read} canRead={canRead} sourceGeneration={generation} renderWorkspace={renderWorkspace}/>);
   expect(screen.getByRole("heading",{level:1,name:"Objective unavailable"})).toBeTruthy();
   expect(screen.queryByText("Work visibility baseline")).toBeNull();
+  expect(read).toHaveBeenCalledTimes(1);
+});
+
+it("renders v2 comparison and header from one fenced real-decoder result and masks both on revocation", async () => {
+  const current = { work_ref: "WS:PLAN-TEST" };
+  const body = decodeProjectPlan(v2Fixture.cases.available_pending, current);
+  let granted = true;
+  const read = vi.fn<ProjectPlanReader>(async () => body);
+  const props = { selection: current, read, canRead: () => granted, sourceGeneration: () => 8,
+    renderWorkspace: ({objective,panel}: {objective: string|null;panel: React.ReactNode}) => <><h1>{objective ?? "No objective"}</h1>{panel}</> };
+  const view = render(<ProjectPlanPanel {...props} />);
+  expect(await screen.findByRole("heading", { level: 1, name: "Real available objective." })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Plan comparison", level: 3 })).toBeTruthy();
+  const comparison = screen.getByRole("heading", { name: "Plan comparison" });
+  for (const title of ["Waves", "Record revision history"])
+    expect(comparison.compareDocumentPosition(screen.getByRole("heading", {name:title})) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getAllByText("PLAN-PROPOSAL").length).toBeGreaterThan(0);
+  expect(screen.queryByText(/does not declare plan adoption/)).toBeNull();
+  expect(read).toHaveBeenCalledTimes(1);
+  granted = false; view.rerender(<ProjectPlanPanel {...props} />);
+  expect(screen.queryByRole("heading", { name: "Plan comparison" })).toBeNull();
+  expect(screen.queryAllByText("PLAN-PROPOSAL")).toHaveLength(0);
+  expect(screen.getByRole("heading", { level: 1, name: "No objective" })).toBeTruthy();
   expect(read).toHaveBeenCalledTimes(1);
 });

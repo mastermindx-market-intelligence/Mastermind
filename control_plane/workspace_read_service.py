@@ -11,6 +11,7 @@ from control_plane.workspace_owned_task import await_owned
 import copy
 import dataclasses
 import math
+from http import HTTPStatus
 import re
 import time
 from collections.abc import Callable, Mapping
@@ -495,9 +496,15 @@ class WorkspaceReadService:
                  product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                  product_acceptance_owner_guard=None, product_acceptance_read=None,
                  product_acceptance_observe=None, activity_membership=None,
-                 project_plan_reader=None, project_journal_reader=None,
+                 project_plan_reader=None, project_journal_reader=None, project_session_source=None, project_direction_reader=None,
                  control_room_presenter=None,
-                 control_room_actions=None):
+                 control_room_actions=None, project_admission_permissions=None):
+        from control_plane.workspace_project_permission_binding import ProjectAdmissionPermissions
+        if project_admission_permissions is not None:
+            if type(project_admission_permissions) is not ProjectAdmissionPermissions:
+                raise ValueError("nominal installed project permission source required")
+            project_admission_permissions.check()
+        self._project_admission_permissions = project_admission_permissions
         self.cache = cache
         self.runtime = runtime
         self.authorize = authorize
@@ -571,6 +578,58 @@ class WorkspaceReadService:
             if type(project_journal_reader) is not AgentOsProjectJournalReader:
                 raise ValueError("exact installed Agent OS journal reader required")
         self._project_journal_reader = project_journal_reader
+        self._project_direction_reader = project_direction_reader
+        self._direction_read_adapter = None
+        if project_direction_reader is not None:
+            from control_plane.workspace_project_direction_read import ProjectDirectionReadAdapter
+            self._direction_read_adapter = ProjectDirectionReadAdapter(workspace=self, reader=project_direction_reader)
+        if project_session_source is not None:
+            from control_plane.workspace_managed_project_session_source import ExistingManagedProjectSessionSource
+            if type(project_session_source) is not ExistingManagedProjectSessionSource:
+                raise ValueError("exact managed project session source required")
+        self._project_session_source = project_session_source
+
+    def _read_project_session(self, selected):
+        from common import workspace_project_session_contract as wire
+        def member(snapshot):
+            if not _qualified(snapshot): raise ValueError("source_unavailable")
+            if _join(snapshot.document, selected) is None: raise LookupError("selection_not_found")
+            macro = snapshot.document.get("sources", {}).get("macro_sha")
+            if not wire._hex(macro, 40): raise ValueError("source_unavailable")
+            return macro
+        before = self.cache.snapshot()
+        macro = member(before)
+        source = self._project_session_source
+        if source is None: return wire.unavailable(selected)
+        body = wire.validate_body(source.read(**selected, expected_macro_sha=macro))
+        after = self.cache.snapshot()
+        if (member(after) != macro or self._project_session_source is not source
+                or body["selection"] != selected or before.owner is not after.owner
+                or before.instance != after.instance or before.publication != after.publication
+                or digest(before.document) != digest(after.document)
+                or _plan_validity_identity(before.validity) != _plan_validity_identity(after.validity)):
+            return wire.unavailable(selected, "SOURCE_CHANGED")
+        bounded_canonical({"ok": True, "result": body}, limit=wire.MAX_RESPONSE_BYTES)
+        return body
+
+    async def _handle_project_session_frame(self, frame):
+        from common import workspace_project_session_contract as wire
+        try: wire.validate_frame(frame)
+        except (TypeError, ValueError): return error("invalid_input", 400)
+        try:
+            if self.authorize(frame["principal"]) is not True: return error("access_denied", int(HTTPStatus.FORBIDDEN))
+            stamp = permission_stamp(self.authorize, frame["principal"])
+        except Exception: return error("access_denied", 403)
+        task = asyncio.create_task(asyncio.to_thread(self._read_project_session, frame["selection"]))
+        try: result = {"ok": True, "result": await await_owned(task)}
+        except LookupError: result = error("selection_not_found", 404)
+        except Exception: result = {"ok": True, "result": wire.unavailable(frame["selection"])}
+        try:
+            if (self.authorize(frame["principal"]) is not True
+                    or permission_stamp(self.authorize, frame["principal"]) != stamp):
+                return error("access_denied", 403)
+        except Exception: return error("access_denied", 403)
+        return result
 
     def _read_project_plan(self, selected):
         from common import workspace_project_plan_contract as wire
@@ -1567,10 +1626,42 @@ class WorkspaceReadService:
         return self._read_mission_v3({"selection": selection})["result"]
 
     async def handle_frame(self, frame, *, action_host_ready=None):
+        from common.workspace_project_direction_contract import FRAME_SCHEMA as DIRECTION_FRAME_SCHEMA
+        if type(frame) is dict and frame.get("schema") == DIRECTION_FRAME_SCHEMA:
+            from control_plane.workspace_project_direction_read import ProjectDirectionReadAdapter
+            adapter = self._direction_read_adapter or ProjectDirectionReadAdapter(workspace=self, reader=None)
+            return await adapter.handle_frame(frame)
+        from common import workspace_project_admission_wire as admission_wire
+        if admission_wire.is_project_admission_frame(frame):
+            try:
+                checked = admission_wire.validate_frame(frame)
+            except (TypeError, ValueError):
+                return error("invalid_input", 400)
+            if self._project_admission_permissions is None:
+                return admission_wire.withheld(checked, reason="OWNER_NOT_READY")
+            from control_plane.workspace_project_admission import project_admission_request, read_project_admission_control
+            wire, mode = admission_wire.classify(checked)
+            permissions = self._project_admission_permissions
+            def ready():
+                return (self._project_admission_permissions is permissions
+                    and callable(action_host_ready) and action_host_ready() is True)
+            def owned():
+                options = dict(permissions=permissions, host_ready=ready)
+                if mode == "current":
+                    return read_project_admission_control(self, checked, **options)
+                return project_admission_request(self, checked, status=mode == "status",
+                    resume=wire.OPERATION == "resume_workstream_admission", **options)
+            # A disconnected App cannot cancel an already-entered Runtime
+            # transaction. Retain the same owned thread until it settles.
+            task = asyncio.create_task(asyncio.to_thread(owned))
+            return await await_owned(task)
         from common.workspace_autonomy_read_contract import FRAME_SCHEMA as AUTONOMY_READ_FRAME_SCHEMA
         if type(frame) is dict and frame.get("schema") == AUTONOMY_READ_FRAME_SCHEMA:
             from control_plane.workspace_autonomy_policy_adapter import read_autonomy_policy
             return await read_autonomy_policy(self, frame)
+        from common.workspace_project_session_contract import FRAME_SCHEMA as PROJECT_SESSION_FRAME_SCHEMA
+        if isinstance(frame, dict) and frame.get("schema") == PROJECT_SESSION_FRAME_SCHEMA:
+            return await self._handle_project_session_frame(frame)
         from common.workspace_project_journal_contract import FRAME_SCHEMA as PROJECT_JOURNAL_FRAME_SCHEMA
         if type(frame) is dict and frame.get("schema") == PROJECT_JOURNAL_FRAME_SCHEMA:
             return await self._handle_project_journal_frame(frame)
@@ -1610,6 +1701,10 @@ class WorkspaceReadService:
             return await self._handle_v4_frame(frame)
         if isinstance(frame, dict) and frame.get("schema") == FRAME_SCHEMA_V3:
             return await self._handle_v3_frame(frame)
+        from common import workspace_resource_capacity_contract as capacity_wire
+        if type(frame) is dict and frame.get("schema") == capacity_wire.FRAME_SCHEMA:
+            from control_plane.workspace_resource_capacity_read import handle_capacity_frame
+            return await handle_capacity_frame(self, frame)
         from common.executive_workspace_activity_contract import FRAME_SCHEMA as ACTIVITY_FRAME_SCHEMA
         if isinstance(frame, dict) and frame.get("schema") == ACTIVITY_FRAME_SCHEMA:
             return await self._handle_activity_frame(frame)
@@ -1803,8 +1898,9 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                                product_acceptance_owner_guard=None, product_acceptance_read=None,
                                product_acceptance_observe=None, activity_membership=None,
-                               project_plan_reader=None, project_journal_reader=None,
-                               cross_plane_context=None, cross_plane_enrollment=None):
+                               project_plan_reader=None, project_journal_reader=None, project_session_source_factory=None, project_direction_reader=None,
+                               cross_plane_context=None, cross_plane_enrollment=None,
+                               project_admission_permissions=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
 
     Installers pass this to CeoIngressAppBinding.workspace_read_provider_factory.
@@ -1821,6 +1917,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
     from that same trusted enrollment owner; omission keeps mutations unavailable.
     """
     from control_plane.workspace_control_room_lifecycle import HostedControlRoom
+    from control_plane.workspace_managed_project_session_source import ExistingManagedProjectSessionSource
     if type(control_room) is not HostedControlRoom or not callable(authorize):
         raise ValueError("workspace owner configuration refused")
     if cross_plane_enrollment is not None:
@@ -1848,7 +1945,13 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
         actions = ExistingControlRoomActions(
             control_room, authorize=authorize, authorize_actions=authorize_actions, now=action_now,
         )
+    if project_session_source_factory is not None and not callable(project_session_source_factory):
+        raise ValueError("project session source factory must be installed")
     def provide(runtime):
+        session_source = project_session_source_factory(runtime) if project_session_source_factory is not None else None
+        if session_source is not None and (type(session_source) is not ExistingManagedProjectSessionSource
+                or session_source._service._require_runtime() is not runtime):
+            raise ValueError("project session source Runtime differs")
         return WorkspaceReadService(cache=cache, runtime=runtime, authorize=authorize,
                                     armed=armed, runtime_identity=runtime_identity,
                                     control_room_presenter=presenter, control_room_actions=actions,
@@ -1860,5 +1963,8 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     product_acceptance_observe=product_acceptance_observe,
                                     project_plan_reader=project_plan_reader,
                                     project_journal_reader=project_journal_reader,
-                                    activity_membership=activity_membership)
+                                    project_session_source=session_source,
+                                    project_direction_reader=project_direction_reader,
+                                    activity_membership=activity_membership,
+                                    project_admission_permissions=project_admission_permissions)
     return provide

@@ -66,7 +66,7 @@ VALID_LANE_STATES = {
 }
 VALID_EXIT_CLAIMS = {
     "CONTINUE", "CHECKPOINT_SUMMARY_STOP", "CHECKPOINTED_CONTINUATION",
-    "WAIT_EXTERNAL_EXECUTOR", "ALL_LANES_BLOCKED_STOP",
+    "WAIT_EXTERNAL_EXECUTOR", "ALL_LANES_BLOCKED_STOP", "OWNER_HANDOFF_STOP",
 }
 VALID_CONTINUITY_REASONS = {
     "CONTEXT_PRESSURE", "SESSION_UNSTABLE", "SURFACE_TRANSITION",
@@ -178,6 +178,11 @@ def _audit_lanes(snapshot: dict[str, Any], effect: dict[str, Any]) -> dict[str, 
     cycles = lanes.get("support_cycles_without_delta", 0)
     if type(cycles) is not int or cycles < 0:
         raise InvalidSnapshot("support cycles must be a nonnegative integer")
+
+    # An owner name or requested reviewer is not a successor receipt. A
+    # purported handoff without an actual current receiver/continuation is
+    # always a premature exit, even when other lanes are waiting.
+    owner_handoff_stop = exit_claim == "OWNER_HANDOFF_STOP"
 
     # A started worker is relevant only when bound to a specific waiting lane.
     # Canonical blocker/owner evidence is validated above; the caller still
@@ -318,12 +323,90 @@ def _audit_lanes(snapshot: dict[str, Any], effect: dict[str, Any]) -> dict[str, 
         "checkpoint_continuation_verified": checkpoint_proven,
         "wait_executor_verified": durable_wait,
         "status_summary_is_not_continuation": exit_claim == "CHECKPOINT_SUMMARY_STOP",
+        "owner_only_handoff_is_not_continuation": owner_handoff_stop,
         "wait_requires_started_durable_executor": (
             exit_claim == "WAIT_EXTERNAL_EXECUTOR" and not durable_wait
         ),
         "premature_exit_detected": exit_claim != "CONTINUE" and not lawful_stop,
     }
 
+def _next_proof(requirement: str, worker: dict[str, Any],
+                source: dict[str, Any], current_head: str) -> str:
+    """Describe the missing evidence without originating duplicate operations.
+
+    These are fixed advisory strings, not scheduler actions. Supplied snapshots
+    remain unverified until their existing owners confirm them; pending means
+    neither execution nor acceptance. No source/ref/content is echoed here.
+    """
+    if requirement == "current_head_ci":
+        state = source.get("ci_conclusion")
+        bound = source.get("ci_head") == current_head and _ref(source.get("ci_run_ref"))
+        if bound and isinstance(state, str):
+            if state in {"QUEUED", "PENDING", "IN_PROGRESS", "WAITING", "REQUESTED"}:
+                return (
+                    "consume the existing current-head CI run through its original observation path; "
+                    "do not rerun or push an empty change; advance independent permitted work"
+                )
+            # STALE, SKIPPED and NEUTRAL do not establish a failed check.
+            # Reconcile identity and required status before any repair.
+            if state in {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"}:
+                return (
+                    "inspect the original CI result and identify a permitted repair; "
+                    "no blind retry or duplicate run"
+                )
+        return (
+            "reconcile current-head CI identity and state with GitHub before any new run; "
+            "missing evidence is not a failed build"
+        )
+    if requirement == "independent_source_review":
+        verdict = source.get("review_verdict")
+        bound = (
+            source.get("review_head") == current_head
+            and _ref(source.get("review_ref"))
+            and _ref(source.get("author_id"))
+            and _ref(source.get("reviewer_id"))
+            and source.get("author_id") != source.get("reviewer_id")
+        )
+        if bound and isinstance(verdict, str):
+            if verdict in {"REQUESTED", "PENDING"}:
+                return (
+                    "consume the existing current-head review request, confirm no active review "
+                    "on its original carrier, then any eligible independent non-author may "
+                    "return a real head-bound verdict; do not duplicate a started review "
+                    "or change review identities; a request is not execution or approval"
+                )
+            if verdict == "IN_PROGRESS":
+                return (
+                    "consume the active current-head review on its original carrier; "
+                    "do not duplicate or reroute a started review; "
+                    "review execution is not approval"
+                )
+            if verdict == "CHANGES_REQUESTED":
+                return (
+                    "repair the existing findings on the original source carrier, then obtain "
+                    "independent review of the stable changed head; do not repeat unchanged reviews"
+                )
+        return (
+            "reconcile the original review and current source with the independent reviewer; "
+            "obtain the missing head-bound verdict without duplicating an existing request"
+        )
+    if requirement == "accepted_worker_result":
+        if worker["state"] in {"QUEUED", "STARTED", "UNKNOWN"}:
+            return (
+                "reconcile the original worker through the existing Fabric/Runtime owner; "
+                "do not submit a replacement; queue or unknown state is not accepted execution"
+            )
+        if worker["state"] == "TERMINAL":
+            if worker.get("exit_code") == 0:
+                return (
+                    "consume and verify the original terminal result; exit zero is not acceptance; "
+                    "do not relaunch for missing result or acceptance evidence"
+                )
+            return (
+                "inspect the original terminal failure and reconcile its effects; "
+                "do not relaunch or fail over to obtain the same effect"
+            )
+    return ACTION[requirement]
 
 
 def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -403,7 +486,8 @@ def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
         ),
     }
     gaps = [
-        {"requirement": key, "owner": OWNER[key], "next_proof": ACTION[key]}
+        {"requirement": key, "owner": OWNER[key],
+         "next_proof": _next_proof(key, worker, source, current_head)}
         for key in REQUIREMENTS if key in req and not checks[key]
     ]
     held = []
@@ -419,9 +503,14 @@ def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
                 "do not retry the denied action through any carrier"
             ),
         })
+    # A proof-complete packet does not make a procedurally invalid session
+    # exit ready for canonical adjudication. Audit the optional lane claim
+    # before the CLI disposition so a ghost-owner/status-only stop fails
+    # closed even when every separately enumerated proof gate passes.
+    lane_audit = _audit_lanes(root, effect) if root.get("lanes") is not None else {}
     # The caller must verify these observations against each canonical owner;
     # all green checks only mean the supplied packet is ready for adjudication.
-    ready = not gaps and not held
+    ready = not gaps and not held and not lane_audit.get("premature_exit_detected", False)
     report = {
         "schema": OUTPUT_SCHEMA,
         "disposition": "READY_FOR_CANONICAL_ADJUDICATION" if ready else "INCOMPLETE",
@@ -444,8 +533,7 @@ def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
     # Exit-claim classification is additive: snapshots without a ``lanes`` section
     # keep the exact incumbent output contract (no lane flags ever appear).
-    if root.get("lanes") is not None:
-        report.update(_audit_lanes(root, effect))
+    report.update(lane_audit)
     return report
 
 

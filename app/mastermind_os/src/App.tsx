@@ -1,3 +1,4 @@
+import { appCopy } from "./app-copy";
 import { ProductAcceptancePanel } from "./product-acceptance/ProductAcceptancePanel";
 import type { AuthState, MissionHost } from "./host";
 import type {
@@ -16,8 +17,13 @@ import { qualifyWorkerResultRef } from "./fabric/mission-worker-result";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
 import { Projects } from "./projects/Projects";
 import { ProjectWorkspace } from "./projects/ProjectWorkspace";
+import { ProjectConversationAssociation } from "./conversations/ProjectConversationAssociation";
+import { AcceptedDirectionPanel } from "./direction/AcceptedDirectionPanel";
+import { useProjectAdmissionWorkspace } from "./useProjectAdmissionWorkspace";
 import { Inbox } from "./inbox/Inbox";
 import { Knowledge } from "./knowledge/Knowledge";
+import { DiscoveryWorkspace } from "./discovery/DiscoveryWorkspace";
+import { projectDiscovery } from "./discovery/projection";
 import { ProjectWorkDetail, ProjectEvidence, ProjectJournal } from "./workJourney";
 import { ConversationWindow } from "./conversations/ConversationWindow";
 import { HistoricalOriginalAnswers } from "./conversations/HistoricalOriginalAnswers";
@@ -77,6 +83,8 @@ import { type ControlRoomState } from "./control-room";
 import { ControlRoomPanel } from "./ControlRoomPanel";
 import { SessionEstate } from "./session-estate/SessionEstate";
 import { ResourcesSystemsPanel } from "./resources/ResourcesSystemsPanel";
+import { ResourceCapacityRead } from "./resources/ResourceCapacityRead";
+import { selectedCurrentCapacityAttempt } from "./resource-capacity-selection";
 import { SupervisionLedger } from "./supervision/SupervisionLedger";
 import { SupervisionTrace } from "./supervision/SupervisionTrace";
 import { ProjectPlanPanel } from "./planning/ProjectPlanPanel";
@@ -104,6 +112,9 @@ export const navigation = [
   "Inbox",
   "Conversations",
   "Knowledge",
+  "Search",
+  "Sources",
+  "Tools",
   "Meta-CEO",
   "Work",
   "Programs",
@@ -147,13 +158,17 @@ const missionNavigation: readonly View[] = [
   "Connections",
   "Evidence",
 ];
-const advancedNavigation: readonly View[] = ["Meta-CEO", "Work", "Programs", "Control Room", "Session Estate", "Fleet & Capacity", ...missionNavigation];
+const advancedNavigation: readonly View[] = ["Sources", "Tools", "Meta-CEO", "Work", "Programs", "Control Room", "Session Estate", "Fleet & Capacity", ...missionNavigation];
 const advancedLabel = (view: View, locale: "en" | "zh-CN") => locale === "zh-CN" ? navigationLabel(view, locale) :
   view === "Work" ? "Work queue" : view === "Programs" ? "Programs workspace" :
   view === "Control Room" ? "Control Room workspace" : view === "Fleet & Capacity" ? "Fleet & Capacity workspace" : view;
 const projectTabs = ["Conversation", "Overview", "Plan", "Work", "Evidence", "Journal", "More"] as const;
 type ProjectTab = (typeof projectTabs)[number];
 const navigationPaths: Record<View, string> = {
+  Search: "M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14M15 15l6 6",
+  Sources: "M5 3h10l4 4v14H5zM14 3v5h5M8 12h8M8 16h5",
+  Tools: "M8 3h8v5H8zM4 12h5v8H4zM15 12h5v8h-5M12 8v3M6 11h12",
+
   "Session Estate": "M4 4h16v12H4zM8 20h8M12 16v4",
   Today: "M3 10 12 3l9 7v11H3zM9 21v-7h6v7",
   Projects: "M3 6h6l2 2h10v12H3z", Inbox: "M3 5h18v15H3zM3 14h5l2 3h4l2-3h5",
@@ -170,7 +185,7 @@ function NavigationIcon({ view }: { view: View }) {
 }
 function navigationLabel(view: View, locale: "en" | "zh-CN"): string {
   if (locale === "en") return view;
-  const labels: Record<View, string> = { "Session Estate": "会话工作区", Today: "今天", Projects: "项目", Inbox: "收件箱", Conversations: "对话", Knowledge: "知识", "Meta-CEO": "Meta-CEO 办公室", Work: "工作", Programs: "工作流", "Control Room": "控制室", "Fleet & Capacity": "计算资源", "Mission Workspace": "任务工作区", Conversation: "当前对话", Activity: "活动", Connections: "连接", Evidence: "证据" };
+  const labels: Record<View, string> = { Search: "搜索", Sources: "来源", Tools: "工具", "Session Estate": "会话工作区", Today: "今天", Projects: "项目", Inbox: "收件箱", Conversations: "对话", Knowledge: "知识", "Meta-CEO": "Meta-CEO 办公室", Work: "工作", Programs: "工作流", "Control Room": "控制室", "Fleet & Capacity": "计算资源", "Mission Workspace": "任务工作区", Conversation: "当前对话", Activity: "活动", Connections: "连接", Evidence: "证据" };
   return labels[view];
 }
 
@@ -1328,8 +1343,25 @@ export interface AppProps {
   preferencesControl?: React.ReactNode;
 }
 export function App({ locale = "en", theme = "dark", preferencesControl }: AppProps = {}) {
+  const copy = appCopy(locale);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const navigationPane = useRef<HTMLElement>(null);
+  const preferencesPane = useRef<HTMLDivElement>(null);
+  const [hasPreferencesNavigation, setHasPreferencesNavigation] = useState(false);
+  useLayoutEffect(() => {
+    setHasPreferencesNavigation(Boolean(preferencesPane.current?.querySelector("button.display-preferences__toggle")));
+  }, [preferencesControl]);
+  const openDisplayPreferences = () => {
+    if (window.matchMedia?.("(max-width: 959px)").matches) setNavigationOpen(true);
+    const open = () => {
+      const toggle = preferencesPane.current?.querySelector<HTMLButtonElement>("button.display-preferences__toggle");
+      if (!toggle) return;
+      if (toggle.getAttribute("aria-expanded") !== "true") toggle.click();
+      toggle.focus();
+    };
+    if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(open);
+    else queueMicrotask(open);
+  };
   const navigationToggle = useRef<HTMLButtonElement>(null);
   const closeNavigation = () => { setNavigationOpen(false); navigationToggle.current?.focus(); };
   useEffect(() => {
@@ -2276,7 +2308,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     selection?.rootJobId,
   ]);
   useEffect(() => {
-    if (active !== "Control Room" && active !== "Session Estate" && active !== "Fleet & Capacity") return;
+    if (active !== "Control Room" && active !== "Session Estate" && active !== "Fleet & Capacity" && active !== "Sources" && active !== "Tools") return;
     const host = window.MastermindMissionHost;
     const read = host?.readControlRoomState;
     const ownerRevision = authRevision;
@@ -3052,7 +3084,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         onClick={checkCommandStatus}
         disabled={recoverInFlight}
       >
-        Check status
+        {copy.checkStatus}
       </button>
     </div>
   ) : null;
@@ -3075,23 +3107,23 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation, authRevision]);
   const commandPanel =
     !signedIn && passiveExpiryHold.current && retainedComposerDrafts.launch ? (
-      <section className="card" aria-label="Retained Launch draft">
-        <h2>Unsent launch goal</h2>
-        <p className="muted">Your session expired. Copy or discard this local draft before signing in again. Commands are disabled.</p>
-        <label htmlFor="retained-launch-goal">Goal</label>
+      <section className="card" aria-label={copy.retainedDraft}>
+        <h2>{copy.unsentGoal}</h2>
+        <p className="muted">{copy.expiredDraft}</p>
+        <label htmlFor="retained-launch-goal">{copy.goal}</label>
         <textarea id="retained-launch-goal" value={retainedComposerDrafts.launch}
           onChange={event => updateRetainedComposer("launch", event.target.value)}
           rows={4} />
         <button type="button" onClick={() => updateRetainedComposer("launch", "")}>
-          Discard launch goal
+          {copy.discardGoal}
         </button>
       </section>
     ) : canLaunch && commandView && launchDraftDismissed ? (
       <section className="card">
         <div className="section-title">
-          <h2>Launch Orchestrator</h2>
+          <h2>{copy.startWork}</h2>
         </div>
-        <p className="muted">Launch draft dismissed.</p>
+        <p className="muted">{copy.draftDismissed}</p>
         <button
           type="button"
           onClick={() => {
@@ -3099,7 +3131,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             routeHeading.current?.focus();
           }}
         >
-          New launch
+          {copy.newGoal}
         </button>
       </section>
     ) : commandReady && commandView ? (
@@ -3133,7 +3165,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           unavailableReason={
             canLaunch
               ? undefined
-              : "Launch choices are unavailable. Your draft is retained."
+              : copy.choicesUnavailable
           }
           submitting={heldKind === "launch" && commandBusy}
           blocked={!!currentReopened || heldKind === "consume"}
@@ -3173,13 +3205,13 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       <section className="card">
         <div className="section-title">
           <div>
-            <h2>Launch Orchestrator</h2>
+            <h2>{copy.startWork}</h2>
           </div>
-          <span className="state state-unavailable">UNAVAILABLE</span>
+          <span className="state state-unavailable">{copy.unavailable}</span>
         </div>
-        <p className="muted">Command route is not available.</p>
+        <p className="muted">{copy.workUnavailable}</p>
         <details className="reason-details">
-          <summary>Technical details</summary>
+          <summary>{copy.technicalDetails}</summary>
           <code>{COMMAND_ROUTE_UNAVAILABLE}</code>
         </details>
         {heldKind === "launch" ? checkStatusControl : null}
@@ -3577,6 +3609,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       generation: host?.invalidationGeneration ? () => host.invalidationGeneration!() : undefined,
       plan: host?.readProjectPlan ? (request: Parameters<NonNullable<MissionHost["readProjectPlan"]>>[0]) => host.readProjectPlan!(request) : undefined,
       journal: host?.readProjectJournal ? ({workRef, signal}: {workRef: string; signal: AbortSignal}) => host.readProjectJournal!({work_ref: workRef, signal}) : undefined,
+      direction: host?.readProjectDirection ? (request: Parameters<NonNullable<MissionHost["readProjectDirection"]>>[0]) => host.readProjectDirection!(request) : undefined,
+      association: host?.readProjectSessionAssociation ? (request: Parameters<NonNullable<MissionHost["readProjectSessionAssociation"]>>[0]) => host.readProjectSessionAssociation!(request) : undefined,
       autonomy: host?.readAutonomyPolicy ? (request: Parameters<NonNullable<MissionHost["readAutonomyPolicy"]>>[0]) => host.readAutonomyPolicy!(request) : undefined,
     };
   }, [retainedResultHost, authRevision]);
@@ -3587,6 +3621,43 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     index.state === "AVAILABLE" && requestedProjectWorkRef
       ? index.programs.filter(card => card.workRef === requestedProjectWorkRef) : [];
   const projectWorkRef = currentProjectCards.length === 1 ? currentProjectCards[0].workRef : null;
+  // Admission gates address the canonical programme, not an inferred Runtime
+  // root. The owner independently brackets its exact Agent OS source and grant.
+  const admissionPorts = useMemo(() => {
+    const host=retainedResultHost;
+    return {
+      read: host?.readProjectAdmissionControl ? (request: Parameters<NonNullable<MissionHost["readProjectAdmissionControl"]>>[0]) => host.readProjectAdmissionControl!(request) : undefined,
+      transport: host?.pauseProjectAdmission && host.resumeProjectAdmission && host.readProjectAdmissionOperation ? {
+        pause: (request: Parameters<NonNullable<MissionHost["pauseProjectAdmission"]>>[0]) => host.pauseProjectAdmission!(request),
+        resume: (request: Parameters<NonNullable<MissionHost["resumeProjectAdmission"]>>[0]) => host.resumeProjectAdmission!(request),
+        status: (request: Parameters<NonNullable<MissionHost["readProjectAdmissionOperation"]>>[0]) => host.readProjectAdmissionOperation!(request),
+      } : undefined,
+    };
+  }, [retainedResultHost,authRevision,projectWorkRef,selectionSeq.current]);
+  const projectAdmissionPanel=useProjectAdmissionWorkspace({
+    selection:projectWorkRef ? {work_ref:projectWorkRef} : null,
+    authGeneration:authRevision,sourceGeneration:projectReaders.generation,canRead:projectReaders.canRead,
+    readCurrent:admissionPorts.read,transport:admissionPorts.transport,store:commandBinding?.store,locale,
+  });
+  // Observational association reads use the canonical catalogue pair, independently
+  // of the Mission/conversation-send selection. No association grants a send target.
+  const projectCard = currentProjectCards.length === 1 ? currentProjectCards[0] : null;
+  const projectAssociationSelection = projectWorkRef && projectReaders.canRead() &&
+    projectCard?.rootState === "RESOLVED" && projectCard.rootJobId &&
+    projectCard.rootCandidates.length === 1 && projectCard.rootCandidates[0] === projectCard.rootJobId
+      ? {workRef: projectWorkRef, rootJobId: projectCard.rootJobId} : null;
+  const directionConversation = projectConversationActive && projectWorkRef && selection?.workRef === projectWorkRef &&
+    observedConversation.projection.conversation.source.state === "CURRENT" &&
+    observedConversation.projection.context.selection?.workRef === projectWorkRef &&
+    observedConversation.projection.context.selection?.rootJobId === selection.rootJobId;
+  const recordedDirection = <AcceptedDirectionPanel selection={projectWorkRef ? {work_ref:projectWorkRef} : null}
+    read={projectReaders.direction} sourceGeneration={projectReaders.generation} canRead={projectReaders.canRead} locale={locale}
+    onChangeDirection={directionConversation ? workRef => {
+      if (workRef === projectWorkRef && projectReaders.canRead()) setActive("Conversations");
+    } : undefined}/>;
+  const projectSessionEvidence = <ProjectConversationAssociation selection={projectAssociationSelection}
+    authGeneration={authRevision} hostGeneration={retainedResultHost?.invalidationGeneration?.() ?? null}
+    readAssociation={projectReaders.association} locale={locale}/>;
   const recordedProjectJournal = projectWorkRef ? <ProjectJournalReader selection={{workRef: projectWorkRef}}
       read={projectReaders.journal} generation={projectReaders.generation?.() ?? "SOURCE_UNAVAILABLE"}
       authGeneration={authRevision} canRead={projectReaders.canRead} locale={locale}/> : null;
@@ -3660,10 +3731,13 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         )}
       />
     ) : null;
-  const quietHeader = active === "Today" || active === "Knowledge" ||
+  const quietHeader = active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
     active === "Projects" && !directRoute && (!projectTab ||
       Boolean(projectWorkRef && (projectTab === "Conversation" || catalogueWorkRef)));
   const projectReadGeneration = JSON.stringify([authRevision, retainedHostGeneration, selectionSeq.current]);
+  const discoveryView = projectDiscovery({projection: office.projection,
+    conversation: observedConversation.projection, controlRoom: currentControlRoom});
+
   const currentConversationPanel = (
       <>
         <ConversationWindow
@@ -3748,6 +3822,32 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     );
   else if (active === "Conversations")
     content = currentConversationPanel;
+  else if (active === "Search" || active === "Sources" || active === "Tools")
+    content = <DiscoveryWorkspace view={discoveryView} projection={office.projection}
+      mode={active} locale={locale} theme={theme}
+      sourceProps={{readResultReferences: retainedResultHost?.readResultReferences,
+        readResult: retainedResultHost?.readResult,
+        hostGeneration: retainedResultHost?.invalidationGeneration?.(),
+        draftPort: {projection: observedConversation.projection, text: observedConversation.draft,
+          revision: observedConversation.draftRevision, insertion: observedConversation.draftInsertion,
+          append: observedConversation.appendSource, undo: observedConversation.undoSource,
+          edit: () => setActive("Conversations")}}}
+      onModeChange={setActive}
+      onOpenProject={office.projection.programs.source.state === "CURRENT" && index.state === "AVAILABLE"
+        ? (target, mode) => {
+            if (mode !== "current" || office.projection.programs.source.state !== "CURRENT" || index.state !== "AVAILABLE") return;
+            const cards = index.programs.filter(card => card.workRef === target.workRef);
+            if (cards.length !== 1 || cards[0].rootState !== "RESOLVED" ||
+                cards[0].rootJobId !== target.rootJobId || cards[0].rootCandidates.length !== 1 ||
+                cards[0].rootCandidates[0] !== target.rootJobId) return;
+            open(target.workRef, target.rootJobId);
+          } : undefined}
+      onOpenConversation={() => setActive("Conversations")}
+      onOpenMetaCeo={() => setActive("Meta-CEO")}
+      onOpenKnowledge={() => setActive("Knowledge")}
+      onOpenPreferences={hasPreferencesNavigation ? openDisplayPreferences : undefined}
+      onRefreshSources={authState?.acquisition && typeof retainedResultHost?.readControlRoomState === "function"
+        ? () => setControlRoomRevision(revision => revision + 1) : undefined}/>
   else if (active === "Knowledge")
     content = <Knowledge projection={office.projection} locale={locale}
       readResultReferences={retainedResultHost?.readResultReferences}
@@ -3800,7 +3900,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               </details>
             </> : undefined}
             detailsPanel={<>
-              {panel}{recordedProjectJournal}
+              {panel}{recordedDirection}{projectAdmissionPanel}{projectSessionEvidence}{recordedProjectJournal}
               {projectConversationActive ? <>
                 <AutonomyPanel selection={selection} read={projectReaders.autonomy}
                   canRead={Boolean(projectReaders.generation) && projectReaders.canRead()}
@@ -4025,7 +4125,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     content = (
       <>
       <ResourcesSystemsPanel controlRoom={currentControlRoom} work={workState} locale={locale}
-        onReviewSources={() => setActive("Connections")}/>
+        onReviewSources={() => setActive("Sources")}/>
+      <ResourceCapacityRead host={retainedResultHost} locale={locale}
+        selection={selectedCurrentCapacityAttempt(office.projection, selection,
+          resultState.kind === "READY" ? resultState.selection : null, authRevision)}/>
       <AttendedFabricWorkspace
         key={`fleet:${authRevision}`}
         host={window.MastermindMissionHost}
@@ -4187,6 +4290,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             mastermind<small>EXECUTIVE OS</small>
           </span>
         </div>
+        <button type="button" className="sidebar-search" aria-current={active === "Search" ? "page" : undefined}
+          onClick={() => {setProjectTab(null);setActive("Search");if (navigationOpen) closeNavigation();}}>
+          <NavigationIcon view="Search"/>{locale === "zh-CN" ? "搜索" : "Search"}
+        </button>
         <div className="nav-section">
           <span className="nav-section-label">COMPANY</span>
           <nav aria-label="Company navigation">
@@ -4215,14 +4322,14 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           {selection ? (
             <div className="mission-context">
               <b>{d?.program.title || selection.workRef}</b>
-              <small>Exact mission selected</small>
+              <small>{copy.selectedWork}</small>
             </div>
           ) : (
             <div className="mission-context mission-context-empty">
-              No exact mission selected
+              {copy.noWork}
             </div>
           )}
-          <nav aria-label="Mission navigation">
+          <nav aria-label={copy.missionNavigation}>
             {advancedNavigation.map((x) => (
               <button
                 key={x}
@@ -4243,21 +4350,20 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             ))}
           </nav>
         </div>
-        {preferencesControl}
+        <div ref={preferencesPane}>{preferencesControl}</div>
         <div className="side-note">
-          <b>Source-qualified viewer</b>
+          <b>{copy.statusSources}</b>
           <br />
-          Lifecycle, review, transport, acceptance and source freshness remain
-          separate facts.
+          {copy.statusNote}
         </div>
       </aside>
       <main id="content" tabIndex={-1}>
         <header className={quietHeader ? "workspace-header workspace-header-quiet" : "workspace-header"}>
           <div className="workspace-route">
             <button ref={navigationToggle} type="button" className="navigation-toggle" aria-expanded={navigationOpen} aria-controls="workspace-navigation" aria-label={locale === "zh-CN" ? "打开导航" : "Open navigation"} onClick={() => setNavigationOpen(value => !value)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></button>
-            <span className="eyebrow">{directRoute ? (locale === "zh-CN" ? "单个只读任务" : "One read-only task") : active}</span>
+            <span className="eyebrow">{directRoute ? (locale === "zh-CN" ? "单个只读任务" : "One read-only task") : navigationLabel(active, locale)}</span>
             {quietHeader ? <h2 ref={routeHeading} tabIndex={-1}>{navigationLabel(active, locale)}</h2> : <h1 ref={routeHeading} tabIndex={-1}>
-              {directRoute ? (locale === "zh-CN" ? "原生任务" : "Native task") : active}
+              {directRoute ? (locale === "zh-CN" ? "原生任务" : "Native task") : navigationLabel(active, locale)}
             </h1>}
             {!quietHeader && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : headerSummary}</p>}
           </div>
@@ -4266,22 +4372,20 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             {authState ? (
               <div>
                 <small>
-                  {authState.status === "unconfigured"
-                    ? "Sign-in setup pending"
-                    : authState.status.replaceAll("_", " ")}
+                  {copy.authStatus[authState.status]}
                 </small>
                 {authState.reason && authState.status !== "unconfigured" ? (
                   <p className="muted">
                     {authState.reason === "POPUP_BLOCKED"
-                      ? "Allow the sign-in popup and try again."
+                      ? copy.allowPopup
                       : authState.reason === "POPUP_CLOSED"
-                        ? "Sign-in window closed. Try again when ready."
+                        ? copy.popupClosed
                         : authState.reason.includes("EXPIRED") ||
                             authState.reason.includes("TIMEOUT")
-                          ? "Sign-in timed out. Please try again."
+                          ? copy.signInTimeout
                           : authState.acquisition
-                            ? "Workspace connected. Conversation access is unavailable."
-                            : "Sign-in could not complete. Please try again."}
+                            ? copy.conversationUnavailable
+                            : copy.signInFailed}
                   </p>
                 ) : null}
                 <button
@@ -4319,10 +4423,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                   }}
                 >
                   {authState.status === "signing_in"
-                    ? "Cancel sign in"
+                    ? copy.cancelSignIn
                     : authState.acquisition || authState.content
-                      ? "Sign out"
-                      : "Sign in"}
+                      ? copy.signOut
+                      : copy.signIn}
                 </button>
               </div>
             ) : null}
@@ -4330,43 +4434,45 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         </header>
         {!native && authState && authState.status === "signed_out" &&
          passiveExpiryHold.current && hasUnsentUserText.current ? (
-          <section className="notice" aria-label="Unsent work protected">
-            <p>Authentication expired. Unsent work is retained only in this tab. Copy or finish it before signing in again.</p>
+          <section className="notice" aria-label={copy.unsentProtected}>
+            <p>{copy.expiredUnsent}</p>
             <button type="button" onClick={() => {
               office.changeDraft("");
               observedConversation.discardDraft();
               updateRetainedComposer("launch", "");
               updateRetainedComposer("session", "");
               passiveExpiryHold.current = false;
-            }}>Discard all unsent work</button>
+            }}>{copy.discardAll}</button>
           </section>
         ) : null}
         {active !== "Control Room" && active !== "Today" && !directRoute ? (
-          <div className="notice" role="status">{visibleNotice}</div>
+          <div className="notice" role="status">{visibleNotice === "Choose a Program with one resolved mission before opening the workspace."
+            ? locale === "zh-CN" ? "选择一个项目，查看其工作。" : "Choose a project to view its work."
+            : visibleNotice}</div>
         ) : null}
         {build ? (
           <details className="build-details">
-            <summary>Build details</summary>
+            <summary>{copy.buildDetails}</summary>
             <dl>
-              <dt>Version</dt>
+              <dt>{copy.version}</dt>
               <dd>{build.version}</dd>
-              <dt>Source revision</dt>
+              <dt>{copy.sourceRevision}</dt>
               <dd>
                 <code>{build.source_revision}</code>
               </dd>
-              <dt>Build identity</dt>
+              <dt>{copy.buildIdentity}</dt>
               <dd>
                 <code>{build.build_identity}</code>
               </dd>
               {build.native_client_ref ? (
                 <>
-                  <dt>Native client reference</dt>
+                  <dt>{copy.nativeClient}</dt>
                   <dd>
                     <code>{build.native_client_ref}</code>
                   </dd>
                 </>
               ) : null}
-              <dt>Transport</dt>
+              <dt>{copy.transport}</dt>
               <dd>{`${build.transport} / ${build.state}`}</dd>
             </dl>
           </details>
