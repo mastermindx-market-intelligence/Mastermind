@@ -32,6 +32,9 @@ class _ProjectReadPhase:
     material: object = None
     capture: object = None
     active: bool = False
+    provider_factory: object = None
+    provider_lease: object = None
+    provider_acquiring: bool = False
 
 
 def _require_phase_liveness(owner, principal, workspace, foreground, *, deadline=None):
@@ -83,6 +86,7 @@ def _project_validation_phase(owner, principal, workspace, work_ref, *, expected
             deadline=parent.capture.operation.read_deadline)
         return
     phase = _ProjectReadPhase(_SEAL, owner, principal, workspace, work_ref, foreground)
+    phase.provider_factory = owner._app.workspace_read_provider_factory
     token = _PHASE.set(phase)
     owner._project_validation_phase = phase
     try:
@@ -98,6 +102,8 @@ def _project_validation_phase(owner, principal, workspace, work_ref, *, expected
                 yield
             finally:
                 phase.active = False
+        if phase.provider_lease is not None:
+            phase.provider_lease.finish(phase,phase.provider_factory,owner._runtime)
         # The Macro full-post may block AFTER the body's final ForeOp check.
         # Rejoin the actual current invocation/identity and both windows only
         # after it finishes; no expired or closed authority may escape.
@@ -105,10 +111,41 @@ def _project_validation_phase(owner, principal, workspace, work_ref, *, expected
             deadline=phase.capture.operation.read_deadline)
     finally:
         phase.active = False
+        if phase.provider_lease is not None:phase.provider_lease.close()
+        phase.provider_lease = phase.provider_factory = None
+        phase.provider_acquiring = False
         phase.capture = phase.view = phase.material = None
         owner._project_validation_phase = None
         _PHASE.reset(token)
 
+
+
+def _reader_for_project_phase(owner,principal,workspace,work_ref,factory):
+    """One installed constructor result, ONLY for this existing pure phase."""
+    phase=_PHASE.get()
+    if phase is None:return factory(owner._runtime)
+    if (phase.seal is not _SEAL or phase.owner is not owner or phase.principal is not principal
+            or phase.workspace is not workspace or phase.work_ref!=work_ref
+            or getattr(owner,'_project_validation_phase',None) is not phase
+            or phase.provider_factory is not factory or phase.provider_acquiring):
+        raise ValueError('CONVERSATION_PROJECT_CHANGED')
+    from control_plane.workspace_read_provider_binding import installed_read_provider
+    provider=installed_read_provider(factory)
+    if phase.provider_lease is not None:
+        reader=phase.provider_lease.current(phase,factory,owner._runtime)
+    elif provider is None:
+        # Existing custom/stable fixtures and generic readers retain all old
+        # calls and exact nominal rejoin guards; no fallback cache is added.
+        reader=factory(owner._runtime)
+    else:
+        if phase.view is not None:raise ValueError('CONVERSATION_PROJECT_CHANGED')
+        phase.provider_acquiring=True
+        try:phase.provider_lease=provider.acquire(phase,owner._runtime)
+        finally:phase.provider_acquiring=False
+        reader=phase.provider_lease.reader
+    _require_phase_liveness(owner,principal,workspace,phase.foreground,
+        deadline=None if phase.capture is None else phase.capture.operation.read_deadline)
+    return reader
 
 def _binding_current(binding):
     # Same installed binding postcondition as its ordinary read entry. No

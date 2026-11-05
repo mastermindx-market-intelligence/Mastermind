@@ -2442,4 +2442,5 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     activity_membership=activity_membership,
                                     project_admission_permissions=project_admission_permissions,
                                     instruction_admission_permissions=instruction_admission_permissions)
-    return provide
+    from control_plane.workspace_read_provider_binding import bind_installed_read_provider
+    return bind_installed_read_provider(provide,canonical_project_read_bindings_factory)

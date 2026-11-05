@@ -160,7 +160,8 @@ class FreshConversationOwner:
         factory = self._app.workspace_read_provider_factory
         if not callable(factory):
             raise ConversationRefusal("project_read_refused")
-        reader = factory(self._runtime)
+        from control_plane.fresh_conversation_membership import _reader_for_project_phase
+        reader = _reader_for_project_phase(self,principal,workspace_principal,work_ref,factory)
         if type(reader) is not WorkspaceReadService or reader.runtime is not self._runtime:
             raise ConversationRefusal("project_read_refused")
         raw = {key: sorted(p.scopes) if key == "scopes" else getattr(p, key) for key in PRINCIPAL_KEYS}
