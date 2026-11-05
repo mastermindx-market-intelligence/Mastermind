@@ -555,6 +555,14 @@ REVIEWED_FILES['integrations/hermes_secretary/tab_sweep.py'] = {
     'sites': ((19, 77, 80, 'int', '443'),),
 }
 
+# S14 reviewed private-directory comparison (Root + independent89cb). This
+# single permission check grants no identity or chmod capability. Any path,
+# token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
+REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/post_failure_observation.py'] = {
+    'sha256': '2a78630ccaf574da752c77d7b8f821723ccb264b970e2fe38b1976d886ca97a0',
+    'sites': ((293, 79, 84, 'int', '0o700'),),
+}
+
 
 # PR1890 attended parent classification under the current Chairman source waiver:
 # two CSS dimensions and five graph coordinates, never identities or grants.
