@@ -4695,7 +4695,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const freshEntryUnavailableReason = !freshHost?.freshConversation
     ? (locale === "zh-CN" ? "当前连接无法新建对话。" : "This connection can’t start a new conversation.")
     : !freshExecutiveOwner()
-      ? (locale === "zh-CN" ? "暂时无法确认新建对话的访问权限。" : "Access to start a conversation couldn’t be confirmed.") : null;
+      ? (locale === "zh-CN" ? "暂时无法确认新建对话的访问权限。" : "Conversation access couldn’t be confirmed.") : null;
   const conversationListPanel = <ConversationsList model={conversationListModel} locale={locale} theme={theme}
     onNewConversation={freshHost?.freshConversation ? openFreshConversation : undefined}
     query={conversationNavigation.query} onQueryChange={conversationNavigation.changeQuery}
