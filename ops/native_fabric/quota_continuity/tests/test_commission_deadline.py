@@ -718,6 +718,7 @@ class FullCliDeadline(unittest.TestCase):
         original=importlib.util.module_from_spec(spec);spec.loader.exec_module(original)
         with tempfile.TemporaryDirectory(prefix='full-cli-',dir=ROOT/'tests') as tmp:
             root=Path(tmp);source=root/'source';source.mkdir()
+            diagnostics=root/'diagnostics';diagnostics.mkdir(mode=0o700)
             names=(*original.SOURCE_SHA256,'remote_sub_helpers.py','commission_deadline.py',
                    'lane_runtime.py','quota_circuit.py','lease_broker.py')
             for name in names:
@@ -741,7 +742,7 @@ class FullCliDeadline(unittest.TestCase):
                     for path in (fixture_root/'ext/state/remote_sub').glob('*.json*'):
                         if path.is_file() and path.stat().st_size<=65536:
                             stages[path.name]=path.read_text()
-                    (ROOT/'tests/last-full-cli-request-stages.json').write_text(json.dumps(stages,indent=2)+'\n')
+                    (diagnostics/'last-full-cli-request-stages.json').write_text(json.dumps(stages,indent=2)+'\n')
                     return result
                 proc.communicate=communicate_and_retain
                 return proc
@@ -752,15 +753,17 @@ class FullCliDeadline(unittest.TestCase):
                 case.test_original_budget_bounds_real_cli_broker_wait_before_task_start()
             finally:
                 if (root/'last-run.json').exists():
-                    shutil.copyfile(root/'last-run.json',ROOT/'tests/last-full-cli-attempt.json')
+                    shutil.copyfile(root/'last-run.json',diagnostics/'last-full-cli-attempt.json')
                 if (root/'last-controller.stderr').exists():
-                    shutil.copyfile(root/'last-controller.stderr',ROOT/'tests/last-full-cli-attempt.stderr')
+                    shutil.copyfile(root/'last-controller.stderr',diagnostics/'last-full-cli-attempt.stderr')
             evidence=json.loads((root/'last-run.json').read_text())
             self.assertEqual(evidence['transport_or_task_invocation_count'],0)
             self.assertFalse(evidence['launch_log_present'])
             self.assertEqual(evidence['continuation_finished']['reason'],'commission_time_exhausted')
-            (ROOT/'tests/last-full-cli-green.json').write_text(json.dumps(evidence,indent=2,sort_keys=True)+'\n')
-            (ROOT/'tests/last-full-cli-green.stderr').write_text((root/'last-controller.stderr').read_text())
+            (diagnostics/'last-full-cli-green.json').write_text(json.dumps(evidence,indent=2,sort_keys=True)+'\n')
+            (diagnostics/'last-full-cli-green.stderr').write_text((root/'last-controller.stderr').read_text())
+            self.assertEqual(json.loads((diagnostics/'last-full-cli-green.json').read_text()),evidence)
+            self.assertTrue((diagnostics/'last-full-cli-request-stages.json').is_file())
 
 
 if __name__=='__main__':
