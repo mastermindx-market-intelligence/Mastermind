@@ -45,10 +45,10 @@ class TerminalDiagnostic(unittest.TestCase):
         self.provider_file.chmod(0o600)
         self.process_file.chmod(0o600)
 
-    def project(self, **status):
+    def project(self, *, owner_ext=None, **status):
         with mock.patch.object(provider_outcome, "validate_receipt") as verify:
             value = fabric_task._terminal_provider_projection(
-                self.RID, status or self.status, self.log)
+                self.RID, status or self.status, self.log, owner_ext=owner_ext)
             if value:
                 verify.assert_called_once()
             return value
@@ -59,6 +59,8 @@ class TerminalDiagnostic(unittest.TestCase):
             "kind": "turn_limit", "cli_subtype": "error_max_turns",
             "source": "validated_original_provider_process_receipt",
             "replay_authorized": False,
+            "workspace_changes": "NOT_INSPECTED",
+            "recovery_action": "RECONCILE_ORIGINAL_WORKSPACE",
         }})
 
     def test_success_settling_other_rc_and_effect_unknown_never_project(self):
@@ -94,6 +96,35 @@ class TerminalDiagnostic(unittest.TestCase):
     def test_missing_controller_proof_is_never_inferred_from_result_text(self):
         self.log = b"2026-10-30T22:16Z unrecognized_model\n"
         (self.dir / f"{self.RID}.log").write_bytes(self.log)
+        self.assertFalse(self.project())
+
+    def test_original_namespace_is_not_replaced_by_module_default(self):
+        with mock.patch.object(fabric_task, "HERE", self.root / "another-owner"):
+            self.assertFalse(self.project())
+            self.assertIn("terminal_provider_diagnostic", self.project(owner_ext=self.root))
+
+    def test_duplicate_and_nonfinite_receipts_are_not_projected(self):
+        for raw in ('{"kind":"turn_limit","kind":"success"}', '{"command_rc":NaN}'):
+            self.provider_file.write_text(raw)
+            self.assertFalse(self.project())
+
+    def test_receipt_change_after_validation_withholds_projection(self):
+        def mutate(*args):
+            self.provider_file.write_text('{"changed":true}')
+        with mock.patch.object(provider_outcome, "validate_receipt", side_effect=mutate):
+            self.assertFalse(fabric_task._terminal_provider_projection(
+                self.RID, self.status, self.log))
+
+    def test_mismatched_root_hardlink_and_symlink_withhold_projection(self):
+        self.outcome['root_id'] = 'different-root'
+        self.save()
+        self.assertFalse(self.project(**dict(self.status, root_id='requested-root')))
+        other = self.dir / 'other-receipt'
+        os.link(self.provider_file, other)
+        self.assertFalse(self.project())
+        other.unlink()
+        self.provider_file.rename(other)
+        self.provider_file.symlink_to(other)
         self.assertFalse(self.project())
 
 

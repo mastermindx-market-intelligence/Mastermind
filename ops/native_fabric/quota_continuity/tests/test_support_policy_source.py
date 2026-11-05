@@ -93,7 +93,7 @@ class SupportPolicySource(unittest.TestCase):
 
 
 class CurrentGenerationClosure(unittest.TestCase):
-    def test_actual_95_member_builder_uses_ordinary_verified_selection(self):
+    def test_actual_current_builder_uses_ordinary_verified_selection(self):
         import contextlib
         import io
         import os
@@ -119,11 +119,9 @@ class CurrentGenerationClosure(unittest.TestCase):
         self.assertEqual((built/'native-source-inventory.json').read_bytes(),
                          (rollout/'native-source-inventory.json').read_bytes())
         manifest=json.loads(raw)
-        self.assertEqual(len(manifest),95)
-        # New diagnostic release changes exactly the two reviewed native members;
-        # the checked-in full closure pin must move with their verified bytes.
+        self.assertEqual(set(manifest), {"ext/"+name for name in builder.BASE_FILES|builder.ADDITIONS}|{"pool"})
         self.assertEqual(hashlib.sha256(raw).hexdigest(),
-                         '234501d7af7255712a4bf24e37044f7f2ac698d89e51fbe2975a4e823fd0a1fe')
+                         'fb206e377b2fb6d9388cfa183b252478cbce9c3bd2a5c25dfb441772019693bf')
         controller=(built/'native-code-stage/ext/remote_sub.sh').read_bytes()
         self.assertEqual(controller,(harness.ROOT/'candidate/remote_sub.sh').read_bytes())
         self.assertEqual(hashlib.sha256(controller).hexdigest(),manifest['ext/remote_sub.sh'])

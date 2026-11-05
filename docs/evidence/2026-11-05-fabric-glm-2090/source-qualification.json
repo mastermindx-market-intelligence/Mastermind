@@ -1,0 +1,128 @@
+{
+  "host": "m2studio",
+  "issue": 2090,
+  "mcp": {
+    "command": "node --test integrations/studio_direct_mcp/fabric-turn-budget.test.mjs integrations/studio_direct_mcp/fabric-backend.test.mjs",
+    "failed": 0,
+    "log_sha256": "49e910042558b76699cf59f1e29c48faaac13e83b72fba595a5eb7efc5bf2eb8",
+    "passed": 76,
+    "returncode": 0
+  },
+  "native_package": {
+    "changed_members": [
+      "ext/fabric_task.py",
+      "ext/provider_outcome.py"
+    ],
+    "files": 102,
+    "inventory_sha256": "f7bd737cb00763eefad16a7043253c2e9440739c7d53d12d88965d2caf674d95",
+    "manifest_sha256": "fb206e377b2fb6d9388cfa183b252478cbce9c3bd2a5c25dfb441772019693bf"
+  },
+  "operation": "fabric-glm-2090-repair-20261105",
+  "original_pr_head": "ed2a482f0b0bb4eebfc35c6c361f89d2b49dd049",
+  "protected_base": "f4e418163882211c9f0e56ae3d93851543eda2bf",
+  "python": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -o addopts= -q -p no:cacheprovider --junitxml=/tmp/glm2090-final-qualification.xml <selected modules listed in suites>",
+    "junit_counts": {
+      "errors": "0",
+      "failures": "0",
+      "skipped": "6",
+      "tests": "176",
+      "time": "89.816"
+    },
+    "junit_sha256": "cd1da80eb1e6faf9860a61c5ee2a3283064bca98a987a3d7d1282cabf1c1fff8",
+    "log_sha256": "ce95b13d67720e07470ac64be5ae84cabf88494a11705bca2623e436773fbec4",
+    "passed": 128,
+    "returncode": 0,
+    "skipped": 6,
+    "subtests_passed": 42,
+    "suites": [
+      "ops.native_fabric.quota_continuity.rollout.test_native_launcher_upgrade.PairedLauncherUpgrade",
+      "ops.native_fabric.quota_continuity.tests.test_claude_catalog_notice_outcome.CatalogNoticeOutcome",
+      "ops.native_fabric.quota_continuity.tests.test_fabric_status_terminal_diagnostic.TerminalDiagnostic",
+      "ops.native_fabric.quota_continuity.tests.test_owned_wrapper_outcome.OwnedWrapperOutcome",
+      "ops.native_fabric.quota_continuity.tests.test_request_turn_budget.ContinuationTurnBudget",
+      "ops.native_fabric.quota_continuity.tests.test_request_turn_budget.ExistingShellProfile",
+      "ops.native_fabric.quota_continuity.tests.test_request_turn_budget.OwnedWrapperCeiling",
+      "ops.native_fabric.quota_continuity.tests.test_request_turn_budget.RequestTurnBudget",
+      "ops.native_fabric.quota_continuity.tests.test_support_policy_source.CurrentGenerationClosure",
+      "ops.native_fabric.quota_continuity.tests.test_support_policy_source.SupportPolicySource",
+      "tests.test_catalog_native_release_staging",
+      "tests.test_fabric_native_security_composition_20261018",
+      "tests.test_host_pull_launchd_admission",
+      "tests.test_native_manual_auto_source_20261024",
+      "tests.test_paid_initializer"
+    ]
+  },
+  "qualification": "SOURCE_ONLY_NOT_INSTALLED",
+  "real_original_receipt_projection": {
+    "artifacts_checked_per_run": 4,
+    "original_artifacts_unchanged": true,
+    "provider_calls": 0,
+    "result": "turn_limit/error_max_turns, original workspace reconciliation, replay_authorized=false",
+    "runs": [
+      "fabric-app-commodity-influence-native-20261105-01",
+      "fabric-app-response-eval-native-20261105-01",
+      "fabric-app-whitehouse-native-20261105-01"
+    ],
+    "worker_replays": 0
+  },
+  "recorded_at": "2026-11-05T11:10:48.642315+00:00",
+  "remaining": [
+    "exact-head GitHub CI",
+    "protected merge by eligible non-author release actor",
+    "existing native generation and same-account facade installation",
+    "new admitted GLM work and parent consumption",
+    "original business work custody/access and validation"
+  ],
+  "schema": "mastermind.source_qualification_evidence.v1",
+  "source_hashes": {
+    "integrations/studio_direct_mcp/fabric-backend.mjs": "10ae3e21b58bc80f1d1dac32ac68a76e4f9db043a271b05553ccb74812846146",
+    "ops/native_fabric/quota_continuity/candidate/fabric_task.py": "7888f71c5e19d3a52c995d0537e383ace07100de719119a51c1d439b98c49a83",
+    "ops/native_fabric/quota_continuity/candidate/provider_outcome.py": "a77f0d0e378756c15b918bd9990257127aa35e91f69a68e63e825d46e07805f5"
+  },
+  "source_pr": 1892,
+  "wider_suite": {
+    "cause": "Unchanged protected sparse Git observer rejects invocation-scoped informational advice.sparseIndexExpanded stderr on this Mac. Exact observed rc=0 with Git hint. Corresponding separate source repair is PR #2007; no fix imported or test bypassed here.",
+    "failure_count": 32,
+    "failures": [
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_actual_new_workspace_accepts_sparse_donor_and_preserves_original[True]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_gitlink_refuses_before_status_or_mint[False]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_git_environment_is_scrubbed_for_controller_and_actual_mint_boundary",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_clean_assume_unchanged_flags_refuse_without_executing_a_bypass[scripts/worktree_sparse.py]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_clean_assume_unchanged_flags_refuse_without_executing_a_bypass[config/sparse_worktree.json]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_clean_assume_unchanged_flags_refuse_without_executing_a_bypass[preserve.txt]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_modified_policy_bytes_refuse_independently_of_git_status",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_policy_index_must_match_independent_head_and_working_pin",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_critical_skip_flag_observation_refuses[scripts/worktree_sparse.py]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_critical_skip_flag_observation_refuses[config/sparse_worktree.json]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_skipped_present_or_required_path_observation_refuses[preserve.txt]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_skipped_present_or_required_path_observation_refuses[scripts/keep.txt]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_dangling_link_is_not_a_verified_sparse_absence",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_unapproved_donor_cone_refuses_without_resparsifying",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_untracked_and_ignored_objects_refuse[untracked.fixture]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_untracked_and_ignored_objects_refuse[scripts/cache.fixture]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_second_helper_pass_rejects_changed_fallback_before_process",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_prelaunch_helper_change_refuses_before_process",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_donor_drift_error_branch_is_reachable_and_preserves_cause[False]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_donor_drift_error_branch_is_reachable_and_preserves_cause[True]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_unverified_mint_keeps_uncertain_effect_and_created_fixture[returncode]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_unverified_mint_keeps_uncertain_effect_and_created_fixture[timed_out]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_unverified_mint_keeps_uncertain_effect_and_created_fixture[cleanup_proven]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_unverified_mint_keeps_uncertain_effect_and_created_fixture[stdout_truncated]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_unverified_mint_keeps_uncertain_effect_and_created_fixture[stderr_truncated]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_postmint_input_drift_keeps_uncertain_effect[scripts/worktree_sparse.py-HELPER]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_postmint_input_drift_keeps_uncertain_effect[config/sparse_worktree.json-POLICY]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_existing_effect_carrier_is_never_reused[destination]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_existing_effect_carrier_is_never_reused[receipt]",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_required_cone_omission_refuses_even_when_file_is_absent",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_policy_symlink_refuses_without_following_it",
+      "FAILED tests/test_fabric_native_security_composition_20261018.py::test_existing_partial_clone_and_multivalue_fetch_metadata_are_data_only"
+    ],
+    "log_sha256": "75003e00bb5586678dad1ddc4a531fc96b29cb49a96ab2436616bbc160ab1ca0",
+    "passed": false,
+    "unchanged_files": [
+      "ops/native_fabric/quota_continuity/candidate/remote_sub_exec.py",
+      "tests/test_fabric_clean_linked_donor_20261017.py"
+    ]
+  }
+}

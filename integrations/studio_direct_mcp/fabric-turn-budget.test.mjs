@@ -122,3 +122,40 @@ test('turn ceiling and fixed fabric_accept verification codes coexist on one fac
   }
   assert.equal(e.calls.length,3,'invalid acceptance must not dispatch after capped request');
 });
+
+
+test('complex caps are advisory, unchanged, and never imply an effective limit or retry',async()=>{
+  for (const task_complexity of ['C2_COMPLEX_BOUNDED','C3_FRONTIER_JUDGMENT']) {
+    const e=engine([captured('--max-turns'),captured(JSON.stringify(absent)),pending]);
+    const f=facade(e);
+    const request={...args,task_complexity,max_turns:64,escalation_reason:'Inert fixture checks the complex-task ceiling contract; no provider is contacted.'};
+    const result=unwrap(await f.call('fabric_request',request));
+    assert.equal(result.controller_pid,456);
+    assert.deepEqual(result.request_budget_advisory,{
+      code:'EXPLICIT_COMPLEX_TASK_TURN_CEILING',requested_max_turns:64,
+      task_complexity,effective_max_turns:null,limit_source:'caller_request',retry_authorized:false});
+    assert.match(e.calls[2].arguments.command,/'--max-turns' '64'/);
+    assert.equal(result.worker_start_proven,false);
+    assert.equal(unwrap(await f.call('fabric_request',request)).error,'REQUEST_ALREADY_ATTEMPTED');
+    assert.equal(e.calls.length,3);
+  }
+});
+
+test('uncapped complex requests preserve the native default with no invented warning',async()=>{
+  const {max_turns,...uncapped}=args;
+  const e=engine([captured(JSON.stringify(absent)),pending]);
+  const result=unwrap(await facade(e).call('fabric_request',{...uncapped,task_complexity:'C2_COMPLEX_BOUNDED'}));
+  assert.equal(result.controller_pid,456);
+  assert.equal(result.request_budget_advisory,undefined);
+  assert.equal(result.requested_max_turns,undefined);
+  assert.doesNotMatch(e.calls[1].arguments.command,/'--max-turns'/);
+});
+
+test('routine intentional cap remains quiet and tool help warns about complex truncation',async()=>{
+  const e=engine([captured('--max-turns'),captured(JSON.stringify(absent)),pending]);
+  const result=unwrap(await facade(e).call('fabric_request',args));
+  assert.equal(result.request_budget_advisory,undefined);
+  const help=FABRIC_TOOLS.find(t=>t.name==='fabric_request').inputSchema.properties.max_turns.description;
+  assert.match(help,/Omit for complex implementation/);
+  assert.match(help,/only REDUCES/);
+});

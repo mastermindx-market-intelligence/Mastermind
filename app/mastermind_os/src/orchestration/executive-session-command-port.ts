@@ -238,6 +238,34 @@ async function continueMessageKeyBound(
   }
 }
 
+/** Original Runtime request key is SHA-256 over _canonical({_SCHEMA, operation_key}),
+ * not the dialogue message-key hash. This independently validates both
+ * references before exposing any historical native answer. No new key,
+ * identifier, request, side effect or client-side authority is created. */
+async function originalRequestRefsBound(
+  operationKey: string, readRef: unknown, requestRef: unknown,
+): Promise<boolean> {
+  if (!OPERATION_KEY_RE.test(operationKey) ||
+      typeof readRef !== "string" || typeof requestRef !== "string" ||
+      !/^session-reply-[0-9a-f]{64}$/.test(readRef) ||
+      !/^session-bridge-continue:[0-9a-f]{64}$/.test(requestRef)) return false;
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) return false;
+  try {
+    // Explicit ASCII/sorted-key canonicalization, equal to
+    // control_plane.native_continuation._request_key for this closed key grammar.
+    const material = '{"operation_key":"' + operationKey +
+      '","schema":"mastermind.session_bridge.continue_request.v1"}';
+    const digest = await subtle.digest("SHA-256", new TextEncoder().encode(material));
+    const hex = [...new Uint8Array(digest)]
+      .map(b => b.toString(16).padStart(2, "0")).join("");
+    return readRef === "session-reply-" + hex &&
+      requestRef === "session-bridge-continue:" + hex;
+  } catch {
+    return false;
+  }
+}
+
 // ── Validated projections ─────────────────────────────────────────────────────
 
 /** Exact seven-field canonical fabric_attempt target row. */
@@ -369,6 +397,19 @@ export interface SessionReplyArguments {
   readonly operation_key: string;
 }
 
+/** Bounded fields from an already cryptographically validated native READ.
+ * No new authority, reply fetch or parent-consumed writer is introduced. */
+export interface QualifiedSessionAnswer {
+  readonly text: string;
+  readonly nextStep: string;
+  readonly readRef: string;
+  readonly parentConsumed: false;
+}
+export interface QualifiedSessionAnswerRead {
+  readonly receipt: EffectReceipt;
+  readonly answer: QualifiedSessionAnswer | null;
+}
+
 export interface ExecutiveSessionTransport {
   /** Current private auth generation; monotonic across auth epochs. */
   authGeneration(): number;
@@ -377,6 +418,9 @@ export interface ExecutiveSessionTransport {
   context(selection: MissionSelection, signal: AbortSignal): Promise<unknown>;
   send(args: SessionSendArguments, signal: AbortSignal): Promise<unknown>;
   reply(args: SessionReplyArguments, signal: AbortSignal): Promise<unknown>;
+  /** Canonical historical original-request references; no SEND or ACK. */
+  references?(args: { work_ref: string; root_job_id: string; page_size?: number; cursor?: string },
+              signal: AbortSignal): Promise<unknown>;
 }
 
 // ── Port ──────────────────────────────────────────────────────────────────────
@@ -579,21 +623,31 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
     return receipt;
   }
 
-  async readOperation(
+  /** Legacy command-port observation retains its exact receipt-only shape. */
+  async readOperation(pointer: OperationPointer, signal: AbortSignal): Promise<EffectReceipt> {
+    return (await this.readQualifiedAnswer(pointer, signal)).receipt;
+  }
+
+  /** Same fixed READ, original operation and security checks, now exposing
+   * the already validated bounded body to the existing Office answer port.
+   * Local acceptance cannot mark canonical parent consumption. */
+  async readQualifiedAnswer(
     pointer: OperationPointer,
     signal: AbortSignal,
-  ): Promise<EffectReceipt> {
+  ): Promise<QualifiedSessionAnswerRead> {
+    const withhold = (reason: PortReason): QualifiedSessionAnswerRead =>
+      ({ receipt: this._receipt(pointer, "unknown", reason), answer: null });
     if (!validPointerShape(pointer)) {
-      return this._receipt(pointer, "unknown", "MALFORMED_POINTER");
+      return withhold("MALFORMED_POINTER");
     }
     if (signal.aborted) {
-      return this._receipt(pointer, "unknown", "TRANSPORT_ERROR");
+      return withhold("TRANSPORT_ERROR");
     }
     const owner = this._owner();
     if (!owner) {
       // Recovery is observation only; without an owner nothing is published
       // and the original pointer is retained untouched.
-      return this._receipt(pointer, "unknown", "EPOCH_CHANGED");
+      return withhold("EPOCH_CHANGED");
     }
     // Recovery uses ONLY the exact original operation key. It never sends,
     // never consults targets and never mints or re-derives a key — the
@@ -609,10 +663,10 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
         signal,
       );
     } catch {
-      return this._receipt(pointer, "unknown", "TRANSPORT_ERROR");
+      return withhold("TRANSPORT_ERROR");
     }
     if (signal.aborted) {
-      return this._receipt(pointer, "unknown", "EPOCH_CHANGED");
+      return withhold("EPOCH_CHANGED");
     }
     const current = this._owner();
     if (
@@ -621,15 +675,49 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
       current.generation !== generation ||
       this._transport.authGeneration() !== authGeneration
     ) {
-      return this._receipt(pointer, "unknown", "EPOCH_CHANGED");
+      return withhold("EPOCH_CHANGED");
     }
+    // The strict native correlation check awaits WebCrypto. Pin the exact
+    // already-bounded frame before that await so a mutable transport object
+    // cannot swap text or provenance between validation and local publication.
+    let frameBefore: string;
+    try {
+      frameBefore = JSON.stringify(raw);
+    } catch {
+      return withhold("MALFORMED_RECEIPT");
+    }
+    if (typeof frameBefore !== "string") return withhold("MALFORMED_RECEIPT");
     const receipt = await this._mapReply(pointer, raw);
     const finalOwner = this._owner();
     if (signal.aborted || !finalOwner || finalOwner.principalScope !== scope ||
         finalOwner.generation !== generation || this._transport.authGeneration() !== authGeneration) {
-      return this._receipt(pointer, "unknown", "EPOCH_CHANGED");
+      return withhold("EPOCH_CHANGED");
     }
-    return receipt;
+    try {
+      if (JSON.stringify(raw) !== frameBefore) return withhold("MALFORMED_RECEIPT");
+    } catch {
+      return withhold("MALFORMED_RECEIPT");
+    }
+    // Strict native correlation and bounded text were already proven by
+    // _mapReply on THIS one fixed reply frame. Never publish any reply
+    // fields on an unknown, foreign or malformed receipt.
+    if (receipt.disposition !== "accepted") {
+      return { receipt, answer: null };
+    }
+    const data = decodeEnvelope(raw, "reply")?.data;
+    if (!isPlainObject(data) ||
+        !boundedText(data.text, REPLY_TEXT_BOUND) ||
+        !boundedText(data.next_step, REPLY_TEXT_BOUND) ||
+        !isString(data.read_ref) || data.parent_consumed !== false) {
+      return withhold("MALFORMED_RECEIPT");
+    }
+    return {
+      receipt,
+      answer: Object.freeze({
+        text: data.text, nextStep: data.next_step,
+        readRef: data.read_ref, parentConsumed: false as const,
+      }),
+    };
   }
 
   // ── internals ───────────────────────────────────────────────────────────────
@@ -812,7 +900,8 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
       return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
     }
     if (!(await continueMessageKeyBound(pointer.operationKey, data.in_reply_to)) ||
-        !(await continueMessageKeyBound(pointer.operationKey, data.message_key, true))) {
+        !(await continueMessageKeyBound(pointer.operationKey, data.message_key, true)) ||
+        !(await originalRequestRefsBound(pointer.operationKey, data.read_ref, data.request_ref))) {
       return this._receipt(pointer, "unknown", "RECEIPT_MISMATCH");
     }
     return this._receipt(pointer, "accepted", "ACCEPTED");
@@ -841,6 +930,8 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
  * present but always return null in this binding.
  */
 export interface ExecutiveSessionBinding extends OrchestratorCommandBinding {
+  /** This specific factory installs the actual qualified reply reader, not a generic port. */
+  readonly port: ExecutiveSessionCommandPort;
   makeSessionMessageIntent(
     sessionKey: string,
     text: string,
