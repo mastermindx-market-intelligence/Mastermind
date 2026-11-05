@@ -69,15 +69,15 @@ export interface OfficeLaunchOwnerState {
  * The Office's exact selection and the configured launch must name one
  * workstream. An Office Mission work_ref is never a project or department:
  * it is not mapped onto a launch choice, and it is never guessed from a
- * title. A configured workstream is required; an unselected Office can still
- * begin new work on that explicit configured workstream.
+ * title. The frozen preview must name a concrete enrolled workstream; an
+ * unselected Office never falls back to the normal launcher's default.
  */
 export function officeLaunchWorkstreamAgrees(
   selectedWorkstream: string | null,
   configuredWorkstream: string | null,
 ): boolean {
   if (configuredWorkstream === null) return false;
-  return selectedWorkstream === null || selectedWorkstream === configuredWorkstream;
+  return selectedWorkstream !== null && selectedWorkstream === configuredWorkstream;
 }
 
 /**
