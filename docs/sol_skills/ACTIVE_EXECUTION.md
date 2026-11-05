@@ -35,6 +35,40 @@ These are action checks for all assigned provider sessions, not additional forms
 
 **Responsibility survives a chat; a chat does not own work forever.** Separate role, receiver and lease. Inspect fresh live claim, source-writer custody and pending effects once through their owners; unknown is not expired. Old authors/titles/chats are not liveness. Preserve live/uncertain modifiers; actual lease replacement needs existing CAS/fencing and successor admission. With assignment and no displaced writer/effect, act without a ghost ACK. The active assigned session owns the next recovery action: incumbent reconciliation, independent work, or exact unavailable recovery capability and reachable resolver. This does not transfer STARTed work.
 
+### Prove an owner gate before using it to stop
+
+A factual/source owner is a **place to retrieve evidence or perform an effect**, not
+a permanent human/session staffing assignment. For an assigned continuing
+mission, run this bounded **owner-gate triage** once before telling the Chairman
+that another session, reviewer or team must act:
+
+1. **Name the exact blocked action** and its target/operation/PR/head. Distinguish
+   a past assistant's "owner must act" claim from an actual tool receipt, native
+   rule, live writer/lease, permission refusal or unreconciled effect.
+2. **Check effective execution/custody**: current assignment, exposed action/tool,
+   source writer, original carrier/effect, and genuine remaining review/release
+   rules. No live competing writer/effect and a permitted action means the
+   **current session executes now**, even if the previous chat is archived.
+3. **Requested GitHub reviewer is not mandatory approval.** Check actual
+   branch protection, CODEOWNERS, active rulesets and binding explicit holds
+   at the current head. A 403/unknown read does not prove approval is required
+   *or* waived. Preserve real non-author approvals and no-self-merge.
+4. **Disabled or protected runtime is an action gate, not a ghost owner.**
+   A disabled Control service plus an unresolved protected administrator result
+   cannot be restarted merely to bypass the hold. Keep the original operation
+   intact, inspect its lawful readback once where permitted, and advance
+   genuinely disjoint work. Do not obtain the same denied effect via another
+   account, reader or carrier.
+5. **Exit with an executable action, not a department.** If a real human-only
+   credential, physical ceremony, admin permission or mandatory non-author
+   release control is demonstrated, identify exactly that control and an
+   addressable way to obtain it. Mark only the dependent lane held; do not
+   claim whole-mission `EXACT_HUMAN_GATE` while another safe phase remains.
+
+This is a diagnostic ordering inside existing ownership and Step 8 rules.
+It creates no gate state, approval, account, queue, lease, retry path or release
+permission. Do not reopen an already-denied protected-result operation.
+
 Protected results: use `RECONCILE_STATE.md` Step 4A.
 
 **Gate the action, not the entire mission.** Later deploy/dialogue/dispatch/runtime gates do not stop independent permitted source/tests. Failed transport blocks its dependent effect; no watcher means no unattended-return claim, not no foreground work. Never fabricate receipts.

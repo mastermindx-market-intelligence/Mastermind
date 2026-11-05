@@ -78,6 +78,14 @@ When writing a handoff, name a safe next action for the current or next valid re
 with source/effect checks, not an unreachable original parent as the sole actor.
 
 **Recover old protected-result gates without becoming a ghost-owner messenger.** An "original administrator/result/reviewer/publisher" in a handoff is a provenance/effect identity, not a permanently addressable chat. Current assigned Web, Codex, Claude or Fabric principals identify the existing original operation/carrier, the protected result and any denied read, verify current authority, and own the next lawful recovery step. A successful exit report is not canonical reconciliation; denied privileged reads, live leases and unknown effects remain fenced. Never retry through a second reader/account or restart a held service. Continue independent authorized work; only a genuinely unavailable human credential/control plus exhausted safe lanes qualifies for a whole-mission `EXACT_HUMAN_GATE`. Record evidence in the existing canonical owner and provide an executable successor action, not "wait for original chat."
+Before treating a requested GitHub reviewer or named source publisher as a release
+gate, check exact-head native branch rules, CODEOWNERS and actual explicit holds;
+a requested login alone is not an enforced approval. When rule inspection is 403,
+mark that enforcement UNKNOWN rather than claiming a mandatory review or waiver.
+Distinguish an intentionally disabled Executive service (real per-effect hold)
+from an old chat's staffing label (not a gate). Run ACTIVE_EXECUTION's
+"Prove an owner gate before using it to stop" before a global blocked closeout.
+This authorizes neither self-approval/merge nor bypass of an original denied read.
 
 An architectural owner is not a live session. Data OS and other system names identify
 existing contracts and implementation boundaries, not an approver to find in another
