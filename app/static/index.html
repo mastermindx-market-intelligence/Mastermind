@@ -7850,7 +7850,19 @@ function _schedulePortfolioPrefetch() {
   function next() {
     if (i >= ids.length) return;
     var id = ids[i++];
+    // Remember the cache entry this background work starts from. The foreground fetch owns
+    // the book the reader is looking at; if it commits truth while this request is still
+    // in flight, this completion is the stale one and must not replace it.
+    var prior = _portfolioDataCache[id];
     _fetchPortfolioSnapshot(id).then(function(snapshot) {
+      if (!snapshot) return;
+      // An explicit critical failure is not book truth. Storing the unavailable envelope
+      // would replace a good snapshot with "no data", and its own timestamp would extend
+      // the cache's freshness window with work that never produced any. The self-directed
+      // critical branch carries no criticalStatus at all and stays cacheable as before.
+      if (snapshot.criticalStatus === 'unavailable') return;
+      var current = _portfolioDataCache[id];
+      if (current && current !== prior) return;   // newer foreground truth owns the entry
       _portfolioDataCache[id] = snapshot;
     }).then(function() {
       window.setTimeout(next, 180);
@@ -7941,6 +7953,12 @@ async function fetchAll(opts) {
     if (scopedSnapshot && scopedSnapshot.criticalStatus === 'unavailable') {
       _paintPortfolioSnapshot(scopedSnapshot, false);
       if (opts.showBar) { loadBarDone(); barFinished = true; }
+      // The selected book is truthfully unavailable, but navigation is not. Reach the very
+      // same singleton shared hydration the success path uses, so the switcher and the rest
+      // of the workspace still populate from an empty registry. It stays AFTER the
+      // unavailable paint and the load bar, so the failure remains visible while the shared
+      // group loads, and it is never hoisted above the critical first paint.
+      _hydrateShared();
       return;
     }
     _portfolioDataCache[requestedPortfolio] = scopedSnapshot;
