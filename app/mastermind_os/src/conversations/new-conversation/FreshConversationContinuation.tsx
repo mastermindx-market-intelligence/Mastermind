@@ -1,14 +1,22 @@
-import {useEffect,useMemo} from "react";
+import {useEffect,useLayoutEffect,useMemo} from "react";
+import {freshConversationTarget} from "../../orchestration/fresh-conversation-target";
+import type {OwnerContext} from "../../orchestration/operation-controller";
 import type {FreshConversationWindow} from "../fresh-conversation-reference";
 import type {FreshConversationOriginalRead} from "./fresh-conversation-attended-binding";
 import type {FreshConversationTurnConsumption} from "./fresh-conversation-turn";
 import {useFreshConversationContinuation,type FreshConversationContinuationProps as HookProps} from "./useFreshConversationContinuation";
+import type {FreshConversationTurnDraftState} from "./useFreshConversationTurnDraftState";
 
 export type FreshConversationContinuationEntry=
   |{kind:"initial";read:FreshConversationOriginalRead;initialConsumption?:FreshConversationTurnConsumption|null}
   |{kind:"reference";window:FreshConversationWindow;current:()=>boolean};
-export interface FreshConversationContinuationProps extends Omit<HookProps,"read"|"selection"|"initialConsumption">{
+export interface FreshConversationContinuationProps extends Omit<HookProps,"read"|"selection"|"initialConsumption"|"message"|"draftOwner"|"onMessageChange">{
   entry:FreshConversationContinuationEntry;
+  message?:string;
+  draftOwner?:OwnerContext|null;
+  onMessageChange?:(message:string)=>void;
+  /** Existing App-lifetime owner. Association happens after commit only. */
+  turnDraft?:Pick<FreshConversationTurnDraftState,"selection"|"message"|"draftOwner"|"selectOriginal"|"onMessageChange">;
   /** Stable, owner-guarded caller callback into its incumbent UI hold. False
    * withdraws this view's report; it never clears a durable original pointer. */
   onUnresolvedChange:(held:boolean)=>void;
@@ -31,7 +39,16 @@ export function FreshConversationContinuation(props:FreshConversationContinuatio
   const selection=entry.kind==="initial"?entry.read.selection:
     {work_ref:entry.window.reference.work_ref,reference:entry.window.reference};
   const sourceReadOnly=entry.kind==="reference"&&(entry.window.state!=="RETAINED"||!entry.window.epoch||entry.window.turns.length>0);
+  useLayoutEffect(()=>{
+    if(props.active&&!props.readOnly&&!sourceReadOnly&&read?.current()===true)props.turnDraft?.selectOriginal(read.selection);
+  });
+  const matchesDraft=()=>!!read&&read.current()===true&&!!props.turnDraft&&
+    freshConversationTarget(props.turnDraft.selection)===freshConversationTarget(read.selection);
+  const associated=matchesDraft();
   const view=useFreshConversationContinuation({...props,read,selection,
+    message:props.turnDraft?(associated?props.turnDraft.message:""):props.message??"",
+    draftOwner:props.turnDraft?(associated?props.turnDraft.draftOwner:null):props.draftOwner??null,
+    onMessageChange:message=>{if(props.turnDraft){if(matchesDraft())props.turnDraft.onMessageChange(message);}else props.onMessageChange?.(message);},
     initialConsumption:entry.kind==="reference"?entry.window.initial_consumption:entry.initialConsumption,
     readOnly:props.readOnly||sourceReadOnly});
   useEffect(()=>{onUnresolvedChange(view.hasUnresolvedOriginal);},[onUnresolvedChange,view.hasUnresolvedOriginal]);

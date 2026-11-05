@@ -61,3 +61,21 @@ it("a revoked source window cannot offer Keep/Review/Send and unmount does not c
   expect(screen.queryByRole("button",{name:"Send message"})).toBeNull();mounted.unmount();
   expect(h.peek()).toEqual(original);expect(h.props.onUnresolvedChange).toHaveBeenLastCalledWith(false);
 });
+it("associates private text only after a genuine current visible read, never while revoked",async()=>{
+  const h=setup();h.setCurrent(false);
+  const draft={selection:null,message:"",draftOwner:null,selectOriginal:vi.fn(()=>true),onMessageChange:vi.fn()};
+  const mounted=render(<FreshConversationContinuation {...h.props} entry={{kind:"initial",read:h.initial}} turnDraft={draft}/>);
+  await waitFor(()=>expect(h.props.onUnresolvedChange).toHaveBeenLastCalledWith(false));expect(draft.selectOriginal).not.toHaveBeenCalled();
+  h.setCurrent(true);mounted.rerender(<FreshConversationContinuation {...h.props} entry={{kind:"initial",read:h.initial}} turnDraft={draft}/>);
+  await waitFor(()=>expect(draft.selectOriginal).toHaveBeenCalledWith(h.initial.selection));
+  for(const fn of Object.values(h.transport))expect(fn).not.toHaveBeenCalled();
+});
+it("masks a refused foreign-original turn draft without transplanting its text",async()=>{
+  const h=setup();
+  const draft={selection:h.initial.selection,message:"Private previous original",draftOwner:h.props.draftOwner!,selectOriginal:vi.fn(()=>false),onMessageChange:vi.fn()};
+  render(<FreshConversationContinuation {...h.props} turnDraft={draft}/>);
+  await waitFor(()=>expect(draft.selectOriginal).toHaveBeenCalled());
+  expect(screen.queryByText("Private previous original")).toBeNull();
+  expect((screen.getByRole("button",{name:"Keep first response"}) as HTMLButtonElement).disabled).toBe(true);
+  expect(draft.message).toBe("Private previous original");for(const fn of Object.values(h.transport))expect(fn).not.toHaveBeenCalled();
+});
