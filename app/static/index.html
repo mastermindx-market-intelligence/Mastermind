@@ -5816,12 +5816,19 @@ window.openThesisFromPositions = function(id) { showView('research'); openThesis
 
 // ══ SELF-DIRECTED BOOK (third portfolio) ══════════════════════════════════════
 var _self = null;          // /api/self_directed   (book: positions, allocation, market, pending)
-var _selfHist = null;      // /api/self_directed/history (blotter + pending + summary)
+var _selfHist = {history_status:'loading'}; // /api/self_directed/history load truth + blotter
 var _selfSel = null;       // selected order-ticket name {ticker, price, name}
 var _selfSearchTimer = null, _selfActiveIdx = -1, _selfResults = [];
 var _selfExpanded = null;  // ticker whose thesis / quick-trade row is open
 var _selfBusy = false;     // guard against double-submit
 var _SD_PALETTE = ['var(--q1)','var(--up)','var(--q4)','var(--info)','var(--warn)','var(--q3)','var(--act)','var(--q2)'];
+
+function _selfHistoryUnavailable() {
+  return {
+    history_status: 'unavailable', error: 'self_directed_history_unavailable',
+    history: null, pending: null, realized_total: null, n_closed: null, n_buys: null, win_rate: null
+  };
+}
 
 var fmtShares = function(n) {
   if (n == null) return '—';
@@ -5835,7 +5842,8 @@ function refreshSelf() {
     fetch('/api/self_directed/history').then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; }),
   ]).then(function(res) {
     if (res[0].status === 'fulfilled' && res[0].value) _self = res[0].value;
-    if (res[1].status === 'fulfilled' && res[1].value) _selfHist = res[1].value;
+    _selfHist = (res[1].status === 'fulfilled' && res[1].value)
+      ? res[1].value : _selfHistoryUnavailable();
     renderSelf();
   });
 }
@@ -6028,7 +6036,20 @@ function renderSelfPending() {
 
 function renderSelfHistory() {
   var host = E('sd-history-host'); if (!host) return;
-  var d = _selfHist || {}, hist = d.history || [];
+  var d = _selfHist || {history_status:'loading'};
+  if (d.history_status === 'loading') {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">…</span>' +
+      '<span class="l-en">Loading Self-Directed trade history…</span>' +
+      '<span class="l-zh">正在加载自主管理交易历史…</span></div>';
+    return;
+  }
+  if (d.error === 'self_directed_history_unavailable' || d.history_status === 'unavailable') {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">!</span>' +
+      '<span class="l-en">Self-Directed trade history unavailable — the last load did not complete.</span>' +
+      '<span class="l-zh">自主管理交易历史暂不可用 — 最近一次加载未完成。</span></div>';
+    return;
+  }
+  var hist = Array.isArray(d.history) ? d.history : [];
   if (!hist.length) { host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('sd.hist_empty') + '</div>'; return; }
   var realCls = d.n_closed ? (d.realized_total > 0 ? 'mm-pnl-pos' : d.realized_total < 0 ? 'mm-pnl-neg' : '') : '';
   var realTxt = d.n_closed ? ((d.realized_total >= 0 ? '+$' : '-$') + Math.abs(Math.round(d.realized_total)).toLocaleString()) : '—';
@@ -6352,6 +6373,7 @@ window.setPortfolio = function(id) {
     _decisionsExpanded = false;
     _decisions = [];
     _decisionsStatus = 'loading';
+    if (id === 'self_directed') _selfHist = {history_status:'loading'};
   }
   _portfolio = id;
   renderPortfolioSwitch();
@@ -7656,7 +7678,7 @@ function _fetchPortfolioDetails(id, base) {
       .catch(function() { return null; })
       .then(function(history) {
         return Object.assign({}, base, {
-          selfHistory: history, cachedAt: Date.now(), complete: true
+          selfHistory: history || _selfHistoryUnavailable(), cachedAt: Date.now(), complete: true
         });
       });
   }
@@ -7702,7 +7724,9 @@ function _applyPortfolioSnapshot(snapshot) {
   if (Object.prototype.hasOwnProperty.call(snapshot, 'performance')) _perf = snapshot.performance;
   if (Object.prototype.hasOwnProperty.call(snapshot, 'risk')) _risk = snapshot.risk;
   if (snapshot.self) _self = snapshot.self;
-  if (snapshot.selfHistory) _selfHist = snapshot.selfHistory;
+  if (Object.prototype.hasOwnProperty.call(snapshot, 'selfHistory')) {
+    _selfHist = snapshot.selfHistory || _selfHistoryUnavailable();
+  }
   _rejected = (_book && _book.rejected) ? _book.rejected : [];
 }
 
