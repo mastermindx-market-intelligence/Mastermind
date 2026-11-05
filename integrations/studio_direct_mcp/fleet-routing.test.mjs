@@ -4,6 +4,7 @@ import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 
 import {
   FLEET_BACKEND_TOOL_NAMES,
+  STUDIO_SELECT_HOST_TOOL,
   createFleetRouter,
   fleetPreflightReason,
   resolveFleetRoutingConfig,
@@ -372,6 +373,12 @@ test('unknown modern schema difference still fails closed before binding', async
   assert.equal(h.created[0].calls,0);
   assert.equal(h.created[0].clientCloses,1);
   await router.close();
+});
+
+test('fleet selector teaches that typed Git/Paper remain independent of remote host binding', () => {
+  assert.match(STUDIO_SELECT_HOST_TOOL.description, /NOT required for studio_git_\*/);
+  assert.match(STUDIO_SELECT_HOST_TOOL.description, /studio_fleet_status or paper_\*/);
+  assert.match(STUDIO_SELECT_HOST_TOOL.description, /only routed Desktop Commander operations/);
 });
 
 test('host preflight reason exposes only the closed diagnostic vocabulary', () => {
