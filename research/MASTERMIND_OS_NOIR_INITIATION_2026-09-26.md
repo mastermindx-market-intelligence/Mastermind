@@ -1,3 +1,59 @@
+> **Source reconciliation — 5 November 2026.** This prepend-only note records
+> selected current source facts at `f030206fdad98900c81ca8b97540a47e992610c3`.
+> The complete original document follows as a contiguous, byte-identical
+> historical block. Its October 5 “current/latest” labels, `7eac…` source pin,
+> absence claims and candidate/custody states belong to that observation epoch.
+> They are evidence, not present-day capability or release authority.
+
+## Source capability reconciliation — 5 November 2026
+
+This is a bounded documentation audit at protected `f030206fdad98900c81ca8b97540a47e992610c3`.
+It records the existing source composition and guards; it does not register a
+client, enable an audience, alter a catalog, install a build or prove an
+authenticated user journey. The October 5 source census and UX15 are retained
+as a dated design baseline, not the current capability inventory.
+
+| Surface | Observed source and boundary | Pinned source |
+| --- | --- | --- |
+| App composition | The standard bootstrap calls `composeMissionHost(client)`, mounts its host and registers guarded page-exit and hot-dispose cleanup. A blanket statement that bootstrap supplies only a read/auth host is obsolete at this pin. | [main.tsx](https://github.com/mastermindx-market-intelligence/Mastermind/blob/f030206fdad98900c81ca8b97540a47e992610c3/app/mastermind_os/src/main.tsx#L25-L37) |
+| Launch configuration | Launch composition requires both the selected configuration and `client.executive`. The release builder uses a closed environment, excludes ambient VITE inputs and requires the complete qualified Executive-resource/Launch-manifest pair when Launch is enabled. Its default path omits that pair. | [composition](https://github.com/mastermindx-market-intelligence/Mastermind/blob/f030206fdad98900c81ca8b97540a47e992610c3/app/mastermind_os/src/compose-mission-host.ts#L17-L49), [release builder](https://github.com/mastermindx-market-intelligence/Mastermind/blob/f030206fdad98900c81ca8b97540a47e992610c3/ops/executive_os/os_release_assets.py#L219-L261) |
+| Web selected session | The existing session host is composed independently of the Launch catalog. The Web transport requires configured, valid Executive authentication; submit and session Send additionally require the SEND capability. Source presence is not an authenticated or installed Send acceptance. | [composition](https://github.com/mastermindx-market-intelligence/Mastermind/blob/f030206fdad98900c81ca8b97540a47e992610c3/app/mastermind_os/src/compose-mission-host.ts#L10-L49), [Web guards](https://github.com/mastermindx-market-intelligence/Mastermind/blob/f030206fdad98900c81ca8b97540a47e992610c3/app/mastermind_os/src/web-auth.ts#L1041-L1055) |
+| Native selected session | The native session projection deprivileges `send` to false and rejects Send with `NATIVE_SESSION_READ_ONLY`. The separate `executive_submit` review boundary is not adjudicated by this documentation change. | [native transport](https://github.com/mastermindx-market-intelligence/Mastermind/blob/f030206fdad98900c81ca8b97540a47e992610c3/app/mastermind_os/src/native-executive-transport.ts#L19-L29), [session methods](https://github.com/mastermindx-market-intelligence/Mastermind/blob/f030206fdad98900c81ca8b97540a47e992610c3/app/mastermind_os/src/native-executive-transport.ts#L141-L170) |
+| Launch receipt and command scope | The Launch adapter requires `accepted=true` and `dispatched=false`; that receipt does not prove a running parent or accepted product. This Launch binding maps message and STOP to null. That fact does not remove the separate selected-session host. | [receipt decoder](https://github.com/mastermindx-market-intelligence/Mastermind/blob/f030206fdad98900c81ca8b97540a47e992610c3/app/mastermind_os/src/orchestration/executive-launch-command-port.ts#L362-L384), [Launch mapping](https://github.com/mastermindx-market-intelligence/Mastermind/blob/f030206fdad98900c81ca8b97540a47e992610c3/app/mastermind_os/src/orchestration/executive-launch-command-port.ts#L503-L505) |
+
+These rows describe existing owners and their conditional source behavior.
+They are not a new capability registry, a runtime grant or a release decision.
+Unconfigured or unqualified capability remains unavailable under its existing
+owner. Source composition, authenticated operation, installation and complete
+product acceptance remain separate evidence.
+
+
+### Original external design effects remain unresolved
+
+- Paper `mm-knowledge-flow-added-state-shells-20261004-001`: duplicate
+  `SPU-0` / `STU-0`; original reply unreadable and not retained —
+  **EFFECT_UNKNOWN**. Unchanged counts are not proof of no effect.
+- Paper `mm-knowledge-guide-mobile-chrome-amendment-20261004-001`: note
+  `T0J-0`; retained connection timeout — **EFFECT_UNKNOWN**. Previously
+  observed text does not settle the original write.
+- The separate historical broad Figma component-creation request was an
+  explicit platform safety refusal, **EFFECT_NONE / NO_RETRY** absent material
+  platform recovery. It is not one of the Paper unknown effects.
+
+No verified KD02 variant, completed mobile payload/details/header amendment,
+Paper/Figma recheck or retry, authenticated Send acceptance or newly executed
+app scenario is claimed here. P-series custody and all existing design/runtime
+holds remain with their original carriers.
+
+
+The original S1–S56 source anchors, fifteen implementation acceptance
+scenarios, sixteen UX00–UX15 workflow notes, Paper IDs, design intent and
+dated observations are retained. This source-only reconciliation runs no
+app scenario, performs no external design action and does not turn design
+approval into implementation, installation or product acceptance.
+
+---
+
 # Mastermind OS Noir — cumulative qualification and continuation
 
 Operation: `mastermind-os-noir-design-system-20260926-sol-001`

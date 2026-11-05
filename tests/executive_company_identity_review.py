@@ -1,0 +1,59 @@
+"""Static pins for existing Company modes and the fixed Fabric HTTP statuses.
+
+Reviewed source: 53dd88f444c37e0cfec18b511a54a332addca1a9.
+The listener source was independently reviewed before this static guard repair.
+The original three exact 0710 Constants remain acknowledged. The 2026-11-03
+catalog composition adds three exact HTTP response Constants in the existing
+ingress method. Each method's full AST, owning class, literal values and spelling
+remain pinned; all other identity tokens stay visible to the generic D8 guard.
+No runtime authority is added.
+"""
+
+REVIEWED_PATH = "control_plane/executive_service.py"
+REVIEWED_CONTAINER = "ExecutiveControlService"
+REVIEWED_LITERAL_COUNT = 6
+REVIEWED_ANCHORS = {
+    "_bind_company_consultation_server": {
+        "node_type": "AsyncFunctionDef",
+        "ast_sha256": "01c585ea0efc7e2ba1a09f68ceac6962a74d72e572c10343af4dcf1fdf930236",
+        "sites": (
+            (("body", 7, "body", 2, "value", "keywords", 0, "value"), "int", 456, "0o710"),
+            (("body", 7, "body", 5, "body", 1, "value", "args", 0), "int", 456, "0o710"),
+            (("body", 7, "body", 6, "test", "values", 1, "comparators", 0), "int", 456, "0o710"),
+        ),
+    },
+    # Exact catalog/native-status composition. These are only the second
+    # operands of workspace_error("access_denied", 403) and
+    # workspace_error("source_unavailable", 503), never UIDs or grants.
+    # The complete ingress-method AST binds its admission, source selection
+    # and release-time permission checks; a change to any of them invalidates
+    # all three status sites without changing the historical Company record.
+    "_handle_ceo_ingress_connection": {
+        "node_type": "AsyncFunctionDef",
+        # Existing section-sign/em-dash prose needs an exact full-source pin
+        # in addition to the method AST; all three literal lines are ASCII.
+        # Qualified session/direction/capacity READ and admission additions change the enclosing ingress AST.
+        # The original CCR branch and listener remain structurally unchanged.
+        # 2026-11-05 Mission-result composition re-pin (attended parent source
+        # review under the current Chairman waiver, NOT an independent/formal
+        # review of this postimage): the method body gains one statement before
+        # the pinned branch, so only the enclosing body index moves (35 -> 36);
+        # the three pinned status operands keep their exact spelling, values and
+        # relative AST paths, and their source lines shift by the same +14.
+        # The new MISSION_RESULT read branch uses the existing HTTPStatus
+        # convention for its own invalid_input refusal. Previous source SHA
+        # e43df430e5652ffd9aff5114572bccb5438616e615f7edd065239f018493ef96 and
+        # previous AST SHA
+        # 6735cd4807ae1d203599d8210f141ea9b49b5d3487deaaa169789d6fd4565c72.
+        "source_sha256": "835c619a2a31659bff848b319b175ef63e44430d269d4d7982941ab3e563280b",
+        "ast_sha256": "a28a07df30890f0945054f42d6a1434cc41c57838ea3079128c2cf7c2d9d76cc",
+        "sites": (
+            (("body", 3, "body", 36, "body", 3, "orelse", 0, "body", 2,
+              "body", 0, "value", "args", 1), "int", 403, "403"),
+            (("body", 3, "body", 36, "body", 3, "orelse", 0, "body", 2,
+              "orelse", 0, "body", 4, "body", 0, "value", "args", 1), "int", 403, "403"),
+            (("body", 3, "body", 36, "body", 3, "orelse", 0, "body", 2,
+              "orelse", 0, "handlers", 0, "body", 0, "value", "args", 1), "int", 503, "503"),
+        ),
+    },
+}

@@ -1,0 +1,41 @@
+{
+  "admission_granted": false,
+  "expected_release_head_sha1": "9bbd4ca7f6d8859f28accf76e11d534478dc80e3",
+  "live_install_authorized": false,
+  "overlay_added_files": {
+    "experiential_bridge.py": "sha256 recorded at composition time from the module source"
+  },
+  "owner_modules_sha256": {
+    "experiential_pin.py": "8ddb970fa460634a44c4c2db309207be62e07ea02843e4d6776e084e31c5eb06",
+    "experiential_transport.py": "4687529d1f277ecba510c330f69c2b2e4f6ae18a4e8a60167ec019a0dc88b47b"
+  },
+  "patches_sha256": {
+    "experiential_native_bridge_fabric_task_20261103.patch": "e89f1d8fe290680e3784fc8dc55143b1c3b9f28674e15b11105e14dc773a3572",
+    "experiential_native_bridge_remote_sub_20261103.patch": "e5d5ed99cb3cb8c3ae319167f8aa29ce1aeb15d1484705ca97b98aae17c9ed56",
+    "experiential_native_bridge_slot_20261103.patch": "339d0496f21f434f95bd9cb03c446977baaff81a45849d10bd14ff007f8232c1",
+    "experiential_native_bridge_sub_20261103.patch": "3e86bb0e0a90be0e937ce6c49bbdca832a427cd5cf59bb1361f1275a420faca7"
+  },
+  "postimages_sha256": {
+    "fabric_task.py": "795644a796e4d1eae096df2dc2f9f95beb03ff0b8c626e4247ffb5489f723db3",
+    "remote_sub.sh": "ae9b54060824fe90a68ef642125fb9445a7f97ea5ad5b60b854839b156a5ffdb",
+    "slot.py": "0640a6e914675f85109944d7653929ac8f9c9c5374226a73bb30fe38311e66d4",
+    "sub.sh": "e97fba8644e84d0f0b3f27d4a6b29ce1192c97efb9b0b9543567fe0cf33d7cf7"
+  },
+  "preimages_sha256": {
+    "fabric_task.py": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
+    "remote_sub.sh": "fdb50974e37852c8024135ddf4bf021e6c6a67d1a0418cd5675cc24dc4ad5a17",
+    "slot.py": "02f779f4c11e7023448cdb22201f66c3041a9675ea403333deee94e3d57fbe4f",
+    "sub.sh": "39601b1c2485190049b54183bed82f43c9390339bce59b460d5e6aed9e3e6866"
+  },
+  "release_tree": "ops/native_fabric/quota_continuity/source",
+  "release_tree_file_count": 75,
+  "release_tree_manifest_sha256": "2ee2c05262b406e5f7bd98ae16daa140394fe3b49584f02196288dcacfb9d767",
+  "schema": "mastermind.experiential_native_bridge_release/v1",
+  "skillpack": {
+    "name": "mastermind.sol_skillpack.v1",
+    "version": "1.0.1"
+  },
+  "source_owner": "existing installed M2 Fabric kit and original Fabric selector/admission owners",
+  "status": "source_candidate_not_installed",
+  "worker_started": false
+}

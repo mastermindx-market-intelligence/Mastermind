@@ -49,6 +49,17 @@ class AdapterDescriptor:
 
 
 ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
+    "canonical-paid-fabric": AdapterDescriptor(
+        adapter_id="canonical-paid-fabric", implemented=True,
+        implementation="control_plane.executive_paid_fabric_adapter.CanonicalPaidFabricWorkerAdapter",
+    ),
+    # The retained facade exists; its concrete qualified host backend is not
+    # installed. Catalogue source must not imply worker admission.
+    "attended-fabric": AdapterDescriptor(
+        adapter_id="attended-fabric",
+        implemented=False,
+        implementation="control_plane.executive_fabric_adapter.AttendedFabricWorkerAdapter",
+    ),
     "codex-cli": AdapterDescriptor(
         adapter_id="codex-cli",
         implemented=True,
@@ -68,10 +79,20 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
     ),
     # Clean, deliberately unarmed seams for later provider work.  A routing
     # policy cannot bind a live worker through an unimplemented descriptor.
+    # Read-only metered principal source seam, deliberately NOT an eligible Worker.
+    # Executive/Capacity owner must qualify the API and install a trusted composition.
+    "anthropic-api-principal": AdapterDescriptor(
+        adapter_id="anthropic-api-principal", implemented=False,
+        implementation="control_plane.fable_api_principal.FableApiPrincipal",
+    ),
     "openai-compatible": AdapterDescriptor(
         adapter_id="openai-compatible", implemented=False
     ),
-    "acp": AdapterDescriptor(adapter_id="acp", implemented=False),
+    "acp": AdapterDescriptor(
+        adapter_id="acp",
+        implemented=False,
+        implementation="integrations.acp_worker.installed.InstalledAcpWorkerAdapter",
+    ),
 }
 
 
