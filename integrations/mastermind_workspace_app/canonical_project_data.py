@@ -75,7 +75,10 @@ class InstalledCanonicalProjectData:
     def _read_stamp(self,principal):return self.read.binding_digest(self._frame(principal))
     def _latest_stamp(self,principal):return self.latest.binding_digest(self._frame(principal))
     def _can_read(self,principal):
-        try:return self.read(self._frame(principal)) is True
+        # _frame already checks the actual current Runtime/principal/READ gate.
+        # Do not immediately reload that identical gate a second time; each
+        # callback still obtains its own fresh check and retains no grant truth.
+        try:self._frame(principal);return True
         except (ValueError,PermissionError,TypeError):return False
     def _can_latest(self,principal):
         try:return self.latest(self._frame(principal)) is True

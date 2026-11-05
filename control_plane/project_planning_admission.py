@@ -61,6 +61,17 @@ def _sync(guard):
     return result
 
 
+_READ_OBSERVATION_BINDING = object()
+
+
+@dataclass(frozen=True, slots=True)
+class _ReadObservationBinding:
+    seal: object
+    source: object
+    guard: object
+    read_scope: object
+
+
 @dataclass(frozen=True, slots=True)
 class ProjectPlanningSource:
     """Nominal installed source + distinct incumbent Executive capability.
@@ -79,6 +90,16 @@ class ProjectPlanningSource:
     _publication_guard: object
     _canonical_source_reader: object = None
     _read_scope: object = None
+    _observation_binding: object = None
+
+    def _read_observation_identity(self):
+        binding = self._observation_binding
+        if (self._seal is not _SEAL or type(binding) is not _ReadObservationBinding
+                or binding.seal is not _READ_OBSERVATION_BINDING
+                or binding.source is not self or binding.read_scope is not self._read_scope
+                or not callable(binding.guard)):
+            raise ValueError('original planning observation issuer unavailable')
+        return binding.guard(self)
 
     @contextmanager
     def read_scope(self):
@@ -133,11 +154,14 @@ class ProjectPlanningSource:
             raise ValueError("project planning authority changed during source observation")
 
 
-def _issue_source(*, reader, executive, context, authority_guard, input_owner, events, publication_guard, canonical_source_reader=None, read_scope=None):
+def _issue_source(*, reader, executive, context, authority_guard, input_owner, events, publication_guard, canonical_source_reader=None, read_scope=None, observation_guard=None):
     """Private host join; publication/Workspace grants cannot call this alone."""
     value = ProjectPlanningSource(_SEAL, reader, executive,
         native.canonical(normalize_context(context)), authority_guard, input_owner,events,publication_guard,canonical_source_reader,read_scope)
     value.check()
+    if observation_guard is not None:
+        if not callable(observation_guard):raise ValueError('original planning observation issuer unavailable')
+        object.__setattr__(value,'_observation_binding',_ReadObservationBinding(_READ_OBSERVATION_BINDING,value,observation_guard,read_scope))
     return value
 
 

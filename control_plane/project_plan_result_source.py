@@ -9,6 +9,8 @@ object must never pretend the old planning source is still current.
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 import hashlib
 import json
@@ -21,6 +23,8 @@ from control_plane import project_planning_admission as planning
 
 SCHEMA = "mastermind.project_plan_proposal_result.v1"
 _SEAL = object()
+_OBSERVATION = object()
+_CURRENT_OBSERVATION = ContextVar('original_planning_consumed_observation',default=None)
 
 
 class PlanResultUnavailable(ValueError):
@@ -29,11 +33,43 @@ class PlanResultUnavailable(ValueError):
         super().__init__(code)
 
 
+@dataclass(eq=False, repr=False)
+class _ConsumedPlanningObservation:
+    seal: object
+    result: object
+    source: object
+    binding: object
+    identity: tuple
+    selection: bytes
+    material_bytes: bytes
+    active: bool = True
+
+    def material(self, expected_result):
+        if (self.seal is not _OBSERVATION or not self.active
+                or _CURRENT_OBSERVATION.get() is not self
+                or type(expected_result) is not QualifiedPlanningResult
+                or self.result is not expected_result or self.source is not expected_result._source
+                or self.binding is not self.source._observation_binding
+                or self.selection != expected_result._selection
+                or self.material_bytes != expected_result._material):
+            raise PlanResultUnavailable()
+        current = self.source._read_observation_identity()
+        if (type(current) is not tuple or len(current) != len(self.identity)
+                or any(a is not b for a,b in zip(current,self.identity))):
+            raise PlanResultUnavailable()
+        return json.loads(self.material_bytes)
+
+
 def _canonical(value):
     return result_wire.canonical_bytes(value)
 
 
 def _observe(runtime, *, result_reader, selection, source, executive_admission):
+    return _observe_response(runtime,result_reader=result_reader,selection=selection,
+        source=source,executive_admission=executive_admission)[0]
+
+
+def _observe_response(runtime, *, result_reader, selection, source, executive_admission):
     if type(source) is not planning.ProjectPlanningSource:raise PlanResultUnavailable()
     # All operations in this body are original-record reads. The nominal owner
     # completes its full outer postcheck before any captured result escapes.
@@ -76,7 +112,7 @@ def _observe_in_scope(runtime, *, result_reader, selection, source, executive_ad
     if (not runtime.store.path.samefile(result_reader.store.path)
             or runtime.jobs.direct_native_provenance(selected["job_id"]) != before):
         raise PlanResultUnavailable("RESULT_SOURCE_CHANGED")
-    return dict(schema=SCHEMA, selection=selected, stage=context["stage"],
+    material = dict(schema=SCHEMA, selection=selected, stage=context["stage"],
         result_digest=terminal_digest, payload=payload,
         payload_sha256=hashlib.sha256(_canonical(payload)).hexdigest(),
         planning_context_sha256=hashlib.sha256(_canonical(context)).hexdigest(),
@@ -84,6 +120,10 @@ def _observe_in_scope(runtime, *, result_reader, selection, source, executive_ad
         planning_input_artifact_sha256=context["input_artifact_sha256"],
         principal_scope=context["principal_scope"], origin_root=context["origin_root"],
         budget_ref=context["budget_ref"], return_ref=context["return_ref"])
+    # Consumption is not part of immutable terminal material. Keep the actual
+    # same qualified response available to the separate pure consumption proof;
+    # this is local return data, never a cached observation or authority.
+    return material, copy.deepcopy(response["consumption"])
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,21 +142,65 @@ class QualifiedPlanningResult:
             raise PlanResultUnavailable()
         return json.loads(self._material)
 
+    @contextmanager
+    def read_scope(self):
+        """Group a pure consumer through its existing host-owned source scope.
+
+        This yields no view, grant or receipt. The original source callback
+        owns all nominal/currentness/deadline checks and the full postcheck.
+        No private retention, Event, consumption or publication belongs here.
+        """
+        if self._seal is not _SEAL or type(self._source) is not planning.ProjectPlanningSource:
+            raise PlanResultUnavailable()
+        with self._source.read_scope():yield
+
     def require_consumed(self):
-        # A separate explicit original-parent acknowledgment precedes source
-        # preparation. Reading or declaring a PLAN cannot acknowledge a result.
-        observed=self.check()
-        selected=json.loads(self._selection)
-        access=planning.requalify_original(self._runtime,job_id=selected['job_id'],
-            source=self._source,executive_admission=self._admission)
-        response=result_wire.validate_response(Runtime.read_direct_native_result_bounded(
-            self._reader,selected,access=access))
-        if (response['availability']!='AVAILABLE' or response['selection']!=selected
-                or response['result']['result_digest']!=observed['result_digest']
-                or response['consumption']['state']!='CONSUMED'):
-            raise PlanResultUnavailable('ORIGINAL_RESULT_NOT_CONSUMED')
-        self.check()
-        return copy.deepcopy(response['consumption'])
+        return self._consumed_material()[1]
+
+    @contextmanager
+    def _consumed_observation(self):
+        # The source's actual factory issuer authenticates the full lexical
+        # bracket. A copied Source, generic capture or caller callback cannot
+        # substitute for that issuer. No observation survives this scope.
+        with self.read_scope():
+            observed, _ = self._consumed_material()
+            identity = self._source._read_observation_identity()
+            if _canonical(observed) != self._material:
+                raise PlanResultUnavailable('RESULT_SOURCE_CHANGED')
+            observation = _ConsumedPlanningObservation(_OBSERVATION,self,self._source,
+                self._source._observation_binding,identity,self._selection,self._material)
+            token = _CURRENT_OBSERVATION.set(observation)
+            try:
+                yield observation
+            finally:
+                observation.active = False
+                _CURRENT_OBSERVATION.reset(token)
+
+    def _consumed_material(self):
+        """One current bounded response proves terminal bytes and explicit Keep.
+
+        The incumbent observation still checks the original access, exact store,
+        principal/selection/digest and provenance before/after that read. Its
+        full source scope closes before either copied value escapes. Every call
+        performs a new observation; no result survives a private/Event effect.
+        """
+        if self._seal is not _SEAL:
+            raise PlanResultUnavailable()
+        # As before, an outer source postcheck failure is the original owner's
+        # refusal, not normalized into a different result-read exception.
+        with self.read_scope():
+            try:
+                observed, consumption = _observe_in_scope(self._runtime,
+                    result_reader=self._reader,selection=json.loads(self._selection),
+                    source=self._source,executive_admission=self._admission)
+            except (ValueError, TypeError, KeyError, AttributeError, OSError, StateConflict,
+                    ForegroundOperationClosed, ForegroundOperationRefusal):
+                raise PlanResultUnavailable() from None
+            if _canonical(observed) != self._material:
+                raise PlanResultUnavailable('RESULT_SOURCE_CHANGED')
+            if consumption['state'] != 'CONSUMED':
+                raise PlanResultUnavailable('ORIGINAL_RESULT_NOT_CONSUMED')
+            return copy.deepcopy(observed), copy.deepcopy(consumption)
 
     def check(self):
         if self._seal is not _SEAL:
@@ -132,6 +216,25 @@ class QualifiedPlanningResult:
         if _canonical(observed) != self._material:
             raise PlanResultUnavailable("RESULT_SOURCE_CHANGED")
         return copy.deepcopy(observed)
+
+
+def _capture_consumed_planning_result(runtime, *, result_reader, selection, source, executive_admission):
+    """Private initial preparation proof from ONE genuine current response.
+
+    The existing observation completes its full source postcheck before this
+    sealed result can return. This is not a consumption write or a reusable
+    observation: the service still observes freshly on every effect boundary.
+    Public standalone completed-result capture retains its original semantics.
+    """
+    selected = result_wire.validate_selection(selection)
+    # Keep the existing full source scope outside exception normalization so
+    # its outer postcheck refusal remains authoritative and no value escapes.
+    material, consumption = _observe_response(runtime, result_reader=result_reader,
+        selection=selected, source=source, executive_admission=executive_admission)
+    if consumption['state'] != 'CONSUMED':
+        raise PlanResultUnavailable('ORIGINAL_RESULT_NOT_CONSUMED')
+    return QualifiedPlanningResult(_SEAL, runtime, result_reader, source, executive_admission,
+        _canonical(selected), _canonical(material))
 
 
 def capture_completed_planning_result(runtime, *, result_reader, selection, source, executive_admission):

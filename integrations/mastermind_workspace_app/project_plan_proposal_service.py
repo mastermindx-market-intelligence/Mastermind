@@ -60,6 +60,14 @@ def _sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
+def _require_effect_outside_read():
+    # A caller's enclosing capture survives our nested pure scopes. It can
+    # only remove the right to mutate; it never supplies an effect grant.
+    from control_plane.project_canonical_data import _CAPTURE
+    if _CAPTURE.get() is not None:
+        raise PermissionError("SOURCE_OPERATION_EFFECT_DURING_READ")
+
+
 class ProjectPlanProposalSourceOwner:
     def __init__(self, *, events, private_inputs, permission_factory, adapter,
                  capture_basis, capture_result, actor_for, qualify_recipe,
@@ -115,11 +123,16 @@ class ProjectPlanProposalSourceOwner:
             raise PermissionError("SOURCE_OPERATION_UNAUTHORIZED")
         return basis, result
 
-    def _joins(self, request, selected, basis, result):
+    def _joins(self, request, selected, basis, result, *, observation=None):
         """Exact request join onto the actual basis and terminal result."""
         try:
-            data = result.check()
-            result.require_consumed()
+            if observation is None:
+                data, _ = result._consumed_material()
+            else:
+                from control_plane.project_plan_result_source import _ConsumedPlanningObservation
+                if type(observation) is not _ConsumedPlanningObservation:
+                    raise SourceOperationConflict()
+                data = observation.material(result)
             material = basis.material()
             if (data["selection"] != request["selection"] or data["result_digest"] != request["result_digest"]
                     or material["work_ref"] != request["work_ref"]
@@ -195,40 +208,63 @@ class ProjectPlanProposalSourceOwner:
             self._qualified(principal, prepared, recipe, permission)
         else:
             basis, result = self._captured(request, principal, permission) if qualified is None else qualified
-            with basis._view.capture_scope():
-                self._joins(request, selected, basis, result)
-                snapshot = self._proposal_snapshot(basis, selected["request_id"])
-                try:
-                    actor = self._actor(principal)
-                except Exception:
-                    raise ValueError("SOURCE_OPERATION_ACTOR_UNAVAILABLE") from None
-                prepared = self._adapter.prepare(request=request, initial_snapshot=snapshot,
-                    actor=actor, qualified_result=result)
-                if prepared is None:
-                    # The actual compiler refused: clarify/plain text is never a
-                    # PLAN.  Nothing was frozen and no Event or publisher exists.
-                    raise PlanProposalOperationError("PLAN_PROPOSAL_NOT_PREPARED")
+            recovered = self._private.lookup_original(selected, permission.principal_scope, guard=permission.check)
+            from integrations.mastermind_workspace_app.project_journey_recipes import InstalledProjectPlanProposalRecipeAdapter
+            scope = (result._consumed_observation if type(self._adapter) is InstalledProjectPlanProposalRecipeAdapter
+                     else result.read_scope)
+            with basis._view.capture_scope(), scope() as observation:
+                self._joins(request, selected, basis, result, observation=observation)
+                if recovered is not None:
+                    # A committed private original can precede INTENT when its
+                    # response was lost. Recover those exact bytes/stamp;
+                    # never recapture the actor/clock or invent another key.
+                    if (recovered["request_sha256"] != _sha(_canonical(request))
+                            or recovered["permission_binding_digest"] != permission.permission_binding_digest):
+                        raise SourceOperationConflict()
+                    prepared = self._adapter.restore(private_payload=recovered["private_payload"],
+                        trusted_recipe_fingerprint=recovered["recipe_fingerprint_sha256"])
+                else:
+                    snapshot = self._proposal_snapshot(basis, selected["request_id"])
+                    try:
+                        actor = self._actor(principal)
+                    except Exception:
+                        raise ValueError("SOURCE_OPERATION_ACTOR_UNAVAILABLE") from None
+                    if observation is None:
+                        prepared = self._adapter.prepare(request=request, initial_snapshot=snapshot,
+                            actor=actor, qualified_result=result)
+                    else:
+                        prepared = self._adapter._prepare_observed(request=request, initial_snapshot=snapshot,
+                            actor=actor, qualified_result=result, observation=observation)
+                    if prepared is None:
+                        # Clarify/plain results have no private original or Event.
+                        raise PlanProposalOperationError("PLAN_PROPOSAL_NOT_PREPARED")
                 try:
                     basis.check()
                 except Exception:
                     raise ValueError("SOURCE_OPERATION_SOURCE_UNAVAILABLE") from None
                 recipe = self._adapter.recipe(prepared)
                 self._qualified(principal, prepared, recipe, permission)
-        if original is None:
-            basis.check()
-            result.check()
-            result.require_consumed()
-            if permission.check() is not True:
-                raise PermissionError("SOURCE_OPERATION_UNAUTHORIZED")
+                # Contiguous pure requalification stays inside this same
+                # original basis/result bracket, in its existing check order.
+                basis.check()
+                result._consumed_material()
+                if permission.check() is not True:
+                    raise PermissionError("SOURCE_OPERATION_UNAUTHORIZED")
+        # The private envelope carries the same exact permission binding
+        # identity the Event records, so later recovery compares one stamp.
+        _require_effect_outside_read()
         ref = self._private.prepare(selected, permission.principal_scope,
-            payload=prepared.private_payload(), trusted_recipe_fingerprint=prepared.fingerprint_sha256)
+            payload=prepared.private_payload(), trusted_recipe_fingerprint=prepared.fingerprint_sha256,
+            permission_binding_digest=permission.permission_binding_digest)
         if ref is None:
             raise SourceOperationConflict()
         if original is None:
-            basis.check()
-            result.check()
-            result.require_consumed()
+            # A second pure fence after private retention, before INTENT.
+            with basis._view.capture_scope(), result.read_scope():
+                basis.check()
+                result._consumed_material()
         public_sha, original_input = _sha(_canonical(request)), ref.to_dict()
+        _require_effect_outside_read()
         self._events.prepare(selected, permission.principal_scope, request_sha256=public_sha,
             recipe_fingerprint_sha256=prepared.fingerprint_sha256, original_input=original_input,
             permission_binding_digest=permission.permission_binding_digest, guard=permission.check,
@@ -257,6 +293,8 @@ class ProjectPlanProposalSourceOwner:
     def _restore(self, selected, permission):
         original = self._events.original(selected, permission.principal_scope, guard=permission.check)
         if original is None:
+            raise SourceOperationConflict()
+        if original.get("permission_binding_digest") != permission.permission_binding_digest:
             raise SourceOperationConflict()
         payload = self._private.read(selected, permission.principal_scope,
             original_input=original["original_input"], trusted_recipe_fingerprint=original["recipe_fingerprint_sha256"],
@@ -346,6 +384,17 @@ class ProjectPlanProposalSourceOwner:
     def submit(self, *, lookup, preview_witness, principal):
         selected = self._selection(lookup)
         permission = self._permission(principal, selected)
+        # Retained actual Events state first, as the accepted Knowledge owner
+        # reads it: once the PLAN changed the canonical source, a repeated
+        # submit returns the original observed/attempted status.  It never
+        # restores the frozen compiler, re-qualifies against the old basis or
+        # reaches the publisher again.  Only a fresh INTENT (or no receipt
+        # yet) keeps the existing grant/claim path below.
+        retained = self._events.read_status(selected, permission.principal_scope, guard=permission.check)
+        receipt = retained["receipt"]
+        if (retained["disposition"] in ("accepted", "refused")
+                or (receipt is not None and receipt["kind"] != "INTENT")):
+            return retained
         prepared, _ = self._restore(selected, permission)
         recipe = self._adapter.recipe(prepared)
         self._qualified(principal, prepared, recipe, permission)
@@ -354,8 +403,22 @@ class ProjectPlanProposalSourceOwner:
             preview_witness=preview_witness, guard=permission.check)
         if permit is None:
             return self._events.read_status(selected, permission.principal_scope, guard=permission.check)
-        result = self._publisher(selected, principal, permission, prepared=prepared, recipe=recipe).publish_plan_proposal(
-            prepared.private_payload()["request"], recipe, principal, claim=permit)
+        # Proven pre-publisher failure (before the publisher call) may retain
+        # no effect.  Once publish_plan_proposal is invoked, any exception is
+        # post-invocation and uncertain: it can never claim no effect and is
+        # never retried, so only the observed owner status is returned.
+        invoked = False
+        try:
+            request = prepared.private_payload()["request"]
+            publisher = self._publisher(selected, principal, permission, prepared=prepared, recipe=recipe)
+            invoked = True
+            result = publisher.publish_plan_proposal(request, recipe, principal, claim=permit)
+        except Exception:
+            if not invoked:
+                self._events.retain_no_effect(permit, selected, permission.principal_scope,
+                    qualify_no_effect=lambda: not invoked,
+                    guard=permission.check)
+            return self._events.read_status(selected, permission.principal_scope, guard=permission.check)
         return self._finish(selected, permission, permit, result)
 
     def reconcile(self, lookup, principal):

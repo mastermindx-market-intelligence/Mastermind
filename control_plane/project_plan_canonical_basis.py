@@ -127,7 +127,7 @@ def capture_current_plan_basis(view,*,work_ref):
  try:
   from common.workspace_project_plan_contract import work_ref_key
   if type(view) is not CanonicalProjectDataView:_fail()
-  key=work_ref_key(work_ref);view.check();owner=_owner(view)
+  key=work_ref_key(work_ref);view._require_work(work_ref);view.check();owner=_owner(view)
   ws=_one(view,view.data_commit,'agentos/workstreams/WS-'+key+'.md');record,_=owner.parse_record(_Text(ws['raw_bytes']))
   from pathlib import Path
   if record.get('key')!=key or any(p.hard for p in owner.check_workstream(record,Path(ws['source']['path']),None)):_fail()

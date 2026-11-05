@@ -8,7 +8,7 @@ It cannot reconstruct/retry an unknown operation from changed current data.
 from copy import deepcopy
 import re
 from types import ModuleType
-from control_plane.project_plan_result_source import QualifiedPlanningResult
+from control_plane.project_plan_result_source import QualifiedPlanningResult, _ConsumedPlanningObservation
 from control_plane.project_plan_proposal_git import validate_request,ACTION
 
 PRIVATE_SCHEMA='mastermind.project_source_original_input.v1'
@@ -47,16 +47,27 @@ class PlanProposalRecipeAdapter:
   except (ValueError,KeyError,AttributeError,TypeError,UnicodeError,RecursionError):_fail()
  def prepare(self,*,request,initial_snapshot,actor,qualified_result):
   if type(qualified_result) is not QualifiedPlanningResult:_fail()
-  data=qualified_result.check()
-  payload=dict(schema=PRIVATE_SCHEMA,action=ACTION,request=deepcopy(request),actor=deepcopy(actor),initial_snapshot=dict(snapshot=deepcopy(initial_snapshot),planning_result=data),source_binding=deepcopy(self._binding))
-  recipe=self._recipe(payload)
-  if recipe['status']=='NO_PROPOSAL':return None
-  qualified_result.check()  # The original request is still live before freeze.
-  return PreparedPlanProposal(payload,recipe['recipe_fingerprint_sha256'])
+  with qualified_result.read_scope():
+   data=qualified_result.check()
+   payload=dict(schema=PRIVATE_SCHEMA,action=ACTION,request=deepcopy(request),actor=deepcopy(actor),initial_snapshot=dict(snapshot=deepcopy(initial_snapshot),planning_result=data),source_binding=deepcopy(self._binding))
+   recipe=self._recipe(payload)
+   if recipe['status']=='NO_PROPOSAL':return None
+   qualified_result.check()  # The original request is still live before freeze.
+   return PreparedPlanProposal(payload,recipe['recipe_fingerprint_sha256'])
  def restore(self,*,private_payload,trusted_recipe_fingerprint):
   recipe=self._recipe(private_payload)
   if recipe.get('recipe_fingerprint_sha256')!=trusted_recipe_fingerprint:_fail()
   return PreparedPlanProposal(private_payload,trusted_recipe_fingerprint)
+ def _prepare_observed(self,*,request,initial_snapshot,actor,qualified_result,observation):
+  # Fixed installed service only: its genuine pre/post Runtime observations
+  # surround this PURE compiler. A public DTO/flag cannot select this entry.
+  if type(observation) is not _ConsumedPlanningObservation:_fail()
+  data=observation.material(qualified_result)
+  payload=dict(schema=PRIVATE_SCHEMA,action=ACTION,request=deepcopy(request),actor=deepcopy(actor),initial_snapshot=dict(snapshot=deepcopy(initial_snapshot),planning_result=data),source_binding=deepcopy(self._binding))
+  recipe=self._recipe(payload)
+  if recipe['status']=='NO_PROPOSAL':return None
+  observation.material(qualified_result)
+  return PreparedPlanProposal(payload,recipe['recipe_fingerprint_sha256'])
  def recipe(self,prepared):
   if type(prepared) is not PreparedPlanProposal:_fail()
   recipe=self._recipe(prepared.private_payload())

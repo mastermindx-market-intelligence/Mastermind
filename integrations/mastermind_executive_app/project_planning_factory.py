@@ -26,6 +26,24 @@ from integrations.mastermind_executive_app.principal_namespace import principal_
 from control_plane.foreground_operation import current_foreground_operation
 
 _ROOT_REPOSITORY = "mastermindx-market-intelligence/Mastermind"
+_READ_CODE_BRACKET = object()
+
+
+@dataclasses.dataclass(eq=False,repr=False)
+class _ReadCodeBracket:
+    seal: object
+    owner: object
+    invocation: object
+    data: object
+    view: object
+    capture: object
+    view_identity: tuple
+    context: tuple
+    collector_binding: tuple
+    source: tuple
+    principal: tuple
+    work_ref: str
+    active: bool = True
 
 
 class ProjectPlanningAppFactory:
@@ -117,6 +135,43 @@ class ProjectPlanningAppFactory:
         view._owner._permission_guard(view._operation)
         return view
 
+    def _read_code_bracket(self,invocation,*,data,view,workspace,work_ref):
+        """Only the actual factory full-proof bracket may reuse immutable CODE.
+
+        A generic DATA capture alone supplies no such provenance. The record
+        is private, invocation-local and invalidated before the full postcheck;
+        it never grants permission, survives a request or renews a deadline.
+        """
+        from control_plane.project_canonical_data import _CAPTURE
+        bracket=getattr(invocation,'_planning_read_code_bracket',None)
+        if bracket is None:return None
+        if (type(bracket) is not _ReadCodeBracket or bracket.seal is not _READ_CODE_BRACKET
+                or not bracket.active or bracket.owner is not self
+                or bracket.invocation is not invocation or bracket.data is not data
+                or bracket.work_ref!=work_ref or bracket.view is not view
+                or bracket.context!=data.context_binding()
+                or bracket.collector_binding!=data.collector._canonical_code_capture_binding()
+                or bracket.source!=(self.service.config.proof_source_repository,
+                    self.service.config.proof_base_sha,data.collector._macro_root,
+                    view.code_commit,view.data_commit,view._operation.read_deadline)
+                or bracket.principal!=(dataclasses.asdict(invocation._principal),dataclasses.asdict(workspace))
+                or bracket.view_identity!=view._owner._view_identity(view)):
+            raise ValueError('original planning CODE read bracket differs')
+        invocation._require_live()
+        view._check_capture(bracket.capture)
+        # An ordinary nested/generic capture is not the factory-issued bracket.
+        # It remains strict even when it observes the same nominal DATA view.
+        if _CAPTURE.get() is not bracket.capture:return None
+        view.check()
+        return bracket
+
+    def _require_effect_outside_read(self,invocation):
+        from control_plane.project_canonical_data import _CAPTURE
+        invocation._require_live()
+        if (_CAPTURE.get() is not None
+                or getattr(invocation,'_planning_read_code_bracket',None) is not None):
+            raise ValueError('pure canonical planning read cannot authorize an effect')
+
     def _canonical_view(self,workspace,work_ref,*,verify_source=True):
         data=self._canonical_data()
         if data is None:return None
@@ -171,6 +226,9 @@ class ProjectPlanningAppFactory:
             view._owner._validate_view(view)
             view._owner._permission_guard(view._operation)
             return view
+        if self._read_code_bracket(invocation,data=data,view=view,
+                workspace=workspace,work_ref=work_ref) is not None:
+            return view
         from integrations.executive_mcp.installed import _installed_child_env
         collector=data.collector
         view._owner._permission_guard(view._operation)
@@ -197,15 +255,48 @@ class ProjectPlanningAppFactory:
             return
         if invocation._project_planning_operation not in {'status','result','consume','prepare_proposal'}:
             raise ValueError('original planning read scope requires a read phase')
-        self._current(principal,invocation,operation_key,work_ref)
         workspace=VerifiedPrincipal(**dataclasses.asdict(invocation._project_workspace_principal))
-        view=self._canonical_view(workspace,work_ref)
-        if view is None:raise ValueError('canonical planning read unavailable')
-        with view.capture_scope():
-            yield view
-        # This executes before the caller receives captured DATA or may effect
-        # anything else. A nested same-view scope keeps its outer full bracket.
-        self._current(principal,invocation,operation_key,work_ref)
+        parent=getattr(invocation,'_planning_read_code_bracket',None)
+        if parent is not None:
+            if type(parent) is not _ReadCodeBracket:
+                raise ValueError('original planning CODE read bracket differs')
+            data=self._canonical_data()
+            if self._read_code_bracket(invocation,data=data,view=parent.view,
+                    workspace=workspace,work_ref=work_ref) is not None:
+                # Nested pure materialization inherits this actual outer full
+                # pre/post bracket; it keeps fresh principal/grant checks.
+                self._current(principal,invocation,operation_key,work_ref,current_only=True)
+                yield parent.view
+                self._current(principal,invocation,operation_key,work_ref,current_only=True)
+                return
+        # Suppress any parent reuse while obtaining the uncached full CODE
+        # precheck. Generic scopes still take this path, never a boolean bypass.
+        invocation._planning_read_code_bracket=None
+        bracket=None
+        try:
+            self._current(principal,invocation,operation_key,work_ref)
+            view=self._canonical_view(workspace,work_ref,verify_source=False)
+            if view is None:raise ValueError('canonical planning read unavailable')
+            data=self._canonical_data()
+            with view.capture_scope() as capture:
+                bracket=_ReadCodeBracket(_READ_CODE_BRACKET,self,invocation,data,view,capture,
+                    view._owner._view_identity(view),data.context_binding(),
+                    data.collector._canonical_code_capture_binding(),
+                    (self.service.config.proof_source_repository,self.service.config.proof_base_sha,
+                        data.collector._macro_root,view.code_commit,view.data_commit,view._operation.read_deadline),
+                    (dataclasses.asdict(invocation._principal),dataclasses.asdict(workspace)),work_ref)
+                invocation._planning_read_code_bracket=bracket
+                try:yield view
+                finally:
+                    bracket.active=False
+                    invocation._planning_read_code_bracket=None
+                # Full uncached CODE postcheck runs INSIDE the original view's
+                # capture/deadline. Its DATA/default/Event/config full postcheck
+                # then closes before any eagerly captured value can escape.
+                self._current(principal,invocation,operation_key,work_ref)
+        finally:
+            if bracket is not None:bracket.active=False
+            invocation._planning_read_code_bracket=parent
 
     def _canonical_plan(self,workspace,work_ref,*,current_only=False):
         view=self._canonical_view(workspace,work_ref,verify_source=not current_only)
@@ -373,6 +464,7 @@ class ProjectPlanningAppFactory:
         from control_plane import ceo_intent
         prior=runtime.store.find_event_by_command_id(ceo_intent.command_id_for(command))
         if prior is None:
+            self._require_effect_outside_read(invocation)
             context["input_artifact_sha256"]=input_owner.prepare(context,payload)
         else:
             original=runtime.jobs.direct_native_provenance(prior["job_id"])["project_planning"]
@@ -386,17 +478,34 @@ class ProjectPlanningAppFactory:
         def publication_guard():
             authority()
             return True
+        def observation_guard(source):
+            # Only this actual issued source and this existing full CODE
+            # bracket can authenticate a lexical pure compiler observation.
+            if source is not owner:
+                raise ValueError('original planning observation source differs')
+            bracket=getattr(invocation,'_planning_read_code_bracket',None)
+            if type(bracket) is not _ReadCodeBracket:
+                raise ValueError('original planning observation requires full CODE bracket')
+            workspace=VerifiedPrincipal(**dataclasses.asdict(invocation._project_workspace_principal))
+            if self._read_code_bracket(invocation,data=self._canonical_data(),view=bracket.view,
+                    workspace=workspace,work_ref=work_ref) is not bracket:
+                raise ValueError('original planning observation bracket differs')
+            if self._current(principal,invocation,operation_key,work_ref,current_only=True) != initial:
+                raise ValueError('original planning observation authority/generation changed')
+            return invocation,bracket,bracket.capture
         owner=planning._issue_source(reader=self.reader,executive=execution,context=context,
             authority_guard=authority,input_owner=input_owner,events=self.events,publication_guard=publication_guard,
             canonical_source_reader=(None if not callable(self.app_binding.source_operation_provider_factory) else
                 lambda:self._canonical_creation(principal,invocation,operation_key,work_ref,project_source)),
             read_scope=(None if not callable(self.app_binding.source_operation_provider_factory) else
-                lambda:self.canonical_read_scope(principal=principal,operation_key=operation_key,work_ref=work_ref)))
+                lambda:self.canonical_read_scope(principal=principal,operation_key=operation_key,work_ref=work_ref)),
+            observation_guard=(None if not callable(self.app_binding.source_operation_provider_factory) else observation_guard))
         return owner,executive
 
     def submit(self, *, principal, operation_key, stage, work_ref, project_source,
                publication, private_request, grounding):
         """Authenticated explicit producer -> canonical sink, zero dispatches."""
+        self._require_effect_outside_read(current_foreground_operation())
         source,executive=self.prepare(principal=principal,operation_key=operation_key,stage=stage,work_ref=work_ref,
             project_source=project_source,publication=publication,private_request=private_request,grounding=grounding)
         invocation=current_foreground_operation()
@@ -453,44 +562,8 @@ def build_ingress_owner(factory):
         args=frame['arguments']
         operation.require_arguments(args)
         if frame['operation']=='prepare_proposal':
-            original,access,source,executive=factory.qualified_original_source(principal=principal,
-                operation_key=args['operation_key'],work_ref=args['work_ref'])
-            request=args['proposal_request']
-            if request['selection']['job_id']!=original['job_id']:
-                raise ValueError('proposal belongs to another original planning Job')
-            runtime=factory.service._require_runtime()
-            mounted=factory.service._require_supervisor()
-            workspace=VerifiedPrincipal(**dataclasses.asdict(operation._project_workspace_principal))
-            from integrations.mastermind_workspace_app.source_operation_principal import source_principal_scope
-            if source.material()['publication']['principal_scope']!=source_principal_scope(workspace):
-                raise ValueError('proposal Workspace principal differs')
-            provider=factory.app_binding.source_operation_provider_factory
-            if not callable(provider):raise ValueError('proposal source owner unavailable')
-            binding=provider(runtime,mounted)
-            from control_plane.workspace_source_operation_binding import _current_source_operation,prepare_project_plan_proposal
-            def host_current():
-                operation._require_live()
-                factory._current(principal,operation,args['operation_key'],args['work_ref'])
-                return True
-            current=_current_source_operation(binding,runtime=runtime,supervisor=mounted,host_guard=host_current)
-            data=binding.owner._canonical_data_source
-            if data is None:raise ValueError('canonical plan basis unavailable')
-            from control_plane.project_plan_canonical_basis import capture_current_plan_basis
-            from control_plane.project_plan_result_source import capture_completed_planning_result
-            view=data.view(workspace,work_ref=args['work_ref'])
-            if view is None:raise ValueError('canonical plan basis unavailable')
-            with view.capture_scope():
-                basis=capture_current_plan_basis(view,work_ref=args['work_ref'])
-                bound=factory.service._namespace_custody.bound_runtime(runtime)
-                result=capture_completed_planning_result(runtime,result_reader=bound,selection=request['selection'],
-                    source=source,executive_admission=executive)
-                if result.check()['result_digest']!=request['result_digest']:raise ValueError('proposal result differs')
-                current();host_current()
-            # Captures are read/compiler-only. The distinct original source
-            # retention below uses fresh full checks outside that scope.
-            receipt=prepare_project_plan_proposal(binding,request,runtime=runtime,supervisor=mounted,
-                host_guard=host_current,principal=workspace,basis=basis,result=result)
-            current();host_current()
+            from integrations.mastermind_executive_app.project_plan_preparation import prepare_project_plan_proposal_for_original
+            receipt=prepare_project_plan_proposal_for_original(factory,frame,operation,principal)
         elif frame['operation']=='status':
             with factory.canonical_read_scope(principal=principal,**args):
                 receipt=factory.original(principal=principal,**args)
@@ -504,6 +577,7 @@ def build_ingress_owner(factory):
             bound=custody.bound_runtime(runtime)
             selection=dict(work_ref=args['work_ref'],job_id=original['job_id'],attempt_id=args.get('attempt_id'))
             if frame['operation']=='consume':
+                factory._require_effect_outside_read(operation)
                 selection.update(result_digest=args['result_digest'],operation_key=args['consumption_operation_key'])
                 acknowledged=runtime.consume_direct_native_result(selection,access=access)
             read_selection={key:selection[key] for key in ('work_ref','job_id','attempt_id')}

@@ -134,6 +134,16 @@ class InstalledProjectPlanProposalRecipeAdapter:
                     declaration=captured.declaration,source_binding=captured.proposal_source_binding)
                 return adapter.restore(private_payload=private_payload,trusted_recipe_fingerprint=trusted_recipe_fingerprint)
 
+    def _prepare_observed(self, *, request, initial_snapshot, actor, qualified_result, observation):
+        # Same full installed compiler acquisition/checks; only the surrounding
+        # fixed service's nominal lexical observation supplies result DATA.
+        with self._recipes.capture() as (captured,before):
+            with captured._scope():
+                adapter = PlanProposalRecipeAdapter(compiler=captured.proposal_compiler,owner=captured.owner,
+                    declaration=captured.declaration,source_binding=captured.proposal_source_binding)
+                return adapter._prepare_observed(request=request,initial_snapshot=initial_snapshot,
+                    actor=actor,qualified_result=qualified_result,observation=observation)
+
     def recipe(self, prepared):
         payload = prepared.private_payload()
         with self._recipes.capture(payload['source_binding']['compiler']['commit']) as (captured,before):
