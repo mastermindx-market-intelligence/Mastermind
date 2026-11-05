@@ -3176,3 +3176,128 @@ def test_d8_s14_private_parent_mode_is_one_exact_source_bound_token():
                     source + '\n# unrelated byte drift\n'):
         assert scan(changed)
     assert '777' in scan(source + '\npeer_uid = 777\n')
+
+
+_X_ENGAGEMENT_HTML = (
+    "research/competitive_intelligence/x_engagement/2026-10-30/"
+    "account_network_interactive.html"
+)
+_X_ENGAGEMENT_GEOMETRY = ["680", "900", "495", "535", "720", "922", "800"]
+
+
+def _d8_x_engagement_scan(source, *, path=_X_ENGAGEMENT_HTML, postimage=True):
+    return _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source),
+        source_postimages={path: source} if postimage else None,
+    )
+
+
+def test_d8_x_engagement_exact_geometry_is_frozen():
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    assert hashlib.sha256(source.encode("utf-8")).hexdigest() == (
+        "62492c23f2d6a21d389268e51823f6b2f130e2e47a64f17bcfc38e886e9cc3d8"
+    )
+    assert reviewed_literal_spans(_X_ENGAGEMENT_HTML, source) == (
+        (8, 77, 80, "int"), (37, 17, 20, "int"),
+        (70, 45, 48, "int"), (70, 51, 54, "int"),
+        (72, 45, 48, "int"), (74, 10, 13, "int"),
+        (79, 56, 59, "int"),
+    )
+    lines = source.splitlines()
+    for line, start, end, kind, token in REVIEWED_FILES[_X_ENGAGEMENT_HTML]["sites"]:
+        assert lines[line - 1].isascii()
+        assert lines[line - 1][start:end] == token
+        assert kind == "int"
+    assert _d8_x_engagement_scan(source) == []
+
+
+@pytest.mark.parametrize("path,postimage", [
+    (_X_ENGAGEMENT_HTML, False),
+    ("research/competitive_intelligence/x_engagement/unreviewed.html", True),
+    ("ops/identity/account_network_interactive.html", True),
+])
+def test_d8_x_engagement_requires_exact_path_and_postimage(path, postimage):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    if path != _X_ENGAGEMENT_HTML:
+        assert reviewed_literal_spans(path, source) == ()
+    findings = _d8_x_engagement_scan(source, path=path, postimage=postimage)
+    # The existing nonidentity-path CSS classifier still excludes dimensions.
+    expected = _X_ENGAGEMENT_GEOMETRY[2:] if path.endswith("/unreviewed.html") else _X_ENGAGEMENT_GEOMETRY
+    assert set(expected) <= set(findings)
+
+
+def test_d8_x_engagement_registry_removal_restores_geometry(monkeypatch):
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    monkeypatch.delitem(REVIEWED_FILES, _X_ENGAGEMENT_HTML)
+    assert _d8_x_engagement_scan(source) == _X_ENGAGEMENT_GEOMETRY
+
+
+@pytest.mark.parametrize("old,new,expected", [
+    ("min-height:680px", "min-height:681px", "681"),
+    ("x:495,y:535", "x:496,y:535", "496"),
+    ("x:1470,y:922", "x:1470,y:923", "923"),
+    ("x:495,y:535", "peer_uid:495,y:535", "495"),
+    ("x:495,y:535", "x:495,y:535,extra:495", "495"),
+    ("Additional group ", "Additional group changed ", "800"),
+    ("</body></html>", "</body></html>\n<!-- changed byte -->", "922"),
+])
+def test_d8_x_engagement_geometry_or_context_drift_is_not_repinned(old, new, expected):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    changed = source.replace(old, new)
+    assert reviewed_literal_spans(_X_ENGAGEMENT_HTML, changed) == ()
+    assert expected in _d8_x_engagement_scan(changed)
+
+
+@pytest.mark.parametrize("suffix,expected", [
+    ("\n<script>const peer_uid=777;</script>", ["777"]),
+    ("\n<script>const allowed_peer_uids=[450,459];</script>", ["450", "459"]),
+    ('\n<script>const account="_mastermind_unreviewed";</script>', ["_mastermind_unreviewed"]),
+    ("\n<style>*{--peer-uid:777}</style>", ["777"]),
+    ("\n<button onclick=peer_uid(777)>Inspect</button>", ["777"]),
+    ("\n<button data-peer-uid=777>Inspect</button>", ["777"]),
+])
+def test_d8_x_engagement_pin_cannot_hide_new_identity(suffix, expected):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8") + suffix
+    assert reviewed_literal_spans(_X_ENGAGEMENT_HTML, source) == ()
+    findings = _d8_x_engagement_scan(source)
+    for token in expected:
+        assert token in findings  # The injected identity itself must be exposed.
+
+
+def test_d8_x_engagement_false_postimage_is_rejected():
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    with pytest.raises(AssertionError, match="diff/postimage line mismatch"):
+        _scan_added_identity_diff(
+            _d8_frozen_source_diff(_X_ENGAGEMENT_HTML, source),
+            source_postimages={_X_ENGAGEMENT_HTML: source.replace("x:495,y:535", "x:496,y:535")},
+        )
+
+
+@pytest.mark.parametrize("identity", [False, True])
+def test_d8_x_engagement_real_committed_git_collector(tmp_path, monkeypatch, identity):
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    if identity:
+        source += "\n<script>const peer_uid=777;</script>\n"
+    test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+        tmp_path, monkeypatch, _X_ENGAGEMENT_HTML, source, identity,
+    )
+
+
+def test_d8_x_engagement_quoted_handler_cannot_reuse_geometry_pin():
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    source += '\n<button onclick="peer_uid=777">Inspect</button>'
+    # Quoted handler dataflow is outside the existing scanner's contract. The
+    # source change still invalidates every frozen site and is rejected by D8.
+    assert reviewed_literal_spans(_X_ENGAGEMENT_HTML, source) == ()
+    assert _d8_x_engagement_scan(source) == _X_ENGAGEMENT_GEOMETRY

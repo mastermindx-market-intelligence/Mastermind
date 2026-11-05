@@ -95,6 +95,11 @@ REVIEWED_GENERATIONS = {
     "v21": {
         "bridge.py": "dfbf0b11c49a595610d1ac0e663d95f7291b500cb84d31ef8169bc3b909a2eaa",
     },
+    # Readiness diagnostics retain the v21 getter-first, per-tool guards.
+    # This additive source pin is not runtime staging or activation authority.
+    "v22": {
+        "bridge.py": "af03759abbb493155ba32802a769b27699c672be716c1d29b1cab5b3b68a778b",
+    },
 }
 
 

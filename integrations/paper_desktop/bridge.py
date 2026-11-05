@@ -1097,16 +1097,17 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
             # annotations/input schema *before* any Paper tool is dispatched.
             # A private exact-pin unit fixture retains its historical seam;
             # MCP/CLI callers cannot override the default production pin.
+            status_catalog = client.catalog()
+            status_schema = schema_receipt(
+                client, status_catalog, server_pin=_server_pin, catalog_pin=_catalog_pin)
             if _catalog_pin == SUPPORTED_CATALOG_SHA256:
-                status_catalog = client.catalog()
-                status_schema = schema_receipt(
-                    client, status_catalog, server_pin=_server_pin, catalog_pin=_catalog_pin)
                 if (not status_schema["server_name_compatible"]
                         or not status_schema["server_version_compatible"]
                         or not status_schema["snapshot_tool_compatible"]):
                     raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED")
             return {"state": "CONNECTED", "server": client.server, "endpoint": ENDPOINT,
                     "document": snapshot(client, execution_binding=execution_binding),
+                    "write_schema": status_schema,
                     "quota_remaining": None, "plan": "UNKNOWN"}
         catalog = client.catalog()
         schema = schema_receipt(client, catalog, server_pin=_server_pin, catalog_pin=_catalog_pin)
