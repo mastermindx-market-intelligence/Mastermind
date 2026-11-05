@@ -870,19 +870,41 @@ class Broker:
     def _front_of_queue(
         self, conn: sqlite3.Connection, pool: str, orch: str, task_class: str
     ) -> bool:
-        """True if this orch may take the next slot (priority + oldest-first)."""
+        """True if this orch may take the next slot (priority + oldest-first).
+
+        Only waiters the current lending predicate would actually refuse are
+        skipped: a lending-blocked head (already at/above its fair share while
+        below-share demand waits) cannot convoy eligible later demand. A
+        skipped waiter keeps its exact id, enqueued_at and priority, and still
+        blocks again once it becomes eligible.
+        """
         waiters = self._waiters(conn, pool)
         if not waiters:
             return True
         my_p = _class_priority(task_class)
-        # higher-priority (lower number) waiter from someone else blocks us
-        for w in waiters:
+        # Same lending predicate _try_acquire enforces as lending_blocked.
+        # Match the preceding acquire gate, including a newly arriving caller
+        # whose demand has not yet been registered in the queue.
+        share = self.fair_share(conn, pool, extra=orch)
+        below_any = bool(self._below_share_waiters(conn, pool, "", share))
+        held: Dict[str, int] = {}
+
+        def lending_eligible(w: sqlite3.Row) -> bool:
+            w_orch = w["orchestrator_id"]
+            if w_orch not in held:
+                held[w_orch] = len(self._held_by(conn, w_orch, pool))
+            return not (below_any and held[w_orch] >= share)
+
+        eligible = [w for w in waiters if lending_eligible(w)]
+        # higher-priority (lower number) eligible waiter from someone else
+        # blocks us; priority and oldest-first within a class are unchanged
+        for w in eligible:
             if w["orchestrator_id"] == orch:
                 return True
             if int(w["priority"]) < my_p:
                 return False
             if int(w["priority"]) == my_p:
-                # oldest at this class: if it's us, ok; if someone else, wait
+                # oldest eligible at this class: if it's us, ok; else wait
                 return w["orchestrator_id"] == orch
         return True
 
