@@ -715,3 +715,134 @@ def test_unusable_required_identity_freezes_reads_and_writes(ledger, field, valu
     assert bump == 0
     assert "unavailable" in reason.lower()
     assert ledger.read_bytes() == before
+
+
+def _invoke_integrity_api(pl, operation):
+    calls = {
+        "status": pl.status,
+        "open": pl.open_positions,
+        "closed": pl.closed_positions,
+        "entry": lambda: pl.get_entry_info("conviction", "AAA"),
+        "update": lambda: pl.update([], "2026-02-02"),
+        "manual": lambda: pl.record_manual("BBB", "conviction", event="open", weight=0.05),
+        "close": lambda: pl.close_position("conviction", "AAA", "2026-02-02"),
+    }
+    return calls[operation]()
+
+
+@pytest.mark.parametrize("operation", ["status", "open", "closed", "entry"])
+def test_inaccessible_existing_ledger_is_unavailable_not_missing(tmp_path, monkeypatch, operation):
+    """Real traversal denial must not be collapsed by Path.exists() into a flat book."""
+    from portfolio import position_log as pl
+
+    if os.name != "posix" or os.geteuid() == 0:
+        pytest.skip("requires enforced POSIX traversal permissions as an unprivileged user")
+    sealed = tmp_path / "sealed"
+    sealed.mkdir()
+    target = sealed / "positions_ledger.json"
+    _seed(target, {"conviction:AAA": _open_entry("AAA")})
+    before = target.read_bytes()
+    monkeypatch.setattr(pl, "_ledger_path", lambda portfolio_id=None: target)
+    sealed.chmod(0)
+    try:
+        with pytest.raises(PermissionError):
+            target.stat()
+        if operation == "status":
+            state = pl.status()
+            assert state["state"] == "unavailable"
+            assert state["kind"] == "unreadable"
+            assert state["open_count"] is None
+        else:
+            with pytest.raises(pl.LedgerUnavailable):
+                _invoke_integrity_api(pl, operation)
+    finally:
+        sealed.chmod(0o700)
+    assert target.read_bytes() == before
+
+
+@pytest.mark.parametrize("target_state", ["inaccessible", "missing"])
+@pytest.mark.parametrize("operation", ["status", "open", "closed", "entry",
+                                        "update", "manual", "close"])
+def test_unavailable_symlink_target_preserves_canonical_evidence(
+        ledger, tmp_path, operation, target_state):
+    """A writable lock directory must not let a writer replace an unreadable canonical link."""
+    from portfolio import position_log as pl
+
+    if os.name != "posix":
+        pytest.skip("requires POSIX symbolic links")
+    if target_state == "inaccessible" and os.geteuid() == 0:
+        pytest.skip("requires enforced POSIX traversal permissions as an unprivileged user")
+    sealed = tmp_path / "sealed"
+    sealed.mkdir()
+    target = sealed / "original.json"
+    if target_state == "inaccessible":
+        _seed(target, {"conviction:AAA": _open_entry("AAA")})
+        before = target.read_bytes()
+    ledger.symlink_to(target)
+    if target_state == "inaccessible":
+        sealed.chmod(0)
+    try:
+        if target_state == "inaccessible":
+            with pytest.raises(PermissionError):
+                target.stat()
+        if operation == "status":
+            state = pl.status()
+            assert state["state"] == "unavailable"
+            assert state["kind"] == "unreadable"
+            assert state["open_count"] is None
+        else:
+            with pytest.raises(pl.LedgerUnavailable):
+                _invoke_integrity_api(pl, operation)
+        assert ledger.is_symlink()
+        assert os.readlink(ledger) == str(target)
+        bump, reason, unavailable = _derisk_module()._distribution_escalation("flagship")
+        assert unavailable is True
+        assert bump == 0
+        assert "unavailable" in reason.lower()
+    finally:
+        sealed.chmod(0o700)
+    if target_state == "inaccessible":
+        assert target.read_bytes() == before
+    else:
+        with pytest.raises(FileNotFoundError):
+            target.stat()
+
+
+def test_status_and_reads_do_not_use_boolean_existence_as_authority(ledger, monkeypatch):
+    from portfolio import position_log as pl
+
+    _seed(ledger, {"conviction:AAA": _open_entry("AAA")})
+    real_exists, real_stat = Path.exists, Path.stat
+
+    def misleading_exists(path, *args, **kwargs):
+        return False if path == ledger else real_exists(path, *args, **kwargs)
+
+    def forbidden_preflight_stat(path, *args, **kwargs):
+        if path == ledger:
+            raise AssertionError("ledger must be read before any presence classification")
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "exists", misleading_exists)
+    monkeypatch.setattr(Path, "stat", forbidden_preflight_stat)
+    assert pl.status()["state"] == "populated"
+    assert [row["ticker"] for row in pl.open_positions()] == ["AAA"]
+
+
+def test_read_not_found_with_existing_leaf_is_unavailable(ledger, monkeypatch):
+    """A failed read does not authorize missing/flat if an entry now occupies that name."""
+    from portfolio import position_log as pl
+
+    _seed(ledger, {"conviction:AAA": _open_entry("AAA")})
+    before = ledger.read_bytes()
+    real_read = Path.read_text
+
+    def vanished_read(path, *args, **kwargs):
+        if path == ledger:
+            raise FileNotFoundError(2, "synthetic read/open race", str(path))
+        return real_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", vanished_read)
+    assert pl.status()["state"] == "unavailable"
+    with pytest.raises(pl.LedgerUnavailable):
+        pl.open_positions()
+    assert ledger.read_bytes() == before

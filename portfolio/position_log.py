@@ -158,11 +158,11 @@ def _is_lifecycle_entry(entry: Any) -> bool:
             and isinstance(entry.get("still_open"), bool))
 
 
-def _read_ledger(path: Path) -> dict[str, Any]:
-    """Read + validate the ledger at ``path``.
+def _read_ledger_snapshot(path: Path) -> tuple[dict[str, Any], bool]:
+    """Read + validate once, returning (ledger, present) from that same observation.
 
-    Returns {} ONLY for a genuinely absent file (uninitialized) or a file holding {}. Any other
-    failure raises :class:`LedgerUnavailable` rather than degrading to an empty ledger.
+    A genuinely absent file returns ({}, False); a readable empty file returns ({}, True).
+    Any other failure raises :class:`LedgerUnavailable` instead of becoming an empty ledger.
 
     PER-RECORD POLICY (explicit, in place of the broad swallow this replaces): a record that is not
     a lifecycle entry is QUARANTINED BY NAME and makes the whole ledger unavailable. It is not
@@ -171,9 +171,21 @@ def _read_ledger(path: Path) -> dict[str, Any]:
     record freezes the plane until an operator repairs it, and every other record stays intact.
     """
     try:
-        if not path.exists():
-            return {}
         raw = path.read_text()
+    except FileNotFoundError as exc:
+        # Read first: Path.exists() can suppress permission/I/O errors, and a stat
+        # preflight can race the read. Confirm absence only after opening failed.
+        # An existing leaf (including a dangling symlink) is unavailable evidence,
+        # never permission for a writer to replace the canonical name.
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            return {}, False
+        except OSError as probe_exc:
+            raise LedgerUnavailable(f"{probe_exc!r}"[:240],
+                                    path=path, kind="unreadable") from probe_exc
+        raise LedgerUnavailable("ledger path exists but its target could not be read",
+                                path=path, kind="unreadable") from exc
     except (OSError, UnicodeDecodeError) as exc:
         raise LedgerUnavailable(f"{exc!r}"[:240],
                                 path=path, kind="unreadable") from exc
@@ -192,7 +204,13 @@ def _read_ledger(path: Path) -> dict[str, Any]:
             f"{len(bad)} record(s) are not lifecycle entries: "
             f"{', '.join(bad[:8])}{' …' if len(bad) > 8 else ''}",
             path=path, kind="malformed_records", quarantined=bad)
-    return parsed
+    return parsed, True
+
+
+def _read_ledger(path: Path) -> dict[str, Any]:
+    """Read the ledger; only genuine absence or a healthy empty ledger yields {}."""
+    ledger, _present = _read_ledger_snapshot(path)
+    return ledger
 
 
 def _load(portfolio_id: str | None = None) -> dict[str, Any]:
@@ -211,17 +229,13 @@ def status(portfolio_id: str | None = None) -> dict[str, Any]:
     base: dict[str, Any] = {"path": str(path), "open_count": None, "quarantined": [],
                             "kind": None, "detail": ""}
     try:
-        exists = path.exists()
-    except OSError as exc:
-        return {**base, "state": "unavailable", "kind": "unreadable", "detail": repr(exc)[:240]}
-    if not exists:
-        return {**base, "state": "missing", "open_count": 0,
-                "detail": "positions ledger not initialized"}
-    try:
-        ledger = _read_ledger(path)
+        ledger, present = _read_ledger_snapshot(path)
     except LedgerUnavailable as exc:
         return {**base, "state": "unavailable", "kind": exc.kind,
                 "quarantined": list(exc.quarantined), "detail": exc.detail}
+    if not present:
+        return {**base, "state": "missing", "open_count": 0,
+                "detail": "positions ledger not initialized"}
     return {**base,
             "state": "populated" if ledger else "empty",
             "open_count": sum(1 for e in ledger.values() if e.get("still_open")),
