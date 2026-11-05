@@ -154,6 +154,26 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 if g.digest(original) != old[name]:
                     raise AssertionError('long-horizon historical predecessor differs: '+name)
                 (cls.built/'native-code-stage'/name).write_bytes(original)
+            # A new polling helper delta cannot be inverted into historical95.
+            # Restore its already retained, independently hash-bound preimage.
+            long_raw = fixture.with_name('native-long-horizon-predecessors-20261103.json').read_bytes()
+            if g.digest(long_raw) != 'bb924475a501aa732ca0c5b1f05f9428c100c546bcbfb5d3e0c2ceaf268d6f19':
+                raise AssertionError('long-horizon predecessor fixture changed')
+            long_fixture = json.loads(long_raw)
+            if (long_fixture['schema'] != 'mastermind.test_native_long_horizon_predecessors102/v1'
+                    or long_fixture['source_commit'] != '9f65957e29eba92245d78609f032aaea523b7cb4'
+                    or set(long_fixture['files']) != {'ext/commission_deadline.py',
+                        'ext/fabric_continuation.py', 'ext/remote_sub_exec.py',
+                        'ext/remote_sub_helpers.py', 'ext/slot.py'}):
+                raise AssertionError('long-horizon predecessor scope differs')
+            helper_name = 'ext/remote_sub_helpers.py'
+            helper_item = long_fixture['files'][helper_name]
+            helper_payload = zlib.decompress(base64.b64decode(helper_item['zlib_base64'], validate=True))
+            if (len(helper_payload) != helper_item['bytes']
+                    or g.digest(helper_payload) != helper_item['sha256']
+                    or helper_item['sha256'] != old[helper_name]):
+                raise AssertionError('historical95 polling helper preimage differs')
+            (cls.built / 'native-code-stage' / helper_name).write_bytes(helper_payload)
             inverse = {
                 'ext/commission_deadline.py': [
                     ('not 0 <= result <= 14400', 'not 0 <= result <= 7200'),
@@ -165,12 +185,6 @@ class PairedLauncherUpgrade(unittest.TestCase):
                      '        3600 if kwargs.get("task_complexity") in (None, "") else 0))',
                      'floor = 7200 if kwargs.get("task_complexity") == "C3_FRONTIER_JUDGMENT" else (\n'
                      '        3600 if kwargs.get("task_complexity") in (None, "", "C2_COMPLEX_BOUNDED") else 0)'),
-                ],
-                'ext/remote_sub_helpers.py': [
-                    ("    # Only broker acquisition reserves two seconds for local process cleanup.\n    # Other callers retain the old conservative whole-second deadline. Never\n    # allow a caller-supplied negative reserve or a new deadline authority.\n    selector = sys.argv[2] if len(sys.argv) == 3 else ''\n    if len(sys.argv) > 3 or selector not in ('', 'broker'):\n        raise ValueError('commission_duration_invalid')\n    reserve = 2.0 if selector == 'broker' else 0.0\n    remaining = require_remaining(deadline)\n    # Short admitted attempts retain the immediate-acquire path; with less\n    # than two seconds to spare, the broker may not queue or wait.\n    print(min(int(cap), max(0, int(remaining - reserve))))", '    # Whole seconds are conservative on the Bash/broker/worker wire. The\n    # process owner below retains fractional time for the actual local fuse.\n    print(min(int(cap), int(require_remaining(deadline))))'),
-                    ("r'[1-9][0-9]{0,4}'", "r'[1-9][0-9]{0,3}'"),
-                    ('raw) or int(raw) > 14400:', 'raw) or int(raw) > 7200:'),
-                    ('assert 1 <= timeout <= 14400', 'assert 1 <= timeout <= 7200'),
                 ],
                 'ext/slot.py': [
                     ('MAX_CHILD_TIMEOUT_S = 14400.0', 'MAX_CHILD_TIMEOUT_S = 7200.0'),
