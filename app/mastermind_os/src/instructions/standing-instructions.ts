@@ -5,10 +5,11 @@ export interface StandingInstructionSelection {readonly work_ref:string}
 export interface InstructionSource {readonly repository:'mastermindx-market-intelligence/macro';readonly commit:string;readonly path:string;readonly content_sha256:string}
 export interface StandingInstruction {readonly instruction_ref:string;readonly text:string;readonly revision:string}
 export type InstructionReadReason='ACCESS_DENIED'|'SOURCE_UNAVAILABLE'|'SOURCE_CHANGED'|'OWNER_NOT_READY'|'RECORD_NOT_FOUND'|'RECORD_INVALID'|'CONTENT_OVER_BUDGET';
-export type StandingInstructionsRead={readonly schema:'mastermind.workspace_project_instructions.v1';readonly selection:StandingInstructionSelection}&(
+type ContentFacts=(
  {readonly availability:'AVAILABLE';readonly source:InstructionSource;readonly declaration:'NOT_DECLARED'|'SUPPLIED';readonly instructions:readonly StandingInstruction[];readonly reason_codes:readonly []}|
  {readonly availability:'UNAVAILABLE';readonly source:null;readonly declaration:null;readonly instructions:null;readonly reason_codes:readonly [InstructionReadReason]});
-const SCHEMA='mastermind.workspace_project_instructions.v1';
+export type StandingInstructionsRead=({readonly schema:'mastermind.workspace_project_instructions.v1';readonly selection:StandingInstructionSelection}&ContentFacts)|({readonly schema:'mastermind.workspace_project_instructions.v2';readonly selection:StandingInstructionSelection;readonly recovery_identity:Readonly<{principal_scope:string}>|null}&ContentFacts);
+const SCHEMA='mastermind.workspace_project_instructions.v1',PUBLIC_SCHEMA='mastermind.workspace_project_instructions.v2';
 const REASONS=new Set<unknown>(['ACCESS_DENIED','SOURCE_UNAVAILABLE','SOURCE_CHANGED','OWNER_NOT_READY','RECORD_NOT_FOUND','RECORD_INVALID','CONTENT_OVER_BUDGET']);
 const match=(pattern:RegExp,value:unknown):value is string=>typeof value==='string'&&pattern.exec(value)?.[0]===value;
 function key(value:unknown,prefix:string):value is string{return typeof value==='string'&&value.startsWith(prefix)&&value.length>=prefix.length+2&&value.length<=prefix.length+64&&match(/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/,value.slice(prefix.length));}
@@ -43,7 +44,8 @@ export function decodeStandingInstructions(value:unknown,expected:StandingInstru
  try{
   const selected=parsed(expected,new Set());if(!record(selected,['work_ref'])||!key(selected.work_ref,'WS:'))return null;
   const body=parsed(value,new Set());
-  if(!record(body,['schema','selection','availability','source','declaration','instructions','reason_codes'])||body.schema!==SCHEMA||!record(body.selection,['work_ref'])||body.selection.work_ref!==selected.work_ref)return null;
+  const owned=record(body,['schema','selection','availability','source','declaration','instructions','reason_codes','recovery_identity']);
+  if(!(owned||record(body,['schema','selection','availability','source','declaration','instructions','reason_codes']))||body.schema!==(owned?PUBLIC_SCHEMA:SCHEMA)||!record(body.selection,['work_ref'])||body.selection.work_ref!==selected.work_ref)return null;
   if(body.availability==='AVAILABLE'){
    if(!source(body.source,selected.work_ref)||!['NOT_DECLARED','SUPPLIED'].includes(body.declaration as string)||!Array.isArray(body.instructions)||!Array.isArray(body.reason_codes)||body.reason_codes.length!==0||body.declaration==='NOT_DECLARED'&&body.instructions.length!==0)return null;
    const refs=new Set<string>();
@@ -54,6 +56,10 @@ export function decodeStandingInstructions(value:unknown,expected:StandingInstru
   }else if(body.availability==='UNAVAILABLE'){
    if(body.source!==null||body.declaration!==null||body.instructions!==null||!Array.isArray(body.reason_codes)||body.reason_codes.length!==1||!REASONS.has(body.reason_codes[0]))return null;
   }else return null;
+  if(owned){
+   if(body.availability==='AVAILABLE'){if(!record(body.recovery_identity,['principal_scope'])||!match(/^[0-9a-f]{64}$/,body.recovery_identity.principal_scope))return null;}
+   else if(body.recovery_identity!==null)return null;
+  }
   if(new TextEncoder().encode(JSON.stringify({ok:true,result:body})+'\n').length>32768)return null;
   return JSON.parse(JSON.stringify(body)) as StandingInstructionsRead;
  }catch{return null;}

@@ -53,7 +53,7 @@ fn target(mode:Mode,selection:&Value,command_id:Option<&str>)->Result<Url> {
     Ok(url)
 }
 fn header(value:&Value,mode:Mode,selection:&Value,command_id:Option<&str>)->bool {
-    let schema=match mode {Mode::Content=>"mastermind.workspace_project_instructions.v1",Mode::Current=>"mastermind.workspace_instruction_admission_control.v1",Mode::Pause=>"mastermind.workspace_instruction_admission_action_result.v1",Mode::Status=>"mastermind.workspace_instruction_admission_status_result.v1"};
+    let schema=match mode {Mode::Content=>"mastermind.workspace_project_instructions.v2",Mode::Current=>"mastermind.workspace_instruction_admission_control.v1",Mode::Pause=>"mastermind.workspace_instruction_admission_action_result.v1",Mode::Status=>"mastermind.workspace_instruction_admission_status_result.v1"};
     let mut expected=selection.clone();if let Some(id)=command_id {expected["command_id"]=Value::String(id.into());}
     value.get("schema").and_then(Value::as_str)==Some(schema)&&value.get("selection")==Some(&expected)
 }
@@ -75,7 +75,7 @@ async fn exchange(app:AppHandle,mode:Mode,selection:Value,command_id:Option<Stri
 }
 #[tauri::command]
 pub async fn read_project_instructions(app:AppHandle,selection:ProjectPlanSelection)->Result<Value> {
-    selection.validate()?;exchange(app,Mode::Content,serde_json::to_value(selection).map_err(|_|"REQUEST_INVALID")?,None,None).await
+    selection.validate()?;exchange(app,Mode::Content,serde_json::json!({"work_ref":selection.work_ref}),None,None).await
 }
 #[tauri::command]
 pub async fn read_instruction_admission_control(app:AppHandle,selection:InstructionSelection)->Result<Value> {
@@ -116,5 +116,9 @@ mod instruction_transport_tests {
         let selected=serde_json::json!({"work_ref":"WS:ONE","instruction_ref":"INS:DAILY-ONE"});let id=format!("mmos-instruction-pause-{}","a".repeat(40));
         let mut value=serde_json::json!({"schema":"mastermind.workspace_instruction_admission_status_result.v1","selection":{"work_ref":"WS:ONE","instruction_ref":"INS:DAILY-ONE","command_id":id}});
         assert!(header(&value,Mode::Status,&selected,Some(&id)));value["selection"]["instruction_ref"]=Value::String("INS:OTHER".into());assert!(!header(&value,Mode::Status,&selected,Some(&id)));
+        let project=serde_json::json!({"work_ref":"WS:ONE"});
+        let mut content=serde_json::json!({"schema":"mastermind.workspace_project_instructions.v2","selection":project});
+        assert!(header(&content,Mode::Content,&project,None));
+        content["schema"]=Value::String("mastermind.workspace_project_instructions.v1".into());assert!(!header(&content,Mode::Content,&project,None));
     }
 }

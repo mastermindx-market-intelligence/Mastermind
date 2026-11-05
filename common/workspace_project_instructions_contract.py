@@ -15,6 +15,7 @@ from common.workspace_project_admission_contract import validate_principal
 FRAME_SCHEMA = "mastermind.workspace_project_instructions_read.v1"
 OPERATION = "project_instructions"
 BODY_SCHEMA = "mastermind.workspace_project_instructions.v1"
+PUBLIC_BODY_SCHEMA = "mastermind.workspace_project_instructions.v2"
 MAX_REQUEST_BYTES = 16384
 MAX_RESPONSE_BYTES = 32768
 REASONS = {"ACCESS_DENIED", "SOURCE_UNAVAILABLE", "SOURCE_CHANGED", "OWNER_NOT_READY", "RECORD_NOT_FOUND", "RECORD_INVALID", "CONTENT_OVER_BUDGET"}
@@ -106,6 +107,24 @@ def unavailable(work_ref, reason="SOURCE_UNAVAILABLE"):
     return validate_body({"schema": BODY_SCHEMA, "selection": selected,
         "availability": "UNAVAILABLE", "source": None, "declaration": None,
         "instructions": None, "reason_codes": [reason]}, selected)
+
+
+@_closed("source_unavailable")
+def validate_public_body(value,expected=None):
+    if type(value) is not dict or set(value)!={"schema","selection","availability","source","declaration","instructions","reason_codes","recovery_identity"} or value['schema']!=PUBLIC_BODY_SCHEMA:
+        raise ValueError('source_unavailable')
+    base=validate_body({**{key:item for key,item in value.items() if key!='recovery_identity'},'schema':BODY_SCHEMA},expected)
+    identity=value['recovery_identity']
+    if base['availability']=='AVAILABLE':
+        if type(identity) is not dict or set(identity)!={'principal_scope'} or type(identity['principal_scope']) is not str or re.fullmatch('[0-9a-f]{64}',identity['principal_scope']) is None:raise ValueError('source_unavailable')
+    elif identity is not None:raise ValueError('source_unavailable')
+    workspace.bounded_canonical({'ok':True,'result':value},limit=MAX_RESPONSE_BYTES-1)
+    return json.loads(workspace.canonical(value))
+
+
+def public_body(body,*,recovery_identity):
+    base=validate_body(body)
+    return validate_public_body({**base,'schema':PUBLIC_BODY_SCHEMA,'recovery_identity':recovery_identity if base['availability']=='AVAILABLE' else None})
 
 
 @_closed("source_unavailable")

@@ -84,9 +84,13 @@ def validate_control(value,expected):
     _exact(value,{'schema','selection','availability','state','source','instruction_revision','permission','owner_context','current_receipt','reason_codes'})
     selected=selection(expected)
     if value['schema']!=CONTROL_SCHEMA or selection(value['selection'])!=selected:raise ValueError()
-    facts=('state','source','instruction_revision','permission','owner_context','current_receipt')
+    facts=('state','source','instruction_revision','permission','current_receipt')
     if value['availability']=='UNAVAILABLE':
         if any(value[k] is not None for k in facts) or type(value['reason_codes']) is not list or len(value['reason_codes'])!=1 or value['reason_codes'][0] not in REASONS:raise ValueError()
+        if value['owner_context'] is not None:
+            if value['reason_codes']!=['INSTRUCTION_NOT_SUPPLIED']:raise ValueError()
+            _exact(value['owner_context'],{'principal_scope'})
+            if not _hex(value['owner_context']['principal_scope'],64):raise ValueError()
     elif value['availability']=='AVAILABLE':
         validate_source(value['source'],selected['work_ref'])
         if value['reason_codes']!=[] or not _hex(value['instruction_revision'],64):raise ValueError()
@@ -122,8 +126,8 @@ def validate_result(value,expected,*,status=False):
     return json.loads(canonical(value))
 
 
-def unavailable(selected,reason='SOURCE_UNAVAILABLE'):
-    return validate_control({'schema':CONTROL_SCHEMA,'selection':selected,'availability':'UNAVAILABLE','state':None,'source':None,'instruction_revision':None,'permission':None,'owner_context':None,'current_receipt':None,'reason_codes':[reason]},selected)
+def unavailable(selected,reason='SOURCE_UNAVAILABLE',*,owner_context=None):
+    return validate_control({'schema':CONTROL_SCHEMA,'selection':selected,'availability':'UNAVAILABLE','state':None,'source':None,'instruction_revision':None,'permission':None,'owner_context':owner_context,'current_receipt':None,'reason_codes':[reason]},selected)
 
 
 def decode_frame(raw):

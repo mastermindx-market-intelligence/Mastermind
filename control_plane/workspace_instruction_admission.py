@@ -83,7 +83,13 @@ def read_instruction_admission_control(service,frame,*,permissions,host_ready,no
     try:
         jobs,_,actor,body,guard,capture=_context(service,checked,permissions=permissions,host_ready=host_ready,now=now)
         rows=[row for row in body['instructions'] if row['instruction_ref']==selected['instruction_ref']]
-        if len(rows)!=1:raise _Refused('INSTRUCTION_NOT_SUPPLIED')
+        if len(rows)!=1:
+            # A removed/undeclared instruction is not an execution capability.
+            # Its real current scoped principal still owns an original pointer;
+            # qualify that identity through the same two sealed source captures.
+            if capture()!=body:raise _Refused('SOURCE_CHANGED')
+            return {'ok':True,'result':wire.unavailable(selected,'INSTRUCTION_NOT_SUPPLIED',
+                owner_context={'principal_scope':actor[len('workspace:'):]})}
         first=jobs.read_instruction_admission_suspension(**selected);guard()
         after=capture()
         second=jobs.read_instruction_admission_suspension(**selected);guard()

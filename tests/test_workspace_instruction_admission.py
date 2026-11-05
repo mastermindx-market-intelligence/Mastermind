@@ -75,7 +75,9 @@ def test_foreign_missing_stale_or_unqualified_requests_never_mutate(tmp_path,mon
 @pytest.mark.parametrize('field',['empty','absent'])
 def test_missing_instruction_content_is_not_empty_execution_or_permission(tmp_path,monkeypatch,field):
     runtime,_,_,_,call,_,_,_=setup(tmp_path,monkeypatch,field);before=count(runtime)
-    assert call('current')['result']['reason_codes']==['INSTRUCTION_NOT_SUPPLIED']
+    current=call('current')['result'];assert current['reason_codes']==['INSTRUCTION_NOT_SUPPLIED']
+    assert len(current['owner_context']['principal_scope'])==64
+    assert all(current[key] is None for key in ['state','source','instruction_revision','permission','current_receipt'])
     assert call()['result']['disposition']=='NOT_DISPATCHED'
     assert call('status')['result']['state']=='NOT_OBSERVED' and count(runtime)==before
 
@@ -114,7 +116,8 @@ def test_authored_revision_does_not_resume_and_original_receipt_recovers_after_r
     path.write_text(path.read_text().replace("standing_instructions:\n  - instruction_ref: INS:DAILY-ONE\n    text: 'Later authored content.'\n",'standing_instructions: []\n'))
     subprocess.run(['git','-C',str(seen['macro']),'add','.'],check=True,capture_output=True);subprocess.run(['git','-C',str(seen['macro']),'commit','-qm','remove content'],check=True,capture_output=True)
     doc['sources']['macro_sha']=subprocess.check_output(['git','-C',str(seen['macro']),'rev-parse','HEAD'],text=True).strip();publish()
-    assert call('current')['result']['availability']=='UNAVAILABLE'
+    unavailable=call('current')['result'];assert unavailable['availability']=='UNAVAILABLE'
+    assert unavailable['owner_context']==current['owner_context'] and unavailable['permission'] is None
     assert call('status')['result']['receipt']==first and count(runtime)==before
 
 

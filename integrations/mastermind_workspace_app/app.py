@@ -1132,6 +1132,17 @@ async def _dispatch_v2(
         return _mission_v4_envelope_response(envelope, selection_value)
     if operation == "mission_v4_original":
         return _mission_v4_original_envelope_response(envelope, selection_value)
+    if operation == "project_instructions":
+        response=_project_instructions_envelope_response(envelope,principal=principal)
+        # Identity is published only by the real authenticated READ owner,
+        # after source qualification and a final current grant/expiry fence.
+        try:
+            if (type(config.now()) is not int or not 0<=config.now()<principal.expires_at
+                    or _check_authorize(config.authorize_principal,principal) is not None
+                    or contract.permission_stamp(config.authorize_principal,principal)!=permission_before):
+                return _refuse_json(403,"access_denied")
+        except Exception:return _refuse_json(403,"access_denied")
+        return response
     return response_fn(envelope)
 
 
@@ -1301,13 +1312,14 @@ async def plan_current(request: Request, *, config: WorkspaceAppConfig) -> JSONR
                               required_keys=_MISSION_QUERY_KEYS, response_fn=_plan_envelope_response)
 
 
-def _project_instructions_envelope_response(envelope):
+def _project_instructions_envelope_response(envelope,*,principal=None):
     from common import workspace_project_instructions_contract as wire
     if type(envelope) is not dict or envelope.get("ok") is not True:
         return _envelope_response(envelope)
     try:
         if set(envelope) != {"ok", "result"}: raise ValueError("invalid envelope")
-        body = wire.validate_body(envelope["result"])
+        from integrations.mastermind_workspace_app.owner_context import workspace_owner_context
+        body = wire.public_body(envelope["result"],recovery_identity=workspace_owner_context(principal))
         contract.bounded_canonical(envelope, limit=wire.MAX_RESPONSE_BYTES - 1)
         raw = contract.bounded_canonical(body, limit=wire.MAX_RESPONSE_BYTES - 1)
     except (TypeError, ValueError, KeyError, RecursionError): return _refuse_json(503, "source_unavailable")

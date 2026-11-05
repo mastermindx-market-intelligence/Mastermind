@@ -57,7 +57,7 @@ async def instruction_admission_http(request,*,config,load_bindings,mode):
         envelope=await await_owned(asyncio.create_task(request_owner(checked)))
         if permissions()!=initial:raise ValueError('access_denied')
         result=wire.validate_envelope(envelope,checked)['result']
-        if mode=='current' and result['availability']=='AVAILABLE' and result['owner_context']!=workspace_owner_context(principal):raise ValueError('source_unavailable')
+        if mode=='current' and result['owner_context'] is not None and result['owner_context']!=workspace_owner_context(principal):raise ValueError('source_unavailable')
         if permissions()!=initial:raise ValueError('access_denied')
     except (Exception,asyncio.CancelledError):result=wire.withheld(checked,attempted=True)['result']
     return _response(result)

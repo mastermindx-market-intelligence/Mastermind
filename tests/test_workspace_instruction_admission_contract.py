@@ -20,6 +20,9 @@ def test_current_revision_and_historical_pause_receipt_are_deliberately_distinct
     body=control();assert wire.validate_control(body,SELECTED)==body
     body['current_receipt']['command_id']='an-original-private-runtime-command';assert wire.validate_control(body,SELECTED)==body
     unavailable=wire.unavailable(SELECTED);assert unavailable['source'] is None and unavailable['current_receipt'] is None
+    identity={'principal_scope':'f'*64}
+    assert wire.unavailable(SELECTED,'INSTRUCTION_NOT_SUPPLIED',owner_context=identity)['owner_context']==identity
+    with pytest.raises(ValueError):wire.unavailable(SELECTED,'ACCESS_DENIED',owner_context=identity)
 
 
 @pytest.mark.parametrize('mutation',[lambda b:b.update(permissions={'pause':True}),lambda b:b['permission'].update(resume=True),lambda b:b['permission'].update(pause=False),lambda b:b.update(state='RUNNING'),lambda b:b['owner_context'].update(principal='caller'),lambda b:b['current_receipt'].update(instruction_ref='INS:OTHER'),lambda b:b['current_receipt'].update(event_id=2**53),lambda b:b['current_receipt'].update(committed_at_ms=True),lambda b:b['source'].update(path='agentos/workstreams/WS-OTHER.md'),lambda b:b['selection'].update(instruction_ref='INS:BAD\n')])
