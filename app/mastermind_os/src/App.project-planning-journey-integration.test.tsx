@@ -382,6 +382,10 @@ describe("App project planning journey integration", () => {
       const diagnostic=await screen.findByText('Native readiness receipt unavailable. No source request was attempted.');
       expect(diagnostic.closest('details.workspace-qualification')).not.toBeNull();
       expect(diagnostic.closest('.notice')).toBeNull();
+      expect(document.querySelector('.workspace-header .eyebrow')?.textContent).toBe('New project');
+      expect(document.querySelector('.workspace-header .workspace-route h2')?.textContent).toBe('New project');
+      expect(document.querySelector('.workspace-header .facts details summary')?.textContent?.trim()).toBe('Sources and access');
+      expect(document.querySelector('.workspace-header .facts details')?.textContent).toContain('Workspace project list and existing tasks');
       expect(h.calls('source_operation_prepare')).toHaveLength(0);
       expect(h.calls('source_operation_submit')).toHaveLength(0);
     }finally{delete (window as unknown as Record<string,unknown>).__TAURI_INTERNALS__;}

@@ -4452,6 +4452,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         )}
       />
     ) : null;
+  const newProjectRoute = active === "Projects" && (projectJourney.shown || projectJourney.invalidLink);
   const quietHeader = active === "Conversations" || active === "Inbox" || active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
     active === "Projects" && !directRoute && (!projectTab ||
       Boolean(projectWorkRef && (projectTab === "Conversation" || catalogueWorkRef)));
@@ -5262,14 +5263,14 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         <header className={quietHeader ? "workspace-header workspace-header-quiet" : "workspace-header"}>
           <div className="workspace-route">
             <button ref={navigationToggle} type="button" className="navigation-toggle" aria-expanded={navigationOpen} aria-controls="workspace-navigation" aria-label={locale === "zh-CN" ? "打开导航" : "Open navigation"} onClick={() => setNavigationOpen(value => !value)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></button>
-            <span className="eyebrow">{directRoute ? (locale === "zh-CN" ? "单个只读任务" : "One read-only task") : navigationLabel(active, locale)}</span>
-            {quietHeader ? <h2 ref={routeHeading} tabIndex={-1}>{navigationLabel(active, locale)}</h2> : <h1 ref={routeHeading} tabIndex={-1}>
+            <span className="eyebrow">{directRoute ? (locale === "zh-CN" ? "单个只读任务" : "One read-only task") : newProjectRoute ? (locale === "zh-CN" ? "新建项目" : "New project") : navigationLabel(active, locale)}</span>
+            {quietHeader ? <h2 ref={routeHeading} tabIndex={-1}>{newProjectRoute ? (locale === "zh-CN" ? "新建项目" : "New project") : navigationLabel(active, locale)}</h2> : <h1 ref={routeHeading} tabIndex={-1}>
               {directRoute ? (locale === "zh-CN" ? "原生任务" : "Native task") : navigationLabel(active, locale)}
             </h1>}
             {!quietHeader && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : headerSummary}</p>}
           </div>
           <div className="facts">
-            {!directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" ? <State value={headerState} /> : null}</summary>{active === "Conversations" ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} /> : null}
+            {!directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" || newProjectRoute ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" && !newProjectRoute ? <State value={headerState} /> : null}</summary>{newProjectRoute ? <p>{locale === "zh-CN" ? "工作区项目列表与现有任务" : "Workspace project list and existing tasks"}</p> : null}{active === "Conversations" || newProjectRoute ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} /> : null}
           </div>
         </header>
         {!native && authState && authState.status === "signed_out" &&
