@@ -877,7 +877,6 @@ def main() -> int:
         try:
             if not _hermes_recipe_is_qualified():
                 raise ReleaseManifestError("Hermes requires the fixed isolated Linux recipe")
-            _install_no_site_sentinels()
             return _hermes_runtime(sys.argv[2:])
         except (ReleaseManifestError, OSError, ValueError, ImportError, SyntaxError):
             print("HERMES_RELEASE_SOURCE_UNQUALIFIED", file=sys.stderr)
