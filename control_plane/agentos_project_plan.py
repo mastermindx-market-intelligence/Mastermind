@@ -137,7 +137,8 @@ class AgentOsProjectPlanReader:
 def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
                           work_ref: str, timeout: float = 10.0, runner=None,
                           include_continuity: bool = False, _canonical_data_view=None,
-                          code_root: Path | None = None, code_commit: str | None = None):
+                          code_root: Path | None = None, code_commit: str | None = None,
+                          _discovery_observed_at_ms: int | None = None):
     """Fixed child entry used inside the collector's pre/post seal bracket.
 
     Macro's actual parser and validator consume bounded captured bytes. No
@@ -147,6 +148,10 @@ def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
     from control_plane.workspace_project_plan import project_workstream_plan
     import re
     selected = validate_selection({"work_ref": work_ref})
+    if (_discovery_observed_at_ms is not None
+            and (type(_discovery_observed_at_ms) is not int or not 0 < _discovery_observed_at_ms <= 9007199254740991
+                 or code_root is None or include_continuity)):
+        raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
     if (not Path(macro_root).is_absolute()
             or type(expected_macro_sha) is not str
             or type(include_continuity) is not bool
@@ -241,6 +246,22 @@ def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
             problems = owner.check_workstream(record, root / path, None)
             if any(problem.hard for problem in problems):
                 return unavailable(work_ref, "RECORD_INVALID")
+            if _discovery_observed_at_ms is not None:
+                # A selected metadata projection uses the very same captured
+                # canonical parser/state builder. It is a separate fixed child
+                # response, never an extra field on the public Plan contract.
+                from control_plane.agentos_project_discovery import compile_captured_record
+                source = validate_source({"repository": "mastermindx-market-intelligence/macro",
+                    "commit": expected_macro_sha, "path": path,
+                    "content_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}, work_ref)
+                code_source = {"repository": source["repository"], "commit": code_sha,
+                    "path": "scripts/agentos.py", "content_sha256": hashlib.sha256(parser_text.encode("utf-8")).hexdigest()}
+                result = compile_captured_record(owner=owner, record=record, source=source,
+                    code_source=code_source, data_root=root,
+                    observed_at_ms=_discovery_observed_at_ms, git=git)
+                if not current():
+                    raise ProjectPlanSourceUnavailable("SOURCE_CHANGED")
+                return result
         finally:
             sys.path[:] = original_path
             if prior is None:
