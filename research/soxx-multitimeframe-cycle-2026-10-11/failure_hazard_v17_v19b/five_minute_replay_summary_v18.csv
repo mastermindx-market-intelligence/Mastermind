@@ -1,0 +1,5 @@
+symbol,original_parent_entry_signals,matched5m_entries,missing_fine_entries,old_new_source_disagreements,max_abs_return_delta,stop_first_new_5m_ambiguous_candles,changes_15m_to_5m,new_5m_source_days
+SOXX,11,11,0,0,0,0,[],258
+SMH,8,8,0,0,0,0,[],258
+QQQ,7,7,0,0,0,0,[],258
+AMD,8,8,0,0,0,0,[],258

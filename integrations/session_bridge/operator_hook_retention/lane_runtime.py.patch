@@ -1,0 +1,34 @@
+--- a/lane_runtime.py
++++ b/lane_runtime.py
+@@ -962,6 +962,7 @@
+     receipt_path: str | os.PathLike[str] | None = None,
+     timeout_returncode: int = -9,
+     capture_limit_bytes: int = DEFAULT_CAPTURE_LIMIT_BYTES,
++    receipt_diagnostics=None,
+ ) -> OwnedProcessResult:
+     try:
+         timeout = float(timeout)
+@@ -1141,11 +1142,23 @@
+             stdin_error=stdin_state.get("error_code"),
+         )
+         ended_at = _utc_now()
++        diagnostic_fields = {}
++        if receipt_diagnostics is not None:
++            try:
++                if not (stdout_complete and stderr_complete and stdin_complete):
++                    raise ValueError('diagnostic_capture_incomplete')
++                diagnostic_fields['operator_hook_diagnostics'] = receipt_diagnostics()
++            except Exception:
++                diagnostic_fields['operator_hook_diagnostics'] = {
++                    'schema': 'mastermind.fabric_operator_hook_diagnostics.v1',
++                    'state': 'UNAVAILABLE', 'events': [], 'authority': False,
++                    'invocation_authenticated': False}
+         if receipt_path is not None:
+             _append_process_receipt(
+                 Path(receipt_path),
+                 {
+                     "schema": PROCESS_RECEIPT_SCHEMA,
++                    **diagnostic_fields,
+                     "label": safe_label,
+                     "pid": proc.pid,
+                     "pgid": pgid,
