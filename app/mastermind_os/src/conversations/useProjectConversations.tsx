@@ -49,6 +49,6 @@ export function useProjectConversations(props: ProjectConversationsWorkspace) {
   }, [props.host, session, factory, sourceGeneration, readAllowed]);
   const current = held && held.host === props.host && held.session === session && held.factory === factory &&
     held.sourceGeneration === sourceGeneration ? held.reader : undefined;
-  return { history: current, panel: props.workRef ? <ProjectConversations key={sourceGeneration}
+  return { history: current, panel: props.workRef ? <ProjectConversations key={`project-conversations:${sourceGeneration}`}
     workRef={props.workRef} owner={current?.owner} locale={props.locale} theme={props.theme}/> : null };
 }

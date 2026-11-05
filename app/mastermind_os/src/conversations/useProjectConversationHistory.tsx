@@ -49,7 +49,7 @@ export function useProjectConversationHistory(props: ProjectConversationHistoryW
   }, [props.host, session, factory, sourceGeneration, readAllowed]);
   const current = held && held.host === props.host && held.session === session && held.factory === factory &&
     held.sourceGeneration === sourceGeneration ? held.reader : undefined;
-  return { history: current, panel: props.workRef ? <ProjectConversationHistory key={sourceGeneration}
+  return { history: current, panel: props.workRef ? <ProjectConversationHistory key={`saved-replies:${sourceGeneration}`}
     workRef={props.workRef} sourceGeneration={sourceGeneration} history={current}
     canRead={canRead} locale={props.locale} theme={props.theme}/> : null };
 }
