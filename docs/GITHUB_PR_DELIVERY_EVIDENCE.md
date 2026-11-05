@@ -33,7 +33,7 @@ reader, API client or GitHub mutation is added.
    Complete metadata is never full code/test review. GitHub file enumeration
    can be capped; exhaustion is explicit, not assumed.
 3. **What has an authorized source owner qualified?** Optional exact-head
-   `DraftReadinessFacts` plus the digest of the actual observation. The digest
+   `DraftReadinessFacts` plus the `source_evidence_digest` of the actual source/hold observation. The digest
    binds evidence, not identity or authority. The trusted caller must already
    hold source/custody/qualification authority; PR-authored text cannot provide
    it. The exposed host read method does not accept qualification input.
@@ -59,7 +59,10 @@ all bounded discussion surfaces are inspected, including text beyond the old
 cannot release a real hold. Conversely, after the authorized source owner has
 adjudicated the exact observed evidence and supplies matching qualification,
 a heuristic mention cannot create a permanent new hold. A stale or absent
-observation digest produces no qualified readiness advice. Existing explicit
+source-evidence digest produces no qualified readiness advice. CI progress, reactions,
+and auto-merge enrollment change the full audit digest but not unchanged source
+qualification. New heads, bases, source/body/title/label changes and changed
+restriction/review evidence invalidate the source binding. Existing explicit
 NEVER_MERGE, actual Draft holds, active source writers, unknown effects,
 incomplete scope and stale qualification continue to fail closed in the owner.
 The concurrent ACTIVE-workstream/source-writer repair remains on its incumbent
@@ -116,3 +119,19 @@ owner-authorized live invocation and action consumption must be proven separatel
 The reader does not install or enable that host. #2064 retains release-policy
 ownership, #2066 retains durable orchestration/Wake, and the existing repository
 release controllers retain merge execution. Do not replace those incumbents.
+
+## Exact-source composition with the incumbent readiness repair
+
+The separate #2078 head `7e47f3667e8b25c3d9e9206f4e0f861d72390299`
+repairs the known ACTIVE-programme/source-writer conflation. Its exact lifecycle
+blob is SHA-256 `3106a3e68515305a99c6615273fb92220b8493da03276b610d8bb688fc40040b`.
+The consumer was tested against that inspected module in memory, without changing
+its original branch or copying the repair into this PR: 131 joint-source tests
+passed, including a source-qualified ACTIVE programme and five genuine negative
+gates; lifecycle closure still KEEP_ACTIVE. This is composition proof, not formal
+approval, protected release or installed runtime proof.
+
+The live qualified-Ready path needs that incumbent repair (or its accepted
+semantic equivalent) before ACTIVE-programme readiness is claimed. The read-only
+source evidence remains useful independently; this PR does not silently override
+the current readiness owner or create its own active-work policy.

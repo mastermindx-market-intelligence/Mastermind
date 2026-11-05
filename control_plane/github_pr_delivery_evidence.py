@@ -145,6 +145,41 @@ def _footprint(files: tuple[dict, ...]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def source_evidence_digest(
+    *, repository: str, pull_number: int, current: dict,
+    collections: Mapping[str, tuple[dict, ...]], complete: Mapping[str, bool],
+) -> str:
+    """Bind source/hold adjudication, not incidental CI or release progress.
+
+    The full audit digest remains separate. No approval/authority is supplied by
+    this hash. Head/base, content, discussion identities and source coverage are
+    material; check progress, reactions and auto-merge enrollment are not source
+    edits and must not repeatedly revoke an unchanged local qualification.
+    """
+    signature = pr_signature(current, repository=repository, pull_number=pull_number)
+    signature.pop("updated_at")
+    signature.pop("auto_merge_digest")
+    source_names = ("files", "issue_comments", "review_comments", "reviews")
+    records = {}
+    for name in source_names:
+        rows = []
+        for value in collections[name]:
+            item = _obj(value)
+            if name == "files":
+                fields = ("filename", "previous_filename", "sha", "status", "additions", "deletions", "changes")
+            else:
+                fields = ("id", "body", "state", "commit_id", "original_commit_id", "path", "line", "side", "position", "in_reply_to_id")
+            row = {key: item.get(key) for key in fields}
+            if name != "files":
+                actor = item.get("user")
+                row["author"] = ({key: actor.get(key) for key in ("id", "login", "type")}
+                    if type(actor) is dict else None)
+            rows.append(row)
+        records[name] = sorted(rows, key=lambda row: json.dumps(row, sort_keys=True, ensure_ascii=True))
+    return digest({"signature": signature, "records": records,
+        "source_coverage": {name: complete[name] for name in source_names}})
+
+
 def project_delivery_evidence(
     *, repository: str, pull_number: int, before: dict, after: dict,
     collections: Mapping[str, tuple[dict, ...]], complete: Mapping[str, bool],
@@ -256,6 +291,8 @@ def project_delivery_evidence(
     if mergeability in {"dirty", "behind", "blocked"}:
         reasons.append("INTEGRATION_OR_RELEASE_GATE_OBSERVED")
     observation_digest = digest({"before": before, "after": after, "collections": collections, "complete": coverage})
+    qualification_digest = source_evidence_digest(repository=repository, pull_number=pull_number,
+        current=after, collections=collections, complete=coverage)
     advice = None
     qualification_bound = False
     if qualification is not None:
@@ -272,7 +309,7 @@ def project_delivery_evidence(
         # can adjudicate historical/released mentions only against these exact
         # observed bytes. This digest binds evidence; it authenticates nobody.
         qualification_bound = (type(qualification_evidence_digest) is str
-            and qualification_evidence_digest == observation_digest)
+            and qualification_evidence_digest == qualification_digest)
         if not qualification_bound:
             reasons.append("QUALIFICATION_OBSERVATION_UNBOUND")
         if source_record_complete and qualification_bound and current["head_repository"] == repository:
@@ -316,5 +353,6 @@ def project_delivery_evidence(
         "source_owner_qualification_bound": qualification_bound,
         "next_action": next_action, "reasons": reasons,
         "evidence_digest": observation_digest,
+        "source_evidence_digest": qualification_digest,
     }
     return result

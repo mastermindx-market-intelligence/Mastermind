@@ -5,7 +5,7 @@ import json
 import pytest
 
 from control_plane.github_pr_delivery_evidence import (
-    DeliveryEvidenceInvalid, digest, project_delivery_evidence,
+    DeliveryEvidenceInvalid, digest, source_evidence_digest, project_delivery_evidence,
 )
 from control_plane.github_pr_lifecycle import (
     DraftReadinessFacts, EffectState, ExplicitDisposition, IntegrationState,
@@ -64,7 +64,7 @@ def project(before=None, after=None, collections=None, complete=None, qualificat
         repository=REPO, pull_number=7, before=before, after=after,
         collections=collections, complete=complete, observed_at="2026-11-05T08:00:01Z",
         qualification=qualification,
-        qualification_evidence_digest=(digest({"before": before, "after": after, "collections": collections, "complete": complete})
+        qualification_evidence_digest=(source_evidence_digest(repository=REPO, pull_number=7, current=after, collections=collections, complete=complete)
             if qualification is not None and bind_qualification else None),
     )
 
@@ -330,3 +330,60 @@ def test_unrecognized_commit_status_is_unknown_not_arbitrary_output():
 def test_mergeability_has_a_closed_observation_vocabulary(state):
     with pytest.raises(DeliveryEvidenceInvalid, match="MERGEABILITY_INVALID"):
         project(before=pr(mergeable_state=state))
+
+
+def test_source_qualification_survives_ci_progress_without_reauthorizing_release():
+    rows = data(); rows["checks"][0].update(status="in_progress", conclusion=None)
+    original = project(collections=rows)
+    rows["checks"][0].update(status="completed", conclusion="success")
+    result = project_delivery_evidence(repository=REPO, pull_number=7,
+        before=pr(), after=pr(), collections=rows, complete={key: True for key in rows},
+        observed_at="2026-11-05T08:40:00Z", qualification=qualified(),
+        qualification_evidence_digest=original["source_evidence_digest"])
+    assert result["evidence_digest"] != original["evidence_digest"]
+    assert result["source_evidence_digest"] == original["source_evidence_digest"]
+    assert result["qualification_advice"]["verdict"] == "READY_CANDIDATE"
+    assert result["release_authorized"] is False
+
+
+def test_audit_digest_cannot_be_substituted_for_source_binding():
+    original = project(); rows = data()
+    result = project_delivery_evidence(repository=REPO, pull_number=7,
+        before=pr(), after=pr(), collections=rows, complete={key: True for key in rows},
+        observed_at="2026-11-05T08:40:00Z", qualification=qualified(),
+        qualification_evidence_digest=original["evidence_digest"])
+    assert result["qualification_advice"] is None
+
+
+@pytest.mark.parametrize("changes", [
+    {"body": "New source meaning"}, {"title": "New scope"},
+    {"labels": [{"name": "hold"}]},
+    {"head": {"sha": BASE, "repo": {"full_name": REPO}}},
+    {"base": {"sha": HEAD, "repo": {"full_name": REPO}}},
+])
+def test_source_binding_changes_for_material_pr_changes(changes):
+    assert project(before=pr(**changes))["source_evidence_digest"] != project()["source_evidence_digest"]
+
+
+def test_new_hold_comment_invalidates_prior_source_adjudication():
+    rows = data(); rows["issue_comments"] = ({"id": 19, "body": "do not merge"},)
+    original = project(); current = pr(comments=1)
+    result = project_delivery_evidence(repository=REPO, pull_number=7,
+        before=current, after=current, collections=rows, complete={key: True for key in rows},
+        observed_at="2026-11-05T08:40:00Z", qualification=qualified(),
+        qualification_evidence_digest=original["source_evidence_digest"])
+    assert result["qualification_advice"] is None
+    assert result["next_action"] == "ADJUDICATE_RECORDED_RESTRICTIONS"
+
+
+def test_irrelevant_reactions_and_auto_merge_do_not_invalidate_source_binding():
+    rows = data(); rows["issue_comments"] = ({"id": 19, "body": "unchanged", "reactions": {"total_count": 0}},)
+    original = project(before=pr(comments=1), collections=rows)
+    rows["issue_comments"][0]["reactions"] = {"total_count": 3}
+    current = pr(comments=1, auto_merge={"merge_method": "squash"}, updated_at="2026-11-05T08:41:00Z")
+    result = project_delivery_evidence(repository=REPO, pull_number=7,
+        before=current, after=current, collections=rows, complete={key: True for key in rows},
+        observed_at="2026-11-05T08:42:00Z", qualification=qualified(),
+        qualification_evidence_digest=original["source_evidence_digest"])
+    assert result["qualification_advice"]["verdict"] == "READY_CANDIDATE"
+    assert result["release_authorized"] is False
