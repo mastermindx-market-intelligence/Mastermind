@@ -69,7 +69,7 @@ GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
     'remote_sub_exec.py': '9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1',
     'pick.py': '5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892',
     'remote_sub.sh': 'a1e271170778f992cf07c780234620c22d17f6242581311c414e30dd428ade40',
-    'remote_sub_helpers.py': '3a4efaefd63244e77cee385d83da0bb4e53b86a0e83a183601f2fa80ec4d602b',
+    'remote_sub_helpers.py': 'f7d62e9bdfa7388b7f86c0f968a021bf3949141ddcc8515103075ed3a1da2f93',
     'sub.sh': '4956942c77421b9d1015889995ebf0419399ea62c16de608765a0795b5fb551f',
     'native_remote.py': '2beef7dd4de1dab2908970bed48cfd3fdfd99da2d99bc8de72a92d2a1b2418b6',
     'fabric_operator_contract.py': 'e6b32fd1547402c1184f826f74c253f34384cb6e32306e55b84449a892d19b5e',
@@ -132,6 +132,17 @@ GO_POST_FAILURE_ADDITIONS = {
     "post_failure_observation_delivery.py": "0e096d439e71600a20aabd6f29ea94127596ab3c1a4fb31d567194eba145c7f3"
 }
 
+# The completed-SSH255 observer and its helper are one protected source cohort.
+# Neither half is admitted independently or backdated into the historical102.
+GO_COMPLETED_POLL_PREIMAGES = {
+    "fabric_task.py": "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b",
+    "remote_sub_helpers.py": "3a4efaefd63244e77cee385d83da0bb4e53b86a0e83a183601f2fa80ec4d602b",
+}
+GO_COMPLETED_POLL_DIGESTS = {
+    "fabric_task.py": "baae8bb99ef6ccda1162dd486a10c8e713bcf4e731ba9160c5e9d1d9bdd1e7d8",
+    "remote_sub_helpers.py": "f7d62e9bdfa7388b7f86c0f968a021bf3949141ddcc8515103075ed3a1da2f93",
+}
+
 
 def validate_go_base_manifest(manifest, dependency_hashes):
     """Accept exact historical102/current104 and captured application compositions.
@@ -140,7 +151,8 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     component first. The picker successor is independently source-pinned by
     the existing Grok composition owner. Normalize only that exact successor
     (or the unchanged historical picker), plus the two closed same-owner
-    support changes and the exact protected diagnostic outcome correction.
+    support changes, the exact protected diagnostic outcome correction, and
+    the complete protected poll pair within the current diagnostic closure.
     Every other member/key stays bound to actual395b.
     """
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
@@ -152,6 +164,12 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         raise ValueError("native Go base dependency closure differs")
     historical = dict(manifest)
     current_diagnostics = set(manifest) == expected
+    poll_pair = {name: manifest["ext/" + name] for name in GO_COMPLETED_POLL_PREIMAGES}
+    if (poll_pair != GO_COMPLETED_POLL_PREIMAGES
+            and not (current_diagnostics and poll_pair == GO_COMPLETED_POLL_DIGESTS)):
+        raise ValueError("native Go completed-poll cohort is not the exact protected source")
+    historical.update({"ext/" + name: digest
+                       for name, digest in GO_COMPLETED_POLL_PREIMAGES.items()})
     for name, original in GO_POST_FAILURE_PREIMAGES.items():
         exact = GO_POST_FAILURE_DIGESTS[name] if current_diagnostics else original
         if manifest["ext/" + name] != exact:

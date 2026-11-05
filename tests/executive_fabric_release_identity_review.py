@@ -8,7 +8,7 @@ these pins are not learned or refreshed by the tests.
 
 REVIEWED_FILES = {
     # Reviewed application HTTP statuses, permission modes and bounded limits.
-    # These exact 51 spans contain no account/principal identity. Byte drift
+    # These exact 56 spans contain no account/principal identity. Byte drift
     # exposes the source to the original guard again.
     'app/main.py': {
         "sha256": 'dea65255815d2a906f1b2108e889e5fbb087389b4508ce68c179037a7457513b',
@@ -18,46 +18,51 @@ REVIEWED_FILES = {
         ),
     },
     'ops/native_fabric/quota_continuity/candidate/go_shim.py': {
-        "sha256": '5adee31dce9355257cdef88353f83142e86ccd4a80e2c544522a9567298bbbbf',
+        "sha256": '47d1ee9df7705d8552efe26af561773d59441be2a488a09f89bef0124d4bc4b4',
         "sites": (
-            (1437, 32, 37, 'int', '0o700'),
-            (1788, 140, 143, 'int', '900'),
-            (1790, 33, 36, 'int', '900'),
-            (1853, 22, 25, 'int', '429'),
-            (2036, 79, 82, 'int', '500'),
-            (2114, 34, 37, 'int', '400'),
-            (2129, 33, 36, 'int', '500'),
-            (2149, 34, 37, 'int', '502'),
-            (2382, 92, 95, 'int', '400'),
-            (2389, 99, 102, 'int', '503'),
-            (2392, 80, 83, 'int', '409'),
-            (2397, 91, 94, 'int', '401'),
-            (2401, 96, 99, 'int', '400'),
-            (2421, 113, 116, 'int', '512'),
-            (2425, 94, 97, 'int', '400'),
-            (2433, 106, 109, 'int', '503'),
-            (2454, 109, 112, 'int', '400'),
-            (2458, 96, 99, 'int', '400'),
-            (2467, 103, 106, 'int', '503'),
-            (2470, 96, 99, 'int', '429'),
-            (2480, 102, 105, 'int', '503'),
-            (2488, 106, 109, 'int', '429'),
-            (2524, 103, 106, 'int', '503'),
-            (2543, 74, 77, 'int', '502'),
-            (2644, 23, 26, 'int', '400'),
-            (2691, 35, 38, 'int', '429'),
-            (2720, 37, 40, 'int', '404'),
-            (2751, 27, 30, 'int', '400'),
-            (2754, 27, 30, 'int', '400'),
-            (2757, 27, 30, 'int', '400'),
-            (2763, 31, 34, 'int', '400'),
-            (2770, 31, 34, 'int', '429'),
+            (1466, 32, 37, 'int', '0o700'),
+            (1817, 140, 143, 'int', '900'),
+            (1819, 33, 36, 'int', '900'),
+            (1882, 22, 25, 'int', '429'),
+            (2070, 79, 82, 'int', '500'),
+            (2148, 34, 37, 'int', '400'),
+            (2163, 33, 36, 'int', '500'),
+            (2183, 34, 37, 'int', '502'),
+            (2421, 92, 95, 'int', '400'),
+            (2428, 99, 102, 'int', '503'),
+            (2431, 80, 83, 'int', '409'),
+            (2436, 91, 94, 'int', '401'),
+            (2440, 96, 99, 'int', '400'),
+            (2460, 113, 116, 'int', '512'),
+            (2464, 94, 97, 'int', '400'),
+            (2476, 106, 109, 'int', '503'),
+            (2489, 101, 104, 'int', '409'),
+            (2505, 109, 112, 'int', '400'),
+            (2508, 96, 99, 'int', '400'),
+            (2528, 118, 121, 'int', '503'),
+            (2534, 108, 111, 'int', '409'),
+            (2540, 109, 112, 'int', '409'),
+            (2551, 100, 103, 'int', '409'),
+            (2554, 103, 106, 'int', '503'),
+            (2557, 96, 99, 'int', '429'),
+            (2567, 102, 105, 'int', '503'),
+            (2575, 106, 109, 'int', '429'),
+            (2612, 103, 106, 'int', '503'),
+            (2631, 74, 77, 'int', '502'),
+            (2732, 23, 26, 'int', '400'),
+            (2805, 35, 38, 'int', '429'),
+            (2834, 37, 40, 'int', '404'),
+            (2865, 27, 30, 'int', '400'),
+            (2868, 27, 30, 'int', '400'),
+            (2871, 27, 30, 'int', '400'),
+            (2877, 31, 34, 'int', '400'),
+            (2884, 31, 34, 'int', '429'),
         ),
     },
     'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {
-        "sha256": 'e76377447df0c0f3466a61097e81cbf2ef5d3eeb513dfb0a761c7ba16934ec26',
+        "sha256": 'd6705a98d6f211b38d98dc5f49514dac066cac2b2a49cc283d1d8eb910247291',
         "sites": (
-            (527, 60, 65, 'int', '0o700'),
+            (555, 60, 65, 'int', '0o700'),
         ),
     },
     'ops/native_fabric/quota_continuity/source/go_shim.py': {
@@ -635,4 +640,23 @@ REVIEWED_FILES['integrations/hermes_secretary/tab_sweep.py'] = {
 REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/post_failure_observation.py'] = {
     'sha256': '2a78630ccaf574da752c77d7b8f821723ccb264b970e2fe38b1976d886ca97a0',
     'sites': ((293, 79, 84, 'int', '0o700'),),
+}
+
+
+# PR1890 attended parent classification under the current Chairman source waiver:
+# two CSS dimensions and five graph coordinates, never identities or grants.
+# Each complete token is on an ASCII physical line. Exact final HTML bytes and
+# seven spans only; every source/context/path change restores ordinary D8.
+# This pin is not independent/formal review or a CodeQL finding disposition.
+REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/account_network_interactive.html'] = {
+    'sha256': '62492c23f2d6a21d389268e51823f6b2f130e2e47a64f17bcfc38e886e9cc3d8',
+    'sites': (
+        (8, 77, 80, 'int', '680'),
+        (37, 17, 20, 'int', '900'),
+        (70, 45, 48, 'int', '495'),
+        (70, 51, 54, 'int', '535'),
+        (72, 45, 48, 'int', '720'),
+        (74, 10, 13, 'int', '922'),
+        (79, 56, 59, 'int', '800'),
+    ),
 }

@@ -120,6 +120,9 @@ def test_default_build_stays_exact_reviewed_104_and_go_adds_only_the_fixed_pair(
     historical.update({"ext/" + name: value for name, value in builder.GO_SELECTION_SUPPORT_PREIMAGES.items()})
     assert default["ext/provider_outcome.py"] == builder.GO_PROTECTED_PROVIDER_OUTCOME_SHA256
     historical["ext/provider_outcome.py"] = builder.GO_BASE_PROVIDER_OUTCOME_SHA256
+    for name, original in builder.GO_COMPLETED_POLL_PREIMAGES.items():
+        assert default["ext/" + name] == builder.GO_COMPLETED_POLL_DIGESTS[name]
+        historical["ext/" + name] = original
     for name, original in builder.GO_POST_FAILURE_PREIMAGES.items():
         assert default["ext/" + name] == builder.GO_POST_FAILURE_DIGESTS[name]
         historical["ext/" + name] = original
@@ -197,6 +200,8 @@ def test_exact_post_failure_cohort_and_prior_102_are_both_closed(builds):
     current = json.loads((builds.default / "native-manifest.json").read_bytes())
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     prior = dict(current)
+    for name, original in builder.GO_COMPLETED_POLL_PREIMAGES.items():
+        prior["ext/" + name] = original
     for name, original in builder.GO_POST_FAILURE_PREIMAGES.items():
         prior["ext/" + name] = original
     for name in builder.GO_POST_FAILURE_ADDITIONS:
@@ -223,3 +228,27 @@ def test_exact_post_failure_cohort_and_prior_102_are_both_closed(builds):
     mixed["ext/" + name] = builder.GO_POST_FAILURE_PREIMAGES[name]
     with pytest.raises(ValueError):
         builder.validate_go_base_manifest(mixed, captured)
+
+
+def test_completed_poll_pair_is_closed_and_cannot_relabel_historical_102(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    builder.validate_go_base_manifest(current, captured)
+    pre_poll = dict(current)
+    pre_poll.update({"ext/" + name: digest
+                     for name, digest in builder.GO_COMPLETED_POLL_PREIMAGES.items()})
+    builder.validate_go_base_manifest(pre_poll, captured)
+    for name, original in builder.GO_COMPLETED_POLL_PREIMAGES.items():
+        for digest in (original, "f" * 64):
+            mixed = dict(current)
+            mixed["ext/" + name] = digest
+            with pytest.raises(ValueError, match="completed-poll cohort"):
+                builder.validate_go_base_manifest(mixed, captured)
+    synthetic_prior = dict(current)
+    synthetic_prior.update({"ext/" + name: digest
+                            for name, digest in builder.GO_POST_FAILURE_PREIMAGES.items()})
+    for name in builder.GO_POST_FAILURE_ADDITIONS:
+        del synthetic_prior["ext/" + name]
+    assert len(synthetic_prior) == 102
+    with pytest.raises(ValueError, match="completed-poll cohort"):
+        builder.validate_go_base_manifest(synthetic_prior, captured)

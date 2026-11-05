@@ -457,9 +457,19 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
     protected=([str(bootstrap.resolve()),str(bootstrap.parent)] if system_launch else [str(real),str(logical.parent),*set(observed.values())])
     ancestry=(bootstrap.resolve(),bootstrap) if system_launch else (real,logical,*map(Path,observed.values()))
     ancestors={str(v) for p in ancestry for v in p.parents}
+    # RWE starts through a runner-owned virtual environment. Model only its
+    # exact existing regular startup configuration files, preserving real
+    # content, link, size, getpath and drift checks in the production pin.
+    import stat
+    startup_configs=set()
+    for directory in (logical.parent,logical.parent.parent):
+        candidate=directory/'pyvenv.cfg'
+        try:info=candidate.lstat()
+        except FileNotFoundError:continue
+        if stat.S_ISREG(info.st_mode):startup_configs.add(str(candidate))
     private=[];fault_acl=False
     def distribution(name):
-        return str(name) in ancestors or any(str(name)==p or str(name).startswith(p+'/') for p in protected)
+        return str(name) in ancestors or str(name) in startup_configs or any(str(name)==p or str(name).startswith(p+'/') for p in protected)
     def root_view(info):
         return _preserving_stat_view(info,uid=0,mode=info.st_mode&~0o022)
     def owned_fstat(fd):
@@ -502,7 +512,7 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         # image/getpath/Bash/immutable FD and protocol validators stay real.
         monkeypatch.setattr(os,'fstat',owned_fstat);monkeypatch.setattr(os,'stat',owned_stat);monkeypatch.setattr(os,'lstat',owned_lstat);monkeypatch.setattr(os,'getxattr',modeled_xattr)
         monkeypatch.setenv('HOME',account.pw_dir)
-        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private),prefixes=protected+[scratch],root_directories=ancestors,root_files=[real])
+        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private)|startup_configs,prefixes=protected+[scratch],root_directories=ancestors,root_files=[real,*startup_configs])
         result=json.loads(_inert_bootstrap(req,probe,diagnostic_request=request))
         assert result['binary']['real_path']==str(real)
         assert result['pre_execution']['snapshot_sealed'] is True
@@ -573,7 +583,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='46b742d9fe21f5574c50b141d3495e16a827a906155ac2304ecf0240e69583a3'
+    assert hashlib.sha256(current_raw).hexdigest()=='da702709b6b7ea40d3e26a0d64fe547de3575fa7cd03226ba5b8003a064a2917'
     current=json.loads(current_raw)
     assert len(before)==95 and len(current)==104
     assert set(before)<=set(current)
