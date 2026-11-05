@@ -67,8 +67,8 @@ Fabric run commissions (all stable originals; no duplicate retries):
 |---|---|---|
 | `client-inventory-20261105-c3-01` | Source client/tool/package census | terminal rc0; complete retained response 10,528 bytes; manual parent review; accepted digest `ebc4da744af83611f84263782f70bfa236b73a5d6e8e17319dd4f48068c9ddea` |
 | `inventory-20261105-c3-01` | Existing CI/Wake/consumer owner census | terminal rc0; complete retained response 6,372 bytes; manual parent review; accepted digest `19e5b0becdb045b27cfc45d15c7c99bafca8f8e7c09760eacff46fd314da044c` |
-| `wake-join-20261105-c3-01` | Validated CI continuation persistence through existing Wake ledger | original controller 11855; result outstanding |
-| `finite-watch-20261105-c3-01` | Executable finite timer/CI/review/health observation + focused tests | original controller 13878; result outstanding |
+| `wake-join-20261105-c3-01` | Validated CI continuation persistence through existing Wake ledger | terminal rc0; report received, promised patch retrieval outstanding; not accepted |
+| `finite-watch-20261105-c3-01` | Executable finite timer/CI/review/health observation + focused tests | terminal rc0; complete patch integrated as candidate, 86 focused tests pass; substantive source findings require repair; not accepted |
 | `guidance-20261105-c3-01` | Source AGENTS/delegation and account-neutral operating skill | original controller 34220; observed existing provider lease wait; no worker START yet |
 
 These are finite leaf commissions, not reciprocal dialogue watchers. Controller
@@ -91,3 +91,22 @@ read failures, not proof of a new authentication denial or restored service.
 Independent source, tests, plugin publication and admitted Fabric proof continue.
 
 Package integration check: the shared CEO manifest/allowlist and four affected package-contract tests pass after the planned 0.2.2 skill addition. The first full package run correctly caught four stale 0.2.1/skill-roster expectations; only those expectations were updated, preserving frozen business app bindings and all permission tests. This is source validation, not account installation.
+
+## Candidate implementation review — 2026-11-05
+
+The first finite observer is published only as a reviewable candidate for the next
+paid repair unit. Parent verification ran all 86 focused tests successfully, but
+C3 source review found material gaps that those tests did not cover: an absolute
+deadline must span all sequential reads; cancellation must be latched and win over
+a late event; every signal-handler exit must restore the incumbent handler;
+GitHub output must be bounded during capture; service health requires affirmative
+source-specific evidence and terminal denial handling; CI must bind the execution
+repository and run attempt; review baselines must detect same-ID dismissal and
+strictly bound response identity. No installation or source-result acceptance is
+claimed. The next repair must add discriminating offline cases for these findings.
+
+The Wake adapter returned a test report without its promised unified diff. That
+return remains unaccepted until the exact artifact is retrieved, reviewed, and
+verified in the parent workspace. Its reported initial workspace collision was
+recovered by the worker in a unique isolated worktree; future packets require a
+run-derived unique worktree and no sibling workspace reuse.
