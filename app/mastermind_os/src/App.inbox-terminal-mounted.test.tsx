@@ -28,6 +28,8 @@ async function mount(terminalState: "UNCONFIGURED" | "SIGNED_OUT") {
   fireEvent.click(screen.getAllByRole("button", {name:"Inbox"})[0]);
   await screen.findByRole("region", {name:"Terminal brief requests"});
   expect(document.querySelector('.workspace-header-quiet')).toBeTruthy();
+  expect(screen.getByText("Workspace source", {exact:true})).toBeTruthy();
+  expect(screen.queryByText("Source status", {exact:true})).toBeNull();
   expect(document.querySelector('main > .notice')).toBeNull();
   return {invoke, client};
 }

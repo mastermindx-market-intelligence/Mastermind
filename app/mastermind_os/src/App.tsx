@@ -4653,7 +4653,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             {!quietHeader && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : headerSummary}</p>}
           </div>
           <div className="facts">
-            {!directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{locale === "zh-CN" ? "来源状态" : "Source status"} <State value={headerState} /></summary><p>{headerSummary}</p><p role="status">{visibleNotice}</p></details> : <State value={headerState} /> : null}
+            {!directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Inbox" ? (locale === "zh-CN" ? "工作区来源" : "Workspace source") : (locale === "zh-CN" ? "来源状态" : "Source status")} <State value={headerState} /></summary><p>{headerSummary}</p><p role="status">{visibleNotice}</p></details> : <State value={headerState} /> : null}
             {authState ? (
               <div>
                 <small>
