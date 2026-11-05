@@ -9,6 +9,18 @@ Subprocess calls go through _run so tests can mock them.
 """
 from __future__ import annotations
 
+# The existing CLI remains the bootstrap trust boundary. Re-exec before any
+# path-searchable import; source library imports retain their existing behavior.
+import sys as _bootstrap_sys
+if __name__ == "__main__" and not (
+        _bootstrap_sys.flags.isolated and _bootstrap_sys.flags.no_site
+        and _bootstrap_sys.dont_write_bytecode):
+    import posix as _bootstrap_os
+    _bootstrap_os.execv(
+        _bootstrap_sys.executable,
+        [_bootstrap_sys.executable, "-I", "-S", "-B", __file__, *_bootstrap_sys.argv[1:]],
+    )
+
 import argparse
 import fcntl
 import hashlib
@@ -186,6 +198,52 @@ V2_C2_BUSINESS_FLEET_PREDECESSOR = frozenset((
     "private-tunnel-auth.mjs", "private-tunnel-gateway.mjs",
 ))
 
+# Exact 2026-10-21 predecessor seals only. These do not admit later
+# unreconciled installations or authorize a compatibility upgrade.
+V2_FABRIC_DESIGN_TAILNET_FILES = frozenset((
+    "fleet-status.mjs", "gateway.mjs", "git-publish.mjs",
+    "output-budget.mjs", "package-lock.json", "package.json",
+    "paper-design.mjs", "private-tunnel-auth.mjs",
+    "private-tunnel-gateway.mjs", "tailnet-gateway.mjs",
+))
+
+V2_FABRIC_READ_OPERATOR_FILES = V2_FABRIC_DESIGN_TAILNET_FILES | frozenset((
+    "fabric-operator.mjs",
+))
+
+SEALED_V2_FLEET_GATEWAY_PREDECESSORS = {
+    "admin-business": (
+        "68792c832344c61a7f0ca3462d85c85eba0e586877ee68934153c2bc18e55ebd",
+        "5dc83dd6aa840b3d321502045db1c4dcaf6fa9d09d5cca8422d5717c84191b1a",
+        V2_C2_BUSINESS_FLEET_PREDECESSOR,
+    ),
+    "chatgpt3-w570f6f34": (
+        "35246e482e79f3203b3e1cd28e76c77cfbef8681c1157a9a5add4e232a7820e5",
+        "5462b46a30a5d67fbc3dcee368bfe2675eb409b3bacecbeddc70e9a5a3d9a123",
+        V2_C2_BUSINESS_FLEET_PREDECESSOR,
+    ),
+    "chatgpt3-wa2a9e6f9": (
+        "0a248967072622afa375c6e6ab749d025150b7805fe288c2de83da381c66e0b4",
+        "39c6bbe7ddfb69b8ac837be37f7b9fed06f10645967dc1675221dad4b5040879",
+        V2_C2_BUSINESS_FLEET_PREDECESSOR,
+    ),
+    "chatgpt4": (
+        "2252819766e266ac0be6b30c94694b503aad4634d8de184f62611542fb581bd0",
+        "5b7e4ea4b83d1cff6f371dc1ccb3862762222336ba9bb24c0444ad42d3d959c9",
+        V2_C2_BUSINESS_FLEET_PREDECESSOR,
+    ),
+    "fabric-design": (
+        "87de91f4fd0d51571c2350cf4fe53704ad035eba8f095c13b09352732307671c",
+        "0481da04b267ea610a917e78203ac7829c1799a2a83e226502978c6d8bc7d2f9",
+        V2_FABRIC_DESIGN_TAILNET_FILES,
+    ),
+    "fabric-read": (
+        "f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb",
+        "c0fda20241050072ccdecc4cfa5e31d4322a3e0a645404666e7116db372954d3",
+        V2_FABRIC_READ_OPERATOR_FILES,
+    ),
+}
+
 # Exact historical installed C2 Business 0.1.10 generation. All pinned file
 # hashes are provenance checks, NOT a repository access grant. The Gateway
 # target source is the independently reviewed fleet v0.1.10 generation; the
@@ -247,7 +305,7 @@ FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256 = {
     "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
 }
 FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256 = {
-    "git-publish.mjs": "f67119198a0e63c34ae148633402a7ec3ab351ecf7f40a24bdc355b9890f8a2c",
+    "git-publish.mjs": "10574812f428114314a1529df2d969e52b19d2db8d4f971564a98970d93adc67",
     "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
 }
 
@@ -424,6 +482,19 @@ def _canonical_json_sha256(value: object) -> str:
     return hashlib.sha256(json.dumps(
         value, sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")).hexdigest()
+
+
+def _sealed_v2_fleet_gateway_predecessor(data: dict, account: str) -> bool:
+    """Recognize only one exact already-installed historical V2 gateway seal."""
+    entry = SEALED_V2_FLEET_GATEWAY_PREDECESSORS.get(account)
+    if (entry is None or not isinstance(data, dict)
+            or data.get("version") != MANIFEST_VERSION
+            or data.get("account") != account):
+        return False
+    files = data.get("files")
+    return (isinstance(files, dict)
+            and frozenset(files) == entry[2]
+            and _canonical_json_sha256(data) == entry[0])
 
 
 def _sha256_hex(value: str) -> bool:
@@ -772,7 +843,186 @@ _NATIVE_POOL_PIN_TAILNET_CANONICAL = {
 }
 
 
+
+# Fixed consumer contract of the existing control_bundle owner. This does not
+# install, repair or select a bundle; source-worktree execution remains separate.
+# The interpreter-selected bootstrap is trusted. This authenticates the retained
+# dependency snapshot, not the already-loaded bootstrap generation.
+CONTROL_BUNDLE_SCHEMA = "mastermind.studio_direct_control_bundle.v1"
+CONTROL_BUNDLE_FILES = (
+    "private_service.py",
+    "private_tunnel_service.py",
+    "studio_direct_control.py",
+    "private_service_status_successor.py",
+    "private_service_pin.py",
+    "private_service_pin_enrollment.py",
+    "paper_v20_fleet_cohorts.py",
+    "ops/native_fabric/quota_continuity/rollout/native_install.py",
+    "ops/native_fabric/quota_continuity/rollout/native_generation.py",
+    "ops/fabric_launch/install.py",
+)
+# Exact inert pre-control-bundle snapshots observed on the original M2 host.
+# These are NOT executable/source dependencies and confer no runtime authority.
+# Preserve them without admission of arbitrary pre-* names or changed content.
+HISTORICAL_CONTROL_BACKUPS = {
+    'private_service.py.pre-exact-legacy-manifests-20261022': 'a184ca7f3408e20454adf4f1e5986add845b5742908efd9ed4e0f552755820bb',
+    'private_service.py.pre-sealed-byte-validation-20261022': 'e636a728dbde6ca43b2248456aaabddbab8d78693066df7717030d07e757ebe4',
+    'private_tunnel_service.py.pre-concurrency8-20261022': '4a7d425a2345eaf30b56ed1ca148e0afa2f8e474bd03e2453d4e0a9a4ef85467',
+    'private_tunnel_service.py.pre-exact-sealed-roster-20261022': 'c3753a0c4167560a7980c366e707ce41153d93b8a8710ba4365ba9a45ff8d81f',
+    'private_tunnel_service.py.pre-sealed-argv-20261022': 'b0449df0252159dbebed084ccc3d4520690ff811f0e30125d37ca8effb3e68fa',
+    'studio_direct_control.py.pre-public-projection-20261022': '6fca63efd82132f3063d065d9757e10c22e7d4cef4b6549b24068b407bce912d',
+}
+
+_INSTALLED_CONTROL_CONTEXT = None
+
+
+def _installed_control_layout(root):
+    directories = {Path("."): {"manifest.json", ".control-bundle.lock"}}
+    for name in CONTROL_BUNDLE_FILES:
+        parts = Path(name).parts
+        for index, part in enumerate(parts):
+            parent = Path(*parts[:index])
+            directories.setdefault(parent, set()).add(part)
+            if index < len(parts) - 1:
+                directories.setdefault(parent / part, set())
+    for relative, expected in directories.items():
+        directory = root / relative
+        _assert_dest_safe(directory)
+        info = directory.lstat()
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) != DIR_MODE):
+            raise ValueError("unsafe installed control directory")
+        observed = {path.name for path in directory.iterdir()}
+        if relative == Path("."):
+            for backup, expected_hash in HISTORICAL_CONTROL_BACKUPS.items():
+                if backup not in observed:
+                    continue
+                historical = directory / backup
+                info = historical.lstat()
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                        or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != FILE_MODE
+                        or hashlib.sha256(_fabric_release_bytes(historical)).hexdigest() != expected_hash):
+                    raise ValueError("unsealed installed historical backup")
+                observed.remove(backup)
+        if observed != expected:
+            raise ValueError("unsealed installed control path")
+
+
+def _installed_control_context():
+    root = Path.home() / ".local/share/studio-direct-mcp/control"
+    source = Path(os.path.abspath(__file__))
+    invocation = Path(os.path.abspath(sys.argv[0])) if sys.argv else None
+    def installed_origin(path):
+        return tuple(part.casefold() for part in path.parent.parts[-4:]) == (
+            ".local", "share", "studio-direct-mcp", "control")
+    # Recognize installed-shaped origins independently of the current HOME,
+    # including external aliases and case variants. They must never become a
+    # source-worktree fallback. Genuine disjoint source execution is unchanged.
+    origins = [source, source.resolve()]
+    if invocation is not None:
+        origins.extend((invocation, invocation.resolve()))
+    if not any(installed_origin(path) for path in origins):
+        return None
+    fd = None
+    try:
+        if source != root / "private_service.py":
+            raise ValueError("installed bootstrap origin differs")
+        _assert_dest_safe(source)
+        lock_path = root / ".control-bundle.lock"
+        _assert_dest_safe(lock_path)
+        fd = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != FILE_MODE):
+            raise ValueError("unsafe existing bundle lock")
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        named = lock_path.lstat()
+        if (info.st_dev, info.st_ino) != (named.st_dev, named.st_ino):
+            raise ValueError("existing bundle lock changed")
+        _installed_control_layout(root)
+
+        def unique(pairs):
+            value = {}
+            for key, item in pairs:
+                if key in value:
+                    raise ValueError("duplicate control manifest key")
+                value[key] = item
+            return value
+
+        manifest_path = root / "manifest.json"
+        raw = _fabric_release_bytes(manifest_path, limit=64 * 1024)
+        if stat.S_IMODE(manifest_path.lstat().st_mode) != FILE_MODE:
+            raise ValueError("unsafe control manifest mode")
+        manifest = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
+        if (type(manifest) is not dict
+                or set(manifest) != {"schema", "files", "launcher", "launcherHash",
+                                     "bundleDigest", "source"}
+                or manifest["schema"] != CONTROL_BUNDLE_SCHEMA):
+            raise ValueError("control manifest differs")
+        files = manifest["files"]
+        if (type(files) is not dict or set(files) != set(CONTROL_BUNDLE_FILES)
+                or not all(_sha256_hex(value) for value in files.values())):
+            raise ValueError("incomplete control closure")
+        launcher = Path.home() / ".local/bin/studio-direct"
+        if (manifest["launcher"] != str(launcher)
+                or not _sha256_hex(manifest["launcherHash"])
+                or not _sha256_hex(manifest["bundleDigest"])
+                or not isinstance(manifest["source"], str)
+                or not Path(manifest["source"]).is_absolute()):
+            raise ValueError("control provenance differs")
+        launcher_bytes = _fabric_release_bytes(launcher, limit=64 * 1024)
+        if (not launcher.lstat().st_mode & stat.S_IXUSR
+                or hashlib.sha256(launcher_bytes).hexdigest() != manifest["launcherHash"]
+                or _canonical_json_sha256({
+                    "files": files, "launcherHash": manifest["launcherHash"],
+                }) != manifest["bundleDigest"]):
+            raise ValueError("control bundle digest differs")
+        payloads = {}
+        for name in CONTROL_BUNDLE_FILES:
+            path = root / name
+            payloads[name] = _fabric_release_bytes(path)
+            if (stat.S_IMODE(path.lstat().st_mode) != FILE_MODE
+                    or hashlib.sha256(payloads[name]).hexdigest() != files[name]):
+                raise ValueError("control code differs")
+        # Keep the original owner's shared lock for the entire helper process.
+        # Its existing installer cannot replace files during native imports.
+        return {"root": root, "files": payloads, "lock_fd": fd}
+    except (OSError, ValueError, TypeError, SystemExit):
+        if fd is not None:
+            os.close(fd)
+        raise SystemExit("CONTROL_BUNDLE_CLOSURE_REFUSED") from None
+    except BaseException:
+        if fd is not None:
+            os.close(fd)
+        raise
+
+
+def _installed_control_module(name, relative, *, register=False):
+    import importlib.util
+    context = _INSTALLED_CONTROL_CONTEXT
+    if context is None or relative not in CONTROL_BUNDLE_FILES:
+        raise SystemExit("CONTROL_BUNDLE_CLOSURE_REFUSED")
+    path = context["root"] / relative
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    previous = sys.modules.get(name)
+    if register:
+        sys.modules[name] = module
+    try:
+        exec(compile(context["files"][relative], str(path), "exec"), module.__dict__)
+    except BaseException:
+        if register:
+            if previous is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = previous
+        raise
+    return module
+
+
 def _pin_owner_module():
+    if _INSTALLED_CONTROL_CONTEXT is not None:
+        return _installed_control_module("_studio_pin_owner", "private_service_pin.py")
     import importlib.util
     path = Path(__file__).resolve().with_name("private_service_pin.py")
     spec = importlib.util.spec_from_file_location("_studio_pin_owner", path)
@@ -781,7 +1031,29 @@ def _pin_owner_module():
     return module
 
 
+def _fleet_status_successor_owner_module():
+    if _INSTALLED_CONTROL_CONTEXT is not None:
+        return _installed_control_module("_studio_status_successor_owner", "private_service_status_successor.py", register=True)
+    import importlib.util
+    path = Path(__file__).resolve().with_name("private_service_status_successor.py")
+    spec = importlib.util.spec_from_file_location("_studio_status_successor_owner", path)
+    owner = importlib.util.module_from_spec(spec)
+    # Frozen dataclasses introspect their live defining module during import.
+    sys.modules[spec.name] = owner
+    spec.loader.exec_module(owner)
+    return owner
+
+
+def cmd_fleet_status_module_upgrade(args):
+    owner = _fleet_status_successor_owner_module()
+    value = owner.run(sys.modules[__name__], args)
+    print(json.dumps(value, sort_keys=True))
+    return 0
+
+
 def _pin_enrollment_owner_module():
+    if _INSTALLED_CONTROL_CONTEXT is not None:
+        return _installed_control_module("_studio_pin_enrollment_owner", "private_service_pin_enrollment.py")
     import importlib.util
     path = Path(__file__).resolve().with_name("private_service_pin_enrollment.py")
     spec = importlib.util.spec_from_file_location("_studio_pin_enrollment_owner", path)
@@ -826,7 +1098,10 @@ def cmd_native_pool_pin(args):
 def _pin_native_context(args):
     """Use the existing successor verifier and publication lock, never a hash-only claim."""
     import importlib.util
-    rollout = Path(__file__).resolve().parents[2] / "ops/native_fabric/quota_continuity/rollout"
+    context = _INSTALLED_CONTROL_CONTEXT
+    code_root = context["root"] if context is not None else Path(__file__).resolve().parents[2]
+    rollout = code_root / "ops/native_fabric/quota_continuity/rollout"
+    python_flags = ["-I", "-S", "-B"] if context is not None else ["-I", "-B"]
     for name in ("native_install.py", "native_generation.py"):
         source = rollout / name
         if source.is_symlink() or not source.is_file():
@@ -873,7 +1148,7 @@ print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_g
 """
     def proof():
         try:
-            r = subprocess.run([sys.executable, "-I", "-B", "-c", code, str(rollout),
+            r = subprocess.run([sys.executable, *python_flags, "-c", code, str(rollout),
                 str(args.successor_bundle), args.successor_plan_sha256, args.account],
                 capture_output=True, timeout=30)
         except (OSError, subprocess.SubprocessError):
@@ -886,9 +1161,14 @@ print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_g
             raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
         return value
     first = proof()
-    spec = importlib.util.spec_from_file_location("_studio_pin_native_generation", rollout / "native_generation.py")
-    generation = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(generation)
+    if context is not None:
+        generation = _installed_control_module(
+            "_studio_pin_native_generation",
+            "ops/native_fabric/quota_continuity/rollout/native_generation.py")
+    else:
+        spec = importlib.util.spec_from_file_location("_studio_pin_native_generation", rollout / "native_generation.py")
+        generation = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generation)
     from contextlib import nullcontext
     lock = (generation.publication_lock(Path(first["store"]))
             if args.operation in ("apply", "reconcile") else nullcontext())
@@ -921,6 +1201,11 @@ def _pin_reject_generic_restage(account):
 def _pin_require_start(account, roots):
     if account not in NATIVE_POOL_PIN_ACCOUNTS:
         return
+    if os.path.lexists(roots["state"] / "fleet-status-module-successor"):
+        owner = _fleet_status_successor_owner_module()
+        if owner.require_start(sys.modules[__name__], account, roots):
+            return
+        raise SystemExit("FLEET_STATUS_SUCCESSOR_START_REFUSED")
     if account in ("chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9") and os.path.lexists(roots["state"] / "native-pool-pin-enrollment"):
         _pin_enrollment_owner_module().require_start(sys.modules[__name__], account, roots)
         return
@@ -1323,6 +1608,16 @@ def _valid_manifest(data, account: str, label: str) -> bool:
     if not isinstance(files, dict):
         return False
     fileset = frozenset(files)
+    # Only eight exact, originally enrolled installed successor manifests.
+    # The general validator and the original pin/start proof remain binding.
+    status_owner = _fleet_status_successor_owner_module()
+    qualified_status_successor = (
+        version == MANIFEST_VERSION
+        and account in status_owner.POST_MANIFEST_CANONICAL_SHA256
+        and files.get(status_owner.MODULE) == status_owner.TARGET_SOURCE_SHA256
+        and _canonical_json_sha256(data)
+            == status_owner.POST_MANIFEST_CANONICAL_SHA256.get(account)
+    )
     c2_paper_predecessor = (
         version == MANIFEST_VERSION and account == C2_PAPER_ACCOUNT
         and files == C2_PAPER_FILES_SHA256
@@ -1342,6 +1637,8 @@ def _valid_manifest(data, account: str, label: str) -> bool:
                     and fileset == V2_C2_BUSINESS_FLEET_PREDECESSOR)
             ))
             and not c2_paper_predecessor and not c4_paper_cohort
+            and not qualified_status_successor
+            and not _sealed_v2_fleet_gateway_predecessor(data, account)
             and not (version == MANIFEST_VERSION and account in NATIVE_POOL_PIN_PREDECESSORS
                      and files == NATIVE_POOL_PIN_PREDECESSORS[account])):
         return False
@@ -1367,16 +1664,56 @@ def _read_manifest(
 ) -> dict | None:
     if manifest_path.is_symlink():
         raise SystemExit("refusing symlink manifest")
-    if not manifest_path.exists():
+    try:
+        fd = os.open(
+            manifest_path,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
+        )
+    except FileNotFoundError:
         if required:
             raise SystemExit("not staged: manifest missing")
         return None
+    except OSError as exc:
+        raise SystemExit("corrupt manifest") from exc
     try:
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        raise SystemExit("corrupt manifest")
+        before = os.fstat(fd)
+        # Match the bounded regular-file contract of the existing tunnel reader.
+        limit = 65536
+        if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= limit:
+            raise SystemExit("corrupt manifest")
+        raw = bytearray()
+        while len(raw) <= limit:
+            part = os.read(fd, min(65536, limit + 1 - len(raw)))
+            if not part:
+                break
+            raw.extend(part)
+        after = os.fstat(fd)
+        named = manifest_path.lstat()
+        identity = lambda info: (
+            info.st_dev, info.st_ino, info.st_mode, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns,
+        )
+        if (len(raw) != before.st_size or len(raw) > limit
+                or identity(before) != identity(after)
+                or identity(after) != identity(named)):
+            raise SystemExit("corrupt manifest")
+        captured = bytes(raw)
+    except OSError as exc:
+        raise SystemExit("corrupt manifest") from exc
+    finally:
+        os.close(fd)
+    try:
+        data = json.loads(captured.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit("corrupt manifest") from exc
     if not _valid_manifest(data, account, label):
         raise SystemExit("corrupt manifest")
+    if _sealed_v2_fleet_gateway_predecessor(data, account):
+        expected_bytes_sha = SEALED_V2_FLEET_GATEWAY_PREDECESSORS[account][1]
+        # Authenticate the same immutable bytes that produced data. A later
+        # pathname replacement must never supply a different accepted seal.
+        if hashlib.sha256(captured).hexdigest() != expected_bytes_sha:
+            raise SystemExit("corrupt manifest")
     return data
 
 
@@ -1888,6 +2225,32 @@ def cmd_stage(args) -> int:
         modern_fabric=_modern_fabric_setting(args, roots, prior, fabric_only),
     )
 
+def _sealed_historical_tailnet_launch_argv(
+    account: str, manifest: dict, roots: dict,
+    expected_argv: list[str], actual_argv: list[str],
+) -> bool:
+    """Allow only the two byte-pinned historical Fabric tailnet launchers.
+
+    The caller has already verified every module hash, the immutable original
+    manifest bytes, the plist SHA256, and the account/label. This helper does
+    not permit re-staging or changing the original launch agent.
+    """
+    if account not in {"fabric-design", "fabric-read"}:
+        return False
+    if not _sealed_v2_fleet_gateway_predecessor(manifest, account):
+        return False
+    if "tailnet-gateway.mjs" not in manifest.get("files", {}):
+        return False
+    if len(expected_argv) != 3 or len(actual_argv) != 3:
+        return False
+    historical_argv = [
+        expected_argv[0],
+        str(roots["base"] / "tailnet-gateway.mjs"),
+        expected_argv[2],
+    ]
+    return actual_argv == historical_argv
+
+
 def _verify_staged_install(
     account: str,
     label: str,
@@ -1954,9 +2317,14 @@ def _verify_staged_install(
         raise SystemExit("plist is not our exact install")
 
     expected_argv = _expected_argv(node, roots["gateway"], roots["config"])
-    if list(plist.get("ProgramArguments") or []) != expected_argv:
+    actual_argv = list(plist.get("ProgramArguments") or [])
+    historical_tailnet = _sealed_historical_tailnet_launch_argv(
+        account, manifest, roots, expected_argv, actual_argv,
+    )
+    if actual_argv != expected_argv and not historical_tailnet:
         raise SystemExit("plist is not our exact install")
-    if Path(expected_argv[1]).name != PRIVATE_GATEWAY_NAME:
+    if (Path(actual_argv[1]).name != PRIVATE_GATEWAY_NAME
+            and not historical_tailnet):
         raise SystemExit("plist is not our exact install")
 
     return manifest
@@ -2850,6 +3218,11 @@ def cmd_upgrade(args) -> int:
     prior = _verify_staged_install(
         account, label, roots, require_runtime_seal=False
     )
+    if _sealed_v2_fleet_gateway_predecessor(prior, account):
+        raise SystemExit(
+            "refusing upgrade: sealed historical fleet modules require an "
+            "independently reviewed capability-preserving migration"
+        )
     if prior.get("version") == MANIFEST_VERSION and prior.get("dependencyTreeHash") is not None:
         _verify_staged_install(account, label, roots, require_runtime_seal=True)
     if (
@@ -3233,7 +3606,9 @@ def _frozen_paper_fleet_module():
     # Reuse the original private-service no-follow, owner/mode and inode-stable
     # bounded reader. Verify exactly the bytes that will execute: re-opening
     # the file through a Python loader after a hash check creates a swap race.
-    source_bytes = _fabric_release_bytes(path, limit=64 * 1024)
+    source_bytes = (_INSTALLED_CONTROL_CONTEXT["files"]["paper_v20_fleet_cohorts.py"]
+                    if _INSTALLED_CONTROL_CONTEXT is not None
+                    else _fabric_release_bytes(path, limit=64 * 1024))
     if hashlib.sha256(source_bytes).hexdigest() != FLEET_V20_COHORT_SOURCE_SHA256:
         raise SystemExit("Paper fleet cohort source hash differs from the reviewed release")
     module = ModuleType("_private_paper_fleet_v20_cohorts")
@@ -3911,6 +4286,22 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="private_service")
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    status = sub.add_parser("fleet-status-module-upgrade")
+    status.add_argument("--account", choices=(
+        "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt2-personal",
+        "chatgpt3", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9", "chatgpt4",
+    ), required=True)
+    status.add_argument("--operation", choices=(
+        "preview", "apply", "status", "reconcile",
+    ), required=True)
+    status.add_argument("--release-commit",
+                        help="accepted protected Mastermind merge commit; required for preview/apply")
+    status.add_argument("--expected-manifest-sha256",
+                        help="exact frozen original public-seat manifest CAS")
+    status.add_argument("--expected-plan-sha256",
+                        help="exact owner preview plan SHA256; required for apply")
+    status.set_defaults(func=cmd_fleet_status_module_upgrade)
+
     pin = sub.add_parser("native-pool-pin")
     pin.add_argument("--account", required=True)
     pin.add_argument("--expected-manifest-sha256", required=True)
@@ -4000,6 +4391,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
+
+_INSTALLED_CONTROL_CONTEXT = _installed_control_context()
 
 if __name__ == "__main__":
     sys.exit(main())

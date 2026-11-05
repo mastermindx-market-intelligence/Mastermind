@@ -3,6 +3,49 @@
 # Packet content is transported by scp and read remotely; it is never argv.
 set -u
 
+# bash >=5.1 writes a heredoc/here-string below its pipe size (64 KiB) into a
+# pipe before the reader starts; on 2026-10-13 a 777-byte heredoc blocked there
+# forever on M2 (TERM then misreported ENOSPC). Level 50 restores temp-file
+# heredocs and is exported to local child bash; bash 3.2 ignores it.
+export BASH_COMPAT=50
+
+# Read-only heredoc transport proof: no reservation, lease, trap or worker launch.
+if [ "${1:-}" = "--selftest-heredoc" ]; then
+  selftest_out=$(mktemp "${TMPDIR:-/tmp}/remote_sub_heredoc.XXXXXX") || exit 70
+  selftest_doc=$(printf '%04096d' 0)
+  (
+    if [ -p /dev/stdin ]; then selftest_kind=pipe
+    elif [ -f /dev/stdin ]; then selftest_kind=file
+    else selftest_kind=other
+    fi
+    printf '%s %s\n' "$selftest_kind" "$(wc -c | tr -d ' ')" > "$selftest_out"
+  ) <<HEREDOC_SELFTEST &
+$selftest_doc
+HEREDOC_SELFTEST
+  selftest_pid=$!
+  selftest_ticks=0
+  while kill -0 "$selftest_pid" 2>/dev/null; do
+    if [ "$selftest_ticks" -ge 100 ]; then
+      kill -TERM "$selftest_pid" 2>/dev/null
+      wait "$selftest_pid" 2>/dev/null
+      rm -f "$selftest_out"
+      echo "HEREDOC_SELFTEST_FAIL reason=timeout bash=$BASH_VERSION compat=${BASH_COMPAT:-unset}" >&2
+      exit 124
+    fi
+    sleep 0.1
+    selftest_ticks=$((selftest_ticks + 1))
+  done
+  wait "$selftest_pid" 2>/dev/null
+  selftest_result=$(cat "$selftest_out" 2>/dev/null)
+  rm -f "$selftest_out"
+  if [ "$selftest_result" = "file 4097" ]; then
+    echo "HEREDOC_SELFTEST_OK transport=file bytes=4097 bash=$BASH_VERSION compat=${BASH_COMPAT:-unset}"
+    exit 0
+  fi
+  echo "HEREDOC_SELFTEST_FAIL reason=transport result=${selftest_result:-none} bash=$BASH_VERSION compat=${BASH_COMPAT:-unset}" >&2
+  exit 1
+fi
+
 # Read/export only: enter before any reservation, lease, trap or worker launch.
 if [ "${1:-}" = "--collect-existing" ]; then
   shift
@@ -383,8 +426,13 @@ commission_run() {
 }
 
 commission_refresh_runtime() {
-  local stage seconds
+  local stage seconds actual_observation_poll
   stage="$1"
+  # The adaptive same-run observer never sleeps more than 30s, even when
+  # configured POLL_SECS is higher. Reserve two *actual* observation periods,
+  # not a needlessly large value that truncates a healthy long-horizon worker.
+  actual_observation_poll="$POLL_SECS"
+  [ "$actual_observation_poll" -le 30 ] || actual_observation_poll=30
   if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
     seconds=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$MAX_SECS") || {
       RC=$?; log "COMMISSION_TIME_EXHAUSTED stage=$stage"; return "$RC";
@@ -409,10 +457,10 @@ commission_refresh_runtime() {
   # cleanup/RC publication and a final in-deadline controller observation.
   # This narrows the worker only; it never extends the MAX_SECS fuse, broker
   # lease, provider budget, or commission deadline.
-  if [ "$MAX_SECS" -gt $((2 * POLL_SECS)) ]; then
-    CHILD_TIMEOUT=$((MAX_SECS - 2 * POLL_SECS))
-  elif [ "$MAX_SECS" -gt "$POLL_SECS" ]; then
-    CHILD_TIMEOUT=$((MAX_SECS - POLL_SECS))
+  if [ "$MAX_SECS" -gt $((2 * actual_observation_poll)) ]; then
+    CHILD_TIMEOUT=$((MAX_SECS - 2 * actual_observation_poll))
+  elif [ "$MAX_SECS" -gt "$actual_observation_poll" ]; then
+    CHILD_TIMEOUT=$((MAX_SECS - actual_observation_poll))
   else
     CHILD_TIMEOUT=$MAX_SECS
   fi
@@ -934,6 +982,62 @@ else
 fi
 case "$POLL_SECS" in ''|*[!0-9]*|0) echo "invalid REMOTE_SUB_POLL_SECS" >&2; RC=2; exit "$RC";; esac
 case "$MAX_SECS" in ''|*[!0-9]*|0) echo "invalid REMOTE_SUB_MAX_SECS" >&2; RC=2; exit "$RC";; esac
+# Validate before numeric arithmetic: 00 is also zero, and unbounded
+# decimal input can overflow Bash/test and silently bypass a guard.
+# This changes no valid 1..14400 second configured observation/runtime.
+if [ "${#POLL_SECS}" -gt 5 ] || [ "$POLL_SECS" -eq 0 ] ||
+   [ "$POLL_SECS" -gt 14400 ] ||
+   [ "${POLL_SECS#0}" != "$POLL_SECS" ]; then
+  echo "invalid REMOTE_SUB_POLL_SECS" >&2
+  RC=2; exit "$RC"
+fi
+if [ "${#MAX_SECS}" -gt 5 ] || [ "$MAX_SECS" -eq 0 ] ||
+   [ "${MAX_SECS#0}" != "$MAX_SECS" ]; then
+  echo "invalid REMOTE_SUB_MAX_SECS" >&2
+  RC=2; exit "$RC"
+fi
+# Completion visibility is fastest just after launch, with a hard bounded
+# number of additional SSH observations per job. A transport/protocol failure
+# uses backoff; it never triggers a second launch, provider switch or lease loss.
+# The caller's validated POLL_SECS remains the maximum and the original fuse
+# still owns expiration, heartbeat, collection and EFFECT_UNKNOWN handling.
+fabric_poll_delay() {
+  local observed_elapsed="$1" remaining_seconds="$2" failed_reads="$3"
+  local proposed="$POLL_SECS"
+  if [ "$observed_elapsed" -lt 30 ]; then
+    proposed=2
+  elif [ "$observed_elapsed" -lt 120 ]; then
+    proposed=5
+  elif [ "$observed_elapsed" -lt 600 ]; then
+    proposed=10
+  fi
+  # Outages can only slow observations, never accelerate them.
+  if [ "$failed_reads" -ge 3 ]; then
+    proposed="$POLL_SECS"
+  elif [ "$failed_reads" -eq 2 ] && [ "$proposed" -lt 10 ]; then
+    proposed=10
+  elif [ "$failed_reads" -eq 1 ] && [ "$proposed" -lt 5 ]; then
+    proposed=5
+  fi
+  # A caller's large observation interval must not leave the lease owner
+  # asleep beyond the 30-second heartbeat duty. The configured value is a
+  # maximum, not permission to delay live-liveness observations for hours.
+  [ "$proposed" -le "$POLL_SECS" ] || proposed="$POLL_SECS"
+  [ "$proposed" -le 30 ] || proposed=30
+  [ "$proposed" -le "$remaining_seconds" ] || proposed="$remaining_seconds"
+  FABRIC_POLL_DELAY_S="$proposed"
+}
+
+# The faster first-minute completion observations must not multiply provider
+# broker-heartbeat writes. Keep at least the old caller-selected heartbeat
+# cadence, bounded to 30s even when a caller selects a longer result interval.
+# The original lease and its separate slot-heartbeat remain authoritative.
+fabric_poll_heartbeat_due() {
+  local heartbeat_age="$1" heartbeat_interval="$POLL_SECS"
+  [ "$heartbeat_interval" -le 30 ] || heartbeat_interval=30
+  [ "$heartbeat_age" -ge "$heartbeat_interval" ]
+}
+
 if [ "$MAX_SECS" -gt 14400 ]; then
   echo "REMOTE_SUB_MAX_SECS must not exceed 14400" >&2
   RC=2
@@ -1802,14 +1906,18 @@ while true; do
   WAIT_STARTED_SECONDS=$SECONDS
   RC=""
   poll_count=0
+  POLL_FAILURE_STREAK=0
+  LAST_POLL_BROKER_HEARTBEAT=$((SECONDS - POLL_SECS))
   CANONICAL_LAUNCH_RELAYED=0
   while [ $((SECONDS - WAIT_STARTED_SECONDS)) -lt "$MAX_SECS" ]; do
     if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
       commission_poll_remaining=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$MAX_SECS") || break
       [ "$commission_poll_remaining" -gt 0 ] || break
     fi
-    if [ -n "$LEASE_ID" ]; then
+    if [ -n "$LEASE_ID" ] &&
+       fabric_poll_heartbeat_due "$((SECONDS - LAST_POLL_BROKER_HEARTBEAT))"; then
       broker heartbeat "$LEASE_ID" >/dev/null 2>&1 || true
+      LAST_POLL_BROKER_HEARTBEAT=$SECONDS
     fi
     poll_count=$((poll_count + 1))
     elapsed=$((SECONDS - WAIT_STARTED_SECONDS))
@@ -1835,19 +1943,21 @@ while true; do
         log "RC value=$RC poll=$poll_count"
         break
       elif [ "$POLL_VALUE" = "__REMOTE_SUB_PENDING__" ]; then
+        POLL_FAILURE_STREAK=0
         log "POLL_PENDING poll=$poll_count"
       else
+        [ "$POLL_FAILURE_STREAK" -ge 3 ] || POLL_FAILURE_STREAK=$((POLL_FAILURE_STREAK + 1))
         log "POLL_PROTOCOL_INVALID poll=$poll_count bytes=$(wc -c < "$POLL_FILE" 2>/dev/null || echo 0)"
       fi
     else
+      [ "$POLL_FAILURE_STREAK" -ge 3 ] || POLL_FAILURE_STREAK=$((POLL_FAILURE_STREAK + 1))
       log "POLL_TRANSPORT_FAILED rc=$poll_rc poll=$poll_count"
     fi
     elapsed=$((SECONDS - WAIT_STARTED_SECONDS))
     remaining=$((MAX_SECS - elapsed))
     [ "$remaining" -gt 0 ] || break
-    sleep_for="$POLL_SECS"
-    [ "$sleep_for" -le "$remaining" ] || sleep_for="$remaining"
-    commission_run poll-sleep sleep "$sleep_for" || break
+    fabric_poll_delay "$elapsed" "$remaining" "$POLL_FAILURE_STREAK"
+    commission_run poll-sleep sleep "$FABRIC_POLL_DELAY_S" || break
   done
 
   if [ -z "$RC" ]; then

@@ -3,7 +3,8 @@
 The authoritative VPS uses ``waterfall``: Codex (ChatGPT-managed auth, Sol
 xhigh) first, then Macro Dashboard's shared Claude OAuth pool.  Direct
 ``codex``/``cli`` modes remain available for diagnostics and local use, with
-``api`` as the metered Anthropic Messages API fallback. Explicit
+``api`` as the metered Anthropic Messages API fallback, and explicit
+``explabs`` as the Experiential Labs OpenAI-compatible gateway.
 ``production_mode`` delegates no-tools completions to Macro's Shared AI
 Provider Control production API modes; it does not reserve Fabric capacity.
 
@@ -64,6 +65,9 @@ def available() -> bool:
         return cli_bridge.available()
     if selected == "api":
         return api_available()
+    if selected == "explabs":
+        from brain import explabs_pool
+        return explabs_pool.available()
     if selected == "production_mode":
         from brain import production_inference
         return production_inference.available()
@@ -79,6 +83,33 @@ def call_model(system: str, user: str, *, role: str = "pm", max_tokens: int = 15
     _ROLE_BOOK default book. Attribution-only; never changes routing or behaviour."""
     selected = backend()
 
+    if selected == "explabs":
+        from brain import explabs_client, explabs_pool
+        if not explabs_pool.available():
+            return None, "explabs_unavailable"
+        try:
+            reply = explabs_pool.complete(system, user, max_tokens=max_tokens)
+            # Account for observed usage even if a served reply contains no text.
+            # Reuse the existing cost ledger; never estimate a gateway charge.
+            try:
+                from brain import cost_guard as _cg
+                from brain.cli_bridge import _ROLE_BOOK
+                _cg.record(
+                    record_book or _ROLE_BOOK.get(str(role).lower(), "flagship"),
+                    reply.cost_usd or 0.0,
+                    seat=seat or role,
+                    model=reply.model,
+                    input_tokens=reply.input_tokens,
+                    output_tokens=reply.output_tokens,
+                    key_id=f"explabs_account_{reply.account_slot}" if reply.account_slot else None,
+                )
+            except Exception:
+                pass
+            if not reply.text:
+                return None, "explabs_empty_reply"
+            return reply.text, None
+        except explabs_client.ExperientialError as exc:
+            return None, str(exc)
     if selected == "production_mode":
         from brain import production_inference
         return production_inference.call_model(

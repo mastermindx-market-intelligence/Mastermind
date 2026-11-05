@@ -33,6 +33,7 @@ LANE_FLAGS = (
     "wait_executor_verified",
     "no_delta_loop_forces_tactic_change",
     "status_summary_is_not_continuation",
+    "owner_only_handoff_is_not_continuation",
     "wait_requires_started_durable_executor",
     "premature_exit_detected",
 )
@@ -327,6 +328,73 @@ def test_same_facts_with_continue_claim_is_not_premature():
     assert report["lane_local_wait_blocks_only_its_lane"] is True
     assert report["remaining_safe_work"] is True
     assert report["no_delta_loop_forces_tactic_change"] is True
+
+
+def test_owner_only_handoff_cannot_close_a_mission_with_safe_work():
+    # Regression: the session completed CI, then assigned runtime and review
+    # next steps to historical role names without a live receiver or uptake.
+    data = prophet_snapshot()
+    data["lanes"]["exit_claim"] = "OWNER_HANDOFF_STOP"
+    report = audit(data)
+    assert report["owner_only_handoff_is_not_continuation"] is True
+    assert report["remaining_safe_work"] is True
+    assert report["premature_exit_detected"] is True
+    assert report["all_lanes_proven_blocked"] is False
+    assert report["merge_authorized"] is False
+    assert report["production_activation_authorized"] is False
+
+
+def test_proof_complete_packet_with_owner_handoff_fails_closed_in_cli(tmp_path, capsys):
+    data = prophet_snapshot()
+    data["mission"]["requires"] = ["current_head_ci"]
+    data["source"].update(
+        ci_conclusion="SUCCESS", ci_head=data["source"]["head"],
+        ci_run_ref="github:run-completed",
+    )
+    data["lanes"]["exit_claim"] = "OWNER_HANDOFF_STOP"
+    result = audit(data)
+    assert result["checks_passed"] == ["current_head_ci"]
+    assert result["gaps"] == []
+    assert result["premature_exit_detected"] is True
+    assert result["disposition"] == "INCOMPLETE"
+    file = tmp_path / "ghost-owner.json"
+    file.write_text(json.dumps(data), encoding="utf-8")
+    assert main([str(file)]) == 1
+    assert json.loads(capsys.readouterr().out)["disposition"] == "INCOMPLETE"
+    # The same source evidence can still be adjudicated if the session acts.
+    data["lanes"]["exit_claim"] = "CONTINUE"
+    assert audit(data)["disposition"] == "READY_FOR_CANONICAL_ADJUDICATION"
+
+
+def test_proof_complete_packet_with_checkpoint_summary_cannot_be_ready():
+    data = prophet_snapshot()
+    data["mission"]["requires"] = ["current_head_ci"]
+    data["source"].update(
+        ci_conclusion="SUCCESS", ci_head=data["source"]["head"],
+        ci_run_ref="github:run-completed",
+    )
+    data["lanes"]["exit_claim"] = "CHECKPOINT_SUMMARY_STOP"
+    result = audit(data)
+    assert result["gaps"] == []
+    assert result["premature_exit_detected"] is True
+    assert result["disposition"] == "INCOMPLETE"
+
+
+def test_owner_only_handoff_is_not_durable_executor_or_verified_checkpoint():
+    data = prophet_snapshot()
+    data["lanes"]["items"] = [
+        {"id": "github:review-request", "state": "WAITING_EXTERNAL",
+         "blocker_ref": "github:requested-review", "blocker_owner_ref": "github:review-role",
+         "blocker_observed": True},
+    ]
+    _attest_complete_lanes(data)
+    data["lanes"]["exit_claim"] = "OWNER_HANDOFF_STOP"
+    report = audit(data)
+    assert report["owner_only_handoff_is_not_continuation"] is True
+    assert report["all_external_waits_proven_blocked"] is True
+    assert report["wait_executor_verified"] is False
+    assert report["checkpoint_continuation_verified"] is False
+    assert report["premature_exit_detected"] is True
 
 
 def test_staging_the_guard_lane_removes_remaining_safe_work_flag():
@@ -878,3 +946,187 @@ def test_unrecognized_current_executor_states_are_rejected(state):
     }
     with pytest.raises(InvalidSnapshot, match="current executor state"):
         audit(data)
+
+# Pending evidence is not a reason to create another operation.
+def _gap_guidance(data, requirement):
+    report = audit(data)
+    assert all(report[key] is False for key in (
+        "source_write_authorized", "dispatch_authorized", "retry_authorized",
+        "merge_authorized", "production_activation_authorized",
+    ))
+    return next(g["next_proof"] for g in report["gaps"]
+                if g["requirement"] == requirement)
+
+
+@pytest.mark.parametrize("state", ["QUEUED", "PENDING", "IN_PROGRESS", "WAITING", "REQUESTED"])
+def test_pending_current_head_ci_consumes_original_run_without_rerun(state):
+    data = snapshot()
+    data["source"].update(ci_conclusion=state, ci_run_ref="github:existing-ci")
+    guidance = _gap_guidance(data, "current_head_ci")
+    assert "existing current-head CI run" in guidance
+    assert "do not rerun" in guidance
+    assert "original" in guidance
+    assert "run and inspect CI" not in guidance
+    assert "current_head_ci" not in audit(data)["checks_passed"]
+
+
+@pytest.mark.parametrize("state", ["FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"])
+def test_terminal_ci_failure_is_diagnosed_not_blindly_retried(state):
+    data = snapshot()
+    data["source"].update(ci_conclusion=state, ci_run_ref="github:existing-ci")
+    guidance = _gap_guidance(data, "current_head_ci")
+    assert "original CI result" in guidance
+    assert "no blind retry" in guidance
+
+
+@pytest.mark.parametrize("state", ["STALE", "SKIPPED", "NEUTRAL"])
+def test_unproven_current_head_ci_observation_requires_reconciliation_not_repair(state):
+    data = snapshot()
+    data["source"].update(ci_conclusion=state, ci_run_ref="github:existing-ci")
+    guidance = _gap_guidance(data, "current_head_ci")
+    assert "reconcile current-head CI identity and state with GitHub" in guidance
+    assert "identify a permitted repair" not in guidance
+    assert "current_head_ci" not in audit(data)["checks_passed"]
+    assert audit(data)["retry_authorized"] is False
+
+
+@pytest.mark.parametrize("state", [None, "unrecognized", [], {}])
+def test_unknown_ci_state_requires_reconciliation_not_inferred_failure(state):
+    data = snapshot()
+    data["source"].update(ci_conclusion=state, ci_run_ref="github:existing-ci")
+    guidance = _gap_guidance(data, "current_head_ci")
+    assert "reconcile" in guidance
+    assert "missing evidence is not a failed build" in guidance
+
+
+def test_stale_or_unbound_pending_ci_never_looks_like_current_execution():
+    for field, value in (("ci_head", "0" * 40), ("ci_run_ref", None)):
+        data = snapshot()
+        data["source"].update(ci_conclusion="IN_PROGRESS", ci_run_ref="github:existing-ci")
+        data["source"][field] = value
+        guidance = _gap_guidance(data, "current_head_ci")
+        assert "existing current-head CI run" not in guidance
+        assert "reconcile" in guidance
+        assert "current_head_ci" not in audit(data)["checks_passed"]
+
+
+@pytest.mark.parametrize("state", ["REQUESTED", "PENDING", "IN_PROGRESS"])
+def test_pending_review_does_not_commission_duplicate_or_claim_approval(state):
+    data = snapshot()
+    data["source"].update(review_verdict=state, review_ref="github:original-review")
+    guidance = _gap_guidance(data, "independent_source_review")
+    if state == "IN_PROGRESS":
+        assert "active current-head review" in guidance
+        assert "original carrier" in guidance
+        assert "execution is not approval" in guidance
+    else:
+        assert "existing current-head review request" in guidance
+        assert "request is not execution or approval" in guidance
+    assert "do not duplicate" in guidance
+    assert "independent_source_review" not in audit(data)["checks_passed"]
+
+
+def test_changes_requested_means_repair_findings_not_repeat_review():
+    data = snapshot()
+    data["source"].update(review_verdict="CHANGES_REQUESTED", review_ref="github:original-review")
+    guidance = _gap_guidance(data, "independent_source_review")
+    assert "repair the existing findings" in guidance
+    assert "stable changed head" in guidance
+
+
+@pytest.mark.parametrize("state", ["QUEUED", "STARTED", "UNKNOWN"])
+def test_existing_worker_is_reconciled_without_replacement(state):
+    data = snapshot()
+    data["worker"].update(state=state, exit_code=None)
+    guidance = _gap_guidance(data, "accepted_worker_result")
+    assert "original worker" in guidance
+    assert "do not submit a replacement" in guidance
+    assert "accepted_worker_result" not in audit(data)["checks_passed"]
+
+
+@pytest.mark.parametrize("exit_code", [0, 1, 78])
+def test_terminal_worker_result_is_consumed_without_automatic_relaunch(exit_code):
+    data = snapshot()
+    data["worker"].update(state="TERMINAL", exit_code=exit_code, accepted=False)
+    guidance = _gap_guidance(data, "accepted_worker_result")
+    assert "original terminal" in guidance
+    assert "do not relaunch" in guidance
+    assert "accepted_worker_result" not in audit(data)["checks_passed"]
+
+
+def test_dynamic_guidance_never_echoes_untrusted_refs_or_changes_denial_fence():
+    data = snapshot()
+    secret = "private-test-sentinel-not-for-output"
+    data["source"].update(ci_conclusion="IN_PROGRESS", ci_run_ref=secret,
+                          review_verdict="PENDING", review_ref=secret)
+    result = audit(data)
+    assert secret not in json.dumps(result)
+    assert result["held_actions"][0]["effect_class"] == "SAFETY_DENIED"
+    assert result["retry_authorized"] is False
+
+
+@pytest.mark.parametrize("field,value", [
+    ("review_head", "0" * 40), ("review_ref", None),
+    ("reviewer_id", None), ("author_id", None),
+])
+def test_unbound_pending_review_requires_identity_reconciliation(field, value):
+    data = snapshot()
+    data["source"].update(review_verdict="PENDING", review_ref="github:original-review")
+    data["source"][field] = value
+    guidance = _gap_guidance(data, "independent_source_review")
+    assert "existing current-head review" not in guidance
+    assert "reconcile" in guidance
+
+
+def test_self_requested_review_is_not_an_eligible_pending_independent_review():
+    data = snapshot()
+    data["source"].update(review_verdict="REQUESTED", review_ref="github:self-request")
+    data["source"]["reviewer_id"] = data["source"]["author_id"]
+    guidance = _gap_guidance(data, "independent_source_review")
+    assert "existing current-head review" not in guidance
+    assert "reconcile" in guidance
+
+
+def test_cli_reports_original_pending_work_without_creating_authority(tmp_path):
+    data = snapshot()
+    data["source"].update(ci_conclusion="QUEUED", ci_run_ref="github:existing-ci",
+                          review_verdict="REQUESTED", review_ref="github:existing-review")
+    data["worker"].update(state="QUEUED", exit_code=None)
+    path = tmp_path / "pending.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, "-m", "scripts.ohf.mission_exit_audit", str(path)],
+        cwd=FIXTURE.parents[2], text=True, capture_output=True, timeout=5,
+    )
+    assert proc.returncode == 1
+    assert proc.stderr == ""
+    report = json.loads(proc.stdout)
+    assert report["disposition"] == "INCOMPLETE"
+    guidance = {g["requirement"]: g["next_proof"] for g in report["gaps"]}
+    assert "do not rerun" in guidance["current_head_ci"]
+    assert "do not duplicate" in guidance["independent_source_review"]
+    assert "do not submit a replacement" in guidance["accepted_worker_result"]
+    assert report["retry_authorized"] is False
+    assert report["dispatch_authorized"] is False
+
+
+@pytest.mark.parametrize("state", ["REQUESTED", "PENDING"])
+def test_unconsumed_independent_request_does_not_bind_original_session(state):
+    data = snapshot()
+    data["source"].update(review_verdict=state, review_ref="github:original-review")
+    guidance = _gap_guidance(data, "independent_source_review")
+    assert "any eligible independent non-author" in guidance
+    assert "confirm no active review" in guidance
+    assert "original reviewer" not in guidance
+    assert "do not duplicate" in guidance
+    assert "request is not execution or approval" in guidance
+
+
+def test_started_review_retains_original_carrier_with_no_parallel_worker():
+    data = snapshot()
+    data["source"].update(review_verdict="IN_PROGRESS", review_ref="github:original-review")
+    guidance = _gap_guidance(data, "independent_source_review")
+    assert "active current-head review" in guidance
+    assert "original carrier" in guidance
+    assert "do not duplicate" in guidance
+    assert "any eligible independent non-author" not in guidance

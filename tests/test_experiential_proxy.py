@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import asyncio
-from functools import wraps
+from functools import partial, wraps
 import json
 import time
 
 import httpx
 import pytest
 
+from ops.native_fabric.experiential_proxy import gateway as gateway_module
 from ops.native_fabric.experiential_proxy.gateway import (
     QueueFull,
     QueueExpired,
@@ -108,16 +109,36 @@ async def test_queued_instead_of_429_when_all_slots_reach_ceiling(tmp_path):
 
 @run_async_test
 async def test_persistent_admission_survives_restart(tmp_path):
+    # The admission window is wall-clock, but reopening SQLite plus the 200k-round
+    # PBKDF2 fingerprint derivation is not bounded by it, so a slow restart can age
+    # the persisted reservation out of the window before the second limiter reads
+    # it. Drive admission time explicitly instead of racing it: the reservation is
+    # then restored and still in-window by construction, and the queue deadline
+    # stays a real monotonic budget.
+    fake_time = [1000.0]
     cfg = settings(tmp_path, api_keys=("upstream-A",), window_s=0.11, max_queue_wait_s=0.02)
-    first = SlidingWindowAdmissions(cfg)
-    assert await first.acquire(time.monotonic() + 0.02) == 0
-    first.close()
-    second = SlidingWindowAdmissions(cfg)
-    with pytest.raises(QueueExpired):
-        await second.acquire(time.monotonic() + 0.02)
-    await asyncio.sleep(0.12)
-    assert await second.acquire(time.monotonic() + 0.1) == 0
-    second.close()
+    first = SlidingWindowAdmissions(cfg, clock=lambda: fake_time[0])
+    try:
+        assert await first.acquire(time.monotonic() + 0.02) == 0
+    finally:
+        first.close()
+    second = SlidingWindowAdmissions(cfg, clock=lambda: fake_time[0])
+    try:
+        restored = await second.snapshot()
+        # The prior reservation must come back from SQLite and still be in-window.
+        # The durable salt makes the restored fingerprint match, so a restored slot
+        # is proof the reservation itself survived. Assert this before the queue
+        # deadline, so a lost row cannot hide behind an expired queue wait.
+        assert restored["slots"][0]["used_in_window"] == 1
+        assert restored["slots"][0]["remaining_in_window"] == 0
+        assert list(second.events[0]) == [fake_time[0]]
+        with pytest.raises(QueueExpired):
+            await second.acquire(time.monotonic() + 0.02)
+        # Only admission time moves past the window; the queue budget stays real.
+        fake_time[0] += cfg.window_s + 0.01
+        assert await second.acquire(time.monotonic() + 0.1) == 0
+    finally:
+        second.close()
 
 
 @run_async_test
@@ -446,7 +467,20 @@ async def test_cancelled_queued_asgi_task_leaves_no_waiter_or_upstream_send(tmp_
 
 
 @run_async_test
-async def test_local_status_requires_token_and_reports_no_credentials(tmp_path):
+async def test_local_status_requires_token_and_reports_no_credentials(tmp_path, monkeypatch):
+    # /statusz projects the durable admission window, and this fixture's 70ms
+    # window runs on real wall-clock time: a loaded host can legitimately spend
+    # longer than one window between the admitted /v1/models call and the status
+    # read (scheduler jitter, or this gateway's own durable SQLite commit), so
+    # the credential-projection assertions below would fail on host speed alone.
+    # Drive admission time explicitly like the restart test: the reservation is
+    # then in-window by construction while /statusz auth, the loopback guard and
+    # the queue deadline stay on their real clocks.
+    fake_time = [1000.0]
+    monkeypatch.setattr(
+        gateway_module, "SlidingWindowAdmissions",
+        partial(gateway_module.SlidingWindowAdmissions, clock=lambda: fake_time[0]),
+    )
     app = create_app(settings(tmp_path), transport=httpx.MockTransport(
         lambda req: streamed_json({"ok": True})
     ))

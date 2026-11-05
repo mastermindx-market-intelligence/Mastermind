@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'integrations/hermes_qualification/**'
+      - 'integrations/hermes_steward/**'
       - '.github/workflows/hermes-qualification.yml'
   workflow_dispatch:
 
@@ -32,3 +33,25 @@ jobs:
         run: python -m compileall -q integrations/hermes_qualification
       - name: Run real no-network negative and receipt tests
         run: python -m unittest discover -v -s integrations/hermes_qualification/tests -p 'test_*.py'
+
+  steward-read-bridge:
+    name: Hermes steward read bridge negatives
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install only the audited YAML parser
+        run: python -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+      - name: Compile the read bridge
+        run: python -m compileall -q integrations/hermes_steward
+      - name: Run offline Steward read negative tests
+        run: python -m unittest discover -v -s integrations/hermes_steward/tests -p 'test_*.py'

@@ -162,6 +162,16 @@ def resolve_host_adapter(runtime_root: str | Path | None = None) -> HostAdapter:
         context = _load_host_module(
             base / "experiential_host_context.py", "experiential_bridge_context_host")
         return HostAdapter(pin=pin, transport=transport, context=context, source=base)
+    # The incumbent Mac native-generation publisher admits only flat ext/*.py
+    # source files. This last fixed location is still the bridge's own
+    # host-owned runtime root; no env/caller path or symlink is consulted.
+    pin = _load_host_module(root / "experiential_pin.py", "experiential_bridge_pin_host")
+    if pin is not None:
+        transport = _load_host_module(
+            root / "experiential_transport.py", "experiential_bridge_transport_host")
+        context = _load_host_module(
+            root / "experiential_host_context.py", "experiential_bridge_context_host")
+        return HostAdapter(pin=pin, transport=transport, context=context, source=root)
     _refuse(
         "EXPERIENTIAL_HOST_ADAPTER_MISSING",
         "no host-owned experiential53 adapter is installed beside this "

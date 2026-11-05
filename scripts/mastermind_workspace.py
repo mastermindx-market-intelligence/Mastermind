@@ -652,8 +652,14 @@ def main(argv: list[str] | None = None) -> int:
                         or _repository_git(source, "rev-parse", "--verify", args.base_sha + "^{commit}") != args.base_sha):
                     raise WorkspaceError("REPOSITORY_BASE_INVALID: expected an available exact commit")
             # The enrolled policy names the host root, not a repository subroot.
-            if not _storage_status(host_root)["admission_allowed"]:
-                raise WorkspaceError("STORAGE_LOW_SPACE: available storage is below the host reserve")
+            # Storage policy and volume identity are ALWAYS observed: only the
+            # creation reserve may be waived, and only for an existing operation
+            # workspace that is re-used without any new allocation.
+            storage = _storage_status(host_root)
+            if not storage["admission_allowed"]:
+                requested_path = _workspace_path(root, args.lane, args.operation_id)
+                if not requested_path.exists():
+                    raise WorkspaceError("STORAGE_LOW_SPACE: available storage is below the host reserve")
             # Storage observation may block: re-observe the source at the effect boundary.
             if _selected_repository(alias, explicit=selected is not None) != source:
                 raise WorkspaceError("REPOSITORY_SOURCE_CHANGED: selected repository changed")

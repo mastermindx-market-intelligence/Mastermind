@@ -487,3 +487,208 @@ def test_registered_cli_status_preserves_existing_receipt_contract(fleet):
     assert receipt["branch"] == "sol/web-status-cli-contract"
     assert receipt["workspace_path"] == created["receipt"]["workspace_path"]
     assert receipt["dirty"] is False and receipt["removed"] is False
+
+
+# Storage admission belongs to the existing attended workspace route.  A
+# verified existing operation workspace may be re-used below the creation
+# reserve because re-use allocates nothing, but the enrolled storage policy
+# and volume identity are still observed on every acquisition.  The reserve
+# itself is never weakened and no new allocation is admitted at low space.
+
+
+def _load_cli(monkeypatch, env, module_name):
+    """Load the installed CLI in-process so synthetic stand-ins are honoured."""
+    for name, value in env.items():
+        if name.startswith("MASTERMIND_"):
+            monkeypatch.setenv(name, value)
+    spec = importlib.util.spec_from_file_location(module_name, SCRIPT)
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    return cli
+
+
+@pytest.fixture
+def enrolled_volume(tmp_path, fleet, monkeypatch):
+    """Synthetic enrolled volume: real policy reader, synthetic volume probe.
+
+    No real disk probing and no host volume dependency.  The policy file is a
+    synthetic fixture read by the real policy reader; only the volume identity
+    and the free-byte observation are stand-ins for the enrolled host volume.
+    """
+    repos, config, _, _ = fleet
+    mount = (tmp_path / "volume").resolve()
+    mount.mkdir()
+    root = mount / "workspaces"
+    policy = tmp_path / "worktree-storage.json"
+    data = {
+        "version": 1, "mount_point": str(mount), "root": str(root),
+        "volume_uuid": "7EE5D196-8BB6-4E6D-B1D7-AFEA5DEB172A", "min_free_bytes": 100,
+    }
+    policy.write_text(json.dumps(data))
+    policy.chmod(0o600)
+    env = dict(os.environ)
+    env.update(MASTERMIND_SOURCE_REPO=str(repos["mastermind"][0]),
+               MASTERMIND_AGENT_WORKSPACE_ROOT=str(root),
+               MASTERMIND_WORKSPACE_STORAGE_POLICY=str(policy),
+               MASTERMIND_WORKSPACE_REPOSITORIES=json.dumps(config))
+    cli = _load_cli(monkeypatch, env, "enrolled_volume_cli_test")
+    state = {
+        "free": 100,
+        "volume": {"Mounted": True, "Writable": True, "MountPoint": str(mount),
+                   "VolumeUUID": data["volume_uuid"]},
+    }
+    monkeypatch.setattr(cli, "_volume_identity", lambda path: dict(state["volume"]))
+    monkeypatch.setattr(cli, "_storage_free_bytes", lambda path: state["free"])
+    return cli, repos, root, state, policy, data
+
+
+def test_existing_workspace_reuse_survives_low_storage_without_new_allocation(fleet, monkeypatch, capsys):
+    """A verified existing operation workspace is re-used below the reserve.
+
+    The storage observation itself is never skipped: the enrolled host root is
+    still checked on the re-use, and a new operation is still refused.
+    """
+    repos, _, root, env = fleet
+    code, created = acquire(fleet, "mastermind", "reuse-low-storage")
+    assert code == 0 and created["effect"] == "APPLIED"
+    original = Path(created["receipt"]["workspace_path"])
+    registered = git(repos["mastermind"][0], "worktree", "list", "--porcelain")
+    cli = _load_cli(monkeypatch, env, "reuse_storage_cli_test")
+    observed = []
+
+    def storage(path):
+        observed.append(path)
+        return {"admission_allowed": False}
+
+    monkeypatch.setattr(cli, "_storage_status", storage)
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "reuse-low-storage", "--base-sha", repos["mastermind"][1]])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0 and payload["effect"] == "NOT_APPLIED"
+    assert payload["receipt"]["reused"] is True
+    assert payload["receipt"]["workspace_path"] == str(original)
+    # The storage observation is NOT skipped for an existing path.
+    assert observed == [root]
+    assert git(original, "status", "--porcelain=v1") == ""
+    assert git(repos["mastermind"][0], "worktree", "list", "--porcelain") == registered
+
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "new-low-storage", "--base-sha", repos["mastermind"][1]])
+    payload = json.loads(capsys.readouterr().err)
+    assert code == 2 and payload["effect"] == "NOT_APPLIED"
+    assert "STORAGE_LOW_SPACE" in payload["error"]
+    assert observed == [root, root]
+    assert not (root / "web" / "new-low-storage").exists()
+
+
+def test_verified_existing_workspace_is_reused_below_the_creation_reserve(enrolled_volume, capsys):
+    """The real storage reader observes LOW_SPACE and still permits re-use."""
+    cli, repos, root, state, _policy, _data = enrolled_volume
+    base = repos["mastermind"][1]
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "reuse-below-reserve", "--base-sha", base])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0 and payload["effect"] == "APPLIED"
+    assert payload["receipt"]["reused"] is False
+    original = Path(payload["receipt"]["workspace_path"])
+
+    state["free"] = 99
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "reuse-below-reserve", "--base-sha", base])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0 and payload["effect"] == "NOT_APPLIED"
+    assert payload["receipt"]["reused"] is True
+    assert payload["receipt"]["workspace_path"] == str(original)
+    assert payload["receipt"]["base_sha"] == base
+    assert git(original, "status", "--porcelain=v1") == ""
+
+
+def test_new_allocation_remains_blocked_below_the_creation_reserve(enrolled_volume, capsys):
+    """The reserve still refuses a new allocation; nothing is allocated."""
+    cli, repos, root, state, _policy, _data = enrolled_volume
+    base = repos["mastermind"][1]
+    state["free"] = 99
+    registered = git(repos["mastermind"][0], "worktree", "list", "--porcelain")
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "new-below-reserve", "--base-sha", base])
+    payload = json.loads(capsys.readouterr().err)
+    assert code == 2 and payload["effect"] == "NOT_APPLIED"
+    assert "STORAGE_LOW_SPACE" in payload["error"]
+    assert not (root / "web" / "new-below-reserve").exists()
+    assert git(repos["mastermind"][0], "worktree", "list", "--porcelain") == registered
+    assert "sol/web-new-below-reserve" not in git(repos["mastermind"][0], "branch", "--list")
+
+
+@pytest.mark.parametrize("failure,expected", [
+    ("identity", "STORAGE_VOLUME_IDENTITY_MISMATCH"),
+    ("read_only", "STORAGE_VOLUME_READ_ONLY"),
+    ("policy", "STORAGE_POLICY_INVALID"),
+])
+def test_storage_identity_read_only_and_policy_errors_refuse_even_an_existing_workspace(
+    enrolled_volume, capsys, failure, expected,
+):
+    """A failing storage observation is never skipped for an existing path."""
+    cli, repos, root, state, policy, data = enrolled_volume
+    base = repos["mastermind"][1]
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "guarded-reuse", "--base-sha", base])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0 and payload["effect"] == "APPLIED"
+    original = Path(payload["receipt"]["workspace_path"])
+
+    if failure == "identity":
+        state["volume"]["VolumeUUID"] = "BDB7D9BA-7145-4115-B6BA-EB9B54896B67"
+    elif failure == "read_only":
+        state["volume"]["Writable"] = False
+    else:
+        data["version"] = 2
+        policy.write_text(json.dumps(data))
+
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "guarded-reuse", "--base-sha", base])
+    payload = json.loads(capsys.readouterr().err)
+    assert code == 2 and payload["effect"] == "NOT_APPLIED"
+    assert expected in payload["error"]
+    # The refused re-use left the existing workspace registered and untouched.
+    assert original.is_dir()
+    assert git(original, "status", "--porcelain=v1") == ""
+
+
+def test_invalid_or_mismatched_existing_workspace_is_refused_below_the_creation_reserve(
+    enrolled_volume, capsys,
+):
+    """Existing-path reuse still requires a verified managed linked workspace."""
+    cli, repos, root, state, _policy, _data = enrolled_volume
+    base = repos["mastermind"][1]
+    source = repos["mastermind"][0]
+
+    # A directory that is not a managed linked worktree is never re-used.
+    decoy = root / "web" / "not-a-workspace"
+    decoy.mkdir(parents=True)
+    state["free"] = 99
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "not-a-workspace", "--base-sha", base])
+    payload = json.loads(capsys.readouterr().err)
+    assert code == 2 and payload["effect"] == "NOT_APPLIED"
+    assert "not registered to the source repository" in payload["error"]
+    assert list(decoy.iterdir()) == []
+
+    # A workspace bound to another base is not re-used for this operation.
+    state["free"] = 100
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "bound-workspace", "--base-sha", base])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0 and payload["effect"] == "APPLIED"
+    original = Path(payload["receipt"]["workspace_path"])
+    (source / "second.txt").write_text("second\n")
+    git(source, "add", ".")
+    git(source, "commit", "-qm", "second fixture")
+    second = git(source, "rev-parse", "HEAD")
+    state["free"] = 99
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "bound-workspace", "--base-sha", second])
+    payload = json.loads(capsys.readouterr().err)
+    assert code == 2 and payload["effect"] == "NOT_APPLIED"
+    assert "lock identity does not match" in payload["error"]
+    assert original.is_dir()
+    assert git(original, "status", "--porcelain=v1") == ""

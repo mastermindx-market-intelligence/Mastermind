@@ -40,6 +40,16 @@ mmx-workspace acquire --repository macro \
 mmx-workspace status --repository macro --operation-id "$OPERATION" --lane web
 ```
 
+### Exact base availability and bounded diagnosis
+
+The selected-repository base check is a local Git observation with `GIT_NO_LAZY_FETCH=1`. A healthy binding or `READY` discovery result does not prove that the requested exact commit is present locally. Acquisition does not automatically fetch to satisfy this check.
+
+A failed base observation can report `REPOSITORY_SOURCE_UNAVAILABLE`; this alone does not prove either a missing object or an unhealthy repository. Even diagnostic wording identifying exact-base verification describes the failed phase, not its cause. Through the existing authorized host/source owner, verify the bound source identity and canonical origin, then check that the requested lowercase 40-character SHA resolves locally to that exact commit using the same no-lazy-fetch observation. Keep raw Git stderr and credential-bearing URLs out of shared receipts.
+
+Only when the intended canonical commit is independently qualified and that diagnosis establishes its local absence, an already-authorized source owner may separately fetch that exact commit from the same verified canonical origin, then recheck identity and exact local availability. Fetch is a separate network/write effect, not an automatic recovery action or authority granted by this runbook. Do not substitute another origin, account, source checkout or base, alter bindings, reset work, or use another actor/tool to bypass a refusal. Explicit safety, provider or tool refusals stop this flow.
+
+Preserve the original acquisition receipt and operation identity. For a failed acquisition, only a matching versioned pre-construction refusal establishes `NOT_APPLIED`; the Studio adapter can label this technical result `REFUSED`. Neither the error code nor the effect label establishes the cause or permission to retry. An absent, malformed or uncertain response remains `EFFECT_UNKNOWN` and requires existing same-operation reconciliation before another effect. After a confirmed no-effect missing-object result and authorized source preparation, reassess the original acquisition through its existing owner and gates; do not blindly replay it.
+
 Use the returned `workspace_path`; do not construct another worktree, override the launcher environment, or directly invoke its Python payload as a production allocation shortcut. A second acquisition with the identical repository/operation/base/branch identity reuses that exact workspace. A mismatch refuses; it is not permission to reset or duplicate it.
 
 Mastermind retains its original `<host-root>/<lane>/<operation>` layout. Macro and Terminal use `<host-root>/<repository>/<lane>/<operation>`. The same operation name in two repositories therefore cannot silently share a workspace or Git common directory. The Web branch remains operation-derived, `sol/web-<operation>`, inside the selected repository. Sparse construction consumes that repository's profile at the exact base commit and does not retrofit an active checkout.

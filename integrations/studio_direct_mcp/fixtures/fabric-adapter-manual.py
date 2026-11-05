@@ -31,6 +31,10 @@ parser.add_argument('--subject-pool')
 parser.add_argument('--escalation-reason')
 parser.add_argument('--max-turns', type=int)
 parser.add_argument('--strict-manual-pin', action='store_true')
+parser.add_argument('--experiential-retention-acknowledged', action='store_true')
+parser.add_argument('--experiential-sensitive-data-opt-in', action='store_true')
+parser.add_argument('--experiential-proprietary-code', action='store_true')
+parser.add_argument('--experiential-code-exposure-opt-in', action='store_true')
 parser.add_argument('--quota-fallback', action='store_true')
 parser.add_argument('--follow', action='store_true')
 args = parser.parse_args()
@@ -42,19 +46,37 @@ empty = dict(schema='mastermind.fabric_task_status.v1', run_id=rid,
              root_id=None, parent_run_id=None, state='NOT_FOUND',
              result_available=False, result_bytes=None, accepted=None, accepted_by=None)
 if args.action == 'preview':
-    if args.pool != 'glm' or args.requested_model not in ('glm-5.3', 'auto'):
+    if args.pool == 'glm' and args.requested_model in ('glm-5.3', 'auto'):
+        model, mode = 'glm-5.3', 'glm'
+    elif args.pool == 'experiential' and args.requested_model == 'glm-5.3-uncensored':
+        model, mode = 'glm-5.3-uncensored', 'experiential'
+    else:
         raise SystemExit(78)
     # Read-only preview, intentionally no per-run file or reservation.
+    # This is a synthetic route, not native admission or provider entitlement.
     print(json.dumps(dict(state='PREVIEW_ONLY', reserved=False, run_id=rid,
-                          pool='glm', model='glm-5.3', mode='glm', host='synthetic-host',
+                          pool=args.pool, model=model, mode=mode, host='synthetic-host',
                           selection_rechecked_at_request=True,
                           strict_pin_enforced_at_request=True)))
 elif args.action == 'request':
     # Independently require strict policy after the prior no-effect preview.
-    if (not args.strict_manual_pin or args.pool != 'glm'
-        or args.requested_model != 'glm-5.3' or args.quota_fallback
-        or args.task_class != 'review' or args.max_turns != 12
-        or args.subject_pool != 'openai' or path.exists()):
+    # The Experiential branch is a provider-free fixture only.
+    if not args.strict_manual_pin or args.quota_fallback or path.exists():
+        raise SystemExit(78)
+    if args.pool == 'glm':
+        if (args.requested_model != 'glm-5.3' or args.task_class != 'review'
+            or args.max_turns != 12 or args.subject_pool != 'openai'):
+            raise SystemExit(78)
+    elif args.pool == 'experiential':
+        if (args.requested_model != 'glm-5.3-uncensored'
+            or args.task_class != 'mechanical' or args.max_turns is not None
+            or args.subject_pool is not None
+            or not args.experiential_retention_acknowledged
+            or not args.experiential_sensitive_data_opt_in
+            or not args.experiential_proprietary_code
+            or not args.experiential_code_exposure_opt_in):
+            raise SystemExit(78)
+    else:
         raise SystemExit(78)
     packet = sys.stdin.read()
     response = b'RETURN: VERIFIED\n\n'
@@ -67,7 +89,13 @@ elif args.action == 'request':
     (root / (rid + '.route')).write_text(json.dumps(dict(pool=args.pool,
          model=args.requested_model, strict=args.strict_manual_pin,
          quota_fallback=args.quota_fallback, max_turns=args.max_turns,
-         subject_pool=args.subject_pool, root=args.root, parent=args.parent)))
+         subject_pool=args.subject_pool, root=args.root, parent=args.parent,
+         **(dict(
+             experiential_retention_acknowledged=args.experiential_retention_acknowledged,
+             experiential_sensitive_data_opt_in=args.experiential_sensitive_data_opt_in,
+             experiential_proprietary_code=args.experiential_proprietary_code,
+             experiential_code_exposure_opt_in=args.experiential_code_exposure_opt_in,
+         ) if args.pool == 'experiential' else {}))))
     print(json.dumps(status))
 elif args.action in ('status', 'wait'):
     print(path.read_text() if path.exists() else json.dumps(empty))
