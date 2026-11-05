@@ -1,0 +1,90 @@
+{
+  "artifact_filename": "pyyaml-6.0.3-cp312-cp312-macosx_11_0_arm64.whl",
+  "artifact_sha256": "fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0",
+  "artifact_url": "https://files.pythonhosted.org/packages/89/a0/6cf41a19a1f2f3feab0e9c0b74134aa2ce6849093d5517a0c550fe37a648/pyyaml-6.0.3-cp312-cp312-macosx_11_0_arm64.whl",
+  "excluded_binary_extensions": true,
+  "files": {
+    "LICENSE": {
+      "bytes": 1101,
+      "sha256": "8d3928f9dc4490fd635707cb88eb26bd764102a7282954307d3e5167a577e8a4"
+    },
+    "METADATA": {
+      "bytes": 2351,
+      "sha256": "03c3b415ed38d09faedc49360e930769b40c58f68585e6de00e2e4916a858d34"
+    },
+    "yaml/__init__.py": {
+      "bytes": 12311,
+      "sha256": "b19dfcc333d6a75dfd73073901164507252f271b41d3b5f7d85510033a0547a7"
+    },
+    "yaml/composer.py": {
+      "bytes": 4883,
+      "sha256": "fcaa37d16afa783594794a5ab94193dcb720f503c19ce3d59539c8311189f453"
+    },
+    "yaml/constructor.py": {
+      "bytes": 28639,
+      "sha256": "90d8247da78b524c10618fd0e857f54f3d97570fe91b5c5513d024ef3faf88b0"
+    },
+    "yaml/cyaml.py": {
+      "bytes": 3851,
+      "sha256": "e99ac01bd7c062f7557b614aff0d21997a06ed962ca185306a91bc0a20bbd87d"
+    },
+    "yaml/dumper.py": {
+      "bytes": 2837,
+      "sha256": "3cb72d66563064ba7b5e679477046ebf89d8399d940670c8532f3e94a7cb17ea"
+    },
+    "yaml/emitter.py": {
+      "bytes": 43006,
+      "sha256": "8e086d694ede170837d5b1b407b45979aff6f40762f422a65eafd08e04290a44"
+    },
+    "yaml/error.py": {
+      "bytes": 2533,
+      "sha256": "021f73fada072546c4f63f8cf18a7181244ce4280b09cc15cc980b2d1176171a"
+    },
+    "yaml/events.py": {
+      "bytes": 2445,
+      "sha256": "e74fd392c810884e2ea7e94aa3f57e9c1cbeb402319083d0c58e6a0e1282787c"
+    },
+    "yaml/loader.py": {
+      "bytes": 2061,
+      "sha256": "5156becc8aa6905482218abf3e04869b835226db4763645fff3438fdbd5f1cdd"
+    },
+    "yaml/nodes.py": {
+      "bytes": 1440,
+      "sha256": "80f28d8fca4a09d87677882bde021820d9cf39a3b11a12405226211919cf13ce"
+    },
+    "yaml/parser.py": {
+      "bytes": 25495,
+      "sha256": "8a55a9e6fbe0a07146cef3990c8b45a068c3e83e369e1959ad9ca30306b4a09a"
+    },
+    "yaml/reader.py": {
+      "bytes": 6794,
+      "sha256": "d1d9b38ab3a20c6e17a38d519ee412ecaf6b918df18c78956ac7c330d4ea08dc"
+    },
+    "yaml/representer.py": {
+      "bytes": 14190,
+      "sha256": "22e58ff9c016f6c1ca1274b4802a926bcf78935060e1c813c5a0f021c6d143e6"
+    },
+    "yaml/resolver.py": {
+      "bytes": 9004,
+      "sha256": "f4bf9561f9b89961f1503d558385fbae30d12bfed565de9bf76c33abb63620a6"
+    },
+    "yaml/scanner.py": {
+      "bytes": 51279,
+      "sha256": "60433788b652690c17710460da5d91e0c753d3318fd85f5e1e42862a71f25906"
+    },
+    "yaml/serializer.py": {
+      "bytes": 4165,
+      "sha256": "0a1b85826854d35863e31808f0668abfabdf33606e8f06bd8bb7761401e3edc0"
+    },
+    "yaml/tokens.py": {
+      "bytes": 2573,
+      "sha256": "953408cd2570f0c83dc2fe39f7e4e388e41eeb05738aa69196a5f6ffcf6ba79e"
+    }
+  },
+  "lock_path": "requirements/research-producer-macos-arm64-py312.lock",
+  "lock_sha256": "0c43d2132a6afaba75e5b5720c234d1b565679b650d7c04c024a1a12d711206a",
+  "package": "PyYAML",
+  "schema": "mastermind.paid_pure_yaml_source/v1",
+  "version": "6.0.3",
+  "zip_sha256": "1d6b5f7c42bc620557966d5cc6ca1933a7a12670658a7604676f0aebc26a3131"
+}

@@ -241,6 +241,41 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
 )
 
 _TOOLS_BY_NAME = {spec.name: spec for spec in TOOL_SPECS}
+
+# Explicit opt-in catalogue. The installed legacy six-tool schema and digest
+# remain unchanged; only an enrolled host advertises this additive generation.
+PRODUCT_ACCEPTANCE_SERVER_VERSION = "1.1.0"
+
+
+def _product_acceptance_tools() -> tuple[ToolSpec, ...]:
+    tools = []
+    for spec in TOOL_SPECS:
+        if spec.name != "request_decision":
+            tools.append(spec)
+            continue
+        schema = copy.deepcopy(spec.input_schema)
+        old_required = schema.pop("required")
+        old_fields = tuple(schema["properties"])
+        schema["properties"].update({
+            "purpose": {"type": "string", "enum": ["PRODUCT_ACCEPTANCE"]},
+            "subject_job_id": _string(max_length=128,
+                pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"),
+        })
+        schema["oneOf"] = [
+            {"required": old_required,
+             "not": {"anyOf": [{"required": ["purpose"]},
+                                {"required": ["subject_job_id"]}]}},
+            {"required": ["purpose", "subject_job_id"],
+             "not": {"anyOf": [{"required": [key]} for key in old_fields]}},
+        ]
+        tools.append(dataclasses.replace(spec, input_schema=schema,
+            description=spec.description + " An enrolled 1.1 host can receive a "
+            "PRODUCT_ACCEPTANCE subject selector; the host derives and retains "
+            "the canonical request. This selector grants no authority."))
+    return tuple(tools)
+
+
+PRODUCT_ACCEPTANCE_TOOL_SPECS = _product_acceptance_tools()
 _MESSAGE_TYPES = {
     "ack": "ACK",
     "progress": "PROGRESS",
@@ -287,7 +322,9 @@ def _validated_evidence_refs(value: Any) -> list[str]:
     return refs
 
 
-def validate_tool_arguments(tool_name: str, arguments: Any) -> dict[str, Any]:
+def validate_tool_arguments(
+    tool_name: str, arguments: Any, *, allow_product_acceptance: bool = False,
+) -> dict[str, Any]:
     """Strictly normalize one model-visible call without accepting binding fields."""
 
     spec = _TOOLS_BY_NAME.get(tool_name)
@@ -300,6 +337,19 @@ def validate_tool_arguments(tool_name: str, arguments: Any) -> dict[str, Any]:
     raw = dict(arguments)
     if len(canonical_json({"arguments": raw})) > MAX_REQUEST_BYTES:
         raise GatewayError("INVALID_REQUEST")
+    if tool_name == "request_decision" and (
+        "purpose" in raw or "subject_job_id" in raw
+    ):
+        if (allow_product_acceptance is not True
+                or set(raw) != {"purpose", "subject_job_id"}
+                or raw.get("purpose") != "PRODUCT_ACCEPTANCE"
+                or type(raw.get("subject_job_id")) is not str
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}",
+                                raw["subject_job_id"]) is None):
+            raise GatewayError("INVALID_REQUEST")
+        # This is requested selection only. No body, identity, reviewer, digest
+        # or verdict can enter the owner-generated acceptance association.
+        return raw
     allowed = set(spec.input_schema["properties"])
     if not set(raw) <= allowed:
         raise GatewayError("INVALID_REQUEST")

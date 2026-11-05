@@ -17,7 +17,14 @@ fn required(name: &str) -> String {
 }
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=MM_EXECUTIVE_RESOURCE");
     println!("cargo:rerun-if-env-changed=MM_NATIVE_CLIENT_ID");
+    println!("cargo:rerun-if-env-changed=MM_NATIVE_REFRESH_ENABLED");
+    match std::env::var("MM_NATIVE_REFRESH_ENABLED") {
+        Ok(value) if value == "1" => (),
+        Err(std::env::VarError::NotPresent) => (),
+        _ => panic!("MM_NATIVE_REFRESH_ENABLED must be absent or exactly 1"),
+    }
     match std::env::var("MM_NATIVE_CLIENT_ID") {
         Ok(value) => native_client::validate_native_client_id(&value)
             .unwrap_or_else(|message| panic!("MM_NATIVE_CLIENT_ID {message}")),

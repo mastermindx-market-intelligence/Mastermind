@@ -58,12 +58,13 @@ def test_launchd_templates_are_two_non_root_persistent_system_jobs() -> None:
     assert worker["GroupName"] == "__WORKER_GROUP__"
     assert control["UserName"] != worker["UserName"]
     assert worker["InitGroups"] is False
+    assert control["ProcessType"] == "Interactive"
+    assert worker["ProcessType"] == "Interactive"
 
     for value in (control, worker):
         assert value["RunAtLoad"] is True
         assert value["KeepAlive"] is True
         assert value["AbandonProcessGroup"] is False
-        assert value["ProcessType"] == "Background"
         assert value["Umask"] == 0o77
         assert 1 <= value["ExitTimeOut"] <= 30
         assert value["HardResourceLimits"]["Core"] == 0
@@ -136,12 +137,24 @@ def test_executive_daemons_do_not_throttle_disk_io() -> None:
     # and why a manual `_mastermind_exec` shell reproduction always
     # succeeded: an interactive shell has normal I/O policy; only launchd's
     # plist-driven daemon start applies the throttle. Both Executive
-    # launchd plists must never set the key again. ProcessType=Background
-    # (CPU scheduling politeness, not disk I/O) is retained and is not the
-    # defect -- it stays asserted on both templates below.
+    # launchd plists must never set the key again. Separately, Control serves
+    # latency-bounded user reads, so it must not receive Background policy.
+    # Worker also performs deadline-bounded repository preflight and provider
+    # launch work. A launchd Background clamp can outlive those fixed request
+    # deadlines even when the same operation is sub-second at normal policy.
+    # launchd.plist(5) documents CPU and I/O resource limits, not CPU-only
+    # politeness. In #987, the installed reader passed as UID450 with its
+    # launchd file-size limit but timed out under a background QoS clamp.
+    # Standard also clamps these user-requested reads to utility QoS: the
+    # e981 installed reader exceeded its deadline under taskpolicy -c utility,
+    # while the same reader finished in 13.5s under taskpolicy -a. Request-level
+    # pthread QoS cannot override the process clamp. Interactive supplies the
+    # application resource policy; this Unix socket service has no XPC activity
+    # to drive Adaptive. Explicit resource/deadline limits remain in force.
     for value in (_plist(CONTROL), _plist(WORKER)):
         assert "LowPriorityIO" not in value
-        assert value["ProcessType"] == "Background"
+    assert _plist(CONTROL)["ProcessType"] == "Interactive"
+    assert _plist(WORKER)["ProcessType"] == "Interactive"
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="plutil is a Darwin-only binary")
@@ -294,11 +307,11 @@ def test_generated_launchd_plists_pass_plutil_lint(tmp_path: Path) -> None:
         "SockPathMode": 0o660,
     }
 
-    for rendered_path in (control, worker):
+    for rendered_path, process_type in ((control, "Interactive"), (worker, "Interactive")):
         with rendered_path.open("rb") as handle:
             rendered = plistlib.load(handle)
         assert "LowPriorityIO" not in rendered
-        assert rendered["ProcessType"] == "Background"
+        assert rendered["ProcessType"] == process_type
 
 
 def test_root_scripts_are_syntax_valid_and_service_control_is_fixed_scope() -> None:
@@ -315,7 +328,7 @@ def test_root_scripts_are_syntax_valid_and_service_control_is_fixed_scope() -> N
         assert completed.returncode == 0, f"{script.name}: {completed.stderr}"
 
     lifecycle = (OPS / "service-control.sh").read_text(encoding="utf-8")
-    assert "{start|stop|restart|status}" in lifecycle
+    assert "{start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|publish-os-gateway|reconcile-os-gateway|plan-mcp-component|apply-mcp-component|reconcile-mcp-component|status}" in lifecycle
     assert "com.mastermind.executive.control" in lifecycle
     assert "com.mastermind.executive.worker.codex" in lifecycle
     assert "--label" not in lifecycle and "eval " not in lifecycle
@@ -340,10 +353,15 @@ def test_host_scripts_use_tools_available_at_absolute_macos_paths() -> None:
     assert "/usr/bin/realpath" not in install
     assert 'runtime_target="$(/usr/bin/readlink -f "$runtime_link")"' in install
 
-    for name in ("acceptance.sh", "service-control.sh"):
-        source = (OPS / name).read_text(encoding="utf-8")
-        assert '$(/usr/bin/dirname "$0")' in source
-        assert '$(dirname "$0")' not in source
+    acceptance = (OPS / "acceptance.sh").read_text(encoding="utf-8")
+    assert '$(/usr/bin/dirname "$0")' in acceptance
+    assert '$(dirname "$0")' not in acceptance
+
+    lifecycle = (OPS / "service-control.sh").read_text(encoding="utf-8")
+    assert 'SCRIPT_SOURCE="${BASH_SOURCE[0]}"' in lifecycle
+    assert 'builtin cd -P "$(/usr/bin/dirname "$SCRIPT_SOURCE")"' in lifecycle
+    assert '$(/usr/bin/basename "$SCRIPT_SOURCE")' in lifecycle
+    assert '$(/usr/bin/dirname "$0")' not in lifecycle
 
 
 def test_control_canary_uses_post_drop_wrapper_not_launchd_environment() -> None:
@@ -361,9 +379,16 @@ def test_control_canary_uses_post_drop_wrapper_not_launchd_environment() -> None
     )
     assert "os.execve" in wrapper
     assert "exact_mode=0o440" in wrapper
-    assert wrapper.index("attest_current_service_environment(") < wrapper.index(
-        "service_main("
-    )
+    # Check calls in the actual post-exec entry, not a former service alias
+    # or an earlier function definition. Behavioral order is also exercised
+    # by test_installed_finite_control.py.
+    import ast
+    tree = ast.parse(wrapper)
+    entry = next(node for node in tree.body
+                 if isinstance(node, ast.FunctionDef) and node.name == "_post_exec_main")
+    calls = {node.func.id: node.lineno for node in ast.walk(entry)
+             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    assert calls["attest_current_service_environment"] < calls["serve_installed_control"]
     assert '"PYTHONDONTWRITEBYTECODE": "1"' in wrapper
     assert "KERN_PROCARGS2" in probe
     assert '"/bin/launchctl", "print"' in probe
@@ -500,6 +525,7 @@ def test_acceptance_rejects_existing_receipt_container_metadata_drift(
     monkeypatch.setattr(acceptance, "_assert_no_acl", lambda path: None)
     container = tmp_path / "acceptance"
     container.mkdir(mode=0o755)
+    container.chmod(0o755)  # Deliberately bad metadata, independent of process umask.
 
     with pytest.raises(acceptance.AcceptanceError, match="container metadata drifted"):
         acceptance._prepare_acceptance_receipt_root(
@@ -631,7 +657,7 @@ def test_installer_ships_the_backup_daemon_disabled_like_the_others() -> None:
         '/bin/launchctl bootout "system/$BACKUP_LABEL"',
     ):
         assert line in install
-    assert 'if /bin/launchctl print "system/$BACKUP_LABEL" >/dev/null 2>&1; then' in install
+    assert 'wait_for_launchd_absent "$BACKUP_LABEL" backup || exit 65' in install
     assert (
         '/usr/bin/install -o root -g wheel -m 0644 "$RELEASE_ROOT/ops/executive_os/$BACKUP_LABEL.plist.template" "$BACKUP_PLIST"'
         in install
@@ -741,19 +767,43 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
 
     value = json.loads((OPS / "control.json.template").read_text(encoding="utf-8"))
     assert value["schema_version"] == CONTROL_CONFIG_SCHEMA_VERSION
-    # Installed product groups and the optional read-profile selector stay
-    # omitted in the unconfigured template. Null groups fail validation;
-    # an omitted executive_mcp_profile preserves the legacy generation.
+    # Installed product groups, the optional read-profile selector, and the
+    # attended subscription realm stay omitted in the unconfigured template.
+    # Fabric also requires explicitly installed bindings and remains unarmed
+    # when its three optional composition keys are omitted.
+    # Null groups fail validation; an omitted executive_mcp_profile preserves
+    # the legacy generation and an omitted realm preserves the v4 worker.
     installed_product_keys = {
+        "company_consultation",
         "executive_mcp_profile",
+        # Reply Events are an explicit product enrollment, never a static
+        # control-template default or required boot-time credential.
+        "reply_events",
         "content_observer",
         "content_observer_profile_path",
         "workspace_acquisition",
         "workspace_resource_policy",
         "workspace_control_room",
+        "subscription_canary_realm",
+        "privileged_readiness_armed",
+        "privileged_broker_socket_path",
+        "fabric_bridge_armed",
+        "fabric_bindings_path",
+        "fabric_bindings_sha256",
+        "fabric_attended_probe",
+        # Paid bindings are installed/qualified explicitly, never template admission.
+        "canonical_paid_fabric",
+        "coo_principal_dialogue_armed",
+        # Native V2 requires explicitly sealed source and remains absent by default.
+        "native_capacity_v2",
+        # Provenance is injected only after the installer validates the live
+        # receipt; the static template intentionally has no host digest.
+        "python_runtime_provenance_digest",
     }
     assert installed_product_keys <= _CONFIG_OPTIONAL
     assert set(value) == _CONFIG_REQUIRED | (_CONFIG_OPTIONAL - installed_product_keys)
+    # A missing key fails start-finite. The seat template carries explicit false.
+    assert value["coo_foreground_only"] is False
 
 
 def _membership_snapshot() -> dict:
@@ -983,16 +1033,22 @@ def test_privileged_source_cleanliness_checks_do_not_refresh_worktree_index() ->
     source_policy = (OPS / "install_source_policy.py").read_text(encoding="utf-8")
     acceptance = (OPS / "acceptance.py").read_text(encoding="utf-8")
 
-    assert '["/usr/bin/git", "--no-optional-locks", "-C", str(repo), *args]' in source_policy
-    assert '"status",\n        "--porcelain=v1",\n        "--untracked-files=normal",' in source_policy
-    assert "--refresh" not in source_policy
     assert (
         '"/usr/bin/git",\n'
         '                "--no-optional-locks",\n'
+        '                "-c",\n'
+        '                f"safe.directory={trust_value}",\n'
         '                "-C",\n'
-        '                self.source_repository,\n'
-        '                "status",'
-    ) in acceptance
+        '                trust_value,\n'
+        '                *args,'
+    ) in source_policy
+    assert '"status",\n        "--porcelain=v1",\n        "--untracked-files=normal",' in source_policy
+    assert "--refresh" not in source_policy
+    assert "return validate_acceptance_source(" in acceptance
+    assert "source_repo=self.source_repository," in acceptance
+    assert "expected_sha=self.expected_sha," in acceptance
+    assert "tree_sha = self._source_tree_sha()" in acceptance
+    assert '"/usr/bin/git"' not in acceptance
 
 
 def test_canary_activation_uses_bounded_control_command_not_signal() -> None:
@@ -1452,13 +1508,18 @@ def test_acceptance_requires_exact_reviewed_macos_directory_group_sets() -> None
         )
 
 
-def test_acceptance_derives_assignment_roots_from_durable_job_and_attempt() -> None:
+def test_acceptance_derives_assignment_roots_from_durable_job_and_attempt(tmp_path: Path) -> None:
     import pytest
 
     from ops.executive_os.acceptance import AcceptanceError, _durable_assignment_paths
 
-    workspace_root = Path("/var/db/mastermind-executive/jobs/workspaces")
-    run_root = Path("/var/db/mastermind-executive/jobs/runs")
+    workspace_root = tmp_path.resolve() / "workspaces"
+    run_root = tmp_path.resolve() / "runs"
+    workspace_root.mkdir()
+    run_root.mkdir()
+    (workspace_root / "proof-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").mkdir()
+    (run_root / "attempt-1" / "output").mkdir(parents=True)
+    (run_root / "attempt-1" / "output" / "result.json").write_text("{}")
     job = {
         "job_id": "job-1",
         "current_attempt_id": "attempt-1",
@@ -1468,6 +1529,7 @@ def test_acceptance_derives_assignment_roots_from_durable_job_and_attempt() -> N
         "attempt_id": "attempt-1",
         "job_id": "job-1",
         "result_path": str(run_root / "attempt-1" / "output" / "result.json"),
+        "status": "COMPLETED",
     }
     assert _durable_assignment_paths(
         job, attempt, workspace_root=workspace_root, run_root=run_root
@@ -1705,17 +1767,25 @@ def test_release_manifest_rejects_ownership_and_group_write_drift() -> None:
 
 def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -> None:
     source = (OPS / "install.sh").read_text(encoding="utf-8")
-    stop = source.index('/bin/launchctl disable "system/$CONTROL_LABEL"')
+    mutation_start = source.index("trap leave_installed_services_stopped EXIT")
+    stop = source.index('/bin/launchctl disable "system/$CONTROL_LABEL"', mutation_start)
     control_absent = source.index(
-        'if /bin/launchctl print "system/$CONTROL_LABEL"', stop
+        'wait_for_launchd_absent "$CONTROL_LABEL" control', stop
     )
     worker_absent = source.index(
-        'if /bin/launchctl print "system/$WORKER_LABEL"', control_absent
+        'wait_for_launchd_absent "$WORKER_LABEL" worker', control_absent
     )
-    archive = source.index('/usr/bin/git -C "$SOURCE_REPO" archive')
-    config_write = source.index('temporary.write_text(', archive)
+    # Archive/seal/publication now live in one shared function. Its ordinary
+    # invocation, rather than its definition, must follow the daemon fences.
+    shared = source.split("# --- BEGIN shared sealed release staging ---", 1)[1].split(
+        "# --- END shared sealed release staging ---", 1
+    )[0]
+    archive_command = '/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive'
+    assert shared.count(archive_command) == source.count(archive_command) == 1
+    publication = source.index("\nstage_sealed_release || exit 65", mutation_start)
+    config_write = source.index('temporary.write_text(', publication)
     plist_install = source.index('/usr/bin/install -o root -g wheel -m 0644')
-    assert stop < control_absent < worker_absent < archive < config_write < plist_install
+    assert mutation_start < stop < control_absent < worker_absent < publication < config_write < plist_install
     assert "trap leave_installed_services_stopped EXIT" in source
     tail_after_plists = source[plist_install:]
     # Normal Executive daemons stay inert. The only bootstrap is the explicitly
@@ -1728,6 +1798,50 @@ def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -
     bootstrap = tail_after_plists.index('/bin/launchctl bootstrap system "$PRIVILEGED_PLIST"')
     manifest_verify = tail_after_plists.rindex('release_manifest.py" verify', 0, arm)
     assert manifest_verify < arm < bootstrap
+
+
+def test_installer_waits_boundedly_for_asynchronous_launchd_bootout(tmp_path) -> None:
+    source = (OPS / "install.sh").read_text(encoding="utf-8")
+    helper_start = source.index("wait_for_launchd_absent() {")
+    helper_end = source.index("\n}\nleave_installed_services_stopped()", helper_start)
+    helper = source[helper_start:helper_end]
+    # Exercise the actual shell wrapper with an inert helper process. The
+    # Python boundary's absolute budget and native absence decisions are
+    # covered by the native-acquisition behavioral tests.
+    import subprocess
+    fake_python = tmp_path / "python"
+    fake_python.write_text('''#!/bin/sh
+printf '%s\\n' "$@" > "$CALL_LOG"
+exit "$HELPER_RC"
+''')
+    fake_python.chmod(0o700)
+    call_log = tmp_path / "called"
+    for helper_rc in ("0", "65"):
+        result = subprocess.run(
+            ["/bin/bash", "-c", helper + '\n}\nwait_for_launchd_absent "com.mastermind.executive.privileged" privileged'],
+            env={"PYTHON_BINARY": str(fake_python), "SCRIPT_DIR": str(OPS),
+                 "CALL_LOG": str(call_log), "HELPER_RC": helper_rc},
+            capture_output=True, text=True, timeout=5,
+        )
+        assert result.returncode == (0 if helper_rc == "0" else 1)
+        assert call_log.read_text().splitlines() == [
+            "-I", "-S", "-B", str(OPS / "recovery_install_observation.py"),
+            "com.mastermind.executive.privileged",
+        ]
+        if helper_rc != "0":
+            assert "absence was not proven after bootout" in result.stderr
+
+    mutation_start = source.index("trap leave_installed_services_stopped EXIT")
+    publication = source.index("\nstage_sealed_release || exit 65", mutation_start)
+    mutation = source[mutation_start:publication]
+    for label, description in (
+        ("RELAY_LABEL", "relay"),
+        ("CONTROL_LABEL", "control"),
+        ("WORKER_LABEL", "worker"),
+        ("BACKUP_LABEL", "backup"),
+        ("PRIVILEGED_LABEL", "privileged"),
+    ):
+        assert f'wait_for_launchd_absent "${label}" {description} || exit 65' in mutation
 
 
 @pytest.mark.skipif(sys.platform != 'darwin', reason='macOS plutil installer rendering')

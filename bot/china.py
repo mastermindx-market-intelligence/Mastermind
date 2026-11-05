@@ -103,6 +103,13 @@ def run_china(asof: str | None = None, *, force: bool = False, armed: bool = Tru
             brain = _run_brain(asof, inaugural, directive=directive) if directive else _run_brain(asof, inaugural)
         except Exception as e:                   # noqa: BLE001
             brain = {"ok": False, "error": repr(e)[:300]}
+            try:
+                from brain.cli_bridge import provider_refusal_run_id
+                _refusal_run_id = provider_refusal_run_id(e, book=PORTFOLIO_ID)
+                if _refusal_run_id is not None:
+                    brain["run_id"] = _refusal_run_id
+            except Exception:
+                pass  # Evidence recovery cannot replace the original error/submission.
         # record this seat's known cost + token usage against the nightly per-book ledger.
         _usg = brain.get("usage") or {}
         cost_guard.record(
@@ -771,6 +778,7 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
         "cost_usd": brain.get("cost_usd") if isinstance(brain, dict) else None,
         "model": brain.get("model") if isinstance(brain, dict) else None,
         "error": brain.get("error") if isinstance(brain, dict) else None,
+        "provider_failure": brain.get("provider_failure") if isinstance(brain, dict) else None,
         "packet_id": packet_id,
         **decision_submission.target_status_fields(target_status),
         **decision_rows.accepted_identity_fields(

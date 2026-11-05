@@ -1,0 +1,81 @@
+{
+  "operation_id": "mastermind-os-backend-app-contract-20261004-astra-001",
+  "implementation_base": "03f7ca04cd5b0a3abf7166221dd77d403c7f95df",
+  "consumer_ref": "37d02586eeb97d92e6fb9ed6dbc7cd142dd6449c",
+  "source_sha256": {
+    "control_plane/ceo_intent.py": "84ebc141955e096aea35f90b37b5be0634fc54e3d5021622448b9d413631382f",
+    "tests/test_ceo_intent_work_ref.py": "0d47644032a313a778e18cf022cc157db8b587db3c607880ff570a0b9cbf86cb",
+    "tests/test_executive_mcp_launch_journey.py": "8b8c8cb70398878184ce098e3b09e0544bcf4e9297300b0c431f2f93b1d77a5a",
+    "tests/fixtures/mastermind_os_launch_client_probe.mjs": "de9005a4af5e31a190981e575a2d60d58dcd408308ead278126815133b3fc61a",
+    "tests/fixtures/mastermind_os_launch_cross_layer_probe.py": "7943c32d659a42c9fb6c9ac24c183618071f4cca23318b4bd80ce06ff0ef8dda",
+    "tests/fixtures/mastermind_os_v3_recovery_compat.patch": "4c5092e149ea7171aff297674b7d6fc6a1c9f2407b9689cb5eff911205e9a68c"
+  },
+  "environment": {
+    "python": "3.14.7",
+    "node": "v26.5.0",
+    "mcp": "1.28.1",
+    "PyJWT": "2.13.0",
+    "rolldown": "1.2.9"
+  },
+  "runs": [
+    {
+      "scope": "nine relevant receipt/ingress/MCP/admission/autonomy modules",
+      "collected": 609,
+      "passed": 608,
+      "failed": 1,
+      "exit_code": 1,
+      "failure": "pre-existing Mosyle synthetic credential fixture GID mismatch; default pytest temp tree gid0, expected process gid20"
+    },
+    {
+      "scope": "same failing credential test with a fresh task-local gid20 parent",
+      "passed": 1,
+      "failed": 0,
+      "exit_code": 0,
+      "seconds": 1.76,
+      "source_or_permission_changes": false
+    },
+    {
+      "scope": "tests/test_executive_principal_intent.py",
+      "passed": 47,
+      "failed": 0,
+      "exit_code": 0,
+      "seconds": 2.41,
+      "observer": "internal delegated reviewer"
+    },
+    {
+      "scope": "frozen consumer baseline; actual backend envelopes",
+      "passed": 6,
+      "failed": 2,
+      "exit_code": 1,
+      "negative_controls_passed": 26
+    },
+    {
+      "scope": "proposed consumer patch on disposable source snapshot; actual backend envelopes",
+      "passed": 8,
+      "failed": 0,
+      "exit_code": 0,
+      "negative_controls_passed": 52
+    }
+  ],
+  "external_effects": {
+    "production_runtime_jobs": 0,
+    "dispatches": 0,
+    "installed_service_changes": 0,
+    "credential_changes": 0,
+    "incumbent_source_changes": 0
+  },
+  "release_state": "candidate source; exact-head review, hosted CI, source adoption, and installed acceptance remain separate",
+  "requalification_20261005": {
+    "candidate_sha": "ee8f01583a08a06f24d7cf72aba3ecf1a290da16",
+    "consumer_ref": "37d02586eeb97d92e6fb9ed6dbc7cd142dd6449c",
+    "report": "cross-layer-v3-patch.json",
+    "report_sha256": "020fe2f2f4bb3b8b1d49c02cd6593bd1d8c457453b29ea004e25e0f2a474f894",
+    "consumer_patch_sha256": "4c5092e149ea7171aff297674b7d6fc6a1c9f2407b9689cb5eff911205e9a68c",
+    "launch_client_probe_sha256": "de9005a4af5e31a190981e575a2d60d58dcd408308ead278126815133b3fc61a",
+    "v3_status_server_version": "1.5.0",
+    "passed": 8,
+    "failed": 0,
+    "negative_controls_passed": 52,
+    "production_effects": 0
+  }
+}

@@ -1,0 +1,6 @@
+stage_h,positions_with_signal,alive_with_valid_history,closed_before_feature,alive_future_winners,alive_future_nonwinners,winners_below_entry_at_time,losers_above_entry_at_time,winner_median_5m_close_gain_pct,loser_median_5m_close_gain_pct,winner_median_5m_adverse_pct,loser_median_5m_adverse_pct,original_support_lost_winners,original_support_lost_losers
+0.5,34,31,3,13,18,1,12,0.5103,0.09,-0.1722,-0.10825,0,2
+1.0,34,29,5,13,16,4,8,1.3071,0.0081,-0.2737,-0.3295,3,2
+2.0,34,26,8,13,13,1,13,0.8299,0.2498,-0.2737,-0.2794,1,0
+3.0,34,26,8,13,13,0,5,1.0509,-0.0882,-0.2737,-0.377,0,4
+6.0,34,14,20,13,1,0,0,2.7396,-0.0751,-0.2737,-0.7301,0,1

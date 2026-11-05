@@ -92,8 +92,14 @@ def test_considered_aliases_are_bounded_and_strict(aliases):
         ModelRouter.load().explain_route(WorkRequest("tests"), considered_aliases=aliases)
 
 
-def test_alias_order_is_deterministic_and_disabled_provider_is_source_only():
-    router = ModelRouter.load()
+def test_alias_order_is_deterministic_and_disabled_provider_is_source_only(tmp_path):
+    def disable_glm(raw):
+        raw["providers"]["glm"]["enabled"] = False
+        raw["providers"]["glm"]["autonomous_allowed"] = False
+        for profile in raw["model_aliases"].values():
+            if profile["provider_alias"] == "glm":
+                profile["worker_eligible"] = False
+    router = _router(tmp_path, disable_glm)
     one = router.explain_route(WorkRequest("research"), considered_aliases=("z.flash", "a.flash"))
     two = router.explain_route(WorkRequest("research"), considered_aliases=("a.flash", "z.flash", "a.flash"))
     assert one == two
@@ -134,17 +140,54 @@ def test_consider_alias_without_explain_refuses_before_runtime(tmp_path, capsys,
 @pytest.mark.parametrize("name", ["AGENTS.md", "CLAUDE.md"])
 def test_engineering_entrypoints_share_adaptive_economics_policy(name):
     text = (ROOT / name).read_text()
-    assert "Adaptive engineering delegation" in text
-    assert "docs/sol_skills/WEB_CEO_DELEGATION.md" in text
-    assert "cost per accepted outcome" in text
+    agents = (ROOT / "AGENTS.md").read_text()
+    assert "docs/sol_skills/WEB_CEO_DELEGATION.md" in agents
+    assert "Assigned Codex/Claude Meta-CEO: paid Fabric delegation first" in agents
+    if name == "CLAUDE.md":
+        assert "`AGENTS.md`" in text
+        assert "Prefer economical qualified Fabric workers for separable work." in text
+        assert "Portfolio model tiers" in text
     assert "Portfolio" in text or "portfolio" in text
 
 
 def test_source_policy_does_not_hardcode_premium_workers_as_economical():
-    text = (ROOT / "docs/sol_skills/WEB_CEO_DELEGATION.md").read_text()
-    assert "Adaptive three-level delegation" in text
-    assert "WHY_STRONG_EXECUTOR" in text
-    assert "admission class" in text
-    assert "GLM Flash" in text and "MiniMax" in text
+    text = " ".join((ROOT / "docs/sol_skills/WEB_CEO_DELEGATION.md").read_text().split())
+    assert "Quality and accepted-result cost outrank nominal token or agent-count savings." in text
+    assert "Choose the shallowest capable route;" in text
+    assert "Model Router fixes the first lawful suitability tier;" in text
+    assert "eligible candidates within it by least cost/scarcity." in text
+    assert "unknown quota/proof/budget stays unknown." in text
+    addendum = " ".join((ROOT / "docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md").read_text().split())
+    assert "lowest-marginal-cost / least-scarce route" in addendum
+    assert "when whole-cycle cost improves." in addendum
     claude = (ROOT / "CLAUDE.md").read_text()
     assert "Bias toward delegating non-Opus subtasks to Sonnet/Haiku" not in claude
+
+
+def test_current_provider_source_and_responsibility_are_preserved_without_live_claims():
+    router = ModelRouter.load()
+    raw = json.loads(DEFAULT_POLICY_PATH.read_text())
+    intent = {
+        "schema_version": "mastermind.responsibility_intent/v1",
+        "responsibility_role": "worker",
+        "execution_mode": "execute",
+    }
+    request = WorkRequest("implementation", responsibility_intent=intent)
+    decision = router.route(request).to_dict()
+    report = router.explain_route(request)
+    assert report["decision"] == decision
+    assert report["decision"]["responsibility_intent"] == intent
+    assert report["decision"]["responsibility_intent_digest"] == request.responsibility_intent.digest
+    providers = {row["provider_alias"]: row for row in report["providers"]}
+    assert set(providers) == set(raw["providers"])
+    for alias, source in raw["providers"].items():
+        assert providers[alias]["enabled_in_source"] is source["enabled"]
+        assert providers[alias]["autonomous_allowed_in_source"] is source["autonomous_allowed"]
+        assert providers[alias]["live_readiness"] == "NOT_OBSERVED"
+    assert providers["glm"]["enabled_in_source"] is True
+    assert report["authority"] == "NONE_SOURCE_PREVIEW_ONLY"
+    assert report["runtime_observation"] == "NOT_PERFORMED"
+    assert report["economic_comparison"] == "NOT_PERFORMED"
+    assert report["selected_worker"] is None
+    assert report["live_admission"] is False
+    assert all(row["measured_cost"] is None for row in report["aliases"])

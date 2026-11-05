@@ -39,7 +39,10 @@ _RESPONSE_KEYS = frozenset({
 _IDENTITY_KEYS = ("host_ref", "job_id", "attempt_id", "worker_id", "operation_id")
 _BOUND_AUTHORITY_KEYS = frozenset({"host_ref", "job_id", "attempt_id", "worker_id"})
 _BOUND_PAYLOAD_IDENTITY_KEYS = frozenset({"session_epoch_id", "process_generation_id"})
-_ATTEMPT_RUN_OPERATIONS = frozenset({"start", "status", "collect", "cancel", "validate"})
+_ATTEMPT_RUN_OPERATIONS = frozenset({
+    "start", "status", "collect", "cancel", "validate", "attended-secret-canary",
+    "assignment-seal", "assignment-seal-prepare", "assignment-seal-commit", "assignment-seal-finalize",
+})
 
 
 class TransportValidationError(ValueError):
