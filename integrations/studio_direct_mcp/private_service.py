@@ -3376,6 +3376,12 @@ def _frozen_paper_fleet_module():
     module.__file__ = str(path)
     exec(compile(source_bytes, str(path), "exec"), module.__dict__)
     if (frozenset(module.COHORTS) != FLEET_V20_ENROLLED_ACCOUNTS
+            or frozenset(module.WORKSPACE_12FILE_SUCCESSORS)
+               != frozenset((
+                   "admin-business",
+                   "chatgpt3-w570f6f34",
+                   "chatgpt3-wa2a9e6f9",
+               ))
             or module.C4_POST_ENROLLMENT["manifest_sha256"]
                != "3648a9a8e9711bab7be9fc7a3950f73579ce7d78358a18c15ac7d39adf924a9f"
             or module.TARGET_BRIDGE_SHA256 != PAPER_V20_BRIDGE_SHA256
@@ -3399,8 +3405,13 @@ def _upgrade_paper_frozen_fleet_v20(args) -> int:
         account == C4_PAPER_ACCOUNT
         and expected == cohorts.C4_POST_ENROLLMENT["manifest_sha256"]
     )
+    workspace_successor = (
+        account in cohorts.WORKSPACE_12FILE_SUCCESSORS
+        and expected ==
+            cohorts.WORKSPACE_12FILE_SUCCESSORS[account]["manifest_sha256"]
+    )
     if (expected != cohorts.COHORTS[account]["manifest_sha256"]
-            and not enrolled_c4):
+            and not enrolled_c4 and not workspace_successor):
         raise SystemExit("Paper fleet original manifest is not frozen predecessor")
     label = f"com.mastermind.studio-direct-private.{account}"
     roots = _build_runtime_roots(account)
