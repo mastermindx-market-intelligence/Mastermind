@@ -4634,7 +4634,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         event.preventDefault();
         document.getElementById("content")?.focus();
       }}>
-        Skip to workspace
+        {locale === "zh-CN" ? "跳至工作区" : "Skip to workspace"}
       </a>
       {navigationOpen && <button className="navigation-backdrop" aria-label={locale === "zh-CN" ? "关闭导航" : "Close navigation"} tabIndex={-1} onClick={closeNavigation} />}
       <aside id="workspace-navigation" ref={navigationPane} data-open={navigationOpen ? "true" : "false"}>
@@ -4653,8 +4653,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             <NavigationIcon view="Search"/>{locale === "zh-CN" ? "搜索" : "Search"}
           </button>
           <div className="nav-section">
-            <span className="nav-section-label">COMPANY</span>
-            <nav aria-label="Company navigation">
+            <span className="nav-section-label">{locale === "zh-CN" ? "公司" : "COMPANY"}</span>
+            <nav aria-label={locale === "zh-CN" ? "公司导航" : "Company navigation"}>
               {primaryNavigation.map((x) => (
                 <button
                   key={x}

@@ -12,6 +12,8 @@ afterEach(()=>{cleanup();localStorage.clear();delete window.MastermindMissionHos
 it("shows plain Chinese unavailable work, selection and footer without changing raw diagnostics",()=>{
  render(<App locale="zh-CN" theme="light"/>);
  expect(screen.getByRole("heading",{name:"开始工作"})).toBeTruthy();
+ expect(screen.getByRole("navigation",{name:"公司导航"})).toBeTruthy();
+ expect(screen.getByRole("link",{name:"跳至工作区"})).toBeTruthy();
  expect(screen.getByText("暂时无法开始工作。")).toBeTruthy();
  expect(screen.queryByText("尚未选择工作项")).toBeNull();
  expect(document.querySelector("details.nav-advanced nav")?.getAttribute("aria-label")).toBe("工作导航");
