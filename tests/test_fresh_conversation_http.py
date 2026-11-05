@@ -8,6 +8,8 @@ The separate exact profile/mount/native route joins remain integration checks.
 import asyncio
 import dataclasses
 import json
+import os
+from pathlib import Path
 import time
 
 import pytest
@@ -122,6 +124,28 @@ def test_signed_preview_create_original_read_duplicate_and_reopen(tmp_path, rsa_
             assert code == 200 and reopened["data"]["locator"] == first["data"]["locator"]
             assert len(runtime.jobs.list_jobs()) == 2 and len(runtime.attempts.list_attempts()) == 1
             assert sink.events and all("Bearer" not in repr(frame) for frame in calls)
+            # Retain one coherent actual run for the typed consumer. Only
+            # public requests/responses and finite actual Runtime counts are
+            # exported; signed tokens/private peer frames never leave fixture.
+            destination = os.environ.get("S34_SIGNED_FIXTURE_OUTPUT")
+            if destination:
+                captured = {"schema": "mastermind.s34.signed_fixture.v1",
+                    "source_revision": os.environ["S34_SOURCE_REVISION"],
+                    "seams": ["synthetic fixture authority/host readiness", "actual RS256 verifier",
+                        "inert private kernel peer forwarding actual serialized frame",
+                        "inert physical native/provider account"],
+                    "request": request, "create_request": create,
+                    "preview": preview, "create": first, "read": result,
+                    "duplicate": duplicate, "status": reopened,
+                    "actual_counts": {"jobs": len(runtime.jobs.list_jobs()),
+                        "attempts": len(runtime.attempts.list_attempts()),
+                        "provider_begin_turns": adapters[0].begin_turn_calls},
+                    "created_job_ids": [j.job_id for j in runtime.jobs.list_jobs()],
+                    "retained_creation_event_ids": [event.event_id for event in runtime.events.list_events()
+                        if event.event_type == "JOB_CREATED"]}
+                with Path(destination).open("x", encoding="utf-8") as stream:
+                    json.dump(captured, stream, ensure_ascii=False, sort_keys=True, indent=2)
+                    stream.write("\n")
         finally:
             await cleanup(service)
     asyncio.run(run())

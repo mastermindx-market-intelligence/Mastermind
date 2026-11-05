@@ -1419,6 +1419,8 @@ class ExecutiveOperatorSupervisor:
         foreground_operation = _current_foreground_operation_or_none()
         if foreground_operation is not None:
             foreground_operation.require_root(job.root_job_id)
+        from control_plane.fresh_conversation_admission import require_original_creation_request
+        require_original_creation_request(self.runtime, self.runtime.jobs.get_job(job.root_job_id), foreground_operation)
         outcome = self.runtime.attempts.dispatch_cycle_job(
             job_id, command_id=command_id, lease_owner=self.instance_id)
         if (outcome is None or outcome.attempt.status is not AttemptStatus.CLAIMED

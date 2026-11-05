@@ -8318,6 +8318,15 @@ class ExecutiveControlService:
     def _require_foreground_only_source(self, root_id, *, cycle_entry=False):
         qualification = self._require_attended_qualification()
         owner = self._foreground_cycle_owner
+        from control_plane.fresh_conversation_admission import read_creation_restriction, require_original_creation_request
+        runtime = self._require_runtime()
+        root = runtime.jobs.get_job(root_id)
+        if root is not None and read_creation_restriction(runtime, root) is not None:
+            # Durable denial survives service restart. Neither the creation
+            # receipt nor a later request can recreate its original source.
+            if owner is None or owner[0].done():
+                raise StateConflict("FRESH_CONVERSATION_ORIGINAL_REQUEST_REQUIRED")
+            require_original_creation_request(runtime, root, owner[1])
         if owner is not None and qualification != self._foreground_cycle_qualification:
             raise StateConflict("foreground qualification changed")
         if not self.config.coo_foreground_only and owner is None:
@@ -8460,6 +8469,14 @@ class ExecutiveControlService:
             root = runtime.jobs.get_job(str(row["job_id"]))
             if root is None:
                 continue
+            from control_plane.fresh_conversation_admission import read_creation_restriction
+            try:
+                if read_creation_restriction(runtime, root) is not None:
+                    continue  # Explicit fresh conversations are never autonomous candidates.
+            except StateConflict as exc:
+                if prestart_refusals is not None:
+                    prestart_refusals[root.job_id] = exc
+                continue  # Corruption/partial removal cannot promote a root.
             # Terminal history survives source/profile rotation. Validate its
             # canonical block before asking whether it could dispatch now.
             if runtime.jobs.validated_cycle_block(root.job_id) is not None:

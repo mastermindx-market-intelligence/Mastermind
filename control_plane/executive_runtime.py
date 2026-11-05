@@ -13935,6 +13935,7 @@ class JobRegistry:
         spec: _JobCreationSpec,
         _c2_capability: object | None = None,
         _instruction_source: object | None = None,
+        _fresh_conversation_source: object | None = None,
     ) -> Job:
         """Own the existing Job insert plus immutable creation receipt.
 
@@ -14014,6 +14015,26 @@ class JobRegistry:
         # Only the private nominal capture may label a NEW instruction root.
         # Public provenance and private carrier inputs cannot manufacture it.
         provenance = spec.event_provenance
+        from control_plane.fresh_conversation_admission import FreshConversationCreationSource, TASK_KIND
+        fresh_fields = (isinstance(provenance, Mapping) and any(key in provenance
+            for key in ("fresh_conversation", "fresh_conversation_digest"))) or spec.constraints.get("task_kind") == TASK_KIND
+        if _fresh_conversation_source is not None or fresh_fields:
+            if (type(_fresh_conversation_source) is not FreshConversationCreationSource
+                    or _instruction_source is not None or _c2_capability is not None
+                    or spec.parent_job_id is not None or spec.orchestration_role != "aggregation"
+                    or not fresh_fields):
+                raise StateConflict("FRESH_CONVERSATION_SOURCE_REQUIRED")
+            fresh_material = _fresh_conversation_source.material()
+            if (provenance.get("fresh_conversation") != fresh_material
+                    or provenance.get("fresh_conversation_digest") != orchestration_digest(fresh_material)
+                    or provenance.get("workstream") != fresh_material["work_ref"]
+                    or provenance.get("fingerprint") != fresh_material["intent_fingerprint"]
+                    or spec.command_id != fresh_material["command_id"] or spec.attempt_limit != 1):
+                raise StateConflict("FRESH_CONVERSATION_SOURCE_MISMATCH")
+            _fresh_conversation_source.check()
+            # Existing normalized scalar, privately stamped in the SAME Job
+            # and immutable creation transaction. It is a denial, never a grant.
+            spec = dataclasses.replace(spec, constraints={**spec.constraints, "task_kind": TASK_KIND})
         instruction_fields = isinstance(provenance, Mapping) and any(key in provenance for key in ("instruction_source", "instruction_source_digest"))
         if _instruction_source is not None or instruction_fields:
             from control_plane.instruction_work_source import InstructionWorkSource
@@ -14185,6 +14206,10 @@ class JobRegistry:
             # from arbitrary historical provenance; no legacy Job is backfilled.
             event_payload["instruction_admission"] = {"schema": "mastermind.instruction_driven_root.v1",
                 "source": material, "source_digest": hashlib.sha256(instruction_canonical(material)).hexdigest()}
+        if _fresh_conversation_source is not None:
+            event_payload["fresh_conversation_admission"] = {
+                "schema": "mastermind.fresh_conversation_driven_root.v1", "task_kind": TASK_KIND,
+                "source": fresh_material, "source_digest": orchestration_digest(fresh_material)}
         self.store.append_event(
             connection,
             aggregate_type="job",
@@ -14202,6 +14227,8 @@ class JobRegistry:
             raise PersistenceError("created Job disappeared inside its transaction")
         if _instruction_source is not None:
             _instruction_source.check()
+        if _fresh_conversation_source is not None:
+            _fresh_conversation_source.check()
         return _job_from_row(row)
 
     def create_v2_orchestration_root(
@@ -14216,6 +14243,7 @@ class JobRegistry:
         frontier_selection: Mapping[str, Any] | None = None,
         _instruction_source: object | None = None,
         _instruction_admission_guard: Callable[[], None] | None = None,
+        _fresh_conversation_source: object | None = None,
     ) -> Job:
         """The sole strict v2 intent -> Phase 1F-C aggregation-root boundary.
 
@@ -14290,6 +14318,15 @@ class JobRegistry:
                 dialogue_source,
                 work_ref=work_ref,
             )
+        if _fresh_conversation_source is not None:
+            from control_plane.fresh_conversation_admission import FreshConversationCreationSource
+            if type(_fresh_conversation_source) is not FreshConversationCreationSource or _instruction_source is not None:
+                raise StateConflict("FRESH_CONVERSATION_SOURCE_REQUIRED")
+            _fresh_conversation_source.check_intent(normalized)
+            material = _fresh_conversation_source.material()
+            if orchestration_digest(dialogue_source) != material["dialogue_source_sha256"]:
+                raise StateConflict("FRESH_CONVERSATION_SOURCE_MISMATCH")
+            provenance.update(fresh_conversation=material, fresh_conversation_digest=orchestration_digest(material))
         return self.create_job(
             normalized["objective"],
             department=normalized["department"],
@@ -14315,6 +14352,7 @@ class JobRegistry:
                 "source_digest": fingerprint,
             },
             _v2_root_capability=_V2_ROOT_CREATION_CAPABILITY,
+            _fresh_conversation_source=_fresh_conversation_source,
             **({"_instruction_source": _instruction_source,
                 "_principal_commit_guard": _instruction_admission_guard} if _instruction_source is not None else {}),
         )
@@ -14676,6 +14714,9 @@ class JobRegistry:
             raise StateConflict(
                 "interactive creation requires a strict v2 aggregation root"
             )
+        from control_plane.fresh_conversation_admission import require_original_creation_request
+        from control_plane.foreground_operation import _current_foreground_operation_or_none
+        require_original_creation_request(self.store, root, _current_foreground_operation_or_none())
         constraints = self._operator_child_constraints(root)
         native = (root.constraints.get("operator_harness_armed") is True
                   and root.constraints.get("operator_execution_profile_id")
@@ -16513,6 +16554,7 @@ class JobRegistry:
         _planner_plan_schema_version: str | None = None,
         _direct_native_admission: direct_native.DirectNativeAdmission | None = None,
         _instruction_source: object | None = None,
+        _fresh_conversation_source: object | None = None,
     ) -> Job:
         """Insert one QUEUED Job and its ``JOB_CREATED`` receipt in one transaction.
 
@@ -17071,6 +17113,7 @@ class JobRegistry:
                     planner_plan_schema_version=_planner_plan_schema_version,
                 ),
                 **({"_instruction_source": _instruction_source} if _instruction_source is not None else {}),
+                _fresh_conversation_source=_fresh_conversation_source,
             )
             # Refusal rolls back both the Job and its JOB_CREATED event.
             recheck_principal()
@@ -17987,6 +18030,11 @@ class AttemptRegistry:
         _initial_capacity_evidence: Mapping[str, Any] | None = None,
     ) -> AttemptLease | None:
         """Own the existing quota/Attempt/Job/claim mutation sequence."""
+        from control_plane.fresh_conversation_admission import require_initial_native_claim
+        def fresh_conversation_claim_guard():
+            require_initial_native_claim(self.store, root_job_id=job_row["root_job_id"],
+                role=orchestration_role, profile=constraints.get("execution_profile_id"))
+        fresh_conversation_claim_guard()
 
         self.store._assert_owned_snapshot_connection(connection)
         # A pause cannot revoke an already-issued lease. This gate is only on
@@ -18265,6 +18313,7 @@ class AttemptRegistry:
         ).fetchone()
         if attempt_row is None:  # pragma: no cover - same-transaction invariant
             raise PersistenceError("claimed Attempt disappeared inside its transaction")
+        fresh_conversation_claim_guard()
         return AttemptLease(
             attempt=_attempt_from_row(_direct_attempt_view(connection,attempt_row)),
             lease_token=lease_token,

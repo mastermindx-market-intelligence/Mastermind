@@ -259,6 +259,24 @@ class FreshConversationOwner:
             current()
             operation._bind_admitted_root(root_id, command_id)
 
+        creation_source = None
+        if material is not None:
+            from control_plane.fresh_conversation_admission import _issue_creation_source, SCHEMA
+            intent_id = ceo_request.automated_intent_id(request_ref)
+            envelope = ingress._build_envelope({key: value for key, value in args.items() if key != "operation_key"},
+                intent_id=intent_id, workspace_root=self._service.config.proof_workspace_root,
+                grounding=material["grounding"], strict_v2=True)
+            creation_source = _issue_creation_source(self, operation, dict(schema=SCHEMA,
+                intent_id=intent_id, command_id=command, work_ref=request["work_ref"],
+                intent_fingerprint=ceo_intent.intent_fingerprint(envelope),
+                arguments_sha256=operation._arguments_sha256,
+                principal_scope_sha256=wire.canonical_digest({key: getattr(principal, key) for key in _IDENTITY}),
+                workspace_permission_sha256=material["project"]["permission_stamp"],
+                project_sha256=wire.canonical_digest(material["project"]),
+                dialogue_source_sha256=wire.canonical_digest(material["source"]),
+                host_binding_sha256=wire.canonical_digest(material["binding"]),
+                principal_expires_at=principal.expires_at), current)
+
         entered = False
         try:
             async with self._service._foreground_cycle_scope(operation):
@@ -276,7 +294,8 @@ class FreshConversationOwner:
                     strict_v2_admission=True,
                     execution_binding_provider=lambda: (current(), self._fresh(principal))[1],
                     dialogue_source_provider=self._service._ceo_ingress_dialogue_source_provider,
-                    admission_guard=current, fresh_admission_observer=admitted)
+                    admission_guard=current, fresh_admission_observer=admitted,
+                    fresh_conversation_source=creation_source)
                 if receipt.get("duplicate") is False:
                     root_id = receipt["job_id"]
                     operation.require_root(root_id)
