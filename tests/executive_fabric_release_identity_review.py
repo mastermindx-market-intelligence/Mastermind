@@ -500,7 +500,7 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Journal source-only read composition: exact unchanged action-handler AST and
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '3c88aa6556875d3134137805b935bc14dddd4804ebea3cbc4fab34091075ad78', 'sites': ((875, 71, 74, 'int', '400'), (886, 71, 74, 'int', '403'), (894, 71, 74, 'int', '400'), (900, 79, 82, 'int', '400'), (909, 71, 74, 'int', '400'), (919, 71, 74, 'int', '403'), (924, 76, 79, 'int', '503'), (930, 71, 74, 'int', '403'))}
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '4a1f1e2ac43591e9eb0684134ffad1c3519492e4f7debd205b8ccb3209128eab', 'sites': ((876, 71, 74, 'int', '400'), (887, 71, 74, 'int', '403'), (895, 71, 74, 'int', '400'), (901, 79, 82, 'int', '400'), (910, 71, 74, 'int', '400'), (920, 71, 74, 'int', '403'), (925, 76, 79, 'int', '503'), (931, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -558,7 +558,7 @@ REVIEWED_FILES['integrations/hermes_secretary/tab_sweep.py'] = {
 
 # NEXT accepted source: callback input bound / existing HTTP permission denial,
 # never an OS identity. Exact whole-source hash and token sites only.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'sha256': '721dd74cbd6a4e534b13a27166b2ab005af33b5693d982ee6725d7a7959ba3ee', 'sites': ((731, 49, 52, 'int', '512'),)}
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'sha256': '4d97af924ce072ee6135e21101871fbae75ddcdaaf61989482f4781b112fd133', 'sites': ((731, 49, 52, 'int', '512'),)}
 
 # NEXT accepted source: callback input bound / existing HTTP permission denial,
 # never an OS identity. Exact whole-source hash and token sites only.

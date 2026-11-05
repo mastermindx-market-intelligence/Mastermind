@@ -20,7 +20,7 @@ class NativeEgressTests(unittest.TestCase):
     def test_secretary_explicit_loopback_proxy(self):
         private = {ROLE_ENV_NAME: "mmsecretary", PROXY_ENV_NAME: "http://127.0.0.2:18651"}
         self.assertEqual(native_egress_child_env("mmsecretary", private), {
-            "HTTPS_PROXY": "http://127.0.0.2:18651", "NO_PROXY": "127.0.0.1,localhost",
+            "HTTPS_PROXY": "http://127.0.0.2:18651", "NO_PROXY": "127.0.0.1,localhost,127.0.0.2",
         })
 
     def test_meta_role_receives_only_own_proxy(self):

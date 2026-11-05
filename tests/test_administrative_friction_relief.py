@@ -63,7 +63,7 @@ def test_delivery_wait_is_nonblocking_and_sha_bound():
     for phrase in (
         "CI blocks merge/release, not independent useful work",
         "repository, PR, exact head SHA and workflow run IDs",
-        "one existing Class-E or Class-T observer",
+        "Reuse one existing observer when it reduces a genuinely long wait",
         "No merge/deploy action belongs in the observer",
         "do not push empty/rebase-only commits to restart CI",
         "repair it within the assigned scope",

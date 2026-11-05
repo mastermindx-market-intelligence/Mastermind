@@ -112,13 +112,16 @@ describe("Programs read diagnostics", () => {
     expect(readPrograms).not.toHaveBeenCalled();
   });
 
-  it("reports auth_unavailable without scheduling a read when acquisition is denied", async () => {
+  it("shows private entry and schedules no read when acquisition is denied", async () => {
     const read = vi.fn(async () => qualified());
     sourceHost(read);
     authHost(false);
     await mount();
     expect(read).not.toHaveBeenCalled();
-    expect(diagnosticValue("Projects read phase")).toBe("auth_unavailable");
+    // The accepted private-entry composition replaces the workspace shell, so
+    // the read-phase disclosure is not mounted for a denied acquisition.
+    expect(container.textContent).toContain("Sign in to your workspace.");
+    expect(diagnosticValue("Projects read phase")).toBeNull();
   });
 
   it("reports not_requested when the host exposes no Programs reader", async () => {
@@ -151,7 +154,7 @@ describe("Programs read diagnostics", () => {
     expect(container.textContent).not.toContain("acct-991");
   });
 
-  it("resets the phase on auth invalidation via the existing source epoch and ignores a stale reply", async () => {
+  it("hands the shell to private entry on auth invalidation and ignores a stale reply", async () => {
     const wait = deferred<ProgramsObservation>();
     const read = vi.fn().mockReturnValueOnce(wait.promise).mockResolvedValue(qualified());
     sourceHost(read);
@@ -161,9 +164,13 @@ describe("Programs read diagnostics", () => {
     expect(diagnosticValue("Projects read phase")).toBe("pending");
     await auth.change(false);
     expect(read).toHaveBeenCalledTimes(1);
-    expect(diagnosticValue("Projects read phase")).toBe("auth_unavailable");
+    // Sign-out replaces the shell with private entry; the phase disclosure
+    // unmounts and the in-flight reply must never reschedule a read.
+    expect(container.textContent).toContain("Sign in to your workspace.");
+    expect(diagnosticValue("Projects read phase")).toBeNull();
     await act(async () => { wait.resolve(qualified()); });
-    expect(diagnosticValue("Projects read phase")).toBe("auth_unavailable");
+    expect(container.textContent).toContain("Sign in to your workspace.");
+    expect(diagnosticValue("Projects read phase")).toBeNull();
     expect(read).toHaveBeenCalledTimes(1);
   });
 });

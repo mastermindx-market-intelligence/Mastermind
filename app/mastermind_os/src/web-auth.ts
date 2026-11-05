@@ -1504,6 +1504,29 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         },
       );
     },
+    readMissionResult: (request) => {
+      const { signal, ...input } = request;
+      const normalized = normalizeResultSelection(input);
+      if (!normalized) return Promise.reject(new Error("SELECTION_INVALID"));
+      // Fixed acquisition GET. The compound cap is the incumbent 2_000_000
+      // stream ceiling; the nested 16KiB ceiling stays in the result decoder.
+      // Typed 503 is the closed compound body, not a nested Result document.
+      return read(
+        "acquisition",
+        `${ORIGIN}/workspace/mission-result/current?${new URLSearchParams({
+          work_ref: normalized.workRef,
+          root_job_id: normalized.rootJobId,
+          job_id: normalized.jobId,
+          attempt_id: normalized.attemptId,
+          result_envelope_digest: normalized.resultEnvelopeDigest,
+        })}`,
+        signal,
+        {
+          cap: MAX_RESPONSE_BYTES,
+          typedUnavailableSchema: "mastermind.workspace_mission_result.v1",
+        },
+      );
+    },
     readResultReferences: ({ workRef, rootJobId, signal }) => {
       if (!normalizeWorkspaceSelection({ workRef, rootJobId }))
         return Promise.reject(new Error("SELECTION_INVALID"));

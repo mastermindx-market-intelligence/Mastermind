@@ -57,6 +57,25 @@ Two support/status-only cycles without a capability delta report
 supplied observations; they authorize nothing and are not served-model proof.
 Snapshots without `lanes` keep the exact incumbent output.
 
+### Owner-only handoff is not continuation
+
+Use `OWNER_HANDOFF_STOP` when a session proposes to finish because the next
+step "requires the original owner", "release owner", "reviewer", or another
+role without proving an actual reachable receiver and completed handoff or
+lawful original-carrier operation. The existing lane inventory still identifies
+what is safe to execute. The audit reports
+`owner_only_handoff_is_not_continuation: true` and
+`premature_exit_detected: true` even if every listed lane is observed as
+`WAITING_EXTERNAL`. A premature claim also forces `disposition: INCOMPLETE`
+and CLI exit 1 even when every separately enumerated proof gate is present;
+`READY_FOR_CANONICAL_ADJUDICATION` requires both proof completeness and a
+non-premature exit. An owner name is not a START, runtime binding, GitHub
+approval, transfer receipt or a session that will wake. The assigned session
+must reconcile any live writer/lease and effect, act on permitted source,
+review diagnostics or qualified release steps, and preserve genuine permission,
+security, credential and protected-queue gates. This is diagnostic only: it
+cannot appoint a successor, authorize self-approval, or perform a release.
+
 ### Evidence for lawful exit claims
 
 An enumerated `lanes.items` list alone is not proof of completeness. A

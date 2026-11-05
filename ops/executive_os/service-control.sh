@@ -23,11 +23,12 @@ SCRIPT_PATH="$SCRIPT_DIR/$(/usr/bin/basename "$SCRIPT_SOURCE")"
 GATEWAY_PREFLIGHT_PYTHON="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
 
 usage() {
-  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|publish-os-gateway|reconcile-os-gateway|status}" >&2
+  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|publish-os-gateway|reconcile-os-gateway|plan-mcp-component|apply-mcp-component|reconcile-mcp-component|status}" >&2
   /bin/echo "restart-gateway requires --expected-sha <40 lowercase hex characters>" >&2
   /bin/echo "finite actions require --expected-sha <40 lowercase hex> --expected-manifest-sha256 <64 lowercase hex>" >&2
   /bin/echo "publish-os-gateway requires --expected-sha <40 lowercase hex> --expected-bundle-digest <64 lowercase hex> --expected-mcp-config-sha256 <64 lowercase hex> --expected-mcp-plist-sha256 <64 lowercase hex> and exactly one of --expected-grant-sha256 <64 lowercase hex> or --expected-grant-absent" >&2
   /bin/echo "reconcile-os-gateway requires --expected-sha <40 lowercase hex> --expected-bundle-digest <64 lowercase hex> --transaction-id autonomy-<12 lowercase hex>" >&2
+  /bin/echo "plan-mcp-component requires --expected-sha <40 lowercase hex> and optionally --set-public-mcp-resource; apply-mcp-component additionally requires --plan-sha256 <64 lowercase hex>; reconcile-mcp-component requires only --expected-sha" >&2
   exit 64
 }
 
@@ -550,6 +551,79 @@ dispatch_os_gateway() {
   exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$gateway_dir/autonomy_control.py" "$@"
 }
 
+# Closed MCP component-update argv walk. Every flag is accepted at most once and
+# every value is a bounded digest. The helper's argv is rebuilt from fixed words
+# plus the two validated digests, so no caller text reaches it. No path, label,
+# account, port, resource value or verified boolean is ever accepted here.
+MCP_COMPONENT_ARGV=()
+mcp_component_args() {
+  local verb="$1" flag value seen="" sha="" plan="" public=0 helper_verb
+  shift
+  while [ "$#" -gt 0 ]; do
+    flag="$1"
+    shift
+    case "$seen" in
+      *"|$flag|"*) return 1 ;;
+    esac
+    case "$flag" in
+      --set-public-mcp-resource)
+        [ "$verb" != "reconcile-mcp-component" ] || return 1
+        seen="$seen|$flag|"
+        public=1
+        continue
+        ;;
+      --expected-sha) ;;
+      --plan-sha256) [ "$verb" = "apply-mcp-component" ] || return 1 ;;
+      *) return 1 ;;
+    esac
+    [ "$#" -ge 1 ] || return 1
+    value="$1"
+    shift
+    seen="$seen|$flag|"
+    case "$flag" in
+      --expected-sha)
+        [[ "$value" =~ ^[0-9a-f]{40}$ ]] || return 1
+        sha="$value"
+        ;;
+      *)
+        [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
+        plan="$value"
+        ;;
+    esac
+  done
+  [ -n "$sha" ] || return 1
+  case "$verb" in
+    plan-mcp-component) helper_verb="plan" ;;
+    apply-mcp-component)
+      [ -n "$plan" ] || return 1
+      helper_verb="apply"
+      ;;
+    *) helper_verb="reconcile" ;;
+  esac
+  MCP_COMPONENT_ARGV=("$helper_verb" --release-sha "$sha")
+  [ "$public" -eq 0 ] || MCP_COMPONENT_ARGV+=(--set-public-mcp-resource)
+  [ -z "$plan" ] || MCP_COMPONENT_ARGV+=(--plan-sha256 "$plan")
+  GATEWAY_EXPECTED_SHA="$sha"
+  return 0
+}
+
+dispatch_mcp_component() {
+  local component_dir
+  if ! mcp_component_args "$@"; then
+    usage
+  fi
+  # The updating owner must be this exact installed release's controller: a
+  # copied or relocated service-control never plans, applies or reconciles.
+  component_dir="$MCP_RELEASE_ROOT/$GATEWAY_EXPECTED_SHA/ops/executive_os"
+  [[ "$SCRIPT_SOURCE" == "$component_dir/service-control.sh" ]] || exit 65
+  [[ "$SCRIPT_DIR" == "$component_dir" ]] || exit 65
+  [[ "$SCRIPT_PATH" == "$component_dir/service-control.sh" ]] || exit 65
+  # The helper is a regular, non-symlink file of this release (the same shape
+  # the gateway preflight demands of its controller and helper).
+  [[ -f "$component_dir/mcp_component_update.py" && ! -L "$component_dir/mcp_component_update.py" ]] || exit 65
+  exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$component_dir/mcp_component_update.py" "${MCP_COMPONENT_ARGV[@]}"
+}
+
 
 require_gateway_enabled() {
   local output
@@ -691,6 +765,9 @@ case "$1" in
   publish-os-gateway|reconcile-os-gateway)
     [ "$#" -ge 2 ] || usage
     ;;
+  plan-mcp-component|apply-mcp-component|reconcile-mcp-component)
+    [ "$#" -ge 3 ] || usage
+    ;;
   *) [ "$#" -eq 1 ] || usage ;;
 esac
 case "$1" in
@@ -715,6 +792,10 @@ case "$1" in
   publish-os-gateway|reconcile-os-gateway)
     require_root
     dispatch_os_gateway "$@"
+    ;;
+  plan-mcp-component|apply-mcp-component|reconcile-mcp-component)
+    require_root
+    dispatch_mcp_component "$@"
     ;;
   start)
     require_root

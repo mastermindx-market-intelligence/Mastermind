@@ -3087,7 +3087,7 @@ pub mod protocol_tests {
             ("signed_in", serialized_signed_in.as_str()),
         ] {
             for secret in &secrets {
-                assert!(!text.contains(secret.as_str()), "{label} leaks {secret}");
+                assert!(!text.contains(secret.as_str()), "{label} exposes a sensitive value");
             }
             assert!(!text.contains("access_token"), "{label}");
             assert!(!text.contains("code_verifier"), "{label}");

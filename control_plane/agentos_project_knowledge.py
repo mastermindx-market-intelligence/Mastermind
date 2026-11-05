@@ -109,7 +109,7 @@ _STAMP = re.compile(
 _DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 # Permitted controls are exactly LF, CR and TAB; every other C0, the C1
 # range and DEL are refused anywhere a response can echo them.
-_CONTROL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x80-\x9f]")
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x80-\x9f]")
 _MEMBER = r"100644 blob [0-9a-f]{40}\t"
 _RECORD_PATH = re.compile(
     r"agentos/(?:workstreams|decisions|discoveries|handoffs)/"

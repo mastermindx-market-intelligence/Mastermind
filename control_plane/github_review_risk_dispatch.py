@@ -2,7 +2,7 @@
 
 Pure advice; never creates a webhook, approval, merge, Job, credential or
 scheduler. The existing signed receiver must derive origin, PR number and
-head SHA from its authenticated event/host authority. A FAST assessment is
+head SHA from its authenticated event/host authority. A FAST/STANDARD assessment is
 bound to one exact repo/PR/head and freshly checked again before a skip.
 """
 from __future__ import annotations
@@ -15,6 +15,7 @@ from control_plane.github_review_risk_policy import (
     SCHEMA,
     ReviewRiskAssessment,
     ReviewTier,
+    minimum_review_requirements,
 )
 from control_plane.github_review_risk_source import (
     RiskGitHubReadPort,
@@ -128,17 +129,21 @@ def decide_risk_dispatch(
         "pull_number": expected_pull_number,
         "head_sha": expected_head_sha,
     }
-    if assessment.tier is ReviewTier.FAST:
-        if assessment.minimum_independent_assessments != 0 or assessment.minimum_formal_non_author_approvals != 0:
-            return _hold("FAST_COUNTS_INCONSISTENT")
+    if type(assessment.tier) is not ReviewTier:
+        return _hold("RISK_TIER_INVALID")
+    counts = (assessment.minimum_independent_assessments,
+              assessment.minimum_formal_non_author_approvals)
+    if (any(type(count) is not int for count in counts)
+            or counts != minimum_review_requirements(assessment.tier)):
+        # A caller cannot turn a verified consequential classification into a
+        # zero-review exemption by changing counts on the returned object.
+        return _hold("RISK_COUNTS_INCONSISTENT", assessment.tier)
+    if assessment.tier in (ReviewTier.FAST, ReviewTier.STANDARD):
         return RiskDispatchAdvice(
-            ReviewDispatch.SKIP_NO_REVIEW_NEEDED, ReviewTier.FAST,
-            "FAST_NO_INDEPENDENT_REVIEW_REQUIRED", **bound,
+            ReviewDispatch.SKIP_NO_REVIEW_NEEDED, assessment.tier,
+            f"{assessment.tier.value}_NO_INDEPENDENT_REVIEW_REQUIRED", **bound,
         )
-    if assessment.tier in (ReviewTier.STANDARD, ReviewTier.CRITICAL):
-        # The Web author waiver does not cross this signed automatic machine
-        # trust boundary. A malformed/forged zero-count assessment is never a
-        # blanket exemption for critical authenticated automation.
+    if assessment.tier is ReviewTier.CRITICAL:
         return RiskDispatchAdvice(
             ReviewDispatch.AUTO_REVIEW_ELIGIBLE, assessment.tier,
             "AUTOMATIC_MACHINE_REVIEW_RISK", **bound,

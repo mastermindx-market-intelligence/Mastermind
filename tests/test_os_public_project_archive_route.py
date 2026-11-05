@@ -1,16 +1,16 @@
 """Archive browse exposes one explicit GET and retains its exact predecessor."""
 from pathlib import Path
-from ops.executive_os.os_public_edge import GET_ROUTES, POST_ROUTES, PRE_ARCHIVE_GET_ROUTES, TRANSITION_ROUTE_PROFILES, _TEMPLATE
+from ops.executive_os.os_public_edge import GET_ROUTES, POST_ROUTES, PRE_ARCHIVE_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES, TRANSITION_ROUTE_PROFILES, _TEMPLATE
 
 ROUTE = "/workspace/projects/archive/current"
 
 def test_archive_is_a_single_fixed_get_with_exact_predecessor():
     later = {"/workspace/project-knowledge/current", "/workspace/project-memory/current",
              "/workspace/project-source/current", "/workspace/source-operation/context",
-             "/workspace/source-operation/operation"}
+             "/workspace/source-operation/operation", '/workspace/project-instructions/current', '/workspace/instruction-admission/current', '/workspace/instruction-admission/operation', '/workspace/project-access/current'}
     assert set(GET_ROUTES) - set(PRE_ARCHIVE_GET_ROUTES) == {ROUTE, *later}
     assert GET_ROUTES.count(ROUTE) == 1 and ROUTE not in POST_ROUTES
-    assert (PRE_ARCHIVE_GET_ROUTES, POST_ROUTES) in TRANSITION_ROUTE_PROFILES
+    assert (PRE_ARCHIVE_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES) in TRANSITION_ROUTE_PROFILES
     assert not any("*" in path for path in GET_ROUTES)
     source = (Path(__file__).parents[1] / "integrations/executive_mcp/server.py").read_text()
     assert source.count('"' + ROUTE + '"') == 3

@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import stat
 import re
 import sys
 from contextlib import redirect_stderr, redirect_stdout
@@ -55,6 +57,24 @@ def _refuse(token=_FIXED_REASON):
     if token == _FIXED_REASON or _TOKEN.fullmatch(token) is not None:
         print(token, file=sys.stderr)
     raise SystemExit(2)
+
+
+def _protocol_output():
+    """Require the pipe transport used by the fixed installed caller.
+
+    stdout is a bounded JSON IPC channel, never a diagnostic/log destination.
+    Refuse regular files and terminals before reading any private input.
+    This checks the transport shape; it does not grant a principal authority.
+    """
+    try:
+        descriptor = sys.stdout.fileno()
+        output = sys.stdout.buffer
+        if (output.fileno() != descriptor
+                or not stat.S_ISFIFO(os.fstat(descriptor).st_mode)):
+            _refuse()
+        return output
+    except (AttributeError, OSError, ValueError):
+        _refuse()
 
 
 def _frame(mode):
@@ -94,6 +114,7 @@ def main():
     parser.add_argument("--code-root")
     parser.add_argument("--code-commit")
     args = parser.parse_args()
+    output = _protocol_output()
     frame = _frame(args.mode)
     from control_plane.agentos_project_knowledge_recipe import (
         compile_project_knowledge_recipe,
@@ -129,9 +150,16 @@ def main():
         value, ensure_ascii=False, allow_nan=False,
         sort_keys=True, separators=(",", ":"),
     )
-    if len(encoded.encode("utf-8")) > RESULT_LIMIT:
+    packet = encoded.encode("utf-8")
+    # Bound the complete wire frame, including its LF delimiter, against the
+    # unchanged installed collector cap before emitting any private bytes.
+    frame = packet + b"\n"
+    if len(frame) > RESULT_LIMIT:
         _refuse()
-    print(encoded)
+    # Compiler diagnostics remain suppressed above; no capture is logged.
+    if output.write(frame) != len(frame):
+        _refuse()
+    output.flush()
     return 0
 
 

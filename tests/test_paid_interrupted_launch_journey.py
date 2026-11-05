@@ -27,9 +27,10 @@ from tests.test_paid_authenticated_launch_producer import (
 rsa_key=auth.rsa_key
 short_socket_root=auth.short_socket_root
 # Execute the current composed controller (source recovery def1/7ab included).
-# Its source-only action additions must preserve original Launch GET recovery.
+# Its accepted instruction_pause addition changes only the two closed kind lists;
+# the actual original Launch submit/GET recovery below must remain unchanged.
 EXTRA_PINS={
- 'orchestration/operation-controller.ts':'3ce3f93041e5f86812d52c48f73590c278159083cb7b44cfef05c1ce67a7a9a5',
+ 'orchestration/operation-controller.ts':'5c49a7d571f700bb231784fbbbe8ba9af83f313756b299ac43f891094f23dd03',
  'mission.ts':'20bf1a35c5be760c8418930972ad9adaab23bbde36a3e8b88a2caa72b42b67bb',
  'workspace-contract.ts':'14992cfc81dbc577cf50ba7198285b21652bb25eb5cc6c0efc53954e33ef11b1',
 }
