@@ -190,10 +190,11 @@ def test_issuer_separation_and_foreign_expected_digest_denied(tmp_path):
     payload_b = b"issuer b private"
     ref_b = prepare(h, issuer="9" * 64, fp="d" * 64, payload=payload_b)
     assert ref_a.input_ref != ref_b.input_ref
-    assert os.listdir(tmp_path / toi.PRIVATE_SUBDIR) == [
+    # Directory enumeration order carries no issuer-custody meaning.
+    assert sorted(os.listdir(tmp_path / toi.PRIVATE_SUBDIR)) == sorted([
         toi._stable_key(CMD, ISSUER),
         toi._stable_key(CMD, "9" * 64),
-    ]
+    ])
     with pytest.raises(toi.TerminalInputError) as exc:
         read(h, ref_b.artifact_sha256)  # issuer A identity, B's digest
     expect(exc, toi.TERMINAL_INPUT_CONFLICT)
