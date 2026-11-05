@@ -9,12 +9,16 @@ import { composeConversationsList, isListedConversationProject, isListedCurrentC
 import programs from "../fixtures/programs-available-workspace-service.json";
 import paired from "../fixtures/window-mission-association-producer.json";
 import { controlRoomFixture } from "../test-fixtures";
+import { captureConversationListOwner, conversationListOwnerCurrent } from "./conversation-list-owner";
+import { createElement } from "react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { ConversationsList } from "./ConversationsList";
 
 beforeEach(async () => {
   const { webcrypto } = await vi.importActual<{ webcrypto: Crypto }>("node:crypto");
   vi.stubGlobal("crypto", webcrypto);
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); delete window.MastermindMissionHost; });
 
 async function fixture() {
   const selection = { workRef: paired.selection.work_ref, rootJobId: paired.selection.root_job_id };
@@ -31,23 +35,55 @@ async function fixture() {
     throw new Error("Unexpected fixture command");
   });
   const client = await createNativeClient(invoke as never, async () => () => {}), host = bindMissionHost(client);
+  window.MastermindMissionHost = host;
+  let generation = host.invalidationGeneration!();
+  vi.spyOn(host, "invalidationGeneration").mockImplementation(() => generation);
+  const captureOwner = () => captureConversationListOwner({ host, authGeneration: 4, selectionSequence: 1,
+    currentHost: () => window.MastermindMissionHost, currentAuthGeneration: () => 4,
+    currentSelectionSequence: () => 1 });
   const signal = new AbortController().signal;
+  const catalogueOwner = captureOwner();
   const acquiredPrograms = await host.readProgramsObservation!({ signal });
   const p = completeProgramsOfficeRead(captureProgramsOfficeRead(context), context,
     acquiredPrograms, "2026-11-05T12:00:00Z");
+  const conversationOwner = captureOwner();
   const mission = await host.readMissionV3!({ ...selection, signal });
-  const window = await host.readCurrentWindow!({ signal });
+  const currentWindow = await host.readCurrentWindow!({ signal });
   const c = completeObservedConversation(captureObservedConversation(context), context,
-    decodeMissionv3(mission, selection), window, "2026-11-05T12:00:00Z");
+    decodeMissionv3(mission, selection), currentWindow, "2026-11-05T12:00:00Z");
   if (p.kind !== "observed" || c.kind !== "observed") throw new Error("Fixture observation refused");
   const catalogue = projectOffice({ mission: null, programs: p.snapshot, result: null, conversation: null }, p.context);
   const conversation = projectOffice(c.input, c.context);
   const input = { authGeneration: 4, catalogue, conversation,
-    acquisitionAllowed: true, contentAllowed: true, hasUnsentDraft: true };
-  return { input, invoke, host };
+    acquisitionAllowed: true, contentAllowed: true, hasUnsentDraft: true,
+    catalogueReadCurrent: conversationListOwnerCurrent(catalogueOwner, false),
+    conversationReadCurrent: conversationListOwnerCurrent(conversationOwner, true) };
+  return { input, invoke, host, catalogueOwner, conversationOwner, invalidateWithoutNotify: () => { generation++; } };
 }
 
 describe("CV01 existing producer projection", () => {
+  it("renders actual NativeClient→Host→paired owner receipts into Open and safe Open project, refusing no-notify owner loss", async () => {
+    const e = await fixture(), model = composeConversationsList(e.input);
+    const opened: string[] = [];
+    const invoke = vi.fn((kind: string) => { opened.push(kind); return true; });
+    render(createElement(ConversationsList, { model, query: "", showAllProjects: false,
+      onQueryChange: vi.fn(), onShowAllProjects: vi.fn(), onOpenMetaCeo: vi.fn(), onSourcesAndAccess: vi.fn(),
+      onOpenCurrent: locator => conversationListOwnerCurrent(e.conversationOwner, true) && isListedCurrentConversation(model, locator) && invoke("current"),
+      onOpenProject: locator => conversationListOwnerCurrent(e.catalogueOwner, false) && isListedConversationProject(model, locator) && invoke("project"),
+    }));
+    expect(screen.getAllByRole("article")).toHaveLength(3);
+    expect(screen.queryByText(paired.window.view.items[0].text!)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open conversation: Current conversation" }));
+    fireEvent.click(screen.getAllByRole("button", { name: /^Open project / })[0]);
+    expect(opened).toEqual(["current", "project"]);
+    e.invalidateWithoutNotify();
+    fireEvent.click(screen.getByRole("button", { name: "Open conversation: Current conversation" }));
+    fireEvent.click(screen.getAllByRole("button", { name: /^Open project / })[0]);
+    expect(opened).toEqual(["current", "project"]);
+    expect(screen.getByRole("status").textContent).toContain("no longer current");
+    expect(e.invoke.mock.calls.map(([name]) => name).filter(name => name.startsWith("read_")))
+      .toEqual(["read_programs", "read_mission_v3", "read_current_window"]);
+  });
   it("joins real Host/receipt adapters into distinct current and project populations without body or history acquisition", async () => {
     const { input, invoke } = await fixture(), model = composeConversationsList(input);
     expect(model.recentState).toBe("CURRENT"); expect(model.projectsState).toBe("CURRENT");
@@ -112,6 +148,18 @@ describe("CV01 existing producer projection", () => {
     const { input } = await fixture(), model = composeConversationsList({ ...input, programsPending: true, windowPending: true });
     expect(model.recentState).toBe("PENDING"); expect(model.projectsState).toBe("PENDING");
     expect(model.recent).toEqual([]); expect(model.projects).toEqual([]);
+  });
+  it("cannot requalify cached current DTOs on an unrelated render after no-notify host generation loss", async () => {
+    const e = await fixture(); expect(composeConversationsList(e.input).recent).toHaveLength(1);
+    e.invalidateWithoutNotify(); // Public permission flags and old DTO claims remain unchanged.
+    const model = composeConversationsList({ ...e.input,
+      catalogueReadCurrent: conversationListOwnerCurrent(e.catalogueOwner, false),
+      conversationReadCurrent: conversationListOwnerCurrent(e.conversationOwner, true) });
+    expect(e.input.catalogue.programs.source.state).toBe("CURRENT");
+    expect(e.input.conversation.conversation.source.state).toBe("CURRENT");
+    expect(model.recentState).toBe("WITHHELD"); expect(model.projectsState).toBe("WITHHELD");
+    expect(model.recent).toEqual([]); expect(model.projects).toEqual([]);
+    expect(model.sources.every(source => source.revision === null)).toBe(true);
   });
   it("preserves every exact locator dimension and refuses extra-field identities", async () => {
     const { input } = await fixture(), model = composeConversationsList(input), current = model.recent[0].locator;

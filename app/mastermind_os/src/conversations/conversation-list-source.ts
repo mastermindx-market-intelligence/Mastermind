@@ -14,6 +14,10 @@ export interface ConversationListInputs {
   readonly conversation: OfficeProjection;
   readonly acquisitionAllowed: boolean;
   readonly contentAllowed: boolean;
+  /** Owner captures retained by the existing acquisition, not minted while
+   * rendering a cached DTO after the host/principal generation changed. */
+  readonly catalogueReadCurrent: boolean;
+  readonly conversationReadCurrent: boolean;
   readonly programsPending?: boolean;
   readonly windowPending?: boolean;
   readonly hasUnsentDraft: boolean;
@@ -35,7 +39,7 @@ function sourceState(source: SourceClaim, revision: string | null): Conversation
 export function composeConversationsList(input: ConversationListInputs): ConversationListModel {
   const { catalogue, conversation, authGeneration } = input;
   const epochValid = Number.isSafeInteger(authGeneration) && authGeneration >= 0;
-  const projectsAllowed = epochValid && input.acquisitionAllowed &&
+  const projectsAllowed = epochValid && input.acquisitionAllowed && input.catalogueReadCurrent &&
     catalogue.context.authGeneration === authGeneration;
   let projectsState: ConversationListSourceState = !projectsAllowed ? "WITHHELD"
     : input.programsPending ? "PENDING"
@@ -55,7 +59,7 @@ export function composeConversationsList(input: ConversationListInputs): Convers
     }
   }
 
-  const currentAllowed = epochValid && input.acquisitionAllowed && input.contentAllowed &&
+  const currentAllowed = epochValid && input.acquisitionAllowed && input.contentAllowed && input.conversationReadCurrent &&
     conversation.context.authGeneration === authGeneration;
   let recentState: ConversationListSourceState = !currentAllowed ? "WITHHELD"
     : input.windowPending ? "PENDING"
