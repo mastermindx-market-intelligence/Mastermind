@@ -70,4 +70,3 @@ def read_matches_original(original: dict, current: dict,
         and all(original.get(key) == current.get(key)
                 for key in _IDENTITY if key != "policy_id")
     )
-

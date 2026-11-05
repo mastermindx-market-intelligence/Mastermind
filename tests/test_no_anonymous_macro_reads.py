@@ -115,6 +115,12 @@ _ALLOWLIST: dict[tuple[str, str], str] = {
         "two original proposal URL DATA values /pull/401 and /pull/402; JSON only, "
         "consumed by inert App tests, no anonymous acquisition."
     ),
+    ("app/mastermind_os/src/fixtures/knowledge-memory-source.json",
+     "https://github.com/mastermindx-market-intelligence/macro"): (
+        "DEC:B1-MACRO-PRIVATE-CUTOVER -- unchanged source-issued Memory fixture "
+        "contains one proposal URL DATA value /pull/403, never an acquisition; "
+        "the actual App uses its qualified source operation, not this URL for reads."
+    ),
 }
 
 # PR #2055: fixed pull-request URL DATA and closed URL validators, not remote
@@ -154,6 +160,14 @@ _INERT_PR_LINK_DATA_LINES: dict[str, frozenset[str]] = {
         'url: "https://github.com/mastermindx-market-intelligence/macro/pull/417",',
         'url: "https://github.com/mastermindx-market-intelligence/macro/pull/418",',
         'url: "https://github.com/mastermindx-market-intelligence/macro/pull/417/",',
+    )),
+    'app/mastermind_os/src/fixtures/project-draft-files-source-issued.json': frozenset((
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401"',
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/402"',
+    )),
+    'app/mastermind_os/src/fixtures/native-wire/source-file-6cb8.json': frozenset((
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401"',
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/402"',
     )),
     'common/workspace_source_operation_contract.py': frozenset((
         '_PR_URL_PREFIX = "https://github.com/mastermindx-market-intelligence/macro/pull/"',
@@ -290,9 +304,9 @@ def test_allowlist_entry_is_visible_and_still_matches():
     The fourth is an opt-in Studio publisher's fixed remote identity, not a
     clone/fetch. Each exception remains keyed by exact file and matched text so none silently
     covers drift in another file."""
-    assert len(_ALLOWLIST) == 6, (
-        f"expected exactly six allowlist entries (production _REMOTE, its direct "
-        f"test constant, the workspace-origin fixture, Studio publisher, and two inert "
+    assert len(_ALLOWLIST) == 7, (
+        f"expected exactly seven allowlist entries (production _REMOTE, its direct "
+        f"test constant, the workspace-origin fixture, Studio publisher, and three inert "
         f"source-issued proposal fixtures), found "
         f"{len(_ALLOWLIST)}: {list(_ALLOWLIST)}")
     for (rel, matched), reason in _ALLOWLIST.items():

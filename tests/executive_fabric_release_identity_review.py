@@ -562,7 +562,7 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 
 # NEXT accepted source: callback input bound / existing HTTP permission denial,
 # never an OS identity. Exact whole-source hash and token sites only.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': 'f103f1fdb7ec1533479ae5610a5df93d2333d3264d26a4035dbfe515606b384d', 'sites': ((704, 93, 96, 'int', '403'), (706, 56, 59, 'int', '403'), (713, 46, 49, 'int', '403'), (714, 56, 59, 'int', '403'))}
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '1ad6accf606fccee6b3734e31d660b446a7e9f2a63ef98855fde05a76031d6a1', 'sites': ((704, 93, 96, 'int', '403'), (706, 56, 59, 'int', '403'), (713, 46, 49, 'int', '403'), (714, 56, 59, 'int', '403'))}
 
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
@@ -590,3 +590,18 @@ REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/accoun
         (79, 56, 59, 'int', '800'),
     ),
 }
+
+# validated source path bound; no identity/authority. Exact full postimage and literal sites only.
+REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'sha256': 'e3fdbd84b951d7dbffd8e3630ded3baac10490ae24cb1d9586007bd64d12b127', 'sites': ((360, 26, 29, 'int', '512'), (476, 57, 60, 'int', '512'))}
+
+# fixed HTTP not-found status. Exact full postimage and literal sites only.
+REVIEWED_FILES['integrations/mastermind_executive_app/fresh_conversation_transport.py'] = {'sha256': 'b5fd60efebebc04ea12d1d1976663c74f907dec2f151a2d71a6f442182b5e5b2', 'sites': ((93, 39, 42, 'int', '404'),)}
+
+# fixed HTTP unavailable status. Exact full postimage and literal sites only.
+REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport.py'] = {'sha256': 'a7af82acb1492e1eee4e583181f6be2c763a9e61d1be5112345693018defaa09', 'sites': ((41, 45, 48, 'int', '503'), (67, 81, 84, 'int', '503'))}
+
+# Actual source-issued proposal PR number, never a UID or HTTP/permission grant.
+REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = {'sha256': 'ee715ecbf81efef147491f1cbbea041ba1a62688bd0906b715231156bdacc0e9', 'sites': (), 'utf8_sites': ((1, 36976, 36979, 'int', '403'),)}
+
+# Actual local Programs observation negative-test HTTP statuses, no OS identity.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '3ee477861ae7344849499c3af483e8650f26fa58aea7874ad2a6479e776824ac', 'sites': ((3308, 68, 71, 'int', '503'), (3313, 69, 72, 'int', '503'), (3317, 67, 70, 'int', '503'))}
