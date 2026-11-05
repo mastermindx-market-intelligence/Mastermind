@@ -1,5 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { MissionHost } from "../host";
+import { nativeDraftReturnQualified, type NativeDraftOrigin, type NativeDraftRecoveryOwner } from "../auth-recovery/native-draft-owner";
+import { projectGoalDraftScope } from "../auth-recovery/project-goal-scope";
 import type { ProjectJourneySelection } from "./ProjectPlanningJourney";
 import {
   PROJECT_JOURNEY_FLAG_KEY,
@@ -10,7 +12,7 @@ import {
 } from "./project-journey-location";
 
 /** The mounted host surface this presentation reads; never a new authority. */
-export type ProjectJourneyHost = Pick<MissionHost, "auth" | "invalidationGeneration">;
+export type ProjectJourneyHost = Pick<MissionHost, "auth" | "invalidationGeneration" | "nativeDraftRecovery">;
 
 export interface ProjectJourneyRetainedGoal {
   readonly text: string;
@@ -36,6 +38,8 @@ export interface ProjectJourneyStateApi {
   retainedGoal: ProjectJourneyRetainedGoal | null;
   isHostCurrent: () => boolean;
   hasUnsentDraft: () => boolean;
+  /** Current safe draft lookup after an explicit selection gesture; no authority. */
+  currentGoalScope: () => string | null;
   open: () => boolean;
   hide: () => void;
   onSelection: (value: ProjectJourneySelection) => void;
@@ -43,6 +47,8 @@ export interface ProjectJourneyStateApi {
   invalidateAuth: (preserve: boolean) => void;
   restoreLocation: () => void;
   returnToRetainedGoal: () => boolean;
+  /** Explicit same-principal native privacy recovery; never a source/action grant. */
+  returnToNativeRetainedGoal: (origin: NativeDraftOrigin, owner: NativeDraftRecoveryOwner) => boolean;
   editRetainedGoal: (text: string) => void;
   discardRetainedGoal: () => void;
 }
@@ -360,6 +366,27 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
     return true;
   };
 
+  const returnToNativeRetainedGoal = (origin: NativeDraftOrigin, owner: NativeDraftRecoveryOwner): boolean => {
+    const actor = ensureCurrent(), current = stateRef.current, retained = current.retained;
+    if (!actor || actor.host.nativeDraftRecovery !== owner || !retained || !retained.passivelyHeld || retained.host !== actor.host) return false;
+    const scope = projectGoalDraftScope(retained.selection);
+    if (!scope || !nativeDraftReturnQualified(owner, origin, scope)) return false;
+    const swap = current.goal && goalVisible(current, actor) && current.goal.text !== retained.text
+      ? { text: current.goal.text, selection: current.selection, passivelyHeld: false, actor, host: actor.host } : null;
+    let restored = false;
+    const restore = (selection: ProjectJourneySelection | null) => {
+      // History callbacks and stale click closures cannot restore text after
+      // an intervening auth/host/selection change. Tokens/operations stay out.
+      if (stateRef.current !== current || !actorEquals(ensureCurrent(), actor) || actor.host.nativeDraftRecovery !== owner || !nativeDraftReturnQualified(owner, origin, scope)) return;
+      apply({ ...current, shown: true, invalidLink: false, selection,
+        goal: { text: retained.text, actor, createRequestId: retained.selection?.createRequestId ?? null }, retained: swap });
+      restored = true;
+    };
+    if (retained.selection === null) writeBlankJourneyUrl(() => restore(null));
+    else commitProjectJourneySelection(window.location.href, retained.selection, window.history, restore);
+    return restored;
+  };
+
   // Currency proof for retained-slot-only edits (never draft or navigation):
   // the full live proof, or — only for an exactly held passive same-host
   // text whose credential is already gone — bare live host identity at the
@@ -410,7 +437,12 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
     // Passive expiry preserves ONLY the visible same-host owned text, for the
     // parent's existing passive-expiry hold. Never a new credential.
     if (current.goal === null || !goalVisible(current, latestActor.current)) {
-      apply({ ...current, goal: null });
+      const retained = current.retained;
+      // An off-view goal already parked by this actor is still unsent work.
+      // Keep it in the SAME slot; native callers separately quarantine its
+      // body until genuine same-principal/original-scope recovery qualifies.
+      const owned = retained !== null && actorEquals(retained.actor, latestActor.current);
+      apply({ ...current, goal: null, retained: owned ? { ...retained, passivelyHeld: true } : retained });
       return;
     }
     const goal = current.goal;
@@ -451,6 +483,7 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
     retainedGoal,
     isHostCurrent: isCurrent,
     hasUnsentDraft,
+    currentGoalScope: () => ensureCurrent() ? projectGoalDraftScope(stateRef.current.selection) : null,
     open,
     hide,
     onSelection,
@@ -458,6 +491,7 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
     invalidateAuth,
     restoreLocation,
     returnToRetainedGoal,
+    returnToNativeRetainedGoal,
     editRetainedGoal,
     discardRetainedGoal,
   };

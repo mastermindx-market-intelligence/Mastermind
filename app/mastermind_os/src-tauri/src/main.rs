@@ -100,6 +100,7 @@ fn main() {
             terminal_session::read_terminal_sharing_requests,
             terminal_sharing_navigation::open_terminal_sharing_request,
             auth::auth_status,
+            auth::native_draft_identity::read_native_draft_continuity,
             auth::sign_in,
             auth::sign_out,
             auth::read_programs,

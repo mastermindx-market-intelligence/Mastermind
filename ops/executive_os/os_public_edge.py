@@ -121,6 +121,11 @@ PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES = GET_ROUTES
 PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES = POST_ROUTES
 GET_ROUTES = PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES + ("/workspace/mission-result/current",)
 
+# Fixed zero-selector privacy identity read; preserve the complete predecessor.
+PRE_NATIVE_DRAFT_GET_ROUTES = GET_ROUTES
+PRE_NATIVE_DRAFT_POST_ROUTES = POST_ROUTES
+GET_ROUTES = PRE_NATIVE_DRAFT_GET_ROUTES + ("/workspace/native-draft-identity/current",)
+
 # Preserve exactly the profiles admitted by the two predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
 # partial upgrades, wildcards and extra paths cannot become transition inputs.
@@ -152,6 +157,7 @@ TRANSITION_ROUTE_PROFILES = (
     (PRE_PLAN_PROPOSAL_GET_ROUTES, PRE_PLAN_PROPOSAL_POST_ROUTES),
     (PRE_CONVERSATION_READ_GET_ROUTES, PRE_CONVERSATION_READ_POST_ROUTES),
     (PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES, PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES),
+    (PRE_NATIVE_DRAFT_GET_ROUTES, PRE_NATIVE_DRAFT_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 

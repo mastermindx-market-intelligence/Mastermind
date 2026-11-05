@@ -1,6 +1,7 @@
 import {hostObservationHostMethods,hostObservationPublicSelection,type HostObservationRawMethods,type HostObservationHostMethods} from "./resources/host-observation-host";
 import {freshConversationArguments, freshConversationNeedsWorkspace, type FreshConversationTransport} from "./orchestration/fresh-conversation-transport";
 import { createLazyTerminalSharingHost, type TerminalSharingSource } from "./terminal/terminal-sharing-host";
+import { createNativeDraftRecoveryOwner, type NativeDraftRecoveryOwner } from "./auth-recovery/native-draft-owner";
 import {projectAccessHostMethods,projectAccessPublicSelection,type ProjectAccessRawMethods,type ProjectAccessHostMethods} from "./access/project-access-host";
 import { projectAdmissionHostMethods, projectAdmissionPublicRequest, type ProjectAdmissionRawMethods, type ProjectAdmissionHostMethods } from "./admission/project-admission-host";
 import { validArchiveCursor, type ArchiveCursor } from "./projects/archive/project-archive-continuation";
@@ -78,6 +79,8 @@ import {
 } from "./control-room";
 
 export interface RawClient extends Partial<HostObservationRawMethods>,Partial<ProjectAdmissionRawMethods>,Partial<InstructionRawMethods>,Partial<ProjectAccessRawMethods> {
+  /** Native-owned privacy metadata only; never reconstructed from an event. */
+  readonly nativeDraftRecovery?: NativeDraftRecoveryOwner;
   /** Independent Terminal session; workspace grants never confer brief access. */
   readonly terminalSharing?: TerminalSharingSource;
   /** Public fixed navigation only; Terminal owns its user's authentication and access. */
@@ -171,6 +174,7 @@ export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
 }
 export interface MissionHost extends Partial<HostObservationHostMethods>,Partial<ProjectAdmissionHostMethods>,Partial<InstructionHostMethods>,Partial<ProjectAccessHostMethods> {
+  readonly nativeDraftRecovery?: NativeDraftRecoveryOwner;
   /** Independent Terminal session; workspace grants never confer brief access. */
   readonly terminalSharing?: TerminalSharingSource;
   readonly projectPlanning?: ProjectPlanningTransport;
@@ -435,6 +439,7 @@ export function bindMissionHost(
   }):undefined;
   const command = completeOrchestratorCommandBinding(commandBinding);
   return {
+    ...(client.nativeDraftRecovery ? { nativeDraftRecovery: client.nativeDraftRecovery } : {}),
     ...(client.terminalSharing ? { terminalSharing: client.terminalSharing } : {}),
     ...(client.openTerminalBriefs ? {
       openTerminalBriefs: createTerminalBriefsNavigationPort(() => client.openTerminalBriefs!()),
@@ -1023,8 +1028,14 @@ export async function createNativeClient(
   };
   const listeners = new Set<(state: AuthState) => void>();
   let epoch = 0;
+  const nativeDraftRecovery = createNativeDraftRecoveryOwner({
+    inspect: () => invoke("read_native_draft_continuity"),
+    sourceGeneration: () => epoch,
+    signedIn: () => current.status === "signed_in" && current.acquisition,
+  });
   let readGeneration = new AbortController();
   const invalidateReads = () => {
+    nativeDraftRecovery.invalidate();
     epoch++;
     const previous = readGeneration;
     readGeneration = new AbortController();
@@ -1128,6 +1139,7 @@ export async function createNativeClient(
     });
   }
   return {
+    nativeDraftRecovery,
     terminalSharing,
     executive: executive.transport,
     executiveSession: executive.sessionTransport,
@@ -1149,11 +1161,12 @@ export async function createNativeClient(
       if (ticket === control && started === epoch) update(result);
     },
     async signOut() {
+      nativeDraftRecovery.clear();
       executive.invalidate();
       const ticket = ++control;
       update({
         status: "signed_out",
-        reason: null,
+        reason: "USER_SIGNED_OUT",
         acquisition: false,
         content: false,
       });

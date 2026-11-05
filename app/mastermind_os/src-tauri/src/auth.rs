@@ -1,6 +1,10 @@
 //! The native client owns OAuth transactions and bearer tokens. The webview
 //! receives fixed read results and sanitized state, never credential material.
 pub mod host_observation;
+mod draft_continuity;
+pub mod native_draft_identity;
+#[cfg(test)]
+mod draft_recovery_tests;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -93,6 +97,7 @@ struct Pending {
     generation: u64,
 }
 struct Inner {
+    draft_continuity: draft_continuity::DraftContinuity,
     client_id: Option<String>,
     executive_resource: Option<String>,
     executive_generation: u64,
@@ -115,6 +120,7 @@ impl Inner {
             .filter(|value| crate::native_client::validate_native_client_id(value).is_ok())
             .map(str::to_owned);
         Self {
+            draft_continuity: draft_continuity::DraftContinuity::new(draft_owner_instance()),
             client_id,
             executive_resource: resource.and_then(executive_resource),
             executive_generation: 0,
@@ -130,16 +136,21 @@ impl Inner {
         }
     }
     fn token(&self, resource: Resource) -> Option<&Token> {
+        self.stored_token(resource)
+            .filter(|t| t.expires > Instant::now() && t.wall_expires > SystemTime::now())
+    }
+    fn stored_token(&self, resource: Resource) -> Option<&Token> {
         match resource {
             Resource::Acquisition => self.acquisition.as_ref(),
             Resource::Content => self.content.as_ref(),
             Resource::Executive => self.executive.as_ref().filter(|_| self.executive_resource.is_some()),
         }
-        .filter(|t| t.expires > Instant::now() && t.wall_expires > SystemTime::now())
     }
     fn status(&self) -> AuthStatus {
         let acquisition = self.token(Resource::Acquisition).is_some();
         let content = self.token(Resource::Content).is_some();
+        let expired = self.acquisition.as_ref().is_some_and(|_| !acquisition)
+            || self.content.as_ref().is_some_and(|_| !content);
         AuthStatus {
             status: if self.client_id.is_none() {
                 "unconfigured"
@@ -155,7 +166,11 @@ impl Inner {
             reason: if self.client_id.is_none() {
                 Some("NATIVE_CLIENT_ID_MISSING")
             } else {
-                self.reason
+                self.reason.or_else(|| {
+                    if matches!(self.draft_continuity.snapshot(None).phase, draft_continuity::Phase::Withdrawn) {
+                        Some("USER_SIGNED_OUT")
+                    } else if expired { Some("NATIVE_TOKEN_EXPIRED") } else { None }
+                })
             },
             acquisition,
             content,
@@ -190,6 +205,14 @@ impl Inner {
         else { self.reason = Some(reason); }
     }
     fn invalidate(&mut self) {
+        self.invalidate_auth();
+        self.draft_continuity.logout();
+    }
+    fn begin_reauthentication(&mut self) {
+        self.invalidate_auth();
+        self.draft_continuity.begin_reauthentication();
+    }
+    fn invalidate_auth(&mut self) {
         self.generation = self.generation.wrapping_add(1);
         self.clear_executive();
         self.pending = None;
@@ -270,6 +293,7 @@ impl Inner {
         match token {
             Ok(token) if resource == Resource::Acquisition => {
                 self.acquisition = Some(token);
+                self.draft_continuity.unqualified();
                 self.reason = None;
                 self.transaction(Resource::Content).ok()
             }
@@ -325,6 +349,11 @@ fn random_secret() -> String {
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);
     URL_SAFE_NO_PAD.encode(bytes)
+}
+fn draft_owner_instance() -> String {
+    let mut bytes = [0u8; 16];
+    OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 fn authorization_url(client: &str, resource: Resource, state: &str, verifier: &str) -> String {
     authorization_url_for_audience(client, resource, resource.audience(), state, verifier)
@@ -440,7 +469,16 @@ pub fn auth_status(state: tauri::State<'_, NativeAuth>) -> Result<AuthStatus> {
 #[tauri::command]
 pub fn sign_out(app: AppHandle) -> Result<AuthStatus> {
     let state = app.state::<NativeAuth>();
-    let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
+    let _keychain = match state.keychain_lock.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            // Explicit logout withdraws in-memory authority and privacy
+            // continuity even when platform credential cleanup is unavailable.
+            state.lock()?.invalidate();
+            emit(&app);
+            return Err("KEYCHAIN_UNAVAILABLE".into());
+        }
+    };
     let mut inner = state.lock()?;
     inner.invalidate();
     let client = inner.client_id.clone();
@@ -470,7 +508,7 @@ pub fn sign_in(app: AppHandle) -> Result<AuthStatus> {
     if inner.client_id.is_none() {
         return Ok(inner.status());
     }
-    inner.invalidate();
+    inner.begin_reauthentication();
     if crate::native_refresh::enabled() {
         let client = inner.client_id.as_deref().ok_or("NATIVE_CLIENT_ID_MISSING")?;
         for resource in [Resource::Acquisition, Resource::Content] {
@@ -745,7 +783,10 @@ async fn refresh_one(app: &AppHandle, resource: Resource) -> Result<()> {
         if inner.generation != generation { return Err("AUTHENTICATION_CHANGED".into()); }
         crate::native_refresh::finish_rotation(&client, resource.audience(), &old, next)?;
         match resource {
-            Resource::Acquisition => inner.acquisition = Some(access),
+            Resource::Acquisition => {
+                inner.acquisition = Some(access);
+                inner.draft_continuity.unqualified();
+            },
             Resource::Content => inner.content = Some(access),
             Resource::Executive => return Err("AUTHENTICATION_REQUIRED".into()),
         }
@@ -780,6 +821,16 @@ fn native_refresh_deadline(expires: Instant, now: Instant) -> Instant {
     let floor = now + Duration::from_secs(10);
     if early < floor { floor } else { early }
 }
+fn original_expiry_current(inner: &Inner, resource: Resource, expires: Instant,
+    wall_expires: SystemTime, generation: u64) -> bool {
+    inner.generation == generation && inner.stored_token(resource)
+        .is_some_and(|token| token.expires == expires && token.wall_expires == wall_expires)
+}
+fn original_expiry_due(inner: &Inner, resource: Resource, expires: Instant,
+    wall_expires: SystemTime, generation: u64, now: Instant, wall: SystemTime) -> bool {
+    original_expiry_current(inner, resource, expires, wall_expires, generation)
+        && (now >= expires || wall >= wall_expires)
+}
 fn schedule_expiration(app: AppHandle, resource: Resource, expires: Instant, wall_expires: SystemTime, generation: u64) {
     tauri::async_runtime::spawn(async move {
         let target = if resource.persistent() {
@@ -802,6 +853,23 @@ fn schedule_expiration(app: AppHandle, resource: Resource, expires: Instant, wal
             // A network/rotation failure does not replay an ambiguous token;
             // a later explicit sign-in remains available.
             let _ = refresh_one(&app, resource).await;
+        }
+        // An early refresh failure may leave the old token valid at this
+        // point. The same original deadline owner must still report its real
+        // expiry; it never retries refresh, creates another timer or extends
+        // the token. A replacement grant/logout retires this old deadline.
+        loop {
+            let state = app.state::<NativeAuth>();
+            let due = match state.lock() {
+                Ok(inner) => {
+                    if !original_expiry_current(&inner, resource, expires, wall_expires, generation) { return; }
+                    original_expiry_due(&inner, resource, expires, wall_expires, generation, Instant::now(), SystemTime::now())
+                },
+                Err(_) => return,
+            };
+            if due { break; }
+            let remaining = expires.saturating_duration_since(Instant::now());
+            tokio::time::sleep(remaining.min(Duration::from_secs(30))).await;
         }
         emit(&app);
     });
