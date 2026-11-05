@@ -1,0 +1,75 @@
+{
+  "schema_version": "mastermind.execution_plan/v4",
+  "root_job_id": "example-root",
+  "plan_attempt_id": "example-plan-attempt",
+  "steps": [
+    {
+      "ordinal": 0,
+      "step_id": "source-evidence",
+      "objective": "Investigate the supplied primary sources and return evidence references plus uncertainty.",
+      "business_impact": "material",
+      "review_required": false,
+      "requested_authorities": [
+        "READ"
+      ],
+      "allowed_write_paths": [],
+      "validation_ids": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "attempt_limit": 2,
+      "cost_class": "small",
+      "prerequisite_step_ids": []
+    },
+    {
+      "ordinal": 1,
+      "step_id": "contract-evidence",
+      "objective": "Inspect the supplied source contract and identify constraints with exact artifact references.",
+      "business_impact": "material",
+      "review_required": false,
+      "requested_authorities": [
+        "READ"
+      ],
+      "allowed_write_paths": [],
+      "validation_ids": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "attempt_limit": 2,
+      "cost_class": "small",
+      "prerequisite_step_ids": []
+    },
+    {
+      "ordinal": 2,
+      "step_id": "counterevidence",
+      "objective": "Investigate counterexamples against the original decision criteria.",
+      "business_impact": "material",
+      "review_required": false,
+      "requested_authorities": [
+        "READ"
+      ],
+      "allowed_write_paths": [],
+      "validation_ids": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "attempt_limit": 2,
+      "cost_class": "small",
+      "prerequisite_step_ids": []
+    },
+    {
+      "ordinal": 3,
+      "step_id": "integrated-outcome",
+      "objective": "Integrate every branch, resolve contradictory evidence, and prove each original acceptance criterion with inspectable evidence.",
+      "business_impact": "material",
+      "review_required": true,
+      "requested_authorities": [
+        "READ"
+      ],
+      "allowed_write_paths": [],
+      "validation_ids": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "attempt_limit": 2,
+      "cost_class": "small",
+      "prerequisite_step_ids": []
+    }
+  ]
+}

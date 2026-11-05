@@ -1,0 +1,24 @@
+{
+  "schema_version": "mastermind.execution_plan/v4",
+  "root_job_id": "example-root",
+  "plan_attempt_id": "example-plan-attempt",
+  "steps": [
+    {
+      "ordinal": 0,
+      "step_id": "cohesive-outcome",
+      "objective": "Produce one cohesive evidence-backed answer against the original supplied acceptance criteria.",
+      "business_impact": "material",
+      "review_required": true,
+      "requested_authorities": [
+        "READ"
+      ],
+      "allowed_write_paths": [],
+      "validation_ids": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "attempt_limit": 2,
+      "cost_class": "small",
+      "prerequisite_step_ids": []
+    }
+  ]
+}

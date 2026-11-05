@@ -1,0 +1,29 @@
+{
+  "schema_version": "mastermind.execution_plan/v5",
+  "root_job_id": "example-root",
+  "plan_attempt_id": "example-plan-attempt",
+  "coordinator_job_id": "example-root",
+  "steps": [
+    {
+      "ordinal": 0,
+      "step_id": "domain-owner",
+      "objective": "Own the bounded evidence domain, reserve independent review within the inherited subtree, integrate its result against original criteria.",
+      "business_impact": "material",
+      "review_required": false,
+      "requested_authorities": [
+        "READ"
+      ],
+      "allowed_write_paths": [],
+      "validation_ids": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "attempt_limit": 2,
+      "cost_class": "small",
+      "prerequisite_step_ids": [],
+      "delegation": {
+        "descendant_limit": 10,
+        "max_depth": 3
+      }
+    }
+  ]
+}

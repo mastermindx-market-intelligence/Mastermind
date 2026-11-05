@@ -184,11 +184,15 @@ class ArtifactStore:
     ``MemoryArtifactResolver`` is a separate, narrower implementation under
     ``tests/agent_eval_factories.py``)."""
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(self, root: str | Path, *, create_root: bool = True) -> None:
+        # Read consumers can avoid accidentally creating a misspelled root.
+        # This flag only controls initialization, not publication permissions.
         root_path = Path(root)
         if root_path.exists() and root_path.is_symlink():
             raise ContractError([ContractDefect("$", "ROOT_IS_SYMLINK", "artifact store root must not be a symlink")])
         if not root_path.exists():
+            if not create_root:
+                raise FileNotFoundError(str(root_path))
             root_path.mkdir(parents=True, exist_ok=False, mode=0o700)
         elif not root_path.is_dir():
             raise ContractError([ContractDefect("$", "ROOT_NOT_A_DIRECTORY", "artifact store root must be a directory")])

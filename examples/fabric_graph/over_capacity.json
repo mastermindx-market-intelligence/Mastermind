@@ -1,0 +1,41 @@
+{
+  "schema_version": "mastermind.execution_plan/v4",
+  "root_job_id": "example-root",
+  "plan_attempt_id": "example-plan-attempt",
+  "steps": [
+    {
+      "ordinal": 0,
+      "step_id": "first-reviewed",
+      "objective": "First independently reviewed cohesive outcome.",
+      "business_impact": "material",
+      "review_required": true,
+      "requested_authorities": [
+        "READ"
+      ],
+      "allowed_write_paths": [],
+      "validation_ids": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "attempt_limit": 2,
+      "cost_class": "small",
+      "prerequisite_step_ids": []
+    },
+    {
+      "ordinal": 1,
+      "step_id": "second-reviewed",
+      "objective": "Second independently reviewed cohesive outcome.",
+      "business_impact": "material",
+      "review_required": true,
+      "requested_authorities": [
+        "READ"
+      ],
+      "allowed_write_paths": [],
+      "validation_ids": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "attempt_limit": 2,
+      "cost_class": "small",
+      "prerequisite_step_ids": []
+    }
+  ]
+}
