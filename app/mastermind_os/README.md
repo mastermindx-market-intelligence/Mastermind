@@ -132,11 +132,19 @@ Explicit logout prevents redirect, including if a subsequent popup is blocked.
 **This only reacquires the Workspace acquisition audience**: the separate
 Content and optional Executive grants can remain unavailable if their iframe
 attempts are also blocked. The existing user-initiated Auth0 popup may recover
-those scopes. True unattended, all-resource, cross-restart persistence in
+those scopes. The subsequent OS static-response candidate narrowly permits
+`frame-src` to the exact pinned Auth0 issuer and its own callback origin on the OS app, and allows only
+the exact OAuth callback to be framed by its own OS origin (`frame-ancestors
+'self'`); the app shell and all other assets remain `frame-ancestors 'none'`.
+That repairs the OS-controlled CSP denial without permitting arbitrary
+embedding. It does **not** alter the Auth0 tenant, its own iframe policy, browser
+third-party cookie restrictions, or the deployed edge until installed and
+verified. True unattended, all-resource, cross-restart persistence in
 privacy-restricted browsers requires an independently reviewed first-party
 Auth0 custom domain + scoped CSP changes or a secure cookie/BFF credential
-custodian. The redirect candidate is a scoped fallback, not a substitute for
-those release/tenant and real-browser acceptance requirements.
+custodian. The redirect fallback and CSP candidate are scoped incremental
+repairs, not substitutes for those release/tenant and real-browser acceptance
+requirements.
 
 ### Authentication restoration and multi-tab safety follow-up
 
