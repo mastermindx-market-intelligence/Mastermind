@@ -1,6 +1,7 @@
 mod auth;
 mod project_planning;
 mod fresh_conversation;
+mod project_conversations_read;
 mod native_client;
 mod native_refresh;
 mod terminal_handoff;
@@ -151,6 +152,7 @@ fn main() {
             auth::executive_fresh_conversation,
             auth::executive_session_context,
             auth::executive_project_history_context,
+            auth::executive_project_conversations_read,
             auth::executive_session_reply,
             auth::executive_session_references,
             auth::executive_project_session_references

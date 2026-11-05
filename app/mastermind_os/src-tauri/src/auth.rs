@@ -2326,6 +2326,11 @@ where
             .and_then(Value::as_str) == Some("research_only");
     let planning=crate::project_planning::operation(path);
     let fresh=crate::fresh_conversation::operation(path);
+    let conversation_read=crate::project_conversations_read::operation(path);
+    if let Some(operation)=conversation_read {
+        if !body.as_object().is_some_and(|o|o.len()==1 && o.contains_key("arguments")) {return Err("REQUEST_INVALID".into())}
+        crate::project_conversations_read::validate(operation,&body["arguments"])?;
+    }
     if let Some(operation)=fresh {
         if !body.as_object().is_some_and(|o|o.len()==1 && o.contains_key("arguments")) {return Err("REQUEST_INVALID".into())}
         crate::fresh_conversation::validate(operation,&body["arguments"])?;
@@ -2363,6 +2368,7 @@ where
                     return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into());
                 }
             }
+            _ if conversation_read.is_some() => {}
             _ if planning.is_some() => {if !token.executive_send {return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into())}}
             // Every original fresh-conversation operation belongs to the
             // enrolled submit-policy principal. Pure project catalogue READ
@@ -2465,6 +2471,14 @@ where F: std::future::Future<Output = Result<T>> {
         }
         exchange.as_mut().poll(cx)
     }).await
+}
+#[tauri::command]
+pub async fn executive_project_conversations_read(app:AppHandle,operation:String,arguments:Value)->Result<Value> {
+    let path=crate::project_conversations_read::path(&operation).ok_or("REQUEST_INVALID")?;
+    crate::project_conversations_read::validate(&operation,&arguments)?;
+    let result=executive_post(app.clone(),path,serde_json::json!({"arguments":arguments})).await;
+    if result.is_err(){emit(&app);}
+    result
 }
 #[tauri::command]
 pub async fn executive_fresh_conversation(app:AppHandle,operation:String,arguments:Value)->Result<Value> {
