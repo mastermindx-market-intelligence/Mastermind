@@ -222,6 +222,30 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
   }
   latest.current.onBack();
  }
+ /** Called only after the attended owner settles its genuine original.
+  * Refresh local lookup DATA without changing the issued body or source state. */
+ async function refreshPendingOriginal(){
+  const c=capture(),v=current.current,pointer=v.retained;
+  if(!c||!latest.current.active||v.busy||v.discovering||!pointer||
+    (pointer.kind!=="conversation_consume"&&pointer.kind!=="conversation_turn"))return false;
+  const expected=selectionOf(pointer);
+  if(!expected||!v.original||!sameSelection(v.original,expected))return false;
+  const store=c.binding.store,read=store.read,context=c.binding.context,id=++ticket.current;
+  try{
+   const next=await read.call(store,c.owner.principalScope);
+   if(!live(c)||!latest.current.active||ticket.current!==id||c.binding.store!==store||store.read!==read||
+     c.binding.context!==context||current.current.retained!==pointer||current.current.busy||
+     !current.current.original||!sameSelection(current.current.original,expected))return false;
+   if(next!==null){
+    const pending=selectionOf(next);
+    if(pending&&!sameSelection(pending,expected))patch({retained:next,other:false,original:pending,
+      lookup:false,phase:"outcome",opened:false,data:null,operation:null,preview:null});
+    else patch({retained:next,other:!pending});
+    return false;
+   }
+   patch({retained:null,other:false});return true;
+  }catch{return false;}
+ }
  async function start(){
   const origin=document.activeElement;let v=current.current;
   if(v.busy||v.discovering)return;
@@ -310,5 +334,5 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
     opened={view.opened} busy={!!view.busy||view.discovering||view.other} activity={view.busy==="operation"?"creating":view.busy==="read"?"checking":null} canOpen={canOpen(view.data)&&!view.other&&!!actualOwner}
     onCheck={()=>void check()} onOpen={()=>void check(true)} onBack={back} continuation={continuation}/></>}
  </div>;
- return {panel,start,hasUnresolvedOriginal:!!view.retained||view.other||view.busy==="operation"||view.discovering||view.operation?.status==="unknown"||view.lookup&&!canOpen(view.data)};
+ return {panel,start,refreshPendingOriginal,hasUnresolvedOriginal:!!view.retained||view.other||view.busy==="operation"||view.discovering||view.operation?.status==="unknown"||view.lookup&&!canOpen(view.data)};
 }

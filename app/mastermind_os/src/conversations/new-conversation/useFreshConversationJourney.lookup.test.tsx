@@ -25,7 +25,7 @@ function setup(pointer:OperationPointer|null=null){
 }
 function Harness(props:FreshConversationJourneyProps){
  const view=useFreshConversationJourney(props);
- return <><button onClick={view.start}>Explicit new-entry gesture</button>{view.panel}</>;
+ return <><button onClick={view.start}>Explicit new-entry gesture</button><button onClick={()=>void view.refreshPendingOriginal()}>Refresh owned local hint</button>{view.panel}</>;
 }
 it("restores only a lookup outcome after the terminal pointer cleared, then reads only on an explicit Check",async()=>{
  const {props,store,transport}=setup();render(<Harness {...props}/>);
@@ -77,7 +77,7 @@ it("supplies one stable actual initial-read witness, never authority, and retire
  expect(first.current()).toBe(true);expect(first.selection).toEqual(props.originalLookup!.selection);
  expect(first.result).toEqual(fixture.read.data.result);expect(first.locator).toEqual(fixture.read.data.locator);
  view.rerender(<Harness {...props} locale="zh-CN"/>);expect(issued.at(-1)).toBe(first);
- expect(first.current()).toBe(true);fireEvent.click(screen.getByRole("button",{name:"查看原请求状态"}));
+ expect(first.current()).toBe(true);fireEvent.click(screen.getByRole("button",{name:"查看首次请求状态"}));
  expect(first.current()).toBe(false);
  await waitFor(()=>expect(transport.read).toHaveBeenCalledTimes(3));
  await waitFor(()=>expect(issued.at(-1)).not.toBe(first));const second=issued.at(-1)!;
@@ -172,4 +172,52 @@ it('leaves reference-mode and malformed attended hints with their existing owner
   const view=render(<Harness {...props}/>);await screen.findByText('Another request needs its existing status controls before a new conversation can be created.');
   expect((screen.getByRole('button',{name:'Check original request'}) as HTMLButtonElement).disabled).toBe(true);expect(transport.read).not.toHaveBeenCalled();expect(transport.status).not.toHaveBeenCalled();expect(transport.create).not.toHaveBeenCalled();view.unmount();
  }
+});
+
+it.each(['conversation_consume','conversation_turn'] as const)('retires only an actually cleared matching %s hint without a source call or witness/focus change',async kind=>{
+ const {props,transport}=setup();const currentOwner={principalScope:'f'.repeat(64),generation:'unit-auth-1'};
+ const store=createIndexedDbPendingPointerStore(new IDBFactory());
+ const pointer:OperationPointer={kind,operationKey:(kind==='conversation_consume'?'mmos-conversation-consume-':'mmos-conversation-turn-')+'4'.repeat(40),targetKey:JSON.stringify({operation_key:fixture.request.operation_key,work_ref:fixture.request.work_ref})};
+ await store.reserve(currentOwner.principalScope,pointer);props.binding=createFreshConversationBinding({owner:()=>currentOwner,canPreviewCreate:()=>false,store,transport});props.draftOwner=currentOwner;
+ let issued:FreshConversationInitialRead|null=null;props.renderContinuation=read=>{issued=read;return <p>Owned attended status controls</p>;};
+ render(<Harness {...props}/>);await screen.findByText('An original follow-up request needs a status check. Open its first response to use the existing status controls. Don’t send it again.');
+ fireEvent.click(screen.getByRole('button',{name:'Check original request'}));await screen.findByRole('button',{name:'Open initial response'});fireEvent.click(screen.getByRole('button',{name:'Open initial response'}));await screen.findByText('Owned attended status controls');
+ const first=issued!,calls=transport.read.mock.calls.length;expect(first.current()).toBe(true);
+ const button=screen.getByRole('button',{name:'Refresh owned local hint'});button.focus();
+ fireEvent.click(button);await act(async()=>{});expect(await store.read(currentOwner.principalScope)).toEqual(pointer);
+ expect(screen.getByText(/An original follow-up request needs a status check/)).toBeTruthy();
+ await store.clearIfEqual(currentOwner.principalScope,pointer);fireEvent.click(button);
+ await waitFor(()=>expect(screen.queryByText(/An original follow-up request needs a status check/)).toBeNull());
+ expect(issued).toBe(first);expect(first.current()).toBe(true);expect(document.activeElement).toBe(button);
+ expect(transport.read).toHaveBeenCalledTimes(calls);expect(transport.preview).not.toHaveBeenCalled();expect(transport.create).not.toHaveBeenCalled();expect(transport.status).not.toHaveBeenCalled();
+});
+it('retains a replacement original found during local attended-hint refresh',async()=>{
+ const {props,store,transport}=setup({kind:'conversation_turn',operationKey:'mmos-conversation-turn-'+'5'.repeat(40),targetKey:JSON.stringify({operation_key:fixture.request.operation_key,work_ref:fixture.request.work_ref})});
+ render(<Harness {...props}/>);await screen.findByText(/An original follow-up request needs a status check/);
+ const replacement:OperationPointer={kind:'launch',operationKey:'held-replacement',targetKey:null};vi.mocked(store.read).mockReturnValue(replacement);
+ fireEvent.click(screen.getByRole('button',{name:'Refresh owned local hint'}));await screen.findByText('Another request needs its existing status controls before a new conversation can be created.');
+ expect((screen.getByRole('button',{name:'Check original request'}) as HTMLButtonElement).disabled).toBe(true);expect(transport.read).not.toHaveBeenCalled();expect(transport.create).not.toHaveBeenCalled();expect(store.clearIfEqual).not.toHaveBeenCalled();
+});
+it('rejects late local-hint clearance after no-render store method replacement',async()=>{
+ const {props,store,transport}=setup({kind:'conversation_consume',operationKey:'mmos-conversation-consume-'+'6'.repeat(40),targetKey:JSON.stringify({operation_key:fixture.request.operation_key,work_ref:fixture.request.work_ref})});
+ render(<Harness {...props}/>);await screen.findByText(/An original follow-up request needs a status check/);
+ let finish!:(v:null)=>void;vi.mocked(store.read).mockReturnValueOnce(new Promise<null>(r=>{finish=r;}));
+ fireEvent.click(screen.getByRole('button',{name:'Refresh owned local hint'}));Object.assign(store,{read:vi.fn(()=>null)});
+ await act(async()=>finish(null));expect(screen.getByText(/An original follow-up request needs a status check/)).toBeTruthy();expect(transport.read).not.toHaveBeenCalled();expect(transport.create).not.toHaveBeenCalled();
+});
+it('a late empty local hint read cannot override a newer replacement-pointer observation',async()=>{
+ const pointer:OperationPointer={kind:'conversation_turn',operationKey:'mmos-conversation-turn-'+'7'.repeat(40),targetKey:JSON.stringify({operation_key:fixture.request.operation_key,work_ref:fixture.request.work_ref})};
+ const {props,store,transport}=setup(pointer);render(<Harness {...props}/>);await screen.findByText(/An original follow-up request needs a status check/);
+ let finish!:(v:null)=>void;const replacement:OperationPointer={kind:'launch',operationKey:'newer-held',targetKey:null};
+ vi.mocked(store.read).mockReturnValueOnce(new Promise<null>(r=>{finish=r;})).mockReturnValueOnce(replacement);
+ const button=screen.getByRole('button',{name:'Refresh owned local hint'});fireEvent.click(button);fireEvent.click(button);
+ await screen.findByText('Another request needs its existing status controls before a new conversation can be created.');await act(async()=>finish(null));
+ expect(screen.getByText('Another request needs its existing status controls before a new conversation can be created.')).toBeTruthy();expect(transport.read).not.toHaveBeenCalled();expect(store.clearIfEqual).not.toHaveBeenCalled();
+});
+it('no-render Executive owner loss cannot retire an attended hint from a late empty local read',async()=>{
+ const pointer:OperationPointer={kind:'conversation_consume',operationKey:'mmos-conversation-consume-'+'8'.repeat(40),targetKey:JSON.stringify({operation_key:fixture.request.operation_key,work_ref:fixture.request.work_ref})};
+ const {props,store,transport}=setup(pointer);let actualOwner:OwnerContext|null=owner;
+ props.binding=createFreshConversationBinding({owner:()=>actualOwner,canPreviewCreate:()=>false,store,transport});render(<Harness {...props}/>);await screen.findByText(/An original follow-up request needs a status check/);
+ let finish!:(v:null)=>void;vi.mocked(store.read).mockReturnValueOnce(new Promise<null>(r=>{finish=r;}));fireEvent.click(screen.getByRole('button',{name:'Refresh owned local hint'}));actualOwner=null;
+ await act(async()=>finish(null));expect(screen.getByText(/An original follow-up request needs a status check/)).toBeTruthy();expect(transport.read).not.toHaveBeenCalled();expect(store.clearIfEqual).not.toHaveBeenCalled();
 });

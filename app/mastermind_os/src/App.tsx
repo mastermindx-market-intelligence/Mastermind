@@ -283,7 +283,7 @@ function isFreshRetainedOperation(value: unknown): value is OperationPointer {
       return freshConversationOriginalSelector({work_ref: targetKey, operation_key: operationKey}) !== null;
     if (kind !== "conversation_consume" && kind !== "conversation_turn") return false;
     const pattern = kind === "conversation_consume" ? /^mmos-conversation-consume-[0-9a-f]{40}$/ : /^mmos-conversation-turn-[0-9a-f]{40}$/;
-    return typeof operationKey === "string" && pattern.test(operationKey) && parseFreshConversationTarget(targetKey) !== null;
+    return typeof operationKey === "string" && pattern.exec(operationKey)?.[0] === operationKey && parseFreshConversationTarget(targetKey) !== null;
   } catch { return false; }
 }
 const SESSION_OPERATION_KEY = /^session-continue-[0-9a-f]{64}$/;
@@ -1771,6 +1771,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const freshDraftRef = useRef(freshDraft);
   freshDraftRef.current = freshDraft;
   const freshOriginalHeld = useRef(false);
+  const refreshFreshPendingHint = useRef<(() => Promise<boolean>) | null>(null);
+  const onFreshOriginalSettled = useMemo(() => () => {
+    void refreshFreshPendingHint.current?.().catch(() => {});
+  }, []);
+
   const freshBinding = useMemo(() => {
     const host = freshHost, transport = host?.freshConversation, request = transport?.request;
     if (!host || !transport || !request || !commandBinding?.store) return null;
@@ -4422,7 +4427,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       active={active === "Projects"} binding={freshAttendedBinding} host={freshHost} authGeneration={authRevision}
       entry={{kind: "reference", window: source.window, current: source.current}}
       turnDraft={freshTurnDraft} onUnresolvedChange={reportFreshAttendedOriginal}
-      onReadCurrent={reportFreshReferenceRead}/>});
+      onReadCurrent={reportFreshReferenceRead} onOriginalSettled={onFreshOriginalSettled}/>});
   const [knowledgeRefresh, setKnowledgeRefresh] = useState(0);
   const knowledgePorts = useMemo(() => {
     const host=retainedResultHost;
@@ -4675,8 +4680,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     renderContinuation: read => <FreshConversationContinuation locale={locale}
       active={active === "Conversations" && freshDraft.shown} binding={freshAttendedBinding}
       host={freshHost} authGeneration={authRevision} entry={{kind: "initial", read}}
-      turnDraft={freshTurnDraft} onUnresolvedChange={reportFreshAttendedOriginal}/>,
+      turnDraft={freshTurnDraft} onUnresolvedChange={reportFreshAttendedOriginal}
+      onOriginalSettled={onFreshOriginalSettled}/>,
     onBack: () => {freshDraftRef.current.hide();conversationNavigation.backFromNewConversation();setActive("Conversations");}});
+  refreshFreshPendingHint.current = freshJourney.refreshPendingOriginal;
   freshOriginalHeld.current = freshJourney.hasUnresolvedOriginal;
   const openFreshConversation = () => {
     if (!freshDraft.open(freshJourney.hasUnresolvedOriginal || hasFreshAttendedOriginal() ? "resume" : "new")) return;
