@@ -1,7 +1,7 @@
 > **Source reconciliation — 5 November 2026.** This prepend-only note records
 > selected current source facts at `f030206fdad98900c81ca8b97540a47e992610c3`.
-> The complete original document follows as a contiguous, byte-identical
-> historical block. Its October 5 “current/latest” labels, `7eac…` source pin,
+> The original document follows as one contiguous historical block. Two
+> legacy Markdown hard-break spellings are normalized as documented below. Its October 5 “current/latest” labels, `7eac…` source pin,
 > absence claims and candidate/custody states belong to that observation epoch.
 > They are evidence, not present-day capability or release authority.
 
@@ -51,6 +51,20 @@ scenarios, sixteen UX00–UX15 workflow notes, Paper IDs, design intent and
 dated observations are retained. This source-only reconciliation runs no
 app scenario, performs no external design action and does not turn design
 approval into implementation, installation or product acceptance.
+
+### Historical formatting exception — required CI
+
+The original record contained two Markdown hard breaks written as trailing
+double spaces: the “Paper file” and “File ID” lines in its canonical-file
+entry. Required source CI rejected those added lines. Only those two hard
+breaks are normalized to the equivalent explicit backslash spelling; their
+text and rendered line-break intent are preserved. No historical finding,
+design state, timestamp, source anchor or effect classification is changed.
+
+The exact original 95,940-byte record remains immutable at
+[original blob 8366d4d1d09388cf1610beb8079b8f7559be7f1e](https://github.com/mastermindx-market-intelligence/Mastermind/blob/29cf30d21e61901c7025a2e53d7d3a63d10a974f/research/MASTERMIND_OS_NOIR_INITIATION_2026-09-26.md),
+SHA-256 `051e03a637abe18214cb9b43c1eed62949b7ec64e4e46e4a143b5e5981dd4229`.
+Reversing just the two documented spellings reproduces those original bytes.
 
 ---
 
@@ -264,8 +278,8 @@ The Chairman subsequently directed that the live design-system work use the **Pa
 
 ### Canonical Paper artifact and verified effects
 
-Paper file: `Mastermind Product Design System — Canonical`  
-File ID: `01M312VSDSZFVT45674GDVJVZN`  
+Paper file: `Mastermind Product Design System — Canonical`\
+File ID: `01M312VSDSZFVT45674GDVJVZN`\
 Paper server observed during the applied slice: `paper-desktop 0.5.12`.
 
 The modifying carrier was the guarded Studio Direct Paper surface. The accepted write-schema catalog at the successful prepare boundary was `ca90a537ee97f3e371ac945a8a3b9a928ba7fac9ffaeb67e31491075a0790570`. All listed content mutations returned `APPLIED_RESPONSE_OBSERVED`; no current Paper mutation is left `EFFECT_UNKNOWN`.
