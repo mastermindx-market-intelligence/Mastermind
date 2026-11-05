@@ -562,3 +562,22 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/post_failure_observ
     'sha256': '2a78630ccaf574da752c77d7b8f821723ccb264b970e2fe38b1976d886ca97a0',
     'sites': ((293, 79, 84, 'int', '0o700'),),
 }
+
+
+# PR1890 attended parent classification under the current Chairman source waiver:
+# two CSS dimensions and five graph coordinates, never identities or grants.
+# Each complete token is on an ASCII physical line. Exact final HTML bytes and
+# seven spans only; every source/context/path change restores ordinary D8.
+# This pin is not independent/formal review or a CodeQL finding disposition.
+REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/account_network_interactive.html'] = {
+    'sha256': '62492c23f2d6a21d389268e51823f6b2f130e2e47a64f17bcfc38e886e9cc3d8',
+    'sites': (
+        (8, 77, 80, 'int', '680'),
+        (37, 17, 20, 'int', '900'),
+        (70, 45, 48, 'int', '495'),
+        (70, 51, 54, 'int', '535'),
+        (72, 45, 48, 'int', '720'),
+        (74, 10, 13, 'int', '922'),
+        (79, 56, 59, 'int', '800'),
+    ),
+}
