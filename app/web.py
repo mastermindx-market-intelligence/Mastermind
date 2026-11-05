@@ -2414,14 +2414,28 @@ def api_self_directed() -> JSONResponse:
         _attach_security_names(payload.get("positions"))
         _attach_security_names(payload.get("pending"))
         return JSONResponse(payload)
-    except Exception as exc:  # noqa: BLE001 — never 500 the dashboard
-        return JSONResponse({"nav": 1_000_000.0, "cash": 1_000_000.0, "invested": 0.0,
-                             "positions": [], "pending": [],
-                             "allocation": {"cash_pct": 1.0, "gross": 0.0, "n_positions": 0,
-                                            "largest_weight": 0.0, "total_unrealized_pnl": 0.0,
-                                            "total_return_pct": 0.0},
-                             "market": {"is_open": False, "session": "closed"},
-                             "error": str(exc)})
+    except Exception as exc:  # noqa: BLE001 — never 500, but never invent portfolio state
+        _log.warning("self_directed read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "nav": None,
+            "cash": None,
+            "invested": None,
+            "valuation_complete": False,
+            "unpriced_tickers": [],
+            "positions": [],
+            "pending": [],
+            "allocation": {
+                "cash_pct": None,
+                "invested_pct": None,
+                "gross": None,
+                "n_positions": None,
+                "largest_weight": None,
+                "total_unrealized_pnl": None,
+                "total_return_pct": None,
+            },
+            "market": {"is_open": False, "session": "closed"},
+            "error": "self_directed_unavailable",
+        })
 
 
 @router.get("/api/self_directed/history")
