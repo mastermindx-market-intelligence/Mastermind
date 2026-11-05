@@ -379,3 +379,179 @@ class Diagnostics(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+# Fixed-directory failures are synthetic metadata/syscall seams only. No host,
+# private file, process receipt, permissions or original operation is touched.
+import errno
+import hashlib
+import stat
+import pytest
+
+_READER_PATHS = (
+    NATIVE / 'candidate/run_observation.py',
+)
+_COMPONENTS = ('lanes', 'lanes/ext', 'lanes/ext/lanes')
+_FAULTS = ('regular', 'symlink', 'other', 'uid', 'mode', 'open_io',
+           'open_missing', 'open_permission', 'open_forbidden', 'fstat_io')
+
+
+def _fixed_reader_failure(module, component, fault):
+    uid = 1000  # synthetic account, not an enrolled or observed principal
+    reader = module.Reader.__new__(module.Reader)
+    reader.uid, reader.fds, reader.edges = uid, [100], []
+    paths, infos, opened, closed = {100: ''}, {}, [], []
+    def info(fd, path):
+        mode, owner = stat.S_IFDIR | 0o700, uid
+        if path == component:
+            mode = {'regular': stat.S_IFREG | 0o600,
+                    'symlink': stat.S_IFLNK | 0o777,
+                    'other': stat.S_IFIFO | 0o600,
+                    'mode': stat.S_IFDIR | 0o722}.get(fault, mode)
+            if fault == 'uid': owner += 1
+        return types.SimpleNamespace(st_dev=1, st_ino=fd, st_mode=mode,
+            st_uid=owner, st_gid=uid, st_nlink=1, st_size=0,
+            st_mtime_ns=0, st_ctime_ns=0)
+    def opening(name, flags, *, dir_fd):
+        path = '/'.join(filter(None, (paths[dir_fd], name)))
+        # A guarded parent failure must never continue to another component or
+        # open the receipt, and every directory keeps both kernel flags.
+        assert path in _COMPONENTS
+        assert flags & module.os.O_NOFOLLOW and flags & module.os.O_DIRECTORY
+        opened.append(path)
+        errors = {'open_io': errno.EIO, 'open_missing': errno.ENOENT,
+                  'open_permission': errno.EACCES, 'open_forbidden': errno.EPERM}
+        if path == component and fault in errors:
+            raise OSError(errors[fault], 'PRIVATE_ERROR_CANARY', '/PRIVATE_PATH_CANARY')
+        fd = 100 + len(opened)
+        paths[fd] = path; infos[fd] = info(fd, path)
+        return fd
+    def fstat(fd):
+        if paths[fd] == component and fault == 'fstat_io':
+            raise OSError(errno.EIO, 'PRIVATE_ERROR_CANARY')
+        return infos[fd]
+    with mock.patch.object(module.os, 'open', side_effect=opening), \
+         mock.patch.object(module.os, 'fstat', side_effect=fstat), \
+         mock.patch.object(module.os, 'stat', side_effect=lambda name, *, dir_fd, follow_symlinks:
+             infos[next(fd for fd, path in paths.items()
+                        if path == '/'.join(filter(None, (paths[dir_fd], name))))]), \
+         mock.patch.object(module.os, 'close', side_effect=closed.append):
+        try:
+            result = module.capture(lambda: module.process_receipt(reader, 'synthetic-run'))
+        except OSError as exc:
+            assert exc.errno in (errno.EACCES, errno.EPERM)
+            result = dict(status='unavailable', reason='os_permission_denied',
+                          errno=exc.errno, directory_diagnostic=exc.directory_diagnostic)
+    assert opened == list(_COMPONENTS[:_COMPONENTS.index(component)+1])
+    assert set(closed) == set(infos) and len(closed) == len(infos)
+    assert reader.fds == [100] and reader.edges == []
+    assert 'PRIVATE_' not in json.dumps(result)
+    return result
+
+
+@pytest.mark.parametrize('path', _READER_PATHS)
+@pytest.mark.parametrize('component', _COMPONENTS)
+@pytest.mark.parametrize('fault', _FAULTS)
+def test_first_fixed_directory_failure_is_bounded_and_has_no_onward_reads(path, component, fault):
+    module = load('fixed_directory_reader', path)
+    row = _fixed_reader_failure(module, component, fault)
+    diagnostic = row['directory_diagnostic']
+    assert set(diagnostic) == {'component','kind','uid','mode','errno'}
+    assert diagnostic['component'] == component
+    if fault.startswith(('open_', 'fstat_')):
+        assert diagnostic['kind'] == 'unknown'
+        assert diagnostic['uid'] is None and diagnostic['mode'] is None
+        if fault == 'open_missing':
+            assert row['status'] == 'absent' and row['reason'] == 'missing_at_observation'
+        elif fault in ('open_permission','open_forbidden'):
+            assert row['reason'] == 'os_permission_denied'
+        else:
+            assert row['reason'] == 'filesystem_error'
+    else:
+        assert row['reason'] == 'directory_owner_mode_or_type'
+        assert diagnostic['kind'] == (fault if fault in ('regular','symlink','other') else 'directory')
+        assert diagnostic['uid'] == (1001 if fault == 'uid' else 1000)
+
+
+@pytest.mark.parametrize('path', _READER_PATHS)
+@pytest.mark.parametrize('permission', [False, True])
+def test_observation_stops_after_first_directory_failure_without_reading_other_roles(path, permission):
+    module = load('fixed_directory_stop_reader', path)
+    failure = (OSError(errno.EACCES, 'PRIVATE_ERROR_CANARY') if permission
+               else module.Invalid('directory_owner_mode_or_type'))
+    info = types.SimpleNamespace(st_mode=stat.S_IFDIR | 0o722, st_uid=1000)
+    module._directory_failure(failure, 'lanes/ext', None if permission else info)
+    reader = mock.MagicMock()
+    with mock.patch.object(module, 'Reader', return_value=reader), \
+         mock.patch.object(module, 'support', return_value={}), \
+         mock.patch.object(module, 'marker', side_effect=failure), \
+         mock.patch.object(module, 'rc_file') as rc, \
+         mock.patch.object(module, 'stdout_metadata') as stdout, \
+         mock.patch.object(module, 'process_receipt') as receipt:
+        report = module.observe('synthetic-run', 'a'*64)
+    assert report['status'] == 'unavailable'
+    assert rc.call_count == stdout.call_count == receipt.call_count == 0
+    assert report['reason'] == ('os_permission_denied' if permission
+                                else 'one_or_more_observations_unavailable')
+    if permission:
+        assert report['request_stopped'] is True
+        assert report['directory_diagnostic']['component'] == 'lanes/ext'
+    else:
+        assert report['observations']['marker']['directory_diagnostic']['component'] == 'lanes/ext'
+    assert 'PRIVATE_' not in json.dumps(report)
+
+
+@pytest.mark.parametrize('module', [candidate])
+def test_directory_diagnostic_wire_is_closed_and_legacy_failures_unchanged(module):
+    legacy = dict(status='unavailable', reason='directory_owner_mode_or_type')
+    assert module._failure(legacy)
+    diagnostic = dict(component='lanes/ext/lanes', kind='directory', uid=1000, mode=0o722, errno=None)
+    valid = dict(legacy, directory_diagnostic=diagnostic)
+    assert module._failure(valid)
+    malformed = [dict(diagnostic, component='/PRIVATE_PATH_CANARY'),
+        dict(diagnostic, component='lanes/ext/PRIVATE_RUN_CANARY'),
+        dict(diagnostic, kind='PRIVATE_TYPE_CANARY'), dict(diagnostic, uid=True),
+        dict(diagnostic, uid=-1), dict(diagnostic, mode=True), dict(diagnostic, mode=2**12),
+        dict(diagnostic, errno=errno.EIO), dict(diagnostic, extra='PRIVATE_VALUE_CANARY')]
+    for bad in malformed:
+        assert not module._failure(dict(legacy, directory_diagnostic=bad))
+    unknown = dict(component='lanes', kind='unknown', uid=None, mode=None, errno=errno.EIO)
+    assert module._failure(dict(status='unavailable',reason='filesystem_error',errno=errno.EIO,directory_diagnostic=unknown))
+    assert not module._failure(dict(legacy,directory_diagnostic=unknown))
+    # Exercise the real receiver's response shape/binding, without transport.
+    request = dict(run_id='synthetic-run', support_digest='a'*64)
+    report = dict(schema='mastermind.run_observation.v1', run_id=request['run_id'],
+        expected_support_digest=request['support_digest'], status='unavailable',
+        observations={'process_receipt': valid}, limits=module.LIMITS)
+    module.delivery.digest = lambda raw: hashlib.sha256(raw).hexdigest()
+    def wire(value):
+        return json.dumps(dict(schema=module.SCHEMA,
+            request_sha256=module.delivery.digest(module.reader.canonical(request)), report=value)).encode()
+    with mock.patch.object(module,'validate_request'):
+        assert module.validate_response(wire(report), request) == report
+        stopped = dict(report, reason='filesystem_unavailable', errno=errno.EIO,
+            request_stopped=True, directory_diagnostic=unknown)
+        assert module.validate_response(wire(stopped),request) == stopped
+        with pytest.raises(ValueError):
+            module.validate_response(wire(dict(report,directory_diagnostic=diagnostic)),request)
+        with pytest.raises(ValueError):
+            module.validate_response(wire(dict(stopped,directory_diagnostic=dict(unknown,mode=0o700))),request)
+
+
+def test_fixed_directory_diagnostics_preserve_original_custody_and_race_guards():
+    import ast
+    def definitions(path):
+        tree=ast.parse(path.read_text())
+        reader=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=='Reader')
+        return {n.name:ast.dump(n,include_attributes=False) for n in reader.body
+                if isinstance(n,ast.FunctionDef)}
+    old=definitions(NATIVE/'source/run_observation.py')
+    for path in _READER_PATHS:
+        new=definitions(path)
+        for name in ('__init__','verify','close','__enter__','__exit__','_file'):
+            assert new[name]==old[name]
+    for path in _READER_PATHS:
+        module=load('fixed_directory_privacy_reader',path)
+        error=module.Invalid('directory_owner_mode_or_type')
+        info=types.SimpleNamespace(st_mode=stat.S_IFDIR|0o722,st_uid=1000)
+        module._directory_failure(error,'/PRIVATE_PATH_CANARY',info)
+        assert not hasattr(error,'directory_diagnostic')
