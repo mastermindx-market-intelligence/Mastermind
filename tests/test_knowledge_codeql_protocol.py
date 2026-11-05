@@ -157,3 +157,42 @@ def test_pipe_stdout_cannot_substitute_a_different_buffer_sink(entry,monkeypatch
             assert stderr=='project_knowledge_recipe_unavailable\n'
             assert alternate.tell()==0
         finally:pipe.close();os.close(read)
+
+
+def test_real_fixed_child_uses_actual_bounded_pipe_consumer(tmp_path):
+    import hashlib
+    import subprocess
+    from tests.test_agentos_project_knowledge_recipe import (owner_bytes,canonical_workstream,
+        earlier_decision,_file_request,ACTOR_REF,BINDING_DIGEST,DECISION_DATE)
+    from control_plane.ceo_boot_packet import bounded_subprocess_runner
+    root=tmp_path/'macro';(root/'scripts').mkdir(parents=True)
+    for relative in ('scripts/agentos.py','scripts/project_knowledge_recipes.py'):
+        (root/relative).write_text(owner_bytes(relative),encoding='utf-8')
+    ws=canonical_workstream();path=root/'agentos/workstreams/WS-ALPHA.md'
+    path.parent.mkdir(parents=True);path.write_text(ws,encoding='utf-8')
+    path=root/'agentos/decisions/DEC-EARLIER-CALL.md';path.parent.mkdir(parents=True)
+    path.write_text(earlier_decision(),encoding='utf-8')
+    env=dict(os.environ,GIT_AUTHOR_NAME='source-test',GIT_AUTHOR_EMAIL='test@example.invalid',
+        GIT_COMMITTER_NAME='source-test',GIT_COMMITTER_EMAIL='test@example.invalid')
+    for args in (['init','-q'],['add','.'],['commit','-qm','actual protected compiler fixture']):
+        subprocess.run(['git',*args],cwd=root,env=env,check=True,capture_output=True,timeout=30)
+    commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip()
+    request=_file_request('notes.md','Literal protocol body 文 🌊\r\n')
+    request.update(source_commit=commit,base_revision=hashlib.sha256(ws.encode()).hexdigest())
+    frame=dict(schema='mastermind.project_knowledge_recipe_capture_request.v1',request=request,
+        trusted=dict(actor_ref=ACTOR_REF,permission_binding_digest=BINDING_DIGEST,decision_date=DECISION_DATE))
+    argv=[sys.executable,'-I','-B',str(ROOT/'scripts/agentos_project_knowledge_recipe_entry.py'),
+        '--macro-root',str(root),'--expected-macro-sha',commit,'--mode','prepare','--timeout','10']
+    result=bounded_subprocess_runner(argv,cwd=ROOT,timeout=15,max_bytes=524288,
+        input_bytes=json.dumps(frame,ensure_ascii=False).encode())
+    assert result['code']==0 and result['stderr']==''
+    assert not any(result.get(k) for k in ('timed_out','limit_exceeded','invalid_utf8'))
+    capture=json.loads(result['stdout'])
+    assert capture['schema']=='mastermind.project_knowledge_recipe_capture.v1'
+    assert capture['recipe']['state']=='DRAFT_ONLY'
+    assert result['stdout']==json.dumps(capture,ensure_ascii=False,allow_nan=False,sort_keys=True,separators=(',',':'))+'\n'
+    frame.update(initial_snapshot=capture['initial_snapshot'],source_binding=capture['source_binding'])
+    argv[argv.index('prepare')]='restore'
+    restored=bounded_subprocess_runner(argv,cwd=ROOT,timeout=15,max_bytes=524288,input_bytes=json.dumps(frame).encode())
+    assert restored['code']==0 and restored['stderr']==''
+    assert json.loads(restored['stdout'])['recipe']==capture['recipe']
