@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
@@ -26,10 +27,25 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _reject_duplicate_object_pairs(
+    pairs: list[tuple[str, Any]],
+) -> dict[str, Any]:
+    document: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in document:
+            raise ChairmanCognitionSourceError("duplicate JSON object key")
+        document[key] = value
+    return document
+
+
+def _loads(text: str) -> object:
+    return json.loads(text, object_pairs_hook=_reject_duplicate_object_pairs)
+
+
 def _read(path: str) -> object:
     if path == "-":
-        return json.load(sys.stdin)
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+        return _loads(sys.stdin.read())
+    return _loads(Path(path).read_text(encoding="utf-8"))
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -1,0 +1,9 @@
+{
+  "name": "mastermind-worker-browser-b1-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned official Playwright MCP runtime for the bounded local Worker Browser B1 vertical.",
+  "dependencies": {
+    "@playwright/mcp": "0.0.79"
+  }
+}

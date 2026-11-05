@@ -27,6 +27,58 @@ def _module():
         pytest.fail("native C1 enrollment helper is not implemented")
 
 
+@pytest.mark.parametrize(
+    ("rows", "expected"),
+    [
+        ('"com.mastermind.executive.sol-state-relay" => disabled', True),
+        ('"com.mastermind.executive.sol-state-relay" => true', True),
+        ('"com.mastermind.executive.sol-state-relay" => enabled', False),
+        ('"com.mastermind.executive.sol-state-relay" => false', False),
+        ('"com.mastermind.executive.sol-state-relay" => unknown', False),
+        ('"com.mastermind.executive.sol-state-relay-extra" => disabled', False),
+        ('"com.mastermind.executive.control" => disabled', False),
+        ("", False),
+        (
+            '"com.mastermind.executive.sol-state-relay" => true\n'
+            '"com.mastermind.executive.sol-state-relay" => false',
+            False,
+        ),
+        (
+            '"com.mastermind.executive.sol-state-relay" => disabled\n'
+            '"com.mastermind.executive.sol-state-relay" => disabled',
+            False,
+        ),
+    ],
+)
+def test_launchd_disabled_requires_one_explicit_relay_override(monkeypatch, rows, expected):
+    enrollment = _module()
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(returncode=0, stdout=f"disabled services = {{\n{rows}\n}}\n")
+
+    monkeypatch.setattr(enrollment.subprocess, "run", run)
+    assert enrollment._launchd_disabled(enrollment.RELAY_LABEL) is expected
+    assert len(calls) == 1
+    assert calls[0][0] == ["/bin/launchctl", "print-disabled", "system"]
+    assert calls[0][1]["timeout"] == 5
+
+
+@pytest.mark.parametrize("returncode", [1, 5])
+def test_launchd_disabled_command_failure_does_not_admit_enrollment(monkeypatch, returncode):
+    enrollment = _module()
+    monkeypatch.setattr(
+        enrollment.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=returncode,
+            stdout='disabled services = {\n"com.mastermind.executive.sol-state-relay" => disabled\n}\n',
+        ),
+    )
+    assert enrollment._launchd_disabled(enrollment.RELAY_LABEL) is False
+
+
 class _Transport:
     def __init__(self, responses):
         self.responses = list(responses)
@@ -385,3 +437,9 @@ def test_source_has_no_service_arm_or_secret_argv_environment_path():
     assert "termios.ECHO" in source
     assert "tcsetattr" in source
     assert "validate_relay_group_names" in source
+    assert enrollment.DIALOGUE_OBSERVATION_SOCKET == Path(
+        "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
+    )
+    assert enrollment.DIALOGUE_RELAY_GID == 457
+    assert 'set(sockets) != {"Operator", "CeoIngress", "DialogueObservation"}' in source
+    assert 'control.get("dialogue_bridge_armed") is not False' in source

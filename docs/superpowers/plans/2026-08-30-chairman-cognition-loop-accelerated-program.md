@@ -4,240 +4,234 @@
 **Owner:** `SOL:META-CEO:MASTERMIND`  
 **Parent:** existing `WS:CHAIRMAN-CONTROL-ROOM`  
 **Cognition route:** `CHAT_PRO_DEFAULT`  
-**Current wave:** CCL-A1
+**Current wave:** CCL-A1 R3
 
 ## Mission
 
 Transfer recurring chief-chairman-engineer cognition from Chris into the existing Meta-CEO office as
-quickly as possible, using robust deterministic boundaries and immediate reversible live canaries
-rather than a prolonged passive-shadow program.
+quickly as possible, with deterministic authority/effect boundaries and immediate reversible live
+canaries instead of a prolonged passive-shadow bureaucracy.
 
 ## Program invariants
 
-1. one logical Meta-CEO office; no Meta-Chairman role or database;
-2. one source of truth per concept and one carrier per modifying operation;
+1. one logical Meta-CEO office; no Meta-Chairman or strategy database;
+2. one canonical owner per fact and one carrier per modifying operation;
 3. value, authority and serviceability remain separate;
-4. strategic options preserve a real partial order rather than a hidden score;
+4. no hidden global priority score;
 5. explicit current delegation envelope before modification;
 6. `EFFECT_UNKNOWN`, stale/conflicting sources and duplicate owners fail closed;
-7. current production-deploy/live-capital prohibitions remain intact;
-8. execute through existing Executive/Capacity/RuntimeBinding/Wake/GitHub owners;
-9. every live canary is reversible, bounded, falsifiable and terminally reviewed;
-10. evidence changes the next decision and durable organizational record.
+7. production-deploy and live-capital prohibitions remain intact;
+8. execution uses existing Executive OS, Capacity, RuntimeBinding, Wake, GitHub and Agent OS owners;
+9. each canary is reversible, bounded, falsifiable and terminally reviewed;
+10. evidence changes the next strategic decision and durable organizational record.
 
-## Current wave — CCL-A1
+## CCL-A1 — deterministic strategic decision core
 
 ### Observable capability
 
-A Meta-CEO can feed a structured current-company decision document into one local CLI and receive a
-deterministic strategic frontier plus per-option delegation/serviceability preflight, without any
-side effect or hidden total score.
+Given one closed source-attributed JSON document, emit a deterministic strategic frontier, complete
+Strategic State constraint adjudication, delegation/serviceability preflight and fixed evidence
+digests—without any side effect or reusable authority.
 
-### Exact scope
+### Exact nine-path carrier
 
 ```text
 config/strategic_state.yml
-docs/EXECUTIVE_CHAIRMAN_COGNITION_LAW.md
-docs/superpowers/specs/2026-08-30-chairman-cognition-loop-design.md
-docs/superpowers/plans/2026-08-30-chairman-cognition-loop-accelerated-program.md
 control_plane/chairman_cognition.py
+docs/EXECUTIVE_CHAIRMAN_COGNITION_LAW.md
+docs/superpowers/plans/2026-08-30-chairman-cognition-loop-accelerated-program.md
+docs/superpowers/specs/2026-08-30-chairman-cognition-loop-design.md
 scripts/chairman_cognition.py
 tests/test_chairman_cognition.py
 tests/test_chairman_cognition_hardening.py
 tests/test_chairman_cognition_source_contract.py
 ```
 
-### Implementation order
+### A1 implementation order
 
-1. record the strategy change: add `CHAIRMAN_COGNITION_AUTONOMY`, update `as_of`, add the first-cycle
-   review trigger and preserve all standing constraints/resource weights;
-2. freeze one-office/two-mode, owner composition, accelerated-canary and delegation law;
-3. implement closed schemas and deterministic canonical digests;
-4. implement source-state/effect/duplicate-owner/strategic-constraint refusal, including
-   terminal already-applied effects and future-dated source rejection;
-5. implement Chairman-owned/load-bearing envelope authority, repository/path scope, canonical
-   affected-scope prefixes, allowed exact-carrier prefixes, budget, child, operation and expected-head
-   checks, including explicit `NEW_CHILD` state for new Programs and Executive children;
-6. model `PORTFOLIO_HOLD`, Program pause/resume/retire/combine/split, resource reallocation and
-   organizational restructure as distinct strategic actions rather than generic tasks;
-7. implement supervised-live-canary controls;
-8. implement truthful Pareto frontier and unique-only mechanical recommendation;
-9. expose a no-side-effect JSON CLI with opaque invalid-input failure;
-10. prove focused, hostile-boundary, source-contract, AST/static and existing strategic-state tests;
-11. publish one current-base branch/PR, obtain hosted/security proof and independent review.
+1. record `CHAIRMAN_COGNITION_AUTONOMY` in current Strategic State;
+2. freeze one-office/two-mode, no-rebuild and constitutional authority law;
+3. implement closed input/output schemas and deterministic canonical digests;
+4. implement source state, effect state, exact operation/carrier/head, scope, budget and child limits;
+5. model hold, program restructuring and resource allocation as first-class strategic actions;
+6. implement Chairman-owned delegation envelopes and supervised-canary controls;
+7. preserve a genuine Pareto frontier with no hidden score;
+8. expose a no-side-effect JSON CLI with opaque invalid-input failure;
+9. run hostile, source-contract, static/import and full repository tests;
+10. obtain hosted security proof, independent review and expected-head release only.
 
-### Acceptance tests
+## R2 — complete constraint/source/classification integrity
 
-- same input produces byte-equivalent packet and digest;
-- every output says `execution_authority_granted=false`;
-- no envelope blocks modifying actions but not read-only cognition;
-- stale/conflicting/future-dated source and `EFFECT_UNKNOWN` block action;
-- already-applied effects remain terminal and never re-enter a frontier;
-- `PORTFOLIO_HOLD` is a first-class no-effect alternative;
-- organizational actions require canonical affected scope;
-- new Programs and Executive children require explicit `NEW_CHILD`;
-- exact existing carriers must remain inside the envelope carrier scope;
-- production deploy/live capital stay refused under current constraints;
-- constitutional/terminal/budget/admin changes stay Chairman-only;
-- delegation authority must be current, Chairman-owned and load-bearing;
-- duplicate control plane is refused even inside an envelope;
-- scope, budget, child, operation, carrier and expected-head boundaries fail closed;
-- canary requires stop, rollback and falsifier;
-- incomparable options remain visible and unselected;
-- dominated options are removed only with complete known dimensions;
-- unknown dimensions prevent false dominance;
-- CLI errors leak no input;
-- module imports no network/database/subprocess/runtime/connector owner.
+R2 is a same-carrier A1 repair. It adds no source gatherer, trusted store, runtime owner or successor
+operation.
 
-### Stop condition
+### R2 ordered implementation
 
-One immutable current-base PR head with exact nine-path scope, focused/source/static proof and hosted
-repository/security proof. No production integration, merge-on-green, runtime canary, Executive Job,
-Slack/Linear/Agent OS mutation or automatic envelope expansion in A1.
+1. RED-first tests cover the entire current Strategic State constraint map and load-bearing source
+   semantics.
+2. Require exactly one CURRENT, load-bearing `STRATEGIC_STATE` source via
+   `strategic_constraints_source_ref`.
+3. Content-bind the constraint map to that receipt with `constraints-sha256:<digest>`; substitution
+   under a current-looking receipt is invalid.
+4. Require every option to cite another load-bearing source. Advisory Slack/Linear context cannot
+   establish or cure currentness.
+5. Add closed classification facts:
+   `classification_source_ref`, `change_classes`, `affected_departments`.
+6. Content-bind classification to a current canonical classification owner with
+   `classification-sha256:<digest>`; Slack/Linear cannot be classification owners.
+7. Evaluate **all six current constraints**:
+   - autonomous production deploy;
+   - autonomous live capital execution;
+   - duplicate control planes;
+   - marketing organizational expansion before distribution proof;
+   - new feature expansion;
+   - unbounded autonomous strategic modification.
+8. Treat every future constraint without a selector as visible `UNKNOWN`; prohibited refuses,
+   constrained requires Chairman and permitted continues while preserving uncertainty.
+9. Emit sorted digest-covered `constraint_results` and exact `blocking_constraint` with
+   `REFUSED > CHAIRMAN_REQUIRED > eligibility`.
+10. Require exact expected head for existing-carrier branch writes and merges.
+11. Preserve source/effect/NEW_CHILD/scope/carrier/budget/canary/Pareto behavior,
+    `execution_authority_granted=false`, and effect-owner revalidation.
+12. Obtain exact-head full CI/security proof, fresh independent audit and expected-head release
+    adjudication. Green CI alone does not authorize Ready or merge.
 
-## CCL-A2 — real source composer
+### R2 acceptance tests
 
-### Mission
+- removing any current constraint rejects the input;
+- a swapped constraint map fails its Strategic State content binding;
+- a second load-bearing Strategic State source is rejected;
+- self-attested or transport/projection-owned classification is rejected;
+- changed classification without a matching source binding is rejected;
+- `NEW_FEATURE` invokes the constrained feature rule;
+- marketing `ORGANIZATIONAL_EXPANSION` invokes the prohibited distribution-proof rule;
+- maintenance, completion, research, release and runtime canary do not become expansion;
+- unknown class/department and future keys fail closed;
+- non-load-bearing current context cannot repair a stale classification or implementation fact;
+- every result exposes all constraints, deterministic digest and exact blocker;
+- constitutional production/live-capital/duplicate-plane boundaries cannot be bypassed by
+  classification;
+- both branch write and merge require expected head;
+- module remains pure and no-I/O.
 
-Produce `mastermind.chairman_cognition_input.v1` from accepted existing read owners, without copying
-their data into a new store.
+### R2 stop condition
 
-### Scope boundary
+One exact PR #284 head, still inside the original nine paths, with terminal-green repository/security
+proof and a fresh independent exact-head audit. R2 remains `BUILT_NOT_PROVEN / PRODUCTION_INERT`; it
+creates no Job, canary effect, deployment, trade, delegation expansion or product completion.
 
-- consume strategic state and explicit Chairman envelope;
-- consume CEO boot packet/Agent OS brief;
-- consume corrected Steward snapshot and bounded GitHub evidence packets;
-- optionally consume EAF/Capacity/Observability/OLS receipts when accepted;
-- preserve source owner, revision, observed time, load-bearing flag and current/stale/conflict/unknown;
-- never infer authority/deadline/urgency from prose;
-- no raw transcript memory, direct DB crawl or second Steward.
+## R3 — exact Chairman delegation-envelope binding
 
-### Proof
+R3 is the final same-carrier authority-integrity repair discovered during adversarial release review.
+It prevents an unrelated current Chairman receipt from blessing a caller-mutated delegation
+envelope.
 
-A real current estate packet must retain at least one disagreement/unknown when the underlying owners
-disagree and must not make a modifying option eligible when a load-bearing input is missing.
+### R3 ordered implementation
 
-## CCL-A3 — first supervised live canary
+1. Commit hostile RED tests before core changes.
+2. Canonicalize every authority-bearing envelope field, sorting semantic sets and repository/path
+   mappings.
+3. Bind the exact canonical payload to at least one cited Chairman receipt with:
 
-### Mission
+   ```text
+   envelope-sha256:<sha256(canonical delegation envelope)>
+   ```
 
-Use one real current-company packet to select and complete one independently useful reversible
-strategic transformation.
+4. Continue requiring every cited authority source to be load-bearing and Chairman-owned; preserve
+   aggregate freshness/conflict behavior.
+5. Reject a missing or mismatched envelope binding as malformed before the envelope can become
+   `ACCEPTED`.
+6. Expose the verified envelope digest in deterministic packet evidence.
+7. Preserve `execution_authority_granted=false`, effect-owner revalidation, exact carrier/head,
+   constitutional constraints, Pareto semantics and the no-I/O boundary.
+8. Update the law, architecture and program records without creating a new owner or schema family.
+9. Re-run focused A1 tests, full repository CI and security analysis on one immutable exact head.
+10. Obtain a fresh independent exact-head audit before Ready or expected-head merge.
 
-### Fast-path rules
+### R3 acceptance tests
+
+- mutating envelope identity, mode, action set, reversibility, repositories, path scope, affected
+  scope, carrier scope, budget, active-child ceiling or expiry without rebinding is rejected;
+- changing the authority-source-reference set without rebinding is rejected;
+- a current Chairman receipt with no matching envelope token is insufficient;
+- one of multiple cited current Chairman receipts may carry the exact token, while all cited receipts
+  still participate in source-state evaluation;
+- semantic permutation of set-like fields and path-prefix mappings preserves the digest;
+- packet evidence exposes `sha256:<digest>`;
+- stale, conflicted, wrong-owner and non-load-bearing authority receipts still fail closed;
+- no action, runtime, connector, lifecycle or reusable authority is introduced.
+
+### R3 stop condition
+
+One exact PR #284 head containing only the existing nine A1 paths, with the R3 RED→GREEN history,
+terminal-green hosted test/security proof and a fresh independent exact-head audit. Capability remains
+`BUILT_NOT_PROVEN / PRODUCTION_INERT` until protected.
+
+## CCL-A2 — owner-preserving source composer and trusted bindings
+
+Migrate A2 on its existing carrier after A1 protection. It must:
+
+- compose a real CEO boot packet, current Strategic State and Agent OS brief;
+- emit all six current constraints;
+- emit `strategic_constraints_source_ref` and exact constraint content binding;
+- emit classification facts and source bindings for every option;
+- emit the complete Chairman delegation envelope and exact `envelope-sha256` binding from current
+  canonical Chairman evidence;
+- preserve owner, revision, observation time, freshness and conflicts;
+- keep missing/degraded sources UNKNOWN or CONFLICT;
+- create no second Steward, strategy store, lifecycle, queue or authority plane.
+
+## CCL-A3 — first supervised live reversible canary
+
+Use a real current-company packet with materially different alternatives, including
+`PORTFOLIO_HOLD`. Select one bounded transformation and execute it through an existing owner after
+owner-local revalidation.
+
+Fast-path rules:
 
 - no mandatory multi-week shadow;
 - one canary at a time;
 - no production deploy, live capital, credential/admin expansion or irreversible architecture;
 - exact operation, carrier, budget, stop, rollback and falsifier;
-- manual same-carrier Sol bridging may be used only where zero-touch transport is not proven;
+- manual same-carrier bridge only where the canonical zero-touch path is not proven;
 - terminal Integrator/Auditor review before another canary or envelope expansion.
 
-### Complete journey
-
-```text
-current source packet
--> at least three materially different strategic options
--> A1 frontier and delegation preflight
--> Meta-CEO explicit selection rationale
--> existing Executive/GitHub carrier
--> bounded worker/integrator/auditor execution
--> real capability/evidence
--> Agent OS decision/outcome/handoff
--> envelope expand/hold/contract ruling
-```
-
-### Stop condition
-
-One closed canary with no unbounded Chairman intervention and a documented prediction-versus-outcome
-receipt. A failed canary is valid learning if it fails safely and updates the next decision.
+Stop at **One closed canary** with a terminal effect receipt and prediction-versus-outcome review.
 
 ## CCL-A4 — strategic learning
 
-### Mission
+Record beliefs, source revisions, alternatives, prediction, actual outcome, rework, Chairman
+intervention, capability unlocked and next envelope recommendation through existing durable owners:
+Agent OS for organizational learning and GitHub for immutable implementation/evidence. Do not create a
+strategy-history database or allow automatic envelope expansion.
 
-Make decisions improve from outcomes without creating a strategy database.
+## CCL-A5 — zero-touch integration
 
-### Durable homes
-
-- Agent OS decision/discovery/handoff: strategic belief, selection, outcome and next action;
-- GitHub: immutable implementation/evidence;
-- Linear: selected portfolio projection;
-- existing metrics/agenda surfaces: aggregate intervention, rework, time-to-evidence and forecast
-  calibration where appropriate.
-
-### Evaluation
-
-Measure at least:
-
-```text
-predicted vs actual capability unlocked
-predicted vs actual time/cost
-number of Chairman interventions
-rework and duplicate-carrier incidents
-downstream dependencies actually released
-worker/integrator/auditor load
-source disagreement and effect-uncertainty incidence
-```
-
-Envelope expansion is a Meta-CEO recommendation and Chairman/source-law action until a later explicit
-policy delegates bounded promotion.
-
-## CCL-A5 — canonical zero-touch integration
-
-### Mission
-
-Connect the same decision semantics to existing accepted owners so the Meta-CEO can cause execution
-without message shuttling.
-
-### Dependencies
-
-- corrected Executive Steward and real source composer;
-- exact current Sol action target;
-- current RuntimeBinding and Wake delivery/ACK/source-resolution;
-- transport-neutral Executive admission and deterministic child identity;
-- typed retry/effect safety;
-- mechanical worker return;
-- economical Capacity placement;
-- expected-head GitHub release and production-proof path.
-
-### No-rebuild boundary
-
-No direct provider spawn, browser-tab election, transcript scraper, strategy queue, new lifecycle,
-retry plane, session registry or second capacity router.
+Connect the accepted A1/A2/A3 semantics to the existing exact Sol target, Executive admission,
+Capacity placement, RuntimeBinding, Wake, mechanical worker return, GitHub release and production
+proof. Do not add a direct provider spawn, browser-tab election, transcript scraper, second session
+registry or retry plane.
 
 ## CCL-A6 — bounded portfolio autonomy
 
-### Mission
+Run several independent strategic cycles with bounded concurrency. Reserve Integrator/Auditor
+capacity before increasing fanout, park work under backpressure, and rotate contexts through existing
+continuation/fencing owners.
 
-Run several independent strategic cycles with bounded concurrency while Chris remains outside routine
-operations.
+Production acceptance requires a representative interval with **zero routine** Chairman:
 
-### Initial envelope
-
-- no more than three active strategic children;
-- one action-authoritative Meta-CEO per unresolved turn;
-- at most one active write child per root until workspace/integration isolation proves otherwise;
-- Integrator and Auditor capacity reserved before worker fanout increases;
-- backpressure parks work rather than silently purchasing metered cognition;
-- context rotation preserves logical responsibility and fences predecessors.
-
-### Production acceptance
-
-Across a representative multi-program interval, Chris performs zero routine:
-
-- Slack message carriage;
-- provider/account selection;
+- message shuttling;
+- provider/account allocation;
 - session hunting;
 - watcher repair;
 - carrier archaeology;
 - CI page hunting;
-- initiative status reconstruction;
+- portfolio reconstruction;
 - reminders to continue or close work.
 
-## Exact next action after A1
+## Exact next action
 
-Build and run one real current-source CCL-A2 input against the A1 CLI. The first packet should include
-the active zero-touch execution carriers, Steward/attention dependencies, the new CCL program and at
-least one product/intelligence alternative so the strategic frontier is not trivially self-serving.
-Then select the first CCL-A3 canary inside an explicit bounded envelope.
+Protect A1 R3 only after current exact-head CI, independent audit and release gates pass. Then migrate
+A2 on its existing carrier to all R2/R3 bindings. Do not start another implementation branch, runtime
+canary or A6 portfolio-autonomy wave before A1/A2 current-source and delegation integrity is
+protected.

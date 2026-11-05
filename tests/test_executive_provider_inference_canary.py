@@ -102,6 +102,98 @@ def test_timeout_fails() -> None:
     assert classified["terminal_event_class"] == "timeout"
 
 
+@pytest.mark.parametrize(
+    ("event", "expected_class", "raw_marker"),
+    [
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "Output schema is not supported for this request marker-schema-raw"},
+            },
+            "provider_output_schema_unsupported",
+            "marker-schema-raw",
+        ),
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "Rate limit exceeded for request marker-rate-raw"},
+            },
+            "provider_rate_limited",
+            "marker-rate-raw",
+        ),
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "This plan does not support Codex usage marker-plan-raw"},
+            },
+            "provider_entitlement_denied",
+            "marker-plan-raw",
+        ),
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "Model gpt-test is not available marker-model-raw"},
+            },
+            "provider_model_unavailable",
+            "marker-model-raw",
+        ),
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "Unauthorized token sk-abcdefghijklmnopqrstuvwxyz012345 for user@example.com marker-auth-raw"},
+            },
+            "provider_auth_failed",
+            "marker-auth-raw",
+        ),
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "Opaque provider failure marker-unknown-raw"},
+            },
+            "provider_turn_failed",
+            "marker-unknown-raw",
+        ),
+        (
+            {
+                "type": "error",
+                "message": "Opaque stream failure marker-stream-raw",
+            },
+            "provider_stream_error",
+            "marker-stream-raw",
+        ),
+    ],
+)
+def test_provider_failure_is_allowlisted_without_retaining_raw_message(
+    event: dict[str, object], expected_class: str, raw_marker: str
+) -> None:
+    stdout = (
+        json.dumps({"type": "thread.started", "thread_id": "t1"}).encode("utf-8")
+        + b"\n"
+        + json.dumps(event).encode("utf-8")
+        + b"\n"
+    )
+    classified = canary.classify_provider_streams(
+        stdout=stdout,
+        stderr=b"",
+        result=None,
+        exit_code=1,
+        timed_out=False,
+    )
+    readiness = canary.evaluate_provider_preflight(
+        login_status_ok=True, canary=classified
+    )
+    encoded = json.dumps(classified)
+    assert classified["terminal_event_class"] == expected_class
+    assert classified["passed"] is False
+    assert readiness["refusal"] == expected_class
+    assert raw_marker not in encoded
+    assert "sk-" not in encoded
+    assert "example.com" not in encoded
+    assert classified["provider_error_message_count"] == 1
+    assert len(classified["provider_error_message_sha256"]) == 64
+    assert set(classified["provider_error_terms"]) <= canary.PROVIDER_DIAGNOSTIC_TERMS
+
+
 def test_successful_terminal_turn_and_valid_inert_result_passes(tmp_path: Path) -> None:
     config = _config(tmp_path)
     config.provider_home.mkdir()
@@ -138,6 +230,9 @@ def test_successful_terminal_turn_and_valid_inert_result_passes(tmp_path: Path) 
     assert receipt["result_valid"] is True
     assert receipt["forced_chatgpt_workspace_id_applied"] is False
     assert receipt["workspace_selection_mechanism"] == "none"
+    assert receipt["provider_error_message_count"] == 0
+    assert receipt["provider_error_message_sha256"] is None
+    assert receipt["provider_error_terms"] == []
     payload = {key: value for key, value in receipt.items() if key != "result_valid"}
     assert '"ok"' not in json.dumps(payload)
     assert not (config.probe_root / config.canary_id / "workspace").exists()
@@ -221,6 +316,38 @@ def test_failure_output_is_bounded_and_redacted() -> None:
     assert "example.com" not in encoded
     assert "sk-" not in encoded
     assert encoded.count("invalid_workspace_selected") == 1
+
+
+def test_provider_diagnostic_retains_only_digest_count_and_allowlisted_terms() -> None:
+    marker = "short-secret-123"
+    message = (
+        "Workspace authorization failed for user@example.com token="
+        "sk-abcdefghijklmnopqrstuvwxyz012345 " + marker
+    )
+    stdout = (
+        json.dumps({"type": "turn.failed", "error": {"message": message}})
+        .encode("utf-8")
+        + b"\n"
+    )
+    classified = canary.classify_provider_streams(
+        stdout=stdout,
+        stderr=b"",
+        result=None,
+        exit_code=1,
+        timed_out=False,
+    )
+    encoded = json.dumps(classified, sort_keys=True)
+    assert classified["provider_error_message_count"] == 1
+    assert classified["provider_error_terms"] == [
+        "authorization",
+        "failed",
+        "token",
+        "workspace",
+    ]
+    assert len(classified["provider_error_message_sha256"]) == 64
+    assert marker not in encoded
+    assert "example.com" not in encoded
+    assert "sk-" not in encoded
 
 
 def test_canary_script_is_executable_and_syntax_valid() -> None:
@@ -478,6 +605,53 @@ def test_corrected_451_hierarchy_is_worker_traversable(tmp_path: Path) -> None:
     )
     assert canary.WORKER_UID == 451
     assert canary.WORKER_GID == 451
+
+
+@pytest.mark.parametrize(
+    ("slot_id", "worker_user", "worker_gid"),
+    [
+        ("codex-01", "_mastermind_worker", 451),
+        ("codex-pro-01", "_mastermind_codex_01", 454),
+        ("codex-pro-02", "_mastermind_codex_02", 455),
+        ("codex-pro-03", "_mastermind_codex_03", 456),
+    ],
+)
+def test_live_runner_preserves_selected_slot_principal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    slot_id: str,
+    worker_user: str,
+    worker_gid: int,
+) -> None:
+    config = canary.production_config(
+        probe_root=tmp_path / "probe",
+        operator_home=canary.LIVE_OPERATOR_HOME,
+        slot_id=slot_id,
+    )
+    config.probe_root.mkdir()
+    invocation = canary.prepare_probe(config)
+    # Capture the privileged process boundary without changing host principals
+    # or invoking Codex. The hierarchy's fail-closed behavior is tested below.
+    monkeypatch.setattr(canary, "assign_probe_tree_to_worker", lambda *_: None)
+    monkeypatch.setattr(canary, "assert_worker_probe_hierarchy", lambda *_: None)
+    calls: list[object] = []
+
+    def capture(inner: object, *, timeout_seconds: float) -> object:
+        calls.append(inner)
+        assert timeout_seconds == config.timeout_seconds
+        assert inner.argv[:4] == ("/usr/bin/sudo", "-n", "-u", worker_user)
+        assert inner.argv[4] == "-g"
+        assert inner.argv[5] in {worker_user, f"#{worker_gid}"}
+        assert inner.argv[6:8] == ("/usr/bin/env", "-i")
+        assert inner.env == {}
+        assert inner.cwd == invocation.cwd
+        assert inner.stdin == invocation.stdin
+        assert inner.argv[-len(invocation.argv):] == invocation.argv
+        return canary.CodexRunResult(0, b"", b"", timed_out=False)
+
+    monkeypatch.setattr(canary, "subprocess_runner", capture)
+    assert canary.live_worker_runner(config, invocation).exit_code == 0
+    assert len(calls) == 1
 
 
 def test_outer_root_not_worker_owned_never_invokes_codex(

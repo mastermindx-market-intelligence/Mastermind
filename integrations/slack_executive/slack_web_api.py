@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import ssl
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -68,6 +69,17 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
 
 
+def _default_ssl_context() -> ssl.SSLContext:
+    try:
+        if sys.platform == "darwin":
+            # The sealed PSF runtime has no post-install certifi bundle. Use
+            # macOS's maintained CA file without modifying signed resources.
+            return ssl.create_default_context(cafile="/etc/ssl/cert.pem")
+        return ssl.create_default_context()
+    except OSError:
+        raise RuntimeError("SLACK_TLS_TRUST_UNAVAILABLE") from None
+
+
 class UrllibSlackHttpTransport:
     """Fixed-origin stdlib HTTPS transport for the four reviewed C1 calls."""
 
@@ -84,7 +96,7 @@ class UrllibSlackHttpTransport:
         ):
             raise ValueError("timeout_seconds must be positive")
         self._timeout_seconds = float(timeout_seconds)
-        self._ssl_context = ssl_context or ssl.create_default_context()
+        self._ssl_context = ssl_context if ssl_context is not None else _default_ssl_context()
 
     async def aclose(self) -> None:
         return None

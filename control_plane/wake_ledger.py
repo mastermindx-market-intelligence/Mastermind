@@ -33,6 +33,7 @@ from control_plane.wake_events import (
     parse_obligation,
     utc_now_iso,
 )
+from control_plane.dialogue_source_resolution import PhysicalDialogueSourceIdentity
 
 
 WAKE_AGGREGATE_TYPE = "wake"
@@ -78,6 +79,7 @@ class SourceResolutionCode(str, Enum):
     RUNTIME_REVIEW_ABSENT = "runtime_review_absent"
     INBOX_ATTENTION_ABSENT = "inbox_attention_absent"
     AGENTOS_ITEM_ABSENT = "agentos_item_absent"
+    DIALOGUE_ATTENTION_ABSENT = "dialogue_attention_absent"
 
 
 SNAPSHOT_DIGEST_RE = re.compile(r"^[0-9a-f]{16,64}$")
@@ -87,6 +89,7 @@ ATTEMPT_COMMAND_ID_RE = re.compile(r"^WAKE-[0-9a-f]{32}:A[1-9][0-9]*$")
 _RESOLUTION_CODE_BY_SOURCE = {
     SourceKind.EXECUTIVE_RUNTIME_EVENT: SourceResolutionCode.RUNTIME_REVIEW_ABSENT,
     SourceKind.EXECUTIVE_INBOX_ATTENTION: SourceResolutionCode.INBOX_ATTENTION_ABSENT,
+    SourceKind.AGENT_DIALOGUE_ATTENTION: SourceResolutionCode.DIALOGUE_ATTENTION_ABSENT,
 }
 
 
@@ -114,9 +117,10 @@ GLOBAL_PHASES = frozenset(
         LedgerPhase.SOURCE_RESOLVED,
     }
 )
-TERMINAL_CLOSE = frozenset(
+DELIVERY_CLOSED_PHASES = frozenset(
     {LedgerPhase.TARGET_ACKNOWLEDGED, LedgerPhase.SOURCE_RESOLVED}
 )
+FINAL_SOURCE_CLOSE = LedgerPhase.SOURCE_RESOLVED
 
 
 @dataclasses.dataclass(frozen=True)
@@ -158,8 +162,39 @@ class TrustedAckContext:
     session_alias: str
     reasoning_surface: str
     binding_id: str | None = None
+    binding_generation: int | None = None
     acknowledged_at: str | None = None
     operator_authority_receipt: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class NativeContinuationAckEvidence:
+    """Versioned evidence within the existing ACK event, never a new grant."""
+    schema: str
+    request_event_id: int
+    request_event_sha256: str
+    target_attempt_id: str
+    process_generation_id: str
+    native_session_sha256: str
+    native_turn_sha256: str
+    nudge_id: str
+
+    def __post_init__(self):
+        if (self.schema != "mastermind.native_continuation_ack.v1"
+                or type(self.request_event_id) is not int or self.request_event_id < 1):
+            raise WakeLedgerError("invalid native continuation ACK evidence")
+        for value in (self.request_event_sha256, self.native_session_sha256, self.native_turn_sha256):
+            if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                raise WakeLedgerError("invalid native continuation ACK digest")
+        for value in (self.target_attempt_id, self.process_generation_id, self.nudge_id):
+            if type(value) is not str or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", value) is None:
+                raise WakeLedgerError("invalid native continuation ACK identity")
+
+    @classmethod
+    def from_dict(cls, value):
+        if type(value) is not dict or set(value) != {f.name for f in dataclasses.fields(cls)}:
+            raise WakeLedgerError("invalid native continuation ACK fields")
+        return cls(**value)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -173,6 +208,9 @@ class WakeAcknowledgement:
     acknowledged_at: str
     claimed_obligation_ids: tuple[str, ...]
     operator_authority_receipt: str | None = None
+    binding_generation: int | None = None
+    delivered_command_id: str | None = None
+    native_continuation: NativeContinuationAckEvidence | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -220,6 +258,52 @@ UNARMED_RETRY_POLICY = WakeRetryPolicy()
 
 
 @dataclasses.dataclass(frozen=True)
+class NativeCompanyReadEvidence:
+    """One native read observation; no raw provider address or consumption claim."""
+
+    target_attempt_id: str
+    process_generation_id: str
+    binding_id: str
+    binding_generation: int
+    nudge_id: str
+    consultation_ref: str
+    provider_session_sha256: str
+    provider_native_turn_sha256: str
+    result_sha256: str
+    native_item_sha256: str
+    answer_attestation_sha256: str
+
+    def __post_init__(self) -> None:
+        patterns = {
+            "target_attempt_id": r"ATT-[0-9a-f]{32}",
+            "process_generation_id": r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+            "binding_id": BINDING_ID_RE.pattern,
+            "nudge_id": NUDGE_ID_RE.pattern,
+            "consultation_ref": r"consult-[0-9a-f]{32}",
+        }
+        for name, pattern in patterns.items():
+            value = getattr(self, name)
+            if type(value) is not str or re.fullmatch(pattern, value) is None:
+                raise WakeLedgerError(f"native Company evidence {name} is malformed")
+        _strict_positive_int(self.binding_generation, "binding_generation")
+        for name in ("provider_session_sha256", "provider_native_turn_sha256",
+                     "result_sha256", "native_item_sha256", "answer_attestation_sha256"):
+            value = getattr(self, name)
+            if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                raise WakeLedgerError(f"native Company evidence {name} is malformed")
+
+    def to_dict(self) -> dict[str, object]:
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: object) -> "NativeCompanyReadEvidence":
+        if (not isinstance(value, Mapping)
+                or set(value) != {field.name for field in dataclasses.fields(cls)}):
+            raise WakeLedgerError("native Company evidence must have its exact closed shape")
+        return cls(**dict(value))
+
+
+@dataclasses.dataclass(frozen=True)
 class WakeLedgerRecord:
     command_id: str
     phase: LedgerPhase
@@ -237,6 +321,8 @@ class WakeLedgerRecord:
     ack: WakeAcknowledgement | None = None
     source_resolution: SourceResolution | None = None
     obligation: WakeObligation | None = None
+    physical_source: PhysicalDialogueSourceIdentity | None = None
+    native_company_read: NativeCompanyReadEvidence | None = None
 
     def matches_attempt(self, attempt: DeliveryAttempt) -> bool:
         return (
@@ -302,7 +388,11 @@ def make_delivery_attempt(obligation: WakeObligation, route: WakeRoute, *, attem
     )
 
 
-def requested_record(obligation: WakeObligation) -> WakeLedgerRecord:
+def requested_record(
+    obligation: WakeObligation,
+    *,
+    physical_source: PhysicalDialogueSourceIdentity | None = None,
+) -> WakeLedgerRecord:
     parsed = parse_obligation(obligation.to_dict())
     return parse_ledger_record(
         WakeLedgerRecord(
@@ -311,12 +401,14 @@ def requested_record(obligation: WakeObligation) -> WakeLedgerRecord:
             ),
             phase=LedgerPhase.WAKE_REQUESTED,
             obligation=parsed,
+            physical_source=physical_source,
         )
     )
 
 
 def attempt_record(
-    attempt: DeliveryAttempt, phase: LedgerPhase
+    attempt: DeliveryAttempt, phase: LedgerPhase,
+    *, native_company_read: NativeCompanyReadEvidence | None = None,
 ) -> WakeLedgerRecord:
     if phase not in ATTEMPT_PHASES:
         raise WakeLedgerError(f"{phase} is not an attempt-scoped phase")
@@ -336,6 +428,7 @@ def attempt_record(
             wake_transport=attempt.wake_transport,
             nudge_id=attempt.nudge_id,
             nudge_attempt_command_ids=attempt.nudge_attempt_command_ids,
+            native_company_read=native_company_read,
         )
     )
 
@@ -362,6 +455,7 @@ def parse_ledger_record(record: WakeLedgerRecord) -> WakeLedgerRecord:
                 record.nudge_id,
                 record.nudge_attempt_command_ids,
                 record.native_handle,
+                record.native_company_read,
             )
         ):
             raise WakeLedgerError("global wake phase cannot carry route/native fields")
@@ -376,7 +470,25 @@ def parse_ledger_record(record: WakeLedgerRecord) -> WakeLedgerRecord:
                 raise WakeLedgerError(str(exc)) from exc
             if parsed_obligation.obligation_id != oid:
                 raise WakeLedgerError("WAKE_REQUESTED obligation_id does not match command_id")
-            return dataclasses.replace(record, obligation=parsed_obligation)
+            physical = record.physical_source
+            if physical is not None:
+                if (
+                    type(physical) is not PhysicalDialogueSourceIdentity
+                    or parsed_obligation.source_kind is not SourceKind.AGENT_DIALOGUE_ATTENTION
+                    or parsed_obligation.wake_kind is not WakeKind.DIALOGUE_TURN_PENDING
+                    or physical.logical_source_ref != parsed_obligation.source_ref
+                    or physical.obligation_id != parsed_obligation.obligation_id
+                    or physical.target_seat != parsed_obligation.declared_target_seat
+                    or physical.candidate.root_job_id != parsed_obligation.root_job_id
+                    or physical.candidate.job_id != parsed_obligation.job_id
+                    or physical.candidate.attempt_id != parsed_obligation.attempt_id
+                ):
+                    raise WakeLedgerError("physical source identity disagrees with Wake")
+            return dataclasses.replace(
+                record, obligation=parsed_obligation, physical_source=physical
+            )
+        if record.physical_source is not None:
+            raise WakeLedgerError("physical source is WAKE_REQUESTED-only")
         if record.phase is LedgerPhase.TARGET_ACKNOWLEDGED:
             parse_acknowledgement(record.ack, obligation_id=oid)
         if record.phase is LedgerPhase.SOURCE_RESOLVED:
@@ -399,6 +511,8 @@ def parse_ledger_record(record: WakeLedgerRecord) -> WakeLedgerRecord:
         raise WakeLedgerError("attempt phase cannot carry ack or resolution evidence")
     if record.obligation is not None:
         raise WakeLedgerError("attempt phase cannot carry the obligation envelope")
+    if record.physical_source is not None:
+        raise WakeLedgerError("physical source is WAKE_REQUESTED-only")
     if bool(record.nudge_id) != bool(record.nudge_attempt_command_ids):
         raise WakeLedgerError(
             "attempt phase must carry complete nudge group identity or none"
@@ -420,6 +534,19 @@ def parse_ledger_record(record: WakeLedgerRecord) -> WakeLedgerRecord:
             raise WakeLedgerError(
                 "nudge attempt command identities do not contain this attempt"
             )
+    evidence = record.native_company_read
+    if evidence is not None:
+        if type(evidence) is not NativeCompanyReadEvidence:
+            raise WakeLedgerError("native Company evidence must be typed")
+        NativeCompanyReadEvidence.from_dict(evidence.to_dict())
+        if (record.phase is not LedgerPhase.DELIVERED
+                or record.reasoning_surface != "codex"
+                or record.wake_transport != "codex-app-server"
+                or evidence.binding_id != record.binding_id
+                or evidence.binding_generation != record.binding_generation
+                or evidence.nudge_id != record.nudge_id
+                or len(record.nudge_attempt_command_ids) != 1):
+            raise WakeLedgerError("native Company evidence disagrees with exact DELIVERED route")
     return record
 
 
@@ -428,12 +555,19 @@ def acknowledge(
     *,
     trusted: TrustedAckContext,
     claimed_obligation_ids: Sequence[str],
+    delivered_command_id: str | None = None,
 ) -> WakeAcknowledgement:
     """ACK identity comes from trusted host context, never from model prose."""
 
     if not isinstance(trusted.ack_mode, AckMode):
         raise WakeLedgerError("ack_mode must be AckMode")
-    claimed = {str(item).strip() for item in claimed_obligation_ids}
+    claimed = tuple(str(item).strip() for item in claimed_obligation_ids)
+    if not claimed or claimed != tuple(sorted(set(claimed))):
+        raise WakeLedgerError(
+            "trusted ack obligation identities must be unique and sorted"
+        )
+    if any(WAKE_ID_RE.fullmatch(item) is None for item in claimed):
+        raise WakeLedgerError("trusted ack contains a malformed obligation_id")
     if obligation.obligation_id not in claimed:
         raise WakeLedgerError("trusted ack does not include this obligation_id")
     seat = str(trusted.target_seat or "").strip().lower()
@@ -449,6 +583,7 @@ def acknowledge(
     if ISO_UTC_RE.fullmatch(stamp) is None:
         raise WakeLedgerError("acknowledged_at must be UTC ISO-8601")
     binding_id = trusted.binding_id
+    binding_generation = trusted.binding_generation
     receipt = trusted.operator_authority_receipt
     if trusted.ack_mode is AckMode.REASONING_SESSION:
         if seat != obligation.declared_target_seat:
@@ -457,10 +592,36 @@ def acknowledge(
         if BINDING_ID_RE.fullmatch(token) is None:
             raise WakeLedgerError("reasoning_session ack requires trusted binding context")
         binding_id = token
+        binding_generation = _strict_positive_int(
+            binding_generation, "binding_generation"
+        )
+        delivered = str(delivered_command_id or "").strip()
+        if not delivered.startswith(obligation.obligation_id + ":"):
+            raise WakeLedgerError(
+                "reasoning_session ack requires matching DELIVERED command evidence"
+            )
+        try:
+            suffix = delivered.split(":", 1)[1]
+            attempt_part, phase = suffix.rsplit(":", 1)
+            if (
+                not attempt_part.startswith("A")
+                or int(attempt_part[1:]) < 1
+                or phase != "DELIVERED"
+            ):
+                raise ValueError
+        except (ValueError, IndexError):
+            raise WakeLedgerError(
+                "reasoning_session ack requires matching DELIVERED command evidence"
+            ) from None
+        delivered_command_id = delivered
         if receipt:
             raise WakeLedgerError("reasoning_session ack cannot carry operator authority receipt")
         receipt = None
     elif trusted.ack_mode is AckMode.HUMAN_OPERATOR:
+        if binding_generation is not None or delivered_command_id is not None:
+            raise WakeLedgerError(
+                "human_operator ack cannot carry reasoning-session delivery evidence"
+            )
         token = str(receipt or "").strip()
         if OPERATOR_AUTHORITY_RECEIPT_RE.fullmatch(token) is None:
             raise WakeLedgerError("human_operator ack requires operator_authority_receipt")
@@ -480,6 +641,8 @@ def acknowledge(
         acknowledged_at=stamp,
         claimed_obligation_ids=tuple(str(item).strip() for item in claimed_obligation_ids),
         operator_authority_receipt=receipt,
+        binding_generation=binding_generation,
+        delivered_command_id=delivered_command_id,
     )
 
 
@@ -502,16 +665,38 @@ def parse_acknowledgement(
         raise WakeLedgerError("trusted ack reasoning_surface is unknown")
     if ISO_UTC_RE.fullmatch(str(ack.acknowledged_at or "")) is None:
         raise WakeLedgerError("acknowledged_at must be UTC ISO-8601")
-    if oid not in {str(item).strip() for item in ack.claimed_obligation_ids}:
+    claims = tuple(str(item).strip() for item in ack.claimed_obligation_ids)
+    if not claims or claims != tuple(sorted(set(claims))):
+        raise WakeLedgerError(
+            "trusted ack obligation identities must be unique and sorted"
+        )
+    if any(WAKE_ID_RE.fullmatch(item) is None for item in claims):
+        raise WakeLedgerError("trusted ack contains a malformed obligation_id")
+    if oid not in claims:
         raise WakeLedgerError("trusted ack does not include this obligation_id")
+    if ack.native_continuation is not None:
+        if (type(ack.native_continuation) is not NativeContinuationAckEvidence
+                or ack.ack_mode is not AckMode.REASONING_SESSION or ack.reasoning_surface != "codex"):
+            raise WakeLedgerError("native continuation evidence requires native reasoning ACK")
+        NativeContinuationAckEvidence.from_dict(dataclasses.asdict(ack.native_continuation))
     if ack.ack_mode is AckMode.REASONING_SESSION:
         if BINDING_ID_RE.fullmatch(str(ack.binding_id or "")) is None:
             raise WakeLedgerError("reasoning_session ack requires trusted binding context")
         if ack.operator_authority_receipt:
             raise WakeLedgerError("reasoning_session ack cannot carry operator authority receipt")
+        _strict_positive_int(ack.binding_generation, "binding_generation")
+        delivered = str(ack.delivered_command_id or "").strip()
+        if not delivered.startswith(oid + ":") or not delivered.endswith(":DELIVERED"):
+            raise WakeLedgerError(
+                "reasoning_session ack requires matching DELIVERED command evidence"
+            )
     elif ack.ack_mode is AckMode.HUMAN_OPERATOR:
         if OPERATOR_AUTHORITY_RECEIPT_RE.fullmatch(str(ack.operator_authority_receipt or "")) is None:
             raise WakeLedgerError("human_operator ack requires operator_authority_receipt")
+        if ack.binding_generation is not None or ack.delivered_command_id is not None:
+            raise WakeLedgerError(
+                "human_operator ack cannot carry reasoning-session delivery evidence"
+            )
     else:
         raise WakeLedgerError("unsupported ack_mode")
     return ack
@@ -644,12 +829,11 @@ def reconstruct_status(
         if scoped:
             raise WakeLedgerError("delivery evidence without WAKE_REQUESTED")
         return ObligationStatus.NOT_SEEN
-    terminals = [record.phase for record in scoped if record.phase in TERMINAL_CLOSE]
-    if terminals:
-        first = terminals[0]
-        if first is LedgerPhase.TARGET_ACKNOWLEDGED:
-            return ObligationStatus.TARGET_ACKNOWLEDGED
+    phases = {record.phase for record in scoped}
+    if LedgerPhase.SOURCE_RESOLVED in phases:
         return ObligationStatus.SOURCE_RESOLVED
+    if LedgerPhase.TARGET_ACKNOWLEDGED in phases:
+        return ObligationStatus.TARGET_ACKNOWLEDGED
     dest = destination_digest
     if route is not None:
         dest = route.destination_digest
@@ -697,38 +881,72 @@ def assert_causal(records: Sequence[WakeLedgerRecord]) -> None:
     if requested is None:
         raise WakeLedgerError("WAKE_REQUESTED requires frozen obligation envelope")
     seen_attempts: dict[int, set[LedgerPhase]] = {}
-    closed: LedgerPhase | None = None
+    ack_seen = False
+    source_resolved = False
+    earlier: list[WakeLedgerRecord] = [parsed[0]]
     for record in parsed[1:]:
         if record.phase is LedgerPhase.WAKE_REQUESTED:
             raise WakeLedgerError("duplicate WAKE_REQUESTED")
-        if record.phase in TERMINAL_CLOSE:
-            if record.phase is LedgerPhase.TARGET_ACKNOWLEDGED:
-                ack = parse_acknowledgement(
-                    record.ack, obligation_id=requested.obligation_id
-                )
-                if ack.ack_mode is AckMode.REASONING_SESSION:
-                    if ack.target_seat != requested.declared_target_seat:
-                        raise WakeLedgerError(
-                            "reasoning_session ack target_seat must match the obligation"
-                        )
-            else:
-                resolution = parse_source_resolution(
-                    record.source_resolution, obligation_id=requested.obligation_id
-                )
-                if resolution.source_ref != requested.source_ref:
-                    raise WakeLedgerError("source resolution source_ref does not match")
-                if resolution.source_kind != requested.source_kind.value:
-                    raise WakeLedgerError("source resolution source_kind does not match")
-                if resolution.code is not expected_resolution_code(requested):
+        if record.phase is LedgerPhase.TARGET_ACKNOWLEDGED:
+            if ack_seen:
+                raise WakeLedgerError("second acknowledgement is not allowed")
+            if source_resolved:
+                raise WakeLedgerError("acknowledgement cannot follow source resolution")
+            ack = parse_acknowledgement(
+                record.ack, obligation_id=requested.obligation_id
+            )
+            if ack.ack_mode is AckMode.REASONING_SESSION:
+                if ack.target_seat != requested.declared_target_seat:
                     raise WakeLedgerError(
-                        "source resolution code does not match the obligation source"
+                        "reasoning_session ack target_seat must match the obligation"
                     )
-            if closed is not None and closed is not record.phase:
-                raise WakeLedgerError("conflicting terminal close")
-            closed = record.phase
+                matching = [
+                    candidate
+                    for candidate in earlier
+                    if candidate.command_id == ack.delivered_command_id
+                    and candidate.phase is LedgerPhase.DELIVERED
+                ]
+                if len(matching) != 1:
+                    raise WakeLedgerError(
+                        "reasoning_session ack requires exactly one earlier matching DELIVERED record"
+                    )
+                delivered = matching[0]
+                for field_name in (
+                    "binding_id",
+                    "binding_generation",
+                    "session_alias",
+                    "reasoning_surface",
+                ):
+                    if getattr(delivered, field_name) != getattr(ack, field_name):
+                        raise WakeLedgerError(
+                            f"reasoning_session ack {field_name} does not match DELIVERED"
+                        )
+            ack_seen = True
+            earlier.append(record)
             continue
-        if closed is not None and record.phase in ATTEMPT_PHASES:
-            raise WakeLedgerError("no further delivery after terminal close")
+        if record.phase is LedgerPhase.SOURCE_RESOLVED:
+            if not ack_seen:
+                raise WakeLedgerError(
+                    "SOURCE_RESOLVED requires prior TARGET_ACKNOWLEDGED"
+                )
+            if source_resolved:
+                raise WakeLedgerError("second source resolution is not allowed")
+            resolution = parse_source_resolution(
+                record.source_resolution, obligation_id=requested.obligation_id
+            )
+            if resolution.source_ref != requested.source_ref:
+                raise WakeLedgerError("source resolution source_ref does not match")
+            if resolution.source_kind != requested.source_kind.value:
+                raise WakeLedgerError("source resolution source_kind does not match")
+            if resolution.code is not expected_resolution_code(requested):
+                raise WakeLedgerError(
+                    "source resolution code does not match the obligation source"
+                )
+            source_resolved = True
+            earlier.append(record)
+            continue
+        if (ack_seen or source_resolved) and record.phase in ATTEMPT_PHASES:
+            raise WakeLedgerError("no further delivery after TARGET_ACKNOWLEDGED")
         if record.phase in ATTEMPT_PHASES:
             n = _strict_positive_int(record.attempt_n)
             if n > 1:
@@ -750,6 +968,7 @@ def assert_causal(records: Sequence[WakeLedgerRecord]) -> None:
             if record.phase in ATTEMPT_TERMINALS and (seen_attempts[n] & ATTEMPT_TERMINALS):
                 raise WakeLedgerError("at most one terminal per delivery attempt")
             seen_attempts[n].add(record.phase)
+        earlier.append(record)
 
 
 def unfinished_attempt_n(records: Sequence[WakeLedgerRecord]) -> int | None:
@@ -844,6 +1063,10 @@ WAKE_EVENT_ACTOR = "wake_reconcile"
 FORBIDDEN_EVENT_PAYLOAD_KEYS = frozenset(
     {
         "native_handle",
+        "provider_session_id",
+        "provider_native_turn_id",
+        "threadId",
+        "turnId",
         "native",
         "thread_id",
         "account_label",
@@ -877,10 +1100,15 @@ def identity_payload(obligation: WakeObligation) -> dict[str, object]:
     return {key: full[key] for key in IDENTITY_PAYLOAD_KEYS}
 
 
-def requested_event_payload(obligation: WakeObligation) -> dict[str, object]:
+def requested_event_payload(
+    obligation: WakeObligation,
+    physical_source: PhysicalDialogueSourceIdentity | None = None,
+) -> dict[str, object]:
     payload = identity_payload(obligation)
     payload["source_created_at"] = obligation.source_created_at
     payload["emitted_at"] = obligation.emitted_at
+    if physical_source is not None:
+        payload["physical_source"] = physical_source.to_dict()
     return payload
 
 
@@ -900,7 +1128,7 @@ def resolution_event_payload(resolution: SourceResolution) -> dict[str, object]:
 
 
 def ack_event_payload(ack: WakeAcknowledgement) -> dict[str, object]:
-    return {
+    payload = {
         "obligation_id": ack.obligation_id,
         "ack_mode": ack.ack_mode.value,
         "target_seat": ack.target_seat,
@@ -910,7 +1138,13 @@ def ack_event_payload(ack: WakeAcknowledgement) -> dict[str, object]:
         "acknowledged_at": ack.acknowledged_at,
         "claimed_obligation_ids": list(ack.claimed_obligation_ids),
         "operator_authority_receipt": ack.operator_authority_receipt,
+        "binding_generation": ack.binding_generation,
+        "delivered_command_id": ack.delivered_command_id,
     }
+
+    if ack.native_continuation is not None:
+        payload["native_continuation"] = dataclasses.asdict(ack.native_continuation)
+    return payload
 
 
 def attempt_event_payload(attempt: DeliveryAttempt) -> dict[str, object]:
@@ -946,7 +1180,7 @@ def event_payload_for(
             raise WakeLedgerError("WAKE_REQUESTED payload requires the obligation envelope")
         if envelope.obligation_id != _obligation_id_from_command(record.command_id):
             raise WakeLedgerError("obligation_id does not match WAKE_REQUESTED command")
-        return requested_event_payload(envelope)
+        return requested_event_payload(envelope, record.physical_source)
     if record.phase is LedgerPhase.SOURCE_RESOLVED:
         if record.source_resolution is None:
             raise WakeLedgerError("SOURCE_RESOLVED payload requires resolution evidence")
@@ -977,6 +1211,8 @@ def event_payload_for(
             payload["nudge_attempt_command_ids"] = list(
                 record.nudge_attempt_command_ids
             )
+        if record.native_company_read is not None:
+            payload["native_company_read"] = record.native_company_read.to_dict()
         return payload
     raise WakeLedgerError(f"unsupported ledger phase {record.phase}")
 
@@ -984,7 +1220,10 @@ def event_payload_for(
 def payloads_equivalent(left: Mapping[str, object], right: Mapping[str, object], *, phase: LedgerPhase) -> bool:
     if phase is LedgerPhase.WAKE_REQUESTED:
         def _ident(payload: Mapping[str, object]) -> dict[str, object]:
-            return {key: payload.get(key) for key in IDENTITY_PAYLOAD_KEYS}
+            return {
+                **{key: payload.get(key) for key in IDENTITY_PAYLOAD_KEYS},
+                "physical_source": payload.get("physical_source"),
+            }
 
         return _ident(left) == _ident(right)
     return dict(left) == dict(right)
@@ -1018,17 +1257,35 @@ def wake_record_from_event(event: object) -> WakeLedgerRecord:
         phase = LedgerPhase(event_type)
     except ValueError as exc:
         raise WakeLedgerError(f"wake event_type {event_type!r} is not a ledger phase") from exc
+    if phase is not LedgerPhase.WAKE_REQUESTED and "physical_source" in payload:
+        raise WakeLedgerError("physical source is WAKE_REQUESTED-only")
+    if "native_company_read" in payload and phase is not LedgerPhase.DELIVERED:
+        raise WakeLedgerError("native Company evidence is DELIVERED-only")
     oid = _obligation_id(aggregate_id)
     if command_id.split(":", 1)[0] != oid:
         raise WakeLedgerError("wake command_id does not belong to aggregate_id")
     if ledger_command_id(oid, phase, attempt_n=_payload_attempt_n(payload, phase)) != command_id:
         raise WakeLedgerError("wake command_id does not match phase")
     if phase is LedgerPhase.WAKE_REQUESTED:
-        obligation = parse_obligation(payload)
+        physical_present = "physical_source" in payload
+        physical_value = payload.get("physical_source")
+        if physical_present and type(physical_value) is not dict:
+            raise WakeLedgerError("WAKE_REQUESTED physical source is malformed")
+        obligation = parse_obligation(
+            {key: value for key, value in payload.items() if key != "physical_source"}
+        )
         if obligation.obligation_id != oid:
             raise WakeLedgerError("WAKE_REQUESTED payload obligation_id disagrees with aggregate")
         _assert_outer_correlation(event, obligation)
-        return requested_record(obligation)
+        try:
+            physical = (
+                None
+                if not physical_present
+                else PhysicalDialogueSourceIdentity.from_dict(physical_value)
+            )
+        except Exception as exc:
+            raise WakeLedgerError("WAKE_REQUESTED physical source is malformed") from exc
+        return requested_record(obligation, physical_source=physical)
     if phase is LedgerPhase.SOURCE_RESOLVED:
         try:
             code = SourceResolutionCode(str(payload.get("code") or ""))
@@ -1076,6 +1333,10 @@ def wake_record_from_event(event: object) -> WakeLedgerRecord:
                     str(item) for item in (payload.get("claimed_obligation_ids") or ())
                 ),
                 operator_authority_receipt=payload.get("operator_authority_receipt"),
+                binding_generation=payload.get("binding_generation"),
+                delivered_command_id=payload.get("delivered_command_id"),
+                native_continuation=(NativeContinuationAckEvidence.from_dict(payload["native_continuation"])
+                                     if "native_continuation" in payload else None),
             ),
             obligation_id=oid,
         )
@@ -1083,6 +1344,19 @@ def wake_record_from_event(event: object) -> WakeLedgerRecord:
         return parse_ledger_record(
             WakeLedgerRecord(command_id=command_id, phase=phase, ack=ack)
         )
+    evidence = None
+    if "native_company_read" in payload:
+        allowed = {
+            "obligation_id", "attempt_n", "attempt_command_id", "destination_digest",
+            "route_digest", "binding_id", "binding_generation", "session_alias",
+            "reasoning_surface", "wake_transport", "nudge_id",
+            "nudge_attempt_command_ids", "native_company_read",
+        }
+        if set(payload) != allowed:
+            raise WakeLedgerError("native Company DELIVERED payload must have its exact shape")
+        evidence = NativeCompanyReadEvidence.from_dict(payload["native_company_read"])
+        if getattr(event, "attempt_id", None) != evidence.target_attempt_id:
+            raise WakeLedgerError("native Company evidence disagrees with Event attempt")
     attempt_n = _strict_positive_int(payload.get("attempt_n"))
     raw_group = payload.get("nudge_attempt_command_ids", ())
     if not isinstance(raw_group, (list, tuple)):
@@ -1102,6 +1376,7 @@ def wake_record_from_event(event: object) -> WakeLedgerRecord:
             wake_transport=str(payload.get("wake_transport") or "") or None,
             nudge_id=str(payload.get("nudge_id") or "") or None,
             nudge_attempt_command_ids=tuple(str(item) for item in raw_group),
+            native_company_read=evidence,
         )
     )
 
@@ -1140,6 +1415,7 @@ __all__ = [
     "AckMode",
     "DeliveryAttempt",
     "LedgerPhase",
+    "NativeCompanyReadEvidence",
     "ObligationStatus",
     "SourceReadHealth",
     "SourceResolution",

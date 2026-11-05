@@ -7,9 +7,11 @@ import pytest
 
 from control_plane.operator_harness_contract import (
     AuthRealmFact,
+    CapabilityIdentity,
     CapabilityManifest,
     NativeHelperPolicy,
     ObservedHarnessAttestation,
+    ObservedCapabilityIdentity,
     ObservedTriState,
     ProcessIdentityObservation,
     ProcessLiveness,
@@ -73,6 +75,54 @@ def test_profile_and_attestation_round_trip_without_shape_loss() -> None:
     assert requested_execution_profile(to_wire(profile)) == profile
     assert observed_harness_attestation(to_wire(attestation)) == attestation
     assert to_wire(requested_execution_profile(to_wire(profile))) == to_wire(profile)
+
+
+def test_resource_capability_wire_round_trip_is_closed() -> None:
+    profile = dataclasses.replace(
+        _profile(),
+        capabilities=CapabilityManifest(
+            required=(
+                CapabilityIdentity(
+                    kind="resource",
+                    name="worker-browser-b1-local",
+                    harness_binary_digest="a" * 64,
+                    resource_contract_digest="f" * 64,
+                ),
+            )
+        ),
+    )
+    attestation = dataclasses.replace(
+        _attestation(profile),
+        capabilities=(
+            ObservedCapabilityIdentity(
+                kind="resource",
+                name="worker-browser-b1-local",
+                resource_contract_digest="f" * 64,
+            ),
+        ),
+    )
+    assert requested_execution_profile(to_wire(profile)) == profile
+    assert observed_harness_attestation(to_wire(attestation)) == attestation
+
+    missing = to_wire(profile)
+    missing["capabilities"]["required"][0].pop("resource_contract_digest")
+    with pytest.raises(OperatorHarnessWireError, match="fields drifted"):
+        requested_execution_profile(missing)
+
+    unknown = to_wire(attestation)
+    unknown["capabilities"][0]["resource_authority"] = "ambient"
+    with pytest.raises(OperatorHarnessWireError, match="fields drifted"):
+        observed_harness_attestation(unknown)
+
+    invalid = to_wire(profile)
+    invalid["capabilities"]["required"][0]["resource_contract_digest"] = "short"
+    with pytest.raises(OperatorHarnessWireError, match="resource contract digest"):
+        requested_execution_profile(invalid)
+
+    missing_observation = to_wire(attestation)
+    missing_observation["capabilities"][0]["resource_contract_digest"] = None
+    with pytest.raises(OperatorHarnessWireError, match="resource contract digest"):
+        observed_harness_attestation(missing_observation)
 
 
 @pytest.mark.parametrize("mutation", ["missing", "unknown"])

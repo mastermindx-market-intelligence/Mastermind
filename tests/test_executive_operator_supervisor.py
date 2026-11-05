@@ -11,7 +11,10 @@ from pathlib import Path
 import pytest
 
 from control_plane.ceo_intent import INTENT_SCHEMA_V2, submit_intent
-from control_plane.executive_operator_supervisor import ExecutiveOperatorSupervisor
+from control_plane.executive_operator_supervisor import (
+    ExecutiveOperatorSupervisor,
+    ExecutiveOperatorSupervisorError,
+)
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     OperatorPrincipalObservation,
@@ -23,12 +26,18 @@ from control_plane.executive_orchestration_result import (
     canonical_bytes,
 )
 from control_plane.executive_runtime import (
+    AttemptLease,
     AttemptStatus,
     JobStatus,
     OrchestrationDispatchOutcome,
     Runtime,
 )
-from control_plane.executive_supervisor import ReconcileStatus
+from control_plane.executive_supervisor import (
+    ExecutiveSupervisor,
+    ReconcileStatus,
+    VerifiedCommission,
+    verify_commission_for_job,
+)
 from control_plane.model_router import ModelRouter
 from control_plane.operator_harness_contract import (
     AuthRealmFact,
@@ -43,6 +52,7 @@ from control_plane.operator_harness_contract import (
     ObservedTriState,
     OperationId,
     OperationReceiptKind,
+    ProcessGenerationRef,
     ProcessIdentityObservation,
     ProcessLiveness,
     ProfileValidation,
@@ -50,12 +60,19 @@ from control_plane.operator_harness_contract import (
     ProviderWriterState,
     ReconcileObservation,
     RequestedExecutionProfile,
+    SessionEpochRef,
     SessionStartObservation,
     TurnRef,
     TurnStartObservation,
     WorkspaceIdentity,
 )
-from control_plane.operator_harness_orchestrator import OperatorOperationApplied
+from control_plane.operator_harness_orchestrator import (
+    OperatorOperationApplied,
+    OperatorSessionReceipt,
+)
+from control_plane.operator_harness_wire import to_wire
+from control_plane.remote_codex_operator_adapter import RemoteCodexOperatorAdapter
+from control_plane.worker_browser_b1 import BrowserReviewReceipt
 
 
 class _Clock:
@@ -119,6 +136,7 @@ def _attestation(profile: RequestedExecutionProfile) -> ObservedHarnessAttestati
             mcp_server_identity=item.mcp_server_identity,
             mcp_server_version=item.mcp_server_version,
             mcp_auth_status=item.mcp_auth_status,
+            resource_contract_digest=item.resource_contract_digest,
         )
         for item in profile.capabilities.required
     )
@@ -495,7 +513,36 @@ class _PromptSource:
         return "Read the exact Job and produce the bounded plan."
 
 
-def _seed_dispatchable_operator_planner(tmp_path: Path):
+class _CommissionPromptSource(_PromptSource):
+    def _prompt(
+        self,
+        *_args,
+        commission=None,
+        inline_commission=None,
+    ):
+        text = super()._prompt(*_args)
+        if commission is not None:
+            text += "\n" + json.dumps(commission, sort_keys=True)
+        if inline_commission is not None:
+            text += "\n" + inline_commission
+        return text
+
+
+def _seed_dispatchable_operator_planner(
+    tmp_path: Path,
+    *,
+    commission_content: bytes | None = None,
+    commission_repository: str = "mastermindx-market-intelligence/Mastermind",
+    commission_ref_commit: str | None = None,
+    clock: _Clock | None = None,
+    routing_capacity: bool = False,
+    operator_model_alias: str = "coo.operator.readonly",
+    interactive_operator: bool = False,
+    plan_schema_version: str | None = None,
+    create_planner: bool = True,
+    frontier_selection: dict[str, object] | None = None,
+    operator_harness_armed: bool = True,
+):
     workspace_root = tmp_path / "workspaces"
     workspace = workspace_root / "g2-planner"
     workspace.mkdir(parents=True)
@@ -515,7 +562,11 @@ def _seed_dispatchable_operator_planner(tmp_path: Path):
         check=True,
     )
     (workspace / "README.md").write_text("G2 fixture\n", encoding="utf-8")
-    subprocess.run(["git", "add", "README.md"], cwd=workspace, check=True)
+    if commission_content is not None:
+        commission_path = workspace / "research" / "operator-commission.md"
+        commission_path.parent.mkdir(parents=True)
+        commission_path.write_bytes(commission_content)
+    subprocess.run(["git", "add", "."], cwd=workspace, check=True)
     subprocess.run(
         ["git", "commit", "-q", "-m", "fixture"], cwd=workspace, check=True
     )
@@ -527,10 +578,13 @@ def _seed_dispatchable_operator_planner(tmp_path: Path):
         text=True,
     ).stdout.strip()
 
-    runtime = Runtime.at(tmp_path / "runtime")
+    runtime = Runtime.at(
+        tmp_path / "runtime",
+        **({"clock": clock, "lease_seconds": 2} if clock is not None else {}),
+    )
     router = ModelRouter.load()
     sealed = router.model_aliases["coo.sealed"]
-    operator = router.model_aliases["coo.operator.readonly"]
+    operator = router.model_aliases[operator_model_alias]
     binding = {
         "eligible_quota_classes": ["codex-coo", "codex-coo-default"],
         "provider": sealed.provider_alias,
@@ -555,8 +609,13 @@ def _seed_dispatchable_operator_planner(tmp_path: Path):
         "operator_capability_policy_digest": operator.capability_policy_digest,
         "operator_harness_binary_digest": "a" * 64,
         "operator_harness_version": "0.147.0",
-        "operator_harness_armed": True,
+        "operator_harness_armed": operator_harness_armed,
     }
+    if routing_capacity:
+        binding["host_execution_binding_version"] = "mastermind.host_execution_binding/v3"
+        binding["work_placement_union"] = [
+            {"provider_realm": sealed.provider_alias, "quota_class": "codex-coo"}
+        ]
     runtime.workers.register_worker(
         "worker-a",
         provider=operator.provider_alias,
@@ -582,6 +641,30 @@ def _seed_dispatchable_operator_planner(tmp_path: Path):
             }
         },
     )
+    if routing_capacity:
+        runtime.workers.register_worker(
+            "routing-worker",
+            provider=sealed.provider_alias,
+            account_label="routing-worker@company",
+            worker_type="fixture",
+            capabilities=list(sealed.capabilities),
+            quota_classes={
+                "codex-coo": {
+                    "provider": sealed.provider_alias,
+                    "model": sealed.model,
+                    "effort": sealed.effort,
+                    "cost_class": sealed.cost_class,
+                    "capabilities": list(sealed.capabilities),
+                    "metadata": {
+                        "routing_policy_version": router.policy_version,
+                        "execution_profile_id": sealed.execution_profile_id,
+                        "execution_profile_digest": sealed.execution_profile_digest,
+                        "capability_policy_version": sealed.capability_policy_version,
+                        "capability_policy_digest": sealed.capability_policy_digest,
+                    },
+                }
+            },
+        )
     intent = _intent()
     intent["grounding"] = {"mastermind_sha": base_sha, "macro_sha": "b" * 40}
     intent["execution_contract"] = {
@@ -590,19 +673,371 @@ def _seed_dispatchable_operator_planner(tmp_path: Path):
         "worktree": str(workspace),
         "attempt_limit": 2,
     }
+    dialogue_kwargs = {}
+    if commission_content is not None:
+        intent["workstream"] = "WS:TEST-COMMISSION"
+        dialogue_kwargs = {
+            "dialogue_source": {
+                "schema_version": "mastermind.executive_dialogue_source/v1",
+                "work_ref": "WS:TEST-COMMISSION",
+                "commission_ref": {
+                    "repository": commission_repository,
+                    "commit": commission_ref_commit or base_sha,
+                    "path": "research/operator-commission.md",
+                    "content_sha256": hashlib.sha256(commission_content).hexdigest(),
+                },
+                "watch_mode": None,
+            },
+            "require_dialogue_source": True,
+        }
+    selection_kwargs = {}
+    if frontier_selection is not None:
+        intent["frontier_model_alias"] = frontier_selection["model_alias"]
+        selection_kwargs["frontier_selection"] = frontier_selection
     receipt = submit_intent(
         runtime,
         intent,
         workspace_root=workspace_root,
         execution_binding=binding,
+        **dialogue_kwargs,
+        **selection_kwargs,
     )
     root = runtime.jobs.get_job(receipt["job_id"])
     assert root is not None
-    planner = runtime.jobs.create_cycle_planner(
-        root.job_id,
-        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
-    )
+    planner = None
+    if interactive_operator:
+        planner = runtime.jobs.create_interactive_operator(
+            root.job_id,
+            command_id=f"coo-cycle:{root.job_id}:create-interactive:0",
+        )
+    elif create_planner:
+        planner = runtime.jobs.create_cycle_planner(
+            root.job_id,
+            command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+            plan_schema_version=plan_schema_version,
+        )
     return runtime, root, planner
+
+
+
+def _seed_commission_bound_legacy_turn(
+    tmp_path: Path,
+    *,
+    legacy_operation: bool = True,
+    routing_capacity: bool = False,
+    production_prompt_source: bool = False,
+):
+    """Create the exact pre-feature hazard: valid commission, legacy TX-5 id."""
+
+    clock = _Clock()
+    commission = b"# Legacy Operator commission\n\nUse this exact immutable brief.\n"
+    runtime, root, planner = _seed_dispatchable_operator_planner(
+        tmp_path,
+        commission_content=commission,
+        clock=clock,
+        routing_capacity=routing_capacity,
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert isinstance(dispatch, OrchestrationDispatchOutcome)
+    assert dispatch.lease_token is not None
+
+    # _requested_profile reads only lease.attempt. Keep the fixture on the real
+    # production constructor without introducing a second profile builder.
+    class _LeaseView:
+        attempt = dispatch.attempt
+
+    prompt_source = (
+        ExecutiveSupervisor(
+            runtime,
+            object(),  # type: ignore[arg-type]
+            inspector=object(),  # type: ignore[arg-type]
+            process_controller=object(),  # type: ignore[arg-type]
+        )
+        if production_prompt_source
+        else _CommissionPromptSource()
+    )
+    seed_supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=lambda _loader: None,  # type: ignore[arg-type]
+        prompt_source=prompt_source,  # type: ignore[arg-type]
+    )
+    profile = seed_supervisor._requested_profile(planner, _LeaseView())  # type: ignore[arg-type]
+    harness = runtime.operator_harness
+    sealed = harness.seal_operator_harness_attempt(
+        dispatch.attempt.attempt_id,
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+        requested=profile,
+    )
+    start_op = OperationId("ohf-op:p1-legacy-start")
+    epoch, g1 = harness.reserve_start(
+        sealed.attempt_id,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        operation_id=start_op,
+    )
+    process = ProcessIdentityObservation(4101, 4101, "start-4101", "boot-test")
+    harness.bind_start_result(
+        epoch=epoch,
+        generation=g1,
+        operation_id=start_op,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        provider_session_id="SESSION-G1",
+        process=process,
+    )
+    principal = OperatorPrincipalObservation(
+        attempt_id=sealed.attempt_id,
+        worker_id="worker-a",
+        process_generation_id=g1.process_generation_id,
+        provider_session_id="SESSION-G1",
+        process_identity={
+            "pid": process.pid,
+            "pgid": process.pgid,
+            "process_start_identity": process.process_start_identity,
+            "boot_id": process.boot_id,
+        },
+        os_principal_name="fixture-principal",
+        os_principal_uid=os.getuid(),
+        provider_home_identity={
+            "path": "/tmp/mastermind-g2-provider-home",
+            "device": 3,
+            "inode": 4,
+            "uid": os.getuid(),
+            "gid": os.getgid(),
+            "mode": 0o700,
+        },
+        observed_at_ms=runtime.store.now_ms(),
+    )
+    harness.seal_attestation(
+        generation=g1,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        requested=profile,
+        attestation=_attestation(profile),
+        principal_observation=principal,
+    )
+
+    if legacy_operation:
+        # This is exactly the pre-fix operation identity. It proves only that a
+        # turn happened; it carries no evidence of which commission was sent.
+        turn_operation = OperationId(f"ohf-op:turn:{dispatch.attempt.attempt_id}")
+    else:
+        lease = AttemptLease(dispatch.attempt, dispatch.lease_token)
+        verified = verify_commission_for_job(
+            runtime, planner, Path(planner.worktree).resolve(strict=True)
+        )
+        assert verified is not None
+        prompt = seed_supervisor._prompt(planner, lease, verified)
+        turn_operation = seed_supervisor._turn_operation_id(
+            dispatch.attempt.attempt_id, verified
+        )
+    turn = harness.reserve_turn(
+        epoch=epoch,
+        generation=g1,
+        operation_id=turn_operation,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+    )
+    harness.acknowledge_turn(
+        turn=turn,
+        operation_id=turn_operation,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        observation=TurnStartObservation("NATIVE-G1", True),
+    )
+    return clock, runtime, planner, dispatch, profile, commission, turn
+
+
+def test_commission_bound_recovery_survives_unrelated_routing_capacity_change(
+    tmp_path: Path,
+) -> None:
+    clock, runtime, planner, dispatch, profile, _commission, _turn = (
+        _seed_commission_bound_legacy_turn(
+            tmp_path,
+            legacy_operation=False,
+            routing_capacity=True,
+            production_prompt_source=True,
+        )
+    )
+    lease = AttemptLease(dispatch.attempt, dispatch.lease_token)
+    verified = verify_commission_for_job(
+        runtime, planner, Path(planner.worktree).resolve(strict=True)
+    )
+    assert verified is not None
+    production_prompt = ExecutiveSupervisor(
+        runtime,
+        object(),  # type: ignore[arg-type]
+        inspector=object(),  # type: ignore[arg-type]
+        process_controller=object(),  # type: ignore[arg-type]
+    )
+    operator = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=lambda _loader: None,  # type: ignore[arg-type]
+        prompt_source=production_prompt,
+    )
+    prompt_before = operator._prompt(planner, lease, verified)
+    operation_before = operator._turn_operation_id(
+        dispatch.attempt.attempt_id, verified
+    )
+
+    runtime.workers.set_worker_status("routing-worker", "OFFLINE")
+
+    prompt_after = operator._prompt(planner, lease, verified)
+    operation_after = operator._turn_operation_id(
+        dispatch.attempt.attempt_id, verified
+    )
+    assert hashlib.sha256(prompt_before.encode()).hexdigest() != hashlib.sha256(
+        prompt_after.encode()
+    ).hexdigest()
+    assert operation_after == operation_before
+
+    clock.advance(3)
+    class _RoutingRecoveryAdapter(_RecoveryAdapter):
+        def __init__(self, runtime, profile, loader, *, live_existing):
+            super().__init__(
+                runtime, profile, loader, live_existing=live_existing
+            )
+            self.process = ProcessIdentityObservation(
+                4101, 4101, "start-4101", "boot-test"
+            )
+
+        def reconcile(self, _generation):
+            return ReconcileObservation(
+                ProcessLiveness.ALIVE,
+                self.process,
+                True,
+                ProviderWriterState.HELD,
+                self.provider_session_id,
+                profile.expected_config_digest,
+            )
+
+    adapters: list[_RecoveryAdapter] = []
+
+    def factory(loader):
+        adapter = _RoutingRecoveryAdapter(
+            runtime, profile, loader, live_existing=True
+        )
+        adapters.append(adapter)
+        return adapter
+
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=production_prompt,
+    )
+
+    recovered = supervisor.reconcile_restart()
+
+    assert [item.status for item in recovered] == [ReconcileStatus.OPERATOR_RECOVERED]
+    assert len(adapters) == 1
+    attempt = runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
+    assert attempt is not None and attempt.status is AttemptStatus.COMPLETED
+
+def test_recovery_quarantines_legacy_commission_turn_without_original_input_binding(
+    tmp_path: Path,
+) -> None:
+    clock, runtime, planner, dispatch, profile, _commission, _turn = (
+        _seed_commission_bound_legacy_turn(tmp_path)
+    )
+    clock.advance(3)
+    adapters: list[_RecoveryAdapter] = []
+
+    def factory(loader):
+        adapter = _RecoveryAdapter(runtime, profile, loader, live_existing=True)
+        adapters.append(adapter)
+        return adapter
+
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=_CommissionPromptSource(),  # type: ignore[arg-type]
+    )
+
+    recovered = supervisor.reconcile_restart()
+
+    assert [item.status for item in recovered] == [ReconcileStatus.IDENTITY_AMBIGUOUS]
+    assert adapters == [], "legacy turn must be rejected before any provider read/resume"
+    attempt = runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
+    assert attempt is not None
+    assert attempt.status in {
+        AttemptStatus.CLAIMED,
+        AttemptStatus.RUNNING,
+        AttemptStatus.CHECKPOINTED,
+    }
+
+
+def test_recovery_quarantines_legacy_sealed_result_without_original_input_binding(
+    tmp_path: Path,
+) -> None:
+    clock, runtime, planner, dispatch, profile, _commission, turn = (
+        _seed_commission_bound_legacy_turn(tmp_path)
+    )
+    seed_adapter = _RecoveryAdapter(
+        runtime,
+        profile,
+        lambda _turn: "legacy prompt without commission binding",
+        live_existing=True,
+    )
+    cursor = EventCursor(
+        turn.attempt_id,
+        turn.session_epoch_id,
+        turn.process_generation_id,
+        turn_id=turn.turn_id,
+    )
+    events, next_cursor = seed_adapter.read_events(cursor, timeout_seconds=1.0)
+    candidate = seed_adapter.collect_candidate_result(turn)
+    runtime.operator_harness.record_candidate_evidence(
+        turn=turn,
+        candidate=candidate,
+        events=events,
+        cursor=next_cursor,
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+    )
+    raw = seed_adapter.observe_raw_role_result(turn)
+    runtime.operator_harness.seal_orchestration_role_result(
+        turn=turn,
+        observation=raw,
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+    )
+    with runtime.store.read() as connection:
+        assert connection.execute(
+            """SELECT COUNT(*) FROM events
+               WHERE attempt_id=? AND event_type='ORCHESTRATION_ROLE_RESULT_SEALED'""",
+            (dispatch.attempt.attempt_id,),
+        ).fetchone()[0] == 1
+
+    clock.advance(3)
+    adapters: list[_RecoveryAdapter] = []
+
+    def factory(loader):
+        adapter = _RecoveryAdapter(runtime, profile, loader, live_existing=True)
+        adapters.append(adapter)
+        return adapter
+
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=_CommissionPromptSource(),  # type: ignore[arg-type]
+    )
+
+    recovered = supervisor.reconcile_restart()
+
+    assert [item.status for item in recovered] == [ReconcileStatus.IDENTITY_AMBIGUOUS]
+    assert adapters == [], "legacy sealed result must be rejected before provider recovery"
+    attempt = runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
+    assert attempt is not None
+    assert attempt.status in {
+        AttemptStatus.CLAIMED,
+        AttemptStatus.RUNNING,
+        AttemptStatus.CHECKPOINTED,
+    }
 
 
 class _ActiveAdapter(_RecoveryAdapter):
@@ -621,6 +1056,7 @@ class _ActiveAdapter(_RecoveryAdapter):
         self.stop_calls = 0
         self.read_calls = 0
         self.cancel_during_collect = cancel_during_collect
+        self.prompts: list[str] = []
 
     def validate_requested_profile(self, requested):
         self.profile = requested
@@ -635,7 +1071,9 @@ class _ActiveAdapter(_RecoveryAdapter):
 
     def begin_turn(self, *, turn, **_kwargs):
         self.begin_turn_calls += 1
-        assert "output schema" in self.turn_input_loader(turn)
+        prompt = self.turn_input_loader(turn)
+        self.prompts.append(prompt)
+        assert "output schema" in prompt
         return TurnStartObservation(self.native_turn_id, True)
 
     def read_events(self, cursor, *, timeout_seconds):
@@ -698,6 +1136,163 @@ def test_fresh_operator_planner_completes_one_session_and_releases_epoch(
             (attempt.attempt_id,),
         ).fetchone()
     assert epoch["state"] == "ABANDONED"
+
+
+
+def test_fresh_operator_consumes_persisted_verified_commission_before_provider_turn(
+    tmp_path: Path,
+) -> None:
+    commission = b"# Operator immutable commission\n\nUse the complete exact source.\n"
+    runtime, root, planner = _seed_dispatchable_operator_planner(
+        tmp_path, commission_content=commission
+    )
+    adapters: list[_ActiveAdapter] = []
+
+    def factory(loader):
+        adapter = _ActiveAdapter(runtime, loader, cancel_during_collect=False)
+        adapters.append(adapter)
+        return adapter
+
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=_CommissionPromptSource(),  # type: ignore[arg-type]
+    )
+
+    outcome = asyncio.run(
+        supervisor.start_cycle_job(
+            planner.job_id,
+            command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        )
+    )
+
+    assert outcome.outcome == "TERMINAL"
+    assert len(adapters) == 1 and adapters[0].begin_turn_calls == 1
+    assert len(adapters[0].prompts) == 1
+    prompt = adapters[0].prompts[0]
+    assert commission.decode("utf-8") in prompt
+    assert '"path": "research/operator-commission.md"' in prompt
+    verified = verify_commission_for_job(
+        runtime, planner, Path(planner.worktree).resolve(strict=True)
+    )
+    assert verified is not None
+    binding = {
+        "schema_version": "mastermind.operator_turn_commission_binding/v1",
+        "attempt_id": outcome.attempt.attempt_id,
+        "commission_ref": verified.ref_dict(),
+    }
+    expected_turn_operation = (
+        "ohf-op:turn-commission:"
+        + hashlib.sha256(
+            json.dumps(
+                binding,
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+    )
+    with runtime.store.read() as connection:
+        rows = connection.execute(
+            """SELECT command_id,payload_json FROM events
+               WHERE attempt_id=? AND aggregate_type='operator_operation'
+                 AND event_type=? ORDER BY event_id""",
+            (outcome.attempt.attempt_id, OperationReceiptKind.INTENT.value),
+        ).fetchall()
+    turn_rows = [
+        row
+        for row in rows
+        if json.loads(str(row["payload_json"])).get("operation_kind") == "begin_turn"
+    ]
+    assert len(turn_rows) == 1
+    assert turn_rows[0]["command_id"] == expected_turn_operation
+    assert planner.requested_authorities == ["READ"]
+    assert planner.allowed_write_paths == []
+
+
+def test_post_base_operator_commission_uses_verified_fallback_before_provider_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commission = b"# Post-base Operator commission\n\nUse the immutable published brief.\n"
+    commit = "f" * 40
+    runtime, root, planner = _seed_dispatchable_operator_planner(
+        tmp_path,
+        commission_content=commission,
+        commission_ref_commit=commit,
+    )
+    calls: list[tuple[str, str, str]] = []
+
+    def fetch(*, repository: str, commit: str, path: str) -> bytes:
+        calls.append((repository, commit, path))
+        return commission
+
+    monkeypatch.setattr(
+        "control_plane.executive_supervisor._fetch_remote_commission",
+        fetch,
+    )
+    adapters: list[_ActiveAdapter] = []
+
+    def factory(loader):
+        adapter = _ActiveAdapter(runtime, loader, cancel_during_collect=False)
+        adapters.append(adapter)
+        return adapter
+
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=_CommissionPromptSource(),  # type: ignore[arg-type]
+    )
+    outcome = asyncio.run(
+        supervisor.start_cycle_job(
+            planner.job_id,
+            command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        )
+    )
+
+    assert outcome.outcome == "TERMINAL"
+    assert calls == [(
+        "mastermindx-market-intelligence/Mastermind",
+        commit,
+        "research/operator-commission.md",
+    )]
+    assert len(adapters) == 1 and adapters[0].begin_turn_calls == 1
+    assert commission.decode("utf-8") in adapters[0].prompts[0]
+
+
+def test_real_operator_commission_refusal_precedes_provider_construction(
+    tmp_path: Path,
+) -> None:
+    runtime, root, planner = _seed_dispatchable_operator_planner(
+        tmp_path,
+        commission_content=b"# Exact operator commission\n",
+        commission_repository="mastermindx-market-intelligence/Other",
+    )
+    factory_calls = 0
+
+    def factory(_loader):
+        nonlocal factory_calls
+        factory_calls += 1
+        raise AssertionError("provider construction must remain zero after source refusal")
+
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=_CommissionPromptSource(),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(
+        ExecutiveOperatorSupervisorError,
+        match="commission repository is outside the canonical Executive repository",
+    ):
+        asyncio.run(
+            supervisor.start_cycle_job(
+                planner.job_id,
+                command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+            )
+        )
+
+    assert factory_calls == 0
 
 
 def test_active_operator_cancellation_finishes_cancelled_not_quarantined(
@@ -1021,3 +1616,425 @@ def test_restart_cancellation_before_session_releases_without_provider_call(
     job = runtime.jobs.get_job(planner.job_id)
     assert attempt is not None and attempt.status is AttemptStatus.CANCELLED
     assert job is not None and job.status is JobStatus.CANCELLED
+
+
+def test_browser_terminal_binds_post_sweep_receipt_without_replacing_candidate_digest():
+    generation = ProcessGenerationRef("generation-browser", "epoch-browser", 1, "worker-a")
+    epoch = SessionEpochRef("epoch-browser", "attempt-browser", "worker-a", 1)
+    resource = ObservedCapabilityIdentity(
+        kind="resource",
+        name="worker-browser-b1-local",
+        resource_contract_digest="a" * 64,
+    )
+    observed = ObservedHarnessAttestation(
+        served_model="gpt-5.6-sol",
+        harness_version="0.147.0",
+        harness_binary_digest="b" * 64,
+        capabilities=(resource,),
+        effective_skills=(),
+        effective_mcp=(),
+        effective_plugins_or_apps=(),
+        sandbox_state="read-only",
+        approval_state="never",
+        network_state="loopback-browser-only",
+        effective_config_digest="c" * 64,
+        auth=AuthRealmFact(worker_id="worker-a", provider="openai-codex"),
+        workspace=WorkspaceIdentity("/tmp/browser", "d" * 40, 1, 2, 3, 4),
+    )
+    session = OperatorSessionReceipt(
+        attempt_id="attempt-browser",
+        epoch=epoch,
+        generation=generation,
+        observation=SessionStartObservation(
+            "provider-browser", ProcessIdentityObservation(1001, 1001, "start", "boot")
+        ),
+        observed=observed,
+        launch=None,  # type: ignore[arg-type] - digest helper does not inspect launch
+    )
+    receipt = BrowserReviewReceipt(
+        schema_version="mastermind.browser_review_receipt/v1",
+        attempt_id="attempt-browser",
+        session_epoch_id="epoch-browser",
+        process_generation_id="generation-browser",
+        workspace=observed.workspace,
+        devserver={
+            "local_origin": "http://127.0.0.1:48101",
+            "manifest_digest": "b" * 64,
+        },
+        capability={
+            "manifest_digest": "c" * 64,
+            "profile_digest": "d" * 64,
+            "profile_id": "operator.browser.local-review.v1",
+        },
+        playwright_mcp={
+            "identity": "playwright",
+            "tool_schema_digest": "e" * 64,
+            "version": "1.63.0-alpha-2026-08-05",
+        },
+        browser={
+            "executable": "/tmp/chromium",
+            "executable_sha256": "f" * 64,
+            "revision": "1237",
+            "runtime_manifest_digest": "7" * 64,
+        },
+        viewports=(
+            {"width": 1440, "height": 900},
+            {"width": 390, "height": 844},
+        ),
+        artifacts={
+            "screenshots": [
+                {
+                    "bytes": 10,
+                    "relative_path": "desktop.png",
+                    "sha256": "0" * 64,
+                    "viewport": {"width": 1440, "height": 900},
+                },
+                {
+                    "bytes": 10,
+                    "relative_path": "mobile.png",
+                    "sha256": "1" * 64,
+                    "viewport": {"width": 390, "height": 844},
+                },
+            ],
+            "console": {
+                "bytes": 64,
+                "observed": True,
+                "rows": 1,
+                "sha256": "2" * 64,
+            },
+            "mcp_guard": {
+                "bytes": 4096,
+                "relative_path": "browser-mcp-guard-evidence.json",
+                "schema_version": "mastermind.browser_mcp_guard_evidence/v2",
+                "sha256": "8" * 64,
+            },
+            "network": {
+                "bytes": 64,
+                "observed": True,
+                "rows": 1,
+                "sha256": "3" * 64,
+            },
+        },
+        egress_falsifiers={
+            "external_fetch": "REFUSED",
+            "external_http": "REFUSED",
+            "external_https": "REFUSED",
+            "external_redirect": "REFUSED",
+            "external_subresource": "REFUSED",
+            "external_websocket": "REFUSED",
+            "file_url": "REFUSED",
+            "proxy_override": "REFUSED",
+        },
+        external_egress_observed=False,
+        visual_judgment={
+            "defective_variant": "B",
+            "fixture_nonce": "opaque-supervisor",
+            "image_sha256": ["4" * 64, "5" * 64],
+            "reason": "visible clipping",
+            "source": "model_image_content",
+        },
+        cleanup={
+            "browser_absent": True,
+            "devserver_absent": True,
+            "mcp_absent": True,
+            "proxy_absent": True,
+            "uid_sweep_digest": "6" * 64,
+            "uid_sweep_passed": True,
+        },
+        tracked_workspace_changes_after_review=False,
+    )
+
+    class Adapter:
+        def terminal_artifact_receipt(self, observed_generation):
+            assert observed_generation == generation
+            return receipt
+
+    assert ExecutiveOperatorSupervisor._terminal_artifact_receipt_digest(
+        session=session, adapter=Adapter()  # type: ignore[arg-type]
+    ) == receipt.digest
+    assert receipt.digest not in {"e" * 64, hashlib.sha256(b"[]").hexdigest()}
+
+    class MissingAdapter:
+        def terminal_artifact_receipt(self, _generation):
+            return None
+
+    with pytest.raises(
+        Exception, match="lacks its post-sweep artifact receipt"
+    ):
+        ExecutiveOperatorSupervisor._terminal_artifact_receipt_digest(
+            session=session, adapter=MissingAdapter()  # type: ignore[arg-type]
+        )
+
+
+def test_remote_adapter_caches_closed_browser_receipt_only_after_stop():
+    generation = ProcessGenerationRef("generation-remote", "epoch-remote", 1, "worker-a")
+    receipt = BrowserReviewReceipt(
+        schema_version="mastermind.browser_review_receipt/v1",
+        attempt_id="attempt-remote",
+        session_epoch_id="epoch-remote",
+        process_generation_id="generation-remote",
+        workspace=WorkspaceIdentity("/tmp/browser", "a" * 40, 1, 2, 3, 4),
+        devserver={"local_origin": "http://127.0.0.1:48101", "manifest_digest": "b" * 64},
+        capability={"manifest_digest": "c" * 64, "profile_digest": "d" * 64, "profile_id": "operator.browser.local-review.v1"},
+        playwright_mcp={"identity": "playwright", "tool_schema_digest": "e" * 64, "version": "1.63.0-alpha-2026-08-05"},
+        browser={
+            "executable": "/tmp/chromium",
+            "executable_sha256": "f" * 64,
+            "revision": "1237",
+            "runtime_manifest_digest": "7" * 64,
+        },
+        viewports=({"width": 1440, "height": 900}, {"width": 390, "height": 844}),
+        artifacts={
+            "screenshots": [
+                {
+                    "bytes": 10,
+                    "relative_path": "desktop.png",
+                    "sha256": "3" * 64,
+                    "viewport": {"width": 1440, "height": 900},
+                },
+                {
+                    "bytes": 10,
+                    "relative_path": "mobile.png",
+                    "sha256": "4" * 64,
+                    "viewport": {"width": 390, "height": 844},
+                },
+            ],
+            "console": {
+                "bytes": 64,
+                "observed": True,
+                "rows": 1,
+                "sha256": "5" * 64,
+            },
+            "mcp_guard": {
+                "bytes": 4096,
+                "relative_path": "browser-mcp-guard-evidence.json",
+                "schema_version": "mastermind.browser_mcp_guard_evidence/v2",
+                "sha256": "8" * 64,
+            },
+            "network": {
+                "bytes": 64,
+                "observed": True,
+                "rows": 1,
+                "sha256": "6" * 64,
+            },
+        },
+        egress_falsifiers={
+            "external_fetch": "REFUSED",
+            "external_http": "REFUSED",
+            "external_https": "REFUSED",
+            "external_redirect": "REFUSED",
+            "external_subresource": "REFUSED",
+            "external_websocket": "REFUSED",
+            "file_url": "REFUSED",
+            "proxy_override": "REFUSED",
+        },
+        external_egress_observed=False,
+        visual_judgment={
+            "defective_variant": "B",
+            "fixture_nonce": "opaque-remote",
+            "image_sha256": ["0" * 64, "1" * 64],
+            "reason": "visible clipping",
+            "source": "model_image_content",
+        },
+        cleanup={
+            "browser_absent": True,
+            "devserver_absent": True,
+            "mcp_absent": True,
+            "proxy_absent": True,
+            "uid_sweep_digest": "2" * 64,
+            "uid_sweep_passed": True,
+        },
+        tracked_workspace_changes_after_review=False,
+    )
+    observation = ReconcileObservation(
+        ProcessLiveness.PROVEN_DEAD,
+        ProcessIdentityObservation(1001, 1001, "start", "boot"),
+        False,
+        ProviderWriterState.RELEASED,
+        "provider-remote",
+        "3" * 64,
+    )
+
+    class Client:
+        def request_sync(self, operation, _payload, **_kwargs):
+            assert operation == "ohf-stop"
+            return {
+                "observation": to_wire(observation),
+                "artifact_receipt": receipt.to_wire(),
+            }
+
+    adapter = RemoteCodexOperatorAdapter(Client(), turn_input_loader=lambda _turn: "")  # type: ignore[arg-type]
+    with pytest.raises(Exception, match="not observed in protocol order"):
+        adapter.terminal_artifact_receipt(generation)
+    assert adapter.graceful_stop(
+        generation, operation_id=OperationId("ohf-op:stop-remote")
+    ) == observation
+    assert adapter.terminal_artifact_receipt(generation) == receipt
+
+
+def test_operator_prompt_carries_verified_commission_without_widening_job_grant(
+    tmp_path: Path,
+) -> None:
+    runtime, root, planner = _seed_dispatchable_operator_planner(tmp_path)
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert isinstance(dispatch, OrchestrationDispatchOutcome)
+    assert dispatch.lease_token is not None
+    lease = AttemptLease(dispatch.attempt, dispatch.lease_token)
+    commission_text = "# Immutable commission\nUse the exact bounded acceptance contract.\n"
+    commission = VerifiedCommission(
+        repository="mastermindx-market-intelligence/Mastermind",
+        commit="c" * 40,
+        path="research/commission.md",
+        content_sha256=hashlib.sha256(commission_text.encode()).hexdigest(),
+        content=commission_text.encode(),
+    )
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=lambda _loader: None,  # type: ignore[arg-type]
+        prompt_source=_CommissionPromptSource(),  # type: ignore[arg-type]
+    )
+
+    prompt = supervisor._prompt(planner, lease, commission)
+
+    assert commission_text in prompt
+    assert '"path": "research/commission.md"' in prompt
+    assert "output schema" in prompt
+    assert planner.requested_authorities == ["READ"]
+    assert planner.allowed_write_paths == []
+
+
+def test_fresh_operator_commission_refusal_happens_before_provider_construction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime, root, planner = _seed_dispatchable_operator_planner(tmp_path)
+    factory_calls = 0
+
+    def refuse(*_args, **_kwargs):
+        raise RuntimeError("synthetic immutable commission refusal")
+
+    def factory(_loader):
+        nonlocal factory_calls
+        factory_calls += 1
+        raise AssertionError("provider adapter must not be constructed after commission refusal")
+
+    monkeypatch.setattr(
+        "control_plane.executive_operator_supervisor.verify_commission_for_job", refuse
+    )
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=_PromptSource(),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(
+        ExecutiveOperatorSupervisorError, match="immutable commission verification failed"
+    ):
+        asyncio.run(
+            supervisor.start_cycle_job(
+                planner.job_id,
+                command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+            )
+        )
+
+    assert factory_calls == 0
+
+
+def test_restart_commission_refusal_blocks_resume_but_not_later_cancellation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock, runtime, _root, planner, dispatch, profile, _epoch = _seed_expired_g1(
+        tmp_path, observed_dead=False, with_turn=True
+    )
+    adapters: list[_RecoveryAdapter] = []
+    verification_calls = 0
+
+    def factory(loader):
+        adapter = _RecoveryAdapter(
+            runtime, profile, loader, live_existing=True
+        )
+        adapters.append(adapter)
+        return adapter
+
+    def refuse(*_args, **_kwargs):
+        nonlocal verification_calls
+        verification_calls += 1
+        raise RuntimeError("synthetic immutable commission refusal")
+
+    monkeypatch.setattr(
+        "control_plane.executive_operator_supervisor.verify_commission_for_job", refuse
+    )
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=_PromptSource(),  # type: ignore[arg-type]
+    )
+    clock.advance(3)
+
+    held = supervisor.reconcile_restart()
+
+    assert [item.status for item in held] == [ReconcileStatus.IDENTITY_AMBIGUOUS]
+    assert verification_calls == 1
+    assert adapters == []
+    attempt = runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
+    assert attempt is not None
+    assert attempt.status in {AttemptStatus.CLAIMED, AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED}
+
+    cancelled = runtime.jobs.cancel_job(planner.job_id)
+    assert cancelled.status is JobStatus.CANCEL_REQUESTED
+    clock.advance(361)
+    recovered = supervisor.reconcile_restart()
+
+    assert [item.status for item in recovered] == [ReconcileStatus.MISSING_CANCELLED]
+    assert verification_calls == 1, "cancellation containment must not re-read commission"
+    assert len(adapters) == 1
+    assert adapters[0].resume_calls == 0
+    assert adapters[0].begin_turn_calls == 0
+    assert adapters[0].cancel_calls == 1
+    attempt = runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
+    assert attempt is not None and attempt.status is AttemptStatus.CANCELLED
+
+
+@pytest.mark.parametrize("missing_local_path", [False, True])
+def test_remote_commission_cannot_borrow_control_local_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing_local_path: bool
+) -> None:
+    runtime, root, planner = _seed_dispatchable_operator_planner(
+        tmp_path, commission_content=b"# Exact remote commission\n"
+    )
+    original = Path(planner.worktree)
+    info = original.stat()
+    if missing_local_path:
+        original.rename(original.with_name("remote-only-source"))
+    identity = WorkspaceIdentity(
+        str(original), planner.constraints["base_sha"],
+        info.st_dev, info.st_ino, info.st_uid, info.st_gid,
+    )
+    calls = []
+
+    def forbidden(*_args, **_kwargs):
+        calls.append("unexpected_source_or_provider")
+        raise AssertionError("remote commission must not borrow Control-local source")
+
+    monkeypatch.setattr("control_plane.executive_supervisor._commission_git_probe", forbidden)
+    def unavailable_remote(**_kwargs):
+        calls.append("canonical_remote_reader")
+        raise RuntimeError("immutable remote bytes unavailable")
+    monkeypatch.setattr("control_plane.executive_supervisor._fetch_remote_commission", unavailable_remote)
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime, claimed_adapter_factory=forbidden,
+        workspace_identity_source=lambda _attempt, _job: identity,
+        prompt_source=_CommissionPromptSource(),
+    )
+    with pytest.raises(ExecutiveOperatorSupervisorError,
+                       match="immutable remote bytes unavailable"):
+        asyncio.run(supervisor.start_cycle_job(
+            planner.job_id,
+            command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        ))
+    assert calls == ["canonical_remote_reader"]
+    with runtime.store.read() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM harness_session_epochs").fetchone()[0] == 0

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import os
 import socket
@@ -12,6 +13,13 @@ from pathlib import Path
 import pytest
 
 import integrations.slack_agent_dialogue.service as service_module
+from common.agent_dialogue_consultation_contract import (
+    CONSULTATION_SCHEMA,
+    CONSULTATION_V2_SCHEMA,
+    RECEIPT_KEYS,
+    build_consultation,
+)
+from control_plane.operator_harness_contract import runtime_binding_id_for
 from integrations.slack_agent_dialogue.contract import (
     MESSAGE_SCHEMA,
     PARENT_SCHEMA,
@@ -23,7 +31,13 @@ from integrations.slack_agent_dialogue.contract import (
 from integrations.slack_agent_dialogue.engine import (
     DialogueEngine,
     DialoguePolicy,
+    MessageReceipt,
     SlackMessage,
+)
+from integrations.slack_agent_dialogue.engine_v2 import (
+    DialogueFrameKind,
+    PreparedMessageSend,
+    ReadConsultationPacket,
 )
 from integrations.slack_agent_dialogue.fake_slack import InMemorySlackClient
 from integrations.slack_agent_dialogue.service import (
@@ -31,6 +45,7 @@ from integrations.slack_agent_dialogue.service import (
     AgentDialogueService,
     CONTROL_VERSION,
     DialogueServiceError,
+    EXACT_SEND_PROTOCOL,
     ServiceConfig,
     call_service,
 )
@@ -69,6 +84,9 @@ class FakeV2Engine:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
+        self.relay_parent_thread_ts = THREAD_TS
+        self.prepare_duplicate = False
+        self.packet_read_result: ReadConsultationPacket | None = None
 
     def status(self) -> dict[str, object]:
         self.calls.append(("status", None))
@@ -84,6 +102,15 @@ class FakeV2Engine:
         return {
             "thread_ts": THREAD_TS,
             "operation_key": normalized["operation_key"],
+        }
+
+    async def bind_or_verify_relay_parent_thread(self, context) -> dict[str, object]:
+        normalized = context.normalized()
+        self.calls.append(("bind_or_verify_relay_parent_thread", normalized))
+        return {
+            "thread_ts": self.relay_parent_thread_ts,
+            "parent_author_user_id": BOT,
+            "parent_fingerprint": "a" * 64,
         }
 
     async def ensure_thread(self, context, *, created_at: str) -> dict[str, object]:
@@ -114,6 +141,99 @@ class FakeV2Engine:
         )
         return {"action": "DUPLICATE", "message_key": message["message_key"]}
 
+    async def prepare_send_message(self, *, thread_ts: str, context, message):
+        normalized = context.normalized()
+        self.calls.append(
+            (
+                "prepare_send_message",
+                {
+                    "thread_ts": thread_ts,
+                    "context": normalized,
+                    "message": dict(message),
+                },
+            )
+        )
+        if self.prepare_duplicate:
+            return MessageReceipt(
+                action="DUPLICATE",
+                message_key=message["message_key"],
+                fingerprint=message["fingerprint"],
+                message_ts="1787471000.000002",
+                duplicate_timestamps=(),
+            )
+        return PreparedMessageSend(
+            thread_ts=thread_ts,
+            context=context,
+            message=dict(message),
+            text="frozen fake frame",
+            message_key=message["message_key"],
+            fingerprint=message["fingerprint"],
+        )
+
+    async def commit_send_message(self, prepared, *, fingerprint: str):
+        self.calls.append(
+            (
+                "commit_send_message",
+                {"prepared": prepared, "fingerprint": fingerprint},
+            )
+        )
+        return {
+            "action": "POSTED",
+            "message_key": prepared.message_key,
+            "fingerprint": prepared.fingerprint,
+            "message_ts": "1787471000.000002",
+            "duplicate_timestamps": [],
+        }
+
+    async def prepare_send_consultation_packet(
+        self, *, thread_ts: str, context, packet
+    ):
+        normalized = context.normalized()
+        self.calls.append(
+            (
+                "prepare_send_consultation_packet",
+                {
+                    "thread_ts": thread_ts,
+                    "context": normalized,
+                    "packet": dict(packet),
+                },
+            )
+        )
+        if self.prepare_duplicate:
+            return MessageReceipt(
+                action="DUPLICATE",
+                message_key=packet["message_key"],
+                fingerprint=packet["fingerprint"],
+                message_ts="1787471000.000003",
+                duplicate_timestamps=(),
+            )
+        return PreparedMessageSend(
+            thread_ts=thread_ts,
+            context=context,
+            message=dict(packet),
+            text="frozen fake consultation packet",
+            message_key=packet["message_key"],
+            fingerprint=packet["fingerprint"],
+            frame_kind=DialogueFrameKind.CONSULTATION_PACKET,
+        )
+
+    async def commit_send_consultation_packet(
+        self, prepared, *, fingerprint: str
+    ):
+        self.calls.append(
+            (
+                "commit_send_consultation_packet",
+                {"prepared": prepared, "fingerprint": fingerprint},
+            )
+        )
+        return {
+            "action": "POSTED",
+            "message_key": prepared.message_key,
+            "fingerprint": prepared.fingerprint,
+            "message_ts": "1787471000.000003",
+            "duplicate_timestamps": [],
+        }
+
     async def read_thread(self, *, thread_ts: str, context) -> dict[str, object]:
         normalized = context.normalized()
         self.calls.append(
@@ -123,6 +243,28 @@ class FakeV2Engine:
             )
         )
         return {"thread_ts": thread_ts, "messages": []}
+
+    async def read_consultation_packet(
+        self,
+        *,
+        thread_ts: str,
+        context,
+        consultation_id: str,
+        purpose: str,
+    ):
+        normalized = context.normalized()
+        self.calls.append(
+            (
+                "read_consultation_packet",
+                {
+                    "thread_ts": thread_ts,
+                    "context": normalized,
+                    "consultation_id": consultation_id,
+                    "purpose": purpose,
+                },
+            )
+        )
+        return self.packet_read_result
 
     async def wait_for_reply(
         self,
@@ -291,6 +433,107 @@ def v2_message_dict() -> dict[str, object]:
     }
 
 
+def consultation_packet_dict(*, purpose: str = "QUESTION") -> dict[str, object]:
+    message_key = "asd-consultation-service-question-0001"
+    consultation_id = "consult-8bdf4a6f9a664bbcf1a93d67a41ba51d"
+    question = build_consultation(
+        {
+            "schema": CONSULTATION_SCHEMA,
+            "message_key": message_key,
+            "consultation_id": consultation_id,
+            "purpose": "QUESTION",
+            "requester_actor_ref": {
+                "kind": "worker_attempt",
+                "job_id": "JOB-200",
+                "attempt_id": "ATT-100",
+                "worker_id": "codex-requester",
+            },
+            "recipient_actor_ref": {
+                "kind": "worker_attempt",
+                "job_id": "JOB-200",
+                "attempt_id": "ATT-200",
+                "worker_id": "codex-recipient",
+            },
+            "recipient_peer_ref": "peer-8bdf4a6f9a664bbcf1a93d67a41ba51d",
+            "recipient_binding": {
+                "binding_id": runtime_binding_id_for("ATT-200", "EPOCH-0002"),
+                "binding_generation": 1,
+                "reasoning_surface": "codex",
+            },
+            "correlation": {
+                "parent_fingerprint": "a" * 64,
+                "request_message_key": message_key,
+                "consultation_id": consultation_id,
+                "requester_actor_digest": "b" * 64,
+                "recipient_actor_digest": "c" * 64,
+            },
+            "question": "Can the exact Relay service carry this packet?",
+            "answer": None,
+            "evidence_refs": [],
+            "artifact_revisions": [
+                {
+                    "repository": REPO,
+                    "path": "research/commission.md",
+                    "commit": "a" * 40,
+                    "content_sha256": "b" * 64,
+                }
+            ],
+            "valid_until": "2026-09-25T01:00:00Z",
+            "deadline_ms": 60000,
+            "response_budget": {
+                "max_answers": 1,
+                "max_evidence_reads": 2,
+                "max_forward_hops": 0,
+                "max_payload_bytes": 2048,
+            },
+            "supersedes_message_key": None,
+            "receipts": {key: None for key in RECEIPT_KEYS},
+            "fingerprint": "",
+        }
+    )
+    if purpose == "QUESTION":
+        return question
+    if purpose != "ANSWER":
+        raise ValueError("purpose must be QUESTION or ANSWER")
+    answer = copy.deepcopy(question)
+    answer["schema"] = CONSULTATION_V2_SCHEMA
+    answer["message_key"] = "asd-consultation-service-answer-0001"
+    answer["purpose"] = "ANSWER"
+    answer["question"] = None
+    answer["answer"] = {
+        "text": '{"answer":"bounded"}',
+        "evidence_refs": [],
+    }
+    answer["question_message_key"] = question["message_key"]
+    answer["fingerprint"] = ""
+    return build_consultation(answer)
+
+
+def exact_send_packet_request_v2(*, purpose: str = "QUESTION") -> dict[str, object]:
+    return request_envelope_v2(
+        "send_consultation_packet",
+        {
+            "context": context_v2_dict(),
+            "thread_ts": THREAD_TS,
+            "message": consultation_packet_dict(purpose=purpose),
+            "send_protocol": EXACT_SEND_PROTOCOL,
+        },
+    )
+
+
+def read_packet_request_v2(*, purpose: str = "QUESTION") -> dict[str, object]:
+    packet = consultation_packet_dict(purpose=purpose)
+    return request_envelope_v2(
+        "read_consultation_packet",
+        {
+            "context": context_v2_dict(),
+            "thread_ts": THREAD_TS,
+            "consultation_id": packet["consultation_id"],
+            "purpose": purpose,
+        },
+    )
+
+
 def parent() -> SlackMessage:
     value = build_parent(
         {
@@ -457,6 +700,18 @@ def request_envelope_v2(operation: str, args: dict[str, object]) -> dict[str, ob
     return {"version": CONTROL_VERSION_V2_TEXT, "operation": operation, "args": args}
 
 
+def exact_send_request_v2() -> dict[str, object]:
+    return request_envelope_v2(
+        "send_message",
+        {
+            "context": context_v2_dict(),
+            "thread_ts": THREAD_TS,
+            "message": v2_message_dict(),
+            "send_protocol": EXACT_SEND_PROTOCOL,
+        },
+    )
+
+
 def test_real_unix_status_and_one_shot_cleanup(socket_root: Path) -> None:
     async def scenario() -> None:
         srv, _client = service(socket_root)
@@ -469,6 +724,710 @@ def test_real_unix_status_and_one_shot_cleanup(socket_root: Path) -> None:
         assert response["result"]["status"] == "DEVELOPMENT_UNARMED"
         await task
         assert not srv.config.socket_path.exists()
+
+    run(scenario())
+
+
+def test_v2_send_response_loss_after_dispatch_is_effect_unknown(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        path = socket_root / "lost-send-response.sock"
+        received = asyncio.Event()
+
+        async def close_without_response(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            await reader.readuntil(b"\n")
+            received.set()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_unix_server(close_without_response, path)
+        try:
+            with pytest.raises(DialogueServiceError) as exc:
+                await call_service(
+                    path,
+                    request_envelope_v2("send_message", {"opaque": "request"}),
+                    timeout_seconds=1,
+                )
+            assert exc.value.code == "SEND_EFFECT_UNKNOWN"
+            await asyncio.wait_for(received.wait(), timeout=1)
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_call_service_runs_before_write_hook_after_unix_connect(
+    socket_root: Path,
+) -> None:
+    """Moving the hook before connect or after request bytes must fail."""
+
+    async def scenario() -> None:
+        path = socket_root / "before-write-order.sock"
+        accepted = asyncio.Event()
+        received = asyncio.Event()
+        order: list[str] = []
+
+        async def respond(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            order.append("connected")
+            accepted.set()
+            await reader.readuntil(b"\n")
+            order.append("bytes")
+            writer.write(b'{"ok":true,"result":{"accepted":true}}\n')
+            await writer.drain()
+            received.set()
+            writer.close()
+            await writer.wait_closed()
+
+        async def before_write() -> None:
+            await asyncio.wait_for(accepted.wait(), timeout=1)
+            order.append("hook")
+
+        server = await asyncio.start_unix_server(respond, path)
+        try:
+            response = await call_service(
+                path,
+                request_envelope_v2("send_message", {"opaque": "request"}),
+                timeout_seconds=1,
+                before_write=before_write,
+            )
+            await asyncio.wait_for(received.wait(), timeout=1)
+            assert response == {"ok": True, "result": {"accepted": True}}
+            assert order == ["connected", "hook", "bytes"]
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_call_service_before_write_refusal_is_definite_and_sends_zero_bytes(
+    socket_root: Path,
+) -> None:
+    """Translating a pre-write refusal to SEND_EFFECT_UNKNOWN must fail."""
+
+    class BeforeWriteRefused(RuntimeError):
+        pass
+
+    async def scenario() -> None:
+        path = socket_root / "before-write-refusal.sock"
+        accepted = asyncio.Event()
+        observed_eof = asyncio.Event()
+        received = bytearray()
+
+        async def observe(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            accepted.set()
+            received.extend(await reader.read())
+            observed_eof.set()
+            writer.close()
+            await writer.wait_closed()
+
+        async def before_write() -> None:
+            await asyncio.wait_for(accepted.wait(), timeout=1)
+            raise BeforeWriteRefused("durable ATTEMPTED marker was refused")
+
+        server = await asyncio.start_unix_server(observe, path)
+        try:
+            with pytest.raises(BeforeWriteRefused, match="durable ATTEMPTED"):
+                await call_service(
+                    path,
+                    request_envelope_v2("send_message", {"opaque": "request"}),
+                    timeout_seconds=1,
+                    before_write=before_write,
+                )
+            await asyncio.wait_for(observed_eof.wait(), timeout=1)
+            assert bytes(received) == b""
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_exact_send_operation_set_accepts_lifecycle_and_packet_only() -> None:
+    assert AgentDialogueService._is_exact_send_request(exact_send_request_v2())
+    assert AgentDialogueService._is_exact_send_request(
+        exact_send_packet_request_v2()
+    )
+
+    for operation in (
+        "send_consultation",
+        "send_consultation_packets",
+        "read_consultation_packet",
+        [],
+    ):
+        request = exact_send_packet_request_v2()
+        request["operation"] = operation
+        assert not AgentDialogueService._is_exact_send_request(request)
+
+
+@pytest.mark.parametrize("purpose", ["QUESTION", "ANSWER"])
+def test_exact_packet_send_uses_ready_commit_and_verified_parent(
+    purpose: str,
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+        request = exact_send_packet_request_v2(purpose=purpose)
+        packet = request["args"]["message"]
+        callbacks: list[str] = []
+
+        async def before_write() -> None:
+            callbacks.append("before_write")
+
+        try:
+            response = await call_service(
+                srv.config.socket_path,
+                request,
+                before_write=before_write,
+            )
+            assert response == {
+                "ok": True,
+                "result": {
+                    "action": "POSTED",
+                    "message_key": packet["message_key"],
+                    "fingerprint": packet["fingerprint"],
+                    "message_ts": "1787471000.000003",
+                    "duplicate_timestamps": [],
+                    "thread_ts": THREAD_TS,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "a" * 64,
+                },
+            }
+            assert callbacks == ["before_write"]
+            assert [name for name, _value in fake.calls] == [
+                "bind_or_verify_relay_parent_thread",
+                "prepare_send_consultation_packet",
+                "commit_send_consultation_packet",
+            ]
+        finally:
+            await task
+
+    run(scenario())
+
+
+def test_exact_send_calls_hook_only_after_ready_then_commits_same_fingerprint(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        path = socket_root / "exact-send-order.sock"
+        request = exact_send_request_v2()
+        fingerprint = request["args"]["message"]["fingerprint"]
+        order: list[str] = []
+
+        async def exact_server(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            observed = json.loads(await reader.readline())
+            assert observed == request
+            order.append("prepare")
+            writer.write(
+                json.dumps(
+                    {"ok": True, "ready": {"fingerprint": fingerprint}},
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            )
+            await writer.drain()
+            order.append("ready")
+            commit = json.loads(await reader.readline())
+            order.append("commit")
+            assert commit == {
+                "commit": "COMMIT",
+                "fingerprint": fingerprint,
+            }
+            writer.write(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "result": {
+                            "action": "POSTED",
+                            "message_key": request["args"]["message"]["message_key"],
+                            "fingerprint": fingerprint,
+                            "message_ts": "1787471000.000002",
+                            "duplicate_timestamps": [],
+                        },
+                    },
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            )
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        async def before_write() -> None:
+            order.append("callback")
+
+        server = await asyncio.start_unix_server(exact_server, path)
+        try:
+            response = await call_service(
+                path,
+                request,
+                timeout_seconds=1,
+                before_write=before_write,
+            )
+            assert response["ok"] is True
+            assert order == ["prepare", "ready", "callback", "commit"]
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_exact_send_committed_receipt_is_closed_over_verified_relay_parent(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+        request = exact_send_request_v2()
+        message = request["args"]["message"]
+        try:
+            response = await call_service(srv.config.socket_path, request)
+            assert response == {
+                "ok": True,
+                "result": {
+                    "action": "POSTED",
+                    "message_key": message["message_key"],
+                    "fingerprint": message["fingerprint"],
+                    "message_ts": "1787471000.000002",
+                    "duplicate_timestamps": [],
+                    "thread_ts": THREAD_TS,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "a" * 64,
+                },
+            }
+            assert [name for name, _value in fake.calls] == [
+                "bind_or_verify_relay_parent_thread",
+                "prepare_send_message",
+                "commit_send_message",
+            ]
+        finally:
+            await task
+
+    run(scenario())
+
+
+def test_exact_send_duplicate_receipt_is_closed_over_verified_relay_parent(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        fake.prepare_duplicate = True
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+        request = exact_send_request_v2()
+        message = request["args"]["message"]
+        try:
+            response = await call_service(srv.config.socket_path, request)
+            assert response == {
+                "ok": True,
+                "result": {
+                    "action": "DUPLICATE",
+                    "message_key": message["message_key"],
+                    "fingerprint": message["fingerprint"],
+                    "message_ts": "1787471000.000002",
+                    "duplicate_timestamps": [],
+                    "thread_ts": THREAD_TS,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "a" * 64,
+                },
+            }
+            assert [name for name, _value in fake.calls] == [
+                "bind_or_verify_relay_parent_thread",
+                "prepare_send_message",
+            ]
+        finally:
+            await task
+
+    run(scenario())
+
+
+def test_exact_send_refuses_request_thread_not_owned_by_verified_relay_parent(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        fake.relay_parent_thread_ts = "1787471000.000099"
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+        try:
+            response = await call_service(srv.config.socket_path, exact_send_request_v2())
+            assert response == {
+                "ok": False,
+                "error": {"code": "THREAD_CONTEXT_MISMATCH"},
+            }
+            assert [name for name, _value in fake.calls] == [
+                "bind_or_verify_relay_parent_thread",
+            ]
+        finally:
+            await task
+
+    run(scenario())
+
+
+def test_exact_send_deep_snapshots_request_before_ready_callback_mutation(
+    socket_root: Path,
+) -> None:
+    """The COMMIT fingerprint is fixed before the first await ignores mutation."""
+
+    async def scenario() -> None:
+        path = socket_root / "exact-send-deep-snapshot.sock"
+        request = exact_send_request_v2()
+        original_fingerprint = request["args"]["message"]["fingerprint"]
+        commit_seen = asyncio.Event()
+        prepare_seen = asyncio.Event()
+        release_ready = asyncio.Event()
+
+        async def exact_server(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            observed = json.loads(await reader.readline())
+            assert observed["args"]["message"]["fingerprint"] == original_fingerprint
+            prepare_seen.set()
+            await release_ready.wait()
+            writer.write(
+                json.dumps(
+                    {"ok": True, "ready": {"fingerprint": original_fingerprint}},
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            )
+            await writer.drain()
+            assert json.loads(await reader.readline()) == {
+                "commit": "COMMIT",
+                "fingerprint": original_fingerprint,
+            }
+            commit_seen.set()
+            writer.write(
+                b'{"ok":true,"result":{"accepted":true}}\n'
+            )
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_unix_server(exact_server, path)
+        try:
+            caller = asyncio.create_task(
+                call_service(path, request, timeout_seconds=1)
+            )
+            await asyncio.wait_for(prepare_seen.wait(), timeout=1)
+            request["args"]["message"]["fingerprint"] = "f" * 64
+            release_ready.set()
+            response = await caller
+            assert response == {"ok": True, "result": {"accepted": True}}
+            await asyncio.wait_for(commit_seen.wait(), timeout=1)
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_exact_send_ready_disconnect_runs_no_commit_or_provider_dispatch(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+
+        reader, writer = await asyncio.open_unix_connection(str(srv.config.socket_path))
+        writer.write(
+            json.dumps(exact_send_request_v2(), separators=(",", ":")).encode()
+            + b"\n"
+        )
+        await writer.drain()
+        ready = json.loads(await reader.readline())
+        assert ready == {
+            "ok": True,
+            "ready": {"fingerprint": v2_message_dict()["fingerprint"]},
+        }
+        writer.close()
+        await writer.wait_closed()
+        await task
+
+        assert [name for name, _value in fake.calls] == [
+            "bind_or_verify_relay_parent_thread",
+            "prepare_send_message",
+        ]
+
+    run(scenario())
+
+
+def test_exact_send_commit_fingerprint_mismatch_dispatches_zero_times(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+
+        reader, writer = await asyncio.open_unix_connection(str(srv.config.socket_path))
+        writer.write(
+            json.dumps(exact_send_request_v2(), separators=(",", ":")).encode()
+            + b"\n"
+        )
+        await writer.drain()
+        assert json.loads(await reader.readline())["ready"]["fingerprint"] == "0" * 64
+        writer.write(
+            json.dumps(
+                {"commit": "COMMIT", "fingerprint": "f" * 64},
+                separators=(",", ":"),
+            ).encode()
+            + b"\n"
+        )
+        await writer.drain()
+        assert json.loads(await reader.readline()) == {
+            "ok": False,
+            "error": {"code": "REQUEST_INVALID"},
+        }
+        writer.close()
+        await writer.wait_closed()
+        await task
+
+        assert [name for name, _value in fake.calls] == [
+            "bind_or_verify_relay_parent_thread",
+            "prepare_send_message",
+        ]
+
+    run(scenario())
+
+
+def test_exact_send_pre_ready_refusal_never_runs_callback(socket_root: Path) -> None:
+    async def scenario() -> None:
+        path = socket_root / "exact-send-refused.sock"
+        callback_called = False
+
+        async def refuse(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            await reader.readline()
+            writer.write(
+                b'{"ok":false,"error":{"code":"THREAD_CONTEXT_MISMATCH"}}\n'
+            )
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        async def before_write() -> None:
+            nonlocal callback_called
+            callback_called = True
+
+        server = await asyncio.start_unix_server(refuse, path)
+        try:
+            response = await call_service(
+                path,
+                exact_send_request_v2(),
+                timeout_seconds=1,
+                before_write=before_write,
+            )
+            assert response == {
+                "ok": False,
+                "error": {"code": "THREAD_CONTEXT_MISMATCH"},
+            }
+            assert callback_called is False
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_exact_send_ready_fingerprint_drift_runs_no_callback_or_commit(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        path = socket_root / "exact-send-ready-drift.sock"
+        observed_after_ready = bytearray()
+        callback_called = False
+
+        async def drift(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            await reader.readline()
+            writer.write(
+                b'{"ok":true,"ready":{"fingerprint":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}}\n'
+            )
+            await writer.drain()
+            observed_after_ready.extend(await reader.read())
+            writer.close()
+            await writer.wait_closed()
+
+        async def before_write() -> None:
+            nonlocal callback_called
+            callback_called = True
+
+        server = await asyncio.start_unix_server(drift, path)
+        try:
+            with pytest.raises(DialogueServiceError) as exc:
+                await call_service(
+                    path,
+                    exact_send_request_v2(),
+                    timeout_seconds=1,
+                    before_write=before_write,
+                )
+            assert exc.value.code == "SERVICE_UNAVAILABLE"
+            assert callback_called is False
+            assert bytes(observed_after_ready) == b""
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_exact_packet_send_lost_reply_after_commit_is_effect_unknown(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        path = socket_root / "exact-packet-lost-reply.sock"
+        request = exact_send_packet_request_v2()
+        fingerprint = request["args"]["message"]["fingerprint"]
+        commit_seen = asyncio.Event()
+
+        async def lose_reply(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            assert json.loads(await reader.readline()) == request
+            writer.write(
+                json.dumps(
+                    {"ok": True, "ready": {"fingerprint": fingerprint}},
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            )
+            await writer.drain()
+            assert json.loads(await reader.readline()) == {
+                "commit": "COMMIT",
+                "fingerprint": fingerprint,
+            }
+            commit_seen.set()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_unix_server(lose_reply, path)
+        try:
+            with pytest.raises(DialogueServiceError) as exc:
+                await call_service(path, request, timeout_seconds=1)
+            assert exc.value.code == "SEND_EFFECT_UNKNOWN"
+            await asyncio.wait_for(commit_seen.wait(), timeout=1)
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_exact_send_lost_reply_after_commit_is_effect_unknown(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        path = socket_root / "exact-send-lost-reply.sock"
+        request = exact_send_request_v2()
+        fingerprint = request["args"]["message"]["fingerprint"]
+        commit_seen = asyncio.Event()
+
+        async def lose_reply(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            await reader.readline()
+            writer.write(
+                json.dumps(
+                    {"ok": True, "ready": {"fingerprint": fingerprint}},
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            )
+            await writer.drain()
+            commit = json.loads(await reader.readline())
+            assert commit == {"commit": "COMMIT", "fingerprint": fingerprint}
+            commit_seen.set()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_unix_server(lose_reply, path)
+        try:
+            with pytest.raises(DialogueServiceError) as exc:
+                await call_service(path, request, timeout_seconds=1)
+            assert exc.value.code == "SEND_EFFECT_UNKNOWN"
+            await asyncio.wait_for(commit_seen.wait(), timeout=1)
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_exact_send_unproven_server_error_after_commit_is_effect_unknown(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        path = socket_root / "exact-send-internal-after-commit.sock"
+        request = exact_send_request_v2()
+        fingerprint = request["args"]["message"]["fingerprint"]
+
+        async def unproven_error(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            await reader.readline()
+            writer.write(
+                json.dumps(
+                    {"ok": True, "ready": {"fingerprint": fingerprint}},
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            )
+            await writer.drain()
+            assert json.loads(await reader.readline()) == {
+                "commit": "COMMIT",
+                "fingerprint": fingerprint,
+            }
+            writer.write(b'{"ok":false,"error":{"code":"INTERNAL_ERROR"}}\n')
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_unix_server(unproven_error, path)
+        try:
+            with pytest.raises(DialogueServiceError) as exc:
+                await call_service(path, request, timeout_seconds=1)
+            assert exc.value.code == "SEND_EFFECT_UNKNOWN"
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
 
     run(scenario())
 
@@ -1244,7 +2203,86 @@ def test_v2_without_engine_returns_existing_fixed_request_invalid(socket_root: P
     assert str(exc.value) == "REQUEST_INVALID"
 
 
-def test_v2_dispatches_only_the_six_closed_operations(socket_root: Path) -> None:
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"context": context_v2_dict(), "thread_ts": THREAD_TS},
+        {
+            "context": context_v2_dict(),
+            "thread_ts": THREAD_TS,
+            "consultation_id": "consult-8bdf4a6f9a664bbcf1a93d67a41ba51d",
+            "purpose": [],
+        },
+        {
+            "context": context_v2_dict(),
+            "thread_ts": THREAD_TS,
+            "consultation_id": "consult-8bdf4a6f9a664bbcf1a93d67a41ba51d",
+            "purpose": "QUESTION",
+            "channel_id": "C0000000000",
+        },
+    ],
+)
+def test_v2_exact_packet_read_arguments_are_closed(
+    args: dict[str, object], socket_root: Path
+) -> None:
+    srv, fake = service_with_v2(socket_root)
+
+    with pytest.raises(DialogueServiceError) as exc:
+        run(srv._dispatch(request_envelope_v2("read_consultation_packet", args)))
+
+    assert exc.value.code == "REQUEST_INVALID"
+    assert fake.calls == []
+
+
+def test_v2_exact_packet_read_returns_one_packet_or_proven_absence(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        packet = consultation_packet_dict()
+        srv, fake = service_with_v2(socket_root)
+        fake.packet_read_result = ReadConsultationPacket(
+            packet=packet,
+            primary_ts="1787471000.000004",
+            duplicate_timestamps=(),
+        )
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+        response = await call_service(
+            srv.config.socket_path, read_packet_request_v2()
+        )
+        await task
+
+        assert response == {
+            "ok": True,
+            "result": {
+                "packet": packet,
+                "primary_ts": "1787471000.000004",
+                "duplicate_timestamps": [],
+            },
+        }
+        assert [name for name, _value in fake.calls] == [
+            "read_consultation_packet"
+        ]
+
+        absent_srv, absent_fake = service_with_v2(socket_root)
+        absent_task = asyncio.create_task(absent_srv.serve_one())
+        await wait_for_service_start(
+            absent_task, absent_srv.config.socket_path
+        )
+        absent = await call_service(
+            absent_srv.config.socket_path, read_packet_request_v2()
+        )
+        await absent_task
+
+        assert absent == {"ok": True, "result": None}
+        assert [name for name, _value in absent_fake.calls] == [
+            "read_consultation_packet"
+        ]
+
+    run(scenario())
+
+
+def test_v2_dispatches_only_the_eight_closed_operations(socket_root: Path) -> None:
     srv, fake = service_with_v2(socket_root)
     context = context_v2_dict()
     message = v2_message_dict()
@@ -1260,6 +2298,20 @@ def test_v2_dispatches_only_the_six_closed_operations(socket_root: Path) -> None
     assert bound == {
         "thread_ts": THREAD_TS,
         "operation_key": context["operation_key"],
+    }
+
+    relay_bound = run(
+        srv._dispatch(
+            request_envelope_v2(
+                "bind_or_verify_relay_parent_thread", {"context": context}
+            )
+        )
+    )
+    assert relay_bound == {
+        "attestation": "mastermind.agent_dialogue.relay_parent/v1",
+        "thread_ts": THREAD_TS,
+        "parent_author_user_id": BOT,
+        "parent_fingerprint": "a" * 64,
     }
 
     ensured = run(
@@ -1298,6 +2350,31 @@ def test_v2_dispatches_only_the_six_closed_operations(socket_root: Path) -> None
     )
     assert read == {"thread_ts": THREAD_TS, "messages": []}
 
+    packet = consultation_packet_dict()
+    fake.packet_read_result = ReadConsultationPacket(
+        packet=packet,
+        primary_ts="1787471000.000004",
+        duplicate_timestamps=(),
+    )
+    packet_read = run(
+        srv._dispatch(
+            request_envelope_v2(
+                "read_consultation_packet",
+                {
+                    "context": context,
+                    "thread_ts": THREAD_TS,
+                    "consultation_id": packet["consultation_id"],
+                    "purpose": "QUESTION",
+                },
+            )
+        )
+    )
+    assert packet_read == {
+        "packet": packet,
+        "primary_ts": "1787471000.000004",
+        "duplicate_timestamps": [],
+    }
+
     waited = run(
         srv._dispatch(
             request_envelope_v2(
@@ -1316,9 +2393,11 @@ def test_v2_dispatches_only_the_six_closed_operations(socket_root: Path) -> None
     assert [call[0] for call in fake.calls] == [
         "status",
         "bind_or_verify_thread",
+        "bind_or_verify_relay_parent_thread",
         "ensure_thread",
         "send_message",
         "read_thread",
+        "read_consultation_packet",
         "wait_for_reply",
     ]
 
@@ -1455,6 +2534,68 @@ def test_v2_real_unix_status_uses_same_one_shot_boundary(socket_root: Path) -> N
         }
         await task
         assert not srv.config.socket_path.exists()
+
+    run(scenario())
+
+
+def test_v2_active_waiter_conflict_is_explicit_at_service_boundary(
+    socket_root: Path,
+) -> None:
+    from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+        ActiveWaiterConflict,
+    )
+
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+
+        async def conflict(**_kwargs):
+            raise ActiveWaiterConflict()
+
+        fake.wait_for_reply = conflict
+        await srv.start()
+        try:
+            response = await call_service(
+                srv.config.socket_path,
+                request_envelope_v2(
+                    "wait_for_reply",
+                    {
+                        "context": context_v2_dict(),
+                        "thread_ts": THREAD_TS,
+                        "request_message_key": "asd-request-v2-service-wait",
+                        "expected_types": ["STOP"],
+                        "max_attempts": 1,
+                    },
+                ),
+            )
+            assert response == {
+                "ok": False,
+                "error": {"code": "ACTIVE_WAITER_CONFLICT"},
+            }
+
+            async def unknown(**_kwargs):
+                raise RuntimeError("private waiter detail")
+
+            fake.wait_for_reply = unknown
+            unknown_response = await call_service(
+                srv.config.socket_path,
+                request_envelope_v2(
+                    "wait_for_reply",
+                    {
+                        "context": context_v2_dict(),
+                        "thread_ts": THREAD_TS,
+                        "request_message_key": "asd-request-v2-service-wait",
+                        "expected_types": ["STOP"],
+                        "max_attempts": 1,
+                    },
+                ),
+            )
+            assert unknown_response == {
+                "ok": False,
+                "error": {"code": "INTERNAL_ERROR"},
+            }
+            assert "private waiter detail" not in repr(unknown_response)
+        finally:
+            await srv.close()
 
     run(scenario())
 

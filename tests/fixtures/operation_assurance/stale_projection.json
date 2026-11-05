@@ -1,0 +1,123 @@
+{
+  "abstraction_contract": {
+    "concrete_scope": "one closed pre-admission fixture operation",
+    "excluded_behavior": "NONE_DECLARED",
+    "introduced_behavior": "NONE_DECLARED",
+    "kind": "DECLARED_EXACT",
+    "notes": [],
+    "preserves": [
+      "SAFETY",
+      "OPTION_TO_COMPLETE",
+      "UNIVERSAL_PROGRESS",
+      "LIVENESS_UNDER_DECLARED_FAIRNESS"
+    ],
+    "validation_kind": "AUTHOR_DECLARATION",
+    "validation_refs": [
+      "Mastermind@1111111111111111111111111111111111111111"
+    ]
+  },
+  "compiler": {
+    "invocation_mode": "AUTHORED_INPUT",
+    "name": "author",
+    "version": "1"
+  },
+  "environment_assumptions": [],
+  "exploration_limits": {
+    "max_depth": 1000,
+    "max_states": 1000
+  },
+  "external_gates": [],
+  "fairness_assumptions": [],
+  "initial_state": {
+    "phase": "START"
+  },
+  "known_model_gaps": [],
+  "model_id": "om_stale_projection_v1",
+  "obligations": [],
+  "operation_ref": {
+    "operation_key": "op_minimal",
+    "pre_admission_identity": null,
+    "root_job_id": "job_minimal"
+  },
+  "property_set": "mastermind.operation_assurance.properties.v1",
+  "recurring_progress_outcomes": [],
+  "resources": [],
+  "safety_properties": [],
+  "schema": "mastermind.operation_assurance_model.v1",
+  "source_snapshot": {
+    "schema": "mastermind.operation_assurance.source_snapshot.v1",
+    "snapshot_hash": "7ad599b53c1aae5083a38576464f105a7712de3d9577ae4439fbf809faedfcfe",
+    "sources": [
+      {
+        "conflict": "CONFLICT",
+        "continuation": null,
+        "correction_ref": null,
+        "coverage": "COMPLETE",
+        "digest": "deadbeef",
+        "effective_at": null,
+        "freshness": "FRESH",
+        "observed_at": null,
+        "owner": "EXECUTIVE_OS",
+        "schema_version": "1",
+        "source_identity": "src_job_1",
+        "source_kind": "STATUS_PROJECTION",
+        "truncated": false
+      }
+    ]
+  },
+  "state_domains": {
+    "phase": [
+      "START",
+      "DONE"
+    ]
+  },
+  "terminal_outcomes": [
+    {
+      "guards": [
+        {
+          "op": "EQ",
+          "value": "DONE",
+          "variable": "phase"
+        }
+      ],
+      "kind": "TERMINAL_SUCCESS",
+      "outcome_id": "done",
+      "owned_persistent_obligation_ids": [],
+      "owned_persistent_resource_ids": [],
+      "source_refs": [
+        "Mastermind@1111111111111111111111111111111111111111"
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "actor_class": "WORKER",
+      "authority_requirement": "NONE",
+      "effects": [
+        {
+          "value": "DONE",
+          "variable": "phase"
+        }
+      ],
+      "external_assumption_ref": null,
+      "fairness_ref": null,
+      "gate_refs": [],
+      "guards": [
+        {
+          "op": "EQ",
+          "value": "START",
+          "variable": "phase"
+        }
+      ],
+      "kind": "MODIFY",
+      "progress_tags": [
+        "PROGRESS"
+      ],
+      "required_reachable": true,
+      "source_refs": [
+        "Mastermind@1111111111111111111111111111111111111111"
+      ],
+      "transition_id": "finish"
+    }
+  ]
+}

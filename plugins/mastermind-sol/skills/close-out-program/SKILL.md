@@ -1,0 +1,56 @@
+---
+name: close-out-program
+description: Use when a material architecture ruling, accepted implementation, production proof, reconciliation, or terminal operator wave must become durable.
+---
+
+# Close Out Program
+
+Use after a material architecture ruling, accepted implementation, production proof, reconciliation, or terminal operator wave.
+
+## Mandatory current-source gate
+
+Reuse the verified compatible mission pin. Read protected Mastermind `master` and bootstrap only
+at unfamiliar entry/recovery without a usable pin, or a material governing-procedure change. Load
+`docs/sol_skills/INDEX.md` and the needed companions from that same exact commit; never mix revisions.
+Action-specific references: `CLOSEOUT.md`, `RECONCILE_STATE.md`.
+A worker return, tool call, new turn or phase completion alone does not restart bootstrap. If no
+verified compatible pin can be established, modifying workflow is unavailable for actions depending
+on that procedure. A failed refresh does not erase a usable pin for independent work whose governing
+constraints are unaffected. Apply gates only to the actual action under INDEX modification scoping.
+
+## Required package reference
+
+Read `../../references/authority-boundaries.md` before interpreting any app, record, or action as authority. The reference summarizes canonical ownership; current protected source still controls.
+
+## Procedure
+
+1. State the before and after capability delta and truthful final capability state.
+2. Re-run the declared completion law against exact implementation and production evidence.
+3. Preserve immutable repository, PR, head, merge, release, test, security, and negative-proof receipts.
+4. Update architecture or source law in its owning repository when changed.
+5. Update Agent OS through a reviewed Git carrier for durable workstream, decision, discovery, and handoff truth.
+6. Update Executive state only through existing runtime contracts.
+7. Repair Linear only as selected projection after canonical truth is known.
+8. Post bounded Slack visibility and an explicit terminal STOP where dialogue law requires it.
+9. Disarm or truthfully report failure to disarm temporary reciprocal watchers.
+10. Leave exact unresolveds, falsifiers, next action, held waves, and do-not-redo laws.
+
+No generic save-memory action exists. Do not write a plugin memory file, vector store, transcript cache, or second Agent OS.
+
+## Output
+
+```text
+capability delta and state
+canonical receipts
+production proof status
+durable homes updated
+projection/transport repairs
+dialogue STOP / watcher shutdown state
+unresolveds and falsifiers
+exact next action
+independent parallel work
+```
+
+## Stop conditions
+
+Closeout is incomplete while a counterpart still awaits an explicit edge, a projection is false-green, production proof is missing, or the next fresh session cannot recover the ruling without this chat.

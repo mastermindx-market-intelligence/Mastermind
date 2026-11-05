@@ -33,9 +33,9 @@ same broker + worker UID                isolated worktree + validation
 ```
 
 Executive OS SQLite remains the only owner of Jobs, Attempts, Workers, leases,
-process identity, results, and events. The router returns constraints and a
-ranked logical alias list. It does not create a queue, hold a lease, launch a
-process, poll, retry, or mark work complete.
+process identity, results, and events. The router returns suitability decisions
+and compatibility constraints. It does not create a queue, hold a lease, launch
+a process, poll, retry, or mark work complete.
 
 ## 1. Audit findings
 
@@ -71,11 +71,154 @@ The loader fails closed unless:
 - every worker alias belongs to an enabled, autonomous-allowed provider;
 - every route's aliases have the declared task capabilities.
 
+### Explicit logical frontier selection
+
+`ModelRouter.route(..., frontier_model_alias=...)` and `route_work(...)`
+accept an optional logical alias for work that already requires a frontier
+lead: planning, judgment, escalation, critical risk, or high ambiguity.
+`resolve_frontier_model_alias(...)` resolves the same registry used by worker
+routing. The selected entry must be non-worker and declare all three lead
+capabilities: planning, judgment, and escalation. Explicitly requested
+capabilities must also be present. Unknown aliases, worker aliases, and
+insufficient capabilities refuse without substituting the default.
+
+The selected alias and its exact execution-profile and capability-policy
+digests appear in the existing `FRONTIER_LEAD` decision. Its
+`job_constraints()` still refuses: logical cognition selection does not create
+an Executive worker claim. Provider enablement, account availability, capacity,
+and autonomous execution qualification remain with their existing owners.
+A disabled worker provider may therefore have a valid logical lead entry
+without becoming available for execution. The existing included-Chat, metered
+receipt, and Pro-mode receipt requirements still apply.
+
+Omitting the argument preserves the existing `frontier.orchestrator` default.
+An explicit frontier selection on ordinary worker work refuses; it cannot
+convert that work into lead work or be silently ignored. The worker suitability
+tiers, model catalogue, production-arm flags, and admission rules are unchanged.
+
+This API is a source capability for explicit selection. Project launch still
+requires a selected logical reference to be bound into the authenticated
+request, idempotency fingerprint, and immutable root execution binding before
+an app can offer it as an executable CEO choice. Reconciliation must use that
+root's admitted binding. Successful logical resolution alone is not evidence
+that a named model, provider, or app launch path is installed or ready.
+
+### RF1 — provider-neutral suitability tiers
+
+`config/executive_worker_routes.json` is now
+`mastermind.executive_worker_routes/v2`. Every worker route/risk is a non-empty
+ordered list of exact objects:
+
+```json
+{
+  "tier_id": "implementation.routine.primary",
+  "model_aliases": ["fast.engineering", "standard.engineering"]
+}
+```
+
+The loader refuses unknown route or tier keys, malformed or duplicate tier IDs,
+empty tiers, duplicate aliases inside or across tiers, aliases that are unknown
+or not worker-eligible, and aliases that do not meet the route capability
+contract. Aliases within one tier must share one execution profile; they are an
+equivalence set for suitability, while their declared order remains the existing
+compatibility/placement preference inside that tier.
+
+`RoutingDecision.suitability_tiers` is the structured decision. Its
+`preferred_model_aliases` property deliberately projects *only the first tier*
+for the existing Job constraint schema. `to_dict()` emits both forms, but
+`job_constraints()` keeps its pre-RF1 key set so this source wave does not widen
+persisted Job bindings. CF2-I is the later, separately reviewed consumer of the
+structured tiers.
+
+The selection law is fixed:
+
+```text
+authority / Job constraints
+        -> required capabilities and independence exclusions
+        -> first lawful Model Router suitability tier
+        -> Capacity Fabric ranks only candidates inside that tier
+        -> Executive OS atomically claims one Worker
+```
+
+Capacity, provider health, account availability, host placement, quota and cost
+are outside this router. They may rank candidates only inside the first lawful
+tier with an eligible candidate; they cannot promote a lower tier, re-admit an
+excluded worker, or waive a capability/authority refusal.
+
+The v1-to-v2 migration changes the closed JSON schema only: its externally
+consumed `routing_policy_version` remains `2026-08-24.stage4` so existing
+persisted Job constraints, R1 shadow evidence, and host-bound consumers retain
+their exact V1 identity. It preserves every current Codex outcome with exactly
+one first tier per route: implementation/mechanical/tests routine use
+`fast.engineering`, `standard.engineering`; their elevated routes use
+`standard.engineering`; research routine uses `fast.research`,
+`standard.research`; elevated research uses `standard.research`; and routine or
+elevated review uses `standard.review`. No provider, model binding, cost class,
+profile, capability, worker eligibility, or production-arm value changes in this
+migration.
+
+The later native-return host-selection catalogue advances both routing and
+capability policy versions to `2026-10-11.native-return-host-selection`. It adds
+only the explicit private host alias `coo.operator.native-return`; default tiers,
+docs selection and production arms are unchanged. Newly run R1 fixtures qualify
+that current version; historical receipts and persisted Job identities are
+unchanged. Existing host, quota, grant and root bindings must qualify the new
+policy identity through their owners before native selection.
+
+For the ordinary native COO route, the existing stopped, disarmed install-input
+builder can explicitly call
+`ops.executive_os.coo_quota_selection.prepare_current_coo_quota_selection` with
+its validated Control/Worker inputs and protected source's `ModelRouter`. This
+pure preparation changes only the three `codex-coo` selectors. Their shared
+suffix binds the routing catalogue, both complete resolved aliases and the
+observed Operator binary digest/version; a proof-source-only upgrade does not
+change it. Historical quota rows remain immutable. The helper neither publishes
+configuration nor arms or registers anything, and does not run by default in
+the installer or arm path. The existing host installer owns publication; service
+registration and Runtime retain current-binding checks and refuse additive
+registration while an Attempt is held. The helper refuses armed, attended,
+subscription-canary, custom and native-return compositions. Prepared selectors
+are not authentication, provider readiness, Capacity evidence or permission to
+submit the original request.
+
+An ordinary native-return planner still stops after its one sealed plan. A
+retained native proof requires the existing deterministic `create-interactive`
+creator and an already sealed native root profile; creation rejects stale
+identity rather than refreshing it. It reuses Runtime's bounded interactive
+turns and the same Operator Harness start, lease, attestation and cleanup.
+The extension-free `operator.appserver.interactive.v1` profile is unchanged.
+
+The installed service's existing COO, dispatch and workspace owners start one
+retained native generation after the first plan seal. Its task stays in the
+existing dispatch occupancy. The existing Wake owner must finish its idle attention turn and
+persist the causal native ACK before a follow-up is admitted. That later turn
+gets the actual instruction from `RuntimeSessionReturn.read_continuation_source`
+and can call only the existing `native.reply` capability. Its original operation
+cannot replay the provider turn. The canonical reply still uses the existing
+atomic current-writer COMMIT fence. The service reads that exact canonical
+commit before ordinary proven-dead/released cleanup. Immutable original
+principal provenance and the canonical COMMIT let the parent read the result
+after cleanup; only actual parent evidence establishes consumption and useful
+action. The disposable root remains queued until the parent acts and uses
+canonical cancellation; this probe never labels a business Mission completed.
+The bounded native profile cannot admit a child plan.
+
+The incumbent root grant publisher has an explicit native mode that publishes
+the same sealed receipt file without changing Control or Worker configuration
+or restarting Control. The selected private profile, full-arm receipt, exact
+installed source, original CONTINUE and live writer remain required. The same
+Control process reads that grant on the existing observation listener, refusing
+an unsettled transaction, changed file or revoked grant without a cached
+fallback. Ordinary grant publication keeps its existing configuration and
+reconciliation behavior. This source composition adds no session registry or
+listener and does not arm production or qualify a GUI-owned conversation.
+
 Current logical aliases:
 
 | Alias | Initial binding | Use |
 |---|---|---|
 | `frontier.orchestrator` | Sol / xhigh | planning, judgment, escalation; never worker-claimable |
+| `project.executive.sol61` | GPT-6.1 Sol / xhigh candidate | inert exact project-executive identity; never worker-claimable and selected by no route until separate admission/migration proof |
 | `coo.operator.readonly` | Sol / xhigh | one bounded read-only COO planner through App Server; worker-claimable only under the exact operator profile and dedicated quota |
 | `fast.engineering` | Luna / high | routine bounded implementation, mechanical edits, tests |
 | `standard.engineering` | Terra / high | elevated implementation and Luna fallback |
@@ -88,6 +231,18 @@ Current logical aliases:
 three providers are disabled. No model slug, credential, endpoint, quota, or
 production capability has been invented for them.
 
+A Codex runtime may later serve a `ceo`-seat technical-staff commission under a
+separate authority grant. The router never grants that seat, any executive role,
+review independence, merge/deploy rights, retry authority, or security authority
+from a provider or model alias. In particular, `frontier.orchestrator` remains a
+non-worker `frontier_lead` outcome even though it names a Codex/Sol model.
+
+The additive `project.executive.sol61` alias is intentionally inert. It records the exact
+model/profile candidate needed by the Sol-led project-executive program without changing
+`frontier.orchestrator`, any worker tier, or an installed/provider-home model. No route may
+select it until the separate native served-model canary, Runtime/Capacity admission, and
+project-executive selection contract are accepted.
+
 ## 3. Deterministic rules
 
 The request vocabulary is intentionally small:
@@ -99,26 +254,44 @@ The request vocabulary is intentionally small:
 - additional required capabilities;
 - worker IDs to exclude, primarily for review separation.
 
+Signal semantics are intentionally narrower than business priority:
+
+- `risk` means **execution risk** (authority, reversibility, security, destructive or operational
+  effect), not business importance or review importance;
+- `ambiguity` means unresolved requirements/architecture/acceptance or materially contradictory
+  evidence, not prompt length, repository size, number of files, or the fact that the work is delegated;
+- business impact remains the Job/review concern already carried by Executive runtime and must not
+  be copied into `risk` merely to obtain a stronger model;
+- topology (`worker`, `subagent`, `reviewer`, coordinator) is not a difficulty signal.
+
+A signal producer must decompose first and classify the exact bounded mission. If it selects
+`critical` risk or `high` ambiguity solely because the parent program is important, large,
+production-facing, or delegated, it is misclassifying the request and can force an unnecessary
+`frontier_lead` result before Capacity has any opportunity to choose an economical worker.
+
 Routing law:
 
 1. Planning, judgment, escalation, critical work, or high-ambiguity work returns
    `frontier_lead`. It cannot be converted into worker Job constraints.
-2. Routine implementation/tests/mechanical work prefers Luna and falls back to
-   Terra.
-3. Routine research prefers Luna and falls back to Terra.
-4. Elevated implementation/research goes directly to Terra.
-5. Review goes to the Terra review alias. A supplied builder worker ID is
+2. Routine implementation/tests/mechanical work returns one current-equivalence
+   primary tier containing Luna then Terra.
+3. Routine research returns one current-equivalence primary tier containing Luna
+   then Terra.
+4. Elevated implementation/research returns one Terra primary tier.
+5. Review returns one Terra review primary tier. A supplied builder worker ID is
    excluded before the atomic claim.
-6. Within the same logical alias, Executive OS keeps its stable worker-ID and
-   quota-class tie-break. Later accounts/providers can therefore be added under
-   the alias without changing Job semantics.
+6. Within the selected suitability tier, Executive OS keeps its stable worker-ID
+   and quota-class tie-break after the compatibility projection. Later
+   accounts/providers require their own reviewed suitability/capacity wave; they
+   cannot change Job semantics merely by appearing in a provider dictionary.
 7. A routed Job can only claim quota capacity registered under the same routing
    policy version. Stale alias registrations fail closed instead of silently
    inheriting a changed binding.
 
-The claim transaction records the policy version, ranked aliases, selected
-alias, and reason codes in the existing `JOB_CLAIMED` event. There is no router
-ledger.
+The claim transaction records the policy version, first-tier compatibility
+aliases, selected alias, and reason codes in the existing `JOB_CLAIMED` event.
+There is no router ledger, capacity claim, provider enablement, or production
+effect in RF1.
 
 ## 4. Adapter layer
 
@@ -421,3 +594,70 @@ Rollback is configuration- and code-safe:
 The stop conditions are simple: unexpected authority expansion, unexplained
 placement, lower-quality workers consuming more frontier repair/review capacity
 than they save, or any need for a second lifecycle authority.
+
+
+## Manual pool/model override — execution plan v4
+
+Automatic Fabric routing remains the default. V4 exposes exactly three
+per-step modes while preserving the existing Capacity/claim owners:
+
+1. **No `placement`** — automatic route. The child inherits the root's
+   already-reviewed automatic routing constraints; no manual-routing reason is
+   recorded.
+2. **`placement = {provider_realm, quota_class}`** — manual pool override.
+   The exact pair must already be inside the root's reviewed
+   `work_placement_union`.
+3. **`placement = {provider_realm, quota_class, model}`** — manual pool +
+   exact-model override. The model is an additional hard narrowing constraint
+   inside that admitted pool.
+
+One V4 plan may mix all three modes across different work steps. Existing
+execution-plan V2/V3 behavior is unchanged.
+
+Illustrative pinned-model step:
+
+```json
+{
+  "provider_realm": "minimax",
+  "quota_class": "minimax-example-capacity",
+  "model": "minimax-m3"
+}
+```
+
+The provider/quota names above are illustrative. A real plan must use an exact
+pair already present in that root's current reviewed `work_placement_union`;
+the model value must likewise name a model actually served by eligible capacity.
+
+A manual override is a **hard narrowing constraint**, not a fallback
+preference. If the selected pool or model has no currently eligible capacity,
+no Attempt is created. The system must not silently drop the override,
+substitute another pool/model, hop accounts, or retry through a different
+carrier.
+
+This interface never accepts a Worker id, numbered account, credential, host,
+native session, executable or provider endpoint. Capacity still chooses the
+concrete receiver, and all existing capability, authority, lease, source,
+readiness, quota and effect-reconciliation gates remain binding.
+
+Native selection uses the existing full autonomy `arm --native-return` transaction
+only after fresh full v5 acceptance at the installed source, Gate B, provider
+readiness, Runtime/service UID quiescence and an unoccupied global transaction.
+Installation must already have qualified the fixed CompanyConsultation listener
+with the readonly alias and `native_return_armed=false`. Native arm observes the
+root-owned Control LaunchDaemon's exact socket identity; it never adds a listener.
+The existing AgentRelay must also have the exact current-release W3C plist; an
+old or W3C-disabled enrollment refuses native arm before effects. The A2 owner
+can explicitly enable it through its existing rebind transaction while disabled
+and unloaded; verification and service activation remain separate host steps.
+Native preselection refuses a retained ordinary dialogue grant rather than
+rebinding it. Native arm changes the three normal arm booleans, the fixed native
+alias/flag, and the operator quota selector. The native selector appends `.native-return` to the
+accepted readonly selector, retaining its distinct immutable Capacity class on
+the same Worker. A readonly selector exceeding 49 characters or already using
+that reserved suffix refuses before effects. The existing receipt seals the
+exact resulting Control/Worker hashes; replay must match the requested mode and
+the same installed listener. Disarm restores the readonly alias and quota and
+clears the native flag, so an ordinary later arm cannot revive native selection.
+No Runtime schema change, credential change or personal desktop enrollment is
+implied. The later native grant publication and actual exact-parent consumption
+remain separate required evidence.

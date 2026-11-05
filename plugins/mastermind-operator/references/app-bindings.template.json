@@ -1,0 +1,15 @@
+{
+  "schema": "mastermind.plugin_app_bindings_template.v1",
+  "plugin": "mastermind-operator",
+  "plugin_version": "0.1.0",
+  "generated_file": ".app.json",
+  "generated_by_wave": "BSC-U1",
+  "bindings": [
+    {
+      "logical_name": "mastermind-dialogue",
+      "required": true,
+      "contract_owner": "integrations/mastermind_company_mcp/schemas.py",
+      "app_id": null
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import subprocess
 import sys
@@ -17,6 +18,94 @@ from control_plane.chairman_cognition import (
 )
 
 _ROOT = Path(__file__).resolve().parents[1]
+
+
+def _digest(value) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    ).hexdigest()
+
+
+def _classification_payload(option: dict) -> dict:
+    return {
+        "option_id": option["option_id"],
+        "action": option["action"],
+        "scope_refs": sorted(option["scope_refs"]),
+        "repositories": sorted(option["repositories"]),
+        "paths": sorted(option["paths"]),
+        "creates_duplicate_control_plane": option[
+            "creates_duplicate_control_plane"
+        ],
+        "change_classes": sorted(option["change_classes"]),
+        "affected_departments": sorted(option["affected_departments"]),
+    }
+
+
+def _envelope_payload(envelope: dict) -> dict:
+    return {
+        "schema": envelope["schema"],
+        "envelope_id": envelope["envelope_id"],
+        "authority_source_refs": sorted(envelope["authority_source_refs"]),
+        "mode": envelope["mode"],
+        "allowed_actions": sorted(envelope["allowed_actions"]),
+        "allowed_reversibility": sorted(envelope["allowed_reversibility"]),
+        "allowed_repositories": sorted(envelope["allowed_repositories"]),
+        "allowed_path_prefixes": {
+            repository: sorted(envelope["allowed_path_prefixes"][repository])
+            for repository in sorted(envelope["allowed_path_prefixes"])
+        },
+        "allowed_scope_prefixes": sorted(envelope["allowed_scope_prefixes"]),
+        "allowed_carrier_prefixes": sorted(envelope["allowed_carrier_prefixes"]),
+        "max_budget_units": envelope["max_budget_units"],
+        "max_active_children": envelope["max_active_children"],
+        "require_exact_carrier": envelope["require_exact_carrier"],
+        "expires_at": envelope["expires_at"],
+    }
+
+
+def _set_binding(receipt: dict, label: str, digest: str) -> None:
+    prefix = f"{label}:"
+    fields = [
+        field for field in receipt["revision"].split(";") if not field.startswith(prefix)
+    ]
+    receipt["revision"] = ";".join([*fields, f"{label}:{digest}"])
+
+
+def _set_binding_tokens(receipt: dict, label: str, tokens: set[str]) -> None:
+    prefix = f"{label}:"
+    fields = [
+        field for field in receipt["revision"].split(";") if not field.startswith(prefix)
+    ]
+    receipt["revision"] = ";".join([*fields, *sorted(tokens)])
+
+
+def _bind_document(document: dict) -> dict:
+    constraints_digest = _digest(document["strategic_constraints"])
+    strategy_ref = document["strategic_constraints_source_ref"]
+    receipts = {item["source_ref"]: item for item in document["source_receipts"]}
+    _set_binding(receipts[strategy_ref], "constraints-sha256", constraints_digest)
+
+    envelope = document["delegation_envelope"]
+    if envelope is not None:
+        envelope_digest = _digest(_envelope_payload(envelope))
+        for ref in envelope["authority_source_refs"]:
+            if ref in receipts:
+                _set_binding(receipts[ref], "envelope-sha256", envelope_digest)
+
+    bindings: dict[str, set[str]] = {}
+    for option in document["options"]:
+        ref = option["classification_source_ref"]
+        token = f"classification-sha256:{_digest(_classification_payload(option))}"
+        bindings.setdefault(ref, set()).add(token)
+    for ref, tokens in bindings.items():
+        _set_binding_tokens(receipts[ref], "classification-sha256", tokens)
+    return document
 
 
 def _benefits(**changes):
@@ -55,7 +144,7 @@ def _option(option_id="OPT-A", **changes):
         "operation_key": "chairman-cognition-test-001",
         "carrier_state": "EXACT_EXISTING",
         "carrier_ref": "github:Mastermind:branch:test",
-        "expected_head_sha": None,
+        "expected_head_sha": "a" * 40,
         "repositories": ["mastermindx-market-intelligence/Mastermind"],
         "paths": ["control_plane/chairman_cognition.py"],
         "budget_units": 5,
@@ -64,6 +153,9 @@ def _option(option_id="OPT-A", **changes):
         "stop_condition": "Stop at one immutable review-ready branch head.",
         "rollback_plan": "Delete no canonical state; abandon the branch if rejected.",
         "falsifier": "Any duplicate lifecycle or authority owner is a failure.",
+        "classification_source_ref": "SRC-GITHUB",
+        "change_classes": ["EXISTING_CAPABILITY_COMPLETION"],
+        "affected_departments": ["executive"],
         "benefits": _benefits(),
         "costs": _costs(),
     }
@@ -106,10 +198,18 @@ def _envelope(**changes):
 
 
 def _document(*options, envelope=None):
-    return {
+    document = {
         "schema": INPUT_SCHEMA,
         "as_of": "2026-08-30T15:00:00Z",
         "source_receipts": [
+            {
+                "source_ref": "SRC-STRATEGY",
+                "owner": "STRATEGIC_STATE",
+                "revision": "strategy-current",
+                "state": "CURRENT",
+                "load_bearing": True,
+                "observed_at": "2026-08-30T15:00:00Z",
+            },
             {
                 "source_ref": "SRC-CHAIRMAN",
                 "owner": "CHAIRMAN_DIRECTIVE",
@@ -127,14 +227,19 @@ def _document(*options, envelope=None):
                 "observed_at": "2026-08-30T15:00:00Z",
             },
         ],
+        "strategic_constraints_source_ref": "SRC-STRATEGY",
         "strategic_constraints": {
             "autonomous_production_deploy": "prohibited",
             "autonomous_live_capital_execution": "prohibited",
             "duplicate_control_planes": "prohibited",
+            "marketing_org_expansion_before_distribution_proof": "prohibited",
+            "new_feature_expansion": "constrained",
+            "unbounded_autonomous_strategic_modification": "prohibited",
         },
         "delegation_envelope": envelope,
         "options": list(options or [_option()]),
     }
+    return _bind_document(document)
 
 
 def _adjudication(packet, option_id="OPT-A"):
@@ -172,10 +277,12 @@ def test_read_only_action_is_eligible_without_envelope():
         operation_key=None,
         carrier_state="NOT_APPLICABLE",
         carrier_ref=None,
+        expected_head_sha=None,
         repositories=[],
         paths=[],
         budget_units=0,
         active_children_after=0,
+        change_classes=["RESEARCH"],
     )
     packet = evaluate_document(_document(option, envelope=None))
     item = _adjudication(packet)
@@ -189,11 +296,12 @@ def test_current_envelope_allows_bounded_reversible_source_write():
     assert item["disposition"] == "ELIGIBLE_WITHIN_DELEGATION"
     assert item["reason"] == "EXPLICIT_DELEGATION_ENVELOPE"
     assert item["serviceable"] is True
+    assert packet["delegation_envelope"]["digest"].startswith("sha256:")
 
 
 def test_envelope_is_not_accepted_when_authority_source_is_stale():
     document = _document(_option(), envelope=_envelope())
-    document["source_receipts"][0]["state"] = "STALE"
+    document["source_receipts"][1]["state"] = "STALE"
     packet = evaluate_document(document)
     assert packet["delegation_envelope"]["state"] == "SOURCE_NOT_CURRENT"
     assert _adjudication(packet)["reason"] == "SOURCE_NOT_CURRENT"
@@ -310,7 +418,10 @@ def test_stable_operation_and_exact_carrier_are_required():
 
 def test_source_merge_requires_expected_head_sha():
     packet = evaluate_document(
-        _document(_option(action="SOURCE_MERGE"), envelope=_envelope())
+        _document(
+            _option(action="SOURCE_MERGE", expected_head_sha=None),
+            envelope=_envelope(),
+        )
     )
     assert _adjudication(packet)["reason"] == "EXPECTED_HEAD_REQUIRED"
 
@@ -325,7 +436,14 @@ def test_source_merge_requires_expected_head_sha():
 
 def test_live_canary_requires_stop_rollback_and_falsifier():
     for missing in ("stop_condition", "rollback_plan", "falsifier"):
-        changes = {missing: None, "action": "REVERSIBLE_RUNTIME_CANARY"}
+        changes = {
+            missing: None,
+            "action": "REVERSIBLE_RUNTIME_CANARY",
+            "expected_head_sha": None,
+            "repositories": [],
+            "paths": [],
+            "change_classes": ["RUNTIME_CANARY"],
+        }
         packet = evaluate_document(
             _document(_option(**changes), envelope=_envelope())
         )
@@ -459,7 +577,10 @@ def test_option_action_reversibility_and_carrier_grammar_is_consistent():
 
 
 def test_noncurrent_envelope_source_is_distinct_from_current_option_sources():
-    document = _document(_option(), envelope=_envelope(authority_source_refs=["SRC-ENVELOPE"]))
+    document = _document(
+        _option(),
+        envelope=_envelope(authority_source_refs=["SRC-ENVELOPE"]),
+    )
     document["source_receipts"].append(
         {
             "source_ref": "SRC-ENVELOPE",
@@ -470,6 +591,7 @@ def test_noncurrent_envelope_source_is_distinct_from_current_option_sources():
             "observed_at": "2026-08-30T15:00:00Z",
         }
     )
+    _bind_document(document)
     packet = evaluate_document(document)
     item = _adjudication(packet)
     assert packet["delegation_envelope"]["state"] == "SOURCE_NOT_CURRENT"
@@ -528,6 +650,7 @@ def test_executive_child_commission_requires_explicit_new_child_carrier():
                 action="EXECUTIVE_CHILD_COMMISSION",
                 carrier_state="NEW_CHILD",
                 carrier_ref=None,
+                expected_head_sha=None,
             ),
             envelope=_envelope(),
         )
@@ -589,10 +712,12 @@ def test_read_only_options_cannot_carry_effect_state():
                     operation_key=None,
                     carrier_state="NOT_APPLICABLE",
                     carrier_ref=None,
+                    expected_head_sha=None,
                     repositories=[],
                     paths=[],
                     budget_units=0,
                     active_children_after=0,
+                    change_classes=["RESEARCH"],
                 ),
                 envelope=None,
             )

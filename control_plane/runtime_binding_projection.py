@@ -1,7 +1,6 @@
 """Read-only ABA-safe projection of the accepted current OHF writer."""
 from __future__ import annotations
 
-import hashlib
 import sqlite3
 
 from control_plane.executive_runtime import (
@@ -9,10 +8,24 @@ from control_plane.executive_runtime import (
     Runtime,
     StateConflict,
 )
+from control_plane.operator_harness_contract import runtime_binding_id_for
 from control_plane.session_targets import RuntimeBinding, SessionTarget
 
 
-_PROVIDER_TO_REASONING_SURFACE = {"openai-codex": "codex"}
+_PROVIDER_TO_REASONING_SURFACE = {
+    "chatgpt": "chatgpt-sol",
+    # Canonical ModelRouter/WorkerRegistry alias for the same OHF surface.
+    "codex": "codex",
+    "openai-codex": "codex",
+}
+
+
+def reasoning_surface_for_provider(provider: str) -> str:
+    token = str(provider or "").strip()
+    surface = _PROVIDER_TO_REASONING_SURFACE.get(token)
+    if surface is None:
+        raise StateConflict("runtime binding provider surface is not accepted")
+    return surface
 
 
 def active_operator_binding_facts(
@@ -32,10 +45,9 @@ def active_operator_binding_facts(
     facts = runtime.current_harness_binding_source(
         attempt_id, connection=connection
     )
-    surface = _PROVIDER_TO_REASONING_SURFACE.get(facts.provider)
+    surface = reasoning_surface_for_provider(facts.provider)
     if (
         facts.owner_seat != target.target_seat
-        or surface is None
         or target.reasoning_surface != surface
     ):
         raise StateConflict("runtime binding target/provider surface is not accepted")
@@ -58,9 +70,7 @@ def project_runtime_binding(
     facts = active_operator_binding_facts(
         runtime, attempt_id, target, connection=connection
     )
-    binding_id = "bind-" + hashlib.sha256(
-        f"{facts.attempt_id}:{facts.session_epoch_id}".encode("utf-8")
-    ).hexdigest()[:40]
+    binding_id = runtime_binding_id_for(facts.attempt_id, facts.session_epoch_id)
     return RuntimeBinding(
         session_alias=target.session_alias,
         binding_id=binding_id,
@@ -71,4 +81,8 @@ def project_runtime_binding(
     )
 
 
-__all__ = ["active_operator_binding_facts", "project_runtime_binding"]
+__all__ = [
+    "active_operator_binding_facts",
+    "project_runtime_binding",
+    "reasoning_surface_for_provider",
+]

@@ -1,0 +1,26 @@
+{
+  "status": "FROZEN_TWO_CLOCK_PASS",
+  "hash": "sha256:f172b639c650a682915e55dd0bf318506127f3a9ddd422e7a5a1b269410a3f9b",
+  "semantic_projection_equal": true,
+  "acquisition_envelope_differs": true,
+  "admission": {
+    "blocking_codes": [
+      "COMPLETION_OWNER_EVIDENCE_UNKNOWN"
+    ],
+    "mode": "DIALOGUE_ONLY",
+    "modification_safe": false,
+    "optional_sources_unavailable": [
+      "executive",
+      "identities"
+    ],
+    "refusal_codes": [],
+    "required_sources_unavailable": [],
+    "warning_codes": [
+      "GITHUB_PR_UNBOUND",
+      "SLACK_TRANSPORT_WITHOUT_ACK"
+    ]
+  },
+  "state_digest": "sha256:b0fbe9930ac9d4d992264bfb86bf373b0ceca0b8ed4eaf6e731cb0968c630b25",
+  "context_digest": "sha256:ffdb73f0d0448f728f2d511a61e7b2ebc8ee1e181b28e226378f5750e8d14cb0",
+  "scope": "Same sealed external snapshots; real canonical AgentOS acquisition repeated with two caller clocks 25 hours apart."
+}

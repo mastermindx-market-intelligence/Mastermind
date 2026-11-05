@@ -1,10 +1,10 @@
 # Executive Wake Fabric — PR-1 contracts (v1 rework, final hardening)
 
-**Status:** PR-1 contracts + PR-2 durable ledger/reconciliation. Globally
-unarmed. No Control Panel UI, no GUI automation, no Grok computer-control, no
-ChatGPT GUI adapter, no Codex App Server transport, no production MCP write, no
-public HTTP endpoint, no daemon, no launchd schedule. PR-3 (delivery/transport)
-has not started.
+**Status:** contracts, durable ledger/reconciliation, Codex App Server delivery,
+and the Codex/OHF exact-session ACK1 path are built and tested. Globally unarmed.
+No Control Panel UI, no GUI automation, no Grok computer-control, no ChatGPT GUI
+adapter, no production MCP write, no public HTTP endpoint, no daemon, no launchd
+schedule, and no production target activation.
 
 The Wake Fabric is the missing notification layer between a **canonical source
 fact** and the human-or-AI seat that must continue the work.  It does **not**
@@ -446,15 +446,59 @@ match the historical delivery route.  ACK evidence must still identify the
 trusted consuming context.  Human acknowledgement may later be a trusted
 Control Panel/operator mode.  The MCP tool is **not** implemented in this PR.
 
+### ACK1 exact-session Codex/OHF path
+
+The first automated ACK1 vertical is bound only to the existing Codex/OHF
+current writer. Its ownership chain is deliberately one-way:
+
+```text
+canonical source fact -> WakeObligation
+route + RuntimeBinding -> exact destination
+transport -> ACCEPTED or DELIVERED
+target model -> opaque canonical WAKE-* claim only
+worker-local current generation/client -> exact-turn terminal-trailer reduction
+closed transient projection -> target Attempt + process generation
+                            + binding id/generation
+                            + provider session/native turn
+                            + nudge id + claimed obligation ids
+MAS-237 projection under the ACK transaction -> current binding/generation
+Wake ACK ingress -> TARGET_ACKNOWLEDGED
+later healthy canonical source reread -> SOURCE_RESOLVED
+```
+
+The target emits only `MASTERMIND_WAKE_ACK <WAKE-ID>` lines as one exact
+terminal trailer. It does not author its seat, Attempt, binding, provider,
+session, turn, nudge, host, source-resolution fact, or authority. The already
+owned worker-local adapter supplies those identities and reduces raw model text
+to a closed `WorkerLocalWakeAckProjection`; raw provider/model bytes never cross
+the WorkerBroker boundary.
+
+The current-writer client validates the nested projection against the outer
+attention observation, current RuntimeBinding, and exact submitted obligation
+set. The projection then travels only in the in-memory
+`WakeTransportCompletion`; it is excluded from transport receipt details,
+durable events, logs, public results, and proof artifacts. The persisted
+coordinator authenticates the ordinary receipt, commits every exact `DELIVERED`
+row, and only then invokes ACK1. A bare `ACCEPTED`/`DELIVERED` receipt, a timeout,
+an absent or refused projection, replay-only delivery evidence, or a stale
+Attempt/generation/binding/session/turn/nudge leaves durable truth at
+`DELIVERED_UNACKNOWLEDGED` and causes no retry, alternate reader, failover, ACK,
+or source resolution.
+
+Production remains disarmed. This path creates no second provider client,
+session registry, parser store, watcher, lifecycle owner, or control plane.
+
 ## 14. SOURCE_RESOLVED
 
-An executive wake can become stale before the target reads it (job fails then
+An executive wake can become stale after the target consumes it (job fails then
 later succeeds; `review_required` then sibling review appears; Agent OS
-`needs_ceo` item disappears).  ACK alone is insufficient.
+`needs_ceo` item disappears). ACK is necessary but insufficient: a separate,
+healthy canonical reread must prove the source condition absent before
+`SOURCE_RESOLVED` may follow.
 
-`SOURCE_RESOLVED`: the wake historically existed; the source no longer requires
-attention; no further external delivery should occur; the target did not
-necessarily consume it.  Do not delete history.
+`SOURCE_RESOLVED`: the wake historically existed, the target already
+acknowledged consumption, and the source no longer requires attention. No
+further external delivery should occur. Do not delete history.
 
 **Source resolution requires a sufficiently healthy canonical read.**  Absence
 is not proof if the projector was degraded:
@@ -603,7 +647,9 @@ compare durable wake events
       ↓
 persist missing WAKE_REQUESTED
       ↓
-persist SOURCE_RESOLVED only from healthy canonical absence proof
+leave source-absent Wake open until TARGET_ACKNOWLEDGED
+      ↓
+persist SOURCE_RESOLVED only after ACK + healthy canonical absence proof
 ```
 
 Reconciliation is deterministic, idempotent, crash-recoverable, source-driven,
@@ -621,7 +667,9 @@ remain two obligations because Inbox `attention_id` already disambiguates them.
 
 Degradation is asymmetric: an observed valid source may create a missing
 `WAKE_REQUESTED`.  Absence may `SOURCE_RESOLVE` only when that lane's canonical
-snapshot positively proves a healthy read.  Unreadable runtime, missing boot
+snapshot positively proves a healthy read and the Wake already has a valid
+`TARGET_ACKNOWLEDGED` event. An absent but unacknowledged Wake stays open.
+Unreadable runtime, missing boot
 packet, foreign Inbox schema, or a partial projection is not "source
 disappeared".
 

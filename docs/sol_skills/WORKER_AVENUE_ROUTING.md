@@ -40,6 +40,61 @@ quota state, model preference or convenience does not make the Chairman the allo
 
 `PRECOMMISSION` is not a canonical worker lifecycle state or required ceremony.
 
+### 1.1 Chat web reasoning-mode barrier for every manual handoff turn
+
+Every Chairman-mediated/manual Slack handoff turn defaults to the included web surface and non-Pro
+reasoning, including the turn that drafts, sends, acknowledges, continues, stops, monitors, or
+reports on the handoff:
+
+```text
+EXECUTION_SURFACE: WEB
+COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT
+CHAT_REASONING_MODE: NON_PRO_DEFAULT
+```
+
+Personal-Pro subscription/account, the Chat web surface, and turn-billed Pro reasoning mode are
+separate. The legacy `CHAT_PRO_DEFAULT` is surface-only in historical packets; it is deprecated and
+ambiguous and grants no Pro-mode authorization.
+
+The following work is never Pro-eligible: `handoff / ACK / PICKUP_ACK / START / CONTINUE / STOP`;
+`status / routing / placement / watcher / monitoring / polling / foregrounding`; message relay;
+`mechanical edits / tests / simple review`; and any other short bounded work. The size or importance
+of the parent program does not upgrade one of those turns.
+
+Only a genuinely long-horizon frontier-reasoning turn may request Pro mode, and only with the
+complete receipt:
+
+```text
+COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT
+CHAT_REASONING_MODE: PRO_MODE_EXCEPTION
+WHY_PRO_MODE: <specific frontier-reasoning advantage required by this turn>
+WHY_NON_PRO_INSUFFICIENT: <specific evidence that non-Pro reasoning cannot reliably meet the bar>
+PRO_MODE_TASK_CLASS: <one allowed class below>
+EXPECTED_DURATION_MINUTES: <integer between 80 and 1440 minutes, inclusive>
+STOP_CONDITION: <observable completion or abort condition>
+```
+
+The closed task classes are:
+
+```text
+LONG_HORIZON_FRONTIER_REASONING
+CROSS_SYSTEM_ARCHITECTURE
+HARD_DEBUGGING
+ADVERSARIAL_JUDGMENT
+```
+
+Every field is required. `EXPECTED_DURATION_MINUTES` must be an integer between 80 and 1440 minutes,
+inclusive, and therefore at least 80 minutes. Missing, stale, under-duration, over-duration, or
+ineligible receipts fail closed:
+
+```text
+PRO_MODE_REFUSED / USE_NON_PRO_MODE
+```
+
+This is a reasoning-mode gate only. It does not change avenue selection, placement, receiver
+binding, carrier, `ACK`, `START`, watcher, lifecycle, authority, or effect law. Pro mode is separate
+from `METERED_EXCEPTION`; neither receipt implies or satisfies the other.
+
 ## 2. Closed preferred-avenue vocabulary for manual Slack handoffs
 
 When Sol recommends a manual/Slack execution lane, state exactly one of:
@@ -175,6 +230,34 @@ lawful continuation path, and emits the separate truthful `START` edge when all 
 clear. A packet merely discovered in Slack/GitHub/history remains retrieved data and does not
 self-assign a worker.
 
+Receiver assignment is child-specific. A terminal STOP consumes that child assignment. A standing
+program instruction does not self-assign a successor child; an independent successor requires a
+fresh Sol/Chairman delivery or canonical placement edge plus the fresh operation/carrier/pickup law.
+A worker must not mint a successor operation key and treat an older program-level Chairman sentence,
+prior STOPped child, seat identity, or historical Slack thread as the receiver-assignment edge.
+
+For a Slack direct-targeted child, preserve the exact parent thread chosen by the live delivery. The
+worker ACK belongs under that parent; posting the ACK as a new top-level message in the same channel
+does not create or move the carrier.
+
+### 5.4 New-child origination and unconsumed delivery
+
+A `DIRECT_TARGETED — NEW CHILD` reply buried under an unrelated parent/program/previous-child root
+cannot by itself originate a new independent child or become that child's receiver-assignment event.
+It may carry evidence or continue an already-ACKed child, but `CONTINUE`, `RULING`, and `STOP` remain
+reciprocal continuation/terminal edges on the exact root of an already-ACKed child; they cannot become
+sole assignment for a new child.
+
+A new independent Slack-only child requires its own Sol-authored top-level child commission root, an
+eligible command-create event, deliberate current live delivery into the actual provider interaction,
+or a production-proven exact native wake/resume path that binds that child to an exact root. This
+procedure preserves, rather than duplicates, Executive OS lifecycle and the accepted placement/router
+owners.
+
+DELIVERY_SENT or a Slack mention without a valid receiver PICKUP_ACK is DELIVERY_UNCONSUMED / PRE_START
+and must not be projected as active, STARTED, executing, waiting-on-worker, or watcher-consumed.
+PICKUP_ACK and START remain separate; Executive OS remains the lifecycle owner.
+
 ## 6. Receiver binding mode — capacity-selectable vs exact-session-required
 
 Every bounded handoff must distinguish logical responsibility from the concrete runtime account by
@@ -232,6 +315,25 @@ For `EXACT_SESSION_REQUIRED`, a different numbered account/session is a real tar
 block or reconcile under the owning continuity/RuntimeBinding law. Capacity preference does not
 silently rewrite an exact-session target.
 
+**Slack user/seat identity is not exact native-session identity.** A mention or delivery addressed to
+an account/seat can be transport evidence without proving which provider-native reasoning session
+consumed it. When an `EXACT_SESSION_REQUIRED` packet lands in any session other than the frozen native
+session, **delivery to a different session is not PICKUP_ACK**. That landing must return
+`RECEIVER_SESSION_MISMATCH` (or the current typed equivalent), identify the actual landing session when
+safe, perform zero child effect, and **do not spawn or substitute another session**. Preserve the bound
+session and any dirty/effectful local state for canonical continuity reconciliation; a shared Slack
+identity, seat label, account nickname, or newly spawned same-model session cannot satisfy exactness.
+
+**Slack mention alone is not an exact-session delivery mechanism.** Sol may issue asynchronous
+`EXACT_SESSION_REQUIRED` delivery only when the exact provider conversation is already the current
+live interaction or a **production-proven exact native wake/resume path** can address that verified
+RuntimeBinding/native session. An account/seat mention, ordinary Slack notification, channel
+membership, task title, or ability to spawn a fresh same-model session is insufficient. If no proven
+exact-session path exists, represent the operation as `WAITING_EXACT_SESSION / wake_unavailable` and
+**do not emit an account-targeted DIRECT_TARGETED packet** pretending the named native session will
+consume it. Preserve any existing dirty/effectful owner and reconcile/materialize through the
+canonical RuntimeBinding/Wake/session-provisioning owners instead.
+
 Do not label ordinary new work `EXACT_SESSION_REQUIRED` merely because Sol happened to mention or tag a
 numbered account in an earlier packet. Exactness comes from the operation's real target requirement,
 not from accidental transport wording.
@@ -283,3 +385,11 @@ Fable, Grok or another surface is exempt because it historically emitted or expe
 > eligible session is assignment. Exact-session continuation stays exact; after START, runtime changes
 > require canonical reconciliation. Prefer Terra and CTO Sol when sufficient. Fable is for the hardest
 > principal-level problems, not the default.**
+
+## 10. Source-linked cross-account recovery and Project instruction delivery
+
+An archived original PR author, historical named ChatGPT account or system-name "owner" is a custody clue, not a living execution owner. After actual Chairman assignment, the **current eligible receiver owns the next authorized executable action**: discover current source, check the true writer/lease and original pending effects, do the permitted work, and save evidence. A real active writer or `EFFECT_UNKNOWN` still fences that action. An explicit safety/permission denial is never authorization to retry on another host, account, model or connector. Do not require the Chairman to locate or resurrect an archived chat.
+
+`HANDOFF_SOURCE_LINK_V1` is a transport discipline, not a new approval, runtime state or queue. Store the complete implementation/recovery packet in the already-owning **reviewed GitHub source**. Deliver a small scoped Slack message to the actual eligible receiver naming its task, exact link, original effect/lease fence and return location. Distinguish DELIVERED from actual PICKUP_ACK, START and verified result; neither a message nor a checked-in PR is implementation proof. Keep same-child follow-ups in its existing thread, never spawn duplicate reviewer/worker carriers simply because the first delivery has not been consumed.
+
+For ChatGPT Web Project instructions, the **actual authorized Project owner/editor** installs accepted protected-source text into each *distinct* eligible Project, without duplicating edits for every member or overwriting newer valid existing rules. Check Project ID, editor permission, live browser/tab writer, character and UTF-8 byte limits, saved-settings readback and per-account fresh-chat behavioral proof. If the host is human-active or an editor restriction applies, do not steal focus, bypass it, or claim installation; preserve the exact missing step while independently safe work continues. A source-only PR, Slack transport or paraphrase is never evidence that Web settings were saved.

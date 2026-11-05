@@ -1,0 +1,6 @@
+{
+  "extract": "Precedence:\n\nEFFECT_UNKNOWN                     -> INVALID_EFFECT_UNKNOWN\nelse unauthorized/hidden source   -> INVALID_LEAKAGE\nelse required cleanup unproven    -> INVALID_CLEANUP\nelse config/capability/tool/\n     network/effect/arm/cutoff/\n     corpus/source-digest mismatch -> INVALID_CONFIGURATION\nelse allowed degradation present  -> DEGRADED_DEPENDENCY\nelse                               -> VALID\n\nAll reasons remain visible even when lower priority. Graph verification recomputes and requires exact equality.",
+  "question": "A run draft has effect.state == EFFECT_UNKNOWN AND also has an unauthorized/hidden source. Using ONLY the precedence order in the extract above, which single technical validity status is assigned to this run?",
+  "source_doc": "docs/superpowers/specs/2026-08-31-agent-evaluation-fabric-design.md",
+  "source_section": "§7.6 Deterministic validity"
+}
