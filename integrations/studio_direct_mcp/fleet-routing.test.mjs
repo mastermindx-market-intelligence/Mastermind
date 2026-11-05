@@ -5,6 +5,7 @@ import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import {
   FLEET_BACKEND_TOOL_NAMES,
   createFleetRouter,
+  fleetPreflightReason,
   resolveFleetRoutingConfig,
 } from './fleet-routing.mjs';
 
@@ -371,4 +372,22 @@ test('unknown modern schema difference still fails closed before binding', async
   assert.equal(h.created[0].calls,0);
   assert.equal(h.created[0].clientCloses,1);
   await router.close();
+});
+
+test('host preflight reason exposes only the closed diagnostic vocabulary', () => {
+  assert.equal(fleetPreflightReason(new Error('FLEET_ROUTE_HOST_NOT_CONFIGURED')),
+    'FLEET_ROUTE_HOST_NOT_CONFIGURED');
+  assert.equal(fleetPreflightReason(new Error('FLEET_ROUTE_LOCAL_CONTRACT_UNAVAILABLE')),
+    'FLEET_ROUTE_LOCAL_CONTRACT_UNAVAILABLE');
+
+  const rejected = new Error('FLEET_ROUTE_PREFLIGHT_REFUSED');
+  rejected.cause = new Error('FLEET_ROUTE_CONTRACT_MISMATCH');
+  assert.equal(fleetPreflightReason(rejected), 'FLEET_ROUTE_CONTRACT_MISMATCH');
+
+  const malformed = new Error('FLEET_ROUTE_PREFLIGHT_REFUSED');
+  malformed.cause = new Error('https://private.ts.net/mcp Authorization: Bearer SECRET');
+  assert.equal(fleetPreflightReason(malformed), 'FLEET_ROUTE_TRANSPORT_OR_BACKEND_UNAVAILABLE');
+  assert.equal(fleetPreflightReason(new Error('Authorization: Bearer SECRET')),
+    'FLEET_ROUTE_TRANSPORT_OR_BACKEND_UNAVAILABLE');
+  assert.equal(fleetPreflightReason(null), 'FLEET_ROUTE_TRANSPORT_OR_BACKEND_UNAVAILABLE');
 });
