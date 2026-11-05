@@ -79,11 +79,13 @@ def installed(joined, tmp_path, monkeypatch):
 
 def test_real_installed_prepare_publish_reconcile_advance_and_nominal_read(installed):
     j=installed;f=j.f
+    initial_read=j.data.view(f.who,work_ref=f.work).read_plan(work_ref=f.work)
     preview=j.source.prepare(j.request,f.who)
     assert set(preview['preview']['changed_frontmatter_fields']) <= {'waves','next_action'}
     assert preview['preview']['record_body_changed'] is False
     pending=j.source.submit(lookup=f.lookup,preview_witness=preview['preview_witness'],principal=f.who)
     assert pending['receipt']['kind']=='PROPOSAL_OBSERVED'
+    pending_candidate=deepcopy(pending)
     f.merge(pending)
     ready=j.source.reconcile(f.lookup,f.who)
     assert ready['reason']=='READY_FOR_ADVANCE'
@@ -92,6 +94,7 @@ def test_real_installed_prepare_publish_reconcile_advance_and_nominal_read(insta
     assert before.read_plan(work_ref=f.work)['continuity']['adoption']['decision_ref']=='DEC:PLAN-FIRST'
     pending=j.source.advance(advance_request(f,ready),f.who)
     assert pending['phase']=='ADOPTION' and pending['disposition']=='unknown'
+    pending_adoption=deepcopy(pending)
     f.merge(pending)
     accepted=j.source.reconcile(f.lookup,f.who)
     assert accepted['disposition']=='accepted' and accepted['receipt']['kind']=='SOURCE_OBSERVED'
@@ -108,7 +111,7 @@ def test_real_installed_prepare_publish_reconcile_advance_and_nominal_read(insta
     assert f.pr.create_calls==2 and f.runtime.jobs.list_jobs()==[]
     destination=os.environ.get('MM_ADOPT_READ_FIXTURE')
     if destination:
-        Path(destination).write_text(json.dumps(dict(body=body,witness=view.witness(),status=accepted),ensure_ascii=False,sort_keys=True))
+        Path(destination).write_text(json.dumps(dict(body=body,witness=view.witness(),status=accepted,initial_read=initial_read,request=j.request,preview=preview,context=f.permissions.bind(f.who,action='ADOPT_PLAN',work_ref=f.work).public_context(),pending_candidate=pending_candidate,ready=ready,pending_adoption=pending_adoption),ensure_ascii=False,sort_keys=True))
 
 
 def test_installed_basic_adoption_refuses_current_objective_body_and_foreign_actor(installed):
