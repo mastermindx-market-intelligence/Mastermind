@@ -545,3 +545,13 @@ REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-data-observation
 REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-knowledge-port.ts'] = {'sha256': '9a41d0f5bafef2ab8168509aaf3ff7e37369b619230c2c380bedb2b586d7eaf2', 'sites': ((46, 64, 67, 'int', '512'),)}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-data-observation-owner.json'] = {'sha256': 'd12878bdff07fcdb6bfa05ba2c1694c7600416c7407a9e84e87e20dcc116f118', 'sites': ((119, 16, 19, 'int', '401'),)}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-write-owner.json'] = {'sha256': 'cb6d4c43fc821993f664a9bc75ccf3f38d76bbaff58e36363c6e700b7e3b6856', 'sites': ((97, 22, 25, 'int', '401'), (413, 22, 25, 'int', '402'))}
+
+# PR1917 source review5761933327 at63d184218e8d6a2b7da48f98045a2e67f504f5aa:
+# default HTTPS port in the exact parsed-origin condition, not a UID/GID.
+# Existing full-file SHA + token-span verification binds this one Constant;
+# any source/path/context drift restores the ordinary D8 scanner. This does
+# not change the URL/port policy or the separate reviewed Squid ACL exception.
+REVIEWED_FILES['integrations/hermes_secretary/tab_sweep.py'] = {
+    'sha256': '12d2c8f059f941eb908cc9d7ec3651763f8102832e05435118ce8e1385d5fd46',
+    'sites': ((19, 77, 80, 'int', '443'),),
+}

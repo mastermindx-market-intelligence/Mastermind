@@ -20,7 +20,7 @@ from typing import Any
 from control_plane.session_truth_contract import canonical_json
 
 BLOB_SCHEMA = "mastermind.project_atlas_blob.v1"
-PARSER_VERSION = "atlas-parser-1"
+PARSER_VERSION = "atlas-parser-2"
 MAX_BLOB_BYTES = 1024 * 1024
 MAX_SYMBOLS = 8192
 MAX_IMPORTS = 8192
@@ -252,7 +252,22 @@ def _references(text: str) -> list[str]:
 def _markdown_record(text: str) -> dict[str, Any]:
     lines = text.splitlines()
     headings: list[dict[str, Any]] = []
+    fence_char: str | None = None
+    fence_length = 0
     for index, line in enumerate(lines, start=1):
+        # Fenced code is literal content, not document structure. Match only
+        # CommonMark fence delimiters: up to three spaces, >=3 matching marks.
+        if fence_char is not None:
+            closing = re.fullmatch(r" {0,3}(" + re.escape(fence_char) +
+                                   r"{" + str(fence_length) + r",})[ \t]*", line)
+            if closing:
+                fence_char = None
+            continue
+        opening = re.match(r" {0,3}(`{3,}|~{3,})(.*)$", line)
+        if opening and (opening[1][0] != "`" or "`" not in opening[2]):
+            fence_char = opening[1][0]
+            fence_length = len(opening[1])
+            continue
         match = _HEADING_RE.match(line)
         if not match:
             continue
