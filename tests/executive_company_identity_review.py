@@ -34,16 +34,16 @@ REVIEWED_ANCHORS = {
         # in addition to the method AST; all three literal lines are ASCII.
         # Qualified Knowledge/Archive READ additions change the enclosing ingress AST.
         # The original CCR branch and listener remain structurally unchanged.
-        "source_sha256": "bac208d0c7a19afb73b541f16660188414cc122ad4842922642df2328d0365a7",
-        "ast_sha256": "f0db9fbd0f8cea0c330f3e7c3574649317b967ba814bb22072c73bf7a966feaf",
-        "sites": ((('body', 3, 'body', 47, 'body', 3, 'orelse', 0, 'body', 2, 'body', 0, 'value', 'args', 1),
+        "source_sha256": 'b82f61a07a8191e5935fbf64dab5cdb1d1238eae309812fa41fbf59f6d04c2aa',
+        "ast_sha256": '83aef0bdc6356c12bab0fcce640c7d0a7dcbd91a313a3f99d7ad6d0e1da0997a',
+        "sites": ((('body', 3, 'body', 48, 'body', 3, 'orelse', 0, 'body', 2, 'body', 0, 'value', 'args', 1),
   'int',
   403,
   '403'),
  (('body',
    3,
    'body',
-   47,
+   48,
    'body',
    3,
    'orelse',
@@ -65,7 +65,7 @@ REVIEWED_ANCHORS = {
  (('body',
    3,
    'body',
-   47,
+   48,
    'body',
    3,
    'orelse',
@@ -86,3 +86,11 @@ REVIEWED_ANCHORS = {
   '503')),
     },
 }
+
+# BYOK fixed READ changes the full ingress AST, with existing App/Runtime fences.
+# The same three original Fabric HTTP operands are retained at mapped exact sites.
+# Parent checked this postimage under the Chairman waiver; no independent approval claim.
+# Protected #695 backup composition changes the full source only; the BYOK ingress AST and exact status sites are unchanged.
+
+# Parent reviewed the BYOK + protected Workspace composition at 49c2e1d.
+# The exact 136-node Fabric response branch and original three operands are unchanged.

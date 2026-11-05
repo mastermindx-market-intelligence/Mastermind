@@ -150,8 +150,16 @@ substitute paths and executable from the approved effective unit:
 [Service]
 Restart=no
 ExecStart=
-ExecStart=/usr/bin/python3 -P -m integrations.hermes_runtime.isolation_probe --profile /home/mmsecretary/.local/state/hermes-runtime-mmsecretary/current/profile.yaml --role mmsecretary --qualification-id q20261105 --own-file /home/mmsecretary/.local/state/hermes-runtime-mmsecretary/qualification/synthetic.txt --peer-file /home/mmmeta/.local/state/hermes-runtime-mmmeta/qualification/synthetic.txt --report /home/mmsecretary/.local/state/hermes-runtime-mmsecretary/qualification/report-q20261105-mmsecretary-a1.json
+ExecStart=/usr/bin/python3.12 -I -S -B /opt/mastermind-executive/releases/<40-character-commit>/ops/executive_os/release_manifest.py hermes-runtime isolation-probe --profile /home/mmsecretary/.local/state/hermes-runtime-mmsecretary/current/profile.yaml --role mmsecretary --qualification-id q20261105 --own-file /home/mmsecretary/.local/state/hermes-runtime-mmsecretary/qualification/synthetic.txt --peer-file /home/mmmeta/.local/state/hermes-runtime-mmmeta/qualification/synthetic.txt --report /home/mmsecretary/.local/state/hermes-runtime-mmsecretary/qualification/report-q20261105-mmsecretary-a1.json
 ```
+
+Replace `<40-character-commit>` with the protected release selected by the
+approved effective unit; it must match that unit's implementation identity.
+The fixed `isolation-probe` entry uses the same held first-party source and
+qualified pure-Python YAML context as `supervise` and `canary`. It does not
+accept an arbitrary module or executable. `--list-cases` lists the closed
+matrix without starting the probe. Preserve source-refusal exit 78 and the
+probe's own report/exit semantics, including honest INCOMPLETE results.
 
 `Restart=no` is essential: a failed/incomplete probe must not enter the serving
 unit's restart loop. Create the drop-in exclusively, record its exact hash and
