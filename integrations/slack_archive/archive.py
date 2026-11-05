@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
+from integrations.slack_archive.google_drive_transport import _APP_SHA256
 from integrations.slack_archive.archive_model import (
     ARCHIVE_SCHEMA,
     RUN_RECEIPT_SCHEMA,
@@ -164,11 +165,20 @@ class SlackDriveArchiver:
                         logical_key = _file_logical_key(workspace_id, file_id)
                         existing_file = self._drive.find_file(logical_key=logical_key, parent_id=workspace_files_folder)
                         if isinstance(existing_file, Mapping) and isinstance(existing_file.get("id"), str):
+                            props = existing_file.get("appProperties")
+                            sha256 = props.get(_APP_SHA256) if isinstance(props, Mapping) else None
+                            if not isinstance(sha256, str) or len(sha256) != 64 or any(c not in "0123456789abcdef" for c in sha256):
+                                raise RuntimeError("DRIVE_ARCHIVE_FILE_SHA256_INVALID")
+                            for prior in record.get("archived_files", []):
+                                if (isinstance(prior, Mapping) and prior.get("slack_file_id") == file_id
+                                        and prior.get("sha256") is not None and prior["sha256"] != sha256):
+                                    raise RuntimeError("DRIVE_ARCHIVE_FILE_SHA256_MISMATCH")
                             _set_archived_file(
                                 record,
                                 {
                                     "slack_file_id": file_id,
                                     "drive_file_id": str(existing_file["id"]),
+                                    "sha256": sha256,
                                     "status": "ARCHIVED",
                                 },
                             )

@@ -112,7 +112,10 @@ class GoogleDriveArchiveBase(GoogleDriveTransport):
         try:
             created = self._create_metadata(metadata)
         except DriveApiError as exc:
-            reconciled = self.find_file(logical_key=logical_key, parent_id=parent_id)
+            try:
+                reconciled = self.find_file(logical_key=logical_key, parent_id=parent_id)
+            except DriveApiError:
+                raise DriveEffectUnknown("DRIVE_FOLDER_CREATE_EFFECT_UNKNOWN") from exc
             if reconciled is None or reconciled.get("mimeType") != FOLDER_MIME or not isinstance(reconciled.get("id"), str):
                 raise DriveEffectUnknown("DRIVE_FOLDER_CREATE_EFFECT_UNKNOWN") from exc
             created = dict(reconciled)

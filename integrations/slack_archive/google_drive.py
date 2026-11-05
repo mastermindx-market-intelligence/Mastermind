@@ -110,7 +110,10 @@ class GoogleDriveArchiveClient(DriveResumableMixin, GoogleDriveArchiveBase):
                     return self._create_multipart_bytes(metadata=metadata, content=content, content_type="application/json")
                 return self._resumable_create_bytes(metadata=metadata, content=content, content_type="application/json")
             except DriveApiError as exc:
-                reconciled = self.find_file(logical_key=logical_key, parent_id=parent_id)
+                try:
+                    reconciled = self.find_file(logical_key=logical_key, parent_id=parent_id)
+                except DriveApiError:
+                    raise DriveEffectUnknown("DRIVE_JSON_CREATE_EFFECT_UNKNOWN") from exc
                 if reconciled is not None and reconciled.get("md5Checksum") == expected_md5:
                     return reconciled
                 raise DriveEffectUnknown("DRIVE_JSON_CREATE_EFFECT_UNKNOWN") from exc
@@ -125,7 +128,10 @@ class GoogleDriveArchiveClient(DriveResumableMixin, GoogleDriveArchiveBase):
                 return self._update_media_bytes(file_id=file_id, content=content, content_type="application/json")
             return self._resumable_update_bytes(file_id=file_id, content=content, content_type="application/json")
         except DriveApiError as exc:
-            reconciled = self._get_metadata(file_id=file_id)
+            try:
+                reconciled = self._get_metadata(file_id=file_id)
+            except DriveApiError:
+                raise DriveEffectUnknown("DRIVE_JSON_UPDATE_EFFECT_UNKNOWN") from exc
             if reconciled.get("md5Checksum") == expected_md5:
                 return reconciled
             raise DriveEffectUnknown("DRIVE_JSON_UPDATE_EFFECT_UNKNOWN") from exc
@@ -214,10 +220,14 @@ class GoogleDriveArchiveClient(DriveResumableMixin, GoogleDriveArchiveBase):
         mime_type: str,
         sha256: str,
     ) -> Mapping[str, Any]:
-        if not isinstance(sha256, str) or len(sha256) != 64:
+        if not isinstance(sha256, str) or len(sha256) != 64 or any(c not in "0123456789abcdef" for c in sha256):
             raise ValueError("sha256 invalid")
         existing = self.find_file(logical_key=logical_key, parent_id=parent_id)
         if existing is not None:
+            props = existing.get("appProperties")
+            if (not isinstance(existing.get("id"), str) or not existing["id"]
+                    or not isinstance(props, Mapping) or props.get(_APP_SHA256) != sha256):
+                raise DriveApiError("DRIVE_ARCHIVE_FILE_SHA256_MISMATCH")
             return existing
         metadata = self._metadata(
             logical_key=logical_key,
@@ -229,7 +239,10 @@ class GoogleDriveArchiveClient(DriveResumableMixin, GoogleDriveArchiveBase):
         try:
             return self._stream_create_file(metadata=metadata, source_path=source_path, mime_type=mime_type)
         except DriveApiError as exc:
-            reconciled = self.find_file(logical_key=logical_key, parent_id=parent_id)
+            try:
+                reconciled = self.find_file(logical_key=logical_key, parent_id=parent_id)
+            except DriveApiError:
+                raise DriveEffectUnknown("DRIVE_FILE_CREATE_EFFECT_UNKNOWN") from exc
             props = reconciled.get("appProperties") if isinstance(reconciled, Mapping) else None
             if isinstance(reconciled, Mapping) and isinstance(reconciled.get("id"), str) and isinstance(props, Mapping) and props.get(_APP_SHA256) == sha256:
                 return reconciled

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -18,6 +19,8 @@ import integrations.slack_archive.google_drive_resumable as drive_resumable
 
 from integrations.slack_archive.google_drive import (
     MULTIPART_MAX_BYTES,
+    DriveApiError,
+    DriveEffectUnknown,
     GoogleDriveArchiveClient,
     GoogleOAuthCredentials,
 )
@@ -207,7 +210,12 @@ class FakeDrive:
     ) -> Mapping[str, Any]:
         self.upload_calls += 1
         file_id = self._id()
-        meta = {"id": file_id, "name": name, "mimeType": mime_type, "sha256": sha256}
+        meta = {
+            "id": file_id,
+            "name": name,
+            "mimeType": mime_type,
+            "appProperties": {"mmx_sha256": sha256},
+        }
         self.files[(parent_id, logical_key)] = meta
         assert source_path.read_bytes() == b"archive"
         return copy.deepcopy(meta)
@@ -232,6 +240,11 @@ def test_archiver_reconciles_thread_file_and_later_edit_without_duplicate_file()
     assert slack.downloads == 1
     assert drive.upload_calls == 1
 
+    first_bundle = _single_bundle(drive)
+    first_root = next(record for record in first_bundle["messages"] if record["ts"] == ROOT_TS)
+    first_reference = copy.deepcopy(first_root["archived_files"][0])
+    assert first_reference["sha256"] == hashlib.sha256(b"archive").hexdigest()
+
     slack.root_text = "root v2"
     _receipt2, stats2 = archiver.run(lookback_days=100, now=NOW + dt.timedelta(minutes=15))
     assert stats2.files_reused == 1
@@ -241,6 +254,7 @@ def test_archiver_reconciles_thread_file_and_later_edit_without_duplicate_file()
     root = next(record for record in bundle["messages"] if record["ts"] == ROOT_TS)
     assert [item["text"] for item in root["versions"]] == ["root v1", "root v2"]
     assert root["archived_files"][0]["status"] == "ARCHIVED"
+    assert root["archived_files"][0] == first_reference
 
 
 def test_archiver_treats_missing_membership_as_lane_local() -> None:
@@ -341,3 +355,146 @@ def test_large_drive_json_uses_resumable_create(monkeypatch: pytest.MonkeyPatch)
     )
     assert result["id"] == "drive-large"
     assert calls == ["resumable"]
+
+
+class TwoConversationSlack(FakeSlack):
+    def list_conversations(self) -> Iterable[Mapping[str, Any]]:
+        yield from super().list_conversations()
+        yield {"id": "C87654321", "name": "second", "is_private": False, "is_archived": False}
+
+    def iter_replies(self, *, channel_id: str, thread_ts: str) -> Iterable[Mapping[str, Any]]:
+        yield from super().iter_replies(channel_id="C12345678", thread_ts=thread_ts)
+
+
+def test_reused_file_keeps_checksum_in_another_conversation() -> None:
+    slack = TwoConversationSlack()
+    drive = FakeDrive()
+    _receipt, stats = SlackDriveArchiver(slack=slack, drive=drive).run(lookback_days=100, now=NOW)
+    bundles = [doc for doc in drive.documents.values() if doc.get("schema") == ARCHIVE_SCHEMA]
+    assert len(bundles) == 2
+    references = [
+        record["archived_files"][0]
+        for bundle in bundles
+        for record in bundle["messages"]
+        if record["ts"] == ROOT_TS
+    ]
+    assert len(references) == 2
+    assert references[0] == references[1]
+    assert references[0]["sha256"] == hashlib.sha256(b"archive").hexdigest()
+    assert stats.files_uploaded == stats.files_reused == 1
+    assert drive.upload_calls == slack.downloads == 1
+
+
+@pytest.mark.parametrize("retained_sha", [None, "", "g" * 64, "a" * 63, "b" * 64])
+def test_reused_file_refuses_missing_invalid_or_changed_checksum(retained_sha) -> None:
+    slack = FakeSlack()
+    drive = FakeDrive()
+    archiver = SlackDriveArchiver(slack=slack, drive=drive)
+    archiver.run(lookback_days=100, now=NOW)
+    original_documents = copy.deepcopy(drive.documents)
+    meta = next(value for (_parent, key), value in drive.files.items() if key.startswith("slack-file:"))
+    meta["appProperties"] = {} if retained_sha is None else {"mmx_sha256": retained_sha}
+
+    with pytest.raises(RuntimeError, match="DRIVE_ARCHIVE_FILE_SHA256_"):
+        archiver.run(lookback_days=100, now=NOW + dt.timedelta(minutes=15))
+
+    assert drive.documents == original_documents
+    assert drive.upload_calls == slack.downloads == 1
+
+
+def _drive_client() -> GoogleDriveArchiveClient:
+    return GoogleDriveArchiveClient(credentials=GoogleOAuthCredentials.from_mapping(
+        {"client_id": "synthetic", "client_secret": "synthetic", "refresh_token": "synthetic"}
+    ))
+
+
+@pytest.mark.parametrize("metadata", [
+    {"id": "existing"},
+    {"id": "existing", "appProperties": {}},
+    {"id": "existing", "appProperties": {"mmx_sha256": "b" * 64}},
+    {"appProperties": {"mmx_sha256": "a" * 64}},
+])
+def test_binary_reuse_refuses_inconsistent_integrity_without_write(monkeypatch, tmp_path, metadata) -> None:
+    client = _drive_client()
+    monkeypatch.setattr(client, "find_file", lambda **_kwargs: metadata)
+    writes = []
+    monkeypatch.setattr(client, "_stream_create_file", lambda **kwargs: writes.append(kwargs))
+
+    with pytest.raises(DriveApiError, match="DRIVE_ARCHIVE_FILE_SHA256_MISMATCH"):
+        client.upload_file(logical_key="logical-file", name="file", parent_id="parent",
+                           source_path=tmp_path / "unused", mime_type="text/plain", sha256="a" * 64)
+
+    assert writes == []
+
+
+def test_binary_reuse_accepts_matching_integrity_without_write(monkeypatch, tmp_path) -> None:
+    client = _drive_client()
+    metadata = {"id": "existing", "appProperties": {"mmx_sha256": "a" * 64}}
+    monkeypatch.setattr(client, "find_file", lambda **_kwargs: metadata)
+    writes = []
+    monkeypatch.setattr(client, "_stream_create_file", lambda **kwargs: writes.append(kwargs))
+
+    result = client.upload_file(logical_key="logical-file", name="file", parent_id="parent",
+                                source_path=tmp_path / "unused", mime_type="text/plain", sha256="a" * 64)
+
+    assert result == metadata
+    assert writes == []
+
+
+@pytest.mark.parametrize("operation", ["folder", "json_create", "json_update", "binary_create"])
+@pytest.mark.parametrize("read_fails", [False, True])
+def test_ambiguous_write_reconciliation_preserves_effect_state(monkeypatch, tmp_path, operation, read_fails) -> None:
+    client = _drive_client()
+    write_error = DriveApiError("SYNTHETIC_WRITE_RESPONSE_LOST")
+    read_error = DriveApiError("SYNTHETIC_RECONCILIATION_READ_FAILED")
+    calls = []
+    document = {"value": "archive"}
+    expected_md5 = hashlib.md5(b'{"value":"archive"}\n').hexdigest()
+    reconciled = {
+        "id": "existing",
+        "mimeType": "application/vnd.google-apps.folder",
+        "md5Checksum": expected_md5,
+        "appProperties": {"mmx_sha256": "a" * 64},
+    }
+
+    def read_after_write(**_kwargs):
+        calls.append("reconcile")
+        if read_fails:
+            raise read_error
+        return reconciled
+
+    def find(**_kwargs):
+        if "write" in calls:
+            return read_after_write()
+        calls.append("lookup")
+        return {"id": "existing", "md5Checksum": "old"} if operation == "json_update" else None
+
+    def write(**_kwargs):
+        calls.append("write")
+        raise write_error
+
+    monkeypatch.setattr(client, "find_file", find)
+    monkeypatch.setattr(client, "_get_metadata", read_after_write)
+    monkeypatch.setattr(client, "_create_metadata", lambda _metadata: write())
+    monkeypatch.setattr(client, "_create_multipart_bytes", write)
+    monkeypatch.setattr(client, "_update_media_bytes", write)
+    monkeypatch.setattr(client, "_stream_create_file", write)
+
+    def invoke():
+        if operation == "folder":
+            return client.ensure_folder(logical_key="logical-folder", name="folder", parent_id="parent")
+        if operation.startswith("json"):
+            return client.upsert_json(logical_key="logical-json", name="bundle.json",
+                                      parent_id="parent", document=document)
+        return client.upload_file(logical_key="logical-file", name="file", parent_id="parent",
+                                  source_path=tmp_path / "unused", mime_type="text/plain", sha256="a" * 64)
+
+    if read_fails:
+        with pytest.raises(DriveEffectUnknown, match="EFFECT_UNKNOWN") as caught:
+            invoke()
+        assert caught.value.__cause__ is write_error
+        assert caught.value.__context__ is read_error
+    else:
+        result = invoke()
+        assert result == ("existing" if operation == "folder" else reconciled)
+    assert calls == ["lookup", "write", "reconcile"]

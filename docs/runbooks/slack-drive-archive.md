@@ -107,7 +107,9 @@ A successful run emits one compact `mastermind.slack_drive_archive.run.v1` JSON 
 
 ## Recurring operation on macOS
 
-`ops/slack_archive/com.mastermind.slack-drive-archive.plist.template` runs a 100-day overlap sweep every 15 minutes. The overlap is deliberate: it captures new replies and later-observed edits without introducing a cursor database.
+`ops/slack_archive/com.mastermind.slack-drive-archive.plist.template` is an inert template for a 100-day overlap sweep every 15 minutes. The overlap captures new replies and later-observed edits without introducing a cursor database.
+
+**Recurring activation is held.** Before loading the template, the existing execution owner must retain any `DRIVE_*_EFFECT_UNKNOWN` disposition and prevent the next invocation from writing until that original effect is reconciled on its original Drive carrier. A CLI error exit, a fresh invocation, or a later empty key lookup does not prove the prior write absent. This template alone does not provide that stop; qualify it through the incumbent admission/reconciliation boundary without adding another queue or database.
 
 Before loading it, replace:
 
@@ -115,13 +117,15 @@ Before loading it, replace:
 - `__SECRETS_DIR__`
 - `__LOG_DIR__`
 
-Create the log directory, keep the secret files mode `0600`, validate the rendered plist with `plutil -lint`, then install it as a LaunchAgent through the existing host-management procedure. The plist contains secret **paths**, never secret values.
+Only after that activation gate is qualified, create the log directory, keep the secret files mode `0600`, validate the rendered plist with `plutil -lint`, and use the existing host-management procedure for installation. The plist contains secret **paths**, never secret values.
 
 ## Failure semantics
 
 Slack reads are safe to retry within the bounded client. `not_in_channel` and `channel_not_found` are conversation-local and do not stop accessible conversations from being archived. `missing_scope` is a setup defect and fails the run rather than silently producing a partial archive.
 
 Drive creates/updates are not blindly retried after an ambiguous response. The client first reconciles the exact app-owned logical key/checksum. If it cannot prove whether the write applied, it returns a `DRIVE_*_EFFECT_UNKNOWN` failure so the same Drive carrier can be reconciled before another write.
+
+A failed reconciliation read retains that unknown-effect classification and the original write cause. File reuse retains the app-owned SHA-256 in every message reference and refuses missing, malformed or contradictory checksum evidence; it does not silently replace an established integrity reference.
 
 ## Verification
 
