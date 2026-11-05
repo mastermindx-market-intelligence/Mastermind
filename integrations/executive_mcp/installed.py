@@ -2610,9 +2610,13 @@ class InstalledBootPacketCollector:
         if bound is not None:
             if bound[0] is not self or bound[2] != request['work_ref']:
                 raise ValueError('CANONICAL_DATA_UNAVAILABLE')
-            with self.canonical_project_data_scope(bound[1], work_ref=bound[2]):
-                return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
-                    project_knowledge_recipe_request=(mode, body, encoded))
+            # Compilation/restoration is a pure capture. Keep its immutable
+            # C/N facts inside the existing original-budget capture scope;
+            # the later publisher effect remains outside this scope.
+            with bound[1].capture_scope():
+                with self.canonical_project_data_scope(bound[1], work_ref=bound[2]):
+                    return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
+                        project_knowledge_recipe_request=(mode, body, encoded))
         return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
                                     project_knowledge_recipe_request=(mode, body, encoded))
 
@@ -2641,6 +2645,11 @@ class InstalledBootPacketCollector:
             data_view._require_work(selected_work)
             data_view.check()
         deadline = time.monotonic() + timeout
+        if data_view is not None:
+            # The collector/child cannot acquire another observation lifetime.
+            # Reserve all source/materialization work from the issued view's
+            # original remaining budget, including compiler restoration.
+            deadline = min(deadline, data_view._operation.read_deadline)
 
         def remaining() -> float:
             try:

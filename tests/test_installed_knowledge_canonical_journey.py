@@ -64,6 +64,22 @@ def test_signed_installed_publication_same_reader_and_second_edit(owner, identit
     if os.environ.get('MM_KNOWLEDGE_FIRST_USE_TRACE'):
         import time,traceback
         from control_plane import project_canonical_data as traced
+        from control_plane.workspace_project_git_publisher import FixedProjectGitPublisher
+        counters={'publisher_git':[0,0.0],'collector_git':[0,0.0],'collector_child':[0,0.0]}
+        actual_git=FixedProjectGitPublisher._git
+        def trace_git(self,*args,**kwargs):
+            start=time.monotonic()
+            try:return actual_git(self,*args,**kwargs)
+            finally:
+                counters['publisher_git'][0]+=1;counters['publisher_git'][1]+=time.monotonic()-start
+        monkeypatch.setattr(FixedProjectGitPublisher,'_git',trace_git)
+        actual_runner=collector._runner
+        def trace_runner(argv,**kwargs):
+            start=time.monotonic();kind='collector_git' if str(argv[0])=='git' else 'collector_child'
+            try:return actual_runner(argv,**kwargs)
+            finally:
+                counters[kind][0]+=1;counters[kind][1]+=time.monotonic()-start
+        monkeypatch.setattr(collector,'_runner',trace_runner)
         fail=traced._fail
         def trace_fail():
             traceback.print_stack(limit=12)
@@ -72,6 +88,7 @@ def test_signed_installed_publication_same_reader_and_second_edit(owner, identit
         actual_read=InstalledCanonicalProjectData.read_knowledge
         def trace_read(self,*args,**kwargs):
             start=time.monotonic()
+            baseline={k:list(v) for k,v in counters.items()}
             try:
                 result=actual_read(self,*args,**kwargs)
                 print('ACTUAL_DATA_READ',kwargs.get('operation'),time.monotonic()-start,
@@ -80,6 +97,9 @@ def test_signed_installed_publication_same_reader_and_second_edit(owner, identit
             except Exception:
                 print('ACTUAL_DATA_READ_FAILED',kwargs.get('operation'),time.monotonic()-start,flush=True)
                 traceback.print_exc();raise
+            finally:
+                print('ACTUAL_DATA_COMPONENTS',kwargs.get('operation'),
+                    {k:[v[0]-baseline[k][0],round(v[1]-baseline[k][1],4)] for k,v in counters.items()},flush=True)
         monkeypatch.setattr(InstalledCanonicalProjectData,'read_knowledge',trace_read)
     async def run():
         auth, token = _authenticator(rsa_key), _workspace_token(rsa_key)
