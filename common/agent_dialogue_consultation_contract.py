@@ -7,11 +7,13 @@ import json
 import re
 from collections.abc import Mapping
 from enum import Enum
+from types import MappingProxyType
 from typing import Any
 
 from common.agent_dialogue_contract import (
     DialogueContractError,
     MAX_EVIDENCE_REFS,
+    MAX_FRAME_BYTES,
     validate_evidence_ref,
 )
 from common.agent_dialogue_contract_v2 import (
@@ -24,6 +26,11 @@ from common.agent_dialogue_contract_v2 import (
 
 CONSULTATION_SCHEMA = "mastermind.agent_dialogue_consultation.v1"
 CONSULTATION_V2_SCHEMA = "mastermind.agent_dialogue_consultation.v2"
+GROK_CONSULTATION_SCHEMA = "mastermind.agent_dialogue_consultation.v3"
+CONSULTATION_PACKET_DISCRIMINATOR = (
+    "MMX/AGENT_DIALOGUE_CONSULTATION_PACKET_V1"
+)
+CONSULTATION_PACKET_MAX_BYTES = MAX_FRAME_BYTES
 CONSULTATION_PURPOSES = frozenset({"QUESTION", "ANSWER", "NOTICE", "CORRECTION"})
 CONSULTATION_KEYS = frozenset(
     {
@@ -49,6 +56,20 @@ CONSULTATION_KEYS = frozenset(
     }
 )
 CONSULTATION_V2_KEYS = CONSULTATION_KEYS | {"question_message_key"}
+CONSULTATION_SCHEMA_REASONING_SURFACES = MappingProxyType(
+    {
+        CONSULTATION_SCHEMA: frozenset({"codex", "claude"}),
+        CONSULTATION_V2_SCHEMA: frozenset({"codex", "claude"}),
+        GROK_CONSULTATION_SCHEMA: frozenset({"grok-bot"}),
+    }
+)
+_PRODUCER_SCHEMA_BY_REASONING_SURFACE = MappingProxyType(
+    {
+        "codex": CONSULTATION_SCHEMA,
+        "claude": CONSULTATION_SCHEMA,
+        "grok-bot": GROK_CONSULTATION_SCHEMA,
+    }
+)
 RECIPIENT_BINDING_KEYS = frozenset(
     {"binding_id", "binding_generation", "reasoning_surface"}
 )
@@ -169,6 +190,15 @@ def _schema_keys(value: Any) -> dict[str, Any]:
     return _exact_keys(value, keys)
 
 
+def consultation_schema_for_reasoning_surface(reasoning_surface: Any) -> str:
+    if not isinstance(reasoning_surface, str):
+        raise DialogueContractError("MESSAGE_INVALID")
+    schema = _PRODUCER_SCHEMA_BY_REASONING_SURFACE.get(reasoning_surface)
+    if schema is None:
+        raise DialogueContractError("MESSAGE_INVALID")
+    return schema
+
+
 def _require_string(
     value: Any,
     *,
@@ -234,9 +264,8 @@ def validate_consultation(value: Any) -> dict[str, Any]:
     _reject_secret_shaped_leaves(value, code="MESSAGE_INVALID")
     _reject_forbidden_names(value)
     item = _schema_keys(value)
-    if item["schema"] != CONSULTATION_SCHEMA:
-        if item["schema"] != CONSULTATION_V2_SCHEMA:
-            raise DialogueContractError("MESSAGE_INVALID")
+    schema = item["schema"]
+    if schema == CONSULTATION_V2_SCHEMA:
         if item["purpose"] not in {"ANSWER", "CORRECTION"}:
             raise DialogueContractError("MESSAGE_INVALID")
         question_key = item["question_message_key"]
@@ -244,7 +273,10 @@ def validate_consultation(value: Any) -> dict[str, Any]:
             raise DialogueContractError("MESSAGE_INVALID")
         if item["message_key"] == question_key:
             raise DialogueContractError("MESSAGE_INVALID")
-    elif item["schema"] != CONSULTATION_SCHEMA:
+    elif schema == GROK_CONSULTATION_SCHEMA:
+        if item["purpose"] != "QUESTION":
+            raise DialogueContractError("MESSAGE_INVALID")
+    elif schema != CONSULTATION_SCHEMA:
         raise DialogueContractError("MESSAGE_INVALID")
     if not isinstance(item["message_key"], str) or _MESSAGE_KEY_RE.fullmatch(item["message_key"]) is None:
         raise DialogueContractError("MESSAGE_INVALID")
@@ -265,7 +297,13 @@ def validate_consultation(value: Any) -> dict[str, Any]:
         raise DialogueContractError("MESSAGE_INVALID")
     if type(binding_raw["binding_generation"]) is not int or binding_raw["binding_generation"] < 1:
         raise DialogueContractError("MESSAGE_INVALID")
-    if not isinstance(binding_raw["reasoning_surface"], str) or binding_raw["reasoning_surface"] not in {"codex", "claude"}:
+    reasoning_surface = binding_raw["reasoning_surface"]
+    allowed_surfaces = CONSULTATION_SCHEMA_REASONING_SURFACES.get(schema)
+    if (
+        not isinstance(reasoning_surface, str)
+        or allowed_surfaces is None
+        or reasoning_surface not in allowed_surfaces
+    ):
         raise DialogueContractError("MESSAGE_INVALID")
     item["recipient_binding"] = binding_raw
 
@@ -276,11 +314,11 @@ def validate_consultation(value: Any) -> dict[str, Any]:
         if not isinstance(correlation[key], str):
             raise DialogueContractError("MESSAGE_INVALID")
     if (
-        item["schema"] == CONSULTATION_SCHEMA
+        schema in {CONSULTATION_SCHEMA, GROK_CONSULTATION_SCHEMA}
         and correlation["request_message_key"] != item["message_key"]
     ):
         raise DialogueContractError("MESSAGE_INVALID")
-    if item["schema"] == CONSULTATION_V2_SCHEMA:
+    if schema == CONSULTATION_V2_SCHEMA:
         if item["question_message_key"] != correlation["request_message_key"]:
             raise DialogueContractError("MESSAGE_INVALID")
     if correlation["consultation_id"] != item["consultation_id"]:
@@ -393,6 +431,79 @@ def build_consultation(value: Any) -> dict[str, Any]:
     return item
 
 
+def _strict_packet_loads(raw: str) -> dict[str, Any]:
+    def reject_constant(_value: str) -> Any:
+        raise ValueError("non-finite JSON is not canonical")
+
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON object key")
+            result[key] = value
+        return result
+
+    try:
+        value = json.loads(
+            raw,
+            parse_constant=reject_constant,
+            object_pairs_hook=unique_object,
+        )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raise DialogueContractError("FRAME_INVALID") from None
+    if not isinstance(value, dict):
+        raise DialogueContractError("FRAME_INVALID")
+    return value
+
+
+def _wire_packet(value: Any) -> dict[str, Any]:
+    item = validate_consultation(copy.deepcopy(value))
+    if item["purpose"] not in {"QUESTION", "ANSWER"}:
+        raise DialogueContractError("MESSAGE_INVALID")
+    if not item["fingerprint"]:
+        raise DialogueContractError("MESSAGE_INVALID")
+    return item
+
+
+def render_consultation_packet(value: Mapping[str, Any]) -> str:
+    packet = _wire_packet(value)
+    text = (
+        f"{CONSULTATION_PACKET_DISCRIMINATOR}\n"
+        f"{canonical_consultation_json(packet)}"
+    )
+    if len(text.encode("utf-8")) > CONSULTATION_PACKET_MAX_BYTES:
+        raise DialogueContractError("FRAME_TOO_LARGE")
+    return text
+
+
+def parse_consultation_packet(raw: str | bytes) -> dict[str, Any]:
+    if isinstance(raw, bytes):
+        try:
+            text = raw.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            raise DialogueContractError("FRAME_INVALID") from None
+    elif isinstance(raw, str):
+        text = raw
+    else:
+        raise DialogueContractError("FRAME_INVALID")
+
+    lines = text.split("\n")
+    if (
+        len(lines) != 2
+        or lines[0] != CONSULTATION_PACKET_DISCRIMINATOR
+        or not lines[1]
+    ):
+        raise DialogueContractError("FRAME_INVALID")
+    if len(text.encode("utf-8")) > CONSULTATION_PACKET_MAX_BYTES:
+        raise DialogueContractError("FRAME_TOO_LARGE")
+
+    document = _strict_packet_loads(lines[1])
+    packet = _wire_packet(document)
+    if lines[1] != canonical_consultation_json(packet):
+        raise DialogueContractError("FRAME_INVALID")
+    return packet
+
+
 def classify_duplicate(
     original: Mapping[str, Any], replay: Mapping[str, Any]
 ) -> DuplicateClassification:
@@ -407,11 +518,15 @@ __all__ = [
     "ANSWER_KEYS",
     "ARTIFACT_REVISION_KEYS",
     "CONSULTATION_KEYS",
+    "CONSULTATION_PACKET_DISCRIMINATOR",
+    "CONSULTATION_PACKET_MAX_BYTES",
     "CONSULTATION_V2_KEYS",
     "CONSULTATION_V2_SCHEMA",
     "CONSULTATION_PURPOSES",
     "CONSULTATION_SCHEMA",
+    "CONSULTATION_SCHEMA_REASONING_SURFACES",
     "CORRELATION_KEYS",
+    "GROK_CONSULTATION_SCHEMA",
     "DuplicateClassification",
     "RECEIPT_KEYS",
     "RECIPIENT_BINDING_KEYS",
@@ -420,6 +535,9 @@ __all__ = [
     "build_consultation",
     "canonical_consultation_json",
     "classify_duplicate",
+    "parse_consultation_packet",
+    "render_consultation_packet",
+    "consultation_schema_for_reasoning_surface",
     "consultation_semantic_fingerprint",
     "validate_consultation",
 ]

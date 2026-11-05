@@ -54,6 +54,7 @@ Nothing here pins a live market state. Best-effort throughout — missing data d
 from __future__ import annotations
 
 import json
+import math
 from datetime import date
 from pathlib import Path
 
@@ -125,9 +126,10 @@ def _ci(key: str, default: int) -> int:
 # ─────────────────────────────────────────────────────────────────────────────
 def _hac(series: list[float], lags: int) -> dict:
     """Newey-West mean/t over an active-return series, reusing the macro engine's validated helper.
-    Degrades to a plain mean with t=0 when the helper is unavailable (guard then fails closed → no
-    recommendation). Never raises."""
+    The optional-vendor fallback preserves the same estimator. Missing observations do not
+    count toward the sample; the existing fewer-than-two result shape is retained."""
     s = [float(x) for x in (series or []) if x is not None]
+    s = [x for x in s if not math.isnan(x)]
     if len(s) < 2:
         return {"n": len(s), "mean": (s[0] if s else None), "t": 0.0, "se": None}
     try:
@@ -137,8 +139,6 @@ def _hac(series: list[float], lags: int) -> dict:
         # Keep the fallback statistically equivalent to engine.validation.newey_west_tstat.
         # The vendor is intentionally optional at runtime; returning t=0 here used to turn a
         # missing vendor checkout into a silent global disable of lifecycle loss escalation.
-        import math
-
         n = len(s)
         if n < 8:
             return {"mean": None, "se": None, "t": None, "p": None, "n": n,
@@ -168,6 +168,7 @@ def _loss_significance(active_series: list[float]) -> dict:
     over threshold AND mean < 0). Pure; never raises. Each weekly review is treated as ONE independent
     observation — the caller feeds non-overlapping per-review increments (mirrors the governor)."""
     s = [float(x) for x in (active_series or []) if x is not None]
+    s = [x for x in s if not math.isnan(x)]
     min_n = _ci("min_effective_n", _MIN_EFFECTIVE_N)
     t_min = _cf("hac_t_min", _HAC_T_MIN)
     lags = _ci("hac_lag", _HAC_LAG)

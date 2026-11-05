@@ -1,0 +1,43 @@
+{
+  "schema": "soxx.terminal.15minute.cross_asset_peer_v14",
+  "registered_before_fetch": true,
+  "source": "existing public Terminal intraday API, no provider credentials",
+  "cohort": [
+    "SMH",
+    "QQQ",
+    "AMD"
+  ],
+  "reason": {
+    "SMH": "semiconductor sector ETF nearest SOXX proxy",
+    "QQQ": "broad index benchmark",
+    "AMD": "volatile individual semiconductor stress"
+  },
+  "models": [
+    [
+      "3h_60fast",
+      "3h_medium",
+      60,
+      "fast"
+    ],
+    [
+      "3h_15fast",
+      "3h_medium",
+      15,
+      "fast"
+    ]
+  ],
+  "outcomes": [
+    "time52",
+    "structural_cycle",
+    "finite_guard"
+  ],
+  "risk": "1.5% stop, 25% at +2%, 5bp per side, 52 observed RTH hours, conservative stop-first, same entry/model rules as v14; no tuning",
+  "evaluation_window": [
+    "2025-10-09",
+    "2026-10-08"
+  ],
+  "evaluation": "Within-instrument same-entry paired improvement; cross-asset success not independent because correlated shocks; count missing data and no-signal, no portfolio backfit",
+  "source_quality": "Terminal price adjustment, PIT, completeness explicitly unverified, 30m aggregated pairs required",
+  "no_auth_probe": true,
+  "no_BOATS": true
+}
