@@ -217,13 +217,13 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
   const turnAttempted=view.lastKind==="turn";
   const canReview=editable&&!props.messageReadOnly&&!turnAttempted&&!!consumption&&view.data?.state!=="RECORDED"&&props.message.length>0;
   const panel=<div ref={root} className="new-conversation-journey" lang={props.locale}>
-    {prepared&&<section className="new-conversation-preview"><h3 data-turn-review tabIndex={-1}>{t("Review message","预览消息")}</h3>
-      <p className="new-conversation-preview-message">{props.message}</p>
-      <button type="button" disabled={!!view.busy} onClick={()=>{requestedFocus.current={scope,selector:"textarea"};patch({prepared:null});}}>{t("Edit message","编辑消息")}</button>
-    </section>}
     <FreshConversationTurnPanel locale={props.locale} data={view.data} initialConsumption={suppliedConsumption} responsePending={turnAttempted&&view.data?.state!=="RECORDED"} operationState={view.operation}
       activity={view.busy==="reviewing"?null:view.busy} message={ownsDraft?props.message:""} originalTurnMessage={view.originalTurnMessage}
       onMessageChange={value=>{if(latest.current.messageReadOnly||!capture(true)||!ownsDraft)return;patch({prepared:null,error:null});props.onMessageChange(value);}}
+      messagePreview={prepared?<section className="new-conversation-preview"><h3 data-turn-review tabIndex={-1}>{t("Review message","预览消息")}</h3>
+      <p className="new-conversation-preview-message">{props.message}</p>
+      <button type="button" disabled={!!view.busy} onClick={()=>{requestedFocus.current={scope,selector:"textarea"};patch({prepared:null});}}>{t("Edit message","编辑消息")}</button>
+    </section>:undefined}
       messageReadOnly={props.messageReadOnly} onMessageFocus={props.onMessageFocus}
       readOnly={!editable} feedback={errorText?<p role="status">{errorText}</p>:view.busy==="reviewing"?<p role="status">{t("Reviewing message…","正在预览消息…")}</p>:null}
       keepControl={!props.readOnly&&!view.attempted&&!consumption&&readCurrent&&!held?<button type="button" className="primary" disabled={!editable} onClick={()=>void keep()}>{t("Keep first response","保留第一条回复")}</button>:undefined}

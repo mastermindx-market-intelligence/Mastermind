@@ -95,6 +95,8 @@ it("pre-reservation double clicks cannot duplicate Keep",async()=>{
 it("Edit preserves exact text and one already-minted turn request across locale change",async()=>{
   const h=setup();const mounted=render(<Harness config={h.props}/>);await keepAndRecover(h);
   fireEvent.click(screen.getByRole("button",{name:"Review message"}));await screen.findByRole("heading",{name:"Review message"});
+  expect(screen.queryByRole("textbox",{name:"Your next message"})).toBeNull();
+  expect(screen.getAllByText(fixture.turn_request.message,{exact:true})).toHaveLength(1);
   fireEvent.click(screen.getByRole("button",{name:"Edit message"}));
   expect(document.activeElement).toBe(screen.getByRole("textbox",{name:"Your next message"}));
   mounted.rerender(<Harness config={{...h.props,locale:"zh-CN"}}/>);

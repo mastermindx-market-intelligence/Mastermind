@@ -18,6 +18,8 @@ export interface FreshConversationTurnPanelProps {
   activity: "keeping" | "sending" | "checking" | null;
   /** Controlled draft text; the parent owns every transition. */
   message: string;
+  /** Exact owner-prepared review replaces the editable field; no duplicate draft. */
+  messagePreview?:ReactNode;
   /** Exact owner-captured sent text or actual recorded-window message, never the current draft. */
   originalTurnMessage?:string|null;
   onMessageChange: (value: string) => void;
@@ -120,7 +122,7 @@ function sourceRows(zh: boolean, operationState: OperationState | null,
  * decoded window and every guarded action; this component renders the handed
  * state, forwards exact draft text and never mints or infers a permission. */
 export function FreshConversationTurnPanel({ locale, data, operationState, activity, message,
-  onMessageChange, readOnly, keepControl, sendControl, checkControl, feedback, originalTurnMessage, initialConsumption = null, responsePending = false, messageReadOnly = false, onMessageFocus }: FreshConversationTurnPanelProps) {
+  onMessageChange, readOnly, keepControl, sendControl, checkControl, feedback, originalTurnMessage, initialConsumption = null, responsePending = false, messageReadOnly = false, onMessageFocus, messagePreview }: FreshConversationTurnPanelProps) {
   const inputId=useId();
   const zh = locale === "zh-CN";
   const text = (en: string, cn: string) => zh ? cn : en;
@@ -147,7 +149,7 @@ export function FreshConversationTurnPanel({ locale, data, operationState, activ
       {receipt != null ? text("First response kept", "已保留第一条回复")
         : text("Keep the first response to continue.", "保留第一条回复后继续。")}
     </p>
-    {receipt != null && !recorded && <div className="mm-fresh-conversation-turn-field">
+    {receipt != null && !recorded && (messagePreview ?? <div className="mm-fresh-conversation-turn-field">
       <label className="mm-fresh-conversation-turn-label" htmlFor={inputId}>
         {text("Your next message", "下一条消息")}
       </label>
@@ -157,7 +159,7 @@ export function FreshConversationTurnPanel({ locale, data, operationState, activ
       <p className="mm-fresh-conversation-turn-hint">
         {text("This view supports one follow-up message.", "此视图仅支持一条后续消息。")}
       </p>
-    </div>}
+    </div>)}
     {recorded && result != null && <section className="mm-fresh-conversation-turn-followup">
       <FreshConversationInitialResponse locale={locale} result={result} originalMessage={originalTurnMessage??null} responseKind="followup" headingLevel={3}
         caption={data?.parent_consumed === false
