@@ -1,3 +1,4 @@
+import { createLazyTerminalSharingHost, type TerminalSharingSource } from "./terminal/terminal-sharing-host";
 import { projectAdmissionHostMethods, projectAdmissionPublicRequest, type ProjectAdmissionRawMethods, type ProjectAdmissionHostMethods } from "./admission/project-admission-host";
 import { validArchiveCursor, type ArchiveCursor } from "./projects/archive/project-archive-continuation";
 import { decodeProjectArchive, type ProjectArchiveRead } from "./projects/archive/project-archive";
@@ -70,6 +71,8 @@ import {
 } from "./control-room";
 
 export interface RawClient extends Partial<ProjectAdmissionRawMethods> {
+  /** Independent Terminal session; workspace grants never confer brief access. */
+  readonly terminalSharing?: TerminalSharingSource;
   /** Public fixed navigation only; Terminal owns its user's authentication and access. */
   openTerminalBriefs?(): Promise<unknown>;
   readonly sourceOperations?:SourceOperationTransport;
@@ -156,6 +159,8 @@ export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
 }
 export interface MissionHost extends Partial<ProjectAdmissionHostMethods> {
+  /** Independent Terminal session; workspace grants never confer brief access. */
+  readonly terminalSharing?: TerminalSharingSource;
   /** Optional zero-input navigation; no private content or access receipt. */
   openTerminalBriefs?: TerminalBriefsNavigationPort;
   readonly sourceOperations?:SourceOperationTransport;
@@ -407,6 +412,7 @@ export function bindMissionHost(
   }):undefined;
   const command = completeOrchestratorCommandBinding(commandBinding);
   return {
+    ...(client.terminalSharing ? { terminalSharing: client.terminalSharing } : {}),
     ...(client.openTerminalBriefs ? {
       openTerminalBriefs: createTerminalBriefsNavigationPort(() => client.openTerminalBriefs!()),
     } : {}),
@@ -921,6 +927,8 @@ export async function createNativeClient(
   listen: Listen,
 ): Promise<RawClient> {
   const executive = await createNativeExecutiveTransport(invoke, listen);
+  const terminalSharing = createLazyTerminalSharingHost(invoke,
+    (event, handler) => listen(event, message => handler(message.payload)));
   let current: AuthState = {
     status: "unconfigured",
     reason: "NATIVE_HOST_UNAVAILABLE",
@@ -1027,6 +1035,7 @@ export async function createNativeClient(
     });
   }
   return {
+    terminalSharing,
     executive: executive.transport,
     executiveSession: executive.sessionTransport,
     openTerminalBriefs: createTerminalBriefsNavigationPort((command) => invoke(command)),
