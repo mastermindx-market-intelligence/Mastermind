@@ -64,6 +64,50 @@ def _cleanup(temp):
     temp.cleanup()
 
 
+APPLICATION_PREIMAGES = {
+    'ext/lease_broker.py': ('rollout/preimages/lease_broker_f1059fe.py', 73321,
+        'a2847a29abe590cb168c2cd8ae34e0b1c3222b6e92ab4c00f252a342d56e6406'),
+    'ext/go_lease_capability.py': ('source/go_lease_capability.py', 9456,
+        '9f350698ba94d64fedc3f64ebffce993840d7ee3376b46254756d58bdb78c66a'),
+    'ext/go_lease_gateway.py': ('source/go_lease_gateway.py', 4513,
+        '7b1e1d48933218135771c770a1d25c994aa0332bc6bc8461c5b9d625ef8a7658'),
+}
+
+
+def verify_current_stage(output):
+    """Qualify the current102 build before restoring any historical bytes."""
+    native = Path(builder.__file__).parent.parent
+    manifest = json.loads((output / 'native-manifest.json').read_bytes())
+    baseline = json.loads((native / 'rollout/native-manifest.json').read_bytes())
+    inventory = json.loads((output / 'native-source-inventory.json').read_bytes())
+    if (len(manifest) != 102 or set(manifest) != set(baseline)
+            or {n for n in manifest if manifest[n] != baseline[n]} != set(APPLICATION_PREIMAGES)
+            or set(inventory['files']) != set(manifest)
+            or inventory['native_code_files'] != len(manifest)):
+        raise AssertionError('current application source closure differs')
+    for name, wanted in manifest.items():
+        data = (output / 'native-code-stage' / name).read_bytes()
+        row = inventory['files'][name]
+        source = (native / row['source']).read_bytes()
+        if (g.digest(data) != wanted or row['sha256'] != wanted
+                or row['bytes'] != len(data) or source != data):
+            raise AssertionError('current captured source differs: ' + name)
+        if name in APPLICATION_PREIMAGES:
+            candidate = 'candidate/' + name.split('/')[1]
+            if row['source'] != candidate or (native / candidate).read_bytes() != data:
+                raise AssertionError('current application candidate differs: ' + name)
+    return manifest
+
+
+def restore_application_preimages(stage, manifest):
+    native = Path(builder.__file__).parent.parent
+    for name, (relative, size, expected) in APPLICATION_PREIMAGES.items():
+        raw = (native / relative).read_bytes()
+        if len(raw) != size or g.digest(raw) != expected or manifest[name] != expected:
+            raise AssertionError('historical application preimage differs: ' + name)
+        (stage / name).write_bytes(raw)
+
+
 class PairedLauncherUpgrade(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -76,9 +120,7 @@ class PairedLauncherUpgrade(unittest.TestCase):
                     contextlib.redirect_stdout(io.StringIO()):
                 builder.main()
             current_manifest = (cls.built / 'native-manifest.json').read_bytes()
-            if current_manifest != (Path(builder.__file__).parent / 'native-manifest.json').read_bytes():
-                raise AssertionError('current builder differs from protected manifest')
-            cls.manifest = json.loads(current_manifest)
+            cls.manifest = verify_current_stage(cls.built)
             # Rebuild the original finite paired epoch, never relabel the
             # current H1/daemon generation as the historical95 target. The
             # snapshot contains only changed public code plus its whole95 map.
@@ -191,6 +233,7 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 if g.digest(raw) != old[name]:
                     raise AssertionError('long-horizon historical inverse unqualified: '+name)
                 target.write_bytes(raw)
+            restore_application_preimages(cls.built / 'native-code-stage', old)
             cls.manifest = old
             for name,wanted in cls.manifest.items():
                 if g.digest((cls.built / 'native-code-stage' / name).read_bytes()) != wanted:
@@ -223,7 +266,7 @@ class PairedLauncherUpgrade(unittest.TestCase):
         # remains exactly the historical 8bc -> d044 transition. Restore only
         # that closed three-line addition in a disposable module, not a pin.
         original_g = g
-        epoch_raw = Path(g.__file__).read_bytes()
+        epoch_raw = installer._HISTORICAL_LAUNCHER.read_bytes()
         added = (b'    # One vetted flat plist. Not a suffix rule and not a directory walk.\n'
                  b'    if relative == "ext/host_pull_launchd.plist.template":\n'
                  b'        return\n')

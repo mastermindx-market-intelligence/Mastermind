@@ -30,7 +30,7 @@ builder = historical.builder
 @pytest.fixture(scope='module')
 def source_owners(tmp_path_factory):
     root = tmp_path_factory.mktemp('successor-source').resolve()
-    raw = Path(g.__file__).read_bytes()
+    raw = installer._HISTORICAL_LAUNCHER.read_bytes()
     addition = (b'    # One vetted flat plist. Not a suffix rule and not a directory walk.\n'
                 b'    if relative == "ext/host_pull_launchd.plist.template":\n'
                 b'        return\n')
@@ -49,8 +49,7 @@ def source_owners(tmp_path_factory):
             contextlib.redirect_stdout(io.StringIO()):
         builder.main()
     current_raw = (target / 'native-manifest.json').read_bytes()
-    assert current_raw == (ROLLOUT / 'native-manifest.json').read_bytes()
-    manifest = json.loads(current_raw)
+    manifest = historical.verify_current_stage(target)
     import base64, zlib
     fixture = ROLLOUT.parents[3] / 'tests/fixtures/native-catalog-predecessor102-0be933.json'
     retained_raw = fixture.read_bytes()
@@ -111,7 +110,7 @@ def source_owners(tmp_path_factory):
     assert selection['path'] == 'ops/native_fabric/quota_continuity/candidate/pick.py'
     predecessor_files = {**retained['files'], **diagnostic['files'], 'ext/pick.py': selection}
     assert {name for name in manifest if manifest[name] != historical_manifest[name]} == (
-        set(predecessor_files) | new_names
+        set(predecessor_files) | new_names | set(historical.APPLICATION_PREIMAGES)
     )
     for name, digest in manifest.items():
         assert g.digest((target / 'native-code-stage' / name).read_bytes()) == digest
@@ -129,6 +128,7 @@ def source_owners(tmp_path_factory):
         payload = predecessor.read_bytes()
         assert g.digest(payload) == historical_manifest[name]
         (target / 'native-code-stage' / name).write_bytes(payload)
+    historical.restore_application_preimages(target / 'native-code-stage', historical_manifest)
     manifest = historical_manifest
     historical_raw = (json.dumps(manifest, sort_keys=True, indent=2) + '\n').encode()
     assert g.digest(historical_raw) == retained['manifest_sha256'] == installer.SUCCESSOR_MANIFEST
@@ -252,8 +252,8 @@ def test_wrong_target_cannot_be_admitted(owner):
 
 def test_source_owner_hash_is_not_a_caller_hint(owner):
     path = owner.root / 'wrong_generation.py'
-    path.write_bytes(Path(g.__file__).read_bytes() + b'\n# extra source\n')
-    with mock.patch.object(g, '__file__', str(path)):
+    path.write_bytes(installer._HISTORICAL_LAUNCHER.read_bytes() + b'\n# extra source\n')
+    with mock.patch.object(installer, '_HISTORICAL_LAUNCHER', path):
         with pytest.raises(ValueError, match='source differs'):
             prepare(owner)
     assert not owner.successor.exists()

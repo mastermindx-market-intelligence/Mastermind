@@ -28,6 +28,9 @@ if str(_REPO_ROOT) not in sys.path:
 from ops.fabric_launch import install as studio_consumer_owner
 
 import native_generation as generation
+import build_review_stage as stage_builder
+
+_HISTORICAL_LAUNCHER = Path(__file__).resolve().parent / "preimages/native_generation_75330d.py"
 
 SCHEMA = "native-ingress-bootstrap.v1"
 DRAIN_SCHEMA = "native-ingress-legacy-producers-reconciled.v1"
@@ -78,7 +81,7 @@ def _upgrade_base(original):
         raise ValueError("original launcher allowlist differs")
     new_raw = old_raw.replace(old_fragment, new_fragment)
     if (generation.digest(new_raw) != UPGRADE_TO
-            or generation.regular_bytes(Path(generation.__file__).resolve()) != new_raw):
+            or _successor_sources()[0] != new_raw):
         raise ValueError("protected launcher must differ only by the reviewed two names")
     old_launcher = Path(base["launcher_path"])
     generation.require(old_launcher, stat.S_ISREG, 0o555)
@@ -131,6 +134,7 @@ def _upgrade_plan(original, target, previous):
 
 
 def _upgrade_entries(plan, *, partial=False, complete=False):
+    mutable = {"pool", "task", "go"} if plan["schema"] == GO_SCHEMA else {"pool", "task"}
     for name, entry in plan["entries"].items():
         target = Path(entry["target"])
         if not target.is_absolute() or target.parent.resolve(strict=True) != target.parent:
@@ -139,7 +143,7 @@ def _upgrade_entries(plan, *, partial=False, complete=False):
         generation.require(target, stat.S_ISREG, entry["mode"])
         observed = generation.digest(generation.regular_bytes(target))
         allowed = {entry["previous"]}
-        if name != "remote":
+        if name in mutable:
             if complete:
                 allowed = {entry["bridge"]}
             elif partial:
@@ -282,6 +286,14 @@ _SUCCESSOR_PLAN_FIELDS = frozenset({
     "store", "expected_selection", "target_generation", "from_launcher",
     "to_launcher", "manifest_sha256", "entries", "digest",
 })
+GO_SCHEMA = "native-ingress-go-application.v1"
+GO_BRIDGE_MARKER = "NATIVE_GENERATION_GO_IN_PROCESS_V1"
+_GO_PLAN_FIELDS = frozenset({
+    "schema", "prior_successor_bundle", "prior_successor_digest", "bootstrap_digest",
+    "store", "expected_selection", "target_generation", "from_launcher",
+    "to_launcher", "manifest_sha256", "component_bundle", "component_sha256",
+    "entries", "digest",
+})
 
 
 def _successor_directory(path):
@@ -300,7 +312,7 @@ def _successor_json(path):
 
 
 def _successor_sources():
-    new = generation.regular_bytes(Path(generation.__file__).resolve())
+    new = generation.regular_bytes(_HISTORICAL_LAUNCHER)
     addition = (b'    # One vetted flat plist. Not a suffix rule and not a directory walk.\n'
                 b'    if relative == "ext/host_pull_launchd.plist.template":\n'
                 b'        return\n')
@@ -502,7 +514,7 @@ def read_successor(bundle):
 
 
 def _require_successor_launcher(plan, payloads):
-    launcher = Path(plan["store"]) / "launchers" / (SUCCESSOR_TO + ".py")
+    launcher = Path(plan["store"]) / "launchers" / (plan["to_launcher"] + ".py")
     generation.require(launcher, stat.S_ISREG, 0o555)
     if generation.regular_bytes(launcher) != payloads["native_generation.py"]:
         raise ValueError("published successor launcher differs")
@@ -510,32 +522,56 @@ def _require_successor_launcher(plan, payloads):
 
 def apply_successor(bundle):
     """Advance only this retained source transition; no process or service control."""
-    plan, payloads = read_successor(bundle)
+    return _apply_ingress_transition(bundle, SUCCESSOR_SCHEMA)
+
+
+def _transition_records(plan):
+    schema = plan["schema"]
+    if schema == SUCCESSOR_SCHEMA:
+        prior_key = "prior_upgrade_digest"
+        intent_name, suffix, mutable = ".launcher-successor-v1.json", ".successor.json", ("pool", "task")
+    elif schema == GO_SCHEMA:
+        prior_key = "prior_successor_digest"
+        intent_name, suffix, mutable = ".go-application-ingress-v1.json", ".go.json", ("pool", "task", "go")
+    else:
+        raise ValueError("unsupported ingress transition")
+    previous = plan["expected_selection"]
+    selected = {"schema": generation.POINTER_SCHEMA, "generation": plan["target_generation"],
+                "previous": previous["generation"], "sequence": previous["sequence"] + 1}
+    intent = {"schema": schema, "plan_digest": plan["digest"],
+              prior_key: plan[prior_key], "bootstrap_digest": plan["bootstrap_digest"]}
+    receipt = dict(intent, previous_selection=previous, selection=selected,
+        from_launcher=plan["from_launcher"], to_launcher=plan["to_launcher"],
+        manifest_sha256=plan["manifest_sha256"], bridged=list(mutable), remote="legacy")
+    return intent_name, suffix, mutable, intent, selected, receipt
+
+
+def _apply_ingress_transition(bundle, expected_schema, *, reconcile_only=False):
+    # One finite mutation owner for the two CLOSED transition shapes. This is
+    # not a generic installer, an execution retry or a new service lifecycle.
+    if expected_schema == SUCCESSOR_SCHEMA:
+        reader = read_successor
+    elif expected_schema == GO_SCHEMA:
+        reader = read_go
+    else:
+        raise ValueError("unsupported ingress transition")
+    plan, payloads = reader(bundle)
+    if plan["schema"] != expected_schema:
+        raise ValueError("ingress transition schema differs")
     store = Path(plan["store"])
     with generation.publication_lock(store):
         # Full retained chain, source and target qualification at the actual write boundary.
-        again, checked = read_successor(bundle)
+        again, checked = reader(bundle)
         if again != plan or checked != payloads:
             raise ValueError("successor inputs changed")
-        intent_path = store / "bootstrap/.launcher-successor-v1.json"
-        intent = {"schema": SUCCESSOR_SCHEMA, "plan_digest": plan["digest"],
-                  "prior_upgrade_digest": plan["prior_upgrade_digest"],
-                  "bootstrap_digest": plan["bootstrap_digest"]}
+        intent_name, suffix, mutable, intent, selected, receipt = _transition_records(plan)
+        intent_path = store / "bootstrap" / intent_name
         exists = os.path.lexists(intent_path)
         if exists and _successor_json(intent_path) != intent:
             raise ValueError("foreign launcher successor transaction")
         previous = plan["expected_selection"]
-        selected = {"schema": generation.POINTER_SCHEMA, "generation": plan["target_generation"],
-                    "previous": previous["generation"], "sequence": previous["sequence"] + 1}
-        receipt = {"schema": SUCCESSOR_SCHEMA, "plan_digest": plan["digest"],
-                   "prior_upgrade_digest": plan["prior_upgrade_digest"],
-                   "bootstrap_digest": plan["bootstrap_digest"],
-                   "previous_selection": previous, "selection": selected,
-                   "from_launcher": SUCCESSOR_FROM, "to_launcher": SUCCESSOR_TO,
-                   "manifest_sha256": SUCCESSOR_MANIFEST,
-                   "bridged": ["pool", "task"], "remote": "legacy"}
-        receipt_path = store / "bootstrap" / (plan["digest"] + ".successor.json")
-        launcher = store / "launchers" / (SUCCESSOR_TO + ".py")
+        receipt_path = store / "bootstrap" / (plan["digest"] + suffix)
+        launcher = store / "launchers" / (plan["to_launcher"] + ".py")
         current = generation.current(store)
         completed = os.path.lexists(receipt_path)
         if completed or current == selected:
@@ -549,6 +585,8 @@ def apply_successor(bundle):
         if current != previous:
             raise ValueError("successor selection compare-and-swap refused")
         _upgrade_entries(plan, partial=exists)
+        if reconcile_only:
+            raise ValueError("original ingress transition is not committed; reconciliation made no changes")
         _require_studio_consumer_pin(plan, "bridge")
         if not exists:
             _record_once(intent_path, intent)
@@ -561,8 +599,9 @@ def apply_successor(bundle):
         else:
             generation.atomic_bytes(launcher, payloads["native_generation.py"], 0o555)
         _require_successor_launcher(plan, payloads)
-        for name in ("pool", "task"):
-            read_successor(bundle)
+        for name in mutable:
+            if reader(bundle) != (plan, payloads):
+                raise ValueError("successor inputs changed before ingress replacement")
             _upgrade_entries(plan, partial=True)
             if generation.current(store) != previous:
                 raise ValueError("successor selection changed before ingress replacement")
@@ -572,7 +611,8 @@ def apply_successor(bundle):
             entry = plan["entries"][name]
             if generation.digest(generation.regular_bytes(entry["target"])) != entry["bridge"]:
                 generation.atomic_bytes(Path(entry["target"]), payloads[name + ".bridge"], entry["mode"])
-        read_successor(bundle)
+        if reader(bundle) != (plan, payloads):
+            raise ValueError("successor inputs changed before commit")
         _upgrade_entries(plan, complete=True)
         if generation.current(store) != previous:
             raise ValueError("successor selection changed before commit")
@@ -581,6 +621,229 @@ def apply_successor(bundle):
             raise ValueError("successor selection readback differs")
         _record_once(receipt_path, receipt)
         return receipt
+
+
+def _completed_successor(bundle):
+    """Authenticate retained history, independent of CURRENT and live bridges."""
+    bundle = _successor_directory(bundle)
+    plan, payloads = read_successor(bundle)
+    intent_name, suffix, _, intent, selected, receipt = _transition_records(plan)
+    receipts = Path(plan["store"]) / "bootstrap"
+    if (_successor_json(receipts / intent_name) != intent
+            or _successor_json(receipts / (plan["digest"] + suffix)) != receipt):
+        raise ValueError("completed successor history differs")
+    _require_successor_launcher(plan, payloads)
+    _, _, original, base, _, _ = _successor_origin(plan["prior_upgrade_bundle"])
+    return bundle, plan, original, base, selected
+
+
+def _go_file(path):
+    info = generation.require(path, stat.S_ISREG)
+    if info.st_nlink != 1 or info.st_mode & 0o022:
+        raise ValueError("Go component file custody differs")
+    return generation.regular_bytes(path)
+
+
+def _go_component(bundle, stable_ext, target_files):
+    bundle = Path(bundle)
+    if not bundle.is_absolute() or bundle.resolve(strict=True) != bundle:
+        raise ValueError("canonical Go component bundle required")
+    generation.require(bundle, stat.S_ISDIR)
+    if {p.name for p in bundle.iterdir()} != {"component.json", "source-go_shim.py", "go_shim.py"}:
+        raise ValueError("Go component artifact set differs")
+    raw = _go_file(bundle / "component.json")
+    record = generation.unique_json(raw)
+    root = Path(stage_builder.__file__).resolve().parent.parent
+    preimage = _go_file(root / "source/go_shim.py")
+    handler = _go_file(root / "candidate/go_shim.py")
+    entry = _go_file(root / "candidate/native_go_entry.py")
+    if generation.digest(preimage) != stage_builder.GO_INSTALLED_PREIMAGE:
+        raise ValueError("Go original installed source differs")
+    dependencies = {}
+    for name in stage_builder.GO_APPLICATION_DEPENDENCIES:
+        data = _go_file(root / "candidate" / name)
+        dependencies[name] = {"sha256": generation.digest(data), "bytes": len(data), "source": "candidate/" + name}
+    expected = {"schema": "native-external-go-component.v1", "component": "go_application_handler",
+        "destination_relative_to_stable_ext": "go_shim/go_shim.py", "stable_ext": str(stable_ext),
+        "installed_preimage_sha256": stage_builder.GO_INSTALLED_PREIMAGE,
+        "candidate_sha256": generation.digest(handler), "candidate_bytes": len(handler),
+        "candidate_source": "candidate/go_shim.py", "dependencies": dependencies,
+        "native_stage_dependencies": {name: row["sha256"] for name, row in dependencies.items()},
+        "preimage_source_ref": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6646945527",
+        "installation_state": "HELD_REQUIRES_PROTECTED_RELEASE_AND_EXISTING_OWNER_INSTALLATION"}
+    if (record != expected or _go_file(bundle / "source-go_shim.py") != preimage
+            or _go_file(bundle / "go_shim.py") != handler):
+        raise ValueError("Go component is not the exact reviewed source")
+    manifest_raw = _go_file(bundle.parent / "native-manifest.json")
+    manifest = generation.unique_json(manifest_raw)
+    if manifest != target_files:
+        raise ValueError("Go target differs from captured native manifest")
+    base = {key: value for key, value in manifest.items()
+            if key not in {generation.GO_ENTRY, generation.GO_HANDLER}}
+    base_raw = (json.dumps(base, sort_keys=True, indent=2) + "\n").encode()
+    if (generation.digest(base_raw) != stage_builder.GO_BASE_MANIFEST_SHA256
+            or set(manifest) != set(base) | {generation.GO_ENTRY, generation.GO_HANDLER}
+            or manifest[generation.GO_HANDLER] != generation.digest(handler)
+            or manifest[generation.GO_ENTRY] != generation.digest(entry)
+            or any(manifest.get("ext/" + name) != row["sha256"] for name, row in dependencies.items())):
+        raise ValueError("Go target is not the closed reviewed B and C composition")
+    for relative, wanted in manifest.items():
+        if generation.digest(_go_file(bundle.parent / "native-code-stage" / relative)) != wanted:
+            raise ValueError("captured Go stage changed")
+    return generation.digest(raw), generation.digest(manifest_raw), preimage
+
+
+def go_bridge(original, launcher, store):
+    """Preserve imports and original OS argv; enter verified Go in process."""
+    if generation.digest(original) != stage_builder.GO_INSTALLED_PREIMAGE:
+        raise ValueError("Go bridge requires the original installed handler")
+    launcher = Path(launcher)
+    if launcher.suffix != ".py" or not generation.HEX.fullmatch(launcher.stem):
+        raise ValueError("Go bridge requires a content-addressed launcher")
+    text = original.decode()
+    if GO_BRIDGE_MARKER in text:
+        raise ValueError("Go source is already bridged")
+    module = ast.parse(text)
+    first_business_line = 0
+    for index, item in enumerate(module.body):
+        if ((index == 0 and isinstance(item, ast.Expr)
+                and isinstance(item.value, ast.Constant) and isinstance(item.value.value, str))
+                or isinstance(item, ast.ImportFrom) and item.module == "__future__"):
+            first_business_line = item.end_lineno
+            continue
+        break
+    branch = ("\n# " + GO_BRIDGE_MARKER + "\nif __name__ == '__main__':\n"
+        "    import importlib.util as _native_go_import\n"
+        "    import sys as _native_go_sys\n"
+        "    import os as _native_go_os\n"
+        "    import stat as _native_go_stat\n"
+        "    import hashlib as _native_go_hash\n"
+        f"    _native_go_path = {str(launcher)!r}\n"
+        "    _native_go_fd = _native_go_os.open(_native_go_path, _native_go_os.O_RDONLY | _native_go_os.O_NOFOLLOW | _native_go_os.O_NONBLOCK)\n"
+        "    try:\n"
+        "        _native_go_info = _native_go_os.fstat(_native_go_fd)\n"
+        "        if (not _native_go_stat.S_ISREG(_native_go_info.st_mode) or _native_go_info.st_uid != _native_go_os.geteuid()\n"
+        "                or _native_go_stat.S_IMODE(_native_go_info.st_mode) != 0o555 or _native_go_info.st_nlink != 1\n"
+        "                or not 0 < _native_go_info.st_size <= 16 * 1024 * 1024):\n"
+        "            raise SystemExit('native Go launcher custody refused')\n"
+        "        with _native_go_os.fdopen(_native_go_os.dup(_native_go_fd), 'rb') as _native_go_file:\n"
+        "            _native_go_raw = _native_go_file.read(_native_go_info.st_size + 1)\n"
+        "        _native_go_identity = lambda s: (s.st_dev, s.st_ino, s.st_mode, s.st_uid, s.st_nlink, s.st_size, s.st_mtime_ns, s.st_ctime_ns)\n"
+        "        if (len(_native_go_raw) != _native_go_info.st_size\n"
+        "                or _native_go_identity(_native_go_os.fstat(_native_go_fd)) != _native_go_identity(_native_go_info)\n"
+        "                or _native_go_identity(_native_go_os.lstat(_native_go_path)) != _native_go_identity(_native_go_info)\n"
+        f"                or _native_go_hash.sha256(_native_go_raw).hexdigest() != {launcher.stem!r}):\n"
+        "            raise SystemExit('native Go launcher source refused')\n"
+        "    finally:\n"
+        "        _native_go_os.close(_native_go_fd)\n"
+        f"    _native_go_spec = _native_go_import.spec_from_file_location('_native_go_generation', {str(launcher)!r})\n"
+        "    if _native_go_spec is None or _native_go_spec.loader is None:\n"
+        "        raise SystemExit('native Go launcher unavailable')\n"
+        "    _native_go_generation = _native_go_import.module_from_spec(_native_go_spec)\n"
+        "    _native_go_sys.modules[_native_go_spec.name] = _native_go_generation\n"
+        "    exec(compile(_native_go_raw, _native_go_path, 'exec'), _native_go_generation.__dict__)\n"
+        f"    raise SystemExit(_native_go_generation.launch({str(store)!r}, 'go', _native_go_sys.argv[1:]))\n\n")
+    lines = text.splitlines(keepends=True)
+    result = "".join(lines[:first_business_line]) + branch + "".join(lines[first_business_line:])
+    compile(result, "go_shim.bridge.py", "exec")
+    return result.encode()
+
+
+def _go_plan(prior_successor, target, component, previous):
+    prior_successor, prior, original, base, completed = _completed_successor(prior_successor)
+    _upgrade_pointer(previous)
+    if (previous["sequence"] < completed["sequence"]
+            or previous["sequence"] == completed["sequence"] and previous != completed):
+        raise ValueError("Go selection predates its completed successor")
+    store = Path(base["store"])
+    _, before = generation.verify(store, previous["generation"])
+    target_root, after = generation.verify(store, target)
+    if (before["entrypoints"] != generation.ENTRYPOINTS
+            or after["entrypoints"] != dict(generation.ENTRYPOINTS, go=generation.GO_ENTRY)):
+        raise ValueError("Go entrypoint transition differs")
+    component = Path(component)
+    if component.is_relative_to(store.parent):
+        raise ValueError("Go component must be outside the live owner")
+    component_sha, manifest_sha, old_go = _go_component(component, Path(base["stable_ext"]), after["files"])
+    new_launcher = _go_file(Path(generation.__file__).resolve())
+    launcher_sha = generation.digest(new_launcher)
+    if launcher_sha == SUCCESSOR_TO:
+        raise ValueError("Go requires its reviewed successor launcher")
+    launcher = store / "launchers" / (launcher_sha + ".py")
+    payloads = {"native_generation.py": new_launcher}
+    entries = {}
+    for name in ("pool", "task", "remote"):
+        entry = prior["entries"][name]
+        row = {"target": entry["target"], "mode": entry["mode"],
+               "previous": entry["previous"] if name == "remote" else entry["bridge"]}
+        if name != "remote":
+            bridge = (shell_bridge(Path(base["python"]), launcher, store, "pool")
+                if name == "pool" else task_bridge(generation.regular_bytes(original / "task.original"),
+                    Path(base["python"]), launcher, store))
+            payloads[name + ".bridge"] = bridge
+            row["bridge"] = generation.digest(bridge)
+        entries[name] = row
+    go_target = Path(base["stable_ext"]) / "go_shim/go_shim.py"
+    info = generation.require(go_target, stat.S_ISREG)
+    mode = stat.S_IMODE(info.st_mode)
+    if mode & 0o7022 or info.st_nlink != 1:
+        raise ValueError("Go ingress mode or link custody differs")
+    bridge = go_bridge(old_go, launcher, store)
+    payloads["go.bridge"] = bridge
+    entries["go"] = {"target": str(go_target), "mode": mode,
+        "previous": stage_builder.GO_INSTALLED_PREIMAGE, "bridge": generation.digest(bridge)}
+    plan = {"schema": GO_SCHEMA, "prior_successor_bundle": str(prior_successor),
+        "prior_successor_digest": prior["digest"], "bootstrap_digest": base["digest"],
+        "store": str(store), "expected_selection": previous, "target_generation": target_root.name,
+        "from_launcher": SUCCESSOR_TO, "to_launcher": launcher_sha,
+        "manifest_sha256": manifest_sha, "component_bundle": str(component),
+        "component_sha256": component_sha, "entries": entries}
+    plan["digest"] = generation.digest(generation.canonical(plan))
+    return plan, payloads
+
+
+def prepare_go(prior_successor, target, component, output):
+    _, _, _, base, _ = _completed_successor(prior_successor)
+    store = Path(base["store"])
+    output = Path(output).absolute()
+    generation.require(output.parent, stat.S_ISDIR)
+    if (output.parent.resolve(strict=True) != output.parent
+            or output.is_relative_to(store.parent) or os.path.lexists(output)):
+        raise ValueError("fresh external canonical Go bundle required")
+    with generation.publication_lock(store):
+        plan, payloads = _go_plan(prior_successor, target, component, generation.current(store))
+        _upgrade_entries(plan)
+        if os.path.lexists(store / "bootstrap/.go-application-ingress-v1.json"):
+            raise ValueError("Go ingress already has an original transaction")
+        output.mkdir(mode=0o700)
+        for name, raw in payloads.items():
+            generation.atomic_bytes(output / name, raw, 0o600)
+        generation.atomic_bytes(output / "PLAN.json", generation.canonical(plan) + b"\n", 0o600)
+    return plan
+
+
+def read_go(bundle):
+    bundle = _successor_directory(bundle)
+    plan = _successor_json(bundle / "PLAN.json")
+    if type(plan) is not dict or set(plan) != _GO_PLAN_FIELDS or plan["schema"] != GO_SCHEMA:
+        raise ValueError("invalid Go ingress plan")
+    expected, payloads = _go_plan(plan["prior_successor_bundle"], plan["target_generation"],
+        plan["component_bundle"], plan["expected_selection"])
+    if plan != expected or {p.name for p in bundle.iterdir()} != {"PLAN.json", *payloads}:
+        raise ValueError("Go plan or artifact set differs")
+    for name, raw in payloads.items():
+        generation.require(bundle / name, stat.S_ISREG, 0o600)
+        if _go_file(bundle / name) != raw:
+            raise ValueError("Go payload differs")
+    return plan, payloads
+
+
+def apply_go(bundle):
+    return _apply_ingress_transition(bundle, GO_SCHEMA)
+
+
+def reconcile_go(bundle):
+    return _apply_ingress_transition(bundle, GO_SCHEMA, reconcile_only=True)
 
 
 def relocate_pool(raw):
@@ -937,6 +1200,14 @@ def main():
     prepare_next.add_argument("--output", type=Path, required=True)
     apply_next = sub.add_parser("successor")
     apply_next.add_argument("--bundle", type=Path, required=True)
+    prepare_app = sub.add_parser("prepare-go")
+    prepare_app.add_argument("--prior-successor-bundle", type=Path, required=True)
+    prepare_app.add_argument("--target-generation", required=True)
+    prepare_app.add_argument("--component-bundle", type=Path, required=True)
+    prepare_app.add_argument("--output", type=Path, required=True)
+    for command in ("apply-go", "reconcile-go"):
+        action = sub.add_parser(command)
+        action.add_argument("--bundle", type=Path, required=True)
     for command in ("phase1", "phase2", "rollback"):
         action = sub.add_parser(command)
         action.add_argument("--bundle", type=Path, required=True)
@@ -953,6 +1224,13 @@ def main():
         result = prepare_successor(args.prior_upgrade_bundle, args.target_generation, args.output)
     elif args.command == "successor":
         result = apply_successor(args.bundle)
+    elif args.command == "prepare-go":
+        result = prepare_go(args.prior_successor_bundle, args.target_generation,
+                            args.component_bundle, args.output)
+    elif args.command == "apply-go":
+        result = apply_go(args.bundle)
+    elif args.command == "reconcile-go":
+        result = reconcile_go(args.bundle)
     elif args.command == "phase1":
         result = phase1(args.bundle)
     elif args.command == "phase2":

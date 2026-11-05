@@ -86,6 +86,8 @@ def sha(raw):
 
 GO_INSTALLED_PREIMAGE = "4a41548a757f763ed5210df96aff6c7148d25d9e192cd3d849e108e1e917d100"
 GO_APPLICATION_DEPENDENCIES = ("lease_broker.py", "go_lease_capability.py", "go_lease_gateway.py")
+# Actual B8af captured102 closure, before adding the fixed C entry/handler pair.
+GO_BASE_MANIFEST_SHA256 = "b4be55f9096985d8292160bc00886e44bfbe0941c095b65973b85ba36998acb6"
 
 
 def stage_external_go_component(root, output, stable_ext, *, staged_manifest=None):
@@ -149,13 +151,54 @@ def stage_external_go_component(root, output, stable_ext, *, staged_manifest=Non
     return record
 
 
+def compose_go_stage(root, output, manifest, files, component):
+    """Join only the captured external B handler and the fixed native entry."""
+    root, output = Path(root), Path(output)
+    if sha((json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode()) != GO_BASE_MANIFEST_SHA256:
+        raise ValueError("native Go base closure is not the reviewed B generation")
+    expected = {"ext/" + name: row["sha256"] for name, row in component["dependencies"].items()}
+    if (component.get("schema") != "native-external-go-component.v1"
+            or component.get("component") != "go_application_handler"
+            or component.get("destination_relative_to_stable_ext") != "go_shim/go_shim.py"
+            or component.get("installed_preimage_sha256") != GO_INSTALLED_PREIMAGE
+            or set(component["dependencies"]) != set(GO_APPLICATION_DEPENDENCIES)
+            or component.get("native_stage_dependencies") != {
+                name: manifest.get("ext/" + name) for name in GO_APPLICATION_DEPENDENCIES}
+            or any(manifest.get(name) != digest for name, digest in expected.items())):
+        raise ValueError("native Go component closure differs")
+    handler = output / "external-go-component/go_shim.py"
+    entry = root / "candidate/native_go_entry.py"
+    for path in (handler, entry):
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("native Go source is not an explicit regular file")
+    handler_raw, entry_raw = handler.read_bytes(), entry.read_bytes()
+    if (sha(handler_raw) != component["candidate_sha256"]
+            or len(handler_raw) != component["candidate_bytes"]):
+        raise ValueError("captured native Go handler changed")
+    additions = {"ext/go_application_handler.py": (handler_raw, "candidate/go_shim.py"),
+                 "ext/native_go_entry.py": (entry_raw, "candidate/native_go_entry.py")}
+    if set(additions) & set(manifest):
+        raise ValueError("native Go stage was already composed")
+    for relative, (raw, source) in additions.items():
+        target = output / "native-code-stage" / relative
+        if target.exists() or target.is_symlink():
+            raise ValueError("native Go stage destination already exists")
+        target.write_bytes(raw)
+        manifest[relative] = sha(raw)
+        files[relative] = {"source": source, "sha256": sha(raw),
+            "installed_preimage_sha256": None, "bytes": len(raw)}
+
+
 def main():
     draft = Path(__file__).resolve().parent
     root = draft.parent
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=draft,
                         help='artifact directory outside immutable released source when deploying')
-    output = parser.parse_args().output
+    parser.add_argument('--include-go-application', action='store_true',
+                        help='include the fixed Go entry/handler source pair; does not enroll or start services')
+    args = parser.parse_args()
+    output = args.output
     inventory = json.loads((draft / 'native-preimages.json').read_text())
     if (inventory.get('schema') != 'native-code-preimages.v1'
             or set(inventory['files']) != BASE_FILES | {'pool_launcher.sh'}):
@@ -231,8 +274,14 @@ def main():
             if (name not in {'LICENSE','METADATA'} and not (name.startswith('yaml/') and name.endswith('.py'))
                     or len(raw)!=item['bytes'] or sha(raw)!=item['sha256']):
                 raise ValueError('qualified pure YAML member differs')
+    component = stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
+    if args.include_go_application:
+        compose_go_stage(root, output, manifest, files, component)
+    extra = {"native_go_entry.py", "go_application_handler.py"} if args.include_go_application else set()
+    if {p.name for p in (stage / "ext").iterdir()} != BASE_FILES | ADDITIONS | extra:
+        raise ValueError("unexpected composed native file")
     record = {"qualified_pure_yaml": pure_yaml, "schema": "native-code-source-inventory.v1", "native_code_files": len(manifest),
-        "baseline_code_files": len(BASE_FILES) + 1, "new_code_files": sorted(ADDITIONS),
+        "baseline_code_files": len(BASE_FILES) + 1, "new_code_files": sorted(ADDITIONS | extra),
         "source_status": "SOURCE_INVENTORY_REQUIRES_PROTECTED_RELEASE_AND_INSTALLATION_EVIDENCE",
         "stable_ext": inventory["stable_ext"], "files": files,
         "excluded_historical_importer": "fabric_operator_recovery.py",
@@ -245,7 +294,6 @@ def main():
         "deployment_rule": "Modified bytes must come from protected merged source; rebuild after any source change."}
     for name, value in (("native-manifest.json", manifest), ("native-source-inventory.json", record)):
         (output / name).write_text(json.dumps(value, sort_keys=True, indent=2) + "\n")
-    stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
     print(json.dumps({"native_files": len(manifest), "total_bytes": sum(v["bytes"] for v in files.values()),
         "manifest_sha256": sha((output / "native-manifest.json").read_bytes()),
         "source_inventory_sha256": sha((output / "native-source-inventory.json").read_bytes())}))

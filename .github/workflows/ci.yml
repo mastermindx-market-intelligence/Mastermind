@@ -299,6 +299,26 @@ jobs:
           result = unittest.TextTestRunner(verbosity=2).run(suite)
           raise SystemExit(not result.wasSuccessful())
           PYTEST
+          native_rollout_test_root="$(mktemp -d "$HOME/mmx-native-rollout.XXXXXX")"
+          trap 'rm -rf "$native_rollout_test_root"' EXIT
+          NATIVE_ROLLOUT_TEST_ROOT="$native_rollout_test_root" python -m pytest -q -o addopts= --noconftest \
+            --junitxml="$native_rollout_test_root/native-proof.xml" \
+            ops/native_fabric/quota_continuity/tests/test_go_native_stage.py \
+            ops/native_fabric/quota_continuity/tests/test_go_native_release.py \
+            ops/native_fabric/quota_continuity/tests/test_go_native_entry.py \
+            ops/native_fabric/quota_continuity/tests/test_go_native_install.py \
+            ops/native_fabric/quota_continuity/rollout/test_native_generation.py \
+            ops/native_fabric/quota_continuity/rollout/test_native_launcher_upgrade.py \
+            ops/native_fabric/quota_continuity/rollout/test_native_runtime_bindings.py \
+            tests/test_native_launcher_successor_transition.py
+          python - "$native_rollout_test_root/native-proof.xml" <<'PROOF'
+          import json, sys, xml.etree.ElementTree as ET
+          suites = list(ET.parse(sys.argv[1]).getroot().iter("testsuite"))
+          totals = {key: sum(int(s.get(key, "0")) for s in suites)
+                    for key in ("tests", "failures", "errors", "skipped")}
+          assert totals["tests"] > 0 and all(totals[k] == 0 for k in ("failures", "errors", "skipped")), totals
+          print("NATIVE_GO_RELEASE_PROOF " + json.dumps(totals, sort_keys=True))
+          PROOF
 
       # Use a separate pinned owner fixture; keep the ordinary Macro vendor pin.
       # This executes before any full-suite reuse decision, including merge_group.
