@@ -153,7 +153,8 @@ export function NewConversationOutcome({ locale, data, operationState, originalM
     {opened && <FreshConversationInitialResponse locale={locale} result={result} originalMessage={originalMessage}
       caption={result != null && data?.parent_consumed === false
         ? text("Reading this result does not acknowledge it.", "查看此结果并不表示已确认接收。") : null}
-      continuation={continuation??<p className="mm-new-conversation-outcome-caption">{text("Further messages are not available in this view yet.", "此视图暂不支持继续发送消息。")}</p>}/>}
+      continuation={continuation==null?<p className="mm-new-conversation-outcome-caption">{text("Further messages are not available in this view yet.", "此视图暂不支持继续发送消息。")}</p>:undefined}/>}
+    {opened&&continuation!=null?continuation:null}
     <footer className="mm-new-conversation-outcome-footer">
       <div className="mm-new-conversation-outcome-actions">
         <button type="button" disabled={busy} onClick={onCheck}>

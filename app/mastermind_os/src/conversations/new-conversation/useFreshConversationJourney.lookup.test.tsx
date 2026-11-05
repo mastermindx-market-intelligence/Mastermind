@@ -68,7 +68,9 @@ it("supplies one stable actual initial-read witness, never authority, and retire
  fireEvent.click(screen.getByRole("button",{name:"Check original request"}));
  await screen.findByRole("button",{name:"Open initial response"});expect(issued).toHaveLength(0);
  fireEvent.click(screen.getByRole("button",{name:"Open initial response"}));
- await screen.findByText("Inert independently supplied controls");const first=issued[0]!;
+ await screen.findByText("Inert independently supplied controls");
+ expect(screen.getByText("Inert independently supplied controls").closest(".mm-new-conversation-outcome-panel")).toBeNull();
+ const first=issued[0]!;
  expect(first.current()).toBe(true);expect(first.selection).toEqual(props.originalLookup!.selection);
  expect(first.result).toEqual(fixture.read.data.result);expect(first.locator).toEqual(fixture.read.data.locator);
  view.rerender(<Harness {...props} locale="zh-CN"/>);expect(issued.at(-1)).toBe(first);
