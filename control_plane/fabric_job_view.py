@@ -1888,11 +1888,20 @@ def compose_fabric_view_v3_from_retained(
     creation_event,
     armed,
     runtime_identity,
+    expected_work_ref=None,
 ):
     """Compose the v3 companion from one already-closed joint selection.
 
     The creation event was charged during that selection. This function does
     not open a Runtime observation or read another event.
+
+    ``expected_work_ref`` is the caller's selected workstream. When it is
+    given, the retained root must prove that exact membership inside this
+    SAME bounded observation, through the same fence the live Runtime path
+    uses. A root whose immutable creation provenance omits the workstream
+    cannot be proven to belong to the selected workstream, so the retained
+    join refuses instead of leaving the root unjoined while the compound
+    still reads as current.
     """
 
     def reader(command_id, event=creation_event):
@@ -1904,6 +1913,7 @@ def compose_fabric_view_v3_from_retained(
     projected = _project_retained_root_snapshot(
         snapshot, str(getattr(snapshot, "root_job_id", "")),
         creation_event_reader=reader, notes=notes, runtime=None,
+        expected_work_ref=expected_work_ref,
     )
     observed = {
         **projected,

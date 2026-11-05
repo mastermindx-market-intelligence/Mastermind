@@ -1613,6 +1613,12 @@ class WorkspaceReadService:
         qualified nested CONTENT_OVER_BUDGET Result may remain inside that
         pair. An acquisition, permission, close, budget or association failure
         returns neither document.
+
+        The retained root must also prove the SELECTED workstream inside this
+        same bounded observation. The compound route joins a Mission to one
+        work_ref, so a root whose immutable creation provenance omits the
+        workstream cannot be proven to belong to it; that refusal returns
+        neither document rather than a Mission that reads as current.
         """
         from common.executive_workspace_mission_result_contract import (
             BODY_SCHEMA,
@@ -1663,6 +1669,7 @@ class WorkspaceReadService:
             companion = compose_fabric_view_v3_from_retained(
                 material.root, receipt, creation_event=material.creation_event,
                 armed=self.armed, runtime_identity=self.runtime_identity,
+                expected_work_ref=selected["work_ref"],
             )
             mission = compose_mission_workspace_v3(
                 control_room=before.document, fabric_view=companion,

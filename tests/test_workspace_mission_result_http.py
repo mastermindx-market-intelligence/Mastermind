@@ -39,7 +39,11 @@ from integrations.mastermind_workspace_app.installed import CeoIngressWorkspaceC
 from tests.test_mastermind_executive_app_asgi import _FakeJwksCache, _read_policy, _submit_policy
 from tests.test_workspace_read_app import NOW, _authenticator, _workspace_token, rsa_key
 from tests.test_workspace_read_socket import control, short_socket_root
-from tests.test_workspace_mission_result_service import content_owner
+from tests.test_workspace_mission_result_service import (
+    content_owner,
+    legacy_owner,
+    mission_owner,
+)
 from tests.test_workspace_result_service import result_owner
 
 ROUTE = "/workspace/mission-result/current"
@@ -162,9 +166,9 @@ def _assert_pair(body, selection):
 
 
 def test_signed_export_is_the_associated_compound_body(
-    result_owner, rsa_key, tmp_path, short_socket_root, monkeypatch,
+    mission_owner, rsa_key, tmp_path, short_socket_root, monkeypatch,
 ):
-    owner = result_owner
+    owner = mission_owner
     for registry, method in (
         (owner["reader"].jobs, "list_jobs"),
         (owner["reader"].attempts, "list_attempts"),
@@ -384,23 +388,52 @@ def test_deny_and_malformed_digest_stop_before_runtime(
 
 @pytest.mark.parametrize("gate", ["control", "app"])
 def test_permission_reload_hides_the_pair(
-    result_owner, rsa_key, tmp_path, short_socket_root, gate,
+    mission_owner, rsa_key, tmp_path, short_socket_root, gate,
 ):
     def mutate(slots):
         slots["profiles"]["web"]["enabled"] = False
 
     async def run():
         async with app_transport(
-            result_owner, rsa_key, tmp_path, short_socket_root, **{"after_" + gate: mutate},
+            mission_owner, rsa_key, tmp_path, short_socket_root, **{"after_" + gate: mutate},
         ) as (http, token, _slots, seen, *_rest):
             response = await http.get(
-                ROUTE, params=result_owner["selection"],
+                ROUTE, params=mission_owner["selection"],
                 headers={"Authorization": "Bearer " + token},
             )
             assert response.status_code == 403, response.text
             assert seen["projected"]
             assert "role_result" not in response.text
             assert "reject" not in response.text
+
+    asyncio.run(run())
+
+
+def test_mounted_route_refuses_a_root_without_durable_workstream(
+    legacy_owner, rsa_key, tmp_path, short_socket_root,
+):
+    """The mounted route returns the typed unavailable compound, not a half pair.
+
+    The retained root's creation provenance omits the workstream, so the
+    selected work_ref is unproven for that root.  The route answers with the
+    one typed unavailable body: no Mission and no nested Result.
+    """
+    owner = legacy_owner
+
+    async def run():
+        async with app_transport(owner, rsa_key, tmp_path, short_socket_root) as (
+            http, token, _slots, _seen, _client, _principal, _mounted, _sink,
+        ):
+            response = await http.get(
+                ROUTE, params=owner["selection"],
+                headers={"Authorization": "Bearer " + token},
+            )
+            assert response.status_code == 503, response.text
+            body = response.json()
+            assert body["schema"] == "mastermind.workspace_mission_result.v1"
+            assert body["availability"] == "UNAVAILABLE"
+            assert body["reason_codes"] == ["SOURCE_UNAVAILABLE"]
+            assert body["mission"] is None and body["role_result"] is None
 
     asyncio.run(run())
 
