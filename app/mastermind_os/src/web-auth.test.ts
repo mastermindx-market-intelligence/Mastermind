@@ -1974,3 +1974,40 @@ describe("project history fixed READ",()=>{
     expect(e.fetcher).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("fresh conversation fixed transport",()=>{
+ const resource="https://mcp.mastermind-x.com/os/executive";
+ const preview={work_ref:"WS:Original.Project",operation_key:"mmos-conversation-create-"+"a".repeat(40),message:"Original user message."};
+ it("uses dual resource headers only on preview/create and exact original Executive recovery bodies",async()=>{
+  const e=setup({executiveResource:resource});await e.login();e.fetcher.mockClear();
+  e.fetcher.mockImplementation(async()=>response({ok:false,error:{code:"inert"}}));
+  const signal=new AbortController().signal;
+  for(const operation of ["preview","create","status","read"] as const){
+   const request=operation==="preview"?preview:operation==="create"?{...preview,preview_digest:"b".repeat(64)}:
+    {work_ref:preview.work_ref,operation_key:preview.operation_key};
+   await e.client.executive!.freshConversation!.request(operation,request,signal);
+   const [url,options]=e.fetcher.mock.calls.at(-1)!;
+   expect(url).toBe(ORIGIN+"/os/executive/conversation/"+operation);
+   expect(JSON.parse(options!.body as string)).toEqual({arguments:request});
+   expect(new Headers(options!.headers).has("x-mastermind-workspace-authorization")).toBe(operation==="preview"||operation==="create");
+  }
+  expect(e.fetcher).toHaveBeenCalledTimes(4);
+ });
+ it("does not relabel a READ-only Executive token as original submit-policy recovery",async()=>{
+  const e=setup({executiveResource:resource});
+  e.fetcher.mockImplementation(async()=>response({token_type:"Bearer",access_token:"private-token",expires_in:3600,
+   scope:new URL(e.popup.location).searchParams.get("audience")===resource?"mastermind.executive.read":new URL(e.popup.location).searchParams.get("scope")}));
+  await e.login();e.fetcher.mockClear();
+  await expect(e.client.executive!.freshConversation!.request("status",{work_ref:preview.work_ref,operation_key:preview.operation_key},new AbortController().signal)).rejects.toThrow("EXECUTIVE_SEND_SCOPE_REQUIRED");
+  expect(e.fetcher).not.toHaveBeenCalled();
+ });
+ it("closes unknown/request fields before transport and withholds a late reply after actual sign-out",async()=>{
+  const e=setup({executiveResource:resource}),signal=new AbortController().signal;
+  expect(()=>e.client.executive!.freshConversation!.request("preview",{...preview,root_job_id:"JOB-foreign"},signal)).toThrow("FRESH_CONVERSATION_REQUEST_INVALID");
+  expect(e.fetcher).not.toHaveBeenCalled();await e.login();e.fetcher.mockClear();
+  const held=deferred<Response>();e.fetcher.mockImplementation(()=>held.promise);
+  const pending=e.client.executive!.freshConversation!.request("preview",preview,signal),refused=expect(pending).rejects.toThrow();
+  await flush();await e.client.signOut();held.resolve(response({ok:true}));await refused;
+  expect(e.fetcher).toHaveBeenCalledTimes(1);
+ });
+});

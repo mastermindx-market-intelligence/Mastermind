@@ -1,3 +1,4 @@
+import {freshConversationArguments} from "./orchestration/fresh-conversation-transport";
 import { projectHistoryArguments } from "./orchestration/project-history-arguments";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import { decodeSessionContext } from "./orchestration/executive-session-command-port";
@@ -92,7 +93,7 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
   function call(command: "executive_context" | "executive_submit" | "executive_status" |
     "executive_session_context" | "executive_session_reply" | "executive_session_references" |
     "executive_project_session_references" |
-    "executive_project_history_context" |
+    "executive_project_history_context" | "executive_fresh_conversation" |
     "executive_direct_native_result" | "executive_direct_native_consume" | "executive_direct_correction" | "executive_project_planning",
     signal: AbortSignal, args?: Record<string, unknown>): Promise<unknown> {
     const started = epoch, boundary = generationAbort.signal;
@@ -135,6 +136,8 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
     status: (arguments_, signal) => call("executive_status", signal, { intentId: arguments_.intent_id }),
     projectPlanning: {request:(operation,arguments_,signal)=>call("executive_project_planning",signal,
       {operation,arguments:planningArguments(operation,arguments_)})},
+    freshConversation: {request:(operation,arguments_,signal)=>call("executive_fresh_conversation",signal,
+      {operation,arguments:freshConversationArguments(operation,arguments_)})},
     directNative: {
       read: (selection, signal) => {
         const normalized = normalizeDirectSelection(selection);

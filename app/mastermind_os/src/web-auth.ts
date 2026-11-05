@@ -1,3 +1,5 @@
+import {freshConversationArguments} from "./orchestration/fresh-conversation-transport";
+import type {FreshConversationOperation} from "./conversations/new-conversation/fresh-conversation";
 import {projectAccessPublicSelection} from "./access/project-access-host";
 import {instructionPublicRequest,instructionQuery,type InstructionPauseRequest} from "./instructions/instruction-host";
 import { projectAdmissionPublicRequest, projectAdmissionQuery, type ProjectAdmissionPauseRequest, type ProjectAdmissionResumeRequest } from "./admission/project-admission-host";
@@ -1117,18 +1119,19 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     });
   }
   async function executivePost(
-    route: "context" | "submit" | "status" | "session/context" | "session/history-context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction" | `project-planning/${PlanningOperation}`,
+    route: "context" | "submit" | "status" | "session/context" | "session/history-context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction" | `project-planning/${PlanningOperation}` | `conversation/${FreshConversationOperation}`,
     arguments_: unknown,
     signal: AbortSignal,
   ) {
     const token = tokens.executive, ticket = executiveGeneration;
-    const planning=route.startsWith("project-planning/");
-    const workspace=planning ? tokens.acquisition : null, workspaceGeneration=generation;
+    const planning=route.startsWith("project-planning/"), fresh=route.startsWith("conversation/");
+    const dual=planning || route==="conversation/preview" || route==="conversation/create";
+    const workspace=dual ? tokens.acquisition : null, workspaceGeneration=generation;
     if (!configured || !executiveResource || !token || !valid("executive"))
       throw new Error("EXECUTIVE_AUTH_REQUIRED");
-    if (planning && (!workspace || !valid("acquisition"))) throw new Error("WORKSPACE_AUTH_REQUIRED");
+    if (dual && (!workspace || !valid("acquisition"))) throw new Error("WORKSPACE_AUTH_REQUIRED");
     // READ-only may observe but must never originate a SEND or Event ACK effect.
-    if ((planning || route === "submit" || route === "session/send" || route === "direct-native/consume" || (route === "direct-native/correction" && (arguments_ as Record<string,unknown>)?.operation === "request")) &&
+    if ((planning || fresh || route === "submit" || route === "session/send" || route === "direct-native/consume" || (route === "direct-native/correction" && (arguments_ as Record<string,unknown>)?.operation === "request")) &&
       token.executiveSend !== true)
       throw new Error("EXECUTIVE_SEND_SCOPE_REQUIRED");
     const direct = route.startsWith("direct-native/");
@@ -1144,10 +1147,10 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     const foregroundResearch = route === "submit" && arguments_ !== null &&
       typeof arguments_ === "object" && !Array.isArray(arguments_) &&
       Reflect.get(arguments_, "execution_profile") === "research_only";
-    const timer = later(abort, planning ? Math.max(0,Math.min(300_000,token.expires-now(),workspace!.expires-now())) : foregroundResearch ? 430_000 : READ_TIMEOUT_MS);
+    const timer = later(abort, (planning || fresh) ? Math.max(0,Math.min(300_000,token.expires-now(),dual ? workspace!.expires-now() : Infinity)) : foregroundResearch ? 430_000 : READ_TIMEOUT_MS);
     executiveRequests.add(controller);
     const current = () => !controller.signal.aborted && ticket === executiveGeneration &&
-      tokens.executive === token && valid("executive") && (!planning ||
+      tokens.executive === token && valid("executive") && (!dual ||
         (generation===workspaceGeneration && tokens.acquisition===workspace && valid("acquisition")));
     let rejectAbort!: (error: Error) => void;
     const cancelled = new Promise<never>((_resolve, reject) => { rejectAbort = reject; });
@@ -1159,7 +1162,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         const response = await fetchFn(`${ORIGIN}/os/executive/${route}`, {
           method: "POST", redirect: "error", credentials: "omit", cache: "no-store",
           headers: { Accept: "application/json", "Content-Type": "application/json",
-            Authorization: `Bearer ${token.value}`, ...(planning ? {"X-Mastermind-Workspace-Authorization":`Bearer ${workspace!.value}`} : {}) },
+            Authorization: `Bearer ${token.value}`, ...(dual ? {"X-Mastermind-Workspace-Authorization":`Bearer ${workspace!.value}`} : {}) },
           body, signal: controller.signal,
         });
         if (!current()) throw new Error("EXECUTIVE_REQUEST_CANCELLED");
@@ -1200,6 +1203,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       status: (arguments_, signal) => executivePost("status", { intent_id: arguments_.intent_id }, signal),
       projectPlanning: { request: (operation,arguments_,signal) =>
         executivePost(`project-planning/${operation}`,planningArguments(operation,arguments_),signal) },
+      freshConversation: {request:(operation,arguments_,signal)=>
+        executivePost(`conversation/${operation}`,freshConversationArguments(operation,arguments_),signal)},
       directNative: {
         correction: (request,signal)=>executivePost('direct-native/correction',request,signal),
         read: (selection, signal) => {

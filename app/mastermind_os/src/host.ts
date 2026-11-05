@@ -1,3 +1,4 @@
+import {freshConversationArguments, freshConversationNeedsWorkspace, type FreshConversationTransport} from "./orchestration/fresh-conversation-transport";
 import { createLazyTerminalSharingHost, type TerminalSharingSource } from "./terminal/terminal-sharing-host";
 import {projectAccessHostMethods,projectAccessPublicSelection,type ProjectAccessRawMethods,type ProjectAccessHostMethods} from "./access/project-access-host";
 import { projectAdmissionHostMethods, projectAdmissionPublicRequest, type ProjectAdmissionRawMethods, type ProjectAdmissionHostMethods } from "./admission/project-admission-host";
@@ -171,6 +172,7 @@ export interface MissionHost extends Partial<ProjectAdmissionHostMethods>,Partia
   /** Independent Terminal session; workspace grants never confer brief access. */
   readonly terminalSharing?: TerminalSharingSource;
   readonly projectPlanning?: ProjectPlanningTransport;
+  readonly freshConversation?: FreshConversationTransport;
   /** Optional zero-input navigation; no private content or access receipt. */
   openTerminalBriefs?: TerminalBriefsNavigationPort;
   readonly sourceOperations?:SourceOperationTransport;
@@ -469,6 +471,23 @@ export function bindMissionHost(
         return decodeAutonomyPolicy(raw, selected);
       },
     } : {}),
+    ...(client.executive?.freshConversation ? {freshConversation:{request:async(operation,arguments_,signal)=>{
+      const closed=freshConversationArguments(operation,arguments_);
+      const transport=client.executive!,group=transport.freshConversation!,method=group.request;
+      const getter=client.getState,sourceMethod=client.invalidationGeneration;
+      const started=epoch,source=sourceMethod?.call(client),executiveEpoch=transport.authGeneration();
+      const current=()=>{
+        if(signal.aborted || epoch!==started || client.executive!==transport || transport.freshConversation!==group
+          || group.request!==method || client.getState!==getter || client.invalidationGeneration!==sourceMethod
+          || sourceMethod?.call(client)!==source || transport.authGeneration()!==executiveEpoch || !transport.available())return false;
+        const state=getter.call(client);
+        return state.status==='signed_in' && (!freshConversationNeedsWorkspace(operation) || state.acquisition===true);
+      };
+      if(!current())throw Error('FRESH_CONVERSATION_UNAVAILABLE');
+      const result=await method.call(group,operation,closed,signal);
+      if(!current())throw Error('FRESH_CONVERSATION_UNAVAILABLE');
+      return result;
+    }}} : {}),
     ...(client.executive?.projectPlanning ? {projectPlanning:{request: async (operation,arguments_,signal)=>{
       const transport=client.executive!,group=transport.projectPlanning!,method=group.request;
       const started=epoch,source=client.invalidationGeneration?.(),executiveEpoch=transport.authGeneration();
