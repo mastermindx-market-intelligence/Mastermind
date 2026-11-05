@@ -106,7 +106,7 @@ def test_asset_manifest_and_callback_headers(static_source,settings):
                     ['connect-src', "'self'", 'https://dev-eo0jf8us5mup7wd5.us.auth0.com']
                 ]
                 assert [tokens for tokens in directives if tokens and tokens[0] == 'frame-src'] == [
-                    ['frame-src', 'https://dev-eo0jf8us5mup7wd5.us.auth0.com']
+                    ['frame-src', "'self'", 'https://dev-eo0jf8us5mup7wd5.us.auth0.com']
                 ]
                 ancestors = [tokens for tokens in directives if tokens and tokens[0] == 'frame-ancestors']
                 assert ancestors == [['frame-ancestors', "'self'" if path.startswith('/os/auth/callback')

@@ -780,7 +780,7 @@ _OS_RESPONSE_HEADERS = {
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; "
         f"connect-src 'self' {_OS_AUTH0_ORIGIN}; "
-        f"frame-src {_OS_AUTH0_ORIGIN}; "
+        f"frame-src 'self' {_OS_AUTH0_ORIGIN}; "
         "img-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'none'",
 }
 # Only the OAuth callback can be framed by the OS origin. The app shell and

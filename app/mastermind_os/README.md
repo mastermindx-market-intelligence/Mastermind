@@ -133,7 +133,7 @@ Explicit logout prevents redirect, including if a subsequent popup is blocked.
 Content and optional Executive grants can remain unavailable if their iframe
 attempts are also blocked. The existing user-initiated Auth0 popup may recover
 those scopes. The subsequent OS static-response candidate narrowly permits
-`frame-src` to the exact pinned Auth0 issuer on the OS app and allows only
+`frame-src` to the exact pinned Auth0 issuer and its own callback origin on the OS app, and allows only
 the exact OAuth callback to be framed by its own OS origin (`frame-ancestors
 'self'`); the app shell and all other assets remain `frame-ancestors 'none'`.
 That repairs the OS-controlled CSP denial without permitting arbitrary
