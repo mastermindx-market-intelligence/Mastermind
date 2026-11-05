@@ -66,7 +66,10 @@ lawful original-carrier operation. The existing lane inventory still identifies
 what is safe to execute. The audit reports
 `owner_only_handoff_is_not_continuation: true` and
 `premature_exit_detected: true` even if every listed lane is observed as
-`WAITING_EXTERNAL`. An owner name is not a START, runtime binding, GitHub
+`WAITING_EXTERNAL`. A premature claim also forces `disposition: INCOMPLETE`
+and CLI exit 1 even when every separately enumerated proof gate is present;
+`READY_FOR_CANONICAL_ADJUDICATION` requires both proof completeness and a
+non-premature exit. An owner name is not a START, runtime binding, GitHub
 approval, transfer receipt or a session that will wake. The assigned session
 must reconcile any live writer/lease and effect, act on permitted source,
 review diagnostics or qualified release steps, and preserve genuine permission,

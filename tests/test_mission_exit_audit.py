@@ -344,6 +344,42 @@ def test_owner_only_handoff_cannot_close_a_mission_with_safe_work():
     assert report["production_activation_authorized"] is False
 
 
+def test_proof_complete_packet_with_owner_handoff_fails_closed_in_cli(tmp_path, capsys):
+    data = prophet_snapshot()
+    data["mission"]["requires"] = ["current_head_ci"]
+    data["source"].update(
+        ci_conclusion="SUCCESS", ci_head=data["source"]["head"],
+        ci_run_ref="github:run-completed",
+    )
+    data["lanes"]["exit_claim"] = "OWNER_HANDOFF_STOP"
+    result = audit(data)
+    assert result["checks_passed"] == ["current_head_ci"]
+    assert result["gaps"] == []
+    assert result["premature_exit_detected"] is True
+    assert result["disposition"] == "INCOMPLETE"
+    file = tmp_path / "ghost-owner.json"
+    file.write_text(json.dumps(data), encoding="utf-8")
+    assert main([str(file)]) == 1
+    assert json.loads(capsys.readouterr().out)["disposition"] == "INCOMPLETE"
+    # The same source evidence can still be adjudicated if the session acts.
+    data["lanes"]["exit_claim"] = "CONTINUE"
+    assert audit(data)["disposition"] == "READY_FOR_CANONICAL_ADJUDICATION"
+
+
+def test_proof_complete_packet_with_checkpoint_summary_cannot_be_ready():
+    data = prophet_snapshot()
+    data["mission"]["requires"] = ["current_head_ci"]
+    data["source"].update(
+        ci_conclusion="SUCCESS", ci_head=data["source"]["head"],
+        ci_run_ref="github:run-completed",
+    )
+    data["lanes"]["exit_claim"] = "CHECKPOINT_SUMMARY_STOP"
+    result = audit(data)
+    assert result["gaps"] == []
+    assert result["premature_exit_detected"] is True
+    assert result["disposition"] == "INCOMPLETE"
+
+
 def test_owner_only_handoff_is_not_durable_executor_or_verified_checkpoint():
     data = prophet_snapshot()
     data["lanes"]["items"] = [

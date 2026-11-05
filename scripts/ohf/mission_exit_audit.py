@@ -503,9 +503,14 @@ def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
                 "do not retry the denied action through any carrier"
             ),
         })
+    # A proof-complete packet does not make a procedurally invalid session
+    # exit ready for canonical adjudication. Audit the optional lane claim
+    # before the CLI disposition so a ghost-owner/status-only stop fails
+    # closed even when every separately enumerated proof gate passes.
+    lane_audit = _audit_lanes(root, effect) if root.get("lanes") is not None else {}
     # The caller must verify these observations against each canonical owner;
     # all green checks only mean the supplied packet is ready for adjudication.
-    ready = not gaps and not held
+    ready = not gaps and not held and not lane_audit.get("premature_exit_detected", False)
     report = {
         "schema": OUTPUT_SCHEMA,
         "disposition": "READY_FOR_CANONICAL_ADJUDICATION" if ready else "INCOMPLETE",
@@ -528,8 +533,7 @@ def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
     # Exit-claim classification is additive: snapshots without a ``lanes`` section
     # keep the exact incumbent output contract (no lane flags ever appear).
-    if root.get("lanes") is not None:
-        report.update(_audit_lanes(root, effect))
+    report.update(lane_audit)
     return report
 
 
