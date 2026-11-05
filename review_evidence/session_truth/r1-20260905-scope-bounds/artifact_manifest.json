@@ -1,0 +1,101 @@
+{
+  "schema": "mastermind.session_truth_task7_artifact_manifest.v1",
+  "source_commit": "839162b7bbe97ddc65cb4cd4878383e8c94c0fa5",
+  "files": [
+    {
+      "path": "acquisition_notes.json",
+      "bytes": 3147,
+      "sha256": "d3e787aed908530adaf47827a423d5d75873517a8c50fc79c0f15d08b7ea8852"
+    },
+    {
+      "path": "authored_record_delta_comparison.json",
+      "bytes": 1070,
+      "sha256": "749497e367efd0c3f63c178102163661226f942650c9c3d9464f04a17c4addff"
+    },
+    {
+      "path": "comparison.json",
+      "bytes": 3133,
+      "sha256": "73eea3a3fa567dc7fb4575c2b470f5d2273d80d03d120ed11557f2397a59c3e8"
+    },
+    {
+      "path": "executive_observation.v1.json",
+      "bytes": 123,
+      "sha256": "a362237c1511c34a29d49cd81366516dc9f85020ebf3557bb02f6f9a4eff10ec"
+    },
+    {
+      "path": "github_observation.v1.json",
+      "bytes": 1417,
+      "sha256": "7e351a1316f7797970fab9f8ee47fe3977ed40c25da923c23bfd5cda19b6e657"
+    },
+    {
+      "path": "identity_observation.v1.json",
+      "bytes": 129,
+      "sha256": "c45350775858ef2b5c5bf647ef15889f7d4d3d28a7f8135bb5e6b0b86b211a9d"
+    },
+    {
+      "path": "linear_observation.v1.json",
+      "bytes": 661,
+      "sha256": "b2d1f213bef19ba56012e0754a12912388bb7ceb7be5f3b9ebd329b20864048d"
+    },
+    {
+      "path": "malformed_cli_proof.json",
+      "bytes": 2416,
+      "sha256": "bc156af6bafea95dfbfe382547462f8817b9830168267d794211324a3b7e8b96"
+    },
+    {
+      "path": "proof.md",
+      "bytes": 8585,
+      "sha256": "ccebed89d3597b2e620818909011ce66e6c2901b29be21b42ff58c648edf85fd"
+    },
+    {
+      "path": "receipt_authored_record_before.json",
+      "bytes": 759024,
+      "sha256": "8c5f50ef07a06ff53988a31b5046a32d3806009661ca9af6fce4b7da851b5987"
+    },
+    {
+      "path": "receipt_clock_1.json",
+      "bytes": 759294,
+      "sha256": "c38a15d62eb4eaa719c8713609ae4af1b33a66c56eb55679f7a7efd620f04fdd"
+    },
+    {
+      "path": "receipt_clock_2.json",
+      "bytes": 759304,
+      "sha256": "cd4f6a8c4a621e5a8ce0e25890f1f62a932eac4da6273a19ce4b4d5f9c89d965"
+    },
+    {
+      "path": "required_executive_counterfactual.json",
+      "bytes": 1136840,
+      "sha256": "5dfb1e31aaede215e30df9a71e061b5bfa697096082a74a591547f67be3ec5ea"
+    },
+    {
+      "path": "review.md",
+      "bytes": 3547,
+      "sha256": "106c1870830750f3ebbaf10fd720c0aad0f7f116879447e8931f257dee7efbd2"
+    },
+    {
+      "path": "run_log.json",
+      "bytes": 4725,
+      "sha256": "c91738c4b752c1820269b10d4246100b85db1b42a31cb6a81a35e63b41220730"
+    },
+    {
+      "path": "semantic_projection_clock_1.json",
+      "bytes": 8132,
+      "sha256": "9013fc1d4c47b2c9f783b7ab5e1c7886a77236f1c5d1e7372c69b61f6b118a77"
+    },
+    {
+      "path": "semantic_projection_clock_2.json",
+      "bytes": 8132,
+      "sha256": "9013fc1d4c47b2c9f783b7ab5e1c7886a77236f1c5d1e7372c69b61f6b118a77"
+    },
+    {
+      "path": "slack_observation.v1.json",
+      "bytes": 1266,
+      "sha256": "ef7e16c590b671d9178f09422b5f4014fcd39de07304ede1cb10440ea9918d61"
+    },
+    {
+      "path": "source_pins.json",
+      "bytes": 795,
+      "sha256": "bd5a011a30dffee88a9f5cc23ab5099608919b6e3cbea8e15cf30cb526aba73a"
+    }
+  ]
+}

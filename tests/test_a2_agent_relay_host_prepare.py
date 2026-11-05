@@ -1,0 +1,809 @@
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PREP = ROOT / "ops" / "executive_os" / "prepare-a2-agent-relay-host.sh"
+
+
+def test_fixed_socket_permission_mode_is_pinned_and_not_an_identity_value():
+    source = PREP.read_text(encoding="utf-8")
+    assert source.count("PARENT_DIRECTORY_PERMISSION_MODE=710") == 1
+    assert source.count(
+        'preflight_directory "$SOCKET_ROOT" "$RELAY_UID" "$RELAY_GID" "$PARENT_DIRECTORY_PERMISSION_MODE"'
+    ) == 2
+    assert source.count(
+        'ensure_directory "$SOCKET_ROOT" "$RELAY_USER" "$RELAY_GROUP" "$RELAY_UID" "$RELAY_GID" "$PARENT_DIRECTORY_PERMISSION_MODE"'
+    ) == 2
+    for unapproved in ("700", "750", "770", "777"):
+        assert f"PARENT_DIRECTORY_PERMISSION_MODE={unapproved}" not in source
+
+
+def test_enrollment_gate_requires_exact_prepared_socket_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    from ops.executive_os import a2_agent_relay_enrollment as enrollment
+    import os
+
+    socket = tmp_path / "runtime" / "agent-relay.sock"
+    monkeypatch.setattr(enrollment, "SOCKET_PATH", socket)
+    monkeypatch.setattr(enrollment, "RELAY_UID", os.getuid())
+    monkeypatch.setattr(enrollment, "RELAY_GID", os.getgid())
+    assert not enrollment._socket_parent_prepared()
+
+    socket.parent.mkdir()
+    socket.parent.chmod(0o710)
+    # macOS may inherit the parent group rather than the invoking process gid.
+    monkeypatch.setattr(enrollment, "RELAY_GID", socket.parent.stat().st_gid)
+    assert enrollment._socket_parent_prepared()
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            enrollment.c1_enrollment.c1_runtime,
+            "_path_has_acl",
+            lambda *_args, **_kwargs: True,
+        )
+        assert not enrollment._socket_parent_prepared()
+    socket.parent.chmod(0o770)
+    assert not enrollment._socket_parent_prepared()
+    socket.parent.chmod(0o710)
+    monkeypatch.setattr(enrollment, "RELAY_UID", os.getuid() + 1)
+    assert not enrollment._socket_parent_prepared()
+    monkeypatch.setattr(enrollment, "RELAY_UID", os.getuid())
+    socket.parent.rmdir()
+    target = tmp_path / "elsewhere"
+    target.mkdir(mode=0o710)
+    socket.parent.symlink_to(target, target_is_directory=True)
+    assert not enrollment._socket_parent_prepared()
+
+
+def test_refuses_non_macos_before_any_host_preparation(tmp_path: Path):
+    """Removing the production platform guard must fail before argument parsing."""
+
+    fake_uname = tmp_path / "uname"
+    _write_executable(fake_uname, "#!/bin/sh\nprintf 'Linux\\n'\n")
+    artifact = tmp_path / "prepare-a2-agent-relay-host.sh"
+    _write_executable(
+        artifact,
+        PREP.read_text(encoding="utf-8").replace("/usr/bin/uname", str(fake_uname)),
+    )
+
+    completed = subprocess.run(
+        ["/bin/bash", str(artifact), "--release-root", "/not/a/real/release"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 69
+    assert "supports macOS only" in completed.stderr
+
+
+def test_refuses_non_root_before_any_host_preparation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A privilege-gate regression must never reach a host mutation."""
+
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    monkeypatch.setenv("A2_FAKE_UID", "501")
+    completed = subprocess.run(
+        ["/bin/bash", str(artifact), "--release-root", str(paths["release"])],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 77
+    assert "must run as root" in completed.stderr
+
+
+@pytest.mark.parametrize("arguments", [(), ("--unexpected",), ("--release-root",)])
+def test_refuses_ambiguous_invocation_before_any_host_preparation(
+    arguments, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Removing the closed argument gate must fail before a host command runs."""
+
+    artifact, state_path, _paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    completed = subprocess.run(
+        ["/bin/bash", str(artifact), *arguments],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 64
+    assert "usage:" in completed.stderr
+
+
+@pytest.mark.parametrize(
+    ("candidate", "expected_error"),
+    [
+        ("outside", "beneath the reviewed releases root"),
+        ("not-a-sha", "full 40-character lowercase hexadecimal SHA"),
+        ("F" * 40, "full 40-character lowercase hexadecimal SHA"),
+    ],
+)
+def test_refuses_untrusted_release_identity_before_any_host_preparation(
+    candidate, expected_error, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Changing the release boundary or SHA parser must fail this host gate."""
+
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    release_root = (
+        tmp_path / "unreviewed-release"
+        if candidate == "outside"
+        else paths["release"].parent / candidate
+    )
+    completed = subprocess.run(
+        ["/bin/bash", str(artifact), "--release-root", str(release_root)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 65
+    assert expected_error in completed.stderr
+
+
+def _write_executable(path: Path, source: str) -> None:
+    path.write_text(source, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _fake_host_script(tmp_path: Path) -> tuple[Path, Path, dict[str, Path]]:
+    """Build a disposable macOS command/metadata boundary for the shell artifact."""
+
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    state_path = tmp_path / "state.json"
+    system_root = tmp_path / "Library" / "Application Support" / "MastermindExecutive"
+    runtime_root = tmp_path / "var" / "db" / "mastermind-agent-relay"
+    socket_root = tmp_path / "var" / "db" / "mastermind-agent-relay" / "socket"
+    plist_path = tmp_path / "Library" / "LaunchDaemons" / "com.mastermind.executive.agent-relay.plist"
+    release_root = system_root / "releases" / ("a" * 40)
+    release_root.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "groups": {"wheel": {"PrimaryGroupID": "0"}},
+                "metadata": {
+                    str(release_root): "0:0:755",
+                    str(system_root): "0:0:755",
+                },
+                "users": {
+                    "_mastermind_exec": {
+                        "PrimaryGroupID": "450",
+                        "UniqueID": "450",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _write_executable(
+        fake_bin / "uname",
+        "#!/bin/sh\nprintf 'Darwin\\n'\n",
+    )
+    _write_executable(
+        fake_bin / "uuidgen",
+        "#!/bin/sh\nprintf '00000000-0000-4000-8000-000000000000\\n'\n",
+    )
+    _write_executable(
+        fake_bin / "pwpolicy",
+        "#!/bin/sh\nexit 0\n",
+    )
+    _write_executable(
+        fake_bin / "forbidden-effect",
+        "#!/bin/sh\nprintf 'unexpected effect command: %s\\n' \"$0\" >&2\nexit 99\n",
+    )
+    _write_executable(
+        fake_bin / "id",
+        """#!{python}
+import json
+import os
+import sys
+
+state = json.loads(open(os.environ["A2_FAKE_STATE"], encoding="utf-8").read())
+if sys.argv[1:] == ["-u"]:
+    print(os.environ.get("A2_FAKE_UID", "0"))
+elif sys.argv[1:] == ["-G", "_mastermind_exec"]:
+    members = state["groups"].get("_mastermind_agent_relay", {{}}).get("GroupMembership", [])
+    print("450 457" if "_mastermind_exec" in members else "450")
+else:
+    raise SystemExit(64)
+""".format(python=sys.executable),
+    )
+    _write_executable(
+        fake_bin / "dscl",
+        """#!{python}
+import json
+import os
+import sys
+
+state_path = os.environ["A2_FAKE_STATE"]
+state = json.loads(open(state_path, encoding="utf-8").read())
+kind_map = {{"Groups": "groups", "Users": "users"}}
+
+def save():
+    open(state_path, "w", encoding="utf-8").write(json.dumps(state, sort_keys=True))
+
+def record(path):
+    _, kind, name = path.split("/", 2)
+    return kind_map[kind], name
+
+args = sys.argv[1:]
+if not args or args[0] != ".":
+    raise SystemExit(64)
+if args[1] == "-list":
+    kind = kind_map[args[2].lstrip("/")]
+    attribute = args[3]
+    for name, values in sorted(state[kind].items()):
+        if attribute in values:
+            print(name, values[attribute])
+    raise SystemExit(0)
+if args[1] == "-read":
+    kind, name = record(args[2])
+    values = state[kind].get(name)
+    if values is None:
+        raise SystemExit(1)
+    if len(args) == 3:
+        for key, value in values.items():
+            print(f"{{key}}: {{' '.join(value) if isinstance(value, list) else value}}")
+    else:
+        attribute = args[3]
+        if attribute not in values:
+            raise SystemExit(1)
+        value = values[attribute]
+        display_attribute = attribute
+        if (
+            os.environ.get("A2_FAKE_NATIVE_ATTRIBUTE_PREFIX") == "1"
+            and attribute == "IsHidden"
+        ):
+            display_attribute = f"dsAttrTypeNative:{{attribute}}"
+        print(
+            f"{{display_attribute}}: "
+            f"{{' '.join(value) if isinstance(value, list) else value}}"
+        )
+    raise SystemExit(0)
+if args[1] == "-create":
+    kind, name = record(args[2])
+    values = state[kind].setdefault(name, {{}})
+    if len(args) > 3:
+        values[args[3]] = args[4]
+    save()
+    raise SystemExit(0)
+if args[1] == "-authonly":
+    raise SystemExit(1)
+raise SystemExit(64)
+""".format(python=sys.executable),
+    )
+    _write_executable(
+        fake_bin / "dseditgroup",
+        """#!{python}
+import json
+import os
+import sys
+
+state_path = os.environ["A2_FAKE_STATE"]
+state = json.loads(open(state_path, encoding="utf-8").read())
+args = sys.argv[1:]
+if args[:2] == ["-o", "edit"]:
+    user = args[args.index("-a") + 1]
+    group = args[-1]
+    members = state["groups"][group].setdefault("GroupMembership", [])
+    if user not in members:
+        members.append(user)
+    open(state_path, "w", encoding="utf-8").write(json.dumps(state, sort_keys=True))
+    raise SystemExit(0)
+if args[:2] == ["-o", "checkmember"]:
+    user = args[args.index("-m") + 1]
+    group = args[-1]
+    if user in state["groups"].get(group, {{}}).get("GroupMembership", []):
+        print(f"yes {{user}} is a member of {{group}}")
+        raise SystemExit(0)
+    print(f"no {{user}} is NOT a member of {{group}}")
+    raise SystemExit(67)
+raise SystemExit(64)
+""".format(python=sys.executable),
+    )
+    _write_executable(
+        fake_bin / "install",
+        """#!{python}
+import json
+import os
+from pathlib import Path
+import sys
+
+state_path = os.environ["A2_FAKE_STATE"]
+state = json.loads(open(state_path, encoding="utf-8").read())
+args = sys.argv[1:]
+assert args[0] == "-d"
+owner = args[args.index("-o") + 1]
+group = args[args.index("-g") + 1]
+mode = args[args.index("-m") + 1].lstrip("0") or "0"
+path = Path(args[-1])
+path.mkdir(parents=True, exist_ok=True)
+ids = {{"root": "0", "wheel": "0", "_mastermind_agent_relay": "457"}}
+state["metadata"][str(path)] = f"{{ids[owner]}}:{{ids[group]}}:{{mode}}"
+open(state_path, "w", encoding="utf-8").write(json.dumps(state, sort_keys=True))
+""".format(python=sys.executable),
+    )
+    _write_executable(
+        fake_bin / "stat",
+        """#!{python}
+import json
+import os
+import sys
+
+state = json.loads(open(os.environ["A2_FAKE_STATE"], encoding="utf-8").read())
+format_string = sys.argv[sys.argv.index("-f") + 1]
+metadata = state["metadata"].get(sys.argv[-1], "0:0:755")
+uid, gid, mode = metadata.split(":")
+if format_string == "%u:%g:%Lp":
+    print(metadata)
+elif format_string == "%u:%g":
+    print(f"{{uid}}:{{gid}}")
+elif format_string == "%Lp":
+    print(mode)
+elif format_string == "%Sp":
+    print("drwx------+" if os.environ.get("A2_FAKE_ACL_PATH") == sys.argv[-1] else "drwx------")
+else:
+    raise SystemExit(64)
+""".format(python=sys.executable),
+    )
+
+    _write_executable(
+        fake_bin / "launchctl",
+        r"""#!PYTHON
+import json
+import os
+import sys
+from pathlib import Path
+
+state_path = Path(os.environ["A2_FAKE_STATE"])
+state = json.loads(state_path.read_text())
+label = "system/com.mastermind.executive.agent-relay"
+args = sys.argv[1:]
+if args == ["print", label]:
+    if os.environ.get("A2_FAKE_PRINT_STATUS"):
+        raise SystemExit(int(os.environ["A2_FAKE_PRINT_STATUS"]))
+    loaded = os.environ.get("A2_FAKE_LOADED") == "1"
+    loaded |= state.get("relay_disabled", False) and os.environ.get("A2_FAKE_LOADED_AFTER_DISABLE") == "1"
+    raise SystemExit(0 if loaded else 113)
+if args == ["disable", label]:
+    raise SystemExit("direct shell disable is forbidden")
+    with Path(str(state_path) + ".effects").open("a") as log:
+        log.write("disable " + label + "\n")
+    if os.environ.get("A2_FAKE_DISABLE_FAIL") == "1":
+        raise SystemExit(5)
+    state["relay_disabled"] = True
+    state_path.write_text(json.dumps(state, sort_keys=True))
+elif args == ["print-disabled", "system"]:
+    mode = os.environ.get("A2_FAKE_DISABLED_READ", "valid")
+    if mode == "error":
+        raise SystemExit(5)
+    if mode == "absent":
+        print("{}")
+    else:
+        value = {"false": "false", "malformed": "true garbage", "disabled": "disabled"}.get(mode, "true")
+        line = '"com.mastermind.executive.agent-relay" => ' + value
+        print(line)
+        if mode == "duplicate":
+            print(line)
+else:
+    print("unexpected launchctl operation", args, file=sys.stderr)
+    raise SystemExit(99)
+""".replace("PYTHON", sys.executable),
+    )
+
+    owner_script = release_root / "ops" / "executive_os" / "autonomy-control.sh"
+    owner_script.parent.mkdir(parents=True)
+    _write_executable(owner_script, f'#!/bin/bash\nexec "{sys.executable}" "{fake_bin / "autonomy-owner"}" "$@"\n')
+    _write_executable(fake_bin / "autonomy-owner", r"""#!PYTHON
+import json
+import os
+import sys
+from pathlib import Path
+state_path = Path(os.environ["A2_FAKE_STATE"])
+state = json.loads(state_path.read_text())
+assert sys.argv[1:] == ["a2-disable-prepare", "--expected-sha", "a"*40]
+if os.environ.get("A2_FAKE_OWNER_UNKNOWN") == "1":
+    print('{"status":"EFFECT_UNKNOWN"}')
+    raise SystemExit(2)
+if not state.get("relay_disabled"):
+    with Path(str(state_path) + ".effects").open("a") as log:
+        log.write("disable system/com.mastermind.executive.agent-relay\n")
+    state["relay_disabled"] = True
+    state_path.write_text(json.dumps(state, sort_keys=True))
+print('{"status":"A2_DISABLE_PREPARED"}')
+""".replace("PYTHON", sys.executable))
+
+    artifact = tmp_path / "prepare-a2-agent-relay-host.sh"
+    source = PREP.read_text(encoding="utf-8")
+    replacements = {
+        "/usr/bin/uname": str(fake_bin / "uname"),
+        "/usr/bin/id": str(fake_bin / "id"),
+        "/usr/bin/dscl": str(fake_bin / "dscl"),
+        "/usr/sbin/dseditgroup": str(fake_bin / "dseditgroup"),
+        "/usr/bin/install": str(fake_bin / "install"),
+        "/usr/bin/stat": str(fake_bin / "stat"),
+        "/usr/bin/uuidgen": str(fake_bin / "uuidgen"),
+        "/usr/bin/pwpolicy": str(fake_bin / "pwpolicy"),
+        "/bin/launchctl": str(fake_bin / "launchctl"),
+        "/usr/bin/curl": str(fake_bin / "forbidden-effect"),
+        "/usr/bin/plutil": str(fake_bin / "forbidden-effect"),
+        "/usr/bin/sudo": str(fake_bin / "forbidden-effect"),
+        "/Library/LaunchDaemons/com.mastermind.executive.agent-relay.plist": str(plist_path),
+        "/var/db/mastermind-agent-relay/socket": str(socket_root),
+        "/var/db/mastermind-agent-relay": str(runtime_root),
+        "/Library/Application Support/MastermindExecutive": str(system_root),
+    }
+    # One-pass replacement keeps nested socket paths from being rewritten
+    # twice when a synthetic target itself contains a mapped parent suffix.
+    pattern = re.compile("|".join(re.escape(key) for key in sorted(replacements, key=len, reverse=True)))
+    source = pattern.sub(lambda match: replacements[match.group(0)], source)
+    _write_executable(artifact, source)
+    return artifact, state_path, {
+        "config": system_root / "config",
+        "home": runtime_root / "home",
+        "plist": plist_path,
+        "release": release_root,
+        "runtime": runtime_root,
+        "socket": socket_root,
+        "system": system_root,
+    }
+
+
+def test_prepares_exact_identity_directories_and_disabled_unloaded_relay_idempotently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Omitting an identity/path invariant or making run two mutate must fail."""
+
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    command = ["/bin/bash", str(artifact), "--release-root", str(paths["release"])]
+
+    first = subprocess.run(command, check=False, capture_output=True, text=True)
+
+    assert first.returncode == 0, first.stderr
+    state_after_first = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state_after_first["groups"]["_mastermind_agent_relay"] == {
+        "GeneratedUID": "00000000-0000-4000-8000-000000000000",
+        "GroupMembership": ["_mastermind_exec"],
+        "PrimaryGroupID": "457",
+        "RealName": "_mastermind_agent_relay service group",
+    }
+    assert state_after_first["users"]["_mastermind_agent_relay"] == {
+        "IsHidden": "1",
+        "NFSHomeDirectory": str(paths["home"]),
+        "Password": "*",
+        "PrimaryGroupID": "457",
+        "RealName": "_mastermind_agent_relay service account",
+        "UniqueID": "457",
+        "UserShell": "/usr/bin/false",
+    }
+    for path, metadata in (
+        (paths["system"], "0:0:755"),
+        (paths["config"], "0:0:755"),
+        (paths["runtime"], "0:0:711"),
+        (paths["home"], "457:457:700"),
+        (paths["socket"], "457:457:710"),
+    ):
+        assert path.is_dir()
+        assert state_after_first["metadata"][str(path)] == metadata
+    assert state_after_first["relay_disabled"] is True
+    assert Path(str(state_path) + ".effects").read_text().splitlines() == ["disable system/com.mastermind.executive.agent-relay"]
+    assert not (paths["config"] / "agent-relay.token").exists()
+    assert not (paths["config"] / "agent-relay.json").exists()
+    assert not paths["plist"].exists()
+
+    second = subprocess.run(command, check=False, capture_output=True, text=True)
+
+    assert second.returncode == 0, second.stderr
+    assert json.loads(state_path.read_text(encoding="utf-8")) == state_after_first
+
+
+@pytest.mark.parametrize("foreign", ["symlink", "uid", "mode", "acl"])
+def test_socket_parent_refuses_untrusted_existing_directory_before_identity_changes(
+    foreign, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    target = paths["socket"]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if foreign == "symlink":
+        stable = tmp_path / "foreign-socket-parent"
+        stable.mkdir()
+        target.symlink_to(stable, target_is_directory=True)
+    else:
+        target.mkdir()
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["metadata"][str(target)] = (
+            "450:457:710" if foreign == "uid" else "457:457:777"
+        )
+        state_path.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+    original = state_path.read_bytes()
+    if foreign == "acl":
+        monkeypatch.setenv("A2_FAKE_ACL_PATH", str(target))
+
+    result = subprocess.run(
+        ["/bin/bash", str(artifact), "--release-root", str(paths["release"])],
+        check=False, capture_output=True, text=True,
+    )
+
+    assert result.returncode == 65
+    assert (
+        "existing prerequisite directory differs" in result.stderr
+        or "existing prerequisite directory has a filesystem ACL" in result.stderr
+    )
+    assert state_path.read_bytes() == original
+    assert not Path(str(state_path) + ".effects").exists()
+
+
+def _seed_fake_enrolled_host(state_path: Path, paths: dict[str, Path]) -> None:
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    for name, metadata in (
+        ("agent-relay.token", "457:457:400"),
+        ("agent-relay.json", "457:457:400"),
+    ):
+        path = paths["config"] / name
+        path.write_text("INERT-TEST-METADATA-ONLY", encoding="utf-8")
+        state["metadata"][str(path)] = metadata
+    plist = paths["plist"]
+    plist.parent.mkdir(parents=True, exist_ok=True)
+    plist.write_text("INERT-TEST-PLIST", encoding="utf-8")
+    state["metadata"][str(plist)] = "0:0:644"
+    state_path.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+
+
+def test_enrolled_host_socket_preparation_recreates_only_persistent_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    base = ["/bin/bash", str(artifact), "--release-root", str(paths["release"])]
+    first = subprocess.run(base, check=False, capture_output=True, text=True)
+    assert first.returncode == 0, first.stderr
+    _seed_fake_enrolled_host(state_path, paths)
+    original_effects = Path(str(state_path) + ".effects").read_bytes()
+    paths["socket"].rmdir()
+    before = json.loads(state_path.read_text(encoding="utf-8"))
+    before["metadata"].pop(str(paths["socket"]))
+    state_path.write_text(json.dumps(before, sort_keys=True), encoding="utf-8")
+    upgraded = subprocess.run(
+        base + ["--ensure-enrolled-socket-parent"],
+        check=False, capture_output=True, text=True,
+    )
+    assert upgraded.returncode == 0, upgraded.stderr
+    assert paths["socket"].is_dir()
+    after = json.loads(state_path.read_text(encoding="utf-8"))
+    assert after["metadata"].pop(str(paths["socket"])) == "457:457:710"
+    assert after == before
+    assert Path(str(state_path) + ".effects").read_bytes() == original_effects
+    again = subprocess.run(
+        base + ["--ensure-enrolled-socket-parent"],
+        check=False, capture_output=True, text=True,
+    )
+    assert again.returncode == 0, again.stderr
+    assert Path(str(state_path) + ".effects").read_bytes() == original_effects
+
+
+@pytest.mark.parametrize("foreign", ["symlink", "uid", "mode", "acl"])
+def test_enrolled_socket_repair_fails_closed_on_foreign_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, foreign: str,
+):
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    base = ["/bin/bash", str(artifact), "--release-root", str(paths["release"])]
+    first = subprocess.run(base, check=False, capture_output=True, text=True)
+    assert first.returncode == 0, first.stderr
+    _seed_fake_enrolled_host(state_path, paths)
+    if foreign == "symlink":
+        paths["socket"].rmdir()
+        outside = tmp_path / "unrelated"
+        outside.mkdir()
+        paths["socket"].symlink_to(outside, target_is_directory=True)
+    else:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["metadata"][str(paths["socket"])] = (
+            "450:457:710" if foreign == "uid" else "457:457:777"
+        )
+        state_path.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+    before = state_path.read_bytes()
+    if foreign == "acl":
+        monkeypatch.setenv("A2_FAKE_ACL_PATH", str(paths["socket"]))
+    original_effects = Path(str(state_path) + ".effects").read_bytes()
+    result = subprocess.run(
+        base + ["--ensure-enrolled-socket-parent"],
+        check=False, capture_output=True, text=True,
+    )
+    assert result.returncode == 65
+    assert state_path.read_bytes() == before
+    assert Path(str(state_path) + ".effects").read_bytes() == original_effects
+
+
+def test_persistent_parent_survives_simulated_var_run_reboot_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    import shutil
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    result = subprocess.run(
+        ["/bin/bash", str(artifact), "--release-root", str(paths["release"])],
+        check=False, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert paths["socket"].is_dir()
+    assert str(paths["socket"]).startswith(str(tmp_path / "var" / "db"))
+    volatile = tmp_path / "var" / "run"
+    volatile.mkdir(parents=True, exist_ok=True)
+    (volatile / "reboot-cleared").touch()
+    shutil.rmtree(volatile)
+    assert paths["socket"].is_dir()
+    assert json.loads(state_path.read_text())["metadata"][str(paths["socket"])] == "457:457:710"
+
+
+def test_socket_parent_is_recreated_in_unenrolled_host_preparation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    command = ["/bin/bash", str(artifact), "--release-root", str(paths["release"])]
+    assert subprocess.run(command, check=False, capture_output=True).returncode == 0
+    before = json.loads(state_path.read_text(encoding="utf-8"))
+    assert before["metadata"][str(paths["socket"])] == "457:457:710"
+
+    # The volatile socket parent can disappear. Re-entry on an un-enrolled
+    # host restores only the expected directory, without repeating disable.
+    paths["socket"].rmdir()
+    before["metadata"].pop(str(paths["socket"]))
+    state_path.write_text(json.dumps(before, sort_keys=True), encoding="utf-8")
+    result = subprocess.run(command, check=False, capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+    after = json.loads(state_path.read_text(encoding="utf-8"))
+    assert after["metadata"][str(paths["socket"])] == "457:457:710"
+    assert after["relay_disabled"] is True
+    assert Path(str(state_path) + ".effects").read_text().splitlines() == [
+        "disable system/com.mastermind.executive.agent-relay"
+    ]
+
+
+def test_idempotent_preparation_accepts_native_is_hidden_attribute_spelling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    command = ["/bin/bash", str(artifact), "--release-root", str(paths["release"])]
+
+    first = subprocess.run(command, check=False, capture_output=True, text=True)
+    assert first.returncode == 0, first.stderr
+    state_after_first = json.loads(state_path.read_text(encoding="utf-8"))
+
+    monkeypatch.setenv("A2_FAKE_NATIVE_ATTRIBUTE_PREFIX", "1")
+    second = subprocess.run(command, check=False, capture_output=True, text=True)
+
+    assert second.returncode == 0, second.stderr
+    assert json.loads(state_path.read_text(encoding="utf-8")) == state_after_first
+
+
+def test_refuses_a_foreign_relay_gid_before_creating_any_partial_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Replacing exact collision refusal with creation must fail this hostile case."""
+
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["groups"]["foreign-service"] = {"PrimaryGroupID": "457"}
+    state_path.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    before = json.loads(state_path.read_text(encoding="utf-8"))
+
+    completed = subprocess.run(
+        ["/bin/bash", str(artifact), "--release-root", str(paths["release"])],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 65
+    assert "PrimaryGroupID 457 has an unexpected owner set" in completed.stderr
+    assert json.loads(state_path.read_text(encoding="utf-8")) == before
+    assert not paths["runtime"].exists()
+
+
+def test_refuses_a_foreign_relay_uid_before_creating_any_partial_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Moving UID collision validation after group creation must fail this test."""
+
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["users"]["foreign-service"] = {
+        "PrimaryGroupID": "499",
+        "UniqueID": "457",
+    }
+    state_path.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    before = json.loads(state_path.read_text(encoding="utf-8"))
+
+    completed = subprocess.run(
+        ["/bin/bash", str(artifact), "--release-root", str(paths["release"])],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 65
+    assert "UniqueID 457 has an unexpected owner set" in completed.stderr
+    assert json.loads(state_path.read_text(encoding="utf-8")) == before
+    assert not paths["runtime"].exists()
+
+
+def test_refuses_a_mismatched_existing_directory_before_creating_any_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Moving path validation after principal creation must fail this refusal test."""
+
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["metadata"][str(paths["system"])] = "0:0:700"
+    state_path.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    before = json.loads(state_path.read_text(encoding="utf-8"))
+
+    completed = subprocess.run(
+        ["/bin/bash", str(artifact), "--release-root", str(paths["release"])],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 65
+    assert "existing prerequisite directory differs from the reviewed identity" in completed.stderr
+    assert json.loads(state_path.read_text(encoding="utf-8")) == before
+    assert not paths["runtime"].exists()
+
+
+@pytest.mark.parametrize("setting,value", [
+    ("A2_FAKE_LOADED", "1"), ("A2_FAKE_PRINT_STATUS", "1"),
+])
+def test_unloaded_preflight_refuses_before_owner_or_identity_mutation(
+    setting, value, tmp_path, monkeypatch,
+):
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    monkeypatch.setenv(setting, value)
+    before = state_path.read_bytes()
+    completed = subprocess.run(
+        ["/bin/bash", str(artifact), "--release-root", str(paths["release"])],
+        check=False, capture_output=True, text=True)
+    assert completed.returncode == 65
+    assert "proven unloaded" in completed.stderr
+    assert state_path.read_bytes() == before
+    assert not Path(str(state_path) + ".effects").exists()
+
+
+def test_unknown_owner_result_stops_before_identity_and_directory_changes(tmp_path, monkeypatch):
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    monkeypatch.setenv("A2_FAKE_OWNER_UNKNOWN", "1")
+    before = state_path.read_bytes()
+    completed = subprocess.run(
+        ["/bin/bash", str(artifact), "--release-root", str(paths["release"])],
+        check=False, capture_output=True, text=True)
+    assert completed.returncode == 2
+    assert "EFFECT_UNKNOWN" in completed.stdout
+    assert state_path.read_bytes() == before
+    assert not paths["runtime"].exists()
+    assert not Path(str(state_path) + ".effects").exists()

@@ -13,6 +13,7 @@ from pathlib import Path
 import secrets
 import socket
 import stat
+import time
 from typing import Any, Callable
 from urllib.parse import urlsplit, urlunsplit
 
@@ -20,6 +21,7 @@ from control_plane import surface_bindings as sb
 from . import web_sol_instance as wsi
 from . import web_sol_native_host as native
 from . import web_sol_protocol as wsp
+from . import web_sol_census_protocol as census
 
 SOCKET_TIMEOUT_SECONDS = 5.0
 _CHATGPT_CANONICAL_HOST = "chatgpt.com"
@@ -110,6 +112,9 @@ def _request(
     issued_at: str,
     expires_at: str,
     nonce: str,
+    operation_id: str | None = None,
+    result_digest: str | None = None,
+    obligation_digest: str | None = None,
 ) -> dict[str, Any]:
     accepted = _accepted_binding(binding)
     request = {
@@ -123,6 +128,14 @@ def _request(
         "expires_at": expires_at,
         "nonce": nonce,
     }
+    if action == wsp.SurfaceAction.TYPED_REENTRY.value:
+        request.update(
+            {
+                "operation_id": operation_id,
+                "result_digest": result_digest,
+                "obligation_digest": obligation_digest,
+            }
+        )
     return wsp.validate_request(request)
 
 
@@ -200,6 +213,8 @@ def _complete_transport_handshake(
     *,
     expected_instance_id: str,
     challenge_factory: Callable[[], str] | None = None,
+    deadline: native.Deadline | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     """Complete two bound challenges before any action document is sent."""
 
@@ -220,8 +235,17 @@ def _complete_transport_handshake(
         challenge_nonce=first_challenge,
     )
     try:
-        native.write_frame(writer, first)
-        first_ack = native.read_frame(reader)
+        native.write_frame(
+            writer,
+            first,
+            deadline=deadline,
+            monotonic=monotonic,
+        )
+        first_ack = native.read_frame(
+            reader,
+            deadline=deadline,
+            monotonic=monotonic,
+        )
     except native.NativeHostError as exc:
         raise WebSolExtensionError("transport_handshake_failed") from exc
     accepted_first = _accepted_transport_ack(
@@ -245,8 +269,17 @@ def _complete_transport_handshake(
         challenge_nonce=second_challenge,
     )
     try:
-        native.write_frame(writer, second)
-        second_ack = native.read_frame(reader)
+        native.write_frame(
+            writer,
+            second,
+            deadline=deadline,
+            monotonic=monotonic,
+        )
+        second_ack = native.read_frame(
+            reader,
+            deadline=deadline,
+            monotonic=monotonic,
+        )
     except native.NativeHostError as exc:
         raise WebSolExtensionError("transport_handshake_failed") from exc
     return _accepted_transport_ack(
@@ -257,6 +290,37 @@ def _complete_transport_handshake(
     )
 
 
+class _FrameWriteProgress:
+    """Track bytes a writer accepted without changing framing or retry law."""
+
+    def __init__(self, stream, *, expected_bytes: int):
+        self._stream = stream
+        self._expected_bytes = expected_bytes
+        self.accepted_bytes = 0
+        self._write_raised = False
+
+    def __getattr__(self, name: str):
+        return getattr(self._stream, name)
+
+    def write(self, payload: bytes):
+        try:
+            written = self._stream.write(payload)
+        except BaseException:
+            self._write_raised = True
+            raise
+        if type(written) is int and 0 < written <= len(payload):
+            self.accepted_bytes += written
+        return written
+
+    @property
+    def frame_complete(self) -> bool:
+        return self.accepted_bytes >= self._expected_bytes
+
+    @property
+    def effect_possible(self) -> bool:
+        return self._write_raised or self.frame_complete
+
+
 def _transport_failure_code(
     error: BaseException,
     *,
@@ -265,6 +329,10 @@ def _transport_failure_code(
 ) -> str:
     if sent and action == "FOREGROUND":
         return "foreground_effect_unknown"
+    if sent and action == "TYPED_REENTRY":
+        return "typed_reentry_effect_unknown"
+    if action == "CENSUS":
+        return "census_unavailable"
     if sent:
         return "inspect_effect_unknown"
     return "extension_unavailable"
@@ -276,25 +344,57 @@ def _exchange_web_sol_socket(
     path: Path,
     expected_instance_id: str,
     challenge_factory: Callable[[], str] | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
+    is_census = request.get("schema") == census.REQUEST_SCHEMA
+    if is_census:
+        census.validate_census_window(request)
     _private_socket(path)
+    started = monotonic()
+    deadline = native.Deadline(ends_at=started + SOCKET_TIMEOUT_SECONDS)
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    connection.settimeout(SOCKET_TIMEOUT_SECONDS)
+    connection.settimeout(deadline.remaining(monotonic))
     sent = False
     try:
         connection.connect(str(path))
         reader = connection.makefile("rb", buffering=0)
         writer = connection.makefile("wb", buffering=0)
         try:
+            handshake_kwargs = {
+                "expected_instance_id": expected_instance_id,
+                "deadline": deadline,
+                "monotonic": monotonic,
+            }
+            if challenge_factory is not None:
+                handshake_kwargs["challenge_factory"] = challenge_factory
             _complete_transport_handshake(
                 reader,
                 writer,
-                expected_instance_id=expected_instance_id,
-                challenge_factory=challenge_factory,
+                **handshake_kwargs,
             )
-            native.write_frame(writer, request)
+            action_writer = _FrameWriteProgress(
+                writer,
+                expected_bytes=len(native.encode_frame(request)),
+            )
+            try:
+                native.write_frame(
+                    action_writer,
+                    request,
+                    deadline=deadline,
+                    monotonic=monotonic,
+                )
+            except native.NativeHostError:
+                sent = action_writer.effect_possible
+                raise
             sent = True
-            response = native.read_frame(reader)
+            if is_census:
+                deadline = native.Deadline(ends_at=started + census.TOTAL_SECONDS)
+                connection.settimeout(deadline.remaining(monotonic))
+            response = native.read_frame(
+                reader,
+                deadline=deadline,
+                monotonic=monotonic,
+            )
         finally:
             reader.close()
             writer.close()
@@ -310,7 +410,7 @@ def _exchange_web_sol_socket(
             _transport_failure_code(
                 exc,
                 sent=sent,
-                action=request["action"],
+                action=request.get("action", "CENSUS"),
             )
         ) from exc
     finally:
@@ -319,7 +419,11 @@ def _exchange_web_sol_socket(
 
 
 def _untrusted_receipt_code(action: str, default: str) -> str:
-    return "foreground_effect_unknown" if action == "FOREGROUND" else default
+    if action == "FOREGROUND":
+        return "foreground_effect_unknown"
+    if action == "TYPED_REENTRY":
+        return "typed_reentry_effect_unknown"
+    return default
 
 
 def _invoke(
@@ -330,6 +434,9 @@ def _invoke(
     issued_at: str,
     expires_at: str,
     nonce: str,
+    operation_id: str | None = None,
+    result_digest: str | None = None,
+    obligation_digest: str | None = None,
 ) -> dict[str, Any]:
     request = _request(
         binding,
@@ -338,6 +445,9 @@ def _invoke(
         issued_at=issued_at,
         expires_at=expires_at,
         nonce=nonce,
+        operation_id=operation_id,
+        result_digest=result_digest,
+        obligation_digest=obligation_digest,
     )
     try:
         instance_id = wsi.adapter_instance_id(binding)
@@ -413,3 +523,58 @@ def foreground_via_extension(
         expires_at=expires_at,
         nonce=nonce,
     )
+
+
+def typed_reentry_via_extension(
+    binding: dict[str, Any],
+    *,
+    operation_key: str,
+    operation_id: str,
+    result_digest: str,
+    obligation_digest: str,
+    issued_at: str,
+    expires_at: str,
+    nonce: str,
+) -> dict[str, Any]:
+    """Return one digest-only typed payload to one exact loaded conversation."""
+
+    return _invoke(
+        binding,
+        action="TYPED_REENTRY",
+        operation_key=operation_key,
+        operation_id=operation_id,
+        result_digest=result_digest,
+        obligation_digest=obligation_digest,
+        issued_at=issued_at,
+        expires_at=expires_at,
+        nonce=nonce,
+    )
+
+
+def census_via_extension(
+    binding: dict[str, Any],
+    *,
+    operation_key: str,
+    issued_at: str,
+    expires_at: str,
+    nonce: str,
+) -> dict[str, Any]:
+    """Read one validated profile binding; no alternate socket or profile selector."""
+    accepted = _accepted_binding(binding)
+    try:
+        instance_id = wsi.adapter_instance_id(accepted)
+        request = census.validate_census_window({
+            "schema": census.REQUEST_SCHEMA, "adapter_instance_id": instance_id,
+            "operation_key": operation_key, "issued_at": issued_at,
+            "expires_at": expires_at, "nonce": nonce,
+        })
+        response = _exchange_web_sol_socket(request, path=wsi.socket_path(instance_id),
+                                            expected_instance_id=instance_id)
+        receipt = census.validate_census_receipt(response)
+    except wsp.WebSolProtocolError:
+        raise WebSolExtensionError("invalid_census_value") from None
+    except wsi.WebSolInstanceError:
+        raise WebSolExtensionError("invalid_binding") from None
+    if any(receipt[field] != request[field] for field in census.IDENTITY_FIELDS):
+        raise WebSolExtensionError("receipt_identity_mismatch")
+    return receipt

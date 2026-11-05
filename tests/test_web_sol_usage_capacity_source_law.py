@@ -43,7 +43,7 @@ def test_macro_provider_control_remains_canonical_capacity_owner():
     assert "canonical provider/account-slot availability" in text
     assert "web-sol senses; macro owns quota truth" in text
     assert "there is no web-sol quota database" in text
-    assert "surface_bindings remains navigation-only" in text
+    assert "`surface_bindings` remains navigation-only" in text
 
 
 def test_provider_capacity_v1_is_not_patched_in_place():
@@ -65,7 +65,7 @@ def test_observed_provider_and_estimated_usage_remain_distinct():
         "mastermind-observed reasoning activity",
         "provider-reported quota/reset evidence",
         "estimated runway",
-        "unknown is not zero, full, unlimited, available, or exhausted",
+        "`unknown` is not zero, full, unlimited, available, or exhausted",
     ):
         assert phrase in law
 
@@ -119,7 +119,7 @@ def test_local_pro_counter_requires_known_mode_and_exact_submission():
     assert "a pro-specific local counter increments only when both are proven" in law
     assert "the reasoning/model class for that submission is known" in law
     assert "unknown model mode" in design
-    assert "service-worker restart after receipt" in design
+    assert "service-worker/native restart after receipt" in design
     assert "same event id, no second count" in design
 
 

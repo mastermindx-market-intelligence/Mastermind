@@ -1,0 +1,1080 @@
+{
+  "schema": "mastermind.autonomy_cutover_acceptance/v1",
+  "report_kind": "READ_ONLY_PREFLIGHT",
+  "operation_key": "sol-autonomy-production-preflight-20260905-01a06f74",
+  "protected_mastermind_sha": "46a24a1a4083b74bbde8876100a8ca1f720589a9",
+  "macro_reference_sha": "685d1143251d431360373a6df339c0096df98950",
+  "skillpack": {
+    "schema": "mastermind.sol_skillpack.v1",
+    "version": "1.0.1",
+    "minimum_bootstrap_major": 1,
+    "compatible": true
+  },
+  "verdict": "HOLD",
+  "promotion_applied": false,
+  "accepted_stage": null,
+  "operating_posture": "MANUAL_NO_PROMOTION_THIS_OPERATION",
+  "acceptance_interval": null,
+  "source_only": true,
+  "runtime_readiness": {
+    "executive_connector": {
+      "generated_at": "2026-09-05T02:53:10Z",
+      "mode": "fixture",
+      "ok": true,
+      "grounding": {
+        "boot_packet_schema": "mastermind.ceo_boot_packet.v1",
+        "macro": {
+          "sha": "7794929295ac0934734c9cf1dffe1ade9d1e09ab",
+          "root_label": "reviewed_macro_checkout"
+        },
+        "mastermind": {
+          "branch": "HEAD",
+          "sha": "7191702e3b0104525b6b26cd30ddb53d89a8a663",
+          "root_label": "reviewed_mastermind_checkout"
+        },
+        "runtime": "fixture:runtime",
+        "runtime_db": {
+          "present": false,
+          "location": "connector-reviewed-checkout"
+        }
+      },
+      "degraded": [
+        "Executive runtime database missing at connector-reviewed checkout; runtime not projected.",
+        "mode=fixture: job and intent-status reads use a fixture runtime; state and inbox project a reviewed checkout."
+      ]
+    },
+    "host_observations": [
+      {
+        "kind": "service_status",
+        "command": [
+          "launchctl",
+          "print",
+          "system/com.mastermind.executive.control"
+        ],
+        "exit_code": 113,
+        "status_lines": [],
+        "stderr": "Bad request.\nCould not find service \"com.mastermind.executive.control\" in domain for system"
+      },
+      {
+        "kind": "installed_service_definition",
+        "path": "/Library/LaunchDaemons/com.mastermind.executive.control.plist",
+        "label": "com.mastermind.executive.control",
+        "working_directory": "/Library/Application Support/MastermindExecutive/releases/a6fde00413979ede525033053bc09a495d6e5fbd",
+        "interpretation": "Definition only; not loaded or live proof."
+      },
+      {
+        "kind": "service_status",
+        "command": [
+          "launchctl",
+          "print",
+          "system/com.mastermind.executive.worker.codex"
+        ],
+        "exit_code": 113,
+        "status_lines": [],
+        "stderr": "Bad request.\nCould not find service \"com.mastermind.executive.worker.codex\" in domain for system"
+      },
+      {
+        "kind": "installed_service_definition",
+        "path": "/Library/LaunchDaemons/com.mastermind.executive.worker.codex.plist",
+        "label": "com.mastermind.executive.worker.codex",
+        "working_directory": "/Library/Application Support/MastermindExecutive/releases/a6fde00413979ede525033053bc09a495d6e5fbd",
+        "interpretation": "Definition only; not loaded or live proof."
+      },
+      {
+        "kind": "service_status",
+        "command": [
+          "launchctl",
+          "print",
+          "system/com.mastermind.executive.worker.codex-pro-01"
+        ],
+        "exit_code": 113,
+        "status_lines": [],
+        "stderr": "Bad request.\nCould not find service \"com.mastermind.executive.worker.codex-pro-01\" in domain for system"
+      },
+      {
+        "kind": "installed_service_definition",
+        "path": "/Library/LaunchDaemons/com.mastermind.executive.worker.codex-pro-01.plist",
+        "label": "com.mastermind.executive.worker.codex-pro-01",
+        "working_directory": "/Library/Application Support/MastermindExecutive/releases/e4e44867ace335ac9208a3990a10c163e199492d",
+        "interpretation": "Definition only; not loaded or live proof."
+      },
+      {
+        "kind": "service_status",
+        "command": [
+          "launchctl",
+          "print",
+          "system/com.mastermind.executive.worker.codex-pro-02"
+        ],
+        "exit_code": 113,
+        "status_lines": [],
+        "stderr": "Bad request.\nCould not find service \"com.mastermind.executive.worker.codex-pro-02\" in domain for system"
+      },
+      {
+        "kind": "installed_service_definition",
+        "path": "/Library/LaunchDaemons/com.mastermind.executive.worker.codex-pro-02.plist",
+        "label": "com.mastermind.executive.worker.codex-pro-02",
+        "working_directory": "/Library/Application Support/MastermindExecutive/releases/e4e44867ace335ac9208a3990a10c163e199492d",
+        "interpretation": "Definition only; not loaded or live proof."
+      },
+      {
+        "kind": "service_status",
+        "command": [
+          "launchctl",
+          "print",
+          "system/com.mastermind.executive.worker.codex-pro-03"
+        ],
+        "exit_code": 113,
+        "status_lines": [],
+        "stderr": "Bad request.\nCould not find service \"com.mastermind.executive.worker.codex-pro-03\" in domain for system"
+      },
+      {
+        "kind": "installed_service_definition",
+        "path": "/Library/LaunchDaemons/com.mastermind.executive.worker.codex-pro-03.plist",
+        "label": "com.mastermind.executive.worker.codex-pro-03",
+        "working_directory": "/Library/Application Support/MastermindExecutive/releases/e4e44867ace335ac9208a3990a10c163e199492d",
+        "interpretation": "Definition only; not loaded or live proof."
+      },
+      {
+        "kind": "config_read_access",
+        "path": "/Library/Application Support/MastermindExecutive/config/control.json",
+        "readable": false,
+        "error_class": "PermissionError",
+        "errno": 13,
+        "contents_recorded": false
+      },
+      {
+        "kind": "unauthenticated_control_room_get",
+        "url": "http://127.0.0.1:8787/api/state",
+        "http_status": 403,
+        "interpretation": "Access refused; health and lifecycle unknown."
+      }
+    ]
+  },
+  "evidence_limit": "This preflight is an immutable observation report, not an accepted canary interval, production attestation, runtime input, source-law amendment, or implemented acceptance reducer. No missing measurement is scored as zero.",
+  "current_source_capabilities": [
+    {
+      "id": "AD-RETRY1",
+      "state": "BUILT_NOT_PROVEN",
+      "merge": "7191702e3b0104525b6b26cd30ddb53d89a8a663",
+      "pr": 321,
+      "detail": "Pure classifier integrated with Runtime.commit_coo_retry_decision; transaction rederivation, deterministic command replay and stale-root refusal exist. Natural-time production proof absent from this observation set."
+    },
+    {
+      "id": "RET1_R2",
+      "state": "BUILT_NOT_PROVEN",
+      "merge": "b3f01bbc9ec00594ff936adcec79aaceb513ad56",
+      "pr": 406
+    },
+    {
+      "id": "W3C",
+      "state": "BUILT_NOT_PROVEN",
+      "merge": "b28023f92458ba186937afa1e619f3b4464e149f",
+      "pr": 357
+    },
+    {
+      "id": "CAPACITY_C2_R1A",
+      "state": "BUILT_NOT_PROVEN",
+      "merge": "0a5b070624e03d011887adf8ca213733946b6332",
+      "pr": 415
+    },
+    {
+      "id": "CR1A",
+      "state": "BUILT_NOT_PROVEN",
+      "merge": "b5baa9ed1a38bae5e6821e297f6757fabb7f33a2",
+      "pr": 326
+    },
+    {
+      "id": "MAT_S1",
+      "state": "SPEC_ONLY",
+      "issue": 430,
+      "detail": "Existing operation; current source START gate is CAP-S1 protection, followed by fresh path census."
+    },
+    {
+      "id": "STAGE_B1",
+      "state": "NOT_BUILT",
+      "detail": "At audited SHA; follows MAT-S1. Initial assignment does not establish later generation succession or cross-target transfer."
+    },
+    {
+      "id": "C2_R1B",
+      "state": "NOT_BUILT",
+      "detail": "At audited SHA; follows MAT-S1 independently of Stage-B1. Multi-root reuse canary requires both."
+    },
+    {
+      "id": "AD_CUTOVER_REDUCER",
+      "state": "NOT_BUILT",
+      "detail": "No AD-CUTOVER reducer found at audited SHA. Operation Assurance and Secretary-retirement acceptance remain separate owners/programs."
+    },
+    {
+      "id": "AD_RET2_SUSTAINED_YIELD",
+      "state": "SPEC_ONLY",
+      "issue": "MAS-214",
+      "detail": "Current Linear projection is Todo; source-backed sustained PROGRESS/BLOCKED/DECISION_REQUEST vertical and real provider proof were not recovered. #406 is AD-RET1-R2 terminal RESULT only; it does not commission AD-RET2."
+    }
+  ],
+  "stage_requirements": {
+    "SHADOW": {
+      "launches_from_shadow_decisions": 0,
+      "required_adverse_cases": 17,
+      "latency_distributions_required": true,
+      "numeric_budgets_frozen_before_canary": true,
+      "required_supplemental_case_ids": [
+        "AD-CUTOVER-STALE_SOL_REFUSAL"
+      ]
+    },
+    "CANARY": {
+      "responsibilities_min": 2,
+      "responsibilities_max": 3,
+      "continuation_round_trips_min": 1,
+      "terminal_completions_min": 1,
+      "real_research_and_isolated_code_required": true
+    },
+    "SMALL_FLEET": {
+      "independent_roots_min": 5,
+      "independent_roots_max": 10,
+      "lawful_independent_realms_min": 2,
+      "max_active_authoritative_children_per_root": 1,
+      "safe_retry_and_unsafe_refusal_required": true
+    },
+    "PRODUCTION_FLEET": {
+      "concurrent_responsibilities_floor": 20,
+      "target_range": "20-30+",
+      "every_active_responsibility_crosses_provider_harness": true,
+      "continuation_subset": "meaningful subset; numerical minimum must be declared before interval",
+      "terminal_completions_min": 2,
+      "all_adverse_cases_executed": true,
+      "realms_independence_required": true,
+      "event_complete_interval": true,
+      "additive_natural_time_requirements_preserved": true,
+      "routine_chairman_interventions_required": 0
+    }
+  },
+  "metrics": {
+    "latency": {
+      "admission_to_claim": {
+        "sample_count": null,
+        "observed_p50_ms": null,
+        "observed_p95_ms": null,
+        "observed_max_ms": null,
+        "budget_p50_ms": null,
+        "budget_p95_ms": null,
+        "budget_max_ms": null,
+        "status": "NOT_MEASURED"
+      },
+      "claim_to_provider_start": {
+        "sample_count": null,
+        "observed_p50_ms": null,
+        "observed_p95_ms": null,
+        "observed_max_ms": null,
+        "budget_p50_ms": null,
+        "budget_p95_ms": null,
+        "budget_max_ms": null,
+        "status": "NOT_MEASURED"
+      },
+      "provider_terminal_to_company_return": {
+        "sample_count": null,
+        "observed_p50_ms": null,
+        "observed_p95_ms": null,
+        "observed_max_ms": null,
+        "budget_p50_ms": null,
+        "budget_p95_ms": null,
+        "budget_max_ms": null,
+        "status": "NOT_MEASURED"
+      },
+      "company_return_to_sol_target": {
+        "sample_count": null,
+        "observed_p50_ms": null,
+        "observed_p95_ms": null,
+        "observed_max_ms": null,
+        "budget_p50_ms": null,
+        "budget_p95_ms": null,
+        "budget_max_ms": null,
+        "status": "NOT_MEASURED"
+      },
+      "sol_action_to_worker_continuation": {
+        "sample_count": null,
+        "observed_p50_ms": null,
+        "observed_p95_ms": null,
+        "observed_max_ms": null,
+        "budget_p50_ms": null,
+        "budget_p95_ms": null,
+        "budget_max_ms": null,
+        "status": "NOT_MEASURED"
+      },
+      "eligible_capacity_wait": {
+        "sample_count": null,
+        "observed_p50_ms": null,
+        "observed_p95_ms": null,
+        "observed_max_ms": null,
+        "budget_p50_ms": null,
+        "budget_p95_ms": null,
+        "budget_max_ms": null,
+        "status": "NOT_MEASURED"
+      }
+    },
+    "hard_zero_invariants": {
+      "duplicate_roots": {
+        "observed_count": null,
+        "required_count": 0,
+        "status": "NOT_MEASURED"
+      },
+      "duplicate_action_authoritative_children": {
+        "observed_count": null,
+        "required_count": 0,
+        "status": "NOT_MEASURED"
+      },
+      "dual_worker_authority": {
+        "observed_count": null,
+        "required_count": 0,
+        "status": "NOT_MEASURED"
+      },
+      "dual_sol_authority": {
+        "observed_count": null,
+        "required_count": 0,
+        "status": "NOT_MEASURED"
+      },
+      "stale_worker_writes": {
+        "observed_count": null,
+        "required_count": 0,
+        "status": "NOT_MEASURED"
+      },
+      "stale_sol_writes": {
+        "observed_count": null,
+        "required_count": 0,
+        "status": "NOT_MEASURED"
+      },
+      "blind_effect_unknown_failover": {
+        "observed_count": null,
+        "required_count": 0,
+        "status": "NOT_MEASURED"
+      },
+      "unsafe_retry": {
+        "observed_count": null,
+        "required_count": 0,
+        "status": "NOT_MEASURED"
+      },
+      "permanently_lost_semantic_return": {
+        "observed_count": null,
+        "required_count": 0,
+        "status": "NOT_MEASURED"
+      },
+      "stale_actionable_surfaces": {
+        "observed_count": null,
+        "required_count": 0,
+        "status": "NOT_MEASURED"
+      },
+      "false_needs_chris": {
+        "observed_count": null,
+        "required_count": 0,
+        "status": "NOT_MEASURED"
+      },
+      "routine_chairman_selection": {
+        "observed_count": null,
+        "required_count": 0,
+        "status": "NOT_MEASURED"
+      },
+      "routine_chairman_message_wake_watch_carriage": {
+        "observed_count": null,
+        "required_count": 0,
+        "status": "NOT_MEASURED"
+      },
+      "hidden_eligible_root_starvation": {
+        "observed_count": null,
+        "required_count": 0,
+        "status": "NOT_MEASURED"
+      },
+      "stale_control_room_action_effect": {
+        "observed_count": null,
+        "required_count": 0,
+        "status": "NOT_MEASURED"
+      }
+    },
+    "production_responsibilities": null,
+    "independent_realms": null,
+    "terminal_completions": null,
+    "continuation_round_trips": null,
+    "fairness": {
+      "eligible_root_population": null,
+      "oldest_ready_age_ms": null,
+      "maximum_uncertainty_age_ms": null,
+      "frozen_budgets": null,
+      "status": "NOT_MEASURED"
+    }
+  },
+  "chairman_touches": {
+    "acceptance_interval_count": null,
+    "routine_actions": null,
+    "one_time_setup_actions": null,
+    "classification_required": [
+      "INITIAL_INTENT",
+      "ONE_TIME_ENROLLMENT_MFA_ADMIN",
+      "SCRIPTED_FAULT_INJECTION",
+      "BUSINESS_AUTHORITY_DECISION",
+      "ROUTINE_ACCOUNT_WORKER_SESSION_SELECTION",
+      "ROUTINE_WAKE_FORWARD_SLACK_WATCHER_REPAIR",
+      "ROUTINE_RETRY_CI_CAPACITY_TRANSITION"
+    ],
+    "rule": "One-time setup is recorded separately. Routine Chairman carriage fails the production interval; lack of a ledger is UNKNOWN."
+  },
+  "adverse_matrix": [
+    {
+      "id": 1,
+      "name": "duplicate_ingress",
+      "expected": "Same trusted request through two approved ingress paths yields one root and identical receipt; changed envelope refuses.",
+      "required_evidence": "Executive admission/command receipts and root identities",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_DIRECTIVE_17_CASES",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230"
+      ],
+      "receipt_refs": [],
+      "case_id": "AD-CUTOVER-DUPLICATE_INGRESS",
+      "direct_requirement": {
+        "section": "MANDATORY ADVERSE MATRIX",
+        "item": 1,
+        "text": "duplicate ingress"
+      },
+      "integrator_requirement": {
+        "section": "REQUIRED ADVERSE MATRIX",
+        "text": "duplicate ingress",
+        "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR"
+      }
+    },
+    {
+      "id": 2,
+      "name": "sister_sol_race",
+      "expected": "Exactly one current target acts; observer loses without effect.",
+      "required_evidence": "Unresolved turn, target-binding generation and action transaction receipts",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_DIRECTIVE_17_CASES",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230"
+      ],
+      "receipt_refs": [],
+      "case_id": "AD-CUTOVER-SISTER_SOL_RACE",
+      "direct_requirement": {
+        "section": "MANDATORY ADVERSE MATRIX",
+        "item": 2,
+        "text": "sister-Sol race"
+      },
+      "integrator_requirement": {
+        "section": "REQUIRED ADVERSE MATRIX",
+        "text": "sister-Sol race",
+        "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR"
+      }
+    },
+    {
+      "id": 3,
+      "name": "lost_provider_launch_response",
+      "expected": "Same Attempt reconciles existing provider effect; no alternate realm resend.",
+      "required_evidence": "OHF INTENT/EFFECT_UNKNOWN/RECONCILED and provider session identity",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_DIRECTIVE_17_CASES",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230"
+      ],
+      "receipt_refs": [],
+      "case_id": "AD-CUTOVER-LOST_PROVIDER_LAUNCH_RESPONSE",
+      "direct_requirement": {
+        "section": "MANDATORY ADVERSE MATRIX",
+        "item": 3,
+        "text": "lost provider-launch response"
+      },
+      "integrator_requirement": {
+        "section": "REQUIRED ADVERSE MATRIX",
+        "text": "lost provider-launch response",
+        "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR"
+      }
+    },
+    {
+      "id": 4,
+      "name": "stale_worker_after_rebound",
+      "expected": "Old Attempt/binding sanctioned action refuses; only current writer acts.",
+      "required_evidence": "Attempt/binding/fence history plus stale and current command outcomes",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_DIRECTIVE_17_CASES",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230"
+      ],
+      "receipt_refs": [],
+      "case_id": "AD-CUTOVER-STALE_WORKER_AFTER_REBOUND",
+      "direct_requirement": {
+        "section": "MANDATORY ADVERSE MATRIX",
+        "item": 4,
+        "text": "stale Worker after rebound"
+      },
+      "integrator_requirement": {
+        "section": "REQUIRED ADVERSE MATRIX",
+        "text": "stale Worker after rebound",
+        "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR"
+      }
+    },
+    {
+      "id": 5,
+      "name": "provider_neutral_return",
+      "expected": "At least two genuinely proven provider/worker classes return mechanically without voluntary model messaging.",
+      "required_evidence": "Provider terminal, sealed return, canonical company RESULT and consumer receipt",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_DIRECTIVE_17_CASES",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230"
+      ],
+      "receipt_refs": [],
+      "case_id": "AD-CUTOVER-PROVIDER_NEUTRAL_RETURN",
+      "direct_requirement": {
+        "section": "MANDATORY ADVERSE MATRIX",
+        "item": 5,
+        "text": "provider-neutral return across >=2 worker/provider classes"
+      }
+    },
+    {
+      "id": 6,
+      "name": "dead_unavailable_sol_transfer",
+      "expected": "Unavailable exact target holds visibly; sanctioned transfer CAS succeeds once and former target refuses.",
+      "required_evidence": "Root, unresolved CEO child, prior target, prior binding ID/generation, current Attempt, unique replacement binding and transaction/replay",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_DIRECTIVE_17_CASES",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230"
+      ],
+      "receipt_refs": [],
+      "case_id": "AD-CUTOVER-DEAD_UNAVAILABLE_SOL_TRANSFER",
+      "direct_requirement": {
+        "section": "MANDATORY ADVERSE MATRIX",
+        "item": 6,
+        "text": "dead/unavailable Sol transfer"
+      },
+      "integrator_requirement": {
+        "section": "REQUIRED ADVERSE MATRIX",
+        "text": "dead/unavailable Sol transfer",
+        "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR"
+      }
+    },
+    {
+      "id": 7,
+      "name": "slack_outage",
+      "expected": "Safe lifecycle work continues; Sol boundary holds durably; recovery projects exactly once.",
+      "required_evidence": "Executive lifecycle, transport degradation/recovery and return deduplication receipts",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_DIRECTIVE_17_CASES",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230"
+      ],
+      "receipt_refs": [],
+      "case_id": "AD-CUTOVER-SLACK_OUTAGE",
+      "direct_requirement": {
+        "section": "MANDATORY ADVERSE MATRIX",
+        "item": 7,
+        "text": "Slack outage"
+      },
+      "integrator_requirement": {
+        "section": "REQUIRED ADVERSE MATRIX",
+        "text": "Slack outage",
+        "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR"
+      }
+    },
+    {
+      "id": 8,
+      "name": "safe_retry",
+      "expected": "Currently sanctioned TX9_DETACHED pre-effect retry succeeds exactly once; immutable identical retry replay after restart remains deterministic; stale expectations/Attempts and intervening Worker-quota reuse refuse without overwriting an accepted concurrent retry.",
+      "required_evidence": "Runtime-derived retry evidence, deterministic command and JOB_REQUEUED receipt",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_DIRECTIVE_17_CASES",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230"
+      ],
+      "receipt_refs": [],
+      "required_subcases": [
+        "identical_command_after_restart_returns_same_verified_durable_receipt",
+        "stale_root_cannot_overwrite_identical_concurrent_retry",
+        "stale_expectation_or_current_attempt_refuses_zero_requeue",
+        "intervening_invalidated_worker_quota_event_refuses_zero_requeue"
+      ],
+      "case_id": "AD-CUTOVER-SAFE_RETRY",
+      "direct_requirement": {
+        "section": "MANDATORY ADVERSE MATRIX",
+        "item": 8,
+        "text": "safe retry"
+      },
+      "integrator_requirement": {
+        "section": "REQUIRED ADVERSE MATRIX",
+        "text": "safe retry",
+        "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR"
+      }
+    },
+    {
+      "id": 9,
+      "name": "unsafe_retry",
+      "expected": "Generic semantic failure or unsafe evidence refuses retry.",
+      "required_evidence": "Current Runtime retry classification and zero-requeue receipt",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_DIRECTIVE_17_CASES",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230"
+      ],
+      "receipt_refs": [],
+      "case_id": "AD-CUTOVER-UNSAFE_RETRY",
+      "direct_requirement": {
+        "section": "MANDATORY ADVERSE MATRIX",
+        "item": 9,
+        "text": "unsafe retry"
+      },
+      "integrator_requirement": {
+        "section": "REQUIRED ADVERSE MATRIX",
+        "text": "unsafe retry",
+        "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR"
+      }
+    },
+    {
+      "id": 10,
+      "name": "capacity_saturation",
+      "expected": "WAITING_CAPACITY is visible; independently eligible root progresses without Chairman account selection.",
+      "required_evidence": "Capacity eligibility/claim receipts, queue age and independent-root progress",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_DIRECTIVE_17_CASES",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230"
+      ],
+      "receipt_refs": [],
+      "case_id": "AD-CUTOVER-CAPACITY_SATURATION",
+      "direct_requirement": {
+        "section": "MANDATORY ADVERSE MATRIX",
+        "item": 10,
+        "text": "capacity saturation"
+      },
+      "integrator_requirement": {
+        "section": "REQUIRED ADVERSE MATRIX",
+        "text": "capacity saturation",
+        "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR"
+      }
+    },
+    {
+      "id": 11,
+      "name": "parent_active_no_successor",
+      "expected": "Explicit Needs Sol/parent orphan condition; no silent stall or fabricated successor.",
+      "required_evidence": "Parent/child lifecycle and successor authority evidence",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_DIRECTIVE_17_CASES",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230"
+      ],
+      "receipt_refs": [],
+      "case_id": "AD-CUTOVER-PARENT_ACTIVE_NO_SUCCESSOR",
+      "direct_requirement": {
+        "section": "MANDATORY ADVERSE MATRIX",
+        "item": 11,
+        "text": "parent active/no successor"
+      },
+      "integrator_requirement": {
+        "section": "REQUIRED ADVERSE MATRIX",
+        "text": "parent-active/no-successor",
+        "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR"
+      }
+    },
+    {
+      "id": 12,
+      "name": "stale_chairman_action_cas",
+      "expected": "Stale viewed card refuses STALE_VIEW/REFRESH_REQUIRED with zero effect.",
+      "required_evidence": "Viewed revision, precommit current revision and command refusal",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_DIRECTIVE_17_CASES",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230"
+      ],
+      "receipt_refs": [],
+      "case_id": "AD-CUTOVER-STALE_CHAIRMAN_ACTION_CAS",
+      "direct_requirement": {
+        "section": "MANDATORY ADVERSE MATRIX",
+        "item": 12,
+        "text": "stale Chairman action CAS"
+      },
+      "integrator_requirement": {
+        "section": "REQUIRED ADVERSE MATRIX",
+        "text": "stale Chairman action",
+        "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR"
+      }
+    },
+    {
+      "id": 13,
+      "name": "control_host_restart_ambiguous_response",
+      "expected": "Accepted command reconciles; conflict remains conflict; unknown stays held without automatic resubmit.",
+      "required_evidence": "Pre/post restart durable command/Event identity and canonical status receipt",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_DIRECTIVE_17_CASES",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230"
+      ],
+      "receipt_refs": [],
+      "case_id": "AD-CUTOVER-CONTROL_HOST_RESTART_AMBIGUOUS_RESPONSE",
+      "direct_requirement": {
+        "section": "MANDATORY ADVERSE MATRIX",
+        "item": 13,
+        "text": "control-host restart/ambiguous response"
+      },
+      "integrator_requirement": {
+        "section": "REQUIRED ADVERSE MATRIX",
+        "text": "control-host restart",
+        "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR"
+      }
+    },
+    {
+      "id": 14,
+      "name": "stale_provider_surface",
+      "expected": "Superseded surface is non-actionable and excluded from ordinary resume queues.",
+      "required_evidence": "Binding lineage and authenticated Control Room rendered/action state",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_DIRECTIVE_17_CASES",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230"
+      ],
+      "receipt_refs": [],
+      "case_id": "AD-CUTOVER-STALE_PROVIDER_SURFACE",
+      "direct_requirement": {
+        "section": "MANDATORY ADVERSE MATRIX",
+        "item": 14,
+        "text": "stale provider surface"
+      },
+      "integrator_requirement": {
+        "section": "REQUIRED ADVERSE MATRIX",
+        "text": "stale provider surface",
+        "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR"
+      }
+    },
+    {
+      "id": 15,
+      "name": "attention_broken_lifecycle_healthy",
+      "expected": "ATTENTION_BROKEN remains separate from Job/Attempt FAILED/LOST.",
+      "required_evidence": "Wake/ACK transport evidence joined to canonical lifecycle",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_DIRECTIVE_17_CASES",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230"
+      ],
+      "receipt_refs": [],
+      "case_id": "AD-CUTOVER-ATTENTION_BROKEN_LIFECYCLE_HEALTHY",
+      "direct_requirement": {
+        "section": "MANDATORY ADVERSE MATRIX",
+        "item": 15,
+        "text": "attention broken but lifecycle healthy"
+      },
+      "integrator_requirement": {
+        "section": "REQUIRED ADVERSE MATRIX",
+        "text": "attention-broken/lifecycle-healthy",
+        "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR"
+      }
+    },
+    {
+      "id": 16,
+      "name": "conflicting_steward_identity",
+      "expected": "UNKNOWN/REFUSED exposes full conflicting source set without selecting an owner.",
+      "required_evidence": "Steward input source identities and refusal projection",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_DIRECTIVE_17_CASES",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230"
+      ],
+      "receipt_refs": [],
+      "case_id": "AD-CUTOVER-CONFLICTING_STEWARD_IDENTITY",
+      "direct_requirement": {
+        "section": "MANDATORY ADVERSE MATRIX",
+        "item": 16,
+        "text": "conflicting Steward identity"
+      },
+      "integrator_requirement": {
+        "section": "REQUIRED ADVERSE MATRIX",
+        "text": "conflicting Steward identity",
+        "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR"
+      }
+    },
+    {
+      "id": 17,
+      "name": "effect_unknown_failover_attempt",
+      "expected": "Effect-unknown failover attempt refuses, preserving exact operation/carrier/Attempt.",
+      "required_evidence": "Effect state, existing command status and zero replacement/failover receipt",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_DIRECTIVE_17_CASES",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230"
+      ],
+      "receipt_refs": [],
+      "case_id": "AD-CUTOVER-EFFECT_UNKNOWN_FAILOVER_ATTEMPT",
+      "direct_requirement": {
+        "section": "MANDATORY ADVERSE MATRIX",
+        "item": 17,
+        "text": "effect-unknown failover attempt"
+      },
+      "integrator_requirement": {
+        "section": "REQUIRED ADVERSE MATRIX",
+        "text": "effect-unknown refusal",
+        "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR"
+      }
+    }
+  ],
+  "execution_record": {
+    "production_canary_cases_executed_this_operation": 0,
+    "executive_mutations_this_operation": 0,
+    "provider_calls_this_operation": 0,
+    "services_started_stopped_this_operation": 0,
+    "slack_messages_this_operation": 0,
+    "linear_mutations_this_operation": 0,
+    "source_effect": "TWO_NEW_RESEARCH_REPORT_FILES_ONLY"
+  },
+  "gaps": [
+    "NON_FIXTURE_EXECUTIVE_READ_PATH_UNPROVEN",
+    "CURRENT_ACCEPTED_HOST_RELEASE_AND_RUNTIME_READINESS_UNPROVEN",
+    "MAT_S1_AND_STAGE_B1_NOT_PROTECTED_AT_AUDITED_SHA",
+    "EXACT_SOL_TRANSFER_PRODUCTION_PROOF_MISSING",
+    "TWO_INDEPENDENT_LAWFUL_REALMS_NOT_PROVEN_BY_THIS_REPORT",
+    "CANONICAL_INTERVAL_RECEIPTS_ABSENT",
+    "SHADOW_LATENCY_AND_FAIRNESS_BASELINE_ABSENT",
+    "ALL_18_RECONCILED_ADVERSE_OBLIGATIONS_UNEXECUTED_THIS_OPERATION",
+    "CHAIRMAN_TOUCH_INTERVAL_ABSENT",
+    "AD_CUTOVER_RECEIPT_REDUCER_NOT_IMPLEMENTED",
+    "AD_RET2_SUSTAINED_SEMANTIC_YIELD_PROOF_NOT_RECOVERED"
+  ],
+  "next_action": {
+    "owner": "Existing domain owners routed through Autonomy Integration CEO",
+    "action": "Reconcile the current install/host carrier, CAP-S1/MAT-S1/Stage-B dependencies and read-only canonical evidence access; return exact readiness receipts before admitting the harmless bounded canary. Define reducer inputs from existing canonical producer exports, without a new truth store.",
+    "canary_start_authorized_by_report": false,
+    "authority_limit": "This records the existing integration route; it is not a commission, START, receiver assignment, or host permission."
+  },
+  "sources": [
+    "https://github.com/mastermindx-market-intelligence/Mastermind/tree/46a24a1a4083b74bbde8876100a8ca1f720589a9",
+    "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230",
+    "https://github.com/mastermindx-market-intelligence/Mastermind/issues/430#issuecomment-5539579073",
+    "https://github.com/mastermindx-market-intelligence/Mastermind/issues/430#issuecomment-5539830435",
+    "https://linear.app/mastermindx/issue/MAS-215",
+    "https://linear.app/mastermindx/issue/MAS-216",
+    "https://linear.app/mastermindx/issue/MAS-219",
+    "https://linear.app/mastermindx/issue/MAS-158",
+    "https://linear.app/mastermindx/issue/MAS-214"
+  ],
+  "generated_at": "2026-09-05T02:53:56.477312+00:00",
+  "source_hashes": [
+    {
+      "path": "docs/sol_skills/INDEX.md",
+      "git_blob": "5909db6e26b9d61e0622f83079733857010989da",
+      "sha256": "64b97699065cdb4965b762870b5b36c6a018af9284e9b96c47c489d6f9f48e36",
+      "bytes": 13773
+    },
+    {
+      "path": "docs/sol_skills/COLD_START.md",
+      "git_blob": "95b5dd5c72d9e503f7fdfe73b2e965aa5f42ee46",
+      "sha256": "f2971b5934f87db8f88b5fd1aebf4e8c37548f6471ad7e0a808ab2f186a83933",
+      "bytes": 7975
+    },
+    {
+      "path": "docs/sol_skills/RECONCILE_STATE.md",
+      "git_blob": "1373b72a13fb4a084b0331eb2bcf2d4a680d9738",
+      "sha256": "5b6206e8615fe2de45c712dbba351943be78f1e1ae1fe8a13562bb50fe37b694",
+      "bytes": 12482
+    },
+    {
+      "path": "docs/sol_skills/CLOSEOUT.md",
+      "git_blob": "e1be4043665ea68399917209014f864e4dac61f7",
+      "sha256": "8932e273756241e655fc3e5b97c95e67cfde24ff2519e119ba049975c7ae10eb",
+      "bytes": 8010
+    },
+    {
+      "path": "docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md",
+      "git_blob": "255c32b5aad8bfedfab6ebaadef0166b64c8aa7c",
+      "sha256": "ea4202c92b6e4b6f2ac300f7a7d08b1454261ad446ff4bf548bd7c48687c98cf",
+      "bytes": 26268
+    },
+    {
+      "path": "docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md",
+      "git_blob": "21ac0d28c3ca36d4fefdfc501453f3338636df0d",
+      "sha256": "3c24bf7f7c08d767e6532621df8c70a4f4147cd6bd7e9f0ac6785cd96daff8b3",
+      "bytes": 18370
+    },
+    {
+      "path": "docs/EXECUTIVE_CHAT_NATIVE_SOL_HIERARCHY_LAW.md",
+      "git_blob": "e1f5d9f5fab1c06167e7bb8180ce20945fa15b84",
+      "sha256": "9161f5cf3a707b0b1349e9e7d7b72d88f8bfb7a759deb3c1b06b1933959e7f9d",
+      "bytes": 21363
+    },
+    {
+      "path": "docs/superpowers/plans/2026-09-01-autonomy-stage-b-durable-target-transfer.md",
+      "git_blob": "20742b6fa251216a36b1ddbaba0caa1cd4898e87",
+      "sha256": "e3046c683ab418e66d1810dd0b411c2d3c8e6bdf3a115275e8c8bc6ae369d71d",
+      "bytes": 9204
+    },
+    {
+      "path": "docs/superpowers/plans/2026-09-02-autonomy-completion-mode.md",
+      "git_blob": "2de9397f923dd27a841c61be9a1a5d21b3f529ab",
+      "sha256": "2c1e32754fa3181c78dc4a60d0b094bcc025e94928eac4e42024d80425070ee7",
+      "bytes": 12762
+    },
+    {
+      "path": "control_plane/executive_runtime.py",
+      "git_blob": "6b2f86997e0757187ffa904ea9a9cf339316a725",
+      "sha256": "1361f29b69bac73893a0f17bcb9c1f362ed8ed9d97b1a8f9f712ea65f2bade8e",
+      "bytes": 746672
+    },
+    {
+      "path": "control_plane/executive_retry_safety.py",
+      "git_blob": "faa54747aeaaac2089b73f4b93076d06daba7d20",
+      "sha256": "8f8c6622f52e8b1452fe7f17a0c6e6fd4910b29e793301dc0ae5cfe84ebeebe8",
+      "bytes": 4961
+    }
+  ],
+  "acceptance_basis": {
+    "current_chairman_directive": "SOL-AUTONOMY-PRODUCTION direct task request, 2026-09-05; explicitly requires 17 adverse cases",
+    "existing_fabric": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230",
+    "mapping": "The older fabric groups safe and unsafe retry in one case; this directive separates them and explicitly names effect-unknown failover. Continuation and completion remain stage gates, not substitutes for adverse case 17."
+  },
+  "directive_provenance": {
+    "source_label": "Chairman assignment to SOL-AUTONOMY-PRODUCTION",
+    "text_sha256": "943b8d0bf2158530baf4845096312af76ad3831a7f9ecae117b8630c2d8752a6",
+    "numbered_matrix_count": 17,
+    "mapping_rule": "Preserve both current Chairman assignments: the Production numbered17 include provider-neutral return; the Integrator listed17 include standalone stale Sol. Their union is18 named obligations, represented as Production17 plus supplemental stale-Sol refusal. Neither source substitutes for the other.",
+    "integrator_assignment": {
+      "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR",
+      "text_sha256": "c033fbeee80d3e8c31cbeb6c565b78cf1742fdc311b0cdf4be912d03b566e3f9",
+      "listed_matrix_count": 17
+    },
+    "union_obligation_count": 18
+  },
+  "supplemental_adverse_cases": [
+    {
+      "case_id": "AD-CUTOVER-STALE_SOL_REFUSAL",
+      "name": "stale_sol_refusal",
+      "expected": "A formerly valid Sol target with superseded action authority or RuntimeBinding generation refuses a new stale action with zero effect; only the current exact target can act. Replaying an already accepted command returns its existing receipt without a second effect.",
+      "required_evidence": "Exact root, unresolved CEO child, current Attempt, prior and current Sol target/RuntimeBinding IDs and generations, precommit CAS and action/refusal/replay receipts.",
+      "distinction": "Standalone stale authority exercise, distinct from concurrent sister-Sol race and unavailable-target transfer. It supplements rather than replaces the numbered provider-neutral-return case.",
+      "status": "NOT_RUN_THIS_OPERATION",
+      "observed": null,
+      "rollback_owner": "Production/Graduation via existing Executive effect owner",
+      "requirement_refs": [
+        "CURRENT_CHAIRMAN_INTEGRATOR_REQUIRED_ADVERSE_MATRIX_STALE_SOL",
+        "CURRENT_CHAIRMAN_DIRECTIVE_AD_SOL_FORMER_TARGET_REFUSAL",
+        "CURRENT_CHAIRMAN_DIRECTIVE_HARD_ZERO_STALE_WRITES"
+      ],
+      "direct_requirement": {
+        "sections": [
+          "AD-SOL WAVE",
+          "HARD ZERO INVARIANTS"
+        ],
+        "texts": [
+          "former-target refusal",
+          "stale writes"
+        ]
+      },
+      "receipt_refs": [],
+      "integrator_requirement": {
+        "section": "REQUIRED ADVERSE MATRIX",
+        "text": "stale Sol",
+        "source_label": "Chairman assignment to SOL-AUTONOMY-INTEGRATOR"
+      }
+    }
+  ],
+  "measurement_preregistration": {
+    "status": "PLANNING_AND_STAGING_ACCEPTED_ENDPOINT_FREEZE_PENDING",
+    "planning_adjudicator": "Autonomy Integration CEO under the current Chairman portfolio assignment",
+    "numeric_slos_accepted": false,
+    "runtime_start_authorized": false,
+    "promotion_authorized": false,
+    "source_sequence_ref": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/212#issuecomment-5480487230",
+    "sequence": [
+      "SEPARATELY_AUTHORIZED_SETUP",
+      "READ_ONLY_SHADOW_MEASUREMENT",
+      "LITERAL_BUDGET_ADJUDICATION_AND_IMMUTABLE_FREEZE",
+      "CANARY",
+      "SMALL_FLEET",
+      "PRODUCTION_FLEET"
+    ],
+    "planning_floors": {
+      "completed_observations_per_applicable_edge_per_qualified_stratum": 100,
+      "distinct_roots_per_applicable_edge_per_qualified_stratum": 20,
+      "distinct_eligible_wait_episodes_min": 20,
+      "production_audit_duration_hours_min": 24,
+      "production_duration_rule": "Additive to event completeness and separately frozen natural-time obligations; elapsed time alone never passes.",
+      "production_continuation_rule": "At least ceil(N/3), and at least seven distinct cohort roots, complete Worker-to-Sol-to-Worker continuation.",
+      "production_overlap_rule": "N >= 20 in a substantive predeclared overlap window covering real cohort work, not an instantaneous peak.",
+      "truthful_terminal_completions_min": 2,
+      "terminal_exclusions": [
+        "FIXTURE_TERMINAL",
+        "CLEANUP_ONLY_CANCELLATION"
+      ]
+    },
+    "data_contract_before_measurement": [
+      "Freeze work-class/provider/realm/resource strata and independence taxonomy; sparse strata remain unqualified.",
+      "Freeze exact canonical timestamp and identity fields for all six applicable edges, source/config versions and permissible contribution per root.",
+      "Report all eligible starts with completed, active, right-censored, missing, invalid and failed states; do not discard failed or unresolved starts.",
+      "Report raw nearest-rank quantiles, pooled and root-weighted results, root contributions and uncertainty; repeated turns are not independent roots.",
+      "Use comparable canonical occurrence clocks; invalid clocks or absent endpoints remain unavailable.",
+      "No completed-only p95 or max pass while censored observations could breach the budget.",
+      "Freeze ordinary and deliberate-fault strata and recovery limits in advance; all are retained in authority, recovery and Chairman-touch denominators."
+    ],
+    "fairness_planning_rule": {
+      "unexplained_comparable_bypasses_max_per_frozen_epoch": 3,
+      "evidence": "Canonical candidate, allocation and policy receipts for equal priority/weight, resource/capability requirements and eligible-realm set.",
+      "age": "Report global oldest eligible age and per-comparable-class age. Preserve root age across retry/backoff; pause only verified predeclared ineligibility.",
+      "wait_budget": "Literal eligible-capacity maximum is not frozen. Emitting WAITING_CAPACITY does not end the wait.",
+      "policy_effect": "Measurement of the existing scheduler only; no scheduler modification or invented guarantee."
+    },
+    "numeric_budget_candidate": {
+      "status": "PROPOSED_ONLY_REQUIRES_POST_SHADOW_LITERAL_PRODUCT_ADJUDICATION",
+      "unit": "seconds",
+      "quantile": "nearest rank: sorted sample at ceil(p * N), one-based",
+      "rounding": "round upward to 0.001 second; retain raw measurements",
+      "p50_formula": "1.25 * measured_p50",
+      "p95_formula": "1.5 * measured_p95",
+      "max_formula": "max(measured_max, 2 * measured_p95)",
+      "restriction": "A slow baseline does not self-qualify; literal stratum budgets and product fitness require Sol adjudication before CANARY."
+    },
+    "remaining_before_measurement": [
+      "EXACT_ENDPOINT_AND_CLOCK_MAPPING",
+      "NAMED_STRATA_AND_ROOT_CONTRIBUTION_FREEZE",
+      "LAWFUL_MANUAL_EVENT_SOURCE_AND_EXACT_OWNER_AUTHORITY",
+      "OVERLAP_WINDOW_AND_TERMINAL_TAXONOMY_FREEZE"
+    ],
+    "remaining_before_canary": [
+      "SUFFICIENT_QUALIFIED_SHADOW_MEASUREMENTS",
+      "LITERAL_LATENCY_FAIRNESS_AND_FAULT_RECOVERY_BUDGET_ADJUDICATION",
+      "IMMUTABLE_PROTOCOL_FREEZE",
+      "CURRENT_HOST_CAPACITY_AND_ACTION_AUTHORITY_READINESS"
+    ],
+    "staging_separation": {
+      "problem": "Read-only SHADOW cannot create provider-start, return or continuation events; current source requires frozen budgets before CANARY.",
+      "restriction": "Current host/capability/action-authority gates still apply. Missing edges remain unqualified. No autonomous experiment may be renamed calibration; if appropriate manual authority or source-equivalent events are absent, return the exact missing authorization/staging decision to Sol.",
+      "accepted": true,
+      "candidate": "Accepted separation: observe genuinely analogous, independently authorized MANUAL owner operations through existing read interfaces; SHADOW dispatches or commits nothing. This is an observational mode inside the existing sequence, not a new rollout stage.",
+      "missing_authority_verdict": "WAITING_DEPENDENCY / MANUAL_EVENT_AUTHORITY_ABSENT",
+      "historical_equivalence": "Historical events require the frozen work-class/provider/resource/source equivalence, exact lineage, clock/endpoints and censor parity; otherwise contextual only."
+    }
+  }
+}

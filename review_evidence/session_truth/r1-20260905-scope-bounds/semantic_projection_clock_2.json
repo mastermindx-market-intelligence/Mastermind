@@ -1,0 +1,277 @@
+{
+  "admission": {
+    "blocking_codes": [
+      "COMPLETION_OWNER_EVIDENCE_UNKNOWN"
+    ],
+    "mode": "DIALOGUE_ONLY",
+    "modification_safe": false,
+    "optional_sources_unavailable": [
+      "executive",
+      "identities"
+    ],
+    "refusal_codes": [],
+    "required_sources_unavailable": [],
+    "warning_codes": [
+      "SLACK_TRANSPORT_WITHOUT_ACK",
+      "UNKNOWN_SEAT_IDENTITY"
+    ]
+  },
+  "findings": [
+    {
+      "canonical_owner": "declared_completion_owner",
+      "code": "COMPLETION_OWNER_EVIDENCE_UNKNOWN",
+      "details": {
+        "reason": "exact_reciprocal_completion_owner_unavailable"
+      },
+      "modification_consequence": "requested_modification_blocked",
+      "repair_owner": "declared_completion_owner",
+      "severity": "BLOCKING",
+      "source_a": {
+        "completion": null,
+        "owner_evidence": []
+      },
+      "source_b": {
+        "linear_status": "Done"
+      },
+      "subject": "MAS-228"
+    },
+    {
+      "canonical_owner": "declared_completion_owner",
+      "code": "COMPLETION_OWNER_EVIDENCE_UNKNOWN",
+      "details": {
+        "reason": "owner_proof_state_unclassified"
+      },
+      "modification_consequence": "requested_modification_blocked",
+      "repair_owner": "declared_completion_owner",
+      "severity": "BLOCKING",
+      "source_a": {
+        "completion": "acceptance-required"
+      },
+      "source_b": {
+        "proof_state": null
+      },
+      "subject": "mastermindx-market-intelligence/Mastermind#169"
+    },
+    {
+      "canonical_owner": "runtime_session",
+      "code": "SLACK_TRANSPORT_WITHOUT_ACK",
+      "details": {},
+      "modification_consequence": "repair_debt_visible",
+      "repair_owner": "slack",
+      "severity": "WARNING",
+      "source_a": {
+        "operation_key": "session-truth-r1-project-watch-20260827-sol-001"
+      },
+      "source_b": {
+        "acked": false
+      },
+      "subject": "C0BSBM78V1N@1788585143.654139"
+    },
+    {
+      "canonical_owner": "identity_registry",
+      "code": "UNKNOWN_SEAT_IDENTITY",
+      "details": {},
+      "modification_consequence": "repair_debt_visible",
+      "repair_owner": "identity_registry",
+      "severity": "WARNING",
+      "source_a": {
+        "sender_id": "U0BRGTF1H26"
+      },
+      "source_b": null,
+      "subject": "U0BRGTF1H26"
+    },
+    {
+      "canonical_owner": "identity_registry",
+      "code": "UNKNOWN_SEAT_IDENTITY",
+      "details": {},
+      "modification_consequence": "repair_debt_visible",
+      "repair_owner": "identity_registry",
+      "severity": "WARNING",
+      "source_a": {
+        "target_principal_id": "U0BT20ZL77C"
+      },
+      "source_b": null,
+      "subject": "U0BT20ZL77C"
+    }
+  ],
+  "observations": {
+    "agentos": {
+      "available": true,
+      "source_sha": "88af13cfedd1e4baba11e9dbcf410e35875312fe",
+      "state": {
+        "schema": "agent_os_state.v1",
+        "source_records_digest": "sha256:1ffd5b9dee45873ce9c6c20d3f9e56e3246849991b17e528b74bce5d3957ded2"
+      },
+      "contexts": [
+        {
+          "schema": "context_bundle.v1",
+          "target": {
+            "candidates": [],
+            "resolution": "explicit",
+            "task": null,
+            "wait": null,
+            "workstream": "WS:CHAIRMAN-CONTROL-ROOM"
+          },
+          "sections": [
+            "higher_law",
+            "workstream",
+            "decisions",
+            "discoveries",
+            "handoff",
+            "artifacts"
+          ],
+          "source_records_digest": "sha256:a187b870380a6d60a048a44c5d39169a1773b38d7f6aeac282a84951f2e3ffb8"
+        }
+      ]
+    },
+    "executive": {
+      "available": false,
+      "reason": "EXECUTIVE_READ_PATH_UNAVAILABLE"
+    },
+    "github": {
+      "available": true,
+      "observed_at": "2026-09-05T05:35:09Z",
+      "pull_requests": [
+        {
+          "authority": "architecture",
+          "base_sha": "be68ec881460aa60d7d77cdb69f7c1cae81f6310",
+          "ci": "success",
+          "completion": "acceptance-required",
+          "draft": false,
+          "head_sha": "baba06b8ac2593ae1b86650e5c2e5693f0ab2871",
+          "linear": null,
+          "merge_sha": "cef4332d3682991e3e1c3d6160da17cd0a3a8f63",
+          "number": 169,
+          "operation_key": "cross-plane-reconciliation-20260827-sol-001",
+          "pickup_head_sha": null,
+          "portfolio_mode": "architecture_candidate",
+          "proof_state": null,
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "state": "merged",
+          "wave": "CROSS-PLANE-R0",
+          "workstream": "WS:CHAIRMAN-CONTROL-ROOM"
+        },
+        {
+          "authority": null,
+          "base_sha": "ce08a80174cbdcfbbc5169f846cb47dceaf20a4b",
+          "ci": "success",
+          "completion": null,
+          "draft": true,
+          "head_sha": "1b30ad4d0373322ab36d3344f971cc568a283f82",
+          "linear": null,
+          "merge_sha": null,
+          "number": 170,
+          "operation_key": null,
+          "pickup_head_sha": null,
+          "portfolio_mode": null,
+          "proof_state": "BUILT_NOT_PROVEN",
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "state": "open",
+          "wave": null,
+          "workstream": null
+        }
+      ]
+    },
+    "identities": {
+      "available": false,
+      "reason": "IDENTITY_BINDING_READ_PATH_UNAVAILABLE"
+    },
+    "linear": {
+      "available": true,
+      "issues": [
+        {
+          "completion": null,
+          "github_relations": [],
+          "id": "MAS-177",
+          "parent_id": null,
+          "projection_revision": null,
+          "status": "In Review",
+          "updated_at": "2026-09-05T05:27:49.739Z",
+          "workstream": "WS:CHAIRMAN-CONTROL-ROOM"
+        },
+        {
+          "completion": null,
+          "github_relations": [],
+          "id": "MAS-228",
+          "parent_id": "MAS-177",
+          "projection_revision": null,
+          "status": "Done",
+          "updated_at": "2026-09-04T05:06:34.209Z",
+          "workstream": null
+        }
+      ],
+      "observed_at": "2026-09-05T05:35:09Z"
+    },
+    "slack": {
+      "available": true,
+      "channels": [
+        {
+          "channel_id": "C0BSBM78V1N",
+          "member_ids": [
+            "U0BR1GQH7SB",
+            "U0BRET6191C",
+            "U0BRETDUAS2",
+            "U0BRGTF1H26",
+            "U0BRLGVFFU4",
+            "U0BS3H525NW",
+            "U0BSB73JWNL",
+            "U0BSLFRGA79",
+            "U0BST4WG996",
+            "U0BSXSXQ39B",
+            "U0BT03G58UW",
+            "U0BT0EHCD7Y",
+            "U0BT20ZL77C",
+            "U0BT5J8NTSQ",
+            "U0BT644JP6Y",
+            "U0BT71H4FQE",
+            "U0BTCHX8HMF",
+            "U0BTF3QGABF"
+          ]
+        }
+      ],
+      "messages": [
+        {
+          "ack_required": true,
+          "acked": false,
+          "channel_id": "C0BSBM78V1N",
+          "created_at": "2026-09-05T05:12:23.654Z",
+          "delivered": true,
+          "freeze_at": null,
+          "message_class": "SOL_STATE",
+          "operation_key": "session-truth-r1-project-watch-20260827-sol-001",
+          "payload_hash": null,
+          "receiver_eligible": null,
+          "sender_id": "U0BRGTF1H26",
+          "source_law_sha": "a3440f21a0d6df7666bd9ed9f3b02385dac23588",
+          "target_principal_id": "U0BT20ZL77C",
+          "thread_ts": "1787876752.102929",
+          "transport": "VISIBILITY_ONLY",
+          "ts": "1788585143.654139"
+        }
+      ],
+      "observed_at": "2026-09-05T05:35:09Z"
+    }
+  },
+  "schema": "mastermind.session_truth_receipt.v1",
+  "scope": {
+    "linear": [
+      "MAS-177"
+    ],
+    "operation_key": "session-truth-r1-project-watch-20260827-sol-001",
+    "repositories": [
+      "mastermindx-market-intelligence/Mastermind"
+    ],
+    "requires_executive": false,
+    "workstreams": [
+      "WS:CHAIRMAN-CONTROL-ROOM"
+    ]
+  },
+  "skillpack": {
+    "available": true,
+    "minimum_bootstrap_major": 1,
+    "repository": "mastermindx-market-intelligence/Mastermind",
+    "schema": "mastermind.sol_skillpack.v1",
+    "sha": "a3440f21a0d6df7666bd9ed9f3b02385dac23588",
+    "version": "1.0.1"
+  }
+}

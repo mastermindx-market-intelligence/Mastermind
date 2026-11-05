@@ -8,26 +8,35 @@
 **Compatibility:** `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1.  
 **Detailed architecture:** `docs/superpowers/specs/2026-08-29-chat-native-meta-ceo-core-model-design.md`.
 
-For Sol-class cognition economics, Meta-CEO hierarchy, Chat-first routing, paid-surface exception
-admission, and the relationship between Chat, Business, plugins, Workspace Agents, Work, and API
-inference, this law wins over older planning text that treats a metered agent or API supervisor as
-the default executive brain. It supplements the protected Personal-Pro Sol Executive Shell and does
-not weaken any current lifecycle, authority, runtime-binding, capacity, dialogue, retry, or evidence
-law.
+For Sol-class cognition economics, Meta-CEO hierarchy, Chat-first routing, reasoning-mode admission,
+paid-surface exception admission, and the relationship between Chat, Business, plugins, Workspace
+Agents, Work, and API inference, this law wins over older planning text that treats a metered agent,
+API supervisor, or Pro reasoning mode as the default executive brain. It supplements the protected
+Personal-Pro Sol Executive Shell and does not weaken any current lifecycle, authority,
+runtime-binding, capacity, dialogue, retry, or evidence law.
 
 ## 1. Core ruling
 
-**Personal-Pro Chat remains the primary Sol cognition plane.**
+**Personal-Pro Chat remains the primary Sol cognition plane; non-Pro reasoning is its default
+mode.**
 
-Mastermind has already purchased high-value interactive ChatGPT Pro reasoning capacity. The normal
-company architecture must use that included-plan capacity for Meta-CEO, Program CEO, Project Sol,
-integration, audit, and other Sol-class reasoning before it creates a new per-run or per-token bill.
+Personal-Pro subscription/account, Chat web surface, and reasoning mode are separate. A
+Personal-Pro account provides an included Chat web surface; it does not make the turn-billed Pro
+reasoning mode the default. The normal company architecture uses included Chat web with non-Pro
+reasoning for Meta-CEO, Program CEO, Project Sol, integration, audit, and other Sol-class work unless
+the bounded Pro-mode exception below is fully satisfied.
 
-The default route is:
+The current default receipt is:
 
 ```text
-COGNITION_ROUTE: CHAT_PRO_DEFAULT
+COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT
+CHAT_REASONING_MODE: NON_PRO_DEFAULT
 ```
+
+`CHAT_PRO_DEFAULT` is deprecated and ambiguous. Historical plans, research, and receipts may retain
+that frozen label, where it identifies the included Chat surface only. It grants no Pro-mode
+authorization. New and amended receipts must separate cognition route from reasoning mode using the
+current two-field form above.
 
 The rejected default is:
 
@@ -46,6 +55,49 @@ account eligibility, plan terms, model availability, usage policy, rate limits, 
 capacity remain current platform and Capacity-owner facts. Mastermind must not share accounts, evade
 limits, scrape transcripts as a substitute for governed returns, or misstate an unavailable Chat
 surface as ready.
+
+### 1.1 Pro reasoning-mode exception
+
+Turn-billed Pro reasoning mode is an exception, never a default. It is actionable only with this
+complete receipt:
+
+```text
+COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT
+CHAT_REASONING_MODE: PRO_MODE_EXCEPTION
+WHY_PRO_MODE: <specific frontier-reasoning advantage required by this mission>
+WHY_NON_PRO_INSUFFICIENT: <specific evidence that non-Pro reasoning cannot reliably meet the bar>
+PRO_MODE_TASK_CLASS: <one allowed class below>
+EXPECTED_DURATION_MINUTES: <integer between 80 and 1440 minutes, inclusive>
+STOP_CONDITION: <observable completion or abort condition>
+```
+
+The closed allowed classes are:
+
+```text
+LONG_HORIZON_FRONTIER_REASONING
+CROSS_SYSTEM_ARCHITECTURE
+HARD_DEBUGGING
+ADVERSARIAL_JUDGMENT
+```
+
+All fields are required. `EXPECTED_DURATION_MINUTES` must be an integer between 80 and 1440 minutes,
+inclusive, and therefore at least 80 minutes. The work must genuinely belong to the named class. A
+class label, importance, model prestige, or a desire for more effort is not sufficient.
+
+Pro mode is categorically refused for handoffs; `ACK / PICKUP_ACK / START / CONTINUE / STOP`
+lifecycle or routing packets; status checks; monitoring / watchers / polling; message relay;
+routing / placement / foregrounding; mechanical edits or tests; simple reviews; and other short
+bounded work. Those turns remain `NON_PRO_DEFAULT` even when they support a larger program that may
+separately contain a qualifying Pro-mode reasoning turn. An absent, incomplete, under-duration,
+over-duration, ineligible, or stale receipt produces:
+
+```text
+PRO_MODE_REFUSED / USE_NON_PRO_MODE
+```
+
+Reasoning-mode selection does not grant organizational authority, a Job, lifecycle progress,
+receiver identity, RuntimeBinding, effect permission, budget authority, or permission to keep a
+reasoning session alive as a polling daemon.
 
 ## 2. Metered exception contract
 
@@ -78,6 +130,13 @@ A metered route never grants broader organizational authority. It receives the s
 responsibility, operation, RuntimeBinding, lease/fence, effect, and budget constraints as any other
 surface.
 
+Pro reasoning mode is not a metered cognition surface and `PRO_MODE_EXCEPTION` is not
+`METERED_EXCEPTION`. The Pro-mode receipt controls turn-billed reasoning mode on the included Chat
+surface; the metered receipt above controls selection of a different incrementally billed surface.
+Neither receipt satisfies, implies, or replaces the other. The historical
+`WHY_PRO_CHAT_INSUFFICIENT` field name remains unchanged in the metered schema and refers to the
+included Chat surface, not authorization to select Pro reasoning mode.
+
 ## 3. One Chairman-facing Meta-CEO
 
 The Chairman communicates with one logical Meta-CEO office:
@@ -85,7 +144,7 @@ The Chairman communicates with one logical Meta-CEO office:
 ```text
 responsibility_ref = SOL:META-CEO:MASTERMIND
 role               = META_CEO
-cognition_default  = CHAT_PRO_DEFAULT
+cognition_default  = CHAT_INCLUDED_DEFAULT / NON_PRO_DEFAULT
 current_surface    = one exact current RuntimeBinding
 ```
 
@@ -118,11 +177,11 @@ Chairman
 
 | Role | Default cognition surface | Bounded responsibility |
 |---|---|---|
-| `META_CEO` | ChatGPT Pro Chat, Sol Pro when warranted | company portfolio and cross-program decisions |
-| `PROGRAM_CEO` | ChatGPT Pro Chat | one major program and its child graph |
-| `PROJECT_SOL` | ChatGPT Pro Chat | one bounded project or workstream |
-| `INTEGRATOR_SOL` | ChatGPT Pro Chat | assigned synthesis and contradiction resolution |
-| `AUDITOR_SOL` | ChatGPT Pro Chat | independent read-only adversarial verification |
+| `META_CEO` | included Chat web / `NON_PRO_DEFAULT` | company portfolio and cross-program decisions |
+| `PROGRAM_CEO` | included Chat web / `NON_PRO_DEFAULT` | one major program and its child graph |
+| `PROJECT_SOL` | included Chat web / `NON_PRO_DEFAULT` | one bounded project or workstream |
+| `INTEGRATOR_SOL` | included Chat web / `NON_PRO_DEFAULT` | assigned synthesis and contradiction resolution |
+| `AUDITOR_SOL` | included Chat web / `NON_PRO_DEFAULT` | independent read-only adversarial verification |
 | bounded worker | lowest-cost / least-scarce capable avenue | exact implementation, research, or review mission |
 
 Shared Sol cognition or naming never grants equal authority. The word `Sol`, a powerful model, a
@@ -284,6 +343,7 @@ metered inference, and exactly one current action-authoritative executor for eve
 Business and plugin work remains valuable as an optional companion connection layer for stronger
 read/write adapters, immutable package generations, app attestation, OAuth separation, and
 reversible cockpit canaries. Those capabilities must not replace Personal-Pro Chat as the default
+account/surface family and must not replace included Chat web with non-Pro reasoning as the default
 Sol cognition plane or imply that every Sol responsibility requires a Business seat.
 
 The Business Sol Surface Convergence program remains compatible where it preserves one experience,
@@ -342,6 +402,8 @@ The future operating surface should distinguish at least:
 CHAT_CAPACITY_UNAVAILABLE
 CHAT_SURFACE_UNVERIFIED
 MODEL_MODE_UNVERIFIED
+PRO_MODE_RECEIPT_MISSING
+PRO_MODE_REFUSED
 RUNTIME_BINDING_MISSING
 RUNTIME_BINDING_STALE
 ATTENTION_OWNER_CONFLICT
@@ -365,10 +427,14 @@ or unreconciled cross-surface failover.
 For every meaningful Sol-class cognition commission, record before the worker/model route:
 
 ```text
-COGNITION_ROUTE: CHAT_PRO_DEFAULT
+COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT
+CHAT_REASONING_MODE: NON_PRO_DEFAULT
 ```
 
-or the complete `METERED_EXCEPTION` receipt from Section 2.
+For a qualifying Pro reasoning turn, replace only the reasoning-mode line with
+`CHAT_REASONING_MODE: PRO_MODE_EXCEPTION` and include the complete `ProModeReceipt` from Section
+1.1. For a different incrementally billed surface, use the complete `METERED_EXCEPTION` receipt
+from Section 2. These are independent gates.
 
 Then apply the existing worker avenue and receiver-binding law:
 

@@ -375,3 +375,64 @@ PR #364 final source packet
 ```
 
 No worker watcher/dialogue is associated with this self-review edge.
+
+## 2026-11-05 source-publication qualification
+
+This qualification controls current-state readings of the complete September 2
+source packet, while retaining its internal architecture precedence:
+
+- `docs/EXECUTIVE_WEB_SOL_USAGE_CAPACITY_LAW.md`
+- `docs/superpowers/specs/2026-09-02-web-sol-pro-usage-observability-design.md`
+- `docs/superpowers/plans/2026-09-02-web-sol-pro-usage-observability.md`
+- `docs/superpowers/specs/2026-09-02-web-sol-shared-capacity-pool-amendment.md`
+- `docs/superpowers/specs/2026-09-02-web-sol-q0-adversarial-review-amendment.md`
+
+The September pre-census, provider examples, capability ledgers and uses of
+"current" describe their historical source epoch. Their original numbers and
+examples remain historical inputs. This unimplemented, source-only packet is
+not proof of a current account plan, entitlement, balance or reset, a current
+model allowance, an installation, or whole-platform capability. No present-day
+Personal-Pro API existence or absence is established by the historical research.
+QF0/Q1/Q2/CAP/Control Room remain unissued future work.
+
+The verified production reference is
+`integrations/chairman_surfaces/web_sol_protocol.py` at protected
+`48ca51f882338c58e377a0acf16931066c703384`, blob
+`a2ba13fe3f657e7b36bdab110ec4b2462b57dc88`, unchanged through protected
+`4d8ce6fdaa26430718455ab910afcc5c046bca72`. Its global vocabulary includes
+INSPECT, FOREGROUND and TYPED_REENTRY, with typed identity/digest validation.
+This later global contract supersedes the earlier two-action global snapshot.
+It does not expand WSX-Q* beyond passive/bounded observation and does not
+authorize typed reentry for quota observation. It grants no SEND/TYPE,
+model-selection or account-switch authority to this programme.
+
+Current protected AGENTS and SESSION_LOCAL_REVIEW_POLICY govern attended-Web
+technical judgment: there is no blanket independent technical/source review prerequisite.
+The specific source-release HOLD remains pending an explicit parent ruling
+after corrected-source inspection and actual required exact-head/current-integration CI.
+Actually required GitHub approvals, CODEOWNERS, security and release holds remain binding.
+This qualification claims no independent review, formal approval, released hold,
+completed check, installed behavior or product acceptance. The original runtime,
+provider and product gates remain separate.
+
+Model allowance, safety restriction and transport failure are separate.
+The Chairman's historical restriction correlation is not a universal threshold
+or a safe refusal budget. The corrected local internet/RDC timeout cluster is
+transport evidence, not provider quota or blocked-call evidence. First explicit
+safety/permission denial ends that action; quota observation and old bounded-recovery
+language grant no probe, retry, account switch or alternate route. A lost modifying
+reply can still be EFFECT_UNKNOWN and retains its original effect owner.
+
+The original ownership, privacy, no-retry and versioned-contract redlines remain.
+Capacity availability grants no spend authority. Public references are mutable pages, not immutable September snapshots.
+They cannot authenticate the exact historical page versions or current company/account
+data. Any later commissioned QF0 requires its own fresh supported evidence.
+No new prices, quotas, multipliers or exhaustive plan census are introduced here.
+
+Relevant public primary references for that later qualification are:
+
+- https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers
+- https://help.openai.com/en/articles/20001354-gpt-6-and-other-models-in-chatgpt
+- https://help.openai.com/en/articles/12003714-chatgpt-business-models-and-limits
+- https://help.openai.com/en/articles/11487671-flexible-pricing-for-the-enterprise-edu-and-business-plans
+- https://help.openai.com/en/articles/20001001-manage-usage-limits-and-overages-in-chatgpt-enterprise-and-edu

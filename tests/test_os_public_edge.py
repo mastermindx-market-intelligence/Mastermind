@@ -1,0 +1,316 @@
+import copy
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+
+import pytest
+
+from integrations.mastermind_executive_app.os_assets import os_asset_mimes
+from ops.executive_os.os_public_edge import (
+    GET_ROUTES, LEGACY_POST_ROUTES, MCP_MAX_BODY, MCP_METADATA_ROUTE, MCP_ROUTES, POST_ROUTES,
+    INCUMBENT_POST_ROUTES, asset_routes, render, stage,
+)
+
+
+def manifest(noir=False, notices=False):
+    names = ["index.html", "assets/index-a.css", "assets/index-b.js"]
+    if noir:
+        names += ["assets/atelier-office-a.jpg", "assets/Manrope-Variable-a.ttf",
+                  "assets/Inter-Variable-a.woff2", "licenses/fonts/Inter-OFL.txt",
+                  "licenses/fonts/Manrope-OFL.txt", "licenses/fonts/Manrope-FONTLOG.txt"]
+    if notices:
+        names += ["third-party/deepseek-client-dependency-NOTICES.txt",
+                  "third-party/deepseek-harness-LICENSE.txt"]
+    return {"schema": "mastermind.os_assets.v1", "files": [
+        {"path": name, "byte_count": 1, "sha256": "a" * 64, "mime": mime}
+        for name, mime in os_asset_mimes(names).items()
+    ]}
+
+
+def test_authenticated_control_room_routes_are_exact_and_method_scoped():
+    from ops.executive_os.os_public_edge import (
+        GET_ROUTES, INCUMBENT_GET_ROUTES, POST_ROUTES, INCUMBENT_POST_ROUTES,
+    )
+
+    # The client and the MCP source already consume mission/v4. Requiring an
+    # exact allowlist delta catches accidental omission without opening a
+    # wildcard route or silently expanding the legacy installed profile.
+    expected_get = {
+        "/workspace/control-room/state/current",
+        "/workspace/control-room/discover/current",
+        "/workspace/mission/v4/current",
+        "/workspace/fabric/catalog/current",
+        "/workspace/fabric/status/current",
+        "/workspace/project-plan/current",
+        "/workspace/project-journal/current",
+        "/workspace/autonomy/current",
+        "/workspace/project-session/current",
+        "/workspace/resources/capacity/current",
+        "/workspace/project-direction/current",
+        "/workspace/project-admission/current",
+        "/workspace/project-admission/operation",
+    }
+    expected_post = {
+        "/workspace/control-room/open",
+        "/workspace/control-room/bind",
+        "/workspace/control-room/unbind",
+        "/workspace/control-room/refresh-builds",
+        "/workspace/project-admission/pause",
+        "/workspace/project-admission/resume",
+    }
+    assert set(GET_ROUTES) == set(INCUMBENT_GET_ROUTES) | expected_get
+    assert set(POST_ROUTES) == set(INCUMBENT_POST_ROUTES) | expected_post
+    assert len(GET_ROUTES) == len(set(GET_ROUTES))
+    assert len(POST_ROUTES) == len(set(POST_ROUTES))
+    assert set(GET_ROUTES).isdisjoint(POST_ROUTES)
+    config = render(manifest(), 49152)
+    get_branch, post_branch = config.split("    handle @get {", 1)[0], config.split("    handle @post {", 1)[0]
+    assert get_branch.count("      path ") == 1
+    assert post_branch.count("      path ") == 2
+    # The rendered Caddy contract must match the closed Python route contract,
+    # not merely contain a few exemplar paths. Query strings are not routes.
+    caddy_get = set(get_branch.split("      path ", 1)[1].splitlines()[0].split())
+    caddy_post = set(post_branch.rsplit("      path ", 1)[1].splitlines()[0].split())
+    assert caddy_get == set(GET_ROUTES) | set(asset_routes(manifest()))
+    assert caddy_post == set(POST_ROUTES)
+    for route in expected_get:
+        assert route in get_branch
+    for route in expected_post:
+        assert route not in get_branch
+        assert route in post_branch
+    for route in expected_get:
+        assert route not in post_branch.split("    @post {", 1)[1]
+    assert "      method GET" in get_branch
+    assert "      method POST" in post_branch
+    assert "max_size 64KB" in config
+    assert "    abort" in config
+
+
+@pytest.mark.parametrize("noir,notices,count", [(False, False, 3), (True, False, 9), (True, True, 11)])
+def test_all_accepted_topologies_have_exact_routes(noir, notices, count):
+    value = manifest(noir, notices)
+    routes = asset_routes(value)
+    assert len(routes) == count
+    config = render(value, 49152)
+    # OS GET, OS POST, MCP metadata GET and MCP POST all share the one relay.
+    assert config.count("reverse_proxy 127.0.0.1:49152") == 4
+    # All public POSTs are explicit paths. The new session routes are READ
+    # only; effectful session/send stays closed until the held F2 gate clears.
+    assert "path " + " ".join(POST_ROUTES) + "\n" in config
+    assert INCUMBENT_POST_ROUTES == LEGACY_POST_ROUTES + (
+        "/os/executive/session/context", "/os/executive/session/reply",
+        "/os/executive/session/references")
+    assert "/os/executive/session/send" not in config
+    assert config.count("max_size 64KB") == 2
+    assert config.rstrip().endswith("abort\n  }\n}")
+    for route in routes:
+        assert route in config
+    if notices:
+        for name in ("deepseek-client-dependency-NOTICES.txt", "deepseek-harness-LICENSE.txt"):
+            assert "/os/third-party/" + name in routes
+            item = next(item for item in value["files"] if item["path"] == "third-party/" + name)
+            assert item["mime"] == "text/plain; charset=utf-8"
+
+
+@pytest.mark.parametrize("damage", ["missing", "renamed", "extra", "duplicate", "traversal", "mime"])
+def test_notice_layout_remains_closed(damage):
+    value = manifest(True, True)
+    if damage == "missing":
+        value["files"].pop()
+    elif damage == "renamed":
+        value["files"][-1]["path"] = "third-party/other-LICENSE.txt"
+    elif damage == "extra":
+        extra = copy.deepcopy(value["files"][-1])
+        extra["path"] = "third-party/extra.txt"
+        value["files"].append(extra)
+    elif damage == "duplicate":
+        value["files"][-1] = copy.deepcopy(value["files"][-2])
+    elif damage == "traversal":
+        value["files"][-1]["path"] = "third-party/../deepseek-harness-LICENSE.txt"
+    else:
+        value["files"][-1]["mime"] = "text/javascript; charset=utf-8"
+    with pytest.raises(ValueError):
+        render(value, 49152)
+
+
+def test_legacy_plus_notices_is_not_an_admitted_five_file_layout():
+    with pytest.raises(ValueError, match="fixed OS asset set"):
+        manifest(False, True)
+
+
+@pytest.mark.parametrize("noir", [False, True])
+def test_public_mcp_entrypoint_is_two_exact_branches_before_abort(noir):
+    config = render(manifest(noir), 49152)
+    # RFC 9728 metadata is GET-only; the Streamable HTTP endpoint is POST-only.
+    assert f"method GET\n      path {MCP_METADATA_ROUTE}\n" in config
+    assert "method POST\n      path /mcp\n" in config
+    assert MCP_METADATA_ROUTE == "/.well-known/oauth-protected-resource/mcp"
+    assert MCP_ROUTES == ("/mcp",)
+    # No wildcard or prefix match can widen the public surface.
+    assert "/mcp*" not in config and "/mcp/" not in config and "/.well-known/*" not in config
+    # The /mcp branch alone presents a loopback Host (the gateway SDK fence admits
+    # only loopback hosts); every other branch keeps the public host.
+    assert config.count("header_up Host 127.0.0.1\n") == 1
+    assert config.count("header_up Host mcp.mastermind-x.com\n") == 3
+    # The /mcp branch caps the body at the gateway's own ceiling; no other
+    # branch gained a larger or unbounded body.
+    mcp_branch = config.split("handle @mcp {")[1]
+    assert mcp_branch.index("max_size 64KB") < mcp_branch.index("reverse_proxy")
+    assert MCP_MAX_BODY == 64000
+    # The Host counts above would also pass if the two values swapped branches, so
+    # pin each Host inside its own branch slice.
+    assert "header_up Host 127.0.0.1\n" in mcp_branch
+    assert "header_up Host mcp.mastermind-x.com\n" not in mcp_branch
+    meta_branch = config.split("handle @mcpmeta {")[1].split("@mcp {")[0]
+    assert "header_up Host mcp.mastermind-x.com\n" in meta_branch
+    assert "header_up Host 127.0.0.1\n" not in meta_branch
+    for marker, following in (("handle @get {", "@post {"), ("handle @post {", "@mcpmeta {")):
+        os_branch = config.split(marker)[1].split(following)[0]
+        assert "header_up Host mcp.mastermind-x.com\n" in os_branch
+        assert "header_up Host 127.0.0.1\n" not in os_branch
+    # Order is part of the contract: both MCP branches precede the terminal abort,
+    # after the original GET and POST OS branches.
+    order = [config.index(marker) for marker in
+             ("handle @get {", "handle @post {", "handle @mcpmeta {", "handle @mcp {", "\n    abort\n")]
+    assert order == sorted(order)
+    # Caddy performs no authentication or token handling on any branch.
+    for forbidden in ("basicauth", "forward_auth", "jwt", "authorization", "Authorization"):
+        assert forbidden not in config
+    # Untrusted forwarding and CDN client-identity headers are stripped on every
+    # branch and forwarding identity is rewritten to loopback/https.
+    for header in ("Forwarded", "X-Forwarded-Host", "X-Forwarded-Port", "X-Real-IP",
+                   "CF-Connecting-IP", "EO-Connecting-IP", "EO-Client-IP"):
+        assert config.count(f"header_up -{header}\n") == 4
+    assert config.count("header_up X-Forwarded-Proto https\n") == 4
+    assert config.count("header_up X-Forwarded-For 127.0.0.1\n") == 4
+
+
+@pytest.mark.parametrize("path", [
+    "assets/index-x.css\n}\n:80 { respond hacked",
+    "assets/index-x.css *", "../index.html", "/index.html", "assets/../index-x.css",
+    "assets/index-x.css?x=1", "assets/index-x.css#x", "assets\\index-x.css",
+    "licenses/fonts/unknown.txt",
+])
+def test_manifest_path_cannot_inject_or_expand_caddy_routes(path):
+    value = manifest()
+    value["files"][1]["path"] = path
+    with pytest.raises(ValueError):
+        render(value, 49152)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("byte_count", True), ("byte_count", 0), ("byte_count", 4 * 1024 * 1024 + 1),
+    ("sha256", "bad"), ("mime", "text/plain"), ("path", None),
+])
+def test_metadata_is_closed(field, value):
+    data = manifest()
+    data["files"][0][field] = value
+    with pytest.raises(ValueError):
+        render(data, 49152)
+
+
+def test_duplicate_and_extra_schema_fields_refuse():
+    data = manifest()
+    data["files"].append(copy.deepcopy(data["files"][0]))
+    with pytest.raises(ValueError):
+        render(data, 49152)
+    data = manifest()
+    data["command"] = "unsafe"
+    with pytest.raises(ValueError):
+        render(data, 49152)
+
+
+@pytest.mark.parametrize("port", [True, "49152", 8443, 49151, 50201])
+def test_only_reserved_loopback_relay_range(port):
+    with pytest.raises(ValueError):
+        render(manifest(), port)
+
+
+def test_staging_is_exclusive_and_receipt_observes_exact_bytes(tmp_path):
+    output = tmp_path / "os.caddy"
+    receipt = stage(manifest=manifest(True), relay_port=49152, output=output)
+    assert receipt["installed"] is False
+    assert receipt["mcp"] == {"get": [MCP_METADATA_ROUTE], "post": list(MCP_ROUTES)}
+    assert receipt["sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
+    assert output.stat().st_mode & 0o777 == 0o600
+    before = output.read_bytes()
+    with pytest.raises(FileExistsError):
+        stage(manifest=manifest(), relay_port=49152, output=output)
+    assert output.read_bytes() == before
+
+
+def test_dangling_symlink_and_writable_output_directory_refuse(tmp_path):
+    output = tmp_path / "os.caddy"
+    output.symlink_to(tmp_path / "absent")
+    with pytest.raises(FileExistsError):
+        stage(manifest=manifest(), relay_port=49152, output=output)
+    assert not (tmp_path / "absent").exists()
+    os.chmod(tmp_path, 0o777)
+    try:
+        with pytest.raises(ValueError):
+            stage(manifest=manifest(), relay_port=49152, output=tmp_path / "other")
+    finally:
+        os.chmod(tmp_path, 0o700)
+
+
+
+@pytest.mark.parametrize("noir", [False, True])
+def test_real_caddy_adapter_preserves_exact_read_only_edge_routes(tmp_path, noir):
+    """Native adapter proof, not a Caddy reload or live-host admission.
+
+    Skip when Caddy is not installed on a CI runner, while preserving the
+    pure-renderer and JSON-transition tests on all hosts.
+    """
+    executable = shutil.which("caddy")
+    if executable is None:
+        pytest.skip("Caddy binary absent: inert native-adapter qualification unavailable")
+    caddyfile = tmp_path / "r2-read-only-edge.caddy"
+    caddyfile.write_text(render(manifest(noir), 49152), encoding="utf-8")
+    actual = subprocess.run(
+        [executable, "adapt", "--config", str(caddyfile), "--adapter", "caddyfile"],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        timeout=12, check=False,
+    )
+    assert actual.returncode == 0, actual.stderr[:1000]
+    config = json.loads(actual.stdout)
+    servers = config["apps"]["http"]["servers"]
+    assert len(servers) == 1
+
+    route_matchers = []
+    def visit(node):
+        if type(node) is dict:
+            if "match" in node and "handle" in node:
+                for match in node["match"]:
+                    if "method" in match:
+                        route_matchers.append(match)
+            for child in node.values():
+                visit(child)
+        elif type(node) is list:
+            for child in node:
+                visit(child)
+    visit(servers)
+    # The two OS branches plus the two public-MCP branches (#1656), nothing else.
+    assert len(route_matchers) == 4
+    assert all(set(match) == {"method", "path"} for match in route_matchers)
+    by_paths = {(tuple(match["method"]), tuple(match["path"])): match for match in route_matchers}
+    assert (("POST",), tuple(POST_ROUTES)) in by_paths
+    assert (("GET",), (MCP_METADATA_ROUTE,)) in by_paths
+    assert (("POST",), tuple(MCP_ROUTES)) in by_paths
+    assert "/os/executive/session/send" not in POST_ROUTES
+    os_get = [match for match in route_matchers
+              if match["method"] == ["GET"] and match["path"] != [MCP_METADATA_ROUTE]]
+    assert len(os_get) == 1
+    assert set(os_get[0]["path"]) == set(GET_ROUTES) | set(asset_routes(manifest(noir)))
+    assert config["apps"]["http"]["servers"]
+
+
+def test_admission_transition_keeps_exact_predecessor_and_no_partial_upgrade():
+    from ops.executive_os.os_public_edge import PRE_PROJECT_ADMISSION_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES, TRANSITION_ROUTE_PROFILES
+    assert (PRE_PROJECT_ADMISSION_GET_ROUTES,PRE_PROJECT_ADMISSION_POST_ROUTES) in TRANSITION_ROUTE_PROFILES
+    assert (GET_ROUTES,POST_ROUTES) in TRANSITION_ROUTE_PROFILES
+    assert (GET_ROUTES,PRE_PROJECT_ADMISSION_POST_ROUTES) not in TRANSITION_ROUTE_PROFILES
+    assert (PRE_PROJECT_ADMISSION_GET_ROUTES,POST_ROUTES) not in TRANSITION_ROUTE_PROFILES
+    assert '/workspace/project-admission/current' not in POST_ROUTES
+    assert '/workspace/project-admission/pause' not in GET_ROUTES

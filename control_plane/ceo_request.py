@@ -48,6 +48,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from control_plane import ceo_intent
+from control_plane.mission_acceptance_criteria import (
+    AcceptanceCriteriaError,
+    parse_acceptance_criteria_candidate,
+)
 
 __all__ = [
     "ACTOR",
@@ -77,6 +81,7 @@ __all__ = [
     "REQUIRED_FIELDS",
     "SLACK_INTENT_ID_PREFIX",
     "VALIDATION_KEYS",
+    "app_request_ref",
     "automated_intent_id",
     "build_trusted_envelope",
     "build_validation_commands",
@@ -84,6 +89,7 @@ __all__ = [
     "derive_branch",
     "derive_worktree",
     "mcp_intent_id",
+    "normalize_app_request",
     "normalize_automated_request",
     "normalize_high_level_request",
     "slack_intent_id",
@@ -157,6 +163,15 @@ AUTOMATED_INTENT_ID_PREFIX = "auto-"
 _AUTOMATED_INTENT_ID_DOMAIN = b"mastermind.executive_automated_request.v1\x00"
 AUTOMATED_REQUEST_REF_RE = re.compile(r"^req-[a-z0-9][a-z0-9._-]{7,95}$")
 
+#: New first-party authenticated-app identity (BSC-E1).  Separately
+#: namespaced from both :data:`MCP_INTENT_ID_PREFIX` and
+#: :data:`SLACK_INTENT_ID_PREFIX` so outputs can never collide with either;
+#: unlike those two, this produces the OUTER AD-ID1 ``request_ref`` shape
+#: directly (never an intent id), so its result feeds straight into
+#: :func:`automated_intent_id`.
+APP_REQUEST_REF_PREFIX = "req-"
+_APP_REQUEST_REF_DOMAIN = b"mastermind.executive_app.operation_key.v1\x00"
+
 
 # ---------------------------------------------------------------------------
 # high-level request law (adjudication §4)
@@ -175,14 +190,16 @@ OPTIONAL_FIELDS = frozenset(
 AUTOMATED_REQUIRED_FIELDS = frozenset(
     {"objective", "department", "priority", "execution_profile"}
 )
-AUTOMATED_OPTIONAL_FIELDS = OPTIONAL_FIELDS
+AUTOMATED_OPTIONAL_FIELDS = OPTIONAL_FIELDS | frozenset({'frontier_model_alias'})
 VALIDATION_KEYS = frozenset({"pytest_targets", "compileall_paths", "git_diff_check"})
 
-#: §4.3 — exactly these two execution profiles.  Nothing here may ever grow
+#: Shared profile law, including the explicit authenticated App native choice.
+#: The legacy MCP adapter projects only its original two names. Nothing may grow
 #: ``OPEN_PR``, ``PUSH_BRANCH``, ``MERGE``, ``DEPLOY``, ``SERVICE_CONTROL``, or
 #: ``CROSS_REPO_PUBLISH``.
 EXECUTION_PROFILES: dict[str, tuple[str, ...]] = {
     "research_only": ("READ", "RESEARCH"),
+    "native_research_only": ("READ", "RESEARCH"),
     "bounded_code_change": ("READ", "RUN_TESTS", "WRITE_BRANCH"),
 }
 
@@ -431,7 +448,7 @@ def normalize_high_level_request(payload: Any) -> dict[str, Any]:
     )
 
     # --- profile coherence (§4.3) ------------------------------------------
-    if profile == "research_only":
+    if profile in {"research_only", "native_research_only"}:
         if paths:
             raise CeoRequestInvalid(
                 "execution_profile 'research_only' grants no write authority; "
@@ -442,6 +459,8 @@ def normalize_high_level_request(payload: Any) -> dict[str, Any]:
                 "execution_profile 'research_only' grants no test authority; "
                 "validation is refused"
             )
+        if profile == "native_research_only" and result["attempt_limit"] != 1:
+            raise CeoRequestInvalid("native_research_only requires attempt_limit=1")
     else:  # bounded_code_change
         if not paths:
             raise CeoRequestInvalid(
@@ -473,10 +492,37 @@ def normalize_automated_request(payload: Any) -> dict[str, Any]:
         AUTOMATED_OPTIONAL_FIELDS,
     )
     compatible = dict(payload)
+    selection = {}
+    if "frontier_model_alias" in compatible:
+        from control_plane.frontier_selection import validate_alias, FrontierSelectionError
+        try:
+            selection["frontier_model_alias"] = validate_alias(compatible.pop("frontier_model_alias"))
+        except FrontierSelectionError as exc:
+            raise CeoRequestInvalid(str(exc)) from exc
     compatible["operation_key"] = "automated-request-placeholder"
     normalized = normalize_high_level_request(compatible)
+    # The authenticated OS app may encode a versioned *requirements* section
+    # inside the existing objective. Refuse a broken section before automated
+    # submission; never derive an acceptance verdict or add a new input field.
+    # Frozen v1 CEO_REQUEST normalization remains unchanged for legacy paths.
+    try:
+        parse_acceptance_criteria_candidate(normalized["objective"])
+    except AcceptanceCriteriaError as exc:
+        raise CeoRequestInvalid("objective has a malformed acceptance-criteria section") from exc
     del normalized["operation_key"]
+    normalized.update(selection)
     return normalized
+
+
+def normalize_app_request(payload: Any) -> dict[str, Any]:
+    """Authenticated OS request extension; legacy MCP/Slack shapes stay frozen."""
+    if not isinstance(payload, Mapping) or "frontier_model_alias" not in payload:
+        return normalize_high_level_request(payload)
+    operation_key = _validated_operation_key(payload.get("operation_key"))
+    semantic = normalize_automated_request({
+        key: value for key, value in payload.items() if key != "operation_key"
+    })
+    return {"operation_key": operation_key, **semantic}
 
 
 def build_validation_commands(validation: Mapping[str, Any] | None) -> list[list[str]]:
@@ -565,6 +611,35 @@ def slack_intent_id(operation_key: str) -> str:
     """
 
     return _transport_intent_id(SLACK_INTENT_ID_PREFIX, _SLACK_INTENT_ID_DOMAIN, operation_key)
+
+
+def app_request_ref(operation_key: str) -> str:
+    """``req-<32 hex>`` — new first-party authenticated-app identity (BSC-E1).
+
+    Mirrors :func:`mcp_intent_id`/:func:`slack_intent_id` exactly (same
+    operation_key validation, same hashing construction) but with its OWN
+    domain separator (:data:`_APP_REQUEST_REF_DOMAIN`, distinct from the MCP
+    and Slack domain bytes so outputs can never collide) and its own output
+    shape: an AD-ID1 outer ``request_ref`` — legal input to
+    :func:`automated_intent_id` unchanged — rather than an intent id.
+
+    Pure and deterministic: depends ONLY on ``operation_key`` (the approved
+    logical operation identity supplied through the existing public
+    ``submit_ceo_intent`` five-tool shape).  Never depends on OAuth subject,
+    client, app, session, title, account, transport, or time.  Same
+    ``operation_key`` always yields the same ``request_ref``; a different
+    ``operation_key`` always yields a different one.
+    """
+
+    key = _validated_operation_key(operation_key)
+    digest = hashlib.sha256(_APP_REQUEST_REF_DOMAIN + key.encode("utf-8")).hexdigest()
+    request_ref = APP_REQUEST_REF_PREFIX + digest[:INTENT_ID_DIGEST_CHARS]
+    if AUTOMATED_REQUEST_REF_RE.fullmatch(request_ref) is None or len(request_ref) > 100:
+        # Unreachable with the constants above; asserted rather than assumed so
+        # a future prefix/digest-length change cannot quietly mint a
+        # request_ref the existing upstream validator would refuse.
+        raise CeoRequestInternalError("derived request_ref is not upstream-legal")
+    return request_ref
 
 
 def automated_intent_id(request_ref: str) -> str:

@@ -19,11 +19,14 @@ CONTROL_UID="450"
 CONTROL_GID="450"
 OPS_GID="453"
 CEO_INGRESS_SOCKET="/var/run/mastermind-executive/ceo-ingress.sock"
+DIALOGUE_OBSERVATION_SOCKET="/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
+DIALOGUE_RELAY_GID="457"
 SOL_RUNTIME_CHANNEL_ID="C0BSGABKBFY"
 WORKSPACE_ID="T0BRD2AQXQV"
 
 SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
 RUNTIME_ROOT="/var/db/mastermind-executive"
+C1_REBIND_LOCK_ROOT="$SYSTEM_ROOT/locks"
 CONTROL_CONFIG="$SYSTEM_ROOT/config/control.json"
 CONTROL_PLIST="/Library/LaunchDaemons/$CONTROL_LABEL.plist"
 RELAY_PLIST="/Library/LaunchDaemons/$RELAY_LABEL.plist"
@@ -150,6 +153,18 @@ expected = {
     "ceo_ingress_peer_uid": 452,
     "ceo_ingress_socket_path": "/var/run/mastermind-executive/ceo-ingress.sock",
     "proof_base_sha": release_sha,
+    "dialogue_bridge_armed": False,
+    "dialogue_observation_launchd_socket_name": "DialogueObservation",
+    "dialogue_observation_peer_uid": 457,
+    "dialogue_observation_socket_path": "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
+    "dialogue_wake_retry_policy": {
+        "accepted_ttl_s": None,
+        "armed": False,
+        "max_delivery_attempts": None,
+        "reenable_on_binding_rotation": True,
+        "retry_cooldown_s": None,
+        "target_unavailable_backoff_s": None,
+    },
 }
 if not isinstance(value, dict) or any(value.get(k) != v for k, v in expected.items()):
     raise SystemExit(65)
@@ -174,19 +189,27 @@ if /bin/launchctl print "system/$RELAY_LABEL" >/dev/null 2>&1; then
 fi
 
 read_attribute() {
-  local record="$1" attribute="$2"
-  /usr/bin/dscl . -read "$record" "$attribute" 2>/dev/null \
-    | /usr/bin/awk -v key="$attribute" '
+  local record="$1"
+  local attribute="$2"
+  LC_ALL=C LANG=C /usr/bin/dscl . -read "$record" "$attribute" 2>/dev/null \
+    | /usr/bin/awk -v attribute="$attribute" '
         NR == 1 {
-          prefix=key ":"
-          if (index($0, prefix) != 1) exit 65
-          value=substr($0, length(prefix) + 1)
+          standard=attribute ":"
+          native="dsAttrTypeNative:" attribute ":"
+          if (index($0, standard) == 1) {
+            value=substr($0, length(standard) + 1)
+          } else if (index($0, native) == 1) {
+            value=substr($0, length(native) + 1)
+          } else {
+            malformed=1
+            next
+          }
           sub(/^[[:space:]]*/, "", value)
           next
         }
         {value=value " " $0}
         END {
-          if (NR == 0) exit 65
+          if (NR == 0 || malformed) exit 65
           gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
           print value
         }
@@ -259,8 +282,43 @@ ensure_user() {
   fi
 }
 
+lock_namespace_has_acl() {
+  case "${1:-}" in
+    *$'\n'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+ensure_rebind_lock_root() {
+  if [ -e "$C1_REBIND_LOCK_ROOT" ] || [ -L "$C1_REBIND_LOCK_ROOT" ]; then
+    [ -d "$C1_REBIND_LOCK_ROOT" ] && [ ! -L "$C1_REBIND_LOCK_ROOT" ] || {
+      /bin/echo "C1 rebind lock namespace is not a direct directory" >&2
+      exit 65
+    }
+  else
+    /usr/bin/install -d -o root -g wheel -m 0700 "$C1_REBIND_LOCK_ROOT"
+  fi
+  [ "$(/usr/bin/stat -f '%u:%g' "$C1_REBIND_LOCK_ROOT")" = "0:0" ] || {
+    /bin/echo "C1 rebind lock namespace is not root:wheel" >&2
+    exit 65
+  }
+  [ "$(/usr/bin/stat -f '%Lp' "$C1_REBIND_LOCK_ROOT")" = "700" ] || {
+    /bin/echo "C1 rebind lock namespace is not mode 0700" >&2
+    exit 65
+  }
+  LOCK_NAMESPACE_LONG="$("/bin/ls" -lde "$C1_REBIND_LOCK_ROOT")" || {
+    /bin/echo "C1 rebind lock namespace ACL observation failed" >&2
+    exit 65
+  }
+  if lock_namespace_has_acl "$LOCK_NAMESPACE_LONG"; then
+    /bin/echo "C1 rebind lock namespace has a filesystem ACL" >&2
+    exit 65
+  fi
+}
+
 ensure_group
 ensure_user
+ensure_rebind_lock_root
 
 # Relay must remain out of broad Executive/worker groups. CeoIngress access is
 # granted by the dedicated socket's primary GID, not by _mastermind_ops.
@@ -296,6 +354,10 @@ done
 /usr/bin/plutil -replace Sockets.CeoIngress.SockPathOwner -integer "$CONTROL_UID" "$CONTROL_PLIST"
 /usr/bin/plutil -replace Sockets.CeoIngress.SockPathGroup -integer "$RELAY_GID" "$CONTROL_PLIST"
 /usr/bin/plutil -replace Sockets.CeoIngress.SockPathMode -integer 432 "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.DialogueObservation.SockPathName -string "$DIALOGUE_OBSERVATION_SOCKET" "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.DialogueObservation.SockPathOwner -integer "$CONTROL_UID" "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.DialogueObservation.SockPathGroup -integer "$DIALOGUE_RELAY_GID" "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.DialogueObservation.SockPathMode -integer 432 "$CONTROL_PLIST"
 
 # Re-assert the broad Operator socket is unchanged and inaccessible to Relay.
 /usr/bin/plutil -replace Sockets.Operator.SockPathOwner -integer "$CONTROL_UID" "$CONTROL_PLIST"
@@ -303,19 +365,23 @@ done
 /usr/bin/plutil -replace Sockets.Operator.SockPathMode -integer 432 "$CONTROL_PLIST"
 CONTROL_SOCKET_POLICY="$CONTROL_UID:$OPS_GID:432"
 CEO_SOCKET_POLICY="$CONTROL_UID:$RELAY_GID:432"
-"$PYTHON_BINARY" -I -S -B - "$CONTROL_PLIST" "$CONTROL_SOCKET_POLICY" "$CEO_SOCKET_POLICY" <<'PY' || {
+DIALOGUE_SOCKET_POLICY="$CONTROL_UID:$DIALOGUE_RELAY_GID:432"
+"$PYTHON_BINARY" -I -S -B - "$CONTROL_PLIST" "$CONTROL_SOCKET_POLICY" "$CEO_SOCKET_POLICY" "$DIALOGUE_SOCKET_POLICY" <<'PY' || {
 import plistlib, pathlib, sys
-path, expected_operator, expected_ceo = sys.argv[1:]
+path, expected_operator, expected_ceo, expected_dialogue = sys.argv[1:]
 doc = plistlib.loads(pathlib.Path(path).read_bytes())
 sockets = doc.get("Sockets")
-if not isinstance(sockets, dict) or set(sockets) != {"Operator", "CeoIngress"}:
+if not isinstance(sockets, dict) or set(sockets) != {"Operator", "CeoIngress", "DialogueObservation"}:
     raise SystemExit(65)
 def policy(name):
     row = sockets[name]
     return f"{row.get('SockPathOwner')}:{row.get('SockPathGroup')}:{row.get('SockPathMode')}"
-if policy("Operator") != expected_operator or policy("CeoIngress") != expected_ceo:
+if (policy("Operator") != expected_operator or policy("CeoIngress") != expected_ceo
+        or policy("DialogueObservation") != expected_dialogue):
     raise SystemExit(65)
 if sockets["CeoIngress"].get("SockPathName") != "/var/run/mastermind-executive/ceo-ingress.sock":
+    raise SystemExit(65)
+if sockets["DialogueObservation"].get("SockPathName") != "/var/run/mastermind-dialogue-observation/dialogue-observation.sock":
     raise SystemExit(65)
 PY
   /bin/echo "installed Executive socket policy differs from C1 freeze" >&2
@@ -339,7 +405,7 @@ PY
 /usr/bin/plutil -lint "$RELAY_PLIST" >/dev/null
 
 for protected_path in "$CONTROL_CONFIG" "$CONTROL_PLIST" "$RELAY_PLIST" \
-  "$RUNTIME_ROOT/sol-state-relay" "$RELAY_HOME" "$RELAY_LOG_ROOT"; do
+  "$C1_REBIND_LOCK_ROOT" "$RUNTIME_ROOT/sol-state-relay" "$RELAY_HOME" "$RELAY_LOG_ROOT"; do
   case "$(/usr/bin/stat -f '%Sp' "$protected_path")" in
     *+) /bin/echo "unexpected filesystem ACL on C1 prepared path" >&2; exit 65 ;;
   esac

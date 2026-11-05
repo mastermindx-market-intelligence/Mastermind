@@ -1,0 +1,18 @@
+{
+  "run_id": "lp-novel-identifiability-r1",
+  "root": "latent-pressure-research-20261014-chatgpt4-001",
+  "terminal_rc": 0,
+  "quality_verdict": "NOT_ACCEPTED_AS_COMPLETE_REVIEW",
+  "used_after_independent_check": [
+    "additive and scale observational equivalence",
+    "opposite post-pause paths under different latent pools",
+    "post-pause response alone does not identify susceptibility separately from latent demand evolution"
+  ],
+  "rejected": [
+    "sum of historical flow mislabeled sequence-sensitive",
+    "exclusion of future delistings would bias research",
+    "unsupported effective flow=min(nominal,in-kind) assertion",
+    "uncorrelated noise alone does not identify conditional realized latent paths"
+  ],
+  "replacement_verification": "parent-derived order-sensitive cross-sum, constructed recovery counterexample and prefix-causal prototypes; not a financial alpha review"
+}

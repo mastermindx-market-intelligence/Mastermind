@@ -51,8 +51,10 @@ import argparse
 import hashlib
 import json
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from types import MappingProxyType
 from control_plane import surface_bindings as _surface_bindings
 from . import mas115_multilogin_port_policy as _port_policy
 
@@ -204,6 +206,184 @@ _PROVISION_REQUIRED_KEYS_BASE = frozenset({
 _MAX_PROVISION_BYTES = 64 * 1024
 CHAIRMAN_SEAT_REFS = frozenset({"chatgpt1", "chatgpt2", "chatgpt3"})
 BINDINGS_CENSUS_MAX_AGE_SECONDS = 24 * 60 * 60
+_CURRENT_ENVIRONMENT_CENSUS_MAX_ROWS = 1000
+_CURRENT_ENVIRONMENT_SNAPSHOT_SEAL = object()
+_IMMUTABLE_ROW_TYPE = type(MappingProxyType({}))
+_CURRENT_ENVIRONMENT_ROW_KEYS = frozenset({
+    "env_manager", "workspace_id", "folder_id", "profile_id", "running",
+})
+
+
+@dataclass(frozen=True, slots=True)
+class _CurrentEnvironmentSnapshot:
+    """One copied, immutable observation from the trusted local census owner."""
+
+    _seal: object
+    rows: tuple
+    digest: str
+
+
+def _current_environment_rows_bytes(rows) -> bytes | None:
+    """Return canonical bytes only for the exact closed immutable row shape."""
+
+    if type(rows) is not tuple or len(rows) > _CURRENT_ENVIRONMENT_CENSUS_MAX_ROWS:
+        return None
+    normalized = []
+    prior_sort_key = None
+    managed_identities = set()
+    for row in rows:
+        if (
+            type(row) is not _IMMUTABLE_ROW_TYPE
+            or any(type(key) is not str for key in row.keys())
+            or set(row.keys()) != _CURRENT_ENVIRONMENT_ROW_KEYS
+        ):
+            return None
+        manager = row.get("env_manager")
+        workspace_id = row.get("workspace_id")
+        folder_id = row.get("folder_id")
+        profile_id = row.get("profile_id")
+        running = row.get("running")
+        if type(running) is not bool:
+            return None
+        if manager == "gologin":
+            if (
+                workspace_id is not None
+                or folder_id is not None
+                or type(profile_id) is not str
+                or _surface_bindings.GOLOGIN_PROFILE_ID_RE.fullmatch(profile_id) is None
+            ):
+                return None
+        elif manager == "multilogin":
+            if not all(
+                type(value) is str
+                and _surface_bindings.UUID_RE.fullmatch(value) is not None
+                and value == value.lower()
+                for value in (workspace_id, folder_id, profile_id)
+            ):
+                return None
+        else:
+            return None
+
+        managed_identity = (manager, folder_id, profile_id)
+        if managed_identity in managed_identities:
+            return None
+        managed_identities.add(managed_identity)
+        copied = {
+            "env_manager": manager,
+            "workspace_id": workspace_id,
+            "folder_id": folder_id,
+            "profile_id": profile_id,
+            "running": running,
+        }
+        sort_key = json.dumps(
+            copied, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        )
+        if prior_sort_key is not None and sort_key <= prior_sort_key:
+            return None
+        prior_sort_key = sort_key
+        normalized.append(copied)
+    return json.dumps(
+        normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
+
+
+def _seal_current_environment_snapshot(census):
+    """Strictly copy and seal one raw result from ``list_local_environments``.
+
+    This is the sole authority-grade reducer.  It accepts no partial schema,
+    coercion, skipped row, duplicate managed identity, or mutable alias.
+    """
+
+    if (
+        type(census) is not dict
+        or any(type(key) is not str for key in census.keys())
+        or set(census.keys()) != set(_surface_bindings.ENV_MANAGERS)
+    ):
+        return None
+    if any(type(census.get(manager)) is not list for manager in _surface_bindings.ENV_MANAGERS):
+        return None
+    if sum(len(census[manager]) for manager in _surface_bindings.ENV_MANAGERS) > _CURRENT_ENVIRONMENT_CENSUS_MAX_ROWS:
+        return None
+
+    copied_rows = []
+    managed_identities = set()
+    for manager in _surface_bindings.ENV_MANAGERS:
+        expected_keys = (
+            {"profile_id", "running"}
+            if manager == "gologin"
+            else {"workspace_id", "folder_id", "profile_id", "running"}
+        )
+        for raw in census[manager]:
+            if (
+                type(raw) is not dict
+                or any(type(key) is not str for key in raw.keys())
+                or set(raw.keys()) != expected_keys
+            ):
+                return None
+            profile_id = raw.get("profile_id")
+            running = raw.get("running")
+            if type(profile_id) is not str or type(running) is not bool:
+                return None
+            if manager == "gologin":
+                if _surface_bindings.GOLOGIN_PROFILE_ID_RE.fullmatch(profile_id) is None:
+                    return None
+                workspace_id = None
+                folder_id = None
+            else:
+                workspace_id = raw.get("workspace_id")
+                folder_id = raw.get("folder_id")
+                if not all(
+                    type(value) is str
+                    and _surface_bindings.UUID_RE.fullmatch(value) is not None
+                    for value in (workspace_id, folder_id, profile_id)
+                ):
+                    return None
+                workspace_id = workspace_id.lower()
+                folder_id = folder_id.lower()
+                profile_id = profile_id.lower()
+
+            managed_identity = (manager, folder_id, profile_id)
+            if managed_identity in managed_identities:
+                return None
+            managed_identities.add(managed_identity)
+            copied_rows.append({
+                "env_manager": manager,
+                "workspace_id": workspace_id,
+                "folder_id": folder_id,
+                "profile_id": profile_id,
+                "running": running,
+            })
+
+    copied_rows.sort(
+        key=lambda row: json.dumps(
+            row, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ),
+    )
+    rows = tuple(MappingProxyType(dict(row)) for row in copied_rows)
+    canonical = _current_environment_rows_bytes(rows)
+    if canonical is None:
+        return None
+    return _CurrentEnvironmentSnapshot(
+        _CURRENT_ENVIRONMENT_SNAPSHOT_SEAL,
+        rows,
+        hashlib.sha256(canonical).hexdigest(),
+    )
+
+
+def _is_current_environment_snapshot(snapshot) -> bool:
+    """Defensively revalidate the private type, seal, rows, and digest."""
+
+    if (
+        type(snapshot) is not _CurrentEnvironmentSnapshot
+        or snapshot._seal is not _CURRENT_ENVIRONMENT_SNAPSHOT_SEAL
+        or type(snapshot.digest) is not str
+    ):
+        return False
+    canonical = _current_environment_rows_bytes(snapshot.rows)
+    return (
+        canonical is not None
+        and hashlib.sha256(canonical).hexdigest() == snapshot.digest
+    )
 
 
 def _parse_utc(value):
@@ -216,7 +396,10 @@ def _parse_utc(value):
     return parsed if parsed.tzinfo is not None else None
 
 
-def _current_chairman_profile_census(doc, *, now, candidate_profile_id: str):
+def _current_chairman_profile_census(
+    doc, *, now, candidate_profile_id: str, candidate_vendor=None,
+    candidate_folder_id=None, current_environment_snapshot=None,
+):
     """Return ``"clear"``, ``"collision"``, or ``"unavailable"``.
 
     ``surface_bindings`` remains a navigation cache, not a new authority
@@ -229,6 +412,93 @@ def _current_chairman_profile_census(doc, *, now, candidate_profile_id: str):
     workstream bindings for the same seat are allowed only when they agree on
     that identity.
     """
+    if current_environment_snapshot is not None:
+        if (
+            not isinstance(doc, dict)
+            or doc.get("schema") != _surface_bindings.SCHEMA
+            or _surface_bindings.validate_bindings_document(doc)
+            or not _is_current_environment_snapshot(current_environment_snapshot)
+        ):
+            return "unavailable"
+
+        if candidate_vendor == "gologin":
+            if (
+                not isinstance(candidate_profile_id, str)
+                or _surface_bindings.GOLOGIN_PROFILE_ID_RE.fullmatch(candidate_profile_id) is None
+                or candidate_folder_id is not None
+            ):
+                return "unavailable"
+            candidate_identity = ("gologin", None, candidate_profile_id)
+        elif candidate_vendor == "multilogin":
+            if not all(
+                isinstance(value, str)
+                and _surface_bindings.UUID_RE.fullmatch(value) is not None
+                for value in (candidate_folder_id, candidate_profile_id)
+            ):
+                return "unavailable"
+            candidate_identity = (
+                "multilogin", candidate_folder_id.lower(), candidate_profile_id.lower(),
+            )
+        else:
+            return "unavailable"
+
+        identities: dict[str, tuple[str, str | None, str]] = {}
+        for binding in doc.get("bindings") or []:
+            if not isinstance(binding, dict) or binding.get("provider") != "chatgpt":
+                continue
+            locator = binding.get("locator")
+            if not isinstance(locator, dict):
+                return "unavailable"
+            seat_ref = binding.get("seat_ref")
+            manager = locator.get("env_manager")
+            profile_id = locator.get("profile_id")
+            if (
+                seat_ref not in CHAIRMAN_SEAT_REFS
+                or manager not in _surface_bindings.ENV_MANAGERS
+                or not isinstance(profile_id, str)
+            ):
+                return "unavailable"
+            folder_id = locator.get("folder_id") if manager == "multilogin" else None
+            if manager == "multilogin" and not isinstance(folder_id, str):
+                return "unavailable"
+            identity = (
+                manager,
+                folder_id.lower() if isinstance(folder_id, str) else None,
+                profile_id.lower(),
+            )
+            prior = identities.get(seat_ref)
+            if prior is not None and prior != identity:
+                return "unavailable"
+            identities[seat_ref] = identity
+
+        if (
+            set(identities) != CHAIRMAN_SEAT_REFS
+            or len(set(identities.values())) != len(CHAIRMAN_SEAT_REFS)
+        ):
+            return "unavailable"
+
+        snapshot_rows = current_environment_snapshot.rows
+        snapshot_identities = [
+            (row["env_manager"], row["folder_id"], row["profile_id"])
+            for row in snapshot_rows
+        ]
+        designated = set(identities.values())
+        for identity in designated:
+            indexes = [
+                index for index, observed_identity in enumerate(snapshot_identities)
+                if observed_identity == identity
+            ]
+            if len(indexes) != 1 or snapshot_rows[indexes[0]]["running"] is not True:
+                return "unavailable"
+        running = {
+            identity
+            for identity, row in zip(snapshot_identities, snapshot_rows)
+            if row["running"] is True
+        }
+        if running != designated:
+            return "unavailable"
+        return "collision" if candidate_identity in designated else "clear"
+
     if not isinstance(doc, dict) or doc.get("schema") != _surface_bindings.SCHEMA:
         return "unavailable"
     if _surface_bindings.validate_bindings_document(doc):
@@ -297,7 +567,9 @@ def _read_provision_document(target: Path):
     return doc if isinstance(doc, dict) else None
 
 
-def _validate_provision_document(doc, *, bindings_loader=None, now=None):
+def _validate_provision_document(
+    doc, *, bindings_loader=None, now=None, current_environment_snapshot=None,
+):
     loader = bindings_loader if bindings_loader is not None else _surface_bindings.load_bindings
 
     if not isinstance(doc, dict):
@@ -357,7 +629,12 @@ def _validate_provision_document(doc, *, bindings_loader=None, now=None):
     if problems:
         return None, "BINDINGS_UNAVAILABLE"
     census = _current_chairman_profile_census(
-        collision_doc, now=now, candidate_profile_id=str(profile_id),
+        collision_doc,
+        now=now,
+        candidate_profile_id=str(profile_id),
+        candidate_vendor=vendor,
+        candidate_folder_id=doc.get("folder_id"),
+        current_environment_snapshot=current_environment_snapshot,
     )
     if census == "collision":
         return None, "DISALLOWED_TARGET"
@@ -367,7 +644,9 @@ def _validate_provision_document(doc, *, bindings_loader=None, now=None):
     return doc, None
 
 
-def load_provision(path=None, *, bindings_loader=None, now=None):
+def load_provision(
+    path=None, *, bindings_loader=None, now=None, current_environment_snapshot=None,
+):
     """Load and validate the fixed-policy disposable canary provision.
 
     Returns ``(provision_dict, None)`` on success, or ``(None, code)`` where
@@ -379,12 +658,15 @@ def load_provision(path=None, *, bindings_loader=None, now=None):
     if doc is None:
         return None, "PROVISION_MISSING"
     return _validate_provision_document(
-        doc, bindings_loader=bindings_loader, now=now,
+        doc,
+        bindings_loader=bindings_loader,
+        now=now,
+        current_environment_snapshot=current_environment_snapshot,
     )
 
 
 def load_legacy_provision_for_migration(
-    path=None, *, bindings_loader=None, now=None,
+    path=None, *, bindings_loader=None, now=None, current_environment_snapshot=None,
 ):
     """Validate and transform only the exact historical v2 provision."""
 
@@ -410,7 +692,10 @@ def load_legacy_provision_for_migration(
     candidate["schema"] = PROVISION_SCHEMA
     candidate["origin_policy"] = _port_policy.ORIGIN_POLICY
     return _validate_provision_document(
-        candidate, bindings_loader=bindings_loader, now=now,
+        candidate,
+        bindings_loader=bindings_loader,
+        now=now,
+        current_environment_snapshot=current_environment_snapshot,
     )
 
 

@@ -116,6 +116,53 @@ def test_review_does_not_claim_release_or_live_capability():
     text = _text()
 
     assert "source architecture remains **spec_only**" in text
-    assert "does **not** satisfy the independent-review gate" in text
+    qualification = _current_qualification()
+    assert "no blanket independent technical/source review prerequisite" in qualification
+    assert "the specific source-release hold remains pending an explicit parent ruling" in qualification
+    assert "actually required github approvals, codeowners, security and release holds remain binding" in qualification
     assert "green hosted ci on exact head" in text
     assert "only then source protection/release ruling" in text
+
+
+CURRENT_QUALIFICATION = "## 2026-11-05 source-publication qualification"
+
+
+def _current_qualification() -> str:
+    _, separator, qualification = _text().partition(CURRENT_QUALIFICATION)
+    assert separator, "the current-authority qualification must be present"
+    return " ".join(qualification.split())
+
+
+def test_current_qualification_dates_the_complete_packet_and_preserves_scope():
+    qualification = _current_qualification()
+
+    for path in (
+        "docs/executive_web_sol_usage_capacity_law.md",
+        "docs/superpowers/specs/2026-09-02-web-sol-pro-usage-observability-design.md",
+        "docs/superpowers/plans/2026-09-02-web-sol-pro-usage-observability.md",
+        "docs/superpowers/specs/2026-09-02-web-sol-shared-capacity-pool-amendment.md",
+        "docs/superpowers/specs/2026-09-02-web-sol-q0-adversarial-review-amendment.md",
+    ):
+        assert path in qualification
+    assert "historical source epoch" in qualification
+    assert "integrations/chairman_surfaces/web_sol_protocol.py" in qualification
+    assert "48ca51f882338c58e377a0acf16931066c703384" in qualification
+    assert "a2ba13fe3f657e7b36bdab110ec4b2462b57dc88" in qualification
+    assert "inspect, foreground and typed_reentry" in qualification
+    assert "does not expand wsx-q* beyond passive/bounded observation" in qualification
+    assert "does not authorize typed reentry for quota observation" in qualification
+    assert "qf0/q1/q2/cap/control room remain unissued future work" in qualification
+
+
+def test_current_qualification_preserves_evidence_and_effect_boundaries():
+    qualification = _current_qualification()
+
+    assert "not proof of a current account plan, entitlement, balance or reset" in qualification
+    assert "public references are mutable pages, not immutable september snapshots" in qualification
+    assert "no present-day personal-pro api existence or absence is established" in qualification
+    assert "model allowance, safety restriction and transport failure are separate" in qualification
+    assert "first explicit safety/permission denial ends that action" in qualification
+    assert "a lost modifying reply can still be effect_unknown" in qualification
+    assert "capacity availability grants no spend authority" in qualification
+    for article in ("9793128", "20001354", "12003714", "11487671", "20001001"):
+        assert f"https://help.openai.com/en/articles/{article}" in qualification

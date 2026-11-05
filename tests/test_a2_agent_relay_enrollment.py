@@ -26,6 +26,7 @@ CHANNEL = "C0BSBM78V1N"
 BOT = "U0BST4WG996"
 TOKEN = "".join(("xo", "xb-", "123456789012-", "abcdefghijklmnopqrstuvwxyz"))
 SCOPES = ("channels:history", "chat:write")
+SHARED_SCOPES = ("channels:history", "chat:write", "groups:history")
 
 
 def _module():
@@ -92,6 +93,7 @@ def test_parser_has_only_expected_bot_identity_and_no_secret_or_path_overrides()
     parsed = parser.parse_args(["enroll", "--expected-bot-user-id", BOT])
     assert parsed.command == "enroll"
     assert parsed.expected_bot_user_id == BOT
+    assert not hasattr(parsed, "acknowledge_legacy_dedicated_app")
 
     options = {
         option
@@ -104,11 +106,55 @@ def test_parser_has_only_expected_bot_identity_and_no_secret_or_path_overrides()
             for action in subparser._actions
             for option in getattr(action, "option_strings", ())
         }
-    assert set(parser._subparsers._group_actions[0].choices) == {"enroll", "verify"}
+    assert set(parser._subparsers._group_actions[0].choices) == {"enroll", "enroll-shared", "verify", "rebind-release", "reverse-rebind-release"}
     assert "--expected-bot-user-id" in options
+    assert "--acknowledge-legacy-dedicated-app" not in options
     assert {"--token", "--workspace", "--channel", "--config", "--plist"}.isdisjoint(
         options
     )
+
+
+@pytest.mark.parametrize("enable_w3c", [False, True])
+def test_new_dedicated_enrollment_is_closed_before_any_input(
+    monkeypatch, enable_w3c: bool
+):
+    enrollment = _module()
+    stdout = io.StringIO()
+    async def forbidden_enroll(**kwargs):
+        raise AssertionError("default dedicated enrollment must not call writer")
+    def forbidden_tty(_stdin):
+        raise AssertionError("default dedicated enrollment must not inspect TTY")
+    monkeypatch.setattr(enrollment, "_enroll", forbidden_enroll)
+    monkeypatch.setattr(enrollment, "_require_native_tty", forbidden_tty)
+    argv = ["enroll", "--expected-bot-user-id", BOT]
+    if enable_w3c:
+        argv.append("--enable-w3c")
+    rc = enrollment._run_invocation(
+        argv, stdin=_NoTokenRead(), stdout=stdout,
+        environ={"SAFE": "1"}, require_native_tty=True,
+    )
+    assert rc == 2
+    assert json.loads(stdout.getvalue()) == {
+        "error": "A2_ENROLLMENT_ARGUMENTS_REFUSED",
+        "schema": "mastermind.a2_agent_relay_enrollment.v1",
+        "status": "ERROR",
+    }
+    assert TOKEN not in stdout.getvalue()
+
+
+@pytest.mark.parametrize("verb", ["enroll", "enroll-shared", "verify", "rebind-release"])
+def test_removed_legacy_ack_flag_cannot_reactivate_any_enrollment_verb(
+    verb: str,
+):
+    enrollment = _module()
+    stdout = io.StringIO()
+    rc = enrollment.run(
+        [verb, "--expected-bot-user-id", BOT,
+         "--acknowledge-legacy-dedicated-app"],
+        stdin=_NoTokenRead(), stdout=stdout, environ={"SAFE": "1"},
+    )
+    assert rc == 2
+    assert json.loads(stdout.getvalue())["error"] == "A2_ENROLLMENT_ARGUMENTS_REFUSED"
 
 
 def test_token_input_reuses_bounded_one_line_no_echo_ceremony():
@@ -184,7 +230,7 @@ def test_production_main_refuses_piped_enroll_before_enroll(monkeypatch):
 
     assert enroll_calls == []
     assert json.loads(stdout.getvalue()) == {
-        "error": "A2_ENROLLMENT_INPUT_REFUSED",
+        "error": "A2_ENROLLMENT_ARGUMENTS_REFUSED",
         "schema": "mastermind.a2_agent_relay_enrollment.v1",
         "status": "ERROR",
     }
@@ -219,13 +265,13 @@ def test_production_main_refuses_missing_or_raising_fileno(
     assert enrollment.main() == 2
     assert enroll_calls == []
     assert json.loads(stdout.getvalue()) == {
-        "error": "A2_ENROLLMENT_INPUT_REFUSED",
+        "error": "A2_ENROLLMENT_ARGUMENTS_REFUSED",
         "schema": "mastermind.a2_agent_relay_enrollment.v1",
         "status": "ERROR",
     }
 
 
-def test_production_main_allows_tty_enroll_to_reach_enroll(monkeypatch):
+def test_production_main_refuses_new_dedicated_enroll_even_with_tty(monkeypatch):
     enrollment = _module()
     stdout = io.StringIO()
     stdin = SimpleNamespace(fileno=lambda: 23)
@@ -246,13 +292,12 @@ def test_production_main_allows_tty_enroll_to_reach_enroll(monkeypatch):
     monkeypatch.setattr(enrollment.os, "isatty", lambda descriptor: descriptor == 23)
     monkeypatch.setattr(enrollment, "_enroll", fake_enroll)
 
-    assert enrollment.main() == 0
-    assert enroll_calls == [(BOT, stdin)]
+    assert enrollment.main() == 2
+    assert enroll_calls == []
     assert json.loads(stdout.getvalue()) == {
-        "action": "enrolled",
-        "release_sha": "e" * 40,
+        "error": "A2_ENROLLMENT_ARGUMENTS_REFUSED",
         "schema": "mastermind.a2_agent_relay_enrollment.v1",
-        "status": "PASS",
+        "status": "ERROR",
     }
 
 
@@ -293,7 +338,51 @@ def test_production_main_allows_non_tty_verify_without_isatty(monkeypatch):
     }
 
 
-def test_injected_run_preserves_non_tty_enroll_seam(monkeypatch):
+def test_enroll_shared_dispatches_without_tty_or_stdin_token_read(monkeypatch):
+    enrollment = _module()
+    stdout = io.StringIO()
+    calls: list[tuple[str, bool]] = []
+
+    async def fake_shared(*, bot_user_id, w3c_enabled):
+        calls.append((bot_user_id, w3c_enabled))
+        return {"action": "enrolled-shared", "release_sha": "b" * 40}
+
+    monkeypatch.setattr(enrollment, "_enroll_shared", fake_shared)
+    assert (
+        enrollment.run(
+            ["enroll-shared", "--expected-bot-user-id", BOT, "--enable-w3c"],
+            stdin=_NoTokenRead(),
+            stdout=stdout,
+            environ={"SAFE": "1"},
+        )
+        == 0
+    )
+    assert calls == [(BOT, True)]
+    assert json.loads(stdout.getvalue())["action"] == "enrolled-shared"
+
+
+def test_existing_c1_shared_token_requires_same_bot_identity(monkeypatch):
+    enrollment = _module()
+    monkeypatch.setattr(
+        enrollment.c1_enrollment.c1_runtime,
+        "load_config",
+        lambda *args, **kwargs: SimpleNamespace(slack_bot_user_id=BOT),
+    )
+    monkeypatch.setattr(enrollment.c1_enrollment, "_existing_token", lambda: TOKEN)
+    assert enrollment._existing_c1_shared_token(bot_user_id=BOT) == TOKEN  # noqa: SLF001
+
+    monkeypatch.setattr(
+        enrollment.c1_enrollment.c1_runtime,
+        "load_config",
+        lambda *args, **kwargs: SimpleNamespace(slack_bot_user_id="U0WRONGBOT1"),
+    )
+    with pytest.raises(
+        enrollment.A2EnrollmentError, match="A2_ENROLLMENT_EXISTING_REFUSED"
+    ):
+        enrollment._existing_c1_shared_token(bot_user_id=BOT)  # noqa: SLF001
+
+
+def test_injected_run_cannot_reactivate_new_dedicated_enroll(monkeypatch):
     enrollment = _module()
     stdin = io.BytesIO(b"hermetic-input\n")
     stdout = io.StringIO()
@@ -312,10 +401,35 @@ def test_injected_run_preserves_non_tty_enroll_seam(monkeypatch):
             stdout=stdout,
             environ={"SAFE": "1"},
         )
-        == 0
+        == 2
     )
-    assert enroll_calls == [(BOT, stdin)]
-    assert json.loads(stdout.getvalue())["status"] == "PASS"
+    assert enroll_calls == []
+    assert json.loads(stdout.getvalue())["error"] == "A2_ENROLLMENT_ARGUMENTS_REFUSED"
+
+
+def test_enable_w3c_flag_cannot_reactivate_dedicated_enrollment(monkeypatch):
+    enrollment = _module()
+    stdin = io.BytesIO(b"hermetic-input\n")
+    stdout = io.StringIO()
+    enroll_calls: list[tuple[object, ...]] = []
+
+    async def fake_enroll(*, bot_user_id, stdin, w3c_enabled):
+        enroll_calls.append((bot_user_id, stdin, w3c_enabled))
+        return {"action": "enrolled", "release_sha": "a" * 40}
+
+    monkeypatch.setattr(enrollment, "_enroll", fake_enroll)
+
+    assert (
+        enrollment.run(
+            ["enroll", "--expected-bot-user-id", BOT, "--enable-w3c"],
+            stdin=stdin,
+            stdout=stdout,
+            environ={"SAFE": "1"},
+        )
+        == 2
+    )
+    assert enroll_calls == []
+    assert json.loads(stdout.getvalue())["error"] == "A2_ENROLLMENT_ARGUMENTS_REFUSED"
 
 
 def test_fixed_policy_document_and_plist_are_release_bound_and_secret_free():
@@ -335,8 +449,12 @@ def test_fixed_policy_document_and_plist_are_release_bound_and_secret_free():
         "relay_uid": 457,
         "allowed_peer_uids": [450],
         "allowed_sol_user_ids": ["U0BRETDUAS2", "U0BSB73JWNL"],
-        "allowed_parent_user_ids": ["U0BRETDUAS2"],
-    }
+            "allowed_parent_user_ids": ["U0BRETDUAS2"],
+            "w3c_enabled": False,
+            "dialogue_coordination_socket_path": os.fspath(
+                enrollment.DIALOGUE_COORDINATION_SOCKET_PATH
+            ),
+        }
 
     plist = plistlib.loads(
         enrollment.render_plist(bot_user_id=BOT, release_sha=release_sha)
@@ -369,6 +487,8 @@ def test_fixed_policy_document_and_plist_are_release_bound_and_secret_free():
         "U0BSB73JWNL",
         "--allowed-parent-user-id",
         "U0BRETDUAS2",
+        "--dialogue-coordination-socket-path",
+        os.fspath(enrollment.DIALOGUE_COORDINATION_SOCKET_PATH),
     ]
     assert plist["RunAtLoad"] is True
     assert plist["KeepAlive"] is True
@@ -376,6 +496,58 @@ def test_fixed_policy_document_and_plist_are_release_bound_and_secret_free():
         "xox" in str(value).lower()
         for value in plist["ProgramArguments"]
     )
+
+
+def test_w3c_enrollment_is_explicit_all_or_none_and_default_byte_compatible():
+    enrollment = _module()
+    release_sha = "a" * 40
+    default_config = enrollment.build_config_document(
+        bot_user_id=BOT,
+        release_sha=release_sha,
+    )
+    default_plist = enrollment.render_plist(
+        bot_user_id=BOT,
+        release_sha=release_sha,
+    )
+    assert default_config == enrollment.build_config_document(
+        bot_user_id=BOT,
+        release_sha=release_sha,
+        w3c_enabled=False,
+    )
+    assert default_plist == enrollment.render_plist(
+        bot_user_id=BOT,
+        release_sha=release_sha,
+        w3c_enabled=False,
+    )
+    assert default_config["w3c_enabled"] is False
+    assert default_config["dialogue_coordination_socket_path"] == os.fspath(
+        enrollment.DIALOGUE_COORDINATION_SOCKET_PATH
+    )
+    default_args = plistlib.loads(default_plist)["ProgramArguments"]
+    assert default_args[-2:] == [
+        "--dialogue-coordination-socket-path",
+        os.fspath(enrollment.DIALOGUE_COORDINATION_SOCKET_PATH),
+    ]
+    assert "--enable-w3c" not in default_args
+
+    enabled_config = enrollment.build_config_document(
+        bot_user_id=BOT,
+        release_sha=release_sha,
+        w3c_enabled=True,
+    )
+    assert enabled_config == {
+        **default_config,
+        "w3c_enabled": True,
+    }
+    enabled_args = plistlib.loads(
+        enrollment.render_plist(
+            bot_user_id=BOT,
+            release_sha=release_sha,
+            w3c_enabled=True,
+        )
+    )["ProgramArguments"]
+    assert enabled_args[-1] == "--enable-w3c"
+    assert enabled_args[:-1] == default_args
 
 
 def test_qualification_proves_exact_identity_scopes_and_channel_history():
@@ -437,15 +609,15 @@ def _install_operation_fakes(monkeypatch, enrollment, tmp_path: Path):
     monkeypatch.setattr(enrollment, "PLIST_GID", os.getegid())
     monkeypatch.setattr(enrollment, "_assert_host_prepared", lambda: release_sha)
     monkeypatch.setattr(enrollment, "_assert_disarmed", lambda: None)
-    qualifications: list[tuple[str, str]] = []
+    qualifications: list[tuple[str, str, tuple[str, ...]]] = []
 
-    async def qualify_token(*, token, bot_user_id, **_kwargs):
-        qualifications.append((token, bot_user_id))
+    async def qualify_token(*, token, bot_user_id, scopes=SCOPES, **_kwargs):
+        qualifications.append((token, bot_user_id, scopes))
         return {
             "bot_id": "B0BST4WG996",
             "bot_user_id": bot_user_id,
             "channel_id": CHANNEL,
-            "scopes": list(SCOPES),
+            "scopes": list(scopes),
             "workspace_id": WORKSPACE,
         }
 
@@ -467,7 +639,7 @@ def test_enroll_qualifies_then_commits_exact_three_files(monkeypatch, tmp_path: 
     )
 
     token_path, config_path, plist_path = paths
-    assert qualifications == [(TOKEN, BOT)]
+    assert qualifications == [(TOKEN, BOT, SCOPES)]
     assert token_path.read_text(encoding="ascii") == TOKEN + "\n"
     assert token_path.stat().st_mode & 0o777 == 0o400
     assert config_path.stat().st_mode & 0o777 == 0o400
@@ -477,6 +649,72 @@ def test_enroll_qualifies_then_commits_exact_three_files(monkeypatch, tmp_path: 
     assert receipt["action"] == "enrolled"
     assert receipt["release_sha"] == release_sha
     assert TOKEN not in json.dumps(receipt)
+
+
+def test_scope_modes_are_closed_and_dedicated_path_stays_byte_compatible():
+    enrollment = _module()
+    release_sha = "a" * 40
+    dedicated = enrollment.build_config_document(
+        bot_user_id=BOT,
+        release_sha=release_sha,
+    )
+    shared = enrollment.build_config_document(
+        bot_user_id=BOT,
+        release_sha=release_sha,
+        scopes=SHARED_SCOPES,
+    )
+    assert dedicated["slack_scopes"] == list(SCOPES)
+    assert shared["slack_scopes"] == list(SHARED_SCOPES)
+    with pytest.raises(
+        enrollment.A2EnrollmentError, match="A2_ENROLLMENT_ARGUMENTS_REFUSED"
+    ):
+        enrollment.build_config_document(
+            bot_user_id=BOT,
+            release_sha=release_sha,
+            scopes=("chat:write",),
+        )
+
+
+def test_enroll_shared_reuses_c1_secret_without_stdin_and_commits_same_files(
+    monkeypatch, tmp_path: Path
+):
+    enrollment = _module()
+    release_sha, paths, qualifications = _install_operation_fakes(
+        monkeypatch, enrollment, tmp_path
+    )
+    source_calls: list[str] = []
+
+    def shared_source(*, bot_user_id):
+        source_calls.append(bot_user_id)
+        return TOKEN
+
+    monkeypatch.setattr(enrollment, "_existing_c1_shared_token", shared_source)
+    receipt = asyncio.run(
+        enrollment._enroll_shared(  # noqa: SLF001 - shared native ceremony proof
+            bot_user_id=BOT,
+            w3c_enabled=True,
+        )
+    )
+
+    token_path, config_path, plist_path = paths
+    assert source_calls == [BOT]
+    assert qualifications == [(TOKEN, BOT, SHARED_SCOPES)]
+    assert token_path.read_text(encoding="ascii") == TOKEN + "\n"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config["release_sha"] == release_sha
+    assert config["w3c_enabled"] is True
+    assert config["slack_scopes"] == list(SHARED_SCOPES)
+    assert "--enable-w3c" in plistlib.loads(plist_path.read_bytes())["ProgramArguments"]
+    assert receipt["action"] == "enrolled-shared"
+    assert TOKEN not in json.dumps(receipt)
+
+    verified = asyncio.run(enrollment._verify(bot_user_id=BOT, w3c_enabled=True))  # noqa: SLF001
+    assert verified["action"] == "verified"
+    assert verified["scopes"] == list(SHARED_SCOPES)
+    assert qualifications == [
+        (TOKEN, BOT, SHARED_SCOPES),
+        (TOKEN, BOT, SHARED_SCOPES),
+    ]
 
 
 def test_enroll_success_releases_each_transaction_creation_descriptor_once(
@@ -817,6 +1055,10 @@ def test_enroll_rollback_refuses_replaced_plist_and_cleans_bound_files(
         path.unlink()
         path.write_bytes(payload)
         path.chmod(mode)
+        # macOS temporary directories may be group-owned by wheel.
+        # Restore the expected group so the changed inode, not a stray gid,
+        # is what the rollback safety guard must refuse.
+        os.chown(path, -1, gid)
         replacement = path.stat()
         assert replacement.st_uid == uid
         assert replacement.st_gid == gid
@@ -982,13 +1224,18 @@ def test_verify_is_read_only_and_requalifies_release_identity(monkeypatch, tmp_p
     config_path.chmod(0o400)
     plist_path.write_bytes(enrollment.render_plist(bot_user_id=BOT, release_sha=release_sha))
     plist_path.chmod(0o644)
+    # The verify-only input must meet the installed exact uid/gid/mode
+    # contract. Files created below /private/tmp can inherit wheel gid.
+    os.chown(token_path, -1, enrollment.RELAY_GID)
+    os.chown(config_path, -1, enrollment.RELAY_GID)
+    os.chown(plist_path, -1, enrollment.PLIST_GID)
     before = {path: (path.stat().st_ino, path.read_bytes()) for path in paths}
 
     receipt = asyncio.run(enrollment._verify(bot_user_id=BOT))  # noqa: SLF001
 
     after = {path: (path.stat().st_ino, path.read_bytes()) for path in paths}
     assert after == before
-    assert qualifications == [(TOKEN, BOT)]
+    assert qualifications == [(TOKEN, BOT, SCOPES)]
     assert receipt["action"] == "verified"
     assert receipt["release_sha"] == release_sha
 
@@ -1132,6 +1379,9 @@ def _install_canonical_host_gate_fakes(
     )
     monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_loaded", lambda _label: False)
     monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_disabled", lambda _label: True)
+    # The socket parent is covered by separate mode/owner/symlink tests.
+    # These fixtures isolate principal and credential-host invariants.
+    monkeypatch.setattr(enrollment, "_socket_parent_prepared", lambda: True)
     return library, support, system_root
 
 
