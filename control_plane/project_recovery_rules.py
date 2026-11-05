@@ -10,19 +10,24 @@ from collections import defaultdict
 from collections.abc import Mapping
 from datetime import date
 from typing import Any
-from control_plane.project_recovery_contract import TERMINAL_WAVE, TERMINAL_WORKSTREAM, workstream_wave_rows
+from control_plane.project_recovery_contract import (
+    TERMINAL_WAVE, TERMINAL_WORKSTREAM, workstream_wave_rows,
+    normalized_owner_observations, validate_workstream_identities,
+    workstream_identity as _ws_id,
+)
 
 RUNTIME_UNKNOWN={"RUNTIME_STATE_UNAVAILABLE","RUNTIME_STATE_STALE"}
 PROOF_DEBT={"GITHUB_MERGE_WITH_PROOF_OPEN"}
 UNCLAIMED={"SLACK_TRANSPORT_WITHOUT_RECEIVER","SLACK_TRANSPORT_WITHOUT_ACK"}
 BLOCKING_COLLISION={"MULTIPLE_ACTIVE_CARRIERS"}
 ACTIVE_PR_STATES={"open"}
-ACTIVE_EXEC_STATES={"QUEUED","CLAIMED","RUNNING","STARTED","BLOCKED","AWAITING_REVIEW"}
-
-def _ws_id(key: str) -> str:
-    return key if key.startswith("WS:") else f"WS:{key}"
+# Classification over the R1 owner's validated vocabulary, not a new lifecycle.
+# ADMITTED is not absence; UNKNOWN cannot establish a terminal operation.
+ACTIVE_EXEC_STATES={"QUEUED","ADMITTED","RUNNING","BLOCKED","UNKNOWN"}
 
 def build_recovery_indexes(session_truth: Mapping[str,Any], agentos_state: Mapping[str,Any]) -> dict[str,Any]:
+    gh, ex = normalized_owner_observations(session_truth)
+    validate_workstream_identities(agentos_state.get("workstreams"))
     workstreams={}
     waves={}
     by_program=defaultdict(list)
@@ -41,13 +46,11 @@ def build_recovery_indexes(session_truth: Mapping[str,Any], agentos_state: Mappi
     scope=session_truth.get("scope") or {}
     covered_workstreams={item for item in scope.get("workstreams") or [] if isinstance(item,str)} if isinstance(scope,Mapping) else set()
     scoped_repositories={item for item in scope.get("repositories") or [] if isinstance(item,str)} if isinstance(scope,Mapping) else set()
-    obs=session_truth.get("observations") or {}
-    gh=obs.get("github") if isinstance(obs,Mapping) else None
     github_available=isinstance(gh,Mapping) and gh.get("available") is True and bool(scoped_repositories)
     active_prs=defaultdict(list)
     unbound_open_prs=[]
     if github_available:
-        for pr in gh.get("pull_requests") or []:
+        for pr in gh["pull_requests"]:
             if not isinstance(pr,Mapping) or pr.get("repository") not in scoped_repositories: continue
             if str(pr.get("state") or "").lower() not in ACTIVE_PR_STATES: continue
             wid=pr.get("workstream")
@@ -55,11 +58,11 @@ def build_recovery_indexes(session_truth: Mapping[str,Any], agentos_state: Mappi
                 active_prs[_ws_id(wid)].append(pr)
             else:
                 unbound_open_prs.append(pr)
-    ex=obs.get("executive") if isinstance(obs,Mapping) else None
     executive_available=isinstance(ex,Mapping) and ex.get("available") is True and ex.get("fresh") is True
     executive_active=[]
     if executive_available:
-        executive_active=[op for op in ex.get("operations") or [] if isinstance(op,Mapping) and str(op.get("status") or "").upper() in ACTIVE_EXEC_STATES]
+        executive_active=[op for op in ex["operations"]
+                          if op["status"] in ACTIVE_EXEC_STATES or op["effect_unknown"]]
     return {"workstreams":workstreams,"waves":waves,"programs":programs,"workstreams_by_program":{k:sorted(v) for k,v in by_program.items()},"session_findings":dict(sf),"program_registry_available":reg.get("available") is True,"covered_workstreams":covered_workstreams,"scoped_repositories":scoped_repositories,"github_available":github_available,"active_prs":dict(active_prs),"unbound_open_prs":unbound_open_prs,"executive_available":executive_available,"executive_active":executive_active}
 
 def wait_state(wait: Mapping[str,Any]|None, *, as_of: str) -> str:

@@ -4,7 +4,12 @@ import copy
 from collections.abc import Mapping
 from datetime import date
 from typing import Any
-from control_plane.session_truth_contract import RECEIPT_SCHEMA, semantic_hash
+from control_plane.session_truth_contract import (
+    RECEIPT_SCHEMA, SessionTruthContractError, semantic_hash,
+)
+from control_plane.session_truth_snapshots import (
+    EXECUTIVE_SCHEMA, GITHUB_SCHEMA, normalize_executive, normalize_github,
+)
 
 ASSESSMENT_SCHEMA = "mastermind.project_recovery_assessment.v1"
 AGENTOS_SCHEMA = "agent_os_state.v1"
@@ -45,15 +50,51 @@ def _validate_wait(raw: Any, label: str) -> None:
     if parsed.isoformat() != review_after:
         raise ProjectRecoveryContractError(f"{label}.review_after must be YYYY-MM-DD")
 
-def _unique(rows: Any, key: str, label: str) -> None:
+def workstream_identity(key: str) -> str:
+    """Reuse the index's existing exact alias rule for duplicate detection."""
+    return key if key.startswith("WS:") else f"WS:{key}"
+
+
+def normalized_owner_observations(session_truth: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Revalidate consumed normalized observations through their existing owner.
+
+    R1 strips the transport schema from a normalized observation. Restoring that
+    constant for its normalizer does not default a list, state or identity. The
+    original observation is never mutated, and a supplied wrong schema refuses.
+    """
+    observations = session_truth.get("observations")
+    if not isinstance(observations, Mapping):
+        raise ProjectRecoveryContractError("session_truth.observations must be an object")
+    normalized = []
+    for label, schema, normalizer in (
+        ("github", GITHUB_SCHEMA, normalize_github),
+        ("executive", EXECUTIVE_SCHEMA, normalize_executive),
+    ):
+        source = observations.get(label)
+        if not isinstance(source, Mapping):
+            raise ProjectRecoveryContractError(f"observations.{label} must be an object")
+        try:
+            normalized.append(normalizer({"schema": schema, **source}))
+        except SessionTruthContractError as exc:
+            raise ProjectRecoveryContractError(f"invalid {label} observation: {exc}") from exc
+    return normalized[0], normalized[1]
+
+
+def _unique(rows: Any, key: str, label: str, *, normalize=None) -> None:
     if not isinstance(rows, list): raise ProjectRecoveryContractError(f"{label} must be a list")
     seen=set()
     for row in rows:
         if not isinstance(row, Mapping): raise ProjectRecoveryContractError(f"{label} rows must be objects")
         value=row.get(key)
         if not isinstance(value,str) or not value: raise ProjectRecoveryContractError(f"{label}.{key} must be non-empty")
+        if normalize is not None: value = normalize(value)
         if value in seen: raise ProjectRecoveryContractError(f"duplicate {label} {value}")
         seen.add(value)
+
+def validate_workstream_identities(rows: Any) -> None:
+    """Reject collisions before constructing any normalized workstream index."""
+    _unique(rows, "key", "workstream", normalize=workstream_identity)
+
 
 def workstream_wave_rows(row: Mapping[str, Any], *, label: str) -> list[Any]:
     """Return the canonical Agent OS wave rows without reading its rollup as rows."""
@@ -74,10 +115,11 @@ def validate_inputs(session_truth: Mapping[str,Any], agentos_state: Mapping[str,
     if not isinstance(scope_workstreams, list) or any(not isinstance(item, str) for item in scope_workstreams): raise ProjectRecoveryContractError("session_truth.scope.workstreams must be a list of strings")
     if not isinstance(session_truth.get("findings"), list): raise ProjectRecoveryContractError("session_truth.findings must be a list")
     if not isinstance(session_truth.get("observations"), Mapping): raise ProjectRecoveryContractError("session_truth.observations must be an object")
+    normalized_owner_observations(session_truth)
     if not isinstance(session_truth.get("semantic_hash"), str): raise ProjectRecoveryContractError("session_truth.semantic_hash required")
     if not isinstance(agentos_state, Mapping) or agentos_state.get("schema") != AGENTOS_SCHEMA: raise ProjectRecoveryContractError("agentos schema is incompatible")
     rows = agentos_state.get("workstreams")
-    _unique(rows, "key", "workstream")
+    validate_workstream_identities(rows)
     for index, row in enumerate(rows):
         _validate_wait(row.get("wait"), f"workstream[{index}].wait")
         waves = workstream_wave_rows(row, label=f"workstream[{index}]")

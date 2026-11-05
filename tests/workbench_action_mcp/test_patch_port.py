@@ -38,6 +38,7 @@ class Harness:
         boot_session_id: str = "boot-session-alpha",
         store_dir: Path | None = None,
         threaded: bool = False,
+        admission_evidence=None,
     ) -> None:
         self.clock = 1_800_000_000_000
         self.root = root
@@ -94,6 +95,7 @@ class Harness:
             artifact_store=self.store,
             host=self.host,
             action_ttl_ms=60_000,
+            admission_evidence=admission_evidence,
         )
 
     def close(self) -> None:
@@ -338,3 +340,166 @@ def test_tamper_wrong_caller_and_expiry_refuse(tmp_path: Path) -> None:
         assert target.read_bytes() == original
     finally:
         harness.close()
+
+
+# ---------------------------------------------------------------------------
+# Durable pre-dispatch admission evidence (#670).  The port never reads the
+# ledger itself: it consumes one closed verdict from the entry point, and only
+# REFUSED_ONLY over an untouched source turns artifact absence into
+# NOT_APPLIED.
+# ---------------------------------------------------------------------------
+
+
+class _Verdicts:
+    def __init__(self, verdict: object) -> None:
+        self.verdict = verdict
+        self.calls: list[object] = []
+
+    def __call__(self, action_ref: object) -> str:
+        self.calls.append(action_ref)
+        if isinstance(self.verdict, BaseException):
+            raise self.verdict
+        return self.verdict  # type: ignore[return-value]
+
+
+def _prepared_replace(harness: Harness, original: bytes) -> str:
+    prepared = asyncio.run(
+        harness.prepare(
+            harness.caller,
+            {
+                "project_ref": harness.project_ref,
+                "relative_path": "sample.py",
+                "mode": "REPLACE",
+                "expected_sha256": _sha(original),
+                "old_text": "beta",
+                "new_text": "gamma",
+            },
+        )
+    )
+    return prepared["action_ref"]
+
+
+def test_unclaimed_action_stays_unknown_without_admission_evidence(tmp_path: Path) -> None:
+    """The OAuth adapter composes the port without a ledger reader: artifact
+    absence is EFFECT_UNKNOWN exactly as before."""
+
+    target = tmp_path / "sample.py"
+    original = b"alpha\nbeta\n"
+    target.write_bytes(original)
+    harness = Harness(tmp_path, allowed_paths=("sample.py",))
+    try:
+        action_ref = _prepared_replace(harness, original)
+        reconciled = asyncio.run(harness.reconcile(harness.caller, action_ref))
+        assert reconciled["effect_state"] == "EFFECT_UNKNOWN"
+        assert reconciled["observed_sha256"] == _sha(original)
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize(
+    "verdict,expected",
+    [
+        ("REFUSED_ONLY", "NOT_APPLIED"),
+        ("ACCEPTED", "EFFECT_UNKNOWN"),
+        ("ABSENT", "EFFECT_UNKNOWN"),
+        ("UNCERTAIN", "EFFECT_UNKNOWN"),
+        ("not_applied", "EFFECT_UNKNOWN"),
+        (None, "EFFECT_UNKNOWN"),
+        (RuntimeError("ledger unavailable"), "EFFECT_UNKNOWN"),
+    ],
+)
+def test_unclaimed_action_maps_only_refused_only_to_not_applied(
+    tmp_path: Path, verdict, expected
+) -> None:
+    target = tmp_path / "sample.py"
+    original = b"alpha\nbeta\n"
+    target.write_bytes(original)
+    evidence = _Verdicts(verdict)
+    harness = Harness(tmp_path, allowed_paths=("sample.py",), admission_evidence=evidence)
+    try:
+        action_ref = _prepared_replace(harness, original)
+        reconciled = asyncio.run(harness.reconcile(harness.caller, action_ref))
+        assert reconciled["effect_state"] == expected
+        assert reconciled["observed_sha256"] == _sha(original)
+        assert evidence.calls == [action_ref]
+        assert target.read_bytes() == original
+        assert os.listdir(harness.store_path) == []
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("drift", ["postimage", "foreign", "absent"])
+def test_unclaimed_refused_action_with_moved_source_stays_unknown(
+    tmp_path: Path, drift: str
+) -> None:
+    target = tmp_path / "sample.py"
+    original = b"alpha\nbeta\n"
+    target.write_bytes(original)
+    evidence = _Verdicts("REFUSED_ONLY")
+    harness = Harness(tmp_path, allowed_paths=("sample.py",), admission_evidence=evidence)
+    try:
+        action_ref = _prepared_replace(harness, original)
+        if drift == "postimage":
+            target.write_bytes(b"alpha\ngamma\n")
+        elif drift == "foreign":
+            target.write_bytes(b"foreign\n")
+        else:
+            target.unlink()
+        reconciled = asyncio.run(harness.reconcile(harness.caller, action_ref))
+        assert reconciled["effect_state"] == "EFFECT_UNKNOWN"
+        # Source evidence conflicts, so the ledger is never even consulted.
+        assert evidence.calls == []
+    finally:
+        harness.close()
+
+
+def test_unclaimed_create_is_not_applied_only_while_target_is_absent(tmp_path: Path) -> None:
+    evidence = _Verdicts("REFUSED_ONLY")
+    harness = Harness(tmp_path, allowed_paths=("fresh.py",), admission_evidence=evidence)
+    try:
+        prepared = asyncio.run(
+            harness.prepare(
+                harness.caller,
+                {
+                    "project_ref": harness.project_ref,
+                    "relative_path": "fresh.py",
+                    "mode": "CREATE",
+                    "new_text": "created\n",
+                },
+            )
+        )
+        action_ref = prepared["action_ref"]
+        absent = asyncio.run(harness.reconcile(harness.caller, action_ref))
+        assert absent["effect_state"] == "NOT_APPLIED"
+        assert absent["observed_sha256"] is None
+        (tmp_path / "fresh.py").write_bytes(b"created\n")
+        present = asyncio.run(harness.reconcile(harness.caller, action_ref))
+        assert present["effect_state"] == "EFFECT_UNKNOWN"
+        assert evidence.calls == [action_ref]
+    finally:
+        harness.close()
+
+
+def test_artifact_evidence_outranks_admission_evidence(tmp_path: Path) -> None:
+    """Once a claim exists the ledger is irrelevant: the artifact store is the
+    effect owner and the verdict callback is never consulted."""
+
+    target = tmp_path / "sample.py"
+    original = b"alpha\nbeta\n"
+    target.write_bytes(original)
+    evidence = _Verdicts("REFUSED_ONLY")
+    harness = Harness(tmp_path, allowed_paths=("sample.py",), admission_evidence=evidence)
+    try:
+        action_ref = _prepared_replace(harness, original)
+        committed = asyncio.run(harness.commit(harness.caller, action_ref))
+        assert committed["effect_state"] == "APPLIED"
+        reconciled = asyncio.run(harness.reconcile(harness.caller, action_ref))
+        assert reconciled["effect_state"] == "APPLIED"
+        assert evidence.calls == []
+    finally:
+        harness.close()
+
+
+def test_admission_evidence_must_be_callable(tmp_path: Path) -> None:
+    with pytest.raises(TypeError):
+        Harness(tmp_path, allowed_paths=("sample.py",), admission_evidence="REFUSED_ONLY")

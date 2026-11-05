@@ -30,6 +30,8 @@ from control_plane.executive_orchestration_result import (
     canonical_bytes as result_canonical_bytes,
 )
 from control_plane.executive_runtime import (
+    HOST_EXECUTION_BINDING_V3,
+    HOST_EXECUTION_BINDING_VERSION_KEY,
     AttemptStatus,
     JobStatus,
     OrchestrationDispatchOutcome,
@@ -73,6 +75,7 @@ _FAKE_MCP_PROJECTION = {
         "multi_agent": False,
         "multi_agent_v2": {
             "enabled": True,
+            "disable_direct_message": True,
             "hide_spawn_agent_metadata": True,
             "max_concurrent_threads_per_session": 2,
             "non_code_mode_only": False,
@@ -346,6 +349,13 @@ def _native_fixture(tmp_path: Path) -> _NativeFixture:
         "operator_harness_binary_digest": _python_digest(),
         "operator_harness_version": SEALED_HARNESS_VERSION,
         "operator_harness_armed": True,
+        HOST_EXECUTION_BINDING_VERSION_KEY: HOST_EXECUTION_BINDING_V3,
+        "work_placement_union": [
+            {
+                "provider_realm": "codex",
+                "quota_class": "codex-coo-default",
+            }
+        ],
     }
     runtime.workers.register_worker(
         "worker-a",
@@ -479,6 +489,12 @@ def _with_fake_reply(
         elif method == "config/read" and isinstance(result, dict):
             config = result.get("config")
             if isinstance(config, dict):
+                # W6B hermetic fake must reflect the reviewed native isolation
+                # bit; an old readback must remain REFUSE_CONFIG_DRIFT.
+                flags = config.get("features")
+                multi = flags.get("multi_agent_v2") if isinstance(flags, dict) else None
+                if isinstance(multi, dict):
+                    multi["disable_direct_message"] = True
                 config["mcp_servers"] = _FAKE_MCP_PROJECTION["mcp_servers"]
                 config["skills"] = _FAKE_MCP_PROJECTION["skills"]
         elif method == "mcpServerStatus/list" and isinstance(result, dict):
@@ -887,29 +903,10 @@ def test_w6b_t2v2_crash_replay_preserves_per_work_step_placement(
         loop = asyncio.get_running_loop()
         root = runtime.jobs.get_job(root_id)
         assert root is not None
-        with runtime.store.transaction() as connection:
-            connection.execute(
-                """
-                UPDATE jobs SET constraints_json=? WHERE job_id=?
-                """,
-                (
-                    json.dumps(
-                        {
-                            **root.constraints,
-                            "work_placement_union": [
-                                {
-                                    "provider_realm": "codex",
-                                    "quota_class": "codex-coo-default",
-                                }
-                            ],
-                        },
-                        sort_keys=True,
-                        separators=(",", ":"),
-                        ensure_ascii=False,
-                    ),
-                    root.job_id,
-                ),
-            )
+        admitted_union = [
+            {"provider_realm": "codex", "quota_class": "codex-coo-default"}
+        ]
+        assert root.constraints["work_placement_union"] == admitted_union
         created = CooCycle(runtime).run_once(root_id)
         assert created.action == "PLANNER_CREATED"
         planner_id = str(created.selected_job_id)
@@ -946,6 +943,9 @@ def test_w6b_t2v2_crash_replay_preserves_per_work_step_placement(
 
         gc.collect()
         replay_runtime = Runtime.at(runtime_path)
+        replay_root = replay_runtime.jobs.get_job(root_id)
+        assert replay_root is not None
+        assert replay_root.constraints["work_placement_union"] == admitted_union
         plan = {
             "schema_version": "mastermind.execution_plan/v2",
             "root_job_id": root_id,

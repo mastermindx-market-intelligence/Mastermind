@@ -8,6 +8,7 @@ import json
 import os
 import stat
 import subprocess
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -368,6 +369,17 @@ def test_current_subscription_profiles_cannot_be_composed_as_unattended_executiv
             )
 
 
+def test_openai_compatible_binding_cannot_exceed_spec_only_while_adapter_is_unimplemented():
+    descriptor = adapter_descriptor("openai-compatible")
+    assert descriptor.implemented is False
+
+    # While the openai-compatible adapter remains unimplemented, the production
+    # MiniMax row may not claim more than an unproven specification seam.
+    binding = get_binding("minimax-token-plan.openai-compatible")
+    assert binding.implementation_state == "SPEC_ONLY"
+    assert binding.autonomous_allowed is False
+
+
 def test_command_is_fixed_profile_secret_free_and_bash_free(tmp_path: Path):
     adapter = _adapter(tmp_path)
     spec, _workspace_path = _spec(tmp_path / "case")
@@ -426,6 +438,32 @@ def test_turn_refuses_catalog_canary_and_autonomous_blockers(tmp_path: Path):
             realm_receipt=production_receipt,
             bindings_document=load_bindings(),
             profiles_document=json.loads(DEFAULT_PROFILES_PATH.read_text(encoding="utf-8")),
+        )
+
+
+def test_byteplus_canary_rejects_even_hermetic_owner_sealed_positive_facts():
+    """Test-only HMAC facts do not override actual BytePlus SPEC_ONLY policy.
+
+    Keys/enrollment are test-injected by the existing fixture; no provider
+    account, worker principal or live Capacity source is touched.
+    """
+    byteplus_id = "byteplus-coding-plan-personal.claude-code-anthropic"
+    profiles = json.loads(DEFAULT_PROFILES_PATH.read_text(encoding="utf-8"))
+    bindings = load_bindings(profiles_document=profiles)
+    receipt = issue_provider_realm_enrollment_receipt(
+        binding_id=byteplus_id,
+        bindings_document=bindings,
+        profiles_document=profiles,
+        generation=_REALM_GENERATION,
+    )
+    assert receipt.binding_id == byteplus_id
+    assert receipt.enrollment_state == "enrolled"  # fixture only, not runtime
+    with pytest.raises(CanaryAdmissionError, match="SPEC_ONLY"):
+        seal_subscription_canary_admission(
+            capacity_fact=_capacity_fact(),
+            realm_receipt=receipt,
+            bindings_document=bindings,
+            profiles_document=profiles,
         )
 
 
@@ -673,7 +711,13 @@ def test_adapter_refuses_missing_capacity_or_realm_proof_and_changed_catalog(tmp
     bindings, profiles = _documents()
     admission = _owner_seal(bindings=bindings, profiles=profiles)
     changed = json.loads(json.dumps(bindings))
-    changed["verified_at"] = "2026-09-13T23:59:59Z"
+    # A digest-drift test must supply a *valid* profile-fresh review timestamp.
+    # A stale one is now rejected earlier by the BytePlus review provenance
+    # guard, so it cannot exercise the intended canary digest mismatch.
+    reviewed = datetime.strptime(bindings["verified_at"], "%Y-%m-%dT%H:%M:%SZ")
+    changed["verified_at"] = (reviewed + timedelta(seconds=1)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
     with pytest.raises((CanaryAdmissionError, ClaudeSubscriptionWorkerError), match="catalog digest"):
         ClaudeSubscriptionWorkerAdapter(
             binary,
@@ -719,13 +763,7 @@ def test_broker_execution_refuses_reviewed_spec_only_adapter_before_config_read(
     wire["model"] = adapter.selected_model
     wire["authorities"] = ["READ"]
     workspace = Path(wire["workspace_path"])
-    _git(workspace, "init", "-q")
-    _git(workspace, "config", "user.email", "fixture@example.invalid")
-    _git(workspace, "config", "user.name", "Fixture")
-    (workspace / "README.md").write_text("fixture\n", encoding="utf-8")
-    _git(workspace, "add", "README.md")
-    _git(workspace, "commit", "-qm", "fixture")
-    wire["expected_base_sha"] = _git(workspace, "rev-parse", "HEAD")
+    assert wire["expected_base_sha"] == _git(workspace, "rev-parse", "HEAD")
     Path(wire["run_dir"]).chmod(0o700)
     isolation_roots = [Path(value) for value in wire["isolation_roots"]]
     run_dir = Path(wire["run_dir"])

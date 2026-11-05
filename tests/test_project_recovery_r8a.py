@@ -6,7 +6,18 @@ from control_plane.project_recovery_contract import ProjectRecoveryContractError
 from control_plane.project_recovery_rules import detect_recovery_findings, wait_state
 
 def session(findings=None, workstreams=None, repositories=None):
-    return {"schema":"mastermind.session_truth_receipt.v1","scope":{"workstreams":workstreams or ["WS:ALPHA"],"linear":[],"repositories":repositories or ["o/r"],"operation_key":None,"requires_executive":True},"skillpack":{},"observation":{},"observations":{"agentos":{"available":True,"source_sha":"1"*40},"github":{"available":True,"pull_requests":[]},"executive":{"available":True,"fresh":True,"operations":[]}},"findings":findings or [],"admission":{},"semantic_hash":"sha256:"+"a"*64}
+    return {"schema":"mastermind.session_truth_receipt.v1","scope":{"workstreams":workstreams or ["WS:ALPHA"],"linear":[],"repositories":repositories or ["o/r"],"operation_key":None,"requires_executive":True},"skillpack":{},"observation":{},"observations":{"agentos":{"available":True,"source_sha":"1"*40},"github":{"available":True,"observed_at":"2026-09-14T12:00:00Z","pull_requests":[]},"executive":{"available":True,"observed_at":"2026-09-14T12:00:00Z","fresh":True,"do_not_submit":False,"grounding_sha":"1"*40,"operations":[]}},"findings":findings or [],"admission":{},"semantic_hash":"sha256:"+"a"*64}
+def _owner_pr(number=1, workstream="WS:ALPHA"):
+    return {"repository":"o/r","number":number,"state":"open","draft":True,
+            "head_sha":"1"*40,"base_sha":"2"*40,"merge_sha":None,"ci":"pending",
+            "workstream":workstream,"linear":None,"portfolio_mode":None,"wave":None,
+            "authority":None,"completion":None,"proof_state":None,
+            "operation_key":None,"pickup_head_sha":None}
+
+def _owner_operation():
+    return {"operation_key":"other-op","status":"RUNNING",
+            "payload_hash":"sha256:"+"3"*64,"effect_unknown":False,"carrier":None}
+
 def agent(workstreams=None, programs=None, available=True):
     return {"schema":"agent_os_state.v1","workstreams":workstreams or [],"program_registry":{"schema":"agentos.program_registry.v1","available":available,**({"programs":programs or []} if available else {"reason":"unavailable","programs":[]})}}
 def ws(key="WS:ALPHA",**kw):
@@ -39,7 +50,7 @@ def test_similar_program_title_never_binds():
     assert any(x["code"]=="ORPHAN_BUILDING_PROGRAM" and x["program"]=="alpha" for x in out)
 
 def test_open_exact_pr_is_active_frontier():
-    st=session(); st["observations"]["github"]["pull_requests"]=[{"repository":"o/r","number":1,"state":"open","workstream":"WS:ALPHA"}]
+    st=session(); st["observations"]["github"]["pull_requests"]=[_owner_pr()]
     out=detect_recovery_findings(st,agent([ws()],[{"key":"alpha","lifecycle_state":"building"}]),as_of="2026-09-14")
     assert not any(x["code"] in {"ACTIVE_WITHOUT_CARRIER","RUNTIME_OWNERSHIP_UNKNOWN"} for x in out)
 
@@ -101,7 +112,7 @@ def test_proof_debt_does_not_resurrect_build():
     assert not any(x["code"]=="ACTIVE_WITHOUT_CARRIER" for x in out)
 
 def test_unbound_executive_activity_is_unknown_not_false_healthy():
-    st=session(); st["observations"]["executive"]["operations"]=[{"operation_key":"other-op","status":"RUNNING"}]
+    st=session(); st["observations"]["executive"]["operations"]=[_owner_operation()]
     out=detect_recovery_findings(st,agent([ws()],[{"key":"alpha","lifecycle_state":"building"}]),as_of="2026-09-14")
     assert any(x["code"]=="RUNTIME_OWNERSHIP_UNKNOWN" for x in out)
     assert not any(x["code"]=="ACTIVE_WITHOUT_CARRIER" for x in out)
@@ -125,7 +136,7 @@ def test_registry_unavailable_finding_counts_in_summary():
 
 def test_unbound_open_pr_blocks_false_resurrection():
     st=session()
-    st["observations"]["github"]["pull_requests"]=[{"repository":"o/r","number":99,"state":"open","workstream":None}]
+    st["observations"]["github"]["pull_requests"]=[_owner_pr(number=99, workstream=None)]
     out=detect_recovery_findings(st,agent([ws()],[{"key":"alpha","lifecycle_state":"building"}]),as_of="2026-09-14")
     row=next(x for x in out if x["code"]=="RUNTIME_OWNERSHIP_UNKNOWN")
     assert row["evidence"]==[{"unbound_open_prs":1}]

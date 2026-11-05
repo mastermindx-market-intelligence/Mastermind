@@ -1,0 +1,20 @@
+<PARSED TEXT FOR SHEET: 1 / 1 TABS
+TAB NAME: SOXX_Granular_Exit_30m_Case_2026-10-09.csv>
+index,id,kind,tf,tag,partials,year_n,year_mean,year_hold,year_timer,year_stops
+0,time_60_0,time,60,old_fixed2,[],1,1.899,6.75,0,0
+1,time_60_1,time,60,fixed8,[],1,7.896,20.0,0,0
+2,time_60_2,time,60,hold65,[],1,11.70099,65.0,1,0
+3,legacy_joint_180_3,legacy_joint,180,old_joint_half,"[[2, 0.5]]",1,6.208172,35.5,0,0
+4,legacy_joint_180_4,legacy_joint,180,old_joint_full,[],1,10.517343,35.5,0,0
+5,chandelier_15_9,chandelier,15,,[],1,9.010715,26.0,0,1
+6,swing_15_19,swing,15,,[],1,2.187039,12.0,0,1
+7,chandelier_30_42,chandelier,30,,[],1,9.010715,26.0,0,1
+8,swing_30_52,swing,30,,[],1,9.248038,39.0,0,1
+9,chandelier_60_75,chandelier,60,,[],1,10.331011,33.25,0,1
+10,swing_60_85,swing,60,,[],1,9.248038,39.0,0,1
+11,chandelier_120_108,chandelier,120,,[],1,9.176653,39.25,0,1
+12,swing_120_118,swing,120,,[],1,9.248038,39.0,0,1
+13,chandelier_180_141,chandelier,180,,[],1,9.170499,53.5,0,1
+14,swing_180_151,swing,180,,[],1,9.248038,39.0,0,1
+15,chandelier_240_168,chandelier,240,,[],1,11.70099,65.0,1,0
+16,swing_240_178,swing,240,,[],1,11.70099,65.0,1,0
