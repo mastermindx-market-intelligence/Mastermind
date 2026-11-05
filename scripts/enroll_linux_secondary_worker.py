@@ -70,6 +70,10 @@ RELEASE_PATHS = (
     "ops/native_fabric/quota_continuity/candidate/paid_yaml_runtime.py",
     "ops/native_fabric/quota_continuity/candidate/paid_pyyaml_6_0_3.zip",
     "ops/native_fabric/quota_continuity/candidate/paid_pyyaml_provenance.json",
+    # The shared runtime-custody factory and the incumbent process-identity
+    # helper. Both are reused as-is; neither is copied into the release.
+    "ops/native_fabric/quota_continuity/candidate/paid_initializer.py",
+    "ops/native_fabric/quota_continuity/candidate/linux_process_identity.py",
     "integrations/hermes_harness",
     "integrations/hermes_models",
     "integrations/hermes_steward",
@@ -87,6 +91,7 @@ CENTRAL_UNITS = (
 )
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _VERSION = re.compile(r"^[0-9]+(?:\.[0-9A-Za-z_-]+){1,5}$")
+_MAX_HERMES_ARGUMENT = 64 * 1024
 _GIT_ENV = {
     "PATH": "/usr/bin:/bin",
     "HOME": "/nonexistent",
@@ -115,6 +120,7 @@ class Args:
     codex_source_binary: Path
     codex_version: str
     codex_sha256: str
+    hermes_runtime: dict[str, Any] | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -137,7 +143,55 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--codex-source-binary", type=Path, required=True)
     parser.add_argument("--codex-version", required=True)
     parser.add_argument("--codex-sha256", required=True)
+    parser.add_argument(
+        "--hermes-runtime-json",
+        help=("Optional approved Hermes runtime installation input as one JSON "
+              "object. It is frozen into the release manifest; the manifest is "
+              "never retrofitted."),
+    )
     return parser
+
+
+def _closed_pairs(items):
+    result: dict[str, Any] = {}
+    for key, value in items:
+        if key in result:
+            raise ValueError("duplicate key")
+        result[key] = value
+    return result
+
+
+def decode_hermes_runtime(raw: str | None) -> dict[str, Any] | None:
+    """Bounded closed decode of the optional approved installation input.
+
+    ``None`` (an absent argument) and an explicit JSON ``null`` both mean the
+    release carries no installation member. A malformed or non-canonical
+    document is refused before the first mutation.
+    """
+    if raw is None:
+        return None
+    if type(raw) is not str or not 0 < len(raw) <= _MAX_HERMES_ARGUMENT:
+        raise EnrollmentError("hermes_runtime_json_invalid")
+    try:
+        document = json.loads(raw, object_pairs_hook=_closed_pairs,
+                              parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+    except (ValueError, UnicodeError, RecursionError) as exc:
+        raise EnrollmentError("hermes_runtime_json_invalid") from exc
+    if document is None:
+        return None
+    from ops.executive_os.release_manifest import validate_hermes_runtime_installation
+    try:
+        return validate_hermes_runtime_installation(document)
+    except Exception as exc:
+        raise EnrollmentError("hermes_runtime_invalid") from exc
+
+
+def _hermes_runtime_argument(hermes_runtime: Mapping[str, Any] | None) -> str:
+    """The exact JSON the manifest tool receives; absence is explicit null."""
+    if hermes_runtime is None:
+        return "null"
+    return json.dumps(hermes_runtime, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, allow_nan=False)
 
 
 def _run(
@@ -722,7 +776,16 @@ def _verify_release_tree(root: Path) -> None:
                 raise EnrollmentError("installed_release_metadata_invalid")
 
 
-def install_release(repo: Path, expected_sha: str, expected_tree: str) -> Path:
+def install_release(repo: Path, expected_sha: str, expected_tree: str,
+                     *, hermes_runtime: Mapping[str, Any] | None = None) -> Path:
+    """Create or adopt the immutable release at its final path.
+
+    The manifest tool is always the accepted source copy under ``repo``; the
+    staging or installed copy is never executed. The expected installation
+    input is always passed explicitly, including its absence, so an existing
+    release with a different or missing member conflicts before anything is
+    mutated and the immutable manifest is never retrofitted.
+    """
     manifest_tool = repo / "ops/executive_os/release_manifest.py"
     try:
         manifest_info = manifest_tool.lstat()
@@ -736,6 +799,7 @@ def install_release(repo: Path, expected_sha: str, expected_tree: str) -> Path:
         or stat.S_IMODE(manifest_info.st_mode) & 0o022
     ):
         raise EnrollmentError("release_manifest_source_unsafe")
+    expectation = _hermes_runtime_argument(hermes_runtime)
     destination = RELEASES_ROOT / expected_sha
     if destination.exists() or destination.is_symlink():
         if not destination.is_dir() or destination.is_symlink():
@@ -746,6 +810,7 @@ def install_release(repo: Path, expected_sha: str, expected_tree: str) -> Path:
                 "/usr/bin/python3", "-I", "-S", "-B", os.fspath(manifest_tool),
                 "verify", "--root", os.fspath(destination),
                 "--commit-sha", expected_sha, "--tree-sha", expected_tree,
+                "--hermes-runtime-json", expectation,
             ]
         )
     else:
@@ -783,6 +848,8 @@ def install_release(repo: Path, expected_sha: str, expected_tree: str) -> Path:
                     expected_sha,
                     "--tree-sha",
                     expected_tree,
+                    "--hermes-runtime-json",
+                    expectation,
                 ]
             )
             _run(
@@ -799,6 +866,8 @@ def install_release(repo: Path, expected_sha: str, expected_tree: str) -> Path:
                     expected_sha,
                     "--tree-sha",
                     expected_tree,
+                    "--hermes-runtime-json",
+                    expectation,
                 ]
             )
             os.replace(staging, destination)
@@ -816,6 +885,67 @@ def install_release(repo: Path, expected_sha: str, expected_tree: str) -> Path:
             if staging.exists():
                 shutil.rmtree(staging)
     return destination
+
+
+def _assert_release_input_adoption(repo: Path, expected_sha: str, expected_tree: str,
+                                   hermes_runtime: Mapping[str, Any] | None) -> None:
+    """Refuse an installed release whose frozen input differs, before mutation.
+
+    The immutable manifest is never retrofitted: an existing release with a
+    different installation member, or with no member where one is expected,
+    is a conflict and not an in-place upgrade.
+    """
+    destination = RELEASES_ROOT / expected_sha
+    if not (destination.exists() or destination.is_symlink()):
+        return
+    if not destination.is_dir() or destination.is_symlink():
+        raise EnrollmentError("release_destination_invalid")
+    manifest_tool = repo / "ops/executive_os/release_manifest.py"
+    result = _run(
+        [
+            "/usr/bin/python3", "-I", "-S", "-B", os.fspath(manifest_tool),
+            "verify", "--root", os.fspath(destination),
+            "--commit-sha", expected_sha, "--tree-sha", expected_tree,
+            "--hermes-runtime-json", _hermes_runtime_argument(hermes_runtime),
+        ],
+        check=False,
+    )
+    if result.returncode != 0:
+        raise EnrollmentError("release_manifest_input_conflict")
+
+
+def expected_hermes_role_units(release_commit: str,
+                               hermes_runtime: Mapping[str, Any]) -> dict[str, dict[str, str]]:
+    """The exact role units this release expects, at the FINAL release path.
+
+    This installer never writes these units and never starts a role; the
+    host owner installs exactly these bytes. The ExecStart must name the
+    final installed release, never a temporary archive or staging path.
+    """
+    from integrations.hermes_runtime.errors import RuntimeRefusal
+    from integrations.hermes_runtime.system_service import render_role_units_from_installation
+
+    try:
+        rendered = render_role_units_from_installation(
+            hermes_runtime, release_commit=release_commit)
+    except RuntimeRefusal as exc:
+        raise EnrollmentError("hermes_role_unit_invalid") from exc
+    final_root = str(RELEASES_ROOT / release_commit)
+    expected: dict[str, dict[str, str]] = {}
+    for role, text in rendered.items():
+        exec_lines = [line for line in text.splitlines() if line.startswith("ExecStart=")]
+        if len(exec_lines) != 1:
+            raise EnrollmentError("hermes_role_unit_invalid")
+        exec_start = exec_lines[0][len("ExecStart="):]
+        if (f" {final_root}/ops/executive_os/release_manifest.py hermes-runtime supervise "
+                not in exec_start):
+            raise EnrollmentError("hermes_role_unit_release_path_invalid")
+        expected[role] = {
+            "path": str(UNIT_ROOT / f"hermes-runtime-{role}.service"),
+            "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "exec_start": exec_start,
+        }
+    return expected
 
 
 def render_systemd_units(
@@ -940,9 +1070,19 @@ def apply_enrollment(args: Args) -> dict[str, Any]:
     source_info = inspect_codex_source(args.codex_source_binary)
     if source_info["sha256"] != args.codex_sha256:
         raise EnrollmentError("codex_source_digest_not_accepted")
+    # The expected role units are rendered before the host is touched, so an
+    # unqualified recipe refuses before any mutation instead of after it.
+    expected_units = {}
+    if args.hermes_runtime is not None:
+        expected_units = expected_hermes_role_units(args.expected_sha, args.hermes_runtime)
+    # An already installed release must agree with the expected frozen input
+    # before this run mutates anything on the host.
+    _assert_release_input_adoption(args.source_repo, args.expected_sha,
+                                   args.expected_tree, args.hermes_runtime)
     ensure_service_identities(identities)
     ensure_directories(identities)
-    release = install_release(args.source_repo, args.expected_sha, args.expected_tree)
+    release = install_release(args.source_repo, args.expected_sha, args.expected_tree,
+                              hermes_runtime=args.hermes_runtime)
     codex_binary = install_codex_binary(
         source_info, args.codex_version, args.codex_sha256
     )
@@ -957,6 +1097,7 @@ def apply_enrollment(args: Args) -> dict[str, Any]:
         "codex_sha256": source_info["sha256"],
         "units_installed_inert": list(units),
         "services_activated": False,
+        "hermes_role_units_expected": expected_units,
     }
 
 
@@ -971,6 +1112,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if re.fullmatch(r"[0-9a-f]{64}", ns.codex_sha256) is None:
         sys.stderr.write("invalid Codex digest\n")
         return 64
+    try:
+        hermes_runtime = decode_hermes_runtime(ns.hermes_runtime_json)
+    except EnrollmentError as exc:
+        sys.stderr.write(f"enrollment refused: {exc}\n")
+        return 65
     args = Args(
         source_repo=ns.source_repo,
         expected_sha=ns.expected_sha,
@@ -978,6 +1124,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         codex_source_binary=ns.codex_source_binary,
         codex_version=ns.codex_version,
         codex_sha256=ns.codex_sha256,
+        hermes_runtime=hermes_runtime,
     )
     try:
         receipt = apply_enrollment(args)
