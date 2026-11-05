@@ -7,6 +7,7 @@ import type { ProjectJourneySelection } from "./ProjectPlanningJourney";
 import {
   CREATE_REQUEST_ID_HEX_CHARS,
   PLANNING_OPERATION_ID_HEX_CHARS,
+  PLANNING_OPERATION_ID_PREFIX,
   PROJECT_JOURNEY_KEYS,
   projectJourneyUrl,
 } from "./project-journey-location";
@@ -19,7 +20,7 @@ import {
 const hex = (chars: number, seed: string) => seed.repeat(Math.ceil(chars / seed.length)).slice(0, chars);
 const createId = (seed: string) =>
   ORIGINAL_OPERATION_ID_PREFIXES.publish_project_proposal + hex(CREATE_REQUEST_ID_HEX_CHARS, seed);
-const planningKey = hex(PLANNING_OPERATION_ID_HEX_CHARS, "0123456789abcdef");
+const planningKey = PLANNING_OPERATION_ID_PREFIX+hex(PLANNING_OPERATION_ID_HEX_CHARS, "0123456789abcdef");
 const workRef = "WS:NEWPROJECT-ONE";
 const jobId = "JOB-1";
 const cidA = createId("a1b2c3d4e5");

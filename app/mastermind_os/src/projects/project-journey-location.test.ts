@@ -4,6 +4,7 @@ import {
   MAX_WORK_REF_KEY_CHARS,
   MIN_WORK_REF_KEY_CHARS,
   PLANNING_OPERATION_ID_HEX_CHARS,
+  PLANNING_OPERATION_ID_PREFIX,
   PROJECT_JOURNEY_CREATE_REQUEST_KEY,
   PROJECT_JOURNEY_FLAG_KEY,
   PROJECT_JOURNEY_JOB_KEY,
@@ -21,8 +22,8 @@ import type { ProjectJourneySelection } from "./ProjectPlanningJourney";
 /** 40-char lowercase hex CREATE id built from the real producer prefix. */
 const CREATE = `${ORIGINAL_OPERATION_ID_PREFIXES.publish_project_proposal}${"ab".repeat(CREATE_REQUEST_ID_HEX_CHARS / 2)}`;
 const WORK_REF = "WS:AB-01";
-/** 64-char lowercase hex planning operation id. */
-const OP = "cd".repeat(PLANNING_OPERATION_ID_HEX_CHARS / 2);
+/** Exact issued planning prefix +40 lowercase hex characters. */
+const OP = PLANNING_OPERATION_ID_PREFIX+"cd".repeat(PLANNING_OPERATION_ID_HEX_CHARS / 2);
 const JOB = "JOB-planning.001:alpha";
 const FULL: ProjectJourneySelection = {
   createRequestId: CREATE,

@@ -59,7 +59,8 @@ export const PROJECT_JOURNEY_KEYS = [
 
 /** `<prefix>` + this many lowercase hex characters; never minted here. */
 export const CREATE_REQUEST_ID_HEX_CHARS = 40;
-export const PLANNING_OPERATION_ID_HEX_CHARS = 64;
+export const PLANNING_OPERATION_ID_HEX_CHARS = 40;
+export const PLANNING_OPERATION_ID_PREFIX = "mmos-project-planning-";
 /** `WS:` suffix bounds, mirroring the producer's work-ref key bounds. */
 export const MIN_WORK_REF_KEY_CHARS = 2;
 export const MAX_WORK_REF_KEY_CHARS = 64;
@@ -114,7 +115,8 @@ function isWorkRef(value: string): boolean {
 }
 
 function isPlanningOperationId(value: string): boolean {
-  return PLANNING_OPERATION_ID_RE.test(value);
+  return value.startsWith(PLANNING_OPERATION_ID_PREFIX) &&
+    PLANNING_OPERATION_ID_RE.test(value.slice(PLANNING_OPERATION_ID_PREFIX.length));
 }
 
 function isPlanningJobId(value: string): boolean {
