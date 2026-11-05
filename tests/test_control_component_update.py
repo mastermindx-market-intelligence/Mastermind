@@ -6,12 +6,24 @@ against a hermetic stand-in for the one installed Executive host, so every
 refusal path is exercised with zero cutover and every crash gap of the happy
 path is exercised without dispatching a duplicate effect.
 
-The production QUALIFIERS are never replaced by a stub: the administrative
+The production QUALIFIERS are not replaced by a stub: the administrative
 checkout is proved by the real production method against a real hermetic Git
-repository, and the pinned interpreter is qualified through the installed
-peer's own runtime owner.  Only the leaf host observations (launchd, the
-process table, the installed release tree, the installed files) are stood in
-for, so a defect inside a qualification cannot hide behind an override.
+repository, and the receipt, manifest, compare-and-swap and effect-order
+discipline is the production one.
+
+The pinned interpreter is the ONE documented exception, and the exception is
+deliberate and narrow: the installed peer's two leaf runtime entry points
+(``installed._verify_python_runtime`` and
+``installed._recheck_python_runtime``) inspect the real installed interpreter
+binaries, their version, their code signature and their whole ancestor
+closure on this host, so they are stood in for.  Everything the component
+itself owns around them IS the production code: the retained observation, the
+ONE budget it was observed under, and the recheck of that same observation
+under that same budget immediately before the first effect.
+
+Only the leaf host observations (launchd, the process table, the installed
+release tree, the installed files) are stood in for, so a defect inside a
+qualification cannot hide behind an override.
 """
 
 import copy
@@ -215,6 +227,70 @@ def _disarmed_receipt(control_digest: str, worker_digest: str) -> dict:
     }
 
 
+def _disarmed_ceo_receipt() -> bytes:
+    """One complete existing DISARMED CEO-submit receipt.
+
+    The incumbent validator is the only authority on its shape, so the
+    fixture is built from the incumbent's own projection digest rather than
+    from a hand-written digest.
+    """
+
+    projection = {
+        "ceo_submit_armed": False,
+        "ceo_ingress_app_peer_uid": 501,
+        "ceo_ingress_app_armed": False,
+        "ceo_ingress_peer_uid": 502,
+        "ceo_ingress_socket_path": "/var/run/mastermind/ceo-ingress.sock",
+        "ceo_ingress_launchd_socket_name": "com.mastermind.executive.ceo",
+        "ceo_ingress_app_macro_root": MACRO_ROOT,
+        "coo_autonomy_armed": False,
+        "coo_operator_harness_armed": False,
+        "release_sha": PRIOR_SHA,
+        "installed_sha": PRIOR_SHA,
+        "app_peer_user": "_mastermind_ceo_app",
+        "app_binding_valid": True,
+        "app_acl_valid": True,
+        "app_topology_valid": True,
+        "worker_operator_harness_armed": False,
+        "worker_config_sha256": "5" * 64,
+        "transaction_id": "autonomy-000000000000",
+    }
+    receipt = {
+        "schema_version": ac.CEO_SUBMIT_RECEIPT_SCHEMA,
+        "state": "CEO_SUBMIT_DISARMED",
+        "operation": "CEO_SUBMIT_DISARM",
+        "projection": projection,
+        "projection_digest": ac.ceo_submit_projection_digest(projection),
+        "transaction_id": "autonomy-000000000000",
+        "observed_at": "2026-01-01T00:00:00Z",
+        "tool_version": ac.TOOL_VERSION,
+    }
+    assert ac.validate_ceo_submit_receipt_document(receipt, armed=False)
+    return ac._encoded_json(receipt)
+
+
+class _NoAmbientPath:
+    """One installed path that refuses every ambient existence probe.
+
+    An ``exists()`` or ``is_symlink()`` probe bypasses the qualified receipt
+    owner: it observes whatever the live host happens to carry instead of the
+    sealed bytes, and it cannot tell an absent receipt from an unreadable
+    one.  This stand-in turns such a probe into a hard test failure.
+    """
+
+    def __init__(self, path) -> None:
+        self._path = path
+
+    def __fspath__(self) -> str:
+        return os.fspath(self._path)
+
+    def exists(self) -> bool:
+        raise AssertionError("ambient existence probe on an installed receipt")
+
+    def is_symlink(self) -> bool:
+        raise AssertionError("ambient symlink probe on an installed receipt")
+
+
 class _Group:
     """The fixed control group identity the owner resolves on the host."""
 
@@ -310,6 +386,11 @@ class FakeHost(ac.ProductionControlComponentHost):
             _sha(self.control_raw), _sha(self.worker_raw))
         self.crash_at: int | None = None
         self.fail_after: set[str] = set()
+        # When true, the CLOSED manifest reader is the production one, over the
+        # same in-memory installed file.  The fake reader is only a shortcut
+        # for the happy path; a malformed retained manifest must be classified
+        # by the real reader.
+        self.production_manifest = False
         self.interpreter_calls: dict = {"verify": [], "recheck": []}
         self.files.write(CONTROL_PLIST, plistlib.dumps(_control_plist(PRIOR_ROOT)))
         self.files.write(WORKER_PLIST, plistlib.dumps(_worker_plist(PRIOR_ROOT)))
@@ -433,6 +514,10 @@ class FakeHost(ac.ProductionControlComponentHost):
                 self._component_prior_archives.get(name, b""))
 
     def _manifest(self) -> dict:
+        if self.production_manifest:
+            # The incumbent's own closed manifest reader, over the same
+            # in-memory installed file.
+            return super()._manifest()
         return dict(self.manifest)
 
     def _persist_phase(self, transaction, phase: str, *, operation=None) -> None:
@@ -443,6 +528,11 @@ class FakeHost(ac.ProductionControlComponentHost):
                 if key in self.manifest:
                     value[key] = self.manifest[key]
         self.manifest = value
+        # The retained marker file follows the retained phase, so the
+        # production manifest reader sees exactly the same document.
+        self.files.data[
+            os.fspath(ac.AUTONOMY_TRANSACTION / ac._TRANSACTION_MANIFEST_NAME)
+        ] = ac._encoded_json(value)
         self.phases.append(phase)
 
     def _component_archives(self) -> dict:
@@ -2183,3 +2273,141 @@ def test_the_cli_reports_a_post_claim_receipt_read_failure_as_effect_unknown(
     # The original transaction is retained: nothing is replayed or rolled back.
     assert host.closed is False
     assert host.manifest["transaction_id"]
+
+
+# ---------------------------------------------------------------------------
+# The claimed-transaction classification.  Once the original transaction
+# owner is claimed, EVERY outcome is INCOMPLETE or EFFECT_UNKNOWN: a claimed
+# transaction is never reported as a clean zero-effect refusal.
+# ---------------------------------------------------------------------------
+
+
+def test_a_claimed_malformed_manifest_is_effect_unknown_and_never_refused(
+        host, publisher, capsys):
+    """The manifest read belongs INSIDE the claimed region.
+
+    A malformed but qualified retained manifest used to escape the
+    reconciliation as an unhandled error, which the CLI reported as a
+    generic REFUSED.  That is a false zero-effect report about an operation
+    that had already claimed the global transaction owner.
+    """
+
+    import argparse
+    from datetime import datetime, timezone
+
+    _apply(host)
+    host.closed = False
+    host.production_manifest = True
+    manifest_path = os.fspath(
+        ac.AUTONOMY_TRANSACTION / ac._TRANSACTION_MANIFEST_NAME)
+    # The retained marker now carries a qualified but malformed document.
+    host.files.data[manifest_path] = b'{"operation":[]}'
+    before = dict(host.files.data)
+    commands = [list(command) for command in host.commands]
+    published = list(publisher)
+    # The PRODUCTION closed manifest reader is the one that classifies this
+    # document, and it is exactly the unhashable-membership defect that used
+    # to escape the guarded region.
+    with pytest.raises(TypeError):
+        super(FakeHost, host)._manifest()
+    args = argparse.Namespace(
+        command="reconcile-control-component", expected_sha=TARGET_SHA)
+    code = ac._run_control_component_command(
+        host, args, now=datetime.now(timezone.utc))
+    assert code == 2
+    document = json.loads(capsys.readouterr().out)
+    assert document["outcome"] == "EFFECT_UNKNOWN"
+    assert document["code"]
+    assert "phase" not in document
+    # The original artifacts are unchanged, and NOTHING was published,
+    # dispatched, adopted or replayed.
+    assert host.files.data == before
+    assert [list(command) for command in host.commands] == commands
+    assert publisher == published
+    assert host.closed is False
+
+
+def test_a_claimed_malformed_manifest_is_never_reported_as_refused(
+        host, publisher, capsys):
+    """The generic refusal branch must not be reachable after a claim."""
+
+    import argparse
+    from datetime import datetime, timezone
+
+    _apply(host)
+    host.closed = False
+    host.production_manifest = True
+    host.files.data[
+        os.fspath(ac.AUTONOMY_TRANSACTION / ac._TRANSACTION_MANIFEST_NAME)
+    ] = b'{"operation":[]}'
+    args = argparse.Namespace(
+        command="reconcile-control-component", expected_sha=TARGET_SHA)
+    code = ac._run_control_component_command(
+        host, args, now=datetime.now(timezone.utc))
+    assert code == 2
+    document = json.loads(capsys.readouterr().out)
+    assert document["outcome"] != "REFUSED"
+    assert document["outcome"] == "EFFECT_UNKNOWN"
+
+
+def test_the_reconcile_never_probes_the_ceo_receipt_path_ambiently(
+        host, publisher, monkeypatch):
+    """The CEO receipt is read through the SAME qualified receipt owner.
+
+    A direct ``exists()``/``is_symlink()`` probe bypasses the owner and
+    observes whatever the live host happens to carry; on a host that already
+    has a CEO-submit receipt it turned a provable reconciliation into an
+    uncertain one.
+    """
+
+    _apply(host)
+    host.closed = False
+    reads: list[str] = []
+    original = host._component_receipt_bytes
+
+    def counted(path):
+        if os.fspath(path) == CEO_SUBMIT_RECEIPT:
+            reads.append(os.fspath(path))
+        return original(path)
+
+    monkeypatch.setattr(host, "_component_receipt_bytes", counted)
+    monkeypatch.setattr(
+        ac, "CEO_SUBMIT_RECEIPT", _NoAmbientPath(ac.CEO_SUBMIT_RECEIPT))
+    commands = [list(command) for command in host.commands]
+    result = ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert result["ok"] is True
+    assert result["outcome"] == "RECONCILED"
+    # Exactly ONE qualified read of the CEO receipt: the snapshot that proved
+    # the retained postimage is the snapshot the correlated bytes reuse.
+    assert len(reads) == 1
+    assert host._component_target_ceo_bytes == b""
+    # A reconciliation dispatches no lifecycle effect.
+    assert [list(command) for command in host.commands] == commands
+
+
+def test_the_reconcile_reuses_the_one_qualified_ceo_receipt_snapshot(
+        host, publisher, monkeypatch):
+    """The correlated CEO bytes and the sealed digest name ONE snapshot."""
+
+    host.files.write(CEO_SUBMIT_RECEIPT, _disarmed_ceo_receipt())
+    _apply(host)
+    host.closed = False
+    reads: list[bytes] = []
+    original = host._component_receipt_bytes
+
+    def counted(path):
+        present, raw = original(path)
+        if os.fspath(path) == CEO_SUBMIT_RECEIPT:
+            reads.append(raw)
+        return present, raw
+
+    monkeypatch.setattr(host, "_component_receipt_bytes", counted)
+    monkeypatch.setattr(
+        ac, "CEO_SUBMIT_RECEIPT", _NoAmbientPath(ac.CEO_SUBMIT_RECEIPT))
+    result = ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert result["outcome"] == "RECONCILED"
+    assert len(reads) == 1
+    # The correlated bytes are exactly the bytes the single qualified read
+    # returned: no second read of the same receipt exists.
+    assert host._component_target_ceo_bytes == reads[0]
+    assert host._component_target_ceo_bytes == host.files.read(CEO_SUBMIT_RECEIPT)

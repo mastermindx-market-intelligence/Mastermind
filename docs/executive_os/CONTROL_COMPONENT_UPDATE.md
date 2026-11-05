@@ -18,12 +18,22 @@ service itself.
 
 The target release must be staged and sealed first, and the installer-owned
 administrative checkout that backs the Control configuration's
-`proof_source_repository` must exist for the same commit:
+`proof_source_repository` must exist for the same commit.
+
+`--stage-admin-checkout-only` runs `install.sh` **from the same accepted
+source checkout** that is passed as `--source-repo`, so the script that
+stages the release and the source it stages are one checkout. It also needs
+the pinned interpreter coordinates, because the installer refuses to run
+without them:
 
 ```
-sudo /bin/bash <installed-release>/ops/executive_os/install.sh \
-  --source-repo <repo> --expected-sha <target-40-hex> \
-  --operator-user <name> --stage-admin-checkout-only
+cd <accepted-source-checkout>
+sudo /bin/bash ./ops/executive_os/install.sh \
+  --source-repo <accepted-source-checkout> --expected-sha <target-40-hex> \
+  --operator-user <name> \
+  --python-binary /Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 \
+  --python-runtime-root /Library/Frameworks/Python.framework/Versions/3.12 \
+  --stage-admin-checkout-only
 ```
 
 `--stage-admin-checkout-only` seals and publishes the target release and then
@@ -34,6 +44,11 @@ not already the exact expected checkout owned by the control principal refuses
 untouched; this preparation never recursively repairs another owner's tree.
 `--stage-release-only` keeps its existing behaviour and still returns before
 the administrative checkout is prepared.
+
+`--stage-release-only` and `--stage-admin-checkout-only` are two different
+staging intents and are **never combined**: one stages the release tree, the
+other prepares the administrative checkout, and a single invocation asks for
+both at once.
 
 ## Plan, apply, reconcile
 
@@ -141,9 +156,17 @@ unjoined archive: the compare-and-swap refuses the moved receipt instead.
 Presence is EXPLICIT. It is proven by an absent file, never inferred from the
 byte length of an archived preimage, so an empty receipt stays present.
 
-A receipt that is present but malformed, empty, unreadable or misqualified is
+The AUTHORITY receipt and the CEO-SUBMIT receipt are semantically validated:
+one that is present but malformed, empty, unreadable or misqualified is
 REFUSED before any marker or effect. It is never read as an absent receipt:
 the absent receipt and the unreadable one lead to different correlations.
+
+This operation's OWN prior receipt is different, and the difference is
+deliberate. It is the output of an EARLIER component update, so it is bound
+only by its presence and its exact raw bytes: it is never parsed as a
+receipt, and it may legitimately be EMPTY and still PRESENT. Only a proven
+absence is absent. It is replaced by an exact-byte compare-and-swap, never
+by a re-serialisation of a parse.
 
 ## Effect order
 
@@ -221,6 +244,16 @@ Once the transaction owner is claimed, EVERY qualification or read failure is
 an `INCOMPLETE` or `EFFECT_UNKNOWN` outcome. The original marker and its
 preimages are retained and the phase that was still incomplete is named; a
 claimed transaction is never reported as a zero-effect refusal.
+
+The retained manifest read, the component identity checks, the qualified
+transaction identity and the delegated retained-postimage proof are ONE
+guarded region that begins immediately after the claim. A malformed or
+unexpected retained manifest therefore leaves the ORIGINAL operation
+uncertain (`EFFECT_UNKNOWN`) instead of escaping as a generic refusal; it is
+never reported as an operation that had no effect. Until the transaction
+identity is qualified every unexpected error is `EFFECT_UNKNOWN`; once it is
+qualified, a component refusal is the `INCOMPLETE` classification and names
+the phase that was still incomplete.
 
 The phase the component publication records, `CONTROL_COMPONENT_PUBLICATION_STARTED`,
 is a RECOVERABLE phase. An interruption AFTER the publication is closed by

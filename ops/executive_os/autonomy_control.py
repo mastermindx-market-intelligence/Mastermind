@@ -9397,15 +9397,29 @@ def reconcile_control_component_update(
     if not host._transaction_present():
         raise _component_refusal("control_component_transaction_absent")
     host._claim_transaction_owner()
-    manifest = host._manifest()
-    if (
-        manifest.get("operation") != CONTROL_COMPONENT_UPDATE
-        or manifest.get("expected_sha") != target_sha
-        or manifest.get("phase") not in _COMPONENT_PHASES
-        or not _COMPONENT_MANIFEST_FIELDS <= set(manifest)
-    ):
-        raise TransactionEffectUnknown()
+    # EVERY step that follows the claim happens INSIDE the retained
+    # transaction's own classification.  The manifest read, the component
+    # checks, the qualified transaction identity and the delegated
+    # reconciliation are one guarded region: a malformed or unexpected
+    # manifest can no longer escape as a generic zero-effect refusal, because
+    # the original transaction was already claimed.
+    #
+    # Until the transaction identity is qualified, EVERY unexpected error
+    # leaves the ORIGINAL operation uncertain and is reported as
+    # ``TransactionEffectUnknown``.  Once the identity is qualified, a
+    # ``ComponentUpdateRefused`` is the incumbent's own INCOMPLETE
+    # classification and names the phase that was still incomplete.
+    transaction_id: str | None = None
     try:
+        manifest = host._manifest()
+        if (
+            manifest.get("operation") != CONTROL_COMPONENT_UPDATE
+            or manifest.get("expected_sha") != target_sha
+            or manifest.get("phase") not in _COMPONENT_PHASES
+            or not _COMPONENT_MANIFEST_FIELDS <= set(manifest)
+        ):
+            raise TransactionEffectUnknown()
+        transaction_id = str(manifest["transaction_id"])
         return _reconcile_control_component_update(
             host, manifest, target_sha
         )
@@ -9414,9 +9428,11 @@ def reconcile_control_component_update(
         # zero-effect refusal.  The marker and its preimages are retained,
         # the incomplete phase is named, and nothing is replayed or rolled
         # back.
-        raise _component_incomplete(
-            host, str(manifest["transaction_id"]), exc
-        ) from exc
+        if transaction_id is None:
+            # The original transaction identity is not qualified yet, so no
+            # incomplete phase of an identified transaction can be named.
+            raise TransactionEffectUnknown() from exc
+        raise _component_incomplete(host, transaction_id, exc) from exc
     except TransactionEffectUnknown:
         raise
     except Exception as exc:
@@ -9527,13 +9543,23 @@ def _reconcile_control_component_update(
         "component_target_autonomy_receipt_sha256"
     ]:
         raise TransactionEffectUnknown()
+    # The CEO-submit receipt is read through the SAME qualified receipt owner
+    # that produced the sealed preimage.  There is NO direct ambient path
+    # check here: an ``exists()``/``is_symlink()`` probe bypasses the owner,
+    # observes whatever the live host happens to carry, and cannot tell an
+    # absent receipt from an unreadable one.  The explicit (presence, bytes)
+    # pair names the SAME snapshot the sealed preimage named, and that ONE
+    # snapshot is reused below instead of being read again.
+    try:
+        ceo_present, ceo_raw = host._component_receipt_bytes(CEO_SUBMIT_RECEIPT)
+    except ComponentUpdateRefused as exc:
+        raise TransactionEffectUnknown() from exc
     if manifest["component_prior_ceo_receipt_present"]:
-        ceo_raw, _info = _read_root_file(
-            CEO_SUBMIT_RECEIPT, modes=frozenset({0o444}), uid=0, gid=0
-        )
+        if not ceo_present:
+            raise TransactionEffectUnknown()
         if sha256_bytes(ceo_raw) != manifest["component_target_ceo_receipt_sha256"]:
             raise TransactionEffectUnknown()
-    elif CEO_SUBMIT_RECEIPT.exists() or CEO_SUBMIT_RECEIPT.is_symlink():
+    elif ceo_present:
         raise TransactionEffectUnknown()
     # The lifecycle is qualified FRESH and is NEVER replayed: the Control is
     # running the target source, the Worker is still absent and disabled, and
@@ -9618,13 +9644,10 @@ def _reconcile_control_component_update(
         manifest["component_prior_worker_launchd_disabled"]
     )
     host._component_target_autonomy_bytes = autonomy_raw
-    host._component_target_ceo_bytes = (
-        _read_root_file(
-            CEO_SUBMIT_RECEIPT, modes=frozenset({0o444}), uid=0, gid=0
-        )[0]
-        if manifest["component_prior_ceo_receipt_present"]
-        else b""
-    )
+    # The SAME qualified snapshot that was proved above, never a second read
+    # of the same receipt: the correlated bytes and the sealed digest name
+    # one set of bytes.
+    host._component_target_ceo_bytes = ceo_raw if ceo_present else b""
     # The retained component receipt is compared against the byte-identical
     # document the original operation owed, derived from the retained
     # manifest and the recompiled candidate.
