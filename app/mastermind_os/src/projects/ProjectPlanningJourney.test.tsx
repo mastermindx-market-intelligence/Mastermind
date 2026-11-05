@@ -21,6 +21,7 @@
  */
 
 import { useState } from "react";
+import sourceIssued from "../fixtures/project-journey-source-issued-388205.json";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { RenderResult } from "@testing-library/react";
@@ -30,7 +31,7 @@ import { planningIntentId, planningOperationKey } from "../planning/project-plan
 import type { MissionHost } from "../host";
 import type { OwnerContext, OperationPointer, PendingPointerStore } from "../orchestration/operation-controller";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 // ── stable fixture identity ──────────────────────────────────────────────────
 
@@ -85,8 +86,8 @@ function workspaceOf(executiveScope: string): string {
 
 const PROFILE = {
   id: "balanced",
-  label: { en: "Balanced", "zh-CN": "均衡" },
-  summary: { en: "Balanced source profile.", "zh-CN": "均衡的来源配置。" },
+  label: { en: "Balanced", zhCN: "均衡" },
+  summary: { en: "Balanced source profile.", zhCN: "均衡的来源配置。" },
   revision: PROFILE_REVISION,
   owner: "Chris",
   program: "Mastermind",
@@ -123,7 +124,7 @@ function previewRequest(requestId: string) {
     goal: GOAL,
     expected_macro_sha: MACRO,
     profile_id: PROFILE.id,
-    profile_sha256: sha256Hex(canonicalJson(PROFILE)),
+    profile_sha256: PROFILE.revision,
   };
 }
 
@@ -1040,4 +1041,37 @@ describe("ProjectPlanningJourney", () => {
     expect(screen.queryByRole("button", { name: "Publish project" })).toBeNull();
     expect(screen.getByText("发布将在公司来源中记录该项目，不会打开对话。")).toBeTruthy();
   });
+});
+
+// Exact immutable operands from the real installed/signature/AF_UNIX recorder.
+// Only the Host boundary below is a fixture; raw supplied records stay untouched.
+it.each(["en", "zh-CN"] as const)("uses canonical installed profile labels and issued revision in %s", async locale => {
+  const h=makeHarness({goal:sourceIssued.consumer_inputs.create_goal,locale});harnessRef=h;
+  const options=sourceIssued.samples[1].response;
+  h.responses.options=options;h.responses.context=sourceIssued.samples[0].response;
+  h.responses.prepare=sourceIssued.samples[2].response;
+  vi.spyOn(crypto,"getRandomValues").mockImplementation(array=>{(array as Uint8Array).fill(0xbb);return array;});
+  fireEvent.click(screen.getByRole("button",{name:locale==="en"?"Options":"选项"}));
+  fireEvent.click(screen.getByRole("button",{name:locale==="en"?"Load project options":"载入项目选项"}));
+  const label=locale==="en"?"Mastermind OS delivery":"Mastermind OS 交付";
+  const radio=await screen.findByRole("radio",{name:label});fireEvent.click(radio);
+  fireEvent.click(screen.getByRole("button",{name:locale==="en"?"Prepare preview":"准备预览"}));
+  await screen.findByRole("button",{name:locale==="en"?"Publish project":"发布项目"});
+  expect(h.calls.prepare.mock.calls[0][0]).toEqual(sourceIssued.samples[2].request);
+  expect(h.calls.prepare.mock.calls[0][0].request.profile_sha256).toBe(options.profiles![0].revision);
+  expect(h.calls.submit).not.toHaveBeenCalled();
+});
+
+it.each(["legacy", "mixed", "extra", "missing", "nontext"])("refuses %s installed profile label shape without prepare", async variant => {
+  const h=makeHarness();harnessRef=h;
+  const options=structuredClone(sourceIssued.samples[1].response);
+  const profile=options.profiles![0] as unknown as Record<string,unknown>;
+  const actual=profile.label as Record<string,unknown>;
+  profile.label=variant==="legacy"?{en:actual.en,"zh-CN":actual.zhCN}:variant==="mixed"?{...actual,"zh-CN":actual.zhCN}:variant==="extra"?{...actual,other:"x"}:variant==="missing"?{en:actual.en}:{en:actual.en,zhCN:42};
+  h.responses.context=sourceIssued.samples[0].response;h.responses.options=options;
+  fireEvent.click(screen.getByRole("button",{name:"Options"}));
+  fireEvent.click(screen.getByRole("button",{name:"Load project options"}));
+  await screen.findByText("The supplied project options are unavailable right now.");
+  expect(screen.queryByRole("radio",{name:"Mastermind OS delivery"})).toBeNull();
+  expect(h.calls.prepare).not.toHaveBeenCalled();
 });

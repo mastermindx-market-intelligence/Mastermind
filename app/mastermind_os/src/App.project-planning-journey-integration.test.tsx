@@ -73,8 +73,8 @@ const RESULT_SCHEMA = "mastermind.direct_native_result_response.v1";
 
 const PROFILE = {
   id: "balanced",
-  label: { en: "Balanced", "zh-CN": "均衡" },
-  summary: { en: "Balanced source profile.", "zh-CN": "均衡的来源配置。" },
+  label: { en: "Balanced", zhCN: "均衡" },
+  summary: { en: "Balanced source profile.", zhCN: "均衡的来源配置。" },
   revision: PROFILE_REVISION,
   owner: "Chris",
   program: "Mastermind",
@@ -121,7 +121,7 @@ function previewRequest(requestId: string) {
     goal: GOAL,
     expected_macro_sha: MACRO,
     profile_id: PROFILE.id,
-    profile_sha256: sha256Hex(canonicalJson(PROFILE)),
+    profile_sha256: PROFILE.revision,
   };
 }
 

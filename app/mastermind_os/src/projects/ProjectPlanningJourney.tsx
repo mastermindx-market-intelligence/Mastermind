@@ -259,13 +259,13 @@ function decodeProfileChoice(value: unknown): JourneyProfileChoice | null {
   const id = bounded(record.id, 128);
   if (id === null || !IDENTIFIER.test(id)) return null;
   if (!hex(record.revision, HEX64)) return null;
-  const label = fields(record.label, ["en", "zh-CN"]);
-  const summary = fields(record.summary, ["en", "zh-CN"]);
+  const label = fields(record.label, ["en", "zhCN"]);
+  const summary = fields(record.summary, ["en", "zhCN"]);
   if (!label || !summary) return null;
   const labelEn = bounded(label.en, 200);
-  const labelZh = bounded(label["zh-CN"], 200);
+  const labelZh = bounded(label.zhCN, 200);
   const summaryEn = bounded(summary.en, 1000);
-  const summaryZh = bounded(summary["zh-CN"], 1000);
+  const summaryZh = bounded(summary.zhCN, 1000);
   if (labelEn === null || labelZh === null || summaryEn === null || summaryZh === null) return null;
   const owner = bounded(record.owner, 200);
   const program = bounded(record.program, 200);
@@ -1333,7 +1333,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
       goal,
       expected_macro_sha: options.expectedMacroSha,
       profile_id: choice.id,
-      profile_sha256: sha256Hex(canonicalJson(choice.source)),
+      profile_sha256: choice.revision,
     };
     run("preview", async (signal) => {
       try {
@@ -1723,7 +1723,7 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
     }
     if (previewUnknown && selection !== null) return pair("Check the original source request before continuing.", "继续前请查询原始来源请求。");
     if (options !== null) return pair("Choose a project profile.", "请选择项目配置。");
-    return pair("Draft goal. Load the project options to continue.", "目标为草稿。载入项目选项后继续。");
+    return pair("Choose a project profile in Options to continue.", "请在“选项”中选择项目配置后继续。");
   })();
 
   const disabled = busy !== null;
