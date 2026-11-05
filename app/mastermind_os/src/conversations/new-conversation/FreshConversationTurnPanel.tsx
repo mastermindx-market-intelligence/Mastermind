@@ -10,6 +10,8 @@ export interface FreshConversationTurnPanelProps {
   data: FreshConversationTurnData | null;
   /** Actual current reader's receipt; no synthetic turn DATA is constructed. */
   initialConsumption?: FreshConversationTurnConsumption | null;
+  /** The caller already attempted its one turn; only original recovery remains. */
+  responsePending?: boolean;
   /** Live controller observation; null when the controller holds no state here. */
   operationState: OperationState | null;
   /** Actual caller-side await activity; never a provider state. */
@@ -69,14 +71,14 @@ function turnStatus(zh: boolean, activity: FreshConversationTurnPanelProps["acti
 
 /** Bounded source rows; raw codes live only inside the closed disclosure. */
 function sourceRows(zh: boolean, operationState: OperationState | null,
-  data: FreshConversationTurnData | null): { label: string; value: string }[] {
+  data: FreshConversationTurnData | null, initialConsumption: FreshConversationTurnConsumption | null): { label: string; value: string }[] {
   const text = (en: string, cn: string) => zh ? cn : en;
   const notSupplied = text("Not supplied", "未提供");
   const flag = (value: boolean | undefined) => value === undefined ? notSupplied : String(value);
   const join = (parts: (string | null)[]) => parts.filter(part => part != null).join(" · ");
   const locator = data?.locator ?? null;
   const reference = data?.reference ?? null;
-  const receipt = data?.initial_consumption ?? null;
+  const receipt = data?.initial_consumption ?? initialConsumption;
   return [
     { label: text("Server schema", "服务端结构标识"), value: data?.schema ?? notSupplied },
     { label: text("Turn state", "回合状态"), value: data?.state ?? notSupplied },
@@ -115,7 +117,7 @@ function sourceRows(zh: boolean, operationState: OperationState | null,
  * decoded window and every guarded action; this component renders the handed
  * state, forwards exact draft text and never mints or infers a permission. */
 export function FreshConversationTurnPanel({ locale, data, operationState, activity, message,
-  onMessageChange, readOnly, keepControl, sendControl, checkControl, feedback, originalTurnMessage, initialConsumption = null }: FreshConversationTurnPanelProps) {
+  onMessageChange, readOnly, keepControl, sendControl, checkControl, feedback, originalTurnMessage, initialConsumption = null, responsePending = false }: FreshConversationTurnPanelProps) {
   const inputId=useId();
   const zh = locale === "zh-CN";
   const text = (en: string, cn: string) => zh ? cn : en;
@@ -127,14 +129,17 @@ export function FreshConversationTurnPanel({ locale, data, operationState, activ
   const receipt = data?.initial_consumption ?? initialConsumption;
   const result = data?.result ?? null;
   /** An absent turn is a hold, not clearance: neither slot is offered for replay. */
-  const holdActions = busy || unresolved || recorded || absent || status?.key === "refused";
+  const holdActions = busy || unresolved || recorded || absent || responsePending || status?.key === "refused";
   const keepVisible = keepControl != null && receipt == null && !holdActions;
   const sendVisible = sendControl != null && receipt != null && !holdActions;
-  const inputHeld = readOnly || busy || unresolved || recorded;
-  const showUnavailable = !busy && !recorded && !keepVisible && !sendVisible;
+  const inputHeld = readOnly || busy || unresolved || recorded || responsePending;
+  const showUnavailable = !busy && !recorded && !responsePending && !keepVisible && !sendVisible;
   return <section className="mm-fresh-conversation-turn" lang={zh ? "zh-CN" : "en"}>
     <h2 className="mm-fresh-conversation-turn-heading">{text("Continue this conversation", "继续此对话")}</h2>
     {status != null && <p role="status" className="mm-fresh-conversation-turn-status">{status.title}</p>}
+    {responsePending && !recorded && !busy && !unresolved && <p role="status" className="mm-fresh-conversation-turn-status">
+      {text("Check the original request to read its response. Don’t send another message here.", "请查看原请求以读取回复。请勿在此再次发送消息。")}
+    </p>}
     <p className="mm-fresh-conversation-turn-receipt">
       {receipt != null ? text("First response kept", "已保留第一条回复")
         : text("Keep the first response to continue.", "保留第一条回复后继续。")}
@@ -169,7 +174,7 @@ export function FreshConversationTurnPanel({ locale, data, operationState, activ
     <details className="mm-fresh-conversation-turn-sources">
       <summary>{text("Sources and request", "来源与请求")}</summary>
       <div className="mm-fresh-conversation-turn-source-list">
-        {sourceRows(zh, operationState, data).map(row =>
+        {sourceRows(zh, operationState, data, initialConsumption).map(row =>
           <div key={row.label} className="mm-fresh-conversation-turn-source">
             <span>{row.label}</span>
             <code>{row.value}</code>

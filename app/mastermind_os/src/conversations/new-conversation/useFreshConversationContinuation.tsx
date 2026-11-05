@@ -9,6 +9,8 @@ import "./new-conversation-journey.css";
 export interface FreshConversationContinuationProps {
   locale:"en"|"zh-CN";
   active:boolean;
+  /** A readonly source window still permits qualified original recovery. */
+  readOnly?:boolean;
   binding:FreshConversationAttendedBinding|null;
   host:object|undefined;
   authGeneration:number;
@@ -40,8 +42,10 @@ const methods=(b:FreshConversationAttendedBinding|null)=>[b?.context,b?.makeCons
  * local hint; every source read, preview, Keep and Send needs a user gesture. */
 export function useFreshConversationContinuation(props:FreshConversationContinuationProps){
   const liveOwner=ownerOf(props.binding),target=freshConversationTarget(props.selection);
+  let readWitnessCurrent=false;
+  try{readWitnessCurrent=!!props.read&&props.read.current()===true&&freshConversationTarget(props.read.selection)===target;}catch{ /* withdrawn witness */ }
   const renderMethods=methods(props.binding);
-  const scope=useMemo(()=>({}),[props.host,props.binding,props.authGeneration,target,props.read,
+  const scope=useMemo(()=>({}),[props.host,props.binding,props.authGeneration,target,props.read,readWitnessCurrent,props.readOnly,
     liveOwner?.principalScope,liveOwner?.generation,...renderMethods]);
   const latest=useRef(props);latest.current=props;
   const mounted=useRef(false),committedScope=useRef(scope),latch=useRef<object|null>(null);
@@ -57,7 +61,7 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
     if(!mounted.current||!p.active||!b||!owner||!key||committedScope.current!==scope||!sameOwner(owner,liveOwner)||
       methods(b).some((method,i)=>method!==renderMethods[i]))return null;
     const read=p.read;
-    if(requireRead&&(!read||read.current()!==true||freshConversationTarget(read.selection)!==key))return null;
+    if(requireRead&&(p.readOnly||!read||read.current()!==true||freshConversationTarget(read.selection)!==key))return null;
     return {scope,b,owner,key,host:p.host,auth:p.authGeneration,read,methods:methods(b),message:p.message};
   }
   type Capture=NonNullable<ReturnType<typeof capture>>;
@@ -66,7 +70,7 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
     if(!mounted.current||!p.active||committedScope.current!==c.scope||b!==c.b||p.host!==c.host||p.authGeneration!==c.auth||
        freshConversationTarget(p.selection)!==c.key||!sameOwner(ownerOf(b),c.owner))return false;
     const now=methods(b);if(now.some((method,i)=>method!==c.methods[i]))return false;
-    return !requireRead||!!c.read&&p.read===c.read&&c.read.current()===true&&freshConversationTarget(c.read.selection)===c.key;
+    return !requireRead||!p.readOnly&&!!c.read&&p.read===c.read&&c.read.current()===true&&freshConversationTarget(c.read.selection)===c.key;
   }
   function belongs(pointer:OperationPointer,c:Capture){
     return (pointer.kind==="conversation_consume"||pointer.kind==="conversation_turn")&&pointer.targetKey===c.key;
@@ -104,7 +108,7 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
     if(!request)return;
     const raw=kind==="consume"?await c.b.readOriginalConsume(selection,abort.current!.signal)
       :await c.b.readOriginalTurn(selection,turnKey!,abort.current!.signal);
-    if(!valid(c,true))return;
+    if(!valid(c)||latest.current.read!==c.read||c.read.current()!==true)return;
     const decoded=decodeFreshConversationTurnResult(raw,kind==="consume"?"consume_status":"turn_read",request);
     if(!decoded?.ok){patch({error:"unavailable"});return;}
     patch({data:decoded.data,error:null});
@@ -132,7 +136,7 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
     const c=enter(true);if(!c)return;
     try{
       if((await pending(c)).held||!valid(c,true)||!sameOwner(latest.current.draftOwner,c.owner))return;
-      if(!(current.current.data?.initial_consumption??currentConsumption())||current.current.data?.state==="RECORDED")return;
+      if(!(current.current.data?.initial_consumption??currentConsumption())||current.current.data?.state==="RECORDED"||current.current.lastKind==="turn")return;
       const prior=current.current.request;
       const request=prior&&"message"in prior&&prior.message===c.message?prior:c.b.makeTurnRequest(c.read!,c.message);
       if(!request){patch({error:"unavailable"});return;}
@@ -148,7 +152,7 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
     const c=enter(true);if(!c)return;
     try{
       const prepared=current.current.prepared;
-      if(!prepared||!("message"in prepared.request)||prepared.request.message!==c.message||
+      if(current.current.lastKind==="turn"||!prepared||!("message"in prepared.request)||prepared.request.message!==c.message||
         !sameOwner(latest.current.draftOwner,c.owner)||(await pending(c)).held||!valid(c,true))return;
       const intent=c.b.makeTurnIntent(prepared);if(!intent){patch({prepared:null,error:"changed"});return;}
       if(!("turn_key"in prepared.request))return;
@@ -181,7 +185,7 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
     }catch{if(valid(c))patch({error:"unavailable"});}finally{leave(c);}
   }
   const ownsDraft=sameOwner(props.draftOwner,liveOwner);
-  const readCurrent=!!props.read&&props.read.current()&&freshConversationTarget(props.read.selection)===target;
+  const readCurrent=readWitnessCurrent;
   function currentConsumption(){
     const p=latest.current,value=p.initialConsumption;
     return p.read?.current()&&value?.state==="CONSUMED"&&value.initial_digest===p.read.result.digest&&
@@ -191,24 +195,25 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
   const consumption=view.data?.initial_consumption??suppliedConsumption;
   const held=!!view.pending||view.operation?.status==="unknown"||view.discovering;
   const prepared=view.prepared&&"message"in view.prepared.request&&view.prepared.request.message===props.message?view.prepared:null;
-  const editable=props.active&&!!liveOwner&&readCurrent&&ownsDraft&&!view.busy&&!held;
+  const editable=props.active&&!props.readOnly&&!!liveOwner&&readCurrent&&ownsDraft&&!view.busy&&!held;
   const errorText=view.error==="pending"?t("Check the original request before continuing. Don’t send it again.","请先查看原请求状态，再继续。请勿再次发送。")
     :view.error==="other"?t("Another request needs its existing status controls before continuing.","请先通过另一请求原有的状态控件查询，再继续。")
     :view.error==="changed"?t("The message or its context changed. Review it again before sending.","消息或其上下文已改变。发送前请重新预览。")
     :view.error==="readFirst"?t("The original request was checked. Reopen its first response to continue.","已查询原请求。请重新打开首条回复后继续。")
-    :view.error==="unavailable"?t("This request could not be checked here. Your message remains a draft.","此处暂时无法查询此请求。消息仍是草稿。") :null;
-  const canReview=editable&&!!consumption&&view.data?.state!=="RECORDED"&&props.message.length>0;
+    :view.error==="unavailable"?t("This action could not be completed here. Check the original request for its outcome.","此处暂时无法完成此操作。请查看原请求以确认结果。") :null;
+  const turnAttempted=view.lastKind==="turn";
+  const canReview=editable&&!turnAttempted&&!!consumption&&view.data?.state!=="RECORDED"&&props.message.length>0;
   const panel=<div ref={root} className="new-conversation-journey" lang={props.locale}>
     {prepared&&<section className="new-conversation-preview"><h3 data-turn-review tabIndex={-1}>{t("Review message","预览消息")}</h3>
       <p className="new-conversation-preview-message">{props.message}</p>
       <button type="button" disabled={!!view.busy} onClick={()=>{requestedFocus.current={scope,selector:"textarea"};patch({prepared:null});}}>{t("Edit message","编辑消息")}</button>
     </section>}
-    <FreshConversationTurnPanel locale={props.locale} data={view.data} initialConsumption={suppliedConsumption} operationState={view.operation}
+    <FreshConversationTurnPanel locale={props.locale} data={view.data} initialConsumption={suppliedConsumption} responsePending={turnAttempted&&view.data?.state!=="RECORDED"} operationState={view.operation}
       activity={view.busy==="reviewing"?null:view.busy} message={ownsDraft?props.message:""} originalTurnMessage={view.originalTurnMessage}
       onMessageChange={value=>{if(!capture(true)||!ownsDraft)return;patch({prepared:null,error:null});props.onMessageChange(value);}}
       readOnly={!editable} feedback={errorText?<p role="status">{errorText}</p>:view.busy==="reviewing"?<p role="status">{t("Reviewing message…","正在预览消息…")}</p>:null}
-      keepControl={!view.attempted&&!consumption&&readCurrent&&!held?<button type="button" className="primary" disabled={!editable} onClick={()=>void keep()}>{t("Keep first response","保留第一条回复")}</button>:undefined}
-      sendControl={consumption&&!held?<button type="button" className="primary" disabled={!canReview} onClick={()=>void(prepared?send():review())}>{prepared?t("Send message","发送消息"):t("Review message","预览消息")}</button>:undefined}
+      keepControl={!props.readOnly&&!view.attempted&&!consumption&&readCurrent&&!held?<button type="button" className="primary" disabled={!editable} onClick={()=>void keep()}>{t("Keep first response","保留第一条回复")}</button>:undefined}
+      sendControl={!props.readOnly&&!turnAttempted&&consumption&&!held?<button type="button" className="primary" disabled={!canReview} onClick={()=>void(prepared?send():review())}>{prepared?t("Send message","发送消息"):t("Review message","预览消息")}</button>:undefined}
       checkControl={<button type="button" disabled={!props.active||!liveOwner||!!view.busy||view.discovering} onClick={()=>void check()}>{view.error==="other"?t("Check for pending requests","检查待处理请求"):t("Check original request","查看原请求状态")}</button>}/>
   </div>;
   return {panel,hasUnresolvedOriginal:held||view.busy==="keeping"||view.busy==="sending"};

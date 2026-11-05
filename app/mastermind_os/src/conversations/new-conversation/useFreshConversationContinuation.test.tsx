@@ -154,3 +154,28 @@ it("a binding method replaced without a render cannot start a new preview",async
   fireEvent.click(screen.getByRole("button",{name:"Review message"}));
   await Promise.resolve();expect(replacement).not.toHaveBeenCalled();expect(h.transport.turnPreview).not.toHaveBeenCalled();
 });
+it("withdraws the prepared private view when the same issued witness is revoked",async()=>{
+  const h=setup();const mounted=render(<Harness config={h.props}/>);
+  await keepAndRecover(h);
+  fireEvent.click(screen.getByRole("button",{name:"Review message"}));await screen.findByRole("heading",{name:"Review message"});
+  h.setCurrent(false);mounted.rerender(<Harness config={h.props}/>);
+  expect(screen.queryByRole("heading",{name:"Review message"})).toBeNull();expect(screen.queryByRole("button",{name:"Send message"})).toBeNull();
+  expect(screen.queryByText("First response kept")).toBeNull();expect(h.transport.turn).not.toHaveBeenCalled();
+});
+it("shows the actual supplied receipt in closed source details without claiming a turn frame",async()=>{
+  const h=setup();render(<Harness config={{...h.props,initialConsumption:h.consumption}}/>);
+  await screen.findByText("First response kept");
+  const receipt=screen.getByText(`event ${h.consumption!.event_id} · ${h.consumption!.event_sha256}`);
+  expect((receipt.closest("details") as HTMLDetailsElement).open).toBe(false);
+});
+it("accepted turn with unavailable reply stays on original Check, without another Review/Send or unsent claim",async()=>{
+  const h=setup();h.transport.turnRead.mockImplementationOnce(async()=>{throw Error('unit unavailable original reply');});
+  render(<Harness config={h.props}/>);await keepAndRecover(h);
+  fireEvent.click(screen.getByRole("button",{name:"Review message"}));await screen.findByRole("heading",{name:"Review message"});
+  fireEvent.click(screen.getByRole("button",{name:"Send message"}));
+  await screen.findByText("Check the original request to read its response. Don’t send another message here.");
+  expect(screen.queryByRole("button",{name:"Review message"})).toBeNull();expect(screen.queryByRole("button",{name:"Send message"})).toBeNull();
+  expect(screen.queryByText("Continuing is unavailable here right now. Your message remains a draft.")).toBeNull();
+  fireEvent.click(screen.getByRole("button",{name:"Check original request"}));await screen.findByText("Follow-up response recorded");
+  expect(h.transport.turn).toHaveBeenCalledTimes(1);expect(h.transport.turnRead).toHaveBeenCalledTimes(2);
+});
