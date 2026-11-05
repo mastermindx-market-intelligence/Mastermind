@@ -83,11 +83,12 @@ _OS_EXECUTIVE_ROUTES: tuple[str, ...] = (
     "/os/executive/project-planning/consume",
 )
 
-#: Three fixed POST routes served by the opt-in selected-session transport.
+#: Fixed POST routes served by the opt-in selected-session/history transport.
 #: These are exactly the routes the accepted HTTP leaf owns; nothing else is
 #: added by supplying the installed bridge client.
 _OS_SESSION_EXECUTIVE_ROUTES: tuple[str, ...] = (
     "/os/executive/session/context",
+    "/os/executive/session/history-context",
     "/os/executive/session/send",
     "/os/executive/session/reply",
     "/os/executive/session/references",
