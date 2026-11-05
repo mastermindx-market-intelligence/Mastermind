@@ -13,7 +13,7 @@ from ops.executive_os.os_public_edge import (
     MCP_ROUTES, POST_ROUTES, asset_routes,
     INCUMBENT_GET_ROUTES, INCUMBENT_POST_ROUTES, CONTROL_ROOM_LEGACY_GET_ROUTES,
     CONTROL_ROOM_GET_ROUTES, CONTROL_ROOM_POST_ROUTES, COMPOSED_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES,
-    SOURCE_CONTEXT_GET_ROUTES, SOURCE_POST_ROUTES,
+    SOURCE_CONTEXT_GET_ROUTES, SOURCE_POST_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES,
 )
 from ops.executive_os.os_public_edge_transition import (
     FINAL_NAME, PLAN_NAME, PREPARE_NAME, final_config, plan, prepare_config,
@@ -52,7 +52,7 @@ def host_route(get_paths, port=49152, hosts=None):
         "match": [{"host": [HOST] if hosts is None else hosts}],
         "handle": [{"handler": "subroute", "routes": [
             {"match": [{"method": ["GET"], "path": list(get_paths)}], "handle": [proxy(port)]},
-            {"match": [{"method": ["POST"], "path": list(POST_ROUTES)}],
+            {"match": [{"method": ["POST"], "path": list(PRE_INSTRUCTION_ADMISSION_POST_ROUTES)}],
              "handle": [{"handler": "request_body", "max_size": 64000}, proxy(port)]},
             {"handle": [{"handler": "static_response", "abort": True}]},
         ]}],
@@ -126,7 +126,7 @@ ADMITTED_ROUTE_PAIRS = (
     (CONTROL_ROOM_LEGACY_GET_ROUTES, LEGACY_POST_ROUTES),
     (CONTROL_ROOM_GET_ROUTES, CONTROL_ROOM_POST_ROUTES),
     (COMPOSED_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES),
-    (SOURCE_CONTEXT_GET_ROUTES, POST_ROUTES),
+    (SOURCE_CONTEXT_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 
@@ -290,7 +290,7 @@ def test_only_sealed_legacy_or_read_expanded_public_posts_upgrade():
 @pytest.mark.parametrize("bad", [
     list(LEGACY_POST_ROUTES) + ["/os/executive/session/send"],
     list(POST_ROUTES) + ["/os/executive/session/send"],
-    list(POST_ROUTES[:-1]),
+    list(POST_ROUTES[:-2]),
     list(POST_ROUTES) + [POST_ROUTES[0]],
     ["/os/executive/session/context"],
 ])
@@ -497,8 +497,11 @@ def test_only_get_paths_and_dedicated_source_branch_differ(maker):
     stripped["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"] = None
     original = copy.deepcopy(live)
     original["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"] = None
+    post_paths_of(original)[:] = list(POST_ROUTES)
     assert stripped == original
-    assert inner_of(changed)[1] == inner_of(live)[1]
+    expected_post = copy.deepcopy(inner_of(live)[1])
+    expected_post["match"][0]["path"] = list(POST_ROUTES)
+    assert inner_of(changed)[1] == expected_post
     assert inner_of(changed)[3] == inner_of(live)[2]
     assert changed["apps"]["tls"] == live["apps"]["tls"]
     assert changed["admin"] == live["admin"]
@@ -870,8 +873,11 @@ def test_mcp_shape_changes_only_get_paths_and_dedicated_source_branch(maker):
     inner_of(stripped)[0]["match"][0]["path"] = None
     original = copy.deepcopy(live)
     inner_of(original)[0]["match"][0]["path"] = None
+    post_paths_of(original)[:] = list(POST_ROUTES)
     assert stripped == original
-    assert inner_of(changed)[1] == inner_of(live)[1]
+    expected_post = copy.deepcopy(inner_of(live)[1])
+    expected_post["match"][0]["path"] = list(POST_ROUTES)
+    assert inner_of(changed)[1] == expected_post
     assert inner_of(changed)[3:] == inner_of(live)[2:]
     assert changed["apps"]["tls"] == live["apps"]["tls"]
     assert site_of(changed, index=1) == site_of(live, index=1)

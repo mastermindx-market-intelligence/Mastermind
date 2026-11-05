@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import unittest
 from unittest.mock import patch
@@ -22,6 +23,38 @@ class StewardCandidateContractTests(unittest.TestCase):
                        "steward_live_data_read", "provider_or_model_called",
                        "runtime_tools_admitted"):
             self.assertFalse(result[marker])
+
+    def test_exact_source_witness_is_the_only_large_advertisement_exception(self) -> None:
+        encoded = json.dumps(
+            self.rows, sort_keys=True, ensure_ascii=True, separators=(",", ":"),
+        ).encode("utf-8")
+        self.assertGreater(len(encoded), subject.MAX_ADVERTISEMENT_BYTES)
+        self.assertEqual(len(encoded), subject.PINNED_OWNER_ADVERTISEMENT_BYTES)
+        self.assertEqual(
+            hashlib.sha256(encoded).hexdigest(),
+            subject.PINNED_OWNER_ADVERTISEMENT_SHA256,
+        )
+        self.assertEqual(
+            subject.inspect_advertisement(self.rows)["status"],
+            "PASS_SOURCE_CONTRACT_ONLY",
+        )
+
+    def test_modified_large_advertisement_still_refuses_size_and_drift(self) -> None:
+        altered = copy.deepcopy(self.rows)
+        altered[0]["description"] += " modified-but-readonly"
+        result = subject.inspect_advertisement(altered)
+        self.assertEqual(result["status"], "REFUSED")
+        self.assertIn("ADVERTISED_SIZE_EXCEEDED", result["issues"])
+        self.assertIn("ADVERTISED_SOURCE_DRIFT", result["issues"])
+
+    def test_changed_owner_advertisement_cannot_qualify_itself(self) -> None:
+        owner_mutated = copy.deepcopy(self.rows)
+        owner_mutated[0]["description"] += " owner changed silently"
+        with patch.object(subject, "build_tools", return_value=owner_mutated):
+            result = subject.inspect_advertisement(owner_mutated)
+        self.assertEqual(result["status"], "REFUSED")
+        self.assertIn("OWNER_ADVERTISEMENT_DRIFT", result["issues"])
+        self.assertIn("ADVERTISED_SIZE_EXCEEDED", result["issues"])
 
     def test_write_tool_injection_is_refused_without_echo(self) -> None:
         bad = copy.deepcopy(self.rows)

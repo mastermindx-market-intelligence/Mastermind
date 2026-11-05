@@ -372,7 +372,8 @@ def test_public_edge_allowlist_and_caddy_template_carry_the_exact_path():
 
     assert GET_ROUTES.count(ROUTE) == 1
     # The composed profile retains the legacy ordering, then appends the
-    # reference reader, Control Room reads and Fabric reads in that order.
+    # reference reader, Control Room reads, Fabric reads and the later
+    # project/archive/knowledge and source-operation reads in that order.
     assert GET_ROUTES == (
         "/os/", "/os/auth/callback", "/workspace/programs/current",
         "/workspace/work/current", "/workspace/mission/current",
@@ -387,6 +388,10 @@ def test_public_edge_allowlist_and_caddy_template_carry_the_exact_path():
         "/workspace/autonomy/current", "/workspace/project-session/current",
         "/workspace/resources/capacity/current", "/workspace/project-direction/current",
         "/workspace/project-admission/current", "/workspace/project-admission/operation",
+        "/workspace/projects/archive/current",
+        "/workspace/project-knowledge/current", "/workspace/project-memory/current",
+        "/workspace/project-source/current", "/workspace/source-operation/context",
+        "/workspace/source-operation/operation",
     )
     assert not any("result-references" in route for route in POST_ROUTES)
     names = ["index.html", "assets/index-a.css", "assets/index-b.js"]
@@ -398,8 +403,12 @@ def test_public_edge_allowlist_and_caddy_template_carry_the_exact_path():
     from ops.executive_os.os_public_edge import render
     config = render(manifest, 49152)
     assert config.count(ROUTE) == 1
-    assert "/workspace/result/current /workspace/result-references/current" in config
-    assert "/workspace/result-references/current /workspace/plan/current" in config
+    assert "/workspace/operator/activity/current /workspace/result-references/current" in config
+    assert "/workspace/result-references/current /workspace/control-room/state/current" in config
+    assert "/workspace/source-operation/context /workspace/source-operation/operation" in config
+    assert ("path /workspace/source-operation/prepare /workspace/source-operation/submit"
+            " /workspace/source-operation/reconcile /workspace/source-operation/advance\n") in config
+    assert config.count("max_size 98304") == 1 and config.count("max_size 64KB") == 2
 
 
 def test_producer_failure_still_rechecks_permission_before_typed_unavailable(monkeypatch):

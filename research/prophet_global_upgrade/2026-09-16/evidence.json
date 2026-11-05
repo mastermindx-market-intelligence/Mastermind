@@ -1,0 +1,455 @@
+{
+  "study_version": 1,
+  "status": "RESEARCH_ONLY_NO_PROMOTION",
+  "operation": "prophet-global-upgrade-research-20260916-sol-001",
+  "observed_at_utc": "2026-09-16T09:20:08.792006+00:00",
+  "macro_pin": "11485597cc53b3137346084aae4623cceed28a3f",
+  "skillpack_pin": "8ba7deedde164c90298d3e88785d98e02fa5e2d2",
+  "us_era_diagnostics_not_causal": [
+    {
+      "definition": "bottoming-alignment",
+      "matured_episodes": 174,
+      "origin_dates": 8,
+      "unique_tickers": 153,
+      "positive_outcomes": 101,
+      "win_pct": 58.04598,
+      "mean_pnl_pct_from_rounded_rows": 0.302874,
+      "mean_excess_pct_from_rounded_rows": 0.707586,
+      "first_origin": "2026-06-30",
+      "last_origin": "2026-07-15",
+      "exit_reasons": {
+        "target": 96,
+        "horizon": 77,
+        "stop": 1
+      }
+    },
+    {
+      "definition": "confluence",
+      "matured_episodes": 280,
+      "origin_dates": 9,
+      "unique_tickers": 252,
+      "positive_outcomes": 179,
+      "win_pct": 63.92857,
+      "mean_pnl_pct_from_rounded_rows": 2.373929,
+      "mean_excess_pct_from_rounded_rows": -0.557964,
+      "first_origin": "2026-07-17",
+      "last_origin": "2026-07-31",
+      "exit_reasons": {
+        "target": 156,
+        "horizon": 111,
+        "stop": 13
+      }
+    },
+    {
+      "definition": "us_prophet_v1",
+      "matured_episodes": 68,
+      "origin_dates": 1,
+      "unique_tickers": 68,
+      "positive_outcomes": 39,
+      "win_pct": 57.35294,
+      "mean_pnl_pct_from_rounded_rows": 1.777941,
+      "mean_excess_pct_from_rounded_rows": 2.389853,
+      "first_origin": "2026-08-07",
+      "last_origin": "2026-08-07",
+      "exit_reasons": {
+        "target": 37,
+        "horizon": 31
+      }
+    },
+    {
+      "definition": "us_prophet_v2",
+      "matured_episodes": 112,
+      "origin_dates": 3,
+      "unique_tickers": 111,
+      "positive_outcomes": 36,
+      "win_pct": 32.14286,
+      "mean_pnl_pct_from_rounded_rows": -2.884821,
+      "mean_excess_pct_from_rounded_rows": -1.862411,
+      "first_origin": "2026-08-12",
+      "last_origin": "2026-08-14",
+      "exit_reasons": {
+        "horizon": 76,
+        "target": 34,
+        "stop": 2
+      }
+    },
+    {
+      "definition": "us_prophet_v3",
+      "matured_episodes": 209,
+      "origin_dates": 8,
+      "unique_tickers": 181,
+      "positive_outcomes": 73,
+      "win_pct": 34.92823,
+      "mean_pnl_pct_from_rounded_rows": -2.013876,
+      "mean_excess_pct_from_rounded_rows": -1.832297,
+      "first_origin": "2026-08-17",
+      "last_origin": "2026-08-26",
+      "exit_reasons": {
+        "horizon": 162,
+        "target": 37,
+        "stop": 10
+      }
+    }
+  ],
+  "market_rulers_and_counts": {
+    "us": {
+      "as_of": "2026-09-11",
+      "summary": {
+        "metric": "pnl",
+        "horizon": 10,
+        "n_matured": 843,
+        "n_inflight": 213,
+        "n_skipped_no_price": 2,
+        "n_board_days": 29,
+        "win_pct": 50.8,
+        "expectancy_pct": 0.11,
+        "median_pct": 0.16,
+        "avg_win_pct": 5.5,
+        "avg_loss_pct": -5.45,
+        "profit_factor": 1.04,
+        "ci_lo_pct": 44.7,
+        "ci_hi_pct": 57.2,
+        "exp_lo_pct": -0.87,
+        "exp_hi_pct": 1.08,
+        "median_hold": 10,
+        "capture": 0.32,
+        "n_capture": 698,
+        "n_capture_undefined": 145,
+        "capture_undefined_pct": 17.2,
+        "mfe_median_pct": 2.84,
+        "mae_median_pct": -3.11,
+        "mae_p10_pct": -10.6
+      },
+      "grain": "episode",
+      "total_rows": 1058,
+      "matured_rows": 843,
+      "matured_origin_dates": 29,
+      "matured_unique_tickers": 642,
+      "truncated": 0,
+      "mean_pnl_pct_from_rounded_rows": 0.111862,
+      "mean_excess_pct_from_rounded_rows": -0.548209,
+      "positive_rounded_pnl_fraction": 0.505338
+    },
+    "cn": {
+      "as_of": "2026-09-14",
+      "summary": {
+        "metric": "excess",
+        "horizon": 10,
+        "n_matured": 159,
+        "n_inflight": 107,
+        "n_skipped_no_price": 0,
+        "n_board_days": 11,
+        "win_pct": 44.0,
+        "expectancy_pct": -0.6,
+        "median_pct": -0.98,
+        "avg_win_pct": 4.95,
+        "avg_loss_pct": -4.96,
+        "profit_factor": 0.78,
+        "ci_lo_pct": 30.0,
+        "ci_hi_pct": 58.4,
+        "exp_lo_pct": -2.15,
+        "exp_hi_pct": 0.89,
+        "median_hold": 10,
+        "capture": -0.33,
+        "n_capture": 120,
+        "n_capture_undefined": 39,
+        "capture_undefined_pct": 24.5,
+        "mfe_median_pct": 2.09,
+        "mae_median_pct": -3.76,
+        "mae_p10_pct": -9.71,
+        "n_logged": 266,
+        "n_locked_excluded": 0,
+        "n_skipped_awaiting_t1": 6,
+        "n_skipped_total": 6,
+        "board_definition": "cn_prophet_v4"
+      },
+      "grain": "episode",
+      "total_rows": 266,
+      "matured_rows": 159,
+      "matured_origin_dates": 11,
+      "matured_unique_tickers": 143,
+      "truncated": 0,
+      "mean_pnl_pct_from_rounded_rows": -1.571069,
+      "mean_excess_pct_from_rounded_rows": -0.597107,
+      "positive_rounded_pnl_fraction": 0.327044
+    },
+    "hk": {
+      "as_of": "2026-09-15",
+      "summary": {
+        "state": "accruing",
+        "n_calls": 407,
+        "n_logged": 407,
+        "n_matured": 95,
+        "n_beat": 42,
+        "n_lag": 53,
+        "n_suspended": 81,
+        "hit_matured": 0.442,
+        "wilson_lo_pct": 34.6,
+        "wilson_hi_pct": 54.2,
+        "win_pct": 44.2,
+        "first_read_est": "2026-08-24"
+      },
+      "grain": "board_day",
+      "total_rows": 407,
+      "matured_rows": 95,
+      "matured_origin_dates": 9,
+      "matured_unique_tickers": 33,
+      "truncated": 0,
+      "mean_pnl_pct_from_rounded_rows": -3.246316,
+      "mean_excess_pct_from_rounded_rows": -1.589158,
+      "positive_rounded_pnl_fraction": 0.378947
+    },
+    "ca": {
+      "as_of": "2026-09-11",
+      "summary": {
+        "state": "accruing",
+        "n_calls": 240,
+        "n_logged": 240,
+        "n_matured": 0,
+        "n_beat": 0,
+        "n_lag": 0,
+        "n_suspended": 87,
+        "hit_matured": null,
+        "wilson_lo_pct": null,
+        "wilson_hi_pct": null,
+        "win_pct": null,
+        "first_read_est": "2026-08-24"
+      },
+      "grain": "board_day",
+      "total_rows": 240,
+      "matured_rows": 0,
+      "matured_origin_dates": 0,
+      "matured_unique_tickers": 0,
+      "truncated": 0
+    }
+  },
+  "fossil_metadata_reconciliation": {
+    "bytes": 57157509,
+    "sha256": "0b58bb38d292ec34737d2886134b1d32177493912171e35889ee4931c0b5fed4",
+    "origin_dates": 8,
+    "v3_matured": 209,
+    "matched": 209,
+    "different_rank": 149,
+    "different_sector": 0,
+    "rank_basis": "zero_based_original_buy_lane_position",
+    "normalized_source": "scripts/grade_us_board.py::_board_to_record"
+  },
+  "suspension_exact_function_probes": {
+    "fresh_one_day": true,
+    "month_gap_then_five_prints": false,
+    "five_nan_rows": false
+  },
+  "suspension_flag_dates": {
+    "hk": {
+      "2026-09-08": {
+        "n": 14,
+        "susp": 14,
+        "mature": 0
+      },
+      "2026-09-09": {
+        "n": 19,
+        "susp": 19,
+        "mature": 0
+      },
+      "2026-09-10": {
+        "n": 19,
+        "susp": 19,
+        "mature": 0
+      },
+      "2026-09-11": {
+        "n": 16,
+        "susp": 16,
+        "mature": 0
+      },
+      "2026-09-14": {
+        "n": 13,
+        "susp": 13,
+        "mature": 0
+      }
+    },
+    "ca": {
+      "2026-09-03": {
+        "n": 17,
+        "susp": 17,
+        "mature": 0
+      },
+      "2026-09-04": {
+        "n": 22,
+        "susp": 22,
+        "mature": 0
+      },
+      "2026-09-08": {
+        "n": 18,
+        "susp": 18,
+        "mature": 0
+      },
+      "2026-09-09": {
+        "n": 18,
+        "susp": 18,
+        "mature": 0
+      },
+      "2026-09-10": {
+        "n": 12,
+        "susp": 12,
+        "mature": 0
+      }
+    }
+  },
+  "ca_clock": {
+    "signal_date": "2026-08-19",
+    "next_bar_close_fill_date": "2026-08-20",
+    "earliest_h21_endpoint": "2026-09-21",
+    "sessions_observed_through_2026_09_11": 15,
+    "excluded_holiday": "2026-09-07",
+    "calendar_source": "https://www.tsx.com/en/trading/calendars-and-trading-hours/calendar"
+  },
+  "us_fusion": {
+    "score_kind": "unfitted equal-weight evidence-family vote; a breadth-of-evidence ordering, not a calibrated return forecast and not a promoted alpha model",
+    "families_active": [
+      "F1_TECHNICAL_CONFLUENCE",
+      "F2_MOMENTUM_EXTENSION",
+      "F4_CATALYST_EVENT",
+      "F5_FLOW_POSITIONING"
+    ],
+    "families_abstaining": [
+      "F3_THEME_STRUCTURE",
+      "F6_MACRO_REGIME",
+      "F7_QUALITY_FUNDAMENTAL",
+      "F8_ATTENTION_CROWDING"
+    ],
+    "rows_by_n_families_present": {
+      "3": 22,
+      "4": 30
+    },
+    "rows_scored": 52
+  },
+  "miss_audit": {
+    "price_through": "2026-09-14",
+    "summary": {
+      "universe_n": 1496,
+      "eligible_today_n": 13,
+      "top63_n": 150,
+      "top63_eligible_today_n": 4,
+      "top63_never_eligible_n": 26,
+      "top63_never_eligible_pct": 0.1733,
+      "top63_eligible_days": {
+        "n": 150,
+        "mean": 5.69,
+        "p25": 3.0,
+        "median": 6.0,
+        "p75": 9.0,
+        "min": 0.0,
+        "max": 22.0
+      },
+      "top21_n": 50,
+      "top21_eligible_today_n": 3,
+      "conversion_rate": 0.1694,
+      "conversion_n": "21/124",
+      "basket_misses_n": 0,
+      "basket_scored_n": 49
+    },
+    "excluder_family_hist": {
+      "not_topped_veto": 143,
+      "ELIGIBLE": 4,
+      "freshness_expired": 3
+    },
+    "basis_warning": "Retrospectively chosen prior runners; eligibility stream is not the full live board gate; no causal gate-relaxation verdict.",
+    "score_coverage": {
+      "n_rows": 18816,
+      "n_scored": 709,
+      "coverage_pct": 3.77,
+      "note": "the US builder runs us_board_rank.score_rows on the BUY LANE only, so a row off the board carries no priority score. That is a MEASURED coverage fact, never a zero score — the ranking legs below are computed on the scored subset and the population leg on everything"
+    },
+    "grade_store": {
+      "available": true,
+      "n_rows": 18816,
+      "n_stamp_dates": 11,
+      "by_horizon": {
+        "10d": {
+          "n_rows": 15924,
+          "n_stamp_dates": 11,
+          "n_excess_null": 0
+        },
+        "21d": {
+          "n_rows": 2892,
+          "n_stamp_dates": 2,
+          "n_excess_null": 0
+        }
+      },
+      "by_cohort": {},
+      "by_signal_class": {
+        "other": 18816
+      },
+      "horizon_ladder": [
+        10,
+        21,
+        42,
+        63
+      ],
+      "chartered_horizon": {
+        "basing": {
+          "primary": 63,
+          "supporting": 21
+        },
+        "momentum": {
+          "primary": 10,
+          "supporting": 21
+        },
+        "other": {
+          "primary": 10,
+          "supporting": 21
+        }
+      },
+      "stamp_dates": {
+        "first": "2026-07-31",
+        "last": "2026-08-27"
+      },
+      "n_cohort_null": 18816,
+      "cohort_null_note": "18816 row(s) carry no curated/scan cohort — they were graded before the scan-tier discriminator landed in the candidates store. They are reported as one unsplit population, never folded into 'curated'"
+    }
+  },
+  "board_vintages": {
+    "us": {
+      "as_of": "2026-09-11",
+      "definition": "us_prophet_v3",
+      "buy_count": 52,
+      "watch_count": 48
+    },
+    "cn": {
+      "as_of": "2026-09-15",
+      "definition": "cn_prophet_v4",
+      "buy_count": 16,
+      "watch_count": 25
+    },
+    "hk": {
+      "as_of": "2026-09-15",
+      "definition": "hk_prophet_v2",
+      "buy_count": 1,
+      "watch_count": 8
+    },
+    "ca": {
+      "as_of": "2026-09-11",
+      "definition": "ca_prophet_branch_b_v1",
+      "buy_count": 3,
+      "watch_count": 8
+    }
+  },
+  "source_sha256": {
+    "site/factordata/us_track_ledger.json": "9c5ed6e43e2cd8a0557dac40b53190819669ff8dad7063c864a4b5325679e7d5",
+    "site/factordata/cn_track_ledger.json": "48e3ecd7967fba9433be1d73ecc1df0821a74898a7756209fb493227b0e84e81",
+    "site/factordata/hk_track_ledger.json": "c3061e3f9a48e0b11f488544845f3ddbdc784cc7c837434c5cd30566afb965db",
+    "site/factordata/ca_track_ledger.json": "77400ee7ddb329fc6c38520f86c851b9307b472a6651699037532092046b3f17",
+    "engine/track_scoring.py": "d4cb0e80d809c2cae9869e3fe846c99e54c3511fbaba4db4935b280d281a73fc",
+    "engine/board_ledger.py": "9fe054f6b30dbbf717f16e79f00616afb661780c924eb6201da74fc95f7fb875",
+    "data/prophet_miss_audit/latest.json": "44ff637b623111d3061511aa368f1a5e457f1a4a85af6698cce650193a0f3151",
+    "scripts/grade_us_board.py": "2b218588f07698be39387fe0bdc5106f99d70b121ba80f3d64fa01161eb9ba90"
+  },
+  "limitations": [
+    "No new model trained, promoted, or deployed.",
+    "Published row returns are rounded and not actual user executions.",
+    "US era comparison is descriptive across different periods, not a causal matched race.",
+    "W3 locked comparative outcomes not read.",
+    "No claim that popup metadata is an admission-time feature.",
+    "Canada zero matured H21 is expected at September 11 snapshot."
+  ]
+}

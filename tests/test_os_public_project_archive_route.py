@@ -5,7 +5,10 @@ from ops.executive_os.os_public_edge import GET_ROUTES, POST_ROUTES, PRE_ARCHIVE
 ROUTE = "/workspace/projects/archive/current"
 
 def test_archive_is_a_single_fixed_get_with_exact_predecessor():
-    assert set(GET_ROUTES) - set(PRE_ARCHIVE_GET_ROUTES) == {ROUTE}
+    later = {"/workspace/project-knowledge/current", "/workspace/project-memory/current",
+             "/workspace/project-source/current", "/workspace/source-operation/context",
+             "/workspace/source-operation/operation"}
+    assert set(GET_ROUTES) - set(PRE_ARCHIVE_GET_ROUTES) == {ROUTE, *later}
     assert GET_ROUTES.count(ROUTE) == 1 and ROUTE not in POST_ROUTES
     assert (PRE_ARCHIVE_GET_ROUTES, POST_ROUTES) in TRANSITION_ROUTE_PROFILES
     assert not any("*" in path for path in GET_ROUTES)

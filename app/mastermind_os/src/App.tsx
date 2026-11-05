@@ -12,6 +12,8 @@ import {
 } from "./auth-navigation-guard";
 import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
 import { Today } from "./today/Today";
+import { AuthEntry } from "./auth-entry/AuthEntry";
+import privateEntryArt from "./auth-entry/private-entry.jpg";
 import { AttendedFabricWorkspace } from "./fabric/AttendedFabricWorkspace";
 import { qualifyWorkerResultRef } from "./fabric/mission-worker-result";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
@@ -21,7 +23,8 @@ import { ProjectWorkspace } from "./projects/ProjectWorkspace";
 import { ProjectConversationAssociation } from "./conversations/ProjectConversationAssociation";
 import { AcceptedDirectionPanel } from "./direction/AcceptedDirectionPanel";
 import { useProjectAdmissionWorkspace } from "./useProjectAdmissionWorkspace";
-import { Inbox } from "./inbox/Inbox";
+import { useProjectDetailsControls } from "./projects/useProjectDetailsControls";
+import { InboxWorkspace } from "./inbox/InboxWorkspace";
 import { Knowledge } from "./knowledge/Knowledge";
 import { knowledgeDraftBinding, type KnowledgeDraftPort } from "./knowledge/KnowledgeDraftCompanion";
 import type { ProjectSourceDraftPort } from "./knowledge/library/project-source-draft";
@@ -2657,7 +2660,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               ? "A global current permitted window. No relationship to the selected Mission is proven."
               : "No Mission-linked conversation is currently established."
           : active === "Inbox"
-            ? "Owner-defined attention for the selected Mission; company-wide attention is not inferred."
+            ? locale === "zh-CN"
+              ? "Terminal 请求与任务负责人上下文分别跟随各自来源；全公司覆盖尚未建立。"
+              : "Terminal requests and Mission owner context follow their own sources. Company-wide coverage is not established."
             : active === "Knowledge"
               ? "Supplied Mission references retain exact provenance; canonical record content is not reconstructed."
               : active === "Projects"
@@ -3891,6 +3896,28 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     observedConversation.projection.conversation.source.state === "CURRENT" &&
     observedConversation.projection.context.selection?.workRef === projectWorkRef &&
     observedConversation.projection.context.selection?.rootJobId === selection.rootJobId;
+  const instructionConversationCurrent = !!(projectWorkRef && selection?.workRef === projectWorkRef &&
+    authState?.content === true && projectReaders.canRead() &&
+    observedConversation.projection.conversation.source.state === "CURRENT" &&
+    observedConversation.projection.context.selection?.workRef === projectWorkRef &&
+    observedConversation.projection.context.selection?.rootJobId === selection.rootJobId);
+  const instructionDraftOwner = projectDraftOwner.current;
+  const instructionDraftWitness = instructionConversationCurrent ? projectDraftMethods.readWitness() : null;
+  const projectDetailsControls = useProjectDetailsControls({
+    selection: projectWorkRef ? {work_ref: projectWorkRef} : null,
+    host: retainedResultHost ?? null, authGeneration: authRevision,
+    sourceGeneration: projectReaders.generation, canRead: projectReaders.canRead,
+    store: commandBinding?.store, locale,
+    onChangeInConversation: instructionDraftWitness ? source => {
+      const current = projectDraftMethods.readWitness();
+      if (projectDraftOwner.current === instructionDraftOwner && current &&
+          current.workRef === projectWorkRef && current.workRef === instructionDraftWitness.workRef &&
+          current.binding === instructionDraftWitness.binding && current.revision === instructionDraftWitness.revision &&
+          projectDraftMethods.append(source, instructionDraftWitness.revision)) {
+        setActive("Conversations");
+      }
+    } : undefined,
+  });
   const recordedDirection = <AcceptedDirectionPanel selection={projectWorkRef ? {work_ref:projectWorkRef} : null}
     read={projectReaders.direction} sourceGeneration={projectReaders.generation} canRead={projectReaders.canRead} locale={locale}
     onChangeDirection={directionConversation ? workRef => {
@@ -3972,7 +3999,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         )}
       />
     ) : null;
-  const quietHeader = active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
+  const quietHeader = active === "Inbox" || active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
     active === "Projects" && !directRoute && (!projectTab ||
       Boolean(projectWorkRef && (projectTab === "Conversation" || catalogueWorkRef)));
   const projectReadGeneration = JSON.stringify([authRevision, retainedHostGeneration, selectionSeq.current]);
@@ -4052,7 +4079,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     );
   else if (active === "Inbox")
     content = (
-      <Inbox
+      <InboxWorkspace
+        locale={locale}
+        terminalHost={window.MastermindMissionHost?.terminalSharing}
         projection={office.projection}
         onNavigateMission={
           office.projection.mission.source.state === "CURRENT"
@@ -4157,7 +4186,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               </details>
             </> : undefined}
             detailsPanel={<>
-              {panel}{recordedDirection}{projectAdmissionPanel}{projectSessionEvidence}{recordedProjectJournal}
+              {panel}{recordedDirection}{projectAdmissionPanel}
+              {projectDetailsControls.instructions}{projectDetailsControls.access}
+              <details className="reason-details"><summary>{locale === "zh-CN" ? "项目历史与来源证据" : "Project history and source evidence"}</summary>
+                {projectSessionEvidence}{recordedProjectJournal}
+              </details>
               {projectConversationActive ? <>
                 <AutonomyPanel selection={selection} read={projectReaders.autonomy}
                   canRead={Boolean(projectReaders.generation) && projectReaders.canRead()}
@@ -4552,6 +4585,40 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   else if (active === "Connections") content = <Connections d={d} />;
   else if (active === "Evidence") content = <><Evidence d={d} />{productAcceptancePanel}</>;
   else content = <Conversation locale={locale} />;
+  const privateEntryState = authState && !authState.acquisition && !authState.content &&
+    (authState.status === "signed_out" || authState.status === "signing_in" ||
+      authState.status === "error" || authState.status === "unconfigured") ? authState.status : null;
+  if (privateEntryState) return <AuthEntry state={privateEntryState} locale={locale} theme={theme}
+    illustrationSrc={privateEntryArt} authenticationControl={authenticationControl}
+    preferencesControl={preferencesControl}
+    feedback={authState?.reason && privateEntryState !== "signing_in" && privateEntryState !== "unconfigured" ? <p role="alert">{
+      authState.reason === "POPUP_BLOCKED" ? copy.allowPopup :
+      authState.reason === "POPUP_CLOSED" ? copy.popupClosed :
+      authState.reason.includes("EXPIRED") || authState.reason.includes("TIMEOUT") ? copy.signInTimeout : copy.signInFailed
+    }</p> : undefined}
+    protectedWork={((passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.session || office.draft.text || observedConversation.draft)) || showCheckStatus) ? <>
+      {passiveExpiryHold.current && office.draft.text ? <section className="card">
+        <h2>{locale === "zh-CN" ? "未发送的指示" : "Unsent direction"}</h2>
+        <p>{copy.expiredUnsent}</p>
+        <label htmlFor="entry-office-draft">{locale === "zh-CN" ? "给 Meta-CEO 的指示" : "Direction to Meta-CEO"}</label>
+        <textarea id="entry-office-draft" value={office.draft.text} onChange={event => office.changeDraft(event.target.value)} rows={4}/>
+        <button type="button" onClick={() => office.changeDraft("")}>{locale === "zh-CN" ? "丢弃指示" : "Discard direction"}</button>
+      </section> : null}
+      {passiveExpiryHold.current && observedConversation.draft ? <section className="card">
+        <h2>{locale === "zh-CN" ? "未发送的对话草稿" : "Unsent conversation draft"}</h2>
+        <p>{copy.expiredUnsent}</p>
+        <label htmlFor="entry-conversation-draft">{locale === "zh-CN" ? "消息" : "Message"}</label>
+        <textarea id="entry-conversation-draft" value={observedConversation.draft} onChange={event => observedConversation.changeDraft(event.target.value)} rows={4}/>
+        <button type="button" onClick={observedConversation.discardDraft}>{locale === "zh-CN" ? "丢弃消息" : "Discard message"}</button>
+      </section> : null}
+      {passiveExpiryHold.current && retainedComposerDrafts.launch ? commandPanel : null}
+      {passiveExpiryHold.current && retainedComposerDrafts.session ? sessionPanel : null}
+      {showCheckStatus ? <section className="card">
+        <h2>{locale === "zh-CN" ? "先前请求" : "Previous request"}</h2>
+        <p>{locale === "zh-CN" ? "请检查原请求，不要重新发送。" : "Check the original request. Do not send it again."}</p>
+        {checkStatusControl}
+      </section> : null}
+    </> : undefined} />;
   return (
     <div className="shell" data-theme={theme} data-active-route={active} lang={locale}>
       <a className="skip" href="#content" onClick={event => {
@@ -4649,7 +4716,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             {!quietHeader && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : headerSummary}</p>}
           </div>
           <div className="facts">
-            {!directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{locale === "zh-CN" ? "来源状态" : "Source status"} <State value={headerState} /></summary><p>{headerSummary}</p><p role="status">{visibleNotice}</p></details> : <State value={headerState} /> : null}
+            {!directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Inbox" ? (locale === "zh-CN" ? "工作区来源" : "Workspace source") : (locale === "zh-CN" ? "来源状态" : "Source status")} <State value={headerState} /></summary><p>{headerSummary}</p><p role="status">{visibleNotice}</p></details> : <State value={headerState} /> : null}
             {authState ? (
               <div>
                 <small>
@@ -4687,7 +4754,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             }}>{copy.discardAll}</button>
           </section>
         ) : null}
-        {active !== "Control Room" && active !== "Today" && !directRoute ? (
+        {active !== "Control Room" && active !== "Today" && !directRoute &&
+          !(active === "Inbox" && visibleNotice === "Choose a Program with one resolved mission before opening the workspace.") ? (
           <div className="notice" role="status">{visibleNotice === "Choose a Program with one resolved mission before opening the workspace."
             ? locale === "zh-CN" ? "选择一个项目，查看其工作。" : "Choose a project to view its work."
             : visibleNotice}</div>

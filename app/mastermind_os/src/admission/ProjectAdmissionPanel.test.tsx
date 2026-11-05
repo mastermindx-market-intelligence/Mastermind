@@ -41,7 +41,7 @@ it("UNKNOWN with a failed current read still reaches original status and never d
  fireEvent.click(screen.getByRole("button",{name:"Pause new work"}));await screen.findByText(/original request outcome is unresolved/);
  bound.ref.current={...bound.ref.current,data:unavailable};
  view.rerender(<ProjectAdmissionPanel {...p} source={{data:unavailable,generation:"1",readVersion:2}}/>);
- const recover=screen.getByRole("button",{name:"Check original request"}) as HTMLButtonElement;
+ const recover=screen.getByRole("button",{name:"Check original project request"}) as HTMLButtonElement;
  expect(recover.disabled).toBe(false);fireEvent.click(recover);await screen.findByText(/Request committed/);
  expect(bound.io.status).toHaveBeenCalledTimes(1);expect(bound.io.status.mock.calls[0]?.[0].command_id).toBe("mmos-project-pause-"+"a".repeat(40));
  expect(bound.io.pause).toHaveBeenCalledTimes(1);expect(bound.io.resume).not.toHaveBeenCalled();
@@ -52,7 +52,7 @@ it("auth departure masks current facts and disables original-status observation 
  fireEvent.click(screen.getByRole("button",{name:"Pause new work"}));await screen.findByText(/original request outcome is unresolved/);
  bound.ref.current={...bound.ref.current,canRead:false,generation:"2"};
  view.rerender(<ProjectAdmissionPanel {...p} canRead={false} sourceGeneration="2"/>);
- expect((screen.getByRole("button",{name:"Check original request"}) as HTMLButtonElement).disabled).toBe(true);
+ expect((screen.getByRole("button",{name:"Check original project request"}) as HTMLButtonElement).disabled).toBe(true);
  expect(screen.queryByText(selection.work_ref)).toBeNull();expect(screen.queryByRole("button",{name:"Pause new work"})).toBeNull();
  expect(bound.io.status).not.toHaveBeenCalled();expect(await bound.store.read(fixture.open.owner_context.principal_scope)).not.toBeNull();
 });

@@ -64,11 +64,7 @@ POST_ROUTES = PRE_PROJECT_ADMISSION_POST_ROUTES + PROJECT_ADMISSION_POST_ROUTES
 PRE_SOURCE_CONTEXT_GET_ROUTES = GET_ROUTES
 SOURCE_CONTEXT_GET_ROUTES = PRE_SOURCE_CONTEXT_GET_ROUTES + ("/workspace/source-operation/context",)
 SOURCE_OPERATION_GET_ROUTE = ("/workspace/source-operation/operation",)
-PRE_JOURNEY_GET_ROUTES = SOURCE_CONTEXT_GET_ROUTES + SOURCE_OPERATION_GET_ROUTE
-PRE_JOURNEY_POST_ROUTES = POST_ROUTES
-GET_ROUTES = PRE_JOURNEY_GET_ROUTES + ("/workspace/source-operation/options",)
-PROJECT_PLANNING_POST_ROUTES = tuple("/os/executive/project-planning/"+name for name in ("submit","status","result","consume","prepare_proposal"))
-POST_ROUTES = PRE_JOURNEY_POST_ROUTES + PROJECT_PLANNING_POST_ROUTES
+GET_ROUTES = SOURCE_CONTEXT_GET_ROUTES + SOURCE_OPERATION_GET_ROUTE
 # Dedicated source-operation command POSTs. Source commands are separately
 # granted downstream; these edge paths confer no authority of their own and
 # stay out of POST_ROUTES so the legacy branch matcher is never widened.
@@ -80,6 +76,22 @@ SOURCE_POST_ROUTES = (
 # bytes; only the dedicated source branch admits the larger legitimate
 # 32KiB UTF-8 text uploads with JSON escaping.
 SOURCE_MAX_BODY = 98304
+# Accepted project controls extend the current exact source-operation profile.
+# Keep each predecessor's complete GET/POST pair; route presence grants nothing.
+PRE_PROJECT_INSTRUCTIONS_GET_ROUTES = GET_ROUTES
+PRE_INSTRUCTION_ADMISSION_GET_ROUTES = PRE_PROJECT_INSTRUCTIONS_GET_ROUTES + ("/workspace/project-instructions/current",)
+PRE_INSTRUCTION_ADMISSION_POST_ROUTES = POST_ROUTES
+PRE_PROJECT_ACCESS_GET_ROUTES = PRE_INSTRUCTION_ADMISSION_GET_ROUTES + (
+    "/workspace/instruction-admission/current", "/workspace/instruction-admission/operation")
+GET_ROUTES = PRE_PROJECT_ACCESS_GET_ROUTES + ("/workspace/project-access/current",)
+POST_ROUTES = PRE_INSTRUCTION_ADMISSION_POST_ROUTES + ("/workspace/instruction-admission/pause",)
+
+PRE_JOURNEY_GET_ROUTES = GET_ROUTES
+PRE_JOURNEY_POST_ROUTES = POST_ROUTES
+GET_ROUTES = PRE_JOURNEY_GET_ROUTES + ("/workspace/source-operation/options",)
+PROJECT_PLANNING_POST_ROUTES = tuple("/os/executive/project-planning/"+name for name in ("submit","status","result","consume","prepare_proposal"))
+POST_ROUTES = PRE_JOURNEY_POST_ROUTES + PROJECT_PLANNING_POST_ROUTES
+
 # Preserve exactly the profiles admitted by the two predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
 # partial upgrades, wildcards and extra paths cannot become transition inputs.
@@ -99,10 +111,13 @@ TRANSITION_ROUTE_PROFILES = (
     (PRE_PROJECT_SESSION_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES),
     (PRE_DIRECTION_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES),
     (PRE_PROJECT_ADMISSION_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES),
-    (PRE_ARCHIVE_GET_ROUTES, PRE_JOURNEY_POST_ROUTES),
-    (PRE_PROJECT_KNOWLEDGE_GET_ROUTES, PRE_JOURNEY_POST_ROUTES),
-    (PRE_SOURCE_CONTEXT_GET_ROUTES, PRE_JOURNEY_POST_ROUTES),
-    (SOURCE_CONTEXT_GET_ROUTES, PRE_JOURNEY_POST_ROUTES),
+    (PRE_ARCHIVE_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
+    (PRE_PROJECT_KNOWLEDGE_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
+    (PRE_SOURCE_CONTEXT_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
+    (SOURCE_CONTEXT_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
+    (PRE_PROJECT_INSTRUCTIONS_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
+    (PRE_INSTRUCTION_ADMISSION_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
+    (PRE_PROJECT_ACCESS_GET_ROUTES, PRE_JOURNEY_POST_ROUTES),
     (PRE_JOURNEY_GET_ROUTES, PRE_JOURNEY_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )

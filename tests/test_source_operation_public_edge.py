@@ -157,7 +157,7 @@ def test_legacy_three_branch_transition():
 
 def test_legacy_five_branch_mcp_transition():
     get_paths = list(edge.SOURCE_CONTEXT_GET_ROUTES) + list(CURRENT_ROUTES)
-    cfg = _fullconfig(_inner(RELAY, get_paths, list(edge.POST_ROUTES), mcp=True))
+    cfg = _fullconfig(_inner(RELAY, get_paths, list(edge.PRE_INSTRUCTION_ADMISSION_POST_ROUTES), mcp=True))
     final = _final(cfg)
     inner = _inner_of(final)
     assert len(inner) == 6
@@ -189,11 +189,11 @@ def test_current_six_branch_idempotent_transition():
     final = _final(observed, current=CANDIDATE_MANIFEST, candidate=CANDIDATE_MANIFEST)
     assert transition._canonical(final) == transition._canonical(observed)
     staged = _final(_fullconfig(_inner(RELAY, list(edge.SOURCE_CONTEXT_GET_ROUTES) + list(CURRENT_ROUTES),
-                                       list(edge.POST_ROUTES))))
+                                       list(edge.PRE_INSTRUCTION_ADMISSION_POST_ROUTES))))
     again = _final(staged, current=CANDIDATE_MANIFEST, candidate=CANDIDATE_MANIFEST)
     assert transition._canonical(staged) == transition._canonical(again)
     plan_a = _plan(_fullconfig(_inner(RELAY, list(edge.SOURCE_CONTEXT_GET_ROUTES) + list(CURRENT_ROUTES),
-                                      list(edge.POST_ROUTES))))
+                                      list(edge.PRE_INSTRUCTION_ADMISSION_POST_ROUTES))))
     plan_b = _plan(staged, current=CANDIDATE_MANIFEST)
     assert (plan_a["bindings"]["final_fullconfig_sha256"]
             == plan_b["bindings"]["final_fullconfig_sha256"])
@@ -226,12 +226,13 @@ def test_body_caps_unchanged_and_dedicated():
 def test_get_route_coherence():
     assert edge.GET_ROUTES.count("/workspace/source-operation/context") == 1
     assert edge.GET_ROUTES.count("/workspace/source-operation/operation") == 1
-    assert edge.GET_ROUTES[-1] == "/workspace/source-operation/operation"
-    assert edge.SOURCE_CONTEXT_GET_ROUTES == tuple(edge.GET_ROUTES[:-1])
+    assert edge.PRE_PROJECT_INSTRUCTIONS_GET_ROUTES[-1] == "/workspace/source-operation/operation"
+    assert edge.SOURCE_CONTEXT_GET_ROUTES == tuple(edge.PRE_PROJECT_INSTRUCTIONS_GET_ROUTES[:-1])
     profiles = edge.TRANSITION_ROUTE_PROFILES
     assert profiles[-1] == (edge.GET_ROUTES, edge.POST_ROUTES)
-    assert (edge.SOURCE_CONTEXT_GET_ROUTES, edge.POST_ROUTES) in profiles
-    assert edge.POST_ROUTES[-6:] == edge.CONTROL_ROOM_ACTION_ROUTES + edge.PROJECT_ADMISSION_POST_ROUTES
+    assert (edge.SOURCE_CONTEXT_GET_ROUTES, edge.PRE_INSTRUCTION_ADMISSION_POST_ROUTES) in profiles
+    assert edge.PRE_INSTRUCTION_ADMISSION_POST_ROUTES[-6:] == edge.CONTROL_ROOM_ACTION_ROUTES + edge.PROJECT_ADMISSION_POST_ROUTES
+    assert edge.POST_ROUTES[-1:] == ("/workspace/instruction-admission/pause",)
     assert not set(edge.SOURCE_POST_ROUTES) & set(edge.POST_ROUTES)
     template = edge._TEMPLATE.read_text(encoding="utf-8")
     get_line = "path " + " ".join(edge.GET_ROUTES) + " __ASSET_PATHS__"
@@ -336,7 +337,7 @@ def test_stage_receipt_and_exclusive_creation():
 
 def test_stage_transition_and_prepare_check():
     cfg = _fullconfig(_inner(RELAY, list(edge.SOURCE_CONTEXT_GET_ROUTES) + list(CURRENT_ROUTES),
-                             list(edge.POST_ROUTES)))
+                             list(edge.PRE_INSTRUCTION_ADMISSION_POST_ROUTES)))
     plan = _plan(cfg)
     prepared = _prepare(cfg)
     final = _final(cfg)

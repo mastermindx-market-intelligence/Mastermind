@@ -6,7 +6,7 @@ import {cleanup,fireEvent,render,screen,within,waitFor} from '@testing-library/r
 import {bindMissionHost,createNativeClient} from '../../host';
 import {ProjectKnowledgeLibrary} from './ProjectKnowledgeLibrary';
 import {validate_catalogue,validate_memory,validate_source,type KnowledgeLibrarySourceOwner} from './knowledge-library-contract';
-import {validateProjectDataObservation} from './project-data-observation';
+import {validateKnowledgeReadMetadata,validateProjectDataObservation} from './project-data-observation';
 import {searchProjectFiles} from '../../discovery/project-file-search';
 import {readProjectFileMatchSource} from '../../discovery/project-file-open';
 import {emptyDrafts,readDraft,readDraftRevision,readDraftInsertion,appendDraftSource,undoDraftSource,type DraftSource} from '../../conversations/drafts';
@@ -124,4 +124,85 @@ it('qualified first-N source metadata still reaches the genuine same-work unsent
  expect(readDraft(drafts,context)).toContain(fixture.source.document.content_utf8);
  expect(readDraftInsertion(drafts,context)!.source.label).toContain(fixture.catalogue.source.commit);
  expect(readDraftInsertion(drafts,context)!.source.label).not.toContain('JOB-999');
+});
+const fixtureObservation=fixture.data_observation;
+function continuityInner(overrides:Record<string,unknown>={}):Record<string,unknown>{
+ return {schema:'mastermind.project_data_continuity.v1',kind:'UNCHANGED_SELECTED_PROJECT_DATA',work_ref:work,
+  principal_scope:fixtureObservation.source_operation.principal_scope,executable_macro_commit:fixtureObservation.executable_macro_commit,
+  canonical_data_commit:fixtureObservation.canonical_data_commit,reader_closure_sha256:fixtureObservation.reader_closure_sha256,
+  selected_data_closure_sha256:'e'.repeat(64),ancestry:'CODE_ANCESTOR_OF_DATA',...overrides};
+}
+function continuityObservation(baseOverrides:Record<string,unknown>={},innerOverrides:Record<string,unknown>={}):Record<string,unknown>{
+ const raw=clone(fixtureObservation) as Record<string,unknown>;
+ raw.source_operation=null;raw.publication_recorded_at_ms=null;raw.publication_time=null;
+ raw.data_continuity=continuityInner(innerOverrides);
+ return {...raw,...baseOverrides};
+}
+it('accepts a closed data_continuity frame joined to the same work, principal, reader closure and both commits',()=>{
+ const observation=validateProjectDataObservation(continuityObservation(),{workRef:work});
+ expect(observation.source_operation).toBeNull();expect(observation.publication_recorded_at_ms).toBeNull();
+ const continuity=observation.data_continuity!;
+ expect(continuity.work_ref).toBe(work);
+ expect(continuity.principal_scope).toBe(fixtureObservation.source_operation.principal_scope);
+ expect(continuity.executable_macro_commit).toBe(observation.executable_macro_commit);
+ expect(continuity.canonical_data_commit).toBe(observation.canonical_data_commit);
+ expect(continuity.executable_macro_commit).not.toBe(continuity.canonical_data_commit);
+ expect(continuity.reader_closure_sha256).toBe(observation.reader_closure_sha256);
+ expect(Object.keys(continuity)).toEqual(['schema','kind','work_ref','principal_scope','executable_macro_commit','canonical_data_commit','reader_closure_sha256','selected_data_closure_sha256','ancestry']);
+ expect(Object.isFrozen(continuity)).toBe(true);expect(Object.isFrozen(observation)).toBe(true);
+});
+it('keeps the legacy identical-C/N shape closed with data_continuity absent',()=>{
+ const raw=clone(fixtureObservation) as Record<string,unknown>;
+ raw.source_operation=null;raw.publication_recorded_at_ms=null;raw.publication_time=null;
+ raw.executable_macro_commit=raw.canonical_data_commit;
+ const observation=validateProjectDataObservation(raw,{workRef:work});
+ expect('data_continuity' in observation).toBe(false);expect(observation.data_continuity).toBeUndefined();
+});
+const continuityNegatives:[string,Record<string,unknown>,Record<string,unknown>][]=[
+ ['wrong-schema',{schema:'mastermind.project_data_continuity.v2'},{}],
+ ['wrong-kind',{kind:'REBUILT_SELECTED_PROJECT_DATA'},{}],
+ ['wrong-ancestry',{ancestry:'DATA_ANCESTOR_OF_CODE'},{}],
+ ['bad-work-format',{work_ref:'WS:demo'},{}],
+ ['short-work',{work_ref:'WS:A'},{}],
+ ['long-work',{work_ref:'WS:'+'A'.repeat(65)},{}],
+ ['foreign-work',{work_ref:'WS:OTHER'},{}],
+ ['inner-code',{executable_macro_commit:fixtureObservation.canonical_data_commit},{}],
+ ['inner-data',{canonical_data_commit:fixtureObservation.executable_macro_commit},{}],
+ ['reader-closure',{reader_closure_sha256:'f'.repeat(64)},{}],
+ ['principal-scope',{principal_scope:'0'.repeat(63)},{}],
+ ['selected-closure',{selected_data_closure_sha256:'E'.repeat(64)},{}],
+ ['inner-extra',{unspecified:'extra'},{}],
+ ['operation-mixed',{},{source_operation:clone(fixtureObservation.source_operation)}],
+ ['clock-mixed',{},{publication_recorded_at_ms:fixtureObservation.publication_recorded_at_ms}],
+ ['code-equals-data',{executable_macro_commit:fixtureObservation.canonical_data_commit,canonical_data_commit:fixtureObservation.canonical_data_commit},{executable_macro_commit:fixtureObservation.canonical_data_commit}],
+];
+it.each(continuityNegatives)('rejects unjoined or malformed data_continuity %s',(_kind,inner,base)=>{
+ expect(()=>validateProjectDataObservation(continuityObservation(base,inner),{workRef:work})).toThrow();
+});
+it('rejects accessor, symbol-keyed, hidden and unrelated extra outer keys around data_continuity',()=>{
+ const accessor=continuityObservation();let hooks=0;
+ Object.defineProperty(accessor,'data_continuity',{enumerable:true,get(){hooks++;return continuityInner();}});
+ expect(()=>validateProjectDataObservation(accessor,{workRef:work})).toThrow();
+ const symbolKeyed=continuityObservation();
+ Object.defineProperty(symbolKeyed.data_continuity as object,Symbol('receipt'),{value:true,enumerable:true,configurable:true,writable:true});
+ expect(()=>validateProjectDataObservation(symbolKeyed,{workRef:work})).toThrow();
+ const hidden=continuityObservation();
+ Object.defineProperty(hidden,'data_continuity',{value:continuityInner(),enumerable:false});
+ expect(()=>validateProjectDataObservation(hidden,{workRef:work})).toThrow();
+ const extra=continuityObservation();extra.extra='unrelated';
+ expect(()=>validateProjectDataObservation(extra,{workRef:work})).toThrow();
+ expect(hooks).toBe(0);
+});
+it('validateKnowledgeReadMetadata joins the continuity work_ref and both commits to the actual read body',()=>{
+ const code=fixtureObservation.executable_macro_commit,data=fixtureObservation.canonical_data_commit;
+ const body:Record<string,unknown>={data_observation:continuityObservation(),
+  code_context:{schema:'mastermind.project_knowledge_code_context.v1',work_ref:work,executable_macro_commit:code,reader_source_commit:reader},source:{commit:data}};
+ const metadata=validateKnowledgeReadMetadata(body,work);
+ expect(metadata.dataObservation!.data_continuity!.work_ref).toBe(work);
+ expect(metadata.dataObservation!.data_continuity!.executable_macro_commit).toBe(code);
+ expect(metadata.dataObservation!.data_continuity!.canonical_data_commit).toBe(data);
+ expect(Object.isFrozen(metadata.dataObservation!.data_continuity)).toBe(true);
+ expect(()=>validateKnowledgeReadMetadata({...body,data_observation:continuityObservation({},{work_ref:'WS:OTHER'})},work)).toThrow();
+ expect(()=>validateKnowledgeReadMetadata({...body,code_context:{schema:'mastermind.project_knowledge_code_context.v1',work_ref:work,executable_macro_commit:data,reader_source_commit:reader}},work)).toThrow();
+ expect(()=>validateKnowledgeReadMetadata({...body,source:{commit:code}},work)).toThrow();
 });

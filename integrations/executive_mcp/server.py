@@ -573,6 +573,10 @@ _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES: tuple[str, ...] = (
     "/workspace/project-admission/current",
     "/workspace/project-admission/operation",
     "/workspace/fabric/status/current",
+    "/workspace/project-access/current",
+    "/workspace/project-instructions/current",
+    "/workspace/instruction-admission/current",
+    "/workspace/instruction-admission/operation",
 )
 _WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
     "/workspace/fabric/catalog/current",
@@ -581,8 +585,12 @@ _WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES: tuple[str, ...] = (
     "/workspace/project-admission/pause",
     "/workspace/project-admission/resume",
 )
+_WORKSPACE_INSTRUCTION_ADMISSION_ACTION_ROUTES: tuple[str, ...] = (
+    "/workspace/instruction-admission/pause",
+)
 _WORKSPACE_ACTION_ROUTES = (
     _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES + _WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES
+    + _WORKSPACE_INSTRUCTION_ADMISSION_ACTION_ROUTES
 )
 
 

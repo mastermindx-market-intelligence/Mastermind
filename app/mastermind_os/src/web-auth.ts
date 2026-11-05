@@ -1,3 +1,5 @@
+import {projectAccessPublicSelection} from "./access/project-access-host";
+import {instructionPublicRequest,instructionQuery,type InstructionPauseRequest} from "./instructions/instruction-host";
 import { projectAdmissionPublicRequest, projectAdmissionQuery, type ProjectAdmissionPauseRequest, type ProjectAdmissionResumeRequest } from "./admission/project-admission-host";
 import { validArchiveCursor } from "./projects/archive/project-archive-continuation";
 import { knowledgeReadSelection } from "./knowledge/library/knowledge-read-port";
@@ -965,6 +967,32 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       signal.removeEventListener("abort", onAbort);
     }
   }
+  /** One explicit original instruction pause; no replay or alternate destination. */
+  async function instructionAdmissionAction(request:InstructionPauseRequest):Promise<unknown>{
+    const payload=instructionPublicRequest("pause",request),ticket=generation,token=tokens.acquisition;
+    if(!payload || !token || !valid("acquisition"))throw new Error("INSTRUCTION_UNAUTHORIZED");
+    const signal=request.signal,controller=new AbortController();let timeout:ReturnType<typeof setTimeout>|undefined;
+    let fail!:(reason:Error)=>void;
+    const interrupted=new Promise<never>((_,reject)=>{fail=reject;});
+    void interrupted.catch(()=>{});
+    const cancel=()=>{controller.abort();fail(new Error("INSTRUCTION_OUTCOME_UNCONFIRMED"));};
+    try {
+      signal.addEventListener("abort",cancel,{once:true});
+      timeout=later(cancel,60_000);if(signal.aborted)cancel();
+      const body=JSON.stringify(payload);if(new TextEncoder().encode(body).length>16_384)throw new Error("INSTRUCTION_REQUEST_INVALID");
+      const exchange=async()=>{
+        if(signal.aborted || controller.signal.aborted || ticket!==generation || !valid("acquisition"))throw new Error("INSTRUCTION_UNAUTHORIZED");
+        const response=await fetchFn(`${ORIGIN}/workspace/instruction-admission/pause`,{method:"POST",redirect:"error",credentials:"omit",cache:"no-store",
+          headers:{Accept:"application/json","Content-Type":"application/json",Authorization:`Bearer ${token.value}`},body,signal:controller.signal});
+        if(!response.ok)throw new Error("INSTRUCTION_REQUEST_FAILED");
+        const result=await boundedJson(response,32_768);
+        if(signal.aborted || controller.signal.aborted || ticket!==generation || tokens.acquisition!==token || !valid("acquisition"))throw new Error("INSTRUCTION_OUTCOME_UNCONFIRMED");
+        return result;
+      };
+      return await Promise.race([exchange(),interrupted]);
+    } finally {if(timeout!==undefined)clear(timeout);signal.removeEventListener("abort",cancel);controller.abort();}
+  }
+
   /**
    * One acquisition-authenticated attempt at a fixed Control Room route.
    * The server owns each action grant. A post-dispatch auth change cannot
@@ -1258,6 +1286,31 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       return read("acquisition", `${ORIGIN}/workspace/fabric/status/current?${new URLSearchParams({
         root_id: selected.rootId, run_id: selected.runId,
       })}`, signal, { cap: 16_384, typedUnavailableSchema: null });
+    },
+    readProjectAccess: request => {
+      const selection=projectAccessPublicSelection(request);
+      if(!selection)return Promise.reject(Error("PROJECT_ACCESS_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/project-access/current?${new URLSearchParams({work_ref:selection.work_ref})}`,request.signal,
+        {cap:16_384,typedUnavailableSchema:"mastermind.workspace_project_access.v1"});
+    },
+    readProjectInstructions: request => {
+      const payload=instructionPublicRequest("content",request);
+      if(!payload)return Promise.reject(Error("INSTRUCTION_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/project-instructions/current?${instructionQuery(payload)}`,request.signal,
+        {cap:32_768,typedUnavailableSchema:"mastermind.workspace_project_instructions.v2"});
+    },
+    readInstructionAdmissionControl: request => {
+      const payload=instructionPublicRequest("current",request);
+      if(!payload)return Promise.reject(Error("INSTRUCTION_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/instruction-admission/current?${instructionQuery(payload)}`,request.signal,
+        {cap:32_768,typedUnavailableSchema:"mastermind.workspace_instruction_admission_control.v1"});
+    },
+    pauseInstructionAdmission: request => instructionAdmissionAction(request),
+    readInstructionAdmissionOperation: request => {
+      const payload=instructionPublicRequest("status",request);
+      if(!payload)return Promise.reject(Error("INSTRUCTION_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/instruction-admission/operation?${instructionQuery(payload)}`,request.signal,
+        {cap:32_768,typedUnavailableSchema:null});
     },
     readProjectAdmissionControl: request => {
       const payload=projectAdmissionPublicRequest("current",request);

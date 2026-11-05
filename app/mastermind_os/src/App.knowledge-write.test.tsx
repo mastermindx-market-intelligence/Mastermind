@@ -3,7 +3,7 @@
  * Programs orientation, credentials and PR APIs are explicit inert seams;
  * this is source composition evidence, never installed/publication proof. */
 import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
-import {afterEach,beforeEach,expect,it,vi} from 'vitest';
+import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {IDBFactory} from 'fake-indexeddb';
 import {App} from './App';
 import {bindMissionHost,createNativeClient} from './host';
@@ -11,12 +11,16 @@ import {createIndexedDbPendingPointerStore} from './orchestration/indexeddb-pend
 import {controlRoomFixture} from './test-fixtures';
 import programs from './fixtures/programs-available-workspace-service.json';
 import rawJourney from './fixtures/knowledge-signed-canonical-journey.json';
-const journey=rawJourney as typeof rawJourney & {context?:unknown;second_context?:unknown;second_source?:typeof rawJourney.source};
+import firstUseJourney from './fixtures/knowledge-first-use-signed-journey.json';
+import {validate_catalogue,validate_memory,validate_source} from './knowledge/library/knowledge-library-contract';
+
 beforeEach(async()=>{
  history.replaceState(null,'','/os/');delete window.MastermindMissionHost;delete (window as any).__TAURI_INTERNALS__;
  const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');vi.stubGlobal('crypto',webcrypto);
 });
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();delete window.MastermindMissionHost;});
+describe.each([{name:'existing signed source publication',data:rawJourney},{name:'first unrelated canonical DATA',data:firstUseJourney}])('$name',({data})=>{
+const journey=data as typeof rawJourney & {context?:unknown;second_context?:unknown;second_source?:typeof rawJourney.source};
 async function setup(){
  let stage:'before'|'proposal'|'N'|'second-proposal'|'N2'='before';
  const room=controlRoomFixture(),row=structuredClone(room.work[0]);
@@ -128,4 +132,34 @@ it('prepares the next genuine edit from N, then searches and opens its actual N2
  expect(e.invoke.mock.calls.filter(([name])=>name==='source_operation_reconcile')).toHaveLength(2);
  expect(journey.before.code_context.executable_macro_commit).toBe(journey.reopened.code_context.executable_macro_commit);
  expect(journey.second_request.source_commit).toBe(journey.after.source!.commit);
+});
+
+});
+
+it('qualifies the actual first-N read frames without inventing an operation or publication clock',()=>{
+ const f=firstUseJourney,work=f.request.work_ref;
+ const catalogue=validate_catalogue(f.before,work),memory=validate_memory(f.before_memory,work);
+ const source=validate_source(f.before_source,work,f.before_source.selection.source_ref);
+ expect(f.initial.source.commit).not.toBe(f.unrelated_commit);
+ expect(f.before.source.commit).toBe(f.unrelated_commit);
+ expect(f.request.source_commit).toBe(f.unrelated_commit);
+ expect(f.preview.preview.source_commit).toBe(f.unrelated_commit);
+ for(const body of [catalogue,memory,source]){
+  const observation=body.dataObservation!;
+  expect(observation.executable_macro_commit).toBe(f.initial.source.commit);
+  expect(observation.canonical_data_commit).toBe(f.unrelated_commit);
+  expect(observation.source_operation).toBeNull();
+  expect(observation.publication_recorded_at_ms).toBeNull();
+  expect(observation.publication_time).toBeNull();
+  expect(observation.data_continuity!.work_ref).toBe(work);
+  expect(observation.data_continuity!.principal_scope).toBe(f.context.owner_context.principal_scope);
+  expect(Object.isFrozen(observation.data_continuity)).toBe(true);
+ }
+ expect(memory.availability).toBe('EMPTY');
+ expect(f.after.data_observation.source_operation.event_id).toBe(f.accepted_status.receipt.event_id);
+ expect(f.reopened.data_observation.source_operation.event_id).toBe(f.second_accepted_status.receipt.event_id);
+ expect(f.accepted_status.receipt.event_id).not.toBe(f.second_accepted_status.receipt.event_id);
+ expect(f.second_request.source_commit).toBe(f.after.source.commit);
+ expect(f.reopened.code_context).toEqual(f.before.code_context);
+ expect(f.second_source.source.commit).toBe(f.reopened.source.commit);
 });

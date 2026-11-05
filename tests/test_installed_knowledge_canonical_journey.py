@@ -49,7 +49,7 @@ def configured(o, identity, tmp_path, monkeypatch):
     return collector, git_owner
 
 
-@pytest.mark.parametrize('mode', ['full', 'read_only', 'write_only', 'v4_write', 'late_revoke', 'revoke_during_write'])
+@pytest.mark.parametrize('mode', ['full', 'first_unrelated', 'first_unqualified_data', 'read_only', 'write_only', 'v4_write', 'late_revoke', 'revoke_during_write'])
 def test_signed_installed_publication_same_reader_and_second_edit(owner, identity, tmp_path,
         monkeypatch, rsa_key, short_socket_root, settings, mode):
     from integrations.mastermind_workspace_app.app import WorkspaceAppConfig, create_workspace_app
@@ -61,6 +61,46 @@ def test_signed_installed_publication_same_reader_and_second_edit(owner, identit
     from tests.test_executive_mcp_app_composition import Sink
     o=owner
     collector, git_owner = configured(o,identity,tmp_path,monkeypatch)
+    if os.environ.get('MM_KNOWLEDGE_FIRST_USE_TRACE'):
+        import time,traceback
+        from control_plane import project_canonical_data as traced
+        from control_plane.workspace_project_git_publisher import FixedProjectGitPublisher
+        counters={'publisher_git':[0,0.0],'collector_git':[0,0.0],'collector_child':[0,0.0]}
+        actual_git=FixedProjectGitPublisher._git
+        def trace_git(self,*args,**kwargs):
+            start=time.monotonic()
+            try:return actual_git(self,*args,**kwargs)
+            finally:
+                counters['publisher_git'][0]+=1;counters['publisher_git'][1]+=time.monotonic()-start
+        monkeypatch.setattr(FixedProjectGitPublisher,'_git',trace_git)
+        actual_runner=collector._runner
+        def trace_runner(argv,**kwargs):
+            start=time.monotonic();kind='collector_git' if str(argv[0])=='git' else 'collector_child'
+            try:return actual_runner(argv,**kwargs)
+            finally:
+                counters[kind][0]+=1;counters[kind][1]+=time.monotonic()-start
+        monkeypatch.setattr(collector,'_runner',trace_runner)
+        fail=traced._fail
+        def trace_fail():
+            traceback.print_stack(limit=12)
+            return fail()
+        monkeypatch.setattr(traced,'_fail',trace_fail)
+        actual_read=InstalledCanonicalProjectData.read_knowledge
+        def trace_read(self,*args,**kwargs):
+            start=time.monotonic()
+            baseline={k:list(v) for k,v in counters.items()}
+            try:
+                result=actual_read(self,*args,**kwargs)
+                print('ACTUAL_DATA_READ',kwargs.get('operation'),time.monotonic()-start,
+                    None if result is None else result[0].get('availability'),flush=True)
+                return result
+            except Exception:
+                print('ACTUAL_DATA_READ_FAILED',kwargs.get('operation'),time.monotonic()-start,flush=True)
+                traceback.print_exc();raise
+            finally:
+                print('ACTUAL_DATA_COMPONENTS',kwargs.get('operation'),
+                    {k:[v[0]-baseline[k][0],round(v[1]-baseline[k][1],4)] for k,v in counters.items()},flush=True)
+        monkeypatch.setattr(InstalledCanonicalProjectData,'read_knowledge',trace_read)
     async def run():
         auth, token = _authenticator(rsa_key), _workspace_token(rsa_key)
         who=await auth.verify_authorization_header('Bearer '+token,now=NOW)
@@ -113,9 +153,9 @@ def test_signed_installed_publication_same_reader_and_second_edit(owner, identit
             headers={'Authorization':'Bearer '+token}
             settlements=[]
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='https://mcp.mastermind-x.com',headers=headers) as client:
-                async def catalogue():
+                async def catalogue(*,allow_unavailable=False):
                     response=await client.get('/workspace/project-knowledge/current',params={'work_ref':'WS:ALPHA'})
-                    assert response.status_code==200,response.text
+                    assert response.status_code==200 or allow_unavailable and response.status_code==503,response.text
                     return response.json()
                 async def prepare(request,action='add_project_file'):
                     return await client.post('/workspace/source-operation/prepare',json={'action':action,'request':request})
@@ -135,14 +175,56 @@ def test_signed_installed_publication_same_reader_and_second_edit(owner, identit
                     assert result.json()['disposition']=='accepted',result.text
                     settlements.append(result.json())
                     return rev_parse(root,'HEAD')
-                before=await catalogue()
+                initial=await catalogue()
+                first_request=copy.deepcopy(o['request'])
+                unrelated_commit=None
+                if mode in {'first_unrelated','first_unqualified_data'}:
+                    root=tmp_path/'unrelated-integrator'
+                    git(tmp_path,'clone',str(o['env'].origin),str(root))
+                    path=root/'docs'/'unrelated-first-use.md'
+                    if mode=='first_unqualified_data':
+                        path=root/'agentos'/'workstreams'/'WS-ALPHA.md'
+                        path.write_text(path.read_text()+'\nUnproved selected project change.\n')
+                    else:
+                        path.parent.mkdir(parents=True,exist_ok=True)
+                        path.write_text('Unrelated canonical documentation before first Knowledge publication.\n')
+                    git(root,'add',str(path.relative_to(root)))
+                    git(root,'commit','-m','Canonical movement before first project publication')
+                    git(root,'push','origin','main')
+                    unrelated_commit=rev_parse(root,'HEAD')
+                    assert all(event.payload.get('kind')!='SOURCE_OBSERVED' for event in o['runtime'].store.list_events())
+                    first_request['source_commit']=unrelated_commit
+                before=await catalogue(allow_unavailable=mode=='first_unqualified_data') if unrelated_commit else initial
+                if mode=='first_unqualified_data':
+                    assert before.get('availability')=='UNAVAILABLE',before
+                    refused=await prepare(first_request)
+                    assert refused.status_code!=200 or refused.json().get('preview',{}).get('state')!='DRAFT_ONLY',refused.text
+                    assert o['pr'].create_calls==0 and o['runtime'].jobs.list_jobs()==[]
+                    return
                 assert before['code_context']['executable_macro_commit']==o['request']['source_commit']
+                before_memory=None;before_source=None
+                if mode=='first_unrelated':
+                    assert before['availability']=='AVAILABLE' and before['source']['commit']==unrelated_commit,before
+                    observation=before['data_observation']
+                    assert observation['canonical_data_commit']==unrelated_commit
+                    assert observation['source_operation'] is None and observation['publication_recorded_at_ms'] is None
+                    assert observation['publication_time'] is None and initial['source']['commit']!=unrelated_commit
+                    memory_response=await client.get('/workspace/project-memory/current',params={'work_ref':'WS:ALPHA'})
+                    assert memory_response.status_code==200,memory_response.text
+                    before_memory=memory_response.json()
+                    selected=next(row for row in before['project']['records'] if row['kind']=='WORKSTREAM')
+                    source_response=await client.get('/workspace/project-source/current',params={'work_ref':'WS:ALPHA',
+                        'source_ref':selected['source_ref'],'expected_revision':selected['revision']})
+                    assert source_response.status_code==200,source_response.text
+                    before_source=source_response.json()
+                    assert before_source['source']['commit']==unrelated_commit
                 context=await client.get('/workspace/source-operation/context',params={'action':'add_project_file','work_ref':'WS:ALPHA'})
                 assert context.status_code==200,context.text
                 context=context.json()
                 assert context['can_inspect'] is True and context['selection']=={'action':'add_project_file','work_ref':'WS:ALPHA'}
-                prepared=await prepare(o['request']);assert prepared.status_code==200,prepared.text
+                prepared=await prepare(first_request);assert prepared.status_code==200,prepared.text
                 preview=prepared.json()
+                assert preview['preview']['source_commit']==first_request['source_commit']
                 if mode=='revoke_during_write':
                     original_create=git_owner.create
                     def revoke_after_pr(*args,**kwargs):
@@ -179,6 +261,9 @@ def test_signed_installed_publication_same_reader_and_second_edit(owner, identit
                 after=await catalogue()
                 assert after['source']['commit']==first and after['code_context']==before['code_context']
                 assert after['data_observation']['canonical_data_commit']==first
+                if mode=='first_unrelated':
+                    assert after['data_observation']['source_operation']['selection']['request_id']==first_request['request_id']
+                    assert after['data_observation']['publication_recorded_at_ms']==settlements[0]['receipt']['recorded_at_ms']
                 row=next(r for r in after['project']['files'] if r['display_name']=='Notes.md')
                 opened=await client.get('/workspace/project-source/current',params={'work_ref':'WS:ALPHA',
                     'source_ref':row['source_ref'],'expected_revision':row['revision']})
@@ -225,7 +310,8 @@ def test_signed_installed_publication_same_reader_and_second_edit(owner, identit
                     from pathlib import Path
                     Path(output).write_text(json.dumps({'schema':'mastermind.knowledge_signed_journey_fixture.v1',
                         'scope':'DISPOSABLE_SOURCE_ONLY_CREDENTIAL_CONFIG_SEAL_AND_PR_SEAMS_INERT',
-                        'context':context,'request':o['request'],'before':before,'preview':preview,'proposal_status':status,
+                        'context':context,'request':first_request,'initial':initial,'unrelated_commit':unrelated_commit,
+                        'before':before,'before_memory':before_memory,'before_source':before_source,'preview':preview,'proposal_status':status,
                         'pr_only_catalogue':pending,'accepted_status':settlements[0],
                         'after':after,'source':opened.json(),'second_request':request,
                         'second_preview':second_preview,'second_proposal_status':second_status,

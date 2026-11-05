@@ -1661,6 +1661,36 @@ describe("canonical accepted Direction fixed Web READ", () => {
 });
 
 import admissionFixture from './admission/fixtures/project-admission-owner.json';
+import instructionFixture from './instructions/fixtures/instruction-owner.json';
+describe('fixed authenticated instruction Web transport',()=>{
+ const selection={work_ref:'WS:ONE',instruction_ref:'INS:DAILY-ONE'},command_id=instructionFixture.status.selection.command_id;
+ const request=()=>({selection,command_id,expected_revision:instructionFixture.current.instruction_revision,expected_source:{...instructionFixture.current.source,repository:'mastermindx-market-intelligence/macro' as const},signal:new AbortController().signal});
+ it('joins owner content/current/status GETs and one explicit fixed-origin instruction pause',async()=>{
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client),signal=request().signal;
+  e.fetcher.mockResolvedValueOnce(response(instructionFixture.project_only_empty));await expect(host.readProjectInstructions!({selection:{work_ref:'WS:ONE'},signal})).resolves.toEqual(instructionFixture.project_only_empty);
+  e.fetcher.mockResolvedValueOnce(response(instructionFixture.current));await expect(host.readInstructionAdmissionControl!({selection,signal})).resolves.toEqual(instructionFixture.current);
+  e.fetcher.mockResolvedValueOnce(response(instructionFixture.unknown));await host.pauseInstructionAdmission!(request());
+  e.fetcher.mockResolvedValueOnce(response(instructionFixture.status));await host.readInstructionAdmissionOperation!({selection,command_id,signal});
+  expect(e.fetcher.mock.calls.map(([url,options])=>[new URL(String(url)).origin,new URL(String(url)).pathname,options?.method])).toEqual([[ORIGIN,'/workspace/project-instructions/current','GET'],[ORIGIN,'/workspace/instruction-admission/current','GET'],[ORIGIN,'/workspace/instruction-admission/pause','POST'],[ORIGIN,'/workspace/instruction-admission/operation','GET']]);
+  const post=e.fetcher.mock.calls[2][1];expect(post).toMatchObject({redirect:'error',credentials:'omit',cache:'no-store'});
+  expect(JSON.parse(String(post?.body))).toEqual({selection,command_id,expected_revision:instructionFixture.current.instruction_revision,expected_source:instructionFixture.current.source});
+  expect(Object.fromEntries(new URL(String(e.fetcher.mock.calls[3][0])).searchParams)).toEqual({...selection,command_id});
+ });
+ it('refuses missing authentication and caller authority before sending',async()=>{
+  const e=setup(),host=bindMissionHost(e.client);await expect(host.pauseInstructionAdmission!(request())).rejects.toThrow();expect(e.fetcher).not.toHaveBeenCalled();
+  await e.login();e.fetcher.mockClear();await expect(host.pauseInstructionAdmission!({...request(),principal:'forged'} as never)).rejects.toThrow();expect(e.fetcher).not.toHaveBeenCalled();
+ });
+ it('withholds a late mutation result on auth departure without resending',async()=>{
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client),late=deferred<Response>();e.fetcher.mockReturnValueOnce(late.promise);
+  const pending=host.pauseInstructionAdmission!(request()),rejected=expect(pending).rejects.toThrow();await host.auth!.signOut();late.resolve(response(instructionFixture.unknown));await rejected;expect(e.fetcher).toHaveBeenCalledTimes(1);
+ });
+ it('keeps the same original request through bounded response and timeout failures',async()=>{
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client);
+  e.fetcher.mockResolvedValueOnce(response({padding:'x'.repeat(32769)}));await expect(host.pauseInstructionAdmission!(request())).rejects.toThrow();expect(e.fetcher).toHaveBeenCalledTimes(1);
+  e.fetcher.mockImplementationOnce(()=>new Promise(()=>{}));const pending=host.pauseInstructionAdmission!(request()),rejected=expect(pending).rejects.toThrow();await vi.advanceTimersByTimeAsync(60_001);await rejected;expect(e.fetcher).toHaveBeenCalledTimes(2);
+  for(const [,options] of e.fetcher.mock.calls)expect(JSON.parse(String(options?.body)).command_id).toBe(command_id);
+ });
+});
 describe('fixed authenticated project admission Web transport',()=>{
  const selection=admissionFixture.open.selection;
  const command_id='mmos-project-pause-'+'a'.repeat(40);
@@ -1766,4 +1796,32 @@ describe("canonical archive continuation Web READ", () => {
     await expect(host.readProjectArchivePage!(request())).rejects.toThrow("PROJECT_ARCHIVE_PAGE_CHANGED");
     expect(e.fetcher).toHaveBeenCalledTimes(1);
   });
+});
+import projectAccessFixture from './access/fixtures/current-grants.json';
+import projectAccessV5Fixture from './access/fixtures/v5-current-grants.json';
+describe('fixed current project access Web read',()=>{
+ const request=()=>({selection:{work_ref:'WS:ONE'},signal:new AbortController().signal});
+ it('uses only fixed Acquisition GET and preserves the bounded unavailable body',async()=>{
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client);
+  e.fetcher.mockResolvedValueOnce(response(projectAccessFixture));
+  await expect(host.readProjectAccess!(request())).resolves.toEqual(projectAccessFixture);
+  const [url,options]=e.fetcher.mock.calls[0];
+  expect(new URL(String(url)).origin).toBe(ORIGIN);expect(new URL(String(url)).pathname).toBe('/workspace/project-access/current');
+  expect(Object.fromEntries(new URL(String(url)).searchParams)).toEqual({work_ref:'WS:ONE'});
+  expect(options).toMatchObject({method:'GET',redirect:'error',credentials:'omit',cache:'no-store'});
+  e.fetcher.mockResolvedValueOnce(response(projectAccessV5Fixture));await expect(host.readProjectAccess!(request())).resolves.toEqual(projectAccessV5Fixture);
+  const unavailable={schema:projectAccessFixture.schema,selection:projectAccessFixture.selection,availability:'UNAVAILABLE',source:null,membership:null,declaration:null,grants:null,reason_codes:['SOURCE_UNAVAILABLE']};
+  e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(unavailable),{status:503,headers:{'Content-Type':'application/json'}}));
+  await expect(host.readProjectAccess!(request())).resolves.toEqual(unavailable);
+ });
+ it('refuses login absence, extra selector and oversized grant bodies without a second request',async()=>{
+  const e=setup(),host=bindMissionHost(e.client);await expect(host.readProjectAccess!(request())).rejects.toThrow();expect(e.fetcher).not.toHaveBeenCalled();
+  await e.login();e.fetcher.mockClear();await expect(host.readProjectAccess!({...request(),principal:'forged'} as never)).rejects.toThrow();expect(e.fetcher).not.toHaveBeenCalled();
+  e.fetcher.mockResolvedValueOnce(response({padding:'x'.repeat(16385)}));await expect(host.readProjectAccess!(request())).rejects.toThrow();expect(e.fetcher).toHaveBeenCalledTimes(1);
+ });
+ it('withholds late access facts after sign-out with no retry',async()=>{
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client),late=deferred<Response>();e.fetcher.mockReturnValueOnce(late.promise);
+  const pending=host.readProjectAccess!(request()),rejected=expect(pending).rejects.toThrow();await host.auth!.signOut();late.resolve(response(projectAccessFixture));await rejected;
+  expect(e.fetcher).toHaveBeenCalledTimes(1);
+ });
 });

@@ -500,7 +500,7 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Journal source-only read composition: exact unchanged action-handler AST and
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'dfb287e7a5439f8766d7966e25480b12c63045c55705dd8ee4b237272490c598', 'sites': ((871, 71, 74, 'int', '400'), (882, 71, 74, 'int', '403'), (890, 71, 74, 'int', '400'), (896, 79, 82, 'int', '400'), (905, 71, 74, 'int', '400'), (915, 71, 74, 'int', '403'), (920, 76, 79, 'int', '503'), (926, 71, 74, 'int', '403'))}
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '3c88aa6556875d3134137805b935bc14dddd4804ebea3cbc4fab34091075ad78', 'sites': ((875, 71, 74, 'int', '400'), (886, 71, 74, 'int', '403'), (894, 71, 74, 'int', '400'), (900, 79, 82, 'int', '400'), (909, 71, 74, 'int', '400'), (919, 71, 74, 'int', '403'), (924, 76, 79, 'int', '503'), (930, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -541,7 +541,25 @@ REVIEWED_FILES['app/mastermind_os/src/projects/archive/project-archive-continuat
 
 # Exact Knowledge path/generation bounds and inert synthetic PR fixture numbers.
 # These are not OS identities; full-source drift exposes every token again.
-REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-data-observation.ts'] = {'sha256': 'a37c6ee216bb52b81800ac43e045d208e0578988bf78075d776bf6e94e145df8', 'sites': ((59, 97, 100, 'int', '512'),)}
+REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-data-observation.ts'] = {'sha256': '8255d63192da282f52f0f81e2963aa6ff3084e5065d60e8516d483fab3122b79', 'sites': ((91, 97, 100, 'int', '512'),)}
 REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-knowledge-port.ts'] = {'sha256': '9a41d0f5bafef2ab8168509aaf3ff7e37369b619230c2c380bedb2b586d7eaf2', 'sites': ((46, 64, 67, 'int', '512'),)}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-data-observation-owner.json'] = {'sha256': 'd12878bdff07fcdb6bfa05ba2c1694c7600416c7407a9e84e87e20dcc116f118', 'sites': ((119, 16, 19, 'int', '401'),)}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-write-owner.json'] = {'sha256': 'cb6d4c43fc821993f664a9bc75ccf3f38d76bbaff58e36363c6e700b7e3b6856', 'sites': ((97, 22, 25, 'int', '401'), (413, 22, 25, 'int', '402'))}
+
+# PR1917 source review5761933327 at63d184218e8d6a2b7da48f98045a2e67f504f5aa:
+# default HTTPS port in the exact parsed-origin condition, not a UID/GID.
+# Existing full-file SHA + token-span verification binds this one Constant;
+# any source/path/context drift restores the ordinary D8 scanner. This does
+# not change the URL/port policy or the separate reviewed Squid ACL exception.
+REVIEWED_FILES['integrations/hermes_secretary/tab_sweep.py'] = {
+    'sha256': '12d2c8f059f941eb908cc9d7ec3651763f8102832e05435118ce8e1385d5fd46',
+    'sites': ((19, 77, 80, 'int', '443'),),
+}
+
+# NEXT accepted source: callback input bound / existing HTTP permission denial,
+# never an OS identity. Exact whole-source hash and token sites only.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'sha256': '721dd74cbd6a4e534b13a27166b2ab005af33b5693d982ee6725d7a7959ba3ee', 'sites': ((731, 49, 52, 'int', '512'),)}
+
+# NEXT accepted source: callback input bound / existing HTTP permission denial,
+# never an OS identity. Exact whole-source hash and token sites only.
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '6d7fc6e04b43006e3f5cd87d8a157b28938c73e11e375353de4f7066dbe5ee21', 'sites': ((703, 93, 96, 'int', '403'), (705, 56, 59, 'int', '403'), (712, 46, 49, 'int', '403'), (713, 56, 59, 'int', '403'))}

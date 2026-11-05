@@ -1,6 +1,6 @@
 /** Closed owner-observed CODE/DATA provenance. No permission, currentness,
  * clock acquisition, network, source selection or operation effect lives here. */
-export interface CanonicalProjectDataObservation {
+export interface CanonicalProjectDataObservation{
  readonly schema:'mastermind.canonical_project_data_observation.v1';
  readonly repository:'mastermindx-market-intelligence/macro'; readonly default_ref:string;
  readonly executable_macro_commit:string;readonly canonical_data_commit:string;
@@ -10,15 +10,27 @@ export interface CanonicalProjectDataObservation {
   principal_scope:string;request_sha256:string;recipe_fingerprint_sha256:string;event_id:number;receipt_sha256:string;recorded_at_ms:number;
   sources:readonly Readonly<{repository:'macro';commit:string;path:string;content_sha256:string}>[]}>;
  readonly reader_closure_sha256:string;readonly code_config_relation:'IDENTICAL_READER_CLOSURE';readonly authority:'OBSERVATION_ONLY';
+ readonly data_continuity?:ProjectDataContinuity;
+}
+/** Closed continuity frame for selected DATA unchanged across a CODE-only move:
+ * the same work, principal, reader closure and both exact commits, emitted
+ * beside its observation. No authority, publication or Event is inferred here. */
+export interface ProjectDataContinuity{
+ readonly schema:'mastermind.project_data_continuity.v1';readonly kind:'UNCHANGED_SELECTED_PROJECT_DATA';
+ readonly work_ref:string;readonly principal_scope:string;
+ readonly executable_macro_commit:string;readonly canonical_data_commit:string;
+ readonly reader_closure_sha256:string;readonly selected_data_closure_sha256:string;
+ readonly ancestry:'CODE_ANCESTOR_OF_DATA';
 }
 function invalid():never{throw new Error('INVALID_CANONICAL_DATA_OBSERVATION');}
-function record(value:unknown,keys:readonly string[]):Record<string,unknown>{
+function record(value:unknown,keys:readonly string[],optional:readonly string[]=[]):Record<string,unknown>{
  if(!value||typeof value!=='object'||Array.isArray(value))invalid();
  const proto=Object.getPrototypeOf(value);if(proto!==Object.prototype&&proto!==null)invalid();
  const own=Reflect.ownKeys(value);
- if(own.length!==keys.length||own.some(key=>typeof key!=='string'||!keys.includes(key)))invalid();
+ if(own.length<keys.length||own.length>keys.length+optional.length||own.some(key=>typeof key!=='string'||(!keys.includes(key)&&!optional.includes(key))))invalid();
  const out:Record<string,unknown>={};
  for(const key of keys){const d=Object.getOwnPropertyDescriptor(value,key);if(!d||!d.enumerable||!('value' in d))invalid();out[key]=d.value;}
+ for(const key of optional){if(!own.includes(key))continue;const d=Object.getOwnPropertyDescriptor(value,key);if(!d||!d.enumerable||!('value' in d))invalid();out[key]=d.value;}
  return out;
 }
 function hex(value:unknown,length:number):string{if(typeof value!=='string'||value.length!==length||!/^[0-9a-f]+$/.test(value))invalid();return value;}
@@ -34,19 +46,39 @@ function stamp(value:unknown):string{
  if(date.getUTCMonth()!==+m[2]!-1||date.getUTCDate()!==+m[3]!)invalid();return value;
 }
 function freeze<T>(value:T):T{if(value&&typeof value==='object'){Object.values(value).forEach(freeze);Object.freeze(value);}return value;}
+/** Closed continuity qualification: exact fixed fields, valid WS work, 64-hex
+ * principal and closures, and C/N/reader_closure joins to its own observation
+ * with C!=N. Never inferred from the DATA, build SHA, clock or authority. */
+function validateDataContinuity(raw:unknown,code:string,data:string,reader:string,workRef:string|undefined):ProjectDataContinuity{
+ const value=record(raw,['schema','kind','work_ref','principal_scope','executable_macro_commit','canonical_data_commit','reader_closure_sha256','selected_data_closure_sha256','ancestry']);
+ if(value.schema!=='mastermind.project_data_continuity.v1'||value.kind!=='UNCHANGED_SELECTED_PROJECT_DATA'||value.ancestry!=='CODE_ANCESTOR_OF_DATA')invalid();
+ if(typeof value.work_ref!=='string'||/^WS:[A-Z0-9]+(?:-[A-Z0-9]+)*$/.exec(value.work_ref)?.[0]!==value.work_ref||value.work_ref.length<5||value.work_ref.length>67||(workRef!==undefined&&value.work_ref!==workRef))invalid();
+ const innerCode=hex(value.executable_macro_commit,40),innerData=hex(value.canonical_data_commit,40);
+ if(innerCode!==code||innerData!==data||innerCode===innerData)invalid();
+ if(hex(value.reader_closure_sha256,64)!==reader)invalid();
+ return freeze({schema:'mastermind.project_data_continuity.v1',kind:'UNCHANGED_SELECTED_PROJECT_DATA',work_ref:value.work_ref,
+  principal_scope:hex(value.principal_scope,64),executable_macro_commit:innerCode,canonical_data_commit:innerData,
+  reader_closure_sha256:reader,selected_data_closure_sha256:hex(value.selected_data_closure_sha256,64),ancestry:'CODE_ANCESTOR_OF_DATA'});
+}
 /** expectedExecutable is an actual pinned App/owner CODE coordinate, never a
  * value inferred from this observation. Omission performs shape qualification
  * only (e.g. fixed host parsing); consumers must separately bind CODE scope. */
 export function validateProjectDataObservation(raw:unknown,expected:{workRef?:string;canonicalDataCommit?:string;executableMacroCommit?:string}={}):CanonicalProjectDataObservation{
  try{
-  const value=record(raw,['schema','repository','default_ref','executable_macro_commit','canonical_data_commit','canonical_commit_at','canonical_observed_at_ms','publication_recorded_at_ms','publication_time','source_operation','reader_closure_sha256','code_config_relation','authority']);
+  const value=record(raw,['schema','repository','default_ref','executable_macro_commit','canonical_data_commit','canonical_commit_at','canonical_observed_at_ms','publication_recorded_at_ms','publication_time','source_operation','reader_closure_sha256','code_config_relation','authority'],['data_continuity']);
   if(value.schema!=='mastermind.canonical_project_data_observation.v1'||value.repository!=='mastermindx-market-intelligence/macro'||value.publication_time!==null||value.code_config_relation!=='IDENTICAL_READER_CLOSURE'||value.authority!=='OBSERVATION_ONLY')invalid();
-  const code=hex(value.executable_macro_commit,40),data=hex(value.canonical_data_commit,40);
+  const code=hex(value.executable_macro_commit,40),data=hex(value.canonical_data_commit,40),reader=hex(value.reader_closure_sha256,64);
   if((expected.executableMacroCommit!==undefined&&code!==expected.executableMacroCommit)||(expected.canonicalDataCommit!==undefined&&data!==expected.canonicalDataCommit))invalid();
   const observed=integer(value.canonical_observed_at_ms,1),publication=value.publication_recorded_at_ms===null?null:integer(value.publication_recorded_at_ms);
   let operation:CanonicalProjectDataObservation['source_operation']=null;
-  if(value.source_operation===null){if(publication!==null||code!==data)invalid();}
+  let continuity:ProjectDataContinuity|undefined;
+  if(value.source_operation===null){
+   if(publication!==null)invalid();
+   if(!Object.hasOwn(value,'data_continuity')){if(code!==data)invalid();}
+   else{if(code===data)invalid();continuity=validateDataContinuity(value.data_continuity,code,data,reader,expected.workRef);}
+  }
   else{
+   if(Object.hasOwn(value,'data_continuity'))invalid();
    const op=record(value.source_operation,['selection','principal_scope','request_sha256','recipe_fingerprint_sha256','event_id','receipt_sha256','recorded_at_ms','sources']);
    const selected=record(op.selection,['action','request_id','work_ref']);
    const prefix=selected.action==='add_project_file'?'mmos-project-file-add-':selected.action==='set_project_communication_preference'?'mmos-project-preference-set-':invalid();
@@ -64,10 +96,11 @@ export function validateProjectDataObservation(raw:unknown,expected:{workRef?:st
     principal_scope:hex(op.principal_scope,64),request_sha256:hex(op.request_sha256,64),recipe_fingerprint_sha256:hex(op.recipe_fingerprint_sha256,64),
     event_id:integer(op.event_id,1),receipt_sha256:hex(op.receipt_sha256,64),recorded_at_ms:recorded,sources};
   }
-  return freeze({schema:'mastermind.canonical_project_data_observation.v1',repository:'mastermindx-market-intelligence/macro',default_ref:path(value.default_ref,200),
+  const observation:CanonicalProjectDataObservation={schema:'mastermind.canonical_project_data_observation.v1',repository:'mastermindx-market-intelligence/macro',default_ref:path(value.default_ref,200),
    executable_macro_commit:code,canonical_data_commit:data,canonical_commit_at:stamp(value.canonical_commit_at),canonical_observed_at_ms:observed,
-   publication_recorded_at_ms:publication,publication_time:null,source_operation:operation,reader_closure_sha256:hex(value.reader_closure_sha256,64),
-   code_config_relation:'IDENTICAL_READER_CLOSURE',authority:'OBSERVATION_ONLY'});
+   publication_recorded_at_ms:publication,publication_time:null,source_operation:operation,reader_closure_sha256:reader,
+   code_config_relation:'IDENTICAL_READER_CLOSURE',authority:'OBSERVATION_ONLY'};
+  return freeze(continuity?{...observation,data_continuity:continuity}:observation);
  }catch{invalid();}
 }
 
