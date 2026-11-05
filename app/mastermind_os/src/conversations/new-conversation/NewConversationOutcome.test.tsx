@@ -2,6 +2,7 @@
 // Synthetic unit fixtures only: every id, digest, envelope and state below is a
 // labelled "unit" construction for this suite. None is a captured production
 // payload, a real SessionBridge read or a Runtime proof — the parent owns both.
+import type {ReactNode} from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { NewConversationOutcome, FreshConversationInitialResponse } from "./NewConversationOutcome";
@@ -75,6 +76,7 @@ const entry = (locale: "en" | "zh-CN", overrides: {
   onCheck?: () => void;
   onOpen?: () => void;
   onBack?: () => void;
+  continuation?:ReactNode;
 } = {}) =>
   <NewConversationOutcome locale={locale} data={overrides.data ?? null}
     operationState={overrides.operationState ?? null}
@@ -82,7 +84,7 @@ const entry = (locale: "en" | "zh-CN", overrides: {
     projectTitle={overrides.projectTitle ?? null} opened={overrides.opened ?? false}
     busy={overrides.busy ?? false} canOpen={overrides.canOpen ?? true}
     onCheck={overrides.onCheck ?? vi.fn()} onOpen={overrides.onOpen ?? vi.fn()}
-    onBack={overrides.onBack ?? vi.fn()} />;
+    onBack={overrides.onBack ?? vi.fn()} continuation={overrides.continuation} />;
 
 const buttonNames = () => screen.getAllByRole("button").map(button => button.textContent ?? "");
 
@@ -404,4 +406,12 @@ it.each([['en','Check the original request to view its status.'],['zh-CN','请�
   expect(screen.queryByText(/Conversation status is unavailable here|此处暂时无法查看对话状态/)).toBeNull();
   rerender(<NewConversationOutcome locale={locale} data={null} operationState={null} originalMessage={null} projectTitle={null} opened={false} busy={false} canOpen={false} awaitingCheck={false} onCheck={()=>{}} onOpen={()=>{}} onBack={()=>{}}/>);
   expect(screen.getByText(locale==='en'?'Conversation status is unavailable here.':'此处暂时无法查看对话状态。')).toBeTruthy();
+});
+
+it.each(["en","zh-CN"] as const)("opened %s scope follows actual supplied continuation without claiming a reply already exists",locale=>{
+ render(entry(locale,{opened:true,continuation:<p>Actual caller continuation slot</p>}));
+ expect(screen.queryByText(locale==="en"?"Only the initial response is shown here.":"此处仅显示首条回复。")).toBeNull();
+ expect(screen.getByText(locale==="en"?"The first response and any recorded follow-up are shown here.":"此处显示首条回复及已记录的后续回复。")).toBeTruthy();
+ expect(screen.queryByText(locale==="en"?"Further messages are not available in this view yet.":"此视图暂不支持继续发送消息。")).toBeNull();
+ expect(screen.getByText("Actual caller continuation slot")).toBeTruthy();
 });

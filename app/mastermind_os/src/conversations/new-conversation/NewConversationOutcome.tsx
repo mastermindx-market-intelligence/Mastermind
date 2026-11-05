@@ -146,7 +146,8 @@ export function NewConversationOutcome({ locale, data, operationState, originalM
         <h1>{text("Conversation", "对话")}</h1>
         {projectTitle != null && <p className="mm-new-conversation-outcome-subtitle">{projectTitle}</p>}
         <p className="mm-new-conversation-outcome-scope">
-          {text("Only the initial response is shown here.", "此处仅显示首条回复。")}
+          {continuation==null?text("Only the initial response is shown here.", "此处仅显示首条回复。")
+            :text("The first response and any recorded follow-up are shown here.", "此处显示首条回复及已记录的后续回复。")}
         </p>
       </> : <>
         <h1>{text("New conversation", "新建对话")}</h1>
