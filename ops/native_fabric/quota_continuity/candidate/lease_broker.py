@@ -81,12 +81,74 @@ def _application_time(value):
     return float(value)
 
 
+_APPLICATION_HTTP_POOLS = frozenset({"bailian"})
+_APPLICATION_HTTP_RECIPE_FIELDS = frozenset({
+    "schema", "pool", "model", "driver_id", "realm_id", "provider", "protocol",
+    "endpoint", "source_projection_sha256", "credential_owner",
+})
+_APPLICATION_HTTP_RECEIPT_FIELDS = frozenset({
+    "terminal_kind", "recipe_digest", "logical_payload_digest", "wire_body_digest",
+    "delivery_digest", "served_model",
+})
+
+
+def _application_digest(value):
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise ApplicationAdmissionError("invalid_transport_commitment")
+    return value
+
+
+def _application_http_recipe(recipe, *, pool, model):
+    """Commit an owner-projected recipe; the fresh grant supplies authority.
+
+    This does not choose a realm or endpoint. The trusted handler compiles the
+    exact sealed H identity, and the same transaction compares its complete
+    digest with the canonical grant before any account can be admitted.
+    """
+    if (not isinstance(recipe, dict) or set(recipe) != _APPLICATION_HTTP_RECIPE_FIELDS
+            or recipe["schema"] != "mastermind.application_http_recipe.v1"
+            or not isinstance(pool, str) or pool not in _APPLICATION_HTTP_POOLS or recipe["pool"] != pool
+            or recipe["model"] != model or recipe["protocol"] != "responses"
+            or recipe["credential_owner"] != "bailian_keys._codex_key_value"):
+        raise ApplicationAdmissionError("invalid_transport_recipe")
+    for key in ("driver_id", "realm_id", "provider"):
+        _application_id(recipe[key])
+    _application_model(model)
+    _application_digest(recipe["source_projection_sha256"])
+    from urllib.parse import urlsplit
+    endpoint = recipe["endpoint"]
+    if not isinstance(endpoint, str) or len(endpoint) > 1024:
+        raise ApplicationAdmissionError("invalid_transport_recipe")
+    try:
+        parsed = urlsplit(endpoint)
+    except ValueError:
+        raise ApplicationAdmissionError("invalid_transport_recipe") from None
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username is not None
+            or parsed.password is not None or parsed.query or parsed.fragment
+            or not parsed.path.endswith("/responses")
+            or any(ord(c) < 33 or ord(c) > 126 for c in endpoint)):
+        raise ApplicationAdmissionError("invalid_transport_recipe")
+    encoded = _application_json(recipe)
+    return encoded, hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def _application_receipt(receipt):
     """Validate the original handler's final upstream response receipt."""
     fields = {"dispatch_id", "request_digest", "lease_id", "account", "model", "response_digest",
               "status_code", "completed_at", "usage"}
-    if not isinstance(receipt, dict) or set(receipt) != fields:
+    if (not isinstance(receipt, dict)
+            or set(receipt) not in (fields, fields | _APPLICATION_HTTP_RECEIPT_FIELDS)):
         raise ApplicationAdmissionError("invalid_terminal_receipt")
+    if "terminal_kind" in receipt:
+        if receipt["terminal_kind"] != "http_responses_v1":
+            raise ApplicationAdmissionError("invalid_terminal_receipt")
+        for key in ("recipe_digest", "logical_payload_digest", "wire_body_digest"):
+            _application_digest(receipt[key])
+        if receipt["delivery_digest"] is not None:
+            _application_digest(receipt["delivery_digest"])
+        if receipt["served_model"] is not None and (not isinstance(receipt["served_model"], str)
+                or not 1 <= len(receipt["served_model"]) <= 256 or "\x00" in receipt["served_model"]):
+            raise ApplicationAdmissionError("invalid_terminal_receipt")
     for key in ("dispatch_id", "lease_id", "account"):
         _application_id(receipt[key])
     _application_model(receipt["model"])
@@ -116,6 +178,17 @@ def _application_stored_terminal(request, turn):
                 or receipt["request_digest"] != request["request_digest"]
                 or any(receipt[key] != turn[key] for key in ("lease_id", "account", "model"))
                 or receipt["completed_at"] < request["created_at"]):
+            return None
+        if turn["pool"] in _APPLICATION_HTTP_POOLS:
+            _, digest = _application_http_recipe(json.loads(turn["recipe_json"]),
+                                                pool=turn["pool"], model=turn["model"])
+            if (receipt.get("terminal_kind") != "http_responses_v1"
+                    or digest != turn["recipe_digest"]
+                    or receipt["recipe_digest"] != digest
+                    or any(receipt[key] != request[key] for key in (
+                        "recipe_digest", "logical_payload_digest", "wire_body_digest"))):
+                return None
+        elif "terminal_kind" in receipt:
             return None
         return receipt
     except (ValueError, TypeError, KeyError, OverflowError, RecursionError):
@@ -160,15 +233,25 @@ def _read_application_accounts(path):
         _application_json(document)
         seen = set()
         for grant in document["application_grants"]:
-            if not isinstance(grant, dict) or set(grant) != _APPLICATION_GRANT_FIELDS:
+            if not isinstance(grant, dict):
                 raise ApplicationAdmissionError("invalid_application_grant")
+            if not isinstance(grant.get("pool"), str):
+                raise ApplicationAdmissionError("invalid_application_grant")
+            expected_fields = (_APPLICATION_GRANT_FIELDS | {"recipe_digest"}
+                               if grant.get("pool") in _APPLICATION_HTTP_POOLS
+                               else _APPLICATION_GRANT_FIELDS)
+            if set(grant) != expected_fields:
+                raise ApplicationAdmissionError("invalid_application_grant")
+            if "recipe_digest" in grant:
+                _application_digest(grant["recipe_digest"])
             for key in ("grant_id", "principal_id", "credential_ref", "admission_root"):
                 _application_id(grant[key])
             if grant["grant_id"] in seen:
                 raise ApplicationAdmissionError("duplicate_application_grant")
             seen.add(grant["grant_id"])
             if (grant["purpose"] != "APPLICATION" or type(grant["enabled"]) is not bool
-                    or grant["pool"] != "go" or grant["route"] != "/v1/chat/completions"
+                    or grant["pool"] not in ({"go"} | _APPLICATION_HTTP_POOLS)
+                    or grant["route"] != "/v1/chat/completions"
                     or grant["stream"] is not False):
                 raise ApplicationAdmissionError("invalid_application_grant")
             _application_time(grant["expires_at"])
@@ -498,6 +581,41 @@ class Broker:
             CHECK ((state='terminal' AND terminal_receipt IS NOT NULL)
                    OR (state IN ('pending','unknown') AND terminal_receipt IS NULL)),
             PRIMARY KEY (principal_id, turn_id, request_id))""")
+        # Add commitments to the existing owner rows in this same migration
+        # transaction. Historical Go rows stay NULL and retain their v1 proof.
+        for table, additions in (
+                ("application_turns", ("recipe_json", "recipe_digest")),
+                ("application_requests", ("recipe_digest", "logical_payload_digest", "wire_body_digest"))):
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(" + table + ")")}
+            for column in additions:
+                if column not in columns:
+                    conn.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " TEXT")
+        conn.execute("""CREATE TRIGGER IF NOT EXISTS application_http_turn_binding_v1
+            BEFORE UPDATE ON application_turns WHEN OLD.pool='bailian' AND (
+                NEW.principal_id IS NOT OLD.principal_id OR NEW.turn_id IS NOT OLD.turn_id
+                OR NEW.grant_id IS NOT OLD.grant_id OR NEW.grant_digest IS NOT OLD.grant_digest
+                OR NEW.caller_host IS NOT OLD.caller_host OR NEW.workload IS NOT OLD.workload
+                OR NEW.admission_root IS NOT OLD.admission_root OR NEW.pool IS NOT OLD.pool
+                OR NEW.account IS NOT OLD.account OR NEW.model IS NOT OLD.model
+                OR NEW.lease_id IS NOT OLD.lease_id OR NEW.created_at IS NOT OLD.created_at
+                OR NEW.expires_at IS NOT OLD.expires_at OR NEW.max_steps IS NOT OLD.max_steps
+                OR NEW.recipe_json IS NOT OLD.recipe_json OR NEW.recipe_digest IS NOT OLD.recipe_digest)
+            BEGIN SELECT RAISE(IGNORE); END""")
+        conn.execute("""CREATE TRIGGER IF NOT EXISTS application_http_request_binding_v1
+            BEFORE UPDATE ON application_requests WHEN OLD.recipe_digest IS NOT NULL AND (
+                NEW.principal_id IS NOT OLD.principal_id OR NEW.turn_id IS NOT OLD.turn_id
+                OR NEW.request_id IS NOT OLD.request_id OR NEW.request_digest IS NOT OLD.request_digest
+                OR NEW.dispatch_id IS NOT OLD.dispatch_id OR NEW.created_at IS NOT OLD.created_at
+                OR NEW.recipe_digest IS NOT OLD.recipe_digest
+                OR NEW.logical_payload_digest IS NOT OLD.logical_payload_digest
+                OR NEW.wire_body_digest IS NOT OLD.wire_body_digest)
+            BEGIN SELECT RAISE(IGNORE); END""")
+        conn.execute("""CREATE TRIGGER IF NOT EXISTS application_http_turn_delete_v1
+            BEFORE DELETE ON application_turns WHEN OLD.pool='bailian'
+            BEGIN SELECT RAISE(IGNORE); END""")
+        conn.execute("""CREATE TRIGGER IF NOT EXISTS application_http_request_delete_v1
+            BEFORE DELETE ON application_requests WHEN OLD.recipe_digest IS NOT NULL
+            BEGIN SELECT RAISE(IGNORE); END""")
         # Older immutable worker releases also run GC against this same DB.
         # Keep application custody in the canonical schema, where an old PID,
         # TTL or generic release path cannot erase it. IGNORE affects only the
@@ -544,6 +662,50 @@ class Broker:
                             AND (json_type(r.terminal_receipt,'$.usage.output_tokens')='null'
                                  OR (json_type(r.terminal_receipt,'$.usage.output_tokens')='integer'
                                      AND json_extract(r.terminal_receipt,'$.usage.output_tokens') BETWEEN 0 AND 1000000000000))
+                        THEN 0 ELSE 1 END ELSE 1 END=1))
+            BEGIN SELECT RAISE(IGNORE); END""")
+        # The HTTP extension retains every v1 terminal condition and adds its
+        # original recipe/wire binding. An old broker's release/GC cannot turn
+        # a downgraded Go-shaped receipt into proof for a Bailian operation.
+        conn.execute("""CREATE TRIGGER IF NOT EXISTS application_http_lease_release_v2
+            BEFORE UPDATE OF state ON leases WHEN OLD.purpose='APPLICATION'
+            AND OLD.pool='bailian' AND OLD.state IN ('held','rented')
+            AND NEW.state NOT IN ('held','rented')
+            AND NOT EXISTS (
+                SELECT 1 FROM application_turns t WHERE t.lease_id=OLD.id
+                AND t.pool=OLD.pool AND t.account=OLD.account AND t.model=OLD.model
+                AND t.state='closed' AND json_valid(t.recipe_json)=1
+                AND length(t.recipe_digest)=64
+                AND t.recipe_digest NOT GLOB '*[^0-9a-f]*'
+                AND NOT EXISTS (
+                    SELECT 1 FROM application_requests r
+                    WHERE r.principal_id=t.principal_id AND r.turn_id=t.turn_id
+                    AND CASE WHEN r.state='terminal' AND json_valid(r.terminal_receipt)=1 THEN
+                        CASE WHEN json_extract(r.terminal_receipt,'$.terminal_kind')='http_responses_v1'
+                            AND (SELECT count(*) FROM json_each(r.terminal_receipt))=15
+                            AND NOT EXISTS (SELECT 1 FROM json_each(r.terminal_receipt) j
+                                WHERE j.key NOT IN ('dispatch_id','request_digest','lease_id','account','model',
+                                    'response_digest','status_code','completed_at','usage','terminal_kind',
+                                    'recipe_digest','logical_payload_digest','wire_body_digest','delivery_digest','served_model'))
+                            AND (SELECT count(*) FROM json_each(r.terminal_receipt,'$.usage'))=2
+                            AND NOT EXISTS (SELECT 1 FROM json_each(r.terminal_receipt,'$.usage') j
+                                WHERE j.key NOT IN ('input_tokens','output_tokens'))
+                            AND r.recipe_digest=t.recipe_digest
+                            AND json_extract(r.terminal_receipt,'$.recipe_digest')=r.recipe_digest
+                            AND length(r.logical_payload_digest)=64
+                            AND r.logical_payload_digest NOT GLOB '*[^0-9a-f]*'
+                            AND json_extract(r.terminal_receipt,'$.logical_payload_digest')=r.logical_payload_digest
+                            AND length(r.wire_body_digest)=64
+                            AND r.wire_body_digest NOT GLOB '*[^0-9a-f]*'
+                            AND json_extract(r.terminal_receipt,'$.wire_body_digest')=r.wire_body_digest
+                            AND (json_type(r.terminal_receipt,'$.delivery_digest')='null'
+                                 OR (json_type(r.terminal_receipt,'$.delivery_digest')='text'
+                                     AND length(json_extract(r.terminal_receipt,'$.delivery_digest'))=64
+                                     AND json_extract(r.terminal_receipt,'$.delivery_digest') NOT GLOB '*[^0-9a-f]*'))
+                            AND (json_type(r.terminal_receipt,'$.served_model')='null'
+                                 OR (json_type(r.terminal_receipt,'$.served_model')='text'
+                                     AND length(json_extract(r.terminal_receipt,'$.served_model')) BETWEEN 1 AND 256
+                                     AND instr(json_extract(r.terminal_receipt,'$.served_model'),char(0))=0))
                         THEN 0 ELSE 1 END ELSE 1 END=1))
             BEGIN SELECT RAISE(IGNORE); END""")
         wcols = {r[1] for r in conn.execute("PRAGMA table_info(waiters)")}
@@ -1559,7 +1721,7 @@ class Broker:
             _ACQUIRE_DEADLINE_NS.reset(token)
 
     def _application_grant(self, principal_id, caller_host, workload, pool, model,
-                           expected_credential_ref=None):
+                           expected_credential_ref=None, expected_recipe_digest=None):
         document = _read_application_accounts(self.accounts_path)
         now = _application_time(self.now())
         matches = [g for g in document["application_grants"]
@@ -1576,6 +1738,12 @@ class Broker:
         if (expected_credential_ref is not None
                 and grant["credential_ref"] != expected_credential_ref):
             raise ApplicationAdmissionError("credential_ref_mismatch")
+        if pool in _APPLICATION_HTTP_POOLS:
+            _application_digest(expected_recipe_digest)
+            if grant["recipe_digest"] != expected_recipe_digest:
+                raise ApplicationAdmissionError("recipe_mismatch")
+        elif expected_recipe_digest is not None:
+            raise ApplicationAdmissionError("recipe_mismatch")
         digest = hashlib.sha256(_application_json(grant).encode()).hexdigest()
         return document, grant, digest
 
@@ -1601,21 +1769,38 @@ class Broker:
             disposition = ("pending" if all(row["state"] == "pending" for row in unresolved)
                            else "effect_unknown") if unresolved else (
                 "closed" if turn["state"] != "open" else "existing")
-        return {"ok": True, "disposition": disposition,
+        result = {"ok": True, "disposition": disposition,
                 **{key: turn[key] for key in ("principal_id", "turn_id", "grant_id", "grant_digest",
                     "caller_host", "workload", "admission_root", "pool", "account", "model",
                     "lease_id", "created_at", "expires_at", "max_steps", "state")}}
+        if turn["pool"] in _APPLICATION_HTTP_POOLS:
+            if disposition == "closed":
+                lease = conn.execute("SELECT state FROM leases WHERE id=?", (turn["lease_id"],)).fetchone()
+                if turn["state"] != "closed" or lease is None or lease["state"] not in {"released", "expired"}:
+                    disposition = "effect_unknown"
+                    result["disposition"] = disposition
+            result.update(recipe_digest=turn["recipe_digest"], recipe_json=turn["recipe_json"])
+        return result
 
     def begin_application_turn(self, *, principal_id, caller_host, workload, turn_id,
                                pool, model, deadline_ns=None, transport_accounts=None,
-                               expected_credential_ref=None):
+                               expected_credential_ref=None, application_recipe=None,
+                               expected_recipe_digest=None):
         for value in (principal_id, caller_host, workload, turn_id):
             _application_id(value)
         _application_model(model)
         if expected_credential_ref is not None:
             _application_id(expected_credential_ref)
-        if pool != "go":
+        if not isinstance(pool, str) or pool not in ({"go"} | _APPLICATION_HTTP_POOLS):
             raise ApplicationAdmissionError("unsupported_application_pool")
+        recipe_json = recipe_digest = None
+        if pool in _APPLICATION_HTTP_POOLS:
+            _application_id(expected_credential_ref)
+            recipe_json, recipe_digest = _application_http_recipe(application_recipe, pool=pool, model=model)
+            if _application_digest(expected_recipe_digest) != recipe_digest:
+                raise ApplicationAdmissionError("recipe_mismatch")
+        elif application_recipe is not None or expected_recipe_digest is not None:
+            raise ApplicationAdmissionError("recipe_mismatch")
         if transport_accounts is not None:
             if not isinstance(transport_accounts, (set, frozenset, tuple, list)):
                 raise ApplicationAdmissionError("invalid_transport_accounts")
@@ -1633,10 +1818,13 @@ class Broker:
                 if recovered["disposition"] != "existing":
                     return recovered
             document, grant, digest = self._application_grant(
-                principal_id, caller_host, workload, pool, model, expected_credential_ref)
+                principal_id, caller_host, workload, pool, model, expected_credential_ref,
+                expected_recipe_digest)
             if prior is not None:
                 if prior["grant_digest"] != digest:
                     raise ApplicationAdmissionError("grant_changed")
+                if (prior["recipe_digest"] != recipe_digest or prior["recipe_json"] != recipe_json):
+                    raise ApplicationAdmissionError("recipe_changed")
                 if transport_accounts is not None and prior["account"] not in transport_accounts:
                     raise ApplicationAdmissionError("account_unavailable")
                 return self._application_binding(conn, prior)
@@ -1659,10 +1847,10 @@ class Broker:
                 raise ApplicationAdmissionError("grant_expired")
             conn.execute("INSERT INTO application_turns (principal_id,turn_id,grant_id,grant_digest,"
                          "caller_host,workload,admission_root,pool,account,model,lease_id,created_at,"
-                         "expires_at,max_steps,state) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open')",
+                         "expires_at,max_steps,recipe_json,recipe_digest,state) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open')",
                          (principal_id, turn_id, grant["grant_id"], digest, caller_host, workload,
                           grant["admission_root"], pool, result.account, model, result.lease_id,
-                          lease["granted_at"], expires, grant["max_steps"]))
+                          lease["granted_at"], expires, grant["max_steps"], recipe_json, recipe_digest))
             return self._application_binding(conn, self._application_turn(conn, principal_id, turn_id),
                                              disposition="admitted")
 
@@ -1697,15 +1885,31 @@ class Broker:
             turn = self._application_turn(conn, principal_id, turn_id)
             return self._application_prior_request(conn, turn, request_id, request_digest)
 
-    def prepare_application_request(self, *, principal_id, turn_id, request_id, request_digest):
+    def prepare_application_request(self, *, principal_id, turn_id, request_id, request_digest,
+                                    transport_commitment=None):
         self._application_request_identity(principal_id, turn_id, request_id, request_digest)
         with self._application_transaction() as conn:
             turn = self._application_turn(conn, principal_id, turn_id)
             prior = self._application_prior_request(conn, turn, request_id, request_digest)
             if prior is not None:
                 return prior
+            commitment = {}
+            if turn["pool"] in _APPLICATION_HTTP_POOLS:
+                fields = {"recipe_digest", "logical_payload_digest", "wire_body_digest"}
+                if not isinstance(transport_commitment, dict) or set(transport_commitment) != fields:
+                    raise ApplicationAdmissionError("invalid_transport_commitment")
+                commitment = {key: _application_digest(transport_commitment[key]) for key in fields}
+                if commitment["recipe_digest"] != turn["recipe_digest"]:
+                    raise ApplicationAdmissionError("recipe_changed")
+                encoded, digest = _application_http_recipe(json.loads(turn["recipe_json"]),
+                                                          pool=turn["pool"], model=turn["model"])
+                if digest != turn["recipe_digest"] or encoded != turn["recipe_json"]:
+                    raise ApplicationAdmissionError("recipe_changed")
+            elif transport_commitment is not None:
+                raise ApplicationAdmissionError("invalid_transport_commitment")
             document, grant, digest = self._application_grant(principal_id, turn["caller_host"],
-                                                            turn["workload"], turn["pool"], turn["model"])
+                turn["workload"], turn["pool"], turn["model"],
+                expected_recipe_digest=turn["recipe_digest"])
             if digest != turn["grant_digest"]:
                 raise ApplicationAdmissionError("grant_changed")
             lease = conn.execute("SELECT * FROM leases WHERE id=?", (turn["lease_id"],)).fetchone()
@@ -1734,9 +1938,12 @@ class Broker:
             if now >= expires:
                 raise ApplicationAdmissionError("turn_closed")
             dispatch_id = uuid.uuid4().hex
-            conn.execute("INSERT INTO application_requests (principal_id,turn_id,request_id,request_digest,dispatch_id,state,created_at) "
-                         "VALUES (?,?,?,?,?,'pending',?)", (principal_id, turn_id, request_id, request_digest, dispatch_id, now))
-            return {"ok": True, "dispatch_permitted": True, "disposition": "dispatch_permitted",
+            conn.execute("INSERT INTO application_requests (principal_id,turn_id,request_id,request_digest,dispatch_id,state,created_at,"
+                         "recipe_digest,logical_payload_digest,wire_body_digest) "
+                         "VALUES (?,?,?,?,?,'pending',?,?,?,?)", (principal_id, turn_id, request_id,
+                          request_digest, dispatch_id, now, commitment.get("recipe_digest"),
+                          commitment.get("logical_payload_digest"), commitment.get("wire_body_digest")))
+            return {"ok": True, "dispatch_permitted": True, "disposition": "dispatch_permitted", **commitment,
                     "dispatch_id": dispatch_id, "request_digest": request_digest,
                     "expires_at": expires,
                     "lease_id": turn["lease_id"], "pool": turn["pool"], "account": turn["account"], "model": turn["model"]}
@@ -1766,6 +1973,14 @@ class Broker:
             if (receipt["dispatch_id"] != dispatch_id or receipt["request_digest"] != request["request_digest"]
                     or any(receipt[key] != turn[key] for key in ("lease_id", "account", "model"))
                     or not request["created_at"] <= receipt["completed_at"] <= self.now()):
+                raise ApplicationAdmissionError("terminal_conflict")
+            if turn["pool"] in _APPLICATION_HTTP_POOLS:
+                if (receipt.get("terminal_kind") != "http_responses_v1"
+                        or receipt["recipe_digest"] != turn["recipe_digest"]
+                        or any(receipt[key] != request[key] for key in (
+                            "recipe_digest", "logical_payload_digest", "wire_body_digest"))):
+                    raise ApplicationAdmissionError("terminal_conflict")
+            elif "terminal_kind" in receipt:
                 raise ApplicationAdmissionError("terminal_conflict")
             if request["state"] == "terminal":
                 if request["terminal_receipt"] != encoded:

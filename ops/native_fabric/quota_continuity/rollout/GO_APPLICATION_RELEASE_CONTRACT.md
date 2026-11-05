@@ -14,20 +14,43 @@ B source and its three A dependencies. The output is still uninstalled.
 
 The original B102 base manifest was SHA256
 `b4be55f9096985d8292160bc00886e44bfbe0941c095b65973b85ba36998acb6`.
-The independently rebuilt protected composition at
-`cb390bfc5a4b85a59a1005bfd3824305a5a4bfee` is SHA256
-`395b1af90c815125a92c81c8b72ec61065002f4f9e66ad53618794ec790ce429`.
-Its only base-member change is `ext/remote_sub.sh`, from
-`e24d6123ae1c303fe7a72b88c9ae6093979dcf35a9984d7ba16ccb9689700b05`
-to `a1e271170778f992cf07c780234620c22d17f6242581311c414e30dd428ade40`,
-retaining the protected BASH_COMPAT and bounded heredoc self-test fix.
-The three accepted A dependencies and B handler remain unchanged.
-The builder and installer continue requiring the exact rebuilt base digest;
-the resulting 104-member application stage is a new generation and needs fresh
-publication, installation and enrollment proof through the existing owners.
+The earlier protected controller composition was `8062512b10fc5c62b030c3ceb398495e63e6abd35b2018c5008b658f40d2251c`.
+Published `001d972fba87ed2876e50fa73d2e70664f3b968b` composes protected
+`51e9dc043fd9c53bb5e2ed7f43b76de058d73eea` with the accepted application A3.
+Its independently rebuilt 102-member manifest is
+`395b1af90c815125a92c81c8b72ec61065002f4f9e66ad53618794ec790ce429`,
+including protected `remote_sub.sh` SHA256
+`a1e271170778f992cf07c780234620c22d17f6242581311c414e30dd428ade40`.
+
+The current HTTP application extension updates only those three A dependencies
+inside that base, yielding default102 manifest
+`9f7227994f47adca008093b193fc317e183ef1a88740128e246f2695ae9a83a3`.
+Builder and installer share one validator: compare the actual A3 with captured
+reviewed source, substitute only the three explicit historical A3 hashes in a
+copy, and require the exact395b base. Any fourth changed member, missing or
+extra member refuses. The actual target retains current hashes; no historical
+manifest or receipt is rewritten. The 104-member Go application stage needs
+fresh publication, installation and enrollment proof through the same owners.
 The ordinary generation publisher remains the sole publisher. Old descriptors
 retain their three entrypoints and exact generation identities. Partial Go
 closure is invalid.
+
+### Optional sealed HTTP metadata
+
+Add `--include-application-http` together with `--include-go-application` to
+compose exactly three further members: `application_http_transports.py`,
+`application_http_realm_projection.py` and `application_http_realms.v1.json`,
+all flat under `ext/`. A partial group is invalid. No new entrypoint is added.
+
+The compiler accepts three exact historical1fc byte strings. The old H source
+is retained as `source/application_http_transports.py.preimage`, inert AST
+evidence that is never installed or imported. Current H is sealed separately.
+The builder executes and seals the same captured reader bytes, so a stale
+same-path Python module cannot stand in for the compiler. The existing manifest
+binds the resulting projection digest. Native startup validates that digest
+and the complete fixed driver identity without repository imports, credential
+reads, SQLite or network effects. Missing or malformed sealed metadata never
+falls back to a mutable repository owner.
 
 ## Existing finite installer
 
@@ -49,7 +72,7 @@ selection, altered source or a different valid plan do not authorize repair,
 rollback, a new carrier or another apply.
 
 Historical8bc/d044/43e launchers and historical95/102 manifests/receipts keep
-their exact identities. The two retained preimage files are inert source data,
+their exact identities. Retained preimage files are inert source data,
 used only for authentic lineage reconstruction and disposable historical tests.
 
 ## Original process and startup
@@ -77,11 +100,34 @@ external/PID gates. Fresh A grant parsing/authorization remains inside its
 transaction. The existing paid_yaml_runtime.held_yaml owns the exact packaged
 YAML bytes for the serving lifetime; ambient YAML is not adopted.
 
+## HTTP enrollment and original recovery
+
+The existing finite service-enrollment owner also accepts its v2 HTTP
+specification. It commits the source-derived recipe, original account list and
+incumbent `bailian_keys._codex_key_value` profile identity through the same
+publication/broker locks, one private credential, prepared target inodes,
+ordered renames and original completion receipt. It creates no second key,
+grant, retry, queue or publication owner. A changed source recipe is checked
+before fresh enrollment and inside A's fresh admission transaction.
+
+Completed enrollment authenticates its historical binding/intent/receipt and
+recipe independently of the current catalogue. A removed model, expired grant
+or rotated provider credential cannot relabel an original effect. Current H
+binding uses the current verified projection digest. The original request
+recovery occurs before current recipe lookup, credential loading or admission;
+an absent request must satisfy current source and grant. Provider credentials
+are loaded by the existing key owner only on the exact A-selected account,
+before intent and again at send. HTTP effects, serving model and nullable usage
+remain observations in the original A/B receipt; no Go quota or cost ledger is
+used for a Bailian transport.
+
 ## Limits and next activation work
 
 This source does not create an application secret, permission grant, service
 binding registry, model qualification, queue, provider retry or usage owner.
-Completed service enrollment/startup resolution and VPS transport remain
-separate finite owner changes. The source-pinned Go endpoint is not permission
+Service enrollment and VPS transport remain separate finite owner actions.
+In particular, the existing Bailian Token Plan has no qualified backend
+application permission; this source must not activate it or relabel its
+workload/endpoint to escape that restriction. The source-pinned Go endpoint is not permission
 to activate an unqualified model. Actual provider canary, restart/drain proof
 and authenticated consumer/browser acceptance are still required.

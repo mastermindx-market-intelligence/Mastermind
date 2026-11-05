@@ -122,6 +122,7 @@ class ApplicationServiceBinding:
     workload: str
     credential_ref: str
     credential: str = field(repr=False)
+    pool: str = "go"
 
     def __post_init__(self):
         for value in (self.principal_id, self.host, self.workload, self.credential_ref):
@@ -129,8 +130,10 @@ class ApplicationServiceBinding:
                 raise ValueError("invalid application service identity")
         if (not isinstance(self.credential, str) or not 32 <= len(self.credential) <= 4096
                 or any(not 33 <= ord(c) <= 126 for c in self.credential)
-                or self.credential.startswith(("v1.", "app1."))):
+                or self.credential.startswith(("v1.", "app1.", "app2."))):
             raise ValueError("invalid application service credential")
+        if self.pool not in ("go", "bailian"):
+            raise ValueError("invalid application service pool")
 
 
 @dataclass(frozen=True)
@@ -140,6 +143,81 @@ class ApplicationUpstreamResult:
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
     serving_model: Optional[str] = None
+    upstream_digest: Optional[str] = None
+    delivery_digest: Optional[str] = None
+    answer_complete: bool = True
+
+
+@dataclass(frozen=True)
+class ApplicationHTTPBinding:
+    """Trusted startup projection into this handler, never a caller registry.
+
+    A still selects the exact account. H compiles and observes. This immutable
+    join owns neither admission nor credentials, retries or usage accounting.
+    Native startup supplies the sealed realm projection and incumbent loader.
+    """
+    driver: Any = field(repr=False)
+    accounts: frozenset
+    source_projection_sha256: str
+    credential_loader: Any = field(repr=False)
+
+    def __post_init__(self):
+        from application_http_transports import BailianResponsesDriver
+        if (type(self.driver) is not BailianResponsesDriver
+                or type(self.accounts) is not frozenset or not self.accounts
+                or any(not isinstance(account, str) or APPLICATION_ID.fullmatch(account) is None for account in self.accounts)
+                or not isinstance(self.source_projection_sha256, str)
+                or re.fullmatch(r"[0-9a-f]{64}", self.source_projection_sha256) is None
+                or not callable(self.credential_loader)):
+            raise ValueError("invalid application HTTP binding")
+
+    def recipe(self, model):
+        identity = self.driver.identity
+        if model not in identity.allowed_models:
+            raise ValueError("application HTTP model unavailable")
+        return {"schema": "mastermind.application_http_recipe.v1", "pool": identity.pool, "model": model,
+            "driver_id": identity.driver_id, "realm_id": identity.realm_id, "provider": identity.provider,
+            "protocol": identity.protocol, "endpoint": identity.endpoint,
+            "source_projection_sha256": self.source_projection_sha256,
+            "credential_owner": "bailian_keys._codex_key_value"}
+
+    def account_binding(self, account):
+        from application_http_transports import AccountBinding
+        if account not in self.accounts:
+            raise ValueError("application HTTP account unavailable")
+        return AccountBinding(account, self.credential_loader)
+
+    def observe(self, compiled, permit, account_binding):
+        from application_http_transports import DispatchPermit
+        native_permit = DispatchPermit(**{key: permit[key] for key in (
+            "dispatch_id", "request_digest", "logical_payload_digest", "wire_body_digest", "account",
+            "model", "lease_id", "expires_at", "dispatch_permitted")})
+        observation = self.driver.send_prepared(compiled, native_permit, account_binding)
+        if observation.disposition != "complete":
+            raise ApplicationTransportUncertain("application_transport_unknown")
+        served = observation.served_model
+        served = served if isinstance(served, str) and 1 <= len(served) <= 256 and "\x00" not in served else None
+        normalized = observation.normalized
+        body, complete = b"", False
+        # A complete HTTP effect may still contain no valid model answer.
+        # Retain its actual status/digest/usage and deliver a bounded terminal
+        # error; never reinterpret a partial output as an executable tool call.
+        if observation.result_status == "ok" and normalized is not None:
+            text, calls = normalized["text"], normalized["tool_calls"]
+            complete = bool(text or calls) and served == permit["model"]
+            if complete:
+                message = {"role": "assistant", "content": text or None}
+                if calls:
+                    message["tool_calls"] = calls
+                delivery = {"id": permit["dispatch_id"], "object": "chat.completion", "model": served,
+                    "choices": [{"index": 0, "finish_reason": "tool_calls" if calls else "stop", "message": message}],
+                    "usage": {"prompt_tokens": observation.usage["input_tokens"],
+                              "completion_tokens": observation.usage["output_tokens"]}}
+                body = json.dumps(delivery, sort_keys=True, separators=(",", ":"),
+                    ensure_ascii=False, allow_nan=False).encode("utf-8")
+        return ApplicationUpstreamResult(observation.upstream_status, body,
+            observation.usage["input_tokens"], observation.usage["output_tokens"], served,
+            observation.upstream_body_sha256, hashlib.sha256(body).hexdigest() if complete else None, complete)
 
 
 class ApplicationTransportUncertain(RuntimeError):
@@ -266,6 +344,101 @@ class _ApplicationHTTPSHandler(HTTPSHandler):
             self.connections.append(conn)
             return conn
         return self.do_open(connection, request, context=self._context)
+
+
+def application_http_transport(request, *, clock=time.time):
+    """Consume H's one frozen request using the same bounded exchange."""
+    from application_http_transports import TransportRequest, TransportResponse
+    if (type(request) is not TransportRequest or request.method != "POST"
+            or request.allow_redirects is not False or request.use_environment_proxy is not False
+            or type(request.body) is not bytes or len(request.body) > APPLICATION_MAX_REQUEST
+            or type(request.deadline_seconds) not in (int, float)
+            or not math.isfinite(request.deadline_seconds)
+            or type(request.timeout_seconds) not in (int, float)
+            or not math.isfinite(request.timeout_seconds) or request.timeout_seconds <= 0):
+        raise ApplicationTransportUncertain("application_transport_unavailable")
+    upstream = Request(request.url, data=request.body, method="POST", headers=dict(request.headers))
+    status, raw, headers, final_url, expected = _application_exchange(upstream,
+        expires_at=request.deadline_seconds, timeout_seconds=request.timeout_seconds, clock=clock)
+    return TransportResponse(status, headers, raw, final_url, True, expected)
+
+def _application_exchange(request, *, expires_at, timeout_seconds, clock=time.time):
+    """The existing single-POST I/O owner shared by application protocols."""
+    remaining = expires_at - clock()
+    if remaining <= 0:
+        raise ApplicationTransportUncertain("application_permit_expired")
+    deadline = time.monotonic() + min(APPLICATION_IO_TIMEOUT_S, timeout_seconds, remaining)
+    connections = []
+    opener = build_opener(ProxyHandler({}), _ApplicationNoRedirect(),
+        _ApplicationHTTPHandler(deadline, connections), _ApplicationHTTPSHandler(deadline, connections))
+    response = None
+    try:
+        # Recheck after building the request and immediately before bytes.
+        remaining = expires_at - clock()
+        if remaining <= 0:
+            raise ApplicationTransportUncertain("application_permit_expired")
+        try:
+            response = opener.open(request, timeout=min(APPLICATION_IO_TIMEOUT_S, timeout_seconds, remaining))
+        except HTTPError as error:
+            response = error  # Complete HTTP errors are original terminals.
+        status = response.code
+        if type(status) is not int or not 200 <= status <= 599:
+            raise ApplicationTransportUncertain("application_status_invalid")
+        lengths = response.headers.get_all("Content-Length") or []
+        transfers = response.headers.get_all("Transfer-Encoding") or []
+        if (len(lengths) > 1 or len(transfers) > 1 or lengths and transfers
+                or transfers and transfers[0].lower().strip() != "chunked"):
+            raise ApplicationTransportUncertain("application_response_framing")
+        expected = None
+        if lengths:
+            if not re.fullmatch(r"[0-9]{1,10}", lengths[0]):
+                raise ApplicationTransportUncertain("application_response_framing")
+            expected = int(lengths[0])
+            if expected > APPLICATION_MAX_RESPONSE:
+                raise ApplicationTransportUncertain("application_response_oversize")
+        # read1 returns after one buffered/socket read. A single read(N)
+        # plus a per-socket timeout could be kept alive by a slow trickle.
+        # Recompute the same absolute deadline before every bounded read.
+        fp = response.fp
+        if isinstance(fp, http.client.HTTPResponse):
+            fp = fp.fp
+        sock = getattr(getattr(fp, "raw", None), "_sock", None)
+        if sock is None or not callable(getattr(sock, "settimeout", None)):
+            raise ApplicationTransportUncertain("application_read_deadline_unavailable")
+        chunks, total = [], 0
+        while True:
+            budget = deadline - time.monotonic()
+            if budget <= 0:
+                raise ApplicationTransportUncertain("application_read_deadline")
+            sock.settimeout(budget)
+            chunk = response.read1(min(65536, APPLICATION_MAX_RESPONSE + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > APPLICATION_MAX_RESPONSE:
+                raise ApplicationTransportUncertain("application_response_oversize")
+            if expected is not None and total == expected:
+                break
+        raw = b"".join(chunks)
+        if len(raw) > APPLICATION_MAX_RESPONSE or expected is not None and len(raw) != expected:
+            raise ApplicationTransportUncertain("application_response_incomplete")
+        return status, raw, dict(response.headers.items()), response.geturl(), expected
+    except ApplicationTransportUncertain:
+        raise
+    except Exception:
+        raise ApplicationTransportUncertain("application_transport_unknown") from None
+    finally:
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass  # Cannot erase a fully observed original HTTP terminal.
+        for connection in connections:
+            try:
+                connection.application_finish()
+            except Exception:
+                pass
 
 
 def _application_json(raw):
@@ -1779,68 +1952,22 @@ class Router:
             raise ApplicationTransportUncertain("application_permit_expired")
         account = permit["account"]
         body = permit["payload_bytes"]
-        if account not in self.accounts or type(body) is not bytes:
+        lease_id = permit.get("lease_id")
+        if (account not in self.accounts or type(body) is not bytes
+                or not isinstance(lease_id, str) or APPLICATION_ID.fullmatch(lease_id) is None):
             raise ApplicationTransportUncertain("application_transport_unavailable")
+        # The admitted lease already identifies the original conversation.
+        # Derive its provider session without exposing the lease or accepting
+        # a caller-selected header; every tool step retains the same session.
+        session = "ses_mm_" + hashlib.sha256(
+            b"mastermind-go-application-session/v1\0" + lease_id.encode("utf-8")).hexdigest()
         request = Request(upstream_url(self.upstream_base, "/v1/chat/completions"),
             data=body, method="POST", headers={"Authorization": "Bearer " + self.accounts[account],
             "Content-Type": "application/json", "Accept": "application/json",
-            "User-Agent": "mastermind-go-shim/1"})
-        deadline = time.monotonic() + min(APPLICATION_IO_TIMEOUT_S, remaining)
-        connections = []
-        opener = build_opener(ProxyHandler({}), _ApplicationNoRedirect(),
-            _ApplicationHTTPHandler(deadline, connections), _ApplicationHTTPSHandler(deadline, connections))
-        response = None
+            "User-Agent": "mastermind-go-shim/1", "x-opencode-session": session})
         try:
-            # Recheck after building the request and immediately before bytes.
-            remaining = permit["expires_at"] - self.now()
-            if remaining <= 0:
-                raise ApplicationTransportUncertain("application_permit_expired")
-            try:
-                response = opener.open(request, timeout=min(APPLICATION_IO_TIMEOUT_S, remaining))
-            except HTTPError as error:
-                response = error  # Complete HTTP errors are original terminals.
-            status = response.code
-            if type(status) is not int or not 200 <= status <= 599:
-                raise ApplicationTransportUncertain("application_status_invalid")
-            lengths = response.headers.get_all("Content-Length") or []
-            transfers = response.headers.get_all("Transfer-Encoding") or []
-            if (len(lengths) > 1 or len(transfers) > 1 or lengths and transfers
-                    or transfers and transfers[0].lower().strip() != "chunked"):
-                raise ApplicationTransportUncertain("application_response_framing")
-            expected = None
-            if lengths:
-                if not re.fullmatch(r"[0-9]{1,10}", lengths[0]):
-                    raise ApplicationTransportUncertain("application_response_framing")
-                expected = int(lengths[0])
-                if expected > APPLICATION_MAX_RESPONSE:
-                    raise ApplicationTransportUncertain("application_response_oversize")
-            # read1 returns after one buffered/socket read. A single read(N)
-            # plus a per-socket timeout could be kept alive by a slow trickle.
-            # Recompute the same absolute deadline before every bounded read.
-            fp = response.fp
-            if isinstance(fp, http.client.HTTPResponse):
-                fp = fp.fp
-            sock = getattr(getattr(fp, "raw", None), "_sock", None)
-            if sock is None or not callable(getattr(sock, "settimeout", None)):
-                raise ApplicationTransportUncertain("application_read_deadline_unavailable")
-            chunks, total = [], 0
-            while True:
-                budget = deadline - time.monotonic()
-                if budget <= 0:
-                    raise ApplicationTransportUncertain("application_read_deadline")
-                sock.settimeout(budget)
-                chunk = response.read1(min(65536, APPLICATION_MAX_RESPONSE + 1 - total))
-                if not chunk:
-                    break
-                chunks.append(chunk)
-                total += len(chunk)
-                if total > APPLICATION_MAX_RESPONSE:
-                    raise ApplicationTransportUncertain("application_response_oversize")
-                if expected is not None and total == expected:
-                    break
-            raw = b"".join(chunks)
-            if len(raw) > APPLICATION_MAX_RESPONSE or expected is not None and len(raw) != expected:
-                raise ApplicationTransportUncertain("application_response_incomplete")
+            status, raw, _, _, _ = self._application_exchange(request,
+                expires_at=permit["expires_at"], timeout_seconds=APPLICATION_IO_TIMEOUT_S)
             # A successful reply must be a complete nonstream chat object. An
             # error response can have a non-JSON body and still be a terminal.
             try:
@@ -1863,17 +1990,13 @@ class Router:
             raise
         except Exception:
             raise ApplicationTransportUncertain("application_transport_unknown") from None
-        finally:
-            if response is not None:
-                try:
-                    response.close()
-                except Exception:
-                    pass  # Cannot erase a fully observed original HTTP terminal.
-            for connection in connections:
-                try:
-                    connection.application_finish()
-                except Exception:
-                    pass
+
+    def application_http_transport(self, request):
+        return application_http_transport(request, clock=self.now)
+
+    def _application_exchange(self, request, *, expires_at, timeout_seconds):
+        return _application_exchange(request, expires_at=expires_at,
+            timeout_seconds=timeout_seconds, clock=self.now)
 
     def _upstream(self, handler: Any, endpoint: str, body: bytes, payload: Dict[str, Any], account: str) -> Tuple[Any, Optional[bytes], Optional[int]]:
         headers = {"User-Agent": "mastermind-go-shim/1", "Authorization": "Bearer " + self.accounts[account], "Content-Type": "application/json", "Accept": payload.get("stream") and "text/event-stream" or "application/json"}
@@ -2136,7 +2259,8 @@ class WorkerReplyBuffer(io.BytesIO):
 
 def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                 *, application_services: Tuple[ApplicationServiceBinding, ...] = (),
-                worker_capabilities_enabled: Optional[bool] = None) -> ThreadingHTTPServer:
+                worker_capabilities_enabled: Optional[bool] = None,
+                application_http_binding: Optional[ApplicationHTTPBinding] = None) -> ThreadingHTTPServer:
     # Capability validity is checked against live broker state per request.
     # This does not claim atomic cancellation of an already forwarded inference.
     worker_inflight = set()
@@ -2156,6 +2280,17 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
         if (len(set(refs)) != len(refs) or len(set(credentials)) != len(credentials)
                 or any(hmac.compare_digest(s.credential, router.token) for s in application_services)):
             raise ValueError("ambiguous application credentials")
+    if application_http_binding is not None:
+        if type(application_http_binding) is not ApplicationHTTPBinding or lease_gateway is None:
+            raise ValueError("invalid application HTTP startup")
+        for model in application_http_binding.driver.identity.allowed_models:
+            recipe, _ = lease_gateway.application_recipe("bailian", model)
+            if recipe != application_http_binding.recipe(model):
+                raise ValueError("application HTTP recipe conflicts with admission")
+        if lease_gateway._application_http_accounts != application_http_binding.accounts:
+            raise ValueError("application HTTP accounts conflict with admission")
+    if any(service.pool == "bailian" for service in application_services) and application_http_binding is None:
+        raise ValueError("application HTTP transport required")
     source_sha256 = {}
     for name, path in (("go_shim.py", __file__),
                        ("go_lease_capability.py", os.path.join(_EXT_DIR, "go_lease_capability.py")),
@@ -2275,6 +2410,10 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                 if any(self.headers.get_all(name) for name in ("X-MM-Leased", "X-MM-Pool-Account", "X-MM-Run-Id", "X-MM-Host", "X-MM-Worker-Model", "X-MM-Principal", "X-MM-Workload")):
                     raise ValueError("caller authority override")
                 self.application_turn_id, self.application_request_id = turn_id, request_id
+                recipe_values = self.headers.get_all("X-MM-Application-Recipe-Digest") or []
+                if len(recipe_values) > 1 or recipe_values and re.fullmatch(r"[0-9a-f]{64}", recipe_values[0]) is None:
+                    raise ValueError("invalid recipe commitment")
+                recipe_digest = recipe_values[0] if recipe_values else None
                 raw, payload = self._read_object(APPLICATION_MAX_REQUEST)
                 payload = _application_json(raw)
                 if (set(payload) - APPLICATION_BODY_KEYS or payload.get("stream", False) is not False
@@ -2285,9 +2424,9 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                 self.close_connection = True
                 self._application_reply("refused", code="application_request_invalid", status=400)
                 return
-            scope = {"workload": service.workload, "turn_id": turn_id, "pool": "go", "model": payload["model"]}
+            scope = {"workload": service.workload, "turn_id": turn_id, "pool": service.pool, "model": payload["model"]}
             recovery_args = dict(principal_id=service.principal_id, host=service.host,
-                request_id=request_id, path=path, payload=payload)
+                request_id=request_id, path=path, payload=payload, expected_recipe_digest=recipe_digest)
             try:
                 recovered = lease_gateway.recover_application(scope, **recovery_args)
             except Exception:
@@ -2299,14 +2438,30 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
             # Only an absent original request may consult mutable model/quota
             # state or admit. No live /models or /usage query precedes recovery.
             model = payload["model"]
-            if (model not in router.prices["models"] or not router.wire_supported(model, path)
+            compiled, account_binding, commitment = None, None, None
+            if service.pool == "bailian":
+                try:
+                    if application_http_binding is None or service.workload != "site_interactive":
+                        raise ValueError("application realm workload unavailable")
+                    compiled = application_http_binding.driver.prepare_request(payload)
+                    recipe, expected_digest = lease_gateway.application_recipe(service.pool, model)
+                    if recipe != application_http_binding.recipe(model) or recipe_digest != expected_digest:
+                        raise ValueError("application recipe mismatch")
+                    commitment = {"recipe_digest": recipe_digest,
+                        "logical_payload_digest": compiled.logical_payload_digest,
+                        "wire_body_digest": compiled.wire_body_digest}
+                except Exception:
+                    self._application_reply("refused", code="application_transport_contract_refused", status=400)
+                    return
+            elif (model not in router.prices["models"] or not router.wire_supported(model, path)
                     or router.prices["models"][model].get("training_consent") and not router.allow_training):
                 self._application_reply("refused", code="application_model_unavailable", status=400)
                 return
             try:
                 binding = lease_gateway.begin_application(scope, principal_id=service.principal_id,
                     host=service.host, expected_credential_ref=service.credential_ref,
-                    deadline_ns=time.monotonic_ns() + 5_000_000_000)
+                    deadline_ns=time.monotonic_ns() + 5_000_000_000,
+                    expected_recipe_digest=recipe_digest)
             except Exception:
                 # The admission commit could have succeeded before an ACK loss.
                 self._application_reply("effect_unknown", code="application_admission_unknown", status=503)
@@ -2317,23 +2472,37 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
             if binding.get("disposition") not in {"admitted", "existing"}:
                 self._application_recovered(binding)
                 return
+            if compiled is not None:
+                try:
+                    account_binding = application_http_binding.account_binding(binding["account"])
+                    application_http_binding.driver.preflight_credential(compiled, account_binding)
+                except Exception:
+                    self._application_reply("refused", code="application_account_unavailable", status=503)
+                    return
             reserved, permit, observed, settled = False, None, None, False
             started = router.now()
             try:
-                reserved = router.reserve_application_account(binding["account"], model)
-                if not reserved:
-                    self._application_reply("refused", code="application_account_unavailable", status=429)
-                    return
+                if compiled is None:
+                    reserved = router.reserve_application_account(binding["account"], model)
+                    if not reserved:
+                        self._application_reply("refused", code="application_account_unavailable", status=429)
+                        return
                 permit = lease_gateway.prepare_application(binding["token"], principal_id=service.principal_id,
-                    host=service.host, turn_id=turn_id, request_id=request_id, path=path, payload=payload)
+                    host=service.host, turn_id=turn_id, request_id=request_id, path=path, payload=payload,
+                    expected_pool=service.pool, transport_commitment=commitment)
                 if not permit.get("dispatch_permitted"):
                     self._application_recovered(permit)
                     return
-                observed = router.application_transport(permit)
+                observed = (router.application_transport(permit) if compiled is None
+                            else application_http_binding.observe(compiled, permit, account_binding))
                 terminal = {key: permit[key] for key in ("dispatch_id", "request_digest", "lease_id", "account", "model")}
                 terminal.update(response_digest=hashlib.sha256(observed.body).hexdigest(),
                     status_code=observed.status, completed_at=router.now(),
                     usage={"input_tokens": observed.input_tokens, "output_tokens": observed.output_tokens})
+                if compiled is not None:
+                    terminal.update(terminal_kind="http_responses_v1", **commitment,
+                        response_digest=observed.upstream_digest, delivery_digest=observed.delivery_digest,
+                        served_model=observed.serving_model)
                 try:
                     result = lease_gateway.complete_application(permit["dispatch_id"], terminal_receipt=terminal)
                     settled = result.get("disposition") == "terminal"
@@ -2355,7 +2524,7 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                 self._application_reply("effect_unknown", code="application_execution_unknown", status=503, observed=observed)
                 return
             finally:
-                if observed is not None:
+                if observed is not None and compiled is None:
                     try:
                         router._usage_row(self, permit["account"], path, payload, started,
                             "ok" if observed.status < 300 else "upstream_error", observed.body, 1, None,
@@ -2368,8 +2537,9 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                     router.release(binding["account"])
             # Downstream delivery is deliberately outside transport/settlement
             # exception handling: a closed browser cannot poison known success.
-            if observed.status >= 300 or observed.serving_model != model:
-                self._application_reply("terminal", code="application_upstream_error" if observed.status >= 300 else "application_model_mismatch",
+            if observed.status >= 300 or observed.serving_model != model or not observed.answer_complete:
+                self._application_reply("terminal", code=("application_upstream_error" if observed.status >= 300 else
+                    "application_model_mismatch" if observed.serving_model != model else "application_response_invalid"),
                     status=observed.status if observed.status >= 300 else 502, observed=observed)
                 return
             self.send_response(observed.status)
@@ -2626,11 +2796,15 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
 
 
 def main(*, application_broker=None,
-         application_services: Tuple[ApplicationServiceBinding, ...] = ()) -> int:
+         application_services: Tuple[ApplicationServiceBinding, ...] = (),
+         application_http_binding: Optional[ApplicationHTTPBinding] = None) -> int:
     # Only the verified original startup owner may supply these in-process
     # objects. No new config/credential/grant registry or env selector exists.
     if bool(application_services) != (application_broker is not None):
         raise ValueError("application startup binding incomplete")
+    if application_http_binding is not None and (
+            type(application_http_binding) is not ApplicationHTTPBinding or not application_services):
+        raise ValueError("application HTTP startup binding incomplete")
     if "--check" in sys.argv:
         state_dir = os.environ.get("GO_STATE_DIR", DEFAULTS["GO_STATE_DIR"])
         try:
@@ -2649,10 +2823,15 @@ def main(*, application_broker=None,
         from go_lease_gateway import GoLeaseGateway
         gateway = GoLeaseGateway(_BROKER_DB,
             router.accounts, set(router.prices["models"]) | set(router.prices["unpriced"]),
-            application_broker=application_broker)
+            application_broker=application_broker,
+            **({"application_http_accounts": application_http_binding.accounts,
+                "application_http_recipes": tuple(application_http_binding.recipe(model)
+                    for model in sorted(application_http_binding.driver.identity.allowed_models))}
+               if application_http_binding is not None else {}))
     server = make_server(router, int(os.environ.get("GO_SHIM_PORT", DEFAULTS["GO_SHIM_PORT"])),
         lease_gateway=gateway, application_services=application_services,
-        worker_capabilities_enabled=worker_enabled)
+        worker_capabilities_enabled=worker_enabled,
+        **({"application_http_binding": application_http_binding} if application_http_binding is not None else {}))
     print(f"go_shim listening port={server.server_port}", flush=True)
     server.serve_forever()
     return 0

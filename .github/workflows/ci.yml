@@ -291,6 +291,8 @@ jobs:
           suite = unittest.TestSuite()
           for pattern in (
               "test_application_turn_*.py", "test_go_application_*.py", "test_application_http_transports.py", "test_quota_continuity.py",
+              "test_application_http_admission.py", "test_application_http_realm_projection.py",
+              "test_bailian_application_handler_composition.py",
               "test_broker_prelease_deadline.py", "test_slot_release_custody.py",
               "test_qwen_account_eligibility.py", "test_qwen_429_account_priority.py",
           ):
@@ -309,6 +311,7 @@ jobs:
             ops/native_fabric/quota_continuity/tests/test_go_native_install.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_startup.py \
+            ops/native_fabric/quota_continuity/tests/test_application_http_native_startup.py \
             ops/native_fabric/quota_continuity/rollout/test_native_generation.py \
             ops/native_fabric/quota_continuity/rollout/test_native_launcher_upgrade.py \
             ops/native_fabric/quota_continuity/rollout/test_native_runtime_bindings.py \

@@ -29,11 +29,12 @@ def unseal(root):
 @pytest.fixture(scope="module")
 def builds(tmp_path_factory):
     root = tmp_path_factory.mktemp("go-reviewed-build").resolve()
-    default, application = root / "default", root / "application"
-    for output, extra in ((default, []), (application, ["--include-go-application"])):
+    default, application, http = root / "default", root / "application", root / "http"
+    for output, extra in ((default, []), (application, ["--include-go-application"]),
+                          (http, ["--include-go-application", "--include-application-http"])):
         with mock.patch.object(sys, "argv", ["builder", "--output", str(output), *extra]), redirect_stdout(io.StringIO()):
             builder.main()
-    yield SimpleNamespace(default=default, application=application)
+    yield SimpleNamespace(default=default, application=application, http=http)
     unseal(root)
 
 
@@ -108,7 +109,13 @@ def test_default_build_stays_exact_reviewed_102_and_go_adds_only_the_fixed_pair(
     default_raw = (builds.default / "native-manifest.json").read_bytes()
     default = json.loads(default_raw)
     application = json.loads((builds.application / "native-manifest.json").read_bytes())
-    assert len(default) == 102 and g.digest(default_raw) == builder.GO_BASE_MANIFEST_SHA256
+    assert len(default) == 102
+    captured = {name: g.digest((ROOT / "candidate" / name).read_bytes())
+                for name in builder.GO_APPLICATION_DEPENDENCIES}
+    builder.validate_go_base_manifest(default, captured)
+    historical = dict(default)
+    historical.update({"ext/" + name: value for name, value in builder.GO_BASE_DEPENDENCIES.items()})
+    assert g.digest((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) == builder.GO_BASE_MANIFEST_SHA256
     assert {k: v for k, v in application.items() if k in default} == default
     assert set(application) - set(default) == {g.GO_ENTRY, g.GO_HANDLER}
     assert len(application) == 104

@@ -289,6 +289,8 @@ def _validate_lease_for_authorize(lease, claims, now):
 
 _APPLICATION_TOKEN = re.compile(r"^app1\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$")
 _APPLICATION_DOMAIN = b"mastermind.go.application-lease-capability/v1\x00"
+_APPLICATION_HTTP_TOKEN = re.compile(r"^app2\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$")
+_APPLICATION_HTTP_DOMAIN = b"mastermind.bailian.application-lease-capability/v2\x00"
 _APPLICATION_FIELDS = frozenset({
     "v", "purpose", "lease_id", "root", "pool", "account", "model", "principal_id", "host",
     "workload", "turn_id", "grant_digest", "issued_at", "expires_at", "lease_generation",
@@ -296,9 +298,16 @@ _APPLICATION_FIELDS = frozenset({
 
 
 def _validate_application_claims(claims):
-    if (not isinstance(claims, dict) or set(claims) != _APPLICATION_FIELDS
-            or type(claims["v"]) is not int or claims["v"] != 1
-            or claims["purpose"] != "APPLICATION" or claims["pool"] != "go"):
+    if not isinstance(claims, dict):
+        raise CapabilityError("invalid application capability")
+    http = claims.get("pool") == "bailian"
+    fields = _APPLICATION_FIELDS | {"recipe_digest"} if http else _APPLICATION_FIELDS
+    if (set(claims) != fields
+            or type(claims["v"]) is not int or claims["v"] != (2 if http else 1)
+            or claims["purpose"] != "APPLICATION" or claims["pool"] != ("bailian" if http else "go")):
+        raise CapabilityError("invalid application capability")
+    if http and (not isinstance(claims["recipe_digest"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", claims["recipe_digest"]) is None):
         raise CapabilityError("invalid application capability")
     for key in ("lease_id", "root", "pool", "account", "principal_id", "host", "workload", "turn_id"):
         _identifier(claims[key], "application capability")
@@ -334,6 +343,8 @@ def _validate_application_binding(lease, turn, claims, now, *, recovery_only=Fal
         for key in ("principal_id", "turn_id", "workload", "grant_digest"):
             if turn[key] != claims[key]:
                 raise CapabilityError("application lease unavailable")
+        if claims["pool"] == "bailian" and turn["recipe_digest"] != claims["recipe_digest"]:
+            raise CapabilityError("application lease unavailable")
         _timestamp(lease["granted_at"], "application lease")
         _finite_number(lease["ttl"], "application lease")
         _timestamp(turn["expires_at"], "application lease")
@@ -359,11 +370,15 @@ def mint_application(signing_key, lease, turn, *, now):
                   "workload": turn["workload"], "turn_id": turn["turn_id"], "grant_digest": turn["grant_digest"],
                   "issued_at": now, "expires_at": min(turn["expires_at"], lease["granted_at"] + lease["ttl"]),
                   "lease_generation": lease["granted_at"]}
+        if turn["pool"] == "bailian":
+            claims.update(v=2, recipe_digest=turn["recipe_digest"])
         _validate_application_claims(claims)
         _validate_application_binding(lease, turn, claims, now)
         raw = _canonical_json_bytes(claims)
-        signature = hmac.new(signing_key, _APPLICATION_DOMAIN + raw, hashlib.sha256).digest()
-        token = b"app1." + _base64url_encode(raw) + b"." + _base64url_encode(signature)
+        domain = _APPLICATION_HTTP_DOMAIN if claims["v"] == 2 else _APPLICATION_DOMAIN
+        prefix = b"app2." if claims["v"] == 2 else b"app1."
+        signature = hmac.new(signing_key, domain + raw, hashlib.sha256).digest()
+        token = prefix + _base64url_encode(raw) + b"." + _base64url_encode(signature)
         if len(token) > _MAX_TOKEN_LENGTH:
             raise CapabilityError("invalid application capability")
         return token.decode("ascii")
@@ -372,23 +387,26 @@ def mint_application(signing_key, lease, turn, *, now):
 
 
 def authorize_application(token, signing_key, lease_lookup, turn_lookup, *, principal_id, host, turn_id, model, now,
-                          recovery_only=False):
+                          recovery_only=False, expected_pool="go"):
     _validate_key(signing_key)
     _validate_now(now)
-    if type(recovery_only) is not bool or not isinstance(token, str) or len(token) > _MAX_TOKEN_LENGTH:
+    if (type(recovery_only) is not bool or not isinstance(token, str) or len(token) > _MAX_TOKEN_LENGTH
+            or expected_pool not in ("go", "bailian")):
         raise CapabilityError("invalid application capability")
-    match = _APPLICATION_TOKEN.fullmatch(token)
+    pattern = _APPLICATION_TOKEN if expected_pool == "go" else _APPLICATION_HTTP_TOKEN
+    domain = _APPLICATION_DOMAIN if expected_pool == "go" else _APPLICATION_HTTP_DOMAIN
+    match = pattern.fullmatch(token)
     if match is None:
         raise CapabilityError("invalid application capability")
     encoded, signature_part = (part.encode("ascii") for part in match.groups())
     raw, signature = _base64url_decode(encoded), _base64url_decode(signature_part)
     if (encoded != _base64url_encode(raw) or signature_part != _base64url_encode(signature)
             or len(signature) != hashlib.sha256().digest_size
-            or not hmac.compare_digest(signature, hmac.new(signing_key, _APPLICATION_DOMAIN + raw, hashlib.sha256).digest())):
+            or not hmac.compare_digest(signature, hmac.new(signing_key, domain + raw, hashlib.sha256).digest())):
         raise CapabilityError("invalid application capability")
     claims = _parse_payload(raw)
     _validate_application_claims(claims)
-    if (raw != _canonical_json_bytes(claims) or now < claims["issued_at"]
+    if (claims["pool"] != expected_pool or raw != _canonical_json_bytes(claims) or now < claims["issued_at"]
             or (not recovery_only and now >= claims["expires_at"])
             or any(claims[key] != value for key, value in (("principal_id", principal_id),
                     ("host", host), ("turn_id", turn_id), ("model", model)))):

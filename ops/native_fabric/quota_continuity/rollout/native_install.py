@@ -683,11 +683,17 @@ def _go_component(bundle, stable_ext, target_files):
     manifest = generation.unique_json(manifest_raw)
     if manifest != target_files:
         raise ValueError("Go target differs from captured native manifest")
+    http_members = stage_builder.HTTP_GENERATION_MEMBERS & set(manifest)
+    if http_members:
+        if http_members != stage_builder.HTTP_GENERATION_MEMBERS:
+            raise ValueError("Go target application HTTP closure incomplete")
+        http_sources = stage_builder.application_http_sources(root)
+        if any(manifest[relative] != generation.digest(data[0]) for relative, data in http_sources.items()):
+            raise ValueError("Go target application HTTP differs from exact reviewed source")
     base = {key: value for key, value in manifest.items()
-            if key not in {generation.GO_ENTRY, generation.GO_HANDLER}}
-    base_raw = (json.dumps(base, sort_keys=True, indent=2) + "\n").encode()
-    if (generation.digest(base_raw) != stage_builder.GO_BASE_MANIFEST_SHA256
-            or set(manifest) != set(base) | {generation.GO_ENTRY, generation.GO_HANDLER}
+            if key not in {generation.GO_ENTRY, generation.GO_HANDLER} | http_members}
+    stage_builder.validate_go_base_manifest(base, {name: row["sha256"] for name, row in dependencies.items()})
+    if (set(manifest) != set(base) | {generation.GO_ENTRY, generation.GO_HANDLER} | http_members
             or manifest[generation.GO_HANDLER] != generation.digest(handler)
             or manifest[generation.GO_ENTRY] != generation.digest(entry)
             or any(manifest.get("ext/" + name) != row["sha256"] for name, row in dependencies.items())):
@@ -852,6 +858,7 @@ def reconcile_go(bundle):
 
 
 SERVICE_SPEC_SCHEMA = "native-go-service-enrollment-specification.v1"
+SERVICE_HTTP_SPEC_SCHEMA = "native-go-service-enrollment-specification.v2"
 _SERVICE_PLAN_FIELDS = frozenset({"schema", "operation_id", "go_ingress_bundle", "ingress_digest",
     "source_generation", "store", "selection", "installer_sha256", "entry_sha256", "scope",
     "owners", "owner_identities", "accounts_before", "accounts_after_sha256", "grant_sha256", "digest"})
@@ -934,16 +941,19 @@ def _service_snapshot(entry, path, *, read=True, mode=None):
     return raw, before
 
 
-def _service_owner_identities(entry, startup, profile):
+def _service_owner_identities(entry, startup, profile, *, application_http=False):
     paths = entry.application_enrollment_paths(startup)
     directory_paths = {"go": startup.paths["go"], "broker": startup.paths["db_path"].parent,
         "accounts": startup.paths["accounts_path"].parent, "profile": profile.parent,
         "bootstrap": paths["intent"].parent, "store": paths["intent"].parent.parent}
+    provider_profile = entry.application_http_profile(startup) if application_http else None
+    if provider_profile is not None:
+        directory_paths["provider_profile"] = provider_profile.parent
     identities = {}
     for name, path in directory_paths.items():
         entry._directory(path)
         info = path.lstat()
-        if name in {"go", "profile", "bootstrap", "store"} and stat.S_IMODE(info.st_mode) != 0o700:
+        if name in {"go", "profile", "provider_profile", "bootstrap", "store"} and stat.S_IMODE(info.st_mode) != 0o700:
             raise ValueError("service private parent custody refused")
         identities["directory:" + name] = {"dev": info.st_dev, "ino": info.st_ino,
             "uid": info.st_uid, "gid": info.st_gid, "mode": stat.S_IMODE(info.st_mode)}
@@ -951,15 +961,20 @@ def _service_owner_identities(entry, startup, profile):
         _, identity = _service_snapshot(entry, startup.paths[name], read=False)
         identities[name] = {key: identity[key] for key in ("dev", "ino", "uid", "gid", "mode", "nlink")}
     _, identities["account_profile"] = _service_snapshot(entry, profile, read=False, mode=0o600)
+    if provider_profile is not None:
+        _, identities["provider_profile"] = _service_snapshot(entry, provider_profile, read=False, mode=0o600)
     return identities
 
 
-def _service_specification(entry, specification):
+def _service_specification(entry, specification, startup=None):
     if isinstance(specification, (str, Path)):
         specification = _successor_json(Path(specification))
     fields = {"schema", "operation_id", "scope", "grant"}
+    http = type(specification) is dict and specification.get("schema") == SERVICE_HTTP_SPEC_SCHEMA
+    if http:
+        fields.add("application_recipe")
     if (type(specification) is not dict or set(specification) != fields
-            or specification["schema"] != SERVICE_SPEC_SCHEMA
+            or specification["schema"] != (SERVICE_HTTP_SPEC_SCHEMA if http else SERVICE_SPEC_SCHEMA)
             or type(specification["operation_id"]) is not str
             or entry.IDENTITY.fullmatch(specification["operation_id"]) is None):
         raise ValueError("invalid service enrollment specification")
@@ -980,10 +995,18 @@ def _service_specification(entry, specification):
             or grant.get("caller_hosts") != [scope["caller_host"]]
             or grant.get("workloads") != [scope["workload"]]
             or grant.get("purpose") != "APPLICATION" or grant.get("enabled") is not True
-            or grant.get("pool") != "go" or grant.get("route") != "/v1/chat/completions"
+            or grant.get("pool") != ("bailian" if http else "go") or grant.get("route") != "/v1/chat/completions"
             or grant.get("stream") is not False or type(grant.get("models")) is not list
             or len(grant["models"]) != 1):
         raise ValueError("service enrollment mapping differs")
+    if http:
+        recipe = specification["application_recipe"]
+        if (startup is None or type(recipe) is not dict or scope["workload"] != "site_interactive"
+                or recipe != entry.application_http_recipe(startup, grant["models"][0])):
+            raise ValueError("service enrollment HTTP source recipe differs")
+        _, digest = startup.broker_module._application_http_recipe(recipe, pool="bailian", model=grant["models"][0])
+        if grant.get("recipe_digest") != digest:
+            raise ValueError("service enrollment HTTP grant commitment differs")
     return specification
 
 
@@ -998,7 +1021,7 @@ def _service_candidate(startup, specification, before):
             raise ValueError("existing application grants are invalid")
         if (existing.get("grant_id") == grant.get("grant_id")
                 or existing.get("principal_id") == grant["principal_id"]
-                and existing.get("pool") == "go"
+                and existing.get("pool") == grant["pool"]
                 and set(existing.get("caller_hosts", ())) & set(grant["caller_hosts"])
                 and set(existing.get("workloads", ())) & set(grant["workloads"])
                 and set(existing.get("models", ())) & set(grant["models"])):
@@ -1018,12 +1041,13 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
     generation.require(output.parent, stat.S_ISDIR)
     with generation.publication_lock(store), _service_source(go_ingress_bundle) as context:
         ingress, selection, metadata, entry, startup = context
-        specification = _service_specification(entry, specification)
+        specification = _service_specification(entry, specification, startup)
+        http = specification["schema"] == SERVICE_HTTP_SPEC_SCHEMA
         paths = entry.application_enrollment_paths(startup)
         if any(os.path.lexists(path) for path in paths.values()):
             raise ValueError("service enrollment already has an original artifact")
         profile = Path(specification["scope"]["account_profile"])
-        owners = _service_owner_identities(entry, startup, profile)
+        owners = _service_owner_identities(entry, startup, profile, application_http=http)
         before, identity = _service_snapshot(entry, startup.paths["accounts_path"])
         with startup.yaml_runtime.held_yaml(startup.yaml_archive, startup.yaml_provenance, startup.yaml_check):
             after, document = _service_candidate(startup, specification, before)
@@ -1036,18 +1060,21 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
         if specification["grant"]["expires_at"] <= time.time():
             raise ValueError("service grant is already expired")
         if (_service_snapshot(entry, startup.paths["accounts_path"]) != (before, identity)
-                or _service_owner_identities(entry, startup, profile) != owners):
+                or _service_owner_identities(entry, startup, profile, application_http=http) != owners):
             raise ValueError("service owners changed during preparation")
-        plan = {"schema": entry.SERVICE_ENROLLMENT_SCHEMA,
+        plan = {"schema": entry.SERVICE_HTTP_ENROLLMENT_SCHEMA if http else entry.SERVICE_ENROLLMENT_SCHEMA,
             "operation_id": specification["operation_id"], "go_ingress_bundle": str(go_ingress_bundle),
             "ingress_digest": ingress["digest"], "source_generation": startup.generation,
             "store": str(store), "selection": selection,
             "installer_sha256": generation.digest(generation.regular_bytes(__file__)),
             "entry_sha256": metadata["files"][generation.GO_ENTRY], "scope": specification["scope"],
-            "owners": entry.application_service_owners(startup), "owner_identities": owners,
+            "owners": entry.application_service_owners(startup, application_http=http), "owner_identities": owners,
             "accounts_before": {"sha256": generation.digest(before), "identity": identity},
             "accounts_after_sha256": generation.digest(after),
             "grant_sha256": generation.digest(generation.canonical(specification["grant"]))}
+        if http:
+            plan.update(application_recipe=specification["application_recipe"],
+                application_accounts=specification["grant"]["accounts"])
         plan["digest"] = generation.digest(generation.canonical(plan))
         generation.atomic_bytes(output / "specification.json", generation.canonical(specification) + b"\n", 0o600)
         generation.atomic_bytes(output / "PLAN.json", generation.canonical(plan) + b"\n", 0o600)
@@ -1057,7 +1084,9 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
 def _read_service_plan(bundle):
     bundle = _successor_directory(bundle)
     plan = _successor_json(bundle / "PLAN.json")
-    if type(plan) is not dict or set(plan) != _SERVICE_PLAN_FIELDS:
+    http = type(plan) is dict and plan.get("schema") == "native-go-service-enrollment.v2"
+    fields = _SERVICE_PLAN_FIELDS | {"application_recipe", "application_accounts"} if http else _SERVICE_PLAN_FIELDS
+    if type(plan) is not dict or set(plan) != fields:
         raise ValueError("service enrollment plan shape differs")
     if generation.digest(generation.canonical({k: v for k, v in plan.items() if k != "digest"})) != plan["digest"]:
         raise ValueError("service enrollment plan digest differs")
@@ -1189,17 +1218,24 @@ def _service_transaction(bundle, *, reconcile_only=False):
         raise ValueError("service publication owner differs from original ingress")
     with generation.publication_lock(store), _service_source(plan["go_ingress_bundle"]) as context:
         ingress, selection, metadata, entry, startup = context
-        specification = _service_specification(entry, specification)
+        specification = _service_specification(entry, specification, startup)
+        http = specification["schema"] == SERVICE_HTTP_SPEC_SCHEMA
+        enrollment_schema = entry.SERVICE_HTTP_ENROLLMENT_SCHEMA if http else entry.SERVICE_ENROLLMENT_SCHEMA
+        service_schema = entry.SERVICE_HTTP_SCHEMA if http else entry.SERVICE_SCHEMA
+        receipt_schema = entry.SERVICE_HTTP_RECEIPT_SCHEMA if http else entry.SERVICE_RECEIPT_SCHEMA
+        projection = ({"application_recipe": specification["application_recipe"],
+            "application_accounts": specification["grant"]["accounts"]} if http else {})
         paths = entry.application_enrollment_paths(startup)
         profile = Path(specification["scope"]["account_profile"])
-        if (plan["schema"] != entry.SERVICE_ENROLLMENT_SCHEMA or ingress["digest"] != plan["ingress_digest"]
+        if (plan["schema"] != enrollment_schema or ingress["digest"] != plan["ingress_digest"]
                 or startup.generation != plan["source_generation"] or selection != plan["selection"]
                 or plan["store"] != ingress["store"]
                 or metadata["files"][generation.GO_ENTRY] != plan["entry_sha256"]
                 or specification["operation_id"] != plan["operation_id"]
                 or specification["scope"] != plan["scope"]
-                or entry.application_service_owners(startup) != plan["owners"]
-                or _service_owner_identities(entry, startup, profile) != plan["owner_identities"]
+                or entry.application_service_owners(startup, application_http=http) != plan["owners"]
+                or _service_owner_identities(entry, startup, profile, application_http=http) != plan["owner_identities"]
+                or any(plan[key] != value for key, value in projection.items())
                 or generation.digest(generation.canonical(specification["grant"])) != plan["grant_sha256"]):
             raise ValueError("service enrollment plan no longer binds its original owners")
         with startup.yaml_runtime.held_yaml(startup.yaml_archive, startup.yaml_provenance, startup.yaml_check):
@@ -1207,7 +1243,7 @@ def _service_transaction(bundle, *, reconcile_only=False):
             if (after != expected_after
                     or startup.broker_module._read_application_accounts(bundle / "accounts.after.yaml") != document):
                 raise ValueError("service enrollment candidate differs")
-        intent = {"schema": entry.SERVICE_ENROLLMENT_SCHEMA, "operation_id": plan["operation_id"],
+        intent = {"schema": enrollment_schema, "operation_id": plan["operation_id"],
             "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
             "ingress_digest": plan["ingress_digest"], "bundle": str(bundle)}
         private = bundle / _SERVICE_PRIVATE
@@ -1216,10 +1252,10 @@ def _service_transaction(bundle, *, reconcile_only=False):
         prepared = {name: store / "bootstrap" / (plan["digest"] + ".service-" + name + "-prepared.json")
                     for name in ("binding", "accounts")}
         private_receipt = store / "bootstrap" / (plan["digest"] + ".service-private.json")
-        public = {"schema": entry.SERVICE_ENROLLMENT_SCHEMA, "operation_id": plan["operation_id"],
+        public = {"schema": enrollment_schema, "operation_id": plan["operation_id"],
                   "plan_digest": plan["digest"]}
         with _service_broker_lock(entry, startup, plan["owner_identities"]["lock_path"]):
-            if _service_owner_identities(entry, startup, profile) != plan["owner_identities"]:
+            if _service_owner_identities(entry, startup, profile, application_http=http) != plan["owner_identities"]:
                 raise ValueError("service owners changed before publication")
             original = os.path.lexists(paths["intent"])
             if original:
@@ -1243,10 +1279,10 @@ def _service_transaction(bundle, *, reconcile_only=False):
                 _record_once(paths["intent"], intent)
                 # The first intent owns the only credential generation. Any
                 # interrupted intent without this payload requires reconciliation.
-                payload = {"schema": entry.SERVICE_SCHEMA, "operation_id": plan["operation_id"],
+                payload = {"schema": service_schema, "operation_id": plan["operation_id"],
                     "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
                     "ingress_digest": plan["ingress_digest"], "scope": plan["scope"],
-                    "owners": plan["owners"], "credential": secrets.token_urlsafe(48)}
+                    "owners": plan["owners"], "credential": secrets.token_urlsafe(48), **projection}
                 entry.validate_application_service_document(startup, payload)
                 generation.atomic_bytes(private, generation.canonical(payload) + b"\n", 0o600)
                 private_raw, private_identity = _service_snapshot(entry, private, mode=0o600)
@@ -1257,9 +1293,9 @@ def _service_transaction(bundle, *, reconcile_only=False):
                 raise ValueError("original service credential commitment differs; adoption refused")
             payload = entry._service_json(raw)
             entry.validate_application_service_document(startup, payload)
-            expected_public = {"schema": entry.SERVICE_SCHEMA, "operation_id": plan["operation_id"],
+            expected_public = {"schema": service_schema, "operation_id": plan["operation_id"],
                 "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
-                "ingress_digest": plan["ingress_digest"], "scope": plan["scope"], "owners": plan["owners"]}
+                "ingress_digest": plan["ingress_digest"], "scope": plan["scope"], "owners": plan["owners"], **projection}
             if {key: value for key, value in payload.items() if key != "credential"} != expected_public:
                 raise ValueError("original service credential payload differs")
             targets = (("binding", paths["binding"], raw, None, 0o600),
@@ -1279,7 +1315,7 @@ def _service_transaction(bundle, *, reconcile_only=False):
                 if _read_service_plan(bundle) != (bundle, plan, specification, before, after):
                     raise ValueError("service bundle changed before target publication")
                 if (_completed_go_for_service(plan["go_ingress_bundle"])[1] != selection
-                        or _service_owner_identities(entry, startup, profile) != plan["owner_identities"]
+                        or _service_owner_identities(entry, startup, profile, application_http=http) != plan["owner_identities"]
                         or _successor_json(paths["intent"]) != intent
                         or _service_snapshot(entry, private, mode=0o600) != (raw, private_identity)
                         or _successor_json(private_receipt) != {"sha256": generation.digest(raw), "identity": private_identity}):
@@ -1301,15 +1337,19 @@ def _service_transaction(bundle, *, reconcile_only=False):
                 _record_once(progress[name], {"sha256": generation.digest(data), "identity": identity})
             final = {name: _service_target(entry, path, data, old, progress[name], prepared[name], plan["digest"])[1]
                      for name, path, data, old, _ in targets}
-            if (_service_owner_identities(entry, startup, profile) != plan["owner_identities"]
+            if (_service_owner_identities(entry, startup, profile, application_http=http) != plan["owner_identities"]
                     or _completed_go_for_service(plan["go_ingress_bundle"])[1] != selection
                     or _successor_json(paths["intent"]) != intent):
                 raise ValueError("service original custody changed before completion")
-            receipt = {"schema": entry.SERVICE_RECEIPT_SCHEMA, "operation_id": plan["operation_id"],
+            receipt = {"schema": receipt_schema, "operation_id": plan["operation_id"],
                 "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
                 "ingress_digest": plan["ingress_digest"], "scope": plan["scope"],
                 "binding_sha256": generation.digest(raw), "binding_identity": final["binding"],
                 "accounts_sha256": generation.digest(after), "accounts_identity": final["accounts"]}
+            if http:
+                receipt.update(application_recipe_digest=specification["grant"]["recipe_digest"],
+                    source_projection_sha256=specification["application_recipe"]["source_projection_sha256"],
+                    provider_profile_identity=plan["owner_identities"]["provider_profile"])
             _record_once(paths["receipt"], receipt)
             return receipt
 

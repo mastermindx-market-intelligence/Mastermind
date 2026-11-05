@@ -32,6 +32,8 @@ ENTRYPOINTS = {"pool": "pool", "task": "ext/fabric_task.py",
               "remote": "ext/remote_sub.sh"}
 GO_ENTRY = "ext/native_go_entry.py"
 GO_HANDLER = "ext/go_application_handler.py"
+HTTP_REQUIRED = frozenset({"ext/application_http_transports.py",
+    "ext/application_http_realm_projection.py", "ext/application_http_realms.v1.json"})
 _GO_ENTRY_MODULE = None
 GO_REQUIRED = frozenset({GO_ENTRY, GO_HANDLER,
     "ext/native_runtime_bindings.py", "ext/lease_broker.py",
@@ -44,6 +46,10 @@ GO_REQUIRED = frozenset({GO_ENTRY, GO_HANDLER,
 
 def _entrypoints_for(files):
     """Old releases retain their exact descriptor and content identity."""
+    http_present = HTTP_REQUIRED & set(files)
+    if http_present and (http_present != HTTP_REQUIRED or not GO_REQUIRED.issubset(files)
+                         or "ext/bailian_keys.py" not in files):
+        raise ValueError("incomplete native application HTTP closure")
     present = {GO_ENTRY, GO_HANDLER} & set(files)
     if not present:
         return dict(ENTRYPOINTS)
@@ -127,6 +133,9 @@ def file_name(relative):
         return
     # One vetted flat plist. Not a suffix rule and not a directory walk.
     if relative == "ext/host_pull_launchd.plist.template":
+        return
+    # One source-sealed HTTP realm projection; no general JSON admission.
+    if relative == "ext/application_http_realms.v1.json":
         return
     parts = relative.split("/") if isinstance(relative, str) else []
     if (len(parts) != 2 or parts[0] != "ext" or not NAME.fullmatch(parts[1])

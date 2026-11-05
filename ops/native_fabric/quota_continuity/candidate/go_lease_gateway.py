@@ -18,13 +18,32 @@ class LeaseGatewayError(ValueError):
 
 class GoLeaseGateway:
     def __init__(self, db_path, accounts, models, *, clock=time.time, signing_key=None,
-                 application_broker=None):
+                 application_broker=None, application_http_recipes=(), application_http_accounts=()):
         db_path = Path(db_path)
         if not db_path.is_absolute():
             raise LeaseGatewayError("lease capability refused")
         self._db_path = db_path.resolve()
         self._accounts = frozenset(accounts)
         self._models = frozenset(models)
+        # Application-only projections never broaden the worker capability
+        # account/model sets above. Fresh grants remain the admission authority.
+        self._application_http_recipes = {}
+        self._application_http_accounts = frozenset(application_http_accounts)
+        if any(not isinstance(account, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", account) is None
+               for account in self._application_http_accounts):
+            raise LeaseGatewayError("application transport refused")
+        for recipe in application_http_recipes:
+            try:
+                from lease_broker import _application_http_recipe
+                encoded, digest = _application_http_recipe(recipe, pool=recipe["pool"], model=recipe["model"])
+                key = (recipe["pool"], recipe["model"])
+                if key in self._application_http_recipes:
+                    raise ValueError("duplicate application recipe")
+                self._application_http_recipes[key] = (encoded, digest)
+            except Exception:
+                raise LeaseGatewayError("application transport refused") from None
+        if bool(self._application_http_recipes) != bool(self._application_http_accounts):
+            raise LeaseGatewayError("application transport refused")
         self._clock = clock
         self._application_broker = application_broker
         self._application_db_identity = None
@@ -168,18 +187,35 @@ class GoLeaseGateway:
             raise LeaseGatewayError("application turn unavailable")
         return dict(zip((column[0] for column in cursor.description), row))
 
+    def application_recipe(self, pool, model):
+        """Fresh immutable copy of the sealed transport projection, not authority."""
+        try:
+            encoded, digest = self._application_http_recipes[(pool, model)]
+            return json.loads(encoded), digest
+        except (KeyError, TypeError):
+            raise LeaseGatewayError("application transport unavailable") from None
+
+    def _application_scope(self, pool, model):
+        if pool == "go" and model in self._models:
+            return self._accounts, None, None
+        recipe, digest = self.application_recipe(pool, model)
+        return self._application_http_accounts, recipe, digest
+
     def begin_application(self, request, *, principal_id, host, deadline_ns=None,
-                          expected_credential_ref=None):
+                          expected_credential_ref=None, expected_recipe_digest=None):
         """Internal authenticated service context; never caller-supplied identity."""
         try:
             broker = self._application_owner()
-            if (not isinstance(request, dict) or set(request) != {"workload", "turn_id", "pool", "model"}
-                    or request["pool"] != "go" or request["model"] not in self._models):
+            if not isinstance(request, dict) or set(request) != {"workload", "turn_id", "pool", "model"}:
                 raise LeaseGatewayError("application admission refused")
+            accounts, recipe, digest = self._application_scope(request["pool"], request["model"])
+            if digest != expected_recipe_digest:
+                raise LeaseGatewayError("application recipe refused")
             result = broker.begin_application_turn(principal_id=principal_id, caller_host=host,
                 workload=request["workload"], turn_id=request["turn_id"], pool=request["pool"],
-                model=request["model"], deadline_ns=deadline_ns, transport_accounts=self._accounts,
-                expected_credential_ref=expected_credential_ref)
+                model=request["model"], deadline_ns=deadline_ns, transport_accounts=accounts,
+                expected_credential_ref=expected_credential_ref, application_recipe=recipe,
+                expected_recipe_digest=expected_recipe_digest)
             if not result["ok"] or result["disposition"] not in {"admitted", "existing"}:
                 return result
             connection = self._connection()
@@ -196,7 +232,8 @@ class GoLeaseGateway:
         except Exception:
             raise LeaseGatewayError("application admission refused") from None
 
-    def recover_application(self, request, *, principal_id, host, request_id, path, payload):
+    def recover_application(self, request, *, principal_id, host, request_id, path, payload,
+                            expected_recipe_digest=None):
         """Recover through the same authenticated service after handler restart.
 
         The handler supplies principal and host from its private authentication
@@ -205,7 +242,7 @@ class GoLeaseGateway:
         try:
             broker = self._application_owner()
             if (not isinstance(request, dict) or set(request) != {"workload", "turn_id", "pool", "model"}
-                    or request["pool"] != "go" or path != "/v1/chat/completions"
+                    or request["pool"] not in ("go", "bailian") or path != "/v1/chat/completions"
                     or not isinstance(payload, dict) or payload.get("stream", False) is not False
                     or payload.get("model") != request["model"]):
                 raise LeaseGatewayError("application recovery refused")
@@ -226,8 +263,11 @@ class GoLeaseGateway:
             if turn is None:
                 return None
             if (turn["caller_host"] != host
-                    or any(turn[key] != request[key] for key in ("workload", "pool", "model"))):
+                    or any(turn[key] != request[key] for key in ("workload", "model"))
+                    or turn["recipe_digest"] != expected_recipe_digest):
                 raise LeaseGatewayError("application recovery refused")
+            # Use the original pool and recipe after authentication, even if
+            # today's service projection has rotated. Recovery grants no send.
             return broker.recover_application_request(principal_id=principal_id, turn_id=request["turn_id"],
                 request_id=request_id, request_digest=hashlib.sha256(raw).hexdigest())
         except LeaseGatewayError:
@@ -235,7 +275,8 @@ class GoLeaseGateway:
         except Exception:
             raise LeaseGatewayError("application recovery refused") from None
 
-    def prepare_application(self, token, *, principal_id, host, turn_id, request_id, path, payload):
+    def prepare_application(self, token, *, principal_id, host, turn_id, request_id, path, payload,
+                            expected_pool="go", transport_commitment=None):
         try:
             broker = self._application_owner()
             if (path != "/v1/chat/completions" or not isinstance(payload, dict)
@@ -252,7 +293,7 @@ class GoLeaseGateway:
                     lambda lease_id: self._lease_lookup(connection, lease_id),
                     lambda principal, turn: self._application_turn_lookup(connection, principal, turn),
                     principal_id=principal_id, host=host, turn_id=turn_id,
-                    model=payload["model"], now=self._clock(), recovery_only=True)
+                    model=payload["model"], now=self._clock(), recovery_only=True, expected_pool=expected_pool)
                 recovered = broker.recover_application_request(principal_id=principal_id, turn_id=turn_id,
                     request_id=request_id, request_digest=hashlib.sha256(raw).hexdigest())
                 if recovered is not None:
@@ -263,13 +304,16 @@ class GoLeaseGateway:
                     lambda lease_id: self._lease_lookup(connection, lease_id),
                     lambda principal, turn: self._application_turn_lookup(connection, principal, turn),
                     principal_id=principal_id, host=host, turn_id=turn_id,
-                    model=payload["model"], now=self._clock())
+                    model=payload["model"], now=self._clock(), expected_pool=expected_pool)
             finally:
                 connection.close()
-            if claims["account"] not in self._accounts or claims["model"] not in self._models:
+            accounts, recipe, digest = self._application_scope(expected_pool, claims["model"])
+            if (claims["account"] not in accounts
+                    or expected_pool != "go" and claims["recipe_digest"] != digest):
                 raise LeaseGatewayError("application request refused")
             prepared = broker.prepare_application_request(principal_id=principal_id, turn_id=turn_id,
-                request_id=request_id, request_digest=hashlib.sha256(raw).hexdigest())
+                request_id=request_id, request_digest=hashlib.sha256(raw).hexdigest(),
+                transport_commitment=transport_commitment)
             if prepared.get("dispatch_permitted"):
                 # The original handler sends these immutable, digest-bound bytes.
                 # They are internal dispatch material, never a public receipt/log.

@@ -17,6 +17,7 @@ from unittest import mock
 _active = False
 _expected = False
 _unexpected = []
+_loopback_network = None
 _home = Path(pwd.getpwuid(os.getuid()).pw_dir)
 _private = tuple(str(_home / name) for name in
                  ('.glm', '.bailian', '.minimax', '.qwen', '.claude/projects',
@@ -27,11 +28,51 @@ class FixtureBoundaryError(AssertionError):
     pass
 
 
+def _allowed_loopback_event(event, args):
+    """Only the two registered, numeric-loopback HTTP fixture endpoints."""
+    scope = _loopback_network
+    if scope is None:
+        return False
+    if event == 'socket.__new__':
+        return (len(args) == 4 and args[1] == socket.AF_INET
+                and args[2] == socket.SOCK_STREAM and args[3] in (0, socket.IPPROTO_TCP))
+    if event in ('socket.bind', 'socket.connect'):
+        sock, address = args
+        return (sock.family == socket.AF_INET and sock.type == socket.SOCK_STREAM
+                and isinstance(address, tuple) and len(address) == 2
+                and address[0] == '127.0.0.1' and type(address[1]) is int
+                and (address[1] == 0 if event == 'socket.bind'
+                     else address[1] in scope['ports']))
+    if event == 'socket.getaddrinfo':
+        host, port, family, kind, protocol = args
+        return (host == '127.0.0.1' and type(port) is int and port in scope['ports']
+                and family in (0, socket.AF_INET) and kind in (0, socket.SOCK_STREAM)
+                and protocol in (0, socket.IPPROTO_TCP))
+    if event == 'urllib.Request':
+        return len(args) == 4 and args[0] in scope['post_urls'] and args[3] == 'POST'
+    return False
+
+
+@contextlib.contextmanager
+def numeric_loopback_network():
+    """Opt in after installation; process and private-owner guards stay active."""
+    global _loopback_network
+    assert _active and _loopback_network is None
+    scope = {'ports': set(), 'post_urls': set()}
+    _loopback_network = scope
+    try:
+        yield scope
+    finally:
+        _loopback_network = None
+
+
 def _audit(event, args):
     if not _active:
         return
     kind = None
     if event.startswith('socket.') or event == 'urllib.Request':
+        if _allowed_loopback_event(event, args):
+            return
         kind = 'network'
     elif event in ('subprocess.Popen', 'os.system', 'os.posix_spawn'):
         kind = 'process'

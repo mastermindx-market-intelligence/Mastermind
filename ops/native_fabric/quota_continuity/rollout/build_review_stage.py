@@ -71,7 +71,6 @@ GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
     'sub.sh': '4956942c77421b9d1015889995ebf0419399ea62c16de608765a0795b5fb551f',
     'native_remote.py': '2beef7dd4de1dab2908970bed48cfd3fdfd99da2d99bc8de72a92d2a1b2418b6',
     'fabric_operator_contract.py': 'e6b32fd1547402c1184f826f74c253f34384cb6e32306e55b84449a892d19b5e',
-
 }
 
 EXTRA_PREIMAGES = {
@@ -90,6 +89,82 @@ GO_APPLICATION_DEPENDENCIES = ("lease_broker.py", "go_lease_capability.py", "go_
 # Actual102 closure after protected51e9 and application A3 composition: the B dependencies
 # are unchanged; remote_sub retains the protected fast-observation and terminal-replay fixes.
 GO_BASE_MANIFEST_SHA256 = "395b1af90c815125a92c81c8b72ec61065002f4f9e66ad53618794ec790ce429"
+GO_BASE_DEPENDENCIES = {
+    "lease_broker.py": "b785ff1d83c6e2c6b77c8bd349e37a8624c9055e5fce8aa2307c09b8302d12eb",
+    "go_lease_capability.py": "4d0f9aa423afc56dd29d955beaaab06a6ed9082ea503bdbea352af6c99a6e4df",
+    "go_lease_gateway.py": "a35096dea01297bd872baff021f544bb300e12754839a9e546d655118c94ad21",
+}
+HTTP_GENERATION_MEMBERS = frozenset({"ext/application_http_transports.py",
+    "ext/application_http_realm_projection.py", "ext/application_http_realms.v1.json"})
+
+
+def validate_go_base_manifest(manifest, dependency_hashes):
+    """Accept the historical102 closure plus exactly the captured A3 update.
+
+    Both the builder and installer compare A3 with their reviewed source
+    component first. All other members and their hashes stay bound to the
+    actual395b artifact; a changed key set or fourth changed member refuses.
+    """
+    expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
+    if (type(manifest) is not dict or set(manifest) != expected
+            or type(dependency_hashes) is not dict
+            or set(dependency_hashes) != set(GO_APPLICATION_DEPENDENCIES)):
+        raise ValueError("native Go base dependency closure differs")
+    historical = dict(manifest)
+    for name, original in GO_BASE_DEPENDENCIES.items():
+        if manifest["ext/" + name] != dependency_hashes[name]:
+            raise ValueError("native Go base differs from captured application dependency")
+        historical["ext/" + name] = original
+    if sha((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) != GO_BASE_MANIFEST_SHA256:
+        raise ValueError("native Go base closure is not the reviewed protected composition")
+
+
+def application_http_sources(root):
+    """Compile immutable metadata from the exact three historical inputs.
+
+    The H preimage is explicitly mapped as AST evidence only. The independently
+    sealed CURRENT H is the sole transport code in the flat runtime closure.
+    No Git history, credential, provider or repository import is consulted.
+    """
+    root = Path(root)
+    reader = root / "rollout/application_http_realm_projection.py"
+    def read(path):
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("application HTTP source must be an explicit regular file")
+        return path.read_bytes()
+    reader_raw = read(reader)
+    # Execute and seal the SAME captured compiler bytes. A stale/substituted
+    # same-path module in a reused builder process is not source evidence.
+    compiler = {"__name__": "mastermind_http_projection_compiler", "__file__": str(reader)}
+    exec(compile(reader_raw, str(reader), "exec"), compiler)
+    inputs = {row["path"]: read(root / "source/application_http_transports.py.preimage"
+        if row["path"] == compiler["TRANSPORT_SOURCE_PATH"] else root.parents[2] / row["path"])
+        for row in compiler["INPUT_SOURCES"]}
+    payload = compiler["compile_projection_bytes"](inputs)
+    compiler["validate_projection"](payload, expected_sha256=sha(payload))
+    return {"ext/application_http_transports.py":
+                (read(root / "candidate/application_http_transports.py"), "candidate/application_http_transports.py"),
+            "ext/application_http_realm_projection.py":
+                (reader_raw, "rollout/application_http_realm_projection.py"),
+            "ext/application_http_realms.v1.json":
+                (payload, "generated:rollout/application_http_realm_projection.py")}
+
+
+def compose_application_http_stage(root, output, manifest, files):
+    """Add one closed metadata/reader/transport group to existing Go ingress."""
+    if (not {"ext/native_go_entry.py", "ext/go_application_handler.py"}.issubset(manifest)
+            or HTTP_GENERATION_MEMBERS & set(manifest)):
+        raise ValueError("application HTTP requires one unextended Go composition")
+    additions = application_http_sources(root)
+    for relative in additions:
+        target = Path(output) / "native-code-stage" / relative
+        if target.exists() or target.is_symlink():
+            raise ValueError("application HTTP stage destination already exists")
+    for relative, (raw, source) in additions.items():
+        (Path(output) / "native-code-stage" / relative).write_bytes(raw)
+        manifest[relative] = sha(raw)
+        files[relative] = {"source": source, "sha256": sha(raw),
+            "installed_preimage_sha256": None, "bytes": len(raw)}
 
 
 def stage_external_go_component(root, output, stable_ext, *, staged_manifest=None):
@@ -156,8 +231,8 @@ def stage_external_go_component(root, output, stable_ext, *, staged_manifest=Non
 def compose_go_stage(root, output, manifest, files, component):
     """Join only the captured external B handler and the fixed native entry."""
     root, output = Path(root), Path(output)
-    if sha((json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode()) != GO_BASE_MANIFEST_SHA256:
-        raise ValueError("native Go base closure is not the reviewed protected composition")
+    validate_go_base_manifest(manifest,
+        {name: row["sha256"] for name, row in component["dependencies"].items()})
     expected = {"ext/" + name: row["sha256"] for name, row in component["dependencies"].items()}
     if (component.get("schema") != "native-external-go-component.v1"
             or component.get("component") != "go_application_handler"
@@ -199,7 +274,11 @@ def main():
                         help='artifact directory outside immutable released source when deploying')
     parser.add_argument('--include-go-application', action='store_true',
                         help='include the fixed Go entry/handler source pair; does not enroll or start services')
+    parser.add_argument('--include-application-http', action='store_true',
+                        help='seal fixed HTTP transport metadata; requires Go ingress and grants no application permission')
     args = parser.parse_args()
+    if args.include_application_http and not args.include_go_application:
+        parser.error('--include-application-http requires --include-go-application')
     output = args.output
     inventory = json.loads((draft / 'native-preimages.json').read_text())
     if (inventory.get('schema') != 'native-code-preimages.v1'
@@ -280,6 +359,9 @@ def main():
     if args.include_go_application:
         compose_go_stage(root, output, manifest, files, component)
     extra = {"native_go_entry.py", "go_application_handler.py"} if args.include_go_application else set()
+    if args.include_application_http:
+        compose_application_http_stage(root, output, manifest, files)
+        extra |= {Path(name).name for name in HTTP_GENERATION_MEMBERS}
     if {p.name for p in (stage / "ext").iterdir()} != BASE_FILES | ADDITIONS | extra:
         raise ValueError("unexpected composed native file")
     record = {"qualified_pure_yaml": pure_yaml, "schema": "native-code-source-inventory.v1", "native_code_files": len(manifest),

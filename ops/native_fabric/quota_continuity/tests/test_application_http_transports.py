@@ -1,11 +1,11 @@
 """Fixed native Responses transport drivers: synthetic source proof only.
 
 These fixtures exercise the driver component with an in-process I/O spy and
-synthetic payloads. They are NOT application admission. At this source base A
-admits only ``pool == "go"`` on ``/v1/chat/completions``, so no real
-application turn can reach the ``minimax`` or ``bailian`` drivers; the last
-test proves that refusal with the real incumbent broker instead of faking a
-success. No provider, credential file, broker grant or account is touched.
+synthetic payloads. Compilation is not application admission. MiniMax remains
+unjoined; Bailian requires its exact recipe, authenticated credential reference
+and current grant through the same broker. The final tests prove that merely
+naming either pool cannot authorize a turn. No provider or real credential is
+touched. The separate Bailian handler suite proves the actual admitted join.
 """
 import hashlib
 import json
@@ -179,7 +179,8 @@ class IdentityTest(DriverFixture):
         import inspect
         for driver in (MiniMaxResponsesDriver, BailianResponsesDriver):
             parameters = set(inspect.signature(driver.__init__).parameters)
-            self.assertEqual(parameters, {"self", "transport", "clock", "max_timeout_seconds"})
+            self.assertEqual(parameters, {"self", "transport", "clock", "max_timeout_seconds",
+                                          "realm_projection", "projection_sha256"})
             for forbidden in ("endpoint", "url", "pool", "provider", "model", "account",
                               "api_key", "credential", "key", "realm", "protocol"):
                 self.assertNotIn(forbidden, parameters)
@@ -1030,8 +1031,8 @@ class JoinOrderTest(DriverFixture):
         self.assertEqual(spy.requests, [])
 
 
-class CurrentJoinUnavailableTest(unittest.TestCase):
-    """The real incumbent A owner refuses these pools at this source base."""
+class UnqualifiedJoinTest(unittest.TestCase):
+    """The actual owner refuses unjoined or unauthenticated pool requests."""
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -1066,13 +1067,17 @@ class CurrentJoinUnavailableTest(unittest.TestCase):
     def save(self):
         self.accounts.write_text(json.dumps(self.document))
 
-    def test_the_broker_refuses_the_minimax_and_bailian_pools(self):
+    def test_the_broker_refuses_unjoined_or_unauthenticated_pool_requests(self):
         for pool, model in (("minimax", "MiniMax-M3"), ("bailian", "qwen3.8-max")):
             with self.assertRaises(lease_broker.ApplicationAdmissionError) as caught:
                 self.broker.begin_application_turn(
                     principal_id="macro", caller_host="vps", workload="site_interactive",
                     turn_id="turn-1", pool=pool, model=model)
-            self.assertEqual(caught.exception.code, "unsupported_application_pool")
+            self.assertEqual(caught.exception.code,
+                "unsupported_application_pool" if pool == "minimax" else "invalid_identity")
+        with self.broker._conn() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM leases").fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM application_turns").fetchone()[0], 0)
 
     def test_an_application_grant_for_these_pools_is_refused_by_the_account_owner(self):
         for pool in ("minimax", "bailian"):

@@ -31,11 +31,12 @@ Required incumbent join order (the owner composes this, not the driver):
    ``mark_application_unknown``;
 9. independent downstream delivery/close.
 
-Current join status: A admits only ``pool == "go"`` on
-``/v1/chat/completions``, so no real application turn reaches these drivers
-yet. Mapping an application request record onto the native ``responses`` wire
-is a shared-owner extension for the incumbent A gateway/request owner; it is
-deliberately not done here.
+The existing A/B join can project a source-sealed HTTP recipe into its same
+application request owner. This driver supplies no application permission or
+availability: native generation, enrollment, current grant and real-path
+qualification remain separate requirements. A flat generation supplies the
+verified projection bytes and manifest digest; repository-only construction
+retains the reviewed shared realm owner.
 """
 from __future__ import annotations
 
@@ -46,6 +47,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 SCHEMA = "mastermind.application_http_transports.v1"
@@ -615,8 +617,31 @@ class _FixedResponsesDriver:
 
     def __init__(self, *, transport: Callable[[TransportRequest], TransportResponse],
                  clock: Callable[[], float] = time.time,
-                 max_timeout_seconds: float = MAX_TIMEOUT_SECONDS):
-        realm, protocol = _shared_realm(self.realm_id)
+                 max_timeout_seconds: float = MAX_TIMEOUT_SECONDS,
+                 realm_projection: Optional[bytes] = None,
+                 projection_sha256: Optional[str] = None):
+        if realm_projection is None and projection_sha256 is None:
+            # Repository callers retain their reviewed shared owner. A flat
+            # generation always supplies BOTH sealed inputs and never takes
+            # this branch, including after a malformed projection.
+            realm, protocol = _shared_realm(self.realm_id)
+        else:
+            try:
+                from application_http_realm_projection import validate_projection
+                document = validate_projection(realm_projection, expected_sha256=projection_sha256)
+                matches = [row for row in document["drivers"] if row["driver_id"] == self.driver_id]
+                if len(matches) != 1:
+                    raise ValueError("driver inventory differs")
+                row = matches[0]
+                if (row["realm_id"] != self.realm_id or row["pool"] != self.pool
+                        or frozenset(row["allowed_models"]) != self.allowed_models
+                        or row["default_model"] != self.default_model):
+                    raise ValueError("driver declaration differs")
+                realm = SimpleNamespace(realm_id=row["realm_id"], provider_alias=row["provider"],
+                    base_url=row["base_url"], env_key=row["env_key"])
+                protocol = row["protocol"]
+            except Exception:
+                raise TransportRefused("sealed_realm_refused", self.realm_id) from None
         if (type(max_timeout_seconds) is not float and type(max_timeout_seconds) is not int) \
                 or isinstance(max_timeout_seconds, bool) \
                 or not math.isfinite(max_timeout_seconds) \
@@ -769,6 +794,16 @@ class _FixedResponsesDriver:
                 raise TransportRefused("account_not_eligible", binding.account) from None
 
     # -- the single send ---------------------------------------------------
+    def preflight_credential(self, compiled: CompiledCall, binding: AccountBinding) -> None:
+        """Validate the selected account's actual owner credential before intent.
+
+        Discard the private value immediately. send_prepared independently
+        loads it again after the durable original permit, so revocation or
+        replacement cannot borrow this earlier check or extend its lifetime.
+        """
+        self.preflight_account(compiled, binding)
+        self._credential(binding, binding.account)
+
     def send_prepared(self, compiled: CompiledCall, permit: DispatchPermit,
                       binding: AccountBinding) -> TransportObservation:
         """POST the frozen bytes once, on the bound account, and observe it.
