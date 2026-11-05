@@ -86,9 +86,8 @@ class InstalledCanonicalProjectData:
         if self.latest(frame) is not True:return None
         # Acquire the actual configured CODE pin lazily. Original operation GET
         # and reconciliation never call this method or refresh Macro source.
-        from integrations.executive_mcp.installed import _installed_child_env
-        env=_installed_child_env(code_root=self.collector._code_root,macro_root=self.collector._macro_root)
-        _,code,_,_=self.collector._snapshot_pair(env,deadline=time.monotonic()+15)
+        capture=self.collector._capture_canonical_code()
+        code=capture.observations[1]
         def no_compile(*args):raise ValueError('SOURCE_WRITE_NOT_AVAILABLE')
         publisher=FixedProjectGitPublisher(self.identity.binding,no_compile,lambda _:False,lambda _:'',
             self.identity.qualify,self.identity,principal_scope=self._scope,
@@ -96,7 +95,9 @@ class InstalledCanonicalProjectData:
             authorize_workspace_read=self._can_read,workspace_read_permission_stamp=self._read_stamp,
             authorize_latest_project_data=self._can_latest,latest_project_data_permission_stamp=self._latest_stamp,
             canonical_data_events=self.events)
-        return publisher.observe_canonical_project_data(principal,work_ref=work_ref)
+        view=publisher.observe_canonical_project_data(principal,work_ref=work_ref)
+        self.collector._bind_canonical_code_capture(capture,view)
+        return view
 
     @contextmanager
     def compilation_scope(self,principal,*,work_ref):
@@ -108,6 +109,7 @@ class InstalledCanonicalProjectData:
             else:
                 with self.collector.canonical_project_compilation_scope(view,work_ref=work_ref):yield view
         finally:
+            if view is not None:self.collector._discard_canonical_code_capture(view)
             _ACTIVE_COMPILATION_VIEW.reset(token)
 
     def qualify_publisher(self,binding):
@@ -142,10 +144,12 @@ class InstalledCanonicalProjectData:
         # One pure installed READ capture, inside this view's original budget.
         # Nested collector/source checks retain live permissions while reusing
         # immutable C/N facts; full default/config/Event fences bracket capture.
-        with view.capture_scope():
-            with self.collector.canonical_project_data_scope(view,work_ref=selection['work_ref']):
-                body=readers[operation](**selection)
-            witness=view.witness()
+        try:
+            with view.capture_scope():
+                with self.collector.canonical_project_data_scope(view,work_ref=selection['work_ref']):
+                    body=readers[operation](**selection)
+                witness=view.witness()
+        finally:self.collector._discard_canonical_code_capture(view)
         generation=hashlib.sha256(json.dumps({'code':view.code_commit,'data':view.data_commit,
             'closure':witness['reader_closure_sha256'],'scope':view._operation.scope,
             'permission':view._operation.stamp,'event':witness['source_operation']},
