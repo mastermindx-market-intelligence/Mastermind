@@ -80,16 +80,47 @@ class ProjectPlanningAppFactory:
             raise ValueError('canonical planning installed source owners differ')
         return data
 
+    def _accept_new_canonical_view(self,data,view):
+        """Consume only the immediate installed producer's genuine issued proof.
+
+        Mode.observe has just completed its full current postcheck. This is not
+        a reusable grant or a new deadline: even this immediate handoff refuses
+        an expired view, and the consumer's capture retains full pre/post checks.
+        """
+        from integrations.executive_mcp import installed
+        from control_plane.project_canonical_data import CanonicalProjectDataView
+        if type(view) is not CanonicalProjectDataView:raise ValueError('canonical planning issued view unavailable')
+        collector=data.collector
+        proof=view._verified_facts.pop(installed._CANONICAL_CODE_CAPTURE,None)
+        if (type(proof) is not installed._CanonicalCodeCapture
+                or proof.seal is not installed._CANONICAL_CODE_CAPTURE or proof.owner is not collector
+                or proof.binding!=collector._canonical_code_capture_binding()
+                or proof.view is not view or proof.view_identity!=view._owner._view_identity(view)
+                or proof.observations[0]!=self.service.config.proof_base_sha
+                or proof.observations[1]!=view.code_commit
+                or proof.macro_snapshot.root!=collector._macro_root
+                or proof.macro_snapshot.head!=view.code_commit
+                or collector._source_root!=self.service.config.proof_source_repository
+                or view._code_root!=collector._macro_root
+                or view._owner.events is not data.events
+                or view._owner.publisher._binding!=data.identity.binding):
+            raise ValueError('canonical planning issued CODE proof differs')
+        view._owner._validate_view(view)
+        view._owner._permission_guard(view._operation)
+        return view
+
     def _canonical_view(self,workspace,work_ref,*,verify_source=True):
         data=self._canonical_data()
         if data is None:return None
         invocation=current_foreground_operation()
         identity=(data,dataclasses.asdict(workspace),work_ref,data.context_binding())
         saved=getattr(invocation,'_planning_data_view',None)
+        issued=False
         if saved is None:
             view=data.view(workspace,work_ref=work_ref)
             if view is None:raise ValueError('canonical planning DATA permission unavailable')
-            data.collector._discard_canonical_code_capture(view)
+            view=self._accept_new_canonical_view(data,view)
+            issued=True
             invocation._planning_data_view=(identity,view)
         else:
             if saved[0]!=identity:raise ValueError('canonical planning source owner changed')
@@ -119,10 +150,11 @@ class ProjectPlanningAppFactory:
                 view.check()
             if capture is None and (verify_source or time.monotonic()>=view._operation.read_deadline):
                 renewed=data.view(workspace,work_ref=work_ref)
-                if renewed is not None:data.collector._discard_canonical_code_capture(renewed)
+                if renewed is not None:renewed=self._accept_new_canonical_view(data,renewed)
                 if renewed is None or (renewed.code_commit,renewed.data_commit)!=(view.code_commit,view.data_commit):
                     raise ValueError('original planning source changed; no rebase')
-                view=renewed;invocation._planning_data_view=(identity,view)
+                view=renewed;issued=True;invocation._planning_data_view=(identity,view)
+        if issued:return view
         # Nested access/Event fences recheck current grants; the separate
         # Source.check observation performs the full current Git/seal check.
         # A later independent read may recapture only the SAME immutable C/N.
