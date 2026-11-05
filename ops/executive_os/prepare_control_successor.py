@@ -181,6 +181,28 @@ def build_successor(document: dict[str, Any], *, source_sha: str,
     return successor
 
 
+def build_component_successor(document: dict[str, Any], *, source_sha: str) -> dict[str, Any]:
+    """Return a successor that moves ONLY the two source coordinates.
+
+    A Control *component* update retargets the installed source, not the
+    approved Macro root.  The already-installed Macro root is therefore
+    preserved verbatim: it is read from the supplied document and handed
+    straight back to the existing pure producer, so no Macro path is exported,
+    logged or re-attested by this function.  Only ``proof_base_sha`` and the
+    installer-owned ``proof_source_repository`` may differ afterwards; every
+    other supplied value -- host policy, arming, identities and the Macro
+    binding -- is preserved exactly.
+    """
+    macro_root = document.get("ceo_ingress_app_macro_root")
+    if type(macro_root) is not str or not macro_root:
+        raise PreparationError("an existing Macro root binding is required")
+    successor = build_successor(document, source_sha=source_sha, macro_root=macro_root)
+    changed = {key for key in document if document.get(key) != successor.get(key)}
+    if changed != {"proof_base_sha", "proof_source_repository"}:
+        raise PreparationError("only the source coordinates may change")
+    return successor
+
+
 def prepare(*, input_path: str, output_path: str, source_sha: str,
             macro_root: str) -> dict[str, Any]:
     source = _offline_path(input_path)

@@ -209,7 +209,7 @@ _ARM_ADMISSION_CODES = frozenset(
 _MAX_JSON_BYTES = 1024 * 1024
 _TRANSACTION_SCHEMA = "mastermind.executive_autonomy_transaction/v1"
 A2_DISABLE_COMMANDS = frozenset({"a2-disable-prepare", "a2-disable-prepare-reconcile"})
-_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION", "FINITE_CONTROL_STAGE", "PAID_CONTROL_STAGE", "OS_GATEWAY_PUBLICATION"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
+_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION", "FINITE_CONTROL_STAGE", "PAID_CONTROL_STAGE", "OS_GATEWAY_PUBLICATION", "CONTROL_COMPONENT_UPDATE"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
 # One manifest name for the canonical marker and for the private generation it
 # is published from, so a renamed generation is always readable in place.
 _TRANSACTION_MANIFEST_NAME = "transaction.json"
@@ -412,6 +412,115 @@ _GATEWAY_AUDIT_LEAF_NAME = _GATEWAY_AUDIT_DIRECTORY.name
 _GATEWAY_AUDIT_LEAF_MODE = 0o700
 _GATEWAY_AUDIT_ENTRY_MAX_COUNT = 32
 _GATEWAY_AUDIT_ENTRY_NAME_MAX = 128
+
+# The Control component update operation domain: one closed, root-only
+# composition that retargets the EXISTING installed Control source (its
+# configuration proof coordinates, its Control plist and its already-inert
+# Worker plist) onto an already-staged target release, through the ONE
+# existing ``AUTONOMY_TRANSACTION`` owner.  It opens no second lock, writes no
+# second marker, never touches the MCP component update's own lock, and never
+# acts on the Relay, MCP, Backup or privileged broker.
+CONTROL_COMPONENT_UPDATE = "CONTROL_COMPONENT_UPDATE"
+CONTROL_COMPONENT_COMMANDS = frozenset(
+    {
+        "plan-control-component",
+        "apply-control-component",
+        "reconcile-control-component",
+    }
+)
+# The retained preimages of this operation: the two installed plists and the
+# three receipts it may replace.  They are sealed into the private generation
+# before the canonical marker path can become visible, so an interrupted
+# update always retains the ORIGINAL bytes.
+_COMPONENT_ARCHIVES = (
+    "prior-control-plist.plist",
+    "prior-worker-plist.plist",
+    "prior-component-autonomy-receipt.json",
+    "prior-component-ceo-submit-receipt.json",
+    "prior-component-receipt.json",
+)
+_COMPONENT_MANIFEST_FIELDS = frozenset(
+    {
+        "component_plan_sha256",
+        "component_prior_release_seal_sha256",
+        "component_target_release_seal_sha256",
+        "component_observed_at",
+        "component_prior_control_plist_sha256",
+        "component_target_control_plist_sha256",
+        "component_prior_worker_plist_sha256",
+        "component_target_worker_plist_sha256",
+        "component_prior_autonomy_receipt_present",
+        "component_prior_autonomy_receipt_sha256",
+        "component_target_autonomy_receipt_sha256",
+        "component_prior_ceo_receipt_present",
+        "component_prior_ceo_receipt_sha256",
+        "component_target_ceo_receipt_sha256",
+        "component_prior_component_receipt_present",
+        "component_prior_component_receipt_sha256",
+        "component_target_component_receipt_sha256",
+        "component_mode",
+        "component_prior_control_launchd_disabled",
+        "component_prior_worker_launchd_disabled",
+    }
+)
+_COMPONENT_DIGEST_MANIFEST_FIELDS = frozenset(
+    _COMPONENT_MANIFEST_FIELDS
+    - {
+        "component_prior_autonomy_receipt_present",
+        "component_prior_ceo_receipt_present",
+        "component_prior_component_receipt_present",
+        "component_observed_at",
+        "component_mode",
+        "component_prior_control_launchd_disabled",
+        "component_prior_worker_launchd_disabled",
+    }
+)
+# The two closed input states of this operation.  LIVE: the Control service is
+# registered and enabled.  OFFLINE: the Control service is genuinely absent
+# AND explicitly disabled.  Every other combination refuses before any
+# effect.
+_COMPONENT_LIVE_MODE = "live"
+_COMPONENT_OFFLINE_MODE = "offline"
+_COMPONENT_MODES = frozenset({_COMPONENT_LIVE_MODE, _COMPONENT_OFFLINE_MODE})
+_COMPONENT_PHASES = frozenset(
+    {
+        "LOCKED",
+        "CONTROL_BOOTOUT_RECORDED",
+        "CONTROL_ABSENT_PROVEN",
+        "CONTROL_ENABLE_RECORDED",
+        "CONTROL_ENABLED_PROVEN",
+        "CONTROL_PLIST_REPLACED",
+        "WORKER_PLIST_REPLACED",
+        "CONTROL_REPLACED",
+        "AUTHORITY_RECEIPT_CORRELATED",
+        "CONTROL_BOOTSTRAP_RECORDED",
+        "ADMISSION_BOUND",
+        "CONTROL_COMPONENT_TARGETS_PROVEN",
+        "CONTROL_COMPONENT_RECEIPT_REPLACED",
+        "CONTROL_OBSERVATION_PUBLICATION_STARTED",
+        # The phase the component publication path actually records.  It is a
+        # RECOVERABLE phase: an interruption after the observation was
+        # published must be reconciled by an exact-byte readback, never by a
+        # second publication.  It is deliberately NOT a member of
+        # ``_CONTROL_COMPONENT_PUBLICATION_ADMISSIBLE_PHASES``.
+        "CONTROL_COMPONENT_PUBLICATION_STARTED",
+    }
+)
+# The fixed receipt of one completed update.  It carries only hashes, source
+# identifiers and the closed effect list; it never carries configuration,
+# token or credential content.
+CONTROL_COMPONENT_RECEIPT = CONFIG_ROOT / "control-component-update-v1.json"
+CONTROL_COMPONENT_RECEIPT_SCHEMA = "mastermind.executive_control_component_receipt/v1"
+# The fixed administrative checkout that backs the installer-owned
+# ``proof_source_repository`` coordinate.  It is prepared by the installer, not
+# by this owner.
+_CONTROL_ADMIN_CHECKOUT_ROOT = RUNTIME_ROOT / "control" / "admin-checkout"
+_CONTROL_ADMIN_CHECKOUT_MAX_BYTES = 4 * 1024 * 1024
+_CONTROL_COMPONENT_GIT_TIMEOUT = 10.0
+# The bounded window in which the stopped boundary waits for the Control
+# service UID to drain after a bootout.  The census is observed, never
+# signalled, and it never accepts a caller-selected UID, PID or timeout.
+_CONTROL_COMPONENT_UID_CENSUS_TIMEOUT = 30.0
 
 
 def _fsync_directory(path: Path) -> None:
@@ -1120,6 +1229,34 @@ def _parser() -> argparse.ArgumentParser:
         type=_gateway_transaction_id,
         action=_StoreOnce,
         required=True,
+    )
+    # The Control component update domain: three closed verbs on the ONE
+    # existing transaction owner.  Every argument is a bounded digest or the
+    # exact target release; no path, label, account, port or verified boolean
+    # is ever caller selectable here.
+    component_plan = sub.add_parser(
+        "plan-control-component",
+        help="Plan the configuration-preserving Control source update.",
+    )
+    component_plan.add_argument(
+        "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
+    )
+    component_apply = sub.add_parser(
+        "apply-control-component",
+        help="Publish exactly the approved Control component plan.",
+    )
+    component_apply.add_argument(
+        "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
+    )
+    component_apply.add_argument(
+        "--plan-sha256", type=_exact_digest, action=_StoreOnce, required=True
+    )
+    component_reconcile = sub.add_parser(
+        "reconcile-control-component",
+        help="Prove one interrupted Control component update to its postimages.",
+    )
+    component_reconcile.add_argument(
+        "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
     )
     return parser
 
@@ -3540,6 +3677,35 @@ class ProductionTransactionHost(ProductionArmHost):
         elif value.get("operation") == OS_GATEWAY_PUBLICATION:
             # A gateway marker is never valid without its own closed fields.
             raise TransactionEffectUnknown()
+        if set(value) & _COMPONENT_MANIFEST_FIELDS:
+            # A Control component marker is refused unless it names THIS
+            # operation and every closed component field is exactly shaped.
+            # The receipt-presence flags and the two launchd preimages are
+            # booleans; the mode is one closed value; the rest are digests.
+            # An old schema is never reinterpreted as a component update and
+            # vice versa.
+            if (value.get("operation") != CONTROL_COMPONENT_UPDATE
+                    or type(value.get("component_prior_autonomy_receipt_present")) is not bool
+                    or type(value.get("component_prior_ceo_receipt_present")) is not bool
+                    or type(value.get("component_prior_component_receipt_present")) is not bool
+                    or type(value.get("component_prior_control_launchd_disabled")) is not bool
+                    or type(value.get("component_prior_worker_launchd_disabled")) is not bool
+                    or value.get("component_mode") not in _COMPONENT_MODES
+                    or _TIMESTAMP_RE.fullmatch(str(value.get("component_observed_at", ""))) is None
+                    or any(re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))) is None
+                           for field in _COMPONENT_DIGEST_MANIFEST_FIELDS)):
+                raise TransactionEffectUnknown()
+            # The Worker is disabled in BOTH modes, and the Control is
+            # explicitly disabled in exactly the offline mode.  A marker that
+            # contradicts its own mode is never a valid component marker.
+            if (value.get("component_prior_worker_launchd_disabled") is not True
+                    or (value.get("component_mode") == _COMPONENT_OFFLINE_MODE)
+                    != (value.get("component_prior_control_launchd_disabled") is True)):
+                raise TransactionEffectUnknown()
+            required |= _COMPONENT_MANIFEST_FIELDS
+        elif value.get("operation") == CONTROL_COMPONENT_UPDATE:
+            # A component marker is never valid without its own closed fields.
+            raise TransactionEffectUnknown()
         if value.get("operation") in DIALOGUE_CANARY_OPERATIONS:
             required |= _CANARY_MANIFEST_FIELDS
             if (
@@ -3624,6 +3790,8 @@ class ProductionTransactionHost(ProductionArmHost):
             value.update({key: current[key] for key in _PAID_RECEIPT_FIELDS})
         if current is not None and set(current) & _GATEWAY_MANIFEST_FIELDS:
             value.update({key: current[key] for key in _GATEWAY_MANIFEST_FIELDS})
+        if current is not None and set(current) & _COMPONENT_MANIFEST_FIELDS:
+            value.update({key: current[key] for key in _COMPONENT_MANIFEST_FIELDS})
         _atomic_file(
             self._manifest_path(),
             _encoded_json(value),
@@ -4294,6 +4462,9 @@ class ProductionTransactionHost(ProductionArmHost):
         if set(manifest) & _GATEWAY_MANIFEST_FIELDS:
             expected.add(_GATEWAY_GRANT_ARCHIVE)
             archives.append(AUTONOMY_TRANSACTION / _GATEWAY_GRANT_ARCHIVE)
+        if set(manifest) & _COMPONENT_MANIFEST_FIELDS:
+            expected.update(_COMPONENT_ARCHIVES)
+            archives.extend(AUTONOMY_TRANSACTION / name for name in _COMPONENT_ARCHIVES)
         if manifest.get("operation") in DIALOGUE_CANARY_OPERATIONS:
             expected.add(_CANARY_RECEIPT_ARCHIVE)
             archives.append(AUTONOMY_TRANSACTION / _CANARY_RECEIPT_ARCHIVE)
@@ -7437,6 +7608,2168 @@ def prepare_gateway_publication(
     )
 
 
+# ---------------------------------------------------------------------------
+# The Control component update: one closed, root-only composition that
+# retargets the EXISTING installed Control source onto an already-staged
+# target release, through the ONE existing ``AUTONOMY_TRANSACTION`` owner.
+# ---------------------------------------------------------------------------
+
+
+class ComponentUpdateRefused(RuntimeError):
+    """Refused before any installed-file, launchd or receipt effect.
+
+    A refusal raised AFTER the transaction marker exists is never a zero-effect
+    refusal: it retains the original transaction and names the phase that was
+    still incomplete, so the caller reports an uncertain original operation
+    rather than a clean one that never happened.
+    """
+
+    def __init__(
+        self, code: str, *, phase: str | None = None, transaction_id: str | None = None
+    ) -> None:
+        super().__init__(code)
+        self.code = code
+        self.phase = phase
+        self.transaction_id = transaction_id
+
+    @property
+    def incomplete(self) -> bool:
+        """True when the original transaction was already claimed."""
+
+        return self.transaction_id is not None
+
+
+_COMPONENT_REFUSAL_CODES = frozenset(
+    {
+        "control_component_release_seal_invalid",
+        "control_component_target_release_not_staged",
+        "control_component_admin_checkout_unavailable",
+        "control_component_interpreter_unqualified",
+        "control_component_control_config_unreadable",
+        "control_component_plist_unreadable",
+        "control_component_source_mismatch",
+        "control_component_schema_incompatible",
+        "control_component_transaction_occupied",
+        "control_component_transaction_absent",
+        "control_component_authority_receipt_invalid",
+        "control_component_authority_receipt_armed",
+        "control_component_receipt_invalid",
+        "control_component_receipt_preimage_mismatch",
+        "control_component_worker_live",
+        "control_component_worker_state_unknown",
+        "control_component_worker_not_disabled",
+        "control_component_control_state_mixed",
+        "control_component_control_state_unknown",
+        "control_component_launchd_state_unknown",
+        "control_component_owner_not_quiescent",
+        "control_component_service_uids_live",
+        "control_component_plan_digest_mismatch",
+    }
+)
+# The phases from which a same-operation reconciliation may still perform the
+# ONE control-observation publication this transaction owes.  The publication
+# phase itself is NOT admissible: an attempted publication is never repeated.
+_CONTROL_COMPONENT_PUBLICATION_ADMISSIBLE_PHASES = frozenset(
+    {"CONTROL_COMPONENT_TARGETS_PROVEN", "CONTROL_COMPONENT_RECEIPT_REPLACED"}
+)
+# The one receipt-preserving projection: every field of the existing DISARMED
+# authority receipt except the attested source release, the configuration
+# digest correlation and the transaction label is preserved byte for byte.
+_COMPONENT_RECEIPT_CORRELATION_FIELDS = frozenset(
+    {
+        "release_sha",
+        "control_config_sha256",
+        "prior_control_config_sha256",
+        "transaction_id",
+    }
+)
+_COMPONENT_CEO_PROJECTION_CORRELATION_FIELDS = frozenset(
+    {"release_sha", "installed_sha", "transaction_id"}
+)
+
+
+def _component_refusal(code: str) -> ComponentUpdateRefused:
+    if code not in _COMPONENT_REFUSAL_CODES:
+        raise ValueError("unknown control component refusal")
+    return ComponentUpdateRefused(code)
+
+
+def _component_receipt_payload(raw: bytes, *, code: str) -> dict[str, Any]:
+    """One receipt document, parsed strictly from its EXACT raw bytes.
+
+    The incumbent receipt readers reject a duplicate field, so the document
+    derived from one raw snapshot is exactly the document those bytes carry.
+    A malformed, empty or truncated receipt is a REFUSAL, never an absence:
+    the two states lead to different correlations and are never conflated.
+    """
+
+    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in items:
+            if key in value:
+                raise ValueError("duplicate receipt field")
+            value[key] = item
+        return value
+
+    try:
+        document = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise _component_refusal(code) from exc
+    if type(document) is not dict:
+        raise _component_refusal(code)
+    return document
+
+
+def _component_receipt_metadata() -> ReceiptMetadata:
+    """The metadata of receipt bytes the incumbent root reader has proved.
+
+    ``_read_root_file`` proves the regular file, the root owner, the root
+    group, mode 0444, the single link and the absent ACL of every byte it
+    returns, so the metadata of those exact bytes is fixed.
+    """
+
+    return ReceiptMetadata(
+        uid=0,
+        gid=0,
+        mode=0o444,
+        nlink=1,
+        is_regular=True,
+        is_symlink=False,
+        has_acl=False,
+    )
+
+
+def _component_run(
+    argv: Sequence[str], *, timeout: float, stdin_bytes: bytes | None = None
+) -> tuple[int, bytes]:
+    """One bounded subprocess observation.
+
+    This is the ONLY process seam of the Control component update's Git owner.
+    It never offers a credential, never writes, and never interprets its own
+    output.
+    """
+
+    if stdin_bytes is None:
+        completed = subprocess.run(
+            list(argv),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=timeout,
+        )
+    else:
+        completed = subprocess.run(
+            list(argv),
+            input=stdin_bytes,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=timeout,
+        )
+    return completed.returncode, completed.stdout
+
+
+def _component_git_argv(checkout: Path, *args: str) -> list[str]:
+    """The ONE fixed Control-principal Git owner.
+
+    Git refuses a repository whose owner is neither the effective UID nor the
+    invoking principal ("dubious ownership").  The administrative checkout is
+    owned by the Control principal, so its Git facts are read AS that
+    principal, exactly as the installer reads them.  No ``safe.directory`` and
+    no global trust exception is ever granted, and the observation is
+    credentialless: no credential, prompt or remote is ever offered.
+    """
+
+    return [
+        "/usr/bin/sudo",
+        "-u",
+        CONTROL_USER,
+        "/usr/bin/env",
+        "-i",
+        f"HOME={RUNTIME_ROOT / 'control' / 'home'}",
+        "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
+        "LANG=C.UTF-8",
+        "LC_ALL=C.UTF-8",
+        "GIT_CONFIG_GLOBAL=/dev/null",
+        "GIT_CONFIG_NOSYSTEM=1",
+        "GIT_NO_LAZY_FETCH=1",
+        "GIT_NO_REPLACE_OBJECTS=1",
+        "GIT_TERMINAL_PROMPT=0",
+        "/usr/bin/git",
+        "-C",
+        os.fspath(checkout),
+        *args,
+    ]
+
+
+def correlate_component_authority_receipt(
+    receipt: Mapping[str, Any],
+    *,
+    target_sha: str,
+    prior_control_sha256: str,
+    target_control_sha256: str,
+    transaction_id: str,
+) -> dict[str, Any]:
+    """Correlate one existing DISARMED authority receipt onto the new source.
+
+    No authority, state, evidence, policy, scope or timestamp changes here.
+    Only the attested source release, the configuration-digest correlation and
+    the transaction label move; every other field of the receipt is preserved
+    byte for byte and is re-proved by the incumbent validator afterwards.
+    """
+
+    value = copy.deepcopy(dict(receipt))
+    preserved = {
+        key: item
+        for key, item in value.items()
+        if key not in _COMPONENT_RECEIPT_CORRELATION_FIELDS
+    }
+    value.update(
+        release_sha=target_sha,
+        control_config_sha256=target_control_sha256,
+        prior_control_config_sha256=prior_control_sha256,
+        transaction_id=transaction_id,
+    )
+    for key, item in preserved.items():
+        if value.get(key) != item:
+            raise _component_refusal("control_component_authority_receipt_invalid")
+    return value
+
+
+def correlate_component_ceo_receipt(
+    receipt: Mapping[str, Any], *, target_sha: str, transaction_id: str
+) -> dict[str, Any]:
+    """Correlate one existing DISARMED CEO-submit receipt onto the new source.
+
+    Only the source identifiers and the transaction label inside the closed
+    projection move.  The authority-bearing projection fields, the receipt
+    state, its operation, its timestamp and its tool version are preserved
+    exactly, and the incumbent receipt validator must still accept it.
+    """
+
+    value = copy.deepcopy(dict(receipt))
+    projection = value.get("projection")
+    if type(projection) is not dict:
+        raise _component_refusal("control_component_receipt_invalid")
+    preserved = {
+        key: item
+        for key, item in projection.items()
+        if key not in _COMPONENT_CEO_PROJECTION_CORRELATION_FIELDS
+    }
+    updated = dict(projection)
+    updated.update(
+        release_sha=target_sha,
+        installed_sha=target_sha,
+        transaction_id=transaction_id,
+    )
+    for key, item in preserved.items():
+        if updated.get(key) != item:
+            raise _component_refusal("control_component_receipt_invalid")
+    value["projection"] = updated
+    value["transaction_id"] = transaction_id
+    value["projection_digest"] = ceo_submit_projection_digest(updated)
+    if not validate_ceo_submit_receipt_document(value, armed=False):
+        raise _component_refusal("control_component_receipt_invalid")
+    return value
+
+
+class ProductionControlComponentHost(ProductionCeoSubmitHost):
+    """Root-only Control component update inside the ONE existing owner.
+
+    The update retargets the already-installed Control source onto an
+    already-staged target release.  It reuses ``AUTONOMY_TRANSACTION``, that
+    marker's manifest, the generation seal, the publication mutex and the
+    completion path: there is no second lock, no second marker, no separate
+    controller and no separate readback.  It never writes the MCP component
+    update's own lock, never writes ``worker-codex.json`` and never acts on
+    the Relay, MCP, Backup or privileged broker.
+
+    Only the Control boundary is booted out and bootstrapped.  The Worker
+    daemon is never started, stopped, enabled or disarmed: it must already be
+    absent AND disabled, and its inert plist is retargeted only so that the
+    installed source of the two roles stays symmetric.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._component_candidate: Any = None
+        self._component_prior_archives: dict[str, bytes] = {}
+        self._component_target_autonomy_bytes = b""
+        self._component_target_ceo_bytes = b""
+        self._component_target_component_bytes = b""
+        self._component_plan_sha256: str | None = None
+        self._component_observed_at: str | None = None
+        self._component_prior_seal: str | None = None
+        self._component_target_seal: str | None = None
+        self._component_autonomy_metadata: ReceiptMetadata | None = None
+        self._component_mode_bound: str | None = None
+        self._component_control_launchd_disabled: bool | None = None
+        self._component_worker_launchd_disabled: bool | None = None
+        self._component_receipt_preimages_bound: dict[
+            str, tuple[bool, str, bytes]
+        ] = {}
+        # The EXPLICIT presence of every receipt this operation may replace.
+        # Presence is never inferred from the byte length of an archived
+        # preimage: an empty receipt is present, and only a proven absence
+        # is absent.
+        self._component_prior_receipt_presence: dict[str, bool] = {}
+        # The retained interpreter qualification and the ONE budget it was
+        # observed under.  The same budget rechecks it before any effect.
+        self._component_interpreter_observed: Any = None
+        self._component_interpreter_budget: Any = None
+        # An optional retained operation deadline.  When present it composes
+        # with the installed peer's own local budget in exact integer
+        # nanoseconds; when absent the peer's own 25 s budget is used.
+        self._component_operation_deadline_monotonic_ns: int | None = None
+
+    # -- fixed installed reads ------------------------------------------------
+
+    @staticmethod
+    def _component_root_file(path: Path, *, code: str) -> bytes:
+        """Read one root-owned installed file through the owner's closed proof."""
+
+        try:
+            raw, _info = _read_root_file(path, modes=frozenset({0o644}), uid=0, gid=0)
+        except HostControlError as exc:
+            raise _component_refusal(code) from exc
+        return raw
+
+    def _component_control_config_bytes(self) -> bytes:
+        """Read the installed Control configuration bytes exactly."""
+
+        try:
+            _value, raw = _root_json(
+                CONTROL_CONFIG,
+                modes=frozenset({0o440}),
+                gid=grp.getgrnam(CONTROL_GROUP).gr_gid,
+            )
+        except (HostControlError, OSError, KeyError) as exc:
+            raise _component_refusal(
+                "control_component_control_config_unreadable"
+            ) from exc
+        return raw
+
+    def _component_release_seal(self, sha: str, *, target: bool = False) -> str:
+        """Prove one installed release is sealed at its exact commit."""
+
+        if _SHA_RE.fullmatch(sha) is None:
+            raise _component_refusal("control_component_release_seal_invalid")
+        try:
+            raw = _release_manifest_bytes(sha)
+            manifest = json.loads(raw.decode("utf-8"))
+        except (HostControlError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise _component_refusal(
+                "control_component_target_release_not_staged"
+                if target
+                else "control_component_release_seal_invalid"
+            ) from exc
+        tree = manifest.get("tree_sha") if type(manifest) is dict else None
+        if (
+            type(manifest) is not dict
+            or manifest.get("commit_sha") != sha
+            or type(tree) is not str
+            or _SHA_RE.fullmatch(tree) is None
+        ):
+            raise _component_refusal("control_component_release_seal_invalid")
+        try:
+            release_manifest.verify(SYSTEM_ROOT / "releases" / sha, sha, tree)
+        except (release_manifest.ReleaseManifestError, OSError) as exc:
+            raise _component_refusal(
+                "control_component_release_seal_invalid"
+            ) from exc
+        return hashlib.sha256(raw).hexdigest()
+
+    @staticmethod
+    def _component_prior_release(control_plist: Mapping[str, Any]) -> str:
+        """The prior release identity the installed Control plist actually names."""
+
+        root = control_plist.get("WorkingDirectory")
+        prefix = os.fspath(SYSTEM_ROOT / "releases") + "/"
+        if type(root) is not str or not root.startswith(prefix):
+            raise _component_refusal("control_component_source_mismatch")
+        sha = root[len(prefix):]
+        if _SHA_RE.fullmatch(sha) is None:
+            raise _component_refusal("control_component_source_mismatch")
+        return sha
+
+    def _component_plist_document(self, path: Path) -> dict[str, Any]:
+        raw = self._component_root_file(
+            path, code="control_component_plist_unreadable"
+        )
+        try:
+            value = plistlib.loads(raw)
+        except (plistlib.InvalidFileException, ValueError, TypeError) as exc:
+            raise _component_refusal("control_component_plist_unreadable") from exc
+        if type(value) is not dict:
+            raise _component_refusal("control_component_plist_unreadable")
+        return value
+
+    @staticmethod
+    def _component_plist_matches(
+        document: Mapping[str, Any], *, prior_root: str, script: str
+    ) -> None:
+        """Prove one installed plist names the installed release and its entry."""
+
+        arguments = document.get("ProgramArguments")
+        if (
+            document.get("WorkingDirectory") != prior_root
+            or type(arguments) is not list
+            or not arguments
+            or not all(type(item) is str for item in arguments)
+            or arguments[0] != os.fspath(PINNED_PYTHON)
+            or os.fspath(Path(prior_root) / script) not in arguments
+        ):
+            raise _component_refusal("control_component_source_mismatch")
+
+    def _component_interpreter_observation(self) -> tuple[Any, Any]:
+        """Qualify the pinned interpreter through the installed-peer owner.
+
+        The mode and owner of the pinned executable are NOT a qualification:
+        they say nothing about which bytes would run.  The installed peer's
+        own runtime qualification covers the executable hashes, the pinned
+        version, the code signature and the whole ancestor closure, and it
+        observes them under ONE budget.  That observation and that budget are
+        retained here so the SAME budget can recheck the runtime immediately
+        before the first effect.
+        """
+
+        from control_plane import executive_installed_peer as installed
+
+        budget = installed._Budget(
+            installed._SERVICE_BUDGET_SECONDS,
+            deadline_monotonic_ns=self._component_operation_deadline_monotonic_ns,
+        )
+        try:
+            observation = installed._verify_python_runtime(budget)
+        except Exception as exc:
+            raise _component_refusal(
+                "control_component_interpreter_unqualified"
+            ) from exc
+        self._component_interpreter_observed = observation
+        self._component_interpreter_budget = budget
+        return observation, budget
+
+    def _component_recheck_interpreter(self) -> None:
+        """Re-prove the retained interpreter qualification before an effect.
+
+        The retained observation is rechecked under the SAME budget it was
+        observed under.  A drifted runtime is never carried forward into an
+        effect, and no boolean success is ever invented.
+        """
+
+        from control_plane import executive_installed_peer as installed
+
+        observation = self._component_interpreter_observed
+        budget = self._component_interpreter_budget
+        if observation is None or budget is None:
+            raise TransactionEffectUnknown()
+        try:
+            installed._recheck_python_runtime(observation, budget)
+        except Exception as exc:
+            raise TransactionEffectUnknown() from exc
+
+    def _component_label_loaded(self, label: str, *, code: str) -> bool:
+        try:
+            return self._loaded_observe_only(label)
+        except ArmAdmissionError as exc:
+            raise _component_refusal(code) from exc
+        except Exception as exc:
+            raise _component_refusal(code) from exc
+
+    def _component_disabled_override(self, label: str) -> bool | None:
+        """The persistent launchd override for one fixed label, or None."""
+
+        try:
+            return self._read_launchd_disabled_override(label, allow_absent=True)
+        except TransactionEffectUnknown as exc:
+            raise _component_refusal(
+                "control_component_launchd_state_unknown"
+            ) from exc
+
+    def _component_mode(self) -> tuple[str, bool, bool]:
+        """The closed input state of this operation, and its disabled preimages.
+
+        Exactly two states exist.  LIVE: the Control service is registered
+        and enabled, and the Worker is already absent AND disabled.  OFFLINE:
+        both are genuinely absent AND explicitly disabled.  Every other
+        combination -- unknown, mixed or mismatched -- refuses before any
+        effect, and nothing is ever stopped or disarmed to fit.
+        """
+
+        control_loaded = self._component_label_loaded(
+            CONTROL_LABEL, code="control_component_control_state_unknown"
+        )
+        control_disabled = self._component_disabled_override(CONTROL_LABEL)
+        worker_loaded = self._component_label_loaded(
+            WORKER_LABEL, code="control_component_worker_state_unknown"
+        )
+        worker_disabled = self._component_disabled_override(WORKER_LABEL)
+        if worker_loaded:
+            raise _component_refusal("control_component_worker_live")
+        if worker_disabled is not True:
+            raise _component_refusal("control_component_worker_not_disabled")
+        if control_loaded:
+            if control_disabled is True:
+                # Registered AND explicitly disabled: neither closed mode.
+                raise _component_refusal("control_component_control_state_mixed")
+            return _COMPONENT_LIVE_MODE, bool(control_disabled), bool(worker_disabled)
+        if control_disabled is not True:
+            # Absent but NOT explicitly disabled: neither closed mode.
+            raise _component_refusal("control_component_control_state_mixed")
+        return _COMPONENT_OFFLINE_MODE, bool(control_disabled), bool(worker_disabled)
+
+    def _component_git(self, checkout: Path, *args: str) -> str:
+        """One bounded, credentialless Git observation of the fixed checkout.
+
+        The observation is made by the Control principal, which owns the
+        checkout.  Git refuses a repository owned by another principal, and
+        this owner never grants a ``safe.directory`` or any other trust
+        exception to work around that refusal.
+        """
+
+        argv = _component_git_argv(checkout, *args)
+        try:
+            code, out = _component_run(argv, timeout=_CONTROL_COMPONENT_GIT_TIMEOUT)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise _component_refusal(
+                "control_component_admin_checkout_unavailable"
+            ) from exc
+        if code != 0 or len(out) > _CONTROL_ADMIN_CHECKOUT_MAX_BYTES:
+            raise _component_refusal(
+                "control_component_admin_checkout_unavailable"
+            )
+        try:
+            return out.decode("utf-8", errors="strict").strip()
+        except UnicodeDecodeError as exc:
+            raise _component_refusal(
+                "control_component_admin_checkout_unavailable"
+            ) from exc
+
+    def _component_admin_git_runner(
+        self,
+        checkout: Path,
+        *args: str,
+        maximum: int = _CONTROL_ADMIN_CHECKOUT_MAX_BYTES,
+        input_bytes: bytes | None = None,
+        deadline: float | None = None,
+    ) -> bytes:
+        """The installer's own Git observation, owned by the Control principal.
+
+        The installer's administrative-checkout qualifier shells out to Git
+        with its own runner.  Here that runner is the Control-principal Git
+        owner, so the installer's EXACT ownership and source-closure
+        qualifiers are applied to a repository Git is willing to read.
+        """
+
+        from ops.executive_os import admin_checkout as qualifier
+
+        timeout = _CONTROL_COMPONENT_GIT_TIMEOUT
+        if deadline is not None:
+            timeout = min(timeout, max(deadline - time.monotonic(), 0.0))
+        if timeout <= 0:
+            raise qualifier.AdminCheckoutError("Git observation exceeded its bound")
+        argv = _component_git_argv(checkout, *args)
+        try:
+            code, out = _component_run(argv, timeout=timeout, stdin_bytes=input_bytes)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise qualifier.AdminCheckoutError("Git observation failed") from exc
+        if code != 0:
+            raise qualifier.AdminCheckoutError("Git observation failed")
+        if len(out) > maximum:
+            raise qualifier.AdminCheckoutError("Git observation exceeded its bound")
+        return out
+
+    def _component_admin_closure(self, checkout: Path, target_sha: str) -> None:
+        """Prove the local source closure of the administrative checkout.
+
+        The installer's own qualifiers decide this: no partial-clone
+        configuration, no promisor remote, no remote at all, and every object
+        reachable from the target commit present locally.  They are applied
+        here with the Control-principal Git owner as their runner.
+        """
+
+        from ops.executive_os import admin_checkout as qualifier
+
+        original = qualifier._run_git
+        qualifier._run_git = self._component_admin_git_runner
+        try:
+            qualifier._require_direct_object_store(checkout / ".git")
+            qualifier._require_no_partial_config(checkout)
+            qualifier._require_complete_closure(checkout, target_sha)
+        except Exception as exc:
+            raise _component_refusal(
+                "control_component_admin_checkout_unavailable"
+            ) from exc
+        finally:
+            qualifier._run_git = original
+
+    def _component_admin_checkout(self, target_sha: str) -> str:
+        """Prove the fixed administrative checkout holds the exact target source.
+
+        The checkout is installer-owned and credentialless: it is a real
+        directory owned by the control principal, its Git directory is a real
+        directory, its HEAD is the exact target commit, it carries no remote
+        and its reachable object closure is complete.  This is a read-only
+        observation; the installer owns its preparation and any repair of it.
+        """
+
+        checkout = _CONTROL_ADMIN_CHECKOUT_ROOT / target_sha
+        try:
+            info = checkout.lstat()
+            git_info = (checkout / ".git").lstat()
+            control_uid = pwd.getpwnam(CONTROL_USER).pw_uid
+        except (OSError, KeyError) as exc:
+            raise _component_refusal(
+                "control_component_admin_checkout_unavailable"
+            ) from exc
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISDIR(git_info.st_mode)
+            or stat.S_ISLNK(git_info.st_mode)
+            or info.st_uid != control_uid
+            or stat.S_IMODE(info.st_mode) & 0o022
+        ):
+            raise _component_refusal(
+                "control_component_admin_checkout_unavailable"
+            )
+        head = self._component_git(checkout, "rev-parse", "--verify", "HEAD^{commit}")
+        if head != target_sha:
+            raise _component_refusal(
+                "control_component_admin_checkout_unavailable"
+            )
+        if self._component_git(checkout, "remote"):
+            raise _component_refusal(
+                "control_component_admin_checkout_unavailable"
+            )
+        self._component_admin_closure(checkout, target_sha)
+        return head
+
+    def _component_autonomy_receipt(
+        self,
+        prior_sha: str,
+        configs: ConfigEvidence,
+        snapshot: tuple[bool, str, bytes],
+    ) -> tuple[dict[str, Any], ReceiptMetadata]:
+        """Validate the EXISTING disarmed authority receipt.
+
+        The bounded first path requires existing DISARMED authority: an armed
+        receipt cannot survive a source change without an authority migration,
+        and this operation never migrates or refreshes authority.
+
+        The validated document is derived from the SAME raw snapshot that is
+        archived and compared against, so the semantic validation, the
+        archived preimage, the presence flag and the correlation all name one
+        set of bytes.  A receipt that moves between the validation and the
+        capture can therefore never become an unjoined archive: the
+        compare-and-swap refuses the moved receipt instead.
+        """
+
+        present, _digest, raw = snapshot
+        if not present:
+            raise _component_refusal(
+                "control_component_authority_receipt_invalid"
+            )
+        payload = _component_receipt_payload(
+            raw, code="control_component_authority_receipt_invalid"
+        )
+        metadata = _component_receipt_metadata()
+        if payload.get("state") != "DISARMED":
+            raise _component_refusal("control_component_authority_receipt_armed")
+        readiness = payload.get("provider_readiness_receipt_sha256")
+        if type(readiness) is not str:
+            raise _component_refusal(
+                "control_component_authority_receipt_invalid"
+            )
+        try:
+            validate_receipt_document(
+                payload,
+                metadata=metadata,
+                expected=AutonomyExpectation(
+                    release_sha=prior_sha,
+                    control_config_sha256=configs.control_sha256,
+                    worker_config_sha256=configs.worker_sha256,
+                    provider_readiness_receipt_sha256=readiness,
+                    capability_policy_digest=CAPABILITY_POLICY_DIGEST,
+                    execution_profile_digest=EXECUTION_PROFILE_DIGEST,
+                    native_helper_grant_digest=NATIVE_HELPER_GRANT_DIGEST,
+                    security_config_digest=SECURITY_CONFIG_DIGEST,
+                ),
+                now=None,
+                require_current=False,
+            )
+        except (AutonomyRefusal, TypeError, ValueError) as exc:
+            raise _component_refusal(
+                "control_component_authority_receipt_invalid"
+            ) from exc
+        return dict(payload), metadata
+
+    def _component_ceo_receipt(
+        self, snapshot: tuple[bool, str, bytes]
+    ) -> dict[str, Any] | None:
+        """The EXACT bytes of the EXISTING disarmed CEO-submit receipt.
+
+        ``None`` means the receipt is proven ABSENT.  A receipt that is
+        present but malformed, empty, unreadable or misqualified is a
+        REFUSAL: it is never silently treated as an absent receipt, because
+        the absent receipt and the unreadable one lead to different
+        correlations.
+        """
+
+        present, _digest, raw = snapshot
+        if not present:
+            return None
+        receipt = _component_receipt_payload(
+            raw, code="control_component_receipt_invalid"
+        )
+        if receipt.get("state") != "CEO_SUBMIT_DISARMED":
+            raise _component_refusal("control_component_authority_receipt_armed")
+        if not validate_ceo_submit_receipt_document(receipt, armed=False):
+            raise _component_refusal("control_component_receipt_invalid")
+        return dict(receipt)
+
+    # -- the observation ------------------------------------------------------
+
+    def _component_receipt_bytes(self, path: Path) -> tuple[bool, bytes]:
+        """The EXACT prior bytes of one receipt this operation may replace.
+
+        The read is the incumbent's own root-file proof: a regular file,
+        root owned, root grouped, mode 0444, one link, no ACL and no
+        symlink.  Its ABSENCE is proven by an explicit FileNotFoundError and
+        is never inferred from the byte length, so an empty receipt stays
+        present and distinct from a missing one.
+
+        The digest is always of the raw bytes that were on disk, never of a
+        re-encoded parse of them: a receipt whose serialisation differs from
+        the canonical one is still the receipt that is being replaced, and
+        only its exact bytes may be restored.
+        """
+
+        try:
+            raw, _info = _read_root_file(
+                path, modes=frozenset({0o444}), uid=0, gid=0
+            )
+        except FileNotFoundError:
+            return False, b""
+        except HostControlError as exc:
+            # The incumbent reader reports an absent path through the
+            # FileNotFoundError it raised; anything else is an unreadable or
+            # an unowned receipt, which is a refusal and never an absence.
+            if isinstance(exc.__cause__, FileNotFoundError):
+                return False, b""
+            raise _component_refusal("control_component_receipt_invalid") from exc
+        return True, raw
+
+    def _component_receipt_preimages(self) -> dict[str, tuple[bool, str, bytes]]:
+        """The exact prior state of every receipt this operation may replace."""
+
+        preimages: dict[str, tuple[bool, str, bytes]] = {}
+        for name, path in (
+            ("authority_receipt", AUTONOMY_RECEIPT),
+            ("ceo_submit_receipt", CEO_SUBMIT_RECEIPT),
+            ("component_receipt", CONTROL_COMPONENT_RECEIPT),
+        ):
+            present, raw = self._component_receipt_bytes(path)
+            preimages[name] = (present, sha256_bytes(raw), raw)
+        return preimages
+
+    def observe_control_component_update(self, *, target_sha: str) -> dict[str, Any]:
+        """Read-only observation: the plan and the exact candidate it binds.
+
+        Every precondition is proved here, before any marker, installed file,
+        receipt or launchd effect exists.  A false precondition is a typed
+        refusal with zero cutover.
+        """
+
+        from ops.executive_os import control_component_update as compiler
+
+        if _SHA_RE.fullmatch(target_sha) is None:
+            raise _component_refusal("control_component_release_seal_invalid")
+
+        control_plist_bytes = self._component_root_file(
+            CONTROL_PLIST, code="control_component_plist_unreadable"
+        )
+        worker_plist_bytes = self._component_root_file(
+            WORKER_PLIST, code="control_component_plist_unreadable"
+        )
+        control_plist_document = self._component_plist_document(CONTROL_PLIST)
+        worker_plist_document = self._component_plist_document(WORKER_PLIST)
+        prior_sha = self._component_prior_release(control_plist_document)
+        if prior_sha == target_sha:
+            raise _component_refusal("control_component_source_mismatch")
+        prior_release_root = os.fspath(SYSTEM_ROOT / "releases" / prior_sha)
+        target_release_root = os.fspath(SYSTEM_ROOT / "releases" / target_sha)
+
+        try:
+            (
+                control,
+                worker,
+                control_digest,
+                worker_digest,
+                control_raw,
+                worker_raw,
+            ) = self._configs()
+        except (HostControlError, KeyError, OSError) as exc:
+            raise _component_refusal(
+                "control_component_control_config_unreadable"
+            ) from exc
+        configs = ConfigEvidence(
+            control_sha256=control_digest,
+            worker_sha256=worker_digest,
+            control=control,
+            worker=worker,
+            control_bytes=control_raw,
+            worker_bytes=worker_raw,
+        )
+        if control.get("proof_base_sha") != prior_sha:
+            raise _component_refusal("control_component_source_mismatch")
+
+        prior_seal = self._component_release_seal(prior_sha)
+        target_seal = self._component_release_seal(target_sha, target=True)
+        admin_checkout_commit = self._component_admin_checkout(target_sha)
+
+        self._component_plist_matches(
+            control_plist_document,
+            prior_root=prior_release_root,
+            script="scripts/executive_os_phase1c_control_wrapper.py",
+        )
+        self._component_plist_matches(
+            worker_plist_document,
+            prior_root=prior_release_root,
+            script="scripts/executive_os_phase1c_worker.py",
+        )
+
+        # The incumbent authority receipt must exist and be DISARMED, and the
+        # incumbent arming flags must all be false.  ``ceo_ingress_app_armed``
+        # is transport admission, never CEO-submit authority, so it is not
+        # consulted here.
+        if (
+            control.get("ceo_submit_armed") is not False
+            or control.get("coo_autonomy_armed") is not False
+            or control.get("coo_operator_harness_armed") is not False
+            or worker.get("operator_harness_armed") is not False
+        ):
+            raise _component_refusal("control_component_authority_receipt_armed")
+        # Every receipt this operation may replace is bound by ONE raw
+        # snapshot: its presence, its exact bytes, its semantic validation
+        # and the later correlation all name the same bytes.  The snapshot is
+        # taken BEFORE the validation, so a receipt that moves afterwards is
+        # an unbound later receipt that the compare-and-swap refuses; it can
+        # never become an unjoined archive.
+        receipt_preimages = self._component_receipt_preimages()
+        self._component_receipt_preimages_bound = receipt_preimages
+        self._component_prior_receipt_presence = {
+            name: bool(value[0]) for name, value in receipt_preimages.items()
+        }
+        autonomy_receipt, autonomy_metadata = self._component_autonomy_receipt(
+            prior_sha, configs, receipt_preimages["authority_receipt"]
+        )
+        ceo_receipt = self._component_ceo_receipt(
+            receipt_preimages["ceo_submit_receipt"]
+        )
+
+        # No incumbent global transaction may exist.
+        try:
+            self.require_transaction_absent()
+        except Exception as exc:
+            raise _component_refusal(
+                "control_component_transaction_occupied"
+            ) from exc
+
+        # The existing owner must be quiescent: no live runtime attempt.
+        try:
+            self.require_runtime_quiescent(configs)
+        except Exception as exc:
+            raise _component_refusal(
+                "control_component_owner_not_quiescent"
+            ) from exc
+
+        # The closed input state of this operation: the Control boundary is
+        # either live and enabled, or genuinely absent and explicitly
+        # disabled; the Worker must already be absent AND disabled.  A live
+        # or unknown Worker is a pre-effect refusal: it is never stopped or
+        # disarmed to fit.  A mixed or mismatched Control boundary matches
+        # neither closed mode and refuses here too.
+        mode, control_disabled, worker_disabled = self._component_mode()
+
+        try:
+            candidate = compiler.compile_candidate(
+                control_raw,
+                control_plist_bytes,
+                worker_plist_bytes,
+                target_sha=target_sha,
+                prior_sha=prior_sha,
+                worker_config_sha256=worker_digest,
+                prior_release_root=prior_release_root,
+                target_release_root=target_release_root,
+            )
+        except compiler.ComponentError as exc:
+            raise _component_refusal(
+                "control_component_schema_incompatible"
+            ) from exc
+
+        # The pinned interpreter is qualified by the installed peer's own
+        # runtime owner.  Its observation and its budget are retained so the
+        # SAME budget can recheck the runtime before the first effect.  The
+        # observation is the LAST qualification of this read-only pass, so the
+        # budget it opens is spent on the recheck and not on the release and
+        # checkout proofs that precede it.
+        self._component_interpreter_observation()
+
+        preconditions = {key: True for key in compiler.preconditions_for_mode(mode)}
+        document = compiler.plan_document(
+            candidate,
+            mode=mode,
+            preconditions=preconditions,
+            prior_release_manifest_sha256=prior_seal,
+            target_release_manifest_sha256=target_seal,
+            admin_checkout_commit=admin_checkout_commit,
+            receipts={
+                name: compiler.ReceiptPreimage(
+                    path=compiler_path,
+                    present=present,
+                    sha256=digest,
+                )
+                for name, (present, digest, _raw), compiler_path in (
+                    (
+                        "authority_receipt",
+                        receipt_preimages["authority_receipt"],
+                        compiler.AUTHORITY_RECEIPT_PATH,
+                    ),
+                    (
+                        "ceo_submit_receipt",
+                        receipt_preimages["ceo_submit_receipt"],
+                        compiler.CEO_SUBMIT_RECEIPT_PATH,
+                    ),
+                    (
+                        "component_receipt",
+                        receipt_preimages["component_receipt"],
+                        compiler.COMPONENT_RECEIPT_PATH,
+                    ),
+                )
+            },
+            launchd_disabled={
+                "control": control_disabled,
+                "worker": worker_disabled,
+            },
+        )
+        return {
+            "plan": document,
+            "candidate": candidate,
+            "prior_configs": configs,
+            "candidate_configs": CandidateConfigs(
+                control=json.loads(candidate.control_config_after.decode("utf-8")),
+                worker=worker,
+                control_bytes=candidate.control_config_after,
+                worker_bytes=worker_raw,
+                control_sha256=candidate.control_config_after_sha256,
+                worker_sha256=worker_digest,
+            ),
+            "autonomy_receipt": autonomy_receipt,
+            "autonomy_receipt_metadata": autonomy_metadata,
+            "ceo_receipt": ceo_receipt,
+            "mode": mode,
+            "control_launchd_disabled": control_disabled,
+            "worker_launchd_disabled": worker_disabled,
+            "receipt_preimages": receipt_preimages,
+            "prior_release_root": prior_release_root,
+            "target_release_root": target_release_root,
+            "prior_seal": prior_seal,
+            "target_seal": target_seal,
+            "prior_control_plist": control_plist_bytes,
+            "prior_worker_plist": worker_plist_bytes,
+        }
+
+    # -- the transaction ------------------------------------------------------
+
+    def new_transaction_id(self) -> str:
+        # A fresh update may never lock/adopt a marker that appeared after its
+        # absence preflight.
+        return f"autonomy-{secrets.token_hex(6)}"
+
+    def _manifest_document(
+        self, transaction: TransactionContext, phase: str, *, operation: str
+    ) -> dict[str, Any]:
+        value = super()._manifest_document(transaction, phase, operation=operation)
+        if operation != CONTROL_COMPONENT_UPDATE or self._component_candidate is None:
+            raise TransactionEffectUnknown()
+        candidate = self._component_candidate
+        archives = self._component_prior_archives
+        value.update(
+            component_plan_sha256=str(
+                self._component_plan_sha256 or ""
+            ),
+            component_prior_release_seal_sha256=str(
+                self._component_prior_seal or ""
+            ),
+            component_target_release_seal_sha256=str(
+                self._component_target_seal or ""
+            ),
+            component_observed_at=str(self._component_observed_at or ""),
+            component_prior_control_plist_sha256=candidate.control_plist_before_sha256,
+            component_target_control_plist_sha256=candidate.control_plist_after_sha256,
+            component_prior_worker_plist_sha256=candidate.worker_plist_before_sha256,
+            component_target_worker_plist_sha256=candidate.worker_plist_after_sha256,
+            component_prior_autonomy_receipt_present=bool(
+                self._component_prior_receipt_presence.get("authority_receipt")
+            ),
+            component_prior_autonomy_receipt_sha256=sha256_bytes(
+                archives.get("prior-component-autonomy-receipt.json", b"")
+            ),
+            component_target_autonomy_receipt_sha256=sha256_bytes(
+                self._component_target_autonomy_bytes
+            ),
+            component_prior_ceo_receipt_present=bool(
+                self._component_prior_receipt_presence.get("ceo_submit_receipt")
+            ),
+            component_prior_ceo_receipt_sha256=sha256_bytes(
+                archives.get("prior-component-ceo-submit-receipt.json", b"")
+            ),
+            component_target_ceo_receipt_sha256=sha256_bytes(
+                self._component_target_ceo_bytes
+            ),
+            component_prior_component_receipt_present=bool(
+                self._component_prior_receipt_presence.get("component_receipt")
+            ),
+            component_prior_component_receipt_sha256=sha256_bytes(
+                archives.get("prior-component-receipt.json", b"")
+            ),
+            component_target_component_receipt_sha256=sha256_bytes(
+                self._component_target_component_bytes
+            ),
+            component_mode=str(self._component_mode_bound or ""),
+            component_prior_control_launchd_disabled=bool(
+                self._component_control_launchd_disabled
+            ),
+            component_prior_worker_launchd_disabled=bool(
+                self._component_worker_launchd_disabled
+            ),
+        )
+        value["phase"] = phase
+        return value
+
+    def _seal_generation(
+        self, generation: Path, transaction: TransactionContext, *, operation: str
+    ) -> None:
+        if (
+            operation != CONTROL_COMPONENT_UPDATE
+            or self._component_candidate is None
+            or not self._component_prior_archives
+        ):
+            raise TransactionEffectUnknown()
+        # The plain global-owner seal carries both unchanged config preimages.
+        ProductionTransactionHost._seal_generation(
+            self, generation, transaction, operation=operation
+        )
+        for name in _COMPONENT_ARCHIVES:
+            _atomic_file(
+                generation / name,
+                self._component_prior_archives.get(name, b""),
+                mode=0o400,
+                uid=0,
+                gid=0,
+                replace=False,
+            )
+        manifest = self._manifest_document(transaction, "LOCKED", operation=operation)
+        _atomic_file(
+            generation / _TRANSACTION_MANIFEST_NAME,
+            _encoded_json(manifest),
+            mode=0o400,
+            uid=0,
+            gid=0,
+            replace=True,
+        )
+        _fsync_directory(generation)
+
+    def _component_archives(self) -> dict[str, bytes]:
+        """Read back the sealed preimages of this operation, exactly."""
+
+        archives: dict[str, bytes] = {}
+        for name in ("prior-control.json", "prior-worker.json"):
+            raw, _info = _read_root_file(
+                AUTONOMY_TRANSACTION / name, modes=frozenset({0o400}), uid=0, gid=0
+            )
+            archives[name] = raw
+        for name in _COMPONENT_ARCHIVES:
+            raw, _info = _read_root_file(
+                AUTONOMY_TRANSACTION / name, modes=frozenset({0o400}), uid=0, gid=0
+            )
+            archives[name] = raw
+        return archives
+
+    def _recheck_component_bound(self, transaction: TransactionContext) -> None:
+        if (
+            self._transaction_owner_fd is None
+            or self._active_transaction is None
+            or self._active_transaction.transaction_id != transaction.transaction_id
+        ):
+            raise TransactionEffectUnknown()
+        self._config_root_safe()
+        self._verify_published_inode(self._transaction_owner_fd)
+        manifest = self._manifest()
+        if (
+            manifest.get("operation") != CONTROL_COMPONENT_UPDATE
+            or manifest.get("transaction_id") != transaction.transaction_id
+            or manifest.get("expected_sha") != transaction.expected_sha
+            or not _COMPONENT_MANIFEST_FIELDS <= set(manifest)
+        ):
+            raise TransactionEffectUnknown()
+
+    def _recheck_component_preimages(
+        self, transaction: TransactionContext, observation: Mapping[str, Any]
+    ) -> None:
+        """Every sealed preimage must still be exactly the sealed preimage."""
+
+        self._recheck_component_bound(transaction)
+        manifest = self._manifest()
+        expected = self._manifest_document(
+            transaction, "LOCKED", operation=CONTROL_COMPONENT_UPDATE
+        )
+        if manifest != expected:
+            raise TransactionEffectUnknown()
+        current = self._configs()
+        if (
+            current[2] != transaction.prior_configs.control_sha256
+            or current[3] != transaction.prior_configs.worker_sha256
+        ):
+            raise TransactionEffectUnknown()
+        for path, field in (
+            (CONTROL_PLIST, "component_prior_control_plist_sha256"),
+            (WORKER_PLIST, "component_prior_worker_plist_sha256"),
+        ):
+            raw = self._component_root_file(
+                path, code="control_component_plist_unreadable"
+            )
+            if sha256_bytes(raw) != manifest[field]:
+                raise TransactionEffectUnknown()
+        # Every receipt this operation may replace must still be exactly the
+        # sealed prior bytes, and the launchd preimages must still be the
+        # observed ones.  A receipt that moved after the seal is an unbound
+        # later receipt: it is never overwritten.
+        for name, path in (
+            ("authority_receipt", AUTONOMY_RECEIPT),
+            ("ceo_submit_receipt", CEO_SUBMIT_RECEIPT),
+            ("component_receipt", CONTROL_COMPONENT_RECEIPT),
+        ):
+            present, raw = self._component_receipt_bytes(path)
+            field = {
+                "authority_receipt": "component_prior_autonomy_receipt_sha256",
+                "ceo_submit_receipt": "component_prior_ceo_receipt_sha256",
+                "component_receipt": "component_prior_component_receipt_sha256",
+            }[name]
+            presence_field = {
+                "authority_receipt": "component_prior_autonomy_receipt_present",
+                "ceo_submit_receipt": "component_prior_ceo_receipt_present",
+                "component_receipt": "component_prior_component_receipt_present",
+            }[name]
+            if (
+                present is not manifest[presence_field]
+                or sha256_bytes(raw) != manifest[field]
+            ):
+                raise TransactionEffectUnknown()
+        for label, field in (
+            (CONTROL_LABEL, "component_prior_control_launchd_disabled"),
+            (WORKER_LABEL, "component_prior_worker_launchd_disabled"),
+        ):
+            # An absent launchd row means the launchd default, which is the
+            # same state as an explicit "enabled" row.
+            if bool(self._component_disabled_override(label)) is not manifest[field]:
+                raise TransactionEffectUnknown()
+        # The target source is re-proved under the claimed transaction.
+        self._recheck_component_target_source(transaction)
+
+    def _recheck_component_target_source(self, transaction: TransactionContext) -> None:
+        """The target source must still be sealed and still present.
+
+        The recheck happens under the claimed transaction, before any effect:
+        the sealed target release and the administrative checkout that backs
+        it are re-proved against the values the marker bound.
+        """
+
+        self._recheck_component_bound(transaction)
+        manifest = self._manifest()
+        target_seal = self._component_release_seal(
+            str(transaction.expected_sha), target=True
+        )
+        if target_seal != manifest["component_target_release_seal_sha256"]:
+            raise TransactionEffectUnknown()
+        if self._component_admin_checkout(str(transaction.expected_sha)) != (
+            str(transaction.expected_sha)
+        ):
+            raise TransactionEffectUnknown()
+
+    def _component_service_uids_quiescent(self) -> None:
+        """The fixed service-UID census of the stopped boundary.
+
+        The census is the incumbent owner's own: it observes the process
+        table and the launchd attribution and never sweeps, signals or
+        accepts a caller-selected UID, PID or timeout.  A bootout is
+        asynchronous, so a Control process that is still exiting is observed
+        again within one bounded window instead of being declared live.
+        """
+
+        deadline = time.monotonic() + _CONTROL_COMPONENT_UID_CENSUS_TIMEOUT
+        while True:
+            try:
+                self.require_service_uids_quiescent()
+                return
+            except ArmAdmissionError as exc:
+                if (
+                    exc.code != "service_uid_process_live"
+                    or time.monotonic() >= deadline
+                ):
+                    raise _component_refusal(
+                        "control_component_service_uids_live"
+                    ) from exc
+                time.sleep(0.25)
+
+    def _recheck_component_quiescence(self, transaction: TransactionContext) -> None:
+        """Re-prove the stopped boundary: runtime, custody and the Worker."""
+
+        self._recheck_component_bound(transaction)
+        try:
+            configs = ConfigEvidence(
+                control_sha256=transaction.prior_configs.control_sha256,
+                worker_sha256=transaction.prior_configs.worker_sha256,
+                control=transaction.prior_configs.control,
+                worker=transaction.prior_configs.worker,
+            )
+            self.require_runtime_quiescent(configs)
+        except Exception as exc:
+            raise TransactionEffectUnknown() from exc
+        try:
+            self._component_service_uids_quiescent()
+        except ComponentUpdateRefused as exc:
+            raise TransactionEffectUnknown() from exc
+        # The fixed absence: BOTH boundaries are absent at the stopped
+        # boundary, and the Worker is still explicitly disabled.
+        if self._component_label_loaded(
+            CONTROL_LABEL, code="control_component_control_state_unknown"
+        ):
+            raise TransactionEffectUnknown()
+        if self._component_label_loaded(
+            WORKER_LABEL, code="control_component_worker_state_unknown"
+        ):
+            raise TransactionEffectUnknown()
+        if self._component_disabled_override(WORKER_LABEL) is not True:
+            raise TransactionEffectUnknown()
+
+    def _replace_component_target(
+        self,
+        transaction: TransactionContext,
+        path: Path,
+        *,
+        prior_field: str,
+        target_field: str,
+        payload: bytes,
+        phase: str,
+    ) -> None:
+        """One exact-CAS replacement of one installed file."""
+
+        self._recheck_component_bound(transaction)
+        manifest = self._manifest()
+        raw = self._component_root_file(
+            path, code="control_component_plist_unreadable"
+        )
+        if sha256_bytes(raw) != manifest[prior_field]:
+            raise TransactionEffectUnknown()
+        if sha256_bytes(payload) != manifest[target_field]:
+            raise TransactionEffectUnknown()
+        _atomic_file(path, payload, mode=0o644, uid=0, gid=0, replace=True)
+        written = self._component_root_file(
+            path, code="control_component_plist_unreadable"
+        )
+        if written != payload:
+            raise TransactionEffectUnknown()
+        self._persist_phase(transaction, phase)
+
+    def _publish_control_component_config(
+        self, transaction: TransactionContext, candidate: Any
+    ) -> None:
+        """Publish the bounded Control configuration candidate."""
+
+        control_candidate, _worker_candidate = self._candidate_paths(
+            transaction.transaction_id
+        )
+        _atomic_file(
+            control_candidate,
+            candidate.control_config_after,
+            mode=0o440,
+            uid=0,
+            gid=grp.getgrnam(CONTROL_GROUP).gr_gid,
+            replace=False,
+        )
+        self.replace_control_config(transaction)
+
+    def _component_validate_correlated_receipt(
+        self, transaction: TransactionContext, payload: bytes
+    ) -> None:
+        """Re-prove the correlated receipt through the incumbent validator.
+
+        The correlation preserves every authority, state, evidence, policy,
+        scope and timestamp field of the existing DISARMED receipt; only the
+        attested source release, the configuration digest correlation and the
+        transaction label move.  The incumbent validator must still accept the
+        result before it may be published.
+        """
+
+        try:
+            document = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise TransactionEffectUnknown() from exc
+        if type(document) is not dict:
+            raise TransactionEffectUnknown()
+        readiness = document.get("provider_readiness_receipt_sha256")
+        if type(readiness) is not str:
+            raise TransactionEffectUnknown()
+        try:
+            validate_receipt_document(
+                document,
+                metadata=self._component_autonomy_metadata,
+                expected=AutonomyExpectation(
+                    release_sha=transaction.expected_sha,
+                    control_config_sha256=transaction.candidates.control_sha256,
+                    worker_config_sha256=transaction.candidates.worker_sha256,
+                    provider_readiness_receipt_sha256=readiness,
+                    capability_policy_digest=CAPABILITY_POLICY_DIGEST,
+                    execution_profile_digest=EXECUTION_PROFILE_DIGEST,
+                    native_helper_grant_digest=NATIVE_HELPER_GRANT_DIGEST,
+                    security_config_digest=SECURITY_CONFIG_DIGEST,
+                ),
+                now=None,
+                require_current=False,
+            )
+        except (AutonomyRefusal, TypeError, ValueError) as exc:
+            raise TransactionEffectUnknown() from exc
+
+    def _component_receipt_cas(self, path: Path, *, prior_field: str) -> bool:
+        """The exact prior-byte compare-and-swap of one receipt.
+
+        The receipt on disk must still be EXACTLY the sealed prior bytes.  A
+        receipt that moved after the seal is an unbound later receipt: it is
+        never overwritten.  The returned value says whether the receipt was
+        present before this replacement.
+        """
+
+        manifest = self._manifest()
+        present, raw = self._component_receipt_bytes(path)
+        if (
+            present is not manifest[prior_field.replace("_sha256", "_present")]
+            or sha256_bytes(raw) != manifest[prior_field]
+        ):
+            raise TransactionEffectUnknown()
+        return present
+
+    def _publish_control_component_receipts(self, transaction: TransactionContext) -> None:
+        """Publish the correlated receipts.  No authority is granted or refreshed."""
+
+        self._recheck_component_bound(transaction)
+        self._component_validate_correlated_receipt(
+            transaction, self._component_target_autonomy_bytes
+        )
+        # The exact prior-byte compare-and-swap happens immediately before the
+        # replacement, never after it.
+        self._component_receipt_cas(
+            AUTONOMY_RECEIPT,
+            prior_field="component_prior_autonomy_receipt_sha256",
+        )
+        _atomic_file(
+            AUTONOMY_RECEIPT,
+            self._component_target_autonomy_bytes,
+            mode=0o444,
+            uid=0,
+            gid=0,
+            replace=True,
+        )
+        written, _info = _read_root_file(
+            AUTONOMY_RECEIPT, modes=frozenset({0o444}), uid=0, gid=0
+        )
+        if written != self._component_target_autonomy_bytes:
+            raise TransactionEffectUnknown()
+        if not self._component_target_ceo_bytes:
+            return
+        replace = self._component_receipt_cas(
+            CEO_SUBMIT_RECEIPT,
+            prior_field="component_prior_ceo_receipt_sha256",
+        )
+        _atomic_file(
+            CEO_SUBMIT_RECEIPT,
+            self._component_target_ceo_bytes,
+            mode=0o444,
+            uid=0,
+            gid=0,
+            replace=replace,
+        )
+        written, _info = _read_root_file(
+            CEO_SUBMIT_RECEIPT, modes=frozenset({0o444}), uid=0, gid=0
+        )
+        if written != self._component_target_ceo_bytes:
+            raise TransactionEffectUnknown()
+
+    def _component_enable_control(self) -> None:
+        """One fixed, one-shot Control enable.
+
+        The incumbent stop leaves the Control service explicitly disabled, so
+        the offline mode must re-enable it exactly once before it can be
+        bootstrapped.  The disabled override is read back after the effect: a
+        lost response is never a silent success, and the enable is never
+        repeated.
+        """
+
+        release = SYSTEM_ROOT / "releases" / self._active_transaction.expected_sha
+        try:
+            self._run_fixed(
+                ["/bin/launchctl", "enable", f"system/{CONTROL_LABEL}"],
+                cwd=release,
+                timeout=45.0,
+            )
+        except Exception as exc:
+            # The command may have crossed the launchd effect boundary even
+            # when its response is unavailable.  The transaction is retained.
+            raise TransactionEffectUnknown() from exc
+        try:
+            disabled = self._read_launchd_disabled_override(
+                CONTROL_LABEL, allow_absent=True
+            )
+        except TransactionEffectUnknown as exc:
+            raise TransactionEffectUnknown() from exc
+        if disabled is not False:
+            raise TransactionEffectUnknown()
+
+    def _component_bootout_control(self) -> None:
+        """One fixed Control bootout.  A source switch is never kickstart-only."""
+
+        release = SYSTEM_ROOT / "releases" / self._active_transaction.expected_sha
+        try:
+            self._run_fixed(
+                ["/bin/launchctl", "bootout", f"system/{CONTROL_LABEL}"],
+                cwd=release,
+                timeout=45.0,
+            )
+        except Exception:
+            # The response may have been lost across the effect boundary.  The
+            # absence is proved by observation, never by an exit code.
+            pass
+        try:
+            loaded = self._loaded_observe_only(CONTROL_LABEL)
+        except ArmAdmissionError as exc:
+            raise TransactionEffectUnknown() from exc
+        if loaded:
+            raise TransactionEffectUnknown()
+
+    def _component_bootstrap_control(self) -> None:
+        """One fixed Control bootstrap of the VERIFIED new plist."""
+
+        release = SYSTEM_ROOT / "releases" / self._active_transaction.expected_sha
+        self._require_control_plist_safe()
+        try:
+            self._run_fixed(
+                ["/bin/launchctl", "bootstrap", "system", os.fspath(CONTROL_PLIST)],
+                cwd=release,
+                timeout=45.0,
+            )
+        except Exception as exc:
+            raise TransactionEffectUnknown() from exc
+        try:
+            loaded = self._loaded_observe_only(CONTROL_LABEL)
+        except ArmAdmissionError as exc:
+            raise TransactionEffectUnknown() from exc
+        if not loaded:
+            raise TransactionEffectUnknown()
+
+    def write_control_component_receipt(
+        self, transaction: TransactionContext, receipt: Mapping[str, Any]
+    ) -> None:
+        """Publish the one bounded receipt of this update."""
+
+        if (
+            self._transaction_owner_fd is None
+            or self._active_transaction is None
+            or self._active_transaction.transaction_id != transaction.transaction_id
+        ):
+            raise TransactionEffectUnknown()
+        self._verify_published_inode(self._transaction_owner_fd)
+        encoded = _encoded_json(receipt)
+        # The exact prior-byte compare-and-swap happens immediately before the
+        # replacement: a component receipt that moved after the seal is an
+        # unbound later receipt and is never overwritten.
+        replace = self._component_receipt_cas(
+            CONTROL_COMPONENT_RECEIPT,
+            prior_field="component_prior_component_receipt_sha256",
+        )
+        if replace:
+            metadata = _receipt_metadata(CONTROL_COMPONENT_RECEIPT)
+            if metadata != ReceiptMetadata(
+                uid=0,
+                gid=0,
+                mode=0o444,
+                nlink=1,
+                is_regular=True,
+                is_symlink=False,
+                has_acl=False,
+            ):
+                raise TransactionEffectUnknown()
+        _atomic_file(
+            CONTROL_COMPONENT_RECEIPT,
+            encoded,
+            mode=0o444,
+            uid=0,
+            gid=0,
+            replace=replace,
+        )
+        readback, _info = _read_root_file(
+            CONTROL_COMPONENT_RECEIPT, modes=frozenset({0o444}), uid=0, gid=0
+        )
+        if readback != encoded:
+            raise TransactionEffectUnknown()
+
+
+def _component_receipt_document(
+    *,
+    transaction_id: str,
+    target_sha: str,
+    prior_sha: str,
+    candidate: Any,
+    prior_seal: str,
+    target_seal: str,
+    plan_sha256: str,
+    observed_at: str,
+    mode: str,
+) -> dict[str, Any]:
+    from ops.executive_os import control_component_update as compiler
+
+    return {
+        "schema": CONTROL_COMPONENT_RECEIPT_SCHEMA,
+        "transaction_id": transaction_id,
+        "target_sha": target_sha,
+        "prior_sha": prior_sha,
+        "plan_sha256": plan_sha256,
+        "mode": mode,
+        "control_config_sha256": candidate.control_config_after_sha256,
+        "prior_control_config_sha256": candidate.control_config_before_sha256,
+        "control_plist_sha256": candidate.control_plist_after_sha256,
+        "worker_plist_sha256": candidate.worker_plist_after_sha256,
+        "worker_config_sha256": candidate.worker_config_sha256,
+        "prior_release_seal_sha256": prior_seal,
+        "target_release_seal_sha256": target_seal,
+        "effects": list(compiler.effects_for_mode(mode)),
+        "observed_at": observed_at,
+        "tool_version": TOOL_VERSION,
+    }
+
+
+def _component_incomplete(
+    host: ProductionControlComponentHost,
+    transaction_id: str,
+    exc: ComponentUpdateRefused,
+) -> ComponentUpdateRefused:
+    """Classify a refusal raised after the original transaction was claimed.
+
+    The original transaction and its preimages are retained and the phase
+    that was still incomplete is named.  Nothing is rolled back, nothing is
+    replayed, and the result is never presented as a zero-effect refusal.
+    """
+
+    phase: str | None = None
+    try:
+        phase = str(host._manifest().get("phase"))
+    except Exception:
+        phase = None
+    return ComponentUpdateRefused(
+        exc.code,
+        phase=phase,
+        transaction_id=transaction_id,
+    )
+
+
+def execute_control_component_update(
+    host: ProductionControlComponentHost,
+    *,
+    target_sha: str,
+    plan_sha256: str,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Publish exactly the approved Control component plan.
+
+    The plan is recompiled from the LIVE installed state and its digest must
+    match the operator's digest exactly.  The marker is then claimed on the
+    ONE existing global owner, the preimages are sealed, and the effects are
+    dispatched in the fixed order: one Control bootout, the bounded target
+    publications and the validated receipt correlations, one Control bootstrap
+    of the verified new plist, the wrapper-attested consumed-config proof,
+    and the control observation published by the SAME held owner.
+    """
+
+    from ops.executive_os import control_component_update as compiler
+
+    host.effective_uid()
+    observation = host.observe_control_component_update(target_sha=target_sha)
+    document = observation["plan"]
+    if compiler.plan_digest(document) != plan_sha256:
+        raise _component_refusal("control_component_plan_digest_mismatch")
+    candidate = observation["candidate"]
+    transaction_id = host.new_transaction_id()
+    target_autonomy = correlate_component_authority_receipt(
+        observation["autonomy_receipt"],
+        target_sha=target_sha,
+        prior_control_sha256=observation["prior_configs"].control_sha256,
+        target_control_sha256=candidate.control_config_after_sha256,
+        transaction_id=transaction_id,
+    )
+    target_ceo = (
+        correlate_component_ceo_receipt(
+            observation["ceo_receipt"],
+            target_sha=target_sha,
+            transaction_id=transaction_id,
+        )
+        if observation["ceo_receipt"] is not None
+        else None
+    )
+    transaction = TransactionContext(
+        transaction_id=transaction_id,
+        expected_sha=target_sha,
+        prior_configs=observation["prior_configs"],
+        candidates=observation["candidate_configs"],
+        admission=None,
+    )
+    host._component_candidate = candidate
+    host._component_plan_sha256 = plan_sha256
+    host._component_prior_seal = observation["prior_seal"]
+    host._component_target_seal = observation["target_seal"]
+    host._component_observed_at = _receipt_timestamp(
+        now if now is not None else datetime.now(UTC)
+    )
+    host._component_autonomy_metadata = observation["autonomy_receipt_metadata"]
+    host._component_target_autonomy_bytes = _encoded_json(target_autonomy)
+    host._component_target_ceo_bytes = (
+        _encoded_json(target_ceo) if target_ceo is not None else b""
+    )
+    # The mode and its two disabled preimages are bound in the sealed marker.
+    host._component_mode_bound = observation["mode"]
+    host._component_control_launchd_disabled = observation["control_launchd_disabled"]
+    host._component_worker_launchd_disabled = observation["worker_launchd_disabled"]
+    # The archived preimages are the EXACT bytes that were on disk, never a
+    # re-encoded parse of them.
+    receipt_preimages = observation["receipt_preimages"]
+    host._component_prior_archives = {
+        "prior-component-autonomy-receipt.json": receipt_preimages[
+            "authority_receipt"
+        ][2],
+        "prior-component-ceo-submit-receipt.json": receipt_preimages[
+            "ceo_submit_receipt"
+        ][2],
+        "prior-component-receipt.json": receipt_preimages["component_receipt"][2],
+        "prior-control-plist.plist": observation["prior_control_plist"],
+        "prior-worker-plist.plist": observation["prior_worker_plist"],
+    }
+    # The one receipt this update owes is derived from the retained manifest
+    # and the recompiled candidate, so it is byte-identical to the document
+    # the original operation owed.
+    host._component_target_component_bytes = _encoded_json(
+        _component_receipt_document(
+            transaction_id=transaction_id,
+            target_sha=target_sha,
+            prior_sha=candidate.prior_sha,
+            candidate=candidate,
+            prior_seal=observation["prior_seal"],
+            target_seal=observation["target_seal"],
+            plan_sha256=plan_sha256,
+            observed_at=host._component_observed_at,
+            mode=observation["mode"],
+        )
+    )
+    host._active_transaction = transaction
+    try:
+        host._create_marker(transaction, operation=CONTROL_COMPONENT_UPDATE)
+    except FileExistsError as exc:
+        host._active_transaction = None
+        raise _component_refusal("control_component_transaction_occupied") from exc
+    try:
+        # The retained interpreter qualification is rechecked under the SAME
+        # budget it was observed under, before the first effect.  The recheck
+        # follows the marker claim directly, so the budget it spends is the
+        # budget the observation opened.
+        host._component_recheck_interpreter()
+        host._recheck_component_preimages(transaction, observation)
+        if observation["mode"] == _COMPONENT_LIVE_MODE:
+            # One Control bootout.  The source switch cannot be kickstart-only:
+            # kickstart would reuse the already-loaded job definition and keep
+            # running the prior release.
+            host._persist_phase(transaction, "CONTROL_BOOTOUT_RECORDED")
+            host._component_bootout_control()
+        else:
+            # The offline mode's Control is ALREADY absent.  There is no
+            # bootout to dispatch and no bootout to record: the absence is
+            # proved by observation alone.
+            if host._component_label_loaded(
+                CONTROL_LABEL, code="control_component_control_state_unknown"
+            ):
+                raise TransactionEffectUnknown()
+        host._recheck_component_quiescence(transaction)
+        host._persist_phase(transaction, "CONTROL_ABSENT_PROVEN")
+        # The bounded target publications and the validated receipt
+        # correlations.
+        host._replace_component_target(
+            transaction,
+            CONTROL_PLIST,
+            prior_field="component_prior_control_plist_sha256",
+            target_field="component_target_control_plist_sha256",
+            payload=candidate.control_plist_after,
+            phase="CONTROL_PLIST_REPLACED",
+        )
+        host._replace_component_target(
+            transaction,
+            WORKER_PLIST,
+            prior_field="component_prior_worker_plist_sha256",
+            target_field="component_target_worker_plist_sha256",
+            payload=candidate.worker_plist_after,
+            phase="WORKER_PLIST_REPLACED",
+        )
+        host._publish_control_component_config(transaction, candidate)
+        host._publish_control_component_receipts(transaction)
+        host._persist_phase(transaction, "AUTHORITY_RECEIPT_CORRELATED")
+        if observation["mode"] == _COMPONENT_OFFLINE_MODE:
+            # The incumbent stop left the Control explicitly disabled, so it
+            # must be enabled exactly once before it can be bootstrapped.
+            host._persist_phase(transaction, "CONTROL_ENABLE_RECORDED")
+            host._component_enable_control()
+            host._persist_phase(transaction, "CONTROL_ENABLED_PROVEN")
+        # One Control bootstrap of the VERIFIED new plist.
+        host._persist_phase(transaction, "CONTROL_BOOTSTRAP_RECORDED")
+        host._component_bootstrap_control()
+        # The wrapper-attested consumed-config proof: the live pid, the boot
+        # identity, the target release and the exact consumed configuration.
+        host.prove_control_admission_bound(
+            target_sha, candidate.control_config_after_sha256
+        )
+        host._persist_phase(transaction, "CONTROL_COMPONENT_TARGETS_PROVEN")
+        receipt = _component_receipt_document(
+            transaction_id=transaction.transaction_id,
+            target_sha=target_sha,
+            prior_sha=candidate.prior_sha,
+            candidate=candidate,
+            prior_seal=observation["prior_seal"],
+            target_seal=observation["target_seal"],
+            plan_sha256=plan_sha256,
+            observed_at=host._component_observed_at,
+            mode=observation["mode"],
+        )
+        host.write_control_component_receipt(transaction, receipt)
+        host._persist_phase(transaction, "CONTROL_COMPONENT_RECEIPT_REPLACED")
+        host.complete_transaction(transaction)
+    except ComponentUpdateRefused as exc:
+        # The marker exists: this refusal is NOT a zero-effect refusal.  The
+        # original transaction and its preimages are retained and the phase
+        # that was still incomplete is named, so the caller reports an
+        # uncertain original operation instead of a clean one.
+        raise _component_incomplete(host, transaction.transaction_id, exc) from exc
+    except TransactionEffectUnknown:
+        raise
+    except Exception as exc:
+        raise TransactionEffectUnknown() from exc
+    return {
+        "ok": True,
+        "outcome": "UPDATED",
+        "target_sha": target_sha,
+        "plan_sha256": plan_sha256,
+        "transaction_id": transaction.transaction_id,
+    }
+
+
+def reconcile_control_component_update(
+    host: ProductionControlComponentHost, *, target_sha: str
+) -> dict[str, Any]:
+    """Prove one interrupted update to its exact retained postimages.
+
+    Reconciliation NEVER republishes a target, NEVER re-dispatches a recorded
+    bootout or bootstrap and NEVER rolls back.  It recompiles the candidate
+    from the ARCHIVED preimages, proves every retained postimage exactly, and
+    completes the marker only when all of them hold.
+
+    Once the transaction owner is claimed, EVERY qualification or read
+    failure is an INCOMPLETE or EFFECT_UNKNOWN outcome.  The original marker
+    and its preimages are retained, and the caller is never told that an
+    already claimed transaction had no effect.
+    """
+
+    host.effective_uid()
+    if not host._transaction_present():
+        raise _component_refusal("control_component_transaction_absent")
+    host._claim_transaction_owner()
+    manifest = host._manifest()
+    if (
+        manifest.get("operation") != CONTROL_COMPONENT_UPDATE
+        or manifest.get("expected_sha") != target_sha
+        or manifest.get("phase") not in _COMPONENT_PHASES
+        or not _COMPONENT_MANIFEST_FIELDS <= set(manifest)
+    ):
+        raise TransactionEffectUnknown()
+    try:
+        return _reconcile_control_component_update(
+            host, manifest, target_sha
+        )
+    except ComponentUpdateRefused as exc:
+        # The original transaction was already claimed: this is NOT a
+        # zero-effect refusal.  The marker and its preimages are retained,
+        # the incomplete phase is named, and nothing is replayed or rolled
+        # back.
+        raise _component_incomplete(
+            host, str(manifest["transaction_id"]), exc
+        ) from exc
+    except TransactionEffectUnknown:
+        raise
+    except Exception as exc:
+        # A qualification or a read that fails after the claim leaves the
+        # ORIGINAL transaction uncertain: nothing is replayed, nothing is
+        # rolled back and nothing is reported as a clean refusal.
+        raise TransactionEffectUnknown() from exc
+
+
+def _reconcile_control_component_update(
+    host: ProductionControlComponentHost,
+    manifest: Mapping[str, Any],
+    target_sha: str,
+) -> dict[str, Any]:
+    """The retained-postimage proof of one claimed Control component update."""
+
+    from ops.executive_os import control_component_update as compiler
+
+    archives = host._component_archives()
+    prior_control_plist = archives["prior-control-plist.plist"]
+    prior_worker_plist = archives["prior-worker-plist.plist"]
+    prior_control_config = archives["prior-control.json"]
+    prior_worker_config = archives["prior-worker.json"]
+    try:
+        prior_plist_document = plistlib.loads(prior_control_plist)
+    except (plistlib.InvalidFileException, ValueError, TypeError) as exc:
+        raise TransactionEffectUnknown() from exc
+    prior_sha = ProductionControlComponentHost._component_prior_release(
+        prior_plist_document
+    )
+    prior_release_root = os.fspath(SYSTEM_ROOT / "releases" / prior_sha)
+    target_release_root = os.fspath(SYSTEM_ROOT / "releases" / target_sha)
+    # BOTH actual configurations are re-read through the incumbent qualified
+    # configuration owner.  The retained manifest is never a substitute for
+    # the installed Worker configuration: the Worker must still carry the
+    # exact bytes and the exact digest this operation left untouched, so a
+    # Worker that drifted after the interruption is refused here, before any
+    # publication, lifecycle effect or closeout.
+    try:
+        (
+            _control_document,
+            _worker_document,
+            control_digest,
+            worker_digest,
+            _control_raw,
+            worker_raw,
+        ) = host._configs()
+    except (HostControlError, KeyError, OSError, ValueError) as exc:
+        raise TransactionEffectUnknown() from exc
+    if control_digest != manifest["target_control_sha256"]:
+        raise TransactionEffectUnknown()
+    if worker_digest != manifest["target_worker_sha256"]:
+        raise TransactionEffectUnknown()
+    if worker_raw != prior_worker_config:
+        raise TransactionEffectUnknown()
+    try:
+        candidate = compiler.compile_candidate(
+            prior_control_config,
+            prior_control_plist,
+            prior_worker_plist,
+            target_sha=target_sha,
+            prior_sha=prior_sha,
+            worker_config_sha256=worker_digest,
+            prior_release_root=prior_release_root,
+            target_release_root=target_release_root,
+        )
+    except compiler.ComponentError as exc:
+        raise TransactionEffectUnknown() from exc
+    if (
+        candidate.control_config_after_sha256 != manifest["target_control_sha256"]
+        or candidate.control_plist_after_sha256
+        != manifest["component_target_control_plist_sha256"]
+        or candidate.worker_plist_after_sha256
+        != manifest["component_target_worker_plist_sha256"]
+    ):
+        raise TransactionEffectUnknown()
+    # The target release and the administrative checkout are qualified
+    # FRESH: an interrupted update is only reconciled against a target source
+    # that is still sealed and still present.  A qualification that cannot be
+    # made leaves the ORIGINAL transaction uncertain: nothing is replayed and
+    # nothing is rolled back.
+    try:
+        target_seal = host._component_release_seal(target_sha, target=True)
+    except ComponentUpdateRefused as exc:
+        raise TransactionEffectUnknown() from exc
+    if target_seal != manifest["component_target_release_seal_sha256"]:
+        raise TransactionEffectUnknown()
+    try:
+        admin_checkout_commit = host._component_admin_checkout(target_sha)
+    except ComponentUpdateRefused as exc:
+        raise TransactionEffectUnknown() from exc
+    if admin_checkout_commit != target_sha:
+        raise TransactionEffectUnknown()
+    # Every retained postimage must hold exactly.
+    for path, field in (
+        (CONTROL_PLIST, "component_target_control_plist_sha256"),
+        (WORKER_PLIST, "component_target_worker_plist_sha256"),
+    ):
+        raw = host._component_root_file(
+            path, code="control_component_plist_unreadable"
+        )
+        if sha256_bytes(raw) != manifest[field]:
+            raise TransactionEffectUnknown()
+    autonomy_raw, _info = _read_root_file(
+        AUTONOMY_RECEIPT, modes=frozenset({0o444}), uid=0, gid=0
+    )
+    if sha256_bytes(autonomy_raw) != manifest[
+        "component_target_autonomy_receipt_sha256"
+    ]:
+        raise TransactionEffectUnknown()
+    if manifest["component_prior_ceo_receipt_present"]:
+        ceo_raw, _info = _read_root_file(
+            CEO_SUBMIT_RECEIPT, modes=frozenset({0o444}), uid=0, gid=0
+        )
+        if sha256_bytes(ceo_raw) != manifest["component_target_ceo_receipt_sha256"]:
+            raise TransactionEffectUnknown()
+    elif CEO_SUBMIT_RECEIPT.exists() or CEO_SUBMIT_RECEIPT.is_symlink():
+        raise TransactionEffectUnknown()
+    # The lifecycle is qualified FRESH and is NEVER replayed: the Control is
+    # running the target source, the Worker is still absent and disabled, and
+    # the Control is not disabled.
+    mode = str(manifest["component_mode"])
+    if host._component_label_loaded(
+        WORKER_LABEL, code="control_component_worker_state_unknown"
+    ):
+        raise TransactionEffectUnknown()
+    if host._component_disabled_override(WORKER_LABEL) is not True:
+        raise TransactionEffectUnknown()
+    control_disabled = host._component_disabled_override(CONTROL_LABEL)
+    if mode == _COMPONENT_OFFLINE_MODE:
+        if control_disabled is not False:
+            raise TransactionEffectUnknown()
+    elif control_disabled is True:
+        raise TransactionEffectUnknown()
+    # The live Control service must be running the target source and must have
+    # consumed the exact configuration.
+    if not host._component_label_loaded(
+        CONTROL_LABEL, code="control_component_control_state_unknown"
+    ):
+        raise TransactionEffectUnknown()
+    if not host._ceo_admission_probe(
+        target_sha, candidate.control_config_after_sha256
+    ):
+        raise TransactionEffectUnknown()
+    # The runtime is qualified FRESH and rechecked under the SAME budget
+    # immediately before the first effect this reconciliation still owes.
+    try:
+        host._component_interpreter_observation()
+    except ComponentUpdateRefused as exc:
+        raise TransactionEffectUnknown() from exc
+    host._component_recheck_interpreter()
+    transaction = TransactionContext(
+        transaction_id=str(manifest["transaction_id"]),
+        expected_sha=target_sha,
+        prior_configs=ConfigEvidence(
+            control_sha256=str(manifest["prior_control_sha256"]),
+            worker_sha256=str(manifest["prior_worker_sha256"]),
+            control=json.loads(prior_control_config.decode("utf-8")),
+            worker=json.loads(prior_worker_config.decode("utf-8")),
+            control_bytes=prior_control_config,
+            worker_bytes=prior_worker_config,
+        ),
+        candidates=CandidateConfigs(
+            control=json.loads(candidate.control_config_after.decode("utf-8")),
+            worker=json.loads(worker_raw.decode("utf-8")),
+            control_bytes=candidate.control_config_after,
+            worker_bytes=worker_raw,
+            control_sha256=candidate.control_config_after_sha256,
+            worker_sha256=worker_digest,
+        ),
+        admission=None,
+    )
+    host._active_transaction = transaction
+    host._component_candidate = candidate
+    host._component_plan_sha256 = str(manifest["component_plan_sha256"])
+    host._component_prior_seal = str(manifest["component_prior_release_seal_sha256"])
+    host._component_target_seal = str(manifest["component_target_release_seal_sha256"])
+    host._component_observed_at = str(manifest["component_observed_at"])
+    host._component_prior_archives = archives
+    # The EXPLICIT presence of every receipt the original operation bound.
+    # It is read back from the retained manifest, never inferred from the
+    # byte length of an archived preimage.
+    host._component_prior_receipt_presence = {
+        "authority_receipt": bool(
+            manifest["component_prior_autonomy_receipt_present"]
+        ),
+        "ceo_submit_receipt": bool(
+            manifest["component_prior_ceo_receipt_present"]
+        ),
+        "component_receipt": bool(
+            manifest["component_prior_component_receipt_present"]
+        ),
+    }
+    host._component_mode_bound = mode
+    host._component_control_launchd_disabled = bool(
+        manifest["component_prior_control_launchd_disabled"]
+    )
+    host._component_worker_launchd_disabled = bool(
+        manifest["component_prior_worker_launchd_disabled"]
+    )
+    host._component_target_autonomy_bytes = autonomy_raw
+    host._component_target_ceo_bytes = (
+        _read_root_file(
+            CEO_SUBMIT_RECEIPT, modes=frozenset({0o444}), uid=0, gid=0
+        )[0]
+        if manifest["component_prior_ceo_receipt_present"]
+        else b""
+    )
+    # The retained component receipt is compared against the byte-identical
+    # document the original operation owed, derived from the retained
+    # manifest and the recompiled candidate.
+    receipt = _component_receipt_document(
+        transaction_id=transaction.transaction_id,
+        target_sha=target_sha,
+        prior_sha=prior_sha,
+        candidate=candidate,
+        prior_seal=str(manifest["component_prior_release_seal_sha256"]),
+        target_seal=str(manifest["component_target_release_seal_sha256"]),
+        plan_sha256=str(manifest["component_plan_sha256"]),
+        observed_at=str(manifest["component_observed_at"]),
+        mode=mode,
+    )
+    receipt_bytes = _encoded_json(receipt)
+    if sha256_bytes(receipt_bytes) != manifest[
+        "component_target_component_receipt_sha256"
+    ]:
+        raise TransactionEffectUnknown()
+    host._component_target_component_bytes = receipt_bytes
+    receipt_present, receipt_raw = host._component_receipt_bytes(
+        CONTROL_COMPONENT_RECEIPT
+    )
+    if receipt_present:
+        if receipt_raw != receipt_bytes:
+            # An unbound later receipt is never overwritten.
+            raise TransactionEffectUnknown()
+        if manifest.get("phase") == "CONTROL_COMPONENT_TARGETS_PROVEN":
+            # The receipt was written by the original operation before the
+            # phase was recorded.  The phase is advanced; nothing is
+            # republished.
+            host._persist_phase(transaction, "CONTROL_COMPONENT_RECEIPT_REPLACED")
+    elif manifest.get("phase") == "CONTROL_COMPONENT_RECEIPT_REPLACED":
+        # The marker says the receipt was replaced and it is not there: the
+        # retained postimage does not hold.
+        raise TransactionEffectUnknown()
+    elif manifest.get("phase") == "CONTROL_COMPONENT_TARGETS_PROVEN":
+        # The bounded receipt was not written yet.  Its bytes are derived from
+        # the retained manifest and the recompiled candidate, so it is the
+        # byte-identical document the original operation owed.
+        host.write_control_component_receipt(transaction, receipt)
+        host._persist_phase(transaction, "CONTROL_COMPONENT_RECEIPT_REPLACED")
+    # The ONE control observation this transaction still owes.  The incumbent
+    # publisher performs it exactly once and refuses a second attempt.
+    host._component_observation_recovery_owner = (
+        os.getpid(),
+        host._transaction_owner_fd,
+        transaction.transaction_id,
+        target_sha,
+    )
+    from ops.executive_os.control_observation import publish_for_transaction
+
+    publish_for_transaction(host, transaction)
+    host.complete_transaction(transaction)
+    return {
+        "ok": True,
+        "outcome": "RECONCILED",
+        "target_sha": target_sha,
+        "transaction_id": transaction.transaction_id,
+    }
+
+
+def _run_control_component_command(
+    host: ProductionControlComponentHost,
+    args: argparse.Namespace,
+    *,
+    now: datetime,
+) -> int:
+    """The closed root-only Control component CLI: typed refusals, sanitized documents."""
+
+    from ops.executive_os import control_component_update as compiler
+
+    try:
+        if args.command == "plan-control-component":
+            document = compiler.plan(host, target_sha=args.expected_sha)
+        elif args.command == "apply-control-component":
+            document = compiler.apply(
+                host,
+                target_sha=args.expected_sha,
+                plan_sha256=args.plan_sha256,
+            )
+        else:
+            document = compiler.reconcile(host, target_sha=args.expected_sha)
+    except ComponentUpdateRefused as exc:
+        if exc.incomplete:
+            # The original transaction was already claimed: this is NOT a
+            # zero-effect refusal.  The transaction and its preimages are
+            # retained, the incomplete phase is named, and nothing is rolled
+            # back or replayed.
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "outcome": "INCOMPLETE",
+                        "code": exc.code,
+                        "phase": exc.phase,
+                        "transaction_id": exc.transaction_id,
+                        "note": "the original transaction marker and its preimages are "
+                        "retained; nothing is replayed and no rollback is performed",
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+            return 2
+        print(
+            json.dumps(
+                {"ok": False, "outcome": "REFUSED", "code": exc.code},
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        return 1
+    except TransactionEffectUnknown as exc:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "outcome": "EFFECT_UNKNOWN",
+                    "code": str(exc) or "control_component_effect_unknown",
+                    "note": "the original transaction marker and its preimages are "
+                    "retained; nothing is replayed and no rollback is performed",
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        return 2
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "outcome": "REFUSED",
+                    "code": "CONTROL_COMPONENT_UNEXPECTED_"
+                    + type(exc).__name__.upper(),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        return 1
+    print(json.dumps(document, sort_keys=True, separators=(",", ":")))
+    return 0 if document.get("ok") else 3
+
 def _verify_gateway_postimages(
     host: ProductionGatewayPublicationHost,
     prior_mcp_config: bytes,
@@ -7988,6 +10321,12 @@ def main(
     if args.command in OS_GATEWAY_COMMANDS:
         gateway_host = ProductionGatewayPublicationHost() if host is None else host
         return _run_gateway_command(gateway_host, args, now=current)
+
+    if args.command in CONTROL_COMPONENT_COMMANDS:
+        component_host = (
+            ProductionControlComponentHost() if host is None else host
+        )
+        return _run_control_component_command(component_host, args, now=current)
 
     transaction_host = ProductionTransactionHost() if host is None else host
     try:
