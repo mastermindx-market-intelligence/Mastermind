@@ -23,6 +23,8 @@ export interface FreshConversationJourneyProps {
   projects:readonly ConversationProjectChoice[];
   projectsState:"reading"|"available"|"unavailable";
   isProjectCurrent:(workRef:string)=>boolean;
+  /** Opaque identity of the same acquired list body. Never a grant. */
+  projectReadIdentity?:unknown;
   /** Controlled ephemeral first-message text; never the current Window notes. */
   workRef:string|null;
   message:string;
@@ -40,7 +42,7 @@ export interface FreshConversationJourneyProps {
   renderContinuation?:(read:FreshConversationInitialRead)=>ReactNode;
 }
 type Original=ConversationRequestSelection&{message?:string};
-type Preview={request:ConversationPreviewRequest;data:FreshConversationData;projectTitle:string|null};
+type Preview={request:ConversationPreviewRequest;data:FreshConversationData;projectTitle:string|null;projectReadIdentity?:unknown};
 type View={scope:number;phase:"draft"|"preview"|"outcome";preview:Preview|null;original:Original|null;
   projectTitle:string|null;data:FreshConversationData|null;operation:OperationState|null;
   retained:OperationPointer|null;lookup:boolean;other:boolean;discovering:boolean;busy:"preview"|"operation"|"read"|null;
@@ -146,19 +148,19 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
    if(!live(c)||!projectCurrent(request.work_ref))return;
    const rawResult=await c.binding.preview(request,readAbort.current.signal);
    if(!live(c)||ticket.current!==id||readAbort.current.signal.aborted)return;
-   if(latest.current.workRef!==request.work_ref||latest.current.message!==request.message||!projectCurrent(request.work_ref)){
+   if(latest.current.workRef!==request.work_ref||latest.current.message!==request.message||latest.current.projectReadIdentity!==p.projectReadIdentity||!projectCurrent(request.work_ref)){
     patch({busy:null,error:"changed"});return;}
    const decoded=decodeFreshConversationResult(rawResult,"preview",request);
    if(!decoded?.ok||!decoded.data?.preview){patch({busy:null,error:"unavailable"});return;}
    gestureFocus(".new-conversation-preview h1",origin);
    patch({busy:null,phase:"preview",preview:{request,data:decoded.data,
-    projectTitle:p.projects.find(item=>item.workRef===request.work_ref)?.title??null}});
+    projectTitle:p.projects.find(item=>item.workRef===request.work_ref)?.title??null,projectReadIdentity:p.projectReadIdentity}});
   }catch{if(live(c)&&ticket.current===id)patch({busy:null,error:"unavailable"});}
  }
  async function confirm(){
   const origin=document.activeElement,c=capture(),shown=current.current.preview,p=latest.current;
   if(!c||!shown||current.current.busy||current.current.retained||current.current.other||current.current.discovering)return;
-  if(p.workRef!==shown.request.work_ref||p.message!==shown.request.message||!projectCurrent(shown.request.work_ref)||!sameConversationOwner(p.draftOwner,c.owner)){
+  if(p.workRef!==shown.request.work_ref||p.message!==shown.request.message||p.projectReadIdentity!==shown.projectReadIdentity||!projectCurrent(shown.request.work_ref)||!sameConversationOwner(p.draftOwner,c.owner)){
    patch({phase:"draft",preview:null,error:"changed"});return;}
   try{
    const intent=c.binding.makeCreateIntent(shown.request,shown.data);
@@ -278,7 +280,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
      <h2>{t("First message","第一条消息")}</h2><p>{prepared.request.message}</p></div>
     {error}<div className="new-conversation-preview-actions"><button type="button" disabled={!!view.busy} onClick={()=>{
      gestureFocus("textarea");patch({phase:"draft",preview:null,error:null});}}>{t("Back to message","返回消息草稿")}</button>
-     <button type="button" className="primary" disabled={!!view.busy||!actualOwner} onClick={()=>void confirm()}>{t("Create conversation","创建对话")}</button>
+     <button type="button" className="primary" disabled={!!view.busy||!actualOwner||!projectCurrent(prepared.request.work_ref)||props.projectReadIdentity!==prepared.projectReadIdentity} onClick={()=>void confirm()}>{t("Create conversation","创建对话")}</button>
      <button type="button" onClick={back}>{t("Cancel","取消")}</button></div>
     <p>{t("Creation still depends on the current conversation checks.","创建仍需通过当前的对话检查。")}</p>
     <details><summary>{t("Sources and access","来源与访问")}</summary><dl>{Object.entries(prepared.data.preview??{}).map(([key,value])=>

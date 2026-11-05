@@ -2469,7 +2469,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           const observation = await readObservation({
             signal: controller.signal,
           });
-          return { raw: observation.controlRoom, observation };
+          return { raw: observation.programsInput ?? observation.controlRoom, observation };
         }
         return {
           raw: await read!({ signal: controller.signal }),
@@ -4479,17 +4479,27 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   conversationListSnapshot.current = {model: conversationListModel,
     catalogueOwner: catalogueListOwner.current, windowOwner: windowListOwner.current,
     index, epoch: programIndexEpoch};
-  const freshProjects = conversationListModel.projects.map(row => ({workRef: row.locator.workRef, title: row.title}));
+  const currentProgramsRead = () => {
+    const latest = conversationListSnapshot.current;
+    return latest.index === index && latest.epoch === programIndexEpoch && latest.epoch === programRequest.current &&
+      latest.catalogueOwner === catalogueListOwner.current && conversationListOwnerCurrent(latest.catalogueOwner, false) &&
+      latest.index.state === "AVAILABLE";
+  };
+  // Fresh choices consume the SAME acquired index, including qualified N.
+  // Global saved-conversation locators remain owned by the C projection.
+  const freshIndexCurrent = currentProgramsRead();
+  const freshProjects = freshIndexCurrent
+    ? index.programs.map(row => ({workRef: row.workRef, title: row.title})) : [];
   const freshJourney = useFreshConversationJourney({locale, active: active === "Conversations" && freshDraft.shown,
     binding: freshBinding, authGeneration: authRevision, host: freshHost,
     projects: freshProjects,
-    projectsState: conversationListModel.projectsState === "CURRENT" ? "available" :
-      conversationListModel.projectsState === "PENDING" ? "reading" : "unavailable",
+    projectsState: freshIndexCurrent ? "available" : programsReadPhase === "pending" ? "reading" : "unavailable",
+    projectReadIdentity: index,
     isProjectCurrent: workRef => {
       const latest = conversationListSnapshot.current;
       return latest.catalogueOwner === catalogueListOwner.current &&
-        conversationListOwnerCurrent(latest.catalogueOwner, false) && latest.model.projectsState === "CURRENT" &&
-        latest.model.projects.filter(row => row.locator.workRef === workRef).length === 1;
+        conversationListOwnerCurrent(latest.catalogueOwner, false) && latest.index.state === "AVAILABLE" &&
+        latest.epoch === programRequest.current && latest.index.programs.filter(row => row.workRef === workRef).length === 1;
     },
     workRef: freshDraft.workRef, message: freshDraft.message, draftOwner: freshDraft.draftOwner,
     onWorkRefChange: freshDraft.onWorkRefChange, onMessageChange: freshDraft.onMessageChange,
@@ -4891,10 +4901,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       ) : (
         projectReaders.archive && projectReaders.archivePage && projectReaders.generation ?
         <ProjectArchiveBrowser locale={locale} scopeKey={archiveScopeKey}
-          programs={office.projection.programs} read={projectReaders.archive} readPage={projectReaders.archivePage}
+          programs={office.projection.programs}
+          currentCatalogue={{value: index, current: currentProgramsRead}}
+          read={projectReaders.archive} readPage={projectReaders.archivePage}
           sourceGeneration={projectReaders.generation} canRead={projectReaders.canRead}
           onOpenProject={workRef => {
-            if (office.projection.programs.source.state !== "CURRENT" || index.state !== "AVAILABLE") return;
+            if (!currentProgramsRead() || index.state !== "AVAILABLE") return;
             const cards = index.programs.filter(card => card.workRef === workRef);
             if (cards.length !== 1) return;
             const card = cards[0];

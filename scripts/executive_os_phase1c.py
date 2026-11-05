@@ -2508,7 +2508,7 @@ def _service_from_config(
                     Path(raw["ceo_ingress_app_boot_python"])),
                 expected_source_sha=str(raw["proof_base_sha"]),
             )
-            canonical_project_data_factory = None
+            canonical_project_read_bindings_factory = None
             if "workspace_source_publication" in raw:
                 from integrations.mastermind_workspace_app.project_git_identity import InstalledProjectGitIdentity
                 from integrations.mastermind_workspace_app.installed_source_operations import InstalledWorkspaceSourceOperations
@@ -2523,14 +2523,7 @@ def _service_from_config(
                 source_factories["source_operation_provider_factory"] = InstalledWorkspaceSourceOperations(
                     collector=packet_collector, policy=policy, load_bindings=workspace_acquisition_loader,
                     git_identity=source_git_identity, runtime_guard=source_runtime_guard)
-                def canonical_project_data_factory(runtime):
-                    from integrations.mastermind_workspace_app.canonical_project_data import InstalledCanonicalProjectData
-                    from control_plane.workspace_source_operations import SourceOperationEvents
-                    source_runtime_guard(runtime)
-                    owner = InstalledCanonicalProjectData(collector=packet_collector,policy=policy,
-                        load_bindings=workspace_acquisition_loader,git_identity=source_git_identity,
-                        events=SourceOperationEvents(runtime.store),runtime_guard=lambda:source_runtime_guard(runtime))
-                    return owner.installed_binding()
+                canonical_project_read_bindings_factory = source_factories["source_operation_provider_factory"].read_bindings
             if product_acceptance_macro_root is not None:
                 product_acceptance_context_owner = packet_collector
             compose_inputs = build_workspace_composer(
@@ -2607,7 +2600,7 @@ def _service_from_config(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),
                 project_knowledge_source_reader=packet_collector.project_knowledge_source_reader(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),
-                canonical_project_data_factory=canonical_project_data_factory,
+                canonical_project_read_bindings_factory=canonical_project_read_bindings_factory,
                 project_session_source_factory=managed_project_session_source,
                 project_archive_reader=packet_collector.project_archive_reader(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),

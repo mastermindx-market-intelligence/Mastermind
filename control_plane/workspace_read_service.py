@@ -2350,7 +2350,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                product_acceptance_observe=None, activity_membership=None,
                                project_plan_reader=None, project_journal_reader=None, project_session_source_factory=None, project_instructions_reader=None, project_direction_reader=None, project_archive_reader=None,
                                project_knowledge_catalogue_reader=None, project_knowledge_memory_reader=None, project_knowledge_source_reader=None,
-                               canonical_project_data_factory=None,
+                               canonical_project_data_factory=None, canonical_project_read_bindings_factory=None,
                                cross_plane_context=None, cross_plane_enrollment=None,
                                project_admission_permissions=None, instruction_admission_permissions=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
@@ -2383,6 +2383,9 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
             control_room=control_room, authorize=authorize,
             enrollment=cross_plane_enrollment,
         )
+    if canonical_project_read_bindings_factory is not None and (
+            not callable(canonical_project_read_bindings_factory) or canonical_project_data_factory is not None):
+        raise ValueError('ambiguous installed project DATA composition')
     cache = ExistingControlRoomCache(control_room.current_owner)
     # The original source+permission owner, not a new publisher or identity.
     # Discovery requires an independent callback and remains dark by default.
@@ -2400,6 +2403,19 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
     if project_session_source_factory is not None and not callable(project_session_source_factory):
         raise ValueError("project session source factory must be installed")
     def provide(runtime):
+        data_binding = discovery_binding = None
+        if canonical_project_read_bindings_factory is not None:
+            from control_plane.installed_canonical_project_data_binding import _ProjectDataReadBinding
+            from control_plane.installed_project_discovery_binding import _ProjectDiscoveryBinding
+            pair = canonical_project_read_bindings_factory(runtime)
+            if (type(pair) is not tuple or len(pair) != 2
+                    or type(pair[0]) is not _ProjectDataReadBinding or type(pair[1]) is not _ProjectDiscoveryBinding
+                    or pair[0].store is not runtime.store or pair[1].store is not runtime.store
+                    or pair[1].owner.data is not pair[0].owner):
+                raise ValueError('installed project READ owners differ')
+            data_binding, discovery_binding = pair
+        elif canonical_project_data_factory is not None:
+            data_binding = canonical_project_data_factory(runtime)
         session_source = project_session_source_factory(runtime) if project_session_source_factory is not None else None
         if session_source is not None and (type(session_source) is not ExistingManagedProjectSessionSource
                 or session_source._service._require_runtime() is not runtime):
@@ -2419,7 +2435,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     project_knowledge_catalogue_reader=project_knowledge_catalogue_reader,
                                     project_knowledge_memory_reader=project_knowledge_memory_reader,
                                     project_knowledge_source_reader=project_knowledge_source_reader,
-                                    canonical_project_data=(None if canonical_project_data_factory is None else canonical_project_data_factory(runtime)),
+                                    canonical_project_data=data_binding, project_discovery=discovery_binding,
                                     project_session_source=session_source,
                                     project_direction_reader=project_direction_reader,
                                     project_archive_reader=project_archive_reader,

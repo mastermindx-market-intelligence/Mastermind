@@ -626,6 +626,33 @@ describe("owner, draft drift and back gestures", () => {
     await waitFor(() => expect(screen.getByText("Review new conversation")).toBeTruthy());
   });
 
+  it("withholds a pending preview when the actual project read identity changes", async () => {
+    const rig = makeRig();
+    const harness = mountJourney(rig, { projectReadIdentity: {} });
+    await chooseProjectAndMessage(harness);
+    fireEvent.click(reviewButton());
+    act(() => harness.update({ projectReadIdentity: {} }));
+    await act(async () => { rig.transport.preview[0].resolve(FIXTURE.preview); });
+    await waitFor(() => expect(screen.getByText("The draft or project changed. Review it again before creating a conversation.")).toBeTruthy());
+    expect(screen.queryByText("Review new conversation")).toBeNull();
+    expect(rig.transport.create).toHaveLength(0);
+    expect(rig.store.writes()).toHaveLength(0);
+  });
+
+  it("refuses Create after a new project read replaced the reviewed identity", async () => {
+    const rig = makeRig();
+    const harness = mountJourney(rig, { projectReadIdentity: {} });
+    await chooseProjectAndMessage(harness);
+    fireEvent.click(reviewButton());
+    await act(async () => { rig.transport.preview[0].resolve(FIXTURE.preview); });
+    const create = await screen.findByRole("button", { name: "Create conversation" });
+    act(() => harness.update({ projectReadIdentity: {} }));
+    expect(create).toHaveProperty("disabled", true);
+    fireEvent.click(create);
+    expect(rig.transport.create).toHaveLength(0);
+    expect(rig.store.writes()).toHaveLength(0);
+  });
+
   it("a late preview after the draft changed is ignored with an explicit changed notice", async () => {
     const rig = makeRig();
     const harness = mountJourney(rig);

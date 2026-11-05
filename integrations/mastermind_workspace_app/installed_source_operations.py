@@ -36,6 +36,25 @@ class InstalledWorkspaceSourceOperations:
         from integrations.mastermind_workspace_app.project_journey_recipes import InstalledProjectJourneyRecipes
         self._journey = InstalledProjectJourneyRecipes(collector)
 
+    def canonical_data_owner(self, runtime):
+        """Same installed owner construction for READ and source operations.
+
+        READ needs no writable Supervisor/private-input owner. No owner cache,
+        config copy, registry or grant is created here.
+        """
+        if type(runtime) is not Runtime or self._runtime_guard(runtime) is not True:
+            raise PermissionError('SOURCE_OPERATION_UNAVAILABLE')
+        from integrations.mastermind_workspace_app.canonical_project_data import InstalledCanonicalProjectData
+        return InstalledCanonicalProjectData(collector=self._collector, policy=self._permissions.policy,
+            load_bindings=self._permissions._load_bindings, git_identity=self._git,
+            events=SourceOperationEvents(runtime.store), runtime_guard=lambda:self._runtime_guard(runtime))
+
+    def read_bindings(self, runtime):
+        """One actual DATA owner issues the two fixed READ bindings together."""
+        from integrations.mastermind_workspace_app.project_discovery import InstalledProjectDiscovery
+        data = self.canonical_data_owner(runtime)
+        return data.installed_binding(), InstalledProjectDiscovery(data).installed_binding()
+
     def __call__(self, runtime, supervisor):
         if type(runtime) is not Runtime:
             raise ValueError('SOURCE_OPERATION_UNAVAILABLE')
@@ -54,14 +73,11 @@ class InstalledWorkspaceSourceOperations:
         # status does not acquire Git credentials, Macro or private contents;
         # the actual Git identity owner requalifies before each Git/API read
         # or effect when publication/reconciliation invokes it.
-        events = SourceOperationEvents(runtime.store)
+        data = self.canonical_data_owner(runtime)
+        events = data.events
         private = ProjectSourceOriginalInput(primary)
         contexts = self._permissions
         event_adapter = KnowledgePublisherEvents(events=events,contexts=contexts)
-        from integrations.mastermind_workspace_app.canonical_project_data import InstalledCanonicalProjectData
-        data = InstalledCanonicalProjectData(collector=self._collector,policy=contexts.policy,
-            load_bindings=contexts._load_bindings,git_identity=self._git,events=events,
-            runtime_guard=lambda:self._runtime_guard(runtime))
         owner = ProjectKnowledgeSourceOwner(events=events,private_inputs=private,permission_factory=contexts,
             adapter=ProjectKnowledgeRecipeAdapter(self._compiler),publisher_events=event_adapter,
             publisher_binding=self._git.binding,qualify_publisher=data.qualify_publisher,pr_owner=self._git)
