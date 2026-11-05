@@ -1251,6 +1251,26 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
         }, headers={"Cache-Control": "no-store"})
 
 
+def _risk_unavailable_payload(portfolio: str, *, archived: bool = False) -> dict[str, Any]:
+    """Closed, evidence-unknown risk contract; never claims zero breaches or caveats."""
+    payload: dict[str, Any] = {
+        "portfolio_id": portfolio,
+        "safety_score": None,
+        "grade": "—",
+        "verdict": "Safety report unavailable.",
+        "metrics": None,
+        "subscores": None,
+        "breaches": None,
+        "caveats": None,
+        "report_status": "unavailable",
+        "error": "archived_risk_unavailable" if archived else "risk_unavailable",
+        "note": "Archived safety snapshot unavailable." if archived else "Safety report unavailable.",
+    }
+    if archived:
+        payload.update({"archived": True, "lifecycle": "archived", "snapshot_only": True})
+    return payload
+
+
 @router.get("/api/risk")
 def api_risk(portfolio: str = _PRODUCT_DEFAULT_ID, recompute: bool = False) -> JSONResponse:
     """Portfolio safety scorecard: a static-weight historical risk backtest of the live book
@@ -1265,11 +1285,7 @@ def api_risk(portfolio: str = _PRODUCT_DEFAULT_ID, recompute: bool = False) -> J
         if _portfolio_registry.is_archived(portfolio):
             rep = safety.load_safety(portfolio)
             if rep is None:
-                rep = {
-                    "portfolio_id": portfolio, "safety_score": None, "grade": "—",
-                    "verdict": "Archived safety snapshot unavailable.", "metrics": {},
-                    "subscores": {}, "breaches": [], "caveats": [],
-                }
+                return JSONResponse(_risk_unavailable_payload(portfolio, archived=True))
             rep = {**rep, "portfolio_id": portfolio, "archived": True,
                    "lifecycle": "archived", "snapshot_only": True}
             return JSONResponse(rep)
@@ -1285,11 +1301,8 @@ def api_risk(portfolio: str = _PRODUCT_DEFAULT_ID, recompute: bool = False) -> J
                 pass
         return JSONResponse(rep)
     except Exception as exc:
-        return JSONResponse({
-            "portfolio_id": portfolio, "safety_score": None, "grade": "—",
-            "verdict": "Safety report unavailable.", "metrics": {}, "subscores": {},
-            "breaches": [], "caveats": [], "note": f"Safety unavailable: {exc}",
-        })
+        _log.warning("risk report read failed for %s: %s", portfolio, type(exc).__name__)
+        return JSONResponse(_risk_unavailable_payload(portfolio))
 
 
 @router.get("/api/portfolio")
