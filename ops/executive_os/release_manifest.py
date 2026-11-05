@@ -460,7 +460,7 @@ def _held_release_imports(owner: _HeldReleaseSources):
 
 
 def _hermes_runtime(argv: list[str]) -> int:
-    if (not argv or argv[0] not in {"supervise", "canary"}
+    if (not argv or argv[0] not in {"supervise", "canary", "isolation-probe"}
             or sys.implementation.name != "cpython" or sys.version_info[:2] != (3, 12)
             or not sys.platform.startswith("linux") or not sys.flags.isolated
             or not sys.flags.no_site or not sys.flags.no_user_site
@@ -486,9 +486,14 @@ def _hermes_runtime(argv: list[str]) -> int:
             ) as yaml:
                 finder.predecessor = yaml.__loader__
                 finder.check()
-                from integrations.hermes_runtime.cli import main as hermes_main
+                if argv[0] == "isolation-probe":
+                    from integrations.hermes_runtime.isolation_probe import main as entry_main
+                    entry_args = argv[1:]
+                else:
+                    from integrations.hermes_runtime.cli import main as entry_main
+                    entry_args = argv
                 finder.check()
-                result = hermes_main(argv)
+                result = entry_main(entry_args)
                 finder.check()
                 return result
     finally:

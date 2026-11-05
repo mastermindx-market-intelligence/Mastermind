@@ -660,3 +660,13 @@ qualification, effective-unit and current-process binding, credentials and
 kernel isolation still belong to their existing host owners. The BYOK observer
 continues to report its installed source as unbound until those facts are
 qualified. A rendered unit or implementation label does not establish them.
+
+### Credential-free qualification entry
+
+The fixed isolated release entry also accepts `hermes-runtime isolation-probe`.
+Use the same CPython 3.12 `-I -S -B` recipe, protected release path and held
+source/YAML context as the role service. This is a closed entry to the existing
+finite probe, not an arbitrary module launcher. `--list-cases` is inert.
+Follow [FINAL_ROLE_QUALIFICATION.md](FINAL_ROLE_QUALIFICATION.md) for the
+qualification-only unit override, source identity, external witnesses and
+restoration. This source capability does not clear the serving/deployment hold.

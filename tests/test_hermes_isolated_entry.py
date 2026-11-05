@@ -257,7 +257,10 @@ print('REFUSED_BEFORE_FIRST_PARTY_IMPORT')
     assert result.stderr.strip() == "HERMES_RELEASE_SOURCE_UNQUALIFIED"
 
 
-def test_actual_archive_runs_hermes_help_with_held_yaml_and_no_ambient_packages(tmp_path):
+@pytest.mark.parametrize("command, argument", [
+    ("supervise", "--help"), ("isolation-probe", "--list-cases"),
+])
+def test_actual_archive_runs_closed_hermes_modes_with_held_yaml(tmp_path, command, argument):
     """Actual CLI/import closure; synthetic root identity is stated in the driver."""
     spec = importlib.util.spec_from_file_location("_enrollment_entry_probe", ROOT / "scripts/enroll_linux_secondary_worker.py")
     enrollment = importlib.util.module_from_spec(spec)
@@ -300,7 +303,7 @@ class Proxy:
  def __getattr__(self,name):return self.overrides.get(name,getattr(self.target,name))
 m.os=Proxy(os,stat=lambda *a,**k:root_info(real_os.stat(*a,**k)),
            fstat=lambda fd:root_info(real_os.fstat(fd)))
-m.sys=Proxy(sys,platform='linux',argv=[str(entry),'hermes-runtime','supervise','--help'])
+m.sys=Proxy(sys,platform='linux',argv=[str(entry),'hermes-runtime',sys.argv[2],sys.argv[3]])
 m._LINUX_RELEASES=root.parent
 m._linux_source_acl=lambda fd,directory:None
 try:result=m.main()
@@ -308,10 +311,10 @@ except SystemExit as exc:result=exc.code
 assert result==0,result
 assert not any(n.split('.')[0] in m._FIRST_PARTY or n=='yaml' or n.startswith('yaml.') for n in sys.modules)
 assert str(root) not in sys.path
-print('ARCHIVED_HELD_HERMES_HELP_OK')
+print('ARCHIVED_HELD_HERMES_ENTRY_OK')
 """
-    result = subprocess.run([sys.executable, "-I", "-S", "-B", "-c", driver, str(root)],
+    result = subprocess.run([sys.executable, "-I", "-S", "-B", "-c", driver, str(root), command, argument],
         cwd=poison, env={**os.environ, "PYTHONPATH": str(poison)},
         capture_output=True, text=True, timeout=45)
     assert result.returncode == 0, (result.stdout[-2000:], result.stderr[-4000:])
-    assert result.stdout.rstrip().endswith("ARCHIVED_HELD_HERMES_HELP_OK")
+    assert result.stdout.rstrip().endswith("ARCHIVED_HELD_HERMES_ENTRY_OK")
