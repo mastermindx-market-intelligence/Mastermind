@@ -74,7 +74,9 @@ CODEX_FABRIC_SKILL_PACKAGE = "mastermind-fabric-delegate"
 CODEX_FABRIC_PRIOR_BLOB_SHA = "7fb137a1d2b2a0f4244897d3a71b1f17a70c0a73"
 # Exact former canonical Codex source: installed on M2 before this review update.
 CODEX_FABRIC_PREVIOUS_BLOB_SHA = "b2a24eaada6c2996513eed32ea6a8fa283175015"
-CODEX_FABRIC_SKILL_BLOB_SHA = "1ae788e373c93546ac4990e7ab48c1fa539561e9"
+# Exact installed guide before the new Macro cwd clarification.
+CODEX_FABRIC_CWD_PREVIOUS_BLOB_SHA = "1ae788e373c93546ac4990e7ab48c1fa539561e9"
+CODEX_FABRIC_SKILL_BLOB_SHA = "21480522be625525f1569fbc0b1dec09d0f06160"
 CODEX_FABRIC_LEGACY_SHA256 = "4700ec891fc040df4d0e4a351ede5acc5cd89eebd5b19bb06e659656033d0b9c"
 CODEX_FABRIC_ENTRY_BEGIN = "<!-- mastermind-codex-fabric-entrypoint-v1 -->"
 CODEX_FABRIC_ENTRY_END = "<!-- /mastermind-codex-fabric-entrypoint-v1 -->"
@@ -1220,7 +1222,8 @@ def apply_codex_fabric_entrypoint(home: Path) -> dict[str, object]:
             and _sha256(existing) != CODEX_FABRIC_LEGACY_SHA256
             and hashlib.sha1(b"blob " + str(len(existing)).encode("ascii")
                              + bytes((0,)) + existing).hexdigest() not in (
-                                 CODEX_FABRIC_PRIOR_BLOB_SHA, CODEX_FABRIC_PREVIOUS_BLOB_SHA)):
+                                 CODEX_FABRIC_PRIOR_BLOB_SHA, CODEX_FABRIC_PREVIOUS_BLOB_SHA,
+                                 CODEX_FABRIC_CWD_PREVIOUS_BLOB_SHA)):
         raise OrchestratorPolicyError("Codex Fabric installed Skill changed; refusing replacement")
     original_doc = _regular_bytes(paths["codex_doc"], missing=b"")
     updated_doc = _render_codex_fabric_entry_doc(original_doc)

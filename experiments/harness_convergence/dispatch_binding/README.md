@@ -474,3 +474,30 @@ The donor patches and fetched test references derive from DeepSeek's MIT
 source; `UPSTREAM_LICENSE` retains that notice. Donor sources and third-party
 packages stay in ignored caches/node_modules. This work grants no rights to
 optional proprietary products, and none were installed by this experiment.
+
+## Protected CI: actual DSH MCP process lifecycle
+
+The `.github/workflows/dsh-governed-mcp.yml` workflow runs for changes to this
+package, its grant projection and dependent tool profile. It recovers the exact
+hash-verified donor at `4878cdabd87d4041bdaff61d04c966883b9fd07a`,
+applies the existing reviewed source patches, installs the frozen test
+dependencies **without lifecycle scripts**, and runs `verify_mcp.py` on actual
+MCP SDK stdio child processes.
+
+The positive test suite requires fourteen real stdio cases, including one
+admitted read and search, pre-aborted dispatch (zero reads), and cancellation
+racing with permission revocation (exactly one previously dispatched read and
+one cancellation, never replayed). Every observed probe and useful child must
+be reaped and all synthetic input bytes unchanged. The verifier also requires
+the original donor regressions, native compiled-profile scenarios, strict
+tool-contract tests and mutation falsifiers. Missing/altered donor sources,
+incorrect test counts, skipped assertions and incomplete cleanup are errors.
+
+**Scope ceiling:** passing this workflow proves deterministic provider-free DSH
+ToolRuntime/MCP discovery, tool dispatch, grant revocation and cancellation.
+It does **not** install ACP, exercise a real Executive Job/Attempt/WorkerResult,
+provide a provider credential, prove process isolation, or consume a signed-in
+session reply. The separate pinned `test_dsh_acp_governed_worker.py` still needs
+the exact external `MMX_DSH_GOVERNED_ACP_SUPPLY` and may skip without it.
+Never count that skip as native AgentLoop-to-WorkerResult acceptance; neither
+this CI job nor its artifacts authorize publishing original dirty ACP #1196.

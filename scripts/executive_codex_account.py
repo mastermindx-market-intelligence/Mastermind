@@ -23,12 +23,30 @@ def main(argv=None) -> int:
     seed.add_argument("--seed-file", required=True, type=Path)
     probe = sub.add_parser("readiness")
     probe.add_argument("--binary", required=True, type=Path)
+    probe.add_argument("--previous-observation-stdin", action="store_true",
+                       help="Compare a prior sanitized native result from stdin; no new store")
+    probe.add_argument("--include-models", action="store_true",
+                       help="Include one bounded same-session native model/list read; advisory only")
     args = parser.parse_args(argv)
+    previous = None
+    if args.command == "readiness" and args.previous_observation_stdin:
+        try:
+            raw = sys.stdin.read(1024 * 1024 + 1)
+            if len(raw.encode("utf-8")) > 1024 * 1024:
+                raise ValueError
+            previous = json.loads(raw)
+            if not isinstance(previous, dict):
+                raise ValueError
+        except (ValueError, UnicodeError, RecursionError):
+            print(json.dumps({"state": "PRIOR_OBSERVATION_INVALID"}))
+            return 2
     try:
         with native_codex_account_scope(args.provider_home) as environment:
             result = ({"state": environment.seed_if_missing(args.seed_file)}
                       if args.command == "seed-once"
-                      else probe_native_account(environment, args.binary))
+                      else probe_native_account(environment, args.binary,
+                                                previous_observation=previous,
+                                                include_models=args.include_models))
         print(json.dumps(result, sort_keys=True, allow_nan=False))
         return 0 if result["state"] in {"NATIVE_READS_COMPLETED", "SEEDED_ONCE",
             "PRESERVED_EXISTING", "PRESERVED_CONCURRENT_PUBLICATION"} else 2

@@ -38,6 +38,10 @@ class CeoIngressWorkspaceClient:
         self.action_timeout_seconds = action_timeout_seconds
 
     async def request(self, frame):
+        from common import workspace_project_admission_wire as project_admission_wire
+        if project_admission_wire.is_project_admission_frame(frame):
+            from integrations.mastermind_workspace_app.project_admission_client import request_project_admission
+            return await request_project_admission(self, frame)
         from common import workspace_control_room_action_contract as action_wire
         if type(frame) is dict and frame.get("schema") == action_wire.FRAME_SCHEMA:
             return await self._request_action(frame)
@@ -52,7 +56,34 @@ class CeoIngressWorkspaceClient:
         )
         from common import executive_workspace_fabric_contract as fabric_wire
         timeout = self.timeout_seconds
-        if isinstance(frame, dict) and frame.get("schema") == fabric_wire.FRAME_SCHEMA:
+        from common import workspace_project_plan_contract as plan_wire
+        from common import workspace_project_journal_contract as journal_wire
+        from common import workspace_project_session_contract as session_wire
+        from common import workspace_project_direction_contract as direction_wire
+        from common import workspace_autonomy_read_contract as autonomy_wire
+        from common import workspace_resource_capacity_contract as capacity_wire
+        if isinstance(frame, dict) and frame.get("schema") == direction_wire.FRAME_SCHEMA:
+            direction_wire.validate_frame(frame)
+            ceiling = direction_wire.MAX_RESPONSE_BYTES
+        elif isinstance(frame, dict) and frame.get("schema") == capacity_wire.FRAME_SCHEMA:
+            capacity_wire.validate_frame(frame)
+            ceiling = capacity_wire.MAX_RESPONSE_BYTES
+        elif isinstance(frame, dict) and frame.get("schema") == autonomy_wire.FRAME_SCHEMA:
+            autonomy_wire.validate_frame(frame)
+            ceiling = autonomy_wire.MAX_RESPONSE_BYTES
+        elif isinstance(frame, dict) and frame.get("schema") == session_wire.FRAME_SCHEMA:
+            session_wire.validate_frame(frame)
+            ceiling = session_wire.MAX_RESPONSE_BYTES
+            timeout = self.acceptance_timeout_seconds
+        elif isinstance(frame, dict) and frame.get("schema") == journal_wire.FRAME_SCHEMA:
+            journal_wire.validate_frame(frame)
+            ceiling = journal_wire.MAX_RESPONSE_BYTES
+            timeout = self.acceptance_timeout_seconds
+        elif isinstance(frame, dict) and frame.get("schema") == plan_wire.FRAME_SCHEMA:
+            plan_wire.validate_frame(frame)
+            ceiling = plan_wire.MAX_RESPONSE_BYTES
+            timeout = self.acceptance_timeout_seconds
+        elif isinstance(frame, dict) and frame.get("schema") == fabric_wire.FRAME_SCHEMA:
             fabric_wire.validate_frame(frame)
             ceiling = fabric_wire.ceiling(frame["operation"])
         elif isinstance(frame, dict) and frame.get("schema") == CCR_READ_FRAME_SCHEMA:

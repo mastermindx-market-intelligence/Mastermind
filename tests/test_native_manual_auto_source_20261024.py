@@ -6,6 +6,9 @@ selection is accessed. Source is recreated in a disposable isolated review stage
 from __future__ import annotations
 
 import hashlib
+import base64
+import json
+import zlib
 import os
 from pathlib import Path
 import re
@@ -19,7 +22,8 @@ NATIVE = ROOT / "ops/native_fabric/quota_continuity"
 PATCH = ROOT / "ops/native_fabric/patches/native_generation_manual_preview_20261022.patch"
 FIXTURE = ROOT / "ops/native_fabric/qualification/native_manual_preview_fixture.py"
 HISTORICAL_TASK = ROOT / "research/proposals/fabric_refusal_diagnostics_20261102/fabric_task.py.base"
-CURRENT_TASK_SHA = "0b0484312e5824ab53215bf052c70ac0708dc1c524f51e1247b73614c2c02ae4"
+PRE_LONG_HORIZON_TASK_SHA = "ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88"
+CURRENT_TASK_SHA = "36fbd16469befa0f4ade8d75fe15b3384a042b726668879c59ae03c82d194058"
 SOURCE = {
     "ext/fabric_task.py": ("fabric_task.py", "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b"),
     "ext/pick.py": ("pick.py", "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee"),
@@ -30,7 +34,36 @@ AFTER = {
     "ext/pick.py": "9bbb96c8da84e38bbd802fdd373a0e8ba386395abc5a80bc8628b49d5afd8174",
     "pool": "12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679",
 }
-COMPOSED_PICK = "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b"
+COMPOSED_PICK = "747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132"
+
+
+def _preobserver_picker():
+    """Keep F1/R28's exact protected predecessor; S9 is prospective only."""
+    value = json.loads((ROOT / "tests/fixtures/fabric-selection-preobserver-pick-9f65957e.json").read_bytes())
+    assert value["schema"] == "fabric.selection-preobserver-source.v1"
+    assert value["commit"] == "9f65957e29eba92245d78609f032aaea523b7cb4"
+    assert value["path"] == "ops/native_fabric/quota_continuity/candidate/pick.py"
+    assert value["blob"] == "dd542dbc5bb746c0ad1428b177b25a98b7a02536"
+    raw = zlib.decompress(base64.b64decode(value["zlib_base64"], validate=True))
+    assert len(raw) == value["bytes"] == 118474
+    assert hashlib.sha256(raw).hexdigest() == value["sha256"] == "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b"
+    return raw
+
+
+def _pre_ubuntu4_task(value: bytes) -> bytes:
+    """Undo only the three Ubuntu4 hunks before the frozen F1 inverse."""
+    pairs = (
+        (b'{"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3", "ubuntu4"}',
+         b'{"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3"}'),
+        (b'host=(?P<host>ubuntu[0-4])', b'host=(?P<host>ubuntu[0-3])'),
+        (b'(Grok on Mac or Ubuntu4, MiniMax on M1 or Ubuntu4)',
+         b'(Grok on Mac, MiniMax on M1 or Ubuntu4)'),
+    )
+    for newer, older in pairs:
+        assert value.count(newer) == 1
+        value = value.replace(newer, older, 1)
+    assert hashlib.sha256(value).hexdigest() == "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b"
+    return value
 
 
 def _inverse_manual_member(value: bytes, member: str) -> bytes:
@@ -117,9 +150,22 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
         assert (stage / relative).read_bytes() == current
         if relative == "ext/pick.py":
             assert sha(source) == COMPOSED_PICK
-            current = _inverse_judgment(current)
+            current = _inverse_judgment(_preobserver_picker())
         elif relative == "ext/fabric_task.py":
             assert sha(source) == CURRENT_TASK_SHA
+            # The historical manual-auto fixture remains cryptographically
+            # immutable; only two finite long-horizon budget constants changed
+            # in the current source after that historical acceptance.
+            latest = _pre_ubuntu4_task(source.read_bytes())
+            precursor = latest.replace(
+                b'request_remaining_seconds <= 14400',
+                b'request_remaining_seconds <= 7200', 1,
+            ).replace(
+                b'time.monotonic_ns() + 14400 * 1_000_000_000',
+                b'time.monotonic_ns() + 7200 * 1_000_000_000', 1,
+            )
+            assert precursor != latest
+            assert hashlib.sha256(precursor).hexdigest() == PRE_LONG_HORIZON_TASK_SHA
             assert sha(HISTORICAL_TASK) == AFTER[relative]
             current = HISTORICAL_TASK.read_bytes()
         else:

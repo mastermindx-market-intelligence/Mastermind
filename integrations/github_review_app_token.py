@@ -14,6 +14,8 @@ from threading import RLock
 
 import httpx
 
+from integrations.github_review_http import bounded_json
+
 _REPO_RE = re.compile(r"\A[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}\Z")
 _MAX_ISSUER_RESPONSE = 65536
 
@@ -34,6 +36,7 @@ class GitHubAppInstallationTokens:
         private_key_source: Callable[[], bytes],
         client: httpx.Client | None = None,
         clock: Callable[[], float] = time.time,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         if type(app_id) is not int or app_id <= 0:
             raise GitHubAppTokenUnavailable("GITHUB_APP_ID_INVALID")
@@ -51,6 +54,7 @@ class GitHubAppInstallationTokens:
             timeout=httpx.Timeout(4.0), follow_redirects=False
         )
         self._clock = clock
+        self._monotonic = monotonic
         self._lock = RLock()
         self._cached_token: str | None = None
         self._cached_until = 0.0
@@ -72,12 +76,15 @@ class GitHubAppInstallationTokens:
                      "iss": str(self._app_id)},
                     key, algorithm="RS256",
                 )
-                response = self._client.post(
+                deadline = self._monotonic() + 4.0
+                with self._client.stream(
+                    "POST",
                     "https://api.github.com/app/installations/"
                     + str(self._installation_id) + "/access_tokens",
                     headers={
                         "Authorization": "Bearer " + signed,
                         "Accept": "application/vnd.github+json",
+                        "Accept-Encoding": "identity",
                         "X-GitHub-Api-Version": "2026-03-10",
                     },
                     json={
@@ -89,10 +96,11 @@ class GitHubAppInstallationTokens:
                     },
                     follow_redirects=False,
                     timeout=4.0,
-                )
-                if response.status_code != 201 or len(response.content) > _MAX_ISSUER_RESPONSE:
-                    raise ValueError("installation token request refused")
-                result = response.json()
+                ) as response:
+                    if response.status_code != 201:
+                        raise ValueError("installation token request refused")
+                    result = bounded_json(response, max_bytes=_MAX_ISSUER_RESPONSE,
+                                          deadline=deadline, clock=self._monotonic)
                 if not isinstance(result, dict):
                     raise ValueError("invalid installation token response")
                 token = result.get("token")

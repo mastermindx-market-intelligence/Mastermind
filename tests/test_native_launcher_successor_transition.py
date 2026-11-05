@@ -60,43 +60,86 @@ def source_owners(tmp_path_factory):
     assert retained['source_commit'] == '58083bf128fdac2d8eab374641c78bb403e7d18c'
     historical_manifest = retained['manifest']
     assert set(manifest) == set(historical_manifest)
-    # Verify today's complete source before restoring this disposable fixture
-    # to the single, immutable historical successor target.
+    # S7 changed three additional members of the CURRENT closure. Restore
+    # their exact protected predecessor bytes in this historical B11 fixture;
+    # the immutable original fixture and paired-upgrade target stay unchanged.
+    diagnostic_raw = (ROLLOUT.parents[3] / 'tests/fixtures/native-diagnostic-predecessors-e5f49cf4.json').read_bytes()
+    assert g.digest(diagnostic_raw) == 'fcc3ab7de9a8f517ca59d94cf745c1d894fc14478f399e7d18f198f0679233df'
+    diagnostic = json.loads(diagnostic_raw)
+    assert diagnostic['schema'] == 'mastermind.test_native_diagnostic_predecessors/v1'
+    assert diagnostic['source_commit'] == 'e5f49cf4dbe8d06382c1d6f32368e9e9fb51c63d'
+    assert set(retained['files']) == {'ext/fabric_task.py', 'ext/pool_ledger.py'}
+    assert set(diagnostic['files']) == {'ext/original_delivery_collector.py',
+                                      'ext/provider_outcome.py', 'ext/remote_sub.sh'}
+    # The 2026-11-03 finite long-horizon source extension legitimately changes
+    # ten more CURRENT members than this immutable B11 historical102 snapshot.
+    # Restore exact predecessor *bytes* only in the disposable source fixture,
+    # with independent protected commit and historical SHA readback, rather
+    # than relabeling the old release or ignoring changed-member differences.
+    long_path = (ROLLOUT.parents[3] /
+                 'tests/fixtures/native-long-horizon-predecessors-20261103.json')
+    long_raw = long_path.read_bytes()
+    assert g.digest(long_raw) == 'bb924475a501aa732ca0c5b1f05f9428c100c546bcbfb5d3e0c2ceaf268d6f19'
+    long_retained = json.loads(long_raw)
+    long_names = {'ext/commission_deadline.py','ext/fabric_continuation.py',
+                  'ext/remote_sub_exec.py','ext/remote_sub_helpers.py','ext/slot.py'}
+    assert (long_retained['schema'] ==
+            'mastermind.test_native_long_horizon_predecessors102/v1')
+    assert long_retained['source_commit'] == '9f65957e29eba92245d78609f032aaea523b7cb4'
+    assert set(long_retained['files']) == long_names
+    base_paths = {
+        'ext/fabric_operator_contract.py':
+            ROLLOUT.parents[1] / 'grok47/overlay/fabric_operator_contract.py',
+        'ext/fabric_operator_owner.py':
+            ROLLOUT.parent / 'source/fabric_operator_owner.py',
+        'ext/native_remote.py':
+            ROLLOUT.parents[1] / 'grok47/overlay/native_remote.py',
+        'ext/oc_free_exec.sh':
+            ROLLOUT.parent / 'source/oc_free_exec.sh',
+        'ext/sub.sh':
+            ROLLOUT.parents[1] / 'grok47/overlay/sub.sh',
+    }
+    new_names = long_names | set(base_paths)
+    # S9 also changes the CURRENT picker. Bind its authentic protected
+    # pre-observer bytes; never widen the immutable B11 transition target.
+    selection_raw = (ROLLOUT.parents[3] / 'tests/fixtures/fabric-selection-preobserver-pick-9f65957e.json').read_bytes()
+    assert g.digest(selection_raw) == 'b8792950a718d9b7628a8d3917f3ce11c567cfb87fdaa0e917dc6e7fb8c5866c'
+    selection = json.loads(selection_raw)
+    assert selection['schema'] == 'fabric.selection-preobserver-source.v1'
+    assert selection['commit'] == '9f65957e29eba92245d78609f032aaea523b7cb4'
+    assert selection['blob'] == 'dd542dbc5bb746c0ad1428b177b25a98b7a02536'
+    assert selection['path'] == 'ops/native_fabric/quota_continuity/candidate/pick.py'
+    # Ubuntu4 Grok qualification changes CURRENT policy only. Keep the exact
+    # historical B11 policy bytes bound to their protected source and digest.
+    qualification_raw = (ROLLOUT.parents[3] / 'tests/fixtures/ubuntu4-grok-qualification-predecessor-f374289e.json').read_bytes()
+    assert g.digest(qualification_raw) == '93f5285a758f1045be1f178f35d17e792459f167d2d631ff2914778253b64ebb'
+    qualification = json.loads(qualification_raw)
+    assert qualification['schema'] == 'fabric.ubuntu4-qualification-predecessor.v1'
+    assert qualification['commit'] == 'f374289eb74587eaa755f5bc8e5a3252d00850e0'
+    assert qualification['blob'] == 'f72b12eac939143b1b2ed298139d55b06667a2c2'
+    assert qualification['path'] == 'ops/native_fabric/quota_continuity/candidate/fabric_host_qualification.py'
+    predecessor_files = {**retained['files'], **diagnostic['files'],
+                         'ext/pick.py': selection,
+                         'ext/fabric_host_qualification.py': qualification}
+    assert {name for name in manifest if manifest[name] != historical_manifest[name]} == (
+        set(predecessor_files) | new_names
+    )
     for name, digest in manifest.items():
         assert g.digest((target / 'native-code-stage' / name).read_bytes()) == digest
-
-    remote_name = 'ext/remote_sub.sh'
-    remote_path = target / 'native-code-stage' / remote_name
-    current_remote = remote_path.read_bytes()
-    assert g.digest(current_remote) == manifest[remote_name] == (
-        'c7b078c07f4403d6263462650990fceffeb99ca9dd3359b147e8fddb2eeaf678'
-    )
-    current_block = (
-        b'  # Registered Linux fleet hosts; enrollment and donor custody remain separate.\n'
-        b'  case "$HOST_ARG" in\n'
-        b'    ubuntu0|ubuntu1|ubuntu2|ubuntu3|ubuntu4) ;;'
-    )
-    historical_block = (
-        b'  # This initial implementation covers the four Linux fleet hosts only.\n'
-        b'  case "$HOST_ARG" in\n'
-        b'    ubuntu0|ubuntu1|ubuntu2|ubuntu3) ;;'
-    )
-    assert current_remote.count(current_block) == 1
-    historical_remote = current_remote.replace(current_block, historical_block, 1)
-    assert len(historical_remote) == 103957
-    assert g.digest(historical_remote) == historical_manifest[remote_name] == (
-        'eb7ae5e3288a9f3a49eb5eab14a5481501cced21f72b646f9891fc5b83981bc0'
-    )
-    remote_path.write_bytes(historical_remote)
-    manifest[remote_name] = historical_manifest[remote_name]
-    # All remaining divergence must still be the original two retained members.
-    assert {name for name in manifest if manifest[name] != historical_manifest[name]} == set(retained['files']) == {
-        'ext/fabric_task.py', 'ext/pool_ledger.py'}
-    for name, item in retained['files'].items():
+    for name, item in predecessor_files.items():
         raw = zlib.decompress(base64.b64decode(item['zlib_base64'], validate=True))
         assert len(raw) == item['bytes']
         assert g.digest(raw) == item['sha256'] == historical_manifest[name]
         (target / 'native-code-stage' / name).write_bytes(raw)
+    for name, item in long_retained['files'].items():
+        payload = zlib.decompress(base64.b64decode(item['zlib_base64'], validate=True))
+        assert len(payload) == item['bytes']
+        assert g.digest(payload) == item['sha256'] == historical_manifest[name]
+        (target / 'native-code-stage' / name).write_bytes(payload)
+    for name, predecessor in base_paths.items():
+        payload = predecessor.read_bytes()
+        assert g.digest(payload) == historical_manifest[name]
+        (target / 'native-code-stage' / name).write_bytes(payload)
     manifest = historical_manifest
     historical_raw = (json.dumps(manifest, sort_keys=True, indent=2) + '\n').encode()
     assert g.digest(historical_raw) == retained['manifest_sha256'] == installer.SUCCESSOR_MANIFEST

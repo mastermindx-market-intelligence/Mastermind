@@ -459,6 +459,7 @@ def test_native_helper_profile_compiles_a_hidden_depth_one_parent_ceiling():
     assert projection["features"]["multi_agent"] is False
     assert projection["features"]["multi_agent_v2"] == {
         "enabled": True,
+        "disable_direct_message": True,
         "hide_spawn_agent_metadata": True,
         "max_concurrent_threads_per_session": 2,
         "non_code_mode_only": False,

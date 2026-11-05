@@ -17,11 +17,108 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Scope is deliberately calculated from the *protected base* version of
+  # this qualifier and the accepted risk classifier. PR-authored changes to
+  # tests, workflows or the qualifier cannot vote themselves into fast CI.
+  # A new installation without the trusted version falls back to full CI.
+  pr_scope:
+    name: PR test scope
+    if: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      mode: ${{ steps.scope.outputs.mode }}
+      tier: ${{ steps.scope.outputs.tier }}
+      needs_node: ${{ steps.scope.outputs.needs_node }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify exact PR diff using protected base code
+        id: scope
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          trusted="$RUNNER_TEMP/ci-trusted-base"
+          mkdir -p "$trusted"
+          if git cat-file -e "${PR_BASE_SHA}:scripts/ci_pr_scope.py" 2>/dev/null &&
+             git cat-file -e "${PR_BASE_SHA}:control_plane/github_review_risk_policy.py" 2>/dev/null; then
+            git archive "$PR_BASE_SHA" scripts/ci_pr_scope.py control_plane/github_review_risk_policy.py |
+              tar -x -C "$trusted"
+            PYTHONPATH="$trusted" python "$trusted/scripts/ci_pr_scope.py" \
+              --repo "$GITHUB_WORKSPACE" --event "$GITHUB_EVENT_PATH" \
+              --repository "$GITHUB_REPOSITORY" --output "$GITHUB_OUTPUT"
+          else
+            printf 'mode=full\ntier=HOLD\nneeds_node=false\n' >> "$GITHUB_OUTPUT"
+            echo 'CI_SCOPE source not in protected base: required full suite'
+          fi
+
+  # Ordinary PRs get rapid, bounded feedback while the exact merge-group
+  # candidate still executes *all* canonical discovery-first pytest shards.
+  # The stable protected status context is still the final job named 'test'.
+  pr_fast:
+    name: PR fast checks
+    needs: [pr_scope]
+    if: ${{ always() && github.event_name == 'pull_request' && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact changed source without executing untrusted PR text
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git diff --check "$PR_BASE_SHA...$PR_HEAD_SHA"
+          python -m compileall -q scripts/ci_pr_scope.py control_plane/github_review_risk_policy.py
+      - uses: actions/setup-python@v5
+        if: ${{ needs.pr_scope.outputs.mode == 'smoke' }}
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install focused Python test dependencies
+        if: ${{ needs.pr_scope.outputs.mode == 'smoke' }}
+        run: python -m pip install --disable-pip-version-check -e ".[dev]"
+      - name: Bounded source-proximate PR tests
+        if: ${{ needs.pr_scope.outputs.mode == 'smoke' }}
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          python -m scripts.ci_pr_smoke
+          --repo . --base "$PR_BASE_SHA" --head "$PR_HEAD_SHA"
+      - uses: actions/setup-node@v4
+        if: ${{ needs.pr_scope.outputs.needs_node == 'true' }}
+        with:
+          node-version: "22.14.0"
+          cache: npm
+          cache-dependency-path: app/mastermind_os/package-lock.json
+      - name: Typecheck affected web application
+        if: ${{ needs.pr_scope.outputs.needs_node == 'true' }}
+        run: |
+          npm ci --prefix app/mastermind_os --ignore-scripts --no-audit --no-fund
+          npm --prefix app/mastermind_os run typecheck
+
   # Run each canonical, disjoint pytest shard on a separate hosted runner.
   # This changes placement only, not discovery, exclusions, selected modules
   # or the repository's one protected status context named "test".
   pytest_shards:
     name: pytest shard ${{ matrix.index }}
+    needs: [pr_scope]
+    # All critical/unqualified PRs still run full pytest. Ordinary PRs use
+    # pr_fast; *every* merge-group and master push runs all six canonical
+    # shards (with the existing exact merge-group proof-reuse logic on push).
+    if: ${{ always() && (github.event_name != 'pull_request' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}
     # Only the test-shard job needs read-only workflow-run evidence.
     permissions:
       contents: read
@@ -186,6 +283,37 @@ jobs:
               echo "::notice title=H1 isolated provider module fixture proof::all 23 exact nodes passed; zero skipped, failures or errors; CI fixture only"
             '
 
+      # Use a separate pinned owner fixture; keep the ordinary Macro vendor pin.
+      # This executes before any full-suite reuse decision, including merge_group.
+      - name: Checkout paired Brain production owner fixture
+        if: matrix.index == 0
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 09f0385c2ed3d9060362f3cf20e705bcb7db6043
+          path: .ci-production-macro
+          sparse-checkout: |
+            engine
+            lib
+            config
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - name: Verify actual Brain production inference composition
+        if: matrix.index == 0
+        env:
+          MM_REQUIRE_PRODUCTION_MODE_COMPOSITION: "1"
+        run: |
+          set -euo pipefail
+          brain_composition_root="$(mktemp -d "${RUNNER_TEMP}/brain-production-composition.XXXXXX")"
+          trap 'rm -rf "$brain_composition_root" "$GITHUB_WORKSPACE/.ci-production-macro"' EXIT
+          git archive HEAD brain bot common tests/integration/test_production_inference_composition.py |
+            tar -x -C "$brain_composition_root"
+          mkdir -p "$brain_composition_root/vendor"
+          ln -s "$GITHUB_WORKSPACE/.ci-production-macro" "$brain_composition_root/vendor/macro"
+          cd "$brain_composition_root"
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_production_inference_composition.py -v
+
       - name: Prepare fixed test diagnostics
         run: |
           diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/ci-fixed.XXXXXX")"
@@ -223,12 +351,13 @@ jobs:
           retention-days: 3
           compression-level: 0
 
-  # Branch protection requires exactly the stable context "test". Matrix
-  # checks alone have dynamic names and are NOT a sufficient required check.
-  # A skipped/cancelled/failed matrix must not turn into a green required gate.
+  # Branch protection requires one stable context "test", on both PRs and
+  # native merge_group candidates. A skipped matrix is accepted ONLY for a
+  # verified, completed PR fast lane; merge_group always requires full shards.
+  # There is no green fan-in if scope, smoke, or any required shard failed.
   test:
     name: test
-    needs: [pytest_shards]
+    needs: [pr_scope, pr_fast, pytest_shards]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -242,11 +371,45 @@ jobs:
 
       - name: Run repository test gate
         env:
+          EVENT_TYPE: ${{ github.event_name }}
+          PR_SCOPE_STATUS: ${{ needs.pr_scope.result }}
+          PR_SCOPE_MODE: ${{ needs.pr_scope.outputs.mode }}
+          PR_FAST_STATUS: ${{ needs.pr_fast.result }}
           SHARDS_STATUS: ${{ needs.pytest_shards.result }}
         run: |
-          if [ "$SHARDS_STATUS" != success ]; then
-            echo "required pytest shard matrix did not fully succeed"
-            exit 1
+          set -euo pipefail
+          if [ "$EVENT_TYPE" = "pull_request" ]; then
+            if [ "$PR_SCOPE_STATUS" != success ]; then
+              echo "trusted PR risk-source qualification unavailable"
+              exit 1
+            fi
+            case "$PR_SCOPE_MODE" in
+              full)
+                if [ "$SHARDS_STATUS" != success ] || [ "$PR_FAST_STATUS" != skipped ]; then
+                  echo "critical/unqualified PR must pass all six pytest shards"
+                  exit 1
+                fi
+                ;;
+              fast|smoke)
+                if [ "$PR_FAST_STATUS" != success ] || [ "$SHARDS_STATUS" != skipped ]; then
+                  echo "eligible PR must pass its exact fast/smoke check"
+                  exit 1
+                fi
+                ;;
+              *)
+                echo "no verified CI source scope"
+                exit 1
+                ;;
+            esac
+          else
+            # No fast mode exists for merge_group, protected pushes, or a
+            # deliberate workflow_dispatch. The full matrix is mandatory.
+            if [ "$SHARDS_STATUS" != success ] ||
+               [ "$PR_FAST_STATUS" != skipped ] || [ "$PR_SCOPE_STATUS" != skipped ]; then
+              echo "integration/release CI must pass the full matrix"
+              exit 1
+            fi
           fi
-          # Same discovery/exclusion/total-cover plan, never a test skip.
+          # Revalidate the same canonical test discovery/exclusion/cover plan.
+          # PR smoke does not change the module set used in merge_group.
           python scripts/ci_pytest.py --plan-only --jobs 6

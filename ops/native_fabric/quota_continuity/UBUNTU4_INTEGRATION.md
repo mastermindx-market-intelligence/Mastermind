@@ -4,8 +4,8 @@ Source task tree for the existing fleet integration record [Mastermind #539](htt
 Organizational context: WS:EXECUTIVE-CAPACITY-FABRIC; this file does not create a workstream or runtime registry.
 Original host qualification root: `ubuntu4-fabric-hardening-20261023`.
 Current assigned source operation: `ubuntu4-fabric-integration-20261103-c3`.
-Procedure/source base: `d47cdb5652096e038a8bfb24e431ebe48ccf7ff2`.
-Recorded: 2026-11-03. Task-tree revision is the containing Git commit.
+Original procedure/source base: `d47cdb5652096e038a8bfb24e431ebe48ccf7ff2`.
+Current recovery pin is recorded below. Updated: 2026-11-05; task-tree revision is the containing Git commit.
 Organizational linking of this new source artifact is pending: PLAN_NOT_ORG_LINKED.
 
 ## Objective and completion
@@ -16,18 +16,86 @@ settled lease, original-parent acceptance, narrow automatic-mode promotion and a
 routed task. Repository-work parity additionally requires the receiving host's own qualified Macro
 donor and a successful exact-commit sparse worktree job. Source changes alone do not establish this.
 
+## Current completion frontier — 2026-11-05
+
+Current recovery uses protected Mastermind `f374289eb74587eaa755f5bc8e5a3252d00850e0`
+and the same original operation/PR #2008. The earlier physical-readiness and donor
+receipts below are historical evidence, not proof of current host integrity.
+[The later host incident](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2008#issuecomment-6628831146)
+records a corrupt Git pack, changing installed-library checksums, an apt SIGSEGV
+and repeated unrelated process crashes. No accepted recovery receipt was found.
+A current original-device inventory is offline; one SSH read reset before a result.
+Selected native sequence 30 `9691fff17648c82b09152ba285d620abf0fd12d10a9530a7abae0cd1ab96238b`
+reports Ubuntu4 INELIGIBLE: `explicit-canary-only`, `ssh_unreachable`, and missing
+physical metrics. Preserve all holds and the existing donor/forensic artifacts.
+Do not replay the unknown memtester attempt or denied direct-I/O action.
+
+The next host action requires the existing machine's local console: observe boot,
+login and error state, reconcile prior diagnostics, and restore an approved remote
+connection. Connectivity alone does not clear the integrity hold; verify stable
+trusted bytes, clean Git integrity and process health before provider qualification.
+Do not infer failed RAM/SSD or mandate a BIOS flash without diagnostic proof.
+
+Generic Grok qualification is an alternative to MiniMax. It does not establish
+sparse repository parity: the incumbent sparse modes remain `glm`, `glm-codex`,
+`minimax`, and `qwen`. Complete repository/session acceptance through an actually
+qualified supported route; do not expand a mode allowlist as a substitute for a
+proved adapter. Source, hardware, enrollment, native release, first-worker acceptance,
+normal placement and repository/session acceptance remain distinct gates.
+
+## Current source qualification — 2026-11-05
+
+This candidate integrates original PR head `3aa5f98a1cd8a6c5e5deb9692235fdd59ccdaeea`
+with protected `f374289eb74587eaa755f5bc8e5a3252d00850e0` in the original managed
+workspace and branch. Eleven conflicted paths were reconciled while preserving newer
+protected runtime behavior. The earlier head's hosted run `41777159290` succeeded;
+that receipt does not qualify this new integration.
+
+The canonical builder verifies all 102 current payload members. Final declarations:
+
+- Manifest: `9fc709c501468bd3172eadae1e3768585ddc4fa0d3563ebd98d6eca565b324d4`.
+- Inventory: `e3a38a25b5af3693e393c4b13dbed21fa2c093aaac9f1273179bfcb069cd22fb`.
+- Controller: `614b9e8d34c76079bd6da679782a8cbc0f186e0817762c5a23d82ec68c058f57`.
+- Task adapter: `36fbd16469befa0f4ade8d75fe15b3384a042b726668879c59ae03c82d194058`.
+
+Historical 95/102-member and manual-AUTO targets remain immutable. The qualifier
+preimage is bound to protected source commit/blob and SHA-256
+`1b1b64342c61e90887a6f023dca3e0c75707b57fecaf05227b1a960cb7922899`.
+The manual-AUTO fixture undoes exactly the three Ubuntu4 task hunks before its
+existing historical inverse. The initializer's changed-member assertion names the
+one newly changed qualifier explicitly and still verifies every changed member.
+The final repair run passes all 25 cases; the launcher successor checks also passed.
+
+Local Python 3.12 evidence is deliberately partial:
+
+| Run | Passed | Failed | Skipped | Disposition |
+|---|---:|---:|---:|---|
+| Initial selected run | 34 | 11 | 0 | Stopped after controller scenarios expired before their intended behavior. |
+| Non-controller selection | 62 | 3 | 0 | Stopped at the documented M2 sparse-Git observation refusal boundary. |
+| Remaining release tests | 78 | 2 | 3 | Two historical-source assertions failed and were repaired below. |
+| Exact historical repairs and paired launcher | 25 | 0 | 0 | Passed after restoring authentic preimages. |
+
+The latest observation per unique testcase is 174 passed, 14 failed, three skipped,
+zero errors. The 14 outstanding failures are eleven `COMMISSION_TIME_EXHAUSTED`
+controller scenarios plus three sparse-Git observation refusals. M2 load was observed
+above 100; this is context, not proof of each failure's root cause. No production/test
+deadline, stderr guard, executable, sparse coverage or historical target was weakened.
+The three skipped cases require Linux. Shell syntax and `git diff --check` pass.
+Fresh hosted qualification of the new exact head remains pending; keep PR #2008 Draft.
+No native deployment, provider enrollment, host promotion or real Ubuntu4 task is claimed.
+
 ## Task tree
 
 | ID | Dependency | Objective and evidence | Editorial state |
 |---|---|---|---|
-| U4.1 | none | Verify registered host, fresh physical gates, installed tools and existing first-worker source. | accepted |
-| U4.2 | U4.1 | Admit Ubuntu4 to the two sparse Macro host-name guards, preserving provider, root/parent, donor, helper/policy, resource and lease gates; tests and independent source review. | source tested; review pending |
+| U4.1 | none | Recover current host integrity and reachability, then verify fresh physical gates and installed tools; later corruption/crash evidence invalidates prior readiness for new admission. | blocked |
+| U4.2 | none for source work | Admit Ubuntu4 to the two sparse Macro host-name guards, preserve all admission/lifecycle fences, integrate current protected source and qualify exact closure/tests. Live use still depends on U4.1. | source integration under qualification |
 | U4.3 | U4.1 | Existing credential owner completes real Ubuntu4 provider enrollment and current-key canary through accepted owners. No secret transfer or fabricated receipts. | blocked |
-| U4.4 | U4.3 | One distinct MiniMax qualification through the existing native qualifier; verify lease, START, result, settlement and same-parent acceptance. | blocked |
+| U4.4 | U4.1, U4.3, accepted native source | One distinct supported Grok or MiniMax qualification through the existing native qualifier; verify lease, START, result, settlement and same-parent acceptance. | blocked |
 | U4.5 | U4.4 | Original registry owner removes only the accepted provider mode from the qualification hold with exact-preimage fencing; normal routing succeeds. | blocked |
 | U4.6 | U4.2, U4.5 | Accepted source release, qualified Ubuntu4-local Macro donor, real sparse repository task and retained result. | blocked |
 
-## Verified source and host evidence
+## Historical source and host evidence — 2026-11-03
 
 - Original qualification source PRs #1749 and #1784 are merged; do not redo them.
 - Selected native generation observed on M2: sequence 24,
@@ -47,8 +115,10 @@ donor and a successful exact-commit sparse worktree job. Source changes alone do
 
 ## Source boundary and tests
 
-U4.2 changes only the host-name membership at the attended task adapter and remote controller,
-plus current source-integrity hashes, focused tests and this task tree.
+U4.2 adds Ubuntu4 at the existing sparse task adapter/controller and accepted-worktree
+reclaim parser. The bounded first-worker map additionally admits explicit Ubuntu4 Grok
+qualification; automatic-mode holds remain unchanged. Current source-integrity declarations,
+immutable historical preimages, focused tests and this task tree accompany those changes.
 The generic executor already mints under the receiving user's `~/lanes/wt/<run>` from
 `~/lanes/repos/macro` at an exact commit after normal admission.
 
@@ -64,13 +134,15 @@ and helper negative tests; current native manifest and staged-source closure.
 
 ## Execution and review
 
-The assigned principal owns the two small integration edits because they are a direct
-critical-path repair. An independent read-only source adviser identified the exact boundary.
-A separate admitted Fabric reviewer should review the resulting immutable source before release.
-No self-approval, protected merge, native release selection or host promotion is implied.
+The current assigned session owns recovery and source integration in the original operation.
+Paid Fabric can supply bounded audit evidence; the Web-session waiver does not impose an
+additional independent technical-review prerequisite. Current GitHub rules, source custody,
+required checks and binding release holds still apply. Preserve the existing Draft PR and
+review request; do not self-approve, self-merge or change Ready/merge controls.
 
-Live effects and continuation remain with the original owners. This file records source tasks
-and evidence, not live Jobs, retries, leases or provider credentials.
+Use the existing runtime and registry owners for live effects, retaining original run, root,
+parent and lease custody. An archived writer is not an approver. This file records source
+tasks and evidence, not live Jobs, retries, leases or provider credentials.
 
 ## 2026-11-03 source checkpoint
 

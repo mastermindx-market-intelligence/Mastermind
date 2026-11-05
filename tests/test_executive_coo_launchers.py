@@ -99,9 +99,12 @@ def test_control_factory_wires_existing_workspace_into_guard(tmp_path, monkeypat
         captured.update(kwargs)
         return lambda stamp: {}
     monkeypatch.setattr(workspace_source_join, "build_workspace_composer", composer)
-    class Service:
-        def __init__(self, config, **kwargs):
-            self.kwargs = kwargs
+    def Service(config, **kwargs):
+        from control_plane.executive_service import ExecutiveControlService
+        # Exact nominal service identity, without starting a service or worker.
+        value = object.__new__(ExecutiveControlService)
+        value.config, value.runtime, value.kwargs = config, None, kwargs
+        return value
     monkeypatch.setattr(cli, "ExecutiveControlService", Service)
     try:
         if not source_available:

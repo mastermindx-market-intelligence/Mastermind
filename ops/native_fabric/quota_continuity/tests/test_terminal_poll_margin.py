@@ -28,7 +28,7 @@ def shell_function(path):
 
 
 def budget(path, maximum, poll):
-    assert isinstance(maximum, int) and 1 <= maximum <= 7200
+    assert isinstance(maximum, int) and 1 <= maximum <= 14400
     assert isinstance(poll, int) and 1 <= poll <= maximum
     script = (
         f'COMMISSION_ACTIVE=0; MAX_SECS={maximum}; POLL_SECS={poll}; '
@@ -46,6 +46,7 @@ class TerminalPollBudgetTests(unittest.TestCase):
     def test_max_fuse_unchanged_and_two_interval_reserve(self):
         for file in PATHS:
             for maximum, poll, expected_child in (
+                (14400, 30, 14340),
                 (7200, 30, 7140),
                 (3600, 30, 3540),
                 (3600, 10, 3580),
@@ -103,7 +104,8 @@ class TerminalPollBudgetTests(unittest.TestCase):
             self.assertIn('while [ $((SECONDS - WAIT_STARTED_SECONDS)) -lt "$MAX_SECS" ]; do', body)
             self.assertIn('EFFECT_UNKNOWN timeout max_secs=$MAX_SECS rc_file_missing=1; preserve broker lease until TTL', body)
             self.assertIn('PRESERVE_LEASE=1', body)
-            self.assertIn('MAX_SECS must not exceed 7200', body)
+            self.assertIn('MAX_SECS must not exceed 14400' if file == PATHS[0]
+                          else 'MAX_SECS must not exceed 7200', body)
 
     def test_native_inventory_closure_and_original_preimage(self):
         manifest = json.loads((ROOT / 'rollout/native-manifest.json').read_text())
@@ -113,10 +115,11 @@ class TerminalPollBudgetTests(unittest.TestCase):
         original = ROOT / 'source/remote_sub.sh'
         # The closed, hash-pinned forward candidate preserves both reviewed
         # Grok behavior and caller UTC narrowing. Both distinct launchers keep
-        # their real runtime-margin checks above; this asserts the actual source.
+        # their real runtime-margin checks above; this current pin additionally
+        # binds S7 same-operation private-diagnostic proof retention.
         selected = candidate
         self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),
-                         'c7b078c07f4403d6263462650990fceffeb99ca9dd3359b147e8fddb2eeaf678')
+                         '614b9e8d34c76079bd6da679782a8cbc0f186e0817762c5a23d82ec68c058f57')
         self.assertEqual(inventory['files']['ext/remote_sub.sh']['source'],
                          'candidate/remote_sub.sh')
         self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),

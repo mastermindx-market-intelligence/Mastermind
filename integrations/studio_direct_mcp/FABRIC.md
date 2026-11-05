@@ -18,7 +18,7 @@ Every request supplies a verified original operation root, the actual immediate 
 
 The tools do not accept arbitrary shell commands, adapter paths, working directories, hosts, accounts or credentials. An optional *closed-schema* provider-pool and exact-model constraint is available only on `fabric_request`, subject to the original native selection and admission policy; this does not grant arbitrary providers or models. The operator pins the adapter, Python interpreter and worker working directory at installation. The default working directory is the literal `~`, expanded by the receiving worker's existing adapter path. A bounded packet must contain the required input or exact worker-accessible references; neither a Web `/mnt/data` file nor an M2 workspace is assumed available on another worker host.
 
-Parameters have closed schemas. IDs use `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`. Packets are limited to 16,000 characters / 32,768 UTF-8 bytes, contain no NUL, and travel as literal stdin using a quoted heredoc. C0/C1/C2 classify the child independently; C3 requires a specific escalation reason. The existing router selects admitted qualified provider/host capacity. `subject_pool` expresses author-pool review independence only; it does not select the reviewer.
+Parameters have closed schemas. IDs use `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`. Packets are limited to 16,000 characters / 32,768 UTF-8 bytes, contain no NUL, and travel as literal stdin using a quoted heredoc. Human-readable briefs use approximately 12 leading hex characters for SHA-256 file digests and 40-hex Git commit IDs. Keep complete values in fields or commands that actually need exact machine identity. Fabric run/root/parent IDs remain complete. The backend does not rewrite packets or perform secret/key content rejection; authorized key-bearing work retains the existing transport behavior. C0/C1/C2 classify the child independently; C3 requires a specific escalation reason. The existing router selects admitted qualified provider/host capacity. `subject_pool` expresses author-pool review independence only; it does not select the reviewer.
 
 ## Opt-in strict provider and model constraints (source integration)
 
@@ -37,10 +37,55 @@ Unsupported, stale or malformed selection refuses `MANUAL_ROUTE_UNAVAILABLE` bef
 controller dispatch. Native `request --strict-manual-pin` must independently recheck
 the same pool/model before launch. Preview does not reserve quota or prove a worker
 will start. Manual pins disable cross-provider/model quota continuation; a 429 cannot
-silently substitute another model. Optional `max_turns` is limited by native
+silently substitute another model.
+
+**Manual C2 review refusal diagnostics (source candidate, not installed):** Native
+economic/task-fit policy may require a factual `escalation_reason` for a
+`C2_COMPLEX_BOUNDED` review. Read-only preview can refuse with
+`NONE reason=bounded_complexity_requires_escalation` on **stderr**, not
+stdout, if it is absent. The candidate Web facade captures only one validated
+closed `native_reason` token for a nonzero read-only preview with empty stdout;
+it never forwards raw stderr, full provider output or arbitrary diagnostics.
+It preserves this pre-dispatch refusal as
+`MANUAL_ROUTE_PREFLIGHT_REFUSED` with a low-entropy `native_reason` and, for
+that exact reason only, `required_field: escalation_reason`. This is neither
+an adapter outage nor permission to invent an escalation or retry the refused
+run. No controller is launched for this refusal. Other well-formed native
+`NONE reason=<bounded-token>` refusals are surfaced without trusting arbitrary
+stdout. Unsupported native help or a malformed/mismatched preview still yields
+`MANUAL_ROUTE_UNAVAILABLE`. All declined requests retain
+`retry_allowed=false`; any future genuinely separate review needs a new,
+properly admitted run after the actual policy/capacity issue is resolved.
+
+Optional `max_turns` is limited by native
 policy to GLM/MiniMax: incompatible pool pins fail before dispatch, and the
 read-only preview must report a compatible native execution mode. `subject_pool` remains the separate author
-independence filter. Existing model quality, budget, entitlement, host and policy
+independence filter.
+
+`pool: "experiential"` is an additional strictly manual pin for the Experiential Labs
+uncensored route and accepts exactly `model: "glm-5.3-uncensored"` — no omitted model, no
+`auto`, and no other slug (including `glm-5.3-flash-uncensored` or any case variant);
+every deviation is refused before reservation or dispatch. The current native
+source contract admits only the plugin's `mechanical` and `fix_build` labor
+classes; `review`, `audit`, and `census` are refused before any native call.
+**That provider retains prompts and responses.** Every experiential request must carry all
+three explicit acknowledgments: `retention_opt_in: true`, `sensitive_data_opt_in: true`,
+and `code_exposure_opt_in: true`. This conservative code consent is required even for
+public-looking packets because a worker may later access repository source.
+The fields are refused for other pools; they are never sent to the provider.
+For experiential, the incumbent native `request --help` must advertise the four
+exact independent gates `--experiential-retention-acknowledged`,
+`--experiential-sensitive-data-opt-in`, `--experiential-proprietary-code`,
+`--experiential-code-exposure-opt-in` before any native status/preview/launch.
+The facade passes all four to the **native worker authority** (not HTTP inference);
+older native adapters fail closed as `MANUAL_ROUTE_UNAVAILABLE`.
+This is a mechanism for carrying explicit caller acknowledgments, not proof that
+a ChatGPT identity authenticated the consent or that any provider is qualified. `max_turns` is refused for this pool until the native adapter proves compatibility.
+The same native `preview`, `--strict-manual-pin` recheck, exact run/pool/model witnesses and
+no-fallback rules apply, with the experiential slug compared exactly; if the native adapter
+has no qualified Experiential route the request fails closed with `MANUAL_ROUTE_UNAVAILABLE`
+before any worker dispatch. Source presence alone activates nothing in connected ChatGPT.
+Existing model quality, budget, entitlement, host and policy
 gates always win; a model string is never proof that a model is served or permitted.
 
 `fabric_capabilities.manual_routing.available` is true only when the installed native
@@ -261,11 +306,12 @@ passing cloud source tests alone does not establish this installed-engine proof.
 The optional `fabric-http-manual-qualification.mjs` invokes a real authenticated
 HTTP gateway/SDK plus the maintained Desktop Commander process engine, but binds
 only the separately marked **synthetic** `fixtures/fabric-adapter-manual.py`.
-It verifies a successful exact GLM-5.3 model-pin preview, strictly constrained
-native request with the original root, no cross-provider fallback, cross-session
-result retrieval and deterministic acceptance. All fixture host/model/return data
-are synthetic and no provider key, quota, actual worker or live Fabric ledger is
-accessed. Run it only on the qualified host with `MMX_FABRIC_ENGINE_ENTRY` bound
+It verifies separate exact Z.AI GLM-5.3 and manual Experiential GLM-5.3 Uncensored
+model-pin previews, strictly constrained synthetic requests with original roots,
+Experiential retention opt-in, no cross-provider fallback, cross-session result
+retrieval and deterministic acceptance. All fixture host/model/return data
+are synthetic; no provider key, quota, actual worker or live Fabric ledger is
+accessed. A green fixture is not native provider installation or paid inference. Run it only on the qualified host with `MMX_FABRIC_ENGINE_ENTRY` bound
 to its installed maintained engine; it is intentionally not a GitHub hosted test.
 The existing `fabric-http-qualification.mjs` retains the negative test for older
 native adapters that cannot enforce strict pins.
