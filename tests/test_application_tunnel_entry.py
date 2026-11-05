@@ -216,13 +216,18 @@ def test_actual_application_reader_checks_descriptor_acls_before_secret_use(seal
 def test_actual_application_reader_accepts_owned_private_file_without_acl(sealed_root, monkeypatch):
     with tempfile.TemporaryDirectory(prefix="entry-private-", dir=sealed_root) as directory:
         path = Path(directory) / "application-tunnel.auth"
-        path.write_bytes(APP_SECRET)
-        path.chmod(0o400)
+        # This reader checks ownership, permissions and descriptor ACLs.
+        # Dedicated credential syntax is covered by the launch-spec tests above.
+        fixture_payload = b"private reader fixture"
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400)
+        with os.fdopen(descriptor, "wb") as handle:
+            os.fchmod(handle.fileno(), 0o400)
+            handle.write(fixture_payload)
         observed = []
         def acl(node, *, expected_identity, descriptor):
             observed.append(Path(node))
             assert os.fstat(descriptor).st_ino == expected_identity.st_ino
             return False
         monkeypatch.setattr(application_tunnel_entry, "has_macos_acl", acl)
-        assert application_tunnel_entry._read_application_sealed(path, limit=1024, private=True) == APP_SECRET
+        assert application_tunnel_entry._read_application_sealed(path, limit=1024, private=True) == fixture_payload
         assert observed.count(path) == 2

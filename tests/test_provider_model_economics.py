@@ -21,7 +21,7 @@ def test_catalog_loads_reviewed_routing_models_and_stays_inert():
         "capacity_and_quota": "shared_ai_provider_control",
         "lifecycle_and_claim": "executive_os",
     }
-    assert len(catalog.models) == 18
+    assert len(catalog.models) == 20
 
 
 def test_model_capability_and_harness_overlay_remain_distinct():

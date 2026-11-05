@@ -118,7 +118,7 @@ class ChatCompositionTests(unittest.TestCase):
         first, second = [row["body"] for row in self.dispatches]
         self.assertEqual(first["model"], MODEL)
         self.assertEqual(len(first["tools"]), 25)
-        self.assertTrue(first["stream"])
+        self.assertFalse(first["stream"])
         self.assertEqual(second["messages"][-1]["role"], "tool")
         self.assertEqual(second["messages"][-1]["tool_call_id"], "proposal-1")
         doc = self.conversation_document()
@@ -238,6 +238,7 @@ class ChatCompositionTests(unittest.TestCase):
             events = self.events()
         self.assertEqual(events[-1]["error"], "fabric_conversation_persistence_failed")
         self.assertNotIn("done", [event["type"] for event in events])
+        self.assertNotIn("text", [event["type"] for event in events])
         self.assertEqual(self.events()[-1]["error"], "fabric_conversation_unsettled")
         self.assertEqual(len(self.dispatches), 1)
 

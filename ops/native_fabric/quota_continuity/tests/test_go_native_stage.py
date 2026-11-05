@@ -104,7 +104,7 @@ def loaded_entry(published, *, clean_yaml=False):
         sys.path[:] = path_before
 
 
-def test_default_build_stays_exact_B102_and_go_adds_only_the_fixed_pair(builds):
+def test_default_build_stays_exact_reviewed_102_and_go_adds_only_the_fixed_pair(builds):
     default_raw = (builds.default / "native-manifest.json").read_bytes()
     default = json.loads(default_raw)
     application = json.loads((builds.application / "native-manifest.json").read_bytes())

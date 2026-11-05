@@ -162,8 +162,7 @@ _SAFE = lambda s: "".join(c for c in (s or "") if c.isalnum() or c in "-_")  # n
 
 
 def _hist_path(conversation_id: str) -> Path:
-    validate_conversation_id(conversation_id)
-    return _HISTORY / f"{conversation_id}.json"
+    return _HISTORY / f"{validate_conversation_id(conversation_id)}.json"
 
 
 def load_history(conversation_id: str | None) -> list:

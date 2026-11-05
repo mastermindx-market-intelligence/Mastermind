@@ -7,13 +7,10 @@ driver creates no worker job, account inventory, retry queue or SDK session.
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import TimeoutError as FutureTimeout
-from contextlib import aclosing
 import copy
 import hashlib
 import json
 import os
-import threading
 import time
 import uuid
 
@@ -75,75 +72,66 @@ def _close_binding(shared, provider) -> None:
         provider["_fabric_closed"] = True
 
 
-async def _step_stream(shared, provider, kwargs):
-    """Bridge one synchronous owner stream with bounded backpressure.
+async def _observe_thread(call):
+    """Observe the original bounded call before propagating cancellation.
 
-    The thread performs inference only, never tools or history writes. A client
-    disconnect stops further delivery/continuation; cancelling its waiter is
-    not treated as proof that the upstream request stopped.
+    Shield from the first await: cancelling the asyncio waiter must not mark
+    the still-running provider thread as settled. Keep its strong reference,
+    observe the original outcome, and never start a replacement request.
     """
-    loop = asyncio.get_running_loop()
-    queue = asyncio.Queue(maxsize=8)
-    stop = threading.Event()
-
-    def emit(event):
-        if stop.is_set():
-            return False
-        pending = queue.put(event)
+    def outcome():
+        # A cancelled shield may report a late worker exception to the event
+        # loop even when a second waiter observes it. Carry that outcome as
+        # data until this original waiter can preserve cancellation priority.
         try:
-            future = asyncio.run_coroutine_threadsafe(pending, loop)
-        except RuntimeError:
-            pending.close()
-            return False
-        while True:
-            try:
-                future.result(timeout=0.1)
-                return True
-            except FutureTimeout:
-                if stop.is_set():
-                    future.cancel()
-                    return False
-            except Exception:
-                return False
+            return True, call()
+        except BaseException as exc:
+            return False, exc
 
+    worker = asyncio.create_task(asyncio.to_thread(outcome))
+    cancelled = None
+    while True:
+        try:
+            result = await asyncio.shield(worker)
+            break
+        except asyncio.CancelledError as exc:
+            if worker.cancelled():
+                raise
+            cancelled = cancelled or exc
+        except BaseException:
+            if cancelled is not None:
+                raise cancelled from None
+            raise
+    if cancelled is not None:
+        raise cancelled
+    succeeded, value = result
+    if not succeeded:
+        raise value
+    return value
+
+
+async def _step_response(shared, provider, kwargs):
+    """Buffer one original completion; validate before delivering any prose."""
     def run():
         try:
             def call(client, model):
-                with client.messages.stream(model=model, **kwargs) as stream:
-                    for chunk in stream.text_stream:
-                        if stop.is_set() or not emit(("text", chunk)):
-                            raise shared.FabricProviderError("fabric_stream_abandoned", effect_unknown=True)
-                    if stop.is_set():
-                        raise shared.FabricProviderError("fabric_stream_abandoned", effect_unknown=True)
-                    response = stream.get_final_message()
+                response = client.messages.create(model=model, **kwargs)
                 # Tool-only responses are valid. The completed response object
                 # is the callback result, not an empty prose placeholder.
                 return response, None, response
 
             response, reason, _ = shared.make_call([provider], call, context=_LANE)
             if response is None or reason:
-                raise shared.FabricProviderError("fabric_unavailable")
-            emit(("response", response))
+                failure = provider.get("_fabric_failure")
+                raise shared.FabricProviderError("fabric_unavailable", effect_unknown=bool(
+                    provider.get("_fabric_pending") or getattr(failure, "effect_unknown", False)))
+            return response
         except Exception as exc:
             code = ("fabric_effect_unknown" if not isinstance(exc, shared.FabricProviderError)
                     or exc.effect_unknown else "fabric_unavailable")
-            emit(("error", code))
+            raise advisor.FabricConversationError(code) from None
 
-    worker = asyncio.create_task(asyncio.to_thread(run))
-    try:
-        while True:
-            kind, value = await queue.get()
-            yield kind, value
-            if kind != "text":
-                return
-    finally:
-        stop.set()
-        # Consume completion without spawning a replacement or cancelling the
-        # actual upstream effect. The persisted intent remains its return path.
-        def consume(task):
-            if not task.cancelled():
-                task.exception()
-        worker.add_done_callback(consume)
+    return await _observe_thread(run)
 
 
 def _log_turn(provider, shared, *, prompt, text, error, operation_id, started, role):
@@ -226,27 +214,22 @@ async def chat_stream(prompt: str, *, conversation_id: str, turn_id: str | None 
                         "request_hash": _digest({"model": provider["model"], **kwargs}), "state": "pending"}
                 turn["steps"].append(step)
                 advisor.save_fabric_conversation(doc)  # Before any provider bytes.
-                response = None
-                async with aclosing(_step_stream(shared, provider, kwargs)) as stream:
-                    async for kind, value in stream:
-                        if kind == "text":
-                            text += value
-                            if len(text) > 1_000_000:
-                                raise advisor.FabricConversationError("fabric_conversation_limit")
-                            yield {"type": "text", "text": value}
-                        elif kind == "error":
-                            raise advisor.FabricConversationError(value)
-                        else:
-                            response = value
-                if response is None:
-                    raise advisor.FabricConversationError("fabric_effect_unknown")
+                response = await _step_response(shared, provider, kwargs)
                 calls = bot_mcp.validate_inference_calls(
                     [block for block in response.content if block.type == "tool_use"], used_ids=prior_ids)
                 if len(turn["tool_effects"]) + len(calls) > _MAX_TOOL_CALLS:
                     raise advisor.FabricConversationError("fabric_tool_budget_exhausted")
+                step_text = "".join(block.text for block in response.content if block.type == "text")
+                if len(text) + len(step_text) > 1_000_000:
+                    raise advisor.FabricConversationError("fabric_conversation_limit")
                 doc["messages"].append({"role": "assistant", "content": _plain_response(response)})
                 step["state"] = "complete"
                 advisor.save_fabric_conversation(doc)  # Complete terminal response before tools.
+                # No last-step tool effects or prose when the driver cannot
+                # report the tool result in a following model response.
+                if calls and step_number + 1 == limit:
+                    raise advisor.FabricConversationError("fabric_tool_budget_exhausted")
+                text += step_text
                 if not calls:
                     result = {"text": text, "tools_used": [item["name"] for item in used], "papers": papers,
                               "cost_usd": None, "usage": shared.fabric_usage(provider),
@@ -256,13 +239,13 @@ async def chat_stream(prompt: str, *, conversation_id: str, turn_id: str | None 
                     doc["rendered"] = doc["rendered"][-200:]
                     turn.update(state="complete", result=result)
                     advisor.save_fabric_conversation(doc)
+                    if step_text:
+                        yield {"type": "text", "text": step_text}
                     yield {"type": "done", **result, "session_id": None, "replayed": False,
                            "conversation_id": conversation_id, "turn_id": turn_id, "backend": "fabric"}
                     return
-                # No last-step tool effects when the driver cannot continue and
-                # report their result in a following model response.
-                if step_number + 1 == limit:
-                    raise advisor.FabricConversationError("fabric_tool_budget_exhausted")
+                if step_text:
+                    yield {"type": "text", "text": step_text}
                 result_blocks = []
                 doc["messages"].append({"role": "user", "content": result_blocks})
                 for call in calls:
@@ -306,9 +289,11 @@ async def chat_stream(prompt: str, *, conversation_id: str, turn_id: str | None 
                    "fabric_effect_unknown", "fabric_turn_receipt_missing"}}
     finally:
         if provider is not None:
-            _close_binding(shared, provider)
-            _log_turn(provider, shared, prompt=prompt, text=text, error=error,
-                      operation_id=operation_id, started=started, role=role)
+            try:
+                await _observe_thread(lambda: _close_binding(shared, provider))
+            finally:
+                _log_turn(provider, shared, prompt=prompt, text=text, error=error,
+                          operation_id=operation_id, started=started, role=role)
 
 
 async def research(prompt: str, *, role="deep", max_turns=None, resume=None,

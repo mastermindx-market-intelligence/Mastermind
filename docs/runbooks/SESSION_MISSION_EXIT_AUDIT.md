@@ -110,6 +110,29 @@ evaluator packets (SXA01–SXA07 in `research/fixtures/mission_exit_behavior_cas
 remains with the existing fresh-Sol evaluation owner and is a separate, unmet
 adoption gate.
 
+## Consume pending work instead of duplicating it
+
+The existing `gaps[].next_proof` now uses the supplied observation state:
+
+| Observed gap | Guidance |
+| --- | --- |
+| Exact-head CI is QUEUED, PENDING, IN_PROGRESS, WAITING or REQUESTED, with its original run reference | Consume that run through its original observation path; no rerun or empty push. |
+| Exact-head CI is FAILURE, CANCELLED, TIMED_OUT or ACTION_REQUIRED | Inspect the original result before a permitted repair; no blind retry. |
+| CI identity/state is absent or unrecognized, or its conclusion is STALE, SKIPPED or NEUTRAL | Reconcile identity and required status with GitHub; these observations do not establish a failed build. |
+| Eligible independent review is REQUESTED or PENDING on the exact head | Reconcile its actual original carrier and verify no START/unknown effect, then any eligible independent non-author may complete it; never bind acceptance to a historical reviewer session or duplicate started work. |
+| An independent review is genuinely IN_PROGRESS on the exact head | Consume that active review on its original carrier; do not reroute or duplicate it. Execution is not approval. |
+| Current independent review requests changes | Repair the findings in one stable source revision before renewed review. |
+| Worker is QUEUED, STARTED or UNKNOWN | Reconcile the original worker; do not submit a replacement. |
+| Worker is TERMINAL | Inspect/validate its original result and effects; exit zero is not acceptance and does not justify a relaunch. |
+
+These values use the existing `source.ci_conclusion`, `source.review_verdict`
+and `worker.state` fields; no new schema, observer, clock or scheduler is added.
+The auditor cannot authenticate a caller-supplied snapshot or prove it is still
+current. Stale/missing references and unknown or self-review identity never
+become an eligible pending review. All proof predicates, held-action fences,
+false authorization flags and CLI exit meanings are unchanged. Output guidance
+uses fixed text and never echoes source references or private input.
+
 ## Integration sequence and boundaries
 
 1. Source tests + exact-head CI and independent review of this diagnostic.

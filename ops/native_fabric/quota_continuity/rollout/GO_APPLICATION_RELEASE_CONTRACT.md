@@ -6,14 +6,25 @@ state/profile owners, controller behavior and canonical Fabric lease database.
 
 ## Source and staging
 
-The default builder remains the reviewed B102 closure. The explicit
+The default builder retains a closed, reviewed 102-member base. The explicit
 `build_review_stage.py --include-go-application --output <fresh-external-output>`
 adds only `ext/native_go_entry.py` and `ext/go_application_handler.py`.
 The existing external Go component captures the original handler preimage, the
 B source and its three A dependencies. The output is still uninstalled.
 
-The reviewed B102 base manifest is SHA256
+The original B102 base manifest was SHA256
 `b4be55f9096985d8292160bc00886e44bfbe0941c095b65973b85ba36998acb6`.
+The independently rebuilt protected composition at
+`cb390bfc5a4b85a59a1005bfd3824305a5a4bfee` is SHA256
+`8062512b10fc5c62b030c3ceb398495e63e6abd35b2018c5008b658f40d2251c`.
+Its only base-member change is `ext/remote_sub.sh`, from
+`e24d6123ae1c303fe7a72b88c9ae6093979dcf35a9984d7ba16ccb9689700b05`
+to `3fbad86bc76c65248302191e0ff2e27eecdb933097244c5b87a03863385452c2`,
+retaining the protected BASH_COMPAT and bounded heredoc self-test fix.
+The three accepted A dependencies and B handler remain unchanged.
+The builder and installer continue requiring the exact rebuilt base digest;
+the resulting 104-member application stage is a new generation and needs fresh
+publication, installation and enrollment proof through the existing owners.
 The ordinary generation publisher remains the sole publisher. Old descriptors
 retain their three entrypoints and exact generation identities. Partial Go
 closure is invalid.

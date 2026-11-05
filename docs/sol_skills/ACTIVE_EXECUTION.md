@@ -35,6 +35,8 @@ These are action checks for all assigned provider sessions, not additional forms
 
 **Responsibility survives a chat; a chat does not own work forever.** Separate role, receiver and lease. Inspect fresh live claim, source-writer custody and pending effects once through their owners; unknown is not expired. Old authors/titles/chats are not liveness. Preserve live/uncertain modifiers; actual lease replacement needs existing CAS/fencing and successor admission. With assignment and no displaced writer/effect, act without a ghost ACK. The active assigned session owns the next recovery action: incumbent reconciliation, independent work, or exact unavailable recovery capability and reachable resolver. This does not transfer STARTed work.
 
+Protected results: use `RECONCILE_STATE.md` Step 4A.
+
 **Gate the action, not the entire mission.** Later deploy/dialogue/dispatch/runtime gates do not stop independent permitted source/tests. Failed transport blocks its dependent effect; no watcher means no unattended-return claim, not no foreground work. Never fabricate receipts.
 
 **A platform refusal is action-scoped until evidence proves otherwise.** Use bounded original-carrier readback to separate refusal before tool dispatch from ambiguous dispatch. Proven no dispatch/mutation is `TOOL_DEGRADED / EFFECT_NONE`, not an invented unknown effect or global outage.
