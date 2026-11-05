@@ -419,3 +419,28 @@ previously reviewed fresh-usage reader and caller UTC narrowing. The other91
 member bytes equal the accepted7efa closure. The finite upgrade target now pins
 the resulting95-member manifest6ac208bb; launcher8bc-to-d044, original epoch,
 preimages, intent, lock, CAS and receipt-only recovery behavior are unchanged.
+
+
+### Hook-free physical diagnostic (prospective source capability)
+
+`host_pull.sh --diagnose-physical ubuntu0` is an exclusive one-shot through the
+existing fixed selected target and transport, with strict host-key verification
+and no host-key updates. It skips HOST_ENV and all account-readiness/config
+loading. It returns closed JSON marked DIAGNOSTIC_ONLY, published=false and
+readiness=NOT_REQUESTED; it never writes host snapshots or starts/restarts a
+daemon. Consequently an old flat daemon cannot replace this invocation's result,
+and the result is not a host-picker or broker admission input.
+
+The incumbent remote lane_runtime.py must be a held, no-follow, bounded, owned
+regular file identical to the selected release before its existing --occupancy
+CLI is executed from those held bytes. Mismatch/refusal or failed transport is
+unavailable, not spare capacity. Other physical measurements remain the existing
+template observations, including UNKNOWN occupancy where the existing census
+cannot establish it. Account/launcher configuration equivalence remains separate.
+
+Source review and protected publication do not authorize installation, selection
+or a remote diagnostic invocation. A prospective consumer must first qualify
+actual selected closure, exact registry/target/key policy and producer identity,
+then consume only that original invocation's detached result. Lost or ambiguous
+response is not permission to replay. No normal refresh or hook execution is
+implied by this capability.

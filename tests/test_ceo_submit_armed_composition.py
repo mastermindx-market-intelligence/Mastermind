@@ -816,6 +816,11 @@ def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bo
     stripped = line.lstrip()
     if stripped.startswith(_COMMENT_PREFIXES):
         return True
+    # Squid's exact fixed HTTPS-port ACL is a source-reviewed service-port
+    # policy, not an OS UID/GID or peer identity. The identity guard otherwise
+    # rejects every modified value or line shape; this is not a port wildcard.
+    if stripped == "acl tls_only port 443" and token_text == "443":
+        return True
     if _line_mentions_identity_name(line):
         return False
     # Recognize only the mode slot of this closed shell statement shape.
@@ -880,6 +885,19 @@ def _scan_identity_source_lines(
         except (IndentationError, tokenize.TokenError):
             continue
     return flagged
+
+
+def test_d8_fixed_vendor_tls_port_is_not_an_os_identity():
+    """Only the exact reviewed Squid TLS ACL has a 443 network-port exception."""
+    assert _scan_identity_source_lines(["acl tls_only port 443"]) == []
+    for line, number in (
+        ("acl tls_only port 444", "444"),
+        ("acl tls_only port 450", "450"),
+        ("acl api_user port 443", "443"),
+        ("acl tls_only uid 443", "443"),
+        ("acl tls_only port 443 extra", "443"),
+    ):
+        assert number in _scan_identity_source_lines([line]), line
 
 
 def _scan_added_identity_literals(added_lines: str) -> list[str]:
@@ -1538,22 +1556,28 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if line.startswith("class CeoIngressClient"):
                 clients.append((path.relative_to(ROOT).as_posix(), line_number))
-    assert clients == [("integrations/mastermind_executive_app/gateway.py", 355)]
+    assert clients == [("integrations/mastermind_executive_app/gateway.py", 356)]
     tree = ast.parse(source)
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
 
 def _d7_reviewed_installed_event_loop(path, source, tree, node):
-    # PR #1805 A2 rollback consumer requalification: disarmed legacy A2
-    # read-side selection changed this module; the installed event-loop AST
+    # H2 direct-native host composition: the qualified current-config/source
+    # generation callback changes this module; the installed event-loop AST
     # remains exactly the independently reviewed 060525... anchor below.
     # Keep a pinned full-source digest. Never derive it during this test.
     # Exact source review of the canonical installed wrapper. This does not
     # exempt other run calls or imports, even inside the same function.
+    # Return plus attention composition changes the module; the installed entry
+    # AST below remains identical to protected d65414e. This static literal
+    # freezes the combined candidate, not independent review or release authority.
+    # P16 READ composition adds only the qualified Plan/Journal reader factories;
+    # the exact installed event-loop AST below and all dispatch guards stay fixed.
     from tests.executive_identity_review import _reviewed_ast_dump
+    reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
-            or hashlib.sha256(source.encode()).hexdigest() !=
-            'f756da398e5d50516bd236290d2f1b9eb86421aecc55f28a6f09198203609e9c'):
+            or reviewed_source_sha !=
+            'a81cdea9e79374fa3e95c10c3dcf6922f92fdf816e899c8c9abff0aab018f57c'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
@@ -3053,3 +3077,84 @@ def test_d8_quota_continuity_reviewed_sha_in_reviewed_files_table():
             assert hashlib.sha256(raw.read()).hexdigest() == sha, (
                 f"{path} on-disk bytes do not match its pinned SHA"
             )
+
+
+# PR1917: the reviewed exact-origin parser uses HTTPS 443, not an OS identity.
+# Exercise the existing complete-postimage witness; never teach D8 that 443
+# or a line containing a port is generically safe.
+_HERMES_TAB_SWEEP_PATH = "integrations/hermes_secretary/tab_sweep.py"
+
+
+def _d8_hermes_tab_scan(source, *, path=_HERMES_TAB_SWEEP_PATH, postimage=True):
+    return _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source),
+        source_postimages={path: source} if postimage else None,
+    )
+
+
+def test_d8_hermes_https_port_only_masks_reviewed_token():
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _HERMES_TAB_SWEEP_PATH).read_text()
+    assert hashlib.sha256(source.encode()).hexdigest() == (
+        "12d2c8f059f941eb908cc9d7ec3651763f8102832e05435118ce8e1385d5fd46"
+    )
+    assert reviewed_literal_spans(_HERMES_TAB_SWEEP_PATH, source) == (
+        (19, 77, 80, "int"),
+    )
+    assert _d8_hermes_tab_scan(source) == []
+    line = source.splitlines()[18]
+    diff = (f"--- a/{_HERMES_TAB_SWEEP_PATH}\n+++ b/{_HERMES_TAB_SWEEP_PATH}\n"
+            f"@@ -19 +19 @@\n+{line}\n")
+    assert _scan_added_identity_diff(
+        diff, source_postimages={_HERMES_TAB_SWEEP_PATH: source},
+    ) == []
+
+
+@pytest.mark.parametrize("postimage,path", [
+    (False, _HERMES_TAB_SWEEP_PATH),
+    (True, "integrations/hermes_secretary/other_tab_sweep.py"),
+    (True, "control_plane/unreviewed_tab_sweep.py"),
+])
+def test_d8_hermes_https_port_requires_exact_path_and_postimage(postimage, path):
+    source = (ROOT / _HERMES_TAB_SWEEP_PATH).read_text()
+    assert _d8_hermes_tab_scan(source, path=path, postimage=postimage) == ["443"]
+
+
+@pytest.mark.parametrize("old,new,expected", [
+    ("else 443", "else 444", ["444"]),
+    ("parsed.port in", "parsed.uid in", ["443"]),
+    ("80 if parsed.scheme", "501 if parsed.scheme", ["501", "443"]),
+    ("else 443)", "else 443, 501)", ["443", "501"]),
+    ("else 443)", "else 443, 443)", ["443", "443"]),
+    ('parsed.hostname == "chatgpt.com"',
+     'parsed.hostname == "chatgpt.com.attacker.invalid"', ["443"]),
+])
+def test_d8_hermes_https_port_context_or_numeric_drift_is_guarded(old, new, expected):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _HERMES_TAB_SWEEP_PATH).read_text()
+    assert source.count(old) == 1
+    changed = source.replace(old, new)
+    assert reviewed_literal_spans(_HERMES_TAB_SWEEP_PATH, changed) == ()
+    assert _d8_hermes_tab_scan(changed) == expected
+
+
+@pytest.mark.parametrize("suffix,expected", [
+    ("\npeer_uid = 443\n", ["443", "443"]),
+    ("\npeer_gid = 501\n", ["443", "501"]),
+    ('\naccount = "_mastermind_unreviewed"\n', ["443", "_mastermind_unreviewed"]),
+    ("\n# unrelated byte drift\n", ["443"]),
+])
+def test_d8_hermes_https_port_cannot_hide_added_identity_or_source_drift(suffix, expected):
+    source = (ROOT / _HERMES_TAB_SWEEP_PATH).read_text()
+    assert _d8_hermes_tab_scan(source + suffix) == expected
+
+
+def test_d8_hermes_https_port_rejects_false_postimage():
+    source = (ROOT / _HERMES_TAB_SWEEP_PATH).read_text()
+    with pytest.raises(AssertionError, match="diff/postimage line mismatch"):
+        _scan_added_identity_diff(
+            _d8_frozen_source_diff(_HERMES_TAB_SWEEP_PATH, source),
+            source_postimages={_HERMES_TAB_SWEEP_PATH: source.replace("else 443", "else 444")},
+        )

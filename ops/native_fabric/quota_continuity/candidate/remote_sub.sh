@@ -3,6 +3,49 @@
 # Packet content is transported by scp and read remotely; it is never argv.
 set -u
 
+# bash >=5.1 writes a heredoc/here-string below its pipe size (64 KiB) into a
+# pipe before the reader starts; on 2026-10-13 a 777-byte heredoc blocked there
+# forever on M2 (TERM then misreported ENOSPC). Level 50 restores temp-file
+# heredocs and is exported to local child bash; bash 3.2 ignores it.
+export BASH_COMPAT=50
+
+# Read-only heredoc transport proof: no reservation, lease, trap or worker launch.
+if [ "${1:-}" = "--selftest-heredoc" ]; then
+  selftest_out=$(mktemp "${TMPDIR:-/tmp}/remote_sub_heredoc.XXXXXX") || exit 70
+  selftest_doc=$(printf '%04096d' 0)
+  (
+    if [ -p /dev/stdin ]; then selftest_kind=pipe
+    elif [ -f /dev/stdin ]; then selftest_kind=file
+    else selftest_kind=other
+    fi
+    printf '%s %s\n' "$selftest_kind" "$(wc -c | tr -d ' ')" > "$selftest_out"
+  ) <<HEREDOC_SELFTEST &
+$selftest_doc
+HEREDOC_SELFTEST
+  selftest_pid=$!
+  selftest_ticks=0
+  while kill -0 "$selftest_pid" 2>/dev/null; do
+    if [ "$selftest_ticks" -ge 100 ]; then
+      kill -TERM "$selftest_pid" 2>/dev/null
+      wait "$selftest_pid" 2>/dev/null
+      rm -f "$selftest_out"
+      echo "HEREDOC_SELFTEST_FAIL reason=timeout bash=$BASH_VERSION compat=${BASH_COMPAT:-unset}" >&2
+      exit 124
+    fi
+    sleep 0.1
+    selftest_ticks=$((selftest_ticks + 1))
+  done
+  wait "$selftest_pid" 2>/dev/null
+  selftest_result=$(cat "$selftest_out" 2>/dev/null)
+  rm -f "$selftest_out"
+  if [ "$selftest_result" = "file 4097" ]; then
+    echo "HEREDOC_SELFTEST_OK transport=file bytes=4097 bash=$BASH_VERSION compat=${BASH_COMPAT:-unset}"
+    exit 0
+  fi
+  echo "HEREDOC_SELFTEST_FAIL reason=transport result=${selftest_result:-none} bash=$BASH_VERSION compat=${BASH_COMPAT:-unset}" >&2
+  exit 1
+fi
+
 # Read/export only: enter before any reservation, lease, trap or worker launch.
 if [ "${1:-}" = "--collect-existing" ]; then
   shift
@@ -393,6 +436,17 @@ commission_refresh_runtime() {
       RC=75; log "COMMISSION_TIME_EXHAUSTED stage=$stage"; return "$RC"
     fi
     MAX_SECS="$seconds"
+    # Do not start a new remote effect with too little original commission
+    # time left to publish and observe its terminal RC. A <=4-second launch
+    # opportunity becomes a clean pre-task refusal, not EFFECT_UNKNOWN with
+    # an indefinitely retained provider lease. This is not a retry or a
+    # longer deadline; a prior observed terminal still follows the existing
+    # same-run admission-refusal collection branch.
+    if [ "$stage" = launch ] && [ "$MAX_SECS" -lt 5 ]; then
+      RC=75
+      log "COMMISSION_TIME_EXHAUSTED stage=launch observation_reserve=5"
+      return "$RC"
+    fi
   fi
   # Leave two complete poll intervals for remote child startup, bounded
   # cleanup/RC publication and a final in-deadline controller observation.
@@ -923,8 +977,8 @@ else
 fi
 case "$POLL_SECS" in ''|*[!0-9]*|0) echo "invalid REMOTE_SUB_POLL_SECS" >&2; RC=2; exit "$RC";; esac
 case "$MAX_SECS" in ''|*[!0-9]*|0) echo "invalid REMOTE_SUB_MAX_SECS" >&2; RC=2; exit "$RC";; esac
-if [ "$MAX_SECS" -gt 7200 ]; then
-  echo "REMOTE_SUB_MAX_SECS must not exceed 7200" >&2
+if [ "$MAX_SECS" -gt 14400 ]; then
+  echo "REMOTE_SUB_MAX_SECS must not exceed 14400" >&2
   RC=2
   exit "$RC"
 fi
@@ -937,14 +991,14 @@ fi
 # A caller-supplied short deadline must not silently collapse a task that was
 # already classified as long bounded work. Complexity is an existing economic
 # classification, not a new lifecycle plane. C2 gets at least one hour; C3 gets
-# the full two-hour fabric fuse. The special go-codex profile remains short by
+# a four-hour finite fabric fuse. The special go-codex profile remains short by
 # design and is not lifted here.
 RUNTIME_FLOOR_SECS=0
 if [ "$MODE" != go-codex ]; then
   case "${POOL_TASK_COMPLEXITY:-}" in
     C0_MECHANICAL|C1_ROUTINE_BOUNDED) RUNTIME_FLOOR_SECS=0 ;;
-    C2_COMPLEX_BOUNDED) RUNTIME_FLOOR_SECS=3600 ;;
-    C3_FRONTIER_JUDGMENT) RUNTIME_FLOOR_SECS=7200 ;;
+    C2_COMPLEX_BOUNDED) RUNTIME_FLOOR_SECS=7200 ;;
+    C3_FRONTIER_JUDGMENT) RUNTIME_FLOOR_SECS=14400 ;;
     "")
       # Legacy callers predate complexity tagging. Treat a stale short override
       # as unsafe for real worker labor; short probes must opt into C0/C1.
@@ -964,13 +1018,24 @@ if [ -n "${POOL_COMMISSION_REMAINING_SECONDS:-}" ]; then
   case "$POOL_COMMISSION_REMAINING_SECONDS" in
     ''|*[!0-9]*|0*) log "COMMISSION_TIME_INVALID"; RC=2; exit "$RC" ;;
   esac
-  if [ "${#POOL_COMMISSION_REMAINING_SECONDS}" -gt 4 ] || [ "$POOL_COMMISSION_REMAINING_SECONDS" -gt 7200 ]; then
+  if [ "${#POOL_COMMISSION_REMAINING_SECONDS}" -gt 5 ] || [ "$POOL_COMMISSION_REMAINING_SECONDS" -gt 14400 ]; then
     log "COMMISSION_TIME_INVALID"; RC=2; exit "$RC"
   fi
   if [ "$POOL_COMMISSION_REMAINING_SECONDS" -lt "$POLL_SECS" ]; then
     log "COMMISSION_TIME_EXHAUSTED"; RC=75; exit "$RC"
   fi
   [ "$MAX_SECS" -le "$POOL_COMMISSION_REMAINING_SECONDS" ] || MAX_SECS="$POOL_COMMISSION_REMAINING_SECONDS"
+fi
+
+
+# The separate signed GLM shim capability gateway still enforces <=7500s.
+# Do not request a four-hour window on a two-hour-capability generation.
+# This is a visible prelease narrowing, not a new provider retry or entitlement.
+if [ "$MODE" = glm-codex ] || [ "$CANONICAL_PAID_ACTIVE" -eq 1 ]; then
+  if [ "$MAX_SECS" -gt 7200 ]; then
+    log "GLM_CAPABILITY_WINDOW_NARROWED requested=$MAX_SECS supported=7200"
+    MAX_SECS=7200
+  fi
 fi
 
 ADMISSION_WAIT_SECS="${REMOTE_SUB_ADMISSION_WAIT_SECS:-20}"
@@ -1004,7 +1069,7 @@ fi
 # if the controller loses the terminal receipt.
 PROVIDER_LEASE_TTL=$((CHILD_TIMEOUT + 300))
 [ "$PROVIDER_LEASE_TTL" -lt 900 ] && PROVIDER_LEASE_TTL=900
-[ "$PROVIDER_LEASE_TTL" -gt 7500 ] && PROVIDER_LEASE_TTL=7500
+[ "$PROVIDER_LEASE_TTL" -gt 15000 ] && PROVIDER_LEASE_TTL=15000
 
 # A healthy SSH/tool host is not necessarily ready for this task's worktree.
 # Validate task-specific source roots before reserving scarce provider slots.
@@ -1085,7 +1150,7 @@ if [ "${POOL_CALLER_NOT_BEFORE+x}" = x ]; then
 fi
 LEASE_WAIT_SECS="${REMOTE_SUB_LEASE_WAIT:-3600}"
 if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
-  LEASE_WAIT_SECS=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$LEASE_WAIT_SECS") || {
+  LEASE_WAIT_SECS=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$LEASE_WAIT_SECS" broker) || {
     RC=$?; log "COMMISSION_TIME_EXHAUSTED stage=broker_acquire"; exit "$RC";
   }
   BROKER_DEADLINE_ARGS=(--deadline-ns "$POOL_COMMISSION_DEADLINE_NS")
@@ -1256,7 +1321,7 @@ SUPPORT_FILES=(
 )
 # The v2 executor imports this explicit sealed dependency only for bound roots.
 [ "$REMOTE_PHYSICAL_ROOT" = "-" ] || SUPPORT_FILES+=(artifact_delivery.py)
-[ "$CANONICAL_PAID_ACTIVE" -eq 0 ] || SUPPORT_FILES+=(paid_glm_model_client.py paid_model_owner.py linux_process_identity.py)
+[ "$CANONICAL_PAID_ACTIVE" -eq 0 ] || SUPPORT_FILES+=(paid_glm_model_client.py paid_model_owner.py linux_process_identity.py paid_provider_entry.py paid_initializer.py paid_initializer_token_data.py paid_initializer_nested_data.py)
 SUPPORT_MANIFEST="$LOG_DIR/${ID}.support.json"
 REMOTE_SUPPORT_SOURCE="$REMOTE_LANE_TRANSFER/tmp/$ID.support-src"
  # Retain the exact per-run manifest as the pre-task control-flow identity.
@@ -1525,6 +1590,9 @@ if [ "$PLAIN_PHYSICAL_OWNER" -eq 1 ]; then
   # frozen owner's interpreter precedence, preserving other host PATH order.
   HOST_ENV="$HOST_ENV; export PATH=$REMOTE_LANES_Q/venv/bin:\$PATH"
 fi
+# Only the explicit canonical model profile uses the qualified initializer.
+# Never source a mutable hook in this branch or fall back to the old shell.
+if [ "$CANONICAL_PAID_ACTIVE" -eq 1 ]; then HOST_ENV=:; fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
   show_args "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" "<launch: $REMOTE_PACKET -> $(basename "$REMOTE_PACKET")>"
@@ -1724,6 +1792,15 @@ if [ "$REMOTE_PHYSICAL_ROOT" != "-" ]; then
   REMOTE_LAUNCH_EXEC=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" \
     lane-root-launch-command "$LANE_ROOT_LAYOUT_TOKEN" "$ID") || exit 78
   REMOTE_OUTPUT_REDIRECT='>/dev/null 2>&1'
+fi
+if [ "$CANONICAL_PAID_ACTIVE" -eq 1 ]; then
+  REMOTE_OUTPUT_SETUP=:
+  REMOTE_OUTPUT_REDIRECT='>/dev/null 2>&1'
+  REMOTE_LAUNCH_EXEC=$(commission_run canonical-entry-command "$REMOTE_SUB_PYTHON" \
+    -I -S -B "$HERE/paid_provider_entry.py" executor-command \
+    "$GLM_CAP_LOCAL" "$SUPPORT_MANIFEST" "$HERE") || {
+      RC=78; log 'CANONICAL_PAID_ENTRY_REFUSED before_launch=1'; exit "$RC";
+    }
 fi
 ADMISSION_FILE="$STATE_HERE/lanes/${ID}.admission"
 if [ "$DRY_RUN" -ne 1 ]; then SCRATCH_PATHS+=("$ADMISSION_FILE"); fi
@@ -2014,8 +2091,18 @@ else
   [ "$RECEIPT_SAVED" -eq 1 ] && CLEAN_RECEIPT=" $REMOTE_LANES_Q/ext/lanes/${ID}.process.jsonl"
   CLEAN_USAGE=''
   [ "$USAGE_SAVED" -eq 1 ] && CLEAN_USAGE=" $REMOTE_LANES_Q/ext/lanes/${ID}.usage.json"
+  CLEAN_PACKET=" $REMOTE_LANES_Q/tmp/${ID}.txt"
+  CLEAN_RC=" $REMOTE_LANES_Q/ext/$REMOTE_RC"
+  # Prospective only: retain this failed operation's original proof beside its
+  # already-private capture. No old evidence reconstruction or capture export.
+  if [ "$PROVIDER_SAVED" -eq 1 ] && [ "$RC" -ne 0 ] &&
+      commission_run diagnostic-retention "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
+        "python3 $REMOTE_LANES_Q/support-releases/$SUPPORT_DIGEST/ext/provider_outcome.py retained-diagnostic-ready $REMOTE_LANES_Q '$ID' '$ORCH_ID'" >/dev/null 2>&1; then
+    CLEAN_PACKET=''; CLEAN_RC=''; CLEAN_RECEIPT=''
+    log "DIAGNOSTIC_PROOFS_RETAINED same_operation=1 acceptance=0"
+  fi
   if "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
-      "rm -f $REMOTE_LANES_Q/tmp/${ID}.txt $REMOTE_LANES_Q/ext/$REMOTE_RC $REMOTE_LANES_Q/ext/$REMOTE_STDOUT$CLEAN_RECEIPT$CLEAN_USAGE && rm -rf -- $REMOTE_LANES_Q/tmp/${ID}.support-src"; then
+      "rm -f$CLEAN_PACKET$CLEAN_RC $REMOTE_LANES_Q/ext/$REMOTE_STDOUT$CLEAN_RECEIPT$CLEAN_USAGE && rm -rf -- $REMOTE_LANES_Q/tmp/${ID}.support-src"; then
     log "REMOTE_CLEANED transport=1 receipt_saved=$RECEIPT_SAVED usage_saved=$USAGE_SAVED"
   else
     log "REMOTE_CLEANUP_FAILED; completed work remains reconciled"

@@ -7,7 +7,10 @@ Only passing acceptance publishes an exact queued-root compatibility receipt.
 The v5-to-v7 mode retires one installed unstarted supersede_preproof_v1
 preparation whose source release has completed the offline v5->v6->v7
 transitions: it seals the Root upgrade evidence beside a fresh v7 working
-prestate instead of relabelling the selected v5 lineage.
+prestate instead of relabelling the selected v5 lineage. A normally installed
+prepared parent keeps its own recorded edge and may itself be superseded by
+the same installed selector, re-authenticating its whole sealed lineage down
+to the genuine original sixteen-origin preparation.
 """
 from __future__ import annotations
 
@@ -51,8 +54,18 @@ SCHEMA_UNSTARTED_PREPROOF = (
 SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7 = (
     "mastermind.executive_acceptance_maintenance/"
     "supersede_unstarted_preproof_v5_to_v7_v1")
+SCHEMA_PREPARED_MIGRATION_SUCCESSOR = (
+    "mastermind.executive_acceptance_maintenance/"
+    "supersede_unstarted_migration_preparation_v1")
+SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR = (
+    "mastermind.executive_acceptance_maintenance/"
+    "supersede_installed_unstarted_migration_preparation_v1")
+_PREPARED_MIGRATION_SCHEMAS = {SCHEMA_PREPARED_MIGRATION_SUCCESSOR,
+                              SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR}
+_MIGRATION_SCHEMAS = {SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7, *_PREPARED_MIGRATION_SCHEMAS}
 _TERMINAL_CARRY_SCHEMAS = {SCHEMA_V2, SCHEMA_SUPERSEDE, SCHEMA_PREJOB, SCHEMA_PREPROOF,
-                           SCHEMA_UNSTARTED_PREPROOF, SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7}
+                           SCHEMA_UNSTARTED_PREPROOF, SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7,
+                           *_PREPARED_MIGRATION_SCHEMAS}
 _TRUSTED_UID = 0
 _TRUSTED_GID = 0
 # The artifact inventory can exceed 16 MiB on an otherwise quiescent host.
@@ -127,6 +140,14 @@ _DESCRIPTOR_UNSTARTED_PREPROOF_V5_TO_V7_KEYS = _DESCRIPTOR_V2_KEYS | {
     "superseded_unstarted_preproof_sha", "superseded_descriptor_sha256",
     "schema_upgrade_evidence_sha256", "source_control_config_sha256",
 }
+
+_DESCRIPTOR_PREPARED_MIGRATION_SUCCESSOR_KEYS = _DESCRIPTOR_UNSTARTED_PREPROOF_V5_TO_V7_KEYS | {
+    "superseded_unstarted_migration_preparation_sha",
+    "superseded_migration_preparation_descriptor_sha256",
+}
+
+_DESCRIPTOR_INSTALLED_PREPARED_MIGRATION_SUCCESSOR_KEYS = (
+    _DESCRIPTOR_PREPARED_MIGRATION_SUCCESSOR_KEYS | {"installed_parent_control_config_sha256"})
 
 class MaintenanceError(RuntimeError):
     pass
@@ -294,18 +315,16 @@ def descriptor_for(sha: str) -> dict[str, Any] | None:
         return None
     value = sealed_json(path)
     schema = value.get("schema_version")
-    keys = _DESCRIPTOR_KEYS if schema == SCHEMA else (
-        _DESCRIPTOR_V2_KEYS if schema == SCHEMA_V2 else (
-            _DESCRIPTOR_SUPERSEDE_KEYS if schema == SCHEMA_SUPERSEDE else (
-                _DESCRIPTOR_PREJOB_KEYS if schema == SCHEMA_PREJOB else (
-                    _DESCRIPTOR_PREPROOF_KEYS if schema == SCHEMA_PREPROOF else (
-                        _DESCRIPTOR_UNSTARTED_PREPROOF_KEYS
-                        if schema == SCHEMA_UNSTARTED_PREPROOF else (
-                            _DESCRIPTOR_UNSTARTED_PREPROOF_V5_TO_V7_KEYS
-                            if schema == SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7 else set()))
-            )
-        )
-    ))
+    keys = {
+        SCHEMA: _DESCRIPTOR_KEYS, SCHEMA_V2: _DESCRIPTOR_V2_KEYS,
+        SCHEMA_SUPERSEDE: _DESCRIPTOR_SUPERSEDE_KEYS, SCHEMA_PREJOB: _DESCRIPTOR_PREJOB_KEYS,
+        SCHEMA_PREPROOF: _DESCRIPTOR_PREPROOF_KEYS,
+        SCHEMA_UNSTARTED_PREPROOF: _DESCRIPTOR_UNSTARTED_PREPROOF_KEYS,
+        SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7: _DESCRIPTOR_UNSTARTED_PREPROOF_V5_TO_V7_KEYS,
+        SCHEMA_PREPARED_MIGRATION_SUCCESSOR: _DESCRIPTOR_PREPARED_MIGRATION_SUCCESSOR_KEYS,
+        SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR:
+            _DESCRIPTOR_INSTALLED_PREPARED_MIGRATION_SUCCESSOR_KEYS,
+    }.get(schema, set())
     if not keys or set(value) != keys:
         raise MaintenanceError("maintenance descriptor schema mismatch")
     if (value["successor_sha"] != sha or not isinstance(value["predecessor_sha"], str)
@@ -335,12 +354,18 @@ def descriptor_for(sha: str) -> dict[str, Any] | None:
         or value["interrupted_preproof_sha"] in {sha, value["predecessor_sha"]}
     ):
         raise MaintenanceError("maintenance interrupted release is invalid")
-    if schema in {SCHEMA_UNSTARTED_PREPROOF, SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7} and (
+    if schema in {SCHEMA_UNSTARTED_PREPROOF, *_MIGRATION_SCHEMAS} and (
         not isinstance(value["superseded_unstarted_preproof_sha"], str)
         or _SHA.fullmatch(value["superseded_unstarted_preproof_sha"]) is None
         or value["superseded_unstarted_preproof_sha"] in {sha, value["predecessor_sha"]}
     ):
         raise MaintenanceError("maintenance superseded release is invalid")
+    if schema in _PREPARED_MIGRATION_SCHEMAS and (
+            not isinstance(value["superseded_unstarted_migration_preparation_sha"], str)
+            or _SHA.fullmatch(value["superseded_unstarted_migration_preparation_sha"]) is None
+            or value["superseded_unstarted_migration_preparation_sha"] in {
+                sha, value["predecessor_sha"], value["superseded_unstarted_preproof_sha"]}):
+        raise MaintenanceError("prepared migration parent release is invalid")
     for key in (key for key in keys if key.endswith("_sha256")):
         if not isinstance(value[key], str) or _DIGEST.fullmatch(value[key]) is None:
             raise MaintenanceError("maintenance descriptor digest is invalid")
@@ -424,7 +449,7 @@ def validate_carry_receipt(
     # ever admitted for that schema.
     expected_keys = {"schema_version", "passed", "descriptor_sha256",
                      "acceptance_summary_sha256", "baseline_preserved"}
-    if descriptor["schema_version"] == SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7:
+    if descriptor["schema_version"] in _MIGRATION_SCHEMAS:
         expected_keys |= {"schema_upgrade_evidence_sha256",
                           "acceptance_restore_evidence_sha256"}
     if (set(receipt) != expected_keys
@@ -433,14 +458,14 @@ def validate_carry_receipt(
             or receipt["descriptor_sha256"] != digest(descriptor)
             or receipt["acceptance_summary_sha256"] != summary_sha256):
         raise MaintenanceError("preserved root has no matching maintenance PASS receipt")
-    if descriptor["schema_version"] == SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7 and (
+    if descriptor["schema_version"] in _MIGRATION_SCHEMAS and (
             receipt["schema_upgrade_evidence_sha256"] != descriptor["schema_upgrade_evidence_sha256"]
             or digest(sealed_json(bundle_path(sha)/_V5_TO_V7_EVIDENCE_NAME))
             != descriptor["schema_upgrade_evidence_sha256"]
             or digest(sealed_json(bundle_path(sha)/_V5_TO_V7_RESTORE_EVIDENCE_NAME))
             != receipt["acceptance_restore_evidence_sha256"]):
         raise MaintenanceError("preserved root has no matching maintenance PASS receipt")
-    if descriptor["schema_version"] == SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7:
+    if descriptor["schema_version"] in _MIGRATION_SCHEMAS:
         # A Root self-hash re-seal is never a carry: before any future route may
         # treat this link as its PASS predecessor, the accepted run is
         # re-derived from its own sealed history through the retained owner.
@@ -476,6 +501,8 @@ def _validate_v5_to_v7_carry_history(descriptor: dict, receipt: dict,
             != {"schema_version": descriptor["schema_version"],
                 "descriptor_sha256": digest(descriptor)}):
         raise MaintenanceError("preserved root has no matching maintenance PASS receipt")
+    if descriptor['schema_version'] == SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR:
+        _installed_preparation_snapshot(descriptor, bundle)
     _summary, summary_raw = summary_document(successor)
     if hashlib.sha256(summary_raw).hexdigest() != summary_sha256:
         raise MaintenanceError("preserved root has no matching maintenance PASS receipt")
@@ -580,8 +607,10 @@ def _validate_v5_to_v7_carry_history(descriptor: dict, receipt: dict,
         derived = getattr(verified_copy, "origin_identities", None)
         if not isinstance(derived, dict) or set(derived) != {"database", "manifest"}:
             raise MaintenanceError("qualified proof backup origin is invalid")
-        if {key: _v5_to_v7_origin_record(derived[key])
-                for key in ("database", "manifest")} != origins:
+        observed_origins = {key: _v5_to_v7_origin_record(derived[key])
+                            for key in ("database", "manifest")}
+        if any(not retained._persistent_record_matches(origins[key], observed_origins[key])
+               for key in ("database", "manifest")):
             raise MaintenanceError("qualified proof backup origin drifted from the sealed run")
         verification = dict(_json_data(verified_copy.verification))
         # Only the two explicit copy-address fields are renormalized to the
@@ -614,7 +643,7 @@ def validate_prior_carry_binding(descriptor: dict, *, _seen: frozenset[str] = fr
 
     if descriptor["schema_version"] in {SCHEMA_SUPERSEDE, SCHEMA_PREJOB, SCHEMA_PREPROOF,
                                         SCHEMA_UNSTARTED_PREPROOF,
-                                        SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7}:
+                                        *_MIGRATION_SCHEMAS}:
         validate_superseded_binding(descriptor, historical=True)
 
 
@@ -854,6 +883,82 @@ def verify_inventory(baseline: dict) -> None:
         if {"uid":info.st_uid,"gid":info.st_gid,"mode":stat.S_IMODE(info.st_mode),**content} != expected:
             raise MaintenanceError("preserved artifact changed")
 
+
+def _migration_inventory_matches(evidence, baseline: dict, roots: list[Path] | None = None) -> bool:
+    """Reobserve a complete inventory through actual held migration evidence.
+
+    The generic producer/verifier stay strict. Only historical directory
+    device observations are compared across time, under the current anchor;
+    every current file/link/directory is constrained even when A equals B.
+    """
+    from ops.executive_os.persistent_origin import _same_value
+    evidence.check()
+    if roots is not None:
+        paths = []
+        for root in roots:
+            root = root.resolve(strict=True)
+            paths.extend([root, *sorted(root.rglob('*'))])
+    else:
+        # Active acceptance adds new proof artifacts; preserve every admitted
+        # preimage without freezing its later namespace.
+        paths = [Path(name) for name in baseline]
+    observed = {}
+    for path in paths:
+        info = path.lstat()
+        evidence._require_current_path(path, info)
+        if stat.S_ISDIR(info.st_mode):
+            content = {'directory': True, 'device': info.st_dev, 'inode': info.st_ino}
+        elif stat.S_ISLNK(info.st_mode):
+            content = {'link': os.readlink(path)}
+        elif stat.S_ISREG(info.st_mode):
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+                         | getattr(os, 'O_CLOEXEC', 0))
+            try:
+                held = os.fstat(fd)
+                if _identity(held) != _identity(info):
+                    raise MaintenanceError('preserved file changed during acquisition')
+                evidence._require_current_path(path, held)
+                hashed = hashlib.sha256()
+                offset = 0
+                while offset < held.st_size:
+                    block = os.pread(fd, min(1024*1024, held.st_size-offset), offset)
+                    if not block:
+                        raise MaintenanceError('preserved file was truncated')
+                    hashed.update(block)
+                    offset += len(block)
+                if _identity(os.fstat(fd)) != _identity(held):
+                    raise MaintenanceError('preserved file changed during read')
+                evidence._require_current_path(path, held)
+                content = {'sha256': hashed.hexdigest()}
+            finally:
+                os.close(fd)
+        else:
+            raise MaintenanceError('preserved artifact became a special file')
+        if has_macos_acl(path, expected_identity=info, allow_symlink=stat.S_ISLNK(info.st_mode)):
+            raise MaintenanceError('preserved artifact gained an ACL')
+        evidence._require_current_path(path, info)
+        if _identity(path.lstat()) != _identity(info):
+            raise MaintenanceError('preserved artifact changed during observation')
+        if not stat.S_ISDIR(info.st_mode):
+            content['nlink'] = info.st_nlink
+        observed[str(path)] = {'uid': info.st_uid, 'gid': info.st_gid,
+                               'mode': stat.S_IMODE(info.st_mode), **content}
+    if set(observed) != set(baseline):
+        return False
+    devices = {value['device'] for value in baseline.values()
+               if value.get('directory') is True}
+    if (len(devices) != 1 or any(type(device) is not int or device <= 0 for device in devices)):
+        raise MaintenanceError("preserved inventory historical device cohort differs")
+    for name, expected in baseline.items():
+        current = observed[name]
+        if expected.get('directory') is True:
+            if not evidence._persistent_record_matches(expected, current):
+                return False
+        elif not _same_value(expected, current):
+            return False
+    evidence.check()
+    return True
+
 def write_sealed(path: Path, value: dict, *, public: bool = False) -> None:
     data = (json.dumps(value, sort_keys=True, indent=2, allow_nan=False)+"\n").encode()
     if len(data) > _document_limit(path):
@@ -943,12 +1048,18 @@ def _validate_v5_to_v7_material(material: Any) -> tuple[Path, Path]:
     original by being the same migration evidence.
     """
     owner = _evidence_owner()
+    spent_ctime = (isinstance(material, dict)
+                   and material.get("schema_version") == owner.SPENT_CTIME_MATERIAL_SCHEMA_VERSION)
+    recovered = (isinstance(material, dict)
+                 and material.get("schema_version") == owner.RECOVERED_MATERIAL_SCHEMA_VERSION)
     if (not isinstance(material, dict)
             or set(material) != {"schema_version", "phase", "host", "origin_records", "chain"}
-            or material["schema_version"] != owner.MATERIAL_SCHEMA_VERSION
+            or material["schema_version"] not in {owner.MATERIAL_SCHEMA_VERSION,
+                                                  owner.RECOVERED_MATERIAL_SCHEMA_VERSION,
+                                                  owner.SPENT_CTIME_MATERIAL_SCHEMA_VERSION}
             or material["phase"] != owner.EVIDENCE_PHASE_INITIAL
             or not isinstance(material["origin_records"], list)
-            or len(material["origin_records"]) != 12):
+            or len(material["origin_records"]) != (16 if spent_ctime else 14 if recovered else 12)):
         raise MaintenanceError("schema upgrade evidence material is malformed")
     host = material["host"]
     if (not isinstance(host, dict)
@@ -973,6 +1084,26 @@ def _validate_v5_to_v7_material(material: Any) -> tuple[Path, Path]:
             or _DIGEST.fullmatch(release["manifest_sha256"]) is None):
         raise MaintenanceError("schema upgrade evidence tool release is malformed")
     return runtime_root, backup_root
+
+
+def _bind_pre_census_selected(evidence, selected_sha, selected, source_control):
+    """Join recovery's held Root attestation to the real selected lineage."""
+    owner = _evidence_owner()
+    if evidence.material["schema_version"] not in {owner.RECOVERED_MATERIAL_SCHEMA_VERSION,
+                                                  owner.SPENT_CTIME_MATERIAL_SCHEMA_VERSION}:
+        return
+    qualification = evidence.pre_census_qualification
+    raw = (bundle_path(selected_sha)/"descriptor.json").read_bytes()
+    expected = dict(sha=selected_sha,
+        descriptor_raw_sha256=hashlib.sha256(raw).hexdigest(),
+        descriptor_sha256=digest(selected), source_backup_sha256=selected["backup_sha256"],
+        baseline_sha256=selected["baseline_sha256"], inventory_sha256=selected["inventory_sha256"],
+        prior_canary_sha256=selected["prior_canary_sha256"])
+    if (not isinstance(qualification, dict)
+            or qualification["selected_source"] != expected
+            or qualification["source_control_config"]["sha256"]
+            != hashlib.sha256(source_control).hexdigest()):
+        raise MaintenanceError("recovery qualification selected source or control preimage differs")
 
 
 def _runtime_owner_path(path: Path, guard=None) -> Path:
@@ -1158,8 +1289,17 @@ class _ServiceAdmissionLock:
     migration or before normal Service startup.
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, *, _pre_census_barrier=None):
         self._config = config
+        self._pre_census_barrier = _pre_census_barrier
+        if _pre_census_barrier is not None:
+            # This is a retained observation created by the existing backup
+            # owner's Root-only context, never a caller boolean or path DTO.
+            from control_plane import executive_backup as backup
+            if (os.geteuid() != 0 or not isinstance(
+                    _pre_census_barrier, backup._PreCensusBarrierObservation)):
+                raise MaintenanceError("retained barrier requires the actual Root owner")
+            _pre_census_barrier.check()
         self.state: Path | None = None
         self.alias: tuple | None = None
         self.lock_fd: int | None = None
@@ -1280,6 +1420,11 @@ class _ServiceAdmissionLock:
                 or _identity(self.state.lstat()) != self.state_initial):
             raise MaintenanceError("Executive service state directory changed while held")
         for absent_name in (_SERVICE_MARKER, _UPGRADE_BARRIER_NAME):
+            if absent_name == _UPGRADE_BARRIER_NAME and self._pre_census_barrier is not None:
+                self._pre_census_barrier.check()
+                if self._pre_census_barrier.identity['path'] != str(self.state / absent_name):
+                    raise MaintenanceError("retained barrier differs from the canonical state")
+                continue
             if os.path.lexists(self.state / absent_name):
                 raise MaintenanceError(
                     "Executive " + absent_name + " is present; v5-to-v7 admission refuses")
@@ -1287,6 +1432,26 @@ class _ServiceAdmissionLock:
             info = _MACOS_VAR_ALIAS.lstat()
             if (_identity(info), os.readlink(_MACOS_VAR_ALIAS)) != self.alias:
                 raise MaintenanceError("retained Runtime alias changed")
+
+    def _accept_qualification_creation(self, path: Path, before_names: set[str]) -> None:
+        """Admit exactly our own initially private O_EXCL child publication.
+
+        Creating that one child changes directory timestamps; inode, custody,
+        all ancestors and the exact name transition remain qualified. This
+        private operation is unavailable to normal maintenance callers.
+        """
+        if (self._pre_census_barrier is None or self.state_fd is None
+                or path.parent != self.state):
+            raise MaintenanceError("qualification publication has no retained custody")
+        info = os.fstat(self.state_fd)
+        stable = lambda value: (value.st_dev, value.st_ino, value.st_mode,
+                                value.st_uid, value.st_gid)
+        if (stable(info) != stable(self.ancestry.nodes[self.state][1])
+                or stable(path.parent.lstat()) != stable(info)
+                or set(os.listdir(self.state_fd)) != before_names | {path.name}):
+            raise MaintenanceError("qualification publication changed the state namespace")
+        self.state_initial = _identity(info)
+        self.check()
 
     def __exit__(self, kind, error, traceback) -> bool:
         lock_fd, self.lock_fd = self.lock_fd, None
@@ -1395,7 +1560,7 @@ def _v5_preflight_runtime(selected_sha: str, selected: dict, database: Path, gua
             raise MaintenanceError("selected verification copy changed during decoding")
         guard.check()
 
-def terminal_assignment(config: dict, job: Any, attempt: Any) -> dict:
+def terminal_assignment(config: dict, job: Any, attempt: Any, *, _evidence=None) -> dict:
     """Read the existing control-owned revocation receipt; grant no new effect."""
     import pwd
     from ops.executive_os.autonomy_control import _root_json, CONTROL_USER, HostControlError
@@ -1437,17 +1602,21 @@ def terminal_assignment(config: dict, job: Any, attempt: Any) -> dict:
         identity = dict(path=name, device=info.st_dev, inode=info.st_ino,
                         uid=info.st_uid, gid=info.st_gid, mode=stat.S_IMODE(info.st_mode),
                         mtime_ns=info.st_mtime_ns)
+        if _evidence is not None:
+            _evidence._require_current_path(target, info)
+        matches = (value["paths"][key]["after"] == identity if _evidence is None
+                   else _evidence._persistent_record_matches(value["paths"][key]["after"], identity))
         if (not stat.S_ISDIR(info.st_mode) or info.st_uid != control_uid
                 or stat.S_IMODE(info.st_mode) != 0o700
                 or has_macos_acl(target, expected_identity=info)
-                or value["paths"][key]["after"] != identity):
+                or not matches):
             raise MaintenanceError("terminal assignment filesystem identity drifted")
     return {"assignment_seal_sha256": hashlib.sha256(raw).hexdigest()}
 
 
 def terminal_carry_fields(
     runtime: Any, root: Any, config: dict, before: dict, predecessor: str,
-    successor: str | None = None,
+    successor: str | None = None, *, _evidence=None,
 ) -> tuple[Any, dict]:
     """Qualify one inert failed planner using existing Runtime evidence owners."""
     from control_plane.executive_runtime import RuntimeProofError
@@ -1542,7 +1711,8 @@ def terminal_carry_fields(
     if len(quotas) != 1 or quotas[0]["status"] != "AVAILABLE" or quotas[0]["held_attempt_id"] is not None:
         raise MaintenanceError("terminal carry requires available predecessor proof capacity")
     fields = {
-        **material, **terminal_assignment(config, job, attempt),
+        **material, **(terminal_assignment(config, job, attempt) if _evidence is None
+                      else terminal_assignment(config, job, attempt, _evidence=_evidence)),
         "template_proof_job_id": proof.job_id, "template_proof_job_sha256": digest(proof.to_dict()),
         "terminal_job_id": job.job_id, "terminal_attempt_id": attempt.attempt_id,
         "terminal_marker_event_id": marker["event_id"], "terminal_marker_event_sha256": digest(marker),
@@ -1937,6 +2107,451 @@ def preproof_evidence(sha: str) -> tuple[str, dict]:
     return digest(manifest), envelope_value
 
 
+def _read_unstarted_migration_preparation(parent_sha, expected_digest, guard):
+    """Authenticate one actual sealed, unselected, unstarted sixteen-origin parent."""
+    if (not isinstance(parent_sha, str) or _SHA.fullmatch(parent_sha) is None
+            or not isinstance(expected_digest, str) or _DIGEST.fullmatch(expected_digest) is None):
+        raise MaintenanceError("prepared migration parent selector is invalid")
+    directory = bundle_path(parent_sha)
+    guard.tree(directory)
+    parent = descriptor_for(parent_sha)
+    if (parent is None or parent['schema_version'] != SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7
+            or digest(parent) != expected_digest
+            or {item.name for item in directory.iterdir()} != set(_V5_TO_V7_BUNDLE_NAMES)
+            or sealed_json(directory/'preparing.json') != {'schema_version': SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7}):
+        raise MaintenanceError("prepared migration parent is not an intact unstarted preparation")
+    material = sealed_json(directory/_V5_TO_V7_EVIDENCE_NAME)
+    owner = _evidence_owner()
+    owner._validate_pinned_material(material)
+    if (material['schema_version'] != owner.SPENT_CTIME_MATERIAL_SCHEMA_VERSION
+            or digest(material) != parent['schema_upgrade_evidence_sha256']
+            or _v5_to_v7_tool_release(material) != parent_sha):
+        raise MaintenanceError("prepared parent does not pin its genuine sixteen-origin executor")
+    source_control = sealed_bytes(directory/_V5_TO_V7_SOURCE_CONTROL_NAME, _MAX_DOCUMENT_BYTES)
+    if hashlib.sha256(source_control).hexdigest() != parent['source_control_config_sha256']:
+        raise MaintenanceError("prepared parent source control preimage differs")
+    original_config = json.loads(source_control)
+    if original_config.get('proof_base_sha') != parent['superseded_unstarted_preproof_sha']:
+        raise MaintenanceError("prepared parent original selected release differs")
+    runtime = _runtime_owner_path(_canonical_root_path(original_config.get('runtime_root')), guard)
+    _require_runtime_acceptance_absent(runtime.parent/'acceptance'/parent_sha)
+    baseline = sealed_json(directory/'baseline.json')
+    artifacts = sealed_json(directory/'inventory.json')
+    canary = sealed_json(directory/'prior-secret-canary.json')
+    if (digest(baseline) != parent['baseline_sha256']
+            or digest(artifacts) != parent['inventory_sha256']
+            or digest(canary) != parent['prior_canary_sha256']
+            or sealed_backup_snapshot(directory/'prestate.sqlite3', parent['backup_sha256']) != baseline):
+        raise MaintenanceError("prepared parent sealed prestate differs")
+    if any(item.name.startswith('.preparing-'+parent_sha+'-') for item in directory.parent.iterdir()):
+        raise MaintenanceError("prepared parent has unresolved partial publication")
+    guard.check()
+    return dict(descriptor=parent, material=material, source_control=source_control,
+                baseline=baseline, inventory=artifacts, canary=canary, directory=directory,
+                acceptance_absence=runtime.parent/'acceptance'/parent_sha)
+
+
+def _read_installed_migration_preparation(parent, expected_digest, directory, guard, chain):
+    """Authenticate one sealed unstarted normally installed prepared parent.
+
+    The exact nine-entry namespace and its own preparing marker admit no run
+    marker, acceptance leaf, carry receipt or partial state. The recorded
+    current-config digest and its whole raw preimage are checked first; then
+    the real immediate parent is authenticated through the same bounded walk
+    and the recorded config must be the exact normal-input derivation from
+    that parent's authenticated inherited source input and immediate selected
+    parent identity. An old held parent snapshot is therefore never mistaken
+    for the current installation, and an installed ancestor never claims the
+    original leaf's migration executor identity: the inherited material stays
+    the genuine unchanged leaf content whose executor only the terminal leaf
+    link proves.
+    """
+    if (digest(parent) != expected_digest
+            or {item.name for item in directory.iterdir()}
+                != set(_migration_bundle_names(parent))
+            or sealed_json(directory/'preparing.json')
+                != {'schema_version': SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR}):
+        raise MaintenanceError("prepared migration parent is not an intact unstarted preparation")
+    installed_raw = sealed_bytes(directory/_INSTALLED_PARENT_CONTROL_NAME, _MAX_DOCUMENT_BYTES)
+    if hashlib.sha256(installed_raw).hexdigest() != parent['installed_parent_control_config_sha256']:
+        raise MaintenanceError("installed preparation source config differs")
+    inner = _read_prepared_migration_parent_link(
+        parent['superseded_unstarted_migration_preparation_sha'],
+        parent['superseded_migration_preparation_descriptor_sha256'], guard, chain)
+    if any(parent[key] != inner['descriptor'][key]
+           for key in _DESCRIPTOR_UNSTARTED_PREPROOF_V5_TO_V7_KEYS - {'schema_version', 'successor_sha'}):
+        raise MaintenanceError("prepared migration successor changed a frozen parent binding")
+    if installed_raw != _normal_installed_preparation_config(
+            _installed_preparation_producer_input(inner),
+            parent['superseded_unstarted_migration_preparation_sha'], observed_raw=installed_raw):
+        raise MaintenanceError("installed preparation source config differs")
+    material = sealed_json(directory/_V5_TO_V7_EVIDENCE_NAME)
+    owner = _evidence_owner()
+    owner._validate_pinned_material(material)
+    if (material['schema_version'] != owner.SPENT_CTIME_MATERIAL_SCHEMA_VERSION
+            or digest(material) != parent['schema_upgrade_evidence_sha256']):
+        raise MaintenanceError("prepared parent does not pin its genuine sixteen-origin executor")
+    source_control = sealed_bytes(directory/_V5_TO_V7_SOURCE_CONTROL_NAME, _MAX_DOCUMENT_BYTES)
+    if hashlib.sha256(source_control).hexdigest() != parent['source_control_config_sha256']:
+        raise MaintenanceError("prepared parent source control preimage differs")
+    original_config = json.loads(source_control)
+    if original_config.get('proof_base_sha') != parent['superseded_unstarted_preproof_sha']:
+        raise MaintenanceError("prepared parent original selected release differs")
+    runtime = _runtime_owner_path(_canonical_root_path(original_config.get('runtime_root')), guard)
+    _require_runtime_acceptance_absent(runtime.parent/'acceptance'/parent['successor_sha'])
+    baseline = sealed_json(directory/'baseline.json')
+    artifacts = sealed_json(directory/'inventory.json')
+    canary = sealed_json(directory/'prior-secret-canary.json')
+    if (digest(baseline) != parent['baseline_sha256']
+            or digest(artifacts) != parent['inventory_sha256']
+            or digest(canary) != parent['prior_canary_sha256']
+            or sealed_backup_snapshot(directory/'prestate.sqlite3', parent['backup_sha256']) != baseline):
+        raise MaintenanceError("prepared parent sealed prestate differs")
+    if any(item.name.startswith('.preparing-'+parent['successor_sha']+'-')
+           for item in directory.parent.iterdir()):
+        raise MaintenanceError("prepared parent has unresolved partial publication")
+    guard.check()
+    return dict(descriptor=parent, material=material, source_control=source_control,
+                baseline=baseline, inventory=artifacts, canary=canary, directory=directory,
+                installed_control_raw=installed_raw,
+                acceptance_absence=runtime.parent/'acceptance'/parent['successor_sha'])
+
+
+def _read_prepared_migration_parent_link(parent_sha, expected_digest, guard, chain):
+    """Authenticate one link of the bounded prepared-parent walk.
+
+    The chain state is owned by the single walk that passes it down, so the
+    cycle and depth bounds use the existing budget and can never reset inside
+    a nested snapshot call. The context-local memo shares each authenticated
+    immutable document set across nested callbacks on one live guard; a hit
+    still re-proves the held namespace, the canonical descriptor preimage and
+    every retained identity before the value is reused.
+    """
+    if (not isinstance(parent_sha, str) or _SHA.fullmatch(parent_sha) is None
+            or not isinstance(expected_digest, str) or _DIGEST.fullmatch(expected_digest) is None):
+        raise MaintenanceError("prepared migration parent selector is invalid")
+    if parent_sha in chain:
+        raise MaintenanceError("prepared migration parent chain is cyclic")
+    if len(chain) >= _MAX_SUPERSEDE_DEPTH:
+        raise MaintenanceError("prepared migration parent chain is too deep")
+    directory = bundle_path(parent_sha)
+    guard.tree(directory)
+    held = guard.prepared_parents.get((parent_sha, expected_digest))
+    if held is not None:
+        descriptor = descriptor_for(parent_sha)
+        if (descriptor is None or digest(descriptor) != expected_digest
+                or descriptor['schema_version'] not in _MIGRATION_SCHEMAS):
+            raise MaintenanceError("prepared migration parent is not an intact unstarted preparation")
+        # Cached payloads do not shorten the authenticated chain. Visit every
+        # immutable parent through this same path-local budget, retaining its
+        # live external absence and partial-publication checks without parsing
+        # the large inherited documents again.
+        if descriptor['schema_version'] == SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR:
+            _read_prepared_migration_parent_link(
+                descriptor['superseded_unstarted_migration_preparation_sha'],
+                descriptor['superseded_migration_preparation_descriptor_sha256'],
+                guard, chain + (parent_sha,))
+        guard.tree(directory)
+        # Held identity cannot observe state outside the held namespace: the
+        # live acceptance absence of this link and any later partial
+        # publication beside it are re-proved on every memo hit.
+        _require_runtime_acceptance_absent(held['acceptance_absence'])
+        if any(item.name.startswith('.preparing-'+parent_sha+'-')
+               for item in directory.parent.iterdir()):
+            raise MaintenanceError("prepared parent has unresolved partial publication")
+        guard.check()
+        return held
+    parent = descriptor_for(parent_sha)
+    if parent is None:
+        raise MaintenanceError("prepared migration parent is not an intact unstarted preparation")
+    if parent['schema_version'] == SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR:
+        value = _read_installed_migration_preparation(parent, expected_digest, directory,
+                                                      guard, chain + (parent_sha,))
+    elif parent['schema_version'] == SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7:
+        value = _read_unstarted_migration_preparation(parent_sha, expected_digest, guard)
+    else:
+        raise MaintenanceError("prepared migration parent is not an intact unstarted preparation")
+    # Keep every original/ancestor absence live through the caller's final
+    # guard check, including an ancestor that changed during a later read.
+    guard.absent(value['acceptance_absence'])
+    guard.prepared_parents[(parent_sha, expected_digest)] = value
+    return value
+
+
+def _read_prepared_migration_parent(parent_sha, expected_digest, guard, *, installed=False,
+                                    successor_sha=None):
+    """Authenticate one intact prepared parent and its whole sealed lineage.
+
+    The installed selector continues through a normally installed prepared
+    parent to the genuine original sixteen-origin leaf; the uninstalled
+    selector keeps admitting exactly one original leaf and can never widen its
+    own issuance onto an installed parent. No link of the walk ever demands
+    that a historical ancestor is still the current installation.
+    """
+    if not isinstance(guard, _UnstartedPreproofGuard) or guard.closed:
+        raise MaintenanceError("prepared migration parent walk has no live retained custody")
+    if successor_sha is not None and (not isinstance(successor_sha, str)
+            or _SHA.fullmatch(successor_sha) is None):
+        raise MaintenanceError("prepared migration successor is invalid")
+    # A proposed or accepted successor is part of the same bounded lineage,
+    # even though only its ancestors are read by this helper.
+    chain = () if successor_sha is None else (successor_sha,)
+    parent = _read_prepared_migration_parent_link(parent_sha, expected_digest, guard, chain)
+    # The installed selector admits the genuine original sixteen-origin leaf
+    # (its accepted first installed epoch) and one already installed prepared
+    # parent (its bounded continuation); the uninstalled selector still admits
+    # exactly one original leaf and can never widen onto an installed parent.
+    admitted = ((SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7,
+                 SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR) if installed
+                else (SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7,))
+    if parent['descriptor']['schema_version'] not in admitted:
+        raise MaintenanceError("prepared migration parent is not an intact unstarted preparation")
+    return parent
+
+
+def _prepared_migration_parent(descriptor, *, guard=None):
+    if guard is None:
+        with _UnstartedPreproofGuard() as retained:
+            return _prepared_migration_parent(descriptor, guard=retained)
+    if (not isinstance(descriptor, dict)
+            or descriptor.get('schema_version') not in _PREPARED_MIGRATION_SCHEMAS
+            or set(descriptor) != (_DESCRIPTOR_INSTALLED_PREPARED_MIGRATION_SUCCESSOR_KEYS
+                if descriptor['schema_version'] == SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR
+                else _DESCRIPTOR_PREPARED_MIGRATION_SUCCESSOR_KEYS)):
+        raise MaintenanceError("invalid prepared migration successor")
+    parent_sha = descriptor['superseded_unstarted_migration_preparation_sha']
+    if parent_sha in {descriptor['successor_sha'], descriptor['predecessor_sha'],
+                       descriptor['superseded_unstarted_preproof_sha']}:
+        raise MaintenanceError("prepared migration successor is not a distinct outer edge")
+    parent = _read_prepared_migration_parent(parent_sha,
+        descriptor['superseded_migration_preparation_descriptor_sha256'], guard,
+        installed=descriptor['schema_version'] == SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR,
+        successor_sha=descriptor['successor_sha'])
+    if any(descriptor[key] != parent['descriptor'][key]
+           for key in _DESCRIPTOR_UNSTARTED_PREPROOF_V5_TO_V7_KEYS - {'schema_version', 'successor_sha'}):
+        raise MaintenanceError("prepared migration successor changed a frozen parent binding")
+    return parent
+
+
+def _initial_migration_evidence(descriptor, config, material):
+    owner = _evidence_owner()
+    if descriptor['schema_version'] in _PREPARED_MIGRATION_SCHEMAS:
+        return owner.open_prepared_successor_v5_to_v7_evidence(
+            Path(config['runtime_root']), descriptor['successor_sha'], material)
+    return owner.open_v5_to_v7_evidence(Path(config['runtime_root']), _v5_to_v7_tool_release(material))
+
+
+_INSTALLED_PARENT_CONTROL_NAME = "installed-parent-control.json"
+
+
+def _installed_preparation_producer_input(parent):
+    """The authenticated immediate parent's actual normal-producer input."""
+    return (parent['installed_control_raw']
+            if parent['descriptor']['schema_version'] == SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR
+            else parent['source_control'])
+
+
+def _normal_installed_preparation_config(source_raw: bytes, release_sha: str, *,
+                                         observed_raw: bytes | None = None) -> bytes:
+    """Reproduce the whole normal producer, with its three declared coordinates.
+
+    The source SHA/admin repository are forced by the authenticated edge.
+    Macro comes from this edge's held Root current config or hash-pinned
+    historical snapshot, never a new caller argument or today's global root.
+    The real producer validates the whole input/output and preserves every
+    other field; callers still compare the complete serialized bytes and
+    retain independent raw CAS/seals/installation/FD authority. The two-arg
+    form remains the deterministic unchanged-Macro producer, not admission.
+    """
+    from ops.executive_os.prepare_control_successor import _parse, build_successor
+    source = _parse(source_raw)
+    observed = source if observed_raw is None else _parse(observed_raw)
+    value = build_successor(source, source_sha=release_sha,
+                            macro_root=observed['ceo_ingress_app_macro_root'])
+    terminal = {'terminal_return_armed', 'terminal_return_socket_path'}
+    if terminal & set(value):
+        if not terminal <= set(value):
+            raise MaintenanceError("partial installed preparation terminal-return binding")
+        old = "/var/run/mastermind-agent-relay/agent-relay.sock"
+        canonical = "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
+        if value['terminal_return_socket_path'] == old and value['terminal_return_armed'] is False:
+            value['terminal_return_socket_path'] = canonical
+        elif value['terminal_return_socket_path'] != canonical:
+            raise MaintenanceError("installed preparation terminal-return binding differs")
+    return (json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode()
+
+
+def _migration_bundle_names(descriptor):
+    return (_V5_TO_V7_BUNDLE_NAMES | {_INSTALLED_PARENT_CONTROL_NAME}
+            if descriptor['schema_version'] == SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR
+            else _V5_TO_V7_BUNDLE_NAMES)
+
+
+def _installed_preparation_snapshot(descriptor, directory, *, guard=None):
+    parent = _prepared_migration_parent(descriptor, guard=guard)
+    path = directory/_INSTALLED_PARENT_CONTROL_NAME
+    if guard is not None:
+        guard.file(path)
+    raw = sealed_bytes(path, _MAX_DOCUMENT_BYTES)
+    if (hashlib.sha256(raw).hexdigest() != descriptor['installed_parent_control_config_sha256']
+            or raw != _normal_installed_preparation_config(
+                _installed_preparation_producer_input(parent),
+                descriptor['superseded_unstarted_migration_preparation_sha'], observed_raw=raw)):
+        raise MaintenanceError("installed preparation source config differs")
+    return raw
+
+
+def _require_preparation_install(sha):
+    from ops.executive_os.autonomy_control import (
+        ProductionArmHost, ArmAdmissionError, HostControlError,
+    )
+    try:
+        ProductionArmHost().require_exact_install(sha)
+    except (ArmAdmissionError, HostControlError) as exc:
+        raise MaintenanceError("installed preparation release or plist identity differs") from exc
+
+
+def _prepare_migration_preparation_successor(args):
+    """One exclusive new target; never reissue or mutate the completed parent."""
+    from control_plane import executive_backup as backup
+    if os.geteuid() != 0 or sys.platform != 'darwin':
+        raise MaintenanceError("prepared migration successor requires Root on macOS")
+    forbidden = ('supersede_unstarted_sha', 'supersede_prejob_sha', 'supersede_preproof_sha',
+        'supersede_unstarted_preproof_sha', 'supersede_unstarted_preproof_v5_to_v7_sha',
+        'qualify_v5_source_only', 'qualify_v5_pre_census_continuation', 'reconcile_spent_v5_pre_census_ctime',
+        'expected_operation_id', 'expected_barrier_sha256', 'expected_spent_continuation_sha256',
+        'recovery_job_id', 'recovery_attempt_id', 'superseded_descriptor_sha256')
+    if any(getattr(args, name, None) for name in forbidden) or not getattr(args, 'carry_terminal_dispatch', False):
+        raise MaintenanceError("prepared migration successor admits no mixed selector or recovery")
+    installed_parent = getattr(args, 'supersede_installed_unstarted_migration_preparation_sha', None)
+    if installed_parent and getattr(args, 'supersede_unstarted_migration_preparation_sha', None):
+        raise MaintenanceError("select exactly one prepared migration mode")
+    expected_installed = getattr(args, 'expected_installed_parent_control_config_sha256', None)
+    if bool(installed_parent) != bool(expected_installed):
+        raise MaintenanceError("installed preparation requires its exact config CAS")
+    if installed_parent and (not isinstance(expected_installed, str)
+            or _DIGEST.fullmatch(expected_installed) is None):
+        raise MaintenanceError("installed preparation config CAS is invalid")
+    parent_sha = installed_parent or args.supersede_unstarted_migration_preparation_sha
+    schema = (SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR if installed_parent
+              else SCHEMA_PREPARED_MIGRATION_SUCCESSOR)
+    target = args.successor_sha
+    if (not isinstance(target, str) or _SHA.fullmatch(target) is None or target == parent_sha):
+        raise MaintenanceError("prepared successor target is invalid")
+    with _RootConfig() as current, _UnstartedPreproofGuard() as guard:
+        config = current.value
+        require_disarmed(config); _require_pre_census_stopped()
+        worker = json.loads((SYSTEM_ROOT/'config/worker-codex.json').read_text())
+        if worker.get('operator_harness_armed') is not False:
+            raise MaintenanceError("prepared successor requires closed worker harness")
+        with _ServiceAdmissionLock(config) as lock:
+            parent = _read_prepared_migration_parent(parent_sha,
+                args.superseded_migration_preparation_descriptor_sha256, guard,
+                installed=bool(installed_parent), successor_sha=target)
+            old = parent['descriptor']
+            expected_config = (_normal_installed_preparation_config(
+                                   _installed_preparation_producer_input(parent), parent_sha,
+                                   observed_raw=current.raw)
+                               if installed_parent else parent['source_control'])
+            if installed_parent:
+                if hashlib.sha256(current.raw).hexdigest() != expected_installed:
+                    raise MaintenanceError("installed preparation current config CAS differs")
+                _require_preparation_install(parent_sha)
+            if (current.raw != expected_config
+                    or config['proof_base_sha'] != (parent_sha if installed_parent
+                        else old['superseded_unstarted_preproof_sha'])
+                    or args.predecessor_sha != old['predecessor_sha']
+                    or args.root_job_id != old['root_job_id']
+                    or target in {old['predecessor_sha'], old['superseded_unstarted_preproof_sha']}):
+                raise MaintenanceError("prepared successor config or original root binding differs")
+            # Reader source identity is independently genuine and never claims
+            # the parent migration's executor identity.
+            backup._prove_upgrade_release(target)
+            final_bundle = bundle_path(target)
+            guard.absent(final_bundle)
+            for sha in (parent_sha, target):
+                if any(item.name.startswith('.preparing-'+sha+'-') for item in final_bundle.parent.iterdir()):
+                    raise MaintenanceError("prepared successor has unresolved partial publication")
+            descriptor = dict(old, schema_version=schema, successor_sha=target,
+                superseded_unstarted_migration_preparation_sha=parent_sha,
+                superseded_migration_preparation_descriptor_sha256=digest(old))
+            if installed_parent:
+                descriptor['installed_parent_control_config_sha256'] = hashlib.sha256(current.raw).hexdigest()
+            _prepared_migration_parent(descriptor, guard=guard)
+            guard.file(Path(config['secret_canary_receipt_path']))
+            database = _quiescent_database(config, lock, guard)
+            with _initial_migration_evidence(descriptor, config, parent['material']) as evidence:
+                if (evidence.control_config_bytes != current.raw
+                        or snapshot(database, immutable=True) != parent['baseline']
+                        or snapshot(Path(evidence.target_v7_database), immutable=True) != parent['baseline']
+                        or _json_data(evidence.material) != parent['material']):
+                    raise MaintenanceError("prepared successor strict INITIAL prestate differs")
+                selected = descriptor_for(old['superseded_unstarted_preproof_sha'])
+                _bind_pre_census_selected(evidence, old['superseded_unstarted_preproof_sha'], selected,
+                                         parent['source_control'])
+                _selected_v5_backup(old['superseded_unstarted_preproof_sha'], selected, guard,
+                                    evidence.source_v5_content_digest)
+                _v5_to_v7_projection_digests(evidence, database)
+                roots = [Path(config[key]) for key in
+                    ('proof_workspace_root', 'worker_runs_root', 'receipts_root', 'backup_root')]
+                roots.append(Path(config['runtime_root']).parent.parent/'canary-fixtures')
+                source_inventory = sealed_json(bundle_path(old['superseded_unstarted_preproof_sha'])/'inventory.json')
+                if (_v5_to_v7_working_inventory(source_inventory, evidence.inventory_additions, roots)
+                        != parent['inventory'] or not _migration_inventory_matches(evidence, parent['inventory'], roots)
+                        or json.loads(Path(config['secret_canary_receipt_path']).read_text()) != parent['canary']):
+                    raise MaintenanceError("prepared successor inventory or canary differs")
+                validate_prior_carry_binding(descriptor)
+                # All refusal predicates precede a new private candidate.
+                bundle = Path(tempfile.mkdtemp(prefix='.preparing-'+target+'-', dir=final_bundle.parent))
+                write_sealed(bundle/'preparing.json', {'schema_version': schema})
+                for name in _V5_TO_V7_BUNDLE_NAMES - {'descriptor.json', 'preparing.json'}:
+                    source = parent['directory']/name
+                    fd = guard._hold(source, directory=False, exact=True)
+                    info = os.fstat(fd)
+                    out = os.open(bundle/name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                    try:
+                        offset = 0
+                        while offset < info.st_size:
+                            block = os.pread(fd, min(1024*1024, info.st_size-offset), offset)
+                            if not block:
+                                raise MaintenanceError("prepared parent copy was truncated")
+                            data = memoryview(block)
+                            while data:
+                                written = os.write(out, data)
+                                if written <= 0:
+                                    raise MaintenanceError("prepared successor copy incomplete")
+                                data = data[written:]
+                            offset += len(block)
+                        os.fchmod(out, 0o400); os.fsync(out)
+                    finally:
+                        os.close(out)
+                    guard.check()
+                if installed_parent:
+                    write_sealed_bytes(bundle/_INSTALLED_PARENT_CONTROL_NAME, current.raw)
+                write_sealed(bundle/'descriptor.json', descriptor, public=True)
+                os.chmod(bundle, 0o755)
+                directory_fd = os.open(bundle, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                try: os.fsync(directory_fd)
+                finally: os.close(directory_fd)
+                _requalify_unstarted_preproof_v5_to_v7(descriptor, config, database,
+                    parent['baseline'], parent['inventory'], parent['canary'], guard, bundle,
+                    lock=lock, evidence=evidence)
+                _prepared_migration_parent(descriptor, guard=guard)
+                _require_pre_census_stopped(); current.check(); lock.check(); evidence.check(); guard.check()
+                evidence.check_prepared_sources()
+                if installed_parent:
+                    _require_preparation_install(parent_sha)
+                    current.check(); lock.check(); evidence.check(); guard.check()
+                if current.raw != expected_config or os.path.lexists(final_bundle):
+                    raise MaintenanceError("prepared successor target or config changed before publication")
+                os.rename(bundle, final_bundle)
+                directory_fd = os.open(final_bundle.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                try: os.fsync(directory_fd)
+                finally: os.close(directory_fd)
+                descriptor_for(target)
+                return final_bundle
+
+
 def _unstarted_preproof_v5_to_v7_view(descriptor: Any) -> dict:
     """Project one closed v5-to-v7 descriptor onto its internal old-mode view.
 
@@ -1947,6 +2562,10 @@ def _unstarted_preproof_v5_to_v7_view(descriptor: Any) -> dict:
     hashed, and never demands the selected v5 hashes equal the working v7
     prestate.
     """
+    if isinstance(descriptor, dict) and descriptor.get("schema_version") in _PREPARED_MIGRATION_SCHEMAS:
+        _prepared_migration_parent(descriptor)
+        descriptor = {key: descriptor[key] for key in _DESCRIPTOR_UNSTARTED_PREPROOF_V5_TO_V7_KEYS}
+        descriptor["schema_version"] = SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7
     if (not isinstance(descriptor, dict)
             or descriptor.get("schema_version") != SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7
             or set(descriptor) != _DESCRIPTOR_UNSTARTED_PREPROOF_V5_TO_V7_KEYS):
@@ -1983,7 +2602,7 @@ def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
     its selected link still admits exactly one original unstarted
     ``supersede_preproof_v1`` preparation and nothing newer.
     """
-    if descriptor["schema_version"] == SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7:
+    if descriptor["schema_version"] in _MIGRATION_SCHEMAS:
         descriptor = _unstarted_preproof_v5_to_v7_view(descriptor)
     if descriptor["schema_version"] not in {SCHEMA_SUPERSEDE, SCHEMA_PREJOB, SCHEMA_PREPROOF,
                                             SCHEMA_UNSTARTED_PREPROOF}:
@@ -2143,11 +2762,19 @@ class _UnstartedPreproofGuard:
         self.namespaces = {}
         self.absences = {}
         self.aliases = {}
+        # Context-local memo of already authenticated prepared-parent links.
+        # It never holds authority: every hit re-proves the held namespace,
+        # the canonical descriptor preimage and all retained identities, and
+        # the memo dies with this guard.
+        self.prepared_parents = {}
+        self.closed = False
 
     def __enter__(self):
         return self
 
     def close(self):
+        self.closed = True
+        self.prepared_parents = {}
         nodes, self.nodes = self.nodes, {}
         for node in reversed(list(nodes.values())):
             os.close(node[0])
@@ -2687,19 +3314,29 @@ def _requalify_unstarted_preproof_v5_to_v7(descriptor, config, database, before,
     if root is None:
         raise MaintenanceError("terminal carry root disappeared")
     _proof, fields = terminal_carry_fields(
-        runtime, root, config, current, descriptor['predecessor_sha'], descriptor['successor_sha'])
+        runtime, root, config, current, descriptor['predecessor_sha'], descriptor['successor_sha'],
+        **({'_evidence': evidence} if descriptor['schema_version'] in _PREPARED_MIGRATION_SCHEMAS else {}))
     if any(descriptor[key] != value for key, value in fields.items()):
         raise MaintenanceError("terminal carry semantic evidence changed")
     if snapshot(database, immutable=True) != current:
         raise MaintenanceError("maintenance live baseline changed during terminal validation")
-    verify_inventory(artifacts)
+    if descriptor['schema_version'] not in _PREPARED_MIGRATION_SCHEMAS:
+        verify_inventory(artifacts)
     roots = [Path(config[key]) for key in
              ('proof_workspace_root', 'worker_runs_root', 'receipts_root', 'backup_root')]
     roots.append(Path(config['runtime_root']).parent.parent / 'canary-fixtures')
-    if inventory(roots) != artifacts:
+    if (not _migration_inventory_matches(evidence, artifacts, roots)
+            if descriptor['schema_version'] in _PREPARED_MIGRATION_SCHEMAS
+            else inventory(roots) != artifacts):
         raise MaintenanceError("maintenance live inventory changed before publication")
-    if {entry.name for entry in directory.iterdir()} != set(_V5_TO_V7_BUNDLE_NAMES):
+    if {entry.name for entry in directory.iterdir()} != set(_migration_bundle_names(descriptor)):
         raise MaintenanceError("v5-to-v7 preparation bundle is not the closed working namespace")
+    if descriptor['schema_version'] in _PREPARED_MIGRATION_SCHEMAS:
+        _prepared_migration_parent(descriptor, guard=guard)
+        if sealed_json(directory/'preparing.json') != {'schema_version': descriptor['schema_version']}:
+            raise MaintenanceError("prepared successor preparing marker differs")
+    if descriptor['schema_version'] == SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR:
+        _installed_preparation_snapshot(descriptor, directory, guard=guard)
     guard.tree(directory)
     if evidence is not None:
         evidence.check()
@@ -2794,6 +3431,7 @@ def _issue_v5_to_v7(args: argparse.Namespace, config: dict, guard, *, lock=None,
     evidence_runtime_root, _evidence_backup_root = _validate_v5_to_v7_material(material)
     if evidence_runtime_root != _runtime_owner_path(Path(config["runtime_root"]), guard):
         raise MaintenanceError("schema upgrade evidence runtime root drifted")
+    _bind_pre_census_selected(evidence, selected_sha, selected, config_bytes)
     # The separately qualified current Root config preimage is what the
     # owner observed; issuance happens while the installed release is still
     # the selected v5 one, so this is the same preimage this process holds.
@@ -2881,7 +3519,360 @@ def _issue_v5_to_v7(args: argparse.Namespace, config: dict, guard, *, lock=None,
     return final_bundle
 
 
+def _require_pre_census_stopped() -> None:
+    """Preserve the supported readside stop boundary, never stop MCP."""
+    require_stopped()
+    label = 'com.mastermind.executive.sol-state-relay'
+    result = subprocess.run(['/bin/launchctl', 'print', 'system/' + label],
+                            capture_output=True, timeout=10)
+    absent = f'Could not find service "{label}" in domain for system\n'.encode('ascii')
+    if result.returncode != 113 or result.stdout or result.stderr not in (absent, b"Bad request.\n" + absent):
+        raise MaintenanceError("Executive relay absence could not be verified")
+
+
+def _pre_census_absences(database: Path, *, own_qualification: bool = False) -> None:
+    from control_plane import executive_backup as backup
+    names = (backup._UPGRADE_V5_TO_V6_PREFLIGHT_NAME,
+             backup._UPGRADE_V5_TO_V6_COMPLETION_NAME,
+             backup._UPGRADE_V6_TO_V7_PREFLIGHT_NAME,
+             backup._UPGRADE_V6_TO_V7_COMPLETION_NAME,
+             backup.PRE_CENSUS_CONTINUATION_NAME,
+             backup.SPENT_PRE_CENSUS_CTIME_RECONCILIATION_NAME,
+             backup.SPENT_PRE_CENSUS_CTIME_CONTINUATION_NAME)
+    if not own_qualification:
+        names += (backup.PRE_CENSUS_QUALIFICATION_NAME,)
+    if any(os.path.lexists(database.parent / name) for name in names):
+        raise MaintenanceError("pre-census qualification already has receipts or reservation")
+    if any(name.startswith('.executive.sqlite3.restore-') for name in os.listdir(database.parent)):
+        raise MaintenanceError("pre-census qualification found unresolved restore residue")
+
+
+def _current_v5_qualification(database: Path, guard) -> dict:
+    """Current physical DATA and full semantic proof, never historical prestate."""
+    from control_plane import executive_backup as backup
+    fd = guard._hold(database, directory=False, exact=True)
+    info = os.fstat(fd)
+    observed, offset = hashlib.sha256(), 0
+    while offset < info.st_size:
+        part = os.pread(fd, min(1024 * 1024, info.st_size - offset), offset)
+        if not part:
+            raise MaintenanceError("current v5 database was truncated")
+        observed.update(part)
+        offset += len(part)
+    with backup._readonly_database(database) as connection:
+        _pages, _size, vector = backup._verify_connection(connection, expected_schema_version=5)
+        schema = backup.normalized_schema_digest(connection)
+        content = backup.full_v5_content_digest(connection)
+    guard.check()
+    record = dict(path=str(database), device=info.st_dev, inode=info.st_ino,
+                  uid=info.st_uid, gid=info.st_gid, mode=stat.S_IMODE(info.st_mode),
+                  nlink=info.st_nlink, size=info.st_size, mtime_ns=info.st_mtime_ns,
+                  ctime_ns=info.st_ctime_ns, sha256=observed.hexdigest())
+    return dict(database=record, normalized_schema_digest=schema,
+                full_v5_content_digest=content,
+                migration_vector=[item.to_dict() for item in vector])
+
+
+def _issue_pre_census_qualification(args: argparse.Namespace) -> dict:
+    """Issue one Root-to-Control proof for the original operation's safe PRESENT.
+
+    The qualification is deliberately separate from a migration descriptor.
+    The original barrier is retained unchanged, its phase remains unknown,
+    and only the Control owner may reserve the one-use continuation later.
+    """
+    from datetime import datetime, timezone
+    from control_plane import executive_backup as backup
+    if os.geteuid() != 0 or sys.platform != 'darwin':
+        raise MaintenanceError("pre-census qualification requires Root on macOS")
+    if getattr(args, 'qualify_v5_source_only', False):
+        raise MaintenanceError("pre-census qualification cannot mix source-only actions")
+    selected_sha = _v5_to_v7_selector(args)
+    if selected_sha is None:
+        raise MaintenanceError("pre-census qualification requires exact selected v5 source")
+    with _RootConfig() as config_holder:
+        config = config_holder.value
+        _v5_to_v7_gates(args, config, selected_sha)
+        _require_pre_census_stopped()
+        database = _runtime_owner_path(Path(config['runtime_root']) /
+                                       'data/control_plane/executive.sqlite3')
+        with backup._open_pre_census_barrier_for_root_issuer(database) as barrier:
+            # Optional selectors constrain the actual observed leaf; they do
+            # not supply its UUID, expected payload or authority.
+            if (getattr(args, 'expected_operation_id', None) not in (None, barrier.payload['operation_id'])
+                    or getattr(args, 'expected_barrier_sha256', None) not in (None, barrier.identity['sha256'])):
+                raise MaintenanceError("retained barrier CAS selector differs")
+            with _ServiceAdmissionLock(config, _pre_census_barrier=barrier) as lock, _UnstartedPreproofGuard() as guard:
+                database = _quiescent_database(config, lock, guard)
+                _pre_census_absences(database)
+                proof = _qualify_v5_source_only(args, config, lock=lock,
+                                                 config_holder=config_holder)
+                selected = descriptor_for(selected_sha)
+                if selected is None:
+                    raise MaintenanceError("selected source disappeared")
+                view = _v5_to_v7_view_candidate(selected, selected_sha,
+                    args.superseded_descriptor_sha256, args.successor_sha,
+                    baseline_sha256=proof['source_baseline_sha256'],
+                    inventory_sha256=proof['source_inventory_sha256'],
+                    prior_canary_sha256=proof['source_canary_sha256'])
+                guard.lineage(view)
+                guard.file(Path(config['secret_canary_receipt_path']))
+                source = _current_v5_qualification(database, guard)
+                _selected_v5_backup(selected_sha, selected, guard, source['full_v5_content_digest'])
+                descriptor_path = bundle_path(selected_sha)/'descriptor.json'
+                descriptor_fd = guard._hold(descriptor_path, directory=False, exact=True)
+                raw_descriptor = os.pread(descriptor_fd, _MAX_DOCUMENT_BYTES + 1, 0)
+                if len(raw_descriptor) > _MAX_DOCUMENT_BYTES:
+                    raise MaintenanceError("selected descriptor exceeds its bound")
+                old = barrier.payload
+                old_tool = dict(root=old['tool_release_root'], sha=old['release_sha'],
+                                tree_sha=old['tool_release_tree_sha'],
+                                manifest_sha256=old['tool_release_manifest_sha256'])
+                old_seal = _evidence_owner()._verify_pinned_release(
+                    Path(old_tool['root']), old_tool['sha'], old_tool['tree_sha'])
+                if any(old_seal.get(key) != old_tool[value] for key, value in (
+                        ('commit_sha', 'sha'), ('tree_sha', 'tree_sha'),
+                        ('manifest_sha256', 'manifest_sha256'))):
+                    raise MaintenanceError("original retained migration tool seal differs")
+                release = backup._prove_upgrade_release(args.successor_sha)
+                new_tool = dict(root=release['release_root'], sha=release['release_sha'],
+                                tree_sha=release['release_tree_sha'],
+                                manifest_sha256=release['release_manifest_sha256'])
+                backup_root = _runtime_owner_path(Path(config['backup_root']), guard)
+                payload = dict(schema_version=backup.PRE_CENSUS_QUALIFICATION_SCHEMA,
+                    operation_id=old['operation_id'],
+                    original_barrier=dict(payload=dict(old), identity=dict(barrier.identity)),
+                    original_tool=old_tool, recovery_tool=new_tool, **source,
+                    selected_source=dict(sha=selected_sha,
+                        descriptor_raw_sha256=hashlib.sha256(raw_descriptor).hexdigest(),
+                        descriptor_sha256=digest(selected), source_backup_sha256=selected['backup_sha256'],
+                        baseline_sha256=selected['baseline_sha256'],
+                        inventory_sha256=selected['inventory_sha256'],
+                        prior_canary_sha256=selected['prior_canary_sha256']),
+                    source_control_config=dict(path=str(config_holder.path),
+                        sha256=hashlib.sha256(config_holder.raw).hexdigest()),
+                    host=dict(runtime_root=str(database.parents[2]), backup_root=str(backup_root),
+                              control_uid=lock.control_uid, control_gid=lock.control_gid),
+                    backup_inventory_sha256=digest(inventory([backup_root])),
+                    created_at=datetime.now(timezone.utc).isoformat())
+                backup._validate_pre_census_qualification(payload)
+                raw = backup._upgrade_receipt_bytes(payload)
+                if len(raw) > 64 * 1024:
+                    raise MaintenanceError("Root qualification exceeds the protocol bound")
+                destination = database.parent / backup.PRE_CENSUS_QUALIFICATION_NAME
+                # All source predicates precede creation. Until the final
+                # chmod, an interrupted child remains Root-private and is not
+                # a Control-readable qualification. It is never auto-deleted.
+                before_names = set(os.listdir(lock.state_fd))
+                fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                             os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+                try:
+                    lock._accept_qualification_creation(destination, before_names)
+                    data = memoryview(raw)
+                    while data:
+                        size = os.write(fd, data)
+                        if size <= 0:
+                            raise MaintenanceError("Root qualification write was incomplete")
+                        data = data[size:]
+                    os.fchown(fd, _TRUSTED_UID, lock.control_gid)
+                    os.fsync(fd)
+                    # Re-derive the complete sealed-source predicates at the
+                    # publication boundary; do not replay this on failure.
+                    final_proof = _qualify_v5_source_only(args, config, lock=lock,
+                                                          config_holder=config_holder)
+                    if (final_proof != proof or _current_v5_qualification(database, guard) != source
+                            or digest(inventory([backup_root])) != payload['backup_inventory_sha256']
+                            or os.path.lexists(database.parent / backup.PRE_CENSUS_CONTINUATION_NAME)):
+                        raise MaintenanceError("safe-present source changed before qualification")
+                    _pre_census_absences(database, own_qualification=True)
+                    final_old_seal = _evidence_owner()._verify_pinned_release(
+                        Path(old_tool['root']), old_tool['sha'], old_tool['tree_sha'])
+                    if final_old_seal != old_seal:
+                        raise MaintenanceError("original migration tool changed before qualification")
+                    _require_pre_census_stopped()
+                    barrier.check(); config_holder.check(); guard.check(); lock.check()
+                    os.fchmod(fd, 0o440)
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+                backup._fsync_directory(database.parent)
+                identity = backup._pre_census_artifact_identity(destination,
+                    uid=_TRUSTED_UID, gid=lock.control_gid, mode=0o440)
+                barrier.check(); guard.check(); lock.check(); config_holder.check()
+                return dict(action='qualify-v5-pre-census-continuation',
+                            operation_id=old['operation_id'], qualification_identity=identity)
+
+
+def _spent_ctime_absences(database: Path, *, own_reconciliation=False) -> None:
+    """The old three origins are retained; no later-phase residue is adopted."""
+    from control_plane import executive_backup as backup
+    forbidden = (backup._UPGRADE_V5_TO_V6_PREFLIGHT_NAME,
+                 backup._UPGRADE_V5_TO_V6_COMPLETION_NAME,
+                 backup._UPGRADE_V6_TO_V7_PREFLIGHT_NAME,
+                 backup._UPGRADE_V6_TO_V7_COMPLETION_NAME,
+                 backup.SPENT_PRE_CENSUS_CTIME_CONTINUATION_NAME)
+    if not own_reconciliation:
+        forbidden += (backup.SPENT_PRE_CENSUS_CTIME_RECONCILIATION_NAME,)
+    if any(os.path.lexists(database.parent/name) for name in forbidden):
+        raise MaintenanceError("spent ctime admission already has receipts or reservation")
+    if (any(os.path.lexists(database.with_name(database.name + suffix))
+            for suffix in ("-wal", "-shm", "-journal"))
+            or any(name.startswith('.executive.sqlite3.restore-')
+                   for name in os.listdir(database.parent))):
+        raise MaintenanceError("spent ctime admission has sidecars or restore residue")
+
+
+def _issue_spent_pre_census_ctime_reconciliation(args: argparse.Namespace) -> dict:
+    """Publish one fresh PRESENT proof, retaining the old qualification and intent.
+
+    This closed action does not prove a historical checkpoint phase, migrate,
+    checkpoint, clear quarantine, or issue a maintenance descriptor.  A partial
+    publication remains spent; no failure path deletes or regenerates it.
+    """
+    from datetime import datetime, timezone
+    from control_plane import executive_backup as backup
+    if os.geteuid() != 0 or sys.platform != 'darwin':
+        raise MaintenanceError("spent ctime reconciliation requires Root on macOS")
+    if (getattr(args, 'qualify_v5_source_only', False)
+            or getattr(args, 'qualify_v5_pre_census_continuation', False)):
+        raise MaintenanceError("spent ctime reconciliation cannot mix actions")
+    selected_sha = _v5_to_v7_selector(args)
+    if selected_sha is None:
+        raise MaintenanceError("spent ctime reconciliation requires exact selected v5 source")
+    with _RootConfig() as config_holder:
+        config = config_holder.value
+        _v5_to_v7_gates(args, config, selected_sha)
+        _require_pre_census_stopped()
+        database = _runtime_owner_path(Path(config['runtime_root']) /
+                                       'data/control_plane/executive.sqlite3')
+        with backup._open_spent_pre_census_for_root_issuer(database) as retained:
+            barrier = retained.barrier
+            qualification, spent = retained.qualification, retained.spent_continuation
+            q = backup._validate_pre_census_qualification(qualification.payload)
+            for selector, actual in (
+                    ('expected_operation_id', barrier.payload['operation_id']),
+                    ('expected_barrier_sha256', barrier.identity['sha256']),
+                    ('expected_spent_continuation_sha256', spent.identity['sha256'])):
+                if getattr(args, selector, None) not in (None, actual):
+                    raise MaintenanceError("spent ctime original operation CAS differs")
+            with _ServiceAdmissionLock(config, _pre_census_barrier=barrier) as lock, _UnstartedPreproofGuard() as guard:
+                database = _quiescent_database(config, lock, guard)
+                backup_root = _runtime_owner_path(Path(config['backup_root']), guard)
+                _spent_ctime_absences(database)
+
+                def requalify():
+                    proof = _qualify_v5_source_only(args, config, lock=lock,
+                                                    config_holder=config_holder)
+                    selected = descriptor_for(selected_sha)
+                    if selected is None:
+                        raise MaintenanceError("spent ctime selected source disappeared")
+                    view = _v5_to_v7_view_candidate(selected, selected_sha,
+                        args.superseded_descriptor_sha256, args.successor_sha,
+                        baseline_sha256=proof['source_baseline_sha256'],
+                        inventory_sha256=proof['source_inventory_sha256'],
+                        prior_canary_sha256=proof['source_canary_sha256'])
+                    guard.lineage(view)
+                    guard.file(Path(config['secret_canary_receipt_path']))
+                    source = _current_v5_qualification(database, guard)
+                    backup._validate_spent_pre_census_ctime_origin(q['database'], source['database'])
+                    if any(source[key] != q[key] for key in
+                           ('normalized_schema_digest', 'full_v5_content_digest', 'migration_vector')):
+                        raise MaintenanceError("spent ctime full v5 source differs")
+                    _selected_v5_backup(selected_sha, selected, guard, source['full_v5_content_digest'])
+                    descriptor_path = bundle_path(selected_sha)/'descriptor.json'
+                    descriptor_fd = guard._hold(descriptor_path, directory=False, exact=True)
+                    raw = os.pread(descriptor_fd, _MAX_DOCUMENT_BYTES + 1, 0)
+                    if len(raw) > _MAX_DOCUMENT_BYTES:
+                        raise MaintenanceError("spent ctime selected descriptor exceeds bound")
+                    selected_source = dict(sha=selected_sha,
+                        descriptor_raw_sha256=hashlib.sha256(raw).hexdigest(),
+                        descriptor_sha256=digest(selected), source_backup_sha256=selected['backup_sha256'],
+                        baseline_sha256=selected['baseline_sha256'], inventory_sha256=selected['inventory_sha256'],
+                        prior_canary_sha256=selected['prior_canary_sha256'])
+                    if (q['selected_source'] != selected_source
+                            or q['source_control_config'] != dict(path=str(config_holder.path),
+                                sha256=hashlib.sha256(config_holder.raw).hexdigest())
+                            or q['host'] != dict(runtime_root=str(database.parents[2]), backup_root=str(backup_root),
+                                control_uid=lock.control_uid, control_gid=lock.control_gid)
+                            or q['backup_inventory_sha256'] != digest(inventory([backup_root]))):
+                        raise MaintenanceError("spent ctime Root source commitments differ")
+                    seals = []
+                    for tool in (q['original_tool'], q['recovery_tool']):
+                        seal = _evidence_owner()._verify_pinned_release(
+                            Path(tool['root']), tool['sha'], tool['tree_sha'])
+                        if any(seal.get(key) != tool[field] for key, field in (
+                                ('commit_sha', 'sha'), ('tree_sha', 'tree_sha'),
+                                ('manifest_sha256', 'manifest_sha256'))):
+                            raise MaintenanceError("spent ctime historical tool seal differs")
+                        seals.append(seal)
+                    release = backup._prove_upgrade_release(args.successor_sha)
+                    tool = dict(root=release['release_root'], sha=release['release_sha'],
+                                tree_sha=release['release_tree_sha'], manifest_sha256=release['release_manifest_sha256'])
+                    retained.check(); config_holder.check(); guard.check(); lock.check()
+                    return proof, source, seals, tool
+
+                proof, source, seals, tool = requalify()
+                payload = dict(schema_version=backup.SPENT_PRE_CENSUS_CTIME_RECONCILIATION_SCHEMA,
+                    operation_id=barrier.payload['operation_id'], original_barrier_identity=barrier.identity,
+                    qualification_identity=qualification.identity, spent_continuation_identity=spent.identity,
+                    recovery_tool=tool, database=source['database'], created_at=datetime.now(timezone.utc).isoformat())
+                backup._validate_spent_pre_census_ctime_reconciliation(payload,
+                    barrier_payload=barrier.payload, barrier_identity=barrier.identity,
+                    qualification_payload=q, qualification_identity=qualification.identity,
+                    spent_continuation_payload=spent.payload, spent_continuation_identity=spent.identity)
+                raw = backup._upgrade_receipt_bytes(payload)
+                if len(raw) > 64 * 1024:
+                    raise MaintenanceError("spent ctime reconciliation exceeds bound")
+                destination = database.parent/backup.SPENT_PRE_CENSUS_CTIME_RECONCILIATION_NAME
+                before_names = set(os.listdir(lock.state_fd))
+                fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                             os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+                try:
+                    lock._accept_qualification_creation(destination, before_names)
+                    data = memoryview(raw)
+                    while data:
+                        count = os.write(fd, data)
+                        if count <= 0:
+                            raise MaintenanceError("spent ctime reconciliation write incomplete")
+                        data = data[count:]
+                    os.fchown(fd, _TRUSTED_UID, lock.control_gid); os.fsync(fd)
+                    if requalify() != (proof, source, seals, tool):
+                        raise MaintenanceError("spent ctime source changed before publication")
+                    _spent_ctime_absences(database, own_reconciliation=True)
+                    _require_pre_census_stopped()
+                    retained.check(); guard.check(); lock.check(); config_holder.check()
+                    os.fchmod(fd, 0o440); os.fsync(fd)
+                finally:
+                    os.close(fd)
+                backup._fsync_directory(database.parent)
+                identity = backup._pre_census_artifact_identity(destination,
+                    uid=_TRUSTED_UID, gid=lock.control_gid, mode=0o440)
+                retained.check(); guard.check(); lock.check(); config_holder.check()
+                return dict(action='reconcile-spent-v5-pre-census-ctime',
+                            operation_id=payload['operation_id'], reconciliation_identity=identity)
+
+
 def prepare(args: argparse.Namespace) -> Path:
+    if (getattr(args, 'supersede_unstarted_migration_preparation_sha', None)
+            or getattr(args, 'supersede_installed_unstarted_migration_preparation_sha', None)):
+        return _prepare_migration_preparation_successor(args)
+    if getattr(args, 'expected_installed_parent_control_config_sha256', None):
+        raise MaintenanceError('installed preparation CAS requires its explicit selector')
+    if getattr(args, 'superseded_migration_preparation_descriptor_sha256', None):
+        raise MaintenanceError("prepared parent CAS requires its explicit selector")
+    if getattr(args, 'reconcile_spent_v5_pre_census_ctime', False):
+        result = _issue_spent_pre_census_ctime_reconciliation(args)
+        print(json.dumps(result, sort_keys=True))
+        return result
+    if getattr(args, 'expected_spent_continuation_sha256', None) is not None:
+        raise MaintenanceError("spent intent CAS requires the explicit ctime reconciliation action")
+    if getattr(args, 'qualify_v5_pre_census_continuation', False):
+        result = _issue_pre_census_qualification(args)
+        print(json.dumps(result, sort_keys=True))
+        return result
+    if (getattr(args, 'expected_operation_id', None) is not None
+            or getattr(args, 'expected_barrier_sha256', None) is not None
+            or getattr(args, 'expected_spent_continuation_sha256', None) is not None):
+        raise MaintenanceError("barrier CAS selectors require the explicit qualification action")
     qualify = bool(getattr(args, "qualify_v5_source_only", False))
     v5_to_v7_sha = getattr(args, "supersede_unstarted_preproof_v5_to_v7_sha", None)
     if qualify and v5_to_v7_sha is None:
@@ -3083,7 +4074,7 @@ class Maintenance:
                 guard.file(Path(config['secret_canary_receipt_path']))
                 guard.lineage(selected)
                 self._initialize(sha, expected_digest, config, guard=guard)
-        elif selected['schema_version'] == SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7:
+        elif selected['schema_version'] in _MIGRATION_SCHEMAS:
             # The canonical admission lock is held from the first snapshot
             # through the runmarker and released before normal Service
             # startup; the retained evidence walk never requires it.
@@ -3092,6 +4083,8 @@ class Maintenance:
                     raise MaintenanceError("admission config differs from the qualified Root preimage")
                 with _UnstartedPreproofGuard() as guard, _ServiceAdmissionLock(current_config.value) as lock:
                     guard.tree(bundle_path(sha))
+                    if selected['schema_version'] in _PREPARED_MIGRATION_SCHEMAS:
+                        _prepared_migration_parent(selected, guard=guard)
                     guard.file(Path(config['secret_canary_receipt_path']))
                     guard.lineage(_unstarted_preproof_v5_to_v7_view(selected))
                     self._initialize_v5_to_v7(sha, expected_digest, current_config,
@@ -3106,10 +4099,20 @@ class Maintenance:
         self.bundle = bundle_path(sha)
         self.descriptor = descriptor_for(sha)
         if (self.descriptor is None or digest(self.descriptor) != expected_digest
-                or self.descriptor['schema_version'] != SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7):
+                or self.descriptor['schema_version'] not in _MIGRATION_SCHEMAS):
             raise MaintenanceError("maintenance descriptor schema dispatch changed")
         require_disarmed(config)
         require_stopped()
+        if self.descriptor['schema_version'] in _PREPARED_MIGRATION_SCHEMAS:
+            _prepared_migration_parent(self.descriptor, guard=guard)
+            if sealed_json(self.bundle/'preparing.json') != {'schema_version': self.descriptor['schema_version']}:
+                raise MaintenanceError("prepared successor preparing marker differs")
+        if self.descriptor['schema_version'] == SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR:
+            installed_raw = _installed_preparation_snapshot(self.descriptor, self.bundle, guard=guard)
+            if config_holder.raw != _normal_installed_preparation_config(
+                    installed_raw, sha, observed_raw=config_holder.raw):
+                raise MaintenanceError('installed preparation admission config differs')
+            _require_preparation_install(sha)
         self.database = _quiescent_database(config, lock, guard)
         self.before = sealed_json(self.bundle/"baseline.json")
         self.inventory = sealed_json(self.bundle/"inventory.json")
@@ -3133,8 +4136,7 @@ class Maintenance:
         roots = [Path(config[key]) for key in
                  ('proof_workspace_root', 'worker_runs_root', 'receipts_root', 'backup_root')]
         roots.append(Path(config['runtime_root']).parent.parent/'canary-fixtures')
-        with _evidence_owner().open_v5_to_v7_evidence(
-                Path(config['runtime_root']), _v5_to_v7_tool_release(material)) as initial:
+        with _initial_migration_evidence(self.descriptor, config, material) as initial:
             if (_json_data(initial.material) != material
                     or initial.control_config_bytes != config_holder.raw
                     or _validate_v5_to_v7_material(material)[0]
@@ -3144,11 +4146,15 @@ class Maintenance:
                     or snapshot(Path(initial.source_v5_database), immutable=True)
                     != sealed_json(bundle_path(selected_sha)/'baseline.json')):
                 raise MaintenanceError("maintenance INITIAL evidence drifted")
+            _bind_pre_census_selected(initial, selected_sha, selected, source_control)
             _selected_v5_backup(selected_sha, selected, guard, initial.source_v5_content_digest)
             _v5_to_v7_projection_digests(initial, self.database)
             additions = _v5_to_v7_working_inventory(source_inventory,
                                                     initial.inventory_additions, roots)
-            if additions != self.inventory or inventory(roots) != additions:
+            if (additions != self.inventory or
+                    (not _migration_inventory_matches(initial, additions, roots)
+                     if self.descriptor['schema_version'] in _PREPARED_MIGRATION_SCHEMAS
+                     else inventory(roots) != additions)):
                 raise MaintenanceError("schema upgrade inventory additions drifted")
             validate_prior_carry_binding(self.descriptor)
             _requalify_unstarted_preproof_v5_to_v7(
@@ -3158,6 +4164,16 @@ class Maintenance:
             initial.check()
             lock.check()
             guard.check()
+            if self.descriptor['schema_version'] in _PREPARED_MIGRATION_SCHEMAS:
+                initial.check_prepared_sources()
+                _prepared_migration_parent(self.descriptor, guard=guard)
+            if self.descriptor['schema_version'] == SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR:
+                installed_raw = _installed_preparation_snapshot(self.descriptor, self.bundle, guard=guard)
+                if config_holder.raw != _normal_installed_preparation_config(
+                        installed_raw, sha, observed_raw=config_holder.raw):
+                    raise MaintenanceError('installed preparation config changed before run marker')
+                _require_preparation_install(sha)
+                config_holder.check(); lock.check(); initial.check(); guard.check()
             write_sealed(self.bundle/'run-started.json',
                          {'schema_version': self.descriptor['schema_version'],
                           'descriptor_sha256': digest(self.descriptor)}, public=True)
@@ -3175,7 +4191,7 @@ class Maintenance:
         # a header that flips schema between reads cannot skip its own guard.
         if ((self.descriptor['schema_version'] == SCHEMA_UNSTARTED_PREPROOF)
                 != (guard is not None and not v5_to_v7)
-                or ((self.descriptor['schema_version'] == SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7)
+                or ((self.descriptor['schema_version'] in _MIGRATION_SCHEMAS)
                     != (guard is not None and v5_to_v7))):
             raise MaintenanceError("maintenance descriptor schema dispatch changed")
         validate_prior_carry_binding(self.descriptor)
@@ -3240,16 +4256,31 @@ class Maintenance:
 
     def verify(self, proof_ids: list[str]) -> None:
         verify_preserved(self.before,snapshot(self.database),self.descriptor,proof_ids)
-        verify_inventory(self.inventory)
+        if self.descriptor['schema_version'] in _PREPARED_MIGRATION_SCHEMAS:
+            material = sealed_json(self.bundle/_V5_TO_V7_EVIDENCE_NAME)
+            with _evidence_owner().open_retained_v5_to_v7_evidence(
+                    Path(self.config['runtime_root']), _v5_to_v7_tool_release(material),
+                    pinned_material=material) as retained:
+                if not _migration_inventory_matches(retained, self.inventory):
+                    raise MaintenanceError('preserved artifact changed')
+        else:
+            verify_inventory(self.inventory)
 
     def finish(self, proof_ids: list[str], summary: Path) -> None:
         self.verify(proof_ids)
         _value, raw = summary_document(self.descriptor["successor_sha"])
-        if self.descriptor["schema_version"] == SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7:
+        if self.descriptor["schema_version"] in _MIGRATION_SCHEMAS:
             # The first finish creates the first carry, so it cannot require
             # that nonexistent carry: it proves its own admitted instance and
             # the four real restore receipts before the retained walk.
-            self._finish_v5_to_v7(proof_ids, hashlib.sha256(raw).hexdigest())
+            if self.descriptor['schema_version'] in _PREPARED_MIGRATION_SCHEMAS:
+                with _UnstartedPreproofGuard() as guard:
+                    _prepared_migration_parent(self.descriptor, guard=guard)
+                    if self.descriptor['schema_version'] == SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR:
+                        _installed_preparation_snapshot(self.descriptor, self.bundle, guard=guard)
+                    self._finish_v5_to_v7(proof_ids, hashlib.sha256(raw).hexdigest(), _prepared_guard=guard)
+            else:
+                self._finish_v5_to_v7(proof_ids, hashlib.sha256(raw).hexdigest())
             return
         write_sealed(self.bundle/"carry-forward.json",dict(
             schema_version=self.descriptor["schema_version"],passed=True,baseline_preserved=True,
@@ -3258,7 +4289,7 @@ class Maintenance:
     def _restore_receipts(self) -> dict:
         return _v7_restore_receipts(self.descriptor['successor_sha'])
 
-    def _finish_v5_to_v7(self, proof_ids: list[str], summary_sha256: str) -> None:
+    def _finish_v5_to_v7(self, proof_ids: list[str], summary_sha256: str, *, _prepared_guard=None) -> None:
         """Seal the first restore evidence, then the schema-specific PASS carry.
 
         Every non-circular gate — the admitted instance, run marker,
@@ -3401,10 +4432,22 @@ class Maintenance:
                 retained.check()
                 if _observe() != observed:
                     raise MaintenanceError("postrestore runtime generation changed before sealing")
+                if self.descriptor['schema_version'] in _PREPARED_MIGRATION_SCHEMAS:
+                    if not isinstance(_prepared_guard, _UnstartedPreproofGuard):
+                        raise MaintenanceError("prepared parent custody is not held through finish")
+                    _prepared_migration_parent(self.descriptor, guard=_prepared_guard)
+                    _prepared_guard.check()
+                    if not _migration_inventory_matches(retained, self.inventory):
+                        raise MaintenanceError('preserved artifact changed before finish')
                 write_sealed(restore_path, restore_evidence)
                 retained.check()
                 if _observe() != observed:
                     raise MaintenanceError("postrestore runtime generation changed before carry")
+                if _prepared_guard is not None:
+                    _prepared_migration_parent(self.descriptor, guard=_prepared_guard)
+                    _prepared_guard.check()
+                    if not _migration_inventory_matches(retained, self.inventory):
+                        raise MaintenanceError('preserved artifact changed before carry')
                 write_sealed(self.bundle/"carry-forward.json",dict(
                     schema_version=self.descriptor["schema_version"],passed=True,baseline_preserved=True,
                     descriptor_sha256=digest(self.descriptor),
@@ -3435,14 +4478,34 @@ def main() -> int:
                         help="Retire one installed unstarted supersede_preproof_v1 preparation on unchanged schema v5; never replay its acceptance.")
     parser.add_argument("--supersede-unstarted-preproof-v5-to-v7-sha",
                         help="Retire one installed unstarted supersede_preproof_v1 preparation whose source release completed the offline v5->v6->v7 transitions; never relabel or replay its acceptance.")
+    parser.add_argument("--supersede-unstarted-migration-preparation-sha",
+                        help="Retarget one intact unstarted migration-aware preparation while its original v5 config remains selected; never replay migrations.")
+    parser.add_argument("--supersede-installed-unstarted-migration-preparation-sha",
+                        help="Supersede one exact normally installed but unstarted migration preparation; no migration or PASS credit.")
+    parser.add_argument("--expected-installed-parent-control-config-sha256",
+                        help="Mandatory current raw config CAS for the installed preparation mode only.")
+    parser.add_argument("--superseded-migration-preparation-descriptor-sha256",
+                        help="Exact canonical digest of that immutable prepared parent.")
     parser.add_argument("--qualify-v5-source-only", action="store_true",
                         help="Read-only v5 source qualification paired only with --supersede-unstarted-preproof-v5-to-v7-sha; writes nothing and grants no write authority.")
+    parser.add_argument("--qualify-v5-pre-census-continuation", action="store_true",
+                        help="Issue one control-readable Root safe-present qualification for the retained original pre-census operation; never migrate, clear its barrier or issue a successor descriptor.")
+    parser.add_argument("--reconcile-spent-v5-pre-census-ctime", action="store_true",
+                        help="Issue one fixed fresh ctime-only same-operation reconciliation; never replay the spent continuation or checkpoint.")
+    parser.add_argument("--expected-spent-continuation-sha256",
+                        help="Optional CAS against the immutable spent Control continuation.")
+    parser.add_argument("--expected-operation-id",
+                        help="Optional CAS comparison against the actual retained barrier UUID.")
+    parser.add_argument("--expected-barrier-sha256",
+                        help="Optional CAS comparison against the actual retained barrier bytes.")
     parser.add_argument("--superseded-descriptor-sha256",
                         help="Exact selected V2 descriptor digest; predecessor remains its accepted ancestor.")
     args = parser.parse_args()
     try:
         bundle = prepare(args)
-        if getattr(args, "qualify_v5_source_only", False):
+        if (getattr(args, "qualify_v5_source_only", False)
+                or getattr(args, "qualify_v5_pre_census_continuation", False)
+                or getattr(args, "reconcile_spent_v5_pre_census_ctime", False)):
             return 0
         descriptor = descriptor_for(args.successor_sha)
         print(json.dumps({"bundle":str(bundle),"descriptor_sha256":digest(descriptor)}))
