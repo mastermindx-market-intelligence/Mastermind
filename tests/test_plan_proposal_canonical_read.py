@@ -111,10 +111,48 @@ def test_either_permission_missing_cannot_select_future_data(ready,permission):
 def test_changed_permission_stamp_invalidates_existing_view(ready,change):
  f=ready;view=f.observe();setattr(f.state,change,'f'*64)
  with pytest.raises(CanonicalDataUnavailable):view.check()
-@pytest.mark.parametrize('path',['scripts/agentos.py','config/new-config.yml','agentos/schemas/new-schema.yml','unexpected.md'])
-def test_any_non_data_tree_change_refuses_without_executing_new_code(ready,path):
+@pytest.mark.parametrize('path',['scripts/agentos.py','config/mastermind_programs.yml','agentos/schema/new-schema.yml'])
+def test_fixed_executed_reader_closure_change_refuses_without_executing_new_code(ready,path):
  f=ready;target=f.env.seed/path;target.parent.mkdir(parents=True,exist_ok=True);target.write_text('raise AssertionError("must never execute")\n');old.git(f.env.seed,'add',path);old.git(f.env.seed,'commit','-m','Unqualified source change');old.git(f.env.seed,'push','origin','main')
  with pytest.raises(CanonicalDataUnavailable):f.observe()
+@pytest.mark.parametrize('path',['config/new-config.yml','agentos/schemas/new-schema.yml','unexpected.md'])
+def test_unrelated_default_movement_requires_actual_unchanged_selected_data_and_pinned_reader(ready,path,monkeypatch):
+ # Accepted4e0 continuity law permits unrelated canonical movement only when
+ # the actual selected reader inputs remain equal at C and N. These files
+ # are outside the fixed executable closure; they never become CODE.
+ f=ready;before=f.observe().read_plan(work_ref=f.work)
+ target=f.env.seed/path;target.parent.mkdir(parents=True,exist_ok=True)
+ target.write_text('raise AssertionError("must never execute")\n')
+ old.git(f.env.seed,'add',path);old.git(f.env.seed,'commit','-m','Unrelated canonical movement');old.git(f.env.seed,'push','origin','main')
+ canonical=old.rev_parse(f.env.seed,'HEAD');calls=[]
+ from control_plane import agentos_project_plan
+ actual=agentos_project_plan.bounded_subprocess_runner
+ def observe(argv,**kw):calls.append(argv);return actual(argv,**kw)
+ monkeypatch.setattr(agentos_project_plan,'bounded_subprocess_runner',observe)
+ view=f.observe();body=view.read_plan(work_ref=f.work);witness=view.witness()
+ assert view.code_commit==f.base and view.data_commit==canonical!=f.base
+ assert body['plan']==before['plan']
+ # Reader-generated source labels identify N; immutable historical source
+ # labels stay exact. Compare every other continuity value and source byte
+ # digest, never erase original baseline identity or publication facts.
+ def configured_labels(value):
+  if type(value) is list:return [configured_labels(item) for item in value]
+  if type(value) is dict:
+   if set(value)=={'repository','commit','path','content_sha256'} and value['commit']==canonical:
+    return {**value,'commit':f.base}
+   return {key:configured_labels(item) for key,item in value.items()}
+  return value
+ assert configured_labels(body['continuity'])==before['continuity']
+ assert witness['source_operation'] is None and witness['publication_recorded_at_ms'] is None
+ assert witness['data_continuity']['executable_macro_commit']==f.base
+ assert witness['data_continuity']['canonical_data_commit']==canonical
+ assert body['source']['commit']==canonical and body['source']['content_sha256']==before['source']['content_sha256']
+ assert calls and any(f.base+':scripts/agentos.py' in argv for argv in calls)
+ for argv in calls:
+  assert not any(type(arg) is str and arg.endswith(':'+path) for arg in argv)
+  for arg in argv:
+   if type(arg) is str and arg.endswith((':scripts/agentos.py',':scripts/agentos_project_plan_contract.py')):assert arg.startswith(f.base+':')
+
 def test_changed_recipe_or_foreign_permit_does_not_publish(ready):
  f=ready;before=old.snapshot(f.env.clone);changed=deepcopy(f.recipe);changed['edits'][0]['content_utf8']+='changed'
  assert f.publisher.publish_plan_proposal(f.request,changed,old.AUTHORIZED_PRINCIPAL,claim=f.state.permit)['state']=='CONFLICT'
