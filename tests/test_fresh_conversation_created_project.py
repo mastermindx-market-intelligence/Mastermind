@@ -90,6 +90,17 @@ def test_signed_created_n_preview_measures_complete_preeffect_callgraph(joined,t
             finally:timings.append(round(time.monotonic()-start,3))
         monkeypatch.setattr(service._fixture_fresh_owner,'_project',measured)
         try:
+            from control_plane.fresh_conversation_membership import _project_validation_phase
+            proof_principal=neutral_principal_projection(**dataclasses.asdict(j['args']['principal']))
+            with _project_validation_phase(service._fixture_fresh_owner,proof_principal,workspace,request['work_ref']):
+                snapshot=reader.cache.snapshot();copied_owner=copy.copy(snapshot.owner)
+                assert copied_owner is not snapshot.owner and copied_owner==snapshot.owner
+                with monkeypatch.context() as m:
+                    m.setattr(reader.cache,'snapshot',lambda:dataclasses.replace(snapshot,owner=copied_owner))
+                    with pytest.raises(ValueError):service._fixture_fresh_owner._project(proof_principal,workspace,request['work_ref'])
+                with pytest.raises(ValueError):service._fixture_fresh_owner._project(dataclasses.replace(proof_principal),workspace,request['work_ref'])
+                with pytest.raises(ValueError):service._fixture_fresh_owner._project(proof_principal,dataclasses.replace(workspace),request['work_ref'])
+            timings.clear();acquisitions.clear()
             code,prepared=await post(app,'preview',request,token,wt)
             print('actual_preeffect_membership_calls',len(timings),'seconds',timings)
             assert code==200 and prepared['ok'],prepared

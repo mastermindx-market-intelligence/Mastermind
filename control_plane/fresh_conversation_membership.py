@@ -108,7 +108,8 @@ def read_canonical_membership(reader, principal_frame, *, work_ref, snapshot, ow
                     or phase.reader is not reader or phase.binding is not binding
                     or phase.frame_digest != wire.canonical_digest(principal_frame)
                     or phase.snapshot_digest != wire.canonical_digest(snapshot.document)
-                    or phase.snapshot_identity != (snapshot.owner, snapshot.instance, snapshot.publication)
+                    or phase.snapshot_identity[0] is not snapshot.owner
+                    or phase.snapshot_identity[1:] != (snapshot.instance, snapshot.publication)
                     or not _binding_current(binding)):
                 raise ValueError("CONVERSATION_PROJECT_CHANGED")
             phase.view.check()
