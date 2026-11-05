@@ -47,6 +47,10 @@ def _preview(body, request, scope):
     if selected["action"] in {"add_project_file", "set_project_communication_preference"}:
         _knowledge_preview(body["preview"], request["request"], selected, scope)
         return body
+    if selected["action"] == "ADOPT_PLAN":
+        from integrations.mastermind_workspace_app.project_plan_adoption_preview import validate_plan_adoption_preview
+        validate_plan_adoption_preview(body["preview"], request["request"], selected)
+        return body
     preview = body["preview"]
     if (selected["action"] != "publish_project_proposal" or type(preview) is not dict
             or set(preview) != {"schema", "state", "work_ref", "source_commit", "canonical_path", "content_sha256", "goal", "profile"}
