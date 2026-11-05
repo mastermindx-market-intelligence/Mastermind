@@ -544,7 +544,17 @@ def validate_response(raw,request):
     if 'errno' in report and not (report['errno'] is None or type(report['errno']) is int and 0<report['errno']<=65535):
         raise ValueError('observation_errno_shape')
     if 'request_stopped' in report and report['request_stopped'] is not True:raise ValueError('observation_stop_shape')
-    if 'directory_diagnostic' in report and (report.get('request_stopped') is not True or not _directory_diagnostic(report['directory_diagnostic']) or report['directory_diagnostic']['kind']!='unknown' or report['directory_diagnostic']['errno']!=report.get('errno') or report.get('reason') not in ('os_permission_denied','filesystem_unavailable')):raise ValueError('observation_directory_shape')
+    if 'directory_diagnostic' in report:
+        diagnostic=report['directory_diagnostic']
+        if not _directory_diagnostic(diagnostic) or report['status']!='unavailable':
+            raise ValueError('observation_directory_shape')
+        if diagnostic['kind']=='unknown':
+            if (report.get('request_stopped') is not True or diagnostic['errno']!=report.get('errno')
+                    or report.get('reason') not in ('os_permission_denied','filesystem_unavailable')):
+                raise ValueError('observation_directory_shape')
+        elif (report.get('reason')!='directory_owner_mode_or_type'
+                or 'errno' in report or 'request_stopped' in report):
+            raise ValueError('observation_directory_shape')
     if 'observed_at' in report:
         from run_observation import timestamp
         timestamp(report['observed_at'])

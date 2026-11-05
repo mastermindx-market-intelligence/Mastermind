@@ -615,3 +615,49 @@ def test_missing_fixed_directory_actual_reader_response_roundtrips_without_outer
                     dict(row,directory_diagnostic=dict(row['directory_diagnostic'],errno=None))]:
             with pytest.raises(ValueError):
                 candidate.validate_response(wire(dict(report,observations={'process_receipt':bad})),request)
+
+
+@pytest.mark.parametrize('packet_entry',[False,True])
+def test_actual_packet_and_support_directory_failures_keep_distinct_wire_categories(packet_entry):
+    module=load('fixed_directory_packet_entry_reader',_READER_PATHS[0])
+    request=dict(run_id='synthetic-run',support_digest='a'*64)
+    artifact=dict(packet_sha256='b'*64,
+        support_files={name:'c'*64 for name in module.ARTIFACT_SUPPORT_FILES},
+        contract=dict(schema='mastermind.fabric_artifact_production.v1',root='synthetic-root',
+            parent='synthetic-parent',run_id=request['run_id'],names=['patch.diff'],
+            body_sha256='d'*64,support_digest=request['support_digest']))
+    def observe(reader):
+        with mock.patch.object(module,'Reader',return_value=contextlib.nullcontext(reader)), \
+             mock.patch.object(module,'marker') as marker, \
+             mock.patch.object(module,'rc_file') as rc, \
+             mock.patch.object(module,'stdout_metadata') as stdout, \
+             mock.patch.object(module,'process_receipt') as receipt:
+            report=module.observe(request['run_id'],request['support_digest'],
+                                  artifact=artifact if packet_entry else None)
+        assert marker.call_count==rc.call_count==stdout.call_count==receipt.call_count==0
+        return report
+    # Actual artifact_packet or support -> actual Reader -> fstat mode guard.
+    # Both stop at the common first fixed directory, before packet/manifest bytes.
+    report=_fixed_reader_failure(module,'lanes','mode',observer=observe)
+    assert report['status']=='unavailable'
+    assert 'errno' not in report and 'request_stopped' not in report
+    if packet_entry:
+        assert report['reason']=='directory_owner_mode_or_type'
+        assert report['observations']=={}
+        assert report['directory_diagnostic']['component']=='lanes'
+    else:
+        assert report['reason']=='original_support_unverified'
+        assert 'directory_diagnostic' not in report
+        assert report['observations']['support']['reason']=='directory_owner_mode_or_type'
+        assert report['observations']['support']['directory_diagnostic']['component']=='lanes'
+    def wire(value):
+        return json.dumps(dict(schema=candidate.SCHEMA,
+            request_sha256=candidate.delivery.digest(candidate.reader.canonical(request)),report=value)).encode()
+    candidate.delivery.digest=lambda raw:hashlib.sha256(raw).hexdigest()
+    with mock.patch.object(candidate,'validate_request'), \
+         mock.patch.dict(sys.modules,{'run_observation':module}):
+        assert candidate.validate_response(wire(report),request)==report
+        if packet_entry:
+            for bad in [dict(report,status='observed'),dict(report,request_stopped=True),
+                        dict(report,reason='os_permission_denied',errno=errno.EACCES)]:
+                with pytest.raises(ValueError):candidate.validate_response(wire(bad),request)

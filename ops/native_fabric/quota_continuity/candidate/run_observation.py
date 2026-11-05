@@ -625,6 +625,7 @@ def observe(run_id, expected_support_digest, *, observe_pid=False, artifact=None
         _retain_directory_failure(report, exc)
     except (Invalid, KeyError) as exc:
         report["reason"] = str(exc) if isinstance(exc, Invalid) else "account_home_unavailable"
+        _retain_directory_failure(report, exc)
     report["observed_at"] = datetime.fromtimestamp(now, timezone.utc).isoformat()
     return report
 
@@ -667,6 +668,7 @@ def observe_reserved(run_id):
         _retain_directory_failure(report, exc)
     except (Invalid, KeyError) as exc:
         report["reason"] = str(exc) if isinstance(exc, Invalid) else "account_home_unavailable"
+        _retain_directory_failure(report, exc)
     report["observed_at"] = datetime.fromtimestamp(now, timezone.utc).isoformat()
     return report
 
