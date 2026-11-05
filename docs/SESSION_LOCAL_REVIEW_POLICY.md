@@ -1,6 +1,6 @@
 # Session-owned reviews across ChatGPT Web, Codex, Claude and Fabric
 
-**Status:** This session-local guide entered protected Mastermind in #2026. Its Chairman-directed all-tier clarification was protected-accepted in #2048. The additional #2030 composition remains a SOURCE CANDIDATE until its own protected merge; repository text alone does not install ChatGPT Project settings, native Codex/Claude instructions or an automatic GitHub review host.
+**Status:** This session-local guide entered protected Mastermind in #2026. Its Chairman-directed all-tier clarification was protected-accepted in #2048. The additional #2030 composition protected-merged as 68e3b816c95930f6996dbcc10403a6ad694e6889; repository text alone does not install ChatGPT Project settings or activate the default-OFF automatic GitHub review host. The original eight-online-host native file installation is documented separately in #917 and does not prove fresh model consumption.
 
 **Intent:** Assigned attended CEO Web sessions complete source work without a mandatory different-chat, Fabric, Dot, native-child or extra internal GitHub review handoff for FAST, STANDARD **or CRITICAL**. Higher source risk raises test, security and real-path proof requirements, not a universal reviewer count. A qualified in-session native child is available when genuinely useful or independently mandated, not an automatic prerequisite. This waiver does not override real GitHub/CODEOWNERS approvals, held releases, no-self-approval/merge, exact-head CI or native security rules.
 
