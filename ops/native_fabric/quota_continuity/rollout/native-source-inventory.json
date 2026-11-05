@@ -294,9 +294,9 @@
       "source": "candidate/lane_runtime.py"
     },
     "ext/lease_broker.py": {
-      "bytes": 73321,
+      "bytes": 74098,
       "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
-      "sha256": "a2847a29abe590cb168c2cd8ae34e0b1c3222b6e92ab4c00f252a342d56e6406",
+      "sha256": "598d9b905b71897275a0617d143f3280bc802fbd6c375bed9848d222564e1488",
       "source": "candidate/lease_broker.py"
     },
     "ext/linux_process_identity.py": {
