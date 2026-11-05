@@ -115,6 +115,18 @@ def test_signed_created_n_preview_measures_complete_preeffect_callgraph(joined,t
             assert code==200 and created['ok'] and created['data']['state']=='CREATED',created
             assert runtime is j['runtime'] and len(runtime.jobs.list_jobs())==2 and len(runtime.attempts.list_attempts())==1
             assert adapters[0].begin_turn_calls==1
+            from common.executive_workspace_contract import FRAME_SCHEMA,FRAME_SCHEMA_V2,PRINCIPAL_KEYS
+            from common import workspace_project_plan_contract as plan_wire
+            raw_workspace={key:calls[-1]['workspace_principal'][key] for key in PRINCIPAL_KEYS}
+            before_context_readers=runtime.events.list_events()
+            programs=await reader.handle_frame(dict(schema=FRAME_SCHEMA,operation='programs',selection=None,principal=raw_workspace))
+            selected_project=await reader.handle_frame(dict(schema=plan_wire.FRAME_SCHEMA,operation=plan_wire.OPERATION,
+                selection={'work_ref':request['work_ref']},principal=raw_workspace))
+            mission=await reader.handle_frame(dict(schema=FRAME_SCHEMA_V2,operation='mission_v3',
+                selection={key:created['data']['locator'][key] for key in ('work_ref','root_job_id')},principal=raw_workspace))
+            assert runtime.events.list_events()==before_context_readers
+            # Export exact actual current read responses, including unavailable
+            # catalogue/Mission context. Never invent a new C row or title.
             from control_plane.fresh_conversation import FreshConversationOwner
             principal=neutral_principal_projection(**{**calls[-1]['principal'],'scopes':tuple(calls[-1]['principal']['scopes'])})
             expected=(principal.policy_id,principal.issuer_digest,principal.resource)
@@ -161,6 +173,7 @@ def test_signed_created_n_preview_measures_complete_preeffect_callgraph(joined,t
                     json.dump(dict(schema='mastermind.s34.created_n_recovered_turn_fixture.v1',
                         source_revision=os.environ['S34_SOURCE_REVISION'],project_source=j['status'],
                         code_commit=j['code'],data_commit=j['current'],request=request,preview=prepared,create=created,
+                        programs=programs,selected_project=selected_project,mission=mission,
                         catalogue=catalogue,initial_read=initial,consume_request=consume,lost_consume=lost,
                         consume_status=recovered,turn_preview=ready,turn_request=turn_request,turn=second,
                         status=status,turn_read=read,duplicate=duplicate,archived_read=archived,

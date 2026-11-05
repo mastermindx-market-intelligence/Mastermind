@@ -191,6 +191,13 @@ class ForegroundOperation:
 
     def require_root(self, root_id):
         """Recheck this fresh source before the incumbent canonical claim."""
+        from control_plane.fresh_conversation_admission import _fresh_root_validation_scope
+        # Optional exact private Fresh issuance only. Generic/C2 stays strict;
+        # the scope owns no claim/Event/provider effect and ends before return.
+        with _fresh_root_validation_scope(self):
+            return self._require_root_current(root_id)
+
+    def _require_root_current(self, root_id):
         self._require_live()
         if self._root is None or root_id != self._root:
             raise ForegroundOperationRefusal("root_unbound", "the exact fresh admitted root is required")

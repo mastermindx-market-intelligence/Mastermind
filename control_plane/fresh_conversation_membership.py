@@ -7,7 +7,8 @@ FreshConversationOwner and its incumbent Runtime/foreground owners.
 from common import fresh_conversation_contract as wire
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+import time
 
 _PHASE = ContextVar("fresh_project_validation_phase", default=None)
 _SEAL = object()
@@ -20,19 +21,41 @@ class _ProjectReadPhase:
     principal: object
     workspace: object
     work_ref: str
+    foreground: object = None
     view: object = None
     reader: object = None
     binding: object = None
     frame_digest: object = None
     snapshot_digest: object = None
     snapshot_identity: object = None
+    project_digest: object = None
     material: object = None
     capture: object = None
     active: bool = False
 
 
+def _require_phase_liveness(owner, principal, workspace, foreground, *, deadline=None):
+    """Cheap final authority fence after blocking canonical postchecks.
+
+    This reads current state/windows only; it cannot renew or reuse a closed
+    DATA observation, and deliberately performs no new full acquisition.
+    """
+    from control_plane.foreground_operation import _ACTIVE, ForegroundOperation
+    owner._current(principal)
+    now = time.time()
+    if (not principal.issued_at <= now < principal.expires_at
+            or not workspace.issued_at <= now < workspace.expires_at
+            or (deadline is not None and time.monotonic() >= deadline)):
+        raise ValueError("CONVERSATION_PROJECT_UNAVAILABLE")
+    if foreground is not None and (type(foreground) is not ForegroundOperation
+            or _ACTIVE.get() is not foreground or foreground._closed
+            or foreground._runtime is not owner._runtime
+            or asdict(foreground._principal) != asdict(principal)):
+        raise ValueError("CONVERSATION_REQUEST_CLOSED")
+
+
 @contextmanager
-def _project_validation_phase(owner, principal, workspace, work_ref):
+def _project_validation_phase(owner, principal, workspace, work_ref, *, expected_project_sha256=None):
     """Synchronous pure current() only; it closes before any owner effect.
 
     One exact issued canonical observation supplies repeated nested host/live
@@ -42,22 +65,31 @@ def _project_validation_phase(owner, principal, workspace, work_ref):
     from control_plane.fresh_conversation import FreshConversationOwner
     if type(owner) is not FreshConversationOwner:
         raise ValueError("CONVERSATION_PROJECT_UNAVAILABLE")
+    from control_plane.foreground_operation import _ACTIVE
+    foreground = _ACTIVE.get()
+    _require_phase_liveness(owner, principal, workspace, foreground)
     parent = _PHASE.get()
     if parent is not None:
         if (parent.seal is not _SEAL or parent.owner is not owner
                 or parent.principal is not principal or parent.workspace is not workspace
                 or parent.work_ref != work_ref or not parent.active
+                or (expected_project_sha256 is not None and parent.project_digest != expected_project_sha256)
                 or getattr(owner, "_project_validation_phase", None) is not parent):
             raise ValueError("CONVERSATION_PROJECT_UNAVAILABLE")
         parent.view.check()
         yield
         parent.view.check()
+        _require_phase_liveness(owner, principal, workspace, parent.foreground,
+            deadline=parent.capture.operation.read_deadline)
         return
-    phase = _ProjectReadPhase(_SEAL, owner, principal, workspace, work_ref)
+    phase = _ProjectReadPhase(_SEAL, owner, principal, workspace, work_ref, foreground)
     token = _PHASE.set(phase)
     owner._project_validation_phase = phase
     try:
-        owner._project(principal, workspace, work_ref)
+        observed = owner._project(principal, workspace, work_ref)
+        phase.project_digest = wire.canonical_digest(observed)
+        if expected_project_sha256 is not None and phase.project_digest != expected_project_sha256:
+            raise ValueError("CONVERSATION_PROJECT_CHANGED")
         if phase.view is None:
             raise ValueError("CONVERSATION_PROJECT_UNAVAILABLE")
         with phase.view.capture_scope() as capture:
@@ -66,6 +98,11 @@ def _project_validation_phase(owner, principal, workspace, work_ref):
                 yield
             finally:
                 phase.active = False
+        # The Macro full-post may block AFTER the body's final ForeOp check.
+        # Rejoin the actual current invocation/identity and both windows only
+        # after it finishes; no expired or closed authority may escape.
+        _require_phase_liveness(owner, principal, workspace, foreground,
+            deadline=phase.capture.operation.read_deadline)
     finally:
         phase.active = False
         phase.capture = phase.view = phase.material = None

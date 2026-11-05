@@ -4,7 +4,9 @@ No DB schema, registry, grant, target, session or lifecycle is added. A nominal
 live source is required to label a fresh root; serialized metadata only fences
 autonomy. Every actual initial write still needs its original ForegroundOperation.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+from contextlib import contextmanager, nullcontext
+import time
 import json
 import re
 
@@ -39,6 +41,8 @@ class FreshConversationCreationSource:
     _material: bytes
     _guard: object
     _public_operation_key: str
+    _project_principal: object = None
+    _workspace_principal: object = None
 
     def __post_init__(self):
         from control_plane.fresh_conversation import FreshConversationOwner
@@ -52,6 +56,16 @@ class FreshConversationCreationSource:
         return validate_restriction(json.loads(self._material))
 
     def check(self):
+        # Current-C/default callers retain the incumbent strict path. Only the
+        # original host-issued canonical-N source may share this pure body.
+        # Every check remains fresh; the full original15s source bracket ends
+        # before its caller can insert a Root Event or perform another effect.
+        if self._project_principal is None and self._workspace_principal is None:
+            return self._check_current()
+        with self._root_validation_scope(self._operation):
+            return self._check_current()
+
+    def _check_current(self):
         material = self.material()
         operation = self._operation
         issued = getattr(operation, "_fresh_conversation_creation_source", None)
@@ -75,6 +89,49 @@ class FreshConversationCreationSource:
             raise ValueError("FRESH_CONVERSATION_ORIGINAL_KEY_CHANGED")
         operation._require_live()
 
+    def _require_root_validation_issuer(self, operation):
+        # This checks the actual issuance/foreground identity without calling
+        # check()/require_root()/host_current while issuing its read view.
+        # The original two live/root checks still execute inside the bracket.
+        from control_plane.foreground_operation import _ACTIVE, ForegroundOperation
+        from control_plane.fresh_conversation import FreshConversationOwner
+        material = self.material()
+        issued = getattr(operation, "_fresh_conversation_creation_source", None)
+        owner_issued = getattr(self._issuer, "_root_validation_source", None)
+        if (self._seal is not _SEAL or type(operation) is not ForegroundOperation
+                or operation is not self._operation or _ACTIVE.get() is not operation
+                or operation._closed or type(self._issuer) is not FreshConversationOwner
+                or operation._runtime is not self._issuer._runtime
+                or type(issued) is not tuple or len(issued) != 2 or issued[0] is not self
+                or issued[1] != canonical_digest(material)
+                or type(owner_issued) is not tuple or len(owner_issued) != 2
+                or owner_issued[0] is not operation or owner_issued[1] is not self
+                or operation._command != material["command_id"]
+                or operation._arguments_sha256 != material["arguments_sha256"]
+                or operation._principal.expires_at != material["principal_expires_at"]
+                or not operation._principal.issued_at <= time.time() < operation._principal.expires_at):
+            raise ValueError("FRESH_CONVERSATION_SOURCE_CHANGED")
+        return material
+
+    @contextmanager
+    def _root_validation_scope(self, operation):
+        material = self._require_root_validation_issuer(operation)
+        p, workspace = self._project_principal, self._workspace_principal
+        if p is None and workspace is None:
+            # Current-C and legacy initial admission preserve strict behavior.
+            yield
+            self._require_root_validation_issuer(operation)
+            return
+        from control_plane.principal_projection import NeutralPrincipalProjection
+        if (type(p) is not NeutralPrincipalProjection or type(workspace) is not NeutralPrincipalProjection
+                or asdict(p) != asdict(operation._principal)):
+            raise ValueError("FRESH_CONVERSATION_SOURCE_CHANGED")
+        from control_plane.fresh_conversation_membership import _project_validation_phase
+        with _project_validation_phase(self._issuer, p, workspace, material["work_ref"],
+                expected_project_sha256=material["project_sha256"]):
+            yield
+            self._require_root_validation_issuer(operation)
+
     def public_operation_key(self):
         self.check()
         return self._public_operation_key
@@ -90,13 +147,16 @@ class FreshConversationCreationSource:
             raise ValueError("FRESH_CONVERSATION_SOURCE_MISMATCH")
 
 
-def _issue_creation_source(issuer, operation, material, guard, *, public_operation_key):
+def _issue_creation_source(issuer, operation, material, guard, *, public_operation_key,
+        project_principal=None, workspace_principal=None):
     material = validate_restriction(material)
     source = FreshConversationCreationSource(_SEAL, issuer, operation,
-        json.dumps(material, sort_keys=True, separators=(",", ":")).encode(), guard, public_operation_key)
+        json.dumps(material, sort_keys=True, separators=(",", ":")).encode(), guard, public_operation_key,
+        project_principal, workspace_principal)
     if getattr(operation, "_fresh_conversation_creation_source", None) is not None:
         raise ValueError("FRESH_CONVERSATION_SOURCE_ALREADY_ISSUED")
     operation._fresh_conversation_creation_source = (source, canonical_digest(material))
+    issuer._root_validation_source = (operation, source)
     source.check()
     return source
 
@@ -172,3 +232,12 @@ def require_initial_native_claim(store, *, root_job_id, role, profile):
         return None
     from control_plane.foreground_operation import _current_foreground_operation_or_none
     return require_original_creation_request(store, root, _current_foreground_operation_or_none())
+
+
+def _fresh_root_validation_scope(operation):
+    issued = getattr(operation, "_fresh_conversation_creation_source", None)
+    if issued is None:
+        return nullcontext()
+    if type(issued) is not tuple or len(issued) != 2 or type(issued[0]) is not FreshConversationCreationSource:
+        raise ValueError("FRESH_CONVERSATION_SOURCE_REQUIRED")
+    return issued[0]._root_validation_scope(operation)

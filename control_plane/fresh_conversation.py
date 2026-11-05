@@ -329,7 +329,9 @@ class FreshConversationOwner:
                 dialogue_source_sha256=wire.canonical_digest(material["source"]),
                 host_binding_sha256=wire.canonical_digest(material["binding"]),
                 principal_expires_at=principal.expires_at), current,
-                public_operation_key=request["operation_key"])
+                public_operation_key=request["operation_key"],
+                project_principal=principal if "canonical_membership" in material["project"] else None,
+                workspace_principal=workspace_principal if "canonical_membership" in material["project"] else None)
 
         entered = False
         try:
