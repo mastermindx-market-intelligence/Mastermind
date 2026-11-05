@@ -1,0 +1,446 @@
+// @vitest-environment jsdom
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { App } from "./App";
+import type { AuthState } from "./host";
+import { controlRoomFixture, missionFixture } from "./test-fixtures";
+import type {
+  CommandIntent,
+  EffectReceipt,
+  OperationPointer,
+  OwnerContext,
+  PendingPointerStore,
+} from "./orchestration/operation-controller";
+import type { OrchestratorCommandBinding } from "./orchestration/host-command-bindings";
+
+const invoke = vi.fn().mockResolvedValue({
+  version: "0.1.0",
+  source_revision: "a".repeat(40),
+  build_identity: "test-build",
+  transport: "UNCONFIGURED",
+  state: "BUILT_NOT_PROVEN",
+});
+vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invoke(...args) }));
+
+const DIRECTION = "Ship the bounded launch slice.";
+const MANIFEST = {
+  v: 1,
+  workstream: "WS:ALPHA",
+  priority: 0,
+  projects: [{ ref: "alpha-project", label: "Alpha project" }],
+  profiles: [{ ref: "research_only", label: "Research only" }],
+};
+
+function installHost(options: {
+  ctx?: OwnerContext | null;
+  projects?: { ref: string; label: string }[];
+  profiles?: { ref: string; label: string }[];
+  submit?: (pointer: OperationPointer, intent: CommandIntent) => Promise<EffectReceipt>;
+} = {}) {
+  let ctx: OwnerContext | null = options.ctx ?? { principalScope: "owner-a", generation: "gen-1" };
+  let auth: AuthState = { status: "signed_in", reason: null, acquisition: true, content: true };
+  let listener = (_state: AuthState) => {};
+  const data = new Map<string, OperationPointer>();
+  const store: PendingPointerStore = {
+    read: scope => data.get(scope) ?? null,
+    reserve: (scope, value) => {
+      const saved = data.get(scope);
+      if (saved) return { reserved: false, pointer: saved };
+      data.set(scope, value);
+      return { reserved: true };
+    },
+    clearIfEqual: (scope, value) => {
+      const saved = data.get(scope);
+      if (!saved || saved.operationKey !== value.operationKey ||
+          saved.kind !== value.kind || saved.targetKey !== value.targetKey) return false;
+      data.delete(scope);
+      return true;
+    },
+  };
+  const prepare = vi.fn((intent: CommandIntent): OperationPointer => ({
+    operationKey: `op-${prepare.mock.calls.length + 1}`,
+    kind: intent.kind,
+    targetKey: intent.targetKey,
+  }));
+  const submit = vi.fn(options.submit ?? (async (pointer: OperationPointer): Promise<EffectReceipt> => ({
+    ...pointer,
+    disposition: "accepted",
+  })));
+  const readOperation = vi.fn(async (pointer: OperationPointer): Promise<EffectReceipt> => ({
+    ...pointer,
+    disposition: "accepted",
+  }));
+  const binding: OrchestratorCommandBinding = {
+    port: { context: () => ctx, prepare, submit, readOperation },
+    store,
+    getView: () => ({
+      projects: options.projects ?? [{ ref: "alpha-project", label: "Alpha project" }],
+      profiles: options.profiles ?? [{ ref: "research_only", label: "Research only" }],
+      session: null,
+    }),
+    subscribe: () => () => {},
+    // The existing owner maps the launch form onto its own payload. It never
+    // carries a session reference and never derives one from the form.
+    makeLaunchIntent: form => ({
+      kind: "launch",
+      targetKey: "WS:ALPHA",
+      payload: {
+        objective: form.goal,
+        department: form.projectRef,
+        execution_profile: form.profileRef,
+        workstream: "WS:ALPHA",
+        ...(form.frontierModelAlias !== undefined
+          ? { frontier_model_alias: form.frontierModelAlias }
+          : {}),
+      },
+    }),
+    makeMessageIntent: () => null,
+    makeStopIntent: () => null,
+  };
+  window.MastermindMissionHost = {
+    selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
+    readPrograms: async () => controlRoomFixture(),
+    readMission: async ({ workRef, rootJobId }) => missionFixture(workRef, rootJobId),
+    commandBinding: binding,
+    auth: {
+      getState: () => auth,
+      subscribe: fn => { listener = fn; return () => {}; },
+      signIn: async () => {},
+      signOut: async () => {},
+    },
+  };
+  return {
+    binding,
+    prepare,
+    submit,
+    readOperation,
+    store,
+    notify: (state: AuthState) => { auth = state; listener(state); },
+    setCtx: (next: OwnerContext | null) => { ctx = next; },
+  };
+}
+
+beforeEach(() => {
+  history.replaceState(null, "", "/os/");
+  delete window.MastermindMissionHost;
+  vi.stubEnv("VITE_MM_LAUNCH_CONFIG", JSON.stringify(MANIFEST));
+});
+afterEach(() => {
+  cleanup();
+  delete window.MastermindMissionHost;
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
+
+/** The Meta-CEO route, with its own source reads already settled. */
+async function openOffice(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
+  await screen.findByRole("region", { name: "Meta-CEO office" });
+  await waitFor(() => {
+    const sources = screen.getByRole("region", { name: "Source qualification" });
+    // The Mission read has landed; the frozen preview must not be raced by a
+    // source revision that arrives after it.
+    expect(sources.textContent).not.toContain("MissionUNAVAILABLE");
+  });
+}
+
+/** One frozen direction preview on the Office, ready for the handoff. */
+async function freezeDirection(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText("Direction to Meta-CEO"), DIRECTION);
+  await user.click(screen.getByRole("button", { name: "Review direction preview" }));
+  const preview = await screen.findByRole("region", { name: "Direction preview" });
+  expect(preview.textContent).toContain(DIRECTION);
+  return preview;
+}
+
+/** The handoff refusal inside the frozen preview, not anywhere else on the page. */
+function previewRefusal() {
+  const preview = screen.getByRole("region", { name: "Direction preview" });
+  return within(preview).getByRole("alert");
+}
+
+describe("Office direction handoff into the existing launch owner", () => {
+  it("opens the existing launch form with the exact frozen direction and the configured choices, and prepares nothing before an explicit launch", async () => {
+    const made = installHost();
+    const user = userEvent.setup();
+    render(<App />);
+    await openOffice(user);
+    await freezeDirection(user);
+    expect(screen.queryByLabelText("Goal")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Start new work" }));
+    const goal = await screen.findByLabelText("Goal");
+    expect((goal as HTMLTextAreaElement).value).toBe(DIRECTION);
+    expect((screen.getByLabelText("Project") as HTMLSelectElement).value).toBe("alpha-project");
+    expect((screen.getByLabelText("Profile") as HTMLSelectElement).value).toBe("research_only");
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+    // The Office direction itself is untouched by the handoff.
+    expect((screen.getByLabelText("Direction to Meta-CEO") as HTMLTextAreaElement).value).toBe(DIRECTION);
+  });
+
+  it("launches the exact frozen direction through the existing owner with no session reference in the payload", async () => {
+    const made = installHost();
+    const user = userEvent.setup();
+    render(<App />);
+    await openOffice(user);
+    await freezeDirection(user);
+    await user.click(screen.getByRole("button", { name: "Start new work" }));
+    await user.click(await screen.findByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+    const payload = made.prepare.mock.calls[0][0].payload as Record<string, unknown>;
+    expect(payload.objective).toBe(DIRECTION);
+    expect(payload.department).toBe("alpha-project");
+    expect(payload.execution_profile).toBe("research_only");
+    expect(payload.workstream).toBe("WS:ALPHA");
+    expect(JSON.stringify(payload)).not.toContain("session");
+    // A submission receipt is not a worker result and not acceptance.
+    expect(made.submit.mock.calls[0][1].payload).not.toHaveProperty("sessionRef");
+  });
+
+  it("consumes only the submitted launch draft on acceptance and keeps the Office direction", async () => {
+    const made = installHost({
+      submit: async pointer => ({
+        ...pointer,
+        disposition: "accepted" as const,
+        missionSelection: { workRef: "WS:LAUNCH", rootJobId: "JOB-L" },
+      }),
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await openOffice(user);
+    await freezeDirection(user);
+    await user.click(screen.getByRole("button", { name: "Start new work" }));
+    await user.click(await screen.findByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+    // The accepted effect cleared its own pointer and nothing else.
+    await waitFor(() => expect(made.store.read("owner-a")).toBeNull());
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+    // The submitted launch draft is consumed; the Office direction survives.
+    await user.click(await screen.findByRole("button", { name: "Work queue" }));
+    expect((await screen.findByLabelText("Goal") as HTMLTextAreaElement).value).toBe("");
+    // The settled Office handoff cannot fence a later independent launch.
+    await user.type(screen.getByLabelText("Goal"), "A new launch after the first receipt.");
+    await user.click(screen.getByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(2));
+    expect(made.prepare.mock.calls[1][0].payload).toHaveProperty(
+      "objective", "A new launch after the first receipt.");
+  });
+
+  it("keeps the launch goal and the Office direction when the existing owner refuses the launch", async () => {
+    const made = installHost({
+      submit: async pointer => ({ ...pointer, disposition: "refused" as const }),
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await openOffice(user);
+    await freezeDirection(user);
+    await user.click(screen.getByRole("button", { name: "Start new work" }));
+    await user.click(await screen.findByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("REFUSED")).toBeTruthy();
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(DIRECTION);
+    expect((screen.getByLabelText("Direction to Meta-CEO") as HTMLTextAreaElement).value).toBe(DIRECTION);
+  });
+
+  it("cannot launch twice from one handoff and a cancel keeps the Office direction", async () => {
+    let release!: (value: EffectReceipt) => void;
+    const held = new Promise<EffectReceipt>(resolve => { release = resolve; });
+    const made = installHost({ submit: async pointer => held });
+    const user = userEvent.setup();
+    render(<App />);
+    await openOffice(user);
+    await freezeDirection(user);
+    await user.click(screen.getByRole("button", { name: "Start new work" }));
+    const launch = await screen.findByRole("button", { name: "Launch" });
+    await user.click(launch);
+    await waitFor(() => expect(made.prepare).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "Launching…" }));
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+    expect(made.submit).toHaveBeenCalledTimes(1);
+    await act(async () => { release({ operationKey: "op-1", kind: "launch", targetKey: "WS:ALPHA", disposition: "accepted" }); });
+  });
+
+  it("cancels the handoff without clearing the Office direction and without any effect", async () => {
+    const made = installHost();
+    const user = userEvent.setup();
+    render(<App />);
+    await openOffice(user);
+    await freezeDirection(user);
+    await user.click(screen.getByRole("button", { name: "Start new work" }));
+    await user.click(await screen.findByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByLabelText("Goal")).toBeNull());
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+    // The Office direction and its frozen preview survive the cancel.
+    expect((screen.getByLabelText("Direction to Meta-CEO") as HTMLTextAreaElement).value).toBe(DIRECTION);
+    expect(screen.getByRole("region", { name: "Direction preview" }).textContent).toContain(DIRECTION);
+  });
+
+  it("refuses the handoff when the launch owner is no longer the bound one, with zero effect", async () => {
+    const made = installHost();
+    const user = userEvent.setup();
+    render(<App />);
+    await openOffice(user);
+    await freezeDirection(user);
+    // The bound owner is replaced between the render and the click.
+    window.MastermindMissionHost!.commandBinding = { ...made.binding };
+    await user.click(screen.getByRole("button", { name: "Start new work" }));
+    expect(previewRefusal()).toHaveProperty(
+      "textContent",
+      expect.stringContaining("cannot offer a handoff"),
+    );
+    expect(screen.queryByLabelText("Goal")).toBeNull();
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+  });
+
+  it("refuses the handoff when the selected workstream is not the configured launch workstream", async () => {
+    vi.stubEnv("VITE_MM_LAUNCH_CONFIG", JSON.stringify({ ...MANIFEST, workstream: "WS:OTHER" }));
+    const made = installHost();
+    const user = userEvent.setup();
+    render(<App />);
+    await openOffice(user);
+    await freezeDirection(user);
+    await user.click(screen.getByRole("button", { name: "Start new work" }));
+    expect(previewRefusal()).toHaveProperty(
+      "textContent",
+      expect.stringContaining("another workstream"),
+    );
+    expect(screen.queryByLabelText("Goal")).toBeNull();
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+  });
+
+  it("refuses an Office handoff when the launch workstream cannot be established", async () => {
+    vi.stubEnv("VITE_MM_LAUNCH_CONFIG", "");
+    const made = installHost();
+    const user = userEvent.setup();
+    render(<App />);
+    await openOffice(user);
+    await freezeDirection(user);
+    await user.click(screen.getByRole("button", { name: "Start new work" }));
+    expect(previewRefusal().textContent).toContain("cannot offer a handoff");
+    expect(screen.queryByLabelText("Goal")).toBeNull();
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+    expect((screen.getByLabelText("Direction to Meta-CEO") as HTMLTextAreaElement).value).toBe(DIRECTION);
+  });
+
+  it("keeps an existing unsent launch goal and refuses to replace it", async () => {
+    const made = installHost();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "Work queue" }));
+    await user.type(await screen.findByLabelText("Goal"), "An earlier unsent goal.");
+    await openOffice(user);
+    await freezeDirection(user);
+    await user.click(screen.getByRole("button", { name: "Start new work" }));
+    expect(previewRefusal()).toHaveProperty(
+      "textContent",
+      expect.stringContaining("unsent launch goal"),
+    );
+    expect(screen.queryByLabelText("Goal")).toBeNull();
+    expect(made.prepare).not.toHaveBeenCalled();
+    // The earlier goal is still exactly where it was.
+    await user.click(screen.getByRole("button", { name: "Work queue" }));
+    expect((await screen.findByLabelText("Goal") as HTMLTextAreaElement).value).toBe("An earlier unsent goal.");
+  });
+
+  it("refuses the handoff while an original launch command is held on its own pointer", async () => {
+    let release!: (value: EffectReceipt) => void;
+    const held = new Promise<EffectReceipt>(resolve => { release = resolve; });
+    const made = installHost({ submit: async pointer => held });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "Work queue" }));
+    await user.type(await screen.findByLabelText("Goal"), "An earlier unsent goal.");
+    await user.click(screen.getByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(made.prepare).toHaveBeenCalledTimes(1));
+    await openOffice(user);
+    await freezeDirection(user);
+    await user.click(screen.getByRole("button", { name: "Start new work" }));
+    expect(previewRefusal()).toHaveProperty(
+      "textContent",
+      expect.stringContaining("still held"),
+    );
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+    expect(made.submit).toHaveBeenCalledTimes(1);
+    await act(async () => { release({ operationKey: "op-1", kind: "launch", targetKey: "WS:ALPHA", disposition: "accepted" }); });
+  });
+
+  it("refuses a submission whose frozen preview is no longer current, with zero effect", async () => {
+    const made = installHost();
+    const user = userEvent.setup();
+    render(<App />);
+    await openOffice(user);
+    await freezeDirection(user);
+    await user.click(screen.getByRole("button", { name: "Start new work" }));
+    await screen.findByLabelText("Goal");
+    // The auth epoch moves while the handoff is open. The user stays signed
+    // in, so only the captured preview can refuse the submission.
+    act(() => {
+      made.notify({ status: "signed_in", reason: null, acquisition: true, content: false });
+    });
+    await user.click(screen.getByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(screen.getByText(/no longer current/)).toBeTruthy());
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+    // The Office direction is retained through the refusal.
+    expect((screen.getByLabelText("Direction to Meta-CEO") as HTMLTextAreaElement).value).toBe(DIRECTION);
+  });
+
+  it("refuses a submission whose launch owner was replaced after the handoff opened", async () => {
+  const made = installHost();
+  const user = userEvent.setup();
+  render(<App />);
+  await openOffice(user);
+  await freezeDirection(user);
+  await user.click(screen.getByRole("button", { name: "Start new work" }));
+  await screen.findByLabelText("Goal");
+  // The bound owner is replaced after the handoff opened.
+  window.MastermindMissionHost!.commandBinding = { ...made.binding };
+  await user.click(screen.getByRole("button", { name: "Launch" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Launch" })).toBeTruthy());
+  expect(made.prepare).not.toHaveBeenCalled();
+  expect(made.submit).not.toHaveBeenCalled();
+  // The launch goal is retained for an explicit retry, and the Office
+  // direction is untouched.
+  expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(DIRECTION);
+  expect((screen.getByLabelText("Direction to Meta-CEO") as HTMLTextAreaElement).value).toBe(DIRECTION);
+});
+
+it("revisits an open handoff without a second launch owner", async () => {
+  const made = installHost();
+  const user = userEvent.setup();
+  render(<App />);
+  await openOffice(user);
+  await freezeDirection(user);
+  await user.click(screen.getByRole("button", { name: "Start new work" }));
+  await screen.findByLabelText("Goal");
+  expect(screen.getAllByLabelText("Goal")).toHaveLength(1);
+  // Close the frozen preview and review it again.
+  await user.click(screen.getByRole("button", { name: "Close preview" }));
+  await user.click(screen.getByRole("button", { name: "Review direction preview" }));
+  await user.click(screen.getByRole("button", { name: "Start new work" }));
+  expect(screen.getAllByLabelText("Goal")).toHaveLength(1);
+  expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(DIRECTION);
+  expect(made.prepare).not.toHaveBeenCalled();
+  expect(made.submit).not.toHaveBeenCalled();
+});
+
+it("keeps the Office direction and the frozen preview text out of the session namespace", async () => {
+    const made = installHost();
+    const user = userEvent.setup();
+    render(<App />);
+    await openOffice(user);
+    await freezeDirection(user);
+    await user.click(screen.getByRole("button", { name: "Start new work" }));
+    await user.click(await screen.findByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+    const pointer = await made.store.read("owner-a");
+    expect(pointer?.targetKey).toBe("WS:ALPHA");
+    expect(JSON.stringify(pointer)).not.toContain("session");
+  });
+});

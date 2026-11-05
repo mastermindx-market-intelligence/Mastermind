@@ -41,7 +41,7 @@ class AppSource:
             if fault == "missing_page":
                 return []
             return [{
-                "filename": "server/handler.py", "status": "modified",
+                "filename": "security/handler.py", "status": "modified",
                 "additions": 1, "deletions": 0,
                 **({} if fault == "missing_patch" else {"patch": "@@ -1 +1 @@"}),
             }]

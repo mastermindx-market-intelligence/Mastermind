@@ -11,10 +11,16 @@ import {
   canNavigateForAutomaticSignIn, explicitLogoutRecorded, registerUnsavedNavigationHold,
 } from "./auth-navigation-guard";
 import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
+import {
+  decideOfficeLaunchHandoff, officeLaunchWorkstreamAgrees, previewIsCurrent,
+  type DirectionPreview, type OfficeLaunchOutcome,
+} from "./meta-ceo/preview";
+import { readLaunchBindingConfig } from "./launch-config";
 import { Today } from "./today/Today";
 import { AttendedFabricWorkspace } from "./fabric/AttendedFabricWorkspace";
 import { qualifyWorkerResultRef } from "./fabric/mission-worker-result";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
+import { qualifyExecutiveOfficeSession, SESSION_TARGET_REF } from "./meta-ceo/session-context";
 import { Projects } from "./projects/Projects";
 import { ProjectWorkspace } from "./projects/ProjectWorkspace";
 import { ProjectConversationAssociation } from "./conversations/ProjectConversationAssociation";
@@ -226,7 +232,7 @@ function isRetainedOperation(value: unknown): value is OperationPointer {
     (pointer.targetKey === null || typeof pointer.targetKey === "string");
 }
 const SESSION_OPERATION_KEY = /^session-continue-[0-9a-f]{64}$/;
-const SESSION_TARGET_REF = /^fabric_attempt:[0-9a-f]{64}$/;
+// SESSION_TARGET_REF belongs to the same closed native-session proof adapter.
 // Only a session message pointer is restored from the session-exclusive
 // namespace; launch pointers live in their own store and are never adopted.
 function sessionStoreHold(state: OperationState): boolean {
@@ -1487,6 +1493,16 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     } | null>(null),
     [heldKind, setHeldKind] = useState<OperationKind | null>(null),
     [launchDraftDismissed, setLaunchDraftDismissed] = useState(false),
+    // The Office → existing launch owner handoff. It holds the exact frozen
+    // preview and the owner identity it was opened under, so the same
+    // captured context can be revalidated before a submission. It never
+    // carries a sessionRef and never owns a command.
+    [officeLaunchHandoff, setOfficeLaunchHandoff] = useState<{
+      preview: DirectionPreview;
+      binding: OrchestratorCommandBinding;
+      principalScope: string;
+      generation: string;
+    } | null>(null),
     // True only while a Check-status recover() is actually in flight. A
     // static checking/PENDING_POINTER hold (a persisted pointer with no
     // recovery promise) is NOT busy — its recovery control stays usable.
@@ -1518,6 +1534,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     >(null),
     [resultState, setResultState] = useState<ResultState>({ kind: "IDLE" }),
     resultRequest = useRef(0),
+    compoundTicket = useRef(0),
+    compoundRetention = useRef<{
+      mission: Missionv3Document;
+      selection: MissionSelection | null;
+      authRevision: number;
+    } | null>(null),
     missionRequest = useRef(0),
     programRequest = useRef(0),
     programSelection = useRef(selection),
@@ -1544,7 +1566,6 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     selection, selectionSeq, authEpoch: controlRoomAuthEpoch, authRevision,
     active: active === "Control Room" || active === "Session Estate",
   });
-  const office = useOfficeProjection(authRevision, selection);
   const observedConversation = useObservedConversation(
     authRevision,
     selection,
@@ -1619,10 +1640,6 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const presentedComposerDrafts = liveComposerScope &&
     retainedComposerScope.current === liveComposerScope
       ? retainedComposerDrafts : { launch: "", session: "" };
-  hasUnsentUserText.current = Boolean(office.draft.text ||
-    observedConversation.hasUnsentDraft() ||
-    (signedIn ? presentedComposerDrafts.launch || presentedComposerDrafts.session
-      : retainedComposerDrafts.launch || retainedComposerDrafts.session));
   useEffect(() => {
     if (!signedIn || !liveComposerScope) return;
     if (previousLiveComposerScope.current !== null &&
@@ -1641,6 +1658,18 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const sessionTargetKey = sessionOwner && sessionBinding
     ? sessionBinding.port.currentTargetRef()
     : null;
+  // Read-only exact-session association from the existing Executive owner.
+  // Unknown/legacy/DSH/Grok native sessions stay UNBOUND, not guessed.
+  const officeSession = qualifyExecutiveOfficeSession(
+    signedIn, selection, sessionBinding,
+  );
+  const office = useOfficeProjection(authRevision, selection, officeSession);
+  // The Office draft is part of the unsent-text signal. It is read after the
+  // session-qualified projection exists, never before.
+  hasUnsentUserText.current = Boolean(office.draft.text ||
+    observedConversation.hasUnsentDraft() ||
+    (signedIn ? presentedComposerDrafts.launch || presentedComposerDrafts.session
+      : retainedComposerDrafts.launch || retainedComposerDrafts.session));
   const projectConversationActive = active === "Projects" && projectTab === "Conversation" && !catalogueProject &&
     missionSelectionState === "AVAILABLE" && office.projection.programs.source.state === "CURRENT" && !!selection &&
     index.programs.filter(card => card.workRef === selection.workRef).length === 1 &&
@@ -1915,8 +1944,21 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   }, []);
   const currentResultContext = useRef(resultContext);
   currentResultContext.current = resultContext;
+  const liveSelection = useRef(selection);
+  const liveAuthRevision = useRef(authRevision);
+  liveSelection.current = selection;
+  liveAuthRevision.current = authRevision;
   const resultController = useRef<AbortController | null>(null);
+  const compoundRetained = compoundRetention.current;
+  const compoundContextHeld = !!compoundRetained
+    && compoundRetained.mission === missionV3
+    && compoundRetained.selection === selection
+    && compoundRetained.authRevision === authRevision;
   useEffect(() => {
+    // A compound commit updates missionV3 inside the same pair. That update
+    // must not abort or clear the Result it just accepted. Every other
+    // context change still fences the standalone Result ticket.
+    if (compoundContextHeld) return;
     resultRequest.current++;
     resultController.current?.abort();
     setResultState({ kind: "IDLE" });
@@ -1924,7 +1966,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       resultRequest.current++;
       resultController.current?.abort();
     };
-  }, [resultContext]);
+  }, [resultContext, compoundContextHeld]);
+  useEffect(() => () => {
+    compoundTicket.current += 1;
+    resultController.current?.abort();
+  }, []);
   const projectHeading = useRef<HTMLHeadingElement>(null);
   const legacyProjectTabs = useRef<HTMLDivElement>(null);
   const pendingLegacyTabFocus = useRef<ProjectTab | null>(null);
@@ -2047,6 +2093,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         workRequest.current++;
         missionRequest.current++;
         resultRequest.current++;
+        compoundTicket.current += 1;
+        compoundRetention.current = null;
         resultController.current?.abort();
         setIndex({
           programs: [],
@@ -2078,11 +2126,17 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   useEffect(() => {
     // Selection change clears result detail. The bounded read for the new
     // tuple must be reissued; we never carry stale detail across a click.
+    if (compoundRetention.current?.selection === selection) return;
+    compoundTicket.current += 1;
+    compoundRetention.current = null;
+    resultController.current?.abort();
     setResultState({ kind: "IDLE" });
   }, [selection]);
   useEffect(() => {
     // New result_refs revision (root/work_ref pair changed under the hood)
     // also clears any in-flight detail even if the user kept their click.
+    // The compound pair's own Mission commit is the same observation and stays.
+    if (compoundRetention.current?.mission === missionV3) return;
     setResultState({ kind: "IDLE" });
   }, [missionV3]);
   useEffect(() => {
@@ -2306,6 +2360,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     authState?.acquisition,
     selection?.workRef,
     selection?.rootJobId,
+    officeSession.sessionRef,
+    officeSession.bindingGeneration,
   ]);
   useEffect(() => {
     if (active !== "Control Room" && active !== "Session Estate" && active !== "Fleet & Capacity" && active !== "Sources" && active !== "Tools") return;
@@ -2432,6 +2488,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     let attached = true;
     const current = ++missionRequest.current,
       controller = new AbortController();
+    // An independent Mission refresh supersedes both the standalone Mission
+    // ticket and any compound pair. A late compound accept cannot republish.
+    compoundTicket.current += 1;
+    compoundRetention.current = null;
+    resultController.current?.abort();
+    office.supersedePair();
     const officeRead = office.beginMission();
     if (
       native &&
@@ -2559,6 +2621,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     selectionRefused,
     authRevision,
     authState?.acquisition,
+    officeSession.sessionRef,
+    officeSession.bindingGeneration,
   ]);
   const candidate = isDoc(mission) ? mission : null,
     d =
@@ -2796,6 +2860,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       const sel = state.missionSelection
         ? normalizeSelection(state.missionSelection)
         : null;
+      // Only this owner-qualified accepted launch releases its Office handoff.
+      // A refusal or unknown effect keeps the frozen context and original hold.
+      setOfficeLaunchHandoff(null);
       if (sel) open(sel.workRef, sel.rootJobId,bindingAtStart.directNative?.isDirectSelection(sel)===true);
     }
     pending.complete({ status: state.status });
@@ -3105,6 +3172,47 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         owner.generation !== ownerContext?.generation) return {state: "UNAVAILABLE" as const};
     return readLaunchRequestPreview(binding, form);
   }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation, authRevision]);
+  // The Office → existing launch owner handoff. It re-reads the live host,
+  // binding and owner epoch at the moment of the request, refuses rather than
+  // replacing an existing unsent goal or a held original command, and only
+  // then hands the exact frozen text to the existing launch draft. It never
+  // prepares, submits, or carries a session reference.
+  const startOfficeLaunch = (preview: DirectionPreview): OfficeLaunchOutcome => {
+    const liveBinding = completeOrchestratorCommandBinding(
+      window.MastermindMissionHost?.commandBinding);
+    const liveAuth = window.MastermindMissionHost?.auth?.getState();
+    const liveOwner = liveBinding ? readOwnerContext(liveBinding.port) : null;
+    const launchAvailable = canLaunch && !!commandView &&
+      liveBinding === commandBinding &&
+      liveAuth?.status === "signed_in" && !!liveOwner &&
+      liveOwner.principalScope === ownerContext?.principalScope &&
+      liveOwner.generation === ownerContext?.generation;
+    // Revisiting an open handoff is idempotent: the same frozen direction never
+    // places a second launch owner and never replaces its own goal.
+    const alreadyOpen = officeLaunchHandoff !== null &&
+      officeLaunchHandoff.preview.draft === preview.draft &&
+      previewIsCurrent(officeLaunchHandoff.preview, office.projection.context);
+    const outcome = decideOfficeLaunchHandoff(preview, office.projection.context, {
+      configuredWorkstream: readLaunchBindingConfig()?.workstream ?? null,
+      selectedWorkstream: office.projection.context.selection?.workRef ?? null,
+      launchAvailable,
+      retainedGoal: retainedComposerDrafts.launch,
+      commandHeld: pendingCommand.current?.kind === "launch" || heldKind === "launch",
+      handoffAlreadyOpen: alreadyOpen,
+    });
+    if (outcome.status !== "OPENED") return outcome;
+    if (alreadyOpen) return outcome;
+    retainedComposerScope.current = liveComposerScope;
+    updateRetainedComposer("launch", preview.draft);
+    setLaunchDraftDismissed(false);
+    setOfficeLaunchHandoff({
+      preview,
+      binding: liveBinding!,
+      principalScope: liveOwner!.principalScope,
+      generation: liveOwner!.generation,
+    });
+    return outcome;
+  };
   const commandPanel =
     !signedIn && passiveExpiryHold.current && retainedComposerDrafts.launch ? (
       <section className="card" aria-label={copy.retainedDraft}>
@@ -3184,6 +3292,37 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               onComplete({ status: "refused" });
               return;
             }
+            // A handoff carries the exact frozen preview it was opened from.
+            // Revalidate it against the live owner before anything is
+            // prepared: a stale, changed or mismatched source refuses here
+            // and leaves the Office draft and the launch goal untouched.
+            if (officeLaunchHandoff) {
+              const liveOwner = readOwnerContext(binding.port);
+              const workstreamAgrees = officeLaunchWorkstreamAgrees(
+                office.projection.context.selection?.workRef ?? null,
+                readLaunchBindingConfig()?.workstream ?? null);
+              if (!previewIsCurrent(officeLaunchHandoff.preview, office.projection.context) ||
+                  binding !== officeLaunchHandoff.binding ||
+                  liveOwner?.principalScope !== officeLaunchHandoff.principalScope ||
+                  liveOwner?.generation !== officeLaunchHandoff.generation ||
+                  !workstreamAgrees) {
+                setCommandRefusal({
+                  // The refusal is published against the live owner identity,
+                  // so it stays visible under exactly the route that would
+                  // have dispatched it.
+                  binding,
+                  principalScope: ctx.principalScope,
+                  generation: ctx.generation,
+                  kind: "launch", selectionSeq: selectionSeq.current, sessionKey: null,
+                  presentationSeq: commandPresentation.current.seq,
+                  reason: locale === "zh-CN"
+                    ? "方向交接已不再有效。未准备也未发送任何内容。"
+                    : "The direction handoff is no longer current. Nothing was prepared or sent.",
+                });
+                onComplete({ status: "refused" });
+                return;
+              }
+            }
             const intent = launchIntentFromBinding(binding, form);
             beginCommand("launch", intent, onComplete);
           }}
@@ -3196,6 +3335,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             ) return;
             updateRetainedComposer("launch", "");
             setLaunchDraftDismissed(true);
+            // The Office handoff closes with its own form. The Office draft
+            // itself is never cleared by a cancel.
+            setOfficeLaunchHandoff(null);
             routeHeading.current?.focus();
           }}
         />
@@ -3438,6 +3580,134 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const pickResult = (sel: ResultSelection) => {
     const valid = normalizeResultSelection(sel);
     if (!valid) return;
+    const compoundRead = window.MastermindMissionHost?.readMissionResult;
+    if (compoundRead) {
+      resultController.current?.abort();
+      const ticket = ++compoundTicket.current;
+      missionRequest.current += 1;
+      resultRequest.current += 1;
+      const held = office.beginMissionResult();
+      const host = window.MastermindMissionHost;
+      const hostGeneration = host?.invalidationGeneration?.();
+      const selectionAtStart = liveSelection.current;
+      const authAtStart = liveAuthRevision.current;
+      setResultState({ kind: "PENDING", selection: valid });
+      const controller = new AbortController();
+      resultController.current = controller;
+      // A newer ticket, selection, or auth epoch owns the screen. Its
+      // callback must never clear the replacement ticket or Office pair.
+      const newerOwner = () => compoundTicket.current !== ticket
+        || liveSelection.current !== selectionAtStart
+        || liveAuthRevision.current !== authAtStart;
+      // Host identity/generation can drift without notifying the original
+      // subscription. That is still this ticket's cancellation, not a
+      // reason to strand its card in PENDING.
+      const hostChanged = () => window.MastermindMissionHost !== host
+        || host?.invalidationGeneration?.() !== hostGeneration;
+      const superseded = () => newerOwner() || hostChanged();
+      // The mounted typed method can be replaced without changing the raw
+      // client or the host object. Raw identity checks do not cover that.
+      const typedHeld = () => window.MastermindMissionHost?.readMissionResult === compoundRead;
+      const withholdOwned = (reason: string) => {
+        if (newerOwner()) return;
+        office.supersedePair();
+        compoundRetention.current = null;
+        setResultState({ kind: "UNAVAILABLE", selection: valid, reason });
+      };
+      Promise.resolve()
+        .then(() => {
+          if (superseded()) {
+            withholdOwned("READ_CANCELLED");
+            return undefined;
+          }
+          if (controller.signal.aborted || !typedHeld()) {
+            withholdOwned("READ_CANCELLED");
+            return undefined;
+          }
+          return compoundRead({ ...valid, signal: controller.signal });
+        })
+        .then((decoded) => {
+          if (decoded === undefined) return;
+          if (superseded()) {
+            withholdOwned("READ_CANCELLED");
+            return;
+          }
+          if (!typedHeld()) {
+            withholdOwned("READ_CANCELLED");
+            return;
+          }
+          // The host decoder already checks all five selection fields, but
+          // App must fail closed if a replaced typed host returns an otherwise
+          // well-formed pair belonging to a different selected Job/Attempt.
+          if (!decoded.selection
+            || decoded.selection.workRef !== valid.workRef
+            || decoded.selection.rootJobId !== valid.rootJobId
+            || decoded.selection.jobId !== valid.jobId
+            || decoded.selection.attemptId !== valid.attemptId
+            || decoded.selection.resultEnvelopeDigest !== valid.resultEnvelopeDigest) {
+            withholdOwned("MISSION_RESULT_RESPONSE_INVALID");
+            return;
+          }
+          if (decoded.availability !== "AVAILABLE" || !decoded.mission || !decoded.roleResult) {
+            withholdOwned(decoded.reasonCodes.join(", ") || "SOURCE_UNAVAILABLE");
+            return;
+          }
+          // The nested Result and its source observation each carry their own
+          // five-field selector. A substituted typed method could forge a
+          // matching compound selection around a sibling Job's actual Result.
+          const sameWireSelection = (
+            wire: ResultEnvelopeDigestShape["selection"] | null | undefined,
+          ) => !!wire
+            && wire.work_ref === valid.workRef
+            && wire.root_job_id === valid.rootJobId
+            && wire.job_id === valid.jobId
+            && wire.attempt_id === valid.attemptId
+            && wire.result_envelope_digest === valid.resultEnvelopeDigest;
+          const roleView = decoded.roleResult.result;
+          if (!sameWireSelection(decoded.roleResult.selection)
+            || !sameWireSelection(decoded.roleResult.source_observation?.selection)
+            || (roleView !== null && (!roleView?.selection
+              || roleView.selection.root_job_id !== valid.rootJobId
+              || roleView.selection.job_id !== valid.jobId
+              || roleView.selection.attempt_id !== valid.attemptId
+              || roleView.selection.result_envelope_digest !== valid.resultEnvelopeDigest))) {
+            withholdOwned("MISSION_RESULT_RESPONSE_INVALID");
+            return;
+          }
+          // No async boundary between these fences and the synchronous
+          // Office accept. Post-accept fences could leave a published pair.
+          const accepted = office.acceptMissionResult(
+            held, decoded.mission, decoded.roleResult, new Date().toISOString(),
+          );
+          if (accepted.kind !== "observed") {
+            withholdOwned(accepted.reason);
+            return;
+          }
+          compoundRetention.current = {
+            mission: decoded.mission,
+            selection: liveSelection.current,
+            authRevision: liveAuthRevision.current,
+          };
+          const { result_refs: _refs, ...body } = decoded.mission;
+          setMission({ ...body, schema: "mastermind.mission_workspace.v2" });
+          setMissionV3(decoded.mission);
+          setResultState({ kind: "READY", selection: valid, document: decoded.roleResult });
+        })
+        .catch((err: Error) => {
+          if (superseded()) {
+            withholdOwned("READ_CANCELLED");
+            return;
+          }
+          withholdOwned(
+            err?.message === "MISSION_RESULT_RESPONSE_INVALID"
+              ? "MISSION_RESULT_RESPONSE_INVALID"
+              : err?.message === "READ_CANCELLED"
+                ? "READ_CANCELLED"
+                : "RESULT_SOURCE_UNAVAILABLE",
+          );
+        });
+      return;
+    }
     if (!window.MastermindMissionHost?.readResult) {
       setResultState({
         kind: "UNAVAILABLE",
@@ -3795,7 +4065,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     content = (
       <>
         <MetaCeoOffice
-          key={JSON.stringify([authRevision, selection])}
+          key={JSON.stringify([authRevision, selection, officeSession.sessionRef, officeSession.bindingGeneration])}
           locale={locale}
           projection={office.projection}
           programmeDirection={{selection: projectWorkRef ? {work_ref: projectWorkRef} : null,
@@ -3803,7 +4073,19 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           draft={office.draft}
           onDraftChange={office.changeDraft}
           onInspectWorkerResult={workerResultHost?.readResult ? openOfficeWorkerResult : undefined}
+          nativeContinuation={
+            officeSession.sessionRef !== null &&
+            officeSession.sessionRef === sessionTargetKey &&
+            office.projection.mission.source.state === "CURRENT"
+              ? sessionContinuationPanel
+              : null
+          }
+          onStartNewWork={canLaunch && commandView ? startOfficeLaunch : undefined}
         />
+        {/* The one existing launch owner, mounted where the Office mounts it.
+            It is the same commandPanel element the other routes use, so only
+            one LaunchOrchestrator owner exists at a time. */}
+        {officeLaunchHandoff ? commandPanel : null}
         <OperationalNavigation label="Company operations" onNavigate={navigateOperationalView} />
       </>
     );
@@ -4180,82 +4462,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         {missionV3 && isDocv3(missionV3) ? (
           <ResultRefs
             d={missionV3}
-            onPick={(sel) => {
-              const valid = normalizeResultSelection(sel);
-              if (!valid) return;
-              if (!window.MastermindMissionHost?.readResult) {
-                setResultState({
-                  kind: "UNAVAILABLE",
-                  selection: valid,
-                  reason: "QUALIFIED_RESULT_READ_UNAVAILABLE",
-                });
-                return;
-              }
-              resultController.current?.abort();
-              const context = resultContext;
-              setResultState({ kind: "PENDING", selection: valid });
-              const current = ++resultRequest.current;
-              const controller = new AbortController();
-              resultController.current = controller;
-              let raceAborted = false;
-              Promise.resolve()
-                .then(() =>
-                  window.MastermindMissionHost!.readResult!({
-                    workRef: valid.workRef,
-                    rootJobId: valid.rootJobId,
-                    jobId: valid.jobId,
-                    attemptId: valid.attemptId,
-                    resultEnvelopeDigest: valid.resultEnvelopeDigest,
-                    signal: controller.signal,
-                  }),
-                )
-                .then((raw) => {
-                  if (
-                    resultRequest.current !== current ||
-                    raceAborted ||
-                    currentResultContext.current !== context ||
-                    controller.signal.aborted
-                  )
-                    return;
-                  // The host returns the decoded frozen envelope — including
-                  // the typed allowed 503 body as a validated UNAVAILABLE
-                  // envelope. No kind sniffing, no blind cast: the value is
-                  // re-validated against the exact selected tuple before it
-                  // is admitted for rendering.
-                  const decoded = decodeResultEnvelope(raw, valid);
-                  if (!decoded) {
-                    setResultState({
-                      kind: "UNAVAILABLE",
-                      selection: valid,
-                      reason: "RESULT_RESPONSE_INVALID",
-                    });
-                    return;
-                  }
-                  setResultState({
-                    kind: "READY",
-                    selection: valid,
-                    document: decoded,
-                  });
-                })
-                .catch((err: Error) => {
-                  if (
-                    resultRequest.current !== current ||
-                    raceAborted ||
-                    currentResultContext.current !== context ||
-                    controller.signal.aborted
-                  )
-                    return;
-                  if (err?.message === "READ_CANCELLED") {
-                    raceAborted = true;
-                    return;
-                  }
-                  setResultState({
-                    kind: "UNAVAILABLE",
-                    selection: valid,
-                    reason: "RESULT_SOURCE_UNAVAILABLE",
-                  });
-                });
-            }}
+            onPick={pickResult}
             selectedKey={
               resultState.kind === "READY" || resultState.kind === "PENDING"
                 ? `${resultState.selection.jobId}|${resultState.selection.attemptId}|${resultState.selection.resultEnvelopeDigest}`

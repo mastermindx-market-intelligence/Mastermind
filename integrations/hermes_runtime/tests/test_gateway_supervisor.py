@@ -121,6 +121,25 @@ class GatewaySupervisorTests(unittest.TestCase):
         finally:
             runtime.stop()
 
+    def test_two_role_loopback_aliases_preserve_gateway_auth_and_serve_binding(self) -> None:
+        for role, own, sibling in (
+            ("mmsecretary", "127.0.0.2", "127.0.0.3"),
+            ("mmmeta", "127.0.0.3", "127.0.0.2"),
+        ):
+            with self.subTest(role=role):
+                gateway = Gateway(own, 0, TOKEN, lambda: (200, {"status": "ok"}))
+                try:
+                    url = f"http://{own}:{gateway.port}/api/health"
+                    self.assertEqual(http_get(url)[0], 401)
+                    self.assertEqual(http_get(url, TOKEN)[0], 200)
+                    self.assertEqual(gateway.host, own)
+                    argv = build_serve_argv(STUB, role, 8766, own)
+                    self.assertEqual(argv[argv.index("--host") + 1], own)
+                    with self.assertRaises(RuntimeRefusal):
+                        build_serve_argv(STUB, role, 8766, sibling)
+                finally:
+                    gateway.close()
+
     def test_live_pid_without_responsive_backend_never_returns_healthy(self) -> None:
         for mode in ("silent", "unhealthy"):
             with self.subTest(mode=mode):

@@ -32,8 +32,8 @@ def test_accepted_macro_merge_rule_can_fit_when_composed_with_this_kernel():
     macro_rule = "9A. Macro `merge-on-green`: docs/DELIVERY_WORKFLOW.md. Never bulk-arm."
     assert macro_rule in block, "retain accepted #1999 Macro rule"
     assert len(block.encode("utf-8")) <= 8000
-    assert "Native read-only child may review here; child != GitHub APPROVED." in block
-    assert "No denied/EFFECT_UNKNOWN review reroute." in block
+    assert "Native child != GitHub APPROVED." in block
+    assert "denied/EFFECT_UNKNOWN reroute." in block
 
 
 def test_live_account_owner_and_exact_safety_fences_are_in_installed_fence():
@@ -43,11 +43,11 @@ def test_live_account_owner_and_exact_safety_fences_are_in_installed_fence():
         "Current assigned receiver owns recovery",
         "Archived chats/PR authors aren't live owners",
         "Handoffs name an executable successor action",
-        "Independent non-author review",
+        "Native CRITICAL tier: one distinct review",
         "never native Sol labor",
         "First explicit safety/permission denial",
         "EFFECT_UNKNOWN",
-        "no self-approve/merge",
+        "Never self-approve/bypass protection",
     ):
         assert phrase in block
 
@@ -55,9 +55,9 @@ def test_live_account_owner_and_exact_safety_fences_are_in_installed_fence():
 def test_formal_review_eligibility_and_handoff_remain_inside_fence():
     block = _project_block()
     for phrase in (
-        "6A. Named reviewer login is preferred",
+        "6A. No named-seat lock absent binding rule",
         "independent of PR authors/committers/coauthors",
-        "No impersonation, self-review, duplicate or denial evasion",
+        "No impersonation, self-approval, duplicate or denied/EFFECT_UNKNOWN reroute",
         "HANDOFF_SOURCE_LINK_V1",
         "Delivery != PICKUP_ACK/START",
         "<@U0BTCHX8HMF>",
@@ -84,7 +84,7 @@ def test_native_guidance_uses_one_genuine_non_author_review_owner():
         entry = (ROOT / name).read_text(encoding="utf-8")
         assert "reviewer login is a **placement preference, not an owner wait**" in entry
         assert "same reasoning session between two GitHub accounts" in entry
-        assert "No impersonation, author self-review" in entry
+        assert "No impersonation, false independent-review claim" in entry
     review = (ROOT / "docs/sol_skills/REVIEW_RETURN.md").read_text(encoding="utf-8")
     for phrase in (
         "not an exclusive owner/approver",
@@ -101,7 +101,8 @@ def test_native_guidance_uses_one_genuine_non_author_review_owner():
 def test_native_installer_retires_our_takeover_block_preserving_old_m2():
     installer = (ROOT / "scripts/project_execution_brief.py").read_text(encoding="utf-8")
     assert "'mastermind-active-owner-takeover-20261102'" in installer
-    assert "'mastermind-leadership-continuity-20261024'" not in installer
+    assert "'mastermind-leadership-continuity-20261024'" in installer
+    assert "retire this exact superseded blanket review/release sentence" in installer
     account = ACCOUNT.read_text(encoding="utf-8")
     for term in (
         "scripts/project_execution_brief.py",

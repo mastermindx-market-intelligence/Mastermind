@@ -675,16 +675,32 @@ class DelegateBridge(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "HANDOFF_PHRASE_FORBIDDEN")
 
     def test_package_has_no_live_transport(self):
-        banned = {"subprocess", "urllib", "socket", "requests", "control_plane", "http", "fabric_task"}
+        banned = {"subprocess", "urllib", "socket", "requests", "http", "fabric_task"}
+        # Only the explicit host-side read adapter may import its two existing
+        # owner modules. Bridge/tool/package imports still cannot bind Runtime.
+        owner_reads = {
+            "control_plane.executive_runtime",
+            "control_plane.executive_delegation_identity",
+        }
         for path in PACKAGE.glob("*.py"):
             tree = ast.parse(path.read_text(encoding="utf-8"))
             imported: set[str] = set()
+            owner_imports: set[str] = set()
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     imported.update(alias.name.split(".")[0] for alias in node.names)
+                    owner_imports.update(alias.name for alias in node.names
+                                         if alias.name.split(".")[0] == "control_plane")
                 elif isinstance(node, ast.ImportFrom):
-                    imported.add((node.module or "").split(".")[0])
+                    module = node.module or ""
+                    imported.add(module.split(".")[0])
+                    if module == "control_plane":
+                        owner_imports.update(f"{module}.{alias.name}" for alias in node.names)
+                    elif module.startswith("control_plane."):
+                        owner_imports.add(module)
             self.assertFalse(banned & imported, f"{path.name} imports {banned & imported}")
+            self.assertEqual(owner_imports, owner_reads if path.name == "executive.py" else set(),
+                             f"{path.name} imports an unbound Executive owner")
 
 
 def _review(key, reviewer, sha, verdict="accept"):

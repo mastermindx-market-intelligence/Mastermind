@@ -29,7 +29,7 @@ def main() -> int:
         return 0
     if args and args[0] == "serve":
         host = _flag(args, "--host")
-        if host != "127.0.0.1":
+        if host not in {"127.0.0.1", "127.0.0.2", "127.0.0.3"}:
             sys.stderr.write("NON_LOOPBACK\n")
             return 2
         mode = os.environ.get("HERMES_STUB_MODE")
@@ -67,7 +67,7 @@ def main() -> int:
                 def log_message(self, *args) -> None:
                     pass
 
-            httpd = HTTPServer(("127.0.0.1", port), Health)
+            httpd = HTTPServer((host, port), Health)
             threading.Thread(target=httpd.serve_forever, daemon=True).start()
         ready = os.environ.get("HERMES_STUB_READY")
         if ready:

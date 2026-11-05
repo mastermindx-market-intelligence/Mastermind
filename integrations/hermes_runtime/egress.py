@@ -2,7 +2,10 @@
 
 No proxy is created or launched here. The existing role-private 0600 secrets
 file supplies only its own per-role proxy address. RestrictAddressFamilies,
-IPAddressDeny=any remains; per-role IPAddressAllow now selects the exact role\nloopback alias and the shared original backend 127.0.0.1 only. The unit's\nactual cgroup BPF enforcement and parent slice policy still require proof.
+IPAddressDeny=any remains. The root-managed unit permits only the role's
+one loopback alias for its authenticated gateway, native backend and
+approved vendor CONNECT proxy. Shared 127.0.0.1 is not permitted by
+the actual root unit. Kernel and parent-slice enforcement need host proof.
 Source qualification is not evidence of an installed policy, real CONNECT,
 TLS verification or an authenticated provider response.
 """
@@ -20,6 +23,7 @@ ROLE_PROXY_HOST = {
     "mmsecretary": "127.0.0.2",
     "mmmeta": "127.0.0.3",
 }
+ROLE_PROXY_PORT = {"mmsecretary": 18651, "mmmeta": 18652}
 ROLES = frozenset(ROLE_PROXY_HOST)
 
 
@@ -44,7 +48,7 @@ def native_egress_child_env(role: str, private_values: Mapping[str, str]) -> dic
         raise RuntimeRefusal("NATIVE_EGRESS_PROXY_INVALID") from None
     host = ROLE_PROXY_HOST[role]
     if (url.scheme != "http" or url.hostname != host
-            or not isinstance(port, int) or not 1024 <= port <= 65535
+            or not isinstance(port, int) or port != ROLE_PROXY_PORT[role]
             or raw != f"http://{host}:{port}"):
         raise RuntimeRefusal("NATIVE_EGRESS_PROXY_INVALID")
     # A CONNECT proxy must be locally controlled and allowlisted OUTSIDE this
@@ -52,5 +56,5 @@ def native_egress_child_env(role: str, private_values: Mapping[str, str]) -> dic
     # tokens never reach the child.
     return {
         "HTTPS_PROXY": raw,
-        "NO_PROXY": "127.0.0.1,localhost",
+        "NO_PROXY": f"127.0.0.1,localhost,{host}",
     }

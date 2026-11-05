@@ -16,6 +16,7 @@ import threading
 import time
 
 from .constants import HEALTH_SCHEMA, LOOPBACK_HOST, PINNED_UPSTREAM_SHA
+from .egress import ROLE_PROXY_HOST
 from .hermes_config import render_hermes_config
 from .errors import RuntimeRefusal
 from .gateway import Gateway, reserve_loopback_port
@@ -27,7 +28,7 @@ from .secrets import Secrets, child_env
 _UNSAFE = set(" \n\r\t\"'`$")
 
 
-def _backend_health_ready(port: int) -> bool:
+def _backend_health_ready(port: int, host: str = LOOPBACK_HOST) -> bool:
     """Check native Hermes health identity, not only a local HTTP status.
 
     Pinned Hermes /api/health includes ok and its booted Git commit. A
@@ -35,9 +36,10 @@ def _backend_health_ready(port: int) -> bool:
     must never be promoted to healthy, even if the child PID is still alive.
     No credential, redirect, public interface or model call is used.
     """
-    if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
+    if (isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535
+            or host not in (LOOPBACK_HOST, *ROLE_PROXY_HOST.values())):
         return False
-    conn = http.client.HTTPConnection(LOOPBACK_HOST, port, timeout=0.25)
+    conn = http.client.HTTPConnection(host, port, timeout=0.25)
     try:
         conn.request("GET", "/api/health")
         response = conn.getresponse()
@@ -69,18 +71,20 @@ def build_tools_argv(hermes_bin: Path, role: str) -> list[str]:
     return [_safe_path(hermes_bin), "-p", role, "tools", "list", "--platform", "cli"]
 
 
-def build_serve_argv(hermes_bin: Path, role: str, backend_port: int) -> list[str]:
+def build_serve_argv(hermes_bin: Path, role: str, backend_port: int, host: str = LOOPBACK_HOST) -> list[str]:
     if isinstance(backend_port, bool) or not isinstance(backend_port, int):
         raise RuntimeRefusal("INVALID_BACKEND_PORT")
     if not 1024 <= backend_port <= 65535:
         raise RuntimeRefusal("INVALID_BACKEND_PORT")
+    if host not in (LOOPBACK_HOST, ROLE_PROXY_HOST.get(role)):
+        raise RuntimeRefusal("NON_LOOPBACK_BIND_REFUSED")
     argv = [
         _safe_path(hermes_bin),
         "-p",
         role,
         "serve",
         "--host",
-        LOOPBACK_HOST,
+        host,
         "--port",
         str(backend_port),
         "--skip-build",
@@ -179,7 +183,7 @@ class ServiceRuntime:
                 "child_pid": self.child_pid,
                 "memory_high_water_kib": 0 if self.memory is None else self.memory.high_water,
                 "loopback": True,
-                "gateway_host": LOOPBACK_HOST,
+                "gateway_host": self.profile.gateway_host,
                 "allowlist": sorted(self.profile.tool_allowlist),
                 "upstream_attested": False,
             }
@@ -360,9 +364,9 @@ class ServiceRuntime:
                     self.failed = True
                     return
             self.child_starts += 1
-            port = self.profile.backend_port or reserve_loopback_port()
+            port = self.profile.backend_port or reserve_loopback_port(self.profile.gateway_host)
             try:
-                argv = build_serve_argv(self.hermes_bin, self.profile.role, port)
+                argv = build_serve_argv(self.hermes_bin, self.profile.role, port, self.profile.gateway_host)
             except RuntimeRefusal as exc:
                 self.refusal_code = exc.code
                 self.failed = True
@@ -388,7 +392,7 @@ class ServiceRuntime:
             next_memory_sample = 0.0
             poll_sec = min(0.25, self.profile.memory_sample_interval_sec)
             while not self._stop.is_set() and proc.poll() is None:
-                backend_ready = _backend_health_ready(port)
+                backend_ready = _backend_health_ready(port, self.profile.gateway_host)
                 with self._lock:
                     if self._child is proc:
                         self._backend_ready = backend_ready
