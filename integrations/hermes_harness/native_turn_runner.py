@@ -15,7 +15,6 @@ import secrets
 import selectors
 import signal
 import subprocess
-import sys
 import time
 from collections.abc import Mapping
 
@@ -36,32 +35,27 @@ _ALLOWED_ROLES = frozenset({"mmsecretary", "mmmeta"})
 
 
 def assert_role_service_cgroup(role: str, *, raw: str | None = None) -> None:
-    """Require the current Linux cgroup under the exact selected role unit.
+    """Require the PID1-owned exact system.slice unit, never a user service.
 
-    Pure raw injection exists for deterministic tests only. run_native_canary
-    never accepts raw cgroup evidence: it always reads /proc/self/cgroup.
-    This is a confinement identity guard, not proof of BPF IPAddressDeny
-    enforcement or absence of an unrelated external process.
+    Ubuntu1's user manager matched the role's service basename but did not
+    enforce IPAddressDeny=any. Reuse the canonical root-owned cgroup guard
+    before any model canary can read private role credentials.
+    raw is only for hermetic test injection.
     """
     if role not in _ALLOWED_ROLES:
         raise RuntimeRefusal("NATIVE_CANARY_ROLE_INVALID")
-    if raw is None:
-        if not sys.platform.startswith("linux"):
-            raise RuntimeRefusal("NATIVE_CANARY_LINUX_REQUIRED")
-        try:
-            raw = Path("/proc/self/cgroup").read_text(encoding="utf-8")
-        except (OSError, UnicodeError):
-            raise RuntimeRefusal("NATIVE_CANARY_CGROUP_UNAVAILABLE") from None
-    basename = f"hermes-runtime-{role}.service"
-    if (not isinstance(raw, str) or len(raw) > 16384
-            or not any(
-                (line.split(":", 2)[-1].split("/")[-1] == basename
-                 or f"/{basename}/" in line.split(":", 2)[-1])
-                for line in raw.splitlines()
-                if line.startswith("0::") or line.count(":") >= 2
-            )):
-        raise RuntimeRefusal("NATIVE_CANARY_CGROUP_UNQUALIFIED")
-
+    from integrations.hermes_runtime.system_service import assert_root_service_cgroup
+    try:
+        assert_root_service_cgroup(role, raw=raw)
+    except RuntimeRefusal as exc:
+        native_codes = {
+            "ROOT_UNIT_LINUX_REQUIRED": "NATIVE_CANARY_LINUX_REQUIRED",
+            "ROOT_UNIT_CGROUP_UNAVAILABLE": "NATIVE_CANARY_CGROUP_UNAVAILABLE",
+            "ROOT_UNIT_CGROUP_UNQUALIFIED": "NATIVE_CANARY_CGROUP_UNQUALIFIED",
+        }
+        if exc.code in native_codes:
+            raise RuntimeRefusal(native_codes[exc.code]) from None
+        raise
 
 def _private_child_environment(profile: RuntimeProfile, env: Mapping[str, str]) -> dict[str, str]:
     """Reject ambient/gateway/Slack credential exposure; use provided child scope."""
@@ -98,7 +92,7 @@ def _private_child_environment(profile: RuntimeProfile, env: Mapping[str, str]) 
     if not re.fullmatch(rf"http://{re.escape(expected_host)}:([1-9][0-9]{{3,4}})", proxy):
         raise RuntimeRefusal("NATIVE_CANARY_PROXY_NOT_QUALIFIED")
     port = int(proxy.rpartition(":")[2])
-    if not 1024 <= port <= 65535 or env["NO_PROXY"] != "127.0.0.1,localhost":
+    if not 1024 <= port <= 65535 or env["NO_PROXY"] != f"127.0.0.1,localhost,{expected_host}":
         raise RuntimeRefusal("NATIVE_CANARY_PROXY_NOT_QUALIFIED")
     return dict(env)
 
@@ -122,11 +116,12 @@ def _terminate_group(proc: subprocess.Popen[bytes]) -> None:
 
 def _capture_bounded_child(
     argv: list[str], prompt: bytes, *, env: Mapping[str, str],
-    cwd: Path, timeout_seconds: float,
+    cwd: Path, timeout_seconds: float, max_prompt_bytes: int = 512,
 ) -> tuple[int, bytes, bytes]:
     """Capture pipes with hard byte ceilings; never buffer unlimited child output."""
     if (not 1 <= timeout_seconds <= MAX_CANARY_SECONDS
-            or len(prompt) > 512 or not prompt):
+            or type(max_prompt_bytes) is not int or max_prompt_bytes not in {512, 8192}
+            or type(prompt) is not bytes or len(prompt) > max_prompt_bytes or not prompt):
         raise RuntimeRefusal("NATIVE_CANARY_ARGUMENTS_INVALID")
     proc: subprocess.Popen[bytes] | None = None
     captured: dict[str, bytearray] = {"stdout": bytearray(), "stderr": bytearray()}
@@ -137,12 +132,13 @@ def _capture_bounded_child(
             close_fds=True, start_new_session=True,
         )
         assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
-        # The canary prompt is always <512 bytes (well within a pipe's
-        # atomic write size); no shell and no argv secret/prompt.
-        proc.stdin.write(prompt)
-        proc.stdin.close()
+        # Stream stdin under the SAME deadline as output. Larger canonical
+        # text prompts must not deadlock when a child never drains its pipe.
         deadline = time.monotonic() + timeout_seconds
+        sent = 0
+        os.set_blocking(proc.stdin.fileno(), False)
         with selectors.DefaultSelector() as selector:
+            selector.register(proc.stdin, selectors.EVENT_WRITE, "stdin")
             selector.register(proc.stdout, selectors.EVENT_READ, "stdout")
             selector.register(proc.stderr, selectors.EVENT_READ, "stderr")
             while selector.get_map():
@@ -151,6 +147,18 @@ def _capture_bounded_child(
                     raise RuntimeRefusal("NATIVE_CANARY_TIMEOUT")
                 for key, _ in selector.select(timeout=min(remaining, 0.2)):
                     label = key.data
+                    if label == "stdin":
+                        try:
+                            count = os.write(key.fileobj.fileno(), prompt[sent:sent + 4096])
+                        except BlockingIOError:
+                            continue
+                        if count <= 0:
+                            raise RuntimeRefusal("NATIVE_CANARY_PROCESS_UNAVAILABLE")
+                        sent += count
+                        if sent == len(prompt):
+                            selector.unregister(key.fileobj)
+                            proc.stdin.close()
+                        continue
                     chunk = os.read(key.fileobj.fileno(), 4096)
                     if not chunk:
                         selector.unregister(key.fileobj)
@@ -202,6 +210,8 @@ def run_native_canary(
             or not hermes_bin.is_file()):
         raise RuntimeRefusal("NATIVE_CANARY_PROFILE_UNQUALIFIED")
     assert_role_service_cgroup(profile.role)
+    from integrations.hermes_runtime.system_service import assert_role_network_profile
+    assert_role_network_profile(profile)
     env = _private_child_environment(profile, model_child_env)
     try:
         spec = native_provider(profile.role, profile.native_provider_id)

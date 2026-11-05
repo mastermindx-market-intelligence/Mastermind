@@ -1,0 +1,35 @@
+{
+  "protocol_commit": "60fd199e9",
+  "implementation_freeze_commit": "d072e53e8",
+  "tests": {
+    "fixed_clock_temporal_scoring": 18,
+    "competing_outcome_descriptive": 16,
+    "clock_consumer": 11
+  },
+  "total_new_tests_passed": 45,
+  "old44tests_not_repeated": "Prioracceptedtestreceiptsretained;notadvertisedasnewlyrerun",
+  "empirical_checks": {
+    "prefix_exact_equality": true,
+    "future_based_eligibility": false,
+    "unobserved_future_kept_distinct": true,
+    "strict_label_embargo": true
+  },
+  "logloss_decomposition": true,
+  "real_reader": "14:00NewYork2026-10-05:8records,4standardquietbutotherLactive,allforecastprobabilitiesnull",
+  "diagnostic_boundary_check_before_refusal": {
+    "age_exactly60_rows": 0,
+    "age_ge60_with_standard_in_window": 0,
+    "strict_otherL_versus_standard_count": 737
+  },
+  "timestamp_repair": "Explicituint64queryscalaratallnewarraybounds;syntheticone-nanosecondtestsredthengreenbeforeempiricalrun. No claim aboutunexecutedlegacyimpactaudit.",
+  "dependency_scope": "Oldevent_study importedonlyforalreadyqualifiedCSVload,NAMESandclock;itsoldmake_rows/searchlogicisNOTusedbynewexperiment",
+  "source_hashes": {
+    "clock_reader.py": "c1b80a92642292598d65669d681dfc7517ccd263a3ddb77ad01840b750bb60da",
+    "clock_study.py": "4a269a8836f84222ea2fd9b15b61af3f003519d709e7950a048dc8abde3d3f92",
+    "recovery_incidence.py": "f041231afbd8eca4d23a4b30342e3f0c29d3a47fd85fcb4ff7ebcfe213e6cc31",
+    "test_clock_reader.py": "59ea9e998ef0600638c4d2e5859a7b56fbf28d86916e7cec0521d4a5e08bb40b",
+    "test_clock_study.py": "615077a543eba83bd3810cb35c122b17fb000e06da9e658e160ad1871eb16559",
+    "test_recovery_incidence.py": "3b43a08a39657d933dea1b6919f21379f8a8c311bb1548b9c30642182fd12cce"
+  },
+  "review": "GLMdesignreviewadmitted;returnverificationblocked/unresolved.Noindependentapprovalclaimed."
+}

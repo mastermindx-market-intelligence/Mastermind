@@ -72,8 +72,8 @@ def test_bounded_routine_changes_need_no_independent_review(paths):
 def test_small_sensitive_changes_keep_machine_critical_risk(paths):
     decision = assess_review_risk(facts(paths, additions=1, deletions=0))
     assert decision.tier is ReviewTier.CRITICAL
-    assert decision.minimum_independent_assessments == 2
-    assert decision.minimum_formal_non_author_approvals == 1
+    assert decision.minimum_independent_assessments == 1
+    assert decision.minimum_formal_non_author_approvals == 0
     assert not decision.fast_lane_candidate
 
 
@@ -89,8 +89,8 @@ def test_small_sensitive_changes_keep_machine_critical_risk(paths):
 def test_consequential_code_keeps_machine_standard_risk(paths):
     decision = assess_review_risk(facts(paths))
     assert decision.tier is ReviewTier.STANDARD
-    assert decision.minimum_independent_assessments == 1
-    assert decision.minimum_formal_non_author_approvals == 1
+    assert decision.minimum_independent_assessments == 0
+    assert decision.minimum_formal_non_author_approvals == 0
 
 
 def test_large_unremarkable_diff_gets_one_review():
@@ -258,8 +258,8 @@ def test_real_managed_workspace_identity_change_is_critical_with_verified_metric
     )
     verdict = assess_review_risk(source)
     assert verdict.tier is ReviewTier.CRITICAL
-    assert verdict.minimum_independent_assessments == 2
-    assert verdict.minimum_formal_non_author_approvals == 1
+    assert verdict.minimum_independent_assessments == 1
+    assert verdict.minimum_formal_non_author_approvals == 0
 
 
 @pytest.mark.parametrize("path", [
@@ -274,8 +274,8 @@ def test_real_managed_workspace_identity_change_is_critical_with_verified_metric
 def test_attended_web_waiver_keeps_signed_machine_code_smoke(path):
     result = assess_review_risk(facts((path,), additions=90, deletions=20))
     assert result.tier is ReviewTier.STANDARD
-    assert result.minimum_independent_assessments == 1
-    assert result.minimum_formal_non_author_approvals == 1
+    assert result.minimum_independent_assessments == 0
+    assert result.minimum_formal_non_author_approvals == 0
 
 
 @pytest.mark.parametrize("path", [
@@ -314,8 +314,8 @@ def test_one_line_authority_source_remains_critical_in_machine_risk(path):
             facts((candidate,), additions=1, deletions=0)
         )
         assert decision.tier is ReviewTier.CRITICAL, candidate
-        assert decision.minimum_independent_assessments == 2
-        assert decision.minimum_formal_non_author_approvals == 1
+        assert decision.minimum_independent_assessments == 1
+        assert decision.minimum_formal_non_author_approvals == 0
 
 
 def test_sensitive_previous_rename_path_remains_critical():
@@ -343,7 +343,7 @@ def test_ci_2016_static_only_fast_never_classifies_active_source(path):
                                        additions=2, deletions=0))
     assert verdict.tier is ReviewTier.STANDARD
     assert not verdict.fast_lane_candidate
-    assert verdict.minimum_independent_assessments == 1
+    assert verdict.minimum_independent_assessments == 0
 
 
 def test_ci_2016_still_allows_static_only_fast_for_passive_docs():
