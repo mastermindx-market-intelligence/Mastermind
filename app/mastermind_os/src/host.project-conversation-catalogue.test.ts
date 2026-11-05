@@ -49,7 +49,8 @@ it('forwards fresh reference READ as immutable reference, with no original-key c
 });
 it('refuses accessors/foreign selectors before invocation and retires actual Executive epoch',async()=>{
   const e=await setup(),transport=e.raw.executiveSession!.projectConversations!,getter=vi.fn(()=>history.work_ref);
-  for(const args of [{work_ref:history.work_ref,root_job_id:'JOB-1'},Object.defineProperty({},'work_ref',{get:getter})])
+  for(const args of [{work_ref:history.work_ref,root_job_id:'JOB-1'},{work_ref:history.work_ref+'\n'},
+    {work_ref:history.work_ref,cursor:'page\n'},Object.defineProperty({},'work_ref',{get:getter})])
     await expect(transport.request('catalogue',args,new AbortController().signal)).rejects.toThrow();
   expect(getter).not.toHaveBeenCalled();expect(e.invoke.mock.calls.filter(([name])=>name==='executive_project_conversations_read')).toHaveLength(0);
   const reader=e.host.session!.createProjectCatalogueReader!({workRef:history.work_ref,currentWorkRef:()=>history.work_ref,selectionGeneration:()=>'one'});

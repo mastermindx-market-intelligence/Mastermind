@@ -15,12 +15,12 @@ export function projectConversationArguments(operation:ProjectConversationReadOp
     if(operation==='fresh_read')return typeof work==='string'?decodeFreshConversationReference(value,work):null;
     if(operation!=='catalogue'&&operation!=='fresh_references')return null;
     if(typeof work!=='string'||(operation==='catalogue'
-      ? !/^WS:[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(work)||work.length<5||work.length>67
-      : !/^WS:[A-Za-z0-9][A-Za-z0-9._-]{0,68}$/.test(work)))return null;
+      ? /^WS:[A-Z0-9]+(?:-[A-Z0-9]+)*$/.exec(work)?.[0]!==work||work.length<5||work.length>67
+      : /^WS:[A-Za-z0-9][A-Za-z0-9._-]{0,68}$/.exec(work)?.[0]!==work))return null;
     if(keys==='work_ref')return Object.freeze({work_ref:work});
     if(operation!=='catalogue'||keys!=='cursor,work_ref')return null;
     const cursor=fields.cursor.value;
-    if(cursor!==null&&(typeof cursor!=='string'||!/^[A-Za-z0-9_=-]{1,2048}$/.test(cursor)))return null;
+    if(cursor!==null&&(typeof cursor!=='string'||/^[A-Za-z0-9_=-]{1,2048}$/.exec(cursor)?.[0]!==cursor))return null;
     return Object.freeze({work_ref:work,cursor});
   }catch{return null;}
 }

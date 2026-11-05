@@ -3,6 +3,7 @@ import { parseInstructionAdmissionTarget } from "./instruction-admission-target"
 import type { OperationPointer } from "./operation-controller";
 import { parseDirectConsumeTarget } from "../direct-native-result";
 import { canonicalJson, sha256Hex } from "./operation-key";
+import {parseFreshConversationTarget} from './fresh-conversation-target';
 
 export interface DurablePendingPointerStore {
   read(scope: string, signal?: AbortSignal): Promise<OperationPointer | null>;
@@ -36,7 +37,7 @@ export const PENDING_POINTER_ERRORS = {
 } as const;
 
 type SourceOperationKind = "project_create" | "project_adopt" | "direction_accept";
-type StoredKind = "launch" | "consume" | "project_pause" | "project_resume" | SourceOperationKind | "project_source_write" | "instruction_pause" | "conversation_create";
+type StoredKind = "launch" | "consume" | "project_pause" | "project_resume" | SourceOperationKind | "project_source_write" | "instruction_pause" | "conversation_create" | "conversation_consume" | "conversation_turn";
 type ClosedRecord = {
   readonly v: 1; readonly operationKey: string; readonly kind: "launch" | "consume"; readonly targetKey: string;
 } | {
@@ -59,6 +60,10 @@ type ClosedRecord = {
 } | {
   /** Planning launch retains only the opaque status lookup; its key binding stays port-owned. */
   readonly v: 9; readonly operationKey: string; readonly kind: "launch"; readonly targetKey: string;
+} | {
+  readonly v: 10; readonly operationKey: string; readonly kind: "conversation_consume"; readonly targetKey: string;
+} | {
+  readonly v: 11; readonly operationKey: string; readonly kind: "conversation_turn"; readonly targetKey: string;
 };
 
 type DurableReservation =
@@ -120,6 +125,8 @@ const KIND_RECORDS = {
   project_source_write: { v: 5, key: /^mmos-project-(?:file-add|preference-set)-[0-9a-f]{40}$/, consume: false },
   instruction_pause: { v: 6, key: /^mmos-instruction-pause-[0-9a-f]{40}$/, consume: false },
   conversation_create: { v: 7, key: CONVERSATION_CREATE_KEY_RE, consume: false },
+  conversation_consume: { v: 10, key: /^mmos-conversation-consume-[0-9a-f]{40}$/, consume: false },
+  conversation_turn: { v: 11, key: /^mmos-conversation-turn-[0-9a-f]{40}$/, consume: false },
 } as const;
 /**
  * Extra closed shapes of an EXISTING kind, discriminated by the exact issued
@@ -191,6 +198,7 @@ function validFields(raw: Record<string, unknown>, spec: NonNullable<ReturnType<
   // recomputed from the pointer alone; the issuing port's prepare owns that
   // binding and this store enforces only the exact issued key/target grammar.
   if (spec.v === 9) return planningTargetMatches(raw.targetKey);
+  if (spec.v === 10 || spec.v === 11) return parseFreshConversationTarget(raw.targetKey)!==null;
   return typeof raw.targetKey === "string"
     && (spec.consume ? parseDirectConsumeTarget(raw.targetKey) !== null : TARGET_KEY_RE.test(raw.targetKey))
     && (spec.v === 1 || TARGET_KEY_RE.exec(raw.targetKey)?.[0] === raw.targetKey);
