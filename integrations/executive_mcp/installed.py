@@ -2730,9 +2730,11 @@ class InstalledBootPacketCollector:
         data_view = None
         if bound_data is not None:
             if (bound_data[0] is not self or self._allow_synthetic_fixture
-                    or (project_knowledge_request is None and project_knowledge_recipe_request is None)):
+                    or (project_knowledge_request is None and project_knowledge_recipe_request is None
+                        and project_plan_request is None)):
                 raise ValueError("CANONICAL_DATA_UNAVAILABLE")
             selected_work = (project_knowledge_request[1]["work_ref"] if project_knowledge_request is not None
+                             else project_plan_request if project_plan_request is not None
                              else project_knowledge_recipe_request[1]["request"].get("work_ref"))
             if selected_work != bound_data[2]:
                 raise ValueError("CANONICAL_DATA_UNAVAILABLE")

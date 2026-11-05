@@ -136,7 +136,8 @@ class AgentOsProjectPlanReader:
 
 def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
                           work_ref: str, timeout: float = 10.0, runner=None,
-                          include_continuity: bool = False, _canonical_data_view=None):
+                          include_continuity: bool = False, _canonical_data_view=None,
+                          code_root: Path | None = None, code_commit: str | None = None):
     """Fixed child entry used inside the collector's pre/post seal bracket.
 
     Macro's actual parser and validator consume bounded captured bytes. No
@@ -153,7 +154,13 @@ def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
             or type(timeout) not in (int, float) or not 0 < timeout <= 15):
         raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
     root = Path(macro_root)
-    code_sha, code_root = expected_macro_sha, root
+    if (code_root is None) != (code_commit is None):
+        raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
+    code_sha, executable_root = expected_macro_sha, root
+    if code_root is not None:
+        if not Path(code_root).is_absolute() or type(code_commit) is not str or re.fullmatch(r"[0-9a-f]{40}", code_commit) is None:
+            raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
+        code_sha, executable_root = code_commit, Path(code_root)
     if _canonical_data_view is not None:
         from control_plane.project_canonical_data import CanonicalProjectDataView
         if (type(_canonical_data_view) is not CanonicalProjectDataView
@@ -161,9 +168,15 @@ def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
                 or _canonical_data_view.data_commit != expected_macro_sha):
             raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
         _canonical_data_view.check()
-        code_sha, code_root = _canonical_data_view.code_commit, _canonical_data_view._code_root
+        if code_root is not None and (Path(code_root) != _canonical_data_view._code_root
+                                      or code_commit != _canonical_data_view.code_commit):
+            raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
+        code_sha, executable_root = _canonical_data_view.code_commit, _canonical_data_view._code_root
 
     def current():
+        if ((executable_root != root or code_sha != expected_macro_sha)
+                and code_git("rev-parse", "HEAD").strip() != code_sha):
+            return False
         if _canonical_data_view is not None:
             _canonical_data_view.check()
             return True
@@ -172,24 +185,32 @@ def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
     deadline = time.monotonic() + timeout
     run = runner or bounded_subprocess_runner
 
-    def git(*args, limit=_RECORD_BYTES, input_bytes=None):
+    def git_at(repository, *args, limit=_RECORD_BYTES, input_bytes=None):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
         options = {} if input_bytes is None else {"input_bytes": input_bytes}
         from control_plane.project_canonical_data import local_git_environment
-        value = run(["git", "--no-optional-locks", "--no-replace-objects", "-C", str(root), *args],
-                    cwd=root, timeout=remaining, max_bytes=limit, env=local_git_environment(), **options)
+        value = run(["git", "--no-optional-locks", "--no-replace-objects", "-C", str(repository), *args],
+                    cwd=repository, timeout=remaining, max_bytes=limit, env=local_git_environment(), **options)
         if (not isinstance(value, dict) or value.get("code") != 0
                 or type(value.get("stdout")) is not str
                 or any(value.get(flag) is True for flag in ("timed_out", "limit_exceeded", "invalid_utf8"))):
             raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
         return value["stdout"]
 
+    def git(*args, **options):
+        return git_at(root, *args, **options)
+
+    def code_git(*args, **options):
+        return git_at(executable_root, *args, **options)
+
     def captured(relative, limit, *, executable=False):
         # Parent collector established the immutable source root. This fixed
         # Git-object read avoids following mutable filesystem names in a parser.
         commit = code_sha if executable else expected_macro_sha
+        if executable:
+            return code_git("show", commit + ":" + relative, limit=limit)
         return git("show", commit + ":" + relative, limit=limit)
 
     try:
@@ -203,7 +224,7 @@ def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
         text = captured(path, _RECORD_BYTES)
         parser_text = captured("scripts/agentos.py", _OWNER_BYTES, executable=True)
         owner = types.ModuleType("agentos_bound_plan_source")
-        owner.__file__ = str(code_root / "scripts/agentos.py")
+        owner.__file__ = str(executable_root / "scripts/agentos.py")
         prior = sys.modules.get(owner.__name__)
         sys.modules[owner.__name__] = owner
         original_path = list(sys.path)
@@ -255,7 +276,7 @@ def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
             from common.project_plan_continuity_contract import compose_body_v2
             continuity = capture_plan_continuity(owner=owner, git=git, work_ref=work_ref,
                 macro_sha=expected_macro_sha, workstream_source=source, workstream_bytes=text.encode("utf-8"),
-                executable_macro_sha=code_sha)
+                executable_macro_sha=code_sha, code_git=code_git)
             value = compose_body_v2(value, continuity, authored_bytes=text.encode("utf-8"))
             if not current():
                 return unavailable(work_ref, "SOURCE_CHANGED")
