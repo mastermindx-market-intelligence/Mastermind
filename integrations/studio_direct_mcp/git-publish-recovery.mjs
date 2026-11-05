@@ -126,6 +126,13 @@ export async function createPublicationRecovery({git, workspacePath, operationId
       return {...base, outcome:r.terminal_outcome, reason:r.terminal_proof,
         current_remote_head_sha:remoteHead};
     }
+    // A PREPARED record is explicitly before dispatch. Another valid writer
+    // may have published identical bytes; target equality must not falsely
+    // attribute that effect to this never-proven publisher invocation.
+    if (r.stage === 'PREPARED') {
+      return {...base, outcome:'UNKNOWN', reason:'WRITER_MAY_STILL_DISPATCH',
+        current_remote_head_sha:remoteHead};
+    }
     if (remoteHead === r.intended_head_sha) {
       return {...base, outcome:'APPLIED', reason:'INTENDED_REMOTE_REF_OBSERVED'};
     }
