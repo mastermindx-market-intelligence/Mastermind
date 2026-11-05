@@ -1,0 +1,13 @@
+--- a/lane_runtime.py
++++ b/lane_runtime.py
+@@ -805,0 +806 @@
++        self.capture_hash = hashlib.sha256()
+@@ -831,0 +833 @@
++                    self.capture_hash.update(payload)
+@@ -846,0 +849,4 @@
++
++    def complete_digest(self):
++        with self._lock:
++            return self.capture_hash.hexdigest() if self.eof and self.error_code is None else None
+@@ -1152,0 +1159 @@
++                    "stdout_sha256": stdout_collector.complete_digest() if stdout_complete else None,

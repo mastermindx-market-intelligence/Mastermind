@@ -44,20 +44,20 @@ def test_corpus_covers_evaluator_exposure_and_fail_closed_pro_admission():
 
 
 @pytest.mark.parametrize("clause", [
-    "CONCENTRATED_JUDGMENT", "SUSTAINED_ORCHESTRATION", "role preferences",
-    "not duration guarantees", "Do not force an Astra-to-Sol handoff",
+    "CONCENTRATED_JUDGMENT", "SUSTAINED_ORCHESTRATION", 'provisional profiles',
+    "not duration guarantees", 'No forced Astra-to-Sol handoff',
     "LOWER_TOTAL_OVERHEAD", "PRINCIPAL_JUDGMENT", "UNIQUE_APPROVED_ACCESS",
     "CRITICAL_PATH_SHORTCUT", "NO_ELIGIBLE_PRE_EFFECT_WORKER",
-    "EFFECT_UNKNOWN", "not live admission", "ACTIVE_EXECUTION",
-    "enrolled in the same pinned INDEX",
+    "EFFECT_UNKNOWN", 'not duration guarantees, model aliases or Runtime roles/admission', "ACTIVE_EXECUTION",
+    'Enrolled companion procedure in the same pinned INDEX',
     "PRO_MODE_TASK_CLASS", "PRO_MODE_REFUSED / USE_NON_PRO_MODE",
     "Model Router fixes the first lawful suitability tier",
     "fresh-Sol evaluation bundle", "evaluation exposure, not production enrollment",
-    "Enrolled companion procedure", "not a served-model or Web Pro attestation",
+    "Enrolled companion procedure", 'not served-model/ Web Pro attestation',
 ])
 def test_enrolled_instruction_preserves_required_boundaries(clause):
     assert SKILL.is_file(), "enrolled role-adaptive instruction is not supplied"
-    assert clause in SKILL.read_text(encoding="utf-8")
+    assert clause in " ".join(SKILL.read_text(encoding="utf-8").split())
 
 
 @pytest.mark.parametrize("artifact", [SKILL, PLAN, SPEC])
@@ -93,9 +93,9 @@ def test_index_enrolls_web_ceo_delegation_as_same_pin_companion_without_new_fina
     review = "### `REVIEW_RETURN.md`"
     assert raw_index.count(companion) == 1
     assert raw_index.index(active) < raw_index.index(companion) < raw_index.index(review)
-    assert "same pinned Skillpack revision" in index
-    assert "ACTIVE_EXECUTION remains the sole active-turn, no-delta and finalization owner" in index
-    assert "does not select a provider, account, credential, host, model setting, or reasoning mode" in index
+    assert 'applicable same-pin owner' in index
+    assert 'Sole active-turn/no-delta/final-response owner' in index
+    assert "No provider/account/credential/host/model-setting/reasoning-mode selection" in index
 
 
 def test_enrolled_companion_is_truthful_and_preserves_existing_authority_boundaries():
@@ -111,8 +111,8 @@ def test_enrolled_companion_is_truthful_and_preserves_existing_authority_boundar
     assert "Enrolled companion procedure" in skill
     assert "Candidate procedure: not enrolled" not in raw_skill
     assert "Before that enrollment, this candidate has no procedural authority" not in raw_skill
-    assert "ACTIVE_EXECUTION as the sole active-turn, no-delta and finalization owner" in skill
-    for clause in ("direct-spawn", "raw-socket", "alternate-queue"):
+    assert 'ACTIVE_EXECUTION remains sole active-turn, no-delta and finalization owner' in skill
+    for clause in ('No raw spawn/socket', 'No raw spawn/socket', 'credential fallback or new queue'):
         assert clause in skill
     assert "raw-socket/provider-spawn bypass" in rows["WCD08"]["pass_requires"]
     for task_class in (
@@ -122,7 +122,7 @@ def test_enrolled_companion_is_truthful_and_preserves_existing_authority_boundar
         "ADVERSARIAL_JUDGMENT",
     ):
         assert task_class in skill
-    assert "`SUSTAINED_ORCHESTRATION` is a work profile, not a `PRO_MODE_TASK_CLASS`" in skill
+    assert '`SUSTAINED_ORCHESTRATION` is not a `PRO_MODE_TASK_CLASS`' in skill
     assert "44 tests" in plan
     for artifact in (plan, spec):
         assert "Original design basis" in artifact
