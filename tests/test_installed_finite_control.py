@@ -48,18 +48,40 @@ def test_invalid_selected_definition_refuses_instead_of_ordinary_fallback(change
         installed_control_placements(dict(finite_raw(), **change))
 
 
-def test_postexec_wrapper_calls_fixed_service_entry(monkeypatch, tmp_path):
+@pytest.mark.parametrize('edge', ['disabled', 'enabled', 'config_refused', 'profile_refused'])
+def test_postexec_wrapper_calls_fixed_service_entry(monkeypatch, tmp_path, edge):
+    from ops.executive_os import control_aead_profile as aead
     monkeypatch.setattr(wrapper, '_ROOT', tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(wrapper.SENTINEL_NAME, 'a'*64)
     monkeypatch.setattr('sys.argv', ['wrapper', '--post-exec', '--config', str(tmp_path/'control.json'),
         '--attestation', str(tmp_path/'attestation.json'), '--release-root', str(tmp_path)])
     seen=[]
+    raw = {'reply_events': {'armed': edge != 'disabled'}}
+    def load(path):
+        assert path == tmp_path/'control.json'
+        seen.append('config')
+        if edge == 'config_refused':
+            raise service.ServiceError('synthetic invalid configuration')
+        return raw
+    def activate(supplied, release):
+        assert supplied is raw and release == tmp_path
+        seen.append('profile')
+        if edge == 'profile_refused':
+            raise aead.AeadProfileError('synthetic invalid profile')
+    monkeypatch.setattr(service, 'load_control_config', load)
+    monkeypatch.setattr(aead, 'activate_if_enrolled', activate)
     monkeypatch.setattr(wrapper, 'attest_current_service_environment', lambda **kw: seen.append('attested'))
     monkeypatch.setattr(service, 'main', lambda *a, **k: pytest.fail('default CLI loses finite tuple'))
     monkeypatch.setattr(service, 'serve_installed_control', lambda path: seen.append(path) or 0, raising=False)
-    assert wrapper._post_exec_main() == 0
-    assert seen == ['attested', tmp_path/'control.json']
+    if edge in ('config_refused', 'profile_refused'):
+        with pytest.raises((service.ServiceError, aead.AeadProfileError)):
+            wrapper._post_exec_main()
+        assert seen == (['attested', 'config'] if edge == 'config_refused'
+                        else ['attested', 'config', 'profile'])
+    else:
+        assert wrapper._post_exec_main() == 0
+        assert seen == ['attested', 'config', 'profile', tmp_path/'control.json']
 
 
 def test_fixed_entry_reaches_same_loaded_definition_and_original_guard(tmp_path, monkeypatch, root_stats):

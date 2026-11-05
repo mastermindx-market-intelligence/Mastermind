@@ -69,6 +69,7 @@ from control_plane.executive_runtime import (
     Attempt,
     AttemptLease,
     AttemptStatus,
+    ExecutiveDialogueSource,
     Job,
     JobPayload,
     JobStatus,
@@ -86,6 +87,7 @@ from control_plane.executive_workspace import (
     AssignmentSealError,
     seal_control_owned_paths,
 )
+from control_plane.operator_harness_contract import WorkspaceIdentity
 
 
 RESULT_SCHEMA_VERSION = "mastermind.executive_worker_result/v1"
@@ -551,7 +553,9 @@ def worker_result_schema(
     effective_grant_digest: str | None = None,
     orchestration_role: str | None = None,
     root_job_id: str | None = None,
+    plan_schema_version: str = "mastermind.execution_plan/v1",
     aggregation_schema_version: str = "mastermind.aggregation_result/v1",
+    coordinator_job_id: str | None = None,
 ) -> dict[str, Any]:
     """Return the strict final-output contract for one immutable attempt."""
 
@@ -568,11 +572,17 @@ def worker_result_schema(
             run_id=run_id,
             worker_id=worker_id,
             root_job_id=root_job_id,
+            plan_schema_version=plan_schema_version,
             aggregation_schema_version=aggregation_schema_version,
+            coordinator_job_id=coordinator_job_id,
         )
         result["x-mastermind-effective-grant-digest"] = effective_grant_digest
         return result
 
+    if coordinator_job_id is not None:
+        raise SupervisorError("coordinator binding requires the V5 planner role")
+    if plan_schema_version != "mastermind.execution_plan/v1":
+        raise SupervisorError("versioned plan schema requires the planner role")
     if aggregation_schema_version != "mastermind.aggregation_result/v1":
         raise SupervisorError("aggregation producer schema requires an aggregation role")
     string_list = {"type": "array", "items": {"type": "string"}}
@@ -1041,12 +1051,238 @@ def _verify_commission_workspace(job: Job, workspace: Path) -> None:
         raise SupervisorError("commission Git root differs from the durable Job assignment")
 
 
+_REMOTE_COMMISSION_ASSIGNMENT_KEYS = (
+    "attempt_id",
+    "job_id",
+    "worker_id",
+    "quota_class",
+    "fence_generation",
+    "lease_owner",
+    "authority_policy_hash",
+)
+
+
+def _commission_from_exact_bytes(
+    *,
+    repository: str,
+    commit: str,
+    path: str,
+    content_sha256: str,
+    content: bytes,
+) -> VerifiedCommission:
+    """Apply the one shared immutable-bytes law to an exact commission read."""
+
+    if not content or len(content) > _COMMISSION_MAX_BYTES:
+        raise SupervisorError("commission blob is empty or exceeds the 512 KiB ceiling")
+    digest = hashlib.sha256(content).hexdigest()
+    if digest != content_sha256:
+        raise SupervisorError("commission content digest differs from immutable source")
+    try:
+        text = content.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise SupervisorError("commission content must be UTF-8 text") from exc
+    if "\x00" in text:
+        raise SupervisorError("commission content contains a NUL byte")
+    return VerifiedCommission(
+        repository=repository,
+        commit=commit,
+        path=path,
+        content_sha256=digest,
+        content=content,
+    )
+
+
+def _verify_remote_commission_workspace(
+    job: Job, identity: WorkspaceIdentity
+) -> None:
+    """Bind one privileged selected-host identity to the exact durable Job.
+
+    ``owner_workspace_identity`` is an internal Supervisor value observed by
+    the existing qualified selected-host source on the workspace's own host;
+    the ``WorkspaceIdentity`` type itself is not admission and no caller or
+    model label can mint it.  This Control-side check compares exact durable
+    Job strings and already qualified physical fields only.  It never stats,
+    resolves, or reads the remote path, and it never consults a local
+    workspace.
+    """
+
+    if type(identity) is not WorkspaceIdentity:
+        raise SupervisorError(
+            "remote commission workspace identity is not exact WorkspaceIdentity"
+        )
+    worktree = job.worktree
+    if (
+        type(worktree) is not str
+        or not worktree
+        or not Path(worktree).is_absolute()
+        or str(Path(worktree)) != worktree
+        or ".." in Path(worktree).parts
+        or worktree.startswith("//")
+    ):
+        raise SupervisorError("remote commission Job has no exact assigned workspace")
+    constraints = job.constraints if isinstance(job.constraints, Mapping) else {}
+    base = constraints.get("base_sha")
+    if type(base) is not str or re.fullmatch(r"[0-9a-f]{40}", base) is None:
+        raise SupervisorError("remote commission Job has no exact base identity")
+    if identity.workspace_path != worktree or identity.base_sha != base:
+        raise SupervisorError(
+            "remote commission workspace identity differs from the durable Job assignment"
+        )
+    if any(
+        type(getattr(identity, field)) is not int or getattr(identity, field) < 0
+        for field in ("device", "inode", "uid", "gid")
+    ) or identity.inode == 0:
+        raise SupervisorError(
+            "remote commission workspace physical identity is not qualified"
+        )
+
+
+def _remote_commission_current_attempt(runtime: Runtime, job: Job) -> Attempt:
+    """Read one exact durable current Attempt assignment for the commission Job."""
+
+    current_job = runtime.jobs.get_job(job.job_id)
+    if current_job is None:
+        raise SupervisorError("remote commission Job lost its durable assignment")
+    attempt_id = current_job.current_attempt_id
+    if type(attempt_id) is not str or not attempt_id:
+        raise SupervisorError("remote commission Job has no current Attempt")
+    attempt = runtime.attempts.get_attempt(attempt_id)
+    if attempt is None or attempt.job_id != job.job_id:
+        raise SupervisorError("remote commission current Attempt is not durable")
+    current_constraints = (
+        current_job.constraints if isinstance(current_job.constraints, Mapping) else {}
+    )
+    job_constraints = job.constraints if isinstance(job.constraints, Mapping) else {}
+    if (
+        current_job.assigned_worker_id != attempt.worker_id
+        or current_job.assigned_quota_class != attempt.quota_class
+        or current_job.worktree != job.worktree
+        or current_constraints.get("base_sha") != job_constraints.get("base_sha")
+    ):
+        raise SupervisorError(
+            "remote commission durable assignment differs from the commission Job"
+        )
+    return attempt
+
+
+def _verify_remote_commission_recheck(
+    runtime: Runtime, job: Job, source: ExecutiveDialogueSource, bound: Attempt
+) -> None:
+    """Re-read immutable source and durable assignment after the blocking fetch."""
+
+    try:
+        with runtime.store.read() as connection:
+            reread = _dialogue_source_from_root_creation(
+                connection, root_job_id=job.root_job_id
+            )
+    except StateConflict as exc:
+        raise SupervisorError(f"immutable commission source is invalid: {exc}") from exc
+    if reread is None or reread.to_dict() != source.to_dict():
+        raise SupervisorError(
+            "immutable commission source drifted during remote verification"
+        )
+    current = _remote_commission_current_attempt(runtime, job)
+    if any(
+        getattr(current, key) != getattr(bound, key)
+        for key in _REMOTE_COMMISSION_ASSIGNMENT_KEYS
+    ):
+        raise SupervisorError(
+            "remote commission durable assignment moved during verification"
+        )
+
+
+def _qualify_source_free_remote_planner(
+    runtime: Runtime, job: Job, identity: WorkspaceIdentity
+) -> None:
+    """Qualify one legacy source-free remote planner and pass with no commission.
+
+    The immutable root creation Event carries neither the optional dialogue
+    source nor its digest, so no commission was ever admitted for this Job:
+    that pure absence is legacy source-free provenance, not a lost
+    commissioned input, and it may pass with ``None``.  The ``None`` is only
+    reachable after the full remote qualification: the exact owner-produced
+    selected-host identity must bind to the durable Job worktree and base
+    with already qualified physical fields, and the current Job, Attempt and
+    worker assignment must be durable and exact.  Any present, malformed, or
+    drifted source never reaches this route.  No local Git read, stat, or
+    canonical fetch happens here, and no local workspace is consulted.
+    """
+
+    _verify_remote_commission_workspace(job, identity)
+    _remote_commission_current_attempt(runtime, job)
+
+
+def _verify_remote_commission_for_job(
+    runtime: Runtime,
+    job: Job,
+    identity: WorkspaceIdentity,
+    source: ExecutiveDialogueSource,
+) -> VerifiedCommission:
+    """Verify one remote planner's commission from canonical bytes only.
+
+    The selected-host identity arrives from the Supervisor's own qualified
+    observation, never from model or caller wire data.  This route performs no
+    local Git read, stat, or resolution of the remote workspace, and it never
+    falls back to a local workspace after any refusal: missing or invalid
+    remote bytes stay a refusal.
+    """
+
+    ref = source.commission_ref
+    _verify_remote_commission_workspace(job, identity)
+    _verify_commission_repository(ref.repository)
+    bound = _remote_commission_current_attempt(runtime, job)
+    commit = ref.commit
+    path = ref.path
+    content = _fetch_remote_commission(
+        repository=ref.repository,
+        commit=commit,
+        path=path,
+    )
+    _verify_remote_commission_recheck(runtime, job, source, bound)
+    return _commission_from_exact_bytes(
+        repository=ref.repository,
+        commit=commit,
+        path=path,
+        content_sha256=ref.content_sha256,
+        content=content,
+    )
+
+
 def verify_commission_for_job(
-    runtime: Runtime, job: Job, workspace: Path | None
+    runtime: Runtime,
+    job: Job,
+    workspace: Path | None,
+    *,
+    owner_workspace_identity: WorkspaceIdentity | None = None,
 ) -> VerifiedCommission | None:
-    """Verify exact commission bytes from canonical strict-v2 root provenance."""
+    """Verify exact commission bytes from canonical strict-v2 root provenance.
+
+    ``owner_workspace_identity`` is a keyword-only INTERNAL parameter: the
+    normal Supervisor supplies it only from its existing qualified
+    selected-host source (the requested workspace's own host observation),
+    never from model or caller wire data, and the ``WorkspaceIdentity`` type
+    itself is not admission.  An admitted commission is fetched from the
+    canonical repository directly; no local path is accessed and no local
+    refusal falls back to this route or back from it. A canonical legacy
+    source-free planner returns no commission only after exact remote
+    identity and current durable assignment qualification, without a fetch.
+    """
 
     direct = _is_direct_native_job(job)
+    if owner_workspace_identity is not None:
+        # Refuse every disallowed combination before any source read or fetch.
+        if direct:
+            raise SupervisorError(
+                "direct native commission refuses a remote workspace identity"
+            )
+        if workspace is not None:
+            raise SupervisorError(
+                "commission verification refuses simultaneous local and remote workspace identity"
+            )
+        if job.orchestration_role != "plan":
+            raise SupervisorError(
+                "remote commission identity accepts only the non-direct planner role"
+            )
     if job.orchestration_role is None and not direct:
         return None
     try:
@@ -1056,6 +1292,21 @@ def verify_commission_for_job(
             )
     except StateConflict as exc:
         raise SupervisorError(f"immutable commission source is invalid: {exc}") from exc
+    if owner_workspace_identity is not None:
+        if source is None:
+            # Neither the optional source nor its digest exists in the
+            # immutable root creation Event: legacy source-free provenance,
+            # not a lost commissioned input.  Exact remote identity and
+            # durable assignment still qualify before the no-commission pass,
+            # and a present-but-invalid source above never lands here.
+            return _qualify_source_free_remote_planner(
+                runtime, job, owner_workspace_identity
+            )
+        # A remote commission Job with an admitted source verifies it exactly;
+        # it is never a silent pass and never a local replacement.
+        return _verify_remote_commission_for_job(
+            runtime, job, owner_workspace_identity, source
+        )
     if source is None:
         if direct:
             raise SupervisorError("direct native Job lost its admitted commission source")
@@ -1083,22 +1334,11 @@ def verify_commission_for_job(
             commit=commit,
             path=path,
         )
-    if not content or len(content) > _COMMISSION_MAX_BYTES:
-        raise SupervisorError("commission blob is empty or exceeds the 512 KiB ceiling")
-    digest = hashlib.sha256(content).hexdigest()
-    if digest != ref.content_sha256:
-        raise SupervisorError("commission content digest differs from immutable source")
-    try:
-        text = content.decode("utf-8", errors="strict")
-    except UnicodeDecodeError as exc:
-        raise SupervisorError("commission content must be UTF-8 text") from exc
-    if "\x00" in text:
-        raise SupervisorError("commission content contains a NUL byte")
-    return VerifiedCommission(
+    return _commission_from_exact_bytes(
         repository=ref.repository,
         commit=commit,
         path=path,
-        content_sha256=digest,
+        content_sha256=ref.content_sha256,
         content=content,
     )
 
@@ -2556,6 +2796,8 @@ class ExecutiveSupervisor:
     async def _collect_with_heartbeats(self, active: ActiveRun) -> CollectionReceipt:
         task = asyncio.create_task(self.adapter.collect_result(active.process_ref))
         attempt = active.lease.attempt
+        direct=_is_direct_native_job(self._job(attempt.job_id))
+        cancel_entered=False
         try:
             while True:
                 done, _ = await asyncio.wait(
@@ -2565,15 +2807,34 @@ class ExecutiveSupervisor:
                     return task.result()
                 job = self._job(attempt.job_id)
                 if job.status == JobStatus.CANCEL_REQUESTED:
-                    await self.adapter.cancel(active.process_ref, "durable cancellation request")
-                    return await task
+                    if not direct:
+                        await self.adapter.cancel(active.process_ref, "durable cancellation request")
+                        return await task
+                    if not cancel_entered:
+                        cancel_entered=True
+                        first=self.runtime.reserve_direct_native_cancel_call(attempt.attempt_id,
+                            fence_generation=attempt.fence_generation,lease_token=active.lease.lease_token)
+                        if first:
+                            try:
+                                await self.adapter.cancel(active.process_ref,"durable direct cancellation request")
+                            except Exception as exc:
+                                # No fallback kill or second adapter send. Keep the
+                                # original collection and lease until actual exit.
+                                self.runtime.record_direct_native_cancel_unavailable(attempt.attempt_id,
+                                    fence_generation=attempt.fence_generation,lease_token=active.lease.lease_token,
+                                    unsupported=isinstance(exc,NotImplementedError))
                 self.runtime.attempts.heartbeat_attempt(
                     attempt.attempt_id,
                     fence_generation=attempt.fence_generation,
                     lease_token=active.lease.lease_token,
                 )
         except Exception:
-            if not task.done():
+            if not task.done() and direct and cancel_entered:
+                # The original cancel may have executed. Do not use generic
+                # ownership-loss cleanup to issue that same effect a second time.
+                task.cancel()
+                await asyncio.gather(task,return_exceptions=True)
+            elif not task.done():
                 try:
                     await self.adapter.cancel(active.process_ref, "supervisor ownership lost")
                 finally:
@@ -3567,6 +3828,18 @@ class ExecutiveSupervisor:
                 )
             return seal_path
 
+        async def acknowledge_cancel():
+            current=self._job(attempt.job_id)
+            terminal=None
+            if _is_direct_native_job(current):
+                from control_plane.direct_native_correction import build_terminal
+                terminal=build_terminal(current,attempt,
+                    self.runtime.jobs.direct_native_provenance(current.job_id),
+                    self._read_private_receipt(receipt_path,name='direct cancellation collection'),
+                    self._read_private_receipt(await ensure_sealed(),name='direct cancellation assignment'))
+            return self.runtime.attempts.acknowledge_cancel(attempt.attempt_id,
+                fence_generation=fence,lease_token=token,direct_terminal=terminal)
+
         if receipt.result.exit_code is None:
             raise SupervisorError(
                 "recovered local worker has no truthful durable OS exit code; "
@@ -3598,9 +3871,7 @@ class ExecutiveSupervisor:
         if job.status == JobStatus.CANCEL_REQUESTED:
             await self._settle_recovered_terminal_owner(active)
             await ensure_sealed()
-            cancelled = self.runtime.attempts.acknowledge_cancel(
-                attempt.attempt_id, fence_generation=fence, lease_token=token
-            )
+            cancelled = await acknowledge_cancel()
             return cancelled, (), None, await ensure_sealed()
         output = receipt.result.structured_output
         direct = _is_direct_native_job(job)
@@ -3631,11 +3902,7 @@ class ExecutiveSupervisor:
                     job = self._job(attempt.job_id)
                     if job.status == JobStatus.CANCEL_REQUESTED:
                         await ensure_sealed()
-                        cancelled = self.runtime.attempts.acknowledge_cancel(
-                            attempt.attempt_id,
-                            fence_generation=fence,
-                            lease_token=token,
-                        )
+                        cancelled = await acknowledge_cancel()
                         return (
                             cancelled,
                             validation_receipts,
@@ -3683,11 +3950,7 @@ class ExecutiveSupervisor:
                 return failed, validation_receipts, validation_path, await ensure_sealed()
             except _ValidationCancelled:
                 await ensure_sealed()
-                cancelled = self.runtime.attempts.acknowledge_cancel(
-                    attempt.attempt_id,
-                    fence_generation=fence,
-                    lease_token=token,
-                )
+                cancelled = await acknowledge_cancel()
                 return cancelled, validation_receipts, validation_path, await ensure_sealed()
             except TerminalAssignmentSealError:
                 raise
@@ -3698,11 +3961,7 @@ class ExecutiveSupervisor:
                 current = self._job(attempt.job_id)
                 if current.status == JobStatus.CANCEL_REQUESTED:
                     await ensure_sealed()
-                    cancelled = self.runtime.attempts.acknowledge_cancel(
-                        attempt.attempt_id,
-                        fence_generation=fence,
-                        lease_token=token,
-                    )
+                    cancelled = await acknowledge_cancel()
                     return (
                         cancelled,
                         validation_receipts,
@@ -3714,11 +3973,7 @@ class ExecutiveSupervisor:
                 current = self._job(attempt.job_id)
                 if current.status == JobStatus.CANCEL_REQUESTED:
                     await ensure_sealed()
-                    cancelled = self.runtime.attempts.acknowledge_cancel(
-                        attempt.attempt_id,
-                        fence_generation=fence,
-                        lease_token=token,
-                    )
+                    cancelled = await acknowledge_cancel()
                     return (
                         cancelled,
                         validation_receipts,
@@ -3742,11 +3997,7 @@ class ExecutiveSupervisor:
                     if current.status != JobStatus.CANCEL_REQUESTED:
                         raise
                     await ensure_sealed()
-                    failed = self.runtime.attempts.acknowledge_cancel(
-                        attempt.attempt_id,
-                        fence_generation=fence,
-                        lease_token=token,
-                    )
+                    failed = await acknowledge_cancel()
                 return failed, validation_receipts, validation_path, await ensure_sealed()
         await ensure_sealed()
         failed = self.runtime.attempts.fail_attempt(

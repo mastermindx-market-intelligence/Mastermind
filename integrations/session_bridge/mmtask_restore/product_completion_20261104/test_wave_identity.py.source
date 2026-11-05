@@ -1,0 +1,178 @@
+"""C1: composite task import/proposed export preserve (workstream, wave) identity.
+
+All fixtures are synthetic/disposable. Export-content tests stub validation only;
+the incumbent real-validator evidence remains separate.
+"""
+import copy
+import json
+import os
+from pathlib import Path
+import runpy
+import shutil
+import tempfile
+import types
+import unittest
+from unittest import mock
+
+import test_composite
+
+TOOL = Path(os.environ.get('MMTASK_UNDER_TEST', Path(__file__).with_name('mmtask')))
+
+
+def collision_db():
+    return dict(workstream='WS:ALPHA', related_workstreams=['WS:BETA'], tasks=[], agentos={},
+                waves=[dict(p='P1', id='foundation', workstream='WS:ALPHA', title='ALPHA foundation',
+                            source='local-proposed', status='todo'),
+                       dict(p='P2', id='foundation', workstream='WS:BETA', title='BETA foundation',
+                            source='agentos', status='todo')])
+
+
+def task(tid, scope=None, wave='foundation', **kw):
+    row = dict(id=tid, title=f'{scope or "legacy"} task', wave=wave, status='ready', depends_on=[])
+    if scope is not None:
+        row['workstream'] = scope
+    row.update(kw)
+    return row
+
+
+class TaskIdentity(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.code = runpy.run_path(str(TOOL), run_name='wave_identity_candidate')
+
+    def merge(self, db, rows):
+        return self.code['merge_tasks'](db, rows, 'synthetic.json', None, False)
+
+    def test_explicit_related_scope_retained_when_ids_collide(self):
+        for ref in ('foundation', 'P2', 'WS:BETA#foundation'):
+            with self.subTest(ref=ref):
+                db = collision_db()
+                self.merge(db, [task('P2.T1', 'WS:BETA', wave=ref)])
+                self.assertEqual((db['tasks'][0]['workstream'], db['tasks'][0]['wave']), ('WS:BETA', 'foundation'))
+
+    def test_ambiguous_bare_import_refuses_before_any_task_mutation(self):
+        db = collision_db()
+        db['tasks'] = [task('P1.T0', 'WS:ALPHA', status='accepted', evidence='accepted source', history=[])]
+        before = copy.deepcopy(db)
+        incoming = [task('P1.T0', 'WS:ALPHA', notes=['must not merge on refused batch']),
+                    task('P1.T1', 'WS:ALPHA'), task('P2.T1')]
+        with self.assertRaisesRegex(SystemExit, 'ambiguous wave'):
+            self.merge(db, incoming)
+        self.assertEqual(db, before)
+
+    def test_conflicting_explicit_scope_never_uses_legacy_default(self):
+        for scope, ref in [('WS:BETA', 'unknown'), ('WS:BETA', 'P1'),
+                           ('WS:BETA', 'WS:ALPHA#foundation'), ('WS:OTHER', 'foundation')]:
+            with self.subTest(scope=scope, ref=ref):
+                db = collision_db()
+                db['waves'].append(dict(p='P3', id='codex-session-plan', workstream='WS:ALPHA'))
+                before = copy.deepcopy(db)
+                with self.assertRaises(SystemExit):
+                    self.merge(db, [task('P2.T1', scope, wave=ref)])
+                self.assertEqual(db, before)
+
+    def test_unscoped_unique_and_qualified_refs_keep_legacy_compatibility(self):
+        for ref in ('P2', 'WS:BETA#foundation', 'disjoint'):
+            with self.subTest(ref=ref):
+                db = collision_db()
+                if ref == 'disjoint':
+                    db['waves'][1]['id'] = ref
+                self.merge(db, [task('T001', wave=ref, status='todo')])
+                self.assertEqual(db['tasks'][0]['workstream'], 'WS:BETA')
+                self.assertEqual(db['tasks'][0]['status'], 'ready')
+
+    def test_unscoped_unknown_rows_share_one_legacy_default(self):
+        db = collision_db()
+        self.merge(db, [task('T001', wave='unknown'), task('T002', wave='other')])
+        defaults = [w for w in db['waves'] if w['id'] == 'codex-session-plan']
+        self.assertEqual(len(defaults), 1)
+        self.assertEqual(defaults[0]['workstream'], 'WS:ALPHA')
+        self.assertEqual([t['wave'] for t in db['tasks']], ['codex-session-plan'] * 2)
+
+    def test_bare_selector_refuses_collision_but_p_and_qualified_are_exact(self):
+        db = collision_db()
+        with self.assertRaisesRegex(SystemExit, 'ambiguous wave'):
+            self.code['wave_of'](db, 'foundation')
+        for ref in ('P2', 'WS:BETA#foundation'):
+            self.assertEqual(self.code['wave_of'](db, ref)['workstream'], 'WS:BETA')
+        self.assertEqual(self.code['wave_of'](db, 'foundation', 'WS:BETA')['p'], 'P2')
+
+    def test_primary_proposal_never_adopts_related_task_next_action(self):
+        self.export_case([task('P2.T1', 'WS:BETA')], expected=None)
+
+    def test_primary_proposal_skips_related_first_then_selects_own_task(self):
+        self.export_case([task('P2.T1', 'WS:BETA'), task('P1.T1', 'WS:ALPHA')], expected='P1.T1')
+
+    def test_primary_proposal_retains_legacy_unscoped_task(self):
+        self.export_case([task('T001')], expected='T001')
+
+    def export_case(self, rows, expected):
+        db = collision_db()
+        db['tasks'] = rows
+        with tempfile.TemporaryDirectory(prefix='wave-export-') as tmp:
+            d = Path(tmp)
+            (d / 'agentos' / 'workstreams').mkdir(parents=True)
+            (d / 'agentos' / 'handoffs').mkdir()
+            (d / 'agentos' / 'workstreams' / 'WS-ALPHA.md').write_text(
+                '---\nkey: ALPHA\nwaves:\n  - id: original\n    title: Original\n    status: todo\n---\n')
+            (d / 'STATE.md').write_text('current task: P1.T1\n')
+            db['agentos']['mirror'] = tmp
+            before = copy.deepcopy(db)
+            args = types.SimpleNamespace(dry_run=True, session='test', mission='test source', ended_because='ci_handoff')
+            runner = self.code['do_export'].__globals__['subprocess']
+            with mock.patch.object(runner, 'run', return_value=types.SimpleNamespace(returncode=0, stdout='unit validator stub', stderr='')):
+                hf, pp, *_ = self.code['do_export'](tmp, db, args)
+            try:
+                patch = Path(pp).read_text()
+                self.assertIn('+  - id: foundation', patch)
+                self.assertNotIn('P2.T1', patch)
+                if expected is None:
+                    self.assertNotIn('next_action:', patch)
+                else:
+                    self.assertIn('next_action: "' + expected + ':', patch)
+                self.assertEqual(db, before)
+            finally:
+                shutil.rmtree(Path(hf).parent)
+
+
+class FileMutationBoundary(test_composite.CompositeBase):
+    def setUp(self):
+        super().setUp()
+        self.patch_tool = mock.patch.object(test_composite, 'MMTASK', str(TOOL))
+        self.patch_tool.start()
+        self.addCleanup(self.patch_tool.stop)
+        self.seed(collision_db())
+
+    def import_rows(self, rows):
+        source = Path(self.tmp) / 'synthetic-input.json'
+        source.write_text(json.dumps(rows))
+        return self.cli('--dir', self.d, 'import', '--no-fetch', '--mirror', self.mirror, '--tasks', str(source))
+
+    def test_real_import_command_preserves_related_scope(self):
+        r = self.import_rows([task('P2.T1', 'WS:BETA')])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.tasks()['P2.T1']['workstream'], 'WS:BETA')
+
+    def test_ambiguous_import_command_writes_no_charter_data(self):
+        before = self.snap()
+        r = self.import_rows([task('P1.T1', 'WS:ALPHA'), task('P2.T1')])
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('ambiguous wave', r.stderr)
+        self.assert_no_writes(before)
+
+    def test_bare_add_and_edit_fail_before_data_writes(self):
+        db = self.db()
+        db['tasks'] = [task('P1.T0', 'WS:ALPHA')]
+        self.seed(db)
+        for args in [('add', 'new work', '--wave', 'foundation'),
+                     ('edit', 'P1.T0', '--wave', 'foundation')]:
+            with self.subTest(args=args):
+                before = self.snap()
+                r = self.cli('--dir', self.d, *args)
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn('ambiguous wave', r.stderr)
+                self.assert_no_writes(before)
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

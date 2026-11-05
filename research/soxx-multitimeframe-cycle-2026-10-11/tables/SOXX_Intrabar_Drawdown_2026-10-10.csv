@@ -1,0 +1,9 @@
+<PARSED TEXT FOR SHEET: 1 / 1 TABS
+TAB NAME: SOXX_Intrabar_Drawdown_2026-10-10.csv>
+index,plan,mean,win,mdd
+0,fixed2,1.18347,80.0,-3.1305
+1,slow_p0.25,3.552323,40.0,-8.412106
+2,guard_p0.25,4.184741,70.0,-5.506671
+3,guard_p0.5,3.184317,80.0,-4.067787
+4,guard_timer52,4.335935,70.0,-5.506671
+5,plain_timer52,3.703518,40.0,-8.156359

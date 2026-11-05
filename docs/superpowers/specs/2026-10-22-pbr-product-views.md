@@ -2454,14 +2454,14 @@ redesign. The `Filled` column is completed in the PR that lands the primitive.
 | Gap | Ruling | Lands with | Filled |
 |---|---|---|---|
 | G1 tier-lock primitive | Deferred: no entitlement gate exists in this process (§2); do not build it | — | — |
-| G2 type scale tokens | Accepted | B0 foundation | — |
-| G3 metric tile with a null explanation | Accepted | B0 foundation | — |
-| G4 counted overflow affordance | Accepted | B0 foundation | — |
-| G5 skeleton loader at true final geometry | Accepted | B0 foundation | — |
+| G2 type scale tokens | Accepted | B0 foundation | B0 — `--fs-*` / `--fs-num-*` tokens in `app/static/theme.css` |
+| G3 metric tile with a null explanation | Accepted | B0 foundation | B0 — `.mm-unavail` + `.mm-unavail-why` (`_unavailHtml`); `.mm-book-invalid` for the D-ACCT-1 cell, with `.mm-book-invalid-problem` evidence tier (validator codes verbatim, 6 shown, rest counted) |
+| G4 counted overflow affordance | Accepted | B0 foundation | B0 — `.mm-overflow` (`_overflowHtml`, `state.see_all`) |
+| G5 skeleton loader at true final geometry | Accepted | B0 foundation | B0 — `.mm-skel` on `.mm-pf-awaiting` panels (static, no prose, no motion) |
 | G6 lifecycle rail | Accepted | V6 | — |
 | G7 operational disposition chip family | Accepted | V7 | — |
 | G8 evidence lens (hover + focus + tap) | Accepted | V6 | — |
-| G9 epistemic-qualification badge | Accepted | B0 foundation | — |
+| G9 epistemic-qualification badge | Accepted | B0 foundation | B0 — `.mm-epi-badge` (`_epiBadgeHtml`: qualified / provisional / withheld / unverified) |
 | G10 count ladder | Accepted | V5 | — |
 
 ## 9. Seat decisions (decided 2026-10-22)

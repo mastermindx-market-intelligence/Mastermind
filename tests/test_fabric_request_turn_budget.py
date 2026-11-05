@@ -18,9 +18,21 @@ def _run(argv, *, timeout=60, extra_env=None):
            if not k.startswith(('POOL_', 'REMOTE_SUB_', 'FABRIC_'))}
     env['PYTHONDONTWRITEBYTECODE'] = '1'
     env.update(extra_env or {})
-    result = subprocess.run(argv, cwd=ROOT, env=env, text=True,
-                            capture_output=True, timeout=timeout)
-    assert result.returncode == 0, (result.stdout + result.stderr)[-12000:]
+    from scripts.native_unittest_diagnostics import NativeInvocation, bind_facts, run_native, COMMISSION_ARGS, COMMISSION_SELECTION
+    invocation = None; facts = None
+    if argv == [sys.executable, '-m', 'unittest', *COMMISSION_ARGS]:
+        invocation = NativeInvocation('tests', COMMISSION_SELECTION)
+        result, facts = run_native('tests', timeout_seconds=timeout, root=ROOT, cwd=ROOT,
+                                  invocation=invocation, selection=COMMISSION_SELECTION, env=env)
+    else:
+        result = subprocess.run(argv, cwd=ROOT, env=env, text=True,
+                                capture_output=True, timeout=timeout)
+    if result.returncode != 0:
+        error = AssertionError((result.stdout + result.stderr)[-12000:])
+        if facts is not None:
+            bind_facts(error, facts, invocation,
+                'tests/test_fabric_request_turn_budget.py::test_existing_commission_deadlines_remain_binding')
+        raise error
     return result.stdout + result.stderr
 
 

@@ -70,7 +70,8 @@ const configs=[
 {name:"Equity Edge affiliate and giveaway",x:495,y:535,r:360,color:"#b4a0f5"},
 {name:"OpenMarket / Thanefield / Percept",x:1230,y:305,r:230,color:"#70c5dc"},
 {name:"Unusual Whales / tastytrade",x:1180,y:720,r:137,color:"#f3b67e"},
-{name:"Jake lookalikes — unverified",x:1470,y:922,r:110,color:"#9ba7b9"},
+{name:"Jake lookalikes — unverified",
+ x:1470,y:922,r:110,color:"#9ba7b9"},
 {name:"TrendSpider / SignalStack",x:1035,y:1013,r:95,color:"#8bd5a3"}
 ];
 const positions=new Map(),groupIndex=new Map();
@@ -89,6 +90,14 @@ sorted.forEach((n,i)=>{
 });
 function el(tag,attrs,parent){let e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e}
 function child(tag,text,parent){let x=document.createElement(tag);if(text!==undefined)x.textContent=text;parent.appendChild(x);return x}
+function validatedSourceURL(value){
+if(typeof value!=="string"||/[\u0000-\u0020\u007f-\u009f\s\\]/u.test(value))return null;
+// Reject missing authority and even empty userinfo before WHATWG repair.
+if(!/^https:\/\/[^/?#@]+(?:[/?#]|$)/i.test(value))return null;
+let parsed;try{parsed=new URL(value)}catch{return null}
+if(parsed.protocol!=="https:"||!parsed.host||parsed.username||parsed.password)return null;
+return parsed;
+}
 function typeFamily(type){
 if(type==="GIVEAWAY_REQUIRED_FOLLOW"||type==="GIVEAWAY_PROMOTION"||type==="CROSS_BRAND_GIVEAWAY"||type==="REPEATED_GIVEAWAY_HOST"||type==="OTHER_FIRM_GIVEAWAY"||type==="OTHER_PROP_GIVEAWAY"||type==="REFERRAL_LINK"||type==="referral_link"||type==="AFFILIATE_CODE"||type==="DISCOUNT_CODE"||type==="tracked_referral")return "campaign";
 if(/REPOST|REPLY|MENTION|ENDORS|quote|repost|replies|PROMOTIONAL_POST|PUBLIC_REPLY|REPEATED_REPOSTS/.test(type))return "engagement";
@@ -146,8 +155,8 @@ for(const edge of related.slice(0,95)){
  child("p",edge.evidence,li);
  if(edge.interpretation)child("p","Interpretation: "+edge.interpretation,li);
  for(const id of (edge.source_ids||[]).slice(0,3)){
- const url=data.sources[id];if(!url||!/^https:\/\//.test(url))continue;
- const anchor=child("a","Source: "+id,li);anchor.href=url;anchor.target="_blank";anchor.rel="noopener noreferrer";
+ const target=validatedSourceURL(data.sources[id]);if(!target)continue;
+ const anchor=child("a","Source: "+id,li);anchor.href="https://"+target.host+target.href.slice(target.origin.length);anchor.target="_blank";anchor.rel="noopener noreferrer";
  li.appendChild(document.createTextNode(" "));
  }
  }

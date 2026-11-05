@@ -80,10 +80,20 @@ def test_running_principal_cannot_follow_target_rotation(tmp_path, monkeypatch, 
     with pytest.raises(ValueError, match="configuration changed"): loader()
 
 
-@pytest.mark.parametrize("version", [2, 3])
+@pytest.mark.parametrize("version,events_enabled", [(2, False), (3, False), (3, True)])
 @pytest.mark.parametrize("selected", [False, True])
-def test_same_listener_selection_preserves_coo_profile_and_owns_lifecycle(rsa_key, tmp_path, version, selected):
+def test_same_listener_selection_preserves_coo_profile_and_owns_lifecycle(rsa_key, tmp_path, version, events_enabled, selected):
     _, token, _, settings = producer.fixture.setup_principal(rsa_key, tmp_path)
+    events = {}
+    if events_enabled:
+        from integrations.session_bridge.web_reply_event_rpc import WebReplyEventRpc
+        from tests.test_session_bridge_return_tools import tool as canonical_read_tool
+        from tests.test_session_bridge_web_reply_event_asgi import Owner
+        settings = dataclasses.replace(settings, executive=dataclasses.replace(
+            settings.executive, read_from_ceo_ingress=True))
+        reader, _ = canonical_read_tool()
+        events = dict(session_reply_read_tool=reader,
+            reply_event_rpc=WebReplyEventRpc(Owner(), clock=settings.executive.clock))
     kwargs = dict(coo_settings=settings, audit_sink=producer.fixture.fixture.Sink(),
         principal_ruling_target=producer.target() if selected else None)
     if version == 2:
@@ -95,7 +105,7 @@ def test_same_listener_selection_preserves_coo_profile_and_owns_lifecycle(rsa_ke
             device = unused
         app = server.build_web_ceo_v3_with_coo_mcp_app(settings.executive, **kwargs,
             mdm_reader=Mdm(), session_target_projector=unused,
-            session_reply_handler=unused, session_summon_handler=unused)
+            session_reply_handler=unused, session_summon_handler=unused, **events)
     async def exercise():
         async with app._app.router.lifespan_context(app._app):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
@@ -108,17 +118,27 @@ def test_same_listener_selection_preserves_coo_profile_and_owns_lifecycle(rsa_ke
                 else:
                     assert ruling.status_code == 404
                 assert (await client.post(producer.PATH+"/", headers=producer.headers(token), json=producer.rpc("tools/list"))).status_code == 404
+                if events_enabled:
+                    from tests.test_mastermind_executive_app_asgi import _read_token
+                    reader_token = _read_token(rsa_key)
+                    headers = dict(producer.headers(reader_token), **{"mcp-protocol-version": "2026-07-28"})
+                    request = {"jsonrpc": "2.0", "id": 1, "method": "events/list", "params": {}}
+                    listed = await client.post("/mcp", headers=headers, json=request)
+                    assert listed.status_code == 200, listed.text
+                    assert listed.json()["result"]["events"][0]["name"] == "session.reply_committed"
+                    headers["authorization"] = "Bearer " + token
+                    assert (await client.post("/mcp", headers=headers, json=request)).status_code in (401, 403)
     asyncio.run(exercise())
 
 
 @pytest.mark.parametrize("lose_response", [False, True])
-def test_selected_composition_reaches_original_worker(tmp_path, monkeypatch, rsa_key, lose_response):
+def test_selected_composition_reaches_original_worker(short_socket_root, monkeypatch, rsa_key, lose_response):
     def composed(core, *, target):
         return server.build_web_ceo_v2_with_coo_mcp_app(core.settings.executive,
             coo_settings=core.settings, audit_sink=core._audit_sink, principal_ruling_target=target)
     monkeypatch.setattr(producer, "build_principal_ruling_mcp_app", composed)
     producer.test_signed_mcp_consumption_and_original_response_recovery(
-        tmp_path, monkeypatch, rsa_key, lose_response, True)
+        short_socket_root, monkeypatch, rsa_key, lose_response, True)
 
 
 def test_unselected_prefix_retains_existing_metadata_semantics(rsa_key, tmp_path):
@@ -157,7 +177,8 @@ def test_control_dialogue_selection_requires_separate_exact_opt_in(principal, di
 
 
 @pytest.mark.parametrize("selected", [False, True])
-def test_control_launcher_selects_same_service_runtime_without_observation_socket(tmp_path, monkeypatch, selected):
+def test_control_launcher_selects_same_service_runtime_without_observation_socket(short_socket_root, monkeypatch, selected):
+    tmp_path = short_socket_root
     from types import SimpleNamespace
     from scripts import executive_os_phase1c as cli
     from tests.test_c1_ceo_ingress_composition import _raw

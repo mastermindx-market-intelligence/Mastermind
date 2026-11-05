@@ -26,7 +26,7 @@ function setup(resource: string | null = audience, overrides: { scope?: string; 
   const login = async () => { const pending = client.research!.signIn(); await flush(); callback(); await flush(); await pending; };
   return { client, fetcher, open, popup, callback, login };
 }
-afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
+afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); localStorage.clear(); sessionStorage.clear(); });
 describe("existing private PKCE owner Research resource", () => {
   it("leaves unset Research inert with zero network and popup calls", async () => {
     const f = setup(null);
@@ -43,6 +43,15 @@ describe("existing private PKCE owner Research resource", () => {
     expect(f.fetcher).toHaveBeenCalledTimes(1);
     expect(f.client.getState().acquisition).toBe(false); expect(f.client.getState().content).toBe(false);
     expect(JSON.stringify(f.client.getState())).not.toContain("private-research-bearer");
+  });
+  it("permits an explicit Research re-login only after a real grant following logout", async () => {
+    const f = setup();
+    await f.login();
+    await f.client.signOut();
+    expect(localStorage.getItem("mastermind-os-auth-logout-v1:synthetic-existing-browser-client")).toBe("1");
+    await f.login();
+    expect(f.client.research!.available()).toBe(true);
+    expect(localStorage.getItem("mastermind-os-auth-logout-v1:synthetic-existing-browser-client")).toBeNull();
   });
   it("requires an exact granted Research scope", async () => {
     const f = setup(audience, { scope: "mastermind.executive.read" });

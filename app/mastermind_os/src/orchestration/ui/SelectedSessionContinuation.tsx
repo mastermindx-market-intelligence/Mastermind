@@ -33,6 +33,15 @@ export type SessionContinuationOutcome =
 
 type SessionLocale = "en" | "zh-CN";
 const STATIC_ZH: Record<string, string> = {
+  "Review your message": "查看消息草稿",
+  "Your draft": "当前草稿",
+  "Target session": "目标会话",
+  "Completion condition": "完成条件",
+  "No draft text yet.": "尚未填写草稿。",
+  "No completion condition yet.": "尚未填写完成条件。",
+  "No session target is available.": "暂无可用的会话目标。",
+  "This preview shows the current draft. Opening it does not send or update a request.": "此预览显示当前草稿；打开预览不会发送或更新请求。",
+  "Sending remains subject to the existing session checks.": "发送仍需通过现有会话检查。",
   "Session continuation": "会话继续",
   "Retained continuation": "保留的继续请求",
   "Original message reference": "原消息引用",
@@ -119,6 +128,7 @@ export function SelectedSessionContinuation({
   const conditionId = `${formId}-condition`;
   const [instruction, setInstruction] = useState("");
   const [condition, setCondition] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
   const instructionRef = useRef("");
   const conditionRef = useRef("");
   const sentInstructionRef = useRef("");
@@ -312,9 +322,30 @@ export function SelectedSessionContinuation({
             <p className="session-keyboard-hint">{locale === "zh-CN"
               ? "准备就绪后按 Ctrl / Cmd + Enter 发送；Enter 或 Shift + Enter 换行。"
               : "Ctrl / Cmd + Enter to send when ready. Enter and Shift + Enter insert new lines."}</p>
+            <details className="session-request-preview" onToggle={(event) => setPreviewOpen(event.currentTarget.open)}>
+              <summary>{ui(locale, "Review your message")}</summary>
+              {previewOpen ? (
+                <div className="session-preview-content">
+                  <p className="muted">{ui(locale, "This preview shows the current draft. Opening it does not send or update a request.")}</p>
+                  <div className="session-preview-columns">
+                    <div className="session-preview-panel">
+                      <h3>{ui(locale, "Your draft")}</h3>
+                      <p className="session-preview-text" data-testid="session-preview-instruction">{instruction || ui(locale, "No draft text yet.")}</p>
+                      <h3>{ui(locale, "Completion condition")}</h3>
+                      <p className="session-preview-text" data-testid="session-preview-condition">{condition || ui(locale, "No completion condition yet.")}</p>
+                    </div>
+                    <div className="session-preview-panel">
+                      <h3>{ui(locale, "Target session")}</h3>
+                      <p>{sessionKey ? <code>{sessionKey}</code> : ui(locale, "No session target is available.")}</p>
+                      <p className="muted">{ui(locale, "Sending remains subject to the existing session checks.")}</p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </details>
             <div className="form-actions">
               <button type="submit" disabled={!canContinue} className="primary">
-                {dispatchBusy ? ui(locale, "Sending\u2026") : ui(locale, "Send")}
+                {sending || inFlight ? ui(locale, "Sending\u2026") : ui(locale, "Send")}
               </button>
             </div>
           </form>
