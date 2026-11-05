@@ -35,7 +35,7 @@ export const PENDING_POINTER_ERRORS = {
 } as const;
 
 type SourceOperationKind = "project_create" | "project_adopt" | "direction_accept";
-type StoredKind = "launch" | "consume" | "project_pause" | "project_resume" | SourceOperationKind | "project_source_write" | "instruction_pause";
+type StoredKind = "launch" | "consume" | "project_pause" | "project_resume" | SourceOperationKind | "project_source_write" | "instruction_pause" | "conversation_create";
 type ClosedRecord = {
   readonly v: 1; readonly operationKey: string; readonly kind: "launch" | "consume"; readonly targetKey: string;
 } | {
@@ -49,6 +49,9 @@ type ClosedRecord = {
   readonly v: 5; readonly operationKey: string; readonly kind: "project_source_write"; readonly targetKey: string;
 } | {
   readonly v: 6; readonly operationKey: string; readonly kind: "instruction_pause"; readonly targetKey: string;
+} | {
+  /** Fresh-conversation original lookup only; no message, preview or authority. */
+  readonly v: 7; readonly operationKey: string; readonly kind: "conversation_create"; readonly targetKey: string;
 };
 
 type DurableReservation =
@@ -60,6 +63,9 @@ const SCOPE_RE = /^[0-9a-f]{64}$/;
 const LAUNCH_KEY_RE = /^mmos-launch-[0-9a-f]{40}$/;
 const CONSUME_KEY_RE = /^mmos-consume-[0-9a-f]{40}$/;
 export const PROJECT_PAUSE_KEY_PREFIX = "mmos-project-pause-";
+export const CONVERSATION_CREATE_KEY_PREFIX = "mmos-conversation-create-";
+const CONVERSATION_CREATE_KEY_RE = /^mmos-conversation-create-[0-9a-f]{40}$/;
+const CONVERSATION_WORK_RE = /^WS:[A-Za-z0-9][A-Za-z0-9._-]{0,68}$/;
 const PROJECT_PAUSE_KEY_RE = /^mmos-project-pause-[0-9a-f]{40}$/;
 const TARGET_KEY_RE = /^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$/;
 const POINTER_INPUT_KEYS: ReadonlySet<string> = new Set(["operationKey", "kind", "targetKey"]);
@@ -98,6 +104,7 @@ const KIND_RECORDS = {
   direction_accept: { v: 4, key: /^mmos-direction-accept-[0-9a-f]{40}$/, consume: false },
   project_source_write: { v: 5, key: /^mmos-project-(?:file-add|preference-set)-[0-9a-f]{40}$/, consume: false },
   instruction_pause: { v: 6, key: /^mmos-instruction-pause-[0-9a-f]{40}$/, consume: false },
+  conversation_create: { v: 7, key: CONVERSATION_CREATE_KEY_RE, consume: false },
 } as const;
 function recordSpec(kind: unknown) {
   return typeof kind === "string" && Object.hasOwn(KIND_RECORDS, kind)
@@ -112,6 +119,7 @@ function validFields(raw: Record<string, unknown>, spec: NonNullable<ReturnType<
     return target !== null && projectSourceWriteKeyMatches(raw.operationKey, target);
   }
   if (spec.v === 6) return parseInstructionAdmissionTarget(raw.targetKey) !== null;
+  if (spec.v === 7) return typeof raw.targetKey === "string" && CONVERSATION_WORK_RE.exec(raw.targetKey)?.[0] === raw.targetKey;
   return typeof raw.targetKey === "string"
     && (spec.consume ? parseDirectConsumeTarget(raw.targetKey) !== null : TARGET_KEY_RE.test(raw.targetKey))
     && (spec.v === 1 || TARGET_KEY_RE.exec(raw.targetKey)?.[0] === raw.targetKey);
