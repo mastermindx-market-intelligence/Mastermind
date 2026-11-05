@@ -3,6 +3,11 @@
 No independent clock, queue, daemon, credentials, or capacity grants. Expiry
 permits one existing broker lease to probe; only its qualified success clears
 the exclusion. Every ordinary provider/account/economic gate still applies.
+
+A qualified prospective Qwen adaptive-429 policy receipt is one bounded
+exception to the generic CAPACITY branch: it records a distinct SOFT row in
+the same quota_cooldowns table, keyed to the actual Bailian account, and only
+lowers that exact account's ordinary concurrency cap for the policy window.
 """
 from __future__ import annotations
 
@@ -20,6 +25,29 @@ PRELEASE_UNCERTAINTY_MARKERS = (
     "CONTROLLER_PROCESS_UNPROVEN", "GO_EFFECT_UNKNOWN", "NATIVE_EFFECT_UNKNOWN",
     "EFFECT_UNKNOWN timeout ", "EFFECT_UNKNOWN_NONZERO", "GLM_CAPABILITY_TRANSFER_UNPROVEN",
 )
+
+# Qwen adaptive-429 soft mode. A wrapper-custody policy receipt never claims a
+# provider HTTP status or usage and never enters the generic HARD branch: it
+# records one SOFT row in the SAME quota_cooldowns table under a scope keyed to
+# the ACTUAL account identity, separate from any declared shared HARD scope.
+QWEN_FEEDBACK_FIELD = "qwen_policy_feedback"
+QWEN_FEEDBACK_SCHEMA = "mastermind.qwen_adaptive429_feedback.v1"
+QWEN_FEEDBACK_POLICY_SOURCE = "bailian_keys.adaptive_http_429"
+QWEN_FEEDBACK_CLASSIFICATION = "429"
+QWEN_FEEDBACK_DURATIONS = (120, 240, 480, 960, 1800)
+QWEN_FEEDBACK_FIELDS = frozenset((
+    "schema", "account", "classification_source", "classification",
+    "policy_source", "observed_at", "until_ts", "duration_seconds",
+    "soft_cap", "soft_cap_enabled"))
+QWEN_WRAPPER_INFERENCE = "qwen_wrapper_inference"
+QWEN_CODEX_ENUM = "codex_error_enum"
+QWEN_FEEDBACK_MIN_CAP = 3
+QWEN_FEEDBACK_MAX_CAP = 100000
+QWEN_FEEDBACK_MAX_AGE = 28800
+QWEN_FEEDBACK_SKEW = 5
+SOFT_MODE = "SOFT"
+SOFT_SCOPE_PREFIX = "bailian-adaptive429:"
+SOFT_RESET_SOURCE = "local_adaptive_policy"
 
 
 def capacity_blockade(br, conn, pool, preferred=None):
@@ -195,11 +223,22 @@ def validate_prelease_refusal(here, run, root, parent, *, packet_limit=8 * 1024 
 
 
 def init_schema(conn):
+    # Broker construction may race on the first upgraded invocation. Serialize
+    # introspection and all ALTERs in its existing database transaction.
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
     conn.execute("""CREATE TABLE IF NOT EXISTS quota_cooldowns (
         scope TEXT PRIMARY KEY, observed_at REAL NOT NULL,
         until_ts REAL NOT NULL, failures INTEGER NOT NULL,
         kind TEXT NOT NULL, source_run TEXT NOT NULL,
-        reset_source TEXT NOT NULL)""")
+        reset_source TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'HARD',
+        soft_cap INTEGER)""")
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(quota_cooldowns)")}
+    # Idempotent migration; preexisting rows stay generic HARD cooldowns.
+    if "mode" not in cols:
+        conn.execute("ALTER TABLE quota_cooldowns ADD COLUMN mode TEXT NOT NULL DEFAULT 'HARD'")
+    if "soft_cap" not in cols:
+        conn.execute("ALTER TABLE quota_cooldowns ADD COLUMN soft_cap INTEGER")
     cols = {r[1] for r in conn.execute("PRAGMA table_info(leases)")}
     if "quota_outcome_sha256" not in cols:
         conn.execute("ALTER TABLE leases ADD COLUMN quota_outcome_sha256 TEXT")
@@ -236,18 +275,113 @@ def cooldown(br, pool, account, conn=None):
             conn.close()
 
 
+def soft_cooldown(br, pool, account, conn=None):
+    """The exact-account adaptive-429 SOFT row, or None.
+
+    The scope key carries the actual account identity, never a declared shared
+    allowance scope: pool aliases resolving to the same account see the same
+    row; a different account never does. A soft row can never close or
+    destabilize an account, so every unqualified lookup is just "no soft row".
+    """
+    try:
+        if br.provider_name(pool) != "bailian":
+            return None
+    except (ValueError, TypeError, KeyError):
+        return None
+    if not isinstance(account, str) or not account:
+        return None
+    own = conn is None
+    conn = br._conn() if own else conn
+    try:
+        row = conn.execute("SELECT * FROM quota_cooldowns WHERE scope=?",
+                           (SOFT_SCOPE_PREFIX + account,)).fetchone()
+        if row is None or row["mode"] != SOFT_MODE:
+            return None
+        return dict(row)
+    finally:
+        if own:
+            conn.close()
+
+
+def _qwen_int(value):
+    return type(value) is int  # exact policy-clock integers; bool-as-int refuses
+
+
+def validate_qwen_feedback(value, feedback, lease, provider, now):
+    """Closed-shape gate for one adaptive-429 policy receipt.
+
+    Raises before any database mutation. The wrapper's custody never claims a
+    provider HTTP status or usage: api_status and reset_at/reset_source must
+    stay unset, the classification stays "429", and the envelope kind must
+    match the explicit classification source (wrapper inference stays
+    kind=unknown; a typed CLI enum stays kind=rate_limit and is still not
+    provider HTTP proof).
+    """
+    if provider != "bailian":
+        raise ValueError("qwen_feedback_provider_unqualified")
+    if (not isinstance(feedback, dict) or set(feedback) != QWEN_FEEDBACK_FIELDS
+            or feedback["schema"] != QWEN_FEEDBACK_SCHEMA
+            or feedback["policy_source"] != QWEN_FEEDBACK_POLICY_SOURCE
+            or feedback["classification"] != QWEN_FEEDBACK_CLASSIFICATION):
+        raise ValueError("qwen_feedback_shape_invalid")
+    source = feedback["classification_source"]
+    if source not in (QWEN_WRAPPER_INFERENCE, QWEN_CODEX_ENUM):
+        raise ValueError("qwen_feedback_classification_invalid")
+    kind = value.get("kind")
+    rc = value.get("command_rc")
+    if (value.get("api_status") is not None or value.get("reset_at") is not None
+            or value.get("reset_source") is not None
+            or type(rc) is not int or rc == 0
+            or (source == QWEN_WRAPPER_INFERENCE
+                and (kind != "unknown" or value.get("initial_rejection") is not False))
+            or (source == QWEN_CODEX_ENUM and kind != "rate_limit")):
+        raise ValueError("qwen_feedback_envelope_contradiction")
+    if feedback["account"] != lease["account"]:
+        raise ValueError("qwen_feedback_account_binding")
+    observed, until, duration, cap = (feedback[name] for name in
+        ("observed_at", "until_ts", "duration_seconds", "soft_cap"))
+    if not all(_qwen_int(v) for v in (observed, until, duration, cap)):
+        raise ValueError("qwen_feedback_shape_invalid")
+    if (duration not in QWEN_FEEDBACK_DURATIONS or until != observed + duration
+            or not QWEN_FEEDBACK_MIN_CAP <= cap <= QWEN_FEEDBACK_MAX_CAP
+            or type(feedback["soft_cap_enabled"]) is not bool):
+        raise ValueError("qwen_feedback_shape_invalid")
+    stamp = value["observed_at"]  # already time-qualified above
+    if (observed < lease["granted_at"] - 1  # integer policy clock, rounding <=1s
+            or abs(observed - stamp) > QWEN_FEEDBACK_SKEW
+            or observed > now + QWEN_FEEDBACK_SKEW
+            or now - observed > QWEN_FEEDBACK_MAX_AGE):
+        raise ValueError("qwen_feedback_time_unqualified")
+    return {"account": feedback["account"], "observed_at": observed,
+            "until_ts": until, "soft_cap": cap,
+            "soft_cap_enabled": feedback["soft_cap_enabled"],
+            "classification_source": source, "kind": kind}
+
+
 def account_cap(br, pool, acct, base):
     if base is None:
         return None
+    name = acct.get("name")
     try:
-        row = cooldown(br, pool, acct.get("name"))
+        row = cooldown(br, pool, name)
     except (ValueError, TypeError, KeyError):
         return None  # A malformed target account cannot close other pools.
-    if row is None:
-        return base
-    if row["until_ts"] > br.now():
+    if row is not None and row["until_ts"] > br.now():
         return None
-    return min(base, 1)  # half-open; admission_room enforces the shared scope.
+    cap = base if row is None else min(base, 1)  # half-open; admission_room enforces the shared scope.
+    try:
+        soft = soft_cooldown(br, pool, name)
+    except (ValueError, TypeError, KeyError):
+        soft = None  # An unqualified soft row never destabilizes admission.
+    if (soft is not None and soft["until_ts"] > br.now()
+            and type(soft.get("soft_cap")) is int
+            and soft["soft_cap"] >= QWEN_FEEDBACK_MIN_CAP):
+        # An active SOFT row only lowers this exact account's ordinary cap; an
+        # expired one returns the ordinary base without the half-open throttle.
+        # Rows exist only for policy-enabled observations: a soft_cap_enabled
+        # false receipt stays purely diagnostic and records no row at all.
+        cap = min(cap, soft["soft_cap"])
+    return cap
 
 
 def admission_room(br, conn, pool, acct):
@@ -295,9 +429,19 @@ def pool_blocked(br, pool):
 
 def snapshot_cooldown(br, pool, account, conn):
     try:
-        return cooldown(br, pool, account, conn)
+        row = cooldown(br, pool, account, conn)
     except (ValueError, TypeError, KeyError):
         return {"state": "UNQUALIFIED", "reason": "quota_account_or_scope_invalid"}
+    try:
+        soft = soft_cooldown(br, pool, account, conn)
+    except (ValueError, TypeError, KeyError):
+        soft = None
+    if soft is not None:
+        row = dict(row) if row else {}
+        row["soft"] = {"mode": soft["mode"], "observed_at": soft["observed_at"],
+                       "until_ts": soft["until_ts"], "soft_cap": soft.get("soft_cap"),
+                       "reset_source": soft.get("reset_source")}
+    return row
 
 
 def observe_locked(br, conn, lease_id, root_id, run_id, outcome_path, process_path):
@@ -336,6 +480,49 @@ def observe_locked(br, conn, lease_id, root_id, run_id, outcome_path, process_pa
     prior = dict(prior_row) if prior_row else None
     kind = value.get("kind")
     rc = value.get("command_rc")
+    feedback = value.get(QWEN_FEEDBACK_FIELD)
+    if QWEN_FEEDBACK_FIELD in value:
+        # A qualified adaptive-429 policy observation takes the SOFT branch and
+        # never the generic HARD CAPACITY branch, not even for a typed enum
+        # kind. It never rewrites the declared HARD scope row above: a stronger
+        # preexisting hold is preserved while this lease still binds its exact
+        # terminal observation. Every refusal above happened before mutation.
+        soft = validate_qwen_feedback(value, feedback, lease,
+                                      br.provider_name(lease["pool"]), now)
+        applied = None
+        if soft["soft_cap_enabled"] and soft["until_ts"] > now:
+            # An already-expired policy window records no cooldown at all.
+            soft_scope = SOFT_SCOPE_PREFIX + soft["account"]
+            row = conn.execute("SELECT * FROM quota_cooldowns WHERE scope=?",
+                               (soft_scope,)).fetchone()
+            prior_soft = dict(row) if row else None
+            if prior_soft is not None and prior_soft.get("mode") != SOFT_MODE:
+                raise ValueError("qwen_feedback_scope_collision")
+            until, cap = soft["until_ts"], soft["soft_cap"]
+            failures = 1 if prior_soft is None else min(20, prior_soft["failures"] + 1)
+            if (prior_soft is not None and prior_soft["until_ts"] > now
+                    and type(prior_soft.get("soft_cap")) is int
+                    and prior_soft["soft_cap"] >= QWEN_FEEDBACK_MIN_CAP):
+                # A later distinct observation merges conservatively: it may
+                # keep the longer expiry and the lower cap; it never invents
+                # policy or shortens an active window.
+                until, cap = max(until, prior_soft["until_ts"]), min(cap, prior_soft["soft_cap"])
+            conn.execute("""INSERT INTO quota_cooldowns
+                (scope, observed_at, until_ts, failures, kind, source_run, reset_source, mode, soft_cap)
+                VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(scope) DO UPDATE SET
+                observed_at=excluded.observed_at, until_ts=excluded.until_ts,
+                failures=excluded.failures, kind=excluded.kind,
+                source_run=excluded.source_run, reset_source=excluded.reset_source,
+                mode=excluded.mode, soft_cap=excluded.soft_cap""",
+                (soft_scope, soft["observed_at"], until, failures, soft["kind"],
+                 run_id, SOFT_RESET_SOURCE, SOFT_MODE, cap))
+            applied = {"scope": soft_scope, "observed_at": soft["observed_at"],
+                       "until_ts": until, "soft_cap": cap}
+        conn.execute("UPDATE leases SET quota_outcome_sha256=? WHERE id=?", (sha, lease_id))
+        conn.commit()
+        return {"kind": kind, "recorded": True, "duplicate": False,
+                "initial_rejection": value.get("initial_rejection") is True,
+                "scope": scope, "soft": applied}
     if kind in provider_outcome.CAPACITY and type(rc) is int and rc != 0:
         failures = min(20, prior["failures"] + 1) if prior else 1
         delay = min(3600, 60 * 2 ** min(failures - 1, 6))

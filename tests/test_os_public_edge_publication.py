@@ -20,25 +20,52 @@ from ops.executive_os import executive_mcp_entry as entry
 from ops.executive_os import os_public_edge_publication as m
 from ops.executive_os import os_release_assets as assets
 from ops.executive_os import release_manifest as seals
-from ops.executive_os.os_public_edge import HOST, GET_ROUTES, POST_ROUTES, asset_routes
+from ops.executive_os.os_public_edge import HOST, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES, GET_ROUTES, POST_ROUTES, asset_routes
 
 
 def git(repo, *args):
     return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
 
 
-def make_dist(app, tag):
+NOTICE_BYTES = {
+    "third-party/deepseek-client-dependency-NOTICES.txt": b"Dependency copyright notices\n",
+    "third-party/deepseek-harness-LICENSE.txt": b"Harness license and copyright\n",
+}
+
+
+def make_dist(app, tag, *, noir_notices=False):
     dist = app / "dist"
     (dist / "assets").mkdir(parents=True)
     (dist / "index.html").write_text(f'<script src="/os/assets/index-{tag}.js"></script>'
                                    f'<link href="/os/assets/index-{tag}.css">')
     (dist / f"assets/index-{tag}.js").write_text(f'console.log("{tag}");')
     (dist / f"assets/index-{tag}.css").write_text(f'body{{color:{tag}}}')
+    if noir_notices:
+        extra = {
+            f"assets/atelier-office-{tag}.jpg": b"office image",
+            f"assets/Manrope-Variable-{tag}.ttf": b"Manrope font",
+            f"assets/Inter-Variable-{tag}.woff2": b"Inter font",
+            "licenses/fonts/Inter-OFL.txt": b"Inter license",
+            "licenses/fonts/Manrope-OFL.txt": b"Manrope license",
+            "licenses/fonts/Manrope-FONTLOG.txt": b"Manrope font log",
+            **NOTICE_BYTES,
+        }
+        for name, raw in extra.items():
+            path = dist / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(raw)
     return {"operator_uid": 501, "tools": {"/fixture/node": "a" * 64, "/fixture/npm": "b" * 64}}
 
 
 def fullconfig(manifest):
-    proxy = {"handler": "reverse_proxy", "upstreams": [{"dial": "127.0.0.1:49152"}]}
+    # The handler `caddy adapt` emits for the rendered OS branches; the planner now
+    # requires every branch proxy to equal it, so a bare upstream is refused.
+    proxy = {"handler": "reverse_proxy", "upstreams": [{"dial": "127.0.0.1:49152"}],
+             "headers": {"request": {
+                 "delete": ["Forwarded", "X-Forwarded-Host", "X-Forwarded-Port", "X-Real-IP",
+                            "CF-Connecting-IP", "EO-Connecting-IP", "EO-Client-IP"],
+                 "set": {"Host": [HOST], "X-Forwarded-For": ["127.0.0.1"],
+                         "X-Forwarded-Proto": ["https"]}}}}
     return {"admin": {"listen": "127.0.0.1:2019"}, "apps": {
         "tls": {"automation": {"policies": [{"subjects": ["other.example.invalid"]}]}},
         "http": {"servers": {"srv0": {"listen": [":443"], "routes": [{
@@ -54,7 +81,7 @@ def fullconfig(manifest):
 
 
 @pytest.fixture
-def inputs(tmp_path, monkeypatch):
+def inputs(tmp_path, monkeypatch, request):
     monkeypatch.setattr(assets, "require_sealed_path", lambda *a, **k: None)
     monkeypatch.setattr(entry, "require_sealed_path", lambda *a, **k: None)
     monkeypatch.setattr(assets, "_no_acl", lambda *a, **k: None)
@@ -75,18 +102,28 @@ def inputs(tmp_path, monkeypatch):
     git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "source")
     sha, tree = git(repo, "rev-parse", "HEAD"), git(repo, "rev-parse", "HEAD^{tree}")
     git(repo, "update-ref", "refs/remotes/origin/master", sha)
-    monkeypatch.setattr(assets, "_build", lambda app, **kw: make_dist(app, "new"))
+    settings = getattr(request, "param", (False, False))
+    old_notices, new_notices = settings[:2]
+    retired_edge_profile = len(settings) == 3 and settings[2] is True
+    monkeypatch.setattr(assets, "_build", lambda app, **kw: make_dist(
+        app, "new", noir_notices=new_notices))
     bundle = tmp_path / "bundle"
     assets.prepare(source_repo=repo, expected_sha=sha, web_client_id="test-public-client",
                    output=bundle, build_user="fixture", node=Path("/fixture/node"), npm_cli=Path("/fixture/npm"))
     qualified = assets.qualify(bundle, expected_sha=sha, tree_sha=tree, source_repo=repo)
     old = tmp_path / "old"
-    make_dist(old / "app/mastermind_os", "old")
+    make_dist(old / "app/mastermind_os", "old", noir_notices=old_notices)
     manifest = entry.build_os_asset_manifest(old)
     (old / assets.DIST / "asset-manifest.json").write_bytes(m.canonical(manifest))
     seals.create(old, "a" * 40, "b" * 40)
     live = tmp_path / "live.json"
-    live.write_bytes(m.canonical(fullconfig(manifest)))
+    config = fullconfig(manifest)
+    if retired_edge_profile:
+        # Current production edge initially has no Control Room routes.
+        branches = config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+        branches[0]["match"][0]["path"] = sorted(set(LEGACY_GET_ROUTES) | set(asset_routes(manifest)))
+        branches[1]["match"][0]["path"] = list(LEGACY_POST_ROUTES)
+    live.write_bytes(m.canonical(config))
     return dict(old_root=old, old_sha="a" * 40, old_tree="b" * 40,
                 new_bundle=bundle, source_repo=repo, new_sha=sha, new_tree=tree,
                 new_digest=qualified.digest, live_config=live, relay_port=49152,
@@ -166,6 +203,25 @@ def ready(staged, **changes):
                                      new_sha=i["new_sha"], new_digest=i["new_digest"]), **changes})
 
 
+@pytest.mark.parametrize("inputs", [(False, False, True)], indirect=True)
+def test_legacy_edge_publication_adds_closed_control_room_routes_before_switch(staged):
+    i, r, relay = staged
+    route = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+    assert route[0]["match"][0]["path"] == sorted(set(LEGACY_GET_ROUTES) | set(asset_routes(entry.build_os_asset_manifest(i["old_root"]))))
+    assert route[1]["match"][0]["path"] == list(LEGACY_POST_ROUTES)
+    assert publish(staged)["state"] == "PREPARED"
+    route = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+    assert set(GET_ROUTES) <= set(route[0]["match"][0]["path"])
+    assert route[1]["match"][0]["path"] == list(POST_ROUTES)
+    assert route[1]["handle"][0]["max_size"] == 64000
+    assert ready(staged)["state"] == "CUTOVER_READY"
+    relay.selected = "new"
+    assert publish(staged, "finalize")["state"] == "FINAL"
+    assert route[1]["match"][0]["path"] == list(POST_ROUTES)
+    assert relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][2] == {
+        "handle": [{"handler": "static_response", "abort": True}]}
+
+
 def test_real_consumer_two_phase_order_and_single_selected_release(staged):
     i, r, relay = staged
     with pytest.raises(FileNotFoundError):
@@ -190,6 +246,59 @@ def test_real_consumer_two_phase_order_and_single_selected_release(staged):
         publish(staged, "finalize")
     with pytest.raises(ValueError):
         publish(staged)
+
+
+@pytest.mark.parametrize("inputs,expected_counts", [
+    ((False, True), (4, 12)), ((True, False), (12, 4)), ((True, True), (12, 12)),
+], indirect=["inputs"])
+def test_eleven_asset_release_stage_load_and_cutover(staged, expected_counts):
+    i, r, relay = staged
+    with m.private(i["out"]) as stage:
+        descriptor, manifests, _, _, _ = m._load_stage(stage, r["stage_digest"])
+        for kind, count in zip(("old", "new"), expected_counts):
+            index = descriptor["indexes"][kind]
+            has_notices = count == 12
+            assert len(index) == count
+            assert (set(NOTICE_BYTES) <= set(index)) == has_notices
+            assert len(manifests[kind]["files"]) == len(index) - 1
+            if has_notices:
+                for name, raw in NOTICE_BYTES.items():
+                    assert stage.read(index[name]) == raw
+    assert publish(staged)["state"] == "PREPARED"
+    assert ready(staged)["state"] == "CUTOVER_READY"
+    relay.selected = "new"
+    assert publish(staged, "finalize")["state"] == "FINAL"
+    paths = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"]
+    for name in NOTICE_BYTES:
+        assert ("/os/" + name in paths) == (name in descriptor["indexes"]["new"])
+
+
+@pytest.mark.parametrize("inputs", [(True, True)], indirect=True)
+@pytest.mark.parametrize("damage", ["partial", "extra", "renamed", "bytes"])
+def test_eleven_asset_capture_keeps_exact_notice_set_and_digests(staged, damage):
+    i, _, _ = staged
+    with m.private(i["out"]) as stage:
+        descriptor = m.decode(stage.read(m.DESCRIPTOR))
+        files = {name: stage.read(label) for name, label in descriptor["indexes"]["new"].items()}
+    manifest = m.decode(files["asset-manifest.json"])
+    assert len(files) == 12 and len(manifest["files"]) == 11
+    name = "third-party/deepseek-harness-LICENSE.txt"
+    row = next(row for row in manifest["files"] if row["path"] == name)
+    if damage == "partial":
+        del files[name]
+        manifest["files"].remove(row)
+    elif damage == "extra":
+        extra = {**row, "path": "third-party/extra-LICENSE.txt"}
+        files[extra["path"]] = files[name]
+        manifest["files"].append(extra)
+    elif damage == "renamed":
+        row["path"] = "third-party/other-LICENSE.txt"
+        files[row["path"]] = files.pop(name)
+    else:
+        files[name] = b"changed notice bytes"
+    files["asset-manifest.json"] = m.canonical(manifest)
+    with pytest.raises(ValueError):
+        m._manifest(files)
 
 
 @pytest.mark.parametrize("field,value", [("new_digest", "c" * 64), ("new_sha", "d" * 40),
@@ -470,3 +579,86 @@ def test_cli_explicit_argument_wiring(command, monkeypatch, capsys):
 def test_closed_json_refusals(raw):
     with pytest.raises(ValueError):
         m.decode(raw)
+
+
+
+def _expand_noir_dist(app, *, rich=False, notices=False):
+    """Only exact already-approved static asset names in the local release fixture."""
+    dist = app / "dist"
+    fixed = {
+        "assets/atelier-office-fixture.jpg": b"image",
+        "assets/Manrope-Variable-fixture.ttf": b"font",
+        "assets/Inter-Variable-fixture.woff2": b"font",
+        "licenses/fonts/Inter-OFL.txt": b"Inter licensed fixture",
+        "licenses/fonts/Manrope-OFL.txt": b"Manrope licensed fixture",
+        "licenses/fonts/Manrope-FONTLOG.txt": b"Fontlog fixture",
+    }
+    if rich:
+        fixed.update({
+            "assets/SourceMarkdown-fixture.js": b"export const proof=true;",
+            "assets/SourceMarkdown-fixture.css": b".source-markdown{color:inherit}",
+        })
+    if rich or notices:
+        fixed.update({
+            "third-party/deepseek-client-dependency-NOTICES.txt": b"Fixture dependency notice",
+            "third-party/deepseek-harness-LICENSE.txt": b"Fixture MIT notice",
+        })
+    for name, raw in fixed.items():
+        path = dist / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+
+
+@pytest.mark.parametrize("old_licensed", [False, True])
+def test_original_publication_9_or_11_to_13_closes_the_entire_two_phase_path(inputs, monkeypatch, tmp_path, old_licensed):
+    """Must fail on an obsolete 4/10 index gate, not just pass earlier staging."""
+    old = tmp_path / ("old-licensed" if old_licensed else "old-noir")
+    make_dist(old / "app/mastermind_os", "oldnoir")
+    _expand_noir_dist(old / "app/mastermind_os", notices=old_licensed)
+    old_manifest = entry.build_os_asset_manifest(old)
+    assert len(old_manifest["files"]) == (11 if old_licensed else 9)
+    (old / assets.DIST / "asset-manifest.json").write_bytes(m.canonical(old_manifest))
+    seals.create(old, inputs["old_sha"], inputs["old_tree"])
+    live = tmp_path / "live-rich.json"
+    live.write_bytes(m.canonical(fullconfig(old_manifest)))
+
+    def build_rich(app, **kw):
+        tools = make_dist(app, "rich")
+        _expand_noir_dist(app, rich=True)
+        return tools
+
+    monkeypatch.setattr(assets, "_build", build_rich)
+    new_bundle = tmp_path / "bundle-rich"
+    assets.prepare(source_repo=inputs["source_repo"], expected_sha=inputs["new_sha"],
+                   web_client_id="test-public-client", output=new_bundle,
+                   build_user="fixture", node=Path("/fixture/node"),
+                   npm_cli=Path("/fixture/npm"))
+    qualified = assets.qualify(new_bundle, expected_sha=inputs["new_sha"],
+                               tree_sha=inputs["new_tree"], source_repo=inputs["source_repo"])
+    new_manifest = entry.build_os_asset_manifest(new_bundle)
+    assert len(new_manifest["files"]) == 13
+    configured = {**inputs, "old_root": old, "live_config": live,
+                  "new_bundle": new_bundle, "new_digest": qualified.digest,
+                  "out": tmp_path / "stage-rich"}
+    receipt = m.stage_host(**configured)
+    descriptor = m.decode((configured["out"] / m.DESCRIPTOR).read_bytes())
+    assert len(descriptor["indexes"]["old"]) == (12 if old_licensed else 10)
+    assert len(descriptor["indexes"]["new"]) == 14
+    relay = InertRelay(configured)
+    monkeypatch.setattr(m, "_http", relay.http)
+    monkeypatch.setattr(m, "_listener", lambda port, pid: m.require(
+        (port, pid) == (49152, 123), "listener differs"))
+    monkeypatch.setattr(m, "_validate", lambda stage, phase, config: m.require(
+        m.decode(stage.read("prepare.json" if phase == "prepare" else "final.json")) == config,
+        "validation bytes differ"))
+    original = (configured, receipt, relay)
+    assert publish(original)["state"] == "PREPARED"
+    assert ready(original)["state"] == "CUTOVER_READY"
+    assert not any(event[:2] == ("GET", "new") for event in relay.events)
+    relay.selected = "new"  # Test-host switch only. The production owner remains external.
+    assert publish(original, "finalize")["state"] == "FINAL"
+    assert relay.events.count(("POST", "config")) == 2
+    paths = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"]
+    assert "/os/assets/SourceMarkdown-fixture.js" in paths
+    assert "/os/assets/SourceMarkdown-fixture.css" in paths
+    assert "/os/assets/index-oldnoir.js" not in paths

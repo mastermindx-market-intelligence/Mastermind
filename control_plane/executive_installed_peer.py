@@ -1856,12 +1856,19 @@ def _verify_role_plist(
 
 
 @dataclass(frozen=True, slots=True)
+class _AeadObservation:
+    details: tuple
+    identities: tuple
+
+
+@dataclass(frozen=True, slots=True)
 class _ConfigObservation:
     digest: str
     provenance_digest: str
     release: str
     identity: tuple
     ancestor_identities: tuple
+    control_aead: _AeadObservation | None = None
 
 
 def _require_document_text(document: dict, name: str, *, code: str) -> str:
@@ -1897,7 +1904,42 @@ def _require_release(document: dict, name: str, *, code: str) -> str:
     return value
 
 
-def _verify_control_projection(budget: _Budget) -> _ConfigObservation:
+def _control_aead_snapshot(release_path: str, budget: _Budget) -> tuple:
+    """Fresh descriptor/ACL inventory, including the lock and manifest bytes.
+
+    Reuse the existing sealed-tree walker; this observation is local to one
+    qualification and never persists or authorizes another connection.
+    """
+    from ops.executive_os import control_aead_profile as profile
+    lock_path = release_path + "/" + profile.LOCK_RELATIVE
+    lock_ancestors = _observe_ancestors(lock_path, budget)
+    lock, lock_info = _read_trusted_bytes(
+        lock_path, budget=budget, maximum=32768, expected_mode=0o644)
+    root = str(profile.profile_root(lock))
+    ancestors = _observe_ancestors(root, budget)
+    _, identities, _, _, _ = _walk_closure(root, budget, hash_files=False)
+    manifest, _ = _read_trusted_bytes(
+        root + "/" + profile.MANIFEST, budget=budget,
+        maximum=32 * 1024 * 1024, expected_mode=0o444)
+    return (release_path, root, hashlib.sha256(lock).hexdigest(),
+            _object_identity(lock_info), lock_ancestors, ancestors, identities,
+            hashlib.sha256(manifest).hexdigest())
+
+
+def _observe_control_aead(document, release_path, budget, previous=None):
+    from ops.executive_os.control_aead_profile import observe_if_enrolled
+    before = _control_aead_snapshot(release_path, budget)
+    if previous is not None:
+        if type(previous) is not _AeadObservation or previous.identities != before:
+            raise _refuse("SERVICE_CONTROL_AEAD_CLOSURE_CHANGED")
+        return previous
+    observed = observe_if_enrolled(document, release_path, check=budget.check)
+    _joined(_control_aead_snapshot(release_path, budget), before,
+            "SERVICE_CONTROL_AEAD_CLOSURE_CHANGED")
+    return _AeadObservation(tuple(sorted(observed.items())), before)
+
+
+def _verify_control_projection(budget: _Budget, previous=None) -> _ConfigObservation:
     """Read the fixed trusted Control config that carries the Python projection.
 
     The same snapshot is consumed for either role: this is provenance evidence
@@ -1921,9 +1963,22 @@ def _verify_control_projection(budget: _Budget) -> _ConfigObservation:
         "python_runtime_provenance_digest",
         code="SERVICE_PYTHON_PROVENANCE_MISSING",
     )
+    control_aead = None
+    event_config = document.get("reply_events")
+    if type(event_config) is dict and event_config.get("armed") is True:
+        try:
+            control_aead = _observe_control_aead(
+                document, _release_directory(release), budget,
+                previous.control_aead if previous is not None else None)
+        except PeerIdentityError:
+            raise
+        except Exception:
+            raise _refuse("SERVICE_CONTROL_AEAD_CLOSURE_REFUSED") from None
+        _deadline_fence(budget)
     return _ConfigObservation(
         digest=hashlib.sha256(raw).hexdigest(),
         provenance_digest=projection,
+        control_aead=control_aead,
         release=release,
         identity=_object_identity(identity),
         ancestor_identities=_joined(_observe_ancestors(_CONTROL_CONFIG_PATH, budget), ancestors, "SERVICE_ANCESTOR_CHANGED"),
@@ -2625,9 +2680,9 @@ def _qualify(topology: _RoleTopology, peer, role: str, budget: _Budget, *, studi
             raise _refuse('SERVICE_CONFIG_RELEASE_MISMATCH')
         return value
 
-    def read_projection():
+    def read_projection(previous=None):
         return (_verify_studio_control_observation(budget) if studio_control
-                else _verify_control_projection(budget))
+                else _verify_control_projection(budget, previous))
 
     budget.check()
     if peer.euid != topology.service_uid:
@@ -2705,7 +2760,7 @@ def _qualify(topology: _RoleTopology, peer, role: str, budget: _Budget, *, studi
         "SERVICE_CONFIG_CHANGED",
     )
     _deadline_fence(budget)
-    _joined(read_projection(), projection, "SERVICE_CONFIG_CHANGED")
+    _joined(read_projection(projection), projection, "SERVICE_CONFIG_CHANGED")
     _deadline_fence(budget)
     budget.check()
     _recheck_release(release, budget)
@@ -2720,7 +2775,7 @@ def _qualify(topology: _RoleTopology, peer, role: str, budget: _Budget, *, studi
     _deadline_fence(budget)
     _joined(read_config(plist.release), config, "SERVICE_CONFIG_CHANGED")
     _deadline_fence(budget)
-    _joined(read_projection(), projection, "SERVICE_CONFIG_CHANGED")
+    _joined(read_projection(projection), projection, "SERVICE_CONFIG_CHANGED")
     _deadline_fence(budget)
     _joined(_observe_real_boot_id(**_deadline_probe_kwargs(budget)), boot, "SERVICE_BOOT_ID_CHANGED")
     _deadline_fence(budget)

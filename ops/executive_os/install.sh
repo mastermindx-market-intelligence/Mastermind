@@ -27,6 +27,7 @@ STAGE_RELEASE_ONLY="0"
 ARM_PRIVILEGED_BROKER="0"
 PRIVILEGED_BROKER_LIVE="0"
 CONTROL_CONFIG_SOURCE=""
+CONTROL_AEAD_BUNDLE=""
 OS_WEB_ASSETS=""
 OS_WEB_ASSETS_DIGEST=""
 OPERATOR_USER=""
@@ -395,6 +396,7 @@ while [ "$#" -gt 0 ]; do
     --arm-privileged-broker) ARM_PRIVILEGED_BROKER="1"; shift ;;
     --operator-user) OPERATOR_USER="${2:-}"; shift 2 ;;
     --control-config) CONTROL_CONFIG_SOURCE="${2:-}"; shift 2 ;;
+    --control-aead-bundle) CONTROL_AEAD_BUNDLE="${2:-}"; shift 2 ;;
     --os-web-assets) OS_WEB_ASSETS="${2:-}"; shift 2 ;;
     --python-binary) PYTHON_BINARY="${2:-}"; shift 2 ;;
     --python-runtime-root) PYTHON_RUNTIME_ROOT="${2:-}"; shift 2 ;;
@@ -459,6 +461,9 @@ if [ -n "$CONTROL_CONFIG_SOURCE" ]; then
 fi
 if [ -n "$OS_WEB_ASSETS" ]; then
   case "$OS_WEB_ASSETS" in /*) ;; *) /bin/echo "OS web asset path must be absolute" >&2; exit 65 ;; esac
+fi
+if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
+  case "$CONTROL_AEAD_BUNDLE" in /*) ;; *) /bin/echo "control AEAD bundle path must be absolute" >&2; exit 65 ;; esac
 fi
 [ -x "$PYTHON_BINARY" ] && [ ! -L "$PYTHON_BINARY" ] || {
   /bin/echo "Python binary must be a direct executable file" >&2
@@ -1244,6 +1249,16 @@ if [ -n "$OS_WEB_ASSETS" ]; then
       exit 65
     }
 fi
+# Optional event-only dependency artifact is qualified against committed lock
+# bytes before maintenance/service stop. It never reuses the MCP network runtime.
+if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/control_aead_profile.py" check-bundle \
+    --release-root "$SOURCE_REPO" --expected-sha "$EXPECTED_SHA" \
+    --bundle "$CONTROL_AEAD_BUNDLE" --operator-uid "$OPERATOR_UID" >/dev/null || {
+      /bin/echo "control AEAD bundle preflight refused before maintenance" >&2
+      exit 65
+    }
+fi
 CONTROL_CONFIG="$SYSTEM_ROOT/config/control.json"
 WORKER_CONFIG="$SYSTEM_ROOT/config/worker-codex.json"
 PRIVILEGED_CONFIG="$SYSTEM_ROOT/config/privileged-broker.json"
@@ -1388,6 +1403,33 @@ stage_sealed_release() {
         --bundle "$OS_WEB_ASSETS" --expected-digest "$OS_WEB_ASSETS_DIGEST" \
         --release-root "$STAGING" >/dev/null || return 65
     fi
+    # The canonical paid owner consumes the existing native closure at this
+    # fixed release subtree. Git archives contain its reviewed inputs, not its
+    # generated stage. Materialize with the unchanged owner builder before the
+    # immutable release seal; recorded inventory bytes must remain identical.
+    "$PYTHON_BINARY" -I -S -B - "$STAGING" <<'MASTERMIND_RELEASE_NATIVE_STAGE' >/dev/null || return 65
+import json
+import pathlib
+import runpy
+import sys
+
+root = pathlib.Path(sys.argv[1])
+rollout = root / "ops/native_fabric/quota_continuity/rollout"
+builder = rollout / "build_review_stage.py"
+records = {name: (rollout / name).read_bytes()
+           for name in ("native-manifest.json", "native-source-inventory.json")}
+sys.argv = [str(builder), "--output", str(rollout)]
+runpy.run_path(str(builder), run_name="__main__")
+if any((rollout / name).read_bytes() != expected for name, expected in records.items()):
+    raise ValueError("native closure differs from the reviewed release inventory")
+# The installer uses umask077. These are public reviewed code bytes, not state;
+# both service UIDs must traverse/read them after the root-owned seal.
+stage = rollout / "native-code-stage"
+for directory in (stage, stage / "ext"):
+    directory.chmod(0o755)
+for relative in json.loads(records["native-manifest.json"]):
+    (stage / relative).chmod(0o644)
+MASTERMIND_RELEASE_NATIVE_STAGE
     # Seal and verify while the directory is still operation-owned staging. A
     # settled interruption must never expose a canonical release without a seal.
     "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/release_manifest.py" create \
@@ -1501,6 +1543,13 @@ wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
 
 stage_sealed_release || exit 65
 
+# This remains a substep of the existing serialized installer publication.
+# Same-profile occupants verify exactly; missing/changed occupants are not reset.
+if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
+  "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/control_aead_profile.py" materialize \
+    --release-root "$RELEASE_ROOT" --bundle "$CONTROL_AEAD_BUNDLE" \
+    --operator-uid "$OPERATOR_UID" >/dev/null || exit 65
+fi
 INSTALLED_CODEX="$SYSTEM_ROOT/bin/codex-$CODEX_VERSION"
 if [ ! -f "$INSTALLED_CODEX" ]; then
   CODEX_TEMP="$(/usr/bin/mktemp "$SYSTEM_ROOT/bin/.codex-$CODEX_VERSION.XXXXXX")"
@@ -1771,13 +1820,14 @@ else:
 # host value. Arming remains the existing controller's separate transaction.
 for key, default in {
     "ceo_submit_armed": False,
+    "coo_foreground_only": False,
     "exact_worker_claim_target": {"mode": "disabled"},
 }.items():
     if key in _CONFIG_OPTIONAL:
         value.setdefault(key, default)
 terminal_return_defaults = {
     "terminal_return_armed": False,
-    "terminal_return_socket_path": "/var/run/mastermind-agent-relay/agent-relay.sock",
+    "terminal_return_socket_path": "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
 }
 terminal_schema = set(terminal_return_defaults) & schema_keys
 if terminal_schema and terminal_schema != set(terminal_return_defaults):
@@ -1787,6 +1837,18 @@ if terminal_present and terminal_present != set(terminal_return_defaults):
     raise SystemExit("partial terminal-return control-config source")
 if terminal_schema and not terminal_present:
     value.update(terminal_return_defaults)
+if terminal_schema and terminal_present:
+    prior_socket = "/var/run/mastermind-agent-relay/agent-relay.sock"
+    target_socket = terminal_return_defaults["terminal_return_socket_path"]
+    if value["terminal_return_socket_path"] == prior_socket:
+        # An existing disarmed host may have the pre-fix socket in its
+        # preserved source config. Migrate only that exact historical value,
+        # never an armed live consumer or an arbitrary caller-supplied path.
+        if value["terminal_return_armed"] is not False:
+            raise SystemExit("armed terminal-return socket migration refused")
+        value["terminal_return_socket_path"] = target_socket
+    elif value["terminal_return_socket_path"] != target_socket:
+        raise SystemExit("unrecognized terminal-return socket path refused")
 
 for key, derived in readiness_expected.items():
     if key in value and (type(value[key]) is not type(derived) or value[key] != derived):
@@ -2288,7 +2350,7 @@ done
     HOME="$CONTROL_HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
     LANG=C.UTF-8 LC_ALL=C.UTF-8 \
     PYTHONDONTWRITEBYTECODE=1 "$PYTHON_BINARY" -I -S -B -c \
-      'import sys; sys.path.insert(0,sys.argv[1]); from scripts.executive_os_phase1c import load_control_config; load_control_config(sys.argv[2])' \
+      'import sys; sys.path.insert(0,sys.argv[1]); from scripts.executive_os_phase1c import load_control_config; from ops.executive_os.control_aead_profile import activate_if_enrolled; raw=load_control_config(sys.argv[2]); activate_if_enrolled(raw,sys.argv[1])' \
       "$RELEASE_ROOT" "$CONTROL_CONFIG"
 )
 

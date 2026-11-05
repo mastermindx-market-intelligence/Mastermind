@@ -299,18 +299,21 @@ def test_source_role_ancestor_symlink_refuses_before_write(tmp_path):
 def test_canonical_delegation_companion_does_not_make_sol_routine_manager():
     text = (ROOT / "docs/sol_skills/WEB_CEO_DELEGATION.md").read_text()
     assert "OPERATOR_OWNED_DELIVERY" in text
-    assert "shared principal subscription pool" in text
-    assert "ordinary return adjudication" in text
+    assert 'same scarce subscription pool as Astra/Fable' in text
+    assert 'mandatory routing addendum Section1B' in text
     assert "`SUSTAINED_ORCHESTRATION`: prefer Sol when a mission's dominant need" not in text
     assert "same pinned" in text
+    owner = " ".join((ROOT / "docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md").read_text().split())
+    assert "They own bounded decomposition/commissioning/adjudication/independent review/repair/integration" in owner
+    assert "Sections 3/5 retain reserved principal responsibility" in owner
 
 
 def test_canonical_routing_addendum_enrolls_completion_economics():
     text = (ROOT / "docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md").read_text()
     assert "## 1B. Operator-first completion economics" in text
     assert "skills/mastermind-fabric-orchestration/SKILL.md" in text
-    assert "does not change cognition-route" in text
-    assert "direct commissioning owner retains adjudication" in text
+    assert 'All cognition/Pro, provider/credential, first-tier routing, Runtime/quota, effect, review, custody and release gates remain' in text
+    assert 'the commissioner adjudicates' in text
 
 
 def test_principal_role_overlay_does_not_mutate_protected_operator_package():

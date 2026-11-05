@@ -19,6 +19,8 @@ Require a compact product-excellence brief for major user-facing builds: differe
 
 Maximize delegation while protecting quality: optimize **accepted outcome per total root expenditure**, including principal/operator/worker reasoning, management, review, repair and integration. Prefer qualified economical Fabric operators for routine decomposition, supervision, adjudication and repairs; workers handle bounded leaves. Do not make premium Meta-CEO/Opus seats manage every check or repeatedly redo work. Reserve design critique, independent review, repair and integration capacity before fan-out. Use the shallowest admitted graph with meaningful judgment, compact source-bound packets and factual capability receipts. Escalate strategic choices or genuine blockers, never unknown permissions, quota or effects.
 
+
+Apply review duties under same-pin docs/SESSION_LOCAL_REVIEW_POLICY.md; this Skill adds no blanket technical-review or formal-approval prerequisite.
 ## Future-project default and product-quality obligation
 
 Apply this at intake for **every newly assigned Mastermind project, including Mastermind OS, Macro Dashboard, Terminal and future company products** in a session that actually loaded this policy. Classify the outcome as (a) small bounded reversible work, (b) consequential single-domain work, or (c) consequential multi-domain product delivery. This classification changes the required ownership and review depth, not provider permissions or runtime roles.
