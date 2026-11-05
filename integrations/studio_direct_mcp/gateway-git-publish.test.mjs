@@ -230,6 +230,70 @@ test('typed status, commit, and push are handled locally and exact remote ref pr
   }
 });
 
+test('refused optional fleet host binding cannot block local typed Git status, commit or push', async () => {
+  const f = await makePublisherFixture();
+  const { gw } = await boot({
+    stateDir: f.stateDir,
+    gitPublish: f.gitPublish,
+    fleetRouting: {
+      enabled: true,
+      requestTimeoutMs: 5000,
+      routes: [{ hostRef: 'mini4', url: 'https://mini4.example-tailnet.ts.net/mcp' }],
+    },
+  });
+  const c = await connect(gw);
+  try {
+    const catalog = await c.client.listTools();
+    assert.ok(catalog.tools.some((tool) => tool.name === 'studio_select_host'));
+    const refused = await c.client.callTool({
+      name: 'studio_select_host',
+      arguments: { hostRef: 'not-configured' },
+    });
+    assert.equal(refused.isError, true);
+    assert.equal(refused.structuredContent.status, 'REFUSED');
+    assert.equal(refused.structuredContent.effect_state, 'NOT_APPLIED');
+    assert.equal(refused.structuredContent.code, 'FLEET_ROUTE_PREFLIGHT_REFUSED');
+    assert.equal(refused.structuredContent.reason_code, 'FLEET_ROUTE_HOST_NOT_CONFIGURED');
+    const backendAfterRefusal = gw.stats().requests.backendOps;
+    const ping = await c.client.callTool({ name: 'studio_ping', arguments: {} });
+    assert.equal(ping.structuredContent.selectedHostRef, null);
+
+    const status = await c.client.callTool({
+      name: 'studio_git_publish_status',
+      arguments: { operation_id: f.operationId },
+    });
+    assert.equal(status.isError, undefined);
+    assert.equal(status.structuredContent.local_head_sha, f.head);
+
+    await writeFile(path.join(f.workspacePath, 'after-refused-host.txt'), 'original publisher still works\n');
+    const committed = await c.client.callTool({
+      name: 'studio_git_commit_current_changes',
+      arguments: {
+        operation_id: f.operationId,
+        expected_head_sha: f.head,
+        message: 'test: scoped git continuation after host refusal',
+      },
+    });
+    assert.equal(committed.isError, undefined);
+    assert.equal(committed.structuredContent.effect_state, 'APPLIED');
+    const newHead = committed.structuredContent.commit_head_sha;
+    assert.match(newHead, /^[0-9a-f]{40}$/);
+
+    const pushed = await c.client.callTool({
+      name: 'studio_git_push_current_branch',
+      arguments: { operation_id: f.operationId, expected_head_sha: newHead },
+    });
+    assert.equal(pushed.isError, undefined);
+    assert.equal(pushed.structuredContent.remote_head_sha, newHead);
+    const { stdout } = await git(f.workspacePath, 'ls-remote', '--heads', 'origin', `refs/heads/${f.branch}`);
+    assert.equal(stdout.trim().split(/\s+/)[0], newHead);
+    assert.equal(gw.stats().requests.backendOps, backendAfterRefusal,
+      'local Git tools must not be routed through the refused Desktop Commander host');
+  } finally {
+    await closeAll([f.root, gw, c]);
+  }
+});
+
 test('backend tool-name collision fails closed rather than shadowing either tool', async () => {
   const f = await makePublisherFixture();
   const { gw } = await boot(

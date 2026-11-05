@@ -512,6 +512,10 @@ test('configured fleet routing advertises one-way host selection and refuses lat
   });
   assert.equal(unknown.isError, true);
   assert.equal(unknown.structuredContent.code, 'FLEET_ROUTE_PREFLIGHT_REFUSED');
+  assert.equal(unknown.structuredContent.reason_code, 'FLEET_ROUTE_HOST_NOT_CONFIGURED');
+  assert.equal(unknown.structuredContent.effect_state, 'NOT_APPLIED');
+  assert.equal(unknown.structuredContent.hostRef, undefined);
+  assert.equal(JSON.stringify(unknown.structuredContent).includes('example-tailnet.ts.net'), false);
 
   const localRead = await a.client.callTool({
     name: 'read_file',
