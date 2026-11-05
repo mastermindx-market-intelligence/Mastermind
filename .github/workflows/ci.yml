@@ -320,6 +320,24 @@ jobs:
           print("NATIVE_GO_RELEASE_PROOF " + json.dumps(totals, sort_keys=True))
           PROOF
 
+      # A root-only finite owner must have positive proof, not skipped tests.
+      # The container receives only tracked public source and disposable tmpfs.
+      - name: Verify closed application transport in isolated root fixtures
+        if: matrix.index == 0
+        run: |
+          set -euo pipefail
+          application_transport_source="$(mktemp -d "${RUNNER_TEMP}/application-transport-source.XXXXXX")"
+          trap 'rm -rf "$application_transport_source"' EXIT
+          git archive --format=tar HEAD | tar -x -C "$application_transport_source"
+          docker build --file tests/application_tunnel_ci/Dockerfile \
+            --tag mastermind-application-transport:${{ github.sha }} tests/application_tunnel_ci
+          docker run --rm --network=none --cap-drop=ALL \
+            --security-opt=no-new-privileges --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,mode=1777 \
+            --tmpfs /fixture:rw,exec,nosuid,nodev,mode=0755 \
+            --mount "type=bind,src=${application_transport_source},dst=/repo,readonly" \
+            mastermind-application-transport:${{ github.sha }}
+
       # Use a separate pinned owner fixture; keep the ordinary Macro vendor pin.
       # This executes before any full-suite reuse decision, including merge_group.
       - name: Checkout paired Brain inference owner fixture
