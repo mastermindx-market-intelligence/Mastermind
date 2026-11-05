@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -25,6 +28,20 @@ ENDPOINTS = {
 MAX_RESPONSE = 256 * 1024
 
 
+class ProbeResponseError(ValueError):
+    """Bounded classification; never retain a server's raw error text."""
+
+    def __init__(self, error):
+        encoded = json.dumps(error, ensure_ascii=True).lower()
+        if re.search(r"unauthorized|authentication required|auth_required|\b401\b", encoded):
+            self.state = "AUTH_REQUIRED"
+        elif re.search(r"permission.denied|access.denied|forbidden|not.authorized|\b403\b", encoded):
+            self.state = "DENIED"
+        else:
+            self.state = "UNAVAILABLE"
+        super().__init__("PROBE_" + self.state)
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         raise ValueError("PROBE_REDIRECT_REFUSED")
@@ -32,18 +49,54 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 class ReadOnlyMcpProbe:
     """A transient probe of two fixed existing services, never a tool gateway."""
-    def __init__(self, service):
+    def __init__(self, service, *, deadline=None, clock=time.monotonic, check=None):
         self.url = ENDPOINTS[service]
         self.headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
         self.opener = urllib.request.build_opener(NoRedirect())
+        if deadline is not None and (type(deadline) not in (int, float) or not math.isfinite(deadline)):
+            raise ValueError("PROBE_DEADLINE_INVALID")
+        self.deadline, self.clock, self.check = deadline, clock, check
+
+    def _remaining(self):
+        if self.check is not None:
+            self.check()
+        remaining = 10.0 if self.deadline is None else self.deadline - self.clock()
+        if remaining <= 0:
+            raise TimeoutError("PROBE_DEADLINE_EXCEEDED")
+        return min(10.0, remaining)
+
+    def _read_body(self, response):
+        if self.deadline is None:
+            return response.read(MAX_RESPONSE + 1)
+        # urllib's initial timeout is a per-socket-operation limit, not an
+        # absolute response deadline. Rebound it before each single raw read;
+        # refuse an incompatible response instead of silently losing the bound.
+        reader = getattr(response, "read1", None)
+        raw = getattr(getattr(response, "fp", None), "raw", None)
+        sock = getattr(raw, "_sock", None)
+        if not callable(reader) or not callable(getattr(sock, "settimeout", None)):
+            raise ValueError("PROBE_TIMED_READ_UNAVAILABLE")
+        body = bytearray()
+        while len(body) <= MAX_RESPONSE:
+            sock.settimeout(self._remaining())
+            chunk = reader(min(8192, MAX_RESPONSE + 1 - len(body)))
+            self._remaining()
+            if not chunk:
+                break
+            body.extend(chunk)
+            if getattr(response, "length", None) == 0:
+                break
+        return bytes(body)
 
     def call(self, method, params, identifier):
         request = urllib.request.Request(self.url, data=json.dumps({
             "jsonrpc": "2.0", "id": identifier, "method": method, "params": params,
         }).encode(), headers=self.headers, method="POST")
-        with self.opener.open(request, timeout=10) as response:
-            body = response.read(MAX_RESPONSE + 1)
+        with self.opener.open(request, timeout=self._remaining()) as response:
+            self._remaining()
+            body = self._read_body(response)
             session = response.headers.get("Mcp-Session-Id")
+        self._remaining()
         if len(body) > MAX_RESPONSE:
             raise ValueError("PROBE_RESPONSE_TOO_LARGE")
         if session:
@@ -52,12 +105,13 @@ class ReadOnlyMcpProbe:
         if raw.startswith("event:") or raw.startswith("data:"):
             raw = next(line[6:] for line in raw.splitlines() if line.startswith("data: "))
         value = parse_json(raw.encode("utf-8"), MAX_RESPONSE)
+        if "error" in value:
+            raise ProbeResponseError(value["error"])
         # A response for another request, malformed JSON-RPC envelope or primitive
         # result is not evidence that this exact read succeeded. No retry follows.
         if (value.get("jsonrpc") != "2.0"
                 or type(value.get("id")) is not int
                 or value["id"] != identifier
-                or "error" in value
                 or type(value.get("result")) is not dict):
             raise ValueError("PROBE_PROTOCOL_ERROR")
         return value["result"]

@@ -887,6 +887,7 @@ def test_native_auth_or_quota_error_not_hidden_by_absent_structured_result(fake_
         ("executive-plan-v3", "mastermind.execution_plan/v3", True),
         ("executive-plan-v4", "mastermind.execution_plan/v4", False),
         ("executive-plan-v5", "mastermind.execution_plan/v5", False),
+        ("executive-plan-v6", "mastermind.execution_plan/v6", True),
     ],
 )
 def test_native_versioned_structured_plan_is_provider_schema_bound(
@@ -908,6 +909,9 @@ def test_native_versioned_structured_plan_is_provider_schema_bound(
             if schema == "mastermind.execution_plan/v5":
                 structured["role_result"]["coordinator_job_id"] = structured["role_result"]["root_job_id"]
                 step["delegation"] = None
+            if schema == "mastermind.execution_plan/v6":
+                from test_coo_observation import spec
+                step["observation_gate"] = spec()
             if pin_placement:
                 step["placement"] = {
                     "provider_realm": "codex", "quota_class": "codex-research"
@@ -927,7 +931,7 @@ def test_native_versioned_structured_plan_is_provider_schema_bound(
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("contract", ["executive-plan-v2", "executive-plan-v6", ""])
+@pytest.mark.parametrize("contract", ["executive-plan-v2", "executive-plan-v8", ""])
 def test_unknown_native_plan_helper_contract_refuses_before_sdk_start(
     fake_sdk, contract
 ):

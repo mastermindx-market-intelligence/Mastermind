@@ -32,6 +32,7 @@ from control_plane.operator_continuation import (
     ContinuationAck, OperatorContinuation, OperatorContinuationDraft,
 )
 import threading
+import time
 from types import MappingProxyType
 from abc import ABC, abstractmethod
 from collections.abc import Iterator as IteratorABC, Sequence as SequenceABC
@@ -56,6 +57,8 @@ from common.commission_ref import (
     normalize_commission_ref,
 )
 
+from control_plane import coo_observation
+from control_plane import coo_external_observation
 from control_plane.executive_authority import (
     AuthorityDenied,
     AuthorityPolicyError,
@@ -123,6 +126,8 @@ WORK_DEPENDENCY_MANIFEST_SCHEMA = "mastermind.work_dependency_manifest/v1"
 _COO_PLAN_ADMISSION_SCHEMA_V1 = "mastermind.coo_plan_admission/v1"
 _COO_PLAN_ADMISSION_SCHEMA_V2 = "mastermind.coo_plan_admission/v2"
 _COO_PLAN_ADMISSION_SCHEMA_V3 = "mastermind.coo_plan_admission/v3"
+_COO_PLAN_ADMISSION_SCHEMA_V4 = "mastermind.coo_plan_admission/v4"
+_COO_PLAN_ADMISSION_SCHEMA_V5 = "mastermind.coo_plan_admission/v5"
 
 
 _PLANNER_PRODUCER_BINDING_SCHEMA = "mastermind.planner_producer_binding/v1"
@@ -544,6 +549,9 @@ class ExecutiveSchemaUpgradeRequired(PersistenceError):
 
 class StateConflict(RuntimeProofError):
     """The operation conflicts with the current state machine or lease."""
+
+class ObservationUnavailable(StateConflict):
+    """The existing host is disarmed or absent; preserve the admitted root."""
 
 
 class WorkerStatus(str, Enum):
@@ -10076,6 +10084,7 @@ _WORK_DEPENDENCY_REVISION_KEYS = frozenset(
 
 
 WORK_DEPENDENCY_MANIFEST_SCHEMA_V2 = "mastermind.work_dependency_manifest/v2"
+WORK_DEPENDENCY_MANIFEST_SCHEMA_V3 = "mastermind.work_dependency_manifest/v3"
 
 
 def _validate_work_dependency_manifest(
@@ -10100,6 +10109,9 @@ def _validate_work_dependency_manifest(
         "dependency_manifest_digest",
     }
     nested = isinstance(value, Mapping) and value.get("schema_version") == WORK_DEPENDENCY_MANIFEST_SCHEMA_V2
+    observed = isinstance(value, Mapping) and value.get("schema_version") == WORK_DEPENDENCY_MANIFEST_SCHEMA_V3
+    if observed:
+        expected_keys.add("observation")
     if nested:
         expected_keys.add("coordinator_job_id")
     if not isinstance(value, Mapping) or set(value) != expected_keys:
@@ -10109,7 +10121,7 @@ def _validate_work_dependency_manifest(
     revisions = manifest.get("revisions")
     manifest_digest = manifest.get("dependency_manifest_digest")
     if (
-        manifest.get("schema_version") not in {WORK_DEPENDENCY_MANIFEST_SCHEMA, WORK_DEPENDENCY_MANIFEST_SCHEMA_V2}
+        manifest.get("schema_version") not in {WORK_DEPENDENCY_MANIFEST_SCHEMA, WORK_DEPENDENCY_MANIFEST_SCHEMA_V2, WORK_DEPENDENCY_MANIFEST_SCHEMA_V3}
         or (nested and (not coordinator_job_id or manifest.get("coordinator_job_id") != coordinator_job_id))
         or manifest.get("root_job_id") != root_job_id
         or manifest.get("plan_attempt_id") != plan_attempt_id
@@ -10136,6 +10148,14 @@ def _validate_work_dependency_manifest(
         or _DIGEST_RE.fullmatch(manifest_digest) is None
     ):
         raise StateConflict("work dependency manifest identity is invalid")
+
+    if observed and manifest["observation"] is not None:
+        binding = manifest["observation"]
+        if (type(binding) is not dict or set(binding) != {"gate_digest", "event_id", "evidence_digest"}
+                or type(binding.get("event_id")) is not int or binding["event_id"] < 1
+                or any(not isinstance(binding.get(key), str) or _DIGEST_RE.fullmatch(binding[key]) is None
+                       for key in ("gate_digest", "evidence_digest"))):
+            raise StateConflict("work observation binding is invalid")
 
     digest_fields = {
         "current_result_digest",
@@ -10203,6 +10223,247 @@ def _validate_work_dependency_manifest(
     return manifest
 
 
+def _observation_root_creation_id(connection, root_row) -> int:
+    rows = connection.execute(
+        "SELECT event_id,aggregate_type,aggregate_id FROM events "
+        "WHERE event_type='JOB_CREATED' AND job_id=? LIMIT 2", (root_row["job_id"],)
+    ).fetchall()
+    if len(rows) != 1 or rows[0]["aggregate_type"] != "job" or rows[0]["aggregate_id"] != root_row["job_id"]:
+        raise StateConflict("observation root creation is not unique")
+    return int(rows[0]["event_id"])
+
+
+def _require_observation_authority(root_row) -> str:
+    authorities = _strict_canonical_json_loads(
+        str(root_row["requested_authorities_json"]), name="observation root authorities")
+    if not isinstance(authorities, list) or "READ" not in authorities:
+        raise StateConflict("observation root has no READ authority")
+    try:
+        current = ExecutiveAuthorityPolicy.load().authorize(["READ"])
+    except (AuthorityDenied, AuthorityPolicyError) as exc:
+        raise StateConflict("observation READ authority is unavailable") from exc
+    if current.policy_sha256 != root_row["authority_policy_hash"]:
+        raise StateConflict("observation authority policy drifted")
+    return current.policy_sha256
+
+
+def _validated_observation_admission(connection, root_row, admission, step, reservation):
+    spec = step.get("observation_gate")
+    stored = reservation.get("observation")
+    if spec is None:
+        if stored is not None:
+            raise StateConflict("ungated step has observation authority")
+        return None
+    try:
+        return coo_observation.validate_admission(
+            stored, root_job_id=str(root_row["root_job_id"]),
+            plan_attempt_id=str(admission["plan_attempt_id"]),
+            plan_digest=str(admission["plan_digest"]), plan_step_id=str(step["step_id"]),
+            spec=spec, root_creation_event_id=_observation_root_creation_id(connection, root_row),
+            authority_policy_hash=str(root_row["authority_policy_hash"]))
+    except coo_observation.ObservationError as exc:
+        raise StateConflict(str(exc)) from exc
+
+
+def _observation_event_material(connection, root_row, observation):
+    """Read the exact immutable record; current authority is not needed for history."""
+    command = coo_observation.command_id(observation)
+    metadata = connection.execute(
+        "SELECT event_id,aggregate_type,aggregate_id,event_type,actor,job_id,attempt_id,"
+        "worker_id,quota_class,created_at_ms,length(CAST(payload_json AS BLOB)) AS bytes "
+        "FROM events WHERE command_id=? LIMIT 2", (command,)
+    ).fetchall()
+    if not metadata:
+        return None
+    if len(metadata) != 1:
+        raise StateConflict("observation command is not unique")
+    event = metadata[0]
+    if (event["aggregate_type"] != "job" or event["aggregate_id"] != root_row["job_id"]
+            or event["event_type"] != coo_observation.EVENT_TYPE or event["actor"] != "coo"
+            or event["job_id"] != root_row["job_id"]
+            or event["attempt_id"] != observation["plan_attempt_id"]
+            or event["worker_id"] is not None or event["quota_class"] is not None
+            or int(event["bytes"]) > coo_observation.MAX_INPUT_BYTES):
+        raise StateConflict("observation event binding or byte budget is invalid")
+    payload = connection.execute("SELECT payload_json FROM events WHERE event_id=?",
+                                 (event["event_id"],)).fetchone()[0]
+    record = _strict_canonical_json_loads(str(payload), name="COO observation record")
+    try:
+        record = coo_observation.validate_record(record, observation)
+    except coo_observation.ObservationError as exc:
+        raise StateConflict(str(exc)) from exc
+    if record["finished_at_ms"] != event["created_at_ms"]:
+        raise StateConflict("observation event clock drifted")
+    return {"event_id": int(event["event_id"]), "record": record}
+
+
+def _observation_manifest_binding(connection, root_row, admission, step, reservation):
+    observation = _validated_observation_admission(connection, root_row, admission, step, reservation)
+    if observation is None:
+        return None
+    if coo_observation.is_external_gate(observation["spec"]):
+        material = _external_observation_material(connection, root_row, observation)
+    else:
+        material = _observation_event_material(connection, root_row, observation)
+    if material is None or material["record"]["disposition"] != "MATERIAL":
+        raise StateConflict("observation gate is not satisfied")
+    return {"gate_digest": observation["gate_digest"], "event_id": material["event_id"],
+            "evidence_digest": material["record"]["evidence_digest"]}
+
+
+def _require_current_observation_host(root_row, observation, host) -> None:
+    _require_observation_authority(root_row)
+    if host is None:
+        raise ObservationUnavailable("observation host is not composed or armed")
+    try:
+        host.require_current(admission=observation)
+    except coo_observation.ObservationError as exc:
+        raise StateConflict(str(exc)) from exc
+
+
+_EXTERNAL_SETTLED_DISPOSITIONS = frozenset({"MATERIAL", "STALE", "DENIED", "EXPIRED", "INTERRUPTED"})
+
+
+def _external_observation_events(connection, root_row, observation):
+    """Validate the complete original reservation/result chain before consuming it.
+
+    These are events owned by the existing Runtime, not caller-supplied receipts.
+    Every readback checks both their immutable envelope and the exact admission.
+    """
+    maximum = 2 * int(observation["spec"]["max_samples"])
+    rows = connection.execute(
+        "SELECT event_id,command_id,event_type,aggregate_type,aggregate_id,actor,"
+        "job_id,attempt_id,worker_id,quota_class,created_at_ms,"
+        "length(CAST(payload_json AS BLOB)) AS bytes,"
+        "CASE WHEN length(CAST(payload_json AS BLOB))<=? THEN payload_json END AS payload_json "
+        "FROM events WHERE command_id LIKE ? ORDER BY event_id LIMIT ?",
+        (coo_observation.MAX_EXTERNAL_INPUT_BYTES,
+         f"coo-observation:{observation['gate_digest']}:%", maximum + 1),
+    ).fetchall()
+    if len(rows) > maximum:
+        raise StateConflict("external observation event count exceeds its admitted budget")
+    reservations: list[dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
+    by_command: dict[str, dict[str, Any]] = {}
+    consumed: set[str] = set()
+    commands: set[str] = set()
+    spec = observation["spec"]
+    for row in rows:
+        event_type = row["event_type"]
+        is_reservation = event_type == coo_observation.RESERVATION_EVENT_TYPE
+        if event_type not in {coo_observation.RESERVATION_EVENT_TYPE,
+                              coo_observation.EVENT_TYPE}:
+            raise StateConflict("external observation event type is invalid")
+        limit = (coo_observation.MAX_INPUT_BYTES if is_reservation
+                 else coo_observation.MAX_EXTERNAL_INPUT_BYTES)
+        if (row["aggregate_type"] != "job" or row["aggregate_id"] != root_row["job_id"]
+                or row["actor"] != "coo" or row["job_id"] != root_row["job_id"]
+                or row["attempt_id"] != observation["plan_attempt_id"]
+                or row["worker_id"] is not None or row["quota_class"] is not None
+                or int(row["bytes"]) > limit or row["payload_json"] is None
+                or row["command_id"] in commands):
+            raise StateConflict("external observation event envelope is invalid")
+        commands.add(row["command_id"])
+        payload = _strict_canonical_json_loads(
+            str(row["payload_json"]), name="external observation event")
+        if type(payload) is not dict:
+            raise StateConflict("external observation event payload is not an object")
+        entry = {"event_id": int(row["event_id"]), "command_id": str(row["command_id"]),
+                 "event_type": str(event_type), "payload": payload,
+                 "created_at_ms": int(row["created_at_ms"]), "bytes": int(row["bytes"])}
+        try:
+            if is_reservation:
+                payload = coo_observation.validate_reservation(payload, observation)
+                index = len(reservations) + 1
+                expected = coo_observation.reservation_command_id(observation, index)
+                if (payload["sample_index"] != index or row["command_id"] != expected
+                        or payload["reserved_at_ms"] != row["created_at_ms"]
+                        or (reservations and reservations[-1]["command_id"] not in consumed)
+                        or (records and records[-1]["payload"]["disposition"]
+                            in _EXTERNAL_SETTLED_DISPOSITIONS)):
+                    raise StateConflict("external sample was not reserved in sequence")
+                if reservations and payload["reserved_at_ms"] < (
+                        reservations[-1]["payload"]["reserved_at_ms"] + spec["min_interval_ms"]):
+                    raise StateConflict("external observation sampling interval drifted")
+                if records and payload["reserved_at_ms"] < records[-1]["payload"]["finished_at_ms"]:
+                    raise StateConflict("external observation reservation clock moved backwards")
+                reservations.append(entry)
+                by_command[expected] = entry
+                counters = _external_observation_counters(reservations)
+                if (counters["samples"] > spec["max_samples"]
+                        or counters["api_calls"] > spec["max_api_calls"]
+                        or counters["response_bytes"] > spec["max_response_bytes"]):
+                    raise StateConflict("external observation reservation budget exceeded")
+            else:
+                reservation_command = payload.get("reservation_command_id")
+                parent = by_command.get(reservation_command)
+                if parent is None or reservation_command in consumed:
+                    raise StateConflict("external observation has no exact unsettled reservation")
+                payload = coo_external_observation.validate_external_record(
+                    payload, observation, parent["payload"])
+                if (row["command_id"] != coo_observation.record_command_id(
+                        observation, parent["payload"]["sample_index"])
+                        or payload["finished_at_ms"] != row["created_at_ms"]
+                        or payload["previous_snapshot_digest"] !=
+                           _external_previous_snapshot_digest(records)):
+                    raise StateConflict("external observation record chain drifted")
+                consumed.add(reservation_command)
+                records.append(entry)
+        except coo_observation.ObservationError as exc:
+            raise StateConflict(str(exc)) from exc
+        entry["payload"] = payload
+    return reservations, records
+
+
+def _external_settled_record(records):
+    """The latest material or terminal record of one exact external gate."""
+
+    for entry in reversed(records):
+        if entry["payload"].get("disposition") in _EXTERNAL_SETTLED_DISPOSITIONS:
+            return entry
+    return None
+
+
+def _external_uncommitted_reservation(reservations, records):
+    """A reservation with no committed result.  It is never reissued."""
+
+    committed = {str(entry["payload"].get("reservation_command_id")) for entry in records}
+    for entry in reservations:
+        if entry["command_id"] not in committed:
+            return entry
+    return None
+
+
+def _external_observation_counters(reservations):
+    """Counters survive restart because the reservations are immutable."""
+
+    return {
+        "samples": len(reservations),
+        "api_calls": sum(int(entry["payload"]["reserved_api_calls"]) for entry in reservations),
+        "response_bytes": sum(int(entry["payload"]["reserved_response_bytes"])
+                              for entry in reservations),
+    }
+
+
+def _external_previous_snapshot_digest(records):
+    for entry in reversed(records):
+        value = entry["payload"].get("snapshot_digest")
+        if isinstance(value, str):
+            return value
+    return None
+
+
+def _external_observation_material(connection, root_row, observation):
+    """Read material only through the validated reservation/result chain."""
+    _reservations, records = _external_observation_events(
+        connection, root_row, observation)
+    settled = _external_settled_record(records)
+    if settled is None or settled["payload"]["disposition"] != "MATERIAL":
+        return None
+    return {"event_id": settled["event_id"], "command_id": settled["command_id"],
+            "record": settled["payload"]}
+
+
 def _work_dependency_manifest(
     connection: sqlite3.Connection,
     *,
@@ -10214,8 +10475,8 @@ def _work_dependency_manifest(
     """Derive the canonical accepted-revision snapshot for one V3/V4 work step."""
 
     if (
-        plan_body.get("schema_version") not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
-        or admission.get("schema_version") not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}
+        plan_body.get("schema_version") not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6", "mastermind.execution_plan/v7"}
+        or admission.get("schema_version") not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3, _COO_PLAN_ADMISSION_SCHEMA_V4, _COO_PLAN_ADMISSION_SCHEMA_V5}
         or admission.get("root_job_id") != root_row["root_job_id"]
         or admission.get("coordinator_job_id", admission.get("root_job_id")) != root_row["job_id"]
         or admission.get("plan_attempt_id") != plan_body.get("plan_attempt_id")
@@ -10251,7 +10512,7 @@ def _work_dependency_manifest(
         for prerequisite in prerequisites
     ]
     manifest: dict[str, Any] = {
-        "schema_version": (WORK_DEPENDENCY_MANIFEST_SCHEMA_V2 if plan_body["schema_version"] == "mastermind.execution_plan/v5" else WORK_DEPENDENCY_MANIFEST_SCHEMA),
+        "schema_version": (WORK_DEPENDENCY_MANIFEST_SCHEMA_V3 if plan_body["schema_version"] in {"mastermind.execution_plan/v6", "mastermind.execution_plan/v7"} else WORK_DEPENDENCY_MANIFEST_SCHEMA_V2 if plan_body["schema_version"] == "mastermind.execution_plan/v5" else WORK_DEPENDENCY_MANIFEST_SCHEMA),
         "root_job_id": str(root_row["root_job_id"]),
         **({"coordinator_job_id": str(root_row["job_id"])} if plan_body["schema_version"] == "mastermind.execution_plan/v5" else {}),
         "plan_attempt_id": str(admission["plan_attempt_id"]),
@@ -10260,6 +10521,9 @@ def _work_dependency_manifest(
         "prerequisite_step_ids": list(prerequisites),
         "revisions": revisions,
     }
+    if plan_body["schema_version"] in {"mastermind.execution_plan/v6", "mastermind.execution_plan/v7"}:
+        manifest["observation"] = _observation_manifest_binding(
+            connection, root_row, admission, step, reservation)
     manifest["dependency_manifest_digest"] = orchestration_digest(manifest)
     return _validate_work_dependency_manifest(
         manifest,
@@ -10308,7 +10572,7 @@ def _validated_plan_admission(
         not isinstance(admission, dict)
         or set(admission) != keys
         or admission_schema
-        not in {_COO_PLAN_ADMISSION_SCHEMA_V1, _COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}
+        not in {_COO_PLAN_ADMISSION_SCHEMA_V1, _COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3, _COO_PLAN_ADMISSION_SCHEMA_V4, _COO_PLAN_ADMISSION_SCHEMA_V5}
     ):
         raise StateConflict("COO plan admission is not the closed wire")
     digest_input = dict(admission)
@@ -10424,6 +10688,8 @@ def _validated_plan_admission(
     plan_body = dict(envelope["role_result"])
     _assert_planner_producer_result(connection, plan_attempt, plan_attempt, plan_body)
     expected_admission_schema = (
+        _COO_PLAN_ADMISSION_SCHEMA_V5 if plan_body.get("schema_version") == "mastermind.execution_plan/v7" else
+        _COO_PLAN_ADMISSION_SCHEMA_V4 if plan_body.get("schema_version") == "mastermind.execution_plan/v6" else
         _COO_PLAN_ADMISSION_SCHEMA_V3 if plan_body.get("schema_version") == "mastermind.execution_plan/v5" else _COO_PLAN_ADMISSION_SCHEMA_V2
         if plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
         else _COO_PLAN_ADMISSION_SCHEMA_V1
@@ -10489,6 +10755,8 @@ def _validated_plan_admission(
                 reserved.get("initial_work_command_id") if isinstance(reserved, dict) else None
             )
             dependency_manifest = None
+        if admission_schema in {_COO_PLAN_ADMISSION_SCHEMA_V4, _COO_PLAN_ADMISSION_SCHEMA_V5}:
+            expected_step_keys.add("observation")
         if (
             not isinstance(reserved, dict)
             or set(reserved) != expected_step_keys
@@ -10499,13 +10767,17 @@ def _validated_plan_admission(
             != _step_slots(policy, step, required)
         ):
             raise StateConflict("COO plan admission reservation arithmetic drifted")
+        if admission_schema in {_COO_PLAN_ADMISSION_SCHEMA_V4, _COO_PLAN_ADMISSION_SCHEMA_V5}:
+            observation = _validated_observation_admission(connection, root_row, admission, step, reserved)
+            if observation is not None and observation["admitted_at_ms"] > event["created_at_ms"]:
+                raise StateConflict("observation admission predates its canonical plan event")
         if admission_schema == _COO_PLAN_ADMISSION_SCHEMA_V1:
             if member_command_id != expected_member_command:
                 raise StateConflict("COO plan admission member command drifted")
         else:
             if reserved["prerequisite_step_ids"] != prerequisite_step_ids:
                 raise StateConflict("COO plan admission prerequisites drifted")
-            if prerequisite_step_ids:
+            if prerequisite_step_ids or step.get("observation_gate") is not None:
                 if member_job_id is not None or member_command_id is not None:
                     raise StateConflict(
                         "dependent V3 reservation cannot materialize initial work"
@@ -10521,7 +10793,7 @@ def _validated_plan_admission(
         expected_validation_argv = root_validations if expected_validation_ids else []
         if step["validation_ids"] != expected_validation_ids:
             raise StateConflict("typed plan changed the mandatory root validation set")
-        if admission_schema in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3} and prerequisite_step_ids:
+        if admission_schema in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3, _COO_PLAN_ADMISSION_SCHEMA_V4, _COO_PLAN_ADMISSION_SCHEMA_V5} and (prerequisite_step_ids or step.get("observation_gate") is not None):
             continue
 
         member = connection.execute(
@@ -10576,7 +10848,7 @@ def _validated_plan_admission(
             or member_event["job_id"] != member["job_id"]
         ):
             raise StateConflict("COO plan admission member manifest drifted")
-        if admission_schema in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}:
+        if admission_schema in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3, _COO_PLAN_ADMISSION_SCHEMA_V4, _COO_PLAN_ADMISSION_SCHEMA_V5}:
             dependency_manifest = _work_dependency_manifest(
                 connection,
                 root_row=root_row,
@@ -11157,9 +11429,9 @@ def _current_orchestration_tree_material_for_dispatch(
         ]
         if not revisions:
             deferred_v3 = bool(
-                admission.get("schema_version") in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}
-                and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
-                and step.get("prerequisite_step_ids")
+                admission.get("schema_version") in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3, _COO_PLAN_ADMISSION_SCHEMA_V4, _COO_PLAN_ADMISSION_SCHEMA_V5}
+                and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6", "mastermind.execution_plan/v7"}
+                and (step.get("prerequisite_step_ids") or step.get("observation_gate") is not None)
                 and reservation.get("initial_work_job_id") is None
                 and reservation.get("initial_work_command_id") is None
             )
@@ -11470,14 +11742,14 @@ def _validated_job_dependency_manifest(
         name="work dependency JOB_CREATED payload",
     )
 
-    is_v3 = plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
+    is_v3 = plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6", "mastermind.execution_plan/v7"}
     has_manifest = "dependency_manifest" in payload
     has_digest = "dependency_manifest_digest" in payload
     if not is_v3:
         if has_manifest or has_digest:
             raise StateConflict("legacy work unexpectedly carries dependency evidence")
         return None
-    if admission.get("schema_version") not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}:
+    if admission.get("schema_version") not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3, _COO_PLAN_ADMISSION_SCHEMA_V4, _COO_PLAN_ADMISSION_SCHEMA_V5}:
         raise StateConflict("V3/V4 work dependency admission is not V2")
     if not has_manifest or not has_digest:
         raise StateConflict("V3/V4 work is missing immutable dependency evidence")
@@ -14678,6 +14950,7 @@ class JobRegistry:
         root_job_id: str,
         *,
         command_id: str,
+        observation_host: coo_observation.ObservationHost | None = None,
     ) -> list[Job]:
         """Atomically reserve the sealed plan and create its initial work wave."""
 
@@ -14867,6 +15140,9 @@ class JobRegistry:
             plan_digest = result_digest(plan_body)
             if plan_digest != seal["role_result_digest"]:
                 raise StateConflict("typed plan digest differs from its seal")
+            is_v6 = plan_body["schema_version"] == "mastermind.execution_plan/v6"
+            is_v7 = plan_body["schema_version"] == "mastermind.execution_plan/v7"
+            is_observed = is_v6 or is_v7
             is_v5 = plan_body["schema_version"] == "mastermind.execution_plan/v5"
             if (is_v5 and plan_body.get("coordinator_job_id") != root_token
                     or not is_v5 and root["parent_job_id"] is not None):
@@ -14878,16 +15154,19 @@ class JobRegistry:
             )
             is_v3 = plan_body["schema_version"] in {
                 "mastermind.execution_plan/v3",
-                "mastermind.execution_plan/v4", "mastermind.execution_plan/v5",
+                "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6",
+                "mastermind.execution_plan/v7",
             }
             if plan_body["schema_version"] in {
                 "mastermind.execution_plan/v2",
                 "mastermind.execution_plan/v3",
-                "mastermind.execution_plan/v4", "mastermind.execution_plan/v5",
+                "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6",
+                "mastermind.execution_plan/v7",
             }:
                 requires_placement = plan_body["schema_version"] in {
                     "mastermind.execution_plan/v2",
-                    "mastermind.execution_plan/v3",
+                    "mastermind.execution_plan/v3", "mastermind.execution_plan/v6",
+                    "mastermind.execution_plan/v7",
                 }
                 if requires_placement and any(
                     "placement" not in step for step in plan_body["steps"]
@@ -14935,6 +15214,31 @@ class JobRegistry:
             root_validation_ids = [
                 orchestration_digest(argv) for argv in root_validations
             ]
+            observations: dict[str, Any] = {}
+            if is_observed:
+                for step in plan_body["steps"]:
+                    spec = step["observation_gate"]
+                    observations[step["step_id"]] = None
+                    if spec is None:
+                        continue
+                    if observation_host is None:
+                        raise ObservationUnavailable("observation host is not composed or armed")
+                    authority_hash = _require_observation_authority(root)
+                    _assert_workstream_admission_open(
+                        connection, _admission_root_workstream(connection, str(root["root_job_id"])))
+                    definition = _finite_bound_effect(self.store, connection, str(root["job_id"]))
+                    timestamp = _finite_fresh_effect(self.store, connection, str(root["job_id"]))
+                    try:
+                        scope = observation_host.require_scope(root_job_id=str(root["root_job_id"]),
+                                                               source=spec["source"])
+                        observations[step["step_id"]] = coo_observation.make_admission(
+                            root_job_id=str(root["root_job_id"]), plan_attempt_id=str(plan_attempt["attempt_id"]),
+                            plan_digest=plan_digest, plan_step_id=step["step_id"],
+                            root_creation_event_id=_observation_root_creation_id(connection, root),
+                            authority_policy_hash=authority_hash, spec=spec, admitted_at_ms=timestamp,
+                            scope=scope, finite_expiry_ms=None if definition is None else definition["expires_at_ms"])
+                    except coo_observation.ObservationError as exc:
+                        raise StateConflict(str(exc)) from exc
             reservation_steps: list[dict[str, Any]] = []
             for ordinal, step in enumerate(plan_body["steps"]):
                 has_tests = "RUN_TESTS" in step["requested_authorities"]
@@ -14955,6 +15259,7 @@ class JobRegistry:
                             ),
                             "initial_work_job_id": None,
                             "initial_work_command_id": None,
+                            **({"observation": observations[step["step_id"]]} if is_observed else {}),
                         }
                     )
                     continue
@@ -14995,6 +15300,8 @@ class JobRegistry:
                 )
             admission: dict[str, Any] = {
                 "schema_version": (
+                    _COO_PLAN_ADMISSION_SCHEMA_V5 if is_v7 else
+                    _COO_PLAN_ADMISSION_SCHEMA_V4 if is_v6 else
                     _COO_PLAN_ADMISSION_SCHEMA_V3 if is_v5 else _COO_PLAN_ADMISSION_SCHEMA_V2
                     if is_v3
                     else _COO_PLAN_ADMISSION_SCHEMA_V1
@@ -15010,7 +15317,7 @@ class JobRegistry:
             }
             if is_v3:
                 for ordinal, step in enumerate(plan_body["steps"]):
-                    if step["prerequisite_step_ids"]:
+                    if step["prerequisite_step_ids"] or step.get("observation_gate") is not None:
                         continue
                     member_command = f"{command_id}:member:{ordinal}"
                     manifest = _work_dependency_manifest(
@@ -15055,6 +15362,8 @@ class JobRegistry:
                     reservation_steps[ordinal]["initial_work_command_id"] = (
                         member_command
                     )
+            if is_observed:
+                timestamp = _finite_fresh_effect(self.store, connection, str(root["job_id"]))
             admission["reservation_digest"] = orchestration_digest(admission)
             self.store.append_event(
                 connection,
@@ -15070,6 +15379,339 @@ class JobRegistry:
             )
             _validated_plan_admission(connection, root)
         return [self.get_job(job_id) for job_id in created_ids if self.get_job(job_id)]
+
+
+    def _external_gate(self, root_job_id: str, plan_step_id: str) -> bool:
+        """Whether this exact reserved step carries a versioned external gate."""
+
+        with self.store.read() as connection:
+            root = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (root_job_id,)).fetchone()
+            if root is None:
+                raise StateConflict("observation root does not exist")
+            admission, plan = _validated_plan_admission(connection, root)
+            step = next(
+                (item for item in plan["steps"] if item["step_id"] == plan_step_id), None)
+            if step is None:
+                return False
+            spec = step.get("observation_gate")
+            return (isinstance(spec, Mapping)
+                    and coo_observation.is_external_gate(spec))
+
+    def advance_cycle_observation(
+        self, root_job_id: str, plan_step_id: str, *,
+        observation_host: coo_observation.ObservationHost | None,
+    ) -> dict[str, Any]:
+        """One bounded observation decision; no worker, no wait loop.
+
+        Exact committed records remain readable after authority drift. Fresh
+        effects recheck the root, finite/workstream fences and trusted host.
+        A versioned external gate reserves one sample and its budget before any
+        I/O, reads outside the transaction and commits the bounded result
+        against that exact reservation.
+        """
+        if self._external_gate(root_job_id, plan_step_id):
+            return self._advance_external_observation(
+                root_job_id, plan_step_id, observation_host=observation_host)
+        with self.store.transaction() as connection:
+            root = connection.execute("SELECT * FROM jobs WHERE job_id=?", (root_job_id,)).fetchone()
+            if root is None:
+                raise StateConflict("observation root does not exist")
+            admission, plan = _validated_plan_admission(connection, root)
+            step = next((item for item in plan["steps"] if item["step_id"] == plan_step_id), None)
+            reserved = next((item for item in admission["steps"]
+                             if item["plan_step_id"] == plan_step_id), None)
+            if (admission["schema_version"] not in
+                    {_COO_PLAN_ADMISSION_SCHEMA_V4, _COO_PLAN_ADMISSION_SCHEMA_V5}
+                    or step is None or reserved is None):
+                raise StateConflict("observation requires an admitted V6 or V7 step")
+            observation = _validated_observation_admission(connection, root, admission, step, reserved)
+            if observation is None:
+                raise StateConflict("step has no observation gate")
+            material = _observation_event_material(connection, root, observation)
+            command = coo_observation.command_id(observation)
+            if material is not None:
+                return {"disposition": material["record"]["disposition"], "created": False,
+                        "command_id": command, **material}
+            if root["cancel_requested_at_ms"] is not None or root["status"] == JobStatus.CANCELLED.value:
+                return {"disposition": "CANCELLED", "created": False, "command_id": command}
+            _assert_cycle_root_open_for_child_mutation(connection, root)
+            _assert_workstream_admission_open(
+                connection, _admission_root_workstream(connection, str(root["root_job_id"])))
+            _require_current_observation_host(root, observation, observation_host)
+            now = _finite_fresh_effect(self.store, connection, str(root["job_id"]))
+            disposition = coo_observation.timer_disposition(observation, now)
+            if disposition == "PENDING":
+                return {"disposition": disposition, "created": False, "command_id": command,
+                        "due_at_ms": observation["spec"]["source"]["due_at_ms"],
+                        "deadline_at_ms": observation["effective_deadline_at_ms"]}
+            record = coo_observation.make_record(observation, now)
+            self.store.append_event(connection, aggregate_type="job", aggregate_id=root_job_id,
+                event_type=coo_observation.EVENT_TYPE, actor="coo", job_id=root_job_id,
+                attempt_id=admission["plan_attempt_id"], payload=record,
+                command_id=command, timestamp_ms=now)
+            material = _observation_event_material(connection, root, observation)
+            assert material is not None
+            return {"disposition": disposition, "created": True, "command_id": command, **material}
+
+    def _advance_external_observation(
+        self, root_job_id: str, plan_step_id: str, *,
+        observation_host: coo_observation.ObservationHost | None,
+    ) -> dict[str, Any]:
+        """Reserve once, read outside the transaction, settle the original read.
+
+        An unresolved reservation is never taken over because time elapsed.
+        Its full budget stays charged until the original result or a qualified
+        incumbent recovery settles it. No recovery owner is invented here.
+        """
+        with self.store.transaction() as connection:
+            root = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (root_job_id,)).fetchone()
+            if root is None:
+                raise StateConflict("observation root does not exist")
+            admission, plan = _validated_plan_admission(connection, root)
+            step = next((item for item in plan["steps"]
+                         if item["step_id"] == plan_step_id), None)
+            reserved = next((item for item in admission["steps"]
+                             if item["plan_step_id"] == plan_step_id), None)
+            if (admission["schema_version"] != _COO_PLAN_ADMISSION_SCHEMA_V5
+                    or plan["schema_version"] != "mastermind.execution_plan/v7"
+                    or step is None or reserved is None):
+                raise StateConflict("external observation requires an admitted V7 step")
+            observation = _validated_observation_admission(
+                connection, root, admission, step, reserved)
+            if observation is None or not coo_observation.is_external_gate(observation["spec"]):
+                raise StateConflict("external observation requires a versioned external gate")
+            reservations, records = _external_observation_events(connection, root, observation)
+            settled = _external_settled_record(records)
+            if settled is not None:
+                return {"disposition": settled["payload"]["disposition"], "created": False,
+                        "command_id": settled["command_id"], "event_id": settled["event_id"],
+                        "record": settled["payload"]}
+            pending = _external_uncommitted_reservation(reservations, records)
+            if pending is not None:
+                # Neither a reopened Runtime nor a passed timeout proves the
+                # original acquisition ended. A late denial must not be lost.
+                return {"disposition": "UNRESOLVED", "created": False,
+                        "reason": "original_sample_unsettled",
+                        "command_id": pending["command_id"],
+                        "reservation": pending["payload"]}
+            command_id = coo_observation.command_id(observation)
+            if (root["cancel_requested_at_ms"] is not None
+                    or root["status"] == JobStatus.CANCELLED.value):
+                return {"disposition": "CANCELLED", "created": False, "command_id": command_id}
+            _assert_cycle_root_open_for_child_mutation(connection, root)
+            _assert_workstream_admission_open(
+                connection, _admission_root_workstream(connection, str(root["root_job_id"])))
+            _require_current_observation_host(root, observation, observation_host)
+            now = _finite_fresh_effect(self.store, connection, root_job_id)
+            spec = observation["spec"]
+            counters = _external_observation_counters(reservations)
+            if now >= observation["effective_deadline_at_ms"]:
+                return {"disposition": "EXPIRED", "created": False, "command_id": command_id}
+            source = spec["source"]
+            reserved_calls = coo_external_observation.per_sample_api_calls(source)
+            reserved_bytes = coo_external_observation.per_sample_response_bytes(source)
+            if (counters["samples"] >= spec["max_samples"]
+                    or counters["api_calls"] + reserved_calls > spec["max_api_calls"]
+                    or counters["response_bytes"] + reserved_bytes > spec["max_response_bytes"]):
+                return {"disposition": "BUDGET_EXHAUSTED", "created": False,
+                        "command_id": command_id}
+            if reservations:
+                due_at = reservations[-1]["payload"]["reserved_at_ms"] + spec["min_interval_ms"]
+                if now < due_at:
+                    return {"disposition": "PENDING", "created": False,
+                            "command_id": command_id, "due_at_ms": due_at}
+            sample_index = counters["samples"] + 1
+            timeout_ms = min(spec["sample_timeout_ms"],
+                             observation["effective_deadline_at_ms"] - now)
+            reservation = coo_observation.make_reservation(
+                observation, sample_index=sample_index, source_kind=source["kind"],
+                source_digest=coo_external_observation.source_digest(source),
+                reserved_at_ms=now, deadline_at_ms=observation["effective_deadline_at_ms"],
+                reserved_api_calls=reserved_calls, reserved_response_bytes=reserved_bytes,
+                sample_timeout_ms=timeout_ms)
+            coo_observation.validate_reservation(reservation, observation)
+            reservation_command = coo_observation.reservation_command_id(observation, sample_index)
+            monotonic_deadline = time.monotonic() + timeout_ms / 1000.0
+            self.store.append_event(
+                connection, aggregate_type="job", aggregate_id=root_job_id,
+                event_type=coo_observation.RESERVATION_EVENT_TYPE, actor="coo",
+                job_id=root_job_id, attempt_id=admission["plan_attempt_id"],
+                payload=reservation, command_id=reservation_command, timestamp_ms=now)
+
+        # The original owner keeps this exact reservation; no lock spans I/O.
+        remaining_ms = min(
+            timeout_ms, int((monotonic_deadline - time.monotonic()) * 1000),
+            reservation["reserved_at_ms"] + timeout_ms - self.store.now_ms())
+        if remaining_ms <= 0:
+            sample = {"disposition": "EXPIRED", "snapshot": {"kind": "expired"},
+                      "api_calls": 0, "response_bytes": 0}
+        else:
+            sample = self._read_external_sample(
+                observation, observation_host, timeout_ms=remaining_ms,
+                max_api_calls=reserved_calls, max_response_bytes=reserved_bytes)
+
+        with self.store.transaction() as connection:
+            # Retain an incumbent result even if the fresh-work window closed.
+            # This check isolates the original root; it grants no new work.
+            _finite_existing_effect(self.store, connection, root_job_id)
+            finished = self.store.now_ms()
+            root = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (root_job_id,)).fetchone()
+            if root is None:
+                raise StateConflict("original observation root disappeared")
+            reservations, records = _external_observation_events(connection, root, observation)
+            original = next((entry for entry in reservations
+                             if entry["command_id"] == reservation_command), None)
+            if original is None or original["payload"] != reservation:
+                raise StateConflict("original observation reservation changed")
+            command = coo_observation.record_command_id(observation, sample_index)
+            existing = next((entry for entry in records
+                             if entry["command_id"] == command), None)
+            if existing is not None:
+                record = existing["payload"]
+                if any(record[key] != sample[key] for key in
+                       ("disposition", "snapshot", "api_calls", "response_bytes")):
+                    raise StateConflict("original observation result contradicts its committed receipt")
+                return {"disposition": record["disposition"], "created": False,
+                        "command_id": command, "event_id": existing["event_id"], "record": record}
+            if sample["disposition"] != "DENIED":
+                late = (finished < reservation["reserved_at_ms"]
+                        or finished >= min(reservation["deadline_at_ms"],
+                                           reservation["reserved_at_ms"] + timeout_ms)
+                        or time.monotonic() >= monotonic_deadline)
+                if sample["disposition"] == "MATERIAL" and not late:
+                    try:
+                        _assert_cycle_root_open_for_child_mutation(connection, root)
+                        _assert_workstream_admission_open(
+                            connection, _admission_root_workstream(
+                                connection, str(root["root_job_id"])))
+                        _require_current_observation_host(root, observation, observation_host)
+                        _finite_fresh_effect(self.store, connection, root_job_id)
+                    except StateConflict:
+                        late = True
+                if late:
+                    sample = {**sample, "disposition": "EXPIRED",
+                              "snapshot": {"kind": "expired"}}
+            # A clock rollback cannot make evidence appear earlier than its
+            # durable reservation. A late denial is still retained as denial.
+            finished = max(finished, reservation["reserved_at_ms"])
+            record = coo_observation.make_external_record(
+                observation, sample_index=sample_index,
+                reservation_command_id=reservation_command,
+                started_at_ms=reservation["reserved_at_ms"], finished_at_ms=finished,
+                disposition=sample["disposition"], snapshot=sample["snapshot"],
+                previous_snapshot_digest=_external_previous_snapshot_digest(records),
+                api_calls=sample["api_calls"], response_bytes=sample["response_bytes"])
+            try:
+                coo_external_observation.validate_external_record(record, observation, reservation)
+            except coo_observation.ObservationError as exc:
+                raise StateConflict(str(exc)) from exc
+            self.store.append_event(
+                connection, aggregate_type="job", aggregate_id=root_job_id,
+                event_type=coo_observation.EVENT_TYPE, actor="coo", job_id=root_job_id,
+                attempt_id=admission["plan_attempt_id"], payload=record,
+                command_id=command, timestamp_ms=finished)
+            _reservations, committed = _external_observation_events(connection, root, observation)
+            event = next(entry for entry in committed if entry["command_id"] == command)
+            return {"disposition": record["disposition"], "created": True,
+                    "command_id": command, "event_id": event["event_id"], "record": record}
+
+    def _read_external_sample(
+        self, observation: Mapping[str, Any], host, *,
+        timeout_ms: int, max_api_calls: int, max_response_bytes: int,
+    ) -> dict[str, Any]:
+        """One qualified reader; failure charges are conservative when unknown."""
+        source = observation["spec"]["source"]
+        reader = getattr(host, "read_sample", None)
+        if not callable(reader):
+            return {"disposition": "UNAVAILABLE", "api_calls": 0, "response_bytes": 0,
+                    "snapshot": {"kind": "unavailable", "code": "HOST_READER_UNAVAILABLE"}}
+        try:
+            raw = reader(source, timeout_ms=timeout_ms, max_api_calls=max_api_calls,
+                         max_response_bytes=max_response_bytes)
+        except Exception as exc:
+            payload = getattr(exc, "signal_payload", None)
+            terminal = getattr(exc, "terminal", False) is True
+            if isinstance(payload, dict):
+                terminal = terminal or payload.get("terminal") is True
+            code = (payload.get("code") if isinstance(payload, dict)
+                    else getattr(exc, "code", None))
+            if type(code) is not str or re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", code) is None:
+                code = "SOURCE_DENIED" if terminal else "SOURCE_UNAVAILABLE"
+            # Every reservation is fully charged regardless of a missing
+            # measurement; never report a failed acquisition as zero cost.
+            return {"disposition": "DENIED" if terminal else "UNAVAILABLE",
+                    "api_calls": max_api_calls, "response_bytes": max_response_bytes,
+                    "snapshot": {"kind": "denied" if terminal else "unavailable", "code": code}}
+        if (type(raw) is not dict or set(raw) != {"facts", "api_calls", "response_bytes"}
+                or type(raw["facts"]) is not dict):
+            raise StateConflict("qualified external reader returned an invalid result")
+        api_calls, response_bytes = raw["api_calls"], raw["response_bytes"]
+        if (type(api_calls) is not int or not 0 <= api_calls <= max_api_calls
+                or type(response_bytes) is not int or not 0 <= response_bytes <= max_response_bytes):
+            # Preserve the unresolved original reservation. A contract-breaking
+            # reader must not silently authorize a fresh acquisition.
+            raise StateConflict("qualified external reader exceeded its reserved budget")
+        try:
+            disposition, snapshot = coo_external_observation.evaluate_sample(source, raw["facts"])
+        except coo_observation.ObservationError:
+            disposition, snapshot = "UNAVAILABLE", {"kind": "unavailable", "code": "EVIDENCE_INVALID"}
+        return {"disposition": disposition, "api_calls": api_calls,
+                "response_bytes": response_bytes, "snapshot": snapshot}
+
+
+    def read_cycle_observation_input(
+        self, job_id: str, attempt_id: str, *, max_bytes: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Join actual work creation, its current Attempt and retained gate bytes."""
+        if max_bytes is not None and (
+                type(max_bytes) is not int
+                or not 1 <= max_bytes <= coo_observation.MAX_EXTERNAL_INPUT_BYTES):
+            raise StateConflict("observation input byte budget is invalid")
+        with self.store.read() as connection:
+            job = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if job is None:
+                raise StateConflict("observation input Job does not exist")
+            if job["orchestration_role"] != "work" or job["parent_job_id"] is None:
+                return None
+            manifest = _validated_job_dependency_manifest(connection, job_row=job)
+            if manifest is None or manifest.get("observation") is None:
+                return None
+            attempt = connection.execute("SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
+            if (attempt is None or attempt["job_id"] != job_id
+                    or job["current_attempt_id"] != attempt_id):
+                raise StateConflict("observation input Attempt is not current for this Job")
+            root = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job["parent_job_id"],)).fetchone()
+            admission, plan = _validated_plan_admission(connection, root)
+            step = next(item for item in plan["steps"] if item["step_id"] == job["plan_step_id"])
+            reserved = next(item for item in admission["steps"] if item["plan_step_id"] == job["plan_step_id"])
+            expected = _observation_manifest_binding(connection, root, admission, step, reserved)
+            if expected != manifest["observation"]:
+                raise StateConflict("observation input no longer matches actual work creation")
+            observation = _validated_observation_admission(connection, root, admission, step, reserved)
+            if coo_observation.is_external_gate(observation["spec"]):
+                material = _external_observation_material(connection, root, observation)
+            else:
+                material = _observation_event_material(connection, root, observation)
+            assert material is not None
+            result = {"schema_version": coo_observation.INPUT_SCHEMA,
+                      "root_job_id": str(root["root_job_id"]), "job_id": job_id,
+                      "attempt_id": attempt_id, "plan_attempt_id": admission["plan_attempt_id"],
+                      "plan_digest": admission["plan_digest"], "plan_step_id": job["plan_step_id"],
+                      "dependency_manifest_digest": manifest["dependency_manifest_digest"],
+                      "observation": expected, "evidence": material["record"]}
+            limit = max_bytes
+            if limit is None:
+                limit = (coo_observation.MAX_EXTERNAL_INPUT_BYTES
+                         if coo_observation.is_external_gate(observation["spec"])
+                         else coo_observation.MAX_INPUT_BYTES)
+            measured = len(coo_observation.canonical_bytes(
+                result, max_bytes=coo_observation.MAX_EXTERNAL_INPUT_BYTES))
+            if measured > limit:
+                raise StateConflict("observation input exceeds the byte budget")
+            return result
 
 
     def project_cycle_work_dependency_manifest(
@@ -15100,10 +15742,10 @@ class JobRegistry:
                 None,
             )
             if (
-                admission["schema_version"] not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}
-                or plan_body["schema_version"] not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
+                admission["schema_version"] not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3, _COO_PLAN_ADMISSION_SCHEMA_V4, _COO_PLAN_ADMISSION_SCHEMA_V5}
+                or plan_body["schema_version"] not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6", "mastermind.execution_plan/v7"}
                 or step is None
-                or not step["prerequisite_step_ids"]
+                or not (step["prerequisite_step_ids"] or step.get("observation_gate") is not None)
             ):
                 raise StateConflict("dependency projection requires a deferred V3/V4 step")
             existing = connection.execute(
@@ -15132,6 +15774,7 @@ class JobRegistry:
         *,
         dependency_manifest: Mapping[str, Any],
         command_id: str,
+        observation_host: coo_observation.ObservationHost | None = None,
     ) -> Job:
         """Create/reconcile one dependency-ready reserved V3 work Job."""
 
@@ -15165,11 +15808,11 @@ class JobRegistry:
                 None,
             )
             if (
-                admission["schema_version"] not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}
-                or plan_body["schema_version"] not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
+                admission["schema_version"] not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3, _COO_PLAN_ADMISSION_SCHEMA_V4, _COO_PLAN_ADMISSION_SCHEMA_V5}
+                or plan_body["schema_version"] not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5", "mastermind.execution_plan/v6", "mastermind.execution_plan/v7"}
                 or step is None
                 or reservation is None
-                or not step["prerequisite_step_ids"]
+                or not (step["prerequisite_step_ids"] or step.get("observation_gate") is not None)
                 or reservation["initial_work_job_id"] is not None
                 or reservation["initial_work_command_id"] is not None
             ):
@@ -15231,6 +15874,9 @@ class JobRegistry:
                 )
                 return _job_from_row(row)
             _assert_cycle_root_open_for_child_mutation(connection, root)
+            if step.get("observation_gate") is not None:
+                observation = _validated_observation_admission(connection, root, admission, step, reservation)
+                _require_current_observation_host(root, observation, observation_host)
             existing_step_rows = connection.execute(
                 """
                 SELECT * FROM jobs

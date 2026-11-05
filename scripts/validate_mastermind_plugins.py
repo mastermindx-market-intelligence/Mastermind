@@ -17,7 +17,7 @@ from typing import Any, Mapping, Sequence
 VALIDATION_SCHEMA = "mastermind.plugin_package_validation.v1"
 MARKETPLACE_PATH = Path(".agents/plugins/marketplace.json")
 PLUGIN_VERSIONS = {
-    "mastermind-sol": "0.2.1",
+    "mastermind-sol": "0.2.2",
     "mastermind-operator": "0.1.0",
     "mastermind-cortex": "0.1.0",
     "mastermind-navigator": "0.1.0",
@@ -40,6 +40,7 @@ SOL_SKILLS = (
     "mastermind-product-designer",
     "mastermind-deep-research",
     "mastermind-recovery",
+    "orchestrate-fabric-workflows",
 )
 OPERATOR_SKILLS = (
     "receive-commission",

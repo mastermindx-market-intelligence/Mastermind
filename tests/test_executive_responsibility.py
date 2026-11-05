@@ -144,6 +144,8 @@ def test_startup_prompt_retains_intent_without_new_authority(tmp_path):
     job=runtime.jobs.create_job('role test',constraints=decision.job_constraints())
     host=SimpleNamespace(runtime=runtime,adapter=_InertDataBoundary(),
                          _commission_prompt_suffix=lambda *a:'')
+    host._observation_prompt_suffix = MethodType(
+        ExecutiveSupervisor._observation_prompt_suffix, host)
     host._product_acceptance_review_suffix = MethodType(
         ExecutiveSupervisor._product_acceptance_review_suffix, host)
     host._reviewed_role_prompt_suffix = MethodType(

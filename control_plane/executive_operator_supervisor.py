@@ -32,7 +32,8 @@ from control_plane.executive_agent_capabilities import (
 )
 from control_plane.executive_operator_harness_port import ExecutiveOperatorHarnessPort
 from control_plane.executive_orchestration_result import (
-    PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
+    PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5, PLAN_SCHEMA_V6,
+    PLAN_SCHEMA_V7,
     canonical_bytes,
     canonical_digest,
     parse_canonical_json,
@@ -155,7 +156,8 @@ class ExecutiveOperatorSupervisor:
         if plan_schema_version is not None and (
             type(plan_schema_version) is not str
             or plan_schema_version not in {
-                PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
+                PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5, PLAN_SCHEMA_V6,
+                PLAN_SCHEMA_V7,
             }
         ):
             raise ExecutiveOperatorSupervisorError("operator plan schema is not admitted")

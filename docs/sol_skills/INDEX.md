@@ -94,7 +94,9 @@ tasks need no new plan.
 
 ### `WEB_CEO_DELEGATION.md`
 Mandatory companion to `ACTIVE_EXECUTION.md` for substantial Web CEO principal-duty,
-economics, packets, capacity routing or evidence/continuity work. No provider/account/credential/host/model-setting/reasoning-mode selection or lifecycle/admission/retry/transfer/effect/production authority.
+economics, parallel paid Fabric, bounded waits, capacity routing or evidence/continuity.
+Recipes: `plugins/mastermind-sol/skills/orchestrate-fabric-workflows/SKILL.md`.
+No provider/account/credential/host/model-setting/reasoning-mode selection or lifecycle/admission/retry/transfer/effect/production authority.
 
 ### `REVIEW_RETURN.md`
 Use when a worker/Fable/Claude/Codex/Grok session returns code, a PR, research or a claimed

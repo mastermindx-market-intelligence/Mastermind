@@ -35,10 +35,9 @@ Sol/Opus may consume the same scarce subscription pool as Astra/Fable.
 for economical admitted operators, delegated easy labor, integrated principal returns,
 reserved exceptions and actual role loading. Load
 `skills/mastermind-fabric-orchestration/SKILL.md` and only the assigned role at this
-pin; an existing valid load is reusable. This references the existing owner, not
-optionalizes its before-dispatch conditions.
+pin; an existing valid load is reusable.
 
-These provisional profiles are not duration guarantees, model aliases or Runtime roles/admission. Either model may fit either principal duty. No forced
+These provisional profiles are not duration guarantees, model aliases or Runtime roles/admission. No forced
 Astra-to-Sol handoff, extra principal or productive-incumbent displacement: one
 existing action-authoritative owner and current RuntimeBinding remain responsible.
 
@@ -111,9 +110,8 @@ new evidence/hypothesis or lawful reassessment after effect reconciliation.
 
 Model Router fixes the first lawful suitability tier; Capacity Fabric ranks only
 eligible candidates within it by least cost/scarcity. No lower-tier promotion or
-waived exclusion. Model/harness/plan/host/role differ. An installed binary, catalog,
-preference or unrelated native success is not admission; unknown quota/proof/budget
-stays unknown.
+waived exclusion. Model/harness/plan/host/role differ. Binary/catalog/preference/native success grants no admission;
+unknown quota/proof/budget stays unknown.
 
 Provider/credential/activation holds apply before reads or calls. Approved spend
 includes review/repair; willingness to spend is not unlimited. Metered cognition
@@ -123,11 +121,7 @@ under their own custody/placement: report actual manual pickup/START, not Execut
 dispatch. Missing Web tools prove no global outage and never permit denied-effect
 replay through another actor/carrier.
 
-Sol normally coordinates analysis, review and integration; Astra adds useful
-frontier judgment. Eligible bounded leaf work defaults to admitted paid Fabric,
-including GLM, Qwen/Bailian and Grok when suitable. Use serviceable Executive ingress
-or the accepted attended stable-handle adapter under its procedure. Native Codex
-children are not substitutes merely because spawn is available/familiar.
+Sol coordinates analysis/review/integration; Astra supplies frontier judgment. Eligible bounded leaves default to admitted paid Fabric, including GLM, Qwen/Bailian and Grok when suitable. Use serviceable Executive ingress or the accepted attended stable-handle adapter under its procedure. Native Codex children are not substitutes because spawn is available/familiar.
 
 A native child requires a genuinely needed reasoning/coordinator role; never
 explicitly select Sol for routine implementation, tests, research or repair labor.
@@ -153,13 +147,7 @@ proves only that path; paid START/result/parent consumption needs Fabric proof.
 
 ## 5. Remain productive after dispatch
 
-Apply ACTIVE_EXECUTION Step 2B for overlap, repair and consumption, and Steps 7A/8
-for continuation/finalization; no second stop machine or Executive/COO authority
-is introduced. Advance substantive independent work and consume useful returns
-promptly, without duplicating assignments to fill time. Preserve exact `EFFECT_UNKNOWN`
-operations/carriers and started modifiers. ACK/CONTINUE/repair/acceptance inside a
-mission does not make standalone polling/relay frontier reasoning. Neither principal
-stops for a plan or packet while useful authorized work remains.
+Apply ACTIVE_EXECUTION Step 2B for overlap/repair/consumption and Steps 7A/8 for continuation/finalization; no second stop machine or Executive/COO authority. Advance independent work, consume returns promptly and never duplicate assignments to fill time. Preserve exact `EFFECT_UNKNOWN` operations/carriers and started modifiers. In-mission ACK/CONTINUE/repair/acceptance does not make standalone polling/relay frontier reasoning. Neither principal stops at a plan/packet while useful authorized work remains.
 
 ## 6. Consume evidence, not worker transcripts
 

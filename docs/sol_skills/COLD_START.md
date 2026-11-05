@@ -73,7 +73,7 @@ truth to agree with a projection.
 
 ## Step 6 — Check active collision risk
 
-Check owning repo/adjacent portfolio for overlapping paths/authority, live sister work, changed law and superseded instructions. Parallel work requires disjoint authority and paths.
+Check owning repo/adjacent portfolio for overlapping paths/authority, live sister work, changed law and superseded instructions. Parallel work requires disjoint authority and paths. For ready paid Fabric fanout, load same-pin `WEB_CEO_DELEGATION.md` and its workflow recipe.
 
 ## Step 7 — Recover any open reciprocal dialogue before creating new work
 
