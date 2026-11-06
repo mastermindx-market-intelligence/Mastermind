@@ -211,7 +211,7 @@ class Cursor46ExplicitPin(unittest.TestCase):
     def test_current_application_branch_preserves_explicit_observation_and_no_ambient_read(self):
         path = PICKERS[-1]
         raw = path.read_bytes()
-        self.assertEqual(qualifier.sha(raw), qualifier.APPLICATION_PICKER_SHA256)
+        self.assertEqual(qualifier.sha(raw), qualifier.BROKER_BUSY_PICKER_SHA256)
         qualified = load(path)
         spec = importlib.util.spec_from_file_location("original_application_picker", path)
         original = importlib.util.module_from_spec(spec)
@@ -244,7 +244,8 @@ class Cursor46ExplicitPin(unittest.TestCase):
                 self.assertNotEqual(candidate, raw)
                 self.assertEqual(source.read_bytes(), raw)
                 self.assertIn(b"cursor-grok-4.6-high", candidate)
-                if qualifier.sha(raw) == qualifier.APPLICATION_PICKER_SHA256:
+                if qualifier.sha(raw) in (qualifier.APPLICATION_PICKER_SHA256,
+                                         qualifier.BROKER_BUSY_PICKER_SHA256):
                     self.assertIn(qualifier.APPLICATION_AFFINITY_BEFORE.encode(), raw)
                     self.assertIn(qualifier.APPLICATION_AFFINITY_AFTER.encode(), candidate)
                 else:

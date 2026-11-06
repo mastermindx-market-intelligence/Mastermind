@@ -36,13 +36,18 @@ def _read(path):
 def eligible(api, here, run, root, parent):
     """Check original ledger, process, observer, packet and released lease."""
     status = api.inspect_run(run)
-    if (status.get("state") == "TERMINAL_FAILURE" and status.get("signal") == "quota"
-            and status.get("reason") == "prelease_quota_cooldown"
+    prelease_kind = status.get("reason")
+    if (status.get("state") == "TERMINAL_FAILURE"
+            and ((status.get("signal") == "quota" and prelease_kind == "prelease_quota_cooldown")
+                 or (status.get("signal") == "capacity" and prelease_kind == "prelease_broker_busy"))
             and status.get("execution_absence_proven") is True
             and status.get("root_id") == root and status.get("parent_run_id") == parent):
         import quota_circuit
-        return quota_circuit.validate_prelease_refusal(here, run, root, parent,
-                                                       packet_limit=api.MAX_RESULT_BYTES)
+        proof = quota_circuit.validate_prelease_refusal(
+            here, run, root, parent, packet_limit=api.MAX_RESULT_BYTES)
+        if proof["kind"] != prelease_kind:
+            raise ValueError("continuation_prelease_kind_mismatch")
+        return proof
     if (status.get("state") != "TERMINAL" or status.get("signal") != "quota"
             or type(status.get("rc")) is not int or status["rc"] == 0
             or status.get("root_id") != root or status.get("parent_run_id") != parent):
@@ -115,7 +120,8 @@ def foreground(api, run_id, task_class, **kwargs):
     """Called once by request --quota-fallback; never resurrected by a read."""
     root, parent = kwargs.get("root_id"), kwargs.get("parent_run_id")
     unsupported = ("pool", "prefer", "requested_model", "artifact_names", "native_return",
-                   "qualification_host", "new_macro_worktree", "cpu_scope_percent")
+                   "qualification_host", "new_macro_worktree", "cpu_scope_percent",
+                   "capacity_excluded_pools")
     if not root or not parent or any(kwargs.get(k) for k in unsupported):
         raise ValueError("continuation_contract_not_qualified")
     if os.environ.get("POOL_OPERATOR_CHILD_BUDGET", "0") != "0":
@@ -144,6 +150,7 @@ def foreground(api, run_id, task_class, **kwargs):
         "wall_seconds": budget, "deadline_ns": deadline_ns, "background_execution": False,
         **({"max_turns": kwargs["max_turns"]} if kwargs.get("max_turns") is not None else {})})
     current, rc, reason = run_id, 75, "controller_exception"
+    excluded_pools = []
     try:
         for ordinal in range(MAX_ATTEMPTS):
             remaining = int(remaining_seconds(deadline_ns))
@@ -182,6 +189,15 @@ def foreground(api, run_id, task_class, **kwargs):
             if ordinal + 1 >= MAX_ATTEMPTS:
                 reason = "attempt_bound_reached"
                 break
+            if proof["kind"] == "prelease_broker_busy":
+                import pick
+                busy_pool = proof["pool"]
+                if (busy_pool not in pick._HOST_POOL_MODES
+                        or busy_pool in excluded_pools
+                        or len(excluded_pools) >= MAX_ATTEMPTS - 1):
+                    reason = "continuation_busy_pool_unqualified"
+                    break
+                excluded_pools.append(busy_pool)
             # A successor gets fresh immutable identity. Root and organizational
             # parent are conserved; predecessor is correlation, not its parent.
             successor = run_id[:90] + ".q" + str(ordinal + 1) + "." + uuid.uuid4().hex[:16]
@@ -193,6 +209,8 @@ def foreground(api, run_id, task_class, **kwargs):
             print("FABRIC_QUOTA_CONTINUATION predecessor=" + current + " successor=" + successor, flush=True)
             # Freeze and reuse task bytes, never reconstruct from assistant text.
             kwargs = dict(kwargs, packet=_path(here, run_id, ".request.packet"), stdin_bytes=None)
+            if excluded_pools:
+                kwargs["capacity_excluded_pools"] = list(excluded_pools)
             current = successor
         return int(rc)
     finally:
