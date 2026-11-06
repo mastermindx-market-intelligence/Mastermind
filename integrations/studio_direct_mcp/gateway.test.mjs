@@ -1050,7 +1050,7 @@ test('actual direct CLI preserves explicit Fabric-only input through auth setup'
   let logs = '';
   child.stderr.on('data', chunk => { logs += chunk.toString(); });
   child.stdout.on('data', chunk => { logs += chunk.toString(); });
-  const exited = once(child, 'exit');
+  const exited = once(child, 'close');
   try {
     const deadline = Date.now() + 20000;
     while (!/gateway: listening on http:\/\/127\.0\.0\.1:\d+\/mcp/.test(logs) &&
