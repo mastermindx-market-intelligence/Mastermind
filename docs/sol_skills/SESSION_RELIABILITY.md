@@ -74,6 +74,20 @@ compact capsule and minimum fresh reads, following the sequence below.
 **Thinking failed != context exhausted**: a single failure may justify suspicion,
 not a private provider-limit claim.
 
+## Extra High checkpoint economy
+
+A checkpoint is a **recovery save, not a deliverable or approval request**. In a healthy Extra High
+implementation turn, persist a compact cumulative delta when the last coherent material result
+would otherwise be lost, before a genuinely risky/long operation, or when continuity actually
+degrades. Tool-call counts, elapsed time, a completed assessment, a drafted plan, or a clean phase
+boundary do not independently trigger a checkpoint or justify ending the turn.
+
+Reuse a verified commit, PR, artifact or existing-owner checkpoint when it already covers the
+material result. Do not write another equivalent progress report merely to announce the same
+effect, and do not spend a turn saving a save. After any necessary persistence, start the next
+safe ready in-scope phase immediately while the session is healthy. If an exact effect is unknown,
+reconcile on the original carrier; never prioritize turn length over effect safety.
+
 ## Tool-output and command budgets
 
 Engineering **pressure indicators and checkpoint prompts, never hard productivity
