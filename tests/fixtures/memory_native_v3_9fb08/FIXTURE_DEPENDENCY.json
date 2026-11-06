@@ -1,0 +1,9 @@
+{
+  "schema": "mastermind.memory_v3_public_fixture_dependency.v1",
+  "source_commit": "9fb08c079c0048f3f9fe9549208b2afc1316119b",
+  "source_path": "config/market_memory_canary.v1.json",
+  "bytes": 1650,
+  "sha256": "5e7823e48866b2c0828122b65f684ed5872c6816a6224f61e44db4c03d129b33",
+  "git_blob_sha1": "4bdcc241af9a841f3ec163f2953fe84343b5af26",
+  "reason": "Frozen54-path native issuer kit excludes this actual synthetic capture fixture default public identity config. Same-commit byte-exact dependency, not invented identity/current grant; archive54 files untouched."
+}
