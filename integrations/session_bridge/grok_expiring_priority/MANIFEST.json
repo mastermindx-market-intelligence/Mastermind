@@ -1,0 +1,17 @@
+{
+  "schema": "fabric.grok_expiring_priority.v1",
+  "source_authority": "Chairman explicit 2026-10-11 request; screenshot47percent used",
+  "reset_at": "2026-10-12T05:54:00Z",
+  "capacity_increased": false,
+  "installed": false,
+  "files": {
+    "pick.py": {
+      "preimage": "fd89a5da143fbab7e186edb627d802a742670b5c829c5696908f19d293cdee8b",
+      "postimage": "260141a0ea5f556d490e380a8a4963f434b902863601108c7c2a25ddd15a8edf"
+    },
+    "pools.yaml": {
+      "preimage": "f3eb8a4213e31e4b2f4ac5bc524f1a3b481382e7e835cabe5e41d88c33bd4576",
+      "postimage": "9685154da3e266c16a47bac822df864287997c109303cb9a4e02d424aae34f26"
+    }
+  }
+}

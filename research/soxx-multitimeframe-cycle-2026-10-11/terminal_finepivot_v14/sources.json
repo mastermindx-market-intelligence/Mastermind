@@ -1,0 +1,103 @@
+[
+  {
+    "timeframe": "30m",
+    "extended": "0",
+    "bar_count": 4298,
+    "days": 332,
+    "source_counts": {
+      "stored_5m": 4077,
+      "stored_1h": 0,
+      "live_tail": 221,
+      "unattributed": 0
+    },
+    "storage_reads": [
+      {
+        "base": "5m",
+        "status": "available",
+        "content_sha256": "823ad0c9c0b0e4c67234a8bd417a075b648043ed416a51caa46b26d50c9abbe1"
+      }
+    ],
+    "date_first": "2025-06-16",
+    "date_last": "2026-10-09",
+    "count_hist": {
+      "13": 329,
+      "7": 3
+    },
+    "sha256": "4b5ed22c98cad592d0b09da4d17aff7d8898912bc1d848a9666a57cd9876c481",
+    "filename": "SOXX_Terminal_30m_ext0.json",
+    "lookahead_status": "not_verified",
+    "price_basis": "not_verified",
+    "completeness": "not_assessed"
+  },
+  {
+    "timeframe": "15m",
+    "extended": "0",
+    "bar_count": 8596,
+    "days": 332,
+    "source_counts": {
+      "stored_5m": 8154,
+      "stored_1h": 0,
+      "live_tail": 442,
+      "unattributed": 0
+    },
+    "storage_reads": [
+      {
+        "base": "5m",
+        "status": "available",
+        "content_sha256": "823ad0c9c0b0e4c67234a8bd417a075b648043ed416a51caa46b26d50c9abbe1"
+      }
+    ],
+    "date_first": "2025-06-16",
+    "date_last": "2026-10-09",
+    "count_hist": {
+      "26": 329,
+      "14": 3
+    },
+    "sha256": "9b475e94fae6a92bb4bddfa0987097ea08dbdb60ec943fafcb100326440cdf71",
+    "filename": "SOXX_Terminal_15m_ext0.json",
+    "lookahead_status": "not_verified",
+    "price_basis": "not_verified",
+    "completeness": "not_assessed"
+  },
+  {
+    "timeframe": "30m",
+    "extended": "1",
+    "bar_count": 10225,
+    "days": 332,
+    "source_counts": {
+      "stored_5m": 9681,
+      "stored_1h": 0,
+      "live_tail": 544,
+      "unattributed": 0
+    },
+    "storage_reads": [
+      {
+        "base": "5m",
+        "status": "available",
+        "content_sha256": "823ad0c9c0b0e4c67234a8bd417a075b648043ed416a51caa46b26d50c9abbe1"
+      }
+    ],
+    "date_first": "2025-06-16",
+    "date_last": "2026-10-09",
+    "count_hist": {
+      "30": 19,
+      "32": 212,
+      "25": 4,
+      "31": 36,
+      "29": 17,
+      "19": 1,
+      "27": 9,
+      "26": 10,
+      "28": 18,
+      "24": 3,
+      "23": 1,
+      "20": 1,
+      "21": 1
+    },
+    "sha256": "41acd910e14cb2220535d447ddeacebf19e1069235ff864ffd144bf78287f691",
+    "filename": "SOXX_Terminal_30m_ext1.json",
+    "lookahead_status": "not_verified",
+    "price_basis": "not_verified",
+    "completeness": "not_assessed"
+  }
+]

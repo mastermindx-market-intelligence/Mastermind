@@ -1,0 +1,12 @@
+diff --git a/slot.py b/slot.py
+--- a/slot.py
++++ b/slot.py
+@@ -35,7 +35,7 @@
+     settle_owned_process_session,
+ )
+ 
+-CAPS = {"qwen": 8, "minimax": 7, "grok": 11, "cursor": 11, "glm": 6, "glm-frontier": 5, "go": 9, "ocfree": 3}
++CAPS = {"qwen": 8, "minimax": 7, "grok": 11, "cursor": 11, "glm": 6, "glm-frontier": 5, "go": 9, "experiential": 0, "ocfree": 3}
+ HERE = os.path.dirname(os.path.abspath(__file__))
+ BROKER = os.path.join(HERE, "lease_broker.py")
+ HOSTS_JSON_PATH = os.path.join(HERE, "hosts.json")
