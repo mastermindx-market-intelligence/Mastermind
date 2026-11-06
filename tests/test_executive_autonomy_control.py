@@ -162,6 +162,9 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "paid-control-stage-reconcile",
         "publish-os-gateway",
         "reconcile-os-gateway",
+        "plan-control-component",
+        "apply-control-component",
+        "reconcile-control-component",
     }
     # The OS gateway publication domain: the two closed verbs carry only the
     # bounded digests and the original transaction id, and never accept a
@@ -4298,6 +4301,9 @@ def test_transaction_owner_claim_refuses_a_competing_writer_and_closes_its_fd(
         st_ino=73,
     )
     ledger = []
+    # Do not patch process-global os.fstat/open/close: pytest and Path use them.
+    # The production module resolves its own os binding, so isolate its test seam.
+    monkeypatch.setattr(control, "os", types.SimpleNamespace(**vars(control.os)))
     monkeypatch.setattr(host, "_config_root_safe", lambda: ledger.append("root"))
     monkeypatch.setattr(
         host, "_transaction_present", lambda: ledger.append("marker") or True
@@ -4397,6 +4403,8 @@ def test_transaction_owner_directory_lock_excludes_competing_process_carriers(
     for host in (first, second):
         monkeypatch.setattr(host, "_config_root_safe", lambda: None)
         monkeypatch.setattr(host, "_transaction_present", lambda: True)
+    # os.fstat is used by pytest internals; patch only this owner's module binding.
+    monkeypatch.setattr(control, "os", types.SimpleNamespace(**vars(control.os)))
     monkeypatch.setattr(control, "AUTONOMY_TRANSACTION", marker)
     monkeypatch.setattr(control.os, "fstat", lambda _fd: safe)
     monkeypatch.setattr(control.Path, "lstat", lambda _path: safe)
@@ -9041,9 +9049,14 @@ def test_production_arm_requires_optional_maintenance_carry_pass(tmp_path,monkey
     root=tmp_path/"control/acceptance"/SHA
     root.mkdir(parents=True)
     root.chmod(0o700)
+    # POSIX directories can inherit the parent's group rather than the
+    # process's primary group (for example /private/tmp on macOS). Bind the
+    # fixture account to the actual fixture directory; production still checks
+    # the exact configured owner/group and mode without an exemption.
+    fixture_identity=root.lstat()
     monkeypatch.setattr(control,"RUNTIME_ROOT",tmp_path)
-    monkeypatch.setattr(control.pwd,"getpwnam",lambda name:types.SimpleNamespace(pw_uid=os.getuid()))
-    monkeypatch.setattr(control.grp,"getgrnam",lambda name:types.SimpleNamespace(gr_gid=os.getgid()))
+    monkeypatch.setattr(control.pwd,"getpwnam",lambda name:types.SimpleNamespace(pw_uid=fixture_identity.st_uid))
+    monkeypatch.setattr(control.grp,"getgrnam",lambda name:types.SimpleNamespace(gr_gid=fixture_identity.st_gid))
     monkeypatch.setattr(control,"_has_acl",lambda path:False)
     raw=b"existing full acceptance receipt"
     monkeypatch.setattr(control,"_root_json",lambda *args,**kwargs:({},raw))

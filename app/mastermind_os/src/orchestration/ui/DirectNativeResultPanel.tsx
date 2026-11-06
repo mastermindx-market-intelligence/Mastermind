@@ -1,3 +1,7 @@
+import {
+  decodeDirectCorrection,
+  type DirectCorrection,
+} from "../../direct-native-correction";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   decodeDirectNativeResult,
@@ -9,6 +13,15 @@ export interface DirectNativeResultPanelProps {
   selection: DirectSelection;
   locale?: "en" | "zh-CN";
   read?: (selection: DirectSelection, signal: AbortSignal) => Promise<unknown>;
+  inspectCorrection?: (
+    selection: DirectSelection,
+    signal: AbortSignal,
+  ) => Promise<unknown>;
+  onCorrect?: (
+    selection: DirectTerminalSelection,
+    fence: number,
+    complete: (outcome: { status: "accepted" | "refused" }) => void,
+  ) => void;
   held: boolean;
   recovery?: ReactNode;
   onConsume: (
@@ -25,7 +38,11 @@ export function DirectNativeResultPanel({
   held,
   recovery,
   onConsume,
+  inspectCorrection,
+  onCorrect,
 }: DirectNativeResultPanelProps) {
+  const [correction, setCorrection] = useState<DirectCorrection | null>(null);
+  const [correcting, setCorrecting] = useState(false);
   const [state, setState] = useState<DirectResult | null>(null),
     [reading, setReading] = useState(false),
     [failed, setFailed] = useState(false),
@@ -43,6 +60,8 @@ export function DirectNativeResultPanel({
     latch.current = false;
     actionFocus.current = false;
     setState(null);
+    setCorrection(null);
+    setCorrecting(false);
     setFailed(false);
     setReading(false);
     setConsuming(false);
@@ -123,6 +142,21 @@ export function DirectNativeResultPanel({
         return;
       const decoded = decodeDirectNativeResult(raw, selection);
       setState(decoded);
+      setCorrection(null);
+      if (
+        decoded?.availability === "UNAVAILABLE" &&
+        decoded.reason_codes.includes("NOT_TERMINAL") &&
+        inspectCorrection
+      ) {
+        const status = await inspectCorrection(selection, controller.signal);
+        if (
+          !mounted.current ||
+          controller.signal.aborted ||
+          ticket !== seq.current
+        )
+          return;
+        setCorrection(decodeDirectCorrection(status, selection));
+      }
       setFailed(!decoded);
     } catch {
       if (
@@ -159,14 +193,28 @@ export function DirectNativeResultPanel({
       },
     );
   };
+  const correct = () => {
+    if (!correction || !onCorrect || latch.current || held || correcting)
+      return;
+    latch.current = true;
+    setCorrecting(true);
+    actionFocus.current = true;
+    const ticket = seq.current;
+    onCorrect(correction.selection, correction.fence_generation, () => {
+      if (!mounted.current || ticket !== seq.current) return;
+      latch.current = false;
+      setCorrecting(false);
+      void load();
+    });
+  };
   return (
-    <section className="card" aria-busy={reading || consuming}>
+    <section className="card" aria-busy={reading || consuming || correcting}>
       <div className="section-title">
         <h2>{words.title}</h2>
       </div>
       <button
         type="button"
-        disabled={!read || reading || consuming}
+        disabled={!read || reading || consuming || correcting}
         onClick={() => void load()}
       >
         {reading ? words.reading : words.read}
@@ -174,15 +222,19 @@ export function DirectNativeResultPanel({
       <p ref={statusFocus} tabIndex={-1} role="status" aria-live="polite">
         {reading
           ? words.reading
-          : held || consuming
-            ? words.pending
-            : failed || state?.availability === "UNAVAILABLE" || !read
-              ? words.unavailable
-              : state?.consumption?.state === "CONSUMED"
-                ? words.consumed
-                : state?.availability === "AVAILABLE"
-                  ? words.unconsumed
-                  : words.unknown}
+          : correcting || (held && correction)
+            ? locale === "zh-CN"
+              ? "停止请求尚未解决。只检查原尝试；不要重复提交。"
+              : "The stop request is unresolved. Inspect the original Attempt; do not submit again."
+            : held || consuming
+              ? words.pending
+              : failed || state?.availability === "UNAVAILABLE" || !read
+                ? words.unavailable
+                : state?.consumption?.state === "CONSUMED"
+                  ? words.consumed
+                  : state?.availability === "AVAILABLE"
+                    ? words.unconsumed
+                    : words.unknown}
       </p>
       {state?.availability === "AVAILABLE" &&
       state.consumption?.state === "UNCONSUMED" ? (
@@ -193,6 +245,38 @@ export function DirectNativeResultPanel({
         >
           {consuming ? words.consuming : words.consume}
         </button>
+      ) : null}
+      {correction && onCorrect ? (
+        <>
+          <p role="status">
+            {locale === "zh-CN"
+              ? "停止请求不代表任务已终止。只有原尝试的已验证终态才能被确认接收。"
+              : "A stop request does not prove termination. Only the verified terminal state of this original Attempt can be acknowledged."}
+          </p>
+          {["RUNNING", "CHECKPOINTED"].includes(correction.status) ? (
+            <button
+              type="button"
+              disabled={held || reading || consuming || correcting}
+              onClick={correct}
+            >
+              {locale === "zh-CN"
+                ? "请求停止此原生任务"
+                : "Request stop for this native Job"}
+            </button>
+          ) : (
+            <p>{correction.status}</p>
+          )}
+        </>
+      ) : null}
+      {state?.availability === "AVAILABLE" || correction ? (
+        <p aria-live="polite">
+          {locale === "zh-CN" ? "当前任务状态" : "Current Job state"}:{" "}
+          {state?.availability === "AVAILABLE"
+            ? state.result?.terminal_status === "CANCELLED"
+              ? "CANCELLED"
+              : "COMPLETED"
+            : correction?.status}
+        </p>
       ) : null}
       {recovery}
       <div>

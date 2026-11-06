@@ -1,3 +1,4 @@
+import { decodeProjectDataOwnerObservation, decodeCanonicalProgramsProjects } from "./project-discovery";
 /** Validation of authenticated fixed-service responses, never a currentness producer. */
 const record = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -21,7 +22,8 @@ const state = (v: unknown) =>
   v === "SAME" || v === "UNKNOWN" || v === "CONFLICT";
 type Pair = { work_ref: string; root_job_id: string };
 export interface OwnerObservation {
-  schema: "mastermind.workspace_source_observation.v1";
+  schema: "mastermind.workspace_source_observation.v1" | "mastermind.workspace_source_observation.v2";
+  project_data?: unknown;
   state: "SAME" | "UNKNOWN" | "CONFLICT";
   selection: Pair | null;
   control_room: null | {
@@ -46,6 +48,8 @@ export function decodeOwnerObservation(
   value: unknown,
   selection: Pair | null,
 ): OwnerObservation | null {
+  if (record(value) && value.schema === "mastermind.workspace_source_observation.v2")
+    return decodeProjectDataOwnerObservation(value, selection) as OwnerObservation | null;
   if (
     !record(value) ||
     !exact(value, [
@@ -147,6 +151,21 @@ export function decodeOwnerObservation(
   return value as unknown as OwnerObservation;
 }
 export function decodeProgramsEnvelope(value: unknown): unknown {
+  if (record(value) && value.schema === "mastermind.workspace_programs.v2") {
+    if (!exact(value, ["schema", "availability", "control_room", "source_observation", "reason_codes", "canonical_projects", "coverage"]))
+      throw new Error("PROGRAM_RESPONSE_INVALID");
+    const base = decodeProgramsEnvelope({ schema: "mastermind.workspace_programs.v1", availability: value.availability,
+      control_room: value.control_room, source_observation: value.source_observation, reason_codes: value.reason_codes });
+    const observation = decodeOwnerObservation(value.source_observation, null);
+    const projects = decodeCanonicalProgramsProjects(value.canonical_projects, observation, base);
+    const coverage = value.coverage;
+    if (!record(coverage) || !exact(coverage, ["state", "limit", "returned", "high_water"])
+      || !["COMPLETE", "PARTIAL"].includes(String(coverage.state)) || coverage.limit !== 8
+      || !integer(coverage.returned) || coverage.returned !== projects.length || !integer(coverage.high_water))
+      throw new Error("PROGRAM_RESPONSE_INVALID");
+    return Object.freeze({ schema: "mastermind.programs_source_composition.v1", control_room: base,
+      source_observation: observation, canonical_projects: projects, coverage: Object.freeze({ ...coverage }) });
+  }
   if (
     !record(value) ||
     !exact(value, [

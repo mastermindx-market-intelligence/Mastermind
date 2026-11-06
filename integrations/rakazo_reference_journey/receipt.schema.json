@@ -106,7 +106,7 @@
         "binary": {"type": ["string", "null"]},
         "endpoint": {"type": ["string", "null"]},
         "daemon_id": {"type": ["string", "null"]},
-        "socket_present": {"type": "boolean"},
+        "socket_present": {"type": ["boolean", "null"]},
         "admitted_daemon_ids": {
           "type": "array",
           "maxItems": 0,
@@ -127,7 +127,7 @@
           "properties": {
             "path": {"type": "string"},
             "version": {"type": ["string", "null"]},
-            "state": {"enum": ["OBSERVED", "ABSENT"]}
+            "state": {"enum": ["NOT_OBSERVED", "ABSENT", "PRESENT_UNMEASURED", "UNREADABLE", "OBSERVED"]}
           }
         },
         "node": {
@@ -137,7 +137,7 @@
           "properties": {
             "path": {"type": ["string", "null"]},
             "version": {"type": ["string", "null"]},
-            "state": {"enum": ["OBSERVED", "ABSENT"]},
+            "state": {"enum": ["NOT_OBSERVED", "ABSENT", "PRESENT_UNMEASURED", "UNREADABLE", "OBSERVED"]},
             "satisfies_donor_engine": {"type": "boolean"}
           }
         },
@@ -149,7 +149,7 @@
             "path": {"type": ["string", "null"]},
             "version": {"type": ["string", "null"]},
             "required": {"const": "9.15.0"},
-            "state": {"enum": ["ABSENT", "MISMATCH", "EXACT"]}
+            "state": {"enum": ["NOT_OBSERVED", "ABSENT", "PRESENT_UNMEASURED", "UNREADABLE", "MISMATCH", "EXACT"]}
           }
         },
         "adopted_for_execution": {"const": false}
@@ -292,14 +292,18 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["argv", "returncode", "timed_out", "uncertain", "stdout", "stderr"],
+        "required": ["argv", "returncode", "timed_out", "uncertain", "stdout", "stderr", "pid", "pgid", "settled", "capture_refusal"],
         "properties": {
           "argv": {"type": "array", "items": {"type": "string"}},
           "returncode": {"type": "integer"},
           "timed_out": {"type": "boolean"},
           "uncertain": {"type": "boolean"},
           "stdout": {"type": "string"},
-          "stderr": {"type": "string"}
+          "stderr": {"type": "string"},
+          "pid": {"type": ["integer", "null"]},
+          "pgid": {"type": ["integer", "null"]},
+          "settled": {"type": "boolean"},
+          "capture_refusal": {"type": ["string", "null"]}
         }
       }
     }

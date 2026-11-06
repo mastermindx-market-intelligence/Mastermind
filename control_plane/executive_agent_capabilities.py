@@ -49,6 +49,11 @@ from control_plane.operator_harness_contract import (
 # refuses.
 CAPABILITY_POLICY_SCHEMA_V3 = "mastermind.executive_agent_capabilities/v3"
 CAPABILITY_POLICY_SCHEMA_V4 = "mastermind.executive_agent_capabilities/v4"
+# V5 is opt-in. It adds the supervisor-private validation-resource plane and
+# inherits the complete V4 capability-package/Skill-generation model unchanged.
+# The default policy stays V3, and no V3/V4 document is widened by this
+# generation: V3/V4 keep their exact normalized profile and policy digests.
+CAPABILITY_POLICY_SCHEMA_V5 = "mastermind.executive_agent_capabilities/v5"
 CAPABILITY_POLICY_SCHEMA = CAPABILITY_POLICY_SCHEMA_V3
 DEFAULT_CAPABILITY_POLICY_PATH = (
     Path(__file__).resolve().parent.parent
@@ -60,6 +65,10 @@ DEFAULT_CAPABILITY_SOURCE_ROOT = Path(__file__).resolve().parent.parent
 _MIN_CAPABILITY_PACKAGES = 1
 _MAX_CAPABILITY_PACKAGES = 16
 _MAX_SKILL_CAPABILITIES_PER_PROFILE = 32
+
+# A per-load raw-source budget, separate from schema/cardinality limits.
+# Existing V3/V4 semantics and digests apply within this acquisition ceiling.
+_MAX_CAPABILITY_POLICY_SOURCE_BYTES = 2 * 1024 * 1024
 
 # Fixed, non-echoing refusal reason for every duplicate-JSON-key refusal
 # (review 5087139217 BLOCKER 4). Kept as a module constant -- rather than
@@ -76,6 +85,8 @@ _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 CLAUDE_OPERATOR_PROVIDER = "claude"
 CLAUDE_OPERATOR_HARNESS_KIND = "claude-agent-sdk"
 CLAUDE_OPERATOR_EXECUTION_SURFACE = "claude-agent-sdk"
+CLAUDE_PRINCIPAL_EXECUTION_SURFACE = "claude-code-principal"
+CLAUDE_PRINCIPAL_AUTH_REALM = "oauth-principal-account"
 # Paid model-only sealed-input extension: exactly one reviewed surface/realm/
 # profile tuple (fabric.paid.glm.sealed-input.v1).  The surface joins the
 # sealed-worker fence below, so it can never carry MCP servers, plugins,
@@ -94,10 +105,11 @@ ACP_EXECUTION_SURFACE = "acp-agent"
 ACP_PROVIDER_FREE_AUTH_REALM = "dedicated-worker-no-auth"
 _EXECUTION_SURFACES = frozenset({
     "codex-exec", "codex-app-server", "claude-code", CLAUDE_OPERATOR_EXECUTION_SURFACE,
-    PAID_GLM_EXECUTION_SURFACE, ACP_EXECUTION_SURFACE,
+    PAID_GLM_EXECUTION_SURFACE, ACP_EXECUTION_SURFACE, CLAUDE_PRINCIPAL_EXECUTION_SURFACE,
 })
 _AUTH_REALMS = frozenset({
     "dedicated-worker-account", PAID_GLM_AUTH_REALM, ACP_PROVIDER_FREE_AUTH_REALM,
+    CLAUDE_PRINCIPAL_AUTH_REALM,
 })
 _ADAPTER_EXECUTION_SURFACES = {
     "codex-cli": frozenset({"codex-exec", "codex-app-server"}),
@@ -109,6 +121,14 @@ _ADAPTER_EXECUTION_SURFACES = {
 _SEALED_WORKER_EXECUTION_SURFACES = frozenset({
     "codex-exec", "claude-code", PAID_GLM_EXECUTION_SURFACE,
 })
+# Supervisor-private validation resources (V5) exist only for foreground sealed
+# worker processes.  The paid model-only surface joins the sealed-worker fence
+# above, but its exact reviewed profile is an accepted closed ceiling with no
+# field widening: a generic sealed predicate must not authorize new paid-model
+# validation-runner eligibility, so that surface is excluded here.
+_VALIDATION_RESOURCE_EXECUTION_SURFACES = frozenset(
+    _SEALED_WORKER_EXECUTION_SURFACES - {PAID_GLM_EXECUTION_SURFACE}
+)
 
 
 def adapter_supports_execution_surface(adapter_id: str, execution_surface: str) -> bool:
@@ -126,6 +146,20 @@ def is_sealed_worker_execution_surface(execution_surface: str) -> bool:
 _SANDBOX_POLICIES = frozenset({"read-only", "workspace-write"})
 _APPROVAL_POLICIES = frozenset({"never"})
 _NETWORK_POLICIES = frozenset({"disabled", "loopback-browser-only"})
+
+
+def supports_supervisor_validation_resources(execution_surface: str) -> bool:
+    """Return whether one surface may carry supervisor-private validation grants.
+
+    Supervisor validation capacity is supervisor-private metadata.  It is bound
+    to the V5 profile and policy identity but is never projected to a worker,
+    a provider surface or the OHF capability manifest.  Only foreground sealed
+    worker processes may hold it, and the paid model-only surface is excluded
+    even though it is itself a sealed surface.
+    """
+
+    surface = str(execution_surface or "").strip().lower()
+    return surface in _VALIDATION_RESOURCE_EXECUTION_SURFACES
 
 
 def claude_security_config_projection(effective: Mapping[str, Any], *,
@@ -312,6 +346,33 @@ _RESOURCE_KEYS = frozenset(
         "runtime_manifest_path",
     }
 )
+# V5 supervisor-private validation resources.  The shape is closed and the
+# kind/recipe/network/digest pins are fixed: there is no model-selectable
+# host, path, token, URL, repository, machine or Codespace selector, because
+# no such key is part of this set.  A dynamic selector is therefore refused
+# structurally by the exact-key check rather than by a value rule.
+_VALIDATION_RESOURCE_KEYS = frozenset(
+    {
+        "kind",
+        "recipes",
+        "image_digest",
+        "network",
+        "cpu_millis",
+        "memory_bytes",
+        "pids_limit",
+        "workspace_tmpfs_bytes",
+        "tmp_tmpfs_bytes",
+        "timeout_seconds",
+        "max_stdout_bytes",
+        "max_stderr_bytes",
+        "max_snapshot_files",
+        "max_snapshot_bytes",
+    }
+)
+_VALIDATION_RESOURCE_KIND = "codespace-devbox-sandbox-v1"
+_VALIDATION_RESOURCE_RECIPES = ("compileall",)
+_MAX_VALIDATION_RESOURCES = 16
+_MAX_VALIDATION_RESOURCE_GRANTS_PER_PROFILE = 4
 # Source declaration only. A typed Control-to-worker owner admission does not
 # exist yet; this resource has no executable, host, credential or runtime path.
 _PENDING_BROWSER_PROFILE_ID = "operator.browser.isolated.v1"
@@ -365,6 +426,7 @@ _PROFILE_KEYS = frozenset(
     }
 )
 _PROFILE_KEYS_V4 = _PROFILE_KEYS | frozenset({"skill_capabilities"})
+_PROFILE_KEYS_V5 = _PROFILE_KEYS_V4 | frozenset({"validation_resource_grants"})
 _ROOT_KEYS_V3 = frozenset(
     {
         "schema_version",
@@ -378,6 +440,7 @@ _ROOT_KEYS_V3 = frozenset(
     }
 )
 _ROOT_KEYS_V4 = _ROOT_KEYS_V3 | frozenset({"capability_packages"})
+_ROOT_KEYS_V5 = _ROOT_KEYS_V4 | frozenset({"validation_resources"})
 _NATIVE_HELPER_KEYS = frozenset(
     {
         "mechanism",
@@ -479,6 +542,21 @@ def _digest_value(value: Any, *, field: str) -> str:
     if _DIGEST_RE.fullmatch(token) is None:
         raise CapabilityPolicyError(f"{field} must be a lowercase SHA-256 digest")
     return token
+
+
+def _bounded_int(value: Any, *, field: str, minimum: int, maximum: int) -> int:
+    """Return one strictly integer bounded value.
+
+    ``type(value) is not int`` is deliberate: ``bool`` is a subclass of ``int``
+    in Python, so a boolean would otherwise pass an integer bound.  A float,
+    a string and a boolean are all refused wherever an integer is required.
+    """
+
+    if type(value) is not int or value < minimum or value > maximum:
+        raise CapabilityPolicyError(
+            f"{field} must be an integer from {minimum} through {maximum}"
+        )
+    return value
 
 
 def _https_url(value: Any, *, field: str) -> str:
@@ -734,6 +812,36 @@ class PendingBrowserResource:
     grant_digest: str
 
 
+@dataclasses.dataclass(frozen=True)
+class ValidationResourceGrant:
+    """Supervisor-private validation resource; never projected to the worker.
+
+    This is configuration and identity only.  It names a fixed, digest-pinned
+    offline validation sandbox contract.  It grants no host, path, token, URL,
+    repository, machine or Codespace selector, and it confers no worker
+    capability: it is excluded from ``required_capability_names``, from the
+    App Server/ACP/Claude launch projections, from provider capabilities and
+    from the OHF capability manifest.
+    """
+
+    resource_id: str
+    kind: str
+    recipes: tuple[str, ...]
+    image_digest: str
+    network: str
+    cpu_millis: int
+    memory_bytes: int
+    pids_limit: int
+    workspace_tmpfs_bytes: int
+    tmp_tmpfs_bytes: int
+    timeout_seconds: int
+    max_stdout_bytes: int
+    max_stderr_bytes: int
+    max_snapshot_files: int
+    max_snapshot_bytes: int
+    grant_digest: str
+
+
 _FEATURE_PROJECTION_KEYS = (
     "apps",
     "auth_elicitation",
@@ -941,12 +1049,17 @@ class ExecutionCapabilityProfile:
     skill_grants: tuple[EffectiveSkillGrant, ...]
     mcp_server_grants: tuple[McpServerGrant, ...]
     resource_grants: tuple[ResourceGrant | PendingBrowserResource, ...]
+    # Supervisor-private V5 validation capacity.  It binds the profile identity
+    # only; it is deliberately absent from every capability projection below.
+    validation_resource_grants: tuple[ValidationResourceGrant, ...]
     plugins: tuple[str, ...]
     forbidden: tuple[str, ...]
     profile_digest: str
 
     @property
     def required_capability_names(self) -> tuple[str, ...]:
+        # Supervisor-private validation grants are never a required capability
+        # name: they are metadata for the supervisor, not worker authority.
         return tuple(
             sorted(
                 (
@@ -977,7 +1090,9 @@ class ExecutionCapabilityProfile:
     def app_server_config_projection(self) -> dict[str, object]:
         """Security-relevant config expected back from ``config/read``."""
 
-        if self.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE:
+        if self.execution_surface in {
+            CLAUDE_OPERATOR_EXECUTION_SURFACE, CLAUDE_PRINCIPAL_EXECUTION_SURFACE,
+        }:
             raise CapabilityPolicyError("Claude policy cannot use a Codex config projection")
 
         agents: dict[str, object]
@@ -1003,6 +1118,9 @@ class ExecutionCapabilityProfile:
             }
             multi_agent_v2 = {
                 "enabled": True,
+                # Native helpers return through their original parent. Peer
+                # messaging is not a delegation or project-coordination grant.
+                "disable_direct_message": True,
                 "hide_spawn_agent_metadata": helper.hide_spawn_agent_metadata,
                 # V2 counts the root; the public agents setting above counts
                 # only spawned helpers.  Pin both interpretations.
@@ -1102,6 +1220,15 @@ class ExecutionCapabilityProfile:
                 "sandbox": requested["sandbox"],
                 "permissions": {},
             }, launch_provenance={k: requested[k] for k in ("setting_sources", "strict_mcp_config", "skills")})
+        if self.execution_surface == CLAUDE_PRINCIPAL_EXECUTION_SURFACE:
+            return _digest({
+                "execution_surface": self.execution_surface,
+                "auth_realm": self.auth_realm,
+                "mcp_servers": {
+                    grant.config_name: grant.config_projection()
+                    for grant in self.mcp_server_grants
+                },
+            })
         return _digest(self.app_server_config_projection())
 
     def claude_sdk_config_projection(self) -> dict[str, object]:
@@ -1141,6 +1268,7 @@ class ExecutionCapabilityProfile:
                 or self.mcp_servers != RICH_CLAUDE_PRINCIPAL_MCP_IDS
                 or self.plugins
                 or self.resource_grants
+                or self.validation_resource_grants
             ):
                 raise CapabilityPolicyError(
                     "rich Claude principal candidate differs from its inert reviewed ceiling"
@@ -1208,6 +1336,7 @@ class ExecutionCapabilityProfile:
             or self.mcp_server_grants
             or self.plugins
             or self.resource_grants
+            or self.validation_resource_grants
         ):
             raise CapabilityPolicyError(
                 "Claude policy exceeds its unadmitted first profile"
@@ -1241,11 +1370,21 @@ class ExecutionCapabilityProfile:
                     "features.multi_agent_v2=false",
                 }
             ]
+            # The OHF parent and its bounded native helper are one sealed
+            # model/effort profile. App Server attests the parent model from
+            # config/read before thread/start, so pin both parent settings at
+            # process scope instead of relying on the provider-home defaults.
             values.extend(
                 (
+                    f"model={_toml_string(helper.default_model)}",
+                    (
+                        "model_reasoning_effort="
+                        f"{_toml_string(helper.default_reasoning_effort)}"
+                    ),
                     "features.multi_agent=false",
                     (
                         "features.multi_agent_v2={enabled=true,"
+                        "disable_direct_message=true,"
                         "hide_spawn_agent_metadata=true,"
                         "max_concurrent_threads_per_session="
                         f"{helper.max_concurrent_helpers + 1},"
@@ -1400,6 +1539,9 @@ class ExecutionCapabilityRegistry:
     production_armed: bool
     mcp_servers: Mapping[str, McpServerGrant]
     resources: Mapping[str, ResourceGrant | PendingBrowserResource]
+    # Empty for V3/V4.  The V5 supervisor-private validation registry is bound
+    # into the policy identity and is never projected to a worker.
+    validation_resources: Mapping[str, ValidationResourceGrant]
     capability_packages: Mapping[str, CapabilityPackageGeneration]
     profiles: Mapping[str, ExecutionCapabilityProfile]
     policy_digest: str
@@ -1416,8 +1558,14 @@ class ExecutionCapabilityRegistry:
             strict=True
         )
         try:
+            with source.open("rb") as policy_source:
+                source_bytes = policy_source.read(_MAX_CAPABILITY_POLICY_SOURCE_BYTES + 1)
+            if len(source_bytes) > _MAX_CAPABILITY_POLICY_SOURCE_BYTES:
+                raise CapabilityPolicyError("capability policy source exceeds byte limit")
+            # Preserve read_text's strict UTF-8 and universal-newline behavior.
+            source_text = source_bytes.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
             raw = json.loads(
-                source.read_text(encoding="utf-8"),
+                source_text,
                 object_pairs_hook=_no_duplicate_keys_object_pairs_hook,
             )
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -1431,6 +1579,8 @@ class ExecutionCapabilityRegistry:
             expected_root_keys = _ROOT_KEYS_V3
         elif schema_version == CAPABILITY_POLICY_SCHEMA_V4:
             expected_root_keys = _ROOT_KEYS_V4
+        elif schema_version == CAPABILITY_POLICY_SCHEMA_V5:
+            expected_root_keys = _ROOT_KEYS_V5
         else:
             raise CapabilityPolicyError("capability policy schema_version is unsupported")
         if set(raw) != expected_root_keys:
@@ -1746,9 +1896,155 @@ class ExecutionCapabilityRegistry:
                 browser_revision="1237",
                 grant_digest=_digest(normalized_resource),
             )
+        validation_resource_registry: dict[str, ValidationResourceGrant] = {}
+        if schema_version == CAPABILITY_POLICY_SCHEMA_V5:
+            validation_resources_raw = raw.get("validation_resources")
+            if (
+                not isinstance(validation_resources_raw, dict)
+                or not validation_resources_raw
+                or len(validation_resources_raw) > _MAX_VALIDATION_RESOURCES
+            ):
+                raise CapabilityPolicyError(
+                    f"V5 capability policy requires 1-{_MAX_VALIDATION_RESOURCES} "
+                    "validation resources"
+                )
+            for raw_id, value in validation_resources_raw.items():
+                resource_id = _identifier(raw_id, field="validation_resource_id")
+                if (
+                    not isinstance(value, dict)
+                    or set(value) != _VALIDATION_RESOURCE_KEYS
+                ):
+                    raise CapabilityPolicyError(
+                        f"validation resource {resource_id!r} fields drifted"
+                    )
+                if value.get("kind") != _VALIDATION_RESOURCE_KIND:
+                    raise CapabilityPolicyError(
+                        f"validation resource {resource_id!r} kind is unsupported"
+                    )
+                recipes = _identities(
+                    value.get("recipes"),
+                    field=f"validation_resources.{resource_id}.recipes",
+                    maximum=4,
+                )
+                if recipes != _VALIDATION_RESOURCE_RECIPES:
+                    raise CapabilityPolicyError(
+                        f"validation resource {resource_id!r} recipes are unsupported"
+                    )
+                image_digest = _digest_value(
+                    value.get("image_digest"),
+                    field=f"validation_resources.{resource_id}.image_digest",
+                )
+                if value.get("network") != "none":
+                    raise CapabilityPolicyError(
+                        f"validation resource {resource_id!r} network must be none"
+                    )
+                cpu_millis = _bounded_int(
+                    value.get("cpu_millis"),
+                    field=f"validation_resources.{resource_id}.cpu_millis",
+                    minimum=250,
+                    maximum=4000,
+                )
+                memory_bytes = _bounded_int(
+                    value.get("memory_bytes"),
+                    field=f"validation_resources.{resource_id}.memory_bytes",
+                    minimum=128 * 1024 * 1024,
+                    maximum=8 * 1024 * 1024 * 1024,
+                )
+                pids_limit = _bounded_int(
+                    value.get("pids_limit"),
+                    field=f"validation_resources.{resource_id}.pids_limit",
+                    minimum=16,
+                    maximum=512,
+                )
+                workspace_tmpfs_bytes = _bounded_int(
+                    value.get("workspace_tmpfs_bytes"),
+                    field=(
+                        f"validation_resources.{resource_id}."
+                        "workspace_tmpfs_bytes"
+                    ),
+                    minimum=16 * 1024 * 1024,
+                    maximum=4 * 1024 * 1024 * 1024,
+                )
+                tmp_tmpfs_bytes = _bounded_int(
+                    value.get("tmp_tmpfs_bytes"),
+                    field=f"validation_resources.{resource_id}.tmp_tmpfs_bytes",
+                    minimum=8 * 1024 * 1024,
+                    maximum=1024 * 1024 * 1024,
+                )
+                timeout_seconds = _bounded_int(
+                    value.get("timeout_seconds"),
+                    field=f"validation_resources.{resource_id}.timeout_seconds",
+                    minimum=1,
+                    maximum=900,
+                )
+                max_stdout_bytes = _bounded_int(
+                    value.get("max_stdout_bytes"),
+                    field=f"validation_resources.{resource_id}.max_stdout_bytes",
+                    minimum=1024,
+                    maximum=4 * 1024 * 1024,
+                )
+                max_stderr_bytes = _bounded_int(
+                    value.get("max_stderr_bytes"),
+                    field=f"validation_resources.{resource_id}.max_stderr_bytes",
+                    minimum=1024,
+                    maximum=1024 * 1024,
+                )
+                max_snapshot_files = _bounded_int(
+                    value.get("max_snapshot_files"),
+                    field=f"validation_resources.{resource_id}.max_snapshot_files",
+                    minimum=1,
+                    maximum=8192,
+                )
+                max_snapshot_bytes = _bounded_int(
+                    value.get("max_snapshot_bytes"),
+                    field=f"validation_resources.{resource_id}.max_snapshot_bytes",
+                    minimum=1024,
+                    maximum=256 * 1024 * 1024,
+                )
+                normalized_validation_resource = {
+                    "resource_id": resource_id,
+                    "kind": _VALIDATION_RESOURCE_KIND,
+                    "recipes": list(recipes),
+                    "image_digest": image_digest,
+                    "network": "none",
+                    "cpu_millis": cpu_millis,
+                    "memory_bytes": memory_bytes,
+                    "pids_limit": pids_limit,
+                    "workspace_tmpfs_bytes": workspace_tmpfs_bytes,
+                    "tmp_tmpfs_bytes": tmp_tmpfs_bytes,
+                    "timeout_seconds": timeout_seconds,
+                    "max_stdout_bytes": max_stdout_bytes,
+                    "max_stderr_bytes": max_stderr_bytes,
+                    "max_snapshot_files": max_snapshot_files,
+                    "max_snapshot_bytes": max_snapshot_bytes,
+                }
+                validation_resource_registry[resource_id] = ValidationResourceGrant(
+                    resource_id=resource_id,
+                    kind=_VALIDATION_RESOURCE_KIND,
+                    recipes=recipes,
+                    image_digest=image_digest,
+                    network="none",
+                    cpu_millis=cpu_millis,
+                    memory_bytes=memory_bytes,
+                    pids_limit=pids_limit,
+                    workspace_tmpfs_bytes=workspace_tmpfs_bytes,
+                    tmp_tmpfs_bytes=tmp_tmpfs_bytes,
+                    timeout_seconds=timeout_seconds,
+                    max_stdout_bytes=max_stdout_bytes,
+                    max_stderr_bytes=max_stderr_bytes,
+                    max_snapshot_files=max_snapshot_files,
+                    max_snapshot_bytes=max_snapshot_bytes,
+                    grant_digest=_digest(normalized_validation_resource),
+                )
+
         capability_packages: dict[str, CapabilityPackageGeneration] = {}
         skill_capability_index: dict[str, EffectiveSkillGrant] = {}
-        if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
+        # V5 inherits the complete V4 capability-package/Skill-generation
+        # model unchanged; it does not fork or relax it.
+        if schema_version in {
+            CAPABILITY_POLICY_SCHEMA_V4,
+            CAPABILITY_POLICY_SCHEMA_V5,
+        }:
             capability_packages_raw = raw.get("capability_packages")
             if not isinstance(capability_packages_raw, dict) or not (
                 _MIN_CAPABILITY_PACKAGES
@@ -1795,9 +2091,13 @@ class ExecutionCapabilityRegistry:
         for raw_id, value in profiles_raw.items():
             profile_id = _identifier(raw_id, field="profile_id")
             expected_profile_keys = (
-                _PROFILE_KEYS_V4
-                if schema_version == CAPABILITY_POLICY_SCHEMA_V4
-                else _PROFILE_KEYS
+                _PROFILE_KEYS_V5
+                if schema_version == CAPABILITY_POLICY_SCHEMA_V5
+                else (
+                    _PROFILE_KEYS_V4
+                    if schema_version == CAPABILITY_POLICY_SCHEMA_V4
+                    else _PROFILE_KEYS
+                )
             )
             if not isinstance(value, dict) or set(value) != expected_profile_keys:
                 raise CapabilityPolicyError(
@@ -2059,7 +2359,56 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} cannot inherit browser resource authority"
                 )
-            if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
+
+            if schema_version == CAPABILITY_POLICY_SCHEMA_V5:
+                validation_resource_ids = _identities(
+                    value.get("validation_resource_grants"),
+                    field=(
+                        f"profiles.{profile_id}.validation_resource_grants"
+                    ),
+                    maximum=_MAX_VALIDATION_RESOURCE_GRANTS_PER_PROFILE,
+                )
+                unknown_validation_resources = sorted(
+                    set(validation_resource_ids)
+                    - set(validation_resource_registry)
+                )
+                if unknown_validation_resources:
+                    raise CapabilityPolicyError(
+                        f"profile {profile_id!r} references unknown validation "
+                        "resources: "
+                        + ", ".join(unknown_validation_resources)
+                    )
+                resolved_validation_resources = tuple(
+                    validation_resource_registry[item]
+                    for item in validation_resource_ids
+                )
+                if resolved_validation_resources:
+                    # The closed paid model-only profile is an accepted sealed
+                    # ceiling with no field widening.  A generic sealed-worker
+                    # predicate must not authorize new paid-model
+                    # validation-runner eligibility, so that exact surface is
+                    # refused before the general sealed-worker rule applies.
+                    if execution_surface == PAID_GLM_EXECUTION_SURFACE:
+                        raise CapabilityPolicyError(
+                            f"profile {profile_id!r} cannot grant supervisor-private "
+                            "validation resources to the closed paid model-only "
+                            "sealed-input profile"
+                        )
+                    if not supports_supervisor_validation_resources(
+                        execution_surface
+                    ):
+                        raise CapabilityPolicyError(
+                            f"profile {profile_id!r} validation resources are "
+                            "supervisor-private sealed-worker grants"
+                        )
+            else:
+                validation_resource_ids = ()
+                resolved_validation_resources = ()
+
+            if schema_version in {
+                CAPABILITY_POLICY_SCHEMA_V4,
+                CAPABILITY_POLICY_SCHEMA_V5,
+            }:
                 skill_capability_ids = _identities(
                     value.get("skill_capabilities"),
                     field=f"profiles.{profile_id}.skill_capabilities",
@@ -2071,7 +2420,7 @@ class ExecutionCapabilityRegistry:
                 if skills:
                     raise CapabilityPolicyError(
                         f"profile {profile_id!r} cannot combine skills with "
-                        "skill_capabilities; exact V4 company-Skill profiles "
+                        "skill_capabilities; exact V4/V5 company-Skill profiles "
                         "require skills=[]"
                     )
                 if is_sealed_worker_execution_surface(execution_surface):
@@ -2168,6 +2517,7 @@ class ExecutionCapabilityRegistry:
                 or skill_grants
                 or mcp_server_ids
                 or resource_ids
+                or validation_resource_ids
                 or plugins
                 or forbidden
             ):
@@ -2205,6 +2555,31 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} write-capable native helpers remain unavailable"
                 )
+            is_claude_principal = (
+                execution_surface == CLAUDE_PRINCIPAL_EXECUTION_SURFACE
+            )
+            if auth_realm == CLAUDE_PRINCIPAL_AUTH_REALM and not is_claude_principal:
+                raise CapabilityPolicyError(
+                    f"profile {profile_id!r} principal auth realm requires the principal surface"
+                )
+            if is_claude_principal and (
+                auth_realm != CLAUDE_PRINCIPAL_AUTH_REALM
+                or sandbox_policy != "read-only"
+                or approval_policy != "never"
+                or network_policy != "disabled"
+                or write_capable
+                or native_helper_policy is not NativeHelperPolicy.DISABLED
+                or native_helper is not None
+                or skills
+                or skill_grants
+                or resource_ids
+                or plugins
+                or len(resolved_mcp) != 1
+                or resolved_mcp[0].auth_status != "oAuth"
+            ):
+                raise CapabilityPolicyError(
+                    f"profile {profile_id!r} exceeds the closed Claude principal capability shape"
+                )
             normalized = {
                 "profile_id": profile_id,
                 "enabled": enabled,
@@ -2236,13 +2611,16 @@ class ExecutionCapabilityRegistry:
                 "plugins": list(plugins),
                 "forbidden": list(forbidden),
             }
-            if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
+            if schema_version in {
+                CAPABILITY_POLICY_SCHEMA_V4,
+                CAPABILITY_POLICY_SCHEMA_V5,
+            }:
                 # Identity amendment §4.6: closure movement, an unrelated
                 # package-file change, or revocation must all be able to
                 # change this profile's digest, so the normalized projection
                 # binds each selected exact Skill's grant digest AND its
                 # owning package generation digest, in capability-ID order.
-                # This key is present in every V4 profile normalization
+                # This key is present in every V4/V5 profile normalization
                 # (empty list for grant-less profiles) and never in V3.
                 normalized["skill_capabilities"] = [
                     {
@@ -2253,6 +2631,18 @@ class ExecutionCapabilityRegistry:
                         ].package_generation_digest,
                     }
                     for grant in skill_grants
+                ]
+            if schema_version == CAPABILITY_POLICY_SCHEMA_V5:
+                # Supervisor-private validation capacity binds the V5 profile
+                # identity so a resource change moves the owning profile's
+                # digest.  It is an identity binding only and is never
+                # projected as a worker, provider or manifest capability.
+                normalized["validation_resource_grants"] = [
+                    {
+                        "resource_id": grant.resource_id,
+                        "grant_digest": grant.grant_digest,
+                    }
+                    for grant in resolved_validation_resources
                 ]
             profiles[profile_id] = ExecutionCapabilityProfile(
                 profile_id=profile_id,
@@ -2269,6 +2659,7 @@ class ExecutionCapabilityRegistry:
                 skill_grants=skill_grants,
                 mcp_server_grants=resolved_mcp,
                 resource_grants=resolved_resources,
+                validation_resource_grants=resolved_validation_resources,
                 plugins=plugins,
                 forbidden=forbidden,
                 profile_digest=_digest(normalized),
@@ -2295,10 +2686,23 @@ class ExecutionCapabilityRegistry:
                 for profile_id, profile in sorted(profiles.items())
             },
         }
-        if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
+        if schema_version in {
+            CAPABILITY_POLICY_SCHEMA_V4,
+            CAPABILITY_POLICY_SCHEMA_V5,
+        }:
             normalized_policy["capability_packages"] = {
                 capability_id: generation.package_generation_digest
                 for capability_id, generation in sorted(capability_packages.items())
+            }
+        if schema_version == CAPABILITY_POLICY_SCHEMA_V5:
+            # The V5 policy identity binds every supervisor-private validation
+            # resource grant digest, so a resource change moves the policy
+            # digest even when no profile references it.
+            normalized_policy["validation_resources"] = {
+                resource_id: grant.grant_digest
+                for resource_id, grant in sorted(
+                    validation_resource_registry.items()
+                )
             }
         return cls(
             schema_version=schema_version,
@@ -2307,6 +2711,7 @@ class ExecutionCapabilityRegistry:
             production_armed=False,
             mcp_servers=mcp_registry,
             resources=resource_registry,
+            validation_resources=validation_resource_registry,
             capability_packages=capability_packages,
             profiles=profiles,
             policy_digest=_digest(normalized_policy),
@@ -2328,10 +2733,13 @@ __all__ = [
     "CAPABILITY_POLICY_SCHEMA",
     "CAPABILITY_POLICY_SCHEMA_V3",
     "CAPABILITY_POLICY_SCHEMA_V4",
+    "CAPABILITY_POLICY_SCHEMA_V5",
     "ACP_EXECUTION_SURFACE",
     "ACP_PROVIDER_FREE_AUTH_REALM",
     "DEFAULT_CAPABILITY_POLICY_PATH",
     "DEFAULT_CAPABILITY_SOURCE_ROOT",
+    "CLAUDE_PRINCIPAL_AUTH_REALM",
+    "CLAUDE_PRINCIPAL_EXECUTION_SURFACE",
     "CapabilityPolicyError",
     "CompanyConsultationGrantProfile",
     "ExecutionCapabilityProfile",
@@ -2340,6 +2748,7 @@ __all__ = [
     "NativeHelperGrant",
     "ResourceGrant",
     "PendingBrowserResource",
+    "ValidationResourceGrant",
     "PAID_FABRIC_ADAPTER_ID",
     "PAID_GLM_AUTH_REALM",
     "PAID_GLM_EXECUTION_SURFACE",
@@ -2348,4 +2757,5 @@ __all__ = [
     "app_server_security_config_projection",
     "build_company_consultation_grant_profile",
     "observed_mcp_tool_schema_digest",
+    "supports_supervisor_validation_resources",
 ]

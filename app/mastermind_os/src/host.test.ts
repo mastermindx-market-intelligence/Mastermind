@@ -10,6 +10,7 @@ import v3Current17 from "./fixtures/mission-v3-design-current-17-slots.json";
 import resultAvailable from "./fixtures/result-design-available-at-16384-socket-bytes.json";
 import workAvailable from "./fixtures/work-service-available.json";
 import workUnavailable from "./fixtures/work-service-unavailable.json";
+import compoundAvailable from "./meta-ceo/fixtures/mission-result-producer/actual-pair.json";
 const signed: AuthState = {
   status: "signed_in",
   reason: null,
@@ -391,5 +392,72 @@ describe("optional orchestrator command binding", () => {
         "390cfeea0f8476caa22dd263a243acf66216ea14d560ad6c908f668f59052a3a",
       signal,
     });
+  });
+});
+
+
+describe("native compound Mission and Result acquisition", () => {
+  const selected = {
+    workRef: compoundAvailable.selection.work_ref,
+    rootJobId: compoundAvailable.selection.root_job_id,
+    jobId: compoundAvailable.selection.job_id,
+    attemptId: compoundAvailable.selection.attempt_id,
+    resultEnvelopeDigest: compoundAvailable.selection.result_envelope_digest,
+  };
+
+  it("feeds one fixed native acquisition into the existing typed compound decoder", async () => {
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "auth_status") return signed;
+      if (command === "read_mission_result") return compoundAvailable;
+      return {};
+    });
+    const client = await createNativeClient(invoke as never, async () => () => {});
+    const host = bindMissionHost(client);
+    const result = await host.readMissionResult!({
+      ...selected, signal: new AbortController().signal,
+    });
+    expect(result.availability).toBe("AVAILABLE");
+    expect(result.mission?.schema).toBe("mastermind.mission_workspace.v3");
+    expect(result.roleResult?.schema).toBe("mastermind.workspace_role_result.v1");
+    expect(invoke).toHaveBeenCalledWith("read_mission_result", {
+      selection: compoundAvailable.selection,
+    });
+    expect(invoke.mock.calls.some(([command]) =>
+      command === "read_mission_v3" || command === "read_result")).toBe(false);
+    const calls = invoke.mock.calls.length;
+    await expect(client.readMissionResult!({
+      ...selected, jobId: "https://other.invalid", signal: new AbortController().signal,
+    })).rejects.toThrow("SELECTION_INVALID");
+    expect(invoke.mock.calls).toHaveLength(calls);
+  });
+
+  it("rejects a compound response associated with another selected result", async () => {
+    const mismatched = structuredClone(compoundAvailable);
+    mismatched.selection.result_envelope_digest = "0".repeat(64);
+    const invoke = vi.fn(async (command: string) =>
+      command === "auth_status" ? signed : command === "read_mission_result" ? mismatched : {});
+    const client = await createNativeClient(invoke as never, async () => () => {});
+    await expect(bindMissionHost(client).readMissionResult!({
+      ...selected, signal: new AbortController().signal,
+    })).rejects.toThrow("MISSION_RESULT_RESPONSE_INVALID");
+  });
+
+  it("discards a late compound response when native authentication changes", async () => {
+    const pending = deferred<unknown>();
+    let notify!: (event: { payload: unknown }) => void;
+    const invoke = vi.fn(async (command: string) =>
+      command === "auth_status" ? signed
+        : command === "read_mission_result" ? pending.promise : {});
+    const client = await createNativeClient(invoke as never, async (event, handler) => {
+      if (event === "mastermind-auth-state") notify = handler;
+      return () => {};
+    });
+    const read = bindMissionHost(client).readMissionResult!({
+      ...selected, signal: new AbortController().signal,
+    });
+    notify({ payload: out });
+    pending.resolve(compoundAvailable);
+    await expect(read).rejects.toThrow("READ_CANCELLED");
+    expect(invoke.mock.calls.filter(([command]) => command === "read_mission_result")).toHaveLength(1);
   });
 });

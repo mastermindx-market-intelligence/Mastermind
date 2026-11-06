@@ -98,6 +98,9 @@ COMMAND_CAPACITY = 48
 CLEANUP_COMMAND_RESERVE = 2
 WORK_COMMAND_LIMIT = COMMAND_CAPACITY - CLEANUP_COMMAND_RESERVE
 CAPTURE_FAULTS = frozenset({"set_blocking", "select", "read"})
+_INTERRUPTION_REFUSALS = frozenset({
+    "interrupted_KeyboardInterrupt", "interrupted_SystemExit", "capture_exception",
+})
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 REQUIRED_BLOBS = {
     "packages/testkit/src/cli/topology.ts": {
@@ -234,6 +237,10 @@ class PartialAllocation(Exception):
         super().__init__("partial_allocation")
 
 
+class _NativeSpawnNotStarted(OSError):
+    """Only default_spawn at its native Popen boundary can attest no start."""
+
+
 @dataclass(frozen=True)
 class CommandRecord:
     argv: tuple[str, ...]
@@ -274,7 +281,10 @@ class AttemptBudget:
         if phase == "execution":
             raise Refusal("execution_not_authorized_for_initial_placement")
         reserve_phase = phase in {"owned_cleanup", "reap"}
-        if self.blocked and not (self.blocked == "deadline_exhausted" and reserve_phase):
+        if self.blocked and not (
+            self.blocked in {"deadline_exhausted", "command_interrupted", "native_spawn_not_started"}
+            and reserve_phase
+        ):
             raise Refusal(self.blocked)
         if phase not in DEADLINES_SECONDS:
             raise Refusal("deadline_exhausted")
@@ -311,7 +321,7 @@ class DaemonObservation:
     binary: str | None
     endpoint: str | None
     daemon_id: str | None
-    socket_present: bool
+    socket_present: bool | None
     metadata_complete: bool
     detail: str
     project_name: str | None = None
@@ -486,24 +496,17 @@ def default_spawn(
 ) -> CommandRecord:
     """Stream one owned process group. Settle it before returning.
 
-    An OSError from Popen means no child exists and propagates. Any failure
-    after Popen settles that group or returns uncertainty. A later caller must
-    not hash or delete after an uncertain record.
+    A native Popen OSError has a narrow not-started marker, consumed only
+    on the actual native launcher path. Every post-launch exit returns the
+    original command's settlement record, including control-flow interruption.
+    An uncertain record forbids later hashing, deletion, or another reap.
     """
     assert_closed_env(env)
     assert_readiness_argv(tuple(argv))
     if capture_fault is not None and capture_fault not in CAPTURE_FAULTS:
         raise Refusal("capture_fault_unknown")
-    proc = subprocess.Popen(
-        list(argv),
-        cwd=None if cwd is None else str(cwd),
-        env=dict(env),
-        stdin=subprocess.PIPE if stdin_bytes is not None else subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
-    )
-    pid = proc.pid
+    proc: subprocess.Popen[bytes] | None = None
+    pid: int | None = None
     out_buf = bytearray()
     err_buf = bytearray()
     binary_overflow = False
@@ -517,6 +520,19 @@ def default_spawn(
     returncode = -1
     pending_exc: BaseException | None = None
     try:
+        try:
+            proc = subprocess.Popen(
+                list(argv),
+                cwd=None if cwd is None else str(cwd),
+                env=dict(env),
+                stdin=subprocess.PIPE if stdin_bytes is not None else subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            raise _NativeSpawnNotStarted(type(exc).__name__) from exc
+        pid = proc.pid
         if proc.stdout is None or proc.stderr is None:
             raise OSError("capture_pipes_missing")
         out_fd = proc.stdout.fileno()
@@ -616,52 +632,86 @@ def default_spawn(
         if clean and _close_pipes(proc):
             returncode = proc.returncode if proc.returncode is not None else 0
             settled = True
+    except _NativeSpawnNotStarted:
+        raise
     except OSError:
         capture_error = True
         capture_refusal = capture_refusal or "capture_oserror"
     except BaseException as exc:
         pending_exc = exc
     finally:
-        if not settled:
-            reaped, code = _reap_owned_group(proc, _reap_allowance(budget))
-            settled = reaped
-            uncertain = not reaped
-            returncode = code
-            if uncertain and budget is not None:
-                budget.mark_uncertain()
-    if pending_exc is not None:
-        if not settled and budget is not None:
+        if proc is not None and not settled:
+            try:
+                pid = proc.pid
+                reaped, code = _reap_owned_group(proc, _reap_allowance(budget))
+            except BaseException as exc:
+                # One owned settlement attempt only. An interrupted reaper is
+                # uncertainty, never permission to retry or abandon the record.
+                pending_exc = pending_exc or exc
+                pid = proc.pid
+                uncertain = True
+                returncode = proc.returncode if proc.returncode is not None else -1
+            else:
+                settled = reaped
+                uncertain = not reaped
+                returncode = code
+        elif proc is None and pending_exc is not None:
+            # Popen itself was interrupted before returning a usable handle.
+            # There is no original handle from which to establish absence.
+            uncertain = True
+        if uncertain and budget is not None:
             budget.mark_uncertain()
-        raise pending_exc
-    if binary_overflow:
-        out_buf.clear()
-        capture_refusal = "binary_capture_exceeded"
-    if capture_error:
-        capture_refusal = capture_refusal or "capture_oserror"
-    stdout_text = ""
-    if not binary and not capture_error:
-        stdout_text = redact(bytes(out_buf).decode("utf-8", errors="replace"), truncated=out_capped)
-    stderr_text = redact(bytes(err_buf).decode("utf-8", errors="replace"), truncated=err_capped)
-    if len(stdout_text.encode("utf-8")) > LOG_MAX_BYTES:
-        stdout_text = redact(stdout_text, truncated=True)
-    if len(stderr_text.encode("utf-8")) > LOG_MAX_BYTES:
-        stderr_text = redact(stderr_text, truncated=True)
-    kept = bytes(out_buf) if binary and not binary_overflow and not capture_error else None
-    if uncertain:
-        settled = False
-    return CommandRecord(
-        tuple(argv),
-        returncode,
-        stdout_text,
-        stderr_text,
-        timed_out,
-        uncertain,
-        kept,
-        capture_refusal,
-        pid,
-        pid,
-        settled,
-    )
+    if pending_exc is not None:
+        capture_error = True
+        if isinstance(pending_exc, KeyboardInterrupt):
+            capture_refusal = "interrupted_KeyboardInterrupt"
+        elif isinstance(pending_exc, SystemExit):
+            capture_refusal = "interrupted_SystemExit"
+        else:
+            capture_refusal = "capture_exception"
+    try:
+        if binary_overflow:
+            out_buf.clear()
+            capture_refusal = "binary_capture_exceeded"
+        if capture_error:
+            capture_refusal = capture_refusal or "capture_oserror"
+        stdout_text = ""
+        if not binary and not capture_error:
+            stdout_text = redact(bytes(out_buf).decode("utf-8", errors="replace"), truncated=out_capped)
+        stderr_text = redact(bytes(err_buf).decode("utf-8", errors="replace"), truncated=err_capped)
+        if len(stdout_text.encode("utf-8")) > LOG_MAX_BYTES:
+            stdout_text = redact(stdout_text, truncated=True)
+        if len(stderr_text.encode("utf-8")) > LOG_MAX_BYTES:
+            stderr_text = redact(stderr_text, truncated=True)
+        kept = bytes(out_buf) if binary and not binary_overflow and not capture_error else None
+        if uncertain:
+            settled = False
+        return CommandRecord(
+            tuple(argv),
+            returncode,
+            stdout_text,
+            stderr_text,
+            timed_out,
+            uncertain,
+            kept,
+            capture_refusal,
+            pid,
+            pid,
+            settled,
+        )
+    except BaseException as exc:
+        # Formatting is still part of this command's receipt. A late
+        # interruption must not discard known identity or reap a second time.
+        if isinstance(exc, KeyboardInterrupt):
+            reason = "interrupted_KeyboardInterrupt"
+        elif isinstance(exc, SystemExit):
+            reason = "interrupted_SystemExit"
+        else:
+            reason = "capture_exception"
+        return CommandRecord(
+            tuple(argv), returncode, "", "", timed_out, uncertain,
+            None, reason, pid, pid, settled and not uncertain,
+        )
 
 
 def _write(path: Path, text: str) -> None:
@@ -1287,7 +1337,10 @@ def admit_source(
     try:
         commit = _text(git_dir, ("rev-parse", f"{DONOR_COMMIT}^{{commit}}"))
     except Refusal as exc:
-        if exc.reason in {"uncertain_child", "deadline_exhausted", "binary_capture_exceeded"}:
+        if exc.reason in {
+            "uncertain_child", "deadline_exhausted", "binary_capture_exceeded",
+            "native_spawn_not_started", "command_interrupted",
+        } or exc.reason in _INTERRUPTION_REFUSALS:
             raise
         raise Refusal("pin_not_present") from exc
     if commit != DONOR_COMMIT:
@@ -1298,7 +1351,10 @@ def admit_source(
         try:
             blob = _text(git_dir, ("rev-parse", f"{DONOR_COMMIT}:{rel}"))
         except Refusal as exc:
-            if exc.reason in {"uncertain_child", "deadline_exhausted", "binary_capture_exceeded"}:
+            if exc.reason in {
+                "uncertain_child", "deadline_exhausted", "binary_capture_exceeded",
+                "native_spawn_not_started", "command_interrupted",
+            } or exc.reason in _INTERRUPTION_REFUSALS:
                 raise
             raise Refusal("blob_mismatch") from exc
         if blob != expected["git_blob"]:
@@ -1463,6 +1519,12 @@ def qualify_observation(obs: DaemonObservation) -> dict[str, object]:
     if obs.synthetic:
         verdict["reason"] = "synthetic_fixture_is_not_daemon_authority"
         return verdict
+    if obs.source == "not_observed":
+        verdict["reason"] = "daemon_not_observed"
+        return verdict
+    if obs.source == "unreadable":
+        verdict["reason"] = "docker_binary_unreadable"
+        return verdict
     if obs.source == "absent" or obs.binary != DOCKER:
         verdict["reason"] = "docker_binary_absent" if obs.source == "absent" else "docker_binary_not_exact"
         return verdict
@@ -1483,19 +1545,59 @@ def qualify_observation(obs: DaemonObservation) -> dict[str, object]:
     return verdict
 
 
+def _executable_state(path: str) -> str:
+    candidate = Path(path)
+    try:
+        if _exact_executable(path):
+            return "PRESENT_UNMEASURED"
+        candidate.lstat()
+    except FileNotFoundError:
+        return "ABSENT"
+    except OSError:
+        return "UNREADABLE"
+    return "UNREADABLE"
+
+
 def _exact_executable(path: str) -> bool:
     candidate = Path(path)
     return candidate.is_file() and not candidate.is_symlink() and os.access(candidate, os.X_OK)
 
 
+def _socket_presence() -> bool | None:
+    unreadable = False
+    for path in (Path("/var/run/docker.sock"), Path("/run/docker.sock")):
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            unreadable = True
+        else:
+            return True
+    return None if unreadable else False
+
+
 def probe_daemon(
     env: Mapping[str, str], spawn: Spawn, cwd: Path, budget: AttemptBudget | None = None,
+    *, observation: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    socket_present = Path("/var/run/docker.sock").exists() or Path("/run/docker.sock").exists()
-    if not _exact_executable(DOCKER):
-        return qualify_observation(DaemonObservation(
-            "absent", False, None, None, None, socket_present, False, "docker_binary_absent",
+    socket_present = _socket_presence()
+    state = _executable_state(DOCKER)
+    if state != "PRESENT_UNMEASURED":
+        value = qualify_observation(DaemonObservation(
+            "absent" if state == "ABSENT" else "unreadable", False,
+            None if state == "ABSENT" else DOCKER, None, None,
+            socket_present, False, "binary_observed",
         ))
+        if observation is not None:
+            observation.update(value)
+        return value
+    value = qualify_observation(DaemonObservation(
+        "local-binary", False, DOCKER, None, None,
+        socket_present, False, "probe_incomplete",
+    ))
+    if observation is not None:
+        observation.update(value)
     info = _invoke(
         spawn, [DOCKER, "info", "--format", "{{.ID}}"],
         phase="daemon_probe", budget=budget, env=env, cwd=cwd, binary=False, stdin_bytes=None,
@@ -1508,10 +1610,13 @@ def probe_daemon(
     endpoint = endpoint_from_context(context.stdout) if complete else None
     if endpoint is None:
         complete = False
-    return qualify_observation(DaemonObservation(
+    value = qualify_observation(DaemonObservation(
         "local-binary", False, DOCKER, endpoint, info.stdout.strip() or None,
         socket_present, complete, "probed",
     ))
+    if observation is not None:
+        observation.update(value)
+    return value
 
 
 def node_satisfies(version: str | None) -> bool:
@@ -1534,57 +1639,80 @@ def _first_version(
     spawn: Spawn,
     cwd: Path,
     budget: AttemptBudget | None = None,
+    *,
+    observation: dict[str, object] | None = None,
 ) -> tuple[str | None, str | None]:
+    unreadable_path = None
     for candidate in candidates:
-        if not _exact_executable(candidate):
+        state = _executable_state(candidate)
+        if state == "ABSENT":
             continue
-        record = _invoke(
-            spawn, [candidate, "--version"],
-            phase="toolchain_probe", budget=budget, env=env, cwd=cwd, binary=False, stdin_bytes=None,
+        if unreadable_path is None:
+            unreadable_path = candidate
+        if observation is not None:
+            observation.update(path=candidate, version=None, state=state)
+        if state == "UNREADABLE":
+            continue
+        try:
+            record = _invoke(
+                spawn, [candidate, "--version"],
+                phase="toolchain_probe", budget=budget, env=env, cwd=cwd, binary=False, stdin_bytes=None,
+            )
+        except (OSError, Refusal):
+            if observation is not None:
+                observation["state"] = "UNREADABLE"
+            raise
+        if _failed(record) or not record.stdout.strip():
+            if observation is not None:
+                observation["state"] = "UNREADABLE"
+            continue
+        version = record.stdout.strip().splitlines()[0].strip()
+        if observation is not None:
+            observation.update(path=candidate, version=version, state="OBSERVED")
+        return candidate, version
+    if observation is not None:
+        observation.update(
+            path=unreadable_path, version=None,
+            state="UNREADABLE" if unreadable_path is not None else "ABSENT",
         )
-        if _failed(record):
-            continue
-        line = record.stdout.strip().splitlines()
-        if not line:
-            continue
-        return candidate, line[0].strip()
-    return None, None
+    return unreadable_path, None
 
 
 def probe_toolchain(
     env: Mapping[str, str], spawn: Spawn, cwd: Path, budget: AttemptBudget | None = None,
+    *, observation: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    git_state: dict[str, object] = {"path": GIT, "version": None, "state": "ABSENT"}
-    if _exact_executable(GIT):
-        record = _invoke(
-            spawn, [GIT, "--version"],
-            phase="toolchain_probe", budget=budget, env=env, cwd=cwd, binary=False, stdin_bytes=None,
-        )
+    result = _empty_toolchain() if observation is None else observation
+    git_state = result["git"]
+    assert isinstance(git_state, dict)
+    state = _executable_state(GIT)
+    git_state.update(path=GIT, version=None, state=state)
+    if state == "PRESENT_UNMEASURED":
+        try:
+            record = _invoke(
+                spawn, [GIT, "--version"],
+                phase="toolchain_probe", budget=budget, env=env, cwd=cwd, binary=False, stdin_bytes=None,
+            )
+        except (OSError, Refusal):
+            git_state["state"] = "UNREADABLE"
+            raise
         if not _failed(record) and record.stdout.strip():
-            git_state = {"path": GIT, "version": record.stdout.strip().splitlines()[0], "state": "OBSERVED"}
-    node_path, node_version = _first_version(NODE_CANDIDATES, env, spawn, cwd, budget)
-    pnpm_path, pnpm_version = _first_version(PNPM_CANDIDATES, env, spawn, cwd, budget)
-    pnpm_state = "ABSENT"
-    if pnpm_version == DONOR_PNPM:
-        pnpm_state = "EXACT"
-    elif pnpm_version is not None:
-        pnpm_state = "MISMATCH"
-    return {
-        "git": git_state,
-        "node": {
-            "path": node_path,
-            "version": node_version,
-            "state": "OBSERVED" if node_version else "ABSENT",
-            "satisfies_donor_engine": node_satisfies(node_version),
-        },
-        "pnpm": {
-            "path": pnpm_path,
-            "version": pnpm_version,
-            "required": DONOR_PNPM,
-            "state": pnpm_state,
-        },
-        "adopted_for_execution": False,
-    }
+            git_state.update(version=record.stdout.strip().splitlines()[0], state="OBSERVED")
+        else:
+            git_state["state"] = "UNREADABLE"
+    node = result["node"]
+    pnpm = result["pnpm"]
+    assert isinstance(node, dict) and isinstance(pnpm, dict)
+    _, node_version = _first_version(
+        NODE_CANDIDATES, env, spawn, cwd, budget, observation=node,
+    )
+    node["satisfies_donor_engine"] = node_satisfies(node_version)
+    _, pnpm_version = _first_version(
+        PNPM_CANDIDATES, env, spawn, cwd, budget, observation=pnpm,
+    )
+    if pnpm_version is not None:
+        pnpm["state"] = "EXACT" if pnpm_version == DONOR_PNPM else "MISMATCH"
+    return result
 
 
 def new_identity() -> dict[str, object]:
@@ -1773,6 +1901,24 @@ def _owned_hashes(
     return hashes
 
 
+def _command_record_valid(record: object) -> bool:
+    if type(record) is not CommandRecord:
+        return False
+    return (
+        type(record.argv) is tuple and all(type(item) is str for item in record.argv)
+        and type(record.returncode) is int
+        and type(record.stdout) is str and type(record.stderr) is str
+        and type(record.timed_out) is bool and type(record.uncertain) is bool
+        and type(record.settled) is bool
+        and (record.stdout_bytes is None or type(record.stdout_bytes) is bytes)
+        and (record.capture_refusal is None or (
+            type(record.capture_refusal) is str and len(record.capture_refusal) <= 80
+        ))
+        and (record.pid is None or (type(record.pid) is int and record.pid > 0))
+        and (record.pgid is None or (type(record.pgid) is int and record.pgid > 0))
+    )
+
+
 def _command_public(record: CommandRecord) -> dict[str, object]:
     return {
         "argv": list(record.argv),
@@ -1781,6 +1927,10 @@ def _command_public(record: CommandRecord) -> dict[str, object]:
         "uncertain": record.uncertain,
         "stdout": record.stdout,
         "stderr": record.stderr,
+        "pid": record.pid,
+        "pgid": record.pgid,
+        "settled": record.settled,
+        "capture_refusal": record.capture_refusal,
     }
 
 
@@ -1977,9 +2127,9 @@ def receipt_problems(receipt: Mapping[str, object]) -> list[str]:
 
 def _empty_toolchain() -> dict[str, object]:
     return {
-        "git": {"path": GIT, "version": None, "state": "ABSENT"},
-        "node": {"path": None, "version": None, "state": "ABSENT", "satisfies_donor_engine": False},
-        "pnpm": {"path": None, "version": None, "required": DONOR_PNPM, "state": "ABSENT"},
+        "git": {"path": GIT, "version": None, "state": "NOT_OBSERVED"},
+        "node": {"path": None, "version": None, "state": "NOT_OBSERVED", "satisfies_donor_engine": False},
+        "pnpm": {"path": None, "version": None, "required": DONOR_PNPM, "state": "NOT_OBSERVED"},
         "adopted_for_execution": False,
     }
 
@@ -2005,7 +2155,7 @@ def run_readiness(
     blobs: dict[str, dict[str, str]] = {}
     derived: dict[str, str] = {}
     daemon = qualify_observation(DaemonObservation(
-        "absent", False, None, None, None, False, False, "not_probed",
+        "not_observed", False, None, None, None, None, False, "not_probed",
     ))
     toolchain = _empty_toolchain()
     env: dict[str, str] = {}
@@ -2015,26 +2165,71 @@ def run_readiness(
     stop_reason = ""
 
     def recorded(argv: Sequence[str], **kwargs: object) -> CommandRecord:
-        nonlocal uncertain
+        nonlocal uncertain, stop_reason
         assert_readiness_argv(tuple(argv))
         reserve = bool(kwargs.pop("reserve_command", False))
         kwargs.pop("capture_fault", None)
         _command_room(len(records), reserve=reserve)
         if budget.uncertain or budget.blocked == "uncertain_child":
             raise Refusal("uncertain_child")
+        if budget.blocked in {"command_interrupted", "native_spawn_not_started"} and not reserve:
+            raise Refusal(budget.blocked)
         fn = spawn or default_spawn
         try:
             record = fn(argv, **kwargs)
+        except _NativeSpawnNotStarted:
+            if fn is not default_spawn:
+                uncertain = True
+                budget.mark_uncertain()
+                records.append(CommandRecord(
+                    tuple(argv), -1, "", "", False, True,
+                    capture_refusal="custom_spawn_absence_unproven", settled=False,
+                ))
+                raise
+            record = CommandRecord(
+                tuple(argv), -1, "", "", False, False,
+                capture_refusal="native_spawn_not_started",
+            )
         except OSError:
             uncertain = True
             budget.mark_uncertain()
+            records.append(CommandRecord(
+                tuple(argv), -1, "", "", False, True,
+                capture_refusal="spawn_oserror", settled=False,
+            ))
             raise
-        if not isinstance(record, CommandRecord):
-            raise Refusal("spawn_contract")
+        except BaseException as exc:
+            if fn is default_spawn and isinstance(exc, Refusal):
+                raise
+            reason = "spawn_exception"
+            if isinstance(exc, KeyboardInterrupt):
+                reason = "interrupted_KeyboardInterrupt"
+            elif isinstance(exc, SystemExit):
+                reason = "interrupted_SystemExit"
+            record = CommandRecord(
+                tuple(argv), -1, "", "", False, True,
+                capture_refusal=reason, settled=False,
+            )
+        if not _command_record_valid(record):
+            record = CommandRecord(
+                tuple(argv), -1, "", "", False, True,
+                capture_refusal="spawn_contract", settled=False,
+            )
+        elif record.capture_refusal == "native_spawn_not_started" and fn is not default_spawn:
+            record = CommandRecord(
+                tuple(argv), -1, "", "", False, True,
+                capture_refusal="custom_spawn_absence_unproven", settled=False,
+            )
         records.append(record)
         if record.uncertain or not record.settled:
             uncertain = True
             budget.mark_uncertain()
+        elif record.capture_refusal in _INTERRUPTION_REFUSALS:
+            stop_reason = record.capture_refusal
+            budget.blocked = "command_interrupted"
+        elif record.capture_refusal == "native_spawn_not_started":
+            stop_reason = record.capture_refusal
+            budget.blocked = "native_spawn_not_started"
         return record
 
     def _note_refusal(exc: Refusal) -> None:
@@ -2109,8 +2304,12 @@ def run_readiness(
                 assertions = True
                 if not budget.blocked:
                     stage = "probe"
-                    daemon = probe_daemon(env, recorded, owned.path / "tmp", budget)
-                    toolchain = probe_toolchain(env, recorded, owned.path / "tmp", budget)
+                    daemon = probe_daemon(
+                        env, recorded, owned.path / "tmp", budget, observation=daemon,
+                    )
+                    toolchain = probe_toolchain(
+                        env, recorded, owned.path / "tmp", budget, observation=toolchain,
+                    )
             except Refusal as exc:
                 _note_refusal(exc)
             except OSError as exc:
@@ -2128,7 +2327,9 @@ def run_readiness(
                 owned is not None
                 and not uncertain
                 and not budget.uncertain
-                and budget.blocked != "uncertain_child"
+                and budget.blocked not in {
+                    "uncertain_child", "command_interrupted", "native_spawn_not_started",
+                }
             ):
                 stage = "hash"
                 try:
@@ -2139,6 +2340,8 @@ def run_readiness(
             elif uncertain or budget.uncertain or budget.blocked == "uncertain_child":
                 if hashes.get("config_manifest_cause") in (None, "not_measured"):
                     hashes = _unavailable_hashes(stop_reason or "uncertain_child")
+            elif budget.blocked in {"command_interrupted", "native_spawn_not_started"}:
+                hashes = _unavailable_hashes(stop_reason or budget.blocked)
     except OSError as exc:
         uncertain = True
         budget.mark_uncertain()
@@ -2146,6 +2349,15 @@ def run_readiness(
         source_state = "REFUSED"
         source_reason = "operational_failure"
         hashes = _unavailable_hashes("uncertain_child")
+
+    git_observation = toolchain["git"]
+    if isinstance(git_observation, dict) and git_observation.get("state") == "NOT_OBSERVED":
+        if any(
+            item.argv and item.argv[0] == GIT and item.pid is not None
+            and item.settled and not item.uncertain
+            for item in records
+        ):
+            git_observation["state"] = "PRESENT_UNMEASURED"
 
     identity = new_identity()
     notes = [
@@ -2225,6 +2437,8 @@ def run_readiness(
     if isinstance(limits, dict):
         limits["budget"] = budget.facts()
         note_list = limits.get("notes")
+        if isinstance(note_list, list) and stop_reason and stop_reason not in note_list:
+            note_list.append(stop_reason)
         if isinstance(note_list, list) and budget.settlement == "uncertain":
             for line in (
                 "elapsed_seconds is a parent sample and does not prove an unsettled kernel operation stopped.",
@@ -2293,7 +2507,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             derived={},
             identity=new_identity(),
             daemon=qualify_observation(DaemonObservation(
-                "absent", False, None, None, None, False, False, type(exc).__name__,
+                "not_observed", False, None, None, None, None, False, type(exc).__name__,
             )),
             toolchain=_empty_toolchain(),
             env_keys=sorted(ALLOWED_ENV_KEYS),
@@ -2313,7 +2527,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             derived={},
             identity=new_identity(),
             daemon=qualify_observation(DaemonObservation(
-                "absent", False, None, None, None, False, False, exc.reason,
+                "not_observed", False, None, None, None, None, False, exc.reason,
             )),
             toolchain=_empty_toolchain(),
             env_keys=sorted(ALLOWED_ENV_KEYS),

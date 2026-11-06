@@ -1115,3 +1115,470 @@ vUZJi/sLKE6hTe+0JzTp3FFB1PMloB0l9/lTlQQ0+VUisJqUvi+/3nc/nBXPUzveow4UwSouVAnpac6F
 Z4GYhUEs9flupeiuiKP/LKeXJv87O2zpYCT75zu8UnOXz+cevN0dyvlGg1g49uFHf8lVSlXcOTlW9GshdVufnTzH2CX2yhdg
 H/CXMjjB6WK7a/1hV9f6ldnleb7+oia9+B+T/Lk///w/2qXUUA==
 """
+
+
+def _finish_owned_receipt_fixture(owned, handles, reap, group_gone):
+    """Settle only handles observed before injection, then delete our own root."""
+    for proc in handles:
+        if proc.poll() is None:
+            settled, _ = reap(proc, 2.0)
+            assert settled, "test-owned child settlement is unconfirmed"
+        assert proc.poll() is not None
+        assert group_gone(proc.pid), "test-owned process group remains live"
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
+    if owned.path.exists():
+        assert journey._marker_ok(owned), "fixture root identity changed"
+        shutil.rmtree(owned.path)
+    assert not owned.path.exists()
+
+
+def _interrupt_receipt_fixture(
+    tmp_path, monkeypatch, *, phase, interrupt, unsettled=False,
+    reap_interrupt=False, pid_interrupt=False, format_interrupt=False, cli=False, capsys=None,
+):
+    git_dir = make_unrelated_repo(tmp_path / "repo")
+    owned = journey.create_owned_root()
+    real_popen = subprocess.Popen
+    real_reap = journey._reap_owned_group
+    real_group_gone = journey._group_gone
+    real_run = journey.run_readiness
+    handles = []
+    calls = []
+    selected = False
+    fault_active = False
+    target_handle = None
+    target_index = None
+    escaped = None
+    receipt = None
+    original_environment = dict(os.environ)
+    payload = "test-only-interruption-value-must-not-be-logged"
+
+    def boom(*_args, **_kwargs):
+        raise interrupt(payload)
+
+    class InterruptFirstPid:
+        def __init__(self, proc):
+            self.proc = proc
+            self.fired = False
+
+        @property
+        def pid(self):
+            if not self.fired:
+                self.fired = True
+                boom()
+            return self.proc.pid
+
+        def __getattr__(self, name):
+            return getattr(self.proc, name)
+
+    def observe_popen(*args, **kwargs):
+        nonlocal target_handle
+        proc = real_popen(*args, **kwargs)
+        handles.append(proc)
+        if fault_active:
+            target_handle = proc
+            if pid_interrupt:
+                return InterruptFirstPid(proc)
+        return proc
+
+    def launch(argv, **kwargs):
+        nonlocal selected, fault_active, target_index
+        request = kwargs.get("stdin_bytes")
+        operation = json.loads(request).get("op") if request else "admit"
+        calls.append(operation)
+        if operation == phase and not selected:
+            selected = True
+            target_index = len(calls) - 1
+            fault_active = True
+            try:
+                with monkeypatch.context() as fault:
+                    if reap_interrupt:
+                        fault.setattr(journey, "_reap_owned_group", boom)
+                    elif unsettled:
+                        fault.setattr(journey, "_reap_owned_group", lambda *_: (False, -1))
+                    if format_interrupt:
+                        fault.setattr(journey, "redact", boom)
+                    elif not pid_interrupt and not reap_interrupt:
+                        fault.setattr(journey.select, "select", boom)
+                    return journey.default_spawn(
+                        [
+                            sys.executable, "-I", "-c",
+                            "print('fixture-output')\n" if format_interrupt else "import time\ntime.sleep(30)\n",
+                        ],
+                        env=kwargs["env"], cwd=kwargs.get("cwd"),
+                        timeout=5, budget=kwargs.get("budget"),
+                        capture_fault="read" if reap_interrupt else None,
+                    )
+            finally:
+                fault_active = False
+        return journey.default_spawn(argv, **kwargs)
+
+    try:
+        with monkeypatch.context() as context:
+            context.setattr(journey.subprocess, "Popen", observe_popen)
+            try:
+                if cli:
+                    assert capsys is not None
+
+                    def run_from_main(**kwargs):
+                        return real_run(**kwargs, spawn=launch, allocate_root=lambda: owned)
+
+                    context.setattr(journey, "run_readiness", run_from_main)
+                    capsys.readouterr()
+                    code = journey.main(["readiness", "--object-store", str(git_dir)])
+                    emitted = capsys.readouterr().out
+                    receipt = json.loads(emitted)
+                    assert code == 0
+                else:
+                    receipt = real_run(
+                        object_store=git_dir, spawn=launch, allocate_root=lambda: owned,
+                    )
+            except BaseException as exc:
+                escaped = exc
+        if receipt is not None:
+            assert journey.receipt_problems(receipt) == []
+            assert payload not in json.dumps(receipt)
+            assert receipt["status"] == "READINESS_BLOCKED"
+            assert receipt["execution"]["state"] == "NOT_RUN"
+            assert receipt["execution"]["spawned"] is False
+            assert receipt["cleanup"]["custody"]["kill_authority"] is False
+            assert target_handle is not None
+            original_row = next(
+                row for row in receipt["commands"] if row.get("pid") == target_handle.pid
+            )
+            assert original_row["pgid"] == target_handle.pid
+            assert original_row["capture_refusal"] == "interrupted_" + interrupt.__name__
+            uncertainty = unsettled or reap_interrupt
+            assert original_row["uncertain"] is uncertainty
+            assert original_row["settled"] is not uncertainty
+            if uncertainty:
+                assert calls[target_index + 1:] == []
+                assert receipt["cleanup"]["owned_root"] == "UNKNOWN"
+                assert receipt["limits"]["budget"]["settlement"] == "uncertain"
+                assert owned.path.exists()
+                assert target_handle.poll() is None
+                if phase != "remove":
+                    assert all(receipt["hashes"][key] is None for key in journey.MANIFEST_KEYS)
+            elif phase != "remove":
+                assert calls[target_index + 1:] == ["remove"]
+                assert receipt["cleanup"]["owned_root"] == "REMOVED"
+                assert receipt["cleanup"]["custody"]["settled"] is True
+                assert len(receipt["commands"]) >= 2
+                assert receipt["commands"][-1]["pid"] != target_handle.pid
+            else:
+                assert calls[target_index + 1:] == []
+                assert receipt["cleanup"]["owned_root"] == "UNKNOWN"
+                assert owned.path.exists()
+    finally:
+        os.environ.clear()
+        os.environ.update(original_environment)
+        _finish_owned_receipt_fixture(owned, handles, real_reap, real_group_gone)
+    assert selected, "the intended production phase was never exercised"
+    assert escaped is None, type(escaped).__name__
+    assert receipt is not None
+    return receipt
+
+
+@pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("phase", ["admit", "manifest", "remove"])
+@pytest.mark.parametrize("unsettled", [False, True])
+def test_post_spawn_interrupt_keeps_original_receipt(
+    tmp_path, monkeypatch, interrupt, phase, unsettled,
+):
+    _interrupt_receipt_fixture(
+        tmp_path, monkeypatch, phase=phase, interrupt=interrupt, unsettled=unsettled,
+    )
+
+
+@pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit])
+def test_interrupt_immediately_after_popen_keeps_original_receipt(tmp_path, monkeypatch, interrupt):
+    _interrupt_receipt_fixture(
+        tmp_path, monkeypatch, phase="admit", interrupt=interrupt, pid_interrupt=True,
+    )
+
+
+@pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit])
+def test_interrupted_reaper_returns_uncertain_receipt_without_retry(tmp_path, monkeypatch, interrupt):
+    _interrupt_receipt_fixture(
+        tmp_path, monkeypatch, phase="admit", interrupt=interrupt, reap_interrupt=True,
+    )
+
+
+@pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit])
+def test_post_settlement_formatting_interrupt_preserves_known_child(tmp_path, monkeypatch, interrupt):
+    _interrupt_receipt_fixture(
+        tmp_path, monkeypatch, phase="admit", interrupt=interrupt, format_interrupt=True,
+    )
+
+
+@pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit])
+def test_cli_interrupt_emits_finite_original_child_receipt(tmp_path, monkeypatch, capsys, interrupt):
+    _interrupt_receipt_fixture(
+        tmp_path, monkeypatch, phase="manifest", interrupt=interrupt, cli=True, capsys=capsys,
+    )
+
+
+@pytest.mark.parametrize("failure", ["missing_executable", "missing_cwd"])
+def test_native_precreation_failure_is_not_an_uncertain_child(tmp_path, monkeypatch, failure):
+    git_dir = make_unrelated_repo(tmp_path / "repo")
+    owned = journey.create_owned_root()
+    real_popen = subprocess.Popen
+    real_reap = journey._reap_owned_group
+    real_group_gone = journey._group_gone
+    handles = []
+    attempts = []
+
+    def native_failure_once(argv, **kwargs):
+        attempts.append(tuple(argv))
+        if len(attempts) == 1:
+            if failure == "missing_executable":
+                argv = [str(owned.path / "missing-executable"), *argv[1:]]
+            else:
+                kwargs["cwd"] = str(owned.path / "missing-directory")
+        proc = real_popen(argv, **kwargs)
+        handles.append(proc)
+        return proc
+
+    try:
+        with monkeypatch.context() as context:
+            context.setattr(journey.subprocess, "Popen", native_failure_once)
+            receipt = journey.run_readiness(object_store=git_dir, allocate_root=lambda: owned)
+        assert receipt["source"]["reason"] == "native_spawn_not_started"
+        assert receipt["cleanup"]["owned_root"] == "REMOVED"
+        assert receipt["limits"]["budget"]["settlement"] == "settled"
+        assert len(attempts) == 2 and len(handles) == 1
+        assert len(receipt["commands"]) == 2
+        first = receipt["commands"][0]
+        assert first["capture_refusal"] == "native_spawn_not_started"
+        assert first["pid"] is None and first["pgid"] is None
+        assert first["settled"] is True and first["uncertain"] is False
+        assert receipt["toolchain"]["git"]["state"] == "NOT_OBSERVED"
+        assert journey.receipt_problems(receipt) == []
+    finally:
+        _finish_owned_receipt_fixture(owned, handles, real_reap, real_group_gone)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ["native_exception", "native_record", "keyboard_interrupt", "system_exit", "malformed", "malformed_record", "oserror"],
+)
+def test_custom_spawn_cannot_attest_native_absence(tmp_path, monkeypatch, failure):
+    del monkeypatch
+    git_dir = make_unrelated_repo(tmp_path / "repo")
+    owned = journey.create_owned_root()
+    real_reap = journey._reap_owned_group
+    real_group_gone = journey._group_gone
+    handles = []
+    calls = []
+    receipt = None
+    escaped = None
+
+    def ambiguous(argv, **kwargs):
+        calls.append(tuple(argv))
+        assert len(calls) == 1, "continued after an ambiguous custom callback"
+        proc = subprocess.Popen(
+            [sys.executable, "-I", "-c", "import time\ntime.sleep(30)\n"],
+            env=kwargs["env"], cwd=kwargs.get("cwd"), start_new_session=True,
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        handles.append(proc)
+        if failure == "native_exception":
+            raise journey._NativeSpawnNotStarted("caller-constructible-is-not-proof")
+        if failure == "native_record":
+            return journey.CommandRecord(
+                tuple(argv), -1, "", "", False, False,
+                capture_refusal="native_spawn_not_started",
+            )
+        if failure == "keyboard_interrupt":
+            raise KeyboardInterrupt
+        if failure == "system_exit":
+            raise SystemExit("test-only-not-started-claim")
+        if failure == "malformed":
+            return object()
+        if failure == "malformed_record":
+            return journey.CommandRecord(
+                tuple(argv), 0, "", "", False, False, capture_refusal=[],
+            )
+        raise OSError("custom callback did start a child")
+
+    try:
+        try:
+            receipt = journey.run_readiness(
+                object_store=git_dir, spawn=ambiguous, allocate_root=lambda: owned,
+            )
+        except BaseException as exc:
+            escaped = exc
+        assert escaped is None, type(escaped).__name__
+        assert len(calls) == 1 and len(handles) == 1
+        assert receipt["cleanup"]["owned_root"] == "UNKNOWN"
+        assert receipt["cleanup"]["custody"]["kill_authority"] is False
+        assert receipt["limits"]["budget"]["settlement"] == "uncertain"
+        assert all(receipt["hashes"][key] is None for key in journey.MANIFEST_KEYS)
+        assert receipt["commands"][0]["uncertain"] is True
+        assert receipt["commands"][0]["settled"] is False
+        assert receipt["commands"][0]["pid"] is None
+        assert owned.path.exists() and handles[0].poll() is None
+        assert journey.receipt_problems(receipt) == []
+    finally:
+        _finish_owned_receipt_fixture(owned, handles, real_reap, real_group_gone)
+
+
+def test_wrong_pin_preserves_observed_git_without_inventing_other_capabilities(tmp_path):
+    git_dir = make_unrelated_repo(tmp_path / "repo")
+    receipt = journey.run_readiness(object_store=git_dir)
+    assert receipt["source"]["reason"] == "pin_not_present"
+    assert receipt["toolchain"]["git"] == {
+        "path": journey.GIT, "version": None, "state": "PRESENT_UNMEASURED",
+    }
+    assert receipt["toolchain"]["node"]["state"] == "NOT_OBSERVED"
+    assert receipt["toolchain"]["pnpm"]["state"] == "NOT_OBSERVED"
+    assert receipt["daemon"]["reason"] == "daemon_not_observed"
+    assert receipt["daemon"]["socket_present"] is None
+    assert receipt["cleanup"]["owned_root"] == "REMOVED"
+    assert journey.receipt_problems(receipt) == []
+
+
+def _capability_receipt_fixture(tmp_path, monkeypatch, *, versions, inaccessible=False):
+    """Synthetic capability data through the real runner; no tool/provider execution."""
+    git_dir = make_unrelated_repo(tmp_path / "repo")
+    owned = journey.create_owned_root()
+    real_popen = subprocess.Popen
+    real_reap = journey._reap_owned_group
+    real_group_gone = journey._group_gone
+    handles = []
+    calls = []
+    executables = {journey.GIT, journey.NODE_CANDIDATES[0], journey.PNPM_CANDIDATES[0]}
+    real_lstat = Path.lstat
+    real_stat = Path.stat
+    sockets = {"/var/run/docker.sock", "/run/docker.sock"}
+    capability_paths = {journey.GIT, journey.DOCKER, *journey.NODE_CANDIDATES, *journey.PNPM_CANDIDATES}
+    fixture_executable = tmp_path / "fixture-executable"
+    fixture_executable.write_text("fixture only\n")
+    fixture_executable.chmod(0o700)
+    executable_stat = real_lstat(fixture_executable)
+
+    def exact(path):
+        if inaccessible:
+            raise PermissionError("injected capability observation failure")
+        return path in executables
+
+    def lstat(path, *args, **kwargs):
+        if str(path) in capability_paths:
+            if inaccessible:
+                raise PermissionError("injected capability observation failure")
+            if str(path) in executables:
+                return executable_stat
+            raise FileNotFoundError(str(path))
+        if str(path) in sockets:
+            if inaccessible:
+                raise PermissionError("injected socket observation failure")
+            raise FileNotFoundError(str(path))
+        return real_lstat(path, *args, **kwargs)
+
+    def stat_path(path, *args, **kwargs):
+        if str(path) in capability_paths:
+            if inaccessible:
+                raise PermissionError("injected capability observation failure")
+            if str(path) in executables:
+                return executable_stat
+            raise FileNotFoundError(str(path))
+        if str(path) in sockets:
+            if inaccessible:
+                raise PermissionError("injected socket observation failure")
+            raise FileNotFoundError(str(path))
+        return real_stat(path, *args, **kwargs)
+
+    def observe_popen(*args, **kwargs):
+        proc = real_popen(*args, **kwargs)
+        handles.append(proc)
+        return proc
+
+    def launch(argv, **kwargs):
+        calls.append(tuple(argv))
+        if argv[0] in executables and list(argv[1:]) == ["--version"]:
+            code, text = versions[argv[0]]
+            return journey.CommandRecord(tuple(argv), code, text, "", False, False)
+        assert argv[0] != journey.DOCKER
+        return journey.default_spawn(argv, **kwargs)
+
+    try:
+        with monkeypatch.context() as context:
+            context.setattr(journey, "admit_source", lambda *_a, **_k: {"__identities__": b"{}"})
+            context.setattr(journey, "derive_runner", lambda *_a, **_k: {})
+            context.setattr(journey, "_exact_executable", exact)
+            context.setattr(Path, "lstat", lstat)
+            context.setattr(Path, "stat", stat_path)
+            context.setattr(journey.subprocess, "Popen", observe_popen)
+            receipt = journey.run_readiness(
+                object_store=git_dir, spawn=launch, allocate_root=lambda: owned,
+            )
+        assert receipt["status"] == "READINESS_BLOCKED"
+        assert receipt["daemon"]["state"] == "UNQUALIFIED"
+        assert receipt["daemon"]["admitted_daemon_ids"] == []
+        assert receipt["toolchain"]["adopted_for_execution"] is False
+        assert receipt["execution"]["state"] == "NOT_RUN"
+        assert receipt["execution"]["spawned"] is False
+        assert journey.receipt_problems(receipt) == []
+        return receipt, calls
+    finally:
+        _finish_owned_receipt_fixture(owned, handles, real_reap, real_group_gone)
+
+
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_failed_version_observations_remain_unreadable(tmp_path, monkeypatch, returncode):
+    versions = {
+        path: (returncode, "")
+        for path in (journey.GIT, journey.NODE_CANDIDATES[0], journey.PNPM_CANDIDATES[0])
+    }
+    receipt, calls = _capability_receipt_fixture(tmp_path, monkeypatch, versions=versions)
+    for name, path in (
+        ("git", journey.GIT), ("node", journey.NODE_CANDIDATES[0]), ("pnpm", journey.PNPM_CANDIDATES[0]),
+    ):
+        assert receipt["toolchain"][name]["state"] == "UNREADABLE"
+        assert receipt["toolchain"][name]["path"] == path
+        assert receipt["toolchain"][name]["version"] is None
+        assert (path, "--version") in calls
+    assert receipt["cleanup"]["owned_root"] == "REMOVED"
+
+
+def test_unreadable_capability_metadata_does_not_claim_absence(tmp_path, monkeypatch):
+    receipt, calls = _capability_receipt_fixture(
+        tmp_path, monkeypatch, versions={}, inaccessible=True,
+    )
+    assert receipt["daemon"]["reason"] == "docker_binary_unreadable"
+    assert receipt["daemon"]["socket_present"] is None
+    assert all(receipt["toolchain"][name]["state"] == "UNREADABLE" for name in ("git", "node", "pnpm"))
+    assert all("--version" not in argv for argv in calls)
+    assert receipt["cleanup"]["owned_root"] == "REMOVED"
+
+
+@pytest.mark.parametrize("pnpm_version,expected", [("9.15.0", "EXACT"), ("9.16.0", "MISMATCH")])
+def test_successful_version_observations_keep_original_gates(tmp_path, monkeypatch, pnpm_version, expected):
+    versions = {
+        journey.GIT: (0, "git version 2.43.0\n"),
+        journey.NODE_CANDIDATES[0]: (0, "v22.22.2\n"),
+        journey.PNPM_CANDIDATES[0]: (0, pnpm_version + "\n"),
+    }
+    receipt, _ = _capability_receipt_fixture(tmp_path, monkeypatch, versions=versions)
+    assert receipt["toolchain"]["git"]["state"] == "OBSERVED"
+    assert receipt["toolchain"]["node"]["state"] == "OBSERVED"
+    assert receipt["toolchain"]["node"]["satisfies_donor_engine"] is True
+    assert receipt["toolchain"]["pnpm"]["state"] == expected
+    assert receipt["toolchain"]["pnpm"]["version"] == pnpm_version
+    assert receipt["cleanup"]["owned_root"] == "REMOVED"
+
+
+@pytest.mark.parametrize("failure", [OSError("fixture"), journey.Refusal("fixture")])
+def test_cli_early_fallback_keeps_capabilities_unobserved(monkeypatch, capsys, failure):
+    def refused(**_kwargs):
+        raise failure
+
+    monkeypatch.setattr(journey, "run_readiness", refused)
+    assert journey.main(["readiness"]) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["daemon"]["reason"] == "daemon_not_observed"
+    assert receipt["daemon"]["socket_present"] is None
+    assert all(receipt["toolchain"][name]["state"] == "NOT_OBSERVED" for name in ("git", "node", "pnpm"))
+    assert journey.receipt_problems(receipt) == []

@@ -76,6 +76,28 @@ export interface LaunchBindingConfig {
   };
   readonly projects: readonly LaunchChoice[];
   readonly profiles: readonly LaunchChoice[];
+  readonly frontierModels?: readonly LaunchChoice[];
+}
+
+export interface LaunchEnrollmentConfig {
+  readonly v: 2;
+  readonly defaultWorkstream: string;
+  readonly bindings: readonly (LaunchBindingConfig & { readonly label: string })[];
+}
+export type LaunchConfiguration = LaunchBindingConfig | LaunchEnrollmentConfig;
+
+/** Resolve one exact enrollment; only an omitted legacy selection uses the default. */
+export function resolveLaunchBinding(
+  config: LaunchConfiguration | null,
+  workstreamRef?: string,
+): LaunchBindingConfig | null {
+  if (config === null) return null;
+  if (workstreamRef !== undefined && (typeof workstreamRef !== "string" || !validWorkstream(workstreamRef))) return null;
+  if ("bindings" in config) {
+    return config.bindings.find(binding =>
+      binding.workstream === (workstreamRef ?? config.defaultWorkstream)) ?? null;
+  }
+  return workstreamRef === undefined || workstreamRef === config.workstream ? config : null;
 }
 
 export interface ExecutiveLaunchViewSource {
@@ -92,7 +114,7 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     return !!owner && this.directJobs.has(JSON.stringify([owner.principalScope,owner.generation,selection.workRef,selection.rootJobId]));
   }
   constructor(
-    private readonly config: LaunchBindingConfig,
+    private readonly config: LaunchConfiguration | null,
     private readonly client: ExecutiveToolClient,
     private readonly owner: () => OwnerContext | null,
   ) {}
@@ -106,11 +128,12 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     if (!ctx) return null;
     const payload = this._payloadFromForm(form, ctx.principalScope);
     if (!payload) return null;
-    return { kind: "launch", targetKey: this.config.workstream, payload };
+    return { kind: "launch", targetKey: payload.workstream as string, payload };
   }
 
   prepare(intent: CommandIntent): OperationPointer {
     if (intent.kind !== "launch") throw new Error("INVALID_KIND");
+    if (this.config === null) throw new Error(COMMAND_ROUTE_UNAVAILABLE);
     const ctx = this.owner();
     if (!ctx) throw new Error("INVALID_PAYLOAD");
     const form = formFromPayload(intent.payload);
@@ -138,6 +161,8 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     intent: CommandIntent,
     signal: AbortSignal,
   ): Promise<EffectReceipt> {
+    // A removed catalog closes new legacy submits; original status reads remain available.
+    if (this.config === null) return this._receipt(pointer, "refused", COMMAND_ROUTE_UNAVAILABLE);
     if (pointer.operationKey !== intent.payload.operation_key) {
       return this._receipt(pointer, "refused", "MALFORMED_POINTER");
     }
@@ -194,21 +219,30 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     form: LaunchForm,
     principalScope: string,
   ): Record<string, unknown> | null {
-    if (!validGoal(form.goal)) return null;
+    const config = resolveLaunchBinding(this.config, form.workstreamRef);
+    if (!config || !validGoal(form.goal)) return null;
     if (!DEPARTMENT_RE.test(form.projectRef)) return null;
-    if (!listedChoice(this.config.projects, form.projectRef)) return null;
+    if (!listedChoice(config.projects, form.projectRef)) return null;
     if (!PROFILES.has(form.profileRef)) return null;
-    if (!listedChoice(this.config.profiles, form.profileRef)) return null;
-    if (!validWorkstream(this.config.workstream)) return null;
-    if (!validPriority(this.config.priority)) return null;
+    if (!listedChoice(config.profiles, form.profileRef)) return null;
+    if (form.profileRef === "native_research_only") {
+      if (form.frontierModelAlias !== undefined) return null;
+    } else if (config.frontierModels !== undefined) {
+      if (typeof form.frontierModelAlias !== "string" ||
+          !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(form.frontierModelAlias) ||
+          /[^a-z0-9._-]/.test(form.frontierModelAlias) ||
+          !listedChoice(config.frontierModels, form.frontierModelAlias)) return null;
+    } else if (form.frontierModelAlias !== undefined) return null;
+    if (!validWorkstream(config.workstream)) return null;
+    if (!validPriority(config.priority)) return null;
 
-    const writePaths = this.config.allowedWritePaths;
-    const validation = this.config.validation;
+    const writePaths = config.allowedWritePaths;
+    const validation = config.validation;
     const writeCount = writePaths?.length ?? 0;
     const validationCount = validationEntries(validation);
     if (form.profileRef === "research_only" || form.profileRef === "native_research_only") {
       if (writeCount > 0 || validationCount > 0) return null;
-      if (form.profileRef === "native_research_only" && this.config.attemptLimit !== 1) return null;
+      if (form.profileRef === "native_research_only" && config.attemptLimit !== 1) return null;
     } else {
       if (writeCount < 1 || validationCount < 1) return null;
       if (!writePaths || !validWritePaths(writePaths)) return null;
@@ -217,27 +251,29 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     const payload: Record<string, unknown> = {
       operation_key: operationKeyForLaunch({
         principalScope,
-        workstream: this.config.workstream,
+        workstream: config.workstream,
         department: form.projectRef,
         execution_profile: form.profileRef,
+        ...(form.frontierModelAlias !== undefined ? { frontier_model_alias: form.frontierModelAlias } : {}),
         objective: form.goal,
-        priority: this.config.priority,
+        priority: config.priority,
         ...(writePaths !== undefined ? { allowed_write_paths: writePaths } : {}),
         ...(validation !== undefined ? { validation } : {}),
-        ...(this.config.attemptLimit !== undefined
-          ? { attempt_limit: this.config.attemptLimit }
+        ...(config.attemptLimit !== undefined
+          ? { attempt_limit: config.attemptLimit }
           : {}),
       }),
       objective: form.goal,
       department: form.projectRef,
-      priority: this.config.priority,
+      priority: config.priority,
       execution_profile: form.profileRef,
-      workstream: this.config.workstream,
+      workstream: config.workstream,
     };
+    if (form.frontierModelAlias !== undefined) payload.frontier_model_alias = form.frontierModelAlias;
     if (writePaths !== undefined) payload.allowed_write_paths = [...writePaths];
     if (validation !== undefined) payload.validation = copyValidation(validation);
-    if (this.config.attemptLimit !== undefined) {
-      payload.attempt_limit = this.config.attemptLimit;
+    if (config.attemptLimit !== undefined) {
+      payload.attempt_limit = config.attemptLimit;
     }
     return payload;
   }
@@ -314,32 +350,8 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
       }
       data = envelope.data;
     }
-    if (!isPlainObject(data)) {
-      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
-    }
-    if (typeof data.intent_id !== "string") {
-      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
-    }
-    if (data.intent_id !== intentIdForOperationKey(pointer.operationKey)) {
-      return this._receipt(pointer, "unknown", "RECEIPT_MISMATCH");
-    }
-    if (!validPointerTargetKey(pointer.targetKey)) {
-      return this._receipt(pointer, "unknown", "MALFORMED_POINTER");
-    }
-    const schemaOk =
-      typeof data.schema === "string" && RECEIPT_SCHEMAS.has(data.schema);
-    if (!schemaOk || data.accepted !== true || data.dispatched !== false) {
-      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
-    }
-    if (data.schema === DIRECT_RECEIPT_SCHEMA && !validDirectReceipt(data, pointer.targetKey)) {
-      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
-    }
-    if (typeof data.job_id !== "string") {
-      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
-    }
-    if (!JOB_RE.test(data.job_id)) {
-      return this._receipt(pointer, "unknown", "UNKNOWN_RECEIPT");
-    }
+    const receipt = decodeExecutiveLaunchReceipt(pointer, data);
+    if (receipt.disposition === "accepted" && isPlainObject(data)) {
     if(data.schema===DIRECT_RECEIPT_SCHEMA) {
       const owner=this.owner();
       if(owner) {
@@ -347,10 +359,8 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
         this.directJobs.add(JSON.stringify([owner.principalScope,owner.generation,pointer.targetKey,data.job_id]));
       }
     }
-    return this._receipt(pointer, "accepted", "ACCEPTED", {
-      workRef: pointer.targetKey,
-      rootJobId: data.job_id,
-    });
+    }
+    return receipt;
   }
 
   /**
@@ -433,7 +443,7 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
 }
 
 export function createExecutiveLaunchBinding(
-  config: LaunchBindingConfig,
+  config: LaunchConfiguration | null,
   client: ExecutiveToolClient,
   viewSource: ExecutiveLaunchViewSource,
   direct?: { port: FiniteCommandPort; capability: Omit<NonNullable<OrchestratorCommandBinding["directNative"]>, "isDirectSelection"> },
@@ -444,16 +454,26 @@ export function createExecutiveLaunchBinding(
   return {
     port: direct ? {
       context: () => port.context(),
-      prepare: (intent) => (intent.kind === "consume" ? direct.port : port).prepare(intent),
-      submit: (pointer, intent, signal) => (pointer.kind === "consume" ? direct.port : port).submit(pointer, intent, signal),
-      readOperation: (pointer, signal) => (pointer.kind === "consume" ? direct.port : port).readOperation(pointer, signal),
+      prepare: (intent) => ((intent.kind === "consume" || intent.kind === "stop") ? direct.port : port).prepare(intent),
+      submit: (pointer, intent, signal) => ((pointer.kind === "consume" || pointer.kind === "stop") ? direct.port : port).submit(pointer, intent, signal),
+      readOperation: (pointer, signal) => ((pointer.kind === "consume" || pointer.kind === "stop") ? direct.port : port).readOperation(pointer, signal),
     } : port,
     store: viewSource.store,
     getView(): OrchestratorCommandView {
       const session = viewSource.getSession();
+      const selected = resolveLaunchBinding(config);
       return {
-        projects: config.projects,
-        profiles: config.profiles,
+        projects: selected?.projects ?? [],
+        profiles: selected?.profiles ?? [],
+        ...(selected?.frontierModels !== undefined ? { frontierModels: selected.frontierModels } : {}),
+        ...(config && "bindings" in config ? {
+          defaultWorkstream: config.defaultWorkstream,
+          workstreams: config.bindings.map(binding => ({
+            ref: binding.workstream, label: binding.label,
+            projects: binding.projects, profiles: binding.profiles,
+            ...(binding.frontierModels !== undefined ? { frontierModels: binding.frontierModels } : {}),
+          })),
+        } : {}),
         session: session ? presentSession(session) : null,
       };
     },
@@ -483,13 +503,17 @@ function presentSession(
 }
 
 function formFromPayload(payload: Readonly<Record<string, unknown>>): LaunchForm | null {
+  if (typeof payload.workstream !== "string") return null;
   if (typeof payload.objective !== "string") return null;
   if (typeof payload.department !== "string") return null;
   if (typeof payload.execution_profile !== "string") return null;
+  if (payload.frontier_model_alias !== undefined && typeof payload.frontier_model_alias !== "string") return null;
   return {
     goal: payload.objective,
+    workstreamRef: payload.workstream,
     projectRef: payload.department,
     profileRef: payload.execution_profile,
+    ...(typeof payload.frontier_model_alias === "string" ? { frontierModelAlias: payload.frontier_model_alias } : {}),
   };
 }
 
@@ -642,4 +666,44 @@ function isJsonValue(value: unknown): boolean {
 
 function sameJson(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** Canonical accepted-root decoder shared by authenticated launch transports. */
+export function decodeExecutiveLaunchReceipt(pointer: OperationPointer, data: unknown): EffectReceipt {
+    if (!isPlainObject(data)) {
+      return launchReceipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (typeof data.intent_id !== "string") {
+      return launchReceipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (data.intent_id !== intentIdForOperationKey(pointer.operationKey)) {
+      return launchReceipt(pointer, "unknown", "RECEIPT_MISMATCH");
+    }
+    if (!validPointerTargetKey(pointer.targetKey)) {
+      return launchReceipt(pointer, "unknown", "MALFORMED_POINTER");
+    }
+    const schemaOk =
+      typeof data.schema === "string" && RECEIPT_SCHEMAS.has(data.schema);
+    if (!schemaOk || data.accepted !== true || data.dispatched !== false) {
+      return launchReceipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (data.schema === DIRECT_RECEIPT_SCHEMA && !validDirectReceipt(data, pointer.targetKey)) {
+      return launchReceipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (typeof data.job_id !== "string") {
+      return launchReceipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (!JOB_RE.test(data.job_id)) {
+      return launchReceipt(pointer, "unknown", "UNKNOWN_RECEIPT");
+    }
+    return launchReceipt(pointer, "accepted", "ACCEPTED", {
+      workRef: pointer.targetKey,
+      rootJobId: data.job_id,
+    });
+
+}
+function launchReceipt(pointer: OperationPointer, disposition: EffectReceipt["disposition"], reason: string,
+  missionSelection?: {workRef: string; rootJobId: string}): EffectReceipt {
+  return {operationKey:pointer.operationKey,kind:"launch",targetKey:pointer.targetKey,disposition,reason,
+    ...(missionSelection ? {missionSelection} : {})};
 }
