@@ -60,10 +60,12 @@ jobs:
   # Ordinary PRs get rapid, bounded feedback while the exact merge-group
   # candidate still executes *all* canonical discovery-first pytest shards.
   # The stable protected status context is still the final job named 'test'.
+  # Heavy work must stop when this same-PR run is superseded/cancelled.
+  # Keep the small final test gate on always() so cancellation cannot look green.
   pr_fast:
     name: PR fast checks
     needs: [pr_scope]
-    if: ${{ always() && github.event_name == 'pull_request' && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     permissions:
@@ -118,7 +120,7 @@ jobs:
     # All critical/unqualified PRs still run full pytest. Ordinary PRs use
     # pr_fast; *every* merge-group and master push runs all six canonical
     # shards (with the existing exact merge-group proof-reuse logic on push).
-    if: ${{ always() && (github.event_name != 'pull_request' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}
     # Only the test-shard job needs read-only workflow-run evidence.
     permissions:
       contents: read
@@ -134,10 +136,27 @@ jobs:
       matrix:
         index: [0, 1, 2, 3, 4, 5]
     steps:
-      - uses: actions/checkout@v4
+      # The immutable corpus anchor was squash-merged; branch history alone
+      # does not acquire its original commit. Reuse the existing checkout owner
+      # without executing anchor code, then restore the triggering event source.
+      - name: Acquire immutable corpus fixture anchor
+        uses: actions/checkout@v4
+        with:
+          ref: edd30b4686d3aaf358b4ca6ebd9485b04d15751d
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout event source
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify event source and immutable fixture anchor
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git cat-file -e 'edd30b4686d3aaf358b4ca6ebd9485b04d15751d^{commit}'
 
       # `vendor/macro` is a tracked developer symlink to `vendor/macro_src`.
       # A clean hosted runner lacks the local sibling checkout; pin exactly

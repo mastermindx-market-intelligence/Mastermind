@@ -457,7 +457,8 @@ def test_released_paper_prepare_gate_cannot_be_omitted_or_weakened(mutation):
 def test_primary_checkout_never_persists_expanded_proof_credentials():
     import yaml
     workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
-    primary = workflow["jobs"]["pytest_shards"]["steps"][0]
+    primary = workflow["jobs"]["pytest_shards"]["steps"][1]
+    assert primary["name"] == "Checkout event source"
     assert primary["uses"] == "actions/checkout@v4"
     assert primary["with"].get("persist-credentials") is False
     assert primary["with"].get("fetch-depth") == 0
@@ -469,7 +470,7 @@ def test_primary_checkout_credential_boundary_is_load_bearing(mutation):
     import yaml
     workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
     steps = workflow["jobs"]["pytest_shards"]["steps"]
-    primary = steps[0]
+    primary = steps[1]
     primary["with"]["persist-credentials"] = False
     fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
     if mutation == "missing":
@@ -488,6 +489,58 @@ def test_primary_checkout_credential_boundary_is_load_bearing(mutation):
         primary["with"] = []
     else:
         steps.append(dict(primary))
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
+@pytest.mark.parametrize("mutation", [
+    "wrong-anchor", "missing-anchor", "missing-event", "reversed", "interposed-code",
+    "anchor-credentials", "anchor-conditional", "anchor-path", "anchor-depth-type",
+    "event-ref", "event-continue", "missing-proof", "wrong-event-proof", "ignored-proof",
+    "explicit-root-checkout", "other-root-checkout", "fixture-root-path", "fixture-credentials",
+])
+def test_fixture_anchor_acquisition_preserves_event_source_boundary(mutation):
+    import yaml
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    steps = workflow["jobs"]["pytest_shards"]["steps"]
+    if mutation == "wrong-anchor":
+        steps[0]["with"]["ref"] = "0" * 40
+    elif mutation == "missing-anchor":
+        steps.pop(0)
+    elif mutation == "missing-event":
+        steps.pop(1)
+    elif mutation == "reversed":
+        steps[0], steps[1] = steps[1], steps[0]
+    elif mutation == "interposed-code":
+        steps.insert(1, {"run": "python -m scripts.ci_parallel_shard"})
+    elif mutation == "anchor-credentials":
+        steps[0]["with"]["persist-credentials"] = True
+    elif mutation == "anchor-conditional":
+        steps[0]["if"] = "${{ false }}"
+    elif mutation == "anchor-path":
+        steps[0]["with"]["path"] = "other"
+    elif mutation == "anchor-depth-type":
+        steps[0]["with"]["fetch-depth"] = True
+    elif mutation == "event-ref":
+        steps[1]["with"]["ref"] = "master"
+    elif mutation == "event-continue":
+        steps[1]["continue-on-error"] = True
+    elif mutation == "missing-proof":
+        steps.pop(2)
+    elif mutation == "wrong-event-proof":
+        steps[2]["run"] = "git cat-file -e HEAD"
+    elif mutation in {"explicit-root-checkout", "other-root-checkout"}:
+        repository = ("mastermindx-market-intelligence/Mastermind"
+                      if mutation == "explicit-root-checkout" else "other/repository")
+        steps.append({"uses": "actions/checkout@v4", "with": {"repository": repository}})
+    elif mutation in {"fixture-root-path", "fixture-credentials"}:
+        fixture = next(step for step in steps if step.get("name") == "Checkout pinned Macro engine")
+        if mutation == "fixture-root-path":
+            fixture["with"]["path"] = "."
+        else:
+            fixture["with"]["persist-credentials"] = True
+    else:
+        steps[2]["continue-on-error"] = True
     with pytest.raises(cip.PolicyError):
         fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
 

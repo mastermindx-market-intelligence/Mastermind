@@ -16,18 +16,20 @@ import threading
 import time
 
 from .constants import HEALTH_SCHEMA, LOOPBACK_HOST, PINNED_UPSTREAM_SHA
+from .egress import ROLE_PROXY_HOST
 from .hermes_config import render_hermes_config
 from .errors import RuntimeRefusal
 from .gateway import Gateway, reserve_loopback_port
 from .memory import HighWaterLog, read_rss_kib
 from .profile import RuntimeProfile
 from .registry import assert_registered_tools_exact, extension_tools_for
-from .secrets import Secrets, child_env
+from .secrets import Secrets, child_env, assert_no_supervisor_notification_env
+from .role_status_publisher import PUBLICATION_INTERVAL_SECONDS, RoleStatusPublisher
 
 _UNSAFE = set(" \n\r\t\"'`$")
 
 
-def _backend_health_ready(port: int) -> bool:
+def _backend_health_ready(port: int, host: str = LOOPBACK_HOST) -> bool:
     """Check native Hermes health identity, not only a local HTTP status.
 
     Pinned Hermes /api/health includes ok and its booted Git commit. A
@@ -35,9 +37,10 @@ def _backend_health_ready(port: int) -> bool:
     must never be promoted to healthy, even if the child PID is still alive.
     No credential, redirect, public interface or model call is used.
     """
-    if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
+    if (isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535
+            or host not in (LOOPBACK_HOST, *ROLE_PROXY_HOST.values())):
         return False
-    conn = http.client.HTTPConnection(LOOPBACK_HOST, port, timeout=0.25)
+    conn = http.client.HTTPConnection(host, port, timeout=0.25)
     try:
         conn.request("GET", "/api/health")
         response = conn.getresponse()
@@ -69,18 +72,20 @@ def build_tools_argv(hermes_bin: Path, role: str) -> list[str]:
     return [_safe_path(hermes_bin), "-p", role, "tools", "list", "--platform", "cli"]
 
 
-def build_serve_argv(hermes_bin: Path, role: str, backend_port: int) -> list[str]:
+def build_serve_argv(hermes_bin: Path, role: str, backend_port: int, host: str = LOOPBACK_HOST) -> list[str]:
     if isinstance(backend_port, bool) or not isinstance(backend_port, int):
         raise RuntimeRefusal("INVALID_BACKEND_PORT")
     if not 1024 <= backend_port <= 65535:
         raise RuntimeRefusal("INVALID_BACKEND_PORT")
+    if host not in (LOOPBACK_HOST, ROLE_PROXY_HOST.get(role)):
+        raise RuntimeRefusal("NON_LOOPBACK_BIND_REFUSED")
     argv = [
         _safe_path(hermes_bin),
         "-p",
         role,
         "serve",
         "--host",
-        LOOPBACK_HOST,
+        host,
         "--port",
         str(backend_port),
         "--skip-build",
@@ -99,6 +104,7 @@ class ServiceRuntime:
         hermes_bin: Path,
         *,
         extra_child_env: dict[str, str] | None = None,
+        role_status_publisher: RoleStatusPublisher | None = None,
     ):
         self.profile = profile
         self.secrets = secrets
@@ -116,11 +122,15 @@ class ServiceRuntime:
         self._child: subprocess.Popen[bytes] | None = None
         self._thread: threading.Thread | None = None
         self.memory: HighWaterLog | None = None
+        self._role_status_publisher = role_status_publisher
+        self._next_role_status_publication = 0.0
 
     def start(self) -> None:
         # Check native BYOK/alias policy before *any* Hermes subprocess,
         # including the tools-list census. A failed preflight starts nothing.
         self._model_child_env()
+        if self._role_status_publisher is not None:
+            self._publish_role_status_if_due(time.monotonic())
         self._check_registry()
         self.profile.hermes_home.mkdir(parents=True, exist_ok=True)
         os.chmod(self.profile.hermes_home, 0o700)
@@ -179,7 +189,7 @@ class ServiceRuntime:
                 "child_pid": self.child_pid,
                 "memory_high_water_kib": 0 if self.memory is None else self.memory.high_water,
                 "loopback": True,
-                "gateway_host": LOOPBACK_HOST,
+                "gateway_host": self.profile.gateway_host,
                 "allowlist": sorted(self.profile.tool_allowlist),
                 "upstream_attested": False,
             }
@@ -241,6 +251,7 @@ class ServiceRuntime:
             # Never copy an ambient shell HTTPS_PROXY to the child.
             from .egress import native_egress_child_env
             env.update(native_egress_child_env(self.profile.role, self.secrets.values))
+        assert_no_supervisor_notification_env(env)
         return env
 
     def _expected_disabled_mcp(self) -> dict[str, tuple[str, ...]] | None:
@@ -346,6 +357,18 @@ class ServiceRuntime:
             self.child_pid = None
             self._backend_ready = False
 
+    def _publish_role_status_if_due(self, now: float) -> None:
+        # One due-time check in the incumbent loop, independent of the profile's
+        # 0.01–300 second memory cadence. No timer, thread or cached document.
+        if self._role_status_publisher is None or now < self._next_role_status_publication:
+            return
+        self._next_role_status_publication = now + PUBLICATION_INTERVAL_SECONDS
+        try:
+            self._role_status_publisher.publish()
+        except Exception:
+            # Optional status failure must not enter the child-failure path.
+            pass
+
     def _loop(self) -> None:
         assert self.memory is not None
         while not self._stop.is_set():
@@ -360,9 +383,9 @@ class ServiceRuntime:
                     self.failed = True
                     return
             self.child_starts += 1
-            port = self.profile.backend_port or reserve_loopback_port()
+            port = self.profile.backend_port or reserve_loopback_port(self.profile.gateway_host)
             try:
-                argv = build_serve_argv(self.hermes_bin, self.profile.role, port)
+                argv = build_serve_argv(self.hermes_bin, self.profile.role, port, self.profile.gateway_host)
             except RuntimeRefusal as exc:
                 self.refusal_code = exc.code
                 self.failed = True
@@ -388,7 +411,7 @@ class ServiceRuntime:
             next_memory_sample = 0.0
             poll_sec = min(0.25, self.profile.memory_sample_interval_sec)
             while not self._stop.is_set() and proc.poll() is None:
-                backend_ready = _backend_health_ready(port)
+                backend_ready = _backend_health_ready(port, self.profile.gateway_host)
                 with self._lock:
                     if self._child is proc:
                         self._backend_ready = backend_ready
@@ -398,6 +421,7 @@ class ServiceRuntime:
                     if rss is not None:
                         self.memory.record(proc.pid, rss)
                     next_memory_sample = now + self.profile.memory_sample_interval_sec
+                self._publish_role_status_if_due(now)
                 self._stop.wait(poll_sec)
             if self._stop.is_set():
                 _terminate(proc)

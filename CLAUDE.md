@@ -85,6 +85,30 @@ Use `docs/sol_skills/ACTIVE_EXECUTION.md` for the shared recovery procedure; thi
 runtime authority, required form, new watcher or extra human approval. Existing exact grants,
 source custody, effect reconciliation, review and release controls remain in force.
 
+### Standing authorization: saved credentials for assigned website access
+
+The Chairman authorizes an actively assigned Mastermind engineering/operations session to use
+**already-provisioned saved credentials** and existing authenticated browser sessions to log into
+the legitimate website/service required by that assignment. This includes browser/password-manager
+autofill and any macOS Keychain or other secure-store access that the current OS/tool permissions
+actually allow. **Do not request separate Chairman permission for each routine in-scope
+saved-password use or website login**; try the permitted route, then verify the resulting
+signed-in state. This is standing task-scoped consent, not permission to access arbitrary
+accounts.
+
+Verify the exact website origin, intended account, and relation to the current task before
+supplying a credential. Prefer autofill or another secret-preserving path; never write plaintext
+passwords, tokens, recovery codes, or cookies to transcripts, prompts, argv, logs, source, memory,
+or handoffs. Do not bulk-extract/export a vault, copy secrets to another host/account, or use
+unrelated personal accounts. A saved secret is not independent authority for account/security
+changes, spending, money movement, trading, production deployment, or other reserved actions.
+
+This instruction does not override OS/tool permissions, site controls, explicit access refusals,
+fresh user-consent requirements, passkey/Touch ID or other user-presence checks, MFA, or CAPTCHA.
+If a genuine human-only step remains, name that exact gate once and continue independent
+authorized work. Do not treat an ordinary login page as an administrative approval gate when a
+legitimate, permitted saved credential is already available.
+
 ### Session lifetime and acceptance scope
 
 A role is not a persistent conversation. ChatGPT Web sessions are ephemeral and may be
@@ -127,6 +151,9 @@ Within an assigned nonterminal job, the current session retains responsibility f
 - A dead or missing runtime/session is a reconciliation/succession problem for the existing canonical owner; it never grants this session automatic modifying authority.
 - A named "original administrator," publisher, reviewer, host owner, or ChatGPT conversation may identify provenance or the immutable effect/result carrier; it is not permanent staffing. Resolve exact operation/request identity, original authorized carrier, canonical pending result, live writer/lease, prior read/refusal and next lawful action. The currently assigned session owns this recovery triage, not a missing historical chat.
 - If an old operation reportedly exited successfully but its protected result is not canonically reconciled, do not infer PASS from rc0, a Slack report or a historical owner claim. Do not rerun the operation, trigger a second protected read, switch tools/accounts/credentials or activate a held service. An explicit safety/permission denial ends that action; preserve its original carrier and release hold, and advance genuinely independent authorized work.
+- A requested GitHub reviewer is metadata, not itself a mandatory approval. Check exact-head branch rules, CODEOWNERS and active release holds; a permission-limited read is UNKNOWN, not proof of a required approval or waiver. Never self-approve or self-merge.
+- A disabled Executive Control service with an unreconciled protected result is a real action-scoped admission hold, not evidence that an archived original chat owns the project. Do not restart or replay the denied result; advance disjoint permitted work.
+- Apply ACTIVE_EXECUTION's "Prove an owner gate before using it to stop" before naming another owner as the only next action. Give the exact target, original-carrier effects, live writer/lease, denied or permitted action and addressable next step.
 - `EXACT_HUMAN_GATE` requires a demonstrated unavailable human credential/control, its exact action and evidence that other useful independent lanes are exhausted. "Ask the original owner/chat" or a conceptual department is not that proof. If useful independent work exists, the mission remains `MORE_WORK_EXISTS`; save the accurate blocker in the existing canonical checkpoint, never in a new owner registry.
 <!-- MMX_RESPONSIBILITY_CONTINUITY_END -->
 
@@ -160,13 +187,34 @@ universal procedure owner. Read it before creating or relying on a temporary wat
   proves ACK, START, execution, or reusable capacity. Preserve those states separately until the
   accepted RuntimeBinding/Wake path proves them.
 
-### Session-owned review — local native child first
+### Session-owned review and ordinary release
 
-For review decisions first load [the session-local policy](docs/SESSION_LOCAL_REVIEW_POLICY.md) at the accepted protected pin. The current Claude/Codex/Web parent may self-check or use a genuinely distinct read-only **native reviewer child within this same session** with real START, immutable source and returned findings; no different top-level chat is required. The attended CEO-Web handoff waiver is an instruction-consumer policy; its adoption does not depend on the separate signed-machine host. Other execution surfaces retain their applicable review requirements. A source candidate or protected merge alone proves neither instruction installation nor host enrollment. A technical child is not authenticated non-author GitHub `APPROVED`; maintain real required approvals, CI, holds and no self-merge.
+Load [session-local review policy](docs/SESSION_LOCAL_REVIEW_POLICY.md) at the same
+protected pin. Ordinary reversible FAST/STANDARD changes use this session's self-check,
+affected tests and the normal protected controller/queue. No mandatory independent
+review, formal approval, outside chat or non-author release/arming operator arises from
+internal process. The assigned session may request automated release of its own qualified
+change. Preserve actual required CI, native GitHub/CODEOWNERS protections and specific holds.
 
-For a truly required independent external avenue load [the existing session routing procedure](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md), inspect actual admitted Fabric root/parent/effects and preserve the original carrier. On EFFECT_UNKNOWN, active review or explicit denial do not reroute through a Dot, account or provider. One actually eligible Dot may receive a source-bound Slack technical-review assignment; no fictional START or formal GitHub approval inferred from Slack. Existing Executive/GitHub authority remains controlling.
+Consequential native/automated changes mean the CRITICAL row in REVIEW_RISK_POLICY.md:
+auth/security/permissions, source authority, review/release automation, privileged CI, financial execution, irreversible data and exactly-once. These changes use one genuinely distinct read-only native/Fabric technical reviewer; consume its
+real exact-head result and adjudicate findings here. Review a repair's affected delta only.
+The existing attended CEO-Web all-tier self-review waiver remains; a CRITICAL label alone
+adds no reviewer handoff. No review-host enrollment or different top-level chat is needed.
+An author second pass is `SELF_REVIEWED`; a child result is technical assurance, not formal
+GitHub `APPROVED`. Formal approval requires an eligible actual non-author event only when
+an enforced rule or binding hold requires it. Never impersonate a reviewer or self-approve.
+Use [external review routing](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md) only for an actual
+separate review assignment; preserve active/denied/uncertain review effects on their carrier.
+Source publication proves neither instruction installation nor changed machine enforcement.
 
-A historically named GitHub reviewer login is a **placement preference, not an owner wait**, unless an actual current exact-seat instruction or repository rule binds it. The active assigned principal checks the review's exact PR/head, connected authenticated login, commit/author/coauthor independence and existing review/effect state under `docs/sol_skills/REVIEW_RETURN.md`; it may request a different eligible **genuinely independent** reviewer through GitHub's existing review path. Switching the same reasoning session between two GitHub accounts is not independent substantive review. No impersonation, author self-review, duplicate/denied-effect reroute, self-approval or self-merge. Keep executing other permitted work while the real review is pending.
+**Finish the actual PR, not its draft.** Own the same branch through repair, required CI,
+Ready, applicable review, protected automation, exact merge readback and owed installed/user-
+path proof. A Draft, comment or checkpoint is not delivery. Short checks stay in the same
+healthy turn; pending CI does not justify a replacement PR or an archived-owner handback.
+See [finish-to-release contract](docs/SESSION_LOCAL_REVIEW_POLICY.md#finish-to-release-ownership-a-pr-is-an-intermediate-artifact).
+
+A historically named GitHub reviewer login is a **placement preference, not an owner wait**, unless an actual current exact-seat instruction or repository rule binds it. The active assigned principal checks the review's exact PR/head, connected authenticated login, commit/author/coauthor independence and existing review/effect state under `docs/sol_skills/REVIEW_RETURN.md`; it may request a different eligible **genuinely independent** reviewer through GitHub's existing review path. Switching the same reasoning session between two GitHub accounts is not independent substantive review. No impersonation, false independent-review claim, duplicate/denied-effect reroute, self-approval or protected-release bypass. Keep executing other permitted work while the real review is pending.
 
 ## Agent OS — the organizational knowledge plane
 

@@ -17,6 +17,7 @@ import {
   TRANSACTION_TTL_MS,
   READ_TIMEOUT_MS,
   TOKEN_TIMEOUT_MS,
+  MAX_RESPONSE_BYTES,
 } from "./public-config";
 import workUnavailable from "./fixtures/work-service-unavailable.json";
 const response = (data: unknown) =>
@@ -31,6 +32,23 @@ const deferred = <T>() => {
 const flush = async () => {
   for (let i = 0; i < 30; i++) await Promise.resolve();
 };
+
+describe("fixed BYOK role metadata transport", () => {
+  it("uses the existing acquisition token with the fixed path and private no-store transport", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    e.fetcher.mockResolvedValueOnce(response({ state: "SOURCE_UNBOUND" }));
+    expect(await e.client.readByokRoles!({ signal: new AbortController().signal })).toEqual({ state: "SOURCE_UNBOUND" });
+    expect(e.fetcher).toHaveBeenCalledExactlyOnceWith(ORIGIN + "/workspace/byok/roles/current",
+      expect.objectContaining({ method: "GET", redirect: "error", credentials: "omit", cache: "no-store",
+        headers: expect.objectContaining({ Authorization: "Bearer private-token" }) }));
+  });
+  it("enforces its smaller closed byte ceiling", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    e.fetcher.mockResolvedValueOnce(response({ payload: "x".repeat(8192) }));
+    await expect(e.client.readByokRoles!({ signal: new AbortController().signal })).rejects.toThrow();
+    expect(e.fetcher).toHaveBeenCalledOnce();
+  });
+});
 function setup(
   options: {
     blocked?: boolean;
@@ -503,6 +521,7 @@ describe("callback cleanup and handoff", () => {
 // Fixed structured-result transport uses the existing acquisition token only.
 import { bindMissionHost } from "./host";
 import resultUnavailable from "./fixtures/result-design-unavailable-source_changed.json";
+import { normalizeResultSelection } from "./result";
 const resultRequest = () => ({
   workRef: resultUnavailable.selection.work_ref,
   rootJobId: resultUnavailable.selection.root_job_id,
@@ -584,6 +603,113 @@ describe("fixed structured-result browser transport", () => {
       }),
     ).rejects.toThrow("SELECTION_INVALID");
     expect(e.fetcher).not.toHaveBeenCalled();
+  });
+});
+
+describe("fixed compound Mission/Result browser transport", () => {
+  const wire = resultUnavailable.selection;
+  const selected = normalizeResultSelection({
+    workRef: wire.work_ref,
+    rootJobId: wire.root_job_id,
+    jobId: wire.job_id,
+    attemptId: wire.attempt_id,
+    resultEnvelopeDigest: wire.result_envelope_digest,
+  })!;
+  const compoundRequest = () => ({ ...selected, signal: new AbortController().signal });
+  const unavailableBody = {
+    schema: "mastermind.workspace_mission_result.v1",
+    selection: wire,
+    availability: "UNAVAILABLE",
+    reason_codes: ["SOURCE_UNAVAILABLE"],
+    mission: null,
+    role_result: null,
+  };
+  async function producerBytes() {
+    const cwd = (globalThis as { process?: { cwd?: () => string } }).process?.cwd?.();
+    if (!cwd) throw new Error("producer fixture path requires the vitest worker cwd");
+    // @ts-expect-error node:fs/promises is resolved by the vitest worker.
+    const fs = (await import("node:fs/promises")) as { readFile(path: string): Promise<Uint8Array> };
+    return new Uint8Array(await fs.readFile(
+      `${cwd}/src/meta-ceo/fixtures/mission-result-producer/actual-pair.json`,
+    ));
+  }
+
+  it("uses one fixed acquisition GET and the unchanged producer bytes", async () => {
+    const e = setup();
+    await e.login();
+    const bytes = await producerBytes();
+    const producer = JSON.parse(new TextDecoder().decode(bytes)) as { selection: typeof wire };
+    const producerSelection = normalizeResultSelection({
+      workRef: producer.selection.work_ref,
+      rootJobId: producer.selection.root_job_id,
+      jobId: producer.selection.job_id,
+      attemptId: producer.selection.attempt_id,
+      resultEnvelopeDigest: producer.selection.result_envelope_digest,
+    })!;
+    e.fetcher.mockResolvedValueOnce(new Response(bytes, { headers: { "content-type": "application/json" } }));
+    const host = bindMissionHost(e.client);
+    const decoded = await host.readMissionResult!({ ...producerSelection, signal: new AbortController().signal });
+    expect(decoded.availability).toBe("AVAILABLE");
+    const [url, options] = e.fetcher.mock.calls.at(-1)!;
+    const parsed = new URL(String(url));
+    expect(parsed.origin).toBe(ORIGIN);
+    expect(parsed.pathname).toBe("/workspace/mission-result/current");
+    expect([...parsed.searchParams.keys()]).toEqual([
+      "work_ref", "root_job_id", "job_id", "attempt_id", "result_envelope_digest",
+    ]);
+    expect(parsed.searchParams.get("result_envelope_digest")).toBe(producerSelection.resultEnvelopeDigest);
+    expect(options).toMatchObject({ method: "GET", redirect: "error", credentials: "omit", cache: "no-store" });
+    expect(options?.body).toBeUndefined();
+    expect(new Headers(options?.headers).get("authorization")).toMatch(/^Bearer /);
+    expect(JSON.stringify(e.client)).not.toContain("private-token");
+  });
+
+  it("preserves a typed 503 compound refusal and refuses auth denial without a nested result", async () => {
+    const e = setup();
+    await e.login();
+    const host = bindMissionHost(e.client);
+    e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(unavailableBody), {
+      status: 503, headers: { "content-type": "application/json" },
+    }));
+    const decoded = await host.readMissionResult!(compoundRequest());
+    expect(decoded).toMatchObject({ availability: "UNAVAILABLE", mission: null, roleResult: null });
+    e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(unavailableBody), {
+      status: 401, headers: { "content-type": "application/json" },
+    }));
+    await expect(host.readMissionResult!(compoundRequest())).rejects.toThrow();
+    e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ ...unavailableBody, extra: true }), {
+      status: 503, headers: { "content-type": "application/json" },
+    }));
+    await expect(host.readMissionResult!(compoundRequest())).rejects.toThrow("MISSION_RESULT_RESPONSE_INVALID");
+  });
+
+  it("refuses an oversized declared body and a surplus selector before a second read", async () => {
+    const e = setup();
+    await e.login();
+    const host = bindMissionHost(e.client);
+    e.fetcher.mockClear();
+    e.fetcher.mockResolvedValueOnce(new Response("{}", {
+      status: 200,
+      headers: { "content-type": "application/json", "content-length": String(MAX_RESPONSE_BYTES + 1) },
+    }));
+    await expect(host.readMissionResult!(compoundRequest())).rejects.toThrow("RESPONSE_TOO_LARGE");
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    await expect(e.client.readMissionResult!({ ...compoundRequest(), extra: true } as never)).rejects.toThrow("SELECTION_INVALID");
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("withholds a late body after sign-out even if the transport ignores abort", async () => {
+    const e = setup();
+    await e.login();
+    let release!: (value: Response) => void;
+    e.fetcher.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    const host = bindMissionHost(e.client);
+    const pending = host.readMissionResult!(compoundRequest());
+    const assertion = expect(pending).rejects.toThrow();
+    await flush();
+    await e.client.signOut();
+    release(new Response(JSON.stringify(unavailableBody), { headers: { "content-type": "application/json" } }));
+    await assertion;
   });
 });
 
@@ -1633,6 +1759,36 @@ describe("canonical accepted Direction fixed Web READ", () => {
 });
 
 import admissionFixture from './admission/fixtures/project-admission-owner.json';
+import instructionFixture from './instructions/fixtures/instruction-owner.json';
+describe('fixed authenticated instruction Web transport',()=>{
+ const selection={work_ref:'WS:ONE',instruction_ref:'INS:DAILY-ONE'},command_id=instructionFixture.status.selection.command_id;
+ const request=()=>({selection,command_id,expected_revision:instructionFixture.current.instruction_revision,expected_source:{...instructionFixture.current.source,repository:'mastermindx-market-intelligence/macro' as const},signal:new AbortController().signal});
+ it('joins owner content/current/status GETs and one explicit fixed-origin instruction pause',async()=>{
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client),signal=request().signal;
+  e.fetcher.mockResolvedValueOnce(response(instructionFixture.project_only_empty));await expect(host.readProjectInstructions!({selection:{work_ref:'WS:ONE'},signal})).resolves.toEqual(instructionFixture.project_only_empty);
+  e.fetcher.mockResolvedValueOnce(response(instructionFixture.current));await expect(host.readInstructionAdmissionControl!({selection,signal})).resolves.toEqual(instructionFixture.current);
+  e.fetcher.mockResolvedValueOnce(response(instructionFixture.unknown));await host.pauseInstructionAdmission!(request());
+  e.fetcher.mockResolvedValueOnce(response(instructionFixture.status));await host.readInstructionAdmissionOperation!({selection,command_id,signal});
+  expect(e.fetcher.mock.calls.map(([url,options])=>[new URL(String(url)).origin,new URL(String(url)).pathname,options?.method])).toEqual([[ORIGIN,'/workspace/project-instructions/current','GET'],[ORIGIN,'/workspace/instruction-admission/current','GET'],[ORIGIN,'/workspace/instruction-admission/pause','POST'],[ORIGIN,'/workspace/instruction-admission/operation','GET']]);
+  const post=e.fetcher.mock.calls[2][1];expect(post).toMatchObject({redirect:'error',credentials:'omit',cache:'no-store'});
+  expect(JSON.parse(String(post?.body))).toEqual({selection,command_id,expected_revision:instructionFixture.current.instruction_revision,expected_source:instructionFixture.current.source});
+  expect(Object.fromEntries(new URL(String(e.fetcher.mock.calls[3][0])).searchParams)).toEqual({...selection,command_id});
+ });
+ it('refuses missing authentication and caller authority before sending',async()=>{
+  const e=setup(),host=bindMissionHost(e.client);await expect(host.pauseInstructionAdmission!(request())).rejects.toThrow();expect(e.fetcher).not.toHaveBeenCalled();
+  await e.login();e.fetcher.mockClear();await expect(host.pauseInstructionAdmission!({...request(),principal:'forged'} as never)).rejects.toThrow();expect(e.fetcher).not.toHaveBeenCalled();
+ });
+ it('withholds a late mutation result on auth departure without resending',async()=>{
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client),late=deferred<Response>();e.fetcher.mockReturnValueOnce(late.promise);
+  const pending=host.pauseInstructionAdmission!(request()),rejected=expect(pending).rejects.toThrow();await host.auth!.signOut();late.resolve(response(instructionFixture.unknown));await rejected;expect(e.fetcher).toHaveBeenCalledTimes(1);
+ });
+ it('keeps the same original request through bounded response and timeout failures',async()=>{
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client);
+  e.fetcher.mockResolvedValueOnce(response({padding:'x'.repeat(32769)}));await expect(host.pauseInstructionAdmission!(request())).rejects.toThrow();expect(e.fetcher).toHaveBeenCalledTimes(1);
+  e.fetcher.mockImplementationOnce(()=>new Promise(()=>{}));const pending=host.pauseInstructionAdmission!(request()),rejected=expect(pending).rejects.toThrow();await vi.advanceTimersByTimeAsync(60_001);await rejected;expect(e.fetcher).toHaveBeenCalledTimes(2);
+  for(const [,options] of e.fetcher.mock.calls)expect(JSON.parse(String(options?.body)).command_id).toBe(command_id);
+ });
+});
 describe('fixed authenticated project admission Web transport',()=>{
  const selection=admissionFixture.open.selection;
  const command_id='mmos-project-pause-'+'a'.repeat(40);
@@ -1671,5 +1827,99 @@ describe('fixed authenticated project admission Web transport',()=>{
   e.fetcher.mockImplementationOnce(()=>new Promise(()=>{}));
   const pending=host.pauseProjectAdmission!({...request(),command_id}),rejected=expect(pending).rejects.toThrow();
   await vi.advanceTimersByTimeAsync(60_001);await rejected;expect(e.fetcher).toHaveBeenCalledTimes(2);
+ });
+});
+
+import projectArchiveFixture from "./projects/archive/fixtures/project-archive-owner.json";
+describe("canonical archive fixed Web READ", () => {
+  const request = () => ({ signal: new AbortController().signal });
+  it("uses one fixed rootless Acquisition GET and actual native helper body", async () => {
+    const e = setup(); const host = bindMissionHost(e.client);
+    await expect(host.readProjectArchive!(request())).rejects.toThrow("PROJECT_ARCHIVE_READ_UNAUTHORIZED");
+    expect(e.fetcher).not.toHaveBeenCalled();
+    await e.login(); e.fetcher.mockClear(); e.fetcher.mockResolvedValueOnce(response(projectArchiveFixture));
+    await expect(host.readProjectArchive!(request())).resolves.toEqual(projectArchiveFixture);
+    const [url, options] = e.fetcher.mock.calls[0];
+    expect(new URL(String(url)).pathname).toBe("/workspace/projects/archive/current");
+    expect(new URL(String(url)).search).toBe("");
+    expect(options).toMatchObject({ method: "GET", credentials: "omit", redirect: "error", cache: "no-store" });
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("preserves unavailable sample without inventing empty archives", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    const absent = { schema: "mastermind.workspace_project_archive.v1", availability: "UNAVAILABLE", catalogue: null, sample: null, reason_codes: ["SOURCE_UNAVAILABLE"] };
+    e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(absent), { status: 503, headers: { "content-type": "application/json" } }));
+    await expect(bindMissionHost(e.client).readProjectArchive!(request())).resolves.toMatchObject({ availability: "UNAVAILABLE", sample: null });
+    e.fetcher.mockResolvedValueOnce(new Response("not installed", { status: 404 }));
+    await expect(bindMissionHost(e.client).readProjectArchive!(request())).rejects.toThrow();
+  });
+  it("withholds late archive content after identity loss without a retry", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    const late = deferred<Response>(); e.fetcher.mockReturnValueOnce(late.promise);
+    const host = bindMissionHost(e.client); const pending = host.readProjectArchive!(request());
+    const rejected = expect(pending).rejects.toThrow();
+    await host.auth!.signOut(); late.resolve(response(projectArchiveFixture)); await rejected;
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("refuses caller members and oversized raw bodies", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear(); const host = bindMissionHost(e.client);
+    await expect(host.readProjectArchive!({ ...request(), work_refs: ["WS:FOREIGN"] } as never)).rejects.toThrow("PROJECT_ARCHIVE_REQUEST_INVALID");
+    expect(e.fetcher).not.toHaveBeenCalled();
+    e.fetcher.mockResolvedValueOnce(response({ padding: "x".repeat(262_145) }));
+    await expect(host.readProjectArchive!(request())).rejects.toThrow();
+  });
+});
+
+
+describe("canonical archive continuation Web READ", () => {
+  const cursor = { after_work_ref: projectArchiveFixture.catalogue.work_refs[0]!, catalogue_digest: projectArchiveFixture.catalogue.document_digest };
+  const request = () => ({ ...cursor, signal: new AbortController().signal });
+  it("uses only the same fixed GET with the member anchor and catalogue digest", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    const page = structuredClone(projectArchiveFixture); page.catalogue.work_refs = [projectArchiveFixture.catalogue.work_refs[1]!]; page.sample.items = [];
+    page.sample.coverage.supplied_count = 1; page.sample.coverage.observed_count = 1;
+    e.fetcher.mockResolvedValueOnce(response(page));
+    await expect(bindMissionHost(e.client).readProjectArchivePage!(request())).resolves.toEqual(page);
+    const [url, options] = e.fetcher.mock.calls[0];
+    expect(new URL(String(url)).pathname).toBe("/workspace/projects/archive/current");
+    expect(Object.fromEntries(new URL(String(url)).searchParams)).toEqual(cursor);
+    expect(options).toMatchObject({ method: "GET", credentials: "omit", redirect: "error", cache: "no-store" });
+  });
+  it("rejects private selectors and changed catalogue replies without a retry", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear(); const host = bindMissionHost(e.client);
+    await expect(host.readProjectArchivePage!({ ...request(), work_refs: ["WS:FOREIGN"] } as never)).rejects.toThrow("PROJECT_ARCHIVE_REQUEST_INVALID");
+    expect(e.fetcher).not.toHaveBeenCalled();
+    const changed = structuredClone(projectArchiveFixture); changed.catalogue.document_digest = "f".repeat(64);
+    e.fetcher.mockResolvedValueOnce(response(changed));
+    await expect(host.readProjectArchivePage!(request())).rejects.toThrow("PROJECT_ARCHIVE_PAGE_CHANGED");
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+});
+import projectAccessFixture from './access/fixtures/current-grants.json';
+import projectAccessV5Fixture from './access/fixtures/v5-current-grants.json';
+describe('fixed current project access Web read',()=>{
+ const request=()=>({selection:{work_ref:'WS:ONE'},signal:new AbortController().signal});
+ it('uses only fixed Acquisition GET and preserves the bounded unavailable body',async()=>{
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client);
+  e.fetcher.mockResolvedValueOnce(response(projectAccessFixture));
+  await expect(host.readProjectAccess!(request())).resolves.toEqual(projectAccessFixture);
+  const [url,options]=e.fetcher.mock.calls[0];
+  expect(new URL(String(url)).origin).toBe(ORIGIN);expect(new URL(String(url)).pathname).toBe('/workspace/project-access/current');
+  expect(Object.fromEntries(new URL(String(url)).searchParams)).toEqual({work_ref:'WS:ONE'});
+  expect(options).toMatchObject({method:'GET',redirect:'error',credentials:'omit',cache:'no-store'});
+  e.fetcher.mockResolvedValueOnce(response(projectAccessV5Fixture));await expect(host.readProjectAccess!(request())).resolves.toEqual(projectAccessV5Fixture);
+  const unavailable={schema:projectAccessFixture.schema,selection:projectAccessFixture.selection,availability:'UNAVAILABLE',source:null,membership:null,declaration:null,grants:null,reason_codes:['SOURCE_UNAVAILABLE']};
+  e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(unavailable),{status:503,headers:{'Content-Type':'application/json'}}));
+  await expect(host.readProjectAccess!(request())).resolves.toEqual(unavailable);
+ });
+ it('refuses login absence, extra selector and oversized grant bodies without a second request',async()=>{
+  const e=setup(),host=bindMissionHost(e.client);await expect(host.readProjectAccess!(request())).rejects.toThrow();expect(e.fetcher).not.toHaveBeenCalled();
+  await e.login();e.fetcher.mockClear();await expect(host.readProjectAccess!({...request(),principal:'forged'} as never)).rejects.toThrow();expect(e.fetcher).not.toHaveBeenCalled();
+  e.fetcher.mockResolvedValueOnce(response({padding:'x'.repeat(16385)}));await expect(host.readProjectAccess!(request())).rejects.toThrow();expect(e.fetcher).toHaveBeenCalledTimes(1);
+ });
+ it('withholds late access facts after sign-out with no retry',async()=>{
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client),late=deferred<Response>();e.fetcher.mockReturnValueOnce(late.promise);
+  const pending=host.readProjectAccess!(request()),rejected=expect(pending).rejects.toThrow();await host.auth!.signOut();late.resolve(response(projectAccessFixture));await rejected;
+  expect(e.fetcher).toHaveBeenCalledTimes(1);
  });
 });

@@ -10,7 +10,7 @@ import hashlib
 import re
 
 from common.executive_workspace_contract import canonical
-from integrations.mastermind_workspace_app.contract import principal_frame
+from integrations.mastermind_workspace_app.source_operation_principal import source_principal_frame
 
 REQUEST_SCHEMA = "mastermind.project_proposal_request.v1"
 _PROFILE_KEYS = {"title", "program", "repos", "owner", "class", "blast_radius", "ambiguity", "waves", "next_action"}
@@ -50,7 +50,7 @@ def build_proposal_request(request, *, principal, authored_profile):
         raise ValueError("source_changed")
     # The existing auth owner extracts actual stable identity, not an email,
     # display label, token, client assertion or permission receipt generation.
-    identity = principal_frame(principal)
+    identity = source_principal_frame(principal)
     candidate = hashlib.sha256(canonical({"principal": identity, "request_id": request["request_id"]})).hexdigest()
     record = {"key": "PROJECT-" + candidate[:32].upper(), "objective": request["goal"], "status": "proposed", **profile}
     value = {"schema": "agentos.project_proposal_request.v1", "request_id": request["request_id"],

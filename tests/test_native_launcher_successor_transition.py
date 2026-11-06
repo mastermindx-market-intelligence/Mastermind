@@ -59,7 +59,16 @@ def source_owners(tmp_path_factory):
     assert retained['schema'] == 'mastermind.test_native_catalog_predecessor102/v1'
     assert retained['source_commit'] == '58083bf128fdac2d8eab374641c78bb403e7d18c'
     historical_manifest = retained['manifest']
-    assert set(manifest) == set(historical_manifest)
+    added = {'ext/post_failure_observation.py', 'ext/post_failure_observation_delivery.py',
+                'ext/participant_binding.py', 'ext/fabric_participant_owner.py'}
+    assert set(manifest) == set(historical_manifest) | added
+    # Remove only the two reviewed S14 and two participant additions inside this disposable102
+    # inverse, after proving each is the actual current staged payload.
+    for name in added:
+        path = target / 'native-code-stage' / name
+        assert g.digest(path.read_bytes()) == manifest[name]
+        path.unlink()
+    manifest = {name: digest for name, digest in manifest.items() if name not in added}
     # S7 changed three additional members of the CURRENT closure. Restore
     # their exact protected predecessor bytes in this historical B11 fixture;
     # the immutable original fixture and paired-upgrade target stay unchanged.
@@ -88,6 +97,8 @@ def source_owners(tmp_path_factory):
     assert long_retained['source_commit'] == '9f65957e29eba92245d78609f032aaea523b7cb4'
     assert set(long_retained['files']) == long_names
     base_paths = {
+        'ext/artifact_delivery.py':
+            ROLLOUT.parents[1] / 'grok47/overlay/artifact_delivery.py',
         'ext/fabric_operator_contract.py':
             ROLLOUT.parents[1] / 'grok47/overlay/fabric_operator_contract.py',
         'ext/fabric_operator_owner.py':
@@ -98,6 +109,10 @@ def source_owners(tmp_path_factory):
             ROLLOUT.parent / 'source/oc_free_exec.sh',
         'ext/sub.sh':
             ROLLOUT.parents[1] / 'grok47/overlay/sub.sh',
+        # Protected899ac broker blob b39e1fbcebe88513ee9c1dd756c56a9c68ff72b1.
+        # Restore only this disposable historical102 payload, not CURRENT.
+        'ext/lease_broker.py':
+            fixture.with_name('native-lease-broker-pre-fair-share-899ac3a9.py.txt'),
     }
     new_names = long_names | set(base_paths)
     # S9 also changes the CURRENT picker. Bind its authentic protected
@@ -109,7 +124,26 @@ def source_owners(tmp_path_factory):
     assert selection['commit'] == '9f65957e29eba92245d78609f032aaea523b7cb4'
     assert selection['blob'] == 'dd542dbc5bb746c0ad1428b177b25a98b7a02536'
     assert selection['path'] == 'ops/native_fabric/quota_continuity/candidate/pick.py'
-    predecessor_files = {**retained['files'], **diagnostic['files'], 'ext/pick.py': selection}
+    # Reuse the exact protected observer bytes already checked against the
+    # immutable95 and102 maps; source/ preimages belong to another epoch.
+    observer_raw = (ROLLOUT.parents[3] / 'tests/fixtures/native-observer-historical95-48ca.json').read_bytes()
+    assert g.digest(observer_raw) == '0dd81a279641b9c456ef94439d519d97f7670ec18831f5bd78f69bcdd710b3b2'
+    observer = json.loads(observer_raw)
+    assert observer['schema'] == 'mastermind.test_native_observer_historical95/v1'
+    assert observer['source_commit'] == '48ca51f882338c58e377a0acf16931066c703384'
+    assert set(observer['files']) == {'ext/run_observation.py', 'ext/run_observation_delivery.py'}
+    # Ubuntu4 Grok qualification changes CURRENT policy only. Keep the exact
+    # historical B11 policy bytes bound to their protected source and digest.
+    qualification_raw = (ROLLOUT.parents[3] / 'tests/fixtures/ubuntu4-grok-qualification-predecessor-f374289e.json').read_bytes()
+    assert g.digest(qualification_raw) == '93f5285a758f1045be1f178f35d17e792459f167d2d631ff2914778253b64ebb'
+    qualification = json.loads(qualification_raw)
+    assert qualification['schema'] == 'fabric.ubuntu4-qualification-predecessor.v1'
+    assert qualification['commit'] == 'f374289eb74587eaa755f5bc8e5a3252d00850e0'
+    assert qualification['blob'] == 'f72b12eac939143b1b2ed298139d55b06667a2c2'
+    assert qualification['path'] == 'ops/native_fabric/quota_continuity/candidate/fabric_host_qualification.py'
+    predecessor_files = {**retained['files'], **diagnostic['files'],
+                         **observer['files'], 'ext/pick.py': selection,
+                         'ext/fabric_host_qualification.py': qualification}
     assert {name for name in manifest if manifest[name] != historical_manifest[name]} == (
         set(predecessor_files) | new_names
     )

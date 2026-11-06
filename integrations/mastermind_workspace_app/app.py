@@ -15,6 +15,7 @@ import dataclasses
 import inspect
 import json
 import time
+from http import HTTPStatus
 from collections.abc import Callable, Mapping
 from typing import Any
 from types import MappingProxyType
@@ -49,18 +50,24 @@ _MISSION_ROUTE = "/workspace/mission/current"
 _MISSION_V3_ROUTE = "/workspace/mission/v3/current"
 _MISSION_V4_ROUTE = "/workspace/mission/v4/current"
 _RESULT_ROUTE = "/workspace/result/current"
+_MISSION_RESULT_ROUTE = "/workspace/mission-result/current"
 _RESULT_REFERENCES_ROUTE = "/workspace/result-references/current"
 _PLAN_ROUTE = "/workspace/plan/current"
 _PROJECT_PLAN_ROUTE = "/workspace/project-plan/current"
 _PROJECT_JOURNAL_ROUTE = "/workspace/project-journal/current"
+_PROJECT_KNOWLEDGE_CATALOGUE_ROUTE = "/workspace/project-knowledge/current"
+_PROJECT_KNOWLEDGE_MEMORY_ROUTE = "/workspace/project-memory/current"
+_PROJECT_KNOWLEDGE_SOURCE_ROUTE = "/workspace/project-source/current"
 _PROJECT_SESSION_ROUTE = "/workspace/project-session/current"
 _PROJECT_DIRECTION_ROUTE = "/workspace/project-direction/current"
+_PROJECT_ARCHIVE_ROUTE = "/workspace/projects/archive/current"
 _AUTONOMY_ROUTE = "/workspace/autonomy/current"
 _RESOURCE_CAPACITY_ROUTE = "/workspace/resources/capacity/current"
 _ACTIVITY_ROUTE = "/workspace/operator/activity/current"
 _FABRIC_CATALOG_ROUTE = "/workspace/fabric/catalog/current"
 _FABRIC_STATUS_ROUTE = "/workspace/fabric/status/current"
 _ACTIVITY_QUERY_KEYS = frozenset({"work_ref", "root_job_id", "job_id", "attempt_id"})
+_BYOK_ROLES_ROUTE = "/workspace/byok/roles/current"
 _CCR_STATE_ROUTE = "/workspace/control-room/state/current"
 _CCR_DISCOVER_ROUTE = "/workspace/control-room/discover/current"
 _CCR_ACTION_ROUTES = MappingProxyType({
@@ -337,6 +344,14 @@ def _dispatch_v2_selection(operation: str, query: Mapping[str, str]) -> dict[str
             return selection(dict(query))
         except (TypeError, ValueError):
             return None
+    if operation in ("project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source"):
+        from common.workspace_project_knowledge_read_contract import selection
+        try: return selection(dict(query), operation=operation)
+        except (TypeError, ValueError): return None
+    if operation == "project_instructions":
+        from common.workspace_project_instructions_contract import validate_selection
+        try: return validate_selection(dict(query))
+        except (TypeError, ValueError): return None
     if operation == "project_plan":
         from common.workspace_project_plan_contract import validate_selection
         try:
@@ -358,7 +373,7 @@ def _dispatch_v2_selection(operation: str, query: Mapping[str, str]) -> dict[str
             return selection({k: query[k] for k in ("work_ref", "root_job_id")})
         except (TypeError, ValueError):
             return None
-    if operation == "result":
+    if operation in ("result", "mission_result"):
         return _v2_selection(query)
     if operation == "result_references":
         return _mission_v3_selection(query)
@@ -403,10 +418,16 @@ class WorkspaceAppConfig:
     project_admission_load_bindings: Callable[[], Any] | None = None
     authorize_discovery: Callable[[VerifiedPrincipal], bool] | None = None
     authorize_actions: Mapping[str, Callable[[VerifiedPrincipal], bool]] | None = None
+    source_operation_context: Any = None
 
     def __post_init__(self) -> None:
         if self.project_admission_load_bindings is not None and not callable(self.project_admission_load_bindings):
             raise ValueError("sealed current project membership loader required")
+        if self.source_operation_context is not None:
+            from integrations.mastermind_workspace_app.source_operation_context import WorkspaceSourceOperationContextFactory
+            if (type(self.source_operation_context) is not WorkspaceSourceOperationContextFactory
+                    or self.source_operation_context.policy != self.authenticator.policy):
+                raise ValueError("source operation context must bind the same installed Workspace policy")
         if self.authorize_discovery is not None and not callable(self.authorize_discovery):
             raise ValueError("authorize_discovery must be callable or absent")
         if self.authorize_actions is not None:
@@ -704,6 +725,51 @@ async def mission_current(
     return _envelope_response(envelope)
 
 
+async def byok_roles_current(request: Request, *, config: WorkspaceAppConfig) -> Response:
+    """One fixed metadata read; no body, selection, credential or action input."""
+    from common import workspace_byok_read_contract as wire
+    principal = await _authenticate(request, config.authenticator, clock=config.now)
+    if isinstance(principal, JSONResponse):
+        return _with_no_store(principal)
+    refused = await _reject_any_body(request)
+    if refused is not None:
+        return refused
+    if request.scope.get("query_string"):
+        return _refuse_json(HTTPStatus.BAD_REQUEST, "invalid_input")
+    authorizer, client = config.authorize_principal, config.client
+    try:
+        stamps = _control_room_permissions((authorizer,), principal)
+        frame = wire.validate_frame({"schema": wire.FRAME_SCHEMA, "operation": wire.OPERATION,
+                                     "principal": contract.principal_frame(principal)})
+    except Exception:
+        return _refuse_json(HTTPStatus.FORBIDDEN, "access_denied")
+    try:
+        envelope = await client.request(frame)
+    except Exception:
+        return _refuse_json(HTTPStatus.SERVICE_UNAVAILABLE, "source_unavailable")
+    try:
+        if (config.authorize_principal is not authorizer or config.client is not client
+                or _control_room_permissions((authorizer,), principal) != stamps):
+            raise ValueError("access_denied")
+        instant = config.now()
+        if type(instant) is not int or not 0 <= instant < principal.expires_at:
+            raise ValueError("access_denied")
+    except Exception:
+        return _refuse_json(HTTPStatus.FORBIDDEN, "access_denied")
+    if type(envelope) is dict and envelope.get("ok") is False:
+        return _envelope_response(envelope)
+    try:
+        if type(envelope) is not dict or set(envelope) != {"ok", "result"} or envelope["ok"] is not True:
+            raise ValueError("source_unavailable")
+        body = wire.validate_body(envelope["result"])
+        if not wire.current(body, now_ms=instant * 1000):
+            body = wire.unavailable("SOURCE_STALE")
+        raw = contract.bounded_canonical(body, limit=wire.MAX_RESPONSE_BYTES - 1)
+    except Exception:
+        raw = contract.canonical(wire.unavailable())
+    return Response(raw, media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
 async def control_room_current(
     request: Request, *, config: WorkspaceAppConfig, operation: str,
 ) -> JSONResponse:
@@ -986,6 +1052,16 @@ async def _dispatch_v2(
     try:
         permission_before = contract.permission_stamp(config.authorize_principal, principal)
         principal_frame = contract.principal_frame(principal)
+        latest_gate = None
+        latest_before = None
+        if operation in {"project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source"}:
+            context = config.source_operation_context
+            if context is not None and context.policy == config.authenticator.policy:
+                from integrations.mastermind_workspace_app.project_authoring_grant import workspace_project_authorizers
+                latest_gate, _ = workspace_project_authorizers(policy=context.policy,
+                    load_bindings=context._load_bindings,action="read_latest_project_data")
+                if latest_gate(principal) is True:
+                    latest_before = latest_gate.binding_digest(principal)
     except ValueError:
         return _refuse_json(403, "access_denied")
 
@@ -1003,12 +1079,20 @@ async def _dispatch_v2(
             from common import workspace_project_session_contract as session_wire
             frame = session_wire.validate_frame({"schema": session_wire.FRAME_SCHEMA,
                 "operation": session_wire.OPERATION, "selection": selection_value, "principal": principal_frame})
+        elif operation in ("project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source"):
+            from common import workspace_project_knowledge_read_contract as knowledge_wire
+            frame = knowledge_wire.validate_frame({"schema": knowledge_wire.FRAME_SCHEMA,
+                "operation": operation, "selection": selection_value, "principal": principal_frame})
         elif operation == "project_journal":
             from common import workspace_project_journal_contract as plan_wire
             frame = plan_wire.validate_frame({
                 "schema": plan_wire.FRAME_SCHEMA, "operation": plan_wire.OPERATION,
                 "selection": selection_value, "principal": principal_frame,
             })
+        elif operation == "project_instructions":
+            from common import workspace_project_instructions_contract as instructions_wire
+            frame = instructions_wire.validate_frame({"schema": instructions_wire.FRAME_SCHEMA,
+                "operation": instructions_wire.OPERATION, "selection": selection_value, "principal": principal_frame})
         elif operation == "project_plan":
             from common import workspace_project_plan_contract as plan_wire
             frame = plan_wire.validate_frame({
@@ -1042,6 +1126,13 @@ async def _dispatch_v2(
                 "schema": contract.FRAME_SCHEMA_V3, "operation": operation,
                 "selection": contract.v3_selection(selection_value), "principal": principal_frame,
             })
+        elif operation == "mission_result":
+            frame = contract.validate_mission_result_frame({
+                "schema": contract.MISSION_RESULT_FRAME_SCHEMA,
+                "operation": contract.MISSION_RESULT_OPERATION,
+                "selection": contract.v2_selection(selection_value, "result"),
+                "principal": principal_frame,
+            })
         else:
             frame = contract.validate_v2_frame({
                 "schema": contract.FRAME_SCHEMA_V2,
@@ -1073,16 +1164,40 @@ async def _dispatch_v2(
     try:
         if contract.permission_stamp(config.authorize_principal, principal) != permission_before:
             return _refuse_json(403, "access_denied")
+        if latest_before is not None and (latest_gate(principal) is not True
+                or latest_gate.binding_digest(principal) != latest_before):
+            return _refuse_json(403, "access_denied")
+        if (operation in {"project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source"}
+                and type(envelope) is dict and type(envelope.get("result")) is dict
+                and envelope["result"].get("data_observation") is not None and latest_before is None):
+            return _refuse_json(403, "access_denied")
     except Exception:
         return _refuse_json(403, "access_denied")
-    if operation in ("admitted_plan", "retained_activity", "resource_capacity", "result_references", "project_plan", "project_journal", "project_session", "project_direction", "autonomy") and isinstance(envelope, dict) and envelope.get("ok") is True:
+    if operation in ("admitted_plan", "retained_activity", "resource_capacity", "result_references", "project_plan", "project_journal", "project_session", "project_direction", "project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source", "autonomy", "project_instructions") and isinstance(envelope, dict) and envelope.get("ok") is True:
         body = envelope.get("result")
-        if type(body) is not dict or body.get("selection") != selection_value:
+        expected_selection = ({key: item for key, item in selection_value.items() if key != "expected_revision"}
+                              if operation == "project_knowledge_source" else selection_value)
+        if type(body) is not dict or body.get("selection") != expected_selection:
+            return _refuse_json(503, "source_unavailable")
+        if (operation == "project_knowledge_source" and body.get("availability") == "AVAILABLE"
+                and (type(body.get("source")) is not dict
+                     or body["source"].get("revision") != selection_value["expected_revision"])):
             return _refuse_json(503, "source_unavailable")
     if operation == "mission_v4":
         return _mission_v4_envelope_response(envelope, selection_value)
     if operation == "mission_v4_original":
         return _mission_v4_original_envelope_response(envelope, selection_value)
+    if operation == "project_instructions":
+        response=_project_instructions_envelope_response(envelope,principal=principal)
+        # Identity is published only by the real authenticated READ owner,
+        # after source qualification and a final current grant/expiry fence.
+        try:
+            if (type(config.now()) is not int or not 0<=config.now()<principal.expires_at
+                    or _check_authorize(config.authorize_principal,principal) is not None
+                    or contract.permission_stamp(config.authorize_principal,principal)!=permission_before):
+                return _refuse_json(403,"access_denied")
+        except Exception:return _refuse_json(403,"access_denied")
+        return response
     return response_fn(envelope)
 
 
@@ -1151,6 +1266,42 @@ async def mission_v3_current(
         required_keys=_MISSION_QUERY_KEYS,
         response_fn=lambda envelope: _v2_envelope_response(
             envelope, operation="mission_v3"),
+    )
+
+
+def _mission_result_envelope_response(envelope: Mapping[str, Any]) -> JSONResponse:
+    """Return the compound BODY. The socket ceiling stays the incumbent 2_000_000."""
+
+    if type(envelope) is dict and envelope.get("ok") is True:
+        result = envelope.get("result")
+        try:
+            if set(envelope) != {"ok", "result"} or type(result) is not dict:
+                raise ValueError("invalid_response")
+            contract.validate_mission_result_body(result)
+            body = contract.bounded_canonical(dict(result), limit=contract.MAX_COMPOUND_RESPONSE_BYTES)
+        except (TypeError, ValueError):
+            return _refuse_json(503, "source_unavailable")
+        status = 503 if result.get("availability") == "UNAVAILABLE" else 200
+        return Response(body, status_code=status, media_type="application/json",
+                        headers={"Cache-Control": "no-store"})
+    return _v2_envelope_response(envelope, operation="mission_v3")
+
+
+async def mission_result_current(
+    request: Request, *, config: WorkspaceAppConfig,
+) -> JSONResponse:
+    """Handle ``GET /workspace/mission-result/current``.
+
+    The five-field Result selector, the existing authentication and permission
+    recheck, and one App-peer Unix frame. No new account or grant rule.
+    """
+
+    return await _dispatch_v2(
+        request,
+        config=config,
+        operation="mission_result",
+        required_keys=_RESULT_QUERY_KEYS,
+        response_fn=_mission_result_envelope_response,
     )
 
 
@@ -1252,6 +1403,27 @@ async def plan_current(request: Request, *, config: WorkspaceAppConfig) -> JSONR
                               required_keys=_MISSION_QUERY_KEYS, response_fn=_plan_envelope_response)
 
 
+def _project_instructions_envelope_response(envelope,*,principal=None):
+    from http import HTTPStatus
+    from common import workspace_project_instructions_contract as wire
+    if type(envelope) is not dict or envelope.get("ok") is not True:
+        return _envelope_response(envelope)
+    try:
+        if set(envelope) != {"ok", "result"}: raise ValueError("invalid envelope")
+        from integrations.mastermind_workspace_app.owner_context import workspace_owner_context
+        body = wire.public_body(envelope["result"],recovery_identity=workspace_owner_context(principal))
+        contract.bounded_canonical(envelope, limit=wire.MAX_RESPONSE_BYTES - 1)
+        raw = contract.bounded_canonical(body, limit=wire.MAX_RESPONSE_BYTES - 1)
+    except (TypeError, ValueError, KeyError, RecursionError): return _refuse_json(503, "source_unavailable")
+    return Response(raw, status_code=HTTPStatus.OK if body["availability"] == "AVAILABLE" else HTTPStatus.SERVICE_UNAVAILABLE,
+        media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
+async def project_instructions_current(request: Request, *, config: WorkspaceAppConfig):
+    return await _dispatch_v2(request, config=config, operation="project_instructions",
+        required_keys=frozenset({"work_ref"}), response_fn=_project_instructions_envelope_response)
+
+
 def _project_plan_envelope_response(envelope):
     from common import workspace_project_plan_contract as plan_wire
     if type(envelope) is not dict or envelope.get("ok") is not True:
@@ -1284,6 +1456,64 @@ def _project_direction_envelope_response(envelope):
                     media_type="application/json", headers={"Cache-Control": "no-store"})
 
 
+async def project_archive_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    """Existing READ authority, no caller catalogue/host/path/revision selectors."""
+    from common import workspace_project_archive_contract as archive_wire
+    principal = await _authenticate(request, config.authenticator, clock=config.now)
+    if isinstance(principal, JSONResponse):
+        return _with_no_store(principal)
+    refusal = await _reject_any_body(request)
+    if refusal is not None:
+        return refusal
+    cursor = None
+    raw_query = request.scope.get("query_string") or b""
+    if raw_query:
+        try:
+            cursor = archive_wire.page_selection(_decode_v2_query(raw_query,
+                required_keys=frozenset({"after_work_ref", "catalogue_digest"})))
+        except (ValueError, TypeError):
+            return _refuse_json(400, "invalid_input")
+    authorizer = config.authorize_principal
+    refusal = _check_authorize(authorizer, principal)
+    if refusal is not None:
+        return refusal
+    try:
+        stamp = contract.permission_stamp(authorizer, principal)
+        if stamp is None:
+            return _refuse_json(403, "access_denied")
+        if cursor is None:
+            frame = archive_wire.validate_frame({"schema": archive_wire.FRAME_SCHEMA,
+                "operation": archive_wire.OPERATION, "principal": contract.principal_frame(principal)})
+        else:
+            frame = archive_wire.validate_page_frame({"schema": archive_wire.PAGE_FRAME_SCHEMA,
+                "operation": archive_wire.PAGE_OPERATION, "selection": cursor,
+                "principal": contract.principal_frame(principal)})
+    except (ValueError, TypeError):
+        return _refuse_json(403, "access_denied")
+    try:
+        envelope = await config.client.request(frame)
+    except Exception:
+        return _refuse_json(503, "source_unavailable")
+    try:
+        now = config.now()
+        if (type(now) is not int or now >= principal.expires_at or config.authorize_principal is not authorizer
+                or authorizer(principal) is not True or contract.permission_stamp(authorizer, principal) != stamp):
+            return _refuse_json(403, "access_denied")
+    except Exception:
+        return _refuse_json(403, "access_denied")
+    if type(envelope) is not dict or envelope.get("ok") is not True:
+        return _envelope_response(envelope)
+    try:
+        if set(envelope) != {"ok", "result"}:
+            raise ValueError("source_unavailable")
+        body = archive_wire.validate_body(envelope["result"])
+        raw = contract.bounded_canonical(body, limit=archive_wire.MAX_RESPONSE_BYTES - 1)
+    except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
+        return _refuse_json(503, "source_unavailable")
+    return Response(raw, status_code=200 if body["availability"] == "AVAILABLE" else 503,
+        media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
 async def project_direction_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
     return await _dispatch_v2(request, config=config, operation="project_direction",
         required_keys=frozenset({"work_ref"}), response_fn=_project_direction_envelope_response)
@@ -1292,6 +1522,39 @@ async def project_direction_current(request: Request, *, config: WorkspaceAppCon
 async def project_plan_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
     return await _dispatch_v2(request, config=config, operation="project_plan",
         required_keys=frozenset({"work_ref"}), response_fn=_project_plan_envelope_response)
+
+
+def _project_knowledge_envelope_response(envelope, *, operation):
+    from common import workspace_project_knowledge_read_contract as wire
+    if type(envelope) is not dict or envelope.get("ok") is not True:
+        return _envelope_response(envelope)
+    try:
+        if set(envelope) != {"ok", "result"}: raise ValueError("invalid envelope")
+        body = wire.validate_body(envelope["result"], operation=operation)
+        contract.bounded_canonical(envelope, limit=wire.MAX_RESPONSE_BYTES)
+        raw = contract.bounded_canonical(body, limit=wire.MAX_RESPONSE_BYTES)
+    except (TypeError, ValueError, KeyError, RecursionError):
+        return _refuse_json(503, "source_unavailable")
+    return Response(raw, status_code=200 if body["availability"] in ("AVAILABLE", "EMPTY") else 503,
+                    media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
+async def project_knowledge_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    return await _dispatch_v2(request, config=config, operation="project_knowledge_catalogue",
+        required_keys=frozenset({"work_ref"}),
+        response_fn=lambda envelope: _project_knowledge_envelope_response(envelope, operation="project_knowledge_catalogue"))
+
+
+async def project_memory_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    return await _dispatch_v2(request, config=config, operation="project_knowledge_memory",
+        required_keys=frozenset({"work_ref"}),
+        response_fn=lambda envelope: _project_knowledge_envelope_response(envelope, operation="project_knowledge_memory"))
+
+
+async def project_source_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    return await _dispatch_v2(request, config=config, operation="project_knowledge_source",
+        required_keys=frozenset({"work_ref", "source_ref", "expected_revision"}),
+        response_fn=lambda envelope: _project_knowledge_envelope_response(envelope, operation="project_knowledge_source"))
 
 
 def _project_journal_envelope_response(envelope):
@@ -1411,17 +1674,20 @@ class _RawPathFence:
         _MISSION_V3_ROUTE,
         _MISSION_V4_ROUTE,
         _RESULT_ROUTE,
+        _MISSION_RESULT_ROUTE,
         _RESULT_REFERENCES_ROUTE,
         _PLAN_ROUTE,
         _PROJECT_PLAN_ROUTE,
         _PROJECT_JOURNAL_ROUTE,
         _PROJECT_DIRECTION_ROUTE,
+        _PROJECT_ARCHIVE_ROUTE,
         _PROJECT_SESSION_ROUTE,
         _AUTONOMY_ROUTE,
         _ACTIVITY_ROUTE,
         _RESOURCE_CAPACITY_ROUTE,
         _FABRIC_CATALOG_ROUTE,
         _FABRIC_STATUS_ROUTE,
+        _BYOK_ROLES_ROUTE,
         _CCR_STATE_ROUTE,
         _CCR_DISCOVER_ROUTE,
     )
@@ -1469,6 +1735,43 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def programs_endpoint(request: Request) -> JSONResponse:
         return await programs_current(request, config=config)
 
+    async def source_operation_context_endpoint(request: Request) -> JSONResponse:
+        principal = await _authenticate(request, config.authenticator, clock=config.now)
+        if isinstance(principal, JSONResponse):
+            return _with_no_store(principal)
+        refused = await _reject_any_body(request)
+        if refused is not None:
+            return refused
+        query = _decode_v2_query(request.scope.get("query_string", b""),
+            required_keys=frozenset({"action"} if b"work_ref=" not in request.scope.get("query_string", b"")
+                                    else {"action", "work_ref"}))
+        if set(query) not in ({"action"}, {"action", "work_ref"}):
+            return _refuse_json(400, "invalid_input")
+        if "work_ref" not in query and query["action"] != "publish_project_proposal":
+            return _refuse_json(400, "invalid_input")
+        if (config.source_operation_context is None
+                or config.source_operation_context.policy != config.authenticator.policy):
+            return _refuse_json(503, "source_unavailable")
+        try:
+            permission = config.source_operation_context.bind(principal,
+                action=query["action"], work_ref=query.get("work_ref"))
+            result = permission.public_context()
+            if principal.expires_at <= config.now() or not permission.check():
+                return _refuse_json(403, "access_denied")
+            return JSONResponse(result, headers={"Cache-Control": "no-store"})
+        except PermissionError:
+            return _refuse_json(403, "access_denied")
+        except ValueError:
+            return _refuse_json(400, "invalid_input")
+        except Exception:
+            return _refuse_json(503, "source_unavailable")
+
+    def source_operation_endpoint(operation):
+        async def endpoint(request):
+            from integrations.mastermind_workspace_app.source_operation_http import source_operation_http
+            return await source_operation_http(request, config=config, operation=operation)
+        return endpoint
+
     async def work_endpoint(request: Request) -> JSONResponse:
         return await work_current(request, config=config)
 
@@ -1484,18 +1787,39 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def result_endpoint(request: Request) -> JSONResponse:
         return await result_current(request, config=config)
 
+    async def mission_result_endpoint(request: Request) -> JSONResponse:
+        return await mission_result_current(request, config=config)
+
     async def result_references_endpoint(request: Request) -> JSONResponse:
         return await result_references_current(request, config=config)
 
     async def plan_endpoint(request: Request) -> JSONResponse:
         return await plan_current(request, config=config)
 
+    async def project_access_endpoint(request: Request):
+        from http import HTTPStatus
+        from integrations.mastermind_workspace_app.project_access import project_access_current
+        loader=config.project_admission_load_bindings
+        if loader is None:return _with_no_store(_refuse_json(HTTPStatus.SERVICE_UNAVAILABLE,"source_unavailable"))
+        return await project_access_current(request,config=config,load_bindings=loader)
+
+    async def project_instructions_endpoint(request: Request):
+        return await project_instructions_current(request, config=config)
+
     async def project_plan_endpoint(request: Request) -> JSONResponse:
         return await project_plan_current(request, config=config)
     async def project_session_endpoint(request: Request) -> JSONResponse:
         return await project_session_current(request, config=config)
+    async def project_archive_endpoint(request: Request) -> JSONResponse:
+        return await project_archive_current(request, config=config)
     async def project_direction_endpoint(request: Request) -> JSONResponse:
         return await project_direction_current(request, config=config)
+    async def project_knowledge_endpoint(request: Request) -> JSONResponse:
+        return await project_knowledge_current(request, config=config)
+    async def project_memory_endpoint(request: Request) -> JSONResponse:
+        return await project_memory_current(request, config=config)
+    async def project_source_endpoint(request: Request) -> JSONResponse:
+        return await project_source_current(request, config=config)
     async def project_journal_endpoint(request: Request) -> JSONResponse:
         return await project_journal_current(request, config=config)
 
@@ -1513,6 +1837,14 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         return await admission_endpoint(request, "pause")
     async def project_admission_resume(request: Request):
         return await admission_endpoint(request, "resume")
+    async def instruction_endpoint(request: Request, mode: str):
+        from integrations.mastermind_workspace_app.instruction_admission import instruction_admission_http
+        loader=config.project_admission_load_bindings
+        if loader is None:return _with_no_store(_refuse_json(503,"source_unavailable"))
+        return await instruction_admission_http(request,config=config,load_bindings=loader,mode=mode)
+    async def instruction_current(request: Request):return await instruction_endpoint(request,"current")
+    async def instruction_status(request: Request):return await instruction_endpoint(request,"status")
+    async def instruction_pause(request: Request):return await instruction_endpoint(request,"pause")
     async def autonomy_endpoint(request: Request) -> JSONResponse:
         return await autonomy_current(request, config=config)
 
@@ -1530,6 +1862,9 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         from common.executive_workspace_fabric_contract import STATUS_OPERATION
         return await fabric_current(request, config=config, operation=STATUS_OPERATION)
 
+    async def byok_roles_endpoint(request: Request) -> Response:
+        return await byok_roles_current(request, config=config)
+
     async def ccr_state_endpoint(request: Request) -> JSONResponse:
         return await control_room_current(request, config=config, operation="state")
 
@@ -1537,23 +1872,40 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         return await control_room_current(request, config=config, operation="discover")
 
     routes = [
+        Route(_BYOK_ROLES_ROUTE, byok_roles_endpoint, methods=["GET"]),
+        Route("/workspace/source-operation/context", source_operation_context_endpoint, methods=["GET"]),
+        Route("/workspace/source-operation/operation", source_operation_endpoint("read"), methods=["GET"]),
+        Route("/workspace/source-operation/prepare", source_operation_endpoint("prepare"), methods=["POST"]),
+        Route("/workspace/source-operation/submit", source_operation_endpoint("submit"), methods=["POST"]),
+        Route("/workspace/source-operation/reconcile", source_operation_endpoint("reconcile"), methods=["POST"]),
+        Route("/workspace/source-operation/advance", source_operation_endpoint("advance"), methods=["POST"]),
         Route(_PROGRAMS_ROUTE, programs_endpoint, methods=["GET"]),
         Route(_WORK_ROUTE, work_endpoint, methods=["GET"]),
         Route(_MISSION_ROUTE, mission_endpoint, methods=["GET"]),
         Route(_MISSION_V3_ROUTE, mission_v3_endpoint, methods=["GET"]),
         Route(_MISSION_V4_ROUTE, mission_v4_endpoint, methods=["GET"]),
         Route(_RESULT_ROUTE, result_endpoint, methods=["GET"]),
+        Route(_MISSION_RESULT_ROUTE, mission_result_endpoint, methods=["GET"]),
         Route(_RESULT_REFERENCES_ROUTE, result_references_endpoint, methods=["GET"]),
         Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
+        Route("/workspace/project-access/current", project_access_endpoint, methods=["GET"]),
+        Route("/workspace/project-instructions/current", project_instructions_endpoint, methods=["GET"]),
         Route(_PROJECT_PLAN_ROUTE, project_plan_endpoint, methods=["GET"]),
         Route(_PROJECT_JOURNAL_ROUTE, project_journal_endpoint, methods=["GET"]),
+        Route(_PROJECT_KNOWLEDGE_CATALOGUE_ROUTE, project_knowledge_endpoint, methods=["GET"]),
+        Route(_PROJECT_KNOWLEDGE_MEMORY_ROUTE, project_memory_endpoint, methods=["GET"]),
+        Route(_PROJECT_KNOWLEDGE_SOURCE_ROUTE, project_source_endpoint, methods=["GET"]),
         Route(_PROJECT_SESSION_ROUTE, project_session_endpoint, methods=["GET"]),
         Route(_PROJECT_DIRECTION_ROUTE, project_direction_endpoint, methods=["GET"]),
+        Route(_PROJECT_ARCHIVE_ROUTE, project_archive_endpoint, methods=["GET"]),
         Route(_AUTONOMY_ROUTE, autonomy_endpoint, methods=["GET"]),
         Route("/workspace/project-admission/current", project_admission_current, methods=["GET"]),
         Route("/workspace/project-admission/operation", project_admission_status, methods=["GET"]),
         Route("/workspace/project-admission/pause", project_admission_pause, methods=["POST"]),
         Route("/workspace/project-admission/resume", project_admission_resume, methods=["POST"]),
+        Route("/workspace/instruction-admission/current",instruction_current,methods=["GET"]),
+        Route("/workspace/instruction-admission/operation",instruction_status,methods=["GET"]),
+        Route("/workspace/instruction-admission/pause",instruction_pause,methods=["POST"]),
 
         Route(_ACTIVITY_ROUTE, activity_endpoint, methods=["GET"]),
         Route(_RESOURCE_CAPACITY_ROUTE, resource_capacity_endpoint, methods=["GET"]),

@@ -66,7 +66,7 @@ VALID_LANE_STATES = {
 }
 VALID_EXIT_CLAIMS = {
     "CONTINUE", "CHECKPOINT_SUMMARY_STOP", "CHECKPOINTED_CONTINUATION",
-    "WAIT_EXTERNAL_EXECUTOR", "ALL_LANES_BLOCKED_STOP",
+    "WAIT_EXTERNAL_EXECUTOR", "ALL_LANES_BLOCKED_STOP", "OWNER_HANDOFF_STOP",
 }
 VALID_CONTINUITY_REASONS = {
     "CONTEXT_PRESSURE", "SESSION_UNSTABLE", "SURFACE_TRANSITION",
@@ -178,6 +178,11 @@ def _audit_lanes(snapshot: dict[str, Any], effect: dict[str, Any]) -> dict[str, 
     cycles = lanes.get("support_cycles_without_delta", 0)
     if type(cycles) is not int or cycles < 0:
         raise InvalidSnapshot("support cycles must be a nonnegative integer")
+
+    # An owner name or requested reviewer is not a successor receipt. A
+    # purported handoff without an actual current receiver/continuation is
+    # always a premature exit, even when other lanes are waiting.
+    owner_handoff_stop = exit_claim == "OWNER_HANDOFF_STOP"
 
     # A started worker is relevant only when bound to a specific waiting lane.
     # Canonical blocker/owner evidence is validated above; the caller still
@@ -318,6 +323,7 @@ def _audit_lanes(snapshot: dict[str, Any], effect: dict[str, Any]) -> dict[str, 
         "checkpoint_continuation_verified": checkpoint_proven,
         "wait_executor_verified": durable_wait,
         "status_summary_is_not_continuation": exit_claim == "CHECKPOINT_SUMMARY_STOP",
+        "owner_only_handoff_is_not_continuation": owner_handoff_stop,
         "wait_requires_started_durable_executor": (
             exit_claim == "WAIT_EXTERNAL_EXECUTOR" and not durable_wait
         ),
@@ -497,9 +503,14 @@ def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
                 "do not retry the denied action through any carrier"
             ),
         })
+    # A proof-complete packet does not make a procedurally invalid session
+    # exit ready for canonical adjudication. Audit the optional lane claim
+    # before the CLI disposition so a ghost-owner/status-only stop fails
+    # closed even when every separately enumerated proof gate passes.
+    lane_audit = _audit_lanes(root, effect) if root.get("lanes") is not None else {}
     # The caller must verify these observations against each canonical owner;
     # all green checks only mean the supplied packet is ready for adjudication.
-    ready = not gaps and not held
+    ready = not gaps and not held and not lane_audit.get("premature_exit_detected", False)
     report = {
         "schema": OUTPUT_SCHEMA,
         "disposition": "READY_FOR_CANONICAL_ADJUDICATION" if ready else "INCOMPLETE",
@@ -522,8 +533,7 @@ def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
     # Exit-claim classification is additive: snapshots without a ``lanes`` section
     # keep the exact incumbent output contract (no lane flags ever appear).
-    if root.get("lanes") is not None:
-        report.update(_audit_lanes(root, effect))
+    report.update(lane_audit)
     return report
 
 

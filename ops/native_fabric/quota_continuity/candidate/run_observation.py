@@ -93,6 +93,30 @@ def metadata(s):
             "mtime_ns": s.st_mtime_ns}
 
 
+# Closed fixed-reader directory labels; never an account path or run value.
+_FIXED_DIRECTORY_COMPONENTS = frozenset(('lanes', 'lanes/ext', 'lanes/ext/lanes'))
+
+
+def _directory_failure(exc, component, info=None):
+    if component in _FIXED_DIRECTORY_COMPONENTS:
+        mode = None if info is None else info.st_mode
+        kind = ('unknown' if mode is None else 'directory' if stat.S_ISDIR(mode)
+                else 'symlink' if stat.S_ISLNK(mode) else 'regular' if stat.S_ISREG(mode)
+                else 'other')
+        exc.directory_diagnostic = dict(component=component, kind=kind,
+            uid=None if info is None else info.st_uid,
+            mode=None if mode is None else stat.S_IMODE(mode),
+            errno=exc.errno if isinstance(exc, OSError) else None)
+    return exc
+
+
+def _retain_directory_failure(value, exc):
+    diagnostic = getattr(exc, 'directory_diagnostic', None)
+    if diagnostic is not None:
+        value['directory_diagnostic'] = dict(diagnostic)
+    return value
+
+
 class Reader:
     """Held directory descriptors; each path is a fixed internal tuple."""
     def __init__(self, root, uid, *, require_final_owner=True):
@@ -112,20 +136,24 @@ class Reader:
             self.close()
             raise
 
-    def _directory(self, s):
+    def _directory(self, s, component=None):
         if (not stat.S_ISDIR(s.st_mode) or s.st_uid not in (0, self.uid)
                 or s.st_mode & 0o022):
-            raise Invalid("directory_owner_mode_or_type")
+            raise _directory_failure(Invalid("directory_owner_mode_or_type"), component, s)
 
-    def descend(self, part):
+    def descend(self, part, *, component=None):
         if not part or part in (".", "..") or "/" in part:
             raise Invalid("invalid_fixed_path")
         parent = self.fds[-1]
-        fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-                     dir_fd=parent)
-        self.fds.append(fd)
-        s = os.fstat(fd)
-        self._directory(s)
+        try:
+            fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                         dir_fd=parent)
+            self.fds.append(fd)
+            s = os.fstat(fd)
+        except OSError as exc:
+            _directory_failure(exc, component)
+            raise
+        self._directory(s, component)
         self.edges.append((parent, part, fd, directory_identity(s)))
         self.verify()
 
@@ -157,8 +185,8 @@ class Reader:
         depth, edge_depth = len(self.fds), len(self.edges)
         fd = None
         try:
-            for part in parts[:-1]:
-                self.descend(part)
+            for index, part in enumerate(parts[:-1], 1):
+                self.descend(part, component='/'.join(parts[:index]))
             name, parent = parts[-1], self.fds[-1]
             if not name or name in (".", "..") or "/" in name:
                 raise Invalid("invalid_fixed_path")
@@ -210,17 +238,18 @@ class Reader:
 def capture(fn):
     try:
         return {"status": "observed", **fn()}
-    except FileNotFoundError:
-        return {"status": "absent", "reason": "missing_at_observation"}
+    except FileNotFoundError as exc:
+        return _retain_directory_failure(
+            {"status": "absent", "reason": "missing_at_observation"}, exc)
     except OSError as exc:
         # A permission denial ends this request; never switch to another probe.
         if exc.errno in (errno.EACCES, errno.EPERM):
             raise
-        return {"status": "unavailable", "reason": "filesystem_error",
-                "errno": exc.errno}
+        return _retain_directory_failure(
+            {"status": "unavailable", "reason": "filesystem_error", "errno": exc.errno}, exc)
     except (Invalid, UnicodeError, OverflowError, RecursionError) as exc:
-        return {"status": "unavailable",
-                "reason": str(exc) if isinstance(exc, Invalid) else "malformed_data"}
+        return _retain_directory_failure({"status": "unavailable",
+                "reason": str(exc) if isinstance(exc, Invalid) else "malformed_data"}, exc)
 
 
 def timestamp(value):
@@ -571,16 +600,21 @@ def observe(run_id, expected_support_digest, *, observe_pid=False, artifact=None
                              ("stdout", lambda: stdout_metadata(reader, run_id)),
                              ("process_receipt", lambda: process_receipt(reader, run_id))):
                 observations[name] = capture(fn)
-            if observe_pid and observations["marker"]["status"] == "observed":
+                if 'directory_diagnostic' in observations[name]:
+                    break  # First fixed-directory failure: no onward role reads.
+            directory_failed = any('directory_diagnostic' in value
+                                   for value in observations.values())
+            if observe_pid and not directory_failed and observations["marker"]["status"] == "observed":
                 observations["pid"] = capture(lambda: proc_observation(observations["marker"]["pid"], uid))
                 if observations["pid"]["status"] == "absent":
                     observations["pid"]["observed_pid_present"] = False
                     observations["pid"]["original_child_identity_proven"] = False
-            elif observe_pid:
+            elif observe_pid and not directory_failed:
                 observations["pid"] = {"status": "unavailable", "reason": "validated_marker_required"}
             reader.verify()
         report["status"] = ("unavailable" if any(
-            value["status"] == "unavailable" for value in observations.values()) else "observed")
+            value["status"] == "unavailable" or 'directory_diagnostic' in value
+            for value in observations.values()) else "observed")
         if report["status"] == "unavailable":
             report["reason"] = "one_or_more_observations_unavailable"
     except OSError as exc:
@@ -588,8 +622,10 @@ def observe(run_id, expected_support_digest, *, observe_pid=False, artifact=None
                             else "filesystem_unavailable")
         report["errno"] = exc.errno
         report["request_stopped"] = True
+        _retain_directory_failure(report, exc)
     except (Invalid, KeyError) as exc:
         report["reason"] = str(exc) if isinstance(exc, Invalid) else "account_home_unavailable"
+        _retain_directory_failure(report, exc)
     report["observed_at"] = datetime.fromtimestamp(now, timezone.utc).isoformat()
     return report
 
@@ -621,14 +657,18 @@ def observe_reserved(run_id):
                              ("stdout", lambda: stdout_metadata(reader, run_id)),
                              ("process_receipt", lambda: process_receipt(reader, run_id))):
                 report["observations"][name] = capture(fn)
+                if 'directory_diagnostic' in report['observations'][name]:
+                    break
             reader.verify()
     except OSError as exc:
         report["reason"] = ("os_permission_denied" if exc.errno in (errno.EACCES, errno.EPERM)
                             else "filesystem_unavailable")
         report["errno"] = exc.errno
         report["request_stopped"] = True
+        _retain_directory_failure(report, exc)
     except (Invalid, KeyError) as exc:
         report["reason"] = str(exc) if isinstance(exc, Invalid) else "account_home_unavailable"
+        _retain_directory_failure(report, exc)
     report["observed_at"] = datetime.fromtimestamp(now, timezone.utc).isoformat()
     return report
 

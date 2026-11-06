@@ -30,6 +30,46 @@ TARGETS = {
     'codex': '.codex/AGENTS.md',
     'claude': '.claude/CLAUDE.md',
 }
+POLL_IDENTITY_START = '# BEGIN source-owned CI poll identity'
+POLL_IDENTITY_END = '# END source-owned CI poll identity'
+PR_MUTATION_UPDATE = '''    for key in ci_pr_poll_mutation_keys(clean, str(payload.get("cwd") or ""), state):
+        changed = state.pop(key, None) is not None or changed
+'''
+
+
+def render_poll_identity(source: str) -> str:
+    """Embed the bounded PR classifier without changing cooldown or watch policy."""
+    helper = (ROOT / 'scripts/ci_poll_identity.py').read_text().strip()
+    helper = helper.replace('from __future__ import annotations\n', '')
+    embedded = POLL_IDENTITY_START + '\n' + helper + '\n' + POLL_IDENTITY_END
+    original = '''def _poll_key(clean):
+    m = PR_CHECK_RE.search(clean)
+    if m:
+        return f"pr-checks:{m.group('id')}"
+    m = PR_VIEW_RE.search(clean)
+    if m and PR_VIEW_STATUS_FIELDS_RE.search(m.group("tail") or ""):
+        return f"pr-view:{m.group('id')}"
+    m = RUN_VIEW_RE.search(clean)'''
+    replacement = '''def _poll_key(clean, cwd=""):
+    pr_key = ci_pr_poll_identity(clean, cwd)
+    if pr_key is not None:
+        return pr_key
+    m = RUN_VIEW_RE.search(clean)'''
+    if POLL_IDENTITY_START in source or POLL_IDENTITY_END in source:
+        if (source.count(embedded) != 1 or source.count(POLL_IDENTITY_START) != 1
+                or source.count(POLL_IDENTITY_END) != 1
+                or source.count(replacement) != 1 or original in source):
+            raise ValueError('installed CI poll classifier differs; reconcile before applying')
+    else:
+        source = replace_once(source, original, embedded + '\n\n\n' + replacement)
+    source = replace_once(source, 'key = _poll_key(clean)',
+                          'key = _poll_key(clean, str(payload.get("cwd") or ""))')
+    if PR_MUTATION_UPDATE not in source:
+        source = replace_once(source, '    for match in RUN_MUTATION_RE.finditer(clean):',
+                              PR_MUTATION_UPDATE + '    for match in RUN_MUTATION_RE.finditer(clean):')
+    elif source.count(PR_MUTATION_UPDATE) != 1:
+        raise ValueError('installed PR mutation invalidation differs; reconcile before applying')
+    return source
 
 
 def digest(data: bytes) -> str:
@@ -59,6 +99,8 @@ def render(kind: str, source: str) -> str:
         patches = json.loads((ROOT / 'scripts/ci_wait_guidance_replacements.json').read_text())
         for patch in patches[kind]:
             source = replace_once(source, patch['old'], patch['new'])
+        if kind == 'guard':
+            source = render_poll_identity(source)
         ast.parse(source)  # Refuse broken hook source before any file is written.
         return source
     block = guidance()
@@ -82,9 +124,12 @@ def render(kind: str, source: str) -> str:
     return source.replace(ANCHOR, ANCHOR + '\n\n' + block, 1)
 
 
-def prepare(home: Path) -> list[dict]:
+def prepare(home: Path, targets: list[str] | None = None) -> list[dict]:
     plan = []
-    for kind, relative in TARGETS.items():
+    for kind in dict.fromkeys(targets or TARGETS):
+        if kind not in TARGETS:
+            raise ValueError(f'unknown installed guidance target: {kind}')
+        relative = TARGETS[kind]
         path = home / relative
         if path.is_symlink() or not path.is_file():
             raise ValueError(f'refusing missing or symlink target: {path}')
@@ -158,11 +203,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--home', type=Path, default=Path.home())
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--target', action='append', choices=tuple(TARGETS),
+                        help='limit this operation to named targets; default is all four')
     parser.add_argument('--evidence', type=Path, help='new backup/receipt directory required for apply')
     args = parser.parse_args()
     if args.apply and args.evidence is None:
         parser.error('--apply requires --evidence (new directory)')
-    plan = prepare(args.home)
+    plan = prepare(args.home, args.target)
     report = apply(plan, args.evidence) if args.apply else dict(status='DRY_RUN', files=summary(plan))
     print(json.dumps(report, indent=2))
 

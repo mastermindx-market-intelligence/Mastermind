@@ -16,6 +16,8 @@ interface TodayProps {
   work: TodayWorkState;
   /** The existing qualified LaunchOrchestrator/controller slot; Today never sends. */
   composer: ReactNode;
+  authenticationCue?: ReactNode;
+  retainComposerWithAuth?: boolean;
   onOpenInbox: () => void;
   onOpenProjects: () => void;
   onOpenMission?: (selection: MissionSelection) => void;
@@ -39,8 +41,8 @@ const STRINGS = {
     associationUnavailable: "Association unavailable",
     nothingTitle: "Nothing needs your decision",
     nothingBody: "This applies to this task only. Other project decisions may still be open.",
-    uncertaintyTitle: "Decision summary unavailable",
-    uncertaintyBody: "We can’t confirm whether this task needs your decision.",
+    uncertaintyTitle: "Decisions",
+    uncertaintyBody: "Decision information is unavailable right now.",
     uncertaintyNotClear: "Missing information doesn’t mean there are no decisions.",
     openInbox: "Open inbox",
     openProject: "Open project",
@@ -51,7 +53,7 @@ const STRINGS = {
     selectedProject: "Selected project",
     suppliedCount: (count: number) => `${count} ${count === 1 ? "project" : "projects"} supplied`,
     rootLabel: (root: string) => `Mission ${root}`,
-    projectsUnavailable: "Project facts cannot be displayed from this source.",
+    projectsUnavailable: "Projects are unavailable right now.",
     stateLabel: "Source",
     coverageLabel: "Coverage",
     provenance: "Source details",
@@ -102,8 +104,8 @@ const STRINGS = {
     associationUnavailable: "关联不可用",
     nothingTitle: "目前没有需要您决策的事项",
     nothingBody: "此结论仅适用于当前任务。其他项目事项仍可能需要决策。",
-    uncertaintyTitle: "决策摘要不可用",
-    uncertaintyBody: "暂时无法确认此任务是否需要您决策。",
+    uncertaintyTitle: "待决策事项",
+    uncertaintyBody: "暂时无法获取待决策事项。",
     uncertaintyNotClear: "信息缺失不代表没有待决策事项。",
     openInbox: "打开收件箱",
     openProject: "打开项目",
@@ -114,7 +116,7 @@ const STRINGS = {
     selectedProject: "所选项目",
     suppliedCount: (count: number) => `${count} 个已提供项目`,
     rootLabel: (root: string) => `任务 ${root}`,
-    projectsUnavailable: "无法从该来源显示项目事实。",
+    projectsUnavailable: "暂时无法获取项目。",
     stateLabel: "来源",
     coverageLabel: "覆盖",
     provenance: "来源详情",
@@ -181,14 +183,17 @@ function qualifyPrograms(read: OfficeProjection["programs"]): QualifiedPrograms 
   return { source, cards };
 }
 
-function Provenance({ source, summary, strings }: {
+function Provenance({ source, summary, strings, reason }: {
   source: SourceClaim;
   summary: string;
   strings: Strings;
+  reason?: string | null;
 }) {
   if (source.state === "WITHHELD") return null;
   return <details className="today-provenance"><summary>{summary}</summary>
-    <dl><dt>{strings.owner}</dt><dd>{source.owner}</dd>
+    <dl><dt>{strings.stateLabel}</dt><dd>{source.state}</dd>
+      {reason && <><dt>{strings.reference}</dt><dd>{reason}</dd></>}
+      <dt>{strings.owner}</dt><dd>{source.owner}</dd>
       <dt>{strings.reference}</dt><dd>{source.ref || strings.notSupplied}</dd>
       <dt>{strings.revision}</dt><dd>{source.revision || strings.notSupplied}</dd>
       <dt>{source.observed_at_kind === "LOCAL_ACQUISITION" ? strings.locallyAcquired : strings.observed}</dt>
@@ -263,8 +268,7 @@ function Attention({ projection, strings, onOpenInbox, onOpenMission }: {
   } else {
     body = <article className="today-attention-item">
       <p>{strings.uncertaintyBody}</p>
-      <p className="today-muted">{source.state === "CURRENT" && mission === null ? strings.retainedNote : strings.uncertaintyNotClear}</p>
-      <p className="today-faint">{strings.attentionContext} · {source.state} · {source.coverage}{mission ? ` · ${mission.read_state.state}` : ""}{projection.mission.reason ? ` · ${projection.mission.reason}` : ""}</p>
+
       <div className="today-attention-actions">
         <button type="button" onClick={onOpenInbox}>{strings.openInbox}</button>
       </div>
@@ -273,10 +277,10 @@ function Attention({ projection, strings, onOpenInbox, onOpenMission }: {
   const heading = owed ? strings.attentionTitle : teamTurn ? strings.teamTitle : complete && !effectUnknown ? strings.nothingTitle : strings.uncertaintyTitle;
   return <section className="today-attention" aria-label={strings.attentionRegion}>
     <h2 className="today-module-title">{heading}</h2>
-    <StateChip source={source} strings={strings} />
+    {(owed || teamTurn || complete) && <StateChip source={source} strings={strings} />}
     {effectUnknown && <p className="today-exception" role="alert">{strings.workEffectUnknown}</p>}
     {body}
-    <Provenance source={source} summary={strings.provenance} strings={strings} />
+    <Provenance source={source} summary={strings.provenance} strings={strings} reason={projection.mission.reason} />
   </section>;
 }
 
@@ -319,9 +323,8 @@ function Programs({ projection, strings, selection, onOpenProjects, onOpenMissio
       {qualified.cards.length > 3 && <p className="today-faint">{strings.firstProjects}</p>}
       <Provenance source={qualified.source} summary={strings.provenance} strings={strings} />
     </> : <div className="today-unavailable">
-      <p>{source.state === "WITHHELD" ? strings.withheldNote : strings.projectsUnavailable}</p>
-      <p className="today-faint">{projection.programs.reason || `SOURCE_${source.state}`}</p>
-      <StateChip source={source} strings={strings} />
+      <p>{strings.projectsUnavailable}</p>
+      <Provenance source={source} summary={strings.provenance} strings={strings} reason={projection.programs.reason} />
     </div>}
   </section>;
 }
@@ -394,7 +397,7 @@ function Work({ work, projection, strings }: {
   </section>;
 }
 
-function TodayBody({ locale, projection, work, composer, onOpenInbox, onOpenProjects, onOpenMission }: TodayProps) {
+function TodayBody({ locale, projection, work, composer, authenticationCue, retainComposerWithAuth, onOpenInbox, onOpenProjects, onOpenMission }: TodayProps) {
   const strings = STRINGS[locale ?? "en"];
   const selection = projection.context.selection;
   return <section className="atelier-today" aria-label={strings.heroTitle}>
@@ -402,21 +405,22 @@ function TodayBody({ locale, projection, work, composer, onOpenInbox, onOpenProj
       <h1>{strings.heroTitle}</h1>
       <p>{strings.heroSubtitle}</p>
     </header>
-    <section className="today-composer" aria-label={strings.composerLabel}>{composer}</section>
+    <section className="today-composer" aria-label={strings.composerLabel}><div hidden={!!authenticationCue && !retainComposerWithAuth}>{composer}</div>{authenticationCue}</section>
     <div className="today-lower">
-      <Attention projection={projection} strings={strings} onOpenInbox={onOpenInbox} onOpenMission={onOpenMission} />
+      {!authenticationCue && <Attention projection={projection} strings={strings} onOpenInbox={onOpenInbox} onOpenMission={onOpenMission} />}
+      {authenticationCue && projection.receipts.effect === "EFFECT_UNKNOWN" && <p className="today-exception" role="alert">{strings.workEffectUnknown}</p>}
       <div className="today-side">
-        <Programs projection={projection} strings={strings} selection={selection}
-          onOpenProjects={onOpenProjects} onOpenMission={onOpenMission} />
+        {!authenticationCue && <Programs projection={projection} strings={strings} selection={selection}
+          onOpenProjects={onOpenProjects} onOpenMission={onOpenMission} />}
         {work.kind === "DOCUMENT" && work.document.availability === "AVAILABLE" &&
           work.document.source_observation.state === "SAME" &&
           (work.document.effect_exception.value === "EFFECT_UNKNOWN" ||
             Object.values(work.document.groups).some(rows => rows.some(row =>
               row.root_job_id === selection?.rootJobId && row.effect.value === "EFFECT_UNKNOWN"))) &&
           <p className="today-exception" role="alert">{strings.workEffectUnknown}</p>}
-        <details className="today-work-details"><summary>{strings.workDetails}</summary>
+        {!authenticationCue && <details className="today-work-details"><summary>{strings.workDetails}</summary>
           <Work work={work} projection={projection} strings={strings} />
-        </details>
+        </details>}
       </div>
     </div>
   </section>;

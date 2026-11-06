@@ -556,6 +556,11 @@ _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES: tuple[str, ...] = (
     "/workspace/control-room/unbind",
     "/workspace/control-room/refresh-builds",
 )
+_WORKSPACE_SOURCE_OPERATION_POST_ROUTES: tuple[str, ...] = (
+    "/workspace/source-operation/prepare", "/workspace/source-operation/submit",
+    "/workspace/source-operation/reconcile", "/workspace/source-operation/advance",
+)
+
 
 # Fixed already-owned inner routes. These are transport classifications only;
 # the Workspace App retains each original READ/action principal and grant gate.
@@ -564,16 +569,25 @@ _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES: tuple[str, ...] = (
     "/workspace/project-admission/current",
     "/workspace/project-admission/operation",
     "/workspace/fabric/status/current",
+    "/workspace/project-access/current",
+    "/workspace/project-instructions/current",
+    "/workspace/instruction-admission/current",
+    "/workspace/instruction-admission/operation",
 )
 _WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
     "/workspace/fabric/catalog/current",
+    "/workspace/byok/roles/current",
 )
 _WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES: tuple[str, ...] = (
     "/workspace/project-admission/pause",
     "/workspace/project-admission/resume",
 )
+_WORKSPACE_INSTRUCTION_ADMISSION_ACTION_ROUTES: tuple[str, ...] = (
+    "/workspace/instruction-admission/pause",
+)
 _WORKSPACE_ACTION_ROUTES = (
     _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES + _WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES
+    + _WORKSPACE_INSTRUCTION_ADMISSION_ACTION_ROUTES
 )
 
 
@@ -611,11 +625,18 @@ class _ExecutivePathFence:
                 "/workspace/mission/v3/current",
                 "/workspace/mission/v4/current",
                 "/workspace/result/current",
+                "/workspace/mission-result/current",
                 "/workspace/result-references/current",
                 "/workspace/plan/current",
                 "/workspace/project-plan/current",
                 "/workspace/project-journal/current",
                 "/workspace/project-direction/current",
+                "/workspace/projects/archive/current",
+                "/workspace/project-knowledge/current",
+                "/workspace/project-memory/current",
+                "/workspace/project-source/current",
+                "/workspace/source-operation/context",
+                "/workspace/source-operation/operation",
                 "/workspace/autonomy/current",
                 "/workspace/operator/activity/current", "/workspace/resources/capacity/current",
             ))
@@ -625,11 +646,18 @@ class _ExecutivePathFence:
                 "/workspace/mission/v3/current",
                 "/workspace/mission/v4/current",
                 "/workspace/result/current",
+                "/workspace/mission-result/current",
                 "/workspace/result-references/current",
                 "/workspace/plan/current",
                 "/workspace/project-plan/current",
                 "/workspace/project-journal/current",
                 "/workspace/project-direction/current",
+                "/workspace/projects/archive/current",
+                "/workspace/project-knowledge/current",
+                "/workspace/project-memory/current",
+                "/workspace/project-source/current",
+                "/workspace/source-operation/context",
+                "/workspace/source-operation/operation",
                 "/workspace/autonomy/current",
                 "/workspace/operator/activity/current", "/workspace/resources/capacity/current",
             ))
@@ -642,9 +670,9 @@ class _ExecutivePathFence:
         if workspace_app is not None:
             # Fixed actions share the incumbent public credential/host fences
             # but must not be included in the preceding GET method expansion.
-            self._routes.update({path: "POST" for path in _WORKSPACE_ACTION_ROUTES})
-            self._workspace_routes.update(_WORKSPACE_ACTION_ROUTES)
-            self._public_routes.update(_WORKSPACE_ACTION_ROUTES)
+            self._routes.update({path: "POST" for path in (_WORKSPACE_ACTION_ROUTES + _WORKSPACE_SOURCE_OPERATION_POST_ROUTES)})
+            self._workspace_routes.update(_WORKSPACE_ACTION_ROUTES + _WORKSPACE_SOURCE_OPERATION_POST_ROUTES)
+            self._public_routes.update(_WORKSPACE_ACTION_ROUTES + _WORKSPACE_SOURCE_OPERATION_POST_ROUTES)
         if os_app is not None:
             if type(os_app) is not OsStaticApp:
                 raise ValueError("fixed OS static owner required")
@@ -775,11 +803,21 @@ async def _mounted_lifespan(app):
         await await_owned(asyncio.create_task(finish_owner()))
 
 
+_OS_AUTH0_ORIGIN = "https://dev-eo0jf8us5mup7wd5.us.auth0.com"
 _OS_RESPONSE_HEADERS = {
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; "
-        "connect-src 'self' https://dev-eo0jf8us5mup7wd5.us.auth0.com; "
+        f"connect-src 'self' {_OS_AUTH0_ORIGIN}; "
+        f"frame-src 'self' {_OS_AUTH0_ORIGIN}; "
         "img-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'none'",
+}
+# Only the OAuth callback can be framed by the OS origin. The app shell and
+# all other assets remain non-embeddable. Never permit arbitrary ancestors.
+_OS_CALLBACK_RESPONSE_HEADERS = {
+    **_OS_RESPONSE_HEADERS,
+    "Content-Security-Policy": _OS_RESPONSE_HEADERS["Content-Security-Policy"].replace(
+        "frame-ancestors 'none'", "frame-ancestors 'self'"
+    ),
 }
 
 
@@ -847,7 +885,8 @@ class OsStaticApp:
             return
         key = "/os/" if path == "/os/auth/callback" else path
         body, mime = self._assets[key]
-        headers = {**_OS_RESPONSE_HEADERS, "Content-Type": mime}
+        policy_headers = _OS_CALLBACK_RESPONSE_HEADERS if path == "/os/auth/callback" else _OS_RESPONSE_HEADERS
+        headers = {**policy_headers, "Content-Type": mime}
         await Response(body, headers=headers)(scope, receive, send)
 
 
@@ -1435,17 +1474,24 @@ def _build_profile_mcp_app(
                              "/workspace/mission/v3/current",
                              "/workspace/mission/v4/current",
                              "/workspace/result/current",
+                             "/workspace/mission-result/current",
                              "/workspace/result-references/current",
                              "/workspace/plan/current",
                              "/workspace/project-plan/current",
                 "/workspace/project-journal/current",
                 "/workspace/project-direction/current",
+                "/workspace/projects/archive/current",
+                "/workspace/project-knowledge/current",
+                "/workspace/project-memory/current",
+                "/workspace/project-source/current",
+                "/workspace/source-operation/context",
+                "/workspace/source-operation/operation",
                 "/workspace/autonomy/current",
                              "/workspace/operator/activity/current", "/workspace/resources/capacity/current")
                              + _WORKSPACE_ADDITIONAL_GET_ROUTES)
         outer_routes.extend(
             Route(path, workspace_app, methods=["POST"])
-            for path in _WORKSPACE_ACTION_ROUTES
+            for path in (_WORKSPACE_ACTION_ROUTES + _WORKSPACE_SOURCE_OPERATION_POST_ROUTES)
         )
     if content_app is not None:
         outer_routes.append(Route("/workspace/window/current", content_app, methods=["GET"]))

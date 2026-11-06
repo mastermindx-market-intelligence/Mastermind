@@ -19,8 +19,20 @@ from typing import Sequence
 from scripts import ci_pytest
 
 
-_REQUIRED_SHARDS_IF = "${{ always() && (github.event_name != 'pull_request' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}"
-_REQUIRED_PR_FAST_IF = "${{ always() && github.event_name == 'pull_request' && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}"
+_REQUIRED_SHARDS_IF = "${{ !cancelled() && (github.event_name != 'pull_request' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}"
+_REQUIRED_PR_FAST_IF = "${{ !cancelled() && github.event_name == 'pull_request' && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}"
+
+_EXPECTED_SHARD_SOURCE_STEPS = [
+    {"name": "Acquire immutable corpus fixture anchor", "uses": "actions/checkout@v4",
+     "with": {"ref": "edd30b4686d3aaf358b4ca6ebd9485b04d15751d", "fetch-depth": 1,
+              "persist-credentials": False}},
+    {"name": "Checkout event source", "uses": "actions/checkout@v4",
+     "with": {"fetch-depth": 0, "persist-credentials": False}},
+    {"name": "Verify event source and immutable fixture anchor",
+     "run": "set -euo pipefail\n"
+            'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"\n'
+            "git cat-file -e 'edd30b4686d3aaf358b4ca6ebd9485b04d15751d^{commit}'\n"},
+]
 
 
 _EXPECTED_SCOPE_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 0, 'persist-credentials': False}},
@@ -257,18 +269,39 @@ def validate_parallel_workflow(text: str) -> None:
         and (not isinstance(step.get("with"), dict)
              or not step["with"].get("repository"))
     ]
-    if len(primary_checkouts) != 1:
-        raise ci_pytest.PolicyError("one primary repository checkout is required")
-    primary = primary_checkouts[0]
-    checkout_inputs = primary.get("with")
-    if (not isinstance(checkout_inputs, dict)
-            or checkout_inputs.get("persist-credentials") is not False
-            or type(checkout_inputs.get("fetch-depth")) is not int
-            or checkout_inputs.get("fetch-depth") != 0
-            or primary.get("if") is not None):
+    # The fixed squash-source anchor is acquired first, with no repository code
+    # executed before the event checkout restores GITHUB_SHA. The postcondition
+    # also rejects checkout's fallback that might recreate .git and lose it.
+    # Exact steps forbid credentials, alternate paths/refs, interposed commands,
+    # conditional acquisition and later same-repository source replacement.
+    if (len(primary_checkouts) != 2
+            or shard_steps[:3] != _EXPECTED_SHARD_SOURCE_STEPS
+            or any(step["with"].get("persist-credentials") is not False
+                   or type(step["with"].get("fetch-depth")) is not int
+                   for step in primary_checkouts)):
         raise ci_pytest.PolicyError(
-            "primary checkout must preserve full history without persisted credentials"
+            "fixed fixture acquisition must precede full-history event checkout and source proof"
         )
+    # A checkout with an explicit repository also defaults to the root path.
+    # Only the two incumbent Macro fixtures may follow the event checkout;
+    # their dedicated paths cannot replace the selected repository source.
+    external_checkouts = [
+        step for step in shard_steps
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+        and isinstance(step.get("with"), dict) and step["with"].get("repository")
+    ]
+    fixture_paths = {
+        "Checkout pinned Macro engine": "vendor/macro_src",
+        "Checkout paired Brain production owner fixture": ".ci-production-macro",
+    }
+    if (len(external_checkouts) != 2
+            or {step.get("name") for step in external_checkouts} != set(fixture_paths)
+            or any(step.get("uses") != "actions/checkout@v4"
+                   or step["with"].get("repository") != "mastermindx-market-intelligence/macro"
+                   or step["with"].get("path") != fixture_paths.get(step.get("name"))
+                   or step["with"].get("persist-credentials") is not False
+                   for step in external_checkouts)):
+        raise ci_pytest.PolicyError("later checkouts must retain the two isolated Macro fixture paths")
     # The single prior-CI probe is read-only and executes before the shard.
     # The final shard step can be conditional ONLY on the verified output of
     # this pinned producer. No skipping whole jobs or trusted non-pytest gates.

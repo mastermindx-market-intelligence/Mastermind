@@ -110,10 +110,11 @@ describe("Work read recovery in the actual App", () => {
       state = { status: "signed_out", reason: null, acquisition: false, content: false }; notify(state);
     });
     expect(signal.aborted).toBe(true);
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Refresh Work" }).disabled).toBe(true);
+    expect(screen.getByText("Sign in to your workspace.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Refresh Work" })).toBeNull();
     await act(async () => retry.resolve(structuredClone(workAvailable)));
     expect(screen.queryByText("JOB-2")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Refresh Work" }));
+    expect(screen.queryByRole("button", { name: "Refresh Work" })).toBeNull();
     expect(readWork).toHaveBeenCalledTimes(2);
   });
 

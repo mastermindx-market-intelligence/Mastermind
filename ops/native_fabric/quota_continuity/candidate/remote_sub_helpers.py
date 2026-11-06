@@ -45,6 +45,35 @@ def deadline_seconds():
     print(min(int(cap), max(0, int(remaining - reserve))))
 
 
+def _normal_poll_transport_failure(stage, result):
+    """Recognize only a completed read-only SSH poll, not an interruption.
+
+    SSH uses255 for a transport failure. The controller reserves128+ for
+    uncertain owned-process effects, so preserve255 in the process receipt
+    while reporting an ordinary failed observation to its existing poll loop.
+    This never qualifies a launch, a worker return, or a lease release.
+    """
+    from lane_runtime import cleanup_receipt_is_proven
+    cleanup = result.cleanup
+    return (
+        stage == 'poll'
+        and type(result.returncode) is int and result.returncode == 255
+        and result.timed_out is False
+        and result.stdout_truncated is False and result.stderr_truncated is False
+        and type(result.stdout_bytes) is int and result.stdout_bytes == 0
+        and result.stdout == ''
+        and isinstance(cleanup, dict) and cleanup_receipt_is_proven(cleanup)
+        and type(cleanup.get('residual_count')) is int
+        and cleanup.get('status') == 'not_needed'
+        and cleanup.get('reason') == 'normal_completion'
+        and all(cleanup.get(k) is False for k in ('sigterm_sent', 'sigkill_sent'))
+        and all(cleanup.get(k) is True for k in (
+            'stdout_capture_complete', 'stderr_capture_complete', 'stdin_delivery_complete'))
+        and all(k in cleanup and cleanup[k] is None for k in (
+            'error_code', 'stdout_capture_error', 'stderr_capture_error', 'stdin_delivery_error'))
+    )
+
+
 def deadline_command():
     """Bound one controller command with the incumbent owned-process runtime.
 
@@ -108,6 +137,8 @@ def deadline_command():
         raise SystemExit(76)
     if result.timed_out:
         print('COMMISSION_TIME_EXHAUSTED stage=' + stage, file=sys.stderr)
+    if _normal_poll_transport_failure(stage, result):
+        raise SystemExit(1)
     raise SystemExit(result.returncode if result.returncode >= 0 else 128 - result.returncode)
 
 

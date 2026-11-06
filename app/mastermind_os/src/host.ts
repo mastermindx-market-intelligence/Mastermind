@@ -1,4 +1,15 @@
+import { decodeByokRolesRead, type ByokRolesRead } from "./meta-ceo/byok-roles-read";
+import { createLazyTerminalSharingHost, type TerminalSharingSource } from "./terminal/terminal-sharing-host";
+import {projectAccessHostMethods,projectAccessPublicSelection,type ProjectAccessRawMethods,type ProjectAccessHostMethods} from "./access/project-access-host";
 import { projectAdmissionHostMethods, projectAdmissionPublicRequest, type ProjectAdmissionRawMethods, type ProjectAdmissionHostMethods } from "./admission/project-admission-host";
+import { validArchiveCursor, type ArchiveCursor } from "./projects/archive/project-archive-continuation";
+import { decodeProjectArchive, type ProjectArchiveRead } from "./projects/archive/project-archive";
+import type { ProjectFileSearchOwner, FileSearchCatalogue, FileSearchSource } from "./discovery/project-file-search";
+import { knowledgeReadSelection, validateKnowledgeRead, type KnowledgeReadSelection, type KnowledgeSourceSelection, type KnowledgeReadKind } from "./knowledge/library/knowledge-read-port";
+import { decodeSourceOperationContext, validSourceOperationContextSelection, type SourceOperationContext, type SourceOperationContextSelection } from './source-operations/context';
+import {createSourceOperationTransport,type SourceOperationTransport} from './source-operations/transport';
+import {decodeSourceOperationStatus} from './planning/plan-adoption-status';
+import {instructionHostMethods,instructionPublicRequest,type InstructionRawMethods,type InstructionHostMethods} from "./instructions/instruction-host";
 import { decodeProjectAssociation, normalizeProjectAssociationSelection, type ProjectAssociationSelection, type ProjectAssociationDocument } from "./conversations/project-association";
 import { decodeResourceCapacityRead, validResourceCapacitySelection, type ResourceCapacityReadSelection, type ResourceCapacityRead } from "./resources/resource-capacity-read";
 import { decodeAutonomyPolicy, isAutonomySelection, type AutonomyRead, type AutonomySelection } from "./supervision/autonomy-policy";
@@ -11,6 +22,7 @@ import { attendedSelection, decodeAttendedStatus, type AttendedSelection, type A
 import { decodeAdmittedPlan, validPlanSelection, type PlanRead, type PlanSelection } from "./planning/admitted-plan";
 import { decodeRetainedActivity, validActivitySelection, type ActivitySelection, type ActivityRead } from "./planning/retained-activity";
 import { createNativeExecutiveTransport } from "./native-executive-transport";
+import type { MissionDiagnosticSnapshot } from "./diagnostic-state";
 import { createTerminalBriefsNavigationPort, type TerminalBriefsNavigationPort } from "./terminal/terminal-navigation";
 import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
@@ -36,6 +48,7 @@ import {
   type ResultEnvelopeDigestShape,
   type ResultSelection,
 } from "./result";
+import { decodeMissionResult, type MissionResultDocument } from "./mission-result";
 import { decodeResultReferencesEnvelope, type ResultReferencesDocument } from "./result-references";
 import { decodeWorkDocument, type WorkDocument } from "./work";
 import { decodeProgramsObservation, type ProgramsObservation } from "./programs-observation";
@@ -61,9 +74,12 @@ import {
   type ControlRoomOperation, type ControlRoomActionResult,
 } from "./control-room";
 
-export interface RawClient extends Partial<ProjectAdmissionRawMethods> {
+export interface RawClient extends Partial<ProjectAdmissionRawMethods>,Partial<InstructionRawMethods>,Partial<ProjectAccessRawMethods> {
+  /** Independent Terminal session; workspace grants never confer brief access. */
+  readonly terminalSharing?: TerminalSharingSource;
   /** Public fixed navigation only; Terminal owns its user's authentication and access. */
   openTerminalBriefs?(): Promise<unknown>;
+  readonly sourceOperations?:SourceOperationTransport;
   /** Existing authenticated original-owner acquisition; no caller-supplied request key. */
   readOriginalMissionV4?(request: MissionSelection & { signal: AbortSignal }): Promise<unknown>;
   /** Optional private owner publication; never reconstructed from browser input. */
@@ -83,10 +99,16 @@ export interface RawClient extends Partial<ProjectAdmissionRawMethods> {
   restore?(): Promise<unknown>;
   /** Optional owner-authorized status-only Fabric port. No default browser/machine credential bridge. */
   readAutonomyPolicy?(request: AutonomySelection & { signal: AbortSignal }): Promise<unknown>;
+  readSourceOperationContext?(request: SourceOperationContextSelection & { signal: AbortSignal }): Promise<unknown>;
   readProjectPlan?(request: ProjectPlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readProjectSessionAssociation?(request: ProjectAssociationSelection & { signal: AbortSignal }): Promise<unknown>;
   readProjectJournal?(request: JournalSelection & { signal: AbortSignal }): Promise<unknown>;
+  readProjectArchivePage?(request: ArchiveCursor & { signal: AbortSignal }): Promise<unknown>;
+  readProjectArchive?(request: { signal: AbortSignal }): Promise<unknown>;
   readProjectDirection?(request: DirectionSelection & { signal: AbortSignal }): Promise<unknown>;
+  readProjectKnowledgeCatalogue?(request: KnowledgeReadSelection & { signal: AbortSignal }): Promise<unknown>;
+  readProjectKnowledgeMemory?(request: KnowledgeReadSelection & { signal: AbortSignal }): Promise<unknown>;
+  readProjectKnowledgeSource?(request: KnowledgeSourceSelection & { signal: AbortSignal }): Promise<unknown>;
   readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readResourceCapacity?(request: ResourceCapacityReadSelection & { signal: AbortSignal }): Promise<unknown>;
   readRetainedActivity?(request: ActivitySelection & { signal: AbortSignal }): Promise<unknown>;
@@ -96,6 +118,8 @@ export interface RawClient extends Partial<ProjectAdmissionRawMethods> {
   readPrograms(request: { signal: AbortSignal }): Promise<unknown>;
   /** Fixed authenticated one-cache Control Room state; no operator writes. */
   readControlRoomState?(request: { signal: AbortSignal }): Promise<unknown>;
+  /** Fixed secret-free role-pair metadata; no enrollment or provider operation. */
+  readByokRoles?(request: { signal: AbortSignal }): Promise<unknown>;
   /** Independent read with a separately sealed Discovery grant; never an action grant. */
   readControlRoomDiscovery?(request: { signal: AbortSignal }): Promise<unknown>;
   /** Each original mutation has one fixed, optional host method and one owner. */
@@ -122,6 +146,11 @@ export interface RawClient extends Partial<ProjectAdmissionRawMethods> {
     resultEnvelopeDigest: string;
     signal: AbortSignal;
   }): Promise<unknown>;
+  /**
+   * Optional compound acquisition. Absent on native clients: no compound
+   * command is registered there. Signal stays outside the five-field selector.
+   */
+  readMissionResult?(request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
   readResultReferences?(request: {
     workRef: string;
     rootJobId: string;
@@ -140,9 +169,12 @@ export interface RawClient extends Partial<ProjectAdmissionRawMethods> {
 export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
 }
-export interface MissionHost extends Partial<ProjectAdmissionHostMethods> {
+export interface MissionHost extends Partial<ProjectAdmissionHostMethods>,Partial<InstructionHostMethods>,Partial<ProjectAccessHostMethods> {
+  /** Independent Terminal session; workspace grants never confer brief access. */
+  readonly terminalSharing?: TerminalSharingSource;
   /** Optional zero-input navigation; no private content or access receipt. */
   openTerminalBriefs?: TerminalBriefsNavigationPort;
+  readonly sourceOperations?:SourceOperationTransport;
   /** Existing authenticated original-owner acquisition; no caller-supplied request key. */
   readOriginalMissionV4?(request: MissionSelection & { signal: AbortSignal }): Promise<unknown>;
   readonly productAcceptanceOwner?: ProductAcceptanceOwner;
@@ -154,10 +186,17 @@ export interface MissionHost extends Partial<ProjectAdmissionHostMethods> {
     request: MissionSelection & { signal: AbortSignal },
   ) => Promise<unknown>;
   readAutonomyPolicy?: (request: AutonomySelection & { signal: AbortSignal }) => Promise<AutonomyRead>;
+  readSourceOperationContext?: (request: SourceOperationContextSelection & { signal: AbortSignal }) => Promise<SourceOperationContext>;
   readProjectPlan?: (request: ProjectPlanSelection & { signal: AbortSignal }) => Promise<ProjectPlanRead>;
   readProjectSessionAssociation?: (request: ProjectAssociationSelection & { signal: AbortSignal }) => Promise<ProjectAssociationDocument>;
   readProjectJournal?: (request: JournalSelection & { signal: AbortSignal }) => Promise<ProjectJournalDocument>;
+  readProjectArchivePage?: (request: ArchiveCursor & { signal: AbortSignal }) => Promise<ProjectArchiveRead>;
+  readProjectArchive?: (request: { signal: AbortSignal }) => Promise<ProjectArchiveRead>;
   readProjectDirection?: (request: DirectionSelection & { signal: AbortSignal }) => Promise<AcceptedDirectionRead>;
+  readonly projectFilesSearch?: ProjectFileSearchOwner;
+  readProjectKnowledgeCatalogue?: (request: KnowledgeReadSelection & { signal: AbortSignal }) => Promise<unknown>;
+  readProjectKnowledgeMemory?: (request: KnowledgeReadSelection & { signal: AbortSignal }) => Promise<unknown>;
+  readProjectKnowledgeSource?: (request: KnowledgeSourceSelection & { signal: AbortSignal }) => Promise<unknown>;
   readAdmittedPlan?: (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
   readResourceCapacity?: (request: ResourceCapacityReadSelection & { signal: AbortSignal }) => Promise<ResourceCapacityRead>;
   readRetainedActivity?: (request: ActivitySelection & { signal: AbortSignal }) => Promise<ActivityRead>;
@@ -165,6 +204,7 @@ export interface MissionHost extends Partial<ProjectAdmissionHostMethods> {
   readAttendedFabricCatalog?: (request: { signal: AbortSignal }) => Promise<FabricCatalog>;
   readPrograms?: ProgramRead;
   readControlRoomState?: (request: { signal: AbortSignal }) => Promise<ControlRoomRead>;
+  readByokRoles?: (request: { signal: AbortSignal }) => Promise<ByokRolesRead>;
   readControlRoomDiscovery?: (request: { signal: AbortSignal }) => Promise<ControlRoomDiscovery>;
   openControlRoomSurface?: (request: { payload: Record<string, unknown>; signal: AbortSignal }) => Promise<ControlRoomActionResult>;
   bindControlRoomSurface?: (request: { payload: Record<string, unknown>; signal: AbortSignal }) => Promise<ControlRoomActionResult>;
@@ -174,6 +214,8 @@ export interface MissionHost extends Partial<ProjectAdmissionHostMethods> {
   readProgramsObservation?: (request: { signal: AbortSignal }) => Promise<ProgramsObservation>;
   readWork?: (request: { signal: AbortSignal }) => Promise<WorkDocument>;
   readResult?: MissionResultRead;
+  /** Mounted only when the raw method and the client invalidation generation both exist. */
+  readMissionResult?(request: ResultSelection & { signal: AbortSignal }): Promise<MissionResultDocument>;
   /** Typed retained-result reference index read; same two-field selection grammar. */
   readResultReferences?: (
     request: { workRef: string; rootJobId: string; signal: AbortSignal },
@@ -185,6 +227,8 @@ export interface MissionHost extends Partial<ProjectAdmissionHostMethods> {
   selection?: unknown;
   auth?: Pick<RawClient, "getState" | "subscribe" | "signIn" | "signOut">;
   commandBinding?: OrchestratorCommandBinding;
+  /** Observer-only composition diagnostics; a zero-effect snapshot, never a grant. */
+  diagnostics?: () => MissionDiagnosticSnapshot;
   /** Separately mounted session binding; never the launch route. */
   sessionCommandBinding?: unknown;
   /** Pushes the exact selection on every transition and registers the explicit condition provider. */
@@ -218,6 +262,66 @@ export function bindMissionHost(
       previousClientGeneration = generation;
     }
   });
+  const sourceContextReader = client.readSourceOperationContext;
+  const sourceGroup = client.sourceOperations;
+  const sourceEpochReader = client.invalidationGeneration;
+  const sourceMethods = sourceGroup
+    ? {
+        prepare: sourceGroup.prepareSourceOperation,
+        read: sourceGroup.readSourceOperation,
+        submit: sourceGroup.submitSourceOperation,
+        reconcile: sourceGroup.reconcileSourceOperation,
+        advance: sourceGroup.advanceSourceOperation,
+      }
+    : null;
+  const boundSource =
+    sourceGroup &&
+    sourceMethods &&
+    sourceEpochReader &&
+    Object.values(sourceMethods).every((fn) => typeof fn === "function")
+      ? createSourceOperationTransport(async (method, _path, body, signal) => {
+          const started = epoch,
+            source = sourceEpochReader.call(client);
+          const name = (
+            {
+              prepare: "prepareSourceOperation",
+              read: "readSourceOperation",
+              submit: "submitSourceOperation",
+              reconcile: "reconcileSourceOperation",
+              advance: "advanceSourceOperation",
+            } as const
+          )[method];
+          const authorized = () => {
+            const state = client.getState();
+            return (
+              !signal.aborted &&
+              started === epoch &&
+              client.invalidationGeneration === sourceEpochReader &&
+              sourceEpochReader.call(client) === source &&
+              client.sourceOperations === sourceGroup &&
+              sourceGroup[name] === sourceMethods[method] &&
+              state.status === "signed_in" &&
+              state.acquisition
+            );
+          };
+          if (!authorized()) throw new Error("SOURCE_OPERATION_UNAUTHORIZED");
+          const call = sourceMethods[method] as (
+            input: unknown,
+            signal: AbortSignal,
+          ) => Promise<unknown>;
+          const result = await call.call(sourceGroup, body, signal);
+          if (!authorized()) throw new Error("READ_CANCELLED");
+          if (method === "prepare") return result;
+          const decoded = decodeSourceOperationStatus(result);
+          if (
+            decoded.selection.action !== body.action ||
+            decoded.selection.request_id !== body.request_id ||
+            decoded.selection.work_ref !== body.work_ref
+          )
+            throw new Error("SOURCE_OPERATION_RESPONSE_INVALID");
+          return decoded;
+        })
+      : undefined;
   const check = (signal: AbortSignal, started: number) => {
     if (signal.aborted || started !== epoch) throw new Error("READ_CANCELLED");
   };
@@ -288,12 +392,49 @@ export function bindMissionHost(
       }
     };
   }
+  function knowledgeRead(kind: KnowledgeReadKind, raw: ((request: any) => Promise<unknown>) | undefined) {
+    if(!raw || !client.invalidationGeneration) return undefined;
+    return async (request: (KnowledgeReadSelection|KnowledgeSourceSelection)&{signal:AbortSignal}) => {
+      const {signal,...value}=request;
+      const selected=knowledgeReadSelection(value,kind);
+      if(!selected) throw new Error("PROJECT_KNOWLEDGE_SELECTION_INVALID");
+      const started=epoch, generation=client.invalidationGeneration!();
+      const method=kind==="catalogue"?"readProjectKnowledgeCatalogue":kind==="memory"?"readProjectKnowledgeMemory":"readProjectKnowledgeSource";
+      const current=()=>{const state=client.getState();return !signal.aborted && epoch===started
+        && client[method]===raw && client.invalidationGeneration?.()===generation && state.status==="signed_in" && state.acquisition;};
+      if(!current()) throw new Error("PROJECT_KNOWLEDGE_READ_UNAUTHORIZED");
+      const result=await raw.call(client,{...selected,signal});
+      if(!current()) throw new Error("READ_CANCELLED");
+      const body=await validateKnowledgeRead(result,selected,kind);
+      if(!current()) throw new Error("READ_CANCELLED");
+      return body;
+    };
+  }
+  const catalogueRead=knowledgeRead("catalogue",client.readProjectKnowledgeCatalogue);
+  const memoryRead=knowledgeRead("memory",client.readProjectKnowledgeMemory);
+  const sourceRead=knowledgeRead("source",client.readProjectKnowledgeSource);
+  const projectFilesSearch: ProjectFileSearchOwner|undefined = catalogueRead && sourceRead ? Object.freeze({
+    context:()=>{
+      const state=client.getState(),generation=client.invalidationGeneration?.();
+      return state.status==="signed_in" && state.acquisition && Number.isSafeInteger(generation) && generation!>=0
+        ? Object.freeze({generation:JSON.stringify([epoch,generation])}) : null;
+    },
+    authGeneration:()=>epoch,
+    readCatalogue:({workRef,signal}:{workRef:string;signal:AbortSignal})=>catalogueRead({work_ref:workRef,signal}) as Promise<FileSearchCatalogue>,
+    readSource:({workRef,sourceRef,expectedRevision,signal}:{workRef:string;sourceRef:string;expectedRevision:string;signal:AbortSignal})=>
+      sourceRead({work_ref:workRef,source_ref:sourceRef,expected_revision:expectedRevision,signal}) as Promise<FileSearchSource>,
+  }):undefined;
   const command = completeOrchestratorCommandBinding(commandBinding);
   return {
+    ...(client.terminalSharing ? { terminalSharing: client.terminalSharing } : {}),
     ...(client.openTerminalBriefs ? {
       openTerminalBriefs: createTerminalBriefsNavigationPort(() => client.openTerminalBriefs!()),
     } : {}),
     invalidationGeneration: () => epoch,
+    ...(catalogueRead ? {readProjectKnowledgeCatalogue: catalogueRead} : {}),
+    ...(projectFilesSearch ? {projectFilesSearch} : {}),
+    ...(memoryRead ? {readProjectKnowledgeMemory: memoryRead} : {}),
+    ...(sourceRead ? {readProjectKnowledgeSource: sourceRead} : {}),
     auth: {
       getState: () => client.getState(),
       subscribe: (listener) => client.subscribe(listener),
@@ -307,6 +448,8 @@ export function bindMissionHost(
       },
     },
     ...projectAdmissionHostMethods(client,()=>epoch),
+    ...instructionHostMethods(client,()=>epoch),
+    ...projectAccessHostMethods(client,()=>epoch),
     ...(client.readAutonomyPolicy && client.invalidationGeneration ? {
       async readAutonomyPolicy(request: AutonomySelection & { signal: AbortSignal }) {
         const { signal, ...selected } = request;
@@ -321,6 +464,23 @@ export function bindMissionHost(
         const raw = await client.readAutonomyPolicy!({ ...selected, signal });
         if (!authorized()) throw new Error("READ_CANCELLED");
         return decodeAutonomyPolicy(raw, selected);
+      },
+    } : {}),
+    ...(boundSource?{sourceOperations:boundSource}:{}),
+    ...(sourceContextReader && client.invalidationGeneration ? {
+      async readSourceOperationContext(request: SourceOperationContextSelection & { signal: AbortSignal }) {
+        const { signal, ...selected } = request;
+        if (!validSourceOperationContextSelection(selected)) throw new Error("SOURCE_OPERATION_CONTEXT_SELECTION_INVALID");
+        const started = epoch, source = client.invalidationGeneration!();
+        const authorized = () => { const state = client.getState();
+          return !signal.aborted && started === epoch && source === client.invalidationGeneration?.()
+            && client.readSourceOperationContext === sourceContextReader
+            && state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("SOURCE_OPERATION_CONTEXT_UNAUTHORIZED");
+        const raw = await sourceContextReader.call(client, { ...selected, signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        return decodeSourceOperationContext(raw, selected);
       },
     } : {}),
     ...(client.readProjectPlan && client.invalidationGeneration ? {
@@ -355,6 +515,43 @@ export function bindMissionHost(
         const body = decodeProjectAssociation(raw, selected);
         if (!body) throw new Error("PROJECT_SESSION_RESPONSE_INVALID");
         return body;
+      },
+    } : {}),
+    ...(client.readProjectArchivePage && client.invalidationGeneration ? {
+      async readProjectArchivePage(request: ArchiveCursor & { signal: AbortSignal }) {
+        const { signal, ...cursor } = request;
+        if (!validArchiveCursor(cursor)) throw new Error("PROJECT_ARCHIVE_REQUEST_INVALID");
+        const started = epoch, source = client.invalidationGeneration!(), reader = client.readProjectArchivePage!;
+        const authorized = () => {
+          const state = client.getState();
+          return !signal.aborted && Number.isSafeInteger(source) && source >= 0 && started === epoch &&
+            source === client.invalidationGeneration?.() && reader === client.readProjectArchivePage &&
+            state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("PROJECT_ARCHIVE_READ_UNAUTHORIZED");
+        const raw = await reader.call(client, { ...cursor, signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        const body = decodeProjectArchive(raw);
+        if (body.availability === "AVAILABLE" && body.catalogue.document_digest !== cursor.catalogue_digest)
+          throw new Error("PROJECT_ARCHIVE_PAGE_CHANGED");
+        return body;
+      },
+    } : {}),
+    ...(client.readProjectArchive && client.invalidationGeneration ? {
+      async readProjectArchive(request: { signal: AbortSignal }) {
+        if (Object.keys(request).length !== 1 || !("signal" in request)) throw new Error("PROJECT_ARCHIVE_REQUEST_INVALID");
+        const { signal } = request;
+        const started = epoch, source = client.invalidationGeneration!(), reader = client.readProjectArchive!;
+        const authorized = () => {
+          const state = client.getState();
+          return !signal.aborted && Number.isSafeInteger(source) && source >= 0 && started === epoch &&
+            source === client.invalidationGeneration?.() && reader === client.readProjectArchive &&
+            state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("PROJECT_ARCHIVE_READ_UNAUTHORIZED");
+        const raw = await reader.call(client, { signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        return decodeProjectArchive(raw);
       },
     } : {}),
     ...(client.readProjectDirection && client.invalidationGeneration ? {
@@ -539,6 +736,29 @@ export function bindMissionHost(
       check(signal, started);
       return decodeProgramsEnvelope(raw);
     },
+    ...(client.readByokRoles && client.invalidationGeneration ? {
+      async readByokRoles({ signal }: { signal: AbortSignal }) {
+        const started = epoch;
+        const source = client.invalidationGeneration!();
+        const read = client.readByokRoles!;
+        const generation = client.invalidationGeneration!;
+        const verify = () => {
+          check(signal, started);
+          if (!Number.isSafeInteger(source) || generation !== client.invalidationGeneration ||
+              source !== generation.call(client) || read !== client.readByokRoles)
+            throw new Error("READ_CANCELLED");
+          const state = client.getState();
+          if (state.status !== "signed_in" || !state.acquisition)
+            throw new Error("BYOK_READ_UNAUTHORIZED");
+        };
+        verify();
+        const raw = await read.call(client, { signal });
+        verify();
+        const result = decodeByokRolesRead(raw);
+        verify();
+        return result;
+      },
+    } : {}),
     ...(client.readControlRoomState ? {
       async readControlRoomState({ signal }: { signal: AbortSignal }) {
         const started = epoch;
@@ -685,6 +905,35 @@ export function bindMissionHost(
       if (!decoded) throw new Error("RESULT_RESPONSE_INVALID");
       return decoded;
     },
+    ...(client.readMissionResult && client.invalidationGeneration ? {
+      async readMissionResult(request: ResultSelection & { signal: AbortSignal }) {
+        const { signal, ...input } = request;
+        const selected = normalizeResultSelection(input);
+        if (!selected) throw new Error("SELECTION_INVALID");
+        const started = epoch;
+        const sourceGeneration = client.invalidationGeneration?.();
+        const read = client.readMissionResult;
+        let invalidated = false;
+        const verify = () => {
+          const state = client.getState();
+          if (invalidated || signal.aborted || started !== epoch
+            || sourceGeneration !== client.invalidationGeneration?.()
+            || read !== client.readMissionResult
+            || state.status !== "signed_in" || !state.acquisition)
+            throw new Error("READ_CANCELLED");
+        };
+        verify();
+        const release = client.subscribe(() => { invalidated = true; });
+        try {
+          verify();
+          const raw = await read!.call(client, { ...selected, signal });
+          verify();
+          const decoded = decodeMissionResult(raw, selected);
+          if (!decoded.ok) throw new Error("MISSION_RESULT_RESPONSE_INVALID");
+          return decoded.document;
+        } finally { release(); }
+      },
+    } : {}),
     async readCurrentWindow({ signal }) {
       const started = epoch;
       check(signal, started);
@@ -746,6 +995,8 @@ export async function createNativeClient(
   listen: Listen,
 ): Promise<RawClient> {
   const executive = await createNativeExecutiveTransport(invoke, listen);
+  const terminalSharing = createLazyTerminalSharingHost(invoke,
+    (event, handler) => listen(event, message => handler(message.payload)));
   let current: AuthState = {
     status: "unconfigured",
     reason: "NATIVE_HOST_UNAVAILABLE",
@@ -780,6 +1031,7 @@ export async function createNativeClient(
   async function read(
     command:
       | "read_programs"
+      | "read_byok_roles"
       | "read_work"
       | "read_mission"
       | "read_mission_v3"
@@ -787,11 +1039,27 @@ export async function createNativeClient(
       | "pause_project_admission"
       | "resume_project_admission"
       | "read_project_admission_operation"
+      | "read_project_instructions"
+      | "read_project_access"
+      | "read_instruction_admission_control"
+      | "pause_instruction_admission"
+      | "read_instruction_admission_operation"
       | "read_autonomy_policy"
       | "read_project_plan"
       | "read_project_journal"
+      | "read_project_knowledge_catalogue"
+      | "read_project_knowledge_memory"
+      | "read_project_knowledge_source"
       | "read_project_session"
       | "read_project_direction"
+      | "read_project_archive"
+      | "read_project_archive_page"
+      | "read_source_operation_context"
+      | "source_operation_prepare"
+      | "source_operation_read"
+      | "source_operation_submit"
+      | "source_operation_reconcile"
+      | "source_operation_advance"
       | "read_admitted_plan"
       | "read_retained_activity"
       | "read_resource_capacity"
@@ -841,6 +1109,7 @@ export async function createNativeClient(
     });
   }
   return {
+    terminalSharing,
     executive: executive.transport,
     executiveSession: executive.sessionTransport,
     openTerminalBriefs: createTerminalBriefsNavigationPort((command) => invoke(command)),
@@ -873,7 +1142,27 @@ export async function createNativeClient(
       const result = await invoke("sign_out");
       if (ticket === control && started === epoch) update(result);
     },
+  sourceOperations: createSourceOperationTransport(
+    (method, _path, body, signal) => {
+      if (current.status !== "signed_in" || !current.acquisition)
+        return Promise.reject(new Error("SOURCE_OPERATION_UNAUTHORIZED"));
+      return read(
+        (
+          {
+            prepare: "source_operation_prepare",
+            read: "source_operation_read",
+            submit: "source_operation_submit",
+            reconcile: "source_operation_reconcile",
+            advance: "source_operation_advance",
+          } as const
+        )[method],
+        signal,
+        { request: body },
+      );
+    },
+  ),
     readPrograms: ({ signal }) => read("read_programs", signal),
+    readByokRoles: ({ signal }) => read("read_byok_roles", signal),
     readWork: ({ signal }) => read("read_work", signal),
     readAttendedFabricCatalog: ({ signal }) => read("read_fabric_catalog", signal),
     readAttendedFabric: ({ rootId, runId, signal }) => {
@@ -894,6 +1183,31 @@ export async function createNativeClient(
       const input=projectAdmissionPublicRequest("current",request);
       if(!input)return Promise.reject(new Error("PROJECT_ADMISSION_REQUEST_INVALID"));
       return read("read_project_admission_control",request.signal,{selection:input.selection});
+    },
+    readProjectAccess: request => {
+      const selection=projectAccessPublicSelection(request);
+      if(!selection)return Promise.reject(Error("PROJECT_ACCESS_REQUEST_INVALID"));
+      return read("read_project_access",request.signal,{selection});
+    },
+    readProjectInstructions: request => {
+      const input=instructionPublicRequest("content",request);
+      if(!input)return Promise.reject(Error("INSTRUCTION_REQUEST_INVALID"));
+      return read("read_project_instructions",request.signal,{selection:input.selection});
+    },
+    readInstructionAdmissionControl: request => {
+      const input=instructionPublicRequest("current",request);
+      if(!input)return Promise.reject(Error("INSTRUCTION_REQUEST_INVALID"));
+      return read("read_instruction_admission_control",request.signal,{selection:input.selection});
+    },
+    pauseInstructionAdmission: request => {
+      const input=instructionPublicRequest("pause",request);
+      if(!input)return Promise.reject(Error("INSTRUCTION_REQUEST_INVALID"));
+      return read("pause_instruction_admission",request.signal,{request:input});
+    },
+    readInstructionAdmissionOperation: request => {
+      const input=instructionPublicRequest("status",request);
+      if(!input)return Promise.reject(Error("INSTRUCTION_REQUEST_INVALID"));
+      return read("read_instruction_admission_operation",request.signal,{request:input});
     },
     pauseProjectAdmission: (request) => {
       const input=projectAdmissionPublicRequest("pause",request);
@@ -916,6 +1230,11 @@ export async function createNativeClient(
         return Promise.reject(new Error("AUTONOMY_SELECTION_INVALID"));
       return read("read_autonomy_policy", signal, { selection: selected });
     },
+    readSourceOperationContext: (request) => {
+      const { signal, ...selected } = request;
+      if (!validSourceOperationContextSelection(selected)) return Promise.reject(new Error("SOURCE_OPERATION_CONTEXT_SELECTION_INVALID"));
+      return read("read_source_operation_context", signal, { selection: { action: selected.action, work_ref: selected.workRef } });
+    },
     readProjectPlan: (request) => {
       const { signal, ...selected } = request;
       if (!validProjectPlanSelection(selected))
@@ -928,11 +1247,32 @@ export async function createNativeClient(
       if (!selected) return Promise.reject(new Error("PROJECT_SESSION_SELECTION_INVALID"));
       return read("read_project_session", signal, { selection: { work_ref: selected.workRef, root_job_id: selected.rootJobId } });
     },
+    readProjectArchivePage: (request) => {
+      const { signal, ...cursor } = request;
+      if (!validArchiveCursor(cursor)) return Promise.reject(new Error("PROJECT_ARCHIVE_REQUEST_INVALID"));
+      return read("read_project_archive_page", signal, { cursor });
+    },
+    readProjectArchive: ({ signal }) => read("read_project_archive", signal),
     readProjectDirection: (request) => {
       const { signal, ...selected } = request;
       if (!validDirectionSelection(selected))
         return Promise.reject(new Error("DIRECTION_SELECTION_INVALID"));
       return read("read_project_direction", signal, { selection: selected });
+    },
+    readProjectKnowledgeCatalogue: (request) => {
+      const {signal,...value}=request, selected=knowledgeReadSelection(value,"catalogue");
+      if(!selected) return Promise.reject(new Error("PROJECT_KNOWLEDGE_SELECTION_INVALID"));
+      return read("read_project_knowledge_catalogue",signal,{selection:selected});
+    },
+    readProjectKnowledgeMemory: (request) => {
+      const {signal,...value}=request, selected=knowledgeReadSelection(value,"memory");
+      if(!selected) return Promise.reject(new Error("PROJECT_KNOWLEDGE_SELECTION_INVALID"));
+      return read("read_project_knowledge_memory",signal,{selection:selected});
+    },
+    readProjectKnowledgeSource: (request) => {
+      const {signal,...value}=request, selected=knowledgeReadSelection(value,"source");
+      if(!selected) return Promise.reject(new Error("PROJECT_KNOWLEDGE_SELECTION_INVALID"));
+      return read("read_project_knowledge_source",signal,{selection:selected});
     },
     readProjectJournal: (request) => {
       const { signal, ...selected } = request;

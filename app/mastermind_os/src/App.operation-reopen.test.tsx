@@ -334,7 +334,12 @@ describe("stage-two current operation presentation", () => {
     expect(made.readOperation).toHaveBeenCalledTimes(1);
     act(()=>{made.setCtx(null);made.notify(signedOut);});
     expect(screen.queryByText(original.operationKey)).toBeNull();
-    expect(screen.getByText("Request status unavailable")).toBeTruthy();
+    // The private entry replaces the old Session Estate unavailable panel;
+    // it cannot expose the withdrawn owner's identity or erase its pointer.
+    expect(screen.getByRole("heading",{name:"Welcome back."})).toBeTruthy();
+    expect(screen.queryByRole("heading",{name:"Request status"})).toBeNull();
+    expect(made.data.get("owner-a")).toEqual(original);
+    expect(made.readOperation).toHaveBeenCalledTimes(1);
     expect(made.prepare).not.toHaveBeenCalled();expect(made.submit).not.toHaveBeenCalled();
   });
 });

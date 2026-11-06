@@ -1,3 +1,5 @@
+import { parseProjectSourceWriteTarget, projectSourceWriteKeyMatches } from "./project-source-write-target";
+import { parseInstructionAdmissionTarget } from "./instruction-admission-target";
 import type { OperationPointer } from "./operation-controller";
 import { parseDirectConsumeTarget } from "../direct-native-result";
 
@@ -33,7 +35,7 @@ export const PENDING_POINTER_ERRORS = {
 } as const;
 
 type SourceOperationKind = "project_create" | "project_adopt" | "direction_accept";
-type StoredKind = "launch" | "consume" | "project_pause" | "project_resume" | SourceOperationKind;
+type StoredKind = "launch" | "consume" | "project_pause" | "project_resume" | SourceOperationKind | "project_source_write" | "instruction_pause";
 type ClosedRecord = {
   readonly v: 1; readonly operationKey: string; readonly kind: "launch" | "consume"; readonly targetKey: string;
 } | {
@@ -43,6 +45,10 @@ type ClosedRecord = {
 } | {
   /** Source operations retain only a candidate/work lookup, never payload or authority. */
   readonly v: 4; readonly operationKey: string; readonly kind: SourceOperationKind; readonly targetKey: string;
+} | {
+  readonly v: 5; readonly operationKey: string; readonly kind: "project_source_write"; readonly targetKey: string;
+} | {
+  readonly v: 6; readonly operationKey: string; readonly kind: "instruction_pause"; readonly targetKey: string;
 };
 
 type DurableReservation =
@@ -90,6 +96,8 @@ const KIND_RECORDS = {
   project_create: { v: 4, key: /^mmos-project-create-[0-9a-f]{40}$/, consume: false },
   project_adopt: { v: 4, key: /^mmos-project-adopt-[0-9a-f]{40}$/, consume: false },
   direction_accept: { v: 4, key: /^mmos-direction-accept-[0-9a-f]{40}$/, consume: false },
+  project_source_write: { v: 5, key: /^mmos-project-(?:file-add|preference-set)-[0-9a-f]{40}$/, consume: false },
+  instruction_pause: { v: 6, key: /^mmos-instruction-pause-[0-9a-f]{40}$/, consume: false },
 } as const;
 function recordSpec(kind: unknown) {
   return typeof kind === "string" && Object.hasOwn(KIND_RECORDS, kind)
@@ -98,6 +106,12 @@ function recordSpec(kind: unknown) {
 function validFields(raw: Record<string, unknown>, spec: NonNullable<ReturnType<typeof recordSpec>>): boolean {
   if (typeof raw.operationKey !== "string" || !spec.key.test(raw.operationKey)
       || (spec.v !== 1 && spec.key.exec(raw.operationKey)?.[0] !== raw.operationKey)) return false;
+  if (spec.v === 5) {
+    if (typeof raw.targetKey !== "string") return false;
+    const target = parseProjectSourceWriteTarget(raw.targetKey);
+    return target !== null && projectSourceWriteKeyMatches(raw.operationKey, target);
+  }
+  if (spec.v === 6) return parseInstructionAdmissionTarget(raw.targetKey) !== null;
   return typeof raw.targetKey === "string"
     && (spec.consume ? parseDirectConsumeTarget(raw.targetKey) !== null : TARGET_KEY_RE.test(raw.targetKey))
     && (spec.v === 1 || TARGET_KEY_RE.exec(raw.targetKey)?.[0] === raw.targetKey);

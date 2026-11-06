@@ -107,6 +107,43 @@ C4_POST_ENROLLMENT = {
 }
 
 
+
+# Exact newer 12-file incumbents already installed by existing Studio
+# Git/Workspace publishers after original Paper v20's 11-file freeze.
+# These preserve workspace-access.mjs and every non-Paper byte. Selection is
+# allowed only for the same three original seats at their exact sealed
+# manifest/config/plist preimages; the original COHORTS remain immutable.
+WORKSPACE_12FILE_SUCCESSORS = {
+    "admin-business": {
+        "bridge_sha256": "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc",
+        "config_sha256": "76e093610040209dd788297c99b9d82da557edce13f83bcb2fcc5a2b8a9c4ba1",
+        "file_count": 12,
+        "generation": "v10",
+        "manifest_sha256": "dab1561865cbbf8db10000b655bb33e803201103af76167801159e9b31f5f8e1",
+        "nonpaper_sha256": "3aa7a35697b2b23f67bda0d71328cc69d83d20ae4a8149e1eb02627ffe79df0c",
+        "plist_sha256": "bb3d1e89c9c99cedf4f80c9874170ce1b4ccc83c2441f9f051bf3386fafd97b8"
+    },
+    "chatgpt3-w570f6f34": {
+        "bridge_sha256": "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc",
+        "config_sha256": "16f49e1eea18266664b68fb2f3f4cda4a2f26e25eec9d0b0a08cdcf5f384b1dd",
+        "file_count": 12,
+        "generation": "v10",
+        "manifest_sha256": "0f6b3d5f846ac33b27be7ff38c90f630db044c2b399a7e6ac3b064ce7a89eae2",
+        "nonpaper_sha256": "80e3f6975c2dbdd520e8498ef0106c2403ea7c34f2f8c082dd91e34d361dbce4",
+        "plist_sha256": "cd776537e64f10487261ac78147743fdbcfaef06cab5bc39cebb464452abddd6"
+    },
+    "chatgpt3-wa2a9e6f9": {
+        "bridge_sha256": "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc",
+        "config_sha256": "4d713656ffd06ba577b210e3faad28ff2581986678f86f58320029ba7d3ddd51",
+        "file_count": 12,
+        "generation": "v10",
+        "manifest_sha256": "f1a6f856d87a841f7c7213a229e092ebdcdcba0c3763d27c76d32216bf9ad8cb",
+        "nonpaper_sha256": "cf6a6f719c62d75e77f1b28d698ea47ad4a57c47f8119efc7bf996c359e204bf",
+        "plist_sha256": "12357a27fdd3d957b83cc4ce83262bdccc66bd17005d00248d2da9749537f6e7"
+    }
+}
+
+
 def _sha(blob: bytes) -> str:
     return hashlib.sha256(blob).hexdigest()
 
@@ -127,6 +164,10 @@ def plan_selection(account: str, *, manifest_bytes: bytes, config_bytes: bytes,
     if (account == "chatgpt4" and type(account) is str
             and _sha(manifest_bytes) == C4_POST_ENROLLMENT["manifest_sha256"]):
         pin = C4_POST_ENROLLMENT
+    if (type(account) is str and account in WORKSPACE_12FILE_SUCCESSORS
+            and _sha(manifest_bytes) ==
+                    WORKSPACE_12FILE_SUCCESSORS[account]["manifest_sha256"]):
+        pin = WORKSPACE_12FILE_SUCCESSORS[account]
     if pin is None or type(account) is not str:
         raise ValueError("Paper fleet account is not in the reviewed cohort")
     if (_sha(manifest_bytes) != pin["manifest_sha256"]

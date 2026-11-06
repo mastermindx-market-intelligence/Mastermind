@@ -26,11 +26,14 @@ from tests.test_paid_authenticated_launch_producer import (
 
 rsa_key=auth.rsa_key
 short_socket_root=auth.short_socket_root
-# Current controller matches approved ef97 exactly; protected7aefe historical SHA
-# 9f21d8b2231be09048b38c5c696e14d9c2a53d0a47d75387e4cd8f544fb444fd remains a predecessor, not the current consumer.
+# Execute the current composed controller (source recovery def1/7ab included).
+# Its accepted instruction_pause addition changes only the two closed kind lists;
+# the actual original Launch submit/GET recovery below must remain unchanged.
+# mission.ts includes the accepted optional CCR observation key; no Launch
+# action or permission is derived from that ignored observation metadata.
 EXTRA_PINS={
- 'orchestration/operation-controller.ts':'a23c222b6c0d73419fb6bebed0a6764257af8b9947b0afdd4b4128f6eb46842d',
- 'mission.ts':'20bf1a35c5be760c8418930972ad9adaab23bbde36a3e8b88a2caa72b42b67bb',
+ 'orchestration/operation-controller.ts':'5c49a7d571f700bb231784fbbbe8ba9af83f313756b299ac43f891094f23dd03',
+ 'mission.ts':'e6beede84b865f7d317c7120211a6ccccf296f88433bdf04614edbc4ee74d7be',
  'workspace-contract.ts':'14992cfc81dbc577cf50ba7198285b21652bb25eb5cc6c0efc53954e33ef11b1',
 }
 
@@ -40,13 +43,15 @@ def _compile_controller(tmp_path,scope):
     for name,digest in EXTRA_PINS.items():
         assert hashlib.sha256((ROOT/'app/mastermind_os/src'/name).read_bytes()).hexdigest()==digest
     script=r'''
-import fs from 'node:fs';import path from 'node:path';import {stripTypeScriptTypes} from 'node:module';
+import fs from 'node:fs';import path from 'node:path';import {pathToFileURL} from 'node:url';
 const i=JSON.parse(fs.readFileSync(0,'utf8'));
+const {sourceTransformer}=await import(pathToFileURL(path.resolve(i.source,'../../../tests/typescript_transform.mjs')));
+const transformSource=await sourceTransformer(i.source);
 for(const [name,file,oldPath,newPath] of [
  ['operation-controller','orchestration/operation-controller.ts','"../mission"','"./mission.mjs"'],
  ['mission','mission.ts','"./workspace-contract"','"./workspace-contract.mjs"'],
  ['workspace-contract','workspace-contract.ts',null,null]]){
- let code=stripTypeScriptTypes(fs.readFileSync(path.join(i.source,file),'utf8'),{mode:'transform'});
+ let code=transformSource(file,fs.readFileSync(path.join(i.source,file),'utf8'));
  if(oldPath){if(!code.includes(oldPath))throw Error('dependency drift');code=code.replace(oldPath,newPath);}
  fs.writeFileSync(path.join(i.scratch,name+'.mjs'),code);
 }

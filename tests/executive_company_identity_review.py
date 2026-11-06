@@ -32,17 +32,65 @@ REVIEWED_ANCHORS = {
         "node_type": "AsyncFunctionDef",
         # Existing section-sign/em-dash prose needs an exact full-source pin
         # in addition to the method AST; all three literal lines are ASCII.
-        # Qualified session/direction/capacity READ and admission additions change the enclosing ingress AST.
+        # Qualified Knowledge/Archive READ additions change the enclosing ingress AST.
         # The original CCR branch and listener remain structurally unchanged.
-        "source_sha256": "e43df430e5652ffd9aff5114572bccb5438616e615f7edd065239f018493ef96",
-        "ast_sha256": "6735cd4807ae1d203599d8210f141ea9b49b5d3487deaaa169789d6fd4565c72",
-        "sites": (
-            (("body", 3, "body", 35, "body", 3, "orelse", 0, "body", 2,
-              "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 35, "body", 3, "orelse", 0, "body", 2,
-              "orelse", 0, "body", 4, "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 35, "body", 3, "orelse", 0, "body", 2,
-              "orelse", 0, "handlers", 0, "body", 0, "value", "args", 1), "int", 503, "503"),
-        ),
+        "source_sha256": 'b82f61a07a8191e5935fbf64dab5cdb1d1238eae309812fa41fbf59f6d04c2aa',
+        "ast_sha256": '83aef0bdc6356c12bab0fcce640c7d0a7dcbd91a313a3f99d7ad6d0e1da0997a',
+        "sites": ((('body', 3, 'body', 48, 'body', 3, 'orelse', 0, 'body', 2, 'body', 0, 'value', 'args', 1),
+  'int',
+  403,
+  '403'),
+ (('body',
+   3,
+   'body',
+   48,
+   'body',
+   3,
+   'orelse',
+   0,
+   'body',
+   2,
+   'orelse',
+   0,
+   'body',
+   4,
+   'body',
+   0,
+   'value',
+   'args',
+   1),
+  'int',
+  403,
+  '403'),
+ (('body',
+   3,
+   'body',
+   48,
+   'body',
+   3,
+   'orelse',
+   0,
+   'body',
+   2,
+   'orelse',
+   0,
+   'handlers',
+   0,
+   'body',
+   0,
+   'value',
+   'args',
+   1),
+  'int',
+  503,
+  '503')),
     },
 }
+
+# BYOK fixed READ changes the full ingress AST, with existing App/Runtime fences.
+# The same three original Fabric HTTP operands are retained at mapped exact sites.
+# Parent checked this postimage under the Chairman waiver; no independent approval claim.
+# Protected #695 backup composition changes the full source only; the BYOK ingress AST and exact status sites are unchanged.
+
+# Parent reviewed the BYOK + protected Workspace composition at 49c2e1d.
+# The exact 136-node Fabric response branch and original three operands are unchanged.

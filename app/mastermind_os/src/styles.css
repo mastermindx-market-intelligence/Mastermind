@@ -193,11 +193,69 @@ button:disabled {
   background: var(--sidebar);
   border-right: 1px solid var(--border);
   padding: 28px 16px;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 14px;
   min-width: 0;
   overflow-y: auto;
+}
+/* Fixed brand/Search/primary rail on top, genuinely scrolling context and
+   Advanced in the middle, and a non-shrinking preferences/account bottom. */
+.nav-top,
+.nav-scroll,
+.nav-bottom {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  align-content: start;
+}
+.nav-scroll {
+  min-height: 0;
+  overflow-y: auto;
+}
+.nav-account {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.nav-account small {
+  color: var(--faint);
+}
+.nav-account p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.nav-account button {
+  width: 100%;
+  min-width: 0;
+}
+.nav-advanced {
+  min-width: 0;
+}
+.nav-advanced > summary {
+  display: list-item;
+  list-style-position: inside;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.nav-advanced > summary:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+.nav-advanced[open] > summary {
+  color: var(--text);
+}
+.nav-advanced > nav {
+  margin-top: 4px;
 }
 .brand {
   min-height: 38px;
@@ -300,22 +358,6 @@ button:disabled {
 }
 .mission-context small {
   color: var(--faint);
-}
-.mission-context-empty {
-  color: var(--faint);
-}
-.side-note {
-  margin-top: auto;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  border-radius: 10px;
-  padding: 12px;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.5;
-}
-.side-note b {
-  color: var(--text);
 }
 main {
   padding: 28px;
@@ -794,6 +836,13 @@ a:focus-visible {
 /* Ordinary desktop keeps full labels; compact widths use the full drawer. */
 .navigation-toggle, .navigation-close, .navigation-backdrop { display: none; }
 .workspace-route { min-width: 0; }
+.workspace-header { flex-wrap: wrap; }
+.workspace-header .workspace-route { flex: 0 0 auto; max-width: 100%; }
+.workspace-header .workspace-route h1, .workspace-header .workspace-route h2 { overflow-wrap: normal; word-break: normal; white-space: nowrap; }
+.workspace-header .facts { min-width: 0; flex: 1 1 360px; flex-wrap: wrap; justify-content: flex-end; }
+.workspace-header .facts > div { flex-wrap: wrap; min-width: 0; }
+.workspace-header .facts button { flex-shrink: 0; white-space: nowrap; word-break: normal; overflow-wrap: normal; }
+.workspace-header .facts p { flex: 1 1 240px; min-width: 0; }
 .shell > main { max-width: none; }
 .workspace-header-quiet { min-height: 64px; align-items: center; margin: -28px -28px 0; padding: 0 36px; gap: 16px; }
 .workspace-header-quiet .workspace-route { display: flex; align-items: center; gap: 12px; }
@@ -809,9 +858,9 @@ a:focus-visible {
 @media (max-width: 959px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
   .shell > aside { display: none; }
-  .shell > aside[data-open="true"] { display: flex; position: fixed; inset: 0 auto 0 0; z-index: 102; width: min(320px, calc(100vw - 40px)); height: 100dvh; align-items: stretch; padding: 20px 16px; }
+  .shell > aside[data-open="true"] { display: grid; position: fixed; inset: 0 auto 0 0; z-index: 102; width: min(320px, calc(100vw - 40px)); height: 100dvh; padding: 20px 16px; }
   .navigation-toggle, .navigation-close { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; }
-  .navigation-close { align-self: flex-end; }
+  .shell > aside[data-open="true"] .navigation-close { position: absolute; top: 20px; right: 16px; z-index: 1; }
   .navigation-backdrop { display: block; position: fixed; inset: 0; width: 100%; height: 100%; z-index: 101; border: 0; border-radius: 0; background: rgb(0 0 0 / .5); }
   .shell > main { padding: 24px; }
   .workspace-header { display: flex; flex-wrap: wrap; align-items: center; }
@@ -1025,4 +1074,24 @@ main .launch-orchestrator-composer .form-actions { justify-content: flex-end; ma
   padding: var(--sp-2) var(--sp-3);
   text-align: start;
   flex-shrink: 0;
+}
+
+/* Keep the original controls reachable in a short mobile drawer. */
+@media (max-width: 959px) and (max-height: 700px) {
+  .shell > aside[data-open="true"] {
+    padding-block: 12px;
+    gap: 8px;
+  }
+  .nav-top,
+  .nav-bottom {
+    gap: 8px;
+  }
+  .nav-bottom .display-preferences {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+  .shell > aside[data-open="true"] .navigation-close {
+    top: 12px;
+  }
 }

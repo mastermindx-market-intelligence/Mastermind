@@ -25,6 +25,7 @@ lease/writer and effects under ACTIVE_EXECUTION recovery. Current assignment own
 the next recovery action until actual successor acceptance; stale/dead/unavailable
 owners do not justify an owner-only handback. Missing lawful parent is a gap, not
 permission to invent a tidy workstream.
+Before declaring an "owner gate", apply ACTIVE_EXECUTION "Prove an owner gate before using it to stop": a requested reviewer, a historical author or a disabled runtime service is evidence of different things, not a generic instruction to wait.
 
 ## Step 2A — Recover the current checkpoint before history
 
