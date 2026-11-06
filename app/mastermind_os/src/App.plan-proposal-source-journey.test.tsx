@@ -11,6 +11,7 @@ import {
   waitFor,
   cleanup,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { IDBFactory } from "fake-indexeddb";
 import { createIndexedDbPendingPointerStore } from "./orchestration/indexeddb-pending-pointer-store";
 import { App } from "./App";
@@ -212,13 +213,12 @@ async function driveToKept(
   fireEvent.click(await screen.findByRole("button", { name: "Keep result" }));
   await screen.findByText("This result is kept.");
   if (prepareAfterKeep) {
-    fireEvent.click(
-      screen.getByRole("button", { name: "Prepare planning proposal" }),
-    );
+    await userEvent.setup().click(screen.getByRole("button",{name:"Prepare planning proposal"}));
     await waitFor(() =>
       expect(h.served, "exact served source sequence").toContain(15),
     );
-    await screen.findByRole("button", { name: "Publish planning proposal" });
+    const publish=await screen.findByRole("button", { name: "Publish planning proposal" });
+    await waitFor(()=>expect(document.activeElement).toBe(publish));
   }
 }
 it("actual App Keep→fixed preparation→separate publication→current Compare→Back/reopen retains exact original", async () => {
@@ -243,6 +243,7 @@ it("actual App Keep→fixed preparation→separate publication→current Compare
       ).disabled,
     ).toBe(false),
   );
+  expect(screen.queryByText('Publication outcome is unknown. Check this original request instead of sending it again.')).toBeNull();
   fireEvent.click(
     screen.getByRole("button", { name: "View current Plan and Compare" }),
   );
@@ -265,7 +266,8 @@ it("actual App Keep→fixed preparation→separate publication→current Compare
         element?.tagName === "PRE" && element.textContent === candidate,
     ),
   ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Back to proposal" }));
+  await userEvent.setup().click(screen.getByRole("button",{name:"Back to proposal"}));
+  await waitFor(()=>expect(document.activeElement).toBe(screen.getByRole("button",{name:"View current Plan and Compare"})));
   fireEvent.click(screen.getByRole("button", { name: "Read planning result" }));
   await waitFor(() => expect(h.served).toContain(22));
   expect(

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { MissionHost } from "../host";
 import type { DirectResult } from "../direct-native-result";
 import {
@@ -102,6 +102,8 @@ export function ProjectPlanProposalWorkflow(
   >(null);
   const [showCompare, setShowCompare] = useState(false);
   const request = useRef<AbortController | null>(null);
+  const publishButton=useRef<HTMLButtonElement|null>(null),compareButton=useRef<HTMLButtonElement|null>(null);
+  const focusIntent=useRef<{frame:Frame;target:"publish"|"compare";trigger:HTMLButtonElement}|null>(null);
   const basis = useRef<PlanProposalOriginal | null>(null);
   function originalCurrent(): PlanProposalOriginal | null {
     try {
@@ -205,6 +207,11 @@ export function ProjectPlanProposalWorkflow(
       resultMatches(p.original)
     );
   }
+  function observeStatus(value:SourceOperationStatus,frame:Frame){
+    const original=originalCurrent();if(!original||!frameCurrent(frame))return;
+    statusFrame.current=frame;statusOriginal.current=canonicalJson(original);setStatus(value);
+    if(value.disposition==="accepted"&&value.receipt?.kind==="SOURCE_OBSERVED")setNotice(null);
+  }
   const machine = useRef<OperationController | null>(null);
   if (machine.current === null) {
     const source = {
@@ -242,11 +249,7 @@ export function ProjectPlanProposalWorkflow(
       original: () => originalCurrent(),
       prepared: () => preparedRef.current,
       isPreparedCurrent: preparedCurrent,
-      onStatus: (value) => {
-        statusFrame.current = identity.current?.frame ?? null;
-        statusOriginal.current = canonicalJson(originalCurrent());
-        setStatus(value);
-      },
+      onStatus: (value) => {const frame=identity.current?.frame;if(frame)observeStatus(value,frame);},
     });
     machine.current = new OperationController(port, {
       read: (...a) => {
@@ -272,11 +275,11 @@ export function ProjectPlanProposalWorkflow(
       basis.current = null;
       setPrepared(null);
       setStatus(null);
-      setShowCompare(false);
+      setShowCompare(false);focusIntent.current=null;
       setNotice(null);
     });
     return () => {
-      stop?.();
+      stop?.();focusIntent.current=null;
       request.current?.abort();
       machine.current!.invalidate();
       identity.current = null;
@@ -310,7 +313,7 @@ export function ProjectPlanProposalWorkflow(
       setBusy(false);
     }
   }
-  const prepare = () =>
+  const prepare = (trigger:HTMLButtonElement) =>
     run(async (f, signal) => {
       const p = live.current,
         r = p.result;
@@ -380,6 +383,7 @@ export function ProjectPlanProposalWorkflow(
       );
       if (!frameCurrent(f) || signal.aborted) return;
       preparedFrame.current = f;
+      focusIntent.current={frame:f,target:"publish",trigger};
       setPrepared(value);
       setNotice("prepared");
     });
@@ -446,9 +450,7 @@ export function ProjectPlanProposalWorkflow(
           ? await f.source.reconcileSourceOperation(lookup, signal)
           : await f.source.readSourceOperation(lookup, signal);
         if (!frameCurrent(f) || signal.aborted) return;
-        statusFrame.current = f;
-        statusOriginal.current = canonicalJson(o);
-        setStatus(qualifyPlanProposalStatus(raw, o, identity.current!.scope));
+        observeStatus(qualifyPlanProposalStatus(raw,o,identity.current!.scope),f);
       }
     });
   let current = false;
@@ -493,8 +495,18 @@ export function ProjectPlanProposalWorkflow(
   ).current;
   const canCompare =
     current && typeof props.host?.readProjectPlan === "function";
+  useLayoutEffect(()=>{
+    const intent=focusIntent.current;if(!intent)return;
+    if(!frameCurrent(intent.frame)){focusIntent.current=null;return;}
+    if(busy)return;
+    focusIntent.current=null;
+    const button=intent.target==="publish"?publishButton.current:compareButton.current;
+    if(button?.isConnected&&!button.disabled&&
+      (document.activeElement===document.body||document.activeElement===intent.trigger))button.focus();
+  },[prepared,busy,showCompare,props.original,props.host]);
+
   return (
-    <section aria-label={say("Planning proposal", "规划提案")}>
+    <section aria-label={say("Planning proposal", "规划提案")} aria-busy={busy}>
       <h3>{say("Planning proposal", "规划提案")}</h3>
       <p>
         {published
@@ -536,7 +548,7 @@ export function ProjectPlanProposalWorkflow(
           <button
             className="primary"
             disabled={busy || !eligible || unknown}
-            onClick={prepare}
+            onClick={event=>prepare(event.currentTarget)}
           >
             {o
               ? say("Restore original proposal preview", "恢复原始提案预览")
@@ -563,7 +575,7 @@ export function ProjectPlanProposalWorkflow(
               disabled={
                 busy || unknown || !eligible || publicationStarted.current
               }
-              onClick={publish}
+              ref={publishButton} onClick={publish}
             >
               {say("Publish planning proposal", "发布规划提案")}
             </button>
@@ -588,7 +600,7 @@ export function ProjectPlanProposalWorkflow(
           <button
             className={published ? "primary" : undefined}
             disabled={busy || !canCompare}
-            onClick={showPlan}
+            ref={compareButton} onClick={showPlan}
           >
             {say("View current Plan and Compare", "查看当前计划并比较")}
           </button>
@@ -596,7 +608,10 @@ export function ProjectPlanProposalWorkflow(
       )}
       {showCompare && canCompare && (
         <div>
-          <button onClick={() => setShowCompare(false)}>
+          <button onClick={event=>{
+            const frame=compareFrame.current;if(!frame||!frameCurrent(frame))return;
+            focusIntent.current={frame,target:"compare",trigger:event.currentTarget};setShowCompare(false);
+          }}>
             {say("Back to proposal", "返回提案")}
           </button>
           <ProjectPlanPanel
