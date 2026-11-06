@@ -283,7 +283,7 @@ def test_only_sealed_legacy_or_read_expanded_public_posts_upgrade():
         assert planned["post_routes"] == list(POST_ROUTES)
         assert planned["bindings"]["prepare_fullconfig_sha256"] == module._sha256(prepare)
         assert planned["bindings"]["final_fullconfig_sha256"] == module._sha256(final)
-        assert "/os/executive/session/send" not in post_paths_of(prepare)
+        assert post_paths_of(prepare).count("/os/executive/session/send") == 1
         assert get_paths_of(prepare) == sorted(set(GET_ROUTES) | set(asset_routes(OLD)) | set(asset_routes(NEW)))
 
 

@@ -110,7 +110,10 @@ def operation_request_limit(operation, value):
 
 def validate_operation_request(operation, request):
     value = _tree(request)
-    if operation == "prepare":
+    if operation == "options":
+        _keys(value, {"action"})
+        if value["action"] != "publish_project_proposal":_fail()
+    elif operation == "prepare":
         _keys(value, {"action", "request"})
         body = value["request"]
         if type(body) is not dict or set(body) & {"principal", "verified_expires_at", "operation"}: _fail()

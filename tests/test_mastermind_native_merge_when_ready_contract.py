@@ -52,6 +52,8 @@ def _assert_release_contract(release: str) -> None:
         "A changed head requires fresh source, hold, review and CI qualification",
         "Only GitHub's enforced PR-head checks and native `merge_group`",
         "Read the actual merged PR and commit before claiming release",
+        "Branch cleanup remains queue/repository-owned after merge; the native CLI"
+        " does not support `--delete-branch` during queue enrollment",
     ):
         assert required in source, required
 

@@ -174,6 +174,9 @@ adds no manual review. See [session review policy](SESSION_LOCAL_REVIEW_POLICY.m
      --match-head-commit <CURRENT_40_HEX_HEAD>
    ```
 
+   Branch cleanup remains queue/repository-owned after merge; the native CLI
+   does not support `--delete-branch` during queue enrollment.
+
    GitHub CLI refuses `--delete-branch` when merge queue is enabled. Do not add
    that flag to the auto-merge request: branch cleanup is an optional separate
    post-merge step, never a prerequisite for merge-queue admission. Read the

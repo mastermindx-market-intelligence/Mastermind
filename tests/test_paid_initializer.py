@@ -573,22 +573,23 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='c2b66b83484b0ac414a92975abd614c6352c02af50e4cad5cc6305314e855ad8'
+    assert hashlib.sha256(current_raw).hexdigest()=='febca585a589a7e933650a380b30531fb17e814c0429941853bc9930707fbb2a'
     current=json.loads(current_raw)
-    assert len(before)==95 and len(current)==106
+    assert len(before)==95 and len(current)==107
     assert set(before)<=set(current)
     added={'ext/host_pull_daemon.sh','ext/host_pull_launchd.plist.template',
         'ext/paid_host_readiness.py','ext/paid_initializer.py',
         'ext/paid_initializer_token_data.py','ext/paid_initializer_nested_data.py',
         'ext/paid_provider_entry.py','ext/post_failure_observation.py',
         'ext/post_failure_observation_delivery.py', 'ext/participant_binding.py',
-        'ext/fabric_participant_owner.py'}
+        'ext/fabric_participant_owner.py','ext/original_advertised_artifact.py'}
     # The accepted source union includes the protected review-routing picker,
     # provider/readiness composition and fixed-template launcher transition.
     # Preserve their finite changes without replacing the historical epoch.
     changed={'ext/fabric_task.py','ext/glm_host_account_source.py','ext/lease_broker.py',
         'ext/host_pull.sh','ext/host_pull_backend.py','ext/paid_glm_model_client.py',
         'ext/paid_host_qualification.py','ext/paid_incumbent_state.py',
+        'ext/linux_process_identity.py',
         'ext/paid_model_owner.py','ext/pick.py','ext/pool_ledger.py','ext/remote_sub.sh',
         'ext/remote_sub_exec.py','ext/support_bundle.py','ext/paid_yaml_runtime.py','pool'}
     # P8.T1.S7's reviewed diagnostic boundary changes exactly these four
@@ -609,8 +610,8 @@ def test_native_initializer_extends_only_exact_preimage_members():
     ubuntu4_changed={'ext/fabric_host_qualification.py'}
     assert before['ext/fabric_host_qualification.py']=='1b1b64342c61e90887a6f023dca3e0c75707b57fecaf05227b1a960cb7922899'
     assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|recovery_changed|ubuntu4_changed
-    # Fair-share broker and Ubuntu4 qualifier advance distinct historical members.
-    assert sum(before[p]==current[p] for p in before)==64
+    # Linux process custody and Ubuntu4 qualification advance distinct historical members.
+    assert sum(before[p]==current[p] for p in before)==63
     for name in added|changed|diagnostic_changed|long_horizon_changed|recovery_changed|ubuntu4_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
         assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()

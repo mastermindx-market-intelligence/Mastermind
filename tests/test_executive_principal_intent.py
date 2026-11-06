@@ -303,7 +303,8 @@ def test_accepted_command_arriving_during_wait_precedes_revoked_guard(tmp_path):
     probe = Runtime.at(tmp_path / "probe")
     captured = []
     create = probe.jobs._create_job_in_transaction
-    def capture(connection, *, spec):
+    def capture(connection, *, spec, _fresh_conversation_source=None):
+        assert _fresh_conversation_source is None
         captured.append(spec)
         return create(connection, spec=spec)
     probe.jobs._create_job_in_transaction = capture

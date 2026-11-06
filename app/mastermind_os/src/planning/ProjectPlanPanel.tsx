@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { validProjectPlanSelection, type ProjectPlanRead, type ProjectPlanSelection } from "./project-plan";
 import "./project-plan-panel.css";
-import { ProjectPlanContinuity } from "./ProjectPlanContinuity";
+import { ProjectPlanContinuity, selectedRecordedPlanProposal } from "./ProjectPlanContinuity";
+import type { PlanAdoptionInspection } from "./plan-adoption-workspace";
 
 /**
  * Task-tab content for one canonical Agent OS project-plan read. The
@@ -22,7 +23,7 @@ export interface ProjectPlanPanelProps {
   canRead?: () => boolean;
   locale?: "en" | "zh-CN";
   /** Compose a workspace from this same qualified read, without another cache or read. */
-  renderWorkspace?: (view: {objective: string | null; panel: ReactNode}) => ReactNode;
+  renderWorkspace?: (view: {objective: string | null; panel: ReactNode;inspection:PlanAdoptionInspection|null}) => ReactNode;
 }
 
 // PR links may only derive from the fixed canonical repository and a positive
@@ -256,6 +257,10 @@ export function ProjectPlanPanel({
     workRef: string } | null>(null);
   const autoWindow = useRef<{ ready: boolean; work: string | null } | null>(null);
   const selectedWork = selection?.work_ref ?? null;
+  const [proposalHint,setProposalHint]=useState<string|null>(null);
+  const currentOwner=useRef({read,sourceGeneration,canRead,selectedWork});
+  currentOwner.current={read,sourceGeneration,canRead,selectedWork};
+  const currentProposal=useRef<string|null>(null);
   const setPhase = (next: "idle" | "loading" | "ready" | "unavailable") => {
     phase.current = next;
     setState(next);
@@ -379,6 +384,19 @@ export function ProjectPlanPanel({
     displayedPlan = document;
   }
 
+  const proposal=displayedPlan?.schema==='mastermind.workspace_project_plan.v2'&&displayedPlan.availability==='AVAILABLE'
+    ?selectedRecordedPlanProposal(displayedPlan.continuity,proposalHint):null;
+  currentProposal.current=proposal?.proposal_id??null;
+  const capturedFence=fence.current;
+  const proposalId=proposal?.proposal_id??null;
+  const inspectionCurrent=()=>{
+    const owner=currentOwner.current;
+    return displayedPlan!==null&&capturedFence!==null&&fence.current===capturedFence&&
+      owner.read===read&&owner.sourceGeneration===sourceGeneration&&owner.canRead===canRead&&owner.selectedWork===selectedWork&&
+      currentProposal.current===proposalId&&canRead?.()===true&&sourceGeneration?.()===documentGeneration;
+  };
+  const inspection:PlanAdoptionInspection|null=displayedPlan!==null&&proposalId!==null&&selection!==null
+    ?{read:displayedPlan,selection:{work_ref:selection.work_ref},proposalId,isCurrent:inspectionCurrent,canRead:inspectionCurrent}:null;
   const panel = <section className="mm-project-plan" aria-label={text(COPY.ariaLabel, chinese)}
     aria-busy={state === "loading"}>
     <div className="mm-project-plan__heading">
@@ -416,11 +434,13 @@ export function ProjectPlanPanel({
         <AvailablePlanBody plan={displayedPlan.plan} source={displayedPlan.source} chinese={chinese}
           hasContinuity={displayedPlan.schema === "mastermind.workspace_project_plan.v2"}
           continuity={displayedPlan.schema === "mastermind.workspace_project_plan.v2"
-            ? <ProjectPlanContinuity data={displayedPlan.continuity} locale={locale} /> : undefined} />
+            ? <ProjectPlanContinuity data={displayedPlan.continuity} locale={locale}
+                selectedProposalId={proposalHint} onSelectedProposal={setProposalHint}/> : undefined} />
       </div>}
   </section>;
   return renderWorkspace ? renderWorkspace({
     objective: displayedPlan?.availability === "AVAILABLE" ? displayedPlan.plan?.objective ?? null : null,
     panel,
+    inspection,
   }) : panel;
 }

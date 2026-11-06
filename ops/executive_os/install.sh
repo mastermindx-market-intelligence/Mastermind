@@ -24,6 +24,7 @@ EXPECTED_SHA=""
 PROTECTED_MASTER_SHA=""
 ALLOW_FROZEN_ACCEPTED_ANCESTOR="0"
 STAGE_RELEASE_ONLY="0"
+STAGE_ADMIN_CHECKOUT_ONLY="0"
 ARM_PRIVILEGED_BROKER="0"
 PRIVILEGED_BROKER_LIVE="0"
 CONTROL_CONFIG_SOURCE=""
@@ -382,7 +383,7 @@ MASTERMIND_NATIVE_ACL_RUBY
 # --- END native ACL guard ---
 
 usage() {
-  /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--stage-release-only --os-web-assets PATH] [--control-config PATH] [--os-web-assets PATH] [--allow-frozen-accepted-ancestor --protected-master-sha SHA] [options]" >&2
+  /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--stage-release-only --os-web-assets PATH] [--stage-admin-checkout-only] [--control-config PATH] [--os-web-assets PATH] [--allow-frozen-accepted-ancestor --protected-master-sha SHA] [options]" >&2
   exit 64
 }
 
@@ -393,6 +394,7 @@ while [ "$#" -gt 0 ]; do
     --protected-master-sha) PROTECTED_MASTER_SHA="${2:-}"; shift 2 ;;
     --allow-frozen-accepted-ancestor) ALLOW_FROZEN_ACCEPTED_ANCESTOR="1"; shift ;;
     --stage-release-only) STAGE_RELEASE_ONLY="1"; shift ;;
+    --stage-admin-checkout-only) STAGE_ADMIN_CHECKOUT_ONLY="1"; shift ;;
     --arm-privileged-broker) ARM_PRIVILEGED_BROKER="1"; shift ;;
     --operator-user) OPERATOR_USER="${2:-}"; shift 2 ;;
     --control-config) CONTROL_CONFIG_SOURCE="${2:-}"; shift 2 ;;
@@ -421,6 +423,22 @@ validate_release_staging_options() {
     }
 }
 # --- END release staging option guard ---
+
+# --- BEGIN admin checkout staging option guard ---
+# The administrative checkout is the only artifact this staging-only option
+# prepares.  It changes no configuration, no receipt, no service and no
+# selection, so it excludes the frozen-source, arming and configuration
+# replacement options exactly like the release staging option does.
+validate_admin_checkout_staging_options() {
+  [ "$STAGE_ADMIN_CHECKOUT_ONLY" = "1" ] || return 0
+  [ "$ALLOW_FROZEN_ACCEPTED_ANCESTOR" = "0" ] \
+    && [ "$ARM_PRIVILEGED_BROKER" = "0" ] \
+    && [ -z "$CONTROL_CONFIG_SOURCE" ] || {
+      /bin/echo "admin-checkout staging excludes frozen source, arming and config replacement" >&2
+      return 65
+    }
+}
+# --- END admin checkout staging option guard ---
 [ "$(/usr/bin/id -u)" -eq 0 ] || {
   /bin/echo "install.sh must run as root" >&2
   exit 77
@@ -430,6 +448,7 @@ validate_release_staging_options() {
   exit 69
 }
 validate_release_staging_options || exit 65
+validate_admin_checkout_staging_options || exit 65
 [ -n "$SOURCE_REPO" ] && [ -n "$EXPECTED_SHA" ] && [ -n "$OPERATOR_USER" ] || usage
 case "$OPERATOR_USER" in
   [A-Za-z_]* ) ;;
@@ -1469,6 +1488,129 @@ MASTERMIND_RELEASE_NATIVE_STAGE
 }
 # --- END shared sealed release staging ---
 
+# --- BEGIN administrative checkout preparation ---
+# The installer-owned, credentialless source checkout that backs the Control
+# configuration's ``proof_source_repository`` coordinate.  The destination is
+# FIXED at /var/db/mastermind-executive/control/admin-checkout/<expected SHA>.
+#
+# An occupied target is accepted only when it already IS the exact expected
+# checkout owned by the control principal: a different commit, a different
+# owner or a non-checkout refuses here, untouched.  This preparation never
+# recursively repairs another owner's tree, and it never publishes, starts,
+# stops, reconfigures or selects anything.
+prepare_admin_checkout() {
+ADMIN_CHECKOUT="$RUNTIME_ROOT/control/admin-checkout/$EXPECTED_SHA"
+NEED_CLONE=1
+if [ -e "$ADMIN_CHECKOUT" ] || [ -L "$ADMIN_CHECKOUT" ]; then
+  [ -d "$ADMIN_CHECKOUT" ] && [ ! -L "$ADMIN_CHECKOUT" ] || {
+    /bin/echo "administrative checkout target is occupied by an unsafe path" >&2
+    exit 65
+  }
+  if [ -d "$ADMIN_CHECKOUT/.git" ] && [ ! -L "$ADMIN_CHECKOUT/.git" ]; then
+    # The occupied target is a checkout: it must already BE the exact
+    # expected one, owned by the control principal.  Anything else refuses
+    # here, untouched.
+    [ "$(/usr/bin/stat -f '%u' "$ADMIN_CHECKOUT")" = "$CONTROL_UID" ] || {
+      /bin/echo "administrative checkout target belongs to another owner" >&2
+      exit 65
+    }
+    [ "$(/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
+      PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$CONTROL_HOME" \
+      LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+      GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 \
+      /usr/bin/git -C "$ADMIN_CHECKOUT" rev-parse --verify 'HEAD^{commit}')" = "$EXPECTED_SHA" ] || {
+      /bin/echo "administrative checkout target holds a different commit" >&2
+      exit 65
+    }
+    NEED_CLONE=0
+  fi
+  # A destination that is not a checkout is left to Git itself: the clone
+  # refuses an occupied directory and never writes into another owner's tree.
+fi
+if [ "$NEED_CLONE" = "1" ]; then
+  # Root reads the operator-owned source through Git transport; the local-copy
+  # optimization has a distinct ownership boundary. Trust only the validated
+  # source path for this command, never persist a host-wide exception.
+  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" clone --no-hardlinks --no-checkout --no-local "$SOURCE_REPO" "$ADMIN_CHECKOUT"
+  /usr/bin/git -C "$ADMIN_CHECKOUT" checkout --detach "$EXPECTED_SHA"
+  /usr/bin/git -C "$ADMIN_CHECKOUT" remote remove origin
+fi
+# Pack the administrative checkout, ALWAYS -- not only when it was just
+# created.  Every job clones this repository with `git clone --local
+# --no-hardlinks`, which copies each LOOSE object as its own small file.  A
+# checkout made from a long-lived development repository (or from a linked
+# worktree, which exposes the main repository's object store) inherits
+# thousands of them: measured 2,503 loose objects / 16.8 MB against a 5.9 MB
+# pack.  Copying those one by one as the throttled control principal on a
+# loaded host exceeded the 60 s bound in control_plane/executive_workspace.py
+# `_run`, roughly 21 % through, and the killed clone left a destination with
+# `HEAD -> refs/heads/.invalid` and no base commit -- surfacing only as an
+# opaque WorkspaceError. Packed, the same clone copies ONE ~8 MB file.
+#
+# This is the install-time-cost principle the Codex attestation receipt
+# already follows: pay it once here, as root, warm, at normal priority,
+# rather than on every job under throttling.  It runs outside the guard above
+# deliberately -- an existence guard that skips the repair is exactly how the
+# receipt writer could wedge an install (see the attestation receipt writer),
+# and an already-installed host must be healed by a reinstall rather than
+# left permanently slow.
+#
+# Run as the control principal, never as root: git refuses a repository whose
+# owner is neither the effective UID nor SUDO_UID ("dubious ownership"), and
+# packing as root would leave root-owned pack files inside a checkout the
+# control principal must own.  Ownership and modes are re-asserted afterwards
+# so a pre-existing checkout with drifted metadata is corrected too.
+/usr/sbin/chown -R "$CONTROL_USER:$CONTROL_GROUP" "$ADMIN_CHECKOUT"
+/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
+  PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$CONTROL_HOME" \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+  /usr/bin/git -C "$ADMIN_CHECKOUT" repack -ad
+# Sequence: remote removed -> repack reachable objects -> prune unreachable
+# loose objects -> verify zero loose objects. The `git remote remove origin`
+# call above deletes the remote-tracking refs, which orphans every object
+# that was reachable only through them; `repack -ad` packs just the objects
+# still reachable from the retained refs/HEAD, so those newly-unreachable
+# objects are left behind as loose files instead of being dropped. The
+# administrative checkout is an install-owned, credentialless source whose
+# only required history is what remains reachable from its retained
+# refs/HEAD -- objects inherited from the development repository that are
+# no longer reachable are not company state, they are exactly the
+# clone-cost debris this normalization exists to remove, so prune them
+# before the postcondition below is asserted.
+/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
+  PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$CONTROL_HOME" \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+  /usr/bin/git -C "$ADMIN_CHECKOUT" prune --expire=now
+# A complete checkout cloned from a legitimate partial-clone source can retain
+# an empty pack .promisor sidecar even after remote removal/repack/prune. The
+# installed reader correctly refuses that marker, so normalize only after a
+# no-lazy-fetch zero-missing closure proof. Unsafe/non-empty marker evidence is
+# fail-closed and left untouched by the reviewed helper.
+/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
+  PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$CONTROL_HOME" \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+  GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 \
+  "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/admin_checkout.py" normalize \
+    --checkout "$ADMIN_CHECKOUT" --expected-commit "$EXPECTED_SHA" >/dev/null || {
+  /bin/echo "administrative checkout promisor normalization refused" >&2
+  exit 65
+}
+/usr/sbin/chown -R "$CONTROL_USER:$CONTROL_GROUP" "$ADMIN_CHECKOUT"
+/bin/chmod -R go-rwx "$ADMIN_CHECKOUT"
+[ "$(/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
+  PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$CONTROL_HOME" \
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+  /usr/bin/git -C "$ADMIN_CHECKOUT" count-objects -v | /usr/bin/awk '/^count:/{print $2}')" = "0" ] || {
+  /bin/echo "administrative checkout still holds loose objects after repack" >&2
+  exit 65
+}
+}
+# --- END administrative checkout preparation ---
+
 # --- BEGIN stage-only dispatch ---
 if [ "$STAGE_RELEASE_ONLY" = "1" ]; then
   # No cleanup/service trap: an interrupted stage or publication is retained.
@@ -1477,6 +1619,19 @@ if [ "$STAGE_RELEASE_ONLY" = "1" ]; then
   exit 0
 fi
 # --- END stage-only dispatch ---
+
+# --- BEGIN admin-checkout-only dispatch ---
+if [ "$STAGE_ADMIN_CHECKOUT_ONLY" = "1" ]; then
+  # The target release is sealed and published first: the administrative
+  # checkout normalizer is that release's own reviewed helper.  Nothing else
+  # is touched -- no service, no configuration, no receipt, no selection --
+  # and this dispatch returns BEFORE the mutation boundary.
+  stage_sealed_release || exit 65
+  prepare_admin_checkout
+  printf '{"staged_admin_checkout":true,"commit_sha":"%s","selection_changed":false,"services_changed":false,"configs_changed":false,"receipt_changed":false,"transaction_changed":false}\n' "$EXPECTED_SHA"
+  exit 0
+fi
+# --- END admin-checkout-only dispatch ---
 
 # Cross the mutation boundary only after the identity, runtime, source, auth,
 # and exact-SHA preflight above. From here to process exit the trap keeps all
@@ -1590,88 +1745,7 @@ require_native_no_acl one "$INSTALLED_CODEX" || {
   /bin/echo "installed Codex has a filesystem ACL" >&2; exit 65
 }
 
-ADMIN_CHECKOUT="$RUNTIME_ROOT/control/admin-checkout/$EXPECTED_SHA"
-if [ ! -d "$ADMIN_CHECKOUT/.git" ]; then
-  # Root reads the operator-owned source through Git transport; the local-copy
-  # optimization has a distinct ownership boundary. Trust only the validated
-  # source path for this command, never persist a host-wide exception.
-  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" clone --no-hardlinks --no-checkout --no-local "$SOURCE_REPO" "$ADMIN_CHECKOUT"
-  /usr/bin/git -C "$ADMIN_CHECKOUT" checkout --detach "$EXPECTED_SHA"
-  /usr/bin/git -C "$ADMIN_CHECKOUT" remote remove origin
-fi
-# Pack the administrative checkout, ALWAYS -- not only when it was just
-# created.  Every job clones this repository with `git clone --local
-# --no-hardlinks`, which copies each LOOSE object as its own small file.  A
-# checkout made from a long-lived development repository (or from a linked
-# worktree, which exposes the main repository's object store) inherits
-# thousands of them: measured 2,503 loose objects / 16.8 MB against a 5.9 MB
-# pack.  Copying those one by one as the throttled control principal on a
-# loaded host exceeded the 60 s bound in control_plane/executive_workspace.py
-# `_run`, roughly 21 % through, and the killed clone left a destination with
-# `HEAD -> refs/heads/.invalid` and no base commit -- surfacing only as an
-# opaque WorkspaceError. Packed, the same clone copies ONE ~8 MB file.
-#
-# This is the install-time-cost principle the Codex attestation receipt
-# already follows: pay it once here, as root, warm, at normal priority,
-# rather than on every job under throttling.  It runs outside the guard above
-# deliberately -- an existence guard that skips the repair is exactly how the
-# receipt writer could wedge an install (see the attestation receipt writer),
-# and an already-installed host must be healed by a reinstall rather than
-# left permanently slow.
-#
-# Run as the control principal, never as root: git refuses a repository whose
-# owner is neither the effective UID nor SUDO_UID ("dubious ownership"), and
-# packing as root would leave root-owned pack files inside a checkout the
-# control principal must own.  Ownership and modes are re-asserted afterwards
-# so a pre-existing checkout with drifted metadata is corrected too.
-/usr/sbin/chown -R "$CONTROL_USER:$CONTROL_GROUP" "$ADMIN_CHECKOUT"
-/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
-  PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$CONTROL_HOME" \
-  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
-  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
-  /usr/bin/git -C "$ADMIN_CHECKOUT" repack -ad
-# Sequence: remote removed -> repack reachable objects -> prune unreachable
-# loose objects -> verify zero loose objects. The `git remote remove origin`
-# call above deletes the remote-tracking refs, which orphans every object
-# that was reachable only through them; `repack -ad` packs just the objects
-# still reachable from the retained refs/HEAD, so those newly-unreachable
-# objects are left behind as loose files instead of being dropped. The
-# administrative checkout is an install-owned, credentialless source whose
-# only required history is what remains reachable from its retained
-# refs/HEAD -- objects inherited from the development repository that are
-# no longer reachable are not company state, they are exactly the
-# clone-cost debris this normalization exists to remove, so prune them
-# before the postcondition below is asserted.
-/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
-  PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$CONTROL_HOME" \
-  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
-  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
-  /usr/bin/git -C "$ADMIN_CHECKOUT" prune --expire=now
-# A complete checkout cloned from a legitimate partial-clone source can retain
-# an empty pack .promisor sidecar even after remote removal/repack/prune. The
-# installed reader correctly refuses that marker, so normalize only after a
-# no-lazy-fetch zero-missing closure proof. Unsafe/non-empty marker evidence is
-# fail-closed and left untouched by the reviewed helper.
-/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
-  PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$CONTROL_HOME" \
-  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
-  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
-  GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 \
-  "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/admin_checkout.py" normalize \
-    --checkout "$ADMIN_CHECKOUT" --expected-commit "$EXPECTED_SHA" >/dev/null || {
-  /bin/echo "administrative checkout promisor normalization refused" >&2
-  exit 65
-}
-/usr/sbin/chown -R "$CONTROL_USER:$CONTROL_GROUP" "$ADMIN_CHECKOUT"
-/bin/chmod -R go-rwx "$ADMIN_CHECKOUT"
-[ "$(/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
-  PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$CONTROL_HOME" \
-  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
-  /usr/bin/git -C "$ADMIN_CHECKOUT" count-objects -v | /usr/bin/awk '/^count:/{print $2}')" = "0" ] || {
-  /bin/echo "administrative checkout still holds loose objects after repack" >&2
-  exit 65
-}
-
+prepare_admin_checkout
 (
   cd "$RELEASE_ROOT"
   PYTHONDONTWRITEBYTECODE=1 "$PYTHON_BINARY" -I -S -B - "$RELEASE_ROOT" "$CONTROL_CONFIG" "$CONTROL_CONFIG_SOURCE" \

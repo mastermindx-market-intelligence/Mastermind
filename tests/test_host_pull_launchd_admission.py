@@ -22,7 +22,7 @@ MANIFEST_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-manife
 INVENTORY_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-source-inventory.json"
 HOST_PULL_SHA = "b58b4cf4932b801df45d4a70fdd99aaaee800e7e57cc06501aa5c21b20ea8a1c"
 HOST_PULL_PREIMAGE = "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad"
-MANIFEST_SHA256 = "c2b66b83484b0ac414a92975abd614c6352c02af50e4cad5cc6305314e855ad8"
+MANIFEST_SHA256 = "febca585a589a7e933650a380b30531fb17e814c0429941853bc9930707fbb2a"
 PROGRAM_ARGUMENTS = [
     "/usr/bin/lockf", "-t", "0", "__LOCK__", "/bin/bash", "__HOST_PULL__",
     "__COLLECTOR_OPTION__",
@@ -106,8 +106,8 @@ def test_manifest_enrolls_the_pair_without_an_installed_preimage():
     assert hashlib.sha256(MANIFEST_PATH.read_bytes()).hexdigest() == MANIFEST_SHA256
     manifest = json.loads(MANIFEST_PATH.read_text())
     inventory = json.loads(INVENTORY_PATH.read_text())
-    assert len(manifest) == len(inventory["files"]) == 106
-    assert inventory["native_code_files"] == 106
+    assert len(manifest) == len(inventory["files"]) == 107
+    assert inventory["native_code_files"] == 107
     assert inventory["baseline_code_files"] == 75
     for path in (DAEMON, TEMPLATE):
         raw = path.read_bytes()

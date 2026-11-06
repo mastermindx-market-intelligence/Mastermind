@@ -7,6 +7,21 @@ these pins are not learned or refreshed by the tests.
 """
 
 REVIEWED_FILES = {
+    # Frozen GLM account-admission evidence: these are elapsed-time bounds,
+    # not user identities. Whole-file hashes and exact sites fail closed on
+    # any changed meaning, added identity, or modified retained traceback.
+    "research/fabric_glm_account_admission_20261014/baseline.quota_remote.py": {
+        "sha256": "80ce4151a5d3f05528bc3c5e9af214d510ad9d9f17803c62f01a4c2d818ec5ff",
+        "sites": ((22, 10, 13, "int", "600"),),
+    },
+    "research/fabric_glm_account_admission_20261014/quota_remote.py": {
+        "sha256": "a1dab11da10264836e6271955b375b8e6508c23f23d0444c99d96464deb70f2b",
+        "sites": ((22, 10, 13, "int", "600"),),
+    },
+    "research/fabric_glm_account_admission_20261014/BASELINE.xml": {
+        "sha256": "538923697693ccd4c5e836de20466cbe2f4d2ae1f0ca189da194a5b0d0d5b64a",
+        "sites": ((19, 46, 49, "int", "600"),),
+    },
     # R2 AEAD source candidate: the existing Control UID remains fixed at this
     # single exact site. Independent source acceptance remains a release gate;
     # these static test pins do not establish it or grant a new identity.
@@ -435,7 +450,7 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
                                                                         35,
                                                                         'int',
                                                                         '502'))},
- 'ops/native_fabric/quota_continuity/candidate/paid_host_qualification.py': {'sha256': 'e4cb143b13324bd5ce4d96af5396054b3c63e1b82c831edae4516f37e495a1b0', 'sites': ((34, 17, 20, 'int', '501'), (452, 85, 90, 'int', '0o700'))},
+ 'ops/native_fabric/quota_continuity/candidate/paid_host_qualification.py': {'sha256': '2a52ba79e6cd38a42ecbd48919704d2c837c65d042707b37640df78f27b8d0c0', 'sites': ((34, 17, 20, 'int', '501'), (452, 85, 90, 'int', '0o700'))},
  'ops/native_fabric/quota_continuity/candidate/paid_model_owner.py': {'sha256': '75bbacb052dcb9374245854e2e6b8681fa369e034000689df0d4f752bd1b6e3b',
  'sites': ((147, 32, 37, 'int', '0o700'), (230, 68, 73, 'int', '0o700'))},
  'scripts/executive_paid_fabric_shim.py': {'sha256': 'e80b95a09ce31153e7bff2ea7b85dd1eb8d8850d4d6029ec27250cd8f13228f1',
@@ -447,15 +462,20 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # review; this does not authorize publication, runtime admission or release.
 # No generic numeric exception is added: source/path/site drift exposes all
 # literals again through the existing D8 scanner.
-# Finite-workstream template derivation changes only _gateway_templates.
-# The same four whole Constant tokens, relative AST paths and complete
-# enclosing identity owners remain unchanged; later lines shift by one.
+# Control component composition retains the four original whole Constant
+# tokens and their complete identity-owner AST from protected 49c2e1d.
+# The two added 0o644 tokens are the closed root-file mode and the matching
+# exact-CAS publication mode, both with explicit uid=0 and gid=0. They are
+# permissions, not principals; each complete token and enclosing call was
+# inspected on these exact source bytes. No generic numeric rule changes.
 REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': '93cb7727512d1922461272e8d0b4a2557fa39d51d9a88e18597401f1731ea83a',
-    'sites': ((335, 24, 27, 'int', '501'),
-              (6556, 35, 37, 'int', '80'),
-              (6557, 50, 55, 'int', '0o755'),
-              (7094, 41, 46, 'int', '0o644')),
+    'sha256': 'c3d96bf994aea0969161b25405db9e3623eb7d5047ebd81e7a06b68757e11e7f',
+    'sites': ((342, 24, 27, 'int', '501'),
+              (6847, 35, 37, 'int', '80'),
+              (6848, 50, 55, 'int', '0o755'),
+              (7385, 41, 46, 'int', '0o644'),
+              (8122, 64, 69, 'int', '0o644'),
+              (9524, 41, 46, 'int', '0o644')),
 }
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
@@ -474,8 +494,8 @@ REVIEWED_FILES['control_plane/executive_backup.py'] = {
 }
 
 # Input-mode bounds and exact ignored Linux symlink mode, never target authority.
-REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': 'd203b1363cdc6f926d9542a2ecfb2ec6b24dd1da46c3fd1f527caea232132749',
- 'sites': ((71, 35, 40, 'int', '0o777'), (216, 30, 35, 'int', '0o777'), (226, 33, 38, 'int', '0o777'))}
+REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': '602893be1fa1ece43862ba889e92af8d8e879cb67f62f16840300b7f21ad2887',
+ 'sites': ((72, 35, 40, 'int', '0o777'), (220, 30, 35, 'int', '0o777'), (230, 33, 38, 'int', '0o777'))}
 
 # Exact reviewed recurring-readiness principal checks; no runtime admission.
 REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_host_readiness.py'] = {'sha256': '115bad457d738af088ec4eed79ff56f56b0f154e56521e0093839daf087b9a66',
@@ -500,7 +520,7 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Journal source-only read composition: exact unchanged action-handler AST and
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'ed6e016eb9f65121baff9e9e41d5a7aa98c9edf20765d5b34224f4518e5bd5dd', 'sites': ((923, 71, 74, 'int', '400'), (934, 71, 74, 'int', '403'), (942, 71, 74, 'int', '400'), (948, 79, 82, 'int', '400'), (957, 71, 74, 'int', '400'), (967, 71, 74, 'int', '403'), (972, 76, 79, 'int', '503'), (978, 71, 74, 'int', '403'))}
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '22335a6b83924ae3c28eeb8610e1b8bb2a834964e1ba99afc97ebcaa534440ac', 'sites': ((924, 71, 74, 'int', '400'), (935, 71, 74, 'int', '403'), (943, 71, 74, 'int', '400'), (949, 79, 82, 'int', '400'), (958, 71, 74, 'int', '400'), (968, 71, 74, 'int', '403'), (973, 76, 79, 'int', '503'), (979, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -541,7 +561,7 @@ REVIEWED_FILES['app/mastermind_os/src/projects/archive/project-archive-continuat
 
 # Exact Knowledge path/generation bounds and inert synthetic PR fixture numbers.
 # These are not OS identities; full-source drift exposes every token again.
-REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-data-observation.ts'] = {'sha256': '8255d63192da282f52f0f81e2963aa6ff3084e5065d60e8516d483fab3122b79', 'sites': ((91, 97, 100, 'int', '512'),)}
+REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-data-observation.ts'] = {'sha256': 'f6401f32f9dbff8af0f5f235bd0d21bde03d060a0c9e8943ca16dd3c048e676b', 'sites': ((95, 97, 100, 'int', '512'),)}
 REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-knowledge-port.ts'] = {'sha256': '9a41d0f5bafef2ab8168509aaf3ff7e37369b619230c2c380bedb2b586d7eaf2', 'sites': ((46, 64, 67, 'int', '512'),)}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-data-observation-owner.json'] = {'sha256': 'd12878bdff07fcdb6bfa05ba2c1694c7600416c7407a9e84e87e20dcc116f118', 'sites': ((119, 16, 19, 'int', '401'),)}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-write-owner.json'] = {'sha256': 'cb6d4c43fc821993f664a9bc75ccf3f38d76bbaff58e36363c6e700b7e3b6856', 'sites': ((97, 22, 25, 'int', '401'), (413, 22, 25, 'int', '402'))}
@@ -562,16 +582,12 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 
 # NEXT accepted source: callback input bound / existing HTTP permission denial,
 # never an OS identity. Exact whole-source hash and token sites only.
-# BYOK/Instructions composition preserves the complete permission handler AST;
-# only its enclosing source and four HTTP denial token positions change.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': 'de69741a1be8c3e980815a284c277da04843f16f34ce303141d482ff7ec64a66', 'sites': ((711, 93, 96, 'int', '403'), (713, 56, 59, 'int', '403'), (720, 46, 49, 'int', '403'), (721, 56, 59, 'int', '403'))}
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': 'b5e717931de280e792c47d9fccba49963f7aec55bb0702d07c2bdb0c43a70790', 'sites': ((712, 93, 96, 'int', '403'), (714, 56, 59, 'int', '403'), (721, 46, 49, 'int', '403'), (722, 56, 59, 'int', '403'))}
+
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
-REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/post_failure_observation.py'] = {
-    'sha256': '80fc9d95068099fb797c9e7a05981a9650d50ec170935d748d92a8e7bcd04337',
-    'sites': ((294, 79, 84, 'int', '0o700'),),
-}
+REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/post_failure_observation.py'] = {'sha256': '80fc9d95068099fb797c9e7a05981a9650d50ec170935d748d92a8e7bcd04337', 'sites': ((294, 79, 84, 'int', '0o700'),)}
 
 
 # PR1890 attended parent classification under the current Chairman source waiver:
@@ -592,5 +608,29 @@ REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/accoun
     ),
 }
 
+# validated source path bound; no identity/authority. Exact full postimage and literal sites only.
+REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'sha256': 'e3fdbd84b951d7dbffd8e3630ded3baac10490ae24cb1d9586007bd64d12b127', 'sites': ((360, 26, 29, 'int', '512'), (476, 57, 60, 'int', '512'))}
+
+# fixed HTTP not-found status. Exact full postimage and literal sites only.
+REVIEWED_FILES['integrations/mastermind_executive_app/fresh_conversation_transport.py'] = {'sha256': 'b5fd60efebebc04ea12d1d1976663c74f907dec2f151a2d71a6f442182b5e5b2', 'sites': ((93, 39, 42, 'int', '404'),)}
+
+# fixed HTTP unavailable status. Exact full postimage and literal sites only.
+REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport.py'] = {'sha256': 'a7af82acb1492e1eee4e583181f6be2c763a9e61d1be5112345693018defaa09', 'sites': ((41, 45, 48, 'int', '503'), (67, 81, 84, 'int', '503'))}
+
+# Actual source-issued proposal PR number, never a UID or HTTP/permission grant.
+REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = {'sha256': 'ee715ecbf81efef147491f1cbbea041ba1a62688bd0906b715231156bdacc0e9', 'sites': (), 'utf8_sites': ((1, 36976, 36979, 'int', '403'),)}
+
+# Actual local Programs observation negative-test HTTP statuses, no OS identity.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'a9971f4832196982f7b59cbe9a43451c948d462eb920bbb01c1d64154313562e', 'sites': ((3454, 68, 71, 'int', '503'), (3459, 69, 72, 'int', '503'), (3463, 67, 70, 'int', '503'))}
+
+# Reviewed Session Unicode-scalar input bound, never an OS identity.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'cd31cfc2d232e8d3b432ba059209a8a5f8479fd7dc5a811d1897ca664207645f', 'sites': ((13, 118, 121, 'int', '700'),)}
 # BYOK metadata READ re-pin: same eight action literals and unchanged action AST.
 # Attended parent source check under the current Chairman waiver; no formal approval claim.
+
+# C16: fixed observation-only TLS directory; root owner and canonical Control
+# group retain the exact private traversal mode. Whole-source and token-bound.
+# C20 attended-parent review: archive closure and inert gateway replacement.
+# ensure_directories has the identical AST; its one whole permission token moved
+# by 15 lines. New unit publication consumes the existing canonical identities.
+REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'a08b20f693a9ed10fe110d69469b5cc9155243905890f3a039ac19a2bbbdbed1', 'sites': ((675, 71, 76, 'int', '0o750'),)}

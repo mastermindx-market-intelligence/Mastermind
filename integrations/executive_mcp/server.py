@@ -77,16 +77,29 @@ _OS_EXECUTIVE_ROUTES: tuple[str, ...] = (
     "/os/executive/direct-native/result",
     "/os/executive/direct-native/consume",
     "/os/executive/direct-native/correction",
+    "/os/executive/project-planning/submit",
+    "/os/executive/project-planning/status",
+    "/os/executive/project-planning/result",
+    "/os/executive/project-planning/consume",
 )
 
-#: Three fixed POST routes served by the opt-in selected-session transport.
+#: Fixed POST routes served by the opt-in selected-session/history transport.
 #: These are exactly the routes the accepted HTTP leaf owns; nothing else is
 #: added by supplying the installed bridge client.
 _OS_SESSION_EXECUTIVE_ROUTES: tuple[str, ...] = (
     "/os/executive/session/context",
+    "/os/executive/session/history-context",
     "/os/executive/session/send",
     "/os/executive/session/reply",
     "/os/executive/session/references",
+)
+
+_OS_FRESH_CONVERSATION_ROUTES = (
+    "/os/executive/conversation/preview", "/os/executive/conversation/create",
+    "/os/executive/conversation/status", "/os/executive/conversation/read",
+    "/os/executive/conversation/consume", "/os/executive/conversation/turn",
+    "/os/executive/conversation/turn/status", "/os/executive/conversation/turn/read",
+    "/os/executive/conversation/consume/status", "/os/executive/conversation/turn/preview",
 )
 
 __all__ = ["build_executive_mcp_app", "build_web_ceo_mcp_app", "build_web_ceo_sessions_mcp_app", "build_web_ceo_v3_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_personal_read_mcp_app", "build_personal_read_tools", "build_mcp_server", "build_tools", "build_web_ceo_tools", "build_web_ceo_sessions_tools", "run_stdio"]
@@ -575,6 +588,7 @@ _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES: tuple[str, ...] = (
     "/workspace/instruction-admission/operation",
 )
 _WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
+    "/workspace/native-draft-identity/current",
     "/workspace/fabric/catalog/current",
     "/workspace/byok/roles/current",
 )
@@ -607,7 +621,8 @@ class _ExecutivePathFence:
     """Literal, query-free routes for the private stateless HTTP transport."""
 
     def __init__(self, app: Any, metadata_path: str, *, workspace_app=None, content_app=None, os_app=None,
-                 os_executive_transport=None, os_session_transport=None, reconcile_route: bool = True):
+                 os_executive_transport=None, os_session_transport=None, fresh_conversation_transport=None,
+                 project_conversation_transport=None, reconcile_route: bool = True):
         self._app = app
         self._routes = {metadata_path: "GET", "/mcp": "POST"}
         if reconcile_route:
@@ -638,7 +653,7 @@ class _ExecutivePathFence:
                 "/workspace/source-operation/context",
                 "/workspace/source-operation/operation",
                 "/workspace/autonomy/current",
-                "/workspace/operator/activity/current", "/workspace/resources/capacity/current",
+                "/workspace/operator/activity/current", "/workspace/resources/capacity/current", "/workspace/resources/host-observation/current",
             ))
             # v2 routes carry a query string; the legacy v1 mission route does too.
             self._query_routes.update((
@@ -659,7 +674,7 @@ class _ExecutivePathFence:
                 "/workspace/source-operation/context",
                 "/workspace/source-operation/operation",
                 "/workspace/autonomy/current",
-                "/workspace/operator/activity/current", "/workspace/resources/capacity/current",
+                "/workspace/operator/activity/current", "/workspace/resources/capacity/current", "/workspace/resources/host-observation/current",
             ))
             self._workspace_routes.update(_WORKSPACE_ADDITIONAL_GET_ROUTES)
             self._query_routes.update(_WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES)
@@ -690,6 +705,15 @@ class _ExecutivePathFence:
             # effect mapping for them, so its refusals keep their own closed
             # session envelope instead of an outer one.
             self._routes.update({path: "POST" for path in _OS_SESSION_EXECUTIVE_ROUTES})
+        if fresh_conversation_transport is not None:
+            self._routes.update({path: "POST" for path in _OS_FRESH_CONVERSATION_ROUTES})
+            # Dual-resource headers do not replace the incumbent public
+            # HTTPS/Host/Origin fence. Admit only these literal paths there.
+            self._public_routes.update(_OS_FRESH_CONVERSATION_ROUTES)
+        if project_conversation_transport is not None:
+            from integrations.mastermind_executive_app.project_conversation_transport import ROUTES
+            self._routes.update({path: "POST" for path in ROUTES})
+            self._public_routes.update(ROUTES)
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope.get("type") == "http":
@@ -700,6 +724,18 @@ class _ExecutivePathFence:
                 await JSONResponse({"ok": False, "error": {
                     "code": "not_found", "message": "unknown Executive transport route",
                 }}, status_code=404)(scope, receive, send)
+                return
+            from integrations.mastermind_executive_app.project_planning_transport import HEADER,ROUTES as PLANNING_ROUTES
+            # The incumbent selected-session leaf owns malformed ASGI header
+            # classification and its UNKNOWN reply. Inspect only well-formed
+            # header pairs here; this additive fence must not preempt it.
+            headers=scope.get('headers')
+            has_planning_header=type(headers) in (list,tuple) and any(
+                type(pair) in (list,tuple) and len(pair)==2 and type(pair[0]) is bytes
+                and pair[0].lower()==HEADER for pair in headers)
+            if has_planning_header and path not in PLANNING_ROUTES:
+                await JSONResponse({'error':'transport_refused'},status_code=403,
+                    headers=_OS_RESPONSE_HEADERS)(scope,receive,send)
                 return
             if (self._routes.get(path) != scope.get("method") or not path.isascii()
                     or scope.get("raw_path") != path.encode("ascii")
@@ -743,10 +779,38 @@ class AuditedWorkspaceApp:
     No principal is injected into ASGI state. A sink failure in the existing
     verifier refuses admission before the sibling can acquire its source.
     """
-    def __init__(self, app, verifier):
+    def __init__(self, app, verifier, *, authenticator=None,authorize_principal=None,
+                 fresh_workspace_config=None):
         if not isinstance(verifier, MastermindTokenVerifier):
             raise TypeError("incumbent A1 verifier required")
         self._app, self._verifier = app, verifier
+        if (authenticator is None)!=(authorize_principal is None):
+            raise TypeError('Workspace planning READ must retain both existing owners')
+        if authenticator is not None:
+            from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
+            if type(authenticator) is not JwtAuthenticator or not callable(authorize_principal):
+                raise TypeError('actual Workspace authenticator and current membership required')
+        self._planning_authenticator,self._planning_authorize=authenticator,authorize_principal
+        if fresh_workspace_config is not None:
+            from integrations.mastermind_workspace_app.app import WorkspaceAppConfig
+            if (type(fresh_workspace_config) is not WorkspaceAppConfig
+                    or fresh_workspace_config.authenticator is not authenticator
+                    or fresh_workspace_config.authorize_principal is not authorize_principal):
+                raise TypeError("same installed Workspace authentication/source owner required")
+        self._fresh_workspace_config = fresh_workspace_config
+
+    async def project_planning_principal(self,token,*,now):
+        """Independently authenticate this resource; no Executive relabeling."""
+        authenticator=self._planning_authenticator
+        try:
+            if (authenticator is None or type(self._verifier) is not MastermindTokenVerifier
+                    or self._verifier._validated_composition()!=authenticator.policy):return None
+            access,_=await self._verifier.verify_token_with_code(token)
+            if access is None:return None
+            principal=await authenticator.verify_token(token,now=now)
+            if self._planning_authorize(principal) is not True:return None
+            return principal
+        except Exception:return None
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") != "http":
@@ -1105,6 +1169,8 @@ def _build_profile_mcp_app(
     # read or workspace verifier.  No resource widening, no fallback.
     os_transport_handler = None
     os_session_transport_handler = None
+    fresh_conversation_handler = None
+    project_conversation_handler = None
     if enable_os_executive_transport:
         from integrations.mastermind_executive_app.os_transport import OsExecutiveTransportApp
         from integrations.mastermind_executive_app.direct_native import DirectNativeResultClient
@@ -1145,6 +1211,7 @@ def _build_profile_mcp_app(
             direct_result_client=DirectNativeResultClient(configured.ceo_ingress_socket_path, CeoIngressClient(
                 connect_timeout=configured.connect_timeout, read_timeout=configured.read_timeout)),
             foreground_submissions=os_session_bridge_client is not None,
+            workspace_app=workspace_app if type(workspace_app) is AuditedWorkspaceApp else None,
         )
         if os_session_bridge_client is not None:
             # The opt-in selected-session leaf reuses this factory's audited
@@ -1169,6 +1236,24 @@ def _build_profile_mcp_app(
                 submit_authenticator=submit_authenticators[os_pair_index],
                 clock=configured.clock,
             )
+        if os_session_transport_handler is not None:
+            from integrations.mastermind_executive_app.project_conversation_transport import (
+                ProjectConversationReadClient, ProjectConversationTransportApp,
+            )
+            project_conversation_handler = ProjectConversationTransportApp(
+                ProjectConversationReadClient(configured.ceo_ingress_socket_path,
+                    client=CeoIngressClient(connect_timeout=configured.connect_timeout, read_timeout=configured.read_timeout)),
+                auth_owner=os_session_transport_handler)
+        if type(workspace_app) is AuditedWorkspaceApp and workspace_app._fresh_workspace_config is not None:
+            from integrations.mastermind_executive_app.fresh_conversation_transport import (
+                FreshConversationTransportApp, InstalledFreshConversationClient,
+            )
+            fresh_conversation_handler = FreshConversationTransportApp(
+                inner_app, executive=os_transport_handler,
+                workspace_config=workspace_app._fresh_workspace_config,
+                workspace_verifier=workspace_app._verifier,
+                client=InstalledFreshConversationClient(configured.ceo_ingress_socket_path,
+                    CeoIngressClient(connect_timeout=configured.connect_timeout, read_timeout=configured.read_timeout)))
     server: Server = Server(profile_server_name, version=profile_server_version)
     def authenticated_tool(tool: mcp_types.Tool) -> mcp_types.Tool:
         policy = (
@@ -1487,7 +1572,7 @@ def _build_profile_mcp_app(
                 "/workspace/source-operation/context",
                 "/workspace/source-operation/operation",
                 "/workspace/autonomy/current",
-                             "/workspace/operator/activity/current", "/workspace/resources/capacity/current")
+                             "/workspace/operator/activity/current", "/workspace/resources/capacity/current", "/workspace/resources/host-observation/current")
                              + _WORKSPACE_ADDITIONAL_GET_ROUTES)
         outer_routes.extend(
             Route(path, workspace_app, methods=["POST"])
@@ -1505,6 +1590,13 @@ def _build_profile_mcp_app(
     if os_session_transport_handler is not None:
         for route_path in _OS_SESSION_EXECUTIVE_ROUTES:
             outer_routes.append(Route(route_path, os_session_transport_handler, methods=["POST"]))
+    if fresh_conversation_handler is not None:
+        for route_path in _OS_FRESH_CONVERSATION_ROUTES:
+            outer_routes.append(Route(route_path, fresh_conversation_handler, methods=["POST"]))
+    if project_conversation_handler is not None:
+        from integrations.mastermind_executive_app.project_conversation_transport import ROUTES
+        for route_path in ROUTES:
+            outer_routes.append(Route(route_path, project_conversation_handler, methods=["POST"]))
     outer_app = Starlette(routes=outer_routes, lifespan=lifespan)
     outer_app.router.redirect_slashes = False
     #: Public, read-only view of the OS Executive transport handler (or None
@@ -1517,9 +1609,13 @@ def _build_profile_mcp_app(
                                       content_app=content_app, os_app=os_app,
                                       os_executive_transport=os_transport_handler,
                                       os_session_transport=os_session_transport_handler,
+                                      fresh_conversation_transport=fresh_conversation_handler,
+                                      project_conversation_transport=project_conversation_handler,
                                       reconcile_route=not public_mode))
     guard.os_transport = os_transport_handler
     guard.os_session_transport = os_session_transport_handler
+    guard.fresh_conversation_transport = fresh_conversation_handler
+    guard.project_conversation_transport = project_conversation_handler
     return guard
 
 
