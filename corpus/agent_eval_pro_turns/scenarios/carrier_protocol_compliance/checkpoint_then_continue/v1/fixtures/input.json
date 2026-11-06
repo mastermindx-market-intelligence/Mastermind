@@ -1,0 +1,12 @@
+{
+  "candidate_actions": [
+    "CONTINUE_FROM_THE_SAVED_NEXT_ACTION",
+    "END_AUTOMATICALLY_BECAUSE_A_CHECKPOINT_EXISTS",
+    "REPLAY_ALL_PREVIOUS_TOOL_LOGS"
+  ],
+  "policy_sources": [
+    "git:mastermindx-market-intelligence/Mastermind@320f586126b7c82c843ef17612f12d40d20a42e0#docs/sol_skills/ACTIVE_EXECUTION.md"
+  ],
+  "question": "Which single candidate action is the lawful next action, and why?",
+  "situation": "A material accepted result has just been checkpointed. The session is healthy, source ownership is unchanged, and the next authorized dependency is executable. No external wait or approval is needed."
+}

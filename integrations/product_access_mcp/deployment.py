@@ -1,187 +1,123 @@
-"""Owner-injected Product MCP composition and same-grant result fence.
+"""Inert production composition for the authenticated public Product MCP profile.
 
-No product-user database, verifier, token exchange, listener, process, retry,
-scheduler or browser is created.  The installing owner must provide a CURRENT
-permission resolver, a bounded existing-owner read port and an admitted OAuth
-resource policy. An OAuth claim by itself is never a product authorization.
+All services come from existing Business OAuth/audit/runtime owners. This module
+creates no listener, service, credential, user mapping, queue, session or retry
+plane. The default HTTP observation transport contains only fixed public
+Macro/Terminal endpoints and opens no connection until a tool is invoked.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
-import re
-from typing import Any
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
+from urllib.parse import urlsplit
 
 from integrations.business_mcp_auth.contracts import (
     AuthAuditSink, ResourcePolicy, validate_resource_policy,
 )
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
-from .app import (
-    FinalAuthorization, ReadPort, create_authenticated_product_server,
-)
-from .contracts import ProductCaller, ProductRefused, SOURCES
 
-
-CATALOG_SELECTION = ("catalog", "manifest", "catalog.static")
-
-
-@dataclass(frozen=True)
-class ProductReadBinding:
-    """Projection of the incumbent product owner's exact, revocable grant.
-
-    This is an immutable observation, NOT the grant's owner or a locally
-    authoritative lease. Changes to owner generation, client, resource,
-    product or remaining expiry must refuse release after the I/O await.
-    """
-
-    caller: ProductCaller
-    product: str
-    view: str
-    source_id: str
-    owner_ref: str
-    grant_generation: str
-    expires_at: int
-
-
-BindingResolver = Callable[
-    [ProductCaller, str, str], ProductReadBinding,
-]
+from .app import create_product_server, product_http_app
+from .contracts import utc_now
+from .reader import ProductReader
+from .schemas import SCOPE
+from .transport import PublicTransport
 
 
 @dataclass(frozen=True)
-class ProductDeploymentServices:
-    """Borrowed host dependencies, never acquired implicitly by this adapter."""
+class ProductRuntimeServices:
+    """Borrowed, owner-qualified bindings; never raw config or environment lookup."""
 
     authenticator: JwtAuthenticator
     policy: ResourcePolicy
     now: Callable[[], int]
+    utc_now: Callable[[], datetime]
     audit_sink: AuthAuditSink
-    read_port: ReadPort
-    resolve_binding: BindingResolver
     allowed_hosts: tuple[str, ...]
     allowed_origins: tuple[str, ...] = ()
 
 
-def _selected_source(request: Mapping[str, str]) -> tuple[str, str, str]:
-    if not isinstance(request, Mapping):
-        raise ProductRefused("PRODUCT_GRANT_CHANGED")
-    if not request:
-        return CATALOG_SELECTION
-    if set(request) != {"product", "view"}:
-        raise ProductRefused("PRODUCT_GRANT_CHANGED")
-    product, view = request["product"], request["view"]
-    if type(product) is not str or type(view) is not str or (product, view) not in SOURCES:
-        raise ProductRefused("PRODUCT_GRANT_CHANGED")
-    return product, view, SOURCES[(product, view)][0]
+def _validate_transport_addresses(
+    hosts: object, origins: object,
+) -> None:
+    for addresses, required in ((hosts, True), (origins, False)):
+        if (type(addresses) is not tuple or (required and not addresses)
+                or any(type(address) is not str or not address
+                       or len(address) > 253 or "*" in address
+                       or any(ord(c) <= 32 or ord(c) == 127 for c in address)
+                       for address in addresses)):
+            raise ValueError("TRANSPORT_POLICY_INVALID")
+    # The Browser and OAuth owners choose actual authorities. Here we merely
+    # refuse wildcards/URLs-with-path as trusted Origin values. Do not infer a
+    # loopback or production origin from the environment.
+    for address in origins:
+        try:
+            parsed = urlsplit(address)
+            if (parsed.scheme not in ("https", "http")
+                    or not parsed.netloc or not parsed.hostname
+                    or (parsed.scheme == "http"
+                        and parsed.hostname not in ("127.0.0.1", "::1", "localhost"))
+                    or parsed.username is not None or parsed.password is not None
+                    or parsed.path or parsed.query or parsed.fragment
+                    or address != f"{parsed.scheme}://{parsed.netloc}"
+                    or (parsed.port is not None and not 1 <= parsed.port <= 65535)):
+                raise ValueError
+        except (ValueError, TypeError):
+            raise ValueError("TRANSPORT_POLICY_INVALID") from None
+    for address in hosts:
+        # The underlying SDK still applies its admitted Host-origin checks.
+        # Reject any URL, whitespace, userinfo or path at the source boundary.
+        if any(x in address for x in ("@", "/", "\\", "?", "#", "%")):
+            raise ValueError("TRANSPORT_POLICY_INVALID")
+        try:
+            parsed = urlsplit("//" + address)
+            if (not parsed.netloc or not parsed.hostname or parsed.path
+                    or parsed.query or parsed.fragment
+                    or parsed.username is not None or parsed.password is not None
+                    or (parsed.port is not None and not 1 <= parsed.port <= 65535)):
+                raise ValueError
+        except (ValueError, TypeError):
+            raise ValueError("TRANSPORT_POLICY_INVALID") from None
 
 
-def _binding(
-    resolver: BindingResolver,
-    caller: ProductCaller,
-    selection: tuple[str, str, str],
-    now: Callable[[], int],
-) -> ProductReadBinding:
-    """Re-observe the real grant with the SAME caller and source selection."""
-    try:
-        timestamp = now()
-        if type(timestamp) is not int or timestamp < 0:
-            raise ProductRefused("PRODUCT_GRANT_CHANGED")
-        if timestamp >= caller.expires_at:
-            raise ProductRefused("PRODUCT_GRANT_CHANGED")
-        product, view, source = selection
-        result = resolver(caller, product, view)
-        if type(result) is not ProductReadBinding:
-            raise ProductRefused("PRODUCT_GRANT_CHANGED")
-        if (type(result.caller) is not ProductCaller
-            or result.caller != caller
-            or result.product != product
-            or result.view != view
-            or result.source_id != source
-            or type(result.expires_at) is not int
-            or result.expires_at <= timestamp):
-            raise ProductRefused("PRODUCT_GRANT_CHANGED")
-        if (type(result.owner_ref) is not str
-            or not 1 <= len(result.owner_ref) <= 128
-            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", result.owner_ref) is None
-            or type(result.grant_generation) is not str
-            or not 1 <= len(result.grant_generation) <= 128
-            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*",
-                            result.grant_generation) is None):
-            raise ProductRefused("PRODUCT_GRANT_CHANGED")
-        # Product permission never lengthens the already verified JWT.
-        return replace(result, expires_at=min(result.expires_at, caller.expires_at))
-    except ProductRefused:
-        raise
-    except Exception:
-        # No private product entitlement errors in a Web CEO result.
-        raise ProductRefused("PRODUCT_GRANT_CHANGED") from None
+def create_deployment(services: ProductRuntimeServices):
+    """Build a bounded ASGI app under the *existing* host's lifecycle.
 
-
-def make_product_final_authorization(
-    *, resolve_binding: BindingResolver, now: Callable[[], int],
-) -> FinalAuthorization:
-    """Require one current owner binding before and after awaited observation.
-
-    The late recheck runs synchronously as the final authorization operation
-    after JWT revalidation. A renewed/replaced/withdrawn owner grant is refused
-    for the existing response, even when still permitted in a new request.
+    A product MCP OAuth principal is intentionally NOT treated as an existing
+    product-site session. The only tools in this version read explicitly public
+    source data. New private observations require application-owner binding.
     """
-    if not callable(resolve_binding) or not callable(now):
-        raise ValueError("incumbent product grant resolver and clock required")
-
-    def capture(caller: ProductCaller, request: Mapping[str, str]):
-        if type(caller) is not ProductCaller:
-            raise ProductRefused("PRODUCT_GRANT_CHANGED")
-        selection = _selected_source(request)
-        caller_snapshot = replace(caller)
-        original = _binding(resolve_binding, caller_snapshot, selection, now)
-
-        def revalidate() -> None:
-            current = _binding(resolve_binding, caller_snapshot, selection, now)
-            if current != original:
-                raise ProductRefused("PRODUCT_GRANT_CHANGED")
-
-        return revalidate
-
-    return capture
-
-
-def create_product_deployment(services: ProductDeploymentServices):
-    """Construct inert authenticated MCP/ASGI composition, no listener start.
-
-    This factory does not prove the injected resolver is product-authoritative,
-    nor that a user/product/account/link/tunnel/deployment is installed. These
-    are separate owner-side admission and real-path verification requirements.
-    """
-    if type(services) is not ProductDeploymentServices:
-        raise ValueError("owner ProductDeploymentServices required")
+    if not isinstance(services, ProductRuntimeServices):
+        raise ValueError("RUNTIME_SERVICES_REQUIRED")
     if (not isinstance(services.authenticator, JwtAuthenticator)
-        or not callable(getattr(services.audit_sink, "emit", None))
-        or not all(callable(fn) for fn in
-                   (services.now, services.read_port, services.resolve_binding))):
-        raise ValueError("borrowed service dependencies invalid")
-    if (validate_resource_policy(services.policy) !=
-        validate_resource_policy(services.authenticator.policy)):
-        raise ValueError("authenticator policy identity mismatch")
-    for names, required in ((services.allowed_hosts, True),
-                            (services.allowed_origins, False)):
-        if (type(names) is not tuple or
-            (required and not names) or
-            len(set(names)) != len(names) or
-            any(type(value) is not str or not 1 <= len(value) <= 255
-                or "*" in value or
-                any(ord(ch) < 33 or ord(ch) == 127 for ch in value)
-                for value in names)):
-            raise ValueError("closed transport policy required")
-
-    return create_authenticated_product_server(
+            or not callable(getattr(services.audit_sink, "emit", None))
+            or not callable(services.now) or not callable(services.utc_now)):
+        raise ValueError("RUNTIME_SERVICES_INVALID")
+    try:
+        issued_at = services.now()
+        observed_at = services.utc_now()
+        if type(issued_at) is not int or issued_at < 0:
+            raise ValueError
+        utc_now(observed_at)
+    except Exception:
+        raise ValueError("RUNTIME_SERVICES_INVALID") from None
+    selected = validate_resource_policy(services.policy)
+    if selected != validate_resource_policy(services.authenticator.policy):
+        raise ValueError("AUTH_POLICY_BINDING_MISMATCH")
+    if selected.required_scopes != (SCOPE,):
+        raise ValueError("PRODUCT_SCOPE_REQUIRED")
+    _validate_transport_addresses(services.allowed_hosts, services.allowed_origins)
+    reader = ProductReader(transport=PublicTransport(), now=services.utc_now)
+    server = create_product_server(
         authenticator=services.authenticator,
-        policy=services.policy,
+        policy=selected,
         now=services.now,
         audit_sink=services.audit_sink,
-        read_port=services.read_port,
-        final_authorization=make_product_final_authorization(
-            resolve_binding=services.resolve_binding, now=services.now),
+        reader=reader,
         allowed_hosts=services.allowed_hosts,
         allowed_origins=services.allowed_origins,
     )
+    return product_http_app(server)
+
+
+__all__ = ["ProductRuntimeServices", "create_deployment"]

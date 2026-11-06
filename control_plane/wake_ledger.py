@@ -168,6 +168,36 @@ class TrustedAckContext:
 
 
 @dataclasses.dataclass(frozen=True)
+class NativeContinuationAckEvidence:
+    """Versioned evidence within the existing ACK event, never a new grant."""
+    schema: str
+    request_event_id: int
+    request_event_sha256: str
+    target_attempt_id: str
+    process_generation_id: str
+    native_session_sha256: str
+    native_turn_sha256: str
+    nudge_id: str
+
+    def __post_init__(self):
+        if (self.schema != "mastermind.native_continuation_ack.v1"
+                or type(self.request_event_id) is not int or self.request_event_id < 1):
+            raise WakeLedgerError("invalid native continuation ACK evidence")
+        for value in (self.request_event_sha256, self.native_session_sha256, self.native_turn_sha256):
+            if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                raise WakeLedgerError("invalid native continuation ACK digest")
+        for value in (self.target_attempt_id, self.process_generation_id, self.nudge_id):
+            if type(value) is not str or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", value) is None:
+                raise WakeLedgerError("invalid native continuation ACK identity")
+
+    @classmethod
+    def from_dict(cls, value):
+        if type(value) is not dict or set(value) != {f.name for f in dataclasses.fields(cls)}:
+            raise WakeLedgerError("invalid native continuation ACK fields")
+        return cls(**value)
+
+
+@dataclasses.dataclass(frozen=True)
 class WakeAcknowledgement:
     obligation_id: str
     ack_mode: AckMode
@@ -180,6 +210,7 @@ class WakeAcknowledgement:
     operator_authority_receipt: str | None = None
     binding_generation: int | None = None
     delivered_command_id: str | None = None
+    native_continuation: NativeContinuationAckEvidence | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -643,6 +674,11 @@ def parse_acknowledgement(
         raise WakeLedgerError("trusted ack contains a malformed obligation_id")
     if oid not in claims:
         raise WakeLedgerError("trusted ack does not include this obligation_id")
+    if ack.native_continuation is not None:
+        if (type(ack.native_continuation) is not NativeContinuationAckEvidence
+                or ack.ack_mode is not AckMode.REASONING_SESSION or ack.reasoning_surface != "codex"):
+            raise WakeLedgerError("native continuation evidence requires native reasoning ACK")
+        NativeContinuationAckEvidence.from_dict(dataclasses.asdict(ack.native_continuation))
     if ack.ack_mode is AckMode.REASONING_SESSION:
         if BINDING_ID_RE.fullmatch(str(ack.binding_id or "")) is None:
             raise WakeLedgerError("reasoning_session ack requires trusted binding context")
@@ -1092,7 +1128,7 @@ def resolution_event_payload(resolution: SourceResolution) -> dict[str, object]:
 
 
 def ack_event_payload(ack: WakeAcknowledgement) -> dict[str, object]:
-    return {
+    payload = {
         "obligation_id": ack.obligation_id,
         "ack_mode": ack.ack_mode.value,
         "target_seat": ack.target_seat,
@@ -1105,6 +1141,10 @@ def ack_event_payload(ack: WakeAcknowledgement) -> dict[str, object]:
         "binding_generation": ack.binding_generation,
         "delivered_command_id": ack.delivered_command_id,
     }
+
+    if ack.native_continuation is not None:
+        payload["native_continuation"] = dataclasses.asdict(ack.native_continuation)
+    return payload
 
 
 def attempt_event_payload(attempt: DeliveryAttempt) -> dict[str, object]:
@@ -1295,6 +1335,8 @@ def wake_record_from_event(event: object) -> WakeLedgerRecord:
                 operator_authority_receipt=payload.get("operator_authority_receipt"),
                 binding_generation=payload.get("binding_generation"),
                 delivered_command_id=payload.get("delivered_command_id"),
+                native_continuation=(NativeContinuationAckEvidence.from_dict(payload["native_continuation"])
+                                     if "native_continuation" in payload else None),
             ),
             obligation_id=oid,
         )
