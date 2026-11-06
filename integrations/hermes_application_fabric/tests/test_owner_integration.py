@@ -23,6 +23,7 @@ class OwnerLoopbackTests(unittest.TestCase):
         self.calls, self.mode, self.closed, self.allow = [], "text", 0, True
         self.structured_value = {"answer": 42}
         self.tool_name, self.tool_arguments = "read", {"path": "/tmp/x"}
+        self.response_release, self.response_finished = threading.Event(), threading.Event()
         parent = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -40,6 +41,8 @@ class OwnerLoopbackTests(unittest.TestCase):
                 parent.calls.append({"payload": payload, "request_id": self.headers["Idempotency-Key"],
                     "turn_id": self.headers["X-MM-Application-Turn-ID"],
                     "authenticated": self.headers["Authorization"] == "Bearer " + "t" * 40})
+                if parent.mode == "native-stall":
+                    parent.response_release.wait(timeout=8)
                 if parent.mode == "disconnect" or parent.mode == "native-effect-disconnect" and len(parent.calls) > 1:
                     self.connection.shutdown(socket.SHUT_RDWR)
                     self.connection.close()
@@ -70,6 +73,7 @@ class OwnerLoopbackTests(unittest.TestCase):
                 self.reply(200, {"id": "provider-result", "model": "model-1",
                     "choices": [{"index": 0, "message": msg, "finish_reason": finish}],
                     "usage": {"prompt_tokens": 11, "completion_tokens": 7}}, "terminal", turn, req)
+                parent.response_finished.set()
 
             def reply(self, status, payload, state, turn, req):
                 body = json.dumps(payload).encode()
@@ -99,6 +103,7 @@ class OwnerLoopbackTests(unittest.TestCase):
         self.call = NativeCall("session-1", "task-1", "turn-1", "api-1")
 
     def tearDown(self):
+        self.response_release.set()
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=2)

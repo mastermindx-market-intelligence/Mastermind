@@ -1,5 +1,6 @@
 """Installed Hermes implementation tests; the APPLICATION endpoint is a fixture."""
 import asyncio
+from dataclasses import replace
 import json
 from types import SimpleNamespace as N
 import unittest
@@ -139,9 +140,9 @@ class InstalledNativeTests(unittest.TestCase):
         with patch.dict(REGISTRY_AUTHTYPE_ARMS, {AUTH_TYPE: incumbent}), self.assertRaises(HermesFabricError):
             register_native_provider()
 
-    def test_native_tool_execution_and_original_result_continuation(self):
+    def _tool_turn(self, mode):
         from tools.registry import registry
-        self.mode = "native-conversation"
+        self.mode = mode
         fixture_tool = "mmx_fixture_read"
         # Hermes v0.23 exposes deferred tools through its real tool_call wrapper.
         # The fixture models the exact offered schema, not an unoffered function.
@@ -158,6 +159,10 @@ class InstalledNativeTests(unittest.TestCase):
                 "properties": {"value": {"type": "string"}}, "required": ["value"]}}, handler=handler)
         native = self.agent(enabled_toolsets=["mmx_fixture_tools"])
         result = native.run_conversation("Read the fixture once, then report.", task_id="task-native-tools")
+        return native, result, executed
+
+    def test_native_tool_execution_and_original_result_continuation(self):
+        _, result, executed = self._tool_turn("native-conversation")
         self.assertEqual(result.get("final_response"), "Result 世界",
             {"native_calls": len(self.native_calls), "owner_calls": len(self.calls)})
         self.assertEqual(executed, [{"value": "native fixture"}])
@@ -165,3 +170,37 @@ class InstalledNativeTests(unittest.TestCase):
         self.assertNotEqual(self.calls[0]["request_id"], self.calls[1]["request_id"])
         self.assertEqual(self.calls[1]["payload"]["messages"][-1]["role"], "tool")
         self.assertEqual(self.calls[1]["payload"]["messages"][-1]["tool_call_id"], "tool-original")
+
+    def test_connection_loss_after_native_tool_does_not_execute_it_again(self):
+        native, result, executed = self._tool_turn("native-effect-disconnect")
+        self.assertNotEqual(result.get("final_response"), "Result 世界")
+        self.assertEqual(executed, [{"value": "native fixture"}])
+        self.assertEqual((len(self.calls), len(self.native_calls), self.closed), (2, 2, 1))
+        self.assertTrue(self.owner._closed)
+        rebuilt = native._create_openai_client(native._client_kwargs, reason="fixture-recovery", shared=False)
+        original = self.native_calls[-1]
+        replacement = NativeCall(original.session_id, original.task_id, original.turn_id, "replacement-api-id")
+        with call_scope(self.binding, replacement), self.assertRaises(HermesFabricError):
+            rebuilt.chat.completions.create(model="host-selection", messages=[{"role": "user", "content": "retry"}])
+        self.assertEqual((len(self.calls), len(executed)), (2, 1))
+
+    def test_real_native_watchdog_fences_late_result_and_new_request_identity(self):
+        from agent import chat_completion_helpers as helpers
+        self.mode = "native-stall"
+        native = self.agent(enabled_toolsets=[])
+        original = helpers._resolve_nonstream_watchdogs
+
+        def short_watchdog(agent, kwargs):
+            return replace(original(agent, kwargs), stale_timeout=.05)
+
+        with patch.object(helpers, "_resolve_nonstream_watchdogs", side_effect=short_watchdog):
+            result = native.run_conversation("Wait for the bounded fixture.", task_id="task-watchdog")
+        self.assertNotEqual(result.get("final_response"), "Result 世界")
+        self.assertEqual((len(self.calls), len(self.native_calls), self.closed), (1, 1, 1))
+        self.assertTrue(self.owner._closed)
+        self.response_release.set()
+        self.assertTrue(self.response_finished.wait(timeout=2))
+        first = self.native_calls[0]
+        with call_scope(self.binding, NativeCall(first.session_id, first.task_id, first.turn_id, "after-watchdog")), self.assertRaises(HermesFabricError):
+            HermesApplicationClient().create(model="host-selection", messages=[{"role": "user", "content": "retry"}])
+        self.assertEqual(len(self.calls), 1)
