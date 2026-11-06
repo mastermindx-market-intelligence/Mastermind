@@ -1241,6 +1241,7 @@ class PublicProvenanceTransportTests(unittest.TestCase):
                 conn.settimeout(3)
                 connections.append(conn.getpeername())
                 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
                 context.load_cert_chain(str(cert / 'cert.pem'), str(cert / 'key.pem'))
                 with context.wrap_socket(conn, server_side=True) as client:
                     request = b''
