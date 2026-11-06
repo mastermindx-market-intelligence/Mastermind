@@ -419,12 +419,16 @@ def allocation_attribution(asof: date | None = None, *, book_curves: dict | None
     ledger's bogey curves (SPY = the bench, defensive basket = the 'held XLV' sleeve return, do_nothing
     = the carry). Degrades to an honest 'building' stub when the ledger/curves are missing (P2).
 
-    For each book curve supplied (or the ledger's book rows), we treat the book's realized window return
-    vs SPY as its active return and attribute the portion explained by the DEFENSIVE tilt (allocation)
-    and by sitting in CASH (cash_timing) using the ledger's own defensive + do-nothing curves as the
-    sleeve-return proxies. This makes 'held XLV, avoided semis' a creditable, reconciled fact.
+    Each book is scored ONLY when ``book_curves`` supplies its curve, and ONLY over ONE SHARED
+    window: the book's return vs the bogeys is recomputed at read time by
+    ``brain.benchmark_ledger.compare_book_to_ledger`` over the cohort's actual common dates. The
+    ledger's stored per-inception ``return_pct`` values are never used for scoring — they are each
+    measured from a different inception, so subtracting them compared different windows (#1433).
+    A book with no curve, or whose window is unsupported, is WITHHELD (recorded in the top-level
+    ``withheld`` map with its reason), never scored on a cross-window number.
 
-    Returns {as_of, bench, books:{id:{...terms}}, status, regime}. Never raises."""
+    Returns {as_of, bench, spy_return, defensive_return, books:{id:{...terms, window}}, withheld,
+    status, regime}. Never raises."""
     asof = asof or date.today()
     try:
         from brain import benchmark_ledger as BL
@@ -445,35 +449,53 @@ def allocation_attribution(asof: date | None = None, *, book_curves: dict | None
     if spy_ret is None:
         return {"as_of": asof.isoformat(), "bench": "SPY", "status": "building",
                 "reason": "no SPY bogey curve (benchmark ledger unavailable)",
-                "regime": regime or {}, "books": {}}
+                "regime": regime or {}, "books": {}, "withheld": {}}
 
-    # book curves: prefer explicit arg, else the ledger's book rows are return-only (no curve) — we take
-    # the leaderboard return_pct where a curve isn't supplied.
+    # window-aligned cohort: the defensive sleeve joins the comparison only when its curve exists
     curves = dict(book_curves or {})
+    def_curve = (bogeys.get("defensive") or {}).get("curve") or {}
+    bogey_ids = ("spy", "defensive") if def_curve else ("spy",)
     out_books: dict[str, dict] = {}
+    withheld: dict[str, str] = {}
     for row in (ledger.get("leaderboard") or []):
         if row.get("kind") != "book":
             continue
         bid = row.get("id")
-        if bid in curves:
-            book_ret = _window_return(curves[bid])
-        else:
-            rp = row.get("return_pct")
-            book_ret = (rp / 100.0) if rp is not None else None
-        if book_ret is None:
+        curve = curves.get(bid)
+        if not curve:                                     # return-only row → withheld, not scored
+            withheld[bid] = "no_book_curve"
             continue
-        # sleeve proxies from the ledger: the DEFENSIVE tilt sector return is def_ret (vs SPY bench).
-        # We don't have the book's true sector weights here, so the allocation term is expressed as the
-        # book's realized tilt toward the defensive sleeve: (book beat/lag of the defensive curve). The
-        # honest, reconciled decomposition uses the defensive sleeve as the one measurable tilt and folds
-        # the rest into selection_residual — 'held XLV' shows up as a positive allocation when the book
-        # tracked the defensive curve up while SPY fell.
-        sector_weights = {"defensive": 1.0} if def_ret is not None else {}
-        sector_returns = {"defensive": def_ret} if def_ret is not None else {}
+        hist = {"curve": curve, "status_by_date": {}}
+        try:
+            cmp = BL.compare_book_to_ledger(bid, hist, ledger, bogey_ids=bogey_ids)
+        except Exception:  # noqa: BLE001
+            cmp = {}
+        if (cmp or {}).get("status") != "descriptive":
+            withheld[bid] = (cmp or {}).get("reason") or "unavailable"
+            continue
+        returns_pct = cmp.get("returns_pct") or {}
+        try:
+            book_ret = returns_pct[bid] / 100.0           # WINDOW-ALIGNED returns (fractions)
+            spy_ret_w = returns_pct["spy"] / 100.0
+            def_ret_w = returns_pct.get("defensive")
+            def_ret_w = (def_ret_w / 100.0) if def_ret_w is not None else None
+        except (KeyError, TypeError):
+            withheld[bid] = "unavailable"
+            continue
+        # sleeve proxies from the SAME shared window: the DEFENSIVE tilt sector return is def_ret_w
+        # (vs SPY bench). We don't have the book's true sector weights here, so the allocation term is
+        # expressed as the book's realized tilt toward the defensive sleeve: (book beat/lag of the
+        # defensive curve). The honest, reconciled decomposition uses the defensive sleeve as the one
+        # measurable tilt and folds the rest into selection_residual — 'held XLV' shows up as a
+        # positive allocation when the book tracked the defensive curve up while SPY fell.
+        sector_weights = {"defensive": 1.0} if def_ret_w is not None else {}
+        sector_returns = {"defensive": def_ret_w} if def_ret_w is not None else {}
         bench_sector_weights = {"defensive": 0.0}   # SPY holds none of the defensive tilt by construction
-        terms = allocation_terms(book_ret, spy_ret, sector_weights=sector_weights,
+        terms = allocation_terms(book_ret, spy_ret_w, sector_weights=sector_weights,
                                   sector_returns=sector_returns,
                                   bench_sector_weights=bench_sector_weights, cash_weight=0.0)
+        terms["window"] = {"start": cmp.get("start"), "end": cmp.get("end"),
+                           "common_point_count": cmp.get("common_point_count")}
         out_books[bid] = terms
 
     return {"as_of": asof.isoformat(), "bench": "SPY",
@@ -481,4 +503,5 @@ def allocation_attribution(asof: date | None = None, *, book_curves: dict | None
             "defensive_return": round(def_ret, 6) if def_ret is not None else None,
             "status": "scoring" if out_books else "building",
             "regime": regime or (ledger.get("regime") if isinstance(ledger, dict) else {}) or {},
-            "books": out_books}
+            "books": out_books,
+            "withheld": withheld}

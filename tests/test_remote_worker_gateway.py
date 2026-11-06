@@ -469,7 +469,9 @@ async def test_gateway_restart_has_no_history_or_state(tmp_path: Path) -> None:
             "_broker_client",
             "broker_call",
             "_ssl_context",
+            "_host_observer",
         }
+        assert replacement._host_observer is None
         fixture.gateway = replacement
         fixture.server = await replacement.start_server()
         endpoint = fixture.server.sockets[0].getsockname()[:2]

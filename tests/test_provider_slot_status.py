@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import importlib.util
 import json
 import os
@@ -8,6 +9,8 @@ import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +44,11 @@ def test_status_missing_receipt_is_sanitized_and_never_opens_credential(
 ) -> None:
     module = _load()
     slot = _slot(module, tmp_path)
+    # This test verifies only status rendering, not OS-principal admission.
+    # Its unprivileged runner UID/GID cannot impersonate an Executive worker.
+    # Dedicated negative tests below retain the real strict custody checks.
+    monkeypatch.setattr(module, "_directory_metadata_valid", lambda *_a, **_kw: True)
+    monkeypatch.setattr(module, "_credential_metadata_valid", lambda *_a, **_kw: True)
     slot.provider_home.mkdir(mode=0o700)
     slot.auth_path.write_bytes(b"must-never-be-read")
     slot.auth_path.chmod(0o600)
@@ -108,6 +116,11 @@ def test_status_ready_validation_is_bound_to_exact_slot_without_identity_output(
 ) -> None:
     module = _load()
     slot = _slot(module, tmp_path)
+    # This test verifies only status rendering, not OS-principal admission.
+    # Its unprivileged runner UID/GID cannot impersonate an Executive worker.
+    # Dedicated negative tests below retain the real strict custody checks.
+    monkeypatch.setattr(module, "_directory_metadata_valid", lambda *_a, **_kw: True)
+    monkeypatch.setattr(module, "_credential_metadata_valid", lambda *_a, **_kw: True)
     slot.provider_home.mkdir(mode=0o700)
     slot.auth_path.write_bytes(b"opaque")
     slot.auth_path.chmod(0o600)
@@ -150,6 +163,11 @@ def test_status_maps_unreviewed_exception_text_to_bounded_refusal(
 ) -> None:
     module = _load()
     slot = _slot(module, tmp_path)
+    # This test verifies only status rendering, not OS-principal admission.
+    # Its unprivileged runner UID/GID cannot impersonate an Executive worker.
+    # Dedicated negative tests below retain the real strict custody checks.
+    monkeypatch.setattr(module, "_directory_metadata_valid", lambda *_a, **_kw: True)
+    monkeypatch.setattr(module, "_credential_metadata_valid", lambda *_a, **_kw: True)
     slot.provider_home.mkdir(mode=0o700)
     slot.auth_path.write_bytes(b"opaque")
     slot.auth_path.chmod(0o600)
@@ -203,3 +221,62 @@ def test_runbook_maps_each_personal_pro_slot_to_one_isolated_browser_seat() -> N
     assert "normal Mac Codex app" in runbook
     assert "not routed" in runbook
     assert "--replace-existing" in runbook
+
+
+def test_unprivileged_fixture_is_never_accepted_as_enrolled_worker(tmp_path: Path) -> None:
+    """The live UID/GID gate must reject an ordinary runner's temporary files.
+
+    The other status tests mock this independent gate so they can test sanitized
+    output, refusal normalization and exact arguments without root privileges.
+    """
+    module = _load()
+    slot = module.worker_slots.get_slot("codex-pro-01")
+    home = tmp_path / "provider-home"
+    home.mkdir(mode=0o700)
+    auth = home / "auth.json"
+    auth.write_bytes(b"not-an-actual-provider-token")
+    auth.chmod(0o600)
+    assert module._directory_metadata_valid(
+        home, uid=slot.worker_uid, gid=slot.worker_gid
+    ) is False
+    assert module._credential_metadata_valid(
+        auth, worker_uid=slot.worker_uid, worker_gid=slot.worker_gid
+    ) is False
+    assert module._bounded_refusal(
+        module.readiness.ReadinessError("unsafe /path: secret")
+    ) == "readiness_invalid"
+
+def test_status_permission_denied_is_not_reported_as_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """An unreadable protected realm is UNKNOWN, never proof of absence."""
+    module = _load()
+    hidden = tmp_path / "protected-worker-home"
+    normal_lstat = Path.lstat
+
+    def lstat_with_denied(path: Path, *args, **kwargs):
+        if path == hidden:
+            raise PermissionError(errno.EACCES, "denied", str(path))
+        return normal_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", lstat_with_denied)
+    assert module._lstat_present(tmp_path / "genuinely-absent") is False
+    with pytest.raises(RuntimeError, match="worker_slot_visibility_unavailable"):
+        module._lstat_present(hidden)
+
+
+def test_status_cli_permission_failure_has_no_partial_json_or_paths(
+    monkeypatch, capsys
+) -> None:
+    module = _load()
+
+    def refuse(_path: Path) -> bool:
+        raise module.WorkerStatusVisibilityError("worker_slot_visibility_unavailable")
+
+    monkeypatch.setattr(module, "_lstat_present", refuse)
+    assert module.main(["--slot-id", "codex-pro-01"]) == 2
+    observed = capsys.readouterr()
+    assert observed.out == ""
+    assert "worker_slot_visibility_unavailable" in observed.err
+    for forbidden in ("/var/", "provider-home", "auth.json", "email", "account_id"):
+        assert forbidden not in observed.err
