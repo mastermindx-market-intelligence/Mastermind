@@ -19,6 +19,7 @@ from ops.codex_fabric.enroll_executive_mcp import (
     CALLBACK_URL,
     ClientRegistration,
     EnrollmentError,
+    EnrollmentDefinitiveRefusal,
     KeychainRegistrationStore,
     build_authorize_url,
     discover_metadata,
@@ -77,6 +78,15 @@ class BlobApi:
         self.values[(service, account)] = value
     def delete(self, service: bytes, account: bytes):
         return self.values.pop((service, account), None) is not None
+
+
+@pytest.fixture(autouse=True)
+def isolated_registration_mutex(tmp_path, monkeypatch):
+    from ops.codex_fabric import enroll_executive_mcp as enrollment
+    from ops.codex_fabric import executive_mcp_auth as auth
+
+    monkeypatch.setattr(enrollment, "_exclusive_refresh_lock", lambda:
+        auth._exclusive_refresh_lock(lock_root=tmp_path / "registration-mutex"))
 
 
 def _metadata_document(**updates):
@@ -885,3 +895,273 @@ def test_cli_reconcile_keychain_unavailable_refuses_opaquely(
     assert code == 2
     assert captured.out == ""
     assert captured.err == "REFUSED: Executive MCP enrollment unavailable.\n"
+
+
+def _legacy_absence_kwargs(policy):
+    return {
+        "observed_attempt_ref": "c" * 64,
+        "observed_redirect_uri": CALLBACK_URL,
+        "observed_policy_digest": policy.policy_digest,
+        "marker_created_at_epoch": 1_789_409_188,
+        "attempt_local_outcome_by_epoch": 1_789_410_265,
+        "audit_window_start_epoch": 1_789_326_489,
+        "audit_window_end_epoch": 1_789_684_836,
+        "audit_events_total": 236,
+        "audit_pages_total": 5,
+        "audit_pagination_complete": True,
+        "audit_retention_covers_window": True,
+        "marker_metadata_digest": "1" * 64,
+        "audit_receipt_digest": "2" * 64,
+        "inventory_receipt_digest": "3" * 64,
+        "local_outcome_evidence_digest": "4" * 64,
+        "current_client_match_count": 0,
+        "create_client_match_count": 0,
+        "dynamic_registration_match_count": 0,
+        "deleted_tpc_client_match_count": 0,
+        "observed_at_epoch": 1_790_440_000,
+    }
+
+
+def test_well_formed_caller_claims_cannot_rearm_legacy_operation(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, api, store = _legacy_pending_store(tmp_path)
+    before = dict(api.values)
+    with pytest.raises(EnrollmentError, match="evidence verifier unavailable"):
+        enroll.reconcile_legacy_pending_absence(
+            policy, store=store, **_legacy_absence_kwargs(policy)
+        )
+    assert api.values == before
+
+
+@pytest.mark.parametrize("field,value", [
+    ("observed_attempt_ref", "d" * 64),
+    ("observed_redirect_uri", "http://127.0.0.1:9999/oauth/callback"),
+    ("observed_policy_digest", "f" * 64),
+    ("marker_created_at_epoch", 0),
+    ("attempt_local_outcome_by_epoch", 1_789_409_000),
+    ("audit_window_start_epoch", 1_789_409_189),
+    ("audit_window_end_epoch", 1_789_410_264),
+    ("audit_events_total", 0),
+    ("audit_pages_total", 0),
+    ("audit_pagination_complete", False),
+    ("audit_retention_covers_window", False),
+    ("current_client_match_count", 1),
+    ("create_client_match_count", 1),
+    ("dynamic_registration_match_count", 1),
+    ("deleted_tpc_client_match_count", 1),
+])
+def test_legacy_absence_hold_applies_to_incomplete_or_positive_claims(
+    tmp_path: Path, field: str, value
+):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, _api, store = _legacy_pending_store(tmp_path)
+    before = store.load_state()
+    kwargs = _legacy_absence_kwargs(policy)
+    kwargs[field] = value
+    with pytest.raises(EnrollmentError):
+        enroll.reconcile_legacy_pending_absence(policy, store=store, **kwargs)
+    assert store.load_state() == before
+
+
+def test_held_absence_reconciliation_never_reads_or_changes_marker(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, api, store = _legacy_pending_store(tmp_path)
+    before = dict(api.values)
+    api.read = lambda *a: pytest.fail("held operation read Keychain")
+    api.upsert = lambda *a: pytest.fail("held operation wrote Keychain")
+    with pytest.raises(EnrollmentError, match="evidence verifier unavailable"):
+        enroll.reconcile_legacy_pending_absence(
+            policy, store=store, **_legacy_absence_kwargs(policy)
+        )
+    assert api.values == before
+
+
+def _historical_absence_store(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, api, store = _legacy_pending_store(tmp_path)
+    store.save_absence_reconciled(enroll.AbsenceReconciledRegistration(
+        "c" * 64, CALLBACK_URL, policy.policy_digest,
+        enroll.CLIENT_NAME + " " + "c" * 16, "d" * 64,
+    ))
+    return policy, api, store
+
+
+def test_historical_absence_marker_cannot_authorize_a_resume(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, api, store = _historical_absence_store(tmp_path)
+    before = dict(api.values)
+    metadata = discover_metadata(policy, get_json=lambda _url: _metadata_document())
+    api.read = lambda *a: pytest.fail("held resume read Keychain")
+    api.upsert = lambda *a: pytest.fail("held resume wrote Keychain")
+    for _ in range(2):
+        with pytest.raises(EnrollmentError, match="evidence.*unavailable"):
+            enroll.resume_legacy_registration_after_absence(
+                policy, metadata, store=store,
+                post_json=lambda *a: pytest.fail("held resume posted"),
+            )
+    assert api.values == before
+
+
+@pytest.mark.parametrize("failure", [TimeoutError("lost"),
+    EnrollmentDefinitiveRefusal("refused")])
+def test_held_resume_never_reaches_transport_or_consumes_marker(tmp_path: Path, failure):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, api, store = _historical_absence_store(tmp_path)
+    before = dict(api.values)
+    metadata = discover_metadata(policy, get_json=lambda _url: _metadata_document())
+    calls = []
+
+    def post(*args):
+        calls.append(args)
+        raise failure
+
+    for _ in range(2):
+        with pytest.raises(EnrollmentError, match="evidence.*unavailable"):
+            enroll.resume_legacy_registration_after_absence(
+                policy, metadata, store=store, post_json=post
+            )
+    assert calls == []
+    assert api.values == before
+
+
+def test_cli_absence_claims_are_held_without_mutating_marker(tmp_path: Path, capsys):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, api, store = _legacy_pending_store(tmp_path)
+    before = dict(api.values)
+    policy_path = tmp_path / "executive-mcp.json"
+    kwargs = _legacy_absence_kwargs(policy)
+    code = enroll.main(
+        [
+            "--legacy-absence-reconcile",
+            "--reconcile-attempt-ref", kwargs["observed_attempt_ref"],
+            "--reconcile-redirect-uri", kwargs["observed_redirect_uri"],
+            "--reconcile-policy-digest", kwargs["observed_policy_digest"],
+            "--absence-marker-created-at-epoch", str(kwargs["marker_created_at_epoch"]),
+            "--absence-attempt-outcome-by-epoch", str(kwargs["attempt_local_outcome_by_epoch"]),
+            "--absence-audit-start-epoch", str(kwargs["audit_window_start_epoch"]),
+            "--absence-audit-end-epoch", str(kwargs["audit_window_end_epoch"]),
+            "--absence-audit-events-total", str(kwargs["audit_events_total"]),
+            "--absence-audit-pages-total", str(kwargs["audit_pages_total"]),
+            "--absence-audit-pagination-complete",
+            "--absence-audit-retention-complete",
+            "--absence-marker-metadata-digest", kwargs["marker_metadata_digest"],
+            "--absence-audit-receipt-digest", kwargs["audit_receipt_digest"],
+            "--absence-inventory-receipt-digest", kwargs["inventory_receipt_digest"],
+            "--absence-local-outcome-evidence-digest", kwargs["local_outcome_evidence_digest"],
+            "--absence-current-client-match-count", "0",
+            "--absence-create-client-match-count", "0",
+            "--absence-dcr-match-count", "0",
+            "--absence-deleted-tpc-match-count", "0",
+            "--reconcile-observed-at-epoch", str(kwargs["observed_at_epoch"]),
+        ],
+        policy_path=policy_path,
+        expected_uid=os.getuid(),
+        registration_store=store,
+    )
+    captured = capsys.readouterr()
+    assert code == 2
+    assert captured.out == ""
+    assert "trusted absence evidence verifier unavailable" in captured.err
+    assert api.values == before
+
+
+def test_pending_status_keeps_historical_absence_marker_but_reports_hold(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, _api, store = _legacy_pending_store(tmp_path)
+    reconciled = enroll.AbsenceReconciledRegistration(
+        "c" * 64, CALLBACK_URL, policy.policy_digest,
+        enroll.CLIENT_NAME + " " + "c" * 16, "d" * 64,
+    )
+    store.save_absence_reconciled(reconciled)
+    payload = enroll.pending_registration_status(policy, store=store)
+    assert payload == {
+        "absence_digest": reconciled.absence_digest,
+        "attempt_ref": reconciled.attempt_ref,
+        "client_name": reconciled.client_name,
+        "policy_digest": policy.policy_digest,
+        "reconcilable": False,
+        "redirect_uri": CALLBACK_URL,
+        "state": "absence_reconciled",
+    }
+    assert "client_id" not in payload
+
+
+def test_cli_held_resume_preserves_historical_marker(tmp_path: Path, monkeypatch, capsys):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, api, store = _historical_absence_store(tmp_path)
+    before = dict(api.values)
+    monkeypatch.setattr(enroll, "_get_json", lambda *a: pytest.fail("metadata HTTP"))
+    monkeypatch.setattr(enroll, "_post_json", lambda *a: pytest.fail("registration HTTP"))
+    assert enroll.main(["--resume-legacy-after-absence"], registration_store=store) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "trusted absence evidence verifier unavailable" in captured.err
+    assert api.values == before
+
+
+@pytest.mark.parametrize("field,value", [
+    ("marker_metadata_digest", ""),
+    ("marker_metadata_digest", "g" * 64),
+    ("audit_receipt_digest", "a" * 63),
+    ("inventory_receipt_digest", "b" * 65),
+    ("local_outcome_evidence_digest", None),
+])
+def test_legacy_absence_hold_applies_to_malformed_digest_claims(
+    tmp_path: Path, field: str, value
+):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, _api, store = _legacy_pending_store(tmp_path)
+    before = store.load_state()
+    kwargs = _legacy_absence_kwargs(policy)
+    kwargs[field] = value
+    with pytest.raises(EnrollmentError):
+        enroll.reconcile_legacy_pending_absence(policy, store=store, **kwargs)
+    assert store.load_state() == before
+
+
+@pytest.mark.parametrize("action", ["--legacy-absence-reconcile", "--resume-legacy-after-absence"])
+def test_held_cli_actions_refuse_before_any_external_io(action, monkeypatch, capsys):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("held CLI action attempted external I/O")
+
+    for name in ("KeychainRegistrationStore", "load_installed_policy", "discover_metadata",
+                 "_get_json", "_post_json", "_exclusive_refresh_lock"):
+        monkeypatch.setattr(enroll, name, forbidden)
+    assert enroll.main([action]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "evidence" in captured.err and ("held" in captured.err or "unproven" in captured.err)
+
+
+def test_historical_definitive_refusal_stays_terminal(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, api, store = _historical_absence_store(tmp_path)
+    state = store.load_state()
+    store.save_definitive_refusal(enroll.DefinitivelyRefusedRegistration(
+        state.attempt_ref, state.redirect_uri, state.policy_digest,
+        state.client_name, state.absence_digest,
+    ))
+    before = dict(api.values)
+    status = enroll.pending_registration_status(policy, store=store)
+    assert status["state"] == "definitive_refusal"
+    assert status["reconcilable"] is False
+    metadata = discover_metadata(policy, get_json=lambda _url: _metadata_document())
+    with pytest.raises(EnrollmentError):
+        enroll.resume_legacy_registration_after_absence(
+            policy, metadata, store=store,
+            post_json=lambda *a: pytest.fail("held resume posted"),
+        )
+    assert api.values == before
