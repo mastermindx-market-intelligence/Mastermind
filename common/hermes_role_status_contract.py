@@ -11,7 +11,7 @@ diagnostic consumers read.  The v2 document
 ``custody`` object: the main supervisor's own measured process identity and
 the two hashes it was measured against.  v2 is never a fallback for v1 and a
 v1 payload never satisfies a custody-required read. The v3 document adds a
-closed witness measured from the Secretary supervisor's real listening socket;
+closed witness measured from the selected role supervisor's real listening socket;
 only the listener-required consumer can use that witness to authenticate it.
 """
 from __future__ import annotations
@@ -214,10 +214,13 @@ def validate_status_v2(value, *, expected_role: str | None = None) -> dict:
                                      prefix=STATUS_PREFIX_V2, expected_role=expected_role)
 
 
-def validate_gateway_listener(value) -> dict:
-    """Closed witness measured from the Secretary supervisor's own socket."""
+def validate_gateway_listener(value, *, role: str = "mmsecretary") -> dict:
+    """Closed witness measured from the selected supervisor's own socket."""
+    hosts = {"mmsecretary": "127.0.0.2", "mmmeta": "127.0.0.3"}
+    if type(role) is not str or role not in hosts:
+        raise RoleStatusError()
     if (type(value) is not dict or set(value) != {"host", "port", "inode"}
-            or value["host"] != "127.0.0.2"
+            or value["host"] != hosts[role]
             or not _integer(value["port"], minimum=1024, maximum=65535)
             or not _matches(value["inode"], _DECIMAL)
             or int(value["inode"]) > MAX_START_TICKS):
@@ -227,10 +230,11 @@ def validate_gateway_listener(value) -> dict:
 
 def validate_status_v3(value, *, expected_role: str | None = None) -> dict:
     """Explicit listener-bearing revision; the v2 shape remains unchanged."""
-    if type(value) is not dict or value.get("role") != "mmsecretary":
+    if (type(value) is not dict or type(value.get("role")) is not str
+            or value["role"] not in ROLES):
         raise RoleStatusError()
     validate_custody(value.get("custody"))
-    validate_gateway_listener(value.get("gateway_listener"))
+    validate_gateway_listener(value.get("gateway_listener"), role=value["role"])
     return _validate_status_document(value, schema=STATUS_SCHEMA_V3, keys=_STATUS_KEYS_V3,
                                      prefix=STATUS_PREFIX_V3, expected_role=expected_role)
 

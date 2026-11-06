@@ -20,7 +20,7 @@ from common import workspace_byok_read_contract as workspace
 from control_plane.remote_worker_transport import TransportEffect, TransportError
 from integrations.hermes_runtime import gateway as role_gateway
 from integrations.hermes_runtime import role_status_publisher as publisher
-from integrations.hermes_runtime.constants import SECRETARY_ROLE_RESPONSE_SCHEMA
+from integrations.hermes_runtime.constants import SECRETARY_ROLE_RESPONSE_SCHEMA, conversation_contract
 from integrations.hermes_runtime.errors import RuntimeRefusal
 from ops.executive_os import hermes_role_metadata_observer as observer
 from ops.executive_os import hermes_secretary_forwarder as forwarding
@@ -40,55 +40,64 @@ def anyio_backend():
     return "asyncio"
 
 
-def status_document():
+def status_document(role="mmsecretary"):
     return {
-        "schema": wire.STATUS_SCHEMA_V3, "role": "mmsecretary", "host_boot_id": BOOT,
+        "schema": wire.STATUS_SCHEMA_V3, "role": role, "host_boot_id": BOOT,
         "invocation_id": INVOCATION, "implementation_sha": SHA,
         "observed_at_ms": time.time_ns() // 1_000_000,
         "observed_monotonic_ms": time.monotonic_ns() // 1_000_000,
-        "metadata": {"schema": wire.METADATA_SCHEMA, "role": "mmsecretary", "state": "ABSENT",
+        "metadata": {"schema": wire.METADATA_SCHEMA, "role": role, "state": "ABSENT",
                      "reason": "INSTALL_MANIFEST_ABSENT", "source_binding": "NOT_ATTESTED",
                      "proof": workspace.proof()},
         "custody": {"pid": os.getpid(), "start_ticks": "1234", "uid": 1001, "gid": 1001,
                     "manifest_sha256": "b" * 64, "image_sha256": "c" * 64},
-        "gateway_listener": dict(LISTENER),
+        "gateway_listener": dict(LISTENER, host=role_gateway.ROLE_PROXY_HOST[role]),
     }
 
 
-def test_listener_revision_is_closed_and_does_not_relax_v2():
-    document = status_document()
+@pytest.mark.parametrize("role", ["mmsecretary", "mmmeta"])
+def test_listener_revision_is_closed_and_does_not_relax_v2(role):
+    document = status_document(role)
     encoded = wire.encode_status_v3_text(document)
-    assert wire.decode_status_custody_text(encoded, expected_role="mmsecretary") == document
+    assert wire.decode_status_custody_text(encoded, expected_role=role) == document
     with pytest.raises(wire.RoleStatusError):
         wire.validate_status_v2(document)
     with pytest.raises(wire.RoleStatusError):
-        wire.decode_status_v2_text(encoded, expected_role="mmsecretary")
+        wire.decode_status_v2_text(encoded, expected_role=role)
     legacy = dict(document, schema=wire.STATUS_SCHEMA_V2)
     legacy.pop("gateway_listener")
     assert wire.validate_status_v2(legacy) == legacy
     for field, value in [("port", True), ("port", 80), ("host", "127.0.0.1"),
                          ("inode", "001"), ("inode", 12345), ("credential", "forbidden")]:
-        malformed = dict(document, gateway_listener=dict(LISTENER, **{field: value}))
+        malformed = dict(document, gateway_listener=dict(document["gateway_listener"], **{field: value}))
         with pytest.raises(wire.RoleStatusError):
             wire.validate_status_v3(malformed)
+    sibling = "mmmeta" if role == "mmsecretary" else "mmsecretary"
+    with pytest.raises(wire.RoleStatusError):
+        wire.validate_status_v3(document, expected_role=sibling)
+    with pytest.raises(wire.RoleStatusError):
+        wire.validate_status_v3(dict(document, gateway_listener=dict(
+            document["gateway_listener"], host=role_gateway.ROLE_PROXY_HOST[sibling])))
 
 
-def test_publisher_measures_listener_twice_and_refuses_drift(monkeypatch, tmp_path):
-    document = status_document()
+@pytest.mark.parametrize("role", ["mmsecretary", "mmmeta"])
+def test_publisher_measures_listener_twice_and_refuses_drift(monkeypatch, tmp_path, role):
+    document = status_document(role)
+    witness = document["gateway_listener"]
     monkeypatch.setattr(publisher, "role_metadata", lambda *args: document["metadata"])
     custody = Mock(return_value=document["custody"])
-    listener = Mock(side_effect=[dict(LISTENER), dict(LISTENER)])
+    listener = Mock(side_effect=[dict(witness), dict(witness)])
     instance = publisher.RoleStatusPublisher(
-        "mmsecretary", tmp_path, SHA, BOOT, INVOCATION, os.getpid(), "/tmp/fixture-notify",
+        role, tmp_path, SHA, BOOT, INVOCATION, os.getpid(), "/tmp/fixture-notify",
         custody_observer=custody, listener_observer=listener,
     )
     result = wire.decode_status_v3_text(
         instance._custody_status_text(document["observed_at_ms"], document["observed_monotonic_ms"]),
-        expected_role="mmsecretary",
+        expected_role=role,
     )
     assert result == document and custody.call_count == listener.call_count == 2
     drifted = dataclasses.replace(instance, listener_observer=Mock(side_effect=[
-        dict(LISTENER), dict(LISTENER, inode="12346"),
+        dict(witness), dict(witness, inode="12346"),
     ]))
     with pytest.raises(wire.RoleStatusError):
         drifted._custody_status_text(document["observed_at_ms"], document["observed_monotonic_ms"])
@@ -96,11 +105,14 @@ def test_publisher_measures_listener_twice_and_refuses_drift(monkeypatch, tmp_pa
         document["observed_at_ms"], document["observed_monotonic_ms"]).startswith(wire.STATUS_PREFIX_V2)
 
 
-def test_gateway_witness_comes_from_own_exclusive_listening_socket(monkeypatch):
+@pytest.mark.parametrize("role", ["mmsecretary", "mmmeta"])
+def test_gateway_witness_comes_from_own_exclusive_listening_socket(monkeypatch, role):
     instance = role_gateway.Gateway.__new__(role_gateway.Gateway)
     instance._process_pid = os.getpid()
+    instance._conversation_contract = conversation_contract(role)
+    witness = dict(LISTENER, host=role_gateway.ROLE_PROXY_HOST[role])
     instance._conversation_handler = lambda value: value
-    instance.host, instance.port = LISTENER["host"], LISTENER["port"]
+    instance.host, instance.port = witness["host"], witness["port"]
     options = {socket.SO_ACCEPTCONN: 1, socket.SO_REUSEADDR: 0, socket.SO_REUSEPORT: 0}
     channel = SimpleNamespace(family=socket.AF_INET, type=socket.SOCK_STREAM,
         fileno=lambda: 7, get_inheritable=lambda: False,
@@ -120,7 +132,7 @@ def test_gateway_witness_comes_from_own_exclusive_listening_socket(monkeypatch):
     fake_sys = SimpleNamespace(platform="linux")
     monkeypatch.setattr(role_gateway, "os", fake_os)
     monkeypatch.setattr(role_gateway, "sys", fake_sys)
-    assert instance.listener_custody() == LISTENER
+    assert instance.listener_custody() == witness
     for key, invalid in [(socket.SO_ACCEPTCONN, 0), (socket.SO_REUSEADDR, 1),
                          (socket.SO_REUSEPORT, 1)]:
         original = options[key]
@@ -128,6 +140,9 @@ def test_gateway_witness_comes_from_own_exclusive_listening_socket(monkeypatch):
         with pytest.raises(RuntimeRefusal, match="SECRETARY_LISTENER_UNQUALIFIED"):
             instance.listener_custody()
         options[key] = original
+    instance.host = role_gateway.ROLE_PROXY_HOST["mmmeta" if role == "mmsecretary" else "mmsecretary"]
+    with pytest.raises(RuntimeRefusal, match="LISTENER_UNQUALIFIED"):
+        instance.listener_custody()
 
 
 @pytest.mark.anyio

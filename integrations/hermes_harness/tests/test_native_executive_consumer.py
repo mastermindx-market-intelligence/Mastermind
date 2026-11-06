@@ -1305,7 +1305,10 @@ def test_enrollment_qualification_keeps_original_worker_after_observer_cancellat
               "session_id": "session-1", "instance_id": "instance-1", "authority_epoch": 1,
               "revision": 0, "execution_generation": 0}
     observed = {"status": "ABSENT", "target": None, "route": None}
-    monkeypatch.setattr(control, "read_enrolled_session", lambda *_args: dict(observed))
+    def read_original_enrollment(*_args, role):
+        assert role == publication.session.role == "mmsecretary"
+        return dict(observed)
+    monkeypatch.setattr(control, "read_enrolled_session", read_original_enrollment)
     entered, release = threading.Event(), threading.Event()
     loop = _McpLoop()
     server = _Owner(_Session())

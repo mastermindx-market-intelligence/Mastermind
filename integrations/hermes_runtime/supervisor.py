@@ -16,7 +16,7 @@ import threading
 import time
 
 from .constants import (HEALTH_SCHEMA, LOOPBACK_HOST, PINNED_UPSTREAM_SHA,
-                        SECRETARY_ROLE_REQUEST_SCHEMA, SECRETARY_ROLE_RESPONSE_SCHEMA)
+                        conversation_contract)
 from .egress import ROLE_PROXY_HOST
 from .hermes_config import render_hermes_config
 from .errors import RuntimeRefusal
@@ -207,9 +207,9 @@ class ServiceRuntime:
         os.chmod(self.profile.hermes_home, 0o700)
         self.memory = HighWaterLog(self.profile.state_dir / "memory" / "high-water.log")
         gateway_options = {}
-        if self.profile.gateway_backend == "native-session-authority" and self.profile.role == "mmsecretary":
-            from .secrets import secretary_conversation_token
-            conversation_token = secretary_conversation_token(self.secrets)
+        if self.profile.gateway_backend == "native-session-authority":
+            from .secrets import role_conversation_token
+            conversation_token = role_conversation_token(self.secrets, role=self.profile.role)
             if conversation_token is not None:
                 gateway_options = {"conversation_token": conversation_token,
                                    "conversation_handler": self._native_conversation}
@@ -218,6 +218,7 @@ class ServiceRuntime:
             self.profile.gateway_port,
             self.secrets.token,
             self.health_snapshot,
+            role=self.profile.role,
             **gateway_options,
         )
         if (gateway_options and self._role_status_publisher is not None
@@ -298,14 +299,15 @@ class ServiceRuntime:
 
     def _native_conversation(self, request: dict) -> dict:
         """Existing role gateway -> actual selected native private owner."""
-        from .native_session_control import NativeSecretaryClient, SCHEMA
-        response_schema = SECRETARY_ROLE_RESPONSE_SCHEMA
+        from .native_session_control import NativeSecretaryClient
+        contract = conversation_contract(self.profile.role)
+        response_schema = contract.response_schema
         implementation = self._native_launch.owner.root.name
         def reply(status, **fields):
             return {"schema": response_schema, "implementation_sha": implementation,
-                    "result": {"schema": SCHEMA, "status": status, **fields}}
+                    "result": {"schema": contract.native_schema, "status": status, **fields}}
         if (type(request) is not dict or set(request) != {"schema", "implementation_sha", "request"}
-                or request["schema"] != SECRETARY_ROLE_REQUEST_SCHEMA
+                or request["schema"] != contract.request_schema
                 or request["implementation_sha"] != implementation or type(request["request"]) is not dict):
             return reply("REFUSED", reason="SOURCE_OR_REQUEST_MISMATCH")
         with self._lock:
@@ -331,7 +333,8 @@ class ServiceRuntime:
         # After this boundary, unexpected failure is conservative uncertainty.
         uncertain = "EFFECT_UNKNOWN" if request["request"].get("operation") == "submit" else "UNAVAILABLE"
         try:
-            result = NativeSecretaryClient(home, expected_pid=child.pid).dispatch(request["request"])
+            result = NativeSecretaryClient(
+                home, expected_pid=child.pid, role=contract.role).dispatch(request["request"])
         except RuntimeRefusal:
             return reply("REFUSED", reason="REQUEST_REFUSED")
         except Exception:
@@ -452,10 +455,9 @@ class ServiceRuntime:
                 raise
             except Exception:
                 raise RuntimeRefusal("NATIVE_STARTUP_CUSTODY_UNQUALIFIED") from None
-        from .secrets import secretary_conversation_token
-        conversation_token = secretary_conversation_token(self.secrets)
-        if conversation_token is not None and (self.profile.gateway_backend != "native-session-authority"
-                                                or self.profile.role != "mmsecretary"):
+        from .secrets import role_conversation_token
+        conversation_token = role_conversation_token(self.secrets, role=self.profile.role)
+        if conversation_token is not None and self.profile.gateway_backend != "native-session-authority":
             raise RuntimeRefusal("SECRETARY_CONVERSATION_ROLE_UNQUALIFIED")
         if self.profile.gateway_backend == "native-session-authority":
             current_home = (self.profile.hermes_home / "profiles" / self.profile.role).resolve(strict=True)

@@ -197,8 +197,8 @@ installed/product work is:
    originating request/turn through the existing owners. Never choose the latest
    request for a root or equate native UID/session identity with the Office or
    COO OAuth principal.
-4. Complete the Meta-CEO participant's public gateway, transport and Office
-   selection. The native enrollment/control owner now supports explicit mmmeta
+4. Complete the Meta-CEO participant's remote transport and Office selection.
+   The native enrollment/control and role gateway now support explicit mmmeta
    identity; that source support does not authorize a COO Attempt or make the
    Meta role selectable in Office.
 
@@ -245,3 +245,28 @@ Focused proof includes actual command/renderer qualification, original native
 enrollment recovery with owner doubles, and fresh isolated Python runtime and
 dependency-preparation entries with explicit held-descriptor/effect doubles.
 These checks are source evidence, not installed enrollment or a provider turn.
+
+### Explicit role conversation gateway
+
+The existing gateway selects one finite role contract at construction. Meta uses
+/api/meta/v1 and its own role/native schemas; Secretary keeps /api/secretary/v1
+and its existing schemas. A request cannot choose or change that role. The same
+supervised child, profile home, source owner and private-client identity are
+checked before and after dispatch, including uncertain submission outcomes.
+
+The existing secrets owner selects the corresponding role conversation token.
+A sibling-role token in the role's secrets file is a preflight refusal, even
+when no selected token is present. Both conversation tokens remain reserved from
+child registration and are unconditionally excluded from child environments.
+The selected credential cannot alias gateway, dashboard or provider authority.
+
+Listener-bearing v3 status retains its existing shape and exact role field. The
+only accepted listener pairs are mmsecretary/127.0.0.2 and mmmeta/127.0.0.3. Both
+fresh listener measurements and both main-process custody measurements remain
+required; profile configuration is not a socket witness. Earlier v1/v2 status
+formats and default Secretary behavior are unchanged.
+
+The source tests exercise HTTP through the actual native private-client wire
+using a socket pair, cross-role refusals, startup wiring and measured-listener
+doubles. Remote forwarding, Office selection, installed service/provider
+qualification and activation remain separately owed.
