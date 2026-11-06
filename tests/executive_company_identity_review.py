@@ -12,108 +12,41 @@ No runtime authority is added.
 REVIEWED_PATH = "control_plane/executive_service.py"
 REVIEWED_CONTAINER = "ExecutiveControlService"
 REVIEWED_LITERAL_COUNT = 6
-REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFunctionDef',
-                                       'ast_sha256': '01c585ea0efc7e2ba1a09f68ceac6962a74d72e572c10343af4dcf1fdf930236',
-                                       'sites': ((('body',
-                                                   7,
-                                                   'body',
-                                                   2,
-                                                   'value',
-                                                   'keywords',
-                                                   0,
-                                                   'value'),
-                                                  'int',
-                                                  456,
-                                                  '0o710'),
-                                                 (('body',
-                                                   7,
-                                                   'body',
-                                                   5,
-                                                   'body',
-                                                   1,
-                                                   'value',
-                                                   'args',
-                                                   0),
-                                                  'int',
-                                                  456,
-                                                  '0o710'),
-                                                 (('body',
-                                                   7,
-                                                   'body',
-                                                   6,
-                                                   'test',
-                                                   'values',
-                                                   1,
-                                                   'comparators',
-                                                   0),
-                                                  'int',
-                                                  456,
-                                                  '0o710'))},
- '_handle_ceo_ingress_connection': {'node_type': 'AsyncFunctionDef',
-                                    'source_sha256': '5900a32f8015459135d14c1810da20701640f0f02ae1b76f98d3815c6a9bcafb',
-                                    'ast_sha256': '5677ceb33257852095fc7e9b2ba5c344cc79ea45a498130dd28858e108b28058',
-                                    'sites': ((('body',
-                                                3,
-                                                'body',
-                                                53,
-                                                'body',
-                                                3,
-                                                'orelse',
-                                                0,
-                                                'body',
-                                                2,
-                                                'body',
-                                                0,
-                                                'value',
-                                                'args',
-                                                1),
-                                               'int',
-                                               403,
-                                               '403'),
-                                              (('body',
-                                                3,
-                                                'body',
-                                                53,
-                                                'body',
-                                                3,
-                                                'orelse',
-                                                0,
-                                                'body',
-                                                2,
-                                                'orelse',
-                                                0,
-                                                'body',
-                                                4,
-                                                'body',
-                                                0,
-                                                'value',
-                                                'args',
-                                                1),
-                                               'int',
-                                               403,
-                                               '403'),
-                                              (('body',
-                                                3,
-                                                'body',
-                                                53,
-                                                'body',
-                                                3,
-                                                'orelse',
-                                                0,
-                                                'body',
-                                                2,
-                                                'orelse',
-                                                0,
-                                                'handlers',
-                                                0,
-                                                'body',
-                                                0,
-                                                'value',
-                                                'args',
-                                                1),
-                                               'int',
-                                               503,
-                                               '503'))}}
+REVIEWED_ANCHORS = {
+    "_bind_company_consultation_server": {
+        "node_type": "AsyncFunctionDef",
+        "ast_sha256": "01c585ea0efc7e2ba1a09f68ceac6962a74d72e572c10343af4dcf1fdf930236",
+        "sites": (
+            (("body", 7, "body", 2, "value", "keywords", 0, "value"), "int", 456, "0o710"),
+            (("body", 7, "body", 5, "body", 1, "value", "args", 0), "int", 456, "0o710"),
+            (("body", 7, "body", 6, "test", "values", 1, "comparators", 0), "int", 456, "0o710"),
+        ),
+    },
+    # Exact catalog/native-status composition. These are only the second
+    # operands of workspace_error("access_denied", 403) and
+    # workspace_error("source_unavailable", 503), never UIDs or grants.
+    # The complete ingress-method AST binds its admission, source selection
+    # and release-time permission checks; a change to any of them invalidates
+    # all three status sites without changing the historical Company record.
+    "_handle_ceo_ingress_connection": {
+        "node_type": "AsyncFunctionDef",
+        # Existing section-sign/em-dash prose needs an exact full-source pin
+        # in addition to the method AST; all three literal lines are ASCII.
+        # Qualified Knowledge/Archive READ additions change the enclosing ingress AST.
+        # The original CCR branch and listener remain structurally unchanged.
+        "source_sha256": "9b7dee55b65807867d08840c44b79c5932f30cdc7c13645228736eb240aade0c",
+        "ast_sha256": "bfeed80a98cf1e20152070659d1397600a2597921c38b938799ce2e095a879eb",
+        "sites": (
+            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
+              "body", 0, "value", "args", 1), "int", 403, "403"),
+            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
+              "orelse", 0, "body", 4, "body", 0, "value", "args", 1), "int", 403, "403"),
+            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
+              "orelse", 0, "handlers", 0, "body", 0, "value", "args", 1), "int", 503, "503"),
+        ),
+    },
+}
+
 # BYOK fixed READ changes the full ingress AST, with existing App/Runtime fences.
 # The same three original Fabric HTTP operands are retained at mapped exact sites.
 # Parent checked this postimage under the Chairman waiver; no independent approval claim.
@@ -121,3 +54,10 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
 
 # Parent reviewed the BYOK + protected Workspace composition at 49c2e1d.
 # The exact 136-node Fabric response branch and original three operands are unchanged.
+
+# 2026-11-06 composed-source audit: qualified project execution/planning and
+# bounded project conversation/Fresh READ coexist with protected BYOK and host
+# observation. The whole Company listener AST and exact 136-node protected
+# Fabric response branch are unchanged; only the enclosing ingress composition
+# and mapped sites change. These fixed pins are a new source-drift qualification,
+# not inherited native SEND approval or installation/release authority.

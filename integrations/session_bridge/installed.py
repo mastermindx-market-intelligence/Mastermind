@@ -279,7 +279,7 @@ def build_runtime_native_reply_writer(runtime: Any, *, dialogue_socket_path: Pat
 
 def build_runtime_project_conversation_reader(runtime: Any, *, dialogue_socket_path: Path,
         codex_owner_configured: Callable[[], bool], authorized_policies: Any,
-        reference_cursor_key: bytes):
+        reference_cursor_key: bytes, supervisor: Any = None):
     """Compose only the existing nominal READ source; no listeners or grants."""
     from .runtime_owner import RuntimeFabricTargetProjector, RuntimeCodexTargetProjector
     from .runtime_return import RuntimeSessionReturn
@@ -288,7 +288,8 @@ def build_runtime_project_conversation_reader(runtime: Any, *, dialogue_socket_p
     codex = RuntimeCodexTargetProjector(fabric, owner_configured=codex_owner_configured)
     return RuntimeProjectConversationsReader(RuntimeSessionReturn(runtime,
         fabric=fabric, codex=codex, socket_path=dialogue_socket_path,
-        authorized_policies=authorized_policies, reference_cursor_key=reference_cursor_key)).installed_binding()
+        authorized_policies=authorized_policies, reference_cursor_key=reference_cursor_key),
+        supervisor=supervisor).installed_binding()
 
 
 def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,

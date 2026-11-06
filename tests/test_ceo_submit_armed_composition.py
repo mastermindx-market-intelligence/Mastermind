@@ -1576,7 +1576,8 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if line.startswith("class CeoIngressClient"):
                 clients.append((path.relative_to(ROOT).as_posix(), line_number))
-    assert clients == [("integrations/mastermind_executive_app/gateway.py", 358)]
+    # Pin the sole transport owner, not a line displaced by closed wire constants.
+    assert [path for path, _line in clients] == ["integrations/mastermind_executive_app/gateway.py"]
     tree = ast.parse(source)
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
@@ -1593,11 +1594,16 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # freezes the combined candidate, not independent review or release authority.
     # The accepted current Knowledge/Instructions owner composition changes this
     # module; the exact installed event-loop AST and closed call below stay fixed.
+    # 2026-11-06 source audit: project input custody and paired canonical READ
+    # composition retain protected c571acc9's exact 060525... wrapper AST. This
+    # composed-file pin grants no native SEND or installed-release approval.
+    # d3f observation-only Fabric coexistence adds no event loop: the exact
+    # installed wrapper AST below and paid/attended non-mixing guards remain.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'ea0dbdb33730d854d0731c324595d1723086e94811a283eed19020d2978975f3'):
+            '4d6e98524f460ae9a0dbb38ed35b95b80e27979563c7043deed37df9b61564ab'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

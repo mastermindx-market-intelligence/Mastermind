@@ -79,12 +79,16 @@ class StartReceipt:
 
 
 class ForegroundOperation:
-    def __init__(self, *, mint, runtime, host_current, principal, arguments, project_planning_operation=None):
+    def __init__(self, *, mint, runtime, host_current, principal, arguments, project_planning_operation=None, project_execution_operation=None):
         if mint is not _MINT:
             raise ForegroundOperationClosed("operation is composed by the private handler only")
         self._runtime, self._host_current, self._principal = runtime, host_current, principal
         self._arguments_sha256 = _digest(arguments)
         self._operation_key = arguments["operation_key"]
+        if project_planning_operation is not None and project_execution_operation is not None:
+            raise ForegroundOperationClosed("ambiguous project operation")
+        self._project_execution_operation=project_execution_operation
+        self._project_execution_work_ref=arguments.get('work_ref') if project_execution_operation is not None else None
         self._project_planning_operation=project_planning_operation
         self._project_planning_work_ref=arguments.get('work_ref') if project_planning_operation is not None else None
         if project_planning_operation is None:
@@ -139,7 +143,10 @@ class ForegroundOperation:
     def require_arguments(self, arguments):
         self._require_live()
         try:
-            if self._project_planning_operation is None:
+            if self._project_execution_operation is not None:
+                from common.project_execution_private_contract import arguments as normalize
+                normalized=normalize(arguments,self._project_execution_operation)
+            elif self._project_planning_operation is None:
                 normalized = ceo_request.normalize_app_request(arguments)
             else:
                 from common.project_planning_private_contract import arguments as normalize
@@ -185,6 +192,13 @@ class ForegroundOperation:
             material=self._runtime.jobs.direct_native_provenance(root_id)
             if (self._project_planning_operation!='submit' or material.get('project_planning',{}).get('operation_key')!=self._operation_key):
                 raise ForegroundOperationRefusal('root_unavailable','canonical project planning root differs')
+        if self._project_execution_operation is not None:
+            from control_plane.project_execution_admission import read_source
+            material=read_source(self._runtime,root)
+            if (self._project_execution_operation!='submit' or material is None
+                    or material['operation_key']!=self._operation_key
+                    or material['work_ref']!=self._project_execution_work_ref):
+                raise ForegroundOperationRefusal('root_unavailable','canonical project execution root differs')
         self._root = root_id
         self._root_event_sha256 = _digest(event)
         # Return None: the observation is neither a receipt nor execution.
@@ -333,6 +347,26 @@ async def _project_planning_foreground_dispatch(runtime,frame,require_host_curre
     principal=neutral_principal_projection(**{**raw,'scopes':tuple(raw['scopes'])})
     operation=ForegroundOperation(mint=_MINT,runtime=runtime,host_current=require_host_current,
         principal=principal,arguments=value['arguments'],project_planning_operation=value['operation'])
+    workspace=value['workspace_principal']
+    operation._project_workspace_principal=neutral_principal_projection(**{**workspace,'scopes':tuple(workspace['scopes'])})
+    token=_ACTIVE.set(operation)
+    try:
+        operation._require_live()
+        yield operation
+    finally:
+        operation._mark_source_closed()
+        operation._root,operation._host_current=None,None
+        _ACTIVE.reset(token)
+
+
+@contextlib.asynccontextmanager
+async def _project_execution_foreground_dispatch(runtime,frame,require_host_current):
+    from common.project_execution_private_contract import frame as validate
+    value=validate(frame)
+    raw=value['principal']
+    principal=neutral_principal_projection(**{**raw,'scopes':tuple(raw['scopes'])})
+    operation=ForegroundOperation(mint=_MINT,runtime=runtime,host_current=require_host_current,
+        principal=principal,arguments=value['arguments'],project_execution_operation=value['operation'])
     workspace=value['workspace_principal']
     operation._project_workspace_principal=neutral_principal_projection(**{**workspace,'scopes':tuple(workspace['scopes'])})
     token=_ACTIVE.set(operation)

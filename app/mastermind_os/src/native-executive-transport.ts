@@ -8,6 +8,7 @@ import { projectHistorySelection } from "./conversations/project-history-selecti
 import { normalizeDirectSelection, type DirectNativeTransport } from "./direct-native-result";
 import { closedReadFailureReason, type DiagnosticReadReason, type DiagnosticPhase, type ExecutiveDiagnosticSnapshot } from "./diagnostic-state";
 import { planningArguments } from "./planning/project-planning-transport";
+import { projectExecutionArguments } from "./planning/project-execution-transport";
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 type Listen = (event: string, listener: (event: { payload: unknown }) => void) => Promise<() => void>;
@@ -81,7 +82,7 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
     "executive_session_context" | "executive_session_send" | "executive_session_reply" | "executive_session_references" |
     "executive_project_session_references" |
     "executive_project_history_context" | "executive_fresh_conversation" | "executive_project_conversations_read" |
-    "executive_direct_native_result" | "executive_direct_native_consume" | "executive_direct_correction" | "executive_project_planning",
+    "executive_direct_native_result" | "executive_direct_native_consume" | "executive_direct_correction" | "executive_project_planning" | "executive_project_execution",
     signal: AbortSignal, args?: Record<string, unknown>): Promise<unknown> {
     const started = epoch, boundary = generationAbort.signal;
     if (!available || signal.aborted) return Promise.reject(new Error("EXECUTIVE_UNAVAILABLE"));
@@ -123,6 +124,8 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
     status: (arguments_, signal) => call("executive_status", signal, { intentId: arguments_.intent_id }),
     projectPlanning: {request:(operation,arguments_,signal)=>call("executive_project_planning",signal,
       {operation,arguments:planningArguments(operation,arguments_)})},
+    projectExecution: {request:(operation,arguments_,signal)=>call("executive_project_execution",signal,
+      {operation,arguments:projectExecutionArguments(operation,arguments_)})},
     freshConversation: {request:(operation,arguments_,signal)=>call("executive_fresh_conversation",signal,
       {operation,arguments:freshConversationArguments(operation,arguments_)})},
     directNative: {
@@ -168,10 +171,10 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
       },
     },
   };
-  // Session history reuses the *same* native bearer owner/epoch. It exposes
-  // only the preexisting authenticated READ endpoints and cannot submit even
-  // if the backend reports an addressable target. The independent native
-  // executive_submit F2 review remains held; this does not modify that route.
+  // Session history and the separately qualified fixed continuation reuse
+  // the same native bearer owner/epoch. The backend supplies the current
+  // target and SEND capability. The independent native executive_submit F2
+  // review remains separate; this does not modify that route.
   const sessionTransport: ProjectConversationHistoryTransport = {
     projectConversations: {request: (operation,arguments_,signal) => {
       const closed=projectConversationArguments(operation,arguments_);

@@ -108,6 +108,9 @@ export interface ProjectPlanningJourneyProps {
   /** The existing durable pending-pointer store; shared by all three effects. */
   store: PendingPointerStore;
   onSelection: (value: ProjectJourneySelection) => void;
+  /** Accepted creation supplies only a navigation hint. App must re-read its
+   * current catalogue; this exact source witness must remain current. */
+  onOpenProject?: (workRef: string, current: () => boolean) => Promise<boolean>;
   selection: ProjectJourneySelection | null;
   goal: string;
   onGoalChange: (value: string) => void;
@@ -944,6 +947,7 @@ type Notice =
   | "PREVIEW_STALE"
   | "CREATE_BUSY"
   | "SOURCE_READ_UNAVAILABLE"
+  | "OPEN_PROJECT_UNAVAILABLE"
   | "PUBLICATION_RECONCILE_UNAVAILABLE"
   | "PLANNING_UNAVAILABLE_HOST"
   | "PLANNING_UNAVAILABLE_GROUNDING"
@@ -969,6 +973,7 @@ const NOTICE_COPY: Record<Notice, readonly [string, string]> = {
   PREVIEW_STALE: ["This preview no longer matches the goal or the profile. Prepare it again.", "预览与目标或配置不再一致，请重新准备。"],
   CREATE_BUSY: ["A source publication is already being observed. Nothing was started twice.", "正在观察一次来源发布，没有重复启动。"],
   SOURCE_READ_UNAVAILABLE: ["The source status read is unavailable right now.", "暂时无法读取来源状态。"],
+  OPEN_PROJECT_UNAVAILABLE: ["The created project is unavailable in the current project list. Try Open project again.", "当前项目列表中无法打开此项目。请再次选择“打开项目”。"],
   PUBLICATION_RECONCILE_UNAVAILABLE: [
     "An explicit publication check needs the workspace reference of the pending publication.",
     "显式发布检查需要待发布记录的工作区引用。",
@@ -1008,7 +1013,8 @@ type BusyAction =
   | "plan-read"
   | "result"
   | "keep"
-  | "keep-read";
+  | "keep-read"
+  | "open-project";
 
 interface JourneyRecord {
   createStatus: SourceOperationStatus | null;
@@ -1698,6 +1704,21 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
     status.selection.work_ref === selection?.workRef && status.disposition === "accepted" && status.receipt?.kind === "SOURCE_OBSERVED"
       ? status
       : null;
+  const openCreatedProject = () => {
+    const accepted = observed, captured = fence(), owner = sourceOwner();
+    const open = live.current.onOpenProject;
+    if (!accepted || !captured || !owner || !open || record.current.createStatus !== accepted) return;
+    const identity = selectedIdentity(live.current.selection), workRef = accepted.selection.work_ref;
+    run("open-project", async signal => {
+      setNotice(null);
+      const current = () => stillFenced(captured, signal) &&
+        record.current.createStatus === accepted && selectedIdentity(live.current.selection) === identity &&
+        sourceOwner()?.principalScope === owner.principalScope;
+      let opened = false;
+      try { if (current()) opened = await open(workRef, current); } catch { /* Read-only failure remains retryable. */ }
+      if (!opened && current()) setNotice("OPEN_PROJECT_UNAVAILABLE");
+    });
+  };
   const proposal =
     status !== null && status.disposition === "unknown" && status.receipt !== null ? status : null;
   const publication = observed === null ? null : publicationOf(observed);
@@ -2022,7 +2043,12 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
       onGoalChange={onGoalChange}
       attachmentsControl={fileDraft.control}
       attachmentsPanel={fileDraft.panel}
-      primarySummary={<><p role="status">{copy(stateLine)}</p>{notice!==null&&<p>{copy(NOTICE_COPY[notice])}</p>}      {previewLive !== null && options !== null && (() => {
+      primarySummary={<><p role="status">{copy(stateLine)}</p>{notice!==null&&<p role="status">{copy(NOTICE_COPY[notice])}</p>}
+      {observed !== null && props.onOpenProject && <button type="button" className="primary"
+        onClick={openCreatedProject} disabled={disabled || !authorized} aria-busy={busy === "open-project"}>
+        {busy === "open-project" ? copy(["Opening project…", "正在打开项目…"]) : copy(["Open project", "打开项目"])}
+      </button>}
+      {previewLive !== null && options !== null && (() => {
         const chosen=options.profiles.find(row=>row.id===previewLive.profileId);
         return chosen ? <div><h3>{zh?chosen.labelZh:chosen.labelEn}</h3>
           <p>{zh?chosen.summaryZh:chosen.summaryEn}</p></div> : null;

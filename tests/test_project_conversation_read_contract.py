@@ -83,11 +83,26 @@ def fresh_read_args():
     }
 
 
+def execution_references_args():
+    return {'work_ref': legacy_work_ref()}
+
+
+def execution_read_args():
+    return {
+        **fresh_read_args(),
+        'schema': 'mastermind.project_execution_reference.v1',
+        'work_ref': legacy_work_ref(),
+        'project_execution_source_sha256': hex64(9),
+    }
+
+
 ARGS_FACTORIES = {
     'catalogue': catalogue_args,
     'read': read_args,
     'fresh_references': fresh_references_args,
     'fresh_read': fresh_read_args,
+    'execution_references': execution_references_args,
+    'execution_read': execution_read_args,
 }
 
 
@@ -113,7 +128,8 @@ def raw_of(value, **dumps_kwargs):
 
 def test_contract_constants():
     assert SCHEMA == 'mastermind.project_conversation_read.private.v1'
-    assert OPERATIONS == ('catalogue', 'read', 'fresh_references', 'fresh_read')
+    assert OPERATIONS == ('catalogue', 'read', 'fresh_references', 'fresh_read',
+                          'execution_references', 'execution_read')
     assert MAX_REQUEST_BYTES == 8192
     assert MAX_RESPONSE_BYTES == 32768
 

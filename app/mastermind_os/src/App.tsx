@@ -49,6 +49,7 @@ import { readProjectJourneyLocation } from "./projects/project-journey-location"
 import { ProjectArchiveBrowser } from "./projects/archive/ProjectArchiveBrowser";
 import { ProjectWorkspace } from "./projects/ProjectWorkspace";
 import { ProjectConversationAssociation } from "./conversations/ProjectConversationAssociation";
+import { ProjectExecutionHistory } from "./conversations/ProjectExecutionHistory";
 import { AcceptedDirectionPanel } from "./direction/AcceptedDirectionPanel";
 import { useProjectAdmissionWorkspace } from "./useProjectAdmissionWorkspace";
 import { useProjectDetailsControls } from "./projects/useProjectDetailsControls";
@@ -94,6 +95,7 @@ import {
 import {
   LaunchOrchestrator,
   type LaunchForm,
+  type LaunchDetailsDraft,
 } from "./orchestration/ui/LaunchOrchestrator";
 import { SessionWorkspace } from "./orchestration/ui/SessionWorkspace";
 import {
@@ -138,6 +140,14 @@ import { selectedCurrentCapacityAttempt } from "./resource-capacity-selection";
 import { SupervisionLedger } from "./supervision/SupervisionLedger";
 import { SupervisionTrace } from "./supervision/SupervisionTrace";
 import { ProjectPlanPanel } from "./planning/ProjectPlanPanel";
+import { ProjectStartWork, type ProjectPlanLaunchInspection } from "./planning/ProjectStartWork";
+import { projectExecutionContext } from "./planning/project-execution-context";
+import type { ProjectExecutionPreview, ProjectExecutionPreviousRun } from "./planning/project-execution-transport";
+import { canonicalJson } from "./orchestration/operation-key";
+import {
+  createProjectLaunchDraft, decideProjectLaunchHandoff, projectLaunchContextIsCurrent,
+  type ProjectLaunchDraft, type ProjectLaunchOutcome,
+} from "./planning/project-launch-handoff";
 import { ProjectJournalReader } from "./ProjectJournalReader";
 import { AutonomyPanel } from "./supervision/AutonomyPanel";
 import { ActivationReceipt } from "./activation/ActivationReceipt";
@@ -1506,13 +1516,15 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     // preview and the owner identity it was opened under, so the same
     // captured context can be revalidated before a submission. It never
     // carries a sessionRef and never owns a command.
-    [officeLaunchHandoff, setOfficeLaunchHandoff] = useState<{
-      preview: DirectionPreview;
+    [launchHandoff, setLaunchHandoff] = useState<({
       workstreamRef: string;
       binding: OrchestratorCommandBinding;
       principalScope: string;
       generation: string;
-    } | null>(null),
+    } & (
+      | { kind: "office"; preview: DirectionPreview }
+      | { kind: "project"; draft: ProjectLaunchDraft; inspection: ProjectPlanLaunchInspection; executionPreview: ProjectExecutionPreview; continuationCurrent?: () => boolean }
+    )) | null>(null),
     // True only while a Check-status recover() is actually in flight. A
     // static checking/PENDING_POINTER hold (a persisted pointer with no
     // recovery promise) is NOT busy — its recovery control stays usable.
@@ -1526,7 +1538,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     passiveExpiryHold = useRef(false),
     // App already owns presentation state. These text-only snapshots survive
     // an unmount during passive expiry, never a new principal or sign-out.
-    [retainedComposerDrafts, setRetainedComposerDrafts] = useState({ launch: "", session: "", launchWorkstream: "" }),
+    [retainedComposerDrafts, setRetainedComposerDrafts] = useState({ launch: "", session: "", launchWorkstream: "", launchDetails: null as LaunchDetailsDraft | null }),
     retainedComposerRef = useRef(retainedComposerDrafts),
     retainedComposerScope = useRef<string | null>(null),
     previousLiveComposerScope = useRef<string | null>(null),
@@ -1552,6 +1564,13 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     } | null>(null),
     missionRequest = useRef(0),
     programRequest = useRef(0),
+    // One explicit navigation gesture waits for the incumbent Programs read.
+    // It carries no command, grant, draft payload or persistent operation.
+    createdProjectOpen = useRef<{
+      workRef: string; createRequestId: string; host: MissionHost;
+      authRevision: number; selectionSequence: number; catalogueSequence: number;
+      afterEpoch: number; current: () => boolean; complete: (opened: boolean) => void;
+    } | null>(null),
     programSelection = useRef(selection),
     workRequest = useRef(0),
     missionSelectionState =
@@ -1629,7 +1648,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   // The currently authenticated command scope is checked below, after the
   // qualified host identity has been read. Off-view Office text is inspected
   // independently of whether its component is mounted.
-  const updateRetainedComposer = (kind: "launch" | "session" | "launchWorkstream", text: string) => {
+  const updateRetainedComposer = <K extends keyof typeof retainedComposerDrafts>(
+    kind: K, text: (typeof retainedComposerDrafts)[K],
+  ) => {
     const next = { ...retainedComposerRef.current, [kind]: text };
     retainedComposerRef.current = next;
     setRetainedComposerDrafts(next);
@@ -1828,12 +1849,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   // selection/owner epoch, even when a mounted leaf is later replaced.
   const presentedComposerDrafts = liveComposerScope &&
     retainedComposerScope.current === liveComposerScope
-      ? retainedComposerDrafts : { launch: "", session: "", launchWorkstream: "" };
+      ? retainedComposerDrafts : { launch: "", session: "", launchWorkstream: "", launchDetails: null };
   useEffect(() => {
     if (!signedIn || !liveComposerScope) return;
     if (previousLiveComposerScope.current !== null &&
         previousLiveComposerScope.current !== liveComposerScope) {
-      const blank = { launch: "", session: "", launchWorkstream: "" };
+      const blank = { launch: "", session: "", launchWorkstream: "", launchDetails: null };
       retainedComposerRef.current = blank;
       retainedComposerScope.current = null;
       setRetainedComposerDrafts(blank);
@@ -1863,8 +1884,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   // session-qualified projection exists, never before.
   hasUnsentUserText.current = Boolean(freshDraft.hasUnsentDraft() || freshTurnDraft.hasUnsentDraft() || hasFreshAttendedOriginal() || projectJourney.hasUnsentDraft() || office.draft.text ||
     observedConversation.hasUnsentDraft() ||
-    (signedIn ? presentedComposerDrafts.launch || presentedComposerDrafts.session
-      : retainedComposerDrafts.launch || retainedComposerDrafts.session));
+    (signedIn ? presentedComposerDrafts.launch || presentedComposerDrafts.launchDetails || presentedComposerDrafts.session
+      : retainedComposerDrafts.launch || retainedComposerDrafts.launchDetails || retainedComposerDrafts.session));
   const projectConversationActive = active === "Projects" && projectTab === "Conversation" && !catalogueProject &&
     missionSelectionState === "AVAILABLE" && office.projection.programs.source.state === "CURRENT" && !!selection &&
     index.programs.filter(card => card.workRef === selection.workRef).length === 1 &&
@@ -2142,6 +2163,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   useEffect(() => () => {
     commandSlot.current?.controller.invalidate();
     recoveryFlight.current++;
+    const opening = createdProjectOpen.current;
+    createdProjectOpen.current = null;
+    opening?.complete(false);
     sessionSlot.current?.controller.invalidate();
     sessionSlot.current = null;
     sessionPending.current = null;
@@ -2265,7 +2289,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                  explicitLogoutRecorded())
           passiveExpiryHold.current = false;
         if (!passiveLoss) {
-          const blank = { launch: "", session: "", launchWorkstream: "" };
+          const blank = { launch: "", session: "", launchWorkstream: "", launchDetails: null };
           retainedComposerRef.current = blank;
           retainedComposerScope.current = null;
           setRetainedComposerDrafts(blank);
@@ -2285,6 +2309,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         }
         setHeldKind(null);
         setCommandRefusal(null);
+        setLaunchHandoff(current => current?.kind === "project" ? null : current);
         setReopenedOperation(null);
         recoveryFlight.current++;
         setRecoverInFlight(false);
@@ -3111,7 +3136,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         : null;
       // Only this owner-qualified accepted launch releases its Office handoff.
       // A refusal or unknown effect keeps the frozen context and original hold.
-      setOfficeLaunchHandoff(null);
+      setLaunchHandoff(null);
       if (sel) open(sel.workRef, sel.rootJobId,bindingAtStart.directNative?.isDirectSelection(sel)===true);
     }
     pending.complete({ status: state.status });
@@ -3459,8 +3484,17 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     if (authRevisionRef.current !== authRevision || auth?.status !== "signed_in" || !auth.acquisition ||
         binding !== commandBinding || !owner || owner.principalScope !== ownerContext?.principalScope ||
         owner.generation !== ownerContext?.generation) return {state: "UNAVAILABLE" as const};
+    if (launchHandoff?.kind === "project") {
+      if (!launchHandoff.inspection.isCurrent() ||
+          launchHandoff.executionPreview.previous_run && launchHandoff.continuationCurrent?.() !== true)
+        return {state: "UNAVAILABLE" as const};
+      const intent = binding?.projectExecution?.makeLaunchIntent(form, launchHandoff.draft.context, launchHandoff.executionPreview);
+      return intent ? {state: "PREPARED" as const, goal: form.goal, projectRef: form.projectRef,
+        profileRef: form.profileRef, frontierModelAlias: form.frontierModelAlias ?? null, targetKey: intent.targetKey}
+        : {state: "UNAVAILABLE" as const};
+    }
     return readLaunchRequestPreview(binding, form);
-  }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation, authRevision]);
+  }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation, authRevision, launchHandoff]);
   // Presentation reuses the incumbent explicit auth action and its guards.
   const authenticationControl = authState ? (
                 <button
@@ -3536,9 +3570,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       liveOwner.generation === ownerContext?.generation;
     // Revisiting an open handoff is idempotent: the same frozen direction never
     // places a second launch owner and never replaces its own goal.
-    const alreadyOpen = officeLaunchHandoff !== null &&
-      officeLaunchHandoff.preview.draft === preview.draft &&
-      previewIsCurrent(officeLaunchHandoff.preview, office.projection.context);
+    const alreadyOpen = launchHandoff?.kind === "office" &&
+      launchHandoff.preview.draft === preview.draft &&
+      previewIsCurrent(launchHandoff.preview, office.projection.context);
     const outcome = decideOfficeLaunchHandoff(preview, office.projection.context, {
       configuredWorkstream: enrolled?.workstream ?? null,
       selectedWorkstream: office.projection.context.selection?.workRef ?? null,
@@ -3549,12 +3583,14 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     });
     if (outcome.status !== "OPENED") return outcome;
     if (alreadyOpen) return outcome;
+    if (retainedComposerRef.current.launchDetails)
+      return { status: "REFUSED", reason: "LAUNCH_GOAL_PRESERVED" };
     retainedComposerScope.current = liveComposerScope;
     updateRetainedComposer("launch", preview.draft);
     updateRetainedComposer("launchWorkstream", frozenWorkstream!);
     setLaunchDraftDismissed(false);
-    setOfficeLaunchHandoff({
-      preview,
+    setLaunchHandoff({
+      kind: "office", preview,
       workstreamRef: frozenWorkstream!,
       binding: liveBinding!,
       principalScope: liveOwner!.principalScope,
@@ -3562,8 +3598,86 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     });
     return outcome;
   };
+  const startProjectLaunch = async (
+    draft: ProjectLaunchDraft, inspection: ProjectPlanLaunchInspection,
+    previousRun?: ProjectExecutionPreviousRun, previousRunCurrent?: () => boolean,
+  ): Promise<ProjectLaunchOutcome> => {
+    const liveBinding = completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
+    const liveOwner = liveBinding ? readOwnerContext(liveBinding.port) : null;
+    const workRef = draft.context.workRef;
+    const inspect = (): ProjectLaunchOutcome => {
+      const currentBinding = completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
+      const currentOwner = currentBinding ? readOwnerContext(currentBinding.port) : null;
+      const decision = decideProjectLaunchHandoff(draft, {
+        current: projectExecutionContext(inspection.read, inspection.selection),
+        sourceIsCurrent: inspection.isCurrent() && projectWorkRef === workRef &&
+          (!previousRun || previousRunCurrent?.() === true),
+        owner: {
+          configuredWorkstream: workRef, selectedWorkstream: projectWorkRef,
+          launchAvailable: commandReady && !!liveBinding?.projectExecution &&
+            currentBinding === liveBinding && liveBinding === commandBinding &&
+            window.MastermindMissionHost?.auth?.getState().status === "signed_in" && !!liveOwner &&
+            currentOwner?.principalScope === liveOwner.principalScope && currentOwner?.generation === liveOwner.generation &&
+            liveOwner.principalScope === ownerContext?.principalScope && liveOwner.generation === ownerContext?.generation,
+          retainedGoal: retainedComposerRef.current.launch,
+          commandHeld: pendingCommand.current?.kind === "launch" || heldKind === "launch" || !!currentReopened,
+        },
+        openedDraft: launchHandoff?.kind === "project" &&
+          canonicalJson(launchHandoff.executionPreview.previous_run ?? null) === canonicalJson(previousRun ?? null)
+          ? launchHandoff.draft : null,
+      });
+      return decision.status === "OPENED" && !decision.reuseExisting && retainedComposerRef.current.launchDetails
+        ? { status: "REFUSED", reason: "LAUNCH_GOAL_PRESERVED" } : decision;
+    };
+    try {
+      const initial = inspect();
+      if (initial.status !== "OPENED") return initial;
+      if (initial.reuseExisting && launchHandoff?.kind === "project" &&
+          launchHandoff.binding === liveBinding && launchHandoff.principalScope === liveOwner?.principalScope &&
+          launchHandoff.generation === liveOwner?.generation && launchHandoff.inspection.isCurrent() &&
+          (!previousRun || launchHandoff.continuationCurrent?.() === true)) return initial;
+      const executionPreview = await liveBinding!.projectExecution!.preview(draft.context, new AbortController().signal, previousRun);
+      const current = inspect();
+      if (current.status !== "OPENED") return current;
+      if (executionPreview.execution_state !== "WORK_CAPABLE" || executionPreview.work_ref !== workRef)
+        return {status: "REFUSED", reason: "LAUNCH_OWNER_UNAVAILABLE"};
+      // A newly acquired source may requalify this same draft after a view
+      // unmount. Retain the user’s edited text and scope in that case.
+      if (!current.reuseExisting) {
+        retainedComposerScope.current = liveComposerScope;
+        updateRetainedComposer("launch", draft.goal);
+        updateRetainedComposer("launchWorkstream", workRef);
+      }
+      setLaunchDraftDismissed(false);
+      setLaunchHandoff({ kind: "project", draft, inspection, executionPreview, workstreamRef: workRef,
+        binding: liveBinding!, principalScope: liveOwner!.principalScope, generation: liveOwner!.generation,
+        ...(previousRun ? { continuationCurrent: previousRunCurrent } : {}) });
+      return current;
+    } catch {
+      return { status: "REFUSED", reason: inspection.isCurrent() ? "LAUNCH_OWNER_UNAVAILABLE" : "PROJECT_CONTEXT_NOT_CURRENT" };
+    }
+  };
+  const launchView = launchHandoff?.kind === "project" ? {
+    projects: launchHandoff.executionPreview.binding.projects,
+    profiles: launchHandoff.executionPreview.binding.profiles,
+    frontierModels: undefined,
+    defaultWorkstream: launchHandoff.workstreamRef,
+    workstreams: [{ref: launchHandoff.workstreamRef, label: launchHandoff.workstreamRef,
+      projects: launchHandoff.executionPreview.binding.projects,
+      profiles: launchHandoff.executionPreview.binding.profiles}],
+  } : commandView;
+  // Dynamic project choices are qualified by the authenticated preview. The
+  // legacy static enrollment remains the Office/Today launch source only.
+  const currentLaunchAvailable = commandReady && !!launchView &&
+    launchView.projects.length > 0 && launchView.profiles.length > 0;
+  const retainedLaunchDetails = retainedComposerDrafts.launchDetails;
+  const changeHeldLaunchDetails = (change: Partial<LaunchDetailsDraft>) => {
+    const held = retainedComposerRef.current.launchDetails;
+    if (!signedIn && passiveExpiryHold.current && held)
+      updateRetainedComposer("launchDetails", { ...held, ...change });
+  };
   const commandPanel =
-    !signedIn && passiveExpiryHold.current && retainedComposerDrafts.launch ? (
+    !signedIn && passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.launchDetails) ? (
       <section className="card" aria-label={copy.retainedDraft}>
         <h2>{copy.unsentGoal}</h2>
         <p className="muted">{copy.expiredDraft}</p>
@@ -3571,11 +3685,37 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         <textarea id="retained-launch-goal" value={retainedComposerDrafts.launch}
           onChange={event => updateRetainedComposer("launch", event.target.value)}
           rows={4} />
-        <button type="button" onClick={() => updateRetainedComposer("launch", "")}>
+        {retainedLaunchDetails ? <fieldset className="project-execution-scope">
+          <legend>{locale === "zh-CN" ? "未发送的交接与范围" : "Unsent handoff and scope"}</legend>
+          <div className="form-field">
+            <label htmlFor="retained-launch-handoff">{locale === "zh-CN" ? "交接说明（可选）" : "Handoff (optional)"}</label>
+            <textarea id="retained-launch-handoff" value={retainedLaunchDetails.handoffText} rows={5}
+              onChange={event => changeHeldLaunchDetails({ handoffText: event.target.value })}/>
+          </div>
+          {retainedLaunchDetails.profileRef === "bounded_code_change" || retainedLaunchDetails.writePathsText || retainedLaunchDetails.testTargetsText ? <>
+            <div className="form-field">
+              <label htmlFor="retained-launch-paths">{locale === "zh-CN" ? "可修改的路径" : "Paths to change"}</label>
+              <textarea id="retained-launch-paths" value={retainedLaunchDetails.writePathsText} rows={3}
+                onChange={event => changeHeldLaunchDetails({ writePathsText: event.target.value })}/>
+            </div>
+            <div className="form-field">
+              <label htmlFor="retained-launch-tests">{locale === "zh-CN" ? "Pytest 测试目标（可选）" : "Pytest targets (optional)"}</label>
+              <textarea id="retained-launch-tests" value={retainedLaunchDetails.testTargetsText} rows={2}
+                onChange={event => changeHeldLaunchDetails({ testTargetsText: event.target.value })}/>
+            </div>
+            <label><input type="checkbox" checked={retainedLaunchDetails.diffCheck}
+              onChange={event => changeHeldLaunchDetails({ diffCheck: event.target.checked })}/>
+              {locale === "zh-CN" ? "检查 diff 中的空白错误" : "Check the diff for whitespace errors"}</label>
+          </> : null}
+        </fieldset> : null}
+        <button type="button" onClick={() => {
+          updateRetainedComposer("launch", "");
+          updateRetainedComposer("launchDetails", null);
+        }}>
           {copy.discardGoal}
         </button>
       </section>
-    ) : canLaunch && commandView && launchDraftDismissed ? (
+    ) : commandReady && launchView && launchDraftDismissed ? (
       <section className="card">
         <div className="section-title">
           <h2>{copy.startWork}</h2>
@@ -3591,7 +3731,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           {copy.newGoal}
         </button>
       </section>
-    ) : commandReady && commandView ? (
+    ) : commandReady && launchView ? (
       <>
         <LaunchOrchestrator
           presentation={active === "Today" ? "composer" : "standard"}
@@ -3601,14 +3741,19 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             ownerContext?.principalScope,
             ownerContext?.generation,
           ])}
-          workstreams={commandView.workstreams}
-          defaultWorkstream={commandView.defaultWorkstream}
-          workstreamRef={officeLaunchHandoff?.workstreamRef || presentedComposerDrafts.launchWorkstream || undefined}
-          lockWorkstream={officeLaunchHandoff !== null}
+          workstreams={launchView.workstreams}
+          defaultWorkstream={launchView.defaultWorkstream}
+          projectExecution={launchHandoff?.kind === "project"}
+          projectFollowUp={launchHandoff?.kind === "project" && !!launchHandoff.executionPreview.previous_run}
+          continuationMode={launchHandoff?.kind === "project" ? launchHandoff.executionPreview.continuation_mode : undefined}
+          coordinatorModel={launchHandoff?.kind === "project" ? launchHandoff.executionPreview.coordinator?.model : undefined}
+          executionScope={launchHandoff?.kind === "project" ? launchHandoff.executionPreview.execution_scope : undefined}
+          workstreamRef={launchHandoff?.workstreamRef || presentedComposerDrafts.launchWorkstream || undefined}
+          lockWorkstream={launchHandoff !== null}
           onWorkstreamChange={workstream => {
             const liveBinding = completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
             const liveOwner = liveBinding ? readOwnerContext(liveBinding.port) : null;
-            if (!officeLaunchHandoff && authRevisionRef.current === authRevision &&
+            if (!launchHandoff && authRevisionRef.current === authRevision &&
                 window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
                 liveBinding === commandBinding &&
                 liveOwner?.principalScope === ownerContext?.principalScope &&
@@ -3617,10 +3762,23 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               updateRetainedComposer("launchWorkstream", workstream);
             }
           }}
-          projects={commandView.projects}
-          profiles={commandView.profiles}
-          frontierModels={commandView.frontierModels}
+          projects={launchView.projects}
+          profiles={launchView.profiles}
+          frontierModels={launchView.frontierModels}
           initialDraft={presentedComposerDrafts.launch}
+          initialDetails={launchHandoff?.kind === "project" ? presentedComposerDrafts.launchDetails : null}
+          onDetailsChange={details => {
+            const liveBinding = completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
+            const liveOwner = liveBinding ? readOwnerContext(liveBinding.port) : null;
+            if (launchHandoff?.kind === "project" && authRevisionRef.current === authRevision &&
+                window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
+                liveBinding === commandBinding &&
+                liveOwner?.principalScope === ownerContext?.principalScope &&
+                liveOwner?.generation === ownerContext?.generation) {
+              retainedComposerScope.current = liveComposerScope;
+              updateRetainedComposer("launchDetails", details);
+            }
+          }}
           onDraftChange={text => {
             const liveBinding = completeOrchestratorCommandBinding(
               window.MastermindMissionHost?.commandBinding);
@@ -3633,12 +3791,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             {
               retainedComposerScope.current = liveComposerScope;
               updateRetainedComposer("launch", text);
-              if (!retainedComposerRef.current.launchWorkstream && commandView.defaultWorkstream)
-                updateRetainedComposer("launchWorkstream", commandView.defaultWorkstream);
+              if (!retainedComposerRef.current.launchWorkstream && launchView.defaultWorkstream)
+                updateRetainedComposer("launchWorkstream", launchView.defaultWorkstream);
             }
           }}
           unavailableReason={
-            canLaunch
+            currentLaunchAvailable
               ? undefined
               : copy.choicesUnavailable
           }
@@ -3663,17 +3821,29 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             // Revalidate it against the live owner before anything is
             // prepared: a stale, changed or mismatched source refuses here
             // and leaves the Office draft and the launch goal untouched.
-            if (officeLaunchHandoff) {
+            if (launchHandoff) {
               const liveOwner = readOwnerContext(binding.port);
               const config = readLaunchBindingConfig();
-              const enrolled = config ? resolveLaunchBinding(config, officeLaunchHandoff.workstreamRef) : null;
-              const workstreamAgrees = officeLaunchWorkstreamAgrees(
-                officeLaunchHandoff.preview.context.selection?.workRef ?? null,
-                enrolled?.workstream ?? null) && form.workstreamRef === officeLaunchHandoff.workstreamRef;
-              if (!previewIsCurrent(officeLaunchHandoff.preview, office.projection.context) ||
-                  binding !== officeLaunchHandoff.binding ||
-                  liveOwner?.principalScope !== officeLaunchHandoff.principalScope ||
-                  liveOwner?.generation !== officeLaunchHandoff.generation ||
+              const enrolled = launchHandoff.kind === "project" ? launchHandoff.executionPreview.binding
+                : config ? resolveLaunchBinding(config, launchHandoff.workstreamRef) : null;
+              const capturedWorkRef = launchHandoff.kind === "office"
+                ? launchHandoff.preview.context.selection?.workRef ?? null : launchHandoff.draft.context.workRef;
+              const workstreamAgrees = officeLaunchWorkstreamAgrees(capturedWorkRef,
+                enrolled?.workstream ?? null) && form.workstreamRef === launchHandoff.workstreamRef;
+              let sourceCurrent = false;
+              try {
+                sourceCurrent = launchHandoff.kind === "office"
+                  ? previewIsCurrent(launchHandoff.preview, office.projection.context)
+                  : projectWorkRef === launchHandoff.workstreamRef && projectLaunchContextIsCurrent(
+                    launchHandoff.draft,
+                    projectExecutionContext(launchHandoff.inspection.read, launchHandoff.inspection.selection),
+                    launchHandoff.inspection.isCurrent() && (!launchHandoff.executionPreview.previous_run ||
+                      launchHandoff.continuationCurrent?.() === true));
+              } catch { /* Malformed or stale captured data never reaches preparation. */ }
+              if (!sourceCurrent ||
+                  binding !== launchHandoff.binding ||
+                  liveOwner?.principalScope !== launchHandoff.principalScope ||
+                  liveOwner?.generation !== launchHandoff.generation ||
                   !workstreamAgrees) {
                 setCommandRefusal({
                   // The refusal is published against the live owner identity,
@@ -3685,17 +3855,23 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                   kind: "launch", selectionSeq: selectionSeq.current, sessionKey: null,
                   presentationSeq: commandPresentation.current.seq,
                   reason: locale === "zh-CN"
-                    ? "方向交接已不再有效。未准备也未发送任何内容。"
-                    : "The direction handoff is no longer current. Nothing was prepared or sent.",
+                    ? launchHandoff.kind === "office"
+                      ? "方向交接已不再有效。未准备也未发送任何内容。"
+                      : "项目计划已更改。请刷新项目并重新检查，尚未开始工作。"
+                    : launchHandoff.kind === "office"
+                      ? "The direction handoff is no longer current. Nothing was prepared or sent."
+                      : "The project plan is no longer current. Refresh the project and review it before starting work.",
                 });
                 onComplete({ status: "refused" });
                 return;
               }
             }
-            const intent = launchIntentFromBinding(binding, form);
-            if (officeLaunchHandoff && (!intent ||
-                intent.targetKey !== officeLaunchHandoff.workstreamRef ||
-                intent.payload.workstream !== officeLaunchHandoff.workstreamRef)) {
+            const intent = launchHandoff?.kind === "project"
+              ? binding.projectExecution?.makeLaunchIntent(form, launchHandoff.draft.context, launchHandoff.executionPreview) ?? null
+              : launchIntentFromBinding(binding, form);
+            if (launchHandoff && (!intent ||
+                intent.targetKey !== launchHandoff.workstreamRef ||
+                (launchHandoff.kind === "project" ? intent.payload.work_ref : intent.payload.workstream) !== launchHandoff.workstreamRef)) {
               onComplete({ status: "refused" });
               return;
             }
@@ -3709,10 +3885,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               heldKind === "launch"
             ) return;
             updateRetainedComposer("launch", "");
+            updateRetainedComposer("launchDetails", null);
             setLaunchDraftDismissed(true);
             // The Office handoff closes with its own form. The Office draft
             // itself is never cleared by a cancel.
-            setOfficeLaunchHandoff(null);
+            setLaunchHandoff(null);
             routeHeading.current?.focus();
           }}
         />
@@ -4230,6 +4407,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     (typeof window.MastermindMissionHost?.readProgramsObservation === "function" ||
       typeof window.MastermindMissionHost?.readPrograms === "function") &&
     (!authState || authState.acquisition);
+  const refreshProjects = () => {
+    setIndex({ programs: [], state: "PENDING", reason: "SOURCE_READ_PENDING" });
+    setProgramRevision((revision) => revision + 1);
+  };
   const programsRefreshControl = (
     <button
       type="button"
@@ -4238,8 +4419,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       aria-disabled={index.state === "PENDING" || !programsReadAvailable}
       onClick={() => {
         if (index.state === "PENDING" || !programsReadAvailable) return;
-        setIndex({ programs: [], state: "PENDING", reason: "SOURCE_READ_PENDING" });
-        setProgramRevision((revision) => revision + 1);
+        refreshProjects();
       }}
     >
       Refresh Projects
@@ -4640,6 +4820,53 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       latest.catalogueOwner === catalogueListOwner.current && conversationListOwnerCurrent(latest.catalogueOwner, false) &&
       latest.index.state === "AVAILABLE";
   };
+  const openCreatedProject = (workRef: string, current: () => boolean): Promise<boolean> => {
+    const host = window.MastermindMissionHost, selected = projectJourney.selection;
+    try {
+      if (!host || createdProjectOpen.current || active !== "Projects" || !projectJourney.shown ||
+          !selected || selected.workRef !== workRef || !projectJourney.isHostCurrent() ||
+          !programsReadAvailable || !current()) return Promise.resolve(false);
+    } catch { return Promise.resolve(false); }
+    return new Promise<boolean>(complete => {
+      createdProjectOpen.current = {workRef, createRequestId: selected!.createRequestId, host: host!,
+        authRevision, selectionSequence: selectionSeq.current,
+        catalogueSequence: cataloguePresentationSequence.current,
+        afterEpoch: programRequest.current, current, complete};
+      refreshProjects();
+    });
+  };
+  // Completion belongs to this one explicit Open gesture and its fresh read.
+  // SOURCE_OBSERVED supplies a hint; only the acquired catalogue supplies membership.
+  useLayoutEffect(() => {
+    const opening = createdProjectOpen.current;
+    if (!opening) return;
+    const finish = (opened: boolean) => {
+      createdProjectOpen.current = null;
+      opening.complete(opened);
+    };
+    let current = false;
+    try {
+      current = active === "Projects" && projectJourney.shown &&
+        projectJourney.selection?.createRequestId === opening.createRequestId &&
+        projectJourney.selection?.workRef === opening.workRef &&
+        window.MastermindMissionHost === opening.host && authRevision === opening.authRevision &&
+        authRevisionRef.current === opening.authRevision && selectionSeq.current === opening.selectionSequence &&
+        cataloguePresentationSequence.current === opening.catalogueSequence &&
+        projectJourney.isHostCurrent() && opening.current();
+    } catch { /* An unavailable original witness cannot select a project. */ }
+    if (!current) { finish(false); return; }
+    if (programRequest.current <= opening.afterEpoch) return;
+    if (programRequest.current !== opening.afterEpoch + 1) { finish(false); return; }
+    if (index.state === "PENDING") return;
+    if (!currentProgramsRead() || programIndexEpoch <= opening.afterEpoch ||
+        index.programs.filter(row => row.workRef === opening.workRef).length !== 1) {
+      finish(false); return;
+    }
+    projectJourney.hide();
+    setCatalogueProject({workRef: opening.workRef, authRevision, epoch: programIndexEpoch});
+    setProjectTab("More"); setActive("Projects");
+    finish(true);
+  });
   // Fresh choices consume the SAME acquired index, including qualified N.
   // Global saved-conversation locators remain owned by the C projection.
   const freshIndexCurrent = currentProgramsRead();
@@ -4836,6 +5063,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         }}
         isHostCurrent={projectJourney.isHostCurrent} selection={projectJourney.selection}
         onSelection={value => {projectJourney.onSelection(value);void nativeGoal.beforeEdit();}}
+        onOpenProject={openCreatedProject}
         goal={projectJourney.goal} goalReadOnly={native && !nativeGoal.canEdit}
         onGoalFocus={() => {void nativeGoal.beforeEdit();}}
         onGoalChange={text => {if (nativeGoal.canEdit) projectJourney.onGoalChange(text);}}
@@ -4854,7 +5082,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     content = <Today locale={locale} projection={office.projection} work={workState}
       composer={commandPanel}
       authenticationCue={todayAuthenticationCue}
-      retainComposerWithAuth={Boolean(passiveExpiryHold.current && retainedComposerDrafts.launch) || heldKind === "launch"}
+      retainComposerWithAuth={Boolean(passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.launchDetails)) || heldKind === "launch"}
       onOpenInbox={() => { setProjectTab(null); setActive("Inbox"); }}
       onOpenProjects={() => { setProjectTab(null); setActive("Projects"); }}
       onOpenMission={(!authState || authState.acquisition) ? target => open(target.workRef, target.rootJobId) : undefined}
@@ -4886,7 +5114,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         {/* The one existing launch owner, mounted where the Office mounts it.
             It is the same commandPanel element the other routes use, so only
             one LaunchOrchestrator owner exists at a time. */}
-        {officeLaunchHandoff ? commandPanel : null}
+        {launchHandoff?.kind === "office" ? commandPanel : null}
         <OperationalNavigation label="Company operations" onNavigate={navigateOperationalView} />
       </>
     );
@@ -4983,14 +5211,46 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         {retainedProjectGoal}
         {programsRefreshControl}
         {!directSelected && projectWorkRef && (catalogueWorkRef || projectTab === "Conversation") ? (
-          <ProjectPlanPanel {...projectPlanProps} renderWorkspace={({objective, panel, inspection}) => <ProjectWorkspace headingLevel={1} headingRef={projectHeading} locale={locale}
+          <ProjectPlanPanel {...projectPlanProps} renderWorkspace={({objective, panel, inspection, launchInspection}) => <ProjectWorkspace headingLevel={1} headingRef={projectHeading} locale={locale}
             scopeKey={JSON.stringify([authRevision, projectWorkRef,
               projectConversationActive ? selection?.rootJobId : null, sessionTargetKey])}
             title={currentProjectCards[0].title || projectWorkRef} goal={objective}
-            conversationPanel={projectConversationActive ? currentConversationPanel
-              : <p role="status">{locale === "zh-CN" ? "此项目尚无已确认关联的对话。" : "No qualified conversation is associated with this project here."}</p>}
-            composerPanel={projectConversationActive ? sessionContinuationPanel ?? sessionPanel
-              : <p>{locale === "zh-CN" ? "尚未提供此项目的对话发送入口。" : "A conversation send route is not supplied for this project."}</p>}
+            startWorkControl={<ProjectStartWork inspection={launchInspection} locale={locale}
+              disabled={!signedIn} operationHold={currentReopened
+                ? currentReopened.reason === "READING" ? "checking" : "pending"
+                : pendingCommand.current?.kind === "launch" || heldKind === "launch" ? "pending" : null}
+              onStart={startProjectLaunch}/>}
+            launchPanel={launchHandoff?.kind === "project" && launchHandoff.workstreamRef === projectWorkRef
+              ? commandPanel : undefined}
+            conversationPanel={<>
+              <ProjectExecutionHistory workRef={projectWorkRef} owner={projectConversations.history?.owner}
+                locale={locale} theme={theme} onContinue={async (witness, current) => {
+                  const refresh = locale === "zh-CN" ? "请重新读取项目计划与执行结果后再继续。"
+                    : "Read the current project plan and run again before continuing.";
+                  try {
+                    if (!launchInspection || !launchInspection.isCurrent() || !current()) return refresh;
+                    const context = projectExecutionContext(launchInspection.read, launchInspection.selection);
+                    if (context.state !== "AVAILABLE") return refresh;
+                    // The previous result is immutable input. The user writes a
+                    // new message; a separate current preview qualifies its run.
+                    const outcome = await startProjectLaunch(createProjectLaunchDraft(context, ""),
+                      launchInspection, witness, current);
+                    if (outcome.status === "OPENED") return;
+                    if (outcome.reason === "LAUNCH_GOAL_PRESERVED") return locale === "zh-CN"
+                      ? "已保留现有工作草稿，请先完成或取消该草稿。"
+                      : "Your existing work draft is preserved. Finish or cancel that draft first.";
+                    if (outcome.reason === "LAUNCH_COMMAND_HELD") return locale === "zh-CN"
+                      ? "已有启动请求待确认，请查看原始请求的状态。"
+                      : "A launch is already pending. Check its original status.";
+                    if (outcome.reason === "LAUNCH_OWNER_UNAVAILABLE") return locale === "zh-CN"
+                      ? "此项目暂时无法开始后续工作。"
+                      : "Follow-up work is unavailable for this project right now.";
+                    return refresh;
+                  } catch { return refresh; }
+                }}/>
+              {projectConversationActive ? currentConversationPanel : null}
+            </>}
+            composerPanel={projectConversationActive ? sessionContinuationPanel ?? sessionPanel : undefined}
             filesPanel={projectConversationActive ? retainedResultsPanel : undefined}
             statusPanel={!catalogueProject && selection?.workRef === projectWorkRef ? <>
               <div><small>{locale === "zh-CN" ? "任务来源" : "Mission source"}</small>
@@ -5359,7 +5619,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       authState.reason === "POPUP_CLOSED" ? copy.popupClosed :
       authState.reason.includes("EXPIRED") || authState.reason.includes("TIMEOUT") ? copy.signInTimeout : copy.signInFailed
     }</p> : undefined}
-    protectedWork={(nativeGoalQuarantined || nativeSessionReturn || (passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.session || office.draft.text || observedConversation.draft || projectJourney.retainedGoal?.text || freshDraft.retainedDraft?.text)) || showCheckStatus) ? <>
+    protectedWork={(nativeGoalQuarantined || nativeSessionReturn || (passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.launchDetails || retainedComposerDrafts.session || office.draft.text || observedConversation.draft || projectJourney.retainedGoal?.text || freshDraft.retainedDraft?.text)) || showCheckStatus) ? <>
       {nativeGoalNotice}{nativeSessionReturn}
       {passiveExpiryHold.current ? retainedProjectGoal : null}
       {passiveExpiryHold.current ? retainedFreshMessage : null}
@@ -5377,7 +5637,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         <textarea id="entry-conversation-draft" value={observedConversation.draft} onChange={event => observedConversation.changeDraft(event.target.value)} rows={4}/>
         <button type="button" onClick={observedConversation.discardDraft}>{locale === "zh-CN" ? "丢弃消息" : "Discard message"}</button>
       </section> : null}
-      {passiveExpiryHold.current && retainedComposerDrafts.launch ? commandPanel : null}
+      {passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.launchDetails) ? commandPanel : null}
       {passiveExpiryHold.current && retainedComposerDrafts.session ? sessionPanel : null}
       {showCheckStatus ? <section className="card">
         <h2>{locale === "zh-CN" ? "先前请求" : "Previous request"}</h2>
@@ -5531,6 +5791,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               office.changeDraft("");
               observedConversation.discardDraft();
               updateRetainedComposer("launch", "");
+              updateRetainedComposer("launchDetails", null);
               updateRetainedComposer("session", "");
               passiveExpiryHold.current = false;
             }}>{copy.discardAll}</button>

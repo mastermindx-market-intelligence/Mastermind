@@ -18,12 +18,26 @@ ROUTES={f'/os/executive/project-planning/{name}':name for name in ('submit','sta
 
 
 async def dispatch(owner,scope,body,principal,*,operation,receive):
+    return await dispatch_project_request(owner,scope,body,principal,operation=operation,receive=receive,
+        contract=wire,send_method="send_project_planning_frame")
+
+
+async def dispatch_project_request(owner,scope,body,principal,*,operation,receive,contract,send_method):
+    from common import project_execution_private_contract
+    if (contract,send_method) not in ((wire,"send_project_planning_frame"),
+            (project_execution_private_contract,"send_project_execution_frame")):
+        raise ValueError("fixed project transport required")
+    return await _dispatch_project_request(owner,scope,body,principal,operation=operation,receive=receive,
+        wire=contract,send_method=send_method)
+
+
+async def _dispatch_project_request(owner,scope,body,principal,*,operation,receive,wire,send_method):
     from integrations.mastermind_executive_app.os_transport import _OS_HTTP_HEADERS
     from starlette.requests import Request
     def response(code,status=403):
         return JSONResponse(dict(schema=wire.RESULT_SCHEMA,operation=operation,ok=False,data=None,
-            error=dict(code=code,message='Reconcile the original planning operation' if code=='effect_unknown'
-                else 'Project planning authority unavailable')),status_code=status,headers=_OS_HTTP_HEADERS)
+            error=dict(code=code,message='Reconcile the original project operation' if code=='effect_unknown'
+                else 'Project authority unavailable')),status_code=status,headers=_OS_HTTP_HEADERS)
     try:
         if type(body) is not dict or set(body)!={'arguments'}:raise ValueError()
         args=wire.arguments(body['arguments'],operation)
@@ -58,7 +72,7 @@ async def dispatch(owner,scope,body,principal,*,operation,receive):
         # the original authenticated peer's real duplex connection lifetime.
         async with owned_request(scope,receive,deadline_seconds=min(300,workspace.expires_at-now,principal.expires_at-now)) as current:
             with bind_request(Request(current),principal,clock=owner._clock) as source:
-                result=await source.run(lambda:client.client.send_project_planning_frame(client.socket_path,frame))
+                result=await source.run(lambda:getattr(client.client,send_method)(client.socket_path,frame))
                 source.require_live()
         if not await owner._still_current(scope,principal):return response('effect_unknown',202)
         again=await workspace_owner.project_planning_principal(token,now=owner._clock())
@@ -73,6 +87,9 @@ async def dispatch(owner,scope,body,principal,*,operation,receive):
     # All successful data was produced by the incumbent Runtime owner; error
     # text is fixed, never an upstream exception, header, token or raw input.
     if value['ok'] is False:
-        code='effect_unknown' if type(value['error']) is dict and value['error'].get('code')=='effect_unknown' else 'refused'
+        known={'effect_unknown','operation_conflict','context_changed','source_unavailable',
+            'execution_unavailable','input_too_large','refused'}
+        code=value['error'].get('code') if type(value['error']) is dict else 'refused'
+        if code not in known:code='refused'
         return response(code,202 if code=='effect_unknown' else 403)
     return JSONResponse(value,headers=_OS_HTTP_HEADERS)

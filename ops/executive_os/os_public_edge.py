@@ -126,17 +126,32 @@ PRE_NATIVE_DRAFT_GET_ROUTES = GET_ROUTES
 PRE_NATIVE_DRAFT_POST_ROUTES = POST_ROUTES
 GET_ROUTES = PRE_NATIVE_DRAFT_GET_ROUTES + ("/workspace/native-draft-identity/current",)
 
-# One separately qualified existing-session write, with the entire incumbent
+# One separately qualified existing-session write, with its complete incumbent
 # profile retained. Authentication, target and original-key authority remain
-# with the existing Session owner; no generic path or new grant is introduced.
+# with the existing Session owner; generic submit is unchanged.
 PRE_NATIVE_SESSION_SEND_GET_ROUTES = GET_ROUTES
 PRE_NATIVE_SESSION_SEND_POST_ROUTES = POST_ROUTES
 POST_ROUTES = PRE_NATIVE_SESSION_SEND_POST_ROUTES + ("/os/executive/session/send",)
 
-# Fixed secret-free role metadata READ; no enrollment or provider operation.
+# Protected f1950e9f: fixed secret-free role metadata READ, with no enrollment
+# or provider operation. Preserve its complete native-SEND predecessor.
 PRE_BYOK_ROLES_GET_ROUTES = GET_ROUTES
 PRE_BYOK_ROLES_POST_ROUTES = POST_ROUTES
-GET_ROUTES = PRE_BYOK_ROLES_GET_ROUTES + ("/workspace/byok/roles/current",)
+BYOK_READ_ROUTES = ("/workspace/byok/roles/current",)
+GET_ROUTES = PRE_BYOK_ROLES_GET_ROUTES + BYOK_READ_ROUTES
+
+# Project team launch and retained results extend the qualified parent profile.
+# Their existing downstream Executive/Workspace owners still authorize each call.
+PRE_PROJECT_EXECUTION_GET_ROUTES = GET_ROUTES
+PRE_PROJECT_EXECUTION_POST_ROUTES = POST_ROUTES
+PROJECT_EXECUTION_POST_ROUTES = tuple("/os/executive/project-execution/" + name
+    for name in ("preview", "submit", "status")) + (
+    "/os/executive/session/project-executions", "/os/executive/session/project-execution-read")
+# The published project-only source at 2cf4c5e6 predates native SEND and BYOK.
+# Retain that exact complete pair, not arbitrary mixtures of the three groups.
+PROJECT_EXECUTION_PRE_MERGE_GET_ROUTES = PRE_NATIVE_SESSION_SEND_GET_ROUTES
+PROJECT_EXECUTION_PRE_MERGE_POST_ROUTES = PRE_NATIVE_SESSION_SEND_POST_ROUTES + PROJECT_EXECUTION_POST_ROUTES
+POST_ROUTES = PRE_PROJECT_EXECUTION_POST_ROUTES + PROJECT_EXECUTION_POST_ROUTES
 
 # Preserve exactly the profiles admitted by the two predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
@@ -172,6 +187,8 @@ TRANSITION_ROUTE_PROFILES = (
     (PRE_NATIVE_DRAFT_GET_ROUTES, PRE_NATIVE_DRAFT_POST_ROUTES),
     (PRE_NATIVE_SESSION_SEND_GET_ROUTES, PRE_NATIVE_SESSION_SEND_POST_ROUTES),
     (PRE_BYOK_ROLES_GET_ROUTES, PRE_BYOK_ROLES_POST_ROUTES),
+    (PRE_PROJECT_EXECUTION_GET_ROUTES, PRE_PROJECT_EXECUTION_POST_ROUTES),
+    (PROJECT_EXECUTION_PRE_MERGE_GET_ROUTES, PROJECT_EXECUTION_PRE_MERGE_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 

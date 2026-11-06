@@ -1,5 +1,7 @@
 import { decodeProjectConversationCatalogue, decodeProjectConversationRead, validateProjectConversationSelection,
   type ProjectConversationCatalogue } from './project-conversation-catalogue-contract';
+import {decodeProjectExecutionCatalogue,decodeProjectExecutionReference,decodeProjectExecutionWindow,
+  type ProjectExecutionHistoryCatalogue,type ProjectExecutionReference,type ProjectExecutionHistoryWindow} from './project-execution-history-contract';
 import {decodeFreshConversationCatalogue,decodeFreshConversationReference,decodeFreshConversationWindow,
   type FreshConversationCatalogue,type FreshConversationReference,type FreshConversationWindow} from './fresh-conversation-reference';
 
@@ -18,6 +20,8 @@ export interface ProjectConversationCatalogueTransport {
    * authorize neither callback. Absence remains a partial source population. */
   freshReferences?(selection:{work_ref:string},signal:AbortSignal):Promise<unknown>;
   readFreshReference?(reference:FreshConversationReference,signal:AbortSignal):Promise<unknown>;
+  executionReferences?(selection:{work_ref:string},signal:AbortSignal):Promise<unknown>;
+  readExecutionReference?(reference:ProjectExecutionReference,signal:AbortSignal):Promise<unknown>;
 }
 
 /** One selected-project acquisition owner. No effects on mount, no global
@@ -27,7 +31,8 @@ export function createProjectConversationCatalogueOwner(input:{transport:Project
   const transport=input.transport;
   const methods={context:transport.context,auth:transport.authGeneration,available:transport.available,
     subscribe:transport.subscribe,refresh:transport.refreshContext,catalogue:transport.catalogue,read:transport.read,
-    freshReferences:transport.freshReferences,readFreshReference:transport.readFreshReference};
+    freshReferences:transport.freshReferences,readFreshReference:transport.readFreshReference,
+    executionReferences:transport.executionReferences,readExecutionReference:transport.readExecutionReference};
   let retired=false,epoch=0,pageTicket=0;
   let members=new Map<string,ProjectConversationCatalogue['conversations'][number]>();
   let membershipContext:ReturnType<typeof capture>=null;
@@ -36,12 +41,17 @@ export function createProjectConversationCatalogueOwner(input:{transport:Project
   let freshReadEpoch=0;
   let lastFreshRead:{window:FreshConversationWindow;context:NonNullable<ReturnType<typeof capture>>;
     pageTicket:number;row:FreshConversationCatalogue['entries'][number]}|null=null;
+  let executionTicket=0,executionReadEpoch=0,executionContext:ReturnType<typeof capture>=null;
+  let executionMembers=new Map<string,ProjectExecutionHistoryCatalogue['entries'][number]>();
+  let lastExecutionRead:{window:ProjectExecutionHistoryWindow;context:NonNullable<ReturnType<typeof capture>>;
+    pageTicket:number;row:ProjectExecutionHistoryCatalogue['entries'][number]}|null=null;
   const pending=new Set<AbortController>(),listeners=new Set<()=>void>();
   function fail():never{throw new Error('PROJECT_CONVERSATION_UNAVAILABLE');}
   function sameMethods(){return transport.context===methods.context&&transport.authGeneration===methods.auth&&
     transport.available===methods.available&&transport.subscribe===methods.subscribe&&transport.refreshContext===methods.refresh&&
     transport.catalogue===methods.catalogue&&transport.read===methods.read&&
-    transport.freshReferences===methods.freshReferences&&transport.readFreshReference===methods.readFreshReference;}
+    transport.freshReferences===methods.freshReferences&&transport.readFreshReference===methods.readFreshReference&&
+    transport.executionReferences===methods.executionReferences&&transport.readExecutionReference===methods.readExecutionReference;}
   function capture(){
     try{
       const context=methods.context.call(transport),auth=methods.auth.call(transport),selection=input.selectionGeneration();
@@ -55,7 +65,8 @@ export function createProjectConversationCatalogueOwner(input:{transport:Project
     now.auth===captured.auth&&now.selection===captured.selection&&now.epoch===captured.epoch;}
   function invalidateFreshRead(){freshReadEpoch++;lastFreshRead=null;for(const listener of listeners)listener();}
   function invalidate(){epoch++;pageTicket++;freshTicket++;members.clear();membershipContext=null;freshMembers.clear();freshContext=null;
-    freshReadEpoch++;lastFreshRead=null;for(const c of pending)c.abort();pending.clear();for(const listener of listeners)listener();}
+    freshReadEpoch++;lastFreshRead=null;executionTicket++;executionReadEpoch++;executionMembers.clear();executionContext=null;lastExecutionRead=null;
+    for(const c of pending)c.abort();pending.clear();for(const listener of listeners)listener();}
   const unsubscribe=methods.subscribe.call(transport,invalidate);
   async function bounded<T>(signal:AbortSignal,operation:(signal:AbortSignal)=>Promise<T>){
     if(signal.aborted)fail();const controller=new AbortController();pending.add(controller);
@@ -113,6 +124,28 @@ export function createProjectConversationCatalogueOwner(input:{transport:Project
         await methods.readFreshReference!.call(transport,requested,child),requested));
       if(!current(captured)||ticket!==freshTicket||readEpoch!==freshReadEpoch||freshMembers.get(requested.root_job_id)!==row||result.initial_message!==row.initial_message)fail();
       lastFreshRead={window:result,context:captured,pageTicket:ticket,row};return result;
+    },
+    currentExecution(window:ProjectExecutionHistoryWindow){const value=lastExecutionRead;return !!value&&value.window===window&&
+      current(value.context)&&value.pageTicket===executionTicket&&executionMembers.get(window.reference.root_job_id)===value.row;},
+    async executionCatalogue(args:{workRef:string;signal:AbortSignal}){
+      const captured=capture(),ticket=++executionTicket;executionMembers.clear();executionContext=null;executionReadEpoch++;lastExecutionRead=null;
+      if(!captured||args.workRef!==captured.workRef||!methods.executionReferences||!methods.readExecutionReference)fail();
+      const page=await bounded(args.signal,async signal=>decodeProjectExecutionCatalogue(
+        await methods.executionReferences!.call(transport,{work_ref:args.workRef},signal),args.workRef));
+      if(ticket!==executionTicket||!current(captured))fail();
+      executionMembers=new Map(page.entries.map(row=>[row.reference.root_job_id,row]));executionContext=captured;return page;
+    },
+    async readExecution(reference:unknown,signal:AbortSignal){
+      const captured=executionContext;
+      if(!captured||!current(captured)||!methods.readExecutionReference)fail();
+      const requested=decodeProjectExecutionReference(reference,captured.workRef),row=executionMembers.get(requested.root_job_id),ticket=executionTicket;
+      if(!row||JSON.stringify(row.reference)!==JSON.stringify(requested))fail();
+      const readEpoch=++executionReadEpoch;lastExecutionRead=null;
+      const result=await bounded(signal,async child=>decodeProjectExecutionWindow(
+        await methods.readExecutionReference!.call(transport,requested,child),requested));
+      if(!current(captured)||ticket!==executionTicket||readEpoch!==executionReadEpoch||
+        executionMembers.get(requested.root_job_id)!==row||result.goal!==row.goal)fail();
+      lastExecutionRead={window:result,context:captured,pageTicket:ticket,row};return result;
     },
     dispose(){if(retired)return;retired=true;invalidate();unsubscribe();listeners.clear();},
   });

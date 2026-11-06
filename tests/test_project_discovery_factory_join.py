@@ -42,7 +42,8 @@ def test_shared_installed_read_factory_uses_one_owner_without_supervisor_and_rea
     baseline=CanonicalFixtureCache(j['code_root'],j['tmp_path']/'canonical-baseline',
         mastermind_revision=j['factory'].service.config.proof_base_sha)
     cfg=publisher.ServerConfig(repo_root=Path.cwd(),macro_root=str(j['code_root']),bindings_path=None,
-        token='inert-fixed-read',origin=publisher.UNIX_CONTROL_ROOM_ORIGIN,port=0,state_ttl=3600,validity_sample_fn=baseline.owner.validity_sample_fn)
+        token='inert-fixed-read',origin=publisher.UNIX_CONTROL_ROOM_ORIGIN,port=0,state_ttl=3600,
+        validity_sample_fn=baseline.owner.validity_sample_fn)
     cfg.compose_inputs=lambda *_args,**_kwargs:baseline.compile()
     listener,path=spawn_workspace_room_listener(monkeypatch)
     hosted=HostedControlRoom(cfg,listener=listener,socket_path=path,allowed_peer_uids=(os.geteuid(),))
@@ -95,24 +96,19 @@ def test_shared_installed_read_factory_uses_one_owner_without_supervisor_and_rea
 
 
 def test_phase1c_registers_the_existing_source_factory_paired_read_method(tmp_path,monkeypatch,identity):
-    from control_plane import workspace_read_service as workspace
+    from control_plane import workspace_read_provider_binding as binding
     from tests.test_workspace_source_join import test_installed_factory_is_inert_and_uses_late_service_custody
     from types import MethodType
-    original=workspace.workspace_provider_factory
+    original=binding.bind_installed_read_provider
     seen=[]
-    def capture(**kwargs):
-        method=kwargs.get('canonical_project_read_bindings_factory')
+    def capture(factory, method):
+        # Observe the constructor's existing binding seam. Replacing the factory
+        # itself would invalidate the code identity this composition must prove.
         assert type(method) is MethodType
         assert type(method.__self__) is InstalledWorkspaceSourceOperations
         assert method.__func__ is InstalledWorkspaceSourceOperations.read_bindings
-        assert kwargs.get('canonical_project_data_factory') is None
         seen.append(method)
-        # The nominal constructor imports its own actual function code. The
-        # observer is not an eligible constructor and must not replace it
-        # while the real function establishes that private identity.
-        with monkeypatch.context() as actual:
-            actual.setattr(workspace,'workspace_provider_factory',original)
-            return original(**kwargs)
-    monkeypatch.setattr(workspace,'workspace_provider_factory',capture)
+        return original(factory, method)
+    monkeypatch.setattr(binding,'bind_installed_read_provider',capture)
     test_installed_factory_is_inert_and_uses_late_service_custody(tmp_path,monkeypatch,True,True,identity)
     assert len(seen)==1

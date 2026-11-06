@@ -286,7 +286,7 @@ function makeClient(
 
 function makeBinding(
   client: ExecutiveToolClient,
-  config: LaunchBindingConfig = RESEARCH_CONFIG,
+  config: LaunchBindingConfig | null = RESEARCH_CONFIG,
   store: PendingPointerStore = makeStore(),
   session: OrchestratorSessionPresentation | null = SESSION,
 ) {
@@ -315,6 +315,28 @@ function expectedResearchPayload(form: LaunchForm = RESEARCH_FORM) {
     workstream: WORKSTREAM,
   };
 }
+
+describe("Executive owner without a legacy Launch manifest", () => {
+  it("retains the existing owner and store while refusing every new legacy launch entry", async () => {
+    const idle = makeClient(() => barePreflight("not_found"));
+    const configured = makeBinding(idle.client);
+    const intent = configured.makeLaunchIntent(RESEARCH_FORM)!;
+    const pointer = configured.port.prepare(intent);
+    const store = makeStore();
+    const binding = makeBinding(idle.client, null, store, null);
+
+    expect(completeOrchestratorCommandBinding(binding)).toBe(binding);
+    expect(binding.port.context()).toEqual({ principalScope: PRINCIPAL, generation: GENERATION });
+    expect(binding.store).toBe(store);
+    expect(binding.getView()).toEqual({ projects: [], profiles: [], session: null });
+    expect(binding.makeLaunchIntent(RESEARCH_FORM)).toBeNull();
+    expect(() => binding.port.prepare(intent)).toThrow(COMMAND_ROUTE_UNAVAILABLE);
+    expect(await binding.port.submit(pointer, intent, new AbortController().signal)).toMatchObject({
+      operationKey: pointer.operationKey, disposition: "refused", reason: COMMAND_ROUTE_UNAVAILABLE,
+    });
+    expect(idle.log).toEqual([]);
+  });
+});
 
 describe("T3 makeLaunchIntent", () => {
   const idle = makeClient(() => barePreflight("not_found"));

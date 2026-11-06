@@ -22,11 +22,12 @@ from tests.test_mastermind_os_session_transport import (
 ROUTE = "/os/executive/session/send"
 
 
-def test_only_one_fixed_post_extends_the_complete_current_predecessor():
+def test_session_send_is_one_fixed_post_in_the_complete_composed_profile():
     assert ROUTE in edge.POST_ROUTES
     assert edge.PRE_BYOK_ROLES_GET_ROUTES == edge.PRE_NATIVE_SESSION_SEND_GET_ROUTES
     assert edge.GET_ROUTES == edge.PRE_BYOK_ROLES_GET_ROUTES + ("/workspace/byok/roles/current",)
-    assert edge.POST_ROUTES == edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES + (ROUTE,)
+    assert edge.PRE_BYOK_ROLES_POST_ROUTES == edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES + (ROUTE,)
+    assert edge.POST_ROUTES == edge.PRE_BYOK_ROLES_POST_ROUTES + edge.PROJECT_EXECUTION_POST_ROUTES
     assert ROUTE not in edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES
     assert (edge.PRE_NATIVE_SESSION_SEND_GET_ROUTES,
             edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
@@ -141,3 +142,41 @@ def test_entered_original_send_expiry_remains_unknown_without_retry(rsa_key):
     assert status == 202 and result["effect"] == "UNKNOWN"
     assert result["operation_key"] == KEY and result["data"] is None
     assert len(peer.calls) == 1
+
+
+def test_composed_profile_preserves_parent_native_and_project_predecessors():
+    from integrations.mastermind_executive_app.project_execution_transport import ROUTES as execution_routes
+    from integrations.executive_mcp.server import _WORKSPACE_ADDITIONAL_GET_ROUTES
+
+    assert edge.PRE_BYOK_ROLES_POST_ROUTES == edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES + (ROUTE,)
+    assert edge.PRE_PROJECT_EXECUTION_GET_ROUTES == edge.PRE_BYOK_ROLES_GET_ROUTES + edge.BYOK_READ_ROUTES
+    assert edge.PRE_PROJECT_EXECUTION_POST_ROUTES == edge.PRE_BYOK_ROLES_POST_ROUTES
+    assert edge.POST_ROUTES == edge.PRE_PROJECT_EXECUTION_POST_ROUTES + edge.PROJECT_EXECUTION_POST_ROUTES
+    assert edge.PROJECT_EXECUTION_PRE_MERGE_GET_ROUTES == edge.PRE_NATIVE_SESSION_SEND_GET_ROUTES
+    assert edge.PROJECT_EXECUTION_PRE_MERGE_POST_ROUTES == edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES + edge.PROJECT_EXECUTION_POST_ROUTES
+    assert "/workspace/byok/roles/current" in _WORKSPACE_ADDITIONAL_GET_ROUTES
+    assert set(edge.PROJECT_EXECUTION_POST_ROUTES) == set(execution_routes) | {
+        "/os/executive/session/project-executions", "/os/executive/session/project-execution-read"}
+    for pair in [(edge.PRE_BYOK_ROLES_GET_ROUTES, edge.PRE_BYOK_ROLES_POST_ROUTES),
+                 (edge.PRE_PROJECT_EXECUTION_GET_ROUTES, edge.PRE_PROJECT_EXECUTION_POST_ROUTES),
+                 (edge.PROJECT_EXECUTION_PRE_MERGE_GET_ROUTES, edge.PROJECT_EXECUTION_PRE_MERGE_POST_ROUTES)]:
+        assert pair in edge.TRANSITION_ROUTE_PROFILES
+    assert all("*" not in path for path in edge.GET_ROUTES + edge.POST_ROUTES)
+
+
+@pytest.mark.parametrize("fault", ["missing_byok", "missing_project_post", "extra_byok", "wildcard_send"])
+def test_composed_route_profiles_refuse_partial_or_expanded_sources(fault):
+    old = predecessor()
+    routes = method_routes(old)
+    routes[0]["match"][0]["path"] = sorted(set(edge.GET_ROUTES) | set(edge.asset_routes(manifest())))
+    routes[1]["match"][0]["path"] = list(edge.POST_ROUTES)
+    if fault == "missing_byok":
+        routes[0]["match"][0]["path"].remove("/workspace/byok/roles/current")
+    elif fault == "missing_project_post":
+        routes[1]["match"][0]["path"].remove("/os/executive/project-execution/submit")
+    elif fault == "extra_byok":
+        routes[0]["match"][0]["path"].append("/workspace/byok/keys/current")
+    else:
+        routes[1]["match"][0]["path"].append("/os/executive/session/*")
+    with pytest.raises(ValueError):
+        prepare_config(fullconfig=old, current_manifest=manifest(), candidate_manifest=manifest(), relay_port=49152)

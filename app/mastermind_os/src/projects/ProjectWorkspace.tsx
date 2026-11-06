@@ -29,6 +29,8 @@ export interface ProjectWorkspaceProps {
   pauseControl?: ReactNode;
   filesPanel?: ReactNode;
   detailsPanel?: ReactNode;
+  startWorkControl?: ReactNode;
+  launchPanel?: ReactNode;
 }
 
 interface WorkspaceCopy {
@@ -82,6 +84,8 @@ export function ProjectWorkspace(props: ProjectWorkspaceProps) {
     pauseControl,
     filesPanel,
     detailsPanel,
+    startWorkControl,
+    launchPanel,
   } = props;
   const copy = COPY[locale];
   const Heading = props.headingLevel === 1 ? "h1" : "h2";
@@ -187,6 +191,7 @@ export function ProjectWorkspace(props: ProjectWorkspaceProps) {
           )}
         </div>
         <div className="mm-project-workspace__controls">
+          {startWorkControl}
           {filesControl}
           {detailsControl}
         </div>
@@ -206,6 +211,9 @@ export function ProjectWorkspace(props: ProjectWorkspaceProps) {
           ) : null}
         </div>
       ) : null}
+      <div className="mm-project-workspace__launch" data-workspace-slot="launch">
+        {launchPanel}
+      </div>
       {/* Conversation first, then composer: unboxed owner content in stable
           slots. Toggling disclosures never moves or remounts these nodes. */}
       <div className="mm-project-workspace__conversation" data-workspace-slot="conversation">

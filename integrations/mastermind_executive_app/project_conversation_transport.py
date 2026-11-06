@@ -1,4 +1,4 @@
-"""Four fixed project conversation READs; no registration or mutation owner.
+"""Fixed project conversation READs; no registration or mutation owner.
 
 The actual installed OsSessionTransportApp owns the audited verifier pairs.
 This leaf reuses that exact current owner; neither history-context booleans,
@@ -30,8 +30,11 @@ ROUTES = {
     '/os/executive/session/conversation-read': 'read',
     '/os/executive/session/fresh-conversations': 'fresh_references',
     '/os/executive/session/fresh-conversation-read': 'fresh_read',
+    '/os/executive/session/project-executions': 'execution_references',
+    '/os/executive/session/project-execution-read': 'execution_read',
 }
 _HEX = re.compile(r'[0-9a-f]{64}')
+_JOB_STATES = ('QUEUED', 'RUNNING', 'CHECKPOINTED', 'RATE_LIMITED', 'FAILED', 'LOST', 'CANCEL_REQUESTED', 'COMPLETED', 'CANCELLED')
 
 
 def _fail():
@@ -113,10 +116,77 @@ def _payload(value, locator):
         _fail()
 
 
+def _execution_goal(value):
+    _literal(value, 16000)
+    if len(value) > 4000 or not value.strip() or "\x00" in value:
+        _fail()
+
+
+def _execution_result(data, operation, arguments):
+    from common.project_execution_private_contract import validate_previous_run
+    work = arguments['work_ref']
+    if operation == 'execution_references':
+        _closed(data, ('schema', 'work_ref', 'state', 'coverage', 'entries', 'can_send'))
+        coverage = _closed(data['coverage'], ('state', 'limit', 'returned'))
+        if (data['schema'] != 'mastermind.project_execution_references.v1'
+                or data['work_ref'] != work or data['state'] != 'AVAILABLE' or data['can_send'] is not False
+                or coverage['state'] not in ('COMPLETE', 'PARTIAL')
+                or type(coverage['limit']) is not int or coverage['limit'] != 8
+                or type(data['entries']) is not list or len(data['entries']) > 8
+                or type(coverage['returned']) is not int or coverage['returned'] != len(data['entries'])):
+            _fail()
+        roots, previous_id = set(), None
+        for row in data['entries']:
+            _closed(row, ('kind', 'reference', 'goal', 'root_state'))
+            ref = wire.arguments(row['reference'], 'execution_read')
+            if (row['kind'] != 'project_execution' or ref['work_ref'] != work
+                    or ref['root_job_id'] in roots or row['root_state'] not in _JOB_STATES
+                    or previous_id is not None and ref['root_event_id'] >= previous_id):
+                _fail()
+            roots.add(ref['root_job_id'])
+            previous_id = ref['root_event_id']
+            _execution_goal(row['goal'])
+        return
+    _closed(data, ('schema', 'kind', 'reference', 'state', 'goal', 'continuation_mode',
+                   'locator', 'previous_run', 'result', 'parent_witness', 'can_send'))
+    reference = wire.arguments(data['reference'], 'execution_read')
+    locator = _closed(data['locator'], ('work_ref', 'root_job_id', 'job_id', 'attempt_id'))
+    if (data['schema'] != 'mastermind.project_execution_window.v1' or data['kind'] != 'project_execution'
+            or reference != arguments or data['state'] not in _JOB_STATES or data['can_send'] is not False
+            or data['continuation_mode'] not in ('DURABLE', 'ATTENDED') or locator['work_ref'] != work
+            or locator['root_job_id'] != reference['root_job_id'] or locator['job_id'] != reference['root_job_id']):
+        _fail()
+    if locator['attempt_id'] is not None:
+        _literal(locator['attempt_id'], 128)
+    _execution_goal(data['goal'])
+    if data['previous_run'] is not None:
+        previous = validate_previous_run(data['previous_run'])
+        if previous['root_job_id'] == reference['root_job_id'] or previous['root_event_id'] >= reference['root_event_id']:
+            _fail()
+    if data['state'] != 'COMPLETED':
+        if data['result'] is not None or data['parent_witness'] is not None:
+            _fail()
+        return
+    result = _closed(data['result'], ('digest', 'envelope', 'terminal_receipt_sha256'))
+    witness = validate_previous_run(data['parent_witness'])
+    _payload({key: result[key] for key in ('digest', 'envelope')}, locator)
+    _hex(result['terminal_receipt_sha256'])
+    if (result['envelope'].get('role') != 'aggregation'
+            or any(witness[key] != reference[key] for key in ('root_job_id', 'root_event_id',
+                'root_event_sha256', 'project_execution_source_sha256'))
+            or witness['attempt_id'] != locator['attempt_id']
+            or witness['result_envelope_sha256'] != result['digest']
+            or witness['terminal_receipt_sha256'] != result['terminal_receipt_sha256']):
+        _fail()
+
+
 def validate_result(value, operation, arguments):
     """Closed source DTO/selector binding, not a second source authority."""
     data = _json(value)
     work = arguments['work_ref']
+    if operation in ('execution_references', 'execution_read'):
+        _execution_result(data, operation, arguments)
+        return data
     if operation == 'catalogue':
         _closed(data, ('schema', 'work_ref', 'coverage', 'conversations', 'next_cursor', 'high_water', 'can_send'))
         if (data['schema'] != 'mastermind.project_conversation_catalogue.v1' or data['work_ref'] != work

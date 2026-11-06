@@ -1,14 +1,16 @@
 """Bounded, original-principal project conversations over existing Runtime.
 
 A conversation is an actual retained native epoch/session, not a reply, target
-label, browser login, or guessed thread. Only immutable owned CONTINUE records
-establish membership here. Sessions with no such evidence are outside coverage.
+label, browser login, or guessed thread. Immutable owned CONTINUE records establish native
+conversation membership. Separately qualified PROJECT_EXECUTION roots expose
+original run inputs and validated results through the existing Runtime owner.
 The host authenticates each fixed READ operation independently; a context DTO,
 opaque selector, catalogue row or process-local constructor is not a grant.
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 from collections.abc import Callable
@@ -78,17 +80,19 @@ def _bounded(value):
 
 
 class RuntimeProjectConversationsReader:
-    """Nominal installed original-request owner; no SQL, discovery or writes.
+    """Nominal installed original-request owner; no registry or writes.
 
     ``guard`` is supplied by the authenticated fixed operation's live host
     scope. It is never taken from public JSON. All source calls are incumbent
     bounded Runtime selections or the existing authenticated native reply read.
     """
-    def __init__(self, original: RuntimeSessionReturn):
+    def __init__(self, original: RuntimeSessionReturn, *, supervisor=None):
         if type(original) is not RuntimeSessionReturn:
             raise TypeError("canonical RuntimeSessionReturn required")
         self._original = original
         self._runtime = original.runtime
+        self._supervisor = supervisor
+        self._execution_source = _execution_source_for(supervisor, self._runtime)
         self._source = (original.socket_path, original.service_call, original._trusted_read_pair)
         self._methods = tuple(getattr(getattr(original, name), "__func__", getattr(original, name)) for name in
             ("session_reply_references", "resolve_read", "_continuation_messages"))
@@ -105,6 +109,61 @@ class RuntimeProjectConversationsReader:
                 or (self._original.socket_path, self._original.service_call, self._original._trusted_read_pair) != self._source
                 or methods != self._methods
                 or _principal(principal) != identity):
+            _refused()
+
+    def _execution_scope(self, principal, identity, guard):
+        self._current(principal, identity, guard)
+        if (self._supervisor is None
+                or _execution_source_for(self._supervisor, self._runtime) != self._execution_source
+                or self._original._trusted_read_pair is None):
+            _refused()
+        # The actual installed READ/SUBMIT pair anchors the caller policy. The
+        # stored namespace intentionally excludes policy id; rotation never
+        # creates a new original principal or grants send authority.
+        policies = self._original._trusted_read_pair
+        matches = [policy for policy in policies if policy.policy_id == identity["policy_id"]]
+        if len(matches) != 1:
+            _refused()
+        policy = matches[0]
+        if (identity["resource"] != policy.resource
+                or identity["issuer_digest"] != hashlib.sha256(policy.issuer.encode()).hexdigest()
+                or identity["subject_digest"] not in policy.allowed_subject_digests
+                or frozenset(principal.scopes) != frozenset(policy.required_scopes)):
+            _refused()
+        from common.executive_principal_namespace import principal_scope_from_identity
+        return principal_scope_from_identity(**{key: identity[key] for key in
+            ("issuer_digest", "subject_digest", "client_ref", "resource")})
+
+    def execution_references(self, principal, arguments, *, guard):
+        try:
+            from control_plane.project_execution_reference import execution_references
+            identity = _principal(principal)
+            scope = self._execution_scope(principal, identity, guard)
+            def current():
+                if self._execution_scope(principal, identity, guard) != scope:
+                    _refused()
+                return True
+            result = execution_references(self._runtime, self._supervisor, arguments,
+                principal_scope=scope, guard=current)
+            current()
+            return result
+        except Exception:
+            _refused()
+
+    async def execution_read(self, principal, arguments, *, guard):
+        try:
+            from control_plane.project_execution_reference import execution_read
+            identity = _principal(principal)
+            scope = self._execution_scope(principal, identity, guard)
+            def current():
+                if self._execution_scope(principal, identity, guard) != scope:
+                    _refused()
+                return True
+            result = execution_read(self._runtime, self._supervisor, arguments,
+                principal_scope=scope, guard=current)
+            current()
+            return result
+        except Exception:
             _refused()
 
     def _record(self, principal, identity, work_ref, read_ref, revision, guard):
@@ -239,11 +298,31 @@ class RuntimeProjectConversationsReader:
 __all__ = ["RuntimeProjectConversationsReader", "validate_selection"]
 
 
+def _execution_source_for(supervisor, runtime):
+    if supervisor is None:
+        return None
+    from control_plane.executive_runtime import Runtime
+    from control_plane.executive_supervisor import ExecutiveSupervisor
+    if type(runtime) is not Runtime or type(supervisor) is not ExecutiveSupervisor or supervisor.runtime is not runtime:
+        raise TypeError("original project ExecutiveSupervisor required")
+    original = supervisor._project_input_owner or supervisor
+    if (type(original) is not ExecutiveSupervisor or original.runtime is not runtime
+            or original.instance_id != supervisor.instance_id or original._project_input_owner is not None):
+        raise TypeError("original project input owner required")
+    return (supervisor, runtime, runtime.store, supervisor.runs_root, supervisor.instance_id,
+        original, original.runs_root, original.instance_id)
+
+
 def _installed_reader_current(reader):
     """Integration owns the exact installed source types, core owns the seal."""
     if type(reader) is not RuntimeProjectConversationsReader:
         return False
     original = reader._original
+    try:
+        if _execution_source_for(reader._supervisor, reader._runtime) != reader._execution_source:
+            return False
+    except (TypeError, AttributeError):
+        return False
     return (type(original) is RuntimeSessionReturn and original.runtime is reader._runtime
         and reader._source == (original.socket_path, original.service_call, original._trusted_read_pair)
         and reader._methods == tuple(getattr(getattr(original, name), "__func__", getattr(original, name))

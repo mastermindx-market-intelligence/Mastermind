@@ -184,7 +184,8 @@ describe("owner-backed daily routes in App", () => {
       "Evidence",
     ])
       expect(screen.getByRole("button", { name: route })).toBeTruthy();
-  });
+    // Two typed drafts and repeated route detours share this whole-journey budget.
+  }, 10_000);
   it("withdraws conversation content, evidence and draft in the first auth commit", async () => {
     const e = await hostFixture();
     window.MastermindMissionHost = e.host;

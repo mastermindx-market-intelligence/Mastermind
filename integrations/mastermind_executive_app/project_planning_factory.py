@@ -400,7 +400,7 @@ class ProjectPlanningAppFactory:
             raise ValueError('project planning configured CODE changed; no rebase')
         return saved[1],saved[2]
 
-    def _current(self,principal,invocation,operation_key,work_ref,*,current_only=False):
+    def _authorize_project_request(self,principal,invocation,operation_key,work_ref,*,require_execution=True):
         service=self.service
         now=self.clock()
         if self.policy_loader is not None and self.policy_loader()!=self.policies:
@@ -414,9 +414,13 @@ class ProjectPlanningAppFactory:
                 or type(principal.issued_at) is not int or type(principal.expires_at) is not int
                 or type(now) not in (int,float) or not principal.issued_at <= now < principal.expires_at):
             raise ValueError("project planning verified Executive principal refused")
+        planning_request = (invocation._project_planning_operation in {'submit','status','result','consume','prepare_proposal'}
+            and invocation._project_planning_work_ref == work_ref)
+        execution_request = (getattr(invocation, '_project_execution_operation', None) in {'preview','submit','status'}
+            and getattr(invocation, '_project_execution_work_ref', None) == work_ref)
         if (current_foreground_operation() is not invocation
-                or invocation._project_planning_operation not in {'submit','status','result','consume','prepare_proposal'}
-                or invocation._operation_key!=operation_key or invocation._project_planning_work_ref!=work_ref
+                or not (planning_request or execution_request)
+                or invocation._operation_key!=operation_key
                 or dataclasses.asdict(invocation._principal)!=dataclasses.asdict(principal)
                 or self.app_binding is not service._ceo_ingress_app_binding
                 or not self.app_binding.armed or service._closing or not service._ceo_ingress_ready
@@ -434,11 +438,17 @@ class ProjectPlanningAppFactory:
         from integrations.mastermind_workspace_app.owner_context import workspace_principal_scope
         workspace_scope=workspace_principal_scope(workspace)
         try:
-            service._require_ceo_submit_admission()
-            service._require_current_autonomy()
+            if require_execution:
+                service._require_ceo_submit_admission()
+                service._require_current_autonomy()
         except Exception:
             raise ValueError("project planning existing Executive admission refused") from None
         invocation._require_live()
+        return workspace,workspace_scope,stamp
+
+    def _current(self,principal,invocation,operation_key,work_ref,*,current_only=False):
+        service=self.service
+        workspace,workspace_scope,stamp=self._authorize_project_request(principal,invocation,operation_key,work_ref)
         policy,commission=self._fixed_planning_code(invocation)
         from control_plane.agentos_project_plan import AgentOsProjectPlanReader
         from common.workspace_project_plan_contract import validate_body
