@@ -7,56 +7,172 @@ skill: web_ceo_delegation
 
 # WEB CEO DELEGATION — Role-Adaptive Principal Work
 
-Enrolled companion procedure. This skill is enrolled in the same pinned INDEX as `ACTIVE_EXECUTION.md` for substantial Web CEO work that requires detailed role selection or delegation. ACTIVE_EXECUTION remains the sole active-turn, no-delta and finalization owner. Current authority, worker-routing, source-custody, admission, effect and dialogue laws remain controlling. This procedure selects a working approach; it never selects a provider account, changes a model setting, or grants execution authority. Because `scripts/ohf/fresh_sol_eval.py` materializes every `docs/sol_skills/*.md`, this file also appears in each fresh-Sol evaluation bundle pinned at or after its source merge. That automatic placement is evaluation exposure, not production enrollment; procedural enrollment comes only from the same pinned INDEX and still grants no runtime authority or live behavior.
+Enrolled companion procedure in the same pinned INDEX as `ACTIVE_EXECUTION.md`.
+Load for substantial Web CEO role selection/delegation. ACTIVE_EXECUTION remains
+sole active-turn, no-delta and finalization owner. Existing authority, routing,
+custody, admission, effect and dialogue laws control. No account, mode or authority
+is selected here. `scripts/ohf/fresh_sol_eval.py` materializes the fresh-Sol evaluation bundle:
+evaluation exposure, not production enrollment, admission or behavior proof.
+Procedural enrollment comes only from the same pinned INDEX.
+
+Canonical owners: ACTIVE_EXECUTION (Steps 2A, 2B, 3, 8) owns active-turn/effect duties;
+`docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md` owns routing/economics and is
+mandatory for every meaningful worker/model delegation. Load those owners from the
+same pin before the action they constrain. Operator scope includes ordinary return
+adjudication; the full mandatory owner retains its conditions.
 
 ## 1. Choose the work profile, not a prestige hierarchy
 
-`CONCENTRATED_JUDGMENT`: prefer Astra when a mission's dominant need is difficult architecture, ambiguity resolution, synthesis, adversarial judgment or a concentrated decision that unlocks implementation. When that same turn independently qualifies for Pro mode under governing law, Astra Pro is the provisional preference for this profile.
+`CONCENTRATED_JUDGMENT`: provisionally prefer Astra for difficult architecture,
+ambiguity, synthesis and adversarial decisions unlocking implementation. Prefer
+Astra Pro only when the turn independently qualifies under governing Pro law.
 
-`SUSTAINED_ORCHESTRATION`: prefer Sol when a mission's dominant need is extended decision-bearing orchestration: coherent decomposition, worker-return adjudication, bounded repair, integration and advancement of successive authorized dependencies. When that same turn independently qualifies for Pro mode under governing law, Sol Pro is the provisional preference for this profile. This is useful principal work, not mechanical labor.
+`SUSTAINED_ORCHESTRATION`: prefer Sol for genuine principal sequencing, exceptions
+and cross-domain acceptance, not routine management merely for fewer tokens:
+Sol/Opus may consume the same scarce subscription pool as Astra/Fable.
 
-These are provisional role preferences, not duration guarantees, service limits, mandatory elapsed times, reasoning-mode admission, or runtime/model aliases. Either model may perform either profile when current evidence and capability favor it. Do not force an Astra-to-Sol handoff, add two principals to every task, or interrupt a productive incumbent just because of a model label. One existing action-authoritative responsibility and current RuntimeBinding remain in charge.
+`OPERATOR_OWNED_DELIVERY`: apply the same-pin mandatory routing addendum Section1B
+for economical admitted operators, delegated easy labor, integrated principal returns,
+reserved exceptions and actual role loading. Load
+`skills/mastermind-fabric-orchestration/SKILL.md` and only the assigned role at this
+pin; an existing valid load is reusable. This references the existing owner, not
+optionalizes its before-dispatch conditions.
 
-Reasoning-mode admission remains separate and fail-closed. The default is `COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT` with `CHAT_REASONING_MODE: NON_PRO_DEFAULT`. A Pro turn must carry the complete governing exception receipt, cite one currently allowed `PRO_MODE_TASK_CLASS`, satisfy the current duration and stop-condition rules, and remain eligible after the turn itself is classified. A substantive mission may include routine lifecycle steps, but standalone handoff, `ACK / PICKUP_ACK / START / CONTINUE / STOP`, status, polling, routing, mechanical edit, test or simple-review turns do not inherit Pro eligibility. Missing, stale, under-duration, over-duration or ineligible receipts produce `PRO_MODE_REFUSED / USE_NON_PRO_MODE`. Never invent a task class or pad a duration estimate; consume #506 or its accepted successor when that owner lawfully changes the gate. `SUSTAINED_ORCHESTRATION` is a work profile, not a `PRO_MODE_TASK_CLASS`; under currently protected law, a Sol Pro turn must independently classify as `LONG_HORIZON_FRONTIER_REASONING`, `CROSS_SYSTEM_ARCHITECTURE`, `HARD_DEBUGGING`, or `ADVERSARIAL_JUDGMENT`.
+These provisional profiles are not duration guarantees, model aliases or Runtime roles/admission. Either model may fit either principal duty. No forced
+Astra-to-Sol handoff, extra principal or productive-incumbent displacement: one
+existing action-authoritative owner and current RuntimeBinding remain responsible.
+
+Automated Executive/ModelRouter budgets and Pro gates remain unchanged.
+`PRO_MODE_TASK_CLASS` stays `LONG_HORIZON_FRONTIER_REASONING`,
+`CROSS_SYSTEM_ARCHITECTURE`, `HARD_DEBUGGING` or `ADVERSARIAL_JUDGMENT`;
+ineligible requests retain `PRO_MODE_REFUSED / USE_NON_PRO_MODE`.
+`SUSTAINED_ORCHESTRATION` is not a `PRO_MODE_TASK_CLASS`. Attended sessions use
+ACTIVE_EXECUTION 1B, without fabricated automated admission/duration receipts or
+ceremonial reauthorization for routine steps. Labels grant no permission or budget.
 
 ## 2. Make a delegation decision before substantial routine execution
 
-A work unit is delegable when an independent eligible worker can acquire the necessary inputs, operate within a bounded scope and return checkable evidence without deciding a reserved principal/Chairman question. An investigation may have an unknown answer; specify the question, falsifier and evidence rather than pretending the solution is already known.
+A unit is delegable when an eligible independent worker can acquire its inputs,
+work within bounded scope and return checkable evidence without deciding a reserved
+question. Investigations specify question, falsifier and evidence, not a guessed
+answer. Compare the entire framing/delegation/build/review/repair/integration/
+consumption cycle, actual shared-pool scarcity, delay and useful parallel work.
+Quality and accepted-result cost outrank nominal token or agent-count savings.
 
-Compare direct principal effort with framing + necessary review + expected clarification/repair, also considering worker latency and useful independent work the principal can advance meanwhile. Delegate when total useful progress improves without lowering quality. Do not delegate merely to meet an agent-count quota or save nominal tokens at the expense of acceptance.
+Load and apply ACTIVE_EXECUTION Step 2A for direct-work reasons and reassessment:
+`LOWER_TOTAL_OVERHEAD`, `PRINCIPAL_JUDGMENT`, `UNIQUE_APPROVED_ACCESS`,
+`CRITICAL_PATH_SHORTCUT`, `NO_ELIGIBLE_PRE_EFFECT_WORKER`. A pointer is not a read.
 
-Retain substantial otherwise-delegable work only with a brief concrete reason: `LOWER_TOTAL_OVERHEAD`, `PRINCIPAL_JUDGMENT`, `UNIQUE_APPROVED_ACCESS`, `CRITICAL_PATH_SHORTCUT`, or `NO_ELIGIBLE_PRE_EFFECT_WORKER`. These are explanatory notes aligned to the active-turn owner, not new lifecycle states or runtime enums. Reassess when the remaining task becomes routine, tool work repeats or a repair cycle fails without adding evidence.
+### Optional layers, conserved root
+
+Choose the shallowest capable route; CEO -> native coordinator -> Fabric operator
+-> Fabric worker is optional, not a required chain.
+
+| Assigning function | Eligible next function |
+|---|---|
+| CEO | Direct Fabric worker, self-executing operator, useful native coordinator, or own principal work |
+| Native coordinator | Worker, useful operator/coordinator, or own judgment/integration |
+| Fabric operator | Own execution or separable child within its grant |
+| Fabric worker | Leaf execution; decomposition returns to its parent |
+
+Omitting a manager skips no deterministic admission, capacity, genuinely binding
+review, plan provenance, cleanup or retained-result owner. Titles/native depth are not
+Runtime roles/depth. Shell tasks need no fictional planner Attempt; Runtime tasks
+still need valid owner plan/revision provenance.
+
+Native coordination preserves actual original-root ancestry and bounded commission;
+its own native identity is immediate Fabric parent. Never reset root accounting,
+copy a native ID into `parent_job_id`, or treat caller root/role strings as auth.
+Existing atomic admission/budget owners govern; unqualified mixed accounting is a
+route limitation, not another registry/allowance. Return exact retained bytes to
+the assigning parent. Root-only Codex Stop is not a child hook: preserve its checks.
+Qualified foreground coordinators may adjudicate their child's result and summarize
+to the principal; foreground consumption is not idle Wake.
+
+Direct CEO -> worker is allowed; the commissioner retains adjudication unless it
+explicitly assigns that duty to an admitted operator. CEO -> operator -> workers,
+Meta-CEO -> CEO -> operator -> workers and Meta-CEO -> operator -> workers remain
+valid planning shapes, subject to actual bound depth and conserved-root admission.
 
 ## 3. Commission a complete bounded outcome
 
-Use the existing COMMISSION_WAVE and WORKER_AVENUE_ROUTING contracts. Include mission, why it matters, exact source and authority, scoped paths, non-goals, dependency/input identity, time/null/correction behavior, deterministic versus model method, failures, ordered implementation, acceptance/proof, stop condition and continuation return. Reuse the existing worker-brief/capability-package producer; do not build another compiler or paste the whole CEO transcript.
+Apply existing COMMISSION_WAVE and WORKER_AVENUE_ROUTING before dispatch. Use the
+existing brief/capability producer, not another compiler or the CEO transcript.
+Include mission/value, source/authority, paths/non-goals, dependency/input identity,
+time/null/correction semantics, deterministic/model method, failure handling,
+ordered implementation, acceptance/proof, stop boundary and continuation return.
 
-The worker owns its permitted investigate/build/check/repair loop. Do not require another Pro instruction for each mechanical command. Scope, budget, authority and architecture expansion return to their existing decision owner. Keep repair attempts bounded under the existing retry owner; repeated identical failures are a reason to change the hypothesis, route or plan after effect reconciliation, not to run the same loop indefinitely.
+Workers own the admitted investigate/build/check/repair loop without per-command
+Pro instructions. Scope, budget, authority or architecture expansion returns to
+its decision owner. Existing retry grants bound repair; unchanged failures require
+new evidence/hypothesis or lawful reassessment after effect reconciliation.
 
 ## 4. Capacity and money are real constraints
 
-Model Router fixes the first lawful suitability tier; Capacity Fabric ranks only eligible candidates inside that tier by least cost or least scarcity, without promoting a lower tier or waiving an exclusion. Model, harness, subscription plan, host and organizational role are distinct. A provider preference, installed binary, source catalog entry or successful unrelated native run is not live admission. Unknown quota, route proof or budget remains unknown.
+Model Router fixes the first lawful suitability tier; Capacity Fabric ranks only
+eligible candidates within it by least cost/scarcity. No lower-tier promotion or
+waived exclusion. Model/harness/plan/host/role differ. An installed binary, catalog,
+preference or unrelated native success is not admission; unknown quota/proof/budget
+stays unknown.
 
-Keep all applicable provider/credential/activation holds effective before any credential read or provider call. Cheap workers are not exceptions. Use the existing approved worker-spend envelope and include review/repair consumption; willingness to spend more is not an unlimited cap. Keep metered executive cognition separate from economical worker execution. Do not invent a direct-spawn, raw-socket, alternate-queue or ad hoc credential fallback when the supported path is absent. Before any effect begins, an already-approved available manual/operator route may still be used under current placement/custody law; report it as manual transport with separate pickup/START/evidence, not Executive dispatch. Missing Web tools do not prove the entire fabric is down. This is not permission to retry a platform-blocked action through another actor or carrier.
+Provider/credential/activation holds apply before reads or calls. Approved spend
+includes review/repair; willingness to spend is not unlimited. Metered cognition
+and economical labor are separate. No raw spawn/socket, credential fallback or new
+queue. Independently approved manual/operator routes remain available pre-effect
+under their own custody/placement: report actual manual pickup/START, not Executive
+dispatch. Missing Web tools prove no global outage and never permit denied-effect
+replay through another actor/carrier.
 
-Concurrency is bounded globally by independent ready work, admitted provider/host capacity, workspace custody, the approved budget and the principal's review/integration capacity. Include the existing COO policy's reserved review/repair descendants and depth/child limits, not just currently running workers; a free execution slot does not prove the full admitted work-and-review graph fits. Do not multiply a per-chat allowance across the fleet or split tightly coupled edits among conflicting workers. Nested helpers require existing explicit admission and accounting, not inherited recursive spawning permission.
+Sol normally coordinates analysis, review and integration; Astra adds useful
+frontier judgment. Eligible bounded leaf work defaults to admitted paid Fabric,
+including GLM, Qwen/Bailian and Grok when suitable. Use serviceable Executive ingress
+or the accepted attended stable-handle adapter under its procedure. Native Codex
+children are not substitutes merely because spawn is available/familiar.
+
+A native child requires a genuinely needed reasoning/coordinator role; never
+explicitly select Sol for routine implementation, tests, research or repair labor.
+Direct-retention reasons permit principal work, not native labor children. This includes the principal's authorized implementation/tests/repair without a ceremonial failed dispatch; preserve live/uncertain workers and denied effects. A Fabric
+admission/host/permission blocker means permitted direct work or that exact blocker,
+not silent native substitution. Optional native integration gaps do not bar an
+admitted adapter; QUEUED is neither worker START nor duplicate-dispatch permission.
+
+Record decisions/current route evidence briefly in the existing commission. One
+unavailable pool proves no universal outage: neither probe refused routes nor require
+a provider census. Preserve workers/effects; never cancel, replace or move started
+work to change token source. Explicit permission refusal is never fallback authority.
+Apply routing at the next pre-effect decision; record earlier native-for-paid
+mistakes with actual carriers, without replaying work.
+
+Bound global concurrency by independent ready work, admitted provider/host capacity,
+custody, budget and review capacity. Preserve reserved COO review/repair descendants,
+child/depth ceilings and tighter configured limits; count root/coordinators when
+included. Advertised slots/depth do not admit a full graph. Levels need shared
+accounting; leaves cannot expand scope. Never multiply allowances across chats/levels,
+split conflicting edits or claim unsupported execution. Native Sol-to-Sol success
+proves only that path; paid START/result/parent consumption needs Fabric proof.
 
 ## 5. Remain productive after dispatch
 
-Keep a substantive principal-owned task while workers execute: resolve the hardest uncertainty, prepare integration, examine a risky dependency, or advance another independent in-scope capability. Consume a useful return when it arrives; do not wait for all siblings unless the dependency requires it. Never duplicate a worker's assignment merely to fill time.
-
-Sustained Sol orchestration may include normal ACK/CONTINUE/repair/acceptance steps within a substantive mission. That does not promote a standalone acknowledgment, status check or polling turn into frontier reasoning. Astra may continue orchestration when it is productive, and Sol may directly resolve high-level architecture within its authority. Neither should stop solely because it has written a plan or delivered a packet while useful authorized work remains.
-
-Because `WEB_CEO_DELEGATION.md` is enrolled in the same pinned INDEX as `ACTIVE_EXECUTION.md`, consume ACTIVE_EXECUTION as the sole active-turn, no-delta and finalization owner and this companion only for detailed delegation. Enrollment changes procedure availability only; current Executive/COO cycle and control-service owners retain their authority. This skill adds no second stop-state machine. A failed or blocked lane freezes only its affected work; independently safe and authorized work can continue. Keep `EFFECT_UNKNOWN` on the exact operation/carrier until reconciled; never start a duplicate or silently move a started modifier to another session.
+Apply ACTIVE_EXECUTION Step 2B for overlap, repair and consumption, and Steps 7A/8
+for continuation/finalization; no second stop machine or Executive/COO authority
+is introduced. Advance substantive independent work and consume useful returns
+promptly, without duplicating assignments to fill time. Preserve exact `EFFECT_UNKNOWN`
+operations/carriers and started modifiers. ACK/CONTINUE/repair/acceptance inside a
+mission does not make standalone polling/relay frontier reasoning. Neither principal
+stops for a plan or packet while useful authorized work remains.
 
 ## 6. Consume evidence, not worker transcripts
 
-Normal returns contain canonical job/attempt identity, exact source/artifact revision, bounded summary, actual validation results, review disposition, unresolved facts and the next reserved decision. Full reasoning traces, source dumps and shell logs are not normal parent context. Inspect additional canonical evidence when contradictions or acceptance risk justify it.
-
-Adjust verification to consequence. The principal must not redo every worker step, but must inspect sufficient independent evidence to accept the result. A cheap worker that imposes repeated principal repair can be the expensive route. Independent review remains independent and grants no merge/release authority.
+Apply ACTIVE_EXECUTION 2B before consumption. Returns additionally bind canonical Job/Attempt, artifact revision, actual validation, independent verdict, unresolved facts and next reserved decision. Inspect proof proportionate to consequence/contradiction, not full traces/dumps. Include principal repair in total cost. Review grants no release authority.
 
 ## 7. Preserve continuity without fictional persistence
 
-Use existing Executive/COO/Dialogue/Wake and Agent OS continuation. Maintain enough recoverable state after material decisions and before dependency waits that a lawful successor can recover the objective, decisions, exact artifacts, incumbent effects and next action. Do not rely on predicting a hidden model ceiling or saving everything for the last minute. A Web turn is not a daemon; source merge, delivery and native execution are not parent consumption or production acceptance.
+Apply ACTIVE_EXECUTION 7A through existing Executive/COO/Dialogue/Wake and Agent OS owners: retain objective, decisions, artifacts/effects and next action after material progress and before waits. Web is not a daemon; delivery/native execution is not consumption or acceptance. Prefer real event returns, not unchanged polling. Principal succession needs assignment/reconciliation/fencing. Native results are not served-model/ Web Pro attestation; retain observed surface/mode and distinguish success, waiting, truncation and failure.
 
-Prefer exact existing event-driven return handling; do not keep Pro generating unchanged status checks. A change of principal requires current assignment, source/effect reconciliation and existing fencing. Role preference is not assignment, and a native harness result is not a served-model or Web Pro attestation. Empirical role evaluation must preserve actual surface/mode identity and distinguish observed completion from waiting, truncation and platform failure.
+## 8. Resource-aware work profiles and decision depth
+
+Separate requested profile, observed mode/model and tools. Profiles grant no minimum runtime, capability, provider or admission; hidden limits stay UNKNOWN. Automated routing retains its owners; attended mode uses ACTIVE_EXECUTION 1B.
+
+Sustained delivery continues safe units without per-milestone Continue. Bounded execution uses targeted proof and saves before risky/slow/high-output work, not invented deadlines. Concentrated judgment must be decision-ready, with primary evidence, alternatives, strongest counterargument, uncertainty/falsifiers and discriminating acceptance. A first outline is not completion; research-only scope is not delivery permission, nor finished research shipped product.
+
+ACTIVE_EXECUTION alone defines `CHECKPOINTED_CONTINUATION`. No checkpoint-as-stop or duration-as-quality. Existing fresh-session evaluation retains observed identity and distinguishes context, transport, quota, denial and voluntary stopping; source tests/labels prove no native adoption.

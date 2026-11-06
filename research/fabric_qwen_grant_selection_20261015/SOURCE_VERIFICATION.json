@@ -1,0 +1,57 @@
+{
+  "candidate_sha256": {
+    "bailian_keys.py": "435dad2bcde27384c4c47edaea5afdf7f248d10229558193414b105664a9759c",
+    "qwen_exec.sh": "0c55d7ea9d330d5a55722ed32629da1a09bc70f0599af27c4a7602356fa06015"
+  },
+  "checks": {
+    "baseline": [
+      {
+        "tests": "5",
+        "failures": "4",
+        "errors": "0",
+        "skipped": "0"
+      }
+    ],
+    "candidate": [
+      {
+        "tests": "25",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      }
+    ],
+    "compatibility": [
+      {
+        "tests": "26",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      }
+    ]
+  },
+  "paid_review": {
+    "id": "fabric-qwen-grant-selection-review-01a11e90-v1",
+    "state": "NOT_ACCEPTED",
+    "reason": "terminal75 before model/account mismatch",
+    "result_sha256": "f760c57ce13d8a674e6d82559ed226dc3e9479c100bbe48dd4b4a7de245c247b",
+    "replay": false
+  },
+  "independent_source_review": {
+    "verdict": "PASS",
+    "reviewer": "01a12a08-42a5-7f22-8286-b5d81b2ada3f",
+    "sha256": {
+      "bailian_keys.py": "435dad2bcde27384c4c47edaea5afdf7f248d10229558193414b105664a9759c",
+      "qwen_exec.sh": "0c55d7ea9d330d5a55722ed32629da1a09bc70f0599af27c4a7602356fa06015"
+    },
+    "scope": "exact-account isolation, cap/cooldown compatibility; no provisioning or retry authority"
+  },
+  "installed": "2026-10-15T08:35:28.916955+00:00",
+  "installed_checks": [
+    {
+      "tests": "25",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    }
+  ]
+}

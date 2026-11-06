@@ -1,0 +1,19 @@
+{
+  "name": "mastermind-navigator",
+  "version": "0.1.0",
+  "description": "Role-scoped, owner-preserving navigation from a fresh Mastermind session to the smallest currently evidenced operator surface.",
+  "author": {
+    "name": "Mastermind-X"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Mastermind Navigator",
+    "shortDescription": "Find the current owner and smallest proven surface",
+    "longDescription": "Compose current owner-native capability observations into an honest role-filtered health view, then route one bounded action without creating lifecycle, permission, session, or capability authority.",
+    "developerName": "Mastermind-X",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ]
+  }
+}
