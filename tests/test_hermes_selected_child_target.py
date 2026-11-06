@@ -1178,7 +1178,7 @@ def _unsealed_installation(document, base):
 
 
 @pytest.fixture
-def unsealed(monkeypatch, tmp_path):
+def unsealed(monkeypatch):
     """A sealed installation whose ROOT OWNERSHIP seam is unavailable here.
 
     Only the ROOT OWNERSHIP assertion is relaxed.  Every other law of the
@@ -1197,8 +1197,16 @@ def unsealed(monkeypatch, tmp_path):
             if not is_dir and info.st_nlink != 1:
                 raise ValueError('sealed configuration must have one link')
 
+    # A sealed tree cannot descend from pytest's ordinary writable /tmp.
+    # Validate the canonical home ancestry before creating this disposable
+    # private tree; do not relax any symlink, type, link-count or mode check.
+    parent = Path.home().resolve(strict=True)
+    sealed_without_root(parent, directory=True)
     monkeypatch.setattr(entry, "require_sealed_path", sealed_without_root)
-    return tmp_path
+    with tempfile.TemporaryDirectory(prefix="mmx-selected-child-test-", dir=parent) as directory:
+        base = Path(directory).resolve(strict=True)
+        sealed_without_root(base, directory=True)
+        yield base
 
 
 def _installed_consumers(document, source, config):
