@@ -48,6 +48,8 @@ type Host = NonNullable<ProjectPlanProposalWorkflowProps["host"]>;
 interface Frame {
   host: Host;
   epoch: number;
+  binding: NonNullable<Host["commandBinding"]>;
+  store: PendingPointerStore;
   workRef: string;
   planningKey: string;
   source: NonNullable<Host["sourceOperations"]>;
@@ -58,6 +60,30 @@ export function ProjectPlanProposalWorkflow(
 ) {
   const live = useRef(props);
   live.current = props;
+  const durable = useRef({
+    store: props.store,
+    read: props.store.read,
+    reserve: props.store.reserve,
+    clear: props.store.clearIfEqual,
+  }).current;
+  function storeCurrent(): boolean {
+    try {
+      return (
+        live.current.isCurrent() &&
+        live.current.store === durable.store &&
+        live.current.host?.commandBinding?.store === durable.store &&
+        durable.store.read === durable.read &&
+        durable.store.reserve === durable.reserve &&
+        durable.store.clearIfEqual === durable.clear
+      );
+    } catch {
+      return false;
+    }
+  }
+  function requireStore() {
+    if (!storeCurrent()) return proposalUnavailable();
+  }
+
   const zh = props.locale === "zh-CN",
     say = (en: string, cn: string) => (zh ? cn : en);
   const [prepared, setPrepared] = useState<PreparedPlanProposal | null>(null);
@@ -95,6 +121,10 @@ export function ProjectPlanProposalWorkflow(
     try {
       return (
         p.isCurrent() &&
+        storeCurrent() &&
+        p.store === f.store &&
+        h?.commandBinding === f.binding &&
+        f.binding.store === f.store &&
         h === f.host &&
         h.sourceOperations === f.source &&
         h.readSourceOperationContext === f.context &&
@@ -115,6 +145,8 @@ export function ProjectPlanProposalWorkflow(
     if (
       !h ||
       !h.sourceOperations ||
+      !h.commandBinding ||
+      !storeCurrent() ||
       !h.readSourceOperationContext ||
       !Number.isSafeInteger(epoch)
     )
@@ -122,6 +154,8 @@ export function ProjectPlanProposalWorkflow(
     const f = {
       host: h,
       epoch: epoch!,
+      binding: h.commandBinding,
+      store: durable.store,
       workRef: p.workRef,
       planningKey: p.planningOperationKey,
       source: h.sourceOperations,
@@ -215,9 +249,18 @@ export function ProjectPlanProposalWorkflow(
       },
     });
     machine.current = new OperationController(port, {
-      read: (...a) => live.current.store.read(...a),
-      reserve: (...a) => live.current.store.reserve(...a),
-      clearIfEqual: (...a) => live.current.store.clearIfEqual(...a),
+      read: (...a) => {
+        requireStore();
+        return durable.read.call(durable.store, ...a);
+      },
+      reserve: (...a) => {
+        requireStore();
+        return durable.reserve.call(durable.store, ...a);
+      },
+      clearIfEqual: (...a) => {
+        requireStore();
+        return durable.clear.call(durable.store, ...a);
+      },
     });
   }
   useEffect(() => {

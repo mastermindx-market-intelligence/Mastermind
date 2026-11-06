@@ -1785,6 +1785,17 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const freshHost = window.MastermindMissionHost;
   const freshHostGeneration = (() => {try {return freshHost?.invalidationGeneration?.() ?? null;} catch {return null;}})();
   const freshAuthRevision = useMemo(() => () => authRevisionRef.current, []);
+  // The incumbent ledger belongs to this Host/binding issuance. Ordinary
+  // rerenders, Back, or auth refresh cannot bless an unannounced store swap.
+  // This is identity only: Workspace READ does not acquire an Executive grant.
+  const projectJourneyStoreOwner = useMemo(() => {
+    const host=freshHost,binding=commandBinding,store=binding?.store;
+    if(!host||!binding||!store)return null;
+    const read=store.read,reserve=store.reserve,clear=store.clearIfEqual;
+    return {store,current:()=>window.MastermindMissionHost===host&&host.commandBinding===binding&&
+      binding.store===store&&store.read===read&&store.reserve===reserve&&store.clearIfEqual===clear};
+  },[freshHost,commandBinding]);
+
   const freshExecutiveOwner = useMemo(() => {
     const host = freshHost, revision = authRevision, generation = freshHostGeneration;
     const binding = commandBinding, auth = host?.auth, getState = auth?.getState;
@@ -5298,14 +5309,14 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       {projectJourney.invalidLink ? <section className="card"><h1>{locale === "zh-CN" ? "项目设置链接不可用" : "Project setup link unavailable"}</h1>
         <p>{locale === "zh-CN" ? "请使用原始项目设置链接，或明确打开项目设置。" : "Use the original project setup link, or explicitly open project setup."}</p>
         <button type="button" onClick={openProjectJourney}>{locale === "zh-CN" ? "打开项目设置" : "Open project setup"}</button></section>
-      : nativeGoalQuarantined ? null : commandBinding ? <><ProjectPlanningJourney key={`project-journey:${authRevision}`} locale={locale}
-        host={window.MastermindMissionHost ?? null} store={commandBinding.store}
+      : nativeGoalQuarantined ? null : commandBinding && projectJourneyStoreOwner ? <><ProjectPlanningJourney key={`project-journey:${authRevision}`} locale={locale}
+        host={window.MastermindMissionHost ?? null} store={projectJourneyStoreOwner.store}
         executiveOwner={() => {
-          if (!projectJourney.isHostCurrent() || window.MastermindMissionHost?.commandBinding !== commandBinding) return null;
+          if (!projectJourney.isHostCurrent() || !projectJourneyStoreOwner.current() || window.MastermindMissionHost?.commandBinding !== commandBinding) return null;
           const live = readOwnerContext(commandBinding.port);
           return live && live.principalScope === ownerContext?.principalScope && live.generation === ownerContext?.generation ? live : null;
         }}
-        isHostCurrent={projectJourney.isHostCurrent} selection={projectJourney.selection}
+        isHostCurrent={() => projectJourney.isHostCurrent() && projectJourneyStoreOwner.current()} selection={projectJourney.selection}
         onSelection={value => {projectJourney.onSelection(value);void nativeGoal.beforeEdit();}}
         onOpenProject={openCreatedProject}
         goal={projectJourney.goal} goalReadOnly={native && !nativeGoal.canEdit}

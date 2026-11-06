@@ -12,6 +12,7 @@ import {
   cleanup,
 } from "@testing-library/react";
 import { IDBFactory } from "fake-indexeddb";
+import { createIndexedDbPendingPointerStore } from "./orchestration/indexeddb-pending-pointer-store";
 import { App } from "./App";
 import { createNativeClient } from "./host";
 import { composeMissionHost } from "./compose-mission-host";
@@ -373,4 +374,56 @@ it("no-render actual global Host withdrawal refuses the prepared publication ges
   );
   expect(h.served).not.toContain(17);
   expect(h.served.filter((n) => n === 15)).toHaveLength(1);
+}, 15000);
+
+it("same-Host binding.store replacement at enabled publication refuses with zero submit or id mint", async () => {
+  const h = await setup();
+  await driveToKept(h);
+  const originalStore = h.host.commandBinding!.store;
+  const randomCalls = vi.mocked(crypto.getRandomValues).mock.calls.length;
+  (h.host.commandBinding as unknown as { store: unknown }).store =
+    createIndexedDbPendingPointerStore(new IDBFactory());
+  fireEvent.click(
+    screen.getByRole("button", { name: "Publish planning proposal" }),
+  );
+  await screen.findByText(
+    /The proposal operation is unavailable|Publication outcome is unknown/,
+  );
+  expect(h.served).not.toContain(17);
+  expect(vi.mocked(crypto.getRandomValues).mock.calls).toHaveLength(
+    randomCalls,
+  );
+  expect(
+    await originalStore.read(supplier.identities.workspace_scope),
+  ).toBeNull();
+}, 15000);
+it("Back/remount cannot bless a replacement store or abandon the real original UNKNOWN pointer", async () => {
+  const h = await setup(true);
+  await driveToKept(h);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Publish planning proposal" }),
+  );
+  await screen.findByText(
+    "Publication outcome is unknown. Check this original request instead of sending it again.",
+  );
+  const originalStore = h.host.commandBinding!.store;
+  const original = await originalStore.read(
+    supplier.identities.workspace_scope,
+  );
+  expect(original).not.toBeNull();
+  (h.host.commandBinding as unknown as { store: unknown }).store =
+    createIndexedDbPendingPointerStore(new IDBFactory());
+  fireEvent.click(screen.getByRole("button", { name: "Back to projects" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Continue project setup" }),
+  );
+  const check = screen.queryByRole("button", {
+    name: "Check original proposal",
+  }) as HTMLButtonElement | null;
+  expect(check === null || check.disabled).toBe(true);
+  expect(await originalStore.read(supplier.identities.workspace_scope)).toEqual(
+    original,
+  );
+  expect(h.served.filter((n) => n === 17)).toHaveLength(1);
+  expect(h.served).not.toContain(20);
 }, 15000);

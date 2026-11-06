@@ -49,7 +49,9 @@ function harness() {
     owner_context: { principal_scope: fixture.identities.workspace_scope },
     can_inspect: true,
   }));
+  const store = createIndexedDbPendingPointerStore(new IDBFactory());
   const host = {
+    commandBinding: { store },
     auth: {
       getState: () => ({ status: "signed_in", acquisition: true }),
       subscribe: () => () => {},
@@ -61,7 +63,7 @@ function harness() {
   } as unknown as MissionHost;
   const props: ProjectPlanProposalWorkflowProps = {
     host,
-    store: createIndexedDbPendingPointerStore(new IDBFactory()),
+    store,
     workRef: original.work_ref,
     planningOperationKey: original.operation_key,
     result: null,
@@ -92,6 +94,7 @@ function harness() {
 describe("S24 retained original independent consumer routes", () => {
   it("reopens original publication/current Compare while old S19 result is unavailable; no preparation/submit/consume", async () => {
     const h = harness();
+    h.props.executiveOwner = () => null; // Workspace observation is independent of Executive preparation.
     render(<ProjectPlanProposalWorkflow {...h.props} />);
     expect(
       (
