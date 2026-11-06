@@ -277,6 +277,26 @@ class FakeHost:
             lambda: ExecutionCapabilityRegistry.load(
                 registry, source_root=registry.parent.parent))
 
+
+    def begin_selected_child_preparation(self):
+        return self.read_config()
+
+    def preparation_destination_available(self, destination):
+        try:
+            os.lstat(destination)
+        except FileNotFoundError:
+            return
+        raise m.UpdateRefused("PREPARATION_INPUT_REFUSED:already exists")
+
+    def request_selected_child_capture(self, frame):
+        # This ordinary-UID fixture exercises the real existing transport.
+        # Kernel privilege separation is a separate, explicitly gated test.
+        from integrations.mastermind_workspace_app.installed import CeoIngressWorkspaceClient
+        return asyncio.run(CeoIngressWorkspaceClient(self.socket_path).request(frame))
+
+    def recheck_selected_child_preparation(self):
+        return None
+
     def ceo_ingress_socket_path(self):
         return self.socket_path
 
@@ -2829,8 +2849,8 @@ def test_the_operator_entry_prepares_the_input_through_the_incumbent_transport(
 def test_the_operator_entry_refuses_a_wrong_peer(tmp_path, admitted):
     """The kernel peer check is untouched: a foreign peer is refused.
 
-    The entry issues the request in the CALLING identity and never
-    authorizes a uid at the socket.  The Control admits exactly its App
+    This ordinary-UID transport fixture sends a foreign kernel peer and
+    never authorizes a uid at the socket.  The Control admits exactly its App
     peer, so a request from anybody else is refused before the frame is
     read.  The incumbent workspace client cannot read the Control's
     peer-denied envelope (it carries no ``status``), so the refusal
@@ -2983,3 +3003,249 @@ def test_the_service_control_preparation_verb_walks_a_closed_argv(tmp_path):
         result, argv, _ = run(f"bad{index}", args)
         assert result[0] == 64, (args, result)
         assert argv is None
+
+# C45: the preparation entry owns one finite, real App-identity process.
+# These pipe tests use actual processes; they do not claim installed/root proof.
+def _capture_pipe_process(script):
+    import subprocess
+    return subprocess.Popen(
+        [sys.executable, "-I", "-B", "-c", script],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        close_fds=True, bufsize=0, env={"PYTHONDONTWRITEBYTECODE": "1"})
+
+
+def test_preparation_pipe_bounds_both_streams_and_reaps_the_original(monkeypatch):
+    monkeypatch.setattr(m, "_PREPARATION_CHILD_CLEANUP_SECONDS", 0.2)
+    reply = {"ok": True, "result": {"captured": True}}
+    process = _capture_pipe_process(
+        "import sys; raw=sys.stdin.buffer.read(); "
+        "assert raw == b'one request\\n'; "
+        "sys.stdout.buffer.write(" + repr(m.canonical(reply) + b"\n") + "); sys.stdout.flush()")
+    result = m._exchange_preparation_child(
+        process, b"one request\n", budget=installed._Budget(3), maximum=4096)
+    assert result == reply
+    assert process.returncode == 0
+    assert process.stdin.closed and process.stdout.closed
+
+
+@pytest.mark.parametrize("script,packet,maximum", [
+    ("import sys; sys.stdin.buffer.read(); sys.stdout.write('x'*4097)", b"request\n", 4096),
+    ("import sys; sys.stdin.buffer.read(); sys.stdout.write('{}\\n{}\\n')", b"request\n", 4096),
+    ("import sys; sys.stdin.buffer.read(); sys.stdout.write('{')", b"request\n", 4096),
+    ("import sys; sys.stdin.buffer.read(); sys.stdout.write(' { }\\n')", b"request\n", 4096),
+    ("import sys; sys.stdin.buffer.read(); sys.stdout.write('{\"a\":1,\"a\":1}\\n')", b"request\n", 4096),
+    ("import sys; sys.stdin.buffer.read(); sys.stdout.write('{}\\n'); sys.exit(7)", b"request\n", 4096),
+    ("import time; time.sleep(10)", b"x" * m.MAX_CONFIG_BYTES, 4096),
+    ("import sys,time; sys.stdin.buffer.read(); sys.stdout.write('{}\\n'); "
+     "sys.stdout.flush(); time.sleep(10)", b"request\n", 4096),
+])
+def test_preparation_pipe_refuses_incomplete_oversized_nonzero_or_unsettled_child(
+        script, packet, maximum, monkeypatch):
+    monkeypatch.setattr(m, "_PREPARATION_CHILD_CLEANUP_SECONDS", 0.2)
+    process = _capture_pipe_process(script)
+    with pytest.raises(m.UpdateRefused):
+        m._exchange_preparation_child(
+            process, packet, budget=installed._Budget(1.0), maximum=maximum)
+    assert process.poll() is not None
+    assert process.stdin.closed and process.stdout.closed
+
+
+def test_preparation_rejoins_source_after_the_only_capture(tmp_path, admitted):
+    host, service, holder = _operator_fixture(tmp_path, admitted)
+    original = host.request_selected_child_capture
+    def changed(frame):
+        response = original(frame)
+        document = json.loads(host.config)
+        document["coo"]["missions"][0]["enabled"] = False
+        host.config = mcp_bytes(document)
+        return response
+    host.request_selected_child_capture = changed
+    with _ControlThread(service):
+        before = _runtime_rows(admitted.runtime)
+        with pytest.raises(m.UpdateRefused, match="PREPARATION_SOURCE_CHANGED"):
+            m.prepare_selected_child(
+                host, work_ref=WORK_REF, root_job_id=admitted.root.job_id,
+                child_job_ids=[admitted.work(0).job_id])
+        assert _runtime_rows(admitted.runtime) == before
+    assert holder["facts_calls"] == 1
+    assert not list(host.capture_dir.iterdir())
+
+
+def test_preparation_rejects_a_valid_but_different_child_capture(tmp_path, admitted):
+    host, service, holder = _operator_fixture(tmp_path, admitted)
+    original = host.request_selected_child_capture
+    def changed(frame):
+        from control_plane.coo_principal_host import selected_child_command_id
+        # A structurally valid foreign child cannot satisfy this selector.
+        response = original(frame)
+        child = response["result"]["children"][0]
+        child["job_id"] = "JOB-999999"
+        child["command_id"] = selected_child_command_id(
+            child["root_job_id"], child["job_id"], child["attempt_ordinal"])
+        return response
+    host.request_selected_child_capture = changed
+    with _ControlThread(service):
+        with pytest.raises(m.UpdateRefused, match="PREPARATION_RESPONSE_INVALID"):
+            m.prepare_selected_child(
+                host, work_ref=WORK_REF, root_job_id=admitted.root.job_id,
+                child_job_ids=[admitted.work(0).job_id])
+    assert holder["facts_calls"] == 1
+    assert not list(host.capture_dir.iterdir())
+
+
+def test_preparation_reports_possible_input_effect_and_preserves_original_path(
+        tmp_path, admitted, capsys):
+    host, service, holder = _operator_fixture(tmp_path, admitted)
+    destination = host.preparation_input_path(WORK_REF)
+    def partial(_publication, path):
+        Path(path).write_bytes(b"partial original input")
+        raise OSError("simulated fsync/readback failure")
+    host.write_selected_child_input = partial
+    with _ControlThread(service):
+        before = _runtime_rows(admitted.runtime)
+        code = m.main(["prepare-selected-child", "--work-ref", WORK_REF,
+                       "--root-job-id", admitted.root.job_id,
+                       "--child-job-id", admitted.work(0).job_id], host=host)
+        result = json.loads(capsys.readouterr().out)
+        assert code == 2 and result["outcome"] == "EFFECT_UNKNOWN"
+        assert destination in result["code"]
+        assert Path(destination).read_bytes() == b"partial original input"
+        with pytest.raises(m.UpdateRefused, match="PREPARATION_INPUT_REFUSED"):
+            m.prepare_selected_child(
+                host, work_ref=WORK_REF, root_job_id=admitted.root.job_id,
+                child_job_ids=[admitted.work(0).job_id])
+        assert _runtime_rows(admitted.runtime) == before
+    assert holder["facts_calls"] == 1
+
+
+def test_preparation_v2_chooses_the_mission_binding_not_the_first_record():
+    from integrations.mastermind_executive_app.coo_binding import _digest
+    document = _mission_document("a" * 64)
+    original = document["coo"]["binding"]
+    wanted = copy.deepcopy(original["binding"])
+    other = copy.deepcopy(wanted)
+    other["client_ref"] = "0" * 64 if wanted["client_ref"] != "0" * 64 else "1" * 64
+    records = sorted([other, wanted], key=_digest)
+    wanted = records[-1]
+    document["coo"]["binding"] = {
+        "schema": "mastermind.executive_coo_principal_binding.v2", "enabled": True,
+        "bindings": records,
+    }
+    # The v2 validator retains the incumbent enrolled record's exact digest.
+    document["coo"]["missions"][0]["principal_binding_digest"] = _digest(wanted)
+    principal = m._preparation_principal(document, WORK_REF)
+    assert principal["subject_digest"] == wanted["subject_digest"]
+    assert principal["client_ref"] == wanted["client_ref"]
+    document["coo"]["missions"][0]["principal_binding_digest"] = "f" * 64
+    with pytest.raises(m.UpdateRefused, match="PREPARATION_BINDING_UNAVAILABLE"):
+        m._preparation_principal(document, WORK_REF)
+
+
+def test_preparation_private_child_has_no_public_overrides():
+    assert m.main([m._PREPARATION_CHILD_VERB, "--uid", "0"]) == 64
+    assert m.main([m._PREPARATION_CHILD_VERB], host=FakeHost()) == 64
+
+
+def test_preparation_child_uses_actual_nonroot_credentials_when_privilege_is_available(tmp_path):
+    import grp
+    import pwd
+    import subprocess
+    import time
+    if os.geteuid() != 0:
+        pytest.skip("actual root-to-App kernel UID separation needs root; no account or sudo ceremony is created")
+    candidates = [entry for entry in pwd.getpwall()
+                  if entry.pw_uid > 0 and entry.pw_gid > 0 and entry.pw_name in ("nobody", "_nobody")]
+    if len(candidates) != 1:
+        pytest.skip("no existing disposable nonroot identity is available")
+    account = candidates[0]
+    groups = sorted(set(os.getgrouplist(account.pw_name, account.pw_gid)))
+    # Real kernel process identity and inherited-group isolation; no patched uid.
+    reply_script = (
+        "import json,os,sys; sys.stdin.buffer.read(); "
+        "value={'ok':True,'result':{'uid':os.getuid(),'euid':os.geteuid(),"
+        "'gid':os.getgid(),'groups':sorted(set(os.getgroups()))}}; "
+        "sys.stdout.write(json.dumps(value,sort_keys=True,separators=(',',':'))+'\\n')")
+    process = subprocess.Popen(
+        [sys.executable, "-I", "-B", "-c", reply_script],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        close_fds=True, bufsize=0, cwd="/", env={"PYTHONDONTWRITEBYTECODE": "1"},
+        user=account.pw_uid, group=account.pw_gid, extra_groups=groups)
+    reply = m._exchange_preparation_child(
+        process, b"capture\n", budget=installed._Budget(5), maximum=4096)
+    assert reply["result"] == {
+        "uid": account.pw_uid, "euid": account.pw_uid,
+        "gid": account.pw_gid, "groups": groups}
+    assert process.returncode == 0
+
+def test_preparation_closes_source_after_slow_qualification(tmp_path, admitted):
+    host, service, holder = _operator_fixture(tmp_path, admitted)
+    def rotate_during_qualification():
+        document = json.loads(host.config)
+        document["coo"]["missions"][0]["enabled"] = False
+        host.config = mcp_bytes(document)
+    host.recheck_selected_child_preparation = rotate_during_qualification
+    with _ControlThread(service):
+        with pytest.raises(m.UpdateRefused, match="PREPARATION_SOURCE_CHANGED"):
+            m.prepare_selected_child(
+                host, work_ref=WORK_REF, root_job_id=admitted.root.job_id,
+                child_job_ids=[admitted.work(0).job_id])
+    assert holder["facts_calls"] == 1
+    assert not list(host.capture_dir.iterdir())
+
+
+def test_preparation_qualification_closes_config_after_inventory_recheck(monkeypatch):
+    qualification = m._PreparationQualification.__new__(m._PreparationQualification)
+    qualification.budget = installed._Budget(3)
+    qualification.topology = object()
+    qualification.account = ("app", 458, 458, (452, 458))
+    qualification.config = (b"original", (1, 2), (3, 4))
+    qualification.release_sha = OLD_RELEASE
+    qualification.plist = object()
+    qualification.release = object()
+    qualification.runtime = object()
+    qualification.closure = object()
+    current = {"config": qualification.config}
+    monkeypatch.setattr(m, "_preparation_account", lambda _topology: qualification.account)
+    monkeypatch.setattr(m, "_preparation_config", lambda _topology, _budget: current["config"])
+    monkeypatch.setattr(installed, "_verify_role_plist", lambda *_args, **_kwargs: qualification.plist)
+    monkeypatch.setattr(installed, "_recheck_release", lambda *_args: None)
+    monkeypatch.setattr(installed, "_recheck_python_runtime", lambda *_args: None)
+    def rotate(*_args):
+        # Same bytes, different inode/metadata generation: a digest-only join fails.
+        current["config"] = (b"original", (1, 99), (3, 4))
+    monkeypatch.setattr(installed, "_recheck_network_closure", rotate)
+    with pytest.raises(m.UpdateRefused, match="PREPARATION_SOURCE_CHANGED"):
+        qualification.check()
+
+def test_preparation_selector_initialization_failure_still_reaps_original(monkeypatch):
+    import selectors
+    process = _capture_pipe_process("import time; time.sleep(10)")
+    def unavailable():
+        raise OSError("selector allocation refused")
+    monkeypatch.setattr(selectors, "DefaultSelector", unavailable)
+    with pytest.raises(OSError, match="selector allocation"):
+        m._exchange_preparation_child(
+            process, b"one\n", budget=installed._Budget(3), maximum=4096)
+    assert process.poll() is not None
+    assert process.stdin.closed and process.stdout.closed
+
+
+def test_preparation_selector_close_failure_does_not_skip_child_cleanup(monkeypatch):
+    import selectors
+    original = selectors.DefaultSelector
+    class ClosingFailure:
+        def __init__(self):
+            self.inner = original()
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+        def close(self):
+            self.inner.close()
+            raise OSError("selector close failed")
+    process = _capture_pipe_process("import time; time.sleep(10)")
+    monkeypatch.setattr(selectors, "DefaultSelector", ClosingFailure)
+    monkeypatch.setattr(m, "_PREPARATION_CHILD_CLEANUP_SECONDS", 0.2)
+    with pytest.raises(m.UpdateRefused, match="PREPARATION_CHILD_CLEANUP_UNPROVEN"):
+        m._exchange_preparation_child(
+            process, b"one\n", budget=installed._Budget(1), maximum=4096)
+    assert process.poll() is not None
+    assert process.stdin.closed and process.stdout.closed
