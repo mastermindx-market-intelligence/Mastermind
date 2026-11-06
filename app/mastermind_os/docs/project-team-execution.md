@@ -22,6 +22,7 @@ scheduler, identity service, conversation database, retry queue or daemon.
 
 | Journey | Behavior |
 | --- | --- |
+| Create and open a project | After creation is confirmed in the source, Open project refreshes the existing Programs catalogue and opens the exact current canonical record. Initial planning remains available, and execution starts only through Start work. |
 | Start work on a rootless project | Current project context is acquired; a live effect-free preview supplies eligible profiles, actual coordinator model, repository/base and durable/attended mode. Static launch enrollment is unnecessary. |
 | Goal and handoff | Exact user text and source bodies remain in the existing private original-input artifact. Multiline goal text is retained exactly; only the incumbent scalar intent receives normalized line whitespace. |
 | Build scope | Bounded code changes require declared paths and structured validation. The installed Mastermind repository and exact base are visible before submission. |
@@ -62,6 +63,28 @@ plan/decision, file content, goal, handoff and execution request. Every actual
 descendant obtains the original root input through its validated Runtime lineage.
 Mixed execution supervisors explicitly reference the same original input owner;
 they do not copy an artifact into another store.
+
+## Accepted creation to current project
+
+The setup journey offers **Open project** only after its original creation
+operation is accepted as `SOURCE_OBSERVED`. The returned work reference is a
+navigation hint. It does not substitute for the canonical Programs record or
+supply a Runtime root.
+
+An explicit click requests a refresh through the existing Programs owner. The
+handoff waits for a read newer than the request counter captured at the click
+and still equal to the current request. It requires a current, available
+catalogue with exactly one matching project, the original host and
+authentication context, and the same live setup selection and route. Only then
+does the existing catalogue selector open that actual record.
+
+An unavailable catalogue, absent or ambiguous record, changed authority or
+navigation away ends that gesture without selecting a stale project. Setup
+retains its existing safe drafts and recovery pointers; an explicit retry can
+request another read. There is no background retry loop or second reader.
+Initial planning and Keep result remain available. Opening does not repeat
+creation, adopt a plan or submit work automatically; the project presents its
+separate Start work action.
 
 ## App entry without a legacy Launch manifest
 
@@ -214,6 +237,12 @@ active Attempt blocks workspace transformation. Allocator cases separately cover
 ref/index crash recovery, source withdrawal and file/index tampering. Its bounded
 history exceeds the incumbent maximum of 16 descendants; each follow-up starts
 from its own admitted immutable base.
+
+The actual native-client and manifest-free App integration also joins accepted
+creation, an explicit fresh Programs read, the exact rootless project record,
+Start work preview and one submission. It checks English/Chinese action names,
+read-only retry for unavailable or absent rows, navigation away and auth loss
+while a read waits, alongside initial planning, Keep and original recovery.
 
 Physical workers and provider returns in the automated source tests are inert.
 The retained frontend history fixture is produced by the actual test Runtime

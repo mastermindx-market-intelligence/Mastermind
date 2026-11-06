@@ -1563,6 +1563,13 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     } | null>(null),
     missionRequest = useRef(0),
     programRequest = useRef(0),
+    // One explicit navigation gesture waits for the incumbent Programs read.
+    // It carries no command, grant, draft payload or persistent operation.
+    createdProjectOpen = useRef<{
+      workRef: string; createRequestId: string; host: MissionHost;
+      authRevision: number; selectionSequence: number; catalogueSequence: number;
+      afterEpoch: number; current: () => boolean; complete: (opened: boolean) => void;
+    } | null>(null),
     programSelection = useRef(selection),
     workRequest = useRef(0),
     missionSelectionState =
@@ -2155,6 +2162,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   useEffect(() => () => {
     commandSlot.current?.controller.invalidate();
     recoveryFlight.current++;
+    const opening = createdProjectOpen.current;
+    createdProjectOpen.current = null;
+    opening?.complete(false);
     sessionSlot.current?.controller.invalidate();
     sessionSlot.current = null;
     sessionPending.current = null;
@@ -4396,6 +4406,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     (typeof window.MastermindMissionHost?.readProgramsObservation === "function" ||
       typeof window.MastermindMissionHost?.readPrograms === "function") &&
     (!authState || authState.acquisition);
+  const refreshProjects = () => {
+    setIndex({ programs: [], state: "PENDING", reason: "SOURCE_READ_PENDING" });
+    setProgramRevision((revision) => revision + 1);
+  };
   const programsRefreshControl = (
     <button
       type="button"
@@ -4404,8 +4418,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       aria-disabled={index.state === "PENDING" || !programsReadAvailable}
       onClick={() => {
         if (index.state === "PENDING" || !programsReadAvailable) return;
-        setIndex({ programs: [], state: "PENDING", reason: "SOURCE_READ_PENDING" });
-        setProgramRevision((revision) => revision + 1);
+        refreshProjects();
       }}
     >
       Refresh Projects
@@ -4806,6 +4819,53 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       latest.catalogueOwner === catalogueListOwner.current && conversationListOwnerCurrent(latest.catalogueOwner, false) &&
       latest.index.state === "AVAILABLE";
   };
+  const openCreatedProject = (workRef: string, current: () => boolean): Promise<boolean> => {
+    const host = window.MastermindMissionHost, selected = projectJourney.selection;
+    try {
+      if (!host || createdProjectOpen.current || active !== "Projects" || !projectJourney.shown ||
+          !selected || selected.workRef !== workRef || !projectJourney.isHostCurrent() ||
+          !programsReadAvailable || !current()) return Promise.resolve(false);
+    } catch { return Promise.resolve(false); }
+    return new Promise<boolean>(complete => {
+      createdProjectOpen.current = {workRef, createRequestId: selected!.createRequestId, host: host!,
+        authRevision, selectionSequence: selectionSeq.current,
+        catalogueSequence: cataloguePresentationSequence.current,
+        afterEpoch: programRequest.current, current, complete};
+      refreshProjects();
+    });
+  };
+  // Completion belongs to this one explicit Open gesture and its fresh read.
+  // SOURCE_OBSERVED supplies a hint; only the acquired catalogue supplies membership.
+  useLayoutEffect(() => {
+    const opening = createdProjectOpen.current;
+    if (!opening) return;
+    const finish = (opened: boolean) => {
+      createdProjectOpen.current = null;
+      opening.complete(opened);
+    };
+    let current = false;
+    try {
+      current = active === "Projects" && projectJourney.shown &&
+        projectJourney.selection?.createRequestId === opening.createRequestId &&
+        projectJourney.selection?.workRef === opening.workRef &&
+        window.MastermindMissionHost === opening.host && authRevision === opening.authRevision &&
+        authRevisionRef.current === opening.authRevision && selectionSeq.current === opening.selectionSequence &&
+        cataloguePresentationSequence.current === opening.catalogueSequence &&
+        projectJourney.isHostCurrent() && opening.current();
+    } catch { /* An unavailable original witness cannot select a project. */ }
+    if (!current) { finish(false); return; }
+    if (programRequest.current <= opening.afterEpoch) return;
+    if (programRequest.current !== opening.afterEpoch + 1) { finish(false); return; }
+    if (index.state === "PENDING") return;
+    if (!currentProgramsRead() || programIndexEpoch <= opening.afterEpoch ||
+        index.programs.filter(row => row.workRef === opening.workRef).length !== 1) {
+      finish(false); return;
+    }
+    projectJourney.hide();
+    setCatalogueProject({workRef: opening.workRef, authRevision, epoch: programIndexEpoch});
+    setProjectTab("More"); setActive("Projects");
+    finish(true);
+  });
   // Fresh choices consume the SAME acquired index, including qualified N.
   // Global saved-conversation locators remain owned by the C projection.
   const freshIndexCurrent = currentProgramsRead();
@@ -5002,6 +5062,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         }}
         isHostCurrent={projectJourney.isHostCurrent} selection={projectJourney.selection}
         onSelection={value => {projectJourney.onSelection(value);void nativeGoal.beforeEdit();}}
+        onOpenProject={openCreatedProject}
         goal={projectJourney.goal} goalReadOnly={native && !nativeGoal.canEdit}
         onGoalFocus={() => {void nativeGoal.beforeEdit();}}
         onGoalChange={text => {if (nativeGoal.canEdit) projectJourney.onGoalChange(text);}}

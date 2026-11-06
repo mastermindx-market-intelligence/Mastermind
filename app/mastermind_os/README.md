@@ -33,7 +33,10 @@ controller. The standard app composition mounts that existing Executive command
 owner when the client supplies an Executive transport, even without a legacy
 Launch manifest. Current-project Start work, new conversations and completed-run
 follow-ups keep the same authenticated context and operation store. An absent
-manifest supplies no legacy Launch choices or submit authority. See
+manifest supplies no legacy Launch choices or submit authority. After confirmed
+project creation, Open project refreshes the existing catalogue and opens the
+exact saved project, where Start work is a separate action. It preserves the
+setup draft and original operation if the project cannot yet be read. See
 [Project team execution](docs/project-team-execution.md) for the architecture,
 code artifact continuity, transport boundaries and remaining installed journey
 qualification.
