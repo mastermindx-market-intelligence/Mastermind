@@ -1174,7 +1174,7 @@ def test_the_incumbent_transport_carries_the_advertised_schema_branch():
     if 'mastermind.source_admitted_advertised_artifact_read.v1' not in text:
         pytest.skip('the two-hunk plumbing patch is not applied in this tree')
     assert "code = advertised_recovery_source().decode('utf-8')" in text
-    assert 'original_advertised_artifact.collect(args.run_id, args.destination)' in text
+    assert 'receipt = recovery.collect(args.run_id, args.destination)' in text
 
 
 def test_destination_cannot_change_to_replay_failed_read(monkeypatch, module, tmp_path):
@@ -1336,3 +1336,58 @@ def test_real_dispatcher_never_imports_unchecked_remote_module(monkeypatch, modu
     with pytest.raises(ValueError, match='advertised_remote_source_changed'):
         real.transport('fixture-alias', dict(fixture.scope))
     assert not marker.exists()
+
+
+def test_actual_main_refuses_modified_module_before_import_or_ssh(monkeypatch, module, tmp_path, capsys):
+    real = _import_incumbent('artifact_delivery')
+    fixture, incumbent = _install_local(monkeypatch, module, tmp_path)
+    monkeypatch.setattr(real, 'HERE', fixture.root)
+    monkeypatch.setattr(real, 'local_file', incumbent.local_file)
+    monkeypatch.setattr(real.subprocess, 'Popen', lambda *a, **k: pytest.fail('unqualified SSH launch'))
+    marker = fixture.root / 'main-must-not-import'
+    hostile = ("from pathlib import Path\nPath(" + repr(str(marker)) + ").touch()\n"
+               "def remote_main(): pass\ndef remote_read(): pass\n"
+               "def collect(*a, **k): return {'state':'COMPLETE'}\n")
+    (fixture.root / MODULE_NAME).write_text(hostile)
+    monkeypatch.setattr(sys, 'argv', ['artifact_delivery.py', '--capsule-current',
+        'mm-u0-revision-lens-component-20261105-root', '--destination', str(fixture.root / 'output')])
+    assert real.main() == 75
+    assert json.loads(capsys.readouterr().out)['state'] == 'REFUSED'
+    assert not marker.exists()
+    assert not (fixture.root / 'output').exists()
+    assert incumbent.transport_calls == []
+
+
+def test_checked_bundle_loader_ignores_cached_unchecked_module(monkeypatch, module, tmp_path):
+    real = _import_incumbent('artifact_delivery')
+    fixture, incumbent = _install_local(monkeypatch, module, tmp_path)
+    monkeypatch.setattr(real, 'HERE', fixture.root)
+    monkeypatch.setattr(real, 'local_file', incumbent.local_file)
+    forged = types.SimpleNamespace(collect=lambda *a, **k: pytest.fail('cached unchecked module used'))
+    monkeypatch.setitem(sys.modules, 'original_advertised_artifact', forged)
+    loaded = real.advertised_recovery_module()
+    assert loaded is not forged
+    assert loaded.SCOPE['run_id'] == 'mm-u0-revision-lens-component-20261105-root'
+    assert loaded._delivery().transport is real.transport
+    assert loaded._delivery().advertised_recovery_source is real.advertised_recovery_source
+    assert incumbent.transport_calls == []
+
+
+def test_checked_bundle_loader_executes_one_checked_snapshot(monkeypatch, module, tmp_path):
+    real = _import_incumbent('artifact_delivery')
+    fixture, incumbent = _install_local(monkeypatch, module, tmp_path)
+    monkeypatch.setattr(real, 'HERE', fixture.root)
+    original = _module_path().read_bytes()
+    path = fixture.root / MODULE_NAME
+    marker = fixture.root / 'second-read-must-not-execute'
+    calls = []
+    def read_then_replace(source, limit):
+        calls.append(source)
+        assert len(calls) == 1
+        path.write_text("from pathlib import Path\nPath(" + repr(str(marker)) + ").touch()\n")
+        return original
+    monkeypatch.setattr(real, 'local_file', read_then_replace)
+    loaded = real.advertised_recovery_module()
+    assert loaded.SCOPE['run_id'] == 'mm-u0-revision-lens-component-20261105-root'
+    assert not marker.exists()
+    assert calls == [path]

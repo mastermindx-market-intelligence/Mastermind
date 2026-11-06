@@ -873,6 +873,26 @@ def advertised_recovery_source():
     return raw
 
 
+def advertised_recovery_module():
+    """Execute only the checked fixed bundle, never an import/cache reread."""
+    import types
+    raw = advertised_recovery_source()
+    module = types.ModuleType('_source_admitted_advertised_recovery')
+    module.__file__ = str(HERE / 'original_advertised_artifact.py')
+    exec(compile(raw, module.__file__, 'exec'), module.__dict__)
+    # Keep this already loaded incumbent as owner, including when invoked as
+    # __main__; the delayed owner import must not reopen a different module.
+    owner = types.SimpleNamespace(
+        HERE=HERE, ADVERTISED_RECOVERY_SOURCE_SHA256=ADVERTISED_RECOVERY_SOURCE_SHA256,
+        local_file=local_file, advertised_recovery_source=advertised_recovery_source,
+        validate_capsule_process=validate_capsule_process,
+        reserve_destination=reserve_destination, write_exclusive=write_exclusive,
+        transport=transport, verify_delivered=verify_delivered,
+        publish_receipt=publish_receipt)
+    module._delivery = lambda: owner
+    return module
+
+
 def transport(alias, request, *, observer_source_hash=None, current_sources_sha256=None):
     # Fixed code, fixed interpreter, validated registry alias; paths travel in stdin.
     response_limit = reader.MAX_RESPONSE
@@ -1619,8 +1639,8 @@ def main():
                 import operator_stdout_delivery
                 receipt = operator_stdout_delivery.collect(args.run_id, args.destination)
             elif args.run_id == "mm-u0-revision-lens-component-20261105-root":
-                import original_advertised_artifact
-                receipt = original_advertised_artifact.collect(args.run_id, args.destination)
+                recovery = advertised_recovery_module()
+                receipt = recovery.collect(args.run_id, args.destination)
             elif args.run_id in ("rf-static-checks-01a1333c-v1", "rf-fixed-smoke-runsc-01a1333c-v1", "rf-fixed-smoke-runsc-01a1333c-v2", "rf-fixed-smoke-runsc-01a1333c-v3"):
                 import current_failed_artifact_evidence
                 receipt = current_failed_artifact_evidence.export(args.run_id, args.destination)
