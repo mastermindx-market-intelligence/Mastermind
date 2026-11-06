@@ -435,7 +435,7 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
                                                                         35,
                                                                         'int',
                                                                         '502'))},
- 'ops/native_fabric/quota_continuity/candidate/paid_host_qualification.py': {'sha256': 'e4cb143b13324bd5ce4d96af5396054b3c63e1b82c831edae4516f37e495a1b0', 'sites': ((34, 17, 20, 'int', '501'), (452, 85, 90, 'int', '0o700'))},
+ 'ops/native_fabric/quota_continuity/candidate/paid_host_qualification.py': {'sha256': '2a52ba79e6cd38a42ecbd48919704d2c837c65d042707b37640df78f27b8d0c0', 'sites': ((34, 17, 20, 'int', '501'), (452, 85, 90, 'int', '0o700'))},
  'ops/native_fabric/quota_continuity/candidate/paid_model_owner.py': {'sha256': '75bbacb052dcb9374245854e2e6b8681fa369e034000689df0d4f752bd1b6e3b',
  'sites': ((147, 32, 37, 'int', '0o700'), (230, 68, 73, 'int', '0o700'))},
  'scripts/executive_paid_fabric_shim.py': {'sha256': 'e80b95a09ce31153e7bff2ea7b85dd1eb8d8850d4d6029ec27250cd8f13228f1',
@@ -447,15 +447,20 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # review; this does not authorize publication, runtime admission or release.
 # No generic numeric exception is added: source/path/site drift exposes all
 # literals again through the existing D8 scanner.
-# Finite-workstream template derivation changes only _gateway_templates.
-# The same four whole Constant tokens, relative AST paths and complete
-# enclosing identity owners remain unchanged; later lines shift by one.
+# Control component composition retains the four original whole Constant
+# tokens and their complete identity-owner AST from protected 49c2e1d.
+# The two added 0o644 tokens are the closed root-file mode and the matching
+# exact-CAS publication mode, both with explicit uid=0 and gid=0. They are
+# permissions, not principals; each complete token and enclosing call was
+# inspected on these exact source bytes. No generic numeric rule changes.
 REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': '93cb7727512d1922461272e8d0b4a2557fa39d51d9a88e18597401f1731ea83a',
-    'sites': ((335, 24, 27, 'int', '501'),
-              (6556, 35, 37, 'int', '80'),
-              (6557, 50, 55, 'int', '0o755'),
-              (7094, 41, 46, 'int', '0o644')),
+    'sha256': 'c3d96bf994aea0969161b25405db9e3623eb7d5047ebd81e7a06b68757e11e7f',
+    'sites': ((342, 24, 27, 'int', '501'),
+              (6847, 35, 37, 'int', '80'),
+              (6848, 50, 55, 'int', '0o755'),
+              (7385, 41, 46, 'int', '0o644'),
+              (8122, 64, 69, 'int', '0o644'),
+              (9524, 41, 46, 'int', '0o644')),
 }
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
@@ -474,8 +479,8 @@ REVIEWED_FILES['control_plane/executive_backup.py'] = {
 }
 
 # Input-mode bounds and exact ignored Linux symlink mode, never target authority.
-REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': 'd203b1363cdc6f926d9542a2ecfb2ec6b24dd1da46c3fd1f527caea232132749',
- 'sites': ((71, 35, 40, 'int', '0o777'), (216, 30, 35, 'int', '0o777'), (226, 33, 38, 'int', '0o777'))}
+REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': '602893be1fa1ece43862ba889e92af8d8e879cb67f62f16840300b7f21ad2887',
+ 'sites': ((72, 35, 40, 'int', '0o777'), (220, 30, 35, 'int', '0o777'), (230, 33, 38, 'int', '0o777'))}
 
 # Exact reviewed recurring-readiness principal checks; no runtime admission.
 REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_host_readiness.py'] = {'sha256': '115bad457d738af088ec4eed79ff56f56b0f154e56521e0093839daf087b9a66',
@@ -594,3 +599,7 @@ REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/accoun
 
 # BYOK metadata READ re-pin: same eight action literals and unchanged action AST.
 # Attended parent source check under the current Chairman waiver; no formal approval claim.
+
+# C16: fixed observation-only TLS directory; root owner and canonical Control
+# group retain the exact private traversal mode. Whole-source and token-bound.
+REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': '053f801d4b28ed8cbd033c69869f1b12b2ea83c66d6d21f85fbb8d096b97ec03', 'sites': ((660, 71, 76, 'int', '0o750'),)}
