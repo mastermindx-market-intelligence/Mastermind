@@ -104,12 +104,18 @@ it("joins existing Work and explicit selected-project Journal, then returns with
     }),
   );
   expect(
-    await within(office).findByRole("region", { name: "Observed Work roots" }),
+    await within(office).findByRole("region", {
+      name: "Work items in this view",
+    }),
   ).toBeTruthy();
-  expect(within(office).getByText("JOB-1")).toBeTruthy();
+  expect(within(office).getByText("Work item JOB-1")).toBeTruthy();
   expect(f.count("read_work")).toBe(1);
   expect(f.count("read_project_journal")).toBe(0);
-  expect(within(document.getElementById("office-journal-title")!.closest("section")!).queryByText("Project not selected")).toBeNull();
+  expect(
+    within(
+      document.getElementById("office-journal-title")!.closest("section")!,
+    ).queryByText("Project not selected"),
+  ).toBeNull();
   const draft = within(office).getByRole("textbox", {
     name: "Direction to Meta-CEO",
   });
@@ -176,7 +182,7 @@ it("never publishes a late Work response from the replaced actual Host into Offi
   expect(screen.queryByText("JOB-1")).toBeNull();
   expect(
     screen.getByText(
-      "Work source unavailable. This is not evidence of zero work.",
+      "Work information is unavailable. This does not mean there is no work.",
     ),
   ).toBeTruthy();
   expect(f.count("read_work")).toBe(1);
