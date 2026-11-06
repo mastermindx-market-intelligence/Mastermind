@@ -5236,7 +5236,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       authenticationCue={todayAuthenticationCue}
       retainComposerWithAuth={Boolean(passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.launchDetails)) || heldKind === "launch"}
       onOpenInbox={() => { setProjectTab(null); setActive("Inbox"); }}
-      onOpenProjects={() => { setProjectTab(null); setActive("Projects"); }}
+      onOpenProjects={() => { setProjectTab(null); setCatalogueProject(null); setActive("Projects"); }}
       onOpenMission={(!authState || authState.acquisition) ? target => open(target.workRef, target.rootJobId) : undefined}
     />;
   else if (active === "Meta-CEO")
