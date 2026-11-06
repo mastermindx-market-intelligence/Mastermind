@@ -542,7 +542,7 @@ def read_retained_successor_after_bootstrap_prune(bundle):
     current/native selected state. This helper never writes a file or a pointer.
     """
     def fixed_files(directory, expected, *, exact=True):
-        generation.require(directory, stat.S_ISDIR, 0o700)
+        generation.require(directory, stat.S_ISDIR, stat.S_IRWXU)
         if exact and {p.name for p in directory.iterdir()} != set(expected):
             raise ValueError("retained successor artifact set changed")
         raw = {}
@@ -583,9 +583,9 @@ def read_retained_successor_after_bootstrap_prune(bundle):
         # Original present but malformed? Use the ORIGINAL strict verifier.
         # Original missing at a new/foreign location? The fixed plan hash refuses.
         raise ValueError("strict original bootstrap verifier required")
-    generation.require(original.parent, stat.S_ISDIR, 0o700)
+    generation.require(original.parent, stat.S_ISDIR, stat.S_IRWXU)
     store = Path(plan["store"])
-    generation.require(store, stat.S_ISDIR, 0o700)
+    generation.require(store, stat.S_ISDIR, stat.S_IRWXU)
     receipts_dir = store / "bootstrap"
     evidence = fixed_files(
         receipts_dir, RETAINED_STATUS_PROOF_SHA256["receipts"], exact=False)
