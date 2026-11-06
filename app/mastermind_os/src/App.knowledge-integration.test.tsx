@@ -94,9 +94,15 @@ async function fixture(holdResult = false, indexForDiscovery = false, currentChi
   const readPair = vi.spyOn(host,"readMissionResult");
   return {host,read,readPair,invoke,notify,settle,exact,result,room,list,indexedMission};
 }
+async function openListedOriginalConversation() {
+  // Global Conversations is the qualified catalogue; details require its
+  // explicit source-owned row gesture, never an implicit Window promotion.
+  fireEvent.click(await screen.findByRole("button",{name:/^Open conversation:/}));
+}
 async function start(f:Awaited<ReturnType<typeof fixture>>) {
   window.MastermindMissionHost=f.host;render(<App/>);
   fireEvent.click(screen.getByRole("button",{name:"Conversations"}));
+  await openListedOriginalConversation();
   await screen.findByText(paired.window.view.items.find(item=>item.text)!.text!);
   fireEvent.click(screen.getByRole("button",{name:"Unsent notes"}));
   fireEvent.change(screen.getByRole("textbox",{name:"Unsent notes"}),{target:{value:question}});
@@ -125,6 +131,7 @@ it("joins a same-root cross-child source to the real current App draft and Undo 
   expect(companion.textContent).toContain(question);
   expect(companion.querySelector("p.knowledge-muted")?.textContent).toBe(question);
   fireEvent.click(screen.getByRole("button",{name:"Conversations"}));
+  await openListedOriginalConversation();
   fireEvent.click(await screen.findByRole("button",{name:"Unsent notes"}));
   expect(screen.getByRole<HTMLTextAreaElement>("textbox",{name:"Unsent notes"}).value).toBe(question);
   expect(f.read).toHaveBeenCalledExactlyOnceWith({...f.exact,signal:expect.any(AbortSignal)});
@@ -191,6 +198,7 @@ it.each(["different-root","unknown","conflict"] as const)("does not activate a p
 async function searchFromActualDraft(f:Awaited<ReturnType<typeof fixture>>) {
   window.MastermindMissionHost=f.host;render(<App/>);
   fireEvent.click(screen.getByRole("button",{name:"Conversations"}));
+  await openListedOriginalConversation();
   await screen.findByText(paired.window.view.items.find(item=>item.text)!.text!);
   fireEvent.click(screen.getByRole("button",{name:"Unsent notes"}));
   fireEvent.change(screen.getByRole("textbox",{name:"Unsent notes"}),{target:{value:question}});
@@ -212,6 +220,7 @@ it("joins actual App Search to the independently indexed source and original dra
   fireEvent.click(screen.getByRole("button",{name:"Back to search results"}));
   expect(screen.getByRole("searchbox",{name:"Search available sources"})).toHaveProperty("value",f.exact.jobId);
   fireEvent.click(within(screen.getByRole("navigation",{name:"Company navigation"})).getByRole("button",{name:"Conversations"}));
+  await openListedOriginalConversation();
   fireEvent.click(screen.getByRole("button",{name:"Unsent notes"}));
   expect(screen.getByRole("textbox",{name:"Unsent notes"})).toHaveProperty("value",question);
   expect(f.read).toHaveBeenCalledTimes(1);

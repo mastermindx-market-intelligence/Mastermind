@@ -1576,7 +1576,7 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if line.startswith("class CeoIngressClient"):
                 clients.append((path.relative_to(ROOT).as_posix(), line_number))
-    assert clients == [("integrations/mastermind_executive_app/gateway.py", 356)]
+    assert clients == [("integrations/mastermind_executive_app/gateway.py", 358)]
     tree = ast.parse(source)
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
@@ -1597,7 +1597,7 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            '8011f9c21e9ca26519f4d015eb0af070d293bead2b4955a6871a511e3b690c39'):
+            'ea0dbdb33730d854d0731c324595d1723086e94811a283eed19020d2978975f3'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

@@ -121,13 +121,24 @@ class DirectNativeAdmission:
     _capability: object = dataclasses.field(repr=False, compare=False)
     _material_digest: str = dataclasses.field(repr=False)
     _execution_access: DirectNativeExecutionAccess | None = dataclasses.field(default=None,repr=False,compare=False)
+    _project_planning: dict | None = dataclasses.field(default=None,repr=False,compare=False)
 
     def check(self):
         from control_plane.executive_runtime import normalize_executive_dialogue_source
         if self._capability is not _ADMISSION or type(self.access) is not DirectNativeAccess:
             raise ValueError('direct native admission is not host-issued')
         self.access.check()
-        if digest(dict(source=self.source,binding=self.binding)) != self._material_digest:
+        material = dict(source=self.source,binding=self.binding)
+        if self._project_planning is not None:
+            from control_plane.project_planning_admission import normalize_context
+            context = normalize_context(self._project_planning)
+            if (context['principal_scope'] != self.access.principal_scope
+                    or context['work_ref'] != self.access.work_ref
+                    or digest(context) != self.access.authority_generation_digest
+                    or self._execution_access is None):
+                raise ValueError('project planning admission identity changed')
+            material['project_planning'] = context
+        if digest(material) != self._material_digest:
             raise ValueError('issued direct admission material changed')
         if self._execution_access is not None:
             if type(self._execution_access) is not DirectNativeExecutionAccess or self._execution_access.access is not self.access:
@@ -139,10 +150,13 @@ class DirectNativeAdmission:
             raise ValueError('direct native source is not canonical')
 
 
-def _issue_admission(access, source, binding, *, execution_access=None):
+def _issue_admission(access, source, binding, *, execution_access=None, project_planning=None):
     source=copy.deepcopy(source);binding=normalize_binding(binding)
+    project_planning=copy.deepcopy(project_planning)
+    material=dict(source=source,binding=binding)
+    if project_planning is not None: material['project_planning']=project_planning
     value = DirectNativeAdmission(access, source, binding, _ADMISSION,
-        digest(dict(source=source,binding=binding)),execution_access)
+        digest(material),execution_access,project_planning)
     value.check()
     return value
 
@@ -155,11 +169,14 @@ def job_is_direct(job):
 
 def admission_material(admission):
     admission.check()
-    return dict(schema_version=PROVENANCE_SCHEMA, principal_scope=admission.access.principal_scope,
+    value = dict(schema_version=PROVENANCE_SCHEMA, principal_scope=admission.access.principal_scope,
         receiver_binding_digest=receiver_binding(admission.access.principal_scope,admission.source),
         authority_generation_digest=admission.access.authority_generation_digest,
         source=copy.deepcopy(admission.source),source_digest=digest(admission.source),
         binding=normalize_binding(admission.binding))
+    if admission._project_planning is not None:
+        value['project_planning'] = copy.deepcopy(admission._project_planning)
+    return value
 
 _EXECUTION = object()
 

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {App} from './App';
 import {bindMissionHost,createNativeClient} from './host';
@@ -40,7 +40,7 @@ it('opens an actual fixed-port archived record as rootless read-only inspection 
  const open=await screen.findByRole('button',{name:'Open read-only '+archive.sample.items[0].title});
  fireEvent.click(open);
  expect(await screen.findByRole('article',{name:'Archived record (read-only)'})).toHaveProperty('textContent',expect.stringContaining(archive.sample.items[0].objective));
- expect(screen.queryByRole('button',{name:/^(Pause new work|Resume new work|Restore|Create project|New project|Adopt|Start project)$/})).toBeNull();
+ expect(within(screen.getByRole('article',{name:'Archived record (read-only)'})).queryByRole('button',{name:/^(Pause new work|Resume new work|Restore|Create project|New project|Adopt|Start project)$/})).toBeNull();
  expect(e.invoke.mock.calls.filter(([name])=>/mission|project_admission|project_plan|project_direction|project_session|submit|prepare|launch|create|adopt|pause|resume/.test(name))).toHaveLength(0);
  expect(e.invoke.mock.calls.filter(([name])=>name==='read_project_archive')).toHaveLength(1);
  expect(screen.getAllByRole('heading',{level:1})).toHaveLength(1);

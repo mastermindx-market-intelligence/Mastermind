@@ -23,7 +23,9 @@ def test_only_exact_reviewed_file_and_spelling_qualifies(path):
          '_mastermind_worker', '0o644', '_mastermind_worker'] if path ==
         'ops/executive_os/autonomy_control.py' else
         ['_mastermind_operator_canary', '0o700'] if path ==
-        'control_plane/codex_operator_adapter.py' else [])
+        'control_plane/codex_operator_adapter.py' else
+        ['430', '512', '401', '403', '409', '503', '503', '503', '503'] if path ==
+        'app/mastermind_os/src-tauri/src/auth.rs' else [])
     assert scan(text, path) == expected
     assert reviewed_literal_spans('unreviewed/'+path, text) == ()
 
@@ -34,11 +36,20 @@ def test_changed_or_extended_file_cannot_reuse_review(path):
     changed = text+'\nnew_peer_uid = 471\n'
     assert reviewed_literal_spans(path, changed) == ()
     assert '471' in scan(changed, path)
-    line, start, end, _, spelling = REVIEWED_FILES[path]['sites'][0]
-    lines = text.splitlines(keepends=True)
-    assert lines[line-1][start:end] == spelling
-    lines[line-1] = lines[line-1][:start]+'0'+lines[line-1][end:]
-    assert reviewed_literal_spans(path, ''.join(lines)) == ()
+    record = REVIEWED_FILES[path]
+    if record['sites']:
+        line, start, end, _, spelling = record['sites'][0]
+        lines = text.splitlines(keepends=True)
+        assert lines[line-1][start:end] == spelling
+        lines[line-1] = lines[line-1][:start]+'0'+lines[line-1][end:]
+        mutated = ''.join(lines)
+    else:
+        line, start, end, _, spelling = record['utf8_sites'][0]
+        lines = text.encode('utf-8').splitlines(keepends=True)
+        assert lines[line-1][start:end] == spelling.encode('ascii')
+        lines[line-1] = lines[line-1][:start]+b'0'+lines[line-1][end:]
+        mutated = b''.join(lines).decode('utf-8')
+    assert reviewed_literal_spans(path, mutated) == ()
 
 
 @pytest.mark.parametrize('path', [
