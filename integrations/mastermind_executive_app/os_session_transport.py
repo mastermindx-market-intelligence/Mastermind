@@ -1,6 +1,6 @@
 """App selected-session HTTP transport for the installed v3 OS composition.
 
-This module owns four fixed authenticated HTTPS POST routes around
+This module owns five fixed authenticated HTTPS POST routes around
 the actual :class:`InstalledSessionBridgeClient`.  It registers no routes and
 constructs no Runtime, socket listener, provider or credential; it remains
 disconnected until the integrator supplies the protected composition and the
@@ -9,6 +9,8 @@ principal into ASGI state, or takes a caller-selected private route.
 
 * ``/os/executive/session/context`` resolves one canonical fabric target for
   an exact work/root selection through ``bridge.targets`` only.
+* ``/os/executive/session/history-context`` binds the verified original READ
+  principal and expiry to one project without target enumeration or a root.
 * ``/os/executive/session/send`` commits one continuation with precisely the
   four validated existing arguments, passed once to ``bridge.send``.
 * ``/os/executive/session/references`` discovers bounded original-request
@@ -84,6 +86,7 @@ from integrations.session_bridge.schemas import (
 #: Fixed route -> closed operation name.  Nothing here is request-selectable.
 _OPERATIONS: dict[str, str] = {
     "/os/executive/session/context": "context",
+    "/os/executive/session/history-context": "history_context",
     "/os/executive/session/send": "send",
     "/os/executive/session/reply": "reply",
     "/os/executive/session/references": "references",
@@ -399,7 +402,7 @@ def _validated_native_reply(operation_key: str, native: Any) -> dict[str, Any]:
 
 
 class OsSessionTransportApp:
-    """Four fixed selected-session routes around the installed bridge client.
+    """Fixed selected-session/history routes around the installed bridge client.
 
     No inner app is wrapped: unrecognized scopes, methods, paths, schemes and
     query strings fail closed here, and the private bridge call is reached
@@ -545,7 +548,7 @@ class OsSessionTransportApp:
             return await self._dispatch(operation, scope, body, principal, chain)
         except Exception:
             # No phase may be inferred from an unexpected internal failure.
-            if operation in ("context", "references"):
+            if operation in ("context", "history_context", "references"):
                 return _failure_response(operation, "session_unavailable", effect="NONE")
             return _failure_response(
                 operation,
@@ -648,11 +651,42 @@ class OsSessionTransportApp:
     ) -> Response:
         if operation == "context":
             return await self._context(scope, body, principal, chain)
+        if operation == "history_context":
+            return await self._history_context(scope, body, principal, chain)
         if operation == "send":
             return await self._send(scope, body, principal, chain)
         if operation == "references":
             return await self._references(scope, body, principal, chain)
         return await self._reply(scope, body, principal, chain)
+
+    async def _history_context(
+        self, scope: Mapping[str, Any], body: dict[str, Any],
+        principal: VerifiedPrincipal, chain: tuple[tuple[Any, Any], ...],
+    ) -> Response:
+        """Project-scoped original-history READ; never enumerates live targets.
+
+        This context binds the already verified READ principal and its expiry.
+        References and bodies still pass their existing original-principal
+        bridge checks; this response grants no session or mutation authority.
+        """
+        selection = body.get("selection") if type(body) is dict and set(body) == {"selection"} else None
+        if (type(selection) is not dict or set(selection) != {"work_ref"}
+                or type(selection["work_ref"]) is not str
+                or _WORK_REF_RE.fullmatch(selection["work_ref"]) is None):
+            return _failure_response("history_context", "invalid_input", effect="NONE")
+        if not await self._same_principal(scope, principal, chain):
+            return _failure_response("history_context", "authentication_required", effect="NONE")
+        data = {
+            "schema": "mastermind.os.executive.project_history_context.v1",
+            "principal_scope": principal_scope(principal),
+            "verified_expiry": principal.expires_at,
+            "selection": {"work_ref": selection["work_ref"]},
+            "capabilities": {"references_read": True, "reply_read": True},
+        }
+        if not await self._same_principal(scope, principal, chain):
+            return _failure_response("history_context", "authentication_required", effect="NONE")
+        return _json_response(_result("history_context", ok=True, effect="NONE", data=data),
+                              HTTPStatus.OK, operation="history_context")
 
     async def _context(
         self,

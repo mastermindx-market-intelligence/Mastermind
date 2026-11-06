@@ -106,8 +106,18 @@ def loaded_entry(published, *, clean_yaml=False):
         sys.path[:] = path_before
 
 
-def before_participant_cohort(manifest):
+def before_original_artifact_recovery(manifest):
     prior = dict(manifest)
+    assert len(prior) == 107
+    assert prior.pop("ext/original_advertised_artifact.py") == "46a06945d0e640794cb52945a5caece440abee6da1c0ba13eaff371d9dc6e3c0"
+    assert prior["ext/artifact_delivery.py"] == "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d"
+    prior["ext/artifact_delivery.py"] = "81749610b8afd7151dbadb4cbcedbef853fc18ad9de9364fd3b2b1d747d535b1"
+    assert len(prior) == 106
+    return prior
+
+
+def before_participant_cohort(manifest):
+    prior = before_original_artifact_recovery(manifest)
     prior.update({"ext/" + name: digest
                   for name, digest in builder.GO_PROTECTED_CUSTODY_PREIMAGES.items()})
     assert prior.pop("ext/participant_binding.py") == "09aafda1390914e283915204459e37900123cd54a3d0f4e9116102f3a8921f56"
@@ -117,11 +127,12 @@ def before_participant_cohort(manifest):
     return prior
 
 
-def test_default_build_stays_exact_reviewed_106_and_go_adds_only_the_fixed_pair(builds):
+def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(builds):
     default_raw = (builds.default / "native-manifest.json").read_bytes()
     default = json.loads(default_raw)
     application = json.loads((builds.application / "native-manifest.json").read_bytes())
-    assert len(default) == 106
+    assert len(default) == 107
+    previous = before_original_artifact_recovery(default)
     captured = {name: g.digest((ROOT / "candidate" / name).read_bytes())
                 for name in builder.GO_APPLICATION_DEPENDENCIES}
     builder.validate_go_base_manifest(default, captured)
@@ -144,7 +155,7 @@ def test_default_build_stays_exact_reviewed_106_and_go_adds_only_the_fixed_pair(
         assert historical["ext/" + name] == builder.GO_COMPLETED_POLL_DIGESTS[name]
         historical["ext/" + name] = original
     for name, original in builder.GO_POST_FAILURE_PREIMAGES.items():
-        assert default["ext/" + name] == builder.GO_POST_FAILURE_DIGESTS[name]
+        assert previous["ext/" + name] == builder.GO_POST_FAILURE_DIGESTS[name]
         historical["ext/" + name] = original
     for name, digest in builder.GO_POST_FAILURE_DIAGNOSTICS_ADDITIONS.items():
         assert default["ext/" + name] == digest
@@ -152,9 +163,9 @@ def test_default_build_stays_exact_reviewed_106_and_go_adds_only_the_fixed_pair(
     assert g.digest((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) == builder.GO_BASE_MANIFEST_SHA256
     assert {k: v for k, v in application.items() if k in default} == default
     assert set(application) - set(default) == {g.GO_ENTRY, g.GO_HANDLER}
-    assert len(application) == 108
+    assert len(application) == 109
     http = json.loads((builds.http / "native-manifest.json").read_bytes())
-    assert len(http) == 111
+    assert len(http) == 112
     assert set(http) - set(application) == set(g.HTTP_REQUIRED)
     inventory = json.loads((builds.application / "native-source-inventory.json").read_bytes())
     component = json.loads((builds.application / "external-go-component/component.json").read_bytes())
@@ -420,6 +431,7 @@ def test_participant_cohort_cannot_relabel_legacy_namespace(builds, corruption):
         bad = before_participant_cohort(current)
         bad["ext/fabric_operator_owner.py"] = current["ext/fabric_operator_owner.py"]
     else:
+        bad = before_original_artifact_recovery(current)
         for name in builder.GO_POST_FAILURE_ADDITIONS: del bad["ext/" + name]
         assert len(bad) == 104
     with pytest.raises(ValueError): builder.validate_go_base_manifest(bad, captured)
@@ -442,3 +454,46 @@ def test_protected_custody_cannot_relabel_prior_namespace(builds, count):
     wrong.update({"ext/" + name: digest for name, digest in builder.GO_PROTECTED_CUSTODY_DIGESTS.items()})
     with pytest.raises(ValueError, match="custody cannot relabel historical namespace"):
         builder.validate_go_base_manifest(wrong, captured)
+
+
+
+def test_original_artifact_recovery_preserves_exact_previous106_and_raw_identity(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    previous = before_original_artifact_recovery(current)
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    for manifest in (previous, current):
+        original = dict(manifest)
+        builder.validate_go_base_manifest(manifest, captured)
+        assert manifest == original
+    assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == "5721f06f28d39b493a3b1cfc7d37d3ae5741818e0197ef723a23db15f109c295"
+
+
+@pytest.mark.parametrize("corruption", ["reader-missing", "reader-hash", "delivery-hash",
+    "new-reader-old-delivery", "new-delivery-without-reader", "pair-in104", "pair-in102"])
+def test_original_artifact_pair_cannot_expand_or_relabel_historical_namespace(builds, corruption):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    bad = dict(current)
+    if corruption == "reader-missing":
+        del bad["ext/original_advertised_artifact.py"]
+    elif corruption == "reader-hash":
+        bad["ext/original_advertised_artifact.py"] = "f" * 64
+    elif corruption == "delivery-hash":
+        bad["ext/artifact_delivery.py"] = "f" * 64
+    elif corruption == "new-reader-old-delivery":
+        bad["ext/artifact_delivery.py"] = builder.GO_ORIGINAL_ARTIFACT_PREIMAGE
+    elif corruption == "new-delivery-without-reader":
+        bad = before_original_artifact_recovery(current)
+        bad["ext/artifact_delivery.py"] = builder.GO_ORIGINAL_ARTIFACT_DIGEST
+    else:
+        bad = before_participant_cohort(current)
+        if corruption == "pair-in102":
+            for cohort in (builder.GO_UBUNTU4_PREIMAGES, builder.GO_COMPLETED_POLL_PREIMAGES,
+                           builder.GO_POST_FAILURE_PREIMAGES):
+                bad.update({"ext/" + name: digest for name, digest in cohort.items()})
+            for name in builder.GO_POST_FAILURE_ADDITIONS:
+                del bad["ext/" + name]
+        bad["ext/original_advertised_artifact.py"] = current["ext/original_advertised_artifact.py"]
+        bad["ext/artifact_delivery.py"] = builder.GO_ORIGINAL_ARTIFACT_DIGEST
+    with pytest.raises(ValueError):
+        builder.validate_go_base_manifest(bad, captured)
