@@ -222,7 +222,7 @@ _ARM_ADMISSION_CODES = frozenset(
 _MAX_JSON_BYTES = 1024 * 1024
 _TRANSACTION_SCHEMA = "mastermind.executive_autonomy_transaction/v1"
 A2_DISABLE_COMMANDS = frozenset({"a2-disable-prepare", "a2-disable-prepare-reconcile"})
-_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION", "FINITE_CONTROL_STAGE", "PAID_CONTROL_STAGE", "OS_GATEWAY_PUBLICATION", "CONTROL_COMPONENT_UPDATE"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
+_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION", "FINITE_CONTROL_STAGE", "FINITE_CONTROL_RETIRE", "PAID_CONTROL_STAGE", "OS_GATEWAY_PUBLICATION", "CONTROL_COMPONENT_UPDATE"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
 # One manifest name for the canonical marker and for the private generation it
 # is published from, so a renamed generation is always readable in place.
 _TRANSACTION_MANIFEST_NAME = "transaction.json"
@@ -1279,6 +1279,11 @@ def _parser() -> argparse.ArgumentParser:
     finite_stage.add_argument('--expected-control-sha256', action=_StoreOnce, required=True)
     finite_reconcile = sub.add_parser('finite-control-stage-reconcile', help='Prove an already-published finite stage without replay.')
     finite_reconcile.add_argument('--expected-sha', type=_exact_sha, action=_StoreOnce, required=True)
+    for command in ('finite-control-retire', 'finite-control-retire-reconcile'):
+        finite_retire = sub.add_parser(command, help='Retire the fixed finite selection, retaining its protected provenance.')
+        finite_retire.add_argument('--expected-sha', type=_exact_sha, action=_StoreOnce, required=True)
+        if command == 'finite-control-retire':
+            finite_retire.add_argument('--expected-control-sha256', type=_exact_digest, action=_StoreOnce, required=True)
     for command in ('paid-control-stage','paid-control-stage-reconcile'):
         paid=sub.add_parser(command,help='Stage or reconcile the qualified disarmed paid source.')
         paid.add_argument('--expected-sha',type=_exact_sha,action=_StoreOnce,required=True)
@@ -3794,7 +3799,7 @@ class ProductionTransactionHost(ProductionArmHost):
         elif value.get("operation") == "A2_RETURN_SOCKET_RESTORE":
             raise TransactionEffectUnknown()
         if set(value) & _FINITE_RECEIPT_FIELDS:
-            if (value.get("operation") != "FINITE_CONTROL_STAGE"
+            if (value.get("operation") not in {"FINITE_CONTROL_STAGE", "FINITE_CONTROL_RETIRE"}
                     or type(value.get("finite_prior_receipt_present")) is not bool
                     or any(re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))) is None
                            for field in _FINITE_RECEIPT_FIELDS - {"finite_prior_receipt_present"})):
@@ -11689,7 +11694,8 @@ def main(
         from ops.executive_os.a2_control_restoration import run_command
         return run_command(args, host=host)
 
-    if args.command in {'finite-control-stage', 'finite-control-stage-reconcile'}:
+    if args.command in {'finite-control-stage', 'finite-control-stage-reconcile',
+                        'finite-control-retire', 'finite-control-retire-reconcile'}:
         from ops.executive_os.attended_control_staging import run_command
         return run_command(args, host=host)
 
