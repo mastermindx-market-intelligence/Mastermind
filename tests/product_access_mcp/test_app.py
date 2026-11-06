@@ -64,6 +64,15 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
         self.auth = JwtAuthenticator(policy=self.policy, jwks_cache=Keys(public))
         self.calls = []
         self.mode = "normal"
+        from .test_observations import overlay_payload, risk_payload
+        from zoneinfo import ZoneInfo
+        built = datetime.fromtimestamp(self.clock - 60, timezone.utc).isoformat()
+        self.projection_payloads = {
+            "macro_overlay": overlay_payload(built=built, quote_ts_max=built),
+            "market_risk": risk_payload(
+                built=built, stale_after=datetime.fromtimestamp(self.clock + 600, timezone.utc).isoformat(),
+                asof=datetime.fromtimestamp(self.clock, ZoneInfo("America/New_York")).date().isoformat()),
+        }
         test = self
         class Port:
             async def read(self, endpoint, *, symbols=()):
@@ -77,6 +86,8 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
                     test.audit.fail = True
                 if endpoint == "health":
                     payload = {"status": "ok", "commit": "a" * 7, "checkout": "a" * 7}
+                elif endpoint in test.projection_payloads:
+                    payload = test.projection_payloads[endpoint]
                 else:
                     payload = {"status": "ok", "commit": "a" * 7, "checks": {"quotes": {"status": "missing"}}}
                 return HttpObservation(status=200, body=json.dumps(payload).encode(), content_type="application/json")
@@ -127,7 +138,8 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
             "clientInfo": {"name": "fixture", "version": "1"}}, token=self.token()))
         self.assertEqual(initial["serverInfo"]["name"], "Mastermind Product Observations")
         tools = self.result(await self.rpc("tools/list", token=self.token()))["tools"]
-        self.assertEqual([x["name"] for x in tools], ["product_diagnostics", "product_market_pulse"])
+        self.assertEqual([x["name"] for x in tools], ["product_diagnostics", "product_market_pulse",
+                                                         "product_macro_overlay", "product_market_risk"])
         for tool in tools:
             self.assertFalse(tool["inputSchema"]["additionalProperties"])
             self.assertTrue(tool["annotations"]["readOnlyHint"])
@@ -137,7 +149,7 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_catalog_is_compact_without_weakening_output_validation(self):
         tools = self.result(await self.rpc("tools/list", token=self.token()))["tools"]
-        self.assertLess(len(json.dumps(tools).encode()), 16000)
+        self.assertLess(len(json.dumps(tools).encode()), 32768)
 
     async def test_real_signed_token_invokes_real_projection(self):
         result = self.result(await self.read())
@@ -309,7 +321,7 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_catalog_schema_snapshot_is_pinned(self):
         from integrations.product_access_mcp.schemas import SCHEMA_SNAPSHOT_SHA256, TOOL_SPECS
-        self.assertEqual(SCHEMA_SNAPSHOT_SHA256, "3f7d8141b1af5a56c6b7f6b480e1f5a2fb052a6d42e0710a7e7f1d276db614db")
+        self.assertEqual(SCHEMA_SNAPSHOT_SHA256, "caa96e526da63e7b1fef930f9195aaeb0c58cbae499e5f09c4ff0edbb37654ae")
         tools = self.result(await self.rpc("tools/list", token=self.token()))["tools"]
         self.assertEqual(tools, list(TOOL_SPECS))
 
@@ -367,3 +379,72 @@ class ProductAppTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(ValueError):
                     self.module.create_product_server(authenticator=self.auth, policy=policy, now=lambda: self.clock,
                         audit_sink=self.audit, reader=self.reader, allowed_hosts=hosts)
+
+
+    async def test_signed_new_tools_dispatch_to_their_exact_public_readers(self):
+        for name, endpoint in (("product_macro_overlay", "macro_overlay"), ("product_market_risk", "market_risk")):
+            with self.subTest(name=name):
+                result = self.result(await self.read(name=name))
+                self.assertFalse(result.get("isError", False), result)
+                row = result["structuredContent"]["observations"][0]
+                self.assertEqual(row["endpoint"], endpoint)
+                self.assertEqual(row["state"], "observed")
+                self.assertEqual(self.calls[-1], (endpoint, ()))
+                self.assertNotIn(self.token(), json.dumps(result))
+        self.assertEqual(len(self.calls), 2)
+
+    async def test_new_tools_reject_url_token_cookie_and_unpublished_selectors_before_read(self):
+        for name in ("product_macro_overlay", "product_market_risk"):
+            for field in ("url", "token", "cookie", "symbols", "source", "product_user"):
+                with self.subTest(name=name, field=field):
+                    result = self.result(await self.read(name=name, args={field: "PRIVATE_INPUT"}))
+                    self.assertTrue(result["isError"])
+                    self.assertIn("INVALID_REQUEST", json.dumps(result))
+                    self.assertNotIn("PRIVATE_INPUT", json.dumps(result))
+        self.assertEqual(self.calls, [])
+
+    async def test_new_reads_recheck_expired_and_revoked_bearer_after_await(self):
+        for name in ("product_macro_overlay", "product_market_risk"):
+            for mode in ("expire", "revoke"):
+                with self.subTest(name=name, mode=mode):
+                    original_clock = self.clock
+                    self.mode = mode
+                    try:
+                        result = self.result(await self.read(name=name))
+                        self.assertTrue(result["isError"])
+                        self.assertIn("AUTHENTICATION_CHANGED", json.dumps(result))
+                        self.assertNotIn("structuredContent", result)
+                    finally:
+                        self.clock = original_clock
+                        self.auth._policy = self.policy
+                        self.mode = "normal"
+
+    async def test_faulty_reader_cannot_return_a_forged_qualified_risk(self):
+        original = self.reader.market_risk
+        async def forged():
+            result = await original()
+            data = result["observations"][0]["data"]
+            self.assertTrue(data["freshness"]["qualified"])
+            data["score"] = None
+            # This still fits the closed JSON shape. The semantic boundary
+            # must refuse it after authentication has been revalidated.
+            return result
+        self.reader.market_risk = forged
+        result = self.result(await self.read(name="product_market_risk"))
+        self.assertTrue(result["isError"])
+        self.assertIn("OUTPUT_REFUSED", json.dumps(result))
+        self.assertNotIn("structuredContent", result)
+
+    async def test_faulty_reader_cannot_forward_overlay_prices_or_private_context(self):
+        original = self.reader.macro_overlay
+        async def forged():
+            result = await original()
+            result["observations"][0]["data"]["market"]["SPY"]["price"] = 620.5
+            result["observations"][0]["data"]["sessions"]["us"]["cookie"] = "PRIVATE_COOKIE"
+            return result
+        self.reader.macro_overlay = forged
+        result = self.result(await self.read(name="product_macro_overlay"))
+        self.assertTrue(result["isError"])
+        self.assertIn("OUTPUT_REFUSED", json.dumps(result))
+        self.assertNotIn("PRIVATE_COOKIE", json.dumps(result))
+        self.assertNotIn("structuredContent", result)

@@ -108,6 +108,53 @@ def _decode_pid1(raw: bytes) -> list[dict]:
     return rows
 
 
+async def _settle_owned_query(process):
+    """Bound settlement of this request's exact query, including exited pipes."""
+    if process.returncode is None:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+    waiter = asyncio.create_task(process.wait())
+    try:
+        await asyncio.wait_for(asyncio.shield(waiter), timeout=0.5)
+        if process.returncode is None:
+            raise RoleStatusError()
+        if process.stdout is not None and not process.stdout.at_eof():
+            extra = await asyncio.wait_for(process.stdout.read(1), timeout=0.5)
+            if extra or not process.stdout.at_eof():
+                raise RoleStatusError()
+    except asyncio.TimeoutError:
+        # An inherited pipe is not proof of descendant settlement. Refuse;
+        # never probe or signal a recorded/foreign process to recover it.
+        raise RoleStatusError() from None
+    finally:
+        if not waiter.done():
+            waiter.cancel()
+
+
+async def _await_query_cleanup(cleanup):
+    """Repeated caller cancellation cannot abandon bounded query settlement."""
+    cancelled = isinstance(sys.exception(), asyncio.CancelledError)
+    while not cleanup.done():
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            cancelled = True
+        except Exception:
+            if cancelled:
+                raise asyncio.CancelledError() from None
+            raise
+    try:
+        cleanup.result()
+    except Exception:
+        if cancelled:
+            raise asyncio.CancelledError() from None
+        raise
+    if cancelled:
+        raise asyncio.CancelledError()
+
+
 async def _query_fixed_pid1() -> list[dict]:
     """Only the two fixed units and explicit property allowlist; no shell."""
     process = await asyncio.create_subprocess_exec(
@@ -129,13 +176,8 @@ async def _query_fixed_pid1() -> list[dict]:
             raise RoleStatusError()
         return _decode_pid1(bytes(chunks))
     finally:
-        if process.returncode is None:
-            # Kill only this owned, read-only query. Do not reset the caller's
-            # deadline while waiting for cancellation/SSL cleanup.
-            try:
-                process.kill()
-            except ProcessLookupError:
-                pass
+        cleanup = asyncio.create_task(_settle_owned_query(process))
+        await _await_query_cleanup(cleanup)
 
 
 def _expected_exec_start(unit_text: str) -> tuple[str, str]:

@@ -7,6 +7,21 @@ these pins are not learned or refreshed by the tests.
 """
 
 REVIEWED_FILES = {
+    # Frozen GLM account-admission evidence: these are elapsed-time bounds,
+    # not user identities. Whole-file hashes and exact sites fail closed on
+    # any changed meaning, added identity, or modified retained traceback.
+    "research/fabric_glm_account_admission_20261014/baseline.quota_remote.py": {
+        "sha256": "80ce4151a5d3f05528bc3c5e9af214d510ad9d9f17803c62f01a4c2d818ec5ff",
+        "sites": ((22, 10, 13, "int", "600"),),
+    },
+    "research/fabric_glm_account_admission_20261014/quota_remote.py": {
+        "sha256": "a1dab11da10264836e6271955b375b8e6508c23f23d0444c99d96464deb70f2b",
+        "sites": ((22, 10, 13, "int", "600"),),
+    },
+    "research/fabric_glm_account_admission_20261014/BASELINE.xml": {
+        "sha256": "538923697693ccd4c5e836de20466cbe2f4d2ae1f0ca189da194a5b0d0d5b64a",
+        "sites": ((19, 46, 49, "int", "600"),),
+    },
     # R2 AEAD source candidate: the existing Control UID remains fixed at this
     # single exact site. Independent source acceptance remains a release gate;
     # these static test pins do not establish it or grant a new identity.
@@ -602,9 +617,10 @@ REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/accoun
 
 # C16: fixed observation-only TLS directory; root owner and canonical Control
 # group retain the exact private traversal mode. Whole-source and token-bound.
-# C20 attended-parent source review: native composition preserves the exact
-# ensure_directories AST and its whole permission token at this same site.
-REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'b8a7cf9edd2746c8981dcb0a7ce1f1adf8c0b0067e9a49b949a7f48a85799139', 'sites': ((660, 71, 76, 'int', '0o750'),)}
+# C21 attended-parent source review combines native composition with the
+# accepted archive closure and inert gateway replacement. ensure_directories
+# retains its exact AST and whole permission token at the accepted moved site.
+REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': '58bfdd19e0a03838f2fd9ead533de5de9b0bd9cecd1687f68756fafc53995601', 'sites': ((675, 71, 76, 'int', '0o750'),)}
 
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.

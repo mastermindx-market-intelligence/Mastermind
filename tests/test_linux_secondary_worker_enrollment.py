@@ -177,7 +177,7 @@ def test_real_git_archive_preserves_runtime_byok_modules_and_role_data(tmp_path:
         "vendor/hermes/secret.txt", "integrations/unrelated/secret.txt",
         "integrations/business_mcp_auth/server.py", "integrations/business_mcp_auth/jwks.py",
         "integrations/mastermind_secretary_mcp/adapter.py", "integrations/hermes_delegate/policy.py",
-        "unrelated/private.txt",
+        "unrelated/private.txt", "scripts/ohf/private-probe.py",
     )
     for relative in decoys:
         path = repo / relative
@@ -189,6 +189,9 @@ def test_real_git_archive_preserves_runtime_byok_modules_and_role_data(tmp_path:
     (repo / "common/untracked-private.txt").write_bytes(b"untracked fixture\n")
     required = (
         "common/__init__.py", "integrations/__init__.py",
+        "scripts/ohf/__init__.py", "scripts/ohf/redaction.py",
+        "scripts/ohf/capability_skill_projection.py", "scripts/ohf/laboratory.py",
+        "scripts/ohf/protocol.py", "scripts/ohf/fixtures/__init__.py",
         "ops/native_fabric/quota_continuity/candidate/paid_yaml_runtime.py",
         "ops/native_fabric/quota_continuity/candidate/paid_pyyaml_6_0_3.zip",
         "ops/native_fabric/quota_continuity/candidate/paid_pyyaml_provenance.json",
@@ -242,6 +245,27 @@ def test_real_git_archive_preserves_runtime_byok_modules_and_role_data(tmp_path:
     )
     assert result.returncode == 0, result.stderr[-3000:]
     assert result.stdout.strip() == "ISOLATED_RUNTIME_BYOK_IMPORTS_OK"
+
+    # Reach the actual installed entrypoints with no checkout/site fallback.
+    # The gateway deliberately has no --help option; its closed parser refusal
+    # proves import closure, while an arbitrary failure must never count as proof.
+    from ops.executive_os.remote_worker_gateway_service import SERVICE_CHECK_SCHEMA
+    for entrypoint, expected_rc in (
+        ("executive_os_linux_worker.py", 0),
+        ("executive_os_remote_worker_gateway.py", 64),
+    ):
+        invocation = subprocess.run(
+            [sys.executable, "-I", "-S", "-B", str(extracted / "scripts" / entrypoint), "--help"],
+            cwd=tmp_path, capture_output=True, text=True, timeout=20,
+        )
+        assert invocation.returncode == expected_rc, invocation.stderr[-3000:]
+        if expected_rc == 0:
+            assert "usage:" in invocation.stdout and not invocation.stderr
+        else:
+            assert not invocation.stdout
+            assert json.loads(invocation.stderr) == {
+                "schema": SERVICE_CHECK_SCHEMA, "ok": False, "code": "ARGUMENTS_INVALID",
+            }
 
 
 def test_linux_identities_are_consumed_from_canonical_bootstrap_source(tmp_path: Path) -> None:
@@ -450,6 +474,15 @@ def test_observation_config_is_digest_bound_exact_adoption_and_never_replaced(tm
         m._observation_input(dataclasses.replace(args, gateway_config_sha256='0' * 64), identities)
     with pytest.raises(m.EnrollmentError, match='release_pin'):
         m._observation_input(dataclasses.replace(args, expected_sha='e' * 40), identities)
+    replacement_args = dataclasses.replace(
+        args, expected_sha='e' * 40, expected_gateway_unit_sha256='f' * 64)
+    preserved, preserved_config = m._observation_input(replacement_args, identities)
+    assert preserved == raw
+    assert preserved_config.hermes_role_metadata_read.implementation_sha == args.expected_sha
+    assert destination.stat().st_ino == original_inode
+    destination.unlink()
+    with pytest.raises(m.EnrollmentError, match='predecessor_config_required'):
+        m._observation_input(replacement_args, identities)
     _write(destination, '{}', 0o440)
     with pytest.raises(m.EnrollmentError, match='conflict'):
         m._install_observation_config(raw, identities)
