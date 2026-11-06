@@ -105,6 +105,30 @@ def test_late_current_permission_withdrawal_refuses_existing_read_capability(com
     assert reads==[]
 
 
+@pytest.mark.parametrize('withdrawal',['policy','expiry'])
+def test_policy_withdrawal_during_final_same_byte_result_reread_never_escapes_view(completed_service,monkeypatch,withdrawal):
+    _,_,lease,_,_,_,_,state,_=completed_service
+    cap=reader.capture_completed_memory_read(state['supervisor'],lease.attempt.attempt_id)
+    actual=paid._private_read;result_reads=[]
+    def withdraw_after_last_result_read(path,limit):
+        raw=actual(path,limit)
+        if path.name=='memory-original-result':
+            result_reads.append(raw)
+            if len(result_reads)==2:
+                document=json.loads(state['config']['raw'])
+                if withdrawal=='policy':
+                    del document['memory_original_result_access']
+                    replace_fixture_config(state,document)
+                else:
+                    deadline=document['memory_original_result_access']['expires_at_seconds']
+                    from control_plane import protected_memory_result_access as access
+                    monkeypatch.setattr(access.time,'time',lambda:deadline)
+        return raw
+    monkeypatch.setattr(paid,'_private_read',withdraw_after_last_result_read)
+    with pytest.raises(ValueError):reader.read_completed_memory_result(cap)
+    assert len(result_reads)==2 and result_reads[0]==result_reads[1]
+
+
 def test_v3_completed_access_advancement_keeps_original_native_grant_immutable(completed_service):
     _,_,lease,_,_,_,_,state,_=completed_service
     state['access_advanced']=True

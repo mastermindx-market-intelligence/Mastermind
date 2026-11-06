@@ -96,4 +96,7 @@ def read_completed_memory_result(capability):
     _runtime_read_permission(state.reference);_permission(material,owner)
     if (original.current_reference(state.reference)!=ref or _private_read(directory/'memory-original-input',65536)!=packet
             or _private_read(directory/'memory-original-result',65536)!=result):raise CompletedReadRefused()
+    # All potentially blocking receipt/body reads precede the final current
+    # authorization. A same-byte reread cannot preserve a withdrawn view.
+    _runtime_read_permission(state.reference);_permission(material,owner)
     return view
