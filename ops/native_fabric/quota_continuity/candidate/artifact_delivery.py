@@ -22,6 +22,10 @@ import artifact_reader as reader
 
 from native_runtime_bindings import owner_path
 
+# Exact reviewed remote recovery program. Protected generation publication binds
+# this incumbent pin; neither request fields nor mutable module names set it.
+ADVERTISED_RECOVERY_SOURCE_SHA256 = 'a34c5cf3862ae11ed5d6ac1fb7de732af5988d4b1869e4b7cfbf183299cad704'
+
 HERE = Path(__file__).resolve().parent
 DESTINATION_ROOT = Path("/Volumes/Mastermind/evidence")
 CAPSULE_SOURCE_FILES = {'declaration': {'path': '/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/capsule-path-correction-20261011/CURRENT_PARENT_DECLARATION.json',
@@ -884,7 +888,8 @@ def transport(alias, request, *, observer_source_hash=None, current_sources_sha2
         # Exact source-admitted advertised artifact recovery: one closed scope,
         # one remote read, no producer attestation and no outcome acceptance.
         import original_advertised_artifact
-        code = original_advertised_artifact.code_for_request(request)
+        code = original_advertised_artifact.code_for_request(
+            request, expected_hash=ADVERTISED_RECOVERY_SOURCE_SHA256)
         response_limit = original_advertised_artifact.MAX_RESPONSE
     elif type(request) is dict and request.get("schema") == "mastermind.native_host_review_source_read.v1":
         if digest(local_file(HERE / "native_host_review_source_delivery.py", 65536)) != '3ec53fa0be3c69c28e265a1bb5b1cab3cc0ee3f6f6c03b93908d6c2685f2e902':

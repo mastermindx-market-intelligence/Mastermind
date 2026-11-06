@@ -377,9 +377,11 @@ def qualify(request):
         raise ValueError('advertised_stdout_not_utf8') from exc
     advertisement = _advertisement(text, request)
     registry_raw, alias = _registry(request)
+    source = _qualified_module_source(_delivery().ADVERTISED_RECOVERY_SOURCE_SHA256)
     return {
         'evidence_sha256': {name: digest(raw[name]) for name in sorted(raw)},
         'registry_sha256': digest(registry_raw),
+        'recovery_source_sha256': digest(source),
         'ssh_alias': alias,
         'advertisement': advertisement,
         'settlement_events': settlement,
@@ -451,13 +453,21 @@ def _module_source():
     return _read_local(delivery.HERE / MODULE_NAME, MAX_LOCAL)
 
 
-def code_for_request(request):
-    """The remote program is this module's own bytes, as one program."""
+def _qualified_module_source(expected_hash):
+    """Bind one byte string to the incumbent's protected generation hash."""
+    if (type(expected_hash) is not str or HEX_RE.fullmatch(expected_hash) is None
+            or expected_hash != _delivery().ADVERTISED_RECOVERY_SOURCE_SHA256):
+        raise ValueError('advertised_remote_source_hash_unqualified')
+    raw = _module_source()
+    if digest(raw) != expected_hash:
+        raise ValueError('advertised_remote_source_changed')
+    return raw
+
+
+def code_for_request(request, *, expected_hash):
+    """Transport exactly the checked bytes; never reread or fall back."""
     validate_request(request)
-    text = _module_source().decode('utf-8')
-    if 'def remote_main' not in text or 'def remote_read' not in text:
-        raise ValueError('advertised_remote_source_unqualified')
-    return text
+    return _qualified_module_source(expected_hash).decode('utf-8')
 
 
 def collect(run_id, destination):

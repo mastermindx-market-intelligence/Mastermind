@@ -261,6 +261,7 @@ class FakeIncumbent:
 def _install(monkeypatch, incumbent):
     delivery = types.ModuleType('artifact_delivery')
     delivery.HERE = incumbent.root
+    delivery.ADVERTISED_RECOVERY_SOURCE_SHA256 = _digest(_module_path().read_bytes())
     delivery.local_file = incumbent.local_file
     delivery.digest = incumbent.digest
     delivery.validate_capsule_process = incumbent.validate_capsule_process
@@ -441,6 +442,7 @@ def _repin(monkeypatch, module, name, data):
 
 def _install_local(monkeypatch, module, tmp_path, payload=b'fixture advertised bytes'):
     fixture = _local_fixture(tmp_path, payload)
+    shutil.copyfile(_module_path(), fixture.root / MODULE_NAME)
     incumbent = _install(monkeypatch, FakeIncumbent(fixture.root))
     incumbent.status = {
         'schema': 'mastermind.fabric_task_status.v1',
@@ -528,7 +530,7 @@ def test_request_must_equal_the_closed_scope(module):
 def test_the_remote_program_is_the_exact_current_module_bytes(monkeypatch, module, tmp_path):
     fixture, incumbent = _install_local(monkeypatch, module, tmp_path)
     shutil.copyfile(_module_path(), fixture.root / MODULE_NAME)
-    code = module.code_for_request(dict(fixture.scope))
+    code = module.code_for_request(dict(fixture.scope), expected_hash=_digest(_module_path().read_bytes()))
     assert code == _module_path().read_text(encoding='utf-8')
     assert 'def remote_main' in code and 'def remote_read' in code
 
@@ -1165,7 +1167,7 @@ def test_the_incumbent_transport_carries_the_advertised_schema_branch():
     text = (paths[0] / 'artifact_delivery.py').read_text(encoding='utf-8')
     if 'mastermind.source_admitted_advertised_artifact_read.v1' not in text:
         pytest.skip('the two-hunk plumbing patch is not applied in this tree')
-    assert 'original_advertised_artifact.code_for_request(request)' in text
+    assert 'request, expected_hash=ADVERTISED_RECOVERY_SOURCE_SHA256)' in text
     assert 'original_advertised_artifact.collect(args.run_id, args.destination)' in text
 
 
@@ -1199,7 +1201,7 @@ def test_module_source_failure_does_not_fall_back(monkeypatch, module, tmp_path)
         raise PermissionError('private detail must not cause another source read')
     monkeypatch.setattr(module, '_read_local', denied)
     with pytest.raises(PermissionError):
-        module.code_for_request(dict(fixture.scope))
+        module.code_for_request(dict(fixture.scope), expected_hash=_digest(_module_path().read_bytes()))
     assert calls == [fixture.root / MODULE_NAME]
     assert incumbent.transport_calls == []
 
@@ -1236,3 +1238,75 @@ def test_metadata_paths_use_incumbent_state_not_remote_stdout_directory(monkeypa
     paths = module._evidence_paths(fixture.scope['run_id'])
     assert paths['stdout'].parent == fixture.root / 'lanes'
     assert paths['process'].parent == paths['provider'].parent == fixture.root / 'state' / 'remote_sub'
+
+
+def test_inert_source_body_mutation_refuses_before_transport(monkeypatch, module, tmp_path):
+    fixture, incumbent = _install_local(monkeypatch, module, tmp_path)
+    path = fixture.root / MODULE_NAME
+    path.write_bytes(path.read_bytes() + b'\n# changed inert source body\n')
+    with pytest.raises(ValueError, match='advertised_remote_source_changed'):
+        module.qualify(dict(fixture.scope))
+    with pytest.raises(ValueError, match='advertised_remote_source_changed'):
+        module.code_for_request(dict(fixture.scope), expected_hash=_digest(_module_path().read_bytes()))
+    assert incumbent.transport_calls == []
+    assert not Path(module.DESTINATION).exists()
+
+
+def test_source_drift_between_qualification_and_transport_cannot_send(monkeypatch, module, tmp_path):
+    fixture, incumbent = _install_local(monkeypatch, module, tmp_path)
+    original_verify = _Chain.verify
+    def mutate_after_qualification(chain):
+        original_verify(chain)
+        path = fixture.root / MODULE_NAME
+        path.write_bytes(path.read_bytes() + b'\n# source drift before transport\n')
+    monkeypatch.setattr(_Chain, 'verify', mutate_after_qualification)
+    def checked_transport(alias, request):
+        # Exercise the real dispatch seam before any inert simulated send.
+        module.code_for_request(request, expected_hash=sys.modules['artifact_delivery'].ADVERTISED_RECOVERY_SOURCE_SHA256)
+        return incumbent.transport(alias, request)
+    monkeypatch.setattr(sys.modules['artifact_delivery'], 'transport', checked_transport)
+    with pytest.raises(ValueError, match='advertised_remote_source_changed'):
+        module.collect(fixture.scope['run_id'], module.DESTINATION)
+    assert incumbent.transport_calls == []
+    assert (Path(module.DESTINATION) / 'request.json').exists()
+    assert not (Path(module.DESTINATION) / 'artifact.patch').exists()
+
+
+def test_caller_hash_cannot_replace_incumbent_generation_pin(monkeypatch, module, tmp_path):
+    fixture, incumbent = _install_local(monkeypatch, module, tmp_path)
+    path = fixture.root / MODULE_NAME
+    path.write_bytes(path.read_bytes() + b'\n# alternate source\n')
+    with pytest.raises(ValueError, match='advertised_remote_source_hash_unqualified'):
+        module.code_for_request(dict(fixture.scope), expected_hash=_digest(path.read_bytes()))
+    assert incumbent.transport_calls == []
+
+
+def test_transport_pin_matches_exact_shipped_module():
+    delivery = _import_incumbent('artifact_delivery')
+    assert delivery.ADVERTISED_RECOVERY_SOURCE_SHA256 == _digest(_module_path().read_bytes())
+
+
+def test_real_dispatcher_refuses_changed_source_before_ssh(monkeypatch, module, tmp_path):
+    real = _import_incumbent('artifact_delivery')
+    fixture, incumbent = _install_local(monkeypatch, module, tmp_path)
+    monkeypatch.setitem(sys.modules, 'original_advertised_artifact', module)
+    monkeypatch.setattr(real.subprocess, 'Popen', lambda *a, **k: pytest.fail('unqualified SSH launch'))
+    path = fixture.root / MODULE_NAME
+    path.write_bytes(path.read_bytes() + b'\n# inert unreviewed body\n')
+    with pytest.raises(ValueError, match='advertised_remote_source_changed'):
+        real.transport('fixture-alias', dict(fixture.scope))
+    assert incumbent.transport_calls == []
+
+
+def test_transport_source_bytes_are_not_reread_after_hash_check(monkeypatch, module, tmp_path):
+    fixture, incumbent = _install_local(monkeypatch, module, tmp_path)
+    raw = _module_path().read_bytes()
+    calls = []
+    def once(path, limit):
+        calls.append(path)
+        assert len(calls) == 1, 'second unqualified source read'
+        return raw
+    monkeypatch.setattr(module, '_read_local', once)
+    code = module.code_for_request(dict(fixture.scope), expected_hash=_digest(raw))
+    assert code.encode() == raw
+    assert calls == [fixture.root / MODULE_NAME]
