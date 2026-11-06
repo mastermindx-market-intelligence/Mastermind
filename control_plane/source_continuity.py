@@ -19,7 +19,8 @@ from typing import Mapping
 RECEIPT_SCHEMA = "mastermind.source_continuity_receipt/v1"
 REFUSAL_SCHEMA = "mastermind.source_continuity_refusal/v1"
 WRITER_GATE_SCHEMA = "mastermind.source_continuity_writer_gate/v1"
-RECEIPT_VERSION = "v1"
+SOURCE_RECEIPT_VERSION = "v2"
+WRITER_GATE_RECEIPT_VERSION = "v1"
 MAX_REMOTE_BLOB_BYTES = 10_000_000
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -246,6 +247,7 @@ class RemoteGitFacts:
     path_entries: tuple[RemotePathEntry, ...]
     collision_state: CollisionState
     colliding_pr_numbers: tuple[int, ...]
+    collision_evidence_fingerprint: str
     pagination_complete: bool
 
 
@@ -299,6 +301,7 @@ class SourceContinuityReceipt:
     external_effect_evidence_fingerprint: str
     collision_state: CollisionState
     colliding_pr_numbers: tuple[int, ...]
+    collision_evidence_fingerprint: str
     receipt_kind: ReceiptKind
     verified_at: str
     receipt_digest: str
@@ -349,8 +352,9 @@ class SourceContinuityReceipt:
             "external_effect_evidence_fingerprint": self.external_effect_evidence_fingerprint,
             "collision_state": self.collision_state.value,
             "colliding_pr_numbers": list(self.colliding_pr_numbers),
+            "collision_evidence_fingerprint": self.collision_evidence_fingerprint,
             "receipt_kind": self.receipt_kind.value,
-            "receipt_version": RECEIPT_VERSION,
+            "receipt_version": SOURCE_RECEIPT_VERSION,
             "verified_at": self.verified_at,
             "authority_effect": self.authority_effect,
             "writer_release_authorized": self.writer_release_authorized,
@@ -541,6 +545,8 @@ def _remote_facts_shape_is_valid(remote: RemoteGitFacts) -> bool:
         and isinstance(remote.path_entries, tuple)
         and isinstance(remote.collision_state, CollisionState)
         and isinstance(remote.colliding_pr_numbers, tuple)
+        and isinstance(remote.collision_evidence_fingerprint, str)
+        and _FINGERPRINT_RE.fullmatch(remote.collision_evidence_fingerprint) is not None
         and type(remote.pagination_complete) is bool
         and all(
             _is_nonnegative_int(number) and number > 0
@@ -734,6 +740,7 @@ def verify_source_continuity(
         external_effect_evidence_fingerprint=external.evidence_fingerprint,
         collision_state=remote.collision_state,
         colliding_pr_numbers=tuple(sorted(set(remote.colliding_pr_numbers))),
+        collision_evidence_fingerprint=remote.collision_evidence_fingerprint,
         receipt_kind=request.receipt_kind,
         verified_at=request.verified_at,
         receipt_digest="",
@@ -856,7 +863,7 @@ class WriterGateReceipt:
     def _payload_without_digest(self) -> dict[str, object]:
         return {
             "schema": WRITER_GATE_SCHEMA,
-            "receipt_version": RECEIPT_VERSION,
+            "receipt_version": WRITER_GATE_RECEIPT_VERSION,
             "operation_key": self.operation_key,
             "repository": self.repository,
             "branch": self.branch,

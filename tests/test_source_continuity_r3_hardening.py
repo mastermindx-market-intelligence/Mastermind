@@ -285,9 +285,9 @@ def test_final_fence_rechecks_target_file_census(monkeypatch, second_paths, comp
     def reread(*_args, **_kwargs):
         nonlocal calls
         calls += 1
-        return second_paths, complete
+        return second_paths, complete, True
 
-    monkeypatch.setattr(module, "_changed_paths", reread)
+    monkeypatch.setattr(module, "_subject_changed_paths", reread)
     result = module._remote_still_matches(
         FenceHTTP(), TOKEN, request(module), module._pr_identity(pr_payload()),
         HEAD, BASE, OWNED, True, module.CollisionState.NONE, (), True, ((448, ()),),
@@ -376,6 +376,12 @@ class CaptureRunner:
             return SimpleNamespace(returncode=0, stdout="0\n")
         if tail[0] == "config":
             return SimpleNamespace(returncode=1, stdout="")
+        if tail[0] == "check-attr":
+            paths = tail[4:]
+            return SimpleNamespace(
+                returncode=0,
+                stdout="".join(f"{path}\0filter\0unspecified\0" for path in paths),
+            )
         if tail[0] == "diff":
             return SimpleNamespace(
                 returncode=0,
@@ -391,7 +397,7 @@ class CaptureRunner:
 
 
 def git_tail(command: tuple[str, ...]) -> tuple[str, ...]:
-    commands = {"rev-parse", "symbolic-ref", "cat-file", "merge-base", "rev-list", "config", "diff", "ls-files", "ls-tree", "status"}
+    commands = {"rev-parse", "symbolic-ref", "cat-file", "merge-base", "rev-list", "config", "check-attr", "diff", "ls-files", "ls-tree", "status"}
     return command[next(i for i, value in enumerate(command) if i and value in commands):]
 
 
@@ -440,8 +446,15 @@ def test_all_local_probes_use_closed_argv_and_explicit_diff_controls() -> None:
     for command in runner.commands:
         assert_git_prefix(command)
     diffs = [git_tail(c) for c in runner.commands if git_tail(c)[0] == "diff"]
-    assert len(diffs) == 3
-    for command in diffs:
+    assert len(diffs) == 4
+    staged_raw = [row for row in diffs if "--raw" in row]
+    assert staged_raw == [(
+        "diff", "--cached", "--raw", "-z",
+        "--no-renames", "--no-ext-diff", "HEAD", "--",
+    )]
+    ordinary = [row for row in diffs if "--raw" not in row]
+    assert len(ordinary) == 3
+    for command in ordinary:
         for flag in (
             "--no-renames", "--no-ext-diff", "--no-textconv",
             "--ignore-submodules=none", "--name-only", "-z", "--",
@@ -1066,3 +1079,178 @@ def test_real_no_rename_diff_reports_old_and_new_for_range_staged_and_unstaged(t
     git(repo, "add", "-N", "again.txt")
     unstaged = module._invoke_git(subprocess.run, str(repo), "diff", *common, "HEAD", "--")
     assert unstaged is not None and set(filter(None, unstaged.stdout.split("\0"))) == {"renamed.txt", "again.txt"}
+
+
+def test_real_probe_allows_configured_filter_when_owned_path_is_unfiltered(tmp_path) -> None:
+    repo = tmp_path / "unrelated-filter"
+    init_repo(repo, "base")
+    (repo / ".gitattributes").write_text("*.bin filter=evil\n", encoding="utf-8")
+    git(repo, "add", ".gitattributes")
+    git(repo, "commit", "-q", "-m", "unrelated filter attribute")
+    base = git(repo, "rev-parse", "HEAD^{commit}")
+
+    (repo / "value.txt").write_text("candidate\n", encoding="utf-8")
+    git(repo, "add", "value.txt")
+    git(repo, "commit", "-q", "-m", "candidate")
+    head = git(repo, "rev-parse", "HEAD^{commit}")
+
+    marker = tmp_path / "unrelated-filter-executed"
+    script = tmp_path / "unrelated-filter.sh"
+    script.write_text(
+        "#!/bin/sh\n"
+        f"printf hit > {marker}\n"
+        "cat\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    git(repo, "config", "filter.evil.clean", str(script))
+    git(repo, "config", "filter.evil.process", str(script))
+    marker.unlink(missing_ok=True)
+
+    module = _module()
+    result = module._probe_local_and_entries(
+        subprocess.run,
+        str(repo),
+        repo_request(module, repo, head),
+        head,
+        base,
+        ("value.txt",),
+    )
+
+    assert not isinstance(result, module.SourceContinuityRefusal), result
+    local, entries = result
+    assert local.head_sha == head
+    assert tuple(entry.path for entry in entries) == ("value.txt",)
+    assert not marker.exists()
+
+
+def test_real_probe_refuses_dirty_out_of_scope_filtered_path_before_helper_executes(
+    tmp_path,
+) -> None:
+    repo = tmp_path / "dirty-out-of-scope-filter"
+    init_repo(repo, "seed")
+    (repo / "foreign.txt").write_text("foreign base\n", encoding="utf-8")
+    (repo / ".gitattributes").write_text(
+        "foreign.txt filter=tripwire\n", encoding="utf-8"
+    )
+    git(repo, "add", ".gitattributes", "foreign.txt")
+    git(repo, "commit", "-q", "-m", "filtered foreign base")
+    base = git(repo, "rev-parse", "HEAD^{commit}")
+
+    (repo / "value.txt").write_text("candidate\n", encoding="utf-8")
+    git(repo, "add", "value.txt")
+    git(repo, "commit", "-q", "-m", "candidate")
+    head = git(repo, "rev-parse", "HEAD^{commit}")
+
+    marker = tmp_path / "dirty-out-of-scope-filter-executed"
+    script = tmp_path / "dirty-out-of-scope-filter.sh"
+    script.write_text(
+        "#!/bin/sh\n"
+        f"printf hit > {marker}\n"
+        "cat\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    git(repo, "config", "filter.tripwire.clean", str(script))
+    git(repo, "config", "filter.tripwire.required", "true")
+    (repo / "foreign.txt").write_text("foreign dirty\n", encoding="utf-8")
+    marker.unlink(missing_ok=True)
+
+    module = _module()
+    result = module._probe_local_and_entries(
+        subprocess.run,
+        str(repo),
+        repo_request(module, repo, head),
+        head,
+        base,
+        ("value.txt",),
+    )
+
+    assert isinstance(result, module.SourceContinuityRefusal)
+    assert result.code.value == "LOCAL_PROBE_FAILED"
+    assert not marker.exists()
+
+
+# Regression: submodule-local conversion filters must never run during the probe.
+
+def test_local_probe_nested_submodule_active_clean_filter_cannot_run(tmp_path):
+    child=tmp_path/'child'
+    init_repo(child, 'nested')
+    parent=tmp_path/'parent'
+    init_repo(parent, 'super')
+    git(parent,'-c','protocol.file.allow=always','submodule','add','-q',str(child),'sub')
+    git(parent,'commit','-q','-am','add gitlink')
+    base=git(parent,'rev-parse','HEAD^{commit}')
+    (parent/'value.txt').write_text('candidate\n',encoding='utf8')
+    git(parent,'add','value.txt')
+    git(parent,'commit','-q','-m','candidate')
+    head=git(parent,'rev-parse','HEAD^{commit}')
+    git(parent,'config','submodule.sub.ignore','all')
+    nested=parent/'sub'
+    (nested/'.gitattributes').write_text('value.txt filter=tripwire\n',encoding='utf8')
+    marker=tmp_path/'marker.txt'
+    script=tmp_path/'clean-filter.sh'
+    script.write_text('#!/bin/sh\nprintf executed >> '+str(marker)+'\ncat\n',encoding='utf8')
+    script.chmod(0o755)
+    git(nested,'config','filter.tripwire.clean',str(script))
+    git(nested,'config','filter.tripwire.required','true')
+    (nested/'value.txt').write_text('nested-dirty\n',encoding='utf8')
+    marker.unlink(missing_ok=True)
+    mod=_module()
+    result=mod._probe_local_and_entries(subprocess.run,str(parent),repo_request(mod,parent,head),head,base,('value.txt',))
+    assert isinstance(result, mod.SourceContinuityRefusal),result
+    assert result.code.value=='LOCAL_PROBE_FAILED'
+    assert not marker.exists(), 'nested clean filter executed before failure'
+
+def test_local_probe_dirty_submodule_unused_filter_is_allowed(tmp_path):
+    child=tmp_path/'child'; init_repo(child, 'nested')
+    parent=tmp_path/'parent'; init_repo(parent,'super')
+    git(parent,'-c','protocol.file.allow=always','submodule','add','-q',str(child),'sub')
+    git(parent,'commit','-q','-am','add gitlink')
+    base=git(parent,'rev-parse','HEAD^{commit}')
+    (parent/'value.txt').write_text('candidate\n',encoding='utf8')
+    git(parent,'add','value.txt');git(parent,'commit','-q','-m','candidate')
+    head=git(parent,'rev-parse','HEAD^{commit}')
+    git(parent,'config','submodule.sub.ignore','all')
+    nested=parent/'sub'
+    (nested/'.gitattributes').write_text('unused.bin filter=tripwire\n',encoding='utf8')
+    marker=tmp_path/'marker.txt'
+    script=tmp_path/'clean-filter.sh'
+    script.write_text('#!/bin/sh\nprintf executed >> '+str(marker)+'\ncat\n',encoding='utf8')
+    script.chmod(0o755)
+    git(nested,'config','filter.tripwire.clean',str(script))
+    git(nested,'config','filter.tripwire.required','true')
+    (nested/'value.txt').write_text('nested-dirty\n',encoding='utf8')
+    mod=_module()
+    result=mod._probe_local_and_entries(subprocess.run,str(parent),repo_request(mod,parent,head),head,base,('value.txt',))
+    assert not isinstance(result,mod.SourceContinuityRefusal), result
+    local,_=result
+    assert local.uncommitted_out_of_scope_count==1
+    assert not marker.exists()
+
+
+
+def test_removed_head_gitlink_not_hidden_from_filter_preflight(tmp_path) -> None:
+    """An index deletion cannot make HEAD's tracked gitlink invisible."""
+    child=tmp_path/"child";init_repo(child,"nested")
+    parent=tmp_path/"parent";init_repo(parent,"super")
+    git(parent,"-c","protocol.file.allow=always","submodule","add","-q",str(child),"sub")
+    git(parent,"commit","-q","-am","tracked gitlink")
+    git(parent,"rm","--cached","-q","sub")
+    assert (parent/"sub").is_dir()
+    mod=_module()
+    assert mod._nested_submodules_have_no_filters(subprocess.run,str(parent)) is False
+
+
+def test_nested_filter_preflight_caps_total_tracked_paths(tmp_path) -> None:
+    """Resource bounds must fail closed for oversized nested Git indexes."""
+    child=tmp_path/"child";init_repo(child,"nested")
+    for n in range(514):
+        (child/f"item-{n:04d}.txt").write_text("data\n",encoding="utf8")
+    git(child,"add",".")
+    git(child,"commit","-q","-m","large nested index")
+    parent=tmp_path/"parent";init_repo(parent,"super")
+    git(parent,"-c","protocol.file.allow=always","submodule","add","-q",str(child),"sub")
+    git(parent,"commit","-q","-am","tracked large gitlink")
+    mod=_module()
+    assert mod._nested_submodules_have_no_filters(subprocess.run,str(parent)) is False

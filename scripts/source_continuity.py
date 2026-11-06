@@ -2,7 +2,7 @@
 """Read-only production adapter for deterministic Source Continuity V1 receipts.
 
 This adapter observes one explicit local Git worktree plus authenticated GitHub
-GET-only facts, then delegates all classification to the pure verifier in
+read-only facts, then delegates all classification to the pure verifier in
 ``control_plane.source_continuity``. It intentionally owns no persistence,
 lifecycle, retry/failover, watcher, receiver-transfer, release, merge, provider,
 or runtime effect.
@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
+import hashlib
 import json
 import math
 import os
@@ -64,8 +65,36 @@ from control_plane.source_continuity import (  # noqa: E402
 
 _GIT = "/usr/bin/git"
 _API_ROOT = "https://api.github.com"
+_GRAPHQL_ROOT = "https://api.github.com/graphql"
 _API_VERSION = "2022-11-28"
+_GRAPHQL_PULL_FILES_QUERY = """query($owner:String!,$name:String!,$number:Int!,$cursor:String){
+  rateLimit { cost remaining }
+  repository(owner:$owner,name:$name) {
+    pullRequest(number:$number) {
+      number
+      state
+      headRefOid
+      baseRefOid
+      headRepository { nameWithOwner }
+      baseRepository { nameWithOwner }
+      changedFiles
+      files(first:100,after:$cursor) {
+        totalCount
+        nodes { path changeType }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}"""
+_GRAPHQL_CHANGE_TYPES = frozenset(
+    {"ADDED", "DELETED", "RENAMED", "COPIED", "MODIFIED", "CHANGED"}
+)
 _COMMAND_TIMEOUT_SECONDS = 20.0
+# Fail-closed local Git preflight resource ceilings (remote budgets unchanged).
+_NESTED_GIT_PREFLIGHT_SECONDS = 40.0
+_NESTED_GIT_MATERIALIZED_REPOS = 16
+_NESTED_GIT_CHECKED_PATHS = 512
+_NESTED_GIT_RAW_STAGED_BYTES = 1_048_576
 _HTTP_TIMEOUT_SECONDS = 20.0
 _MAX_HTTP_BODY_BYTES = 5_000_000
 _MAX_GIT_CONFIG_CENSUS_BYTES = 65_536
@@ -74,7 +103,6 @@ _PAGE_SIZE = 100
 _MAX_PAGES = 10
 _MAX_FOREIGN_FILE_PAGES = 30
 _FOREIGN_PR_WORKERS = 4
-_MAX_COLLISION_PRS = 490
 # One invocation-local cooperative budget spans both observations, not hard preemption.
 _MAX_HTTP_CALLS = 1152
 _HTTP_READ_BUDGET_SECONDS = 300.0
@@ -315,6 +343,15 @@ class _BoundedHTTPGet:
         self._semantic_revalidations: list[str] = []
         self._missing_observations: list[str] = []
         self._base_head_update: tuple[str, str] | None = None
+        compact_transport = None
+        if transport is _stdlib_http_get:
+            compact_transport = _stdlib_compact_pull_files_page
+        elif getattr(transport, "compact_foreign_files_available", False) is True:
+            candidate = getattr(transport, "compact_pull_files_page", None)
+            if callable(candidate):
+                compact_transport = candidate
+        self._compact_transport = compact_transport
+        self.compact_foreign_files_available = compact_transport is not None
         self.parallel_safe = (
             transport is _stdlib_http_get
             or getattr(transport, "_source_continuity_parallel_safe", False) is True
@@ -439,6 +476,28 @@ class _BoundedHTTPGet:
         self._account_payload(payload)
         return payload
 
+    def compact_pull_files_page(
+        self,
+        repository: str,
+        pr_number: int,
+        *,
+        cursor: str | None,
+        token: str,
+        timeout: float,
+    ) -> object:
+        if self._compact_transport is None:
+            raise _RemoteProbeError()
+        call_timeout = self._admit_call(timeout)
+        payload = self._compact_transport(
+            repository,
+            pr_number,
+            cursor=cursor,
+            token=token,
+            timeout=call_timeout,
+        )
+        self._account_payload(payload)
+        return payload
+
     def collision_census_reader(self) -> "_CollisionCensusHTTP":
         return _CollisionCensusHTTP(self)
 
@@ -550,6 +609,26 @@ class _CollisionCensusHTTP:
     def __init__(self, parent: _BoundedHTTPGet) -> None:
         self._parent = parent
         self.parallel_safe = parent.parallel_safe
+        self.compact_foreign_files_available = (
+            parent.compact_foreign_files_available
+        )
+
+    def compact_pull_files_page(
+        self,
+        repository: str,
+        pr_number: int,
+        *,
+        cursor: str | None,
+        token: str,
+        timeout: float,
+    ) -> object:
+        return self._parent.compact_pull_files_page(
+            repository,
+            pr_number,
+            cursor=cursor,
+            token=token,
+            timeout=timeout,
+        )
 
     def __call__(
         self,
@@ -598,6 +677,19 @@ class _SaturatedCollisionEvidence:
 
 
 @dataclass(frozen=True)
+class _CurrentBaseCollisionEvidence:
+    pr_number: int
+    proof_method: str
+    head_repository: str
+    head_sha: str
+    target_repository: str
+    target_base_sha: str
+    owned_path_entries: tuple[
+        tuple[str, _GitTreeEntry | None, _GitTreeEntry | None], ...
+    ]
+
+
+@dataclass(frozen=True)
 class _ForeignFilesObservation:
     paths: tuple[str, ...]
     saturated: bool
@@ -607,7 +699,7 @@ class _ForeignFilesObservation:
 class _ForeignCollisionRecord:
     pr_number: int
     identity: _ForeignPullIdentity | None
-    evidence: tuple[str, ...] | _SaturatedCollisionEvidence
+    evidence: tuple[str, ...] | _SaturatedCollisionEvidence | _CurrentBaseCollisionEvidence
     overlaps: bool
 
 
@@ -810,6 +902,69 @@ def _stdlib_http_get(
     return _HTTPRepresentation(payload=payload, etag=etag, not_modified=False)
 
 
+def _stdlib_compact_pull_files_page(
+    repository: str,
+    pr_number: int,
+    *,
+    cursor: str | None,
+    token: str,
+    timeout: float,
+) -> object:
+    """Read one compact PR-file page without REST patch bodies."""
+
+    if (
+        not _is_safe_repository(repository)
+        or type(pr_number) is not int
+        or pr_number <= 0
+        or (cursor is not None and (not isinstance(cursor, str) or not cursor))
+        or not isinstance(token, str)
+        or not token
+    ):
+        raise _RemoteProbeError()
+    owner, name = repository.split("/", 1)
+    body = canonical_json(
+        {
+            "query": _GRAPHQL_PULL_FILES_QUERY,
+            "variables": {
+                "owner": owner,
+                "name": name,
+                "number": pr_number,
+                "cursor": cursor,
+            },
+        }
+    ).encode("utf-8")
+    request = Request(
+        _GRAPHQL_ROOT,
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": _API_VERSION,
+            "User-Agent": "mastermind-source-continuity-v1",
+        },
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:  # noqa: S310 - fixed GitHub API root
+            raw = response.read(_MAX_HTTP_BODY_BYTES + 1)
+    except HTTPError as exc:
+        if exc.code in {401, 403}:
+            raise _AuthProbeError() from None
+        raise _RemoteProbeError() from None
+    except (URLError, TimeoutError, OSError):
+        raise _RemoteProbeError() from None
+    if len(raw) > _MAX_HTTP_BODY_BYTES:
+        raise _RemoteProbeError()
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise _RemoteProbeError() from None
+    if not isinstance(payload, dict):
+        raise _RemoteProbeError()
+    return payload
+
+
 _stdlib_http_get._source_continuity_conditional = True  # type: ignore[attr-defined]
 
 
@@ -979,12 +1134,207 @@ def _changed_paths(
     return _parse_changed_path_rows(raw_items), complete
 
 
+def _subject_changed_paths(
+    http_get: HTTPGet,
+    token: str,
+    repository: str,
+    pr_number: int,
+    owned_paths: tuple[str, ...],
+) -> tuple[tuple[str, ...], bool, bool]:
+    raw_items, complete = _paged_array(
+        http_get,
+        token,
+        lambda page: _pull_files_endpoint(repository, pr_number, page),
+    )
+    paths = _parse_changed_path_rows(raw_items)
+    owned = set(owned_paths)
+    rename_within_ownership = True
+    for item in raw_items:
+        if isinstance(item, dict) and item.get("status") == "renamed":
+            previous = item.get("previous_filename")
+            current = item.get("filename")
+            if previous not in owned or current not in owned:
+                rename_within_ownership = False
+    return paths, complete, rename_within_ownership
+
+
+def _compact_foreign_files_observation(
+    http_get: HTTPGet,
+    token: str,
+    repository: str,
+    pr_number: int,
+    raw_pr: object,
+) -> _ForeignFilesObservation:
+    identity = _foreign_pull_identity(raw_pr, repository)
+    compact = getattr(http_get, "compact_pull_files_page", None)
+    if not callable(compact):
+        raise _RemoteProbeError()
+
+    changed_files: int | None = None
+    paths: list[str] = []
+    seen_paths: set[str] = set()
+    seen_cursors: set[str] = set()
+    cursor: str | None = None
+
+    for page in range(1, _MAX_FOREIGN_FILE_PAGES + 1):
+        payload = compact(
+            repository,
+            pr_number,
+            cursor=cursor,
+            token=token,
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        )
+        if not isinstance(payload, dict):
+            raise _RemoteProbeError()
+        errors = payload.get("errors")
+        if errors not in (None, []):
+            raise _RemoteProbeError()
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise _RemoteProbeError()
+        rate = data.get("rateLimit")
+        if (
+            not isinstance(rate, dict)
+            or type(rate.get("cost")) is not int
+            or rate["cost"] != 1
+            or type(rate.get("remaining")) is not int
+            or rate["remaining"] < 0
+        ):
+            raise _RemoteProbeError()
+        repository_payload = data.get("repository")
+        if not isinstance(repository_payload, dict):
+            raise _RemoteProbeError()
+        pull = repository_payload.get("pullRequest")
+        if not isinstance(pull, dict):
+            raise _RemoteProbeError()
+
+        head_repository = pull.get("headRepository")
+        base_repository = pull.get("baseRepository")
+        if (
+            type(pull.get("number")) is not int
+            or pull.get("number") != identity.pr_number
+            or pull.get("state") != "OPEN"
+            or pull.get("headRefOid") != identity.head_sha
+            or pull.get("baseRefOid") != identity.base_sha
+            or not isinstance(head_repository, dict)
+            or head_repository.get("nameWithOwner") != identity.head_repository
+            or not isinstance(base_repository, dict)
+            or base_repository.get("nameWithOwner") != identity.base_repository
+        ):
+            raise _RemoteProbeError()
+
+        observed_changed_files = pull.get("changedFiles")
+        if type(observed_changed_files) is not int or observed_changed_files < 0:
+            raise _RemoteProbeError()
+        if changed_files is None:
+            changed_files = observed_changed_files
+        elif changed_files != observed_changed_files:
+            raise _RemoteProbeError()
+
+        files = pull.get("files")
+        # GraphQL may return files:null with changedFiles=0 while REST still
+        # advertises 100 or more changed paths. A missing connection is never
+        # a proved empty diff; use the existing immutable target-owned tree
+        # proof, exactly as for RENAMED/COPIED or a saturated file roster.
+        if files is None:
+            return _ForeignFilesObservation((), True)
+        if (
+            not isinstance(files, dict)
+            or type(files.get("totalCount")) is not int
+            or files["totalCount"] != changed_files
+        ):
+            raise _RemoteProbeError()
+
+        # GitHub has returned changedFiles=0 while exposing 100+ REST
+        # /files entries. A present empty GraphQL page is therefore not proof
+        # of disjointness either: resolve the immutable owned-path tree just
+        # as for an unavailable or saturated connection.
+        if changed_files == 0:
+            return _ForeignFilesObservation((), True)
+
+        # Large PRs already use immutable owned-path tree proof. Do not retrieve
+        # thousands of path rows merely to rediscover that the file list is large.
+        if changed_files >= _MAX_FOREIGN_FILE_PAGES * _PAGE_SIZE:
+            return _ForeignFilesObservation((), True)
+
+        nodes = files.get("nodes")
+        page_info = files.get("pageInfo")
+        if (
+            not isinstance(nodes, list)
+            or len(nodes) > _PAGE_SIZE
+            or not isinstance(page_info, dict)
+            or type(page_info.get("hasNextPage")) is not bool
+        ):
+            raise _RemoteProbeError()
+
+        for node in nodes:
+            if not isinstance(node, dict):
+                raise _RemoteProbeError()
+            path = node.get("path")
+            change_type = node.get("changeType")
+            if (
+                not _is_safe_remote_path(path)
+                or not isinstance(change_type, str)
+                or change_type not in _GRAPHQL_CHANGE_TYPES
+                or path in seen_paths
+            ):
+                raise _RemoteProbeError()
+            if change_type in {"RENAMED", "COPIED"}:
+                # GraphQL omits the original source path for both moves and
+                # copies. Promote to the existing exact owned-path tree proof
+                # rather than falsely conclude the source cannot intersect.
+                return _ForeignFilesObservation((), True)
+            seen_paths.add(path)
+            paths.append(path)
+
+        has_next = page_info["hasNextPage"]
+        end_cursor = page_info.get("endCursor")
+        if not has_next:
+            if len(paths) != changed_files:
+                raise _RemoteProbeError()
+            return _ForeignFilesObservation(tuple(paths), False)
+        if not isinstance(end_cursor, str) or not end_cursor:
+            raise _RemoteProbeError()
+        try:
+            cursor_bytes = end_cursor.encode("utf-8")
+        except UnicodeEncodeError:
+            raise _RemoteProbeError() from None
+        if (
+            page == _MAX_FOREIGN_FILE_PAGES
+            or len(cursor_bytes) > _MAX_GIT_PATH_BYTES
+            or end_cursor in seen_cursors
+        ):
+            raise _RemoteProbeError()
+        seen_cursors.add(end_cursor)
+        cursor = end_cursor
+
+    raise _RemoteProbeError()
+
+
 def _foreign_files_observation(
     http_get: HTTPGet,
     token: str,
     repository: str,
     pr_number: int,
+    *,
+    raw_pr: object | None = None,
 ) -> _ForeignFilesObservation:
+    if (
+        raw_pr is not None
+        and getattr(http_get, "compact_foreign_files_available", False) is True
+    ):
+        try:
+            _foreign_pull_identity(raw_pr, repository)
+        except _RemoteProbeError:
+            pass
+        else:
+            return _compact_foreign_files_observation(
+                http_get,
+                token,
+                repository,
+                pr_number,
+                raw_pr,
+            )
     first = _pull_files_page(http_get, token, repository, pr_number, 1)
     if len(first) < _PAGE_SIZE:
         return _ForeignFilesObservation(_parse_changed_path_rows(first), False)
@@ -1170,6 +1520,64 @@ def _resolve_owned_path(
     raise _RemoteProbeError()
 
 
+class _CurrentBasePathResolver:
+    """Invocation-local immutable target-base path cache.
+
+    Foreign PR heads remain independently resolved. Only the target base commit
+    and its tree/path entries are shared across historical-overlap proofs for
+    the same observed base SHA.
+    """
+
+    def __init__(
+        self,
+        http_get: HTTPGet,
+        token: str,
+        repository: str,
+        current_base_head: str,
+    ) -> None:
+        if not _is_safe_repository(repository) or not _is_sha(current_base_head):
+            raise _RemoteProbeError()
+        self._http_get = http_get
+        self._token = token
+        self.repository = repository
+        self.current_base_head = current_base_head
+        self._lock = Lock()
+        self._root_tree_sha: str | None = None
+        self._tree_cache: dict[tuple[str, str], dict[str, _GitTreeEntry]] = {}
+        self._entries: dict[str, _GitTreeEntry | None] = {}
+
+    def resolve(
+        self,
+        paths: tuple[str, ...],
+    ) -> tuple[tuple[str, _GitTreeEntry | None], ...]:
+        ordered = tuple(sorted(paths))
+        if (
+            not ordered
+            or len(ordered) != len(set(ordered))
+            or not all(_is_safe_remote_path(path) for path in ordered)
+        ):
+            raise _RemoteProbeError()
+        with self._lock:
+            if self._root_tree_sha is None:
+                self._root_tree_sha = _commit_tree_sha(
+                    self._http_get,
+                    self._token,
+                    self.repository,
+                    self.current_base_head,
+                )
+            for path in ordered:
+                if path not in self._entries:
+                    self._entries[path] = _resolve_owned_path(
+                        self._http_get,
+                        self._token,
+                        self.repository,
+                        self._root_tree_sha,
+                        path,
+                        self._tree_cache,
+                    )
+            return tuple((path, self._entries[path]) for path in ordered)
+
+
 def _saturated_collision_evidence(
     http_get: HTTPGet,
     token: str,
@@ -1228,6 +1636,71 @@ def _saturated_collision_evidence(
     )
 
 
+def _current_base_collision_evidence(
+    http_get: HTTPGet,
+    token: str,
+    repository: str,
+    raw_pr: object,
+    owned_paths: tuple[str, ...],
+    current_base_head: str,
+    *,
+    target_base_resolver: _CurrentBasePathResolver | None = None,
+) -> tuple[_CurrentBaseCollisionEvidence, bool]:
+    identity = _foreign_pull_identity(raw_pr, repository)
+    if not _is_sha(current_base_head):
+        raise _RemoteProbeError()
+    resolver = target_base_resolver or _CurrentBasePathResolver(
+        http_get,
+        token,
+        repository,
+        current_base_head,
+    )
+    if (
+        resolver.repository != repository
+        or resolver.current_base_head != current_base_head
+    ):
+        raise _RemoteProbeError()
+    target_entries = dict(resolver.resolve(owned_paths))
+    head_root_tree = _commit_tree_sha(
+        http_get,
+        token,
+        identity.head_repository,
+        identity.head_sha,
+    )
+    head_cache: dict[tuple[str, str], dict[str, _GitTreeEntry]] = {}
+    pairs: list[tuple[str, _GitTreeEntry | None, _GitTreeEntry | None]] = []
+    collision = False
+    for path in sorted(owned_paths):
+        target_entry = target_entries[path]
+        head_entry = _resolve_owned_path(
+            http_get,
+            token,
+            identity.head_repository,
+            head_root_tree,
+            path,
+            head_cache,
+        )
+        pairs.append((path, target_entry, head_entry))
+        collision = (
+            collision
+            or target_entry is None
+            or head_entry is None
+            or target_entry != head_entry
+        )
+    return (
+        _CurrentBaseCollisionEvidence(
+            pr_number=identity.pr_number,
+            proof_method="CURRENT_TARGET_BASE_TREE_EQUALITY",
+            head_repository=identity.head_repository,
+            head_sha=identity.head_sha,
+            target_repository=repository,
+            target_base_sha=current_base_head,
+            owned_path_entries=tuple(pairs),
+        ),
+        collision,
+    )
+
+
 def _foreign_collision_evidence(
     http_get: HTTPGet,
     token: str,
@@ -1235,13 +1708,43 @@ def _foreign_collision_evidence(
     raw_pr: object,
     pr_number: int,
     owned_paths: tuple[str, ...],
-) -> tuple[tuple[str, ...] | _SaturatedCollisionEvidence, bool]:
+    *,
+    current_base_head: str | None = None,
+    target_base_resolver: _CurrentBasePathResolver | None = None,
+) -> tuple[
+    tuple[str, ...] | _SaturatedCollisionEvidence | _CurrentBaseCollisionEvidence,
+    bool,
+]:
     files = _foreign_files_observation(
         http_get,
         token,
         repository,
         pr_number,
+        raw_pr=raw_pr,
     )
+    if current_base_head is not None:
+        if not files.saturated:
+            overlap_paths = tuple(sorted(set(owned_paths).intersection(files.paths)))
+            if not overlap_paths:
+                return files.paths, False
+            return _current_base_collision_evidence(
+                http_get,
+                token,
+                repository,
+                raw_pr,
+                overlap_paths,
+                current_base_head,
+                target_base_resolver=target_base_resolver,
+            )
+        return _current_base_collision_evidence(
+            http_get,
+            token,
+            repository,
+            raw_pr,
+            owned_paths,
+            current_base_head,
+            target_base_resolver=target_base_resolver,
+        )
     if not files.saturated:
         return files.paths, bool(set(owned_paths).intersection(files.paths))
     return _saturated_collision_evidence(
@@ -1334,8 +1837,6 @@ def _read_open_pull_roster(
         if not isinstance(payload, list) or len(payload) > _PAGE_SIZE:
             raise _RemoteProbeError()
         pulls.extend(payload)
-        if len(pulls) > _MAX_COLLISION_PRS:
-            return pulls, False
         if len(payload) < _PAGE_SIZE:
             return pulls, True
     return pulls, False
@@ -1347,6 +1848,8 @@ def _collision_census_details(
     repository: str,
     target_pr: int,
     owned_paths: tuple[str, ...],
+    *,
+    current_base_head: str | None = None,
 ) -> _CollisionCensusDetails:
     reader = _collision_reader(http_get)
     pulls, complete = _read_open_pull_roster(reader, token, repository)
@@ -1378,6 +1881,12 @@ def _collision_census_details(
     if not target_seen:
         raise _RemoteProbeError()
 
+    target_base_resolver = (
+        _CurrentBasePathResolver(reader, token, repository, current_base_head)
+        if current_base_head is not None
+        else None
+    )
+
     def observe(item: tuple[int, object]) -> _ForeignCollisionRecord:
         number, raw_pr = item
         try:
@@ -1397,6 +1906,10 @@ def _collision_census_details(
             raw_pr,
             number,
             owned_paths,
+            current_base_head=(current_base_head if identity is not None else None),
+            target_base_resolver=(
+                target_base_resolver if identity is not None else None
+            ),
         )
         return _ForeignCollisionRecord(number, identity, evidence, overlaps)
 
@@ -1452,6 +1965,8 @@ def _collision_census(
     repository: str,
     target_pr: int,
     owned_paths: tuple[str, ...],
+    *,
+    current_base_head: str | None = None,
 ) -> tuple[
     CollisionState,
     tuple[int, ...],
@@ -1464,6 +1979,7 @@ def _collision_census(
         repository,
         target_pr,
         owned_paths,
+        current_base_head=current_base_head,
     )
     return (
         details.state,
@@ -1471,6 +1987,199 @@ def _collision_census(
         details.complete,
         details.snapshot,
     )
+
+
+def _collision_overlap_projection(
+    owned_paths: tuple[str, ...],
+    evidence: tuple[str, ...] | _SaturatedCollisionEvidence | _CurrentBaseCollisionEvidence,
+) -> tuple[str, ...]:
+    owned = set(owned_paths)
+    if isinstance(evidence, _CurrentBaseCollisionEvidence):
+        projected = {
+            path
+            for path, target_entry, head_entry in evidence.owned_path_entries
+            if (
+                path in owned
+                and (
+                    target_entry is None
+                    or head_entry is None
+                    or target_entry != head_entry
+                )
+            )
+        }
+        return tuple(sorted(projected))
+    if isinstance(evidence, _SaturatedCollisionEvidence):
+        projected = {
+            path
+            for path, base_entry, head_entry in evidence.owned_path_entries
+            if path in owned and base_entry != head_entry
+        }
+        return tuple(sorted(projected))
+    if not isinstance(evidence, tuple) or not all(
+        isinstance(path, str) for path in evidence
+    ):
+        raise _RemoteProbeError()
+    return tuple(sorted(owned.intersection(evidence)))
+
+
+def _git_tree_entry_payload(entry: _GitTreeEntry | None) -> object:
+    if entry is None:
+        return None
+    return {
+        "mode": entry.mode,
+        "object_type": entry.object_type,
+        "object_sha": entry.object_sha,
+    }
+
+
+def _collision_record_payload(
+    record: _ForeignCollisionRecord,
+    owned_paths: tuple[str, ...],
+) -> dict[str, object]:
+    projection = _collision_overlap_projection(owned_paths, record.evidence)
+    if record.overlaps != bool(projection):
+        raise _RemoteProbeError()
+
+    identity: object
+    if record.identity is None:
+        identity = None
+    else:
+        identity = {
+            "head_repository": record.identity.head_repository,
+            "head_sha": record.identity.head_sha,
+            "base_repository": record.identity.base_repository,
+            "base_sha": record.identity.base_sha,
+        }
+
+    evidence: object
+    if isinstance(record.evidence, _CurrentBaseCollisionEvidence):
+        evidence = {
+            "proof_method": record.evidence.proof_method,
+            "target_repository": record.evidence.target_repository,
+            "target_base_sha": record.evidence.target_base_sha,
+            "owned_path_entries": [
+                {
+                    "path": path,
+                    "target_base": _git_tree_entry_payload(target_entry),
+                    "head": _git_tree_entry_payload(head_entry),
+                }
+                for path, target_entry, head_entry in record.evidence.owned_path_entries
+            ],
+        }
+    elif isinstance(record.evidence, _SaturatedCollisionEvidence):
+        evidence = {
+            "proof_method": record.evidence.proof_method,
+            "merge_base_sha": record.evidence.merge_base_sha,
+            "owned_path_entries": [
+                {
+                    "path": path,
+                    "base": _git_tree_entry_payload(base_entry),
+                    "head": _git_tree_entry_payload(head_entry),
+                }
+                for path, base_entry, head_entry in record.evidence.owned_path_entries
+            ],
+        }
+    else:
+        evidence = {"changed_paths": list(record.evidence)}
+
+    return {
+        "pr_number": record.pr_number,
+        "identity": identity,
+        "overlap_paths": list(projection),
+        "evidence": evidence,
+    }
+
+
+def _collision_evidence_fingerprint(
+    records: tuple[_ForeignCollisionRecord, ...],
+    owned_paths: tuple[str, ...],
+) -> str:
+    rows = [
+        _collision_record_payload(record, owned_paths)
+        for record in sorted(records, key=lambda item: item.pr_number)
+        if record.overlaps
+    ]
+    return hashlib.sha256(canonical_json(rows).encode("utf-8")).hexdigest()
+
+
+def _revalidate_collision_records(
+    http_get: HTTPGet,
+    token: str,
+    repository: str,
+    owned_paths: tuple[str, ...],
+    first_records: tuple[_ForeignCollisionRecord, ...],
+    first_colliding_pr_numbers: tuple[int, ...],
+    second_details: _CollisionCensusDetails,
+) -> tuple[bool, bool, tuple[_ForeignCollisionRecord, ...]]:
+    if not second_details.complete or second_details.state is CollisionState.INCOMPLETE:
+        return False, False, ()
+
+    first_by_number = {record.pr_number: record for record in first_records}
+    if len(first_by_number) != len(first_records):
+        raise _RemoteProbeError()
+    if tuple(sorted(
+        number for number, record in first_by_number.items() if record.overlaps
+    )) != tuple(sorted(first_colliding_pr_numbers)):
+        raise _RemoteProbeError()
+
+    second_by_number = {
+        record.pr_number: record for record in second_details.foreign_records
+    }
+    if len(second_by_number) != len(second_details.foreign_records):
+        raise _RemoteProbeError()
+
+    for number, first_record in first_by_number.items():
+        if first_record.identity is None:
+            raise _RemoteProbeError()
+        second_record = second_by_number.get(number)
+        if second_record is None:
+            if first_record.overlaps:
+                return False, True, ()
+            direct = _api(
+                http_get=http_get,
+                token=token,
+                endpoint=f"repos/{repository}/pulls/{number}",
+            )
+            if not isinstance(direct, dict) or direct.get("state") != "closed":
+                return False, True, ()
+            if _foreign_pull_identity(direct, repository).pr_number != number:
+                raise _RemoteProbeError()
+            continue
+        if second_record.identity is None:
+            raise _RemoteProbeError()
+
+        if first_record.overlaps:
+            if not second_record.overlaps:
+                return False, True, ()
+            first_identity = first_record.identity
+            second_identity = second_record.identity
+            if (
+                first_identity.head_repository != second_identity.head_repository
+                or first_identity.base_repository != second_identity.base_repository
+            ):
+                return False, True, ()
+            first_projection = _collision_overlap_projection(
+                owned_paths, first_record.evidence
+            )
+            second_projection = _collision_overlap_projection(
+                owned_paths, second_record.evidence
+            )
+            if not first_projection or second_projection != first_projection:
+                return False, True, ()
+            continue
+
+        if second_record.overlaps:
+            return False, True, ()
+
+    for number, second_record in second_by_number.items():
+        if number in first_by_number:
+            continue
+        if second_record.identity is None:
+            raise _RemoteProbeError()
+        if second_record.overlaps:
+            return False, True, ()
+
+    return True, True, second_details.foreign_records
 
 
 def _revalidate_collision_census(
@@ -1481,19 +2190,21 @@ def _revalidate_collision_census(
     owned_paths: tuple[str, ...],
     first_records: tuple[_ForeignCollisionRecord, ...],
     first_colliding_pr_numbers: tuple[int, ...],
-) -> tuple[bool, bool]:
-    """Re-prove custody under a complete second open-PR census.
+    *,
+    current_base_head: str | None = None,
+) -> tuple[bool, bool, tuple[_ForeignCollisionRecord, ...]]:
+    """Re-prove custody without re-fetching stable foreign evidence.
 
-    Stable foreign identities reuse their first collision evidence. New or
-    moved disjoint identities are freshly checked. A missing first-pass
-    disjoint PR must be directly proven closed; a colliding PR may never move
-    or disappear.
+    The second pass reads the complete open-PR roster first. Stable immutable
+    identities reuse first-pass collision evidence. New or moved identities are
+    freshly proved. A moved collider may continue only when its exact non-empty
+    target-owned overlap projection is unchanged.
     """
 
     reader = _collision_reader(http_get)
     pulls, complete = _read_open_pull_roster(reader, token, repository)
     if not complete:
-        return False, False
+        return False, False, ()
 
     seen_numbers: set[int] = set()
     target_seen = False
@@ -1516,11 +2227,9 @@ def _revalidate_collision_census(
         else:
             second_foreign[number] = raw_pr
     if not target_seen:
-        return False, True
+        return False, True, ()
 
-    first_by_number = {
-        record.pr_number: record for record in first_records
-    }
+    first_by_number = {record.pr_number: record for record in first_records}
     if len(first_by_number) != len(first_records):
         raise _RemoteProbeError()
     if tuple(sorted(
@@ -1528,55 +2237,107 @@ def _revalidate_collision_census(
     )) != tuple(sorted(first_colliding_pr_numbers)):
         raise _RemoteProbeError()
 
-    for number, record in first_by_number.items():
-        if record.identity is None:
+    target_base_resolver = (
+        _CurrentBasePathResolver(reader, token, repository, current_base_head)
+        if current_base_head is not None
+        else None
+    )
+    final_records: list[_ForeignCollisionRecord] = []
+    for number, first_record in first_by_number.items():
+        if first_record.identity is None:
             raise _RemoteProbeError()
         raw_pr = second_foreign.pop(number, None)
-        if record.overlaps:
-            if raw_pr is None:
-                return False, True
-            if _foreign_pull_identity(raw_pr, repository) != record.identity:
-                return False, True
-            continue
 
         if raw_pr is None:
-            direct = _api(http_get=reader, token=token, endpoint=f"repos/{repository}/pulls/{number}")
+            if first_record.overlaps:
+                return False, True, ()
+            direct = _api(
+                http_get=reader,
+                token=token,
+                endpoint=f"repos/{repository}/pulls/{number}",
+            )
             if not isinstance(direct, dict) or direct.get("state") != "closed":
-                return False, True
+                return False, True, ()
             if _foreign_pull_identity(direct, repository).pr_number != number:
                 raise _RemoteProbeError()
             continue
 
         second_identity = _foreign_pull_identity(raw_pr, repository)
-        if second_identity == record.identity:
+        evidence_base_is_current = (
+            not isinstance(first_record.evidence, _CurrentBaseCollisionEvidence)
+            or current_base_head is None
+            or first_record.evidence.target_base_sha == current_base_head
+        )
+        if second_identity == first_record.identity and evidence_base_is_current:
+            final_records.append(first_record)
             continue
-        _, overlaps = _foreign_collision_evidence(
+
+        second_evidence, second_overlaps = _foreign_collision_evidence(
             reader,
             token,
             repository,
             raw_pr,
             number,
             owned_paths,
+            current_base_head=current_base_head,
+            target_base_resolver=target_base_resolver,
         )
-        if overlaps:
-            return False, True
+        second_record = _ForeignCollisionRecord(
+            pr_number=number,
+            identity=second_identity,
+            evidence=second_evidence,
+            overlaps=second_overlaps,
+        )
+
+        if first_record.overlaps:
+            if not second_overlaps:
+                return False, True, ()
+            first_identity = first_record.identity
+            if (
+                first_identity.head_repository != second_identity.head_repository
+                or first_identity.base_repository != second_identity.base_repository
+            ):
+                return False, True, ()
+            first_projection = _collision_overlap_projection(
+                owned_paths, first_record.evidence
+            )
+            second_projection = _collision_overlap_projection(
+                owned_paths, second_evidence
+            )
+            if not first_projection or second_projection != first_projection:
+                return False, True, ()
+        elif second_overlaps:
+            return False, True, ()
+
+        final_records.append(second_record)
 
     for number, raw_pr in second_foreign.items():
-        identity = _foreign_pull_identity(raw_pr, repository)
-        if identity.pr_number != number:
+        second_identity = _foreign_pull_identity(raw_pr, repository)
+        if second_identity.pr_number != number:
             raise _RemoteProbeError()
-        _, overlaps = _foreign_collision_evidence(
+        second_evidence, second_overlaps = _foreign_collision_evidence(
             reader,
             token,
             repository,
             raw_pr,
             number,
             owned_paths,
+            current_base_head=current_base_head,
+            target_base_resolver=target_base_resolver,
         )
-        if overlaps:
-            return False, True
+        if second_overlaps:
+            return False, True, ()
+        final_records.append(
+            _ForeignCollisionRecord(
+                pr_number=number,
+                identity=second_identity,
+                evidence=second_evidence,
+                overlaps=False,
+            )
+        )
 
-    return True, True
+    return True, True, tuple(sorted(final_records, key=lambda item: item.pr_number))
+
 
 def _probe_remote_prefix(
     http_get: HTTPGet,
@@ -1655,18 +2416,22 @@ def _probe_remote_prefix(
         return _refusal(RefusalCode.REMOTE_PROBE_FAILED, 2)
     merge_base_sha = merge_base["sha"]
 
-    changed_paths, files_complete = _changed_paths(
+    changed_paths, files_complete, rename_within_ownership = _subject_changed_paths(
         http_get,
         token,
         request.repository,
         request.pr_number,
+        request.owned_paths,
     )
+    if not rename_within_ownership:
+        return _refusal(RefusalCode.PATH_OUTSIDE_OWNERSHIP, 1)
     collision_details = _collision_census_details(
         http_get,
         token,
         request.repository,
         request.pr_number,
         request.owned_paths,
+        current_base_head=current_base_head,
     )
     collision_state = collision_details.state
     colliding_pr_numbers = collision_details.colliding_pr_numbers
@@ -1846,6 +2611,176 @@ def _grafts_path_if_safe(runner: Runner, workspace: str) -> str | None:
     return grafts_path
 
 
+def _paths_have_no_filters(
+    runner: Runner,
+    workspace: str,
+    paths: tuple[str, ...],
+    *,
+    deadline: float | None = None,
+) -> bool:
+    """Refuse any path whose worktree conversion may invoke a Git filter."""
+
+    # Keep each argv comfortably below the platform limit even with maximum-size paths.
+    for offset in range(0, len(paths), 16):
+        if deadline is not None and monotonic() >= deadline:
+            return False
+        batch = paths[offset:offset + 16]
+        result = _invoke_git(
+            runner,
+            workspace,
+            "check-attr",
+            "-z",
+            "filter",
+            "--",
+            *batch,
+        )
+        if result is None or result.returncode != 0:
+            return False
+        tokens = result.stdout.split("\0")
+        if tokens and tokens[-1] == "":
+            tokens.pop()
+        if len(tokens) != 3 * len(batch):
+            return False
+        for index, path in enumerate(batch):
+            observed, attribute, value = tokens[index * 3:index * 3 + 3]
+            if (
+                observed != path
+                or attribute != "filter"
+                or value not in {"unspecified", "unset"}
+            ):
+                return False
+        if deadline is not None and monotonic() >= deadline:
+            return False
+    return True
+
+
+def _nested_submodules_have_no_filters(
+    runner: Runner,
+    workspace: str,
+) -> bool:
+    """Preflight materialized nested gitlinks before an unrestricted worktree diff.
+
+    Superproject check-attr cannot see attributes from a submodule's local
+    worktree, while --ignore-submodules=none can recurse and run clean filters.
+    Enumerate tracked nested paths with non-transforming Git reads, including
+    recursively nested gitlinks. A configured but unused nested filter is safe.
+    """
+    started = monotonic()
+    if not isinstance(started, (int, float)) or not math.isfinite(started):
+        return False
+    deadline = float(started) + _NESTED_GIT_PREFLIGHT_SECONDS
+    if not math.isfinite(deadline):
+        return False
+    pending: list[tuple[Path, int]] = [(Path(workspace), 0)]
+    examined = 0
+    materialized = 0
+    checked_total = 0
+    visited: set[str] = set()
+    while pending:
+        if monotonic() >= deadline:
+            return False
+        current, depth = pending.pop()
+        key = os.path.normpath(str(current))
+        if key in visited or depth > 4:
+            return False
+        visited.add(key)
+        staged = _invoke_git(runner, str(current), "ls-files", "--stage", "-z")
+        if staged is None or staged.returncode != 0:
+            return False
+        # An index-only scan misses tracked HEAD gitlinks staged for deletion.
+        # Cached raw diff compares index/Git objects, never the worktree or
+        # clean/process filters. Refuse any staged gitlink change.
+        if monotonic() >= deadline:
+            return False
+        raw = _invoke_git(
+            runner, str(current), "diff", "--cached", "--raw", "-z",
+            "--no-renames", "--no-ext-diff", "HEAD", "--",
+        )
+        if (
+            raw is None or raw.returncode != 0
+            or len(raw.stdout.encode("utf-8")) > _NESTED_GIT_RAW_STAGED_BYTES
+        ):
+            return False
+        entries = [part for part in raw.stdout.split("\0") if part]
+        if len(entries) % 2:
+            return False
+        for index in range(0, len(entries), 2):
+            header, path = entries[index], entries[index + 1]
+            fields = header.removeprefix(":").split()
+            if (
+                not header.startswith(":")
+                or len(fields) != 5
+                or not _is_safe_remote_path(path)
+            ):
+                return False
+            if fields[0] == "160000" or fields[1] == "160000":
+                return False
+        for record in (row for row in staged.stdout.split("\0") if row):
+            try:
+                header, path = record.split("\t", 1)
+                mode, object_sha, stage = header.split()
+            except ValueError:
+                return False
+            if (
+                not _is_safe_remote_path(path)
+                or not _is_sha(object_sha)
+                or stage not in {"0", "1", "2", "3"}
+            ):
+                return False
+            if mode != "160000":
+                continue
+            examined += 1
+            if examined > 128:
+                return False
+            # Never follow an untrusted intermediate symlink or escape root.
+            target = current
+            missing = False
+            for part in PurePosixPath(path).parts:
+                target = target / part
+                try:
+                    observed = os.lstat(target)
+                except FileNotFoundError:
+                    missing = True
+                    break
+                except OSError:
+                    return False
+                if not stat.S_ISDIR(observed.st_mode):
+                    return False
+            if missing:  # Sparse/unmaterialized gitlink: no nested filter runs.
+                continue
+            materialized += 1
+            if materialized > _NESTED_GIT_MATERIALIZED_REPOS or monotonic() >= deadline:
+                return False
+            top = _invoke_git(runner, str(target), "rev-parse", "--show-toplevel")
+            if (
+                top is None
+                or top.returncode != 0
+                or os.path.normpath(top.stdout.strip()) != os.path.normpath(str(target))
+            ):
+                return False
+            if monotonic() >= deadline:
+                return False
+            flags = _invoke_git(runner, str(target), "ls-files", "-v", "-z")
+            if flags is None or flags.returncode != 0:
+                return False
+            checked: list[str] = []
+            for item in (row for row in flags.stdout.split("\0") if row):
+                if len(item) < 3 or item[1] != " " or not _is_safe_remote_path(item[2:]):
+                    return False
+                if item[0] != "S":
+                    checked.append(item[2:])
+            checked_total += len(checked)
+            if (
+                checked_total > _NESTED_GIT_CHECKED_PATHS
+                or not _paths_have_no_filters(
+                    runner, str(target), tuple(checked), deadline=deadline
+                )
+            ):
+                return False
+            pending.append((target, depth + 1))
+    return True
+
+
 def _probe_local_and_entries(
     runner: Runner,
     workspace: str,
@@ -1853,7 +2788,13 @@ def _probe_local_and_entries(
     remote_head: str,
     merge_base_sha: str,
     remote_changed_paths: tuple[str, ...],
-) -> tuple[LocalGitFacts, tuple[RemotePathEntry, ...]] | SourceContinuityRefusal:
+    *,
+    current_base_head: str | None = None,
+) -> (
+    tuple[LocalGitFacts, tuple[RemotePathEntry, ...]]
+    | tuple[LocalGitFacts, tuple[RemotePathEntry, ...], tuple[str, ...]]
+    | SourceContinuityRefusal
+):
     root_result = _invoke_git(runner, workspace, "rev-parse", "--show-toplevel")
     if root_result is None or root_result.returncode != 0:
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
@@ -1894,6 +2835,19 @@ def _probe_local_and_entries(
     )
     if merge_base_object is None or merge_base_object.returncode != 0:
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+
+    if current_base_head is not None:
+        if not _is_sha(current_base_head):
+            return _refusal(RefusalCode.REMOTE_FACTS_INVALID, 2)
+        current_base_object = _invoke_git(
+            runner,
+            workspace,
+            "cat-file",
+            "-e",
+            f"{current_base_head}^{{commit}}",
+        )
+        if current_base_object is None or current_base_object.returncode != 0:
+            return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
     first_grafts_path = _grafts_path_if_safe(runner, workspace)
     if first_grafts_path is None:
@@ -1937,22 +2891,7 @@ def _probe_local_and_entries(
         "--name-only",
         "-z",
     )
-    filter_config = _invoke_git(
-        runner,
-        workspace,
-        "config",
-        "--null",
-        "--name-only",
-        "--get-regexp",
-        r"^filter\..*\.(clean|process)$",
-    )
-    if filter_config is None or filter_config.returncode not in {0, 1}:
-        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
-    if (
-        len(filter_config.stdout.encode("utf-8")) > _MAX_GIT_CONFIG_CENSUS_BYTES
-        or filter_config.returncode == 0
-        or filter_config.stdout
-    ):
+    if not _paths_have_no_filters(runner, workspace, request.owned_paths):
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
     protected_paths = set(request.owned_paths)
@@ -1967,6 +2906,22 @@ def _probe_local_and_entries(
     if concealed_before is None or concealed_before:
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
+    # The worktree diffs below inspect every materialized tracked path. Git may
+    # invoke clean/process filters while converting those paths even when
+    # --no-ext-diff and --no-textconv are set, so preflight every path they can touch.
+    other_materialized_paths = tuple(sorted({
+        record[2:]
+        for record in index_flags_before.stdout.split("\0")
+        if record and record[0] != "S" and record[2:] not in protected_paths
+    }))
+    if not _paths_have_no_filters(
+        runner, workspace, other_materialized_paths
+    ):
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+
+    if not _nested_submodules_have_no_filters(runner, workspace):
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+
     unstaged = _invoke_git(runner, workspace, "diff", *diff_controls, "HEAD", "--")
     staged = _invoke_git(runner, workspace, "diff", "--cached", *diff_controls, "--")
     untracked = _invoke_git(runner, workspace, "ls-files", "--others", "-z", "--")
@@ -1976,7 +2931,7 @@ def _probe_local_and_entries(
     ):
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
-    local_diff = _invoke_git(
+    historical_diff = _invoke_git(
         runner,
         workspace,
         "diff",
@@ -1984,11 +2939,38 @@ def _probe_local_and_entries(
         f"{merge_base_sha}..{remote_head}",
         "--",
     )
-    if local_diff is None or local_diff.returncode != 0:
+    if historical_diff is None or historical_diff.returncode != 0:
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
-    local_changed_paths = _parse_nul_paths(local_diff.stdout)
-    if not _same_duplicate_free_paths(local_changed_paths, remote_changed_paths):
+    historical_changed_paths = _parse_nul_paths(historical_diff.stdout)
+    if not _same_duplicate_free_paths(
+        historical_changed_paths, remote_changed_paths
+    ):
         return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
+
+    effective_changed_paths = remote_changed_paths
+    if current_base_head is not None:
+        current_diff = _invoke_git(
+            runner,
+            workspace,
+            "diff",
+            *diff_controls,
+            f"{current_base_head}..{remote_head}",
+            "--",
+        )
+        if current_diff is None or current_diff.returncode != 0:
+            return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+        current_snapshot_paths = _parse_nul_paths(current_diff.stdout)
+        if len(current_snapshot_paths) != len(set(current_snapshot_paths)):
+            return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+        current_snapshot_set = set(current_snapshot_paths)
+        effective_changed_paths = tuple(
+            path for path in remote_changed_paths if path in current_snapshot_set
+        )
+        if not effective_changed_paths:
+            return _refusal(RefusalCode.REMOTE_FACTS_INVALID, 2)
+        owned_paths = set(request.owned_paths)
+        if any(path not in owned_paths for path in effective_changed_paths):
+            return _refusal(RefusalCode.PATH_OUTSIDE_OWNERSHIP, 1)
 
     tree_result = _invoke_git(
         runner,
@@ -1998,7 +2980,7 @@ def _probe_local_and_entries(
         "-l",
         remote_head,
         "--",
-        *remote_changed_paths,
+        *effective_changed_paths,
     )
     if tree_result is None or tree_result.returncode != 0:
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
@@ -2040,6 +3022,8 @@ def _probe_local_and_entries(
         uncommitted_out_of_scope_count=len(tracked_paths - owned),
         untracked_out_of_scope_count=len(untracked_paths - owned),
     )
+    if current_base_head is not None:
+        return local_facts, path_entries, effective_changed_paths
     return local_facts, path_entries
 
 
@@ -2047,6 +3031,7 @@ def _probe_local_and_entries(
 class _RemoteRevalidation:
     current_base_head: str
     merge_base_sha: str
+    collision_records: tuple[_ForeignCollisionRecord, ...] = ()
 
 
 def _branch_head_sha(payload: object) -> str | None:
@@ -2182,6 +3167,30 @@ def _remote_still_matches(
         if len(first_collision_snapshot) > 1 and not first_collision_records:
             return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
 
+        base_revalidation: _RemoteRevalidation | None = None
+        collision_base_head = current_base_head
+        update_reader = getattr(http_get, "base_head_update", None)
+        update = update_reader() if callable(update_reader) else None
+        if update is not None:
+            old_base_head, new_base_head = update
+            if not _is_sha(first_merge_base_sha):
+                raise _RemoteProbeError()
+            if old_base_head != current_base_head:
+                return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
+            moved = _revalidate_moved_base(
+                http_get,
+                token,
+                request,
+                old_base_head=old_base_head,
+                new_base_head=new_base_head,
+                remote_head=remote_head,
+                first_merge_base_sha=first_merge_base_sha,
+            )
+            if isinstance(moved, SourceContinuityRefusal):
+                return moved
+            base_revalidation = moved
+            collision_base_head = moved.current_base_head
+
         if any(record.identity is None for record in first_collision_records):
             second_details = _collision_census_details(
                 http_get,
@@ -2189,6 +3198,9 @@ def _remote_still_matches(
                 request.repository,
                 request.pr_number,
                 request.owned_paths,
+                current_base_head=(
+                    collision_base_head if first_collision_records else None
+                ),
             )
             if (
                 not second_details.complete
@@ -2203,8 +3215,13 @@ def _remote_still_matches(
             )
             if not collision_matches:
                 return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
+            final_collision_records = second_details.foreign_records
         else:
-            collision_matches, collision_complete = _revalidate_collision_census(
+            (
+                collision_matches,
+                collision_complete,
+                final_collision_records,
+            ) = _revalidate_collision_census(
                 http_get,
                 token,
                 request.repository,
@@ -2212,30 +3229,26 @@ def _remote_still_matches(
                 request.owned_paths,
                 first_collision_records,
                 first_colliding_pr_numbers,
+                current_base_head=collision_base_head,
             )
             if not collision_complete:
                 return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
             if not collision_matches:
                 return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
 
-        update_reader = getattr(http_get, "base_head_update", None)
-        update = update_reader() if callable(update_reader) else None
-        if update is None:
-            return None
-        old_base_head, new_base_head = update
-        if not _is_sha(first_merge_base_sha):
-            raise _RemoteProbeError()
-        if old_base_head != current_base_head:
-            return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
-        return _revalidate_moved_base(
-            http_get,
-            token,
-            request,
-            old_base_head=old_base_head,
-            new_base_head=new_base_head,
-            remote_head=remote_head,
-            first_merge_base_sha=first_merge_base_sha,
-        )
+        if base_revalidation is not None:
+            return _RemoteRevalidation(
+                base_revalidation.current_base_head,
+                base_revalidation.merge_base_sha,
+                final_collision_records,
+            )
+        if _is_sha(first_merge_base_sha):
+            return _RemoteRevalidation(
+                current_base_head,
+                first_merge_base_sha,
+                final_collision_records,
+            )
+        return None
 
     pr_endpoint = f"repos/{request.repository}/pulls/{request.pr_number}"
     second_pr = _api(http_get, token, pr_endpoint)
@@ -2266,56 +3279,102 @@ def _remote_still_matches(
     ):
         return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
 
-    second_changed_paths, second_files_complete = _changed_paths(
-        http_get,
-        token,
-        request.repository,
-        request.pr_number,
-    )
-    if not first_files_complete or not second_files_complete:
-        return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
-    if second_changed_paths != first_changed_paths:
-        return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
-
-    (
-        second_collision_state,
-        second_colliding_pr_numbers,
-        second_collisions_complete,
-        second_collision_snapshot,
-    ) = _collision_census(
+    second_changed_paths, second_files_complete, rename_within_ownership = _subject_changed_paths(
         http_get,
         token,
         request.repository,
         request.pr_number,
         request.owned_paths,
     )
+    if not rename_within_ownership:
+        return _refusal(RefusalCode.PATH_OUTSIDE_OWNERSHIP, 1)
+    if not first_files_complete or not second_files_complete:
+        return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
+    if second_changed_paths != first_changed_paths:
+        return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
     if (
         not first_collisions_complete
         or first_collision_state is CollisionState.INCOMPLETE
-        or not second_collisions_complete
-        or second_collision_state is CollisionState.INCOMPLETE
     ):
         return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
+
+    base_revalidation: _RemoteRevalidation | None = None
+    collision_base_head = current_base_head
+    if second_base_head != current_base_head:
+        if not _is_sha(first_merge_base_sha):
+            raise _RemoteProbeError()
+        moved = _revalidate_moved_base(
+            http_get,
+            token,
+            request,
+            old_base_head=current_base_head,
+            new_base_head=second_base_head,
+            remote_head=remote_head,
+            first_merge_base_sha=first_merge_base_sha,
+        )
+        if isinstance(moved, SourceContinuityRefusal):
+            return moved
+        base_revalidation = moved
+        collision_base_head = moved.current_base_head
+
     if (
-        second_collision_state is not first_collision_state
-        or second_colliding_pr_numbers != first_colliding_pr_numbers
-        or second_collision_snapshot != first_collision_snapshot
+        first_collision_records
+        and all(record.identity is not None for record in first_collision_records)
     ):
+        (
+            collision_matches,
+            collision_complete,
+            final_collision_records,
+        ) = _revalidate_collision_census(
+            http_get,
+            token,
+            request.repository,
+            request.pr_number,
+            request.owned_paths,
+            first_collision_records,
+            first_colliding_pr_numbers,
+            current_base_head=collision_base_head,
+        )
+        if not collision_complete:
+            return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
+    else:
+        second_details = _collision_census_details(
+            http_get,
+            token,
+            request.repository,
+            request.pr_number,
+            request.owned_paths,
+            current_base_head=None,
+        )
+        if (
+            not second_details.complete
+            or second_details.state is CollisionState.INCOMPLETE
+        ):
+            return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
+        collision_matches = (
+            second_details.state is first_collision_state
+            and second_details.colliding_pr_numbers == first_colliding_pr_numbers
+            and second_details.snapshot == first_collision_snapshot
+        )
+        final_collision_records = second_details.foreign_records
+
+    if not collision_matches:
         return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
 
-    if second_base_head == current_base_head:
-        return None
-    if not _is_sha(first_merge_base_sha):
-        raise _RemoteProbeError()
-    return _revalidate_moved_base(
-        http_get,
-        token,
-        request,
-        old_base_head=current_base_head,
-        new_base_head=second_base_head,
-        remote_head=remote_head,
-        first_merge_base_sha=first_merge_base_sha,
-    )
+    if base_revalidation is not None:
+        return _RemoteRevalidation(
+            base_revalidation.current_base_head,
+            base_revalidation.merge_base_sha,
+            final_collision_records,
+        )
+    if _is_sha(first_merge_base_sha):
+        return _RemoteRevalidation(
+            current_base_head,
+            first_merge_base_sha,
+            final_collision_records,
+        )
+    return None
+
 
 def _is_github_id(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and 0 < value <= 2_147_483_647
@@ -2615,8 +3674,6 @@ def main(
             return _emit(_refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2))
         if not changed_paths:
             return _emit(_refusal(RefusalCode.REMOTE_FACTS_INVALID, 2))
-        if any(path not in set(request.owned_paths) for path in changed_paths):
-            return _emit(_refusal(RefusalCode.PATH_OUTSIDE_OWNERSHIP, 1))
 
         local_probe = _probe_local_and_entries(
             runner,
@@ -2625,10 +3682,11 @@ def main(
             remote_head,
             merge_base_sha,
             changed_paths,
+            current_base_head=current_base_head,
         )
         if isinstance(local_probe, SourceContinuityRefusal):
             return _emit(local_probe)
-        local_facts, path_entries = local_probe
+        local_facts, path_entries, effective_changed_paths = local_probe
 
         remote_refusal = _remote_still_matches(
             bounded_get,
@@ -2649,9 +3707,26 @@ def main(
         if isinstance(remote_refusal, SourceContinuityRefusal):
             return _emit(remote_refusal)
         if isinstance(remote_refusal, _RemoteRevalidation):
+            if remote_refusal.current_base_head != current_base_head:
+                refreshed_local = _probe_local_and_entries(
+                    runner,
+                    workspace,
+                    request,
+                    remote_head,
+                    remote_refusal.merge_base_sha,
+                    changed_paths,
+                    current_base_head=remote_refusal.current_base_head,
+                )
+                if isinstance(refreshed_local, SourceContinuityRefusal):
+                    return _emit(refreshed_local)
+                local_facts, path_entries, effective_changed_paths = refreshed_local
             current_base_head = remote_refusal.current_base_head
             merge_base_sha = remote_refusal.merge_base_sha
+            collision_records = remote_refusal.collision_records
 
+        collision_evidence_fingerprint = _collision_evidence_fingerprint(
+            collision_records, request.owned_paths
+        )
         remote_facts = RemoteGitFacts(
             repository=remote_repo,
             pr_number=request.pr_number,
@@ -2663,10 +3738,11 @@ def main(
             tree_sha=remote_tree,
             merge_base_sha=merge_base_sha,
             current_base_head_sha=current_base_head,
-            changed_paths=changed_paths,
+            changed_paths=effective_changed_paths,
             path_entries=path_entries,
             collision_state=collision_state,
             colliding_pr_numbers=colliding_pr_numbers,
+            collision_evidence_fingerprint=collision_evidence_fingerprint,
             pagination_complete=files_complete and collisions_complete,
         )
         external = ExternalEffectEvidence(

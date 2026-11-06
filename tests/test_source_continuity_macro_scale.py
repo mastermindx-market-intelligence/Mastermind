@@ -1,4 +1,4 @@
-"""Macro-490 Source Continuity profile regressions; no real HTTP or token."""
+"""Resource-bounded Source Continuity scale regressions; no real HTTP or token."""
 from __future__ import annotations
 
 import os
@@ -13,7 +13,6 @@ import test_source_continuity_census_budget as budget
 
 
 def _apply_frozen_profile(module) -> None:
-    module._MAX_COLLISION_PRS = 490
     module._MAX_HTTP_CALLS = 1152
     module._MAX_HTTP_NORMALIZED_BYTES = 128 * 1024 * 1024
     module._HTTP_READ_BUDGET_SECONDS = 300.0
@@ -59,9 +58,9 @@ def test_cli_bootstrap_does_not_write_repository_bytecode(tmp_path) -> None:
     assert created == []
 
 
-def test_macro_490_profile_is_exact() -> None:
+def test_structural_resource_profile_is_exact() -> None:
     module = fx._cli_module()
-    assert module._MAX_COLLISION_PRS == 490
+    assert not hasattr(module, "_MAX_COLLISION_PRS")
     assert module._MAX_HTTP_CALLS == 1152
     assert module._MAX_HTTP_NORMALIZED_BYTES == 128 * 1024 * 1024
     assert module._HTTP_READ_BUDGET_SECONDS == 300.0
@@ -83,12 +82,22 @@ def test_macro_scale_estate_completes(count, capsys, monkeypatch) -> None:
     assert len(http.calls) <= 1152
 
 
-def test_macro_491_refuses_before_foreign_file_enumeration(
+def test_macro_491_is_no_longer_a_policy_ceiling(capsys, monkeypatch) -> None:
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", budget.Clock(), raising=False)
+    http = budget.EstateHTTP(491)
+    rc, payload = budget.run_cli(module, capsys, http)
+    assert rc == 0, payload
+    assert payload["authority_effect"] == "NONE"
+    assert payload["merge_authorized"] is False
+
+
+def test_macro_full_ten_page_roster_refuses_before_foreign_file_enumeration(
     capsys, monkeypatch
 ) -> None:
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", budget.Clock(), raising=False)
-    http = budget.EstateHTTP(491)
+    http = budget.EstateHTTP(1000)
     rc, payload = budget.run_cli(module, capsys, http)
     assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
     assert _foreign_file_calls(http) == []
