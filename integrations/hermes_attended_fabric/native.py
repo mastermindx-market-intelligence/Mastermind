@@ -57,6 +57,10 @@ class FabricNativeRefusal(RuntimeError):
     """A named fail-closed refusal, not permission to change a carrier."""
 
 
+class FabricPreDispatchRefusal(FabricNativeRefusal):
+    """Trusted incumbent owner proves the request never reached a submit call."""
+
+
 @dataclass(frozen=True)
 class SessionGrant:
     """Issued by the actual authenticated Hermes/Executive host, never a model."""
@@ -254,6 +258,8 @@ def native_handler(
         try:
             raw = port.submit(grant, run_id, task_class, complexity, packet,
                               reason, pool=pool, model=model)
+        except FabricPreDispatchRefusal as exc:
+            return _project(grant, run_id, "REFUSED", str(exc)[:120])
         except Exception:
             # The incumbent port may have sent the request. Never auto-retry.
             return _project(grant, run_id, "EFFECT_UNKNOWN",
