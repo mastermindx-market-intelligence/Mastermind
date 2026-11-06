@@ -75,6 +75,7 @@ async function setup({holdSubmit=false}={}){
   fireEvent.click(screen.getByRole('button',{name:'Projects'}));
   fireEvent.click(await screen.findByRole('button',{name:'Open project Adoption test project'}));
   fireEvent.click(screen.getByRole('button',{name:'Project details'}));
+  fireEvent.click(screen.getByRole("button",{name:"Plan",exact:true}));
   await screen.findByRole('region',{name:'Plan adoption review'});
  }
  const view=mount();await open();
