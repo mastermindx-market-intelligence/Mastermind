@@ -39,7 +39,7 @@ const executionResult=(operation:string,data:unknown)=>({
   schema:"mastermind.project_execution_private_result.v1",operation,ok:true,data,error:null,
 });
 type Options={completed?:boolean;loseReply?:boolean;signedOut?:boolean;omitExecutive?:boolean;
-  holdPreview?:boolean;legacyManifest?:boolean};
+  holdPreview?:boolean;legacyManifest?:boolean;holdOperationDiscovery?:boolean};
 async function setup(options:Options={},database=new IDBFactory()){
   const room=controlRoomFixture(),responsibility=structuredClone(room.autonomy.responsibilities[0]);
   room.work=[room.work[0]];room.autonomy.responsibilities=[];
@@ -135,6 +135,18 @@ async function setup(options:Options={},database=new IDBFactory()){
     profiles:[{ref:"research_only",label:"Fixture legacy research"}]}:null;
   const composition=composeMissionHost(options.omitExecutive?withoutExecutive:client,legacy,database,"native");
   disposals.push(composition.dispose);await composition.ready;await composition.sessionReady;
+  let finishOperationDiscovery:(()=>void)|undefined;
+  if(options.holdOperationDiscovery){
+    const store=composition.host.commandBinding!.store;
+    const read=store.read.bind(store);
+    const pending=new Promise<void>(resolve=>{finishOperationDiscovery=resolve;});
+    // Delay delivery of the actual IndexedDB result, keeping the same store
+    // and its source read. A visible project goal does not settle this owner.
+    vi.spyOn(store,"read").mockImplementation(async(principalScope,signal)=>{
+      const value=await read(principalScope,signal);await pending;return value;
+    });
+    disposals.push(()=>finishOperationDiscovery?.());
+  }
   window.MastermindMissionHost=composition.host;
   const view=render(<App/>);
   const executionCalls=(operation:string)=>invoke.mock.calls.filter(([command,args])=>
@@ -143,6 +155,7 @@ async function setup(options:Options={},database=new IDBFactory()){
     command==="executive_fresh_conversation"&&args?.operation===operation);
   return {composition,client,invoke,events,view,executionCalls,freshCalls,database,
     releasePreview:()=>finishPreview?.(),
+    releaseOperationDiscovery:()=>finishOperationDiscovery?.(),
     withdrawExecutive:()=>events.get("mastermind-executive-auth-state")?.forEach(listener=>
       listener({payload:{generation:2,available:false}}))};
 }
@@ -262,14 +275,27 @@ it.each(["absent Executive","signed out"] as const)(
   });
 
 it("withdraws the original Executive owner while a manifest-free project preview waits without reserving or submitting",async()=>{
-  const f=await setup({holdPreview:true});await openProject();
-  fireEvent.click(screen.getByRole("button",{name:"Start work"}));
+  const f=await setup({holdPreview:true,holdOperationDiscovery:true});await openProject();
+  const start=screen.getByRole("button",{name:"Start work"});
+  const binding=f.composition.host.commandBinding!;
+  const reserve=vi.spyOn(binding.store,"reserve");
+  expect(screen.getByText("Checking previous work…")).toBeTruthy();
+  expect(start).toHaveProperty("disabled",true);
+  fireEvent.click(start);
+  expect(f.executionCalls("preview")).toHaveLength(0);
+  expect(reserve).not.toHaveBeenCalled();
+  await act(async()=>{f.releaseOperationDiscovery();});
+  await waitFor(()=>expect(start).toHaveProperty("disabled",false));
+  fireEvent.click(start);
   await waitFor(()=>expect(f.executionCalls("preview")).toHaveLength(1));
   await act(async()=>{f.withdrawExecutive();f.releasePreview();});
-  expect(f.composition.host.commandBinding!.port.context()).toBeNull();
+  expect(binding.port.context()).toBeNull();
   expect(screen.queryByLabelText("Goal")).toBeNull();
+  expect(f.executionCalls("preview")).toHaveLength(1);
   expect(f.executionCalls("submit")).toHaveLength(0);
-  expect(await f.composition.host.commandBinding!.store.read(scope)).toBeNull();
+  expect(reserve).not.toHaveBeenCalled();
+  expect(await binding.store.read(scope)).toBeNull();
+  expect(f.invoke.mock.calls.filter(([name])=>name==="executive_submit")).toHaveLength(0);
 });
 
 it("reopens the original project pointer after its legacy manifest disappears and checks status without another creation",async()=>{
