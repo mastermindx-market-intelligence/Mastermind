@@ -24,8 +24,8 @@ CONTROL_ROOM_ACTION_ROUTES = (
 )
 READER_POST_ROUTES = LEGACY_POST_ROUTES + SESSION_READ_POST_ROUTES
 CONTROL_ROOM_POST_ROUTES = LEGACY_POST_ROUTES + CONTROL_ROOM_ACTION_ROUTES
-# Session context/reply/references are reads. The effectful session/send route
-# is deliberately absent; this composition does not change its authorization.
+# Keep the historical reader profile exact. Qualified Session SEND is a separate
+# final-profile addition below; this does not change generic submit authority.
 POST_ROUTES = READER_POST_ROUTES + CONTROL_ROOM_ACTION_ROUTES
 LEGACY_GET_ROUTES = (
     "/os/", "/os/auth/callback", "/workspace/programs/current",
@@ -85,9 +85,73 @@ PRE_PROJECT_ACCESS_GET_ROUTES = PRE_INSTRUCTION_ADMISSION_GET_ROUTES + (
     "/workspace/instruction-admission/current", "/workspace/instruction-admission/operation")
 GET_ROUTES = PRE_PROJECT_ACCESS_GET_ROUTES + ("/workspace/project-access/current",)
 POST_ROUTES = PRE_INSTRUCTION_ADMISSION_POST_ROUTES + ("/workspace/instruction-admission/pause",)
+
+# The qualified first release is a complete exact predecessor of this cut.
 PRE_MISSION_RESULT_GET_ROUTES = GET_ROUTES
 PRE_MISSION_RESULT_POST_ROUTES = POST_ROUTES
-GET_ROUTES = PRE_MISSION_RESULT_GET_ROUTES + ("/workspace/mission-result/current",)
+MISSION_RESULT_GET_ROUTES = PRE_MISSION_RESULT_GET_ROUTES + ("/workspace/mission-result/current",)
+
+PRE_JOURNEY_GET_ROUTES = GET_ROUTES
+PRE_JOURNEY_POST_ROUTES = POST_ROUTES
+GET_ROUTES = PRE_JOURNEY_GET_ROUTES + ("/workspace/source-operation/options",)
+PROJECT_PLANNING_POST_ROUTES = tuple("/os/executive/project-planning/"+name for name in ("submit","status","result","consume"))
+POST_ROUTES = PRE_JOURNEY_POST_ROUTES + PROJECT_PLANNING_POST_ROUTES
+PRE_PLAN_PROPOSAL_GET_ROUTES = GET_ROUTES
+PRE_PLAN_PROPOSAL_POST_ROUTES = POST_ROUTES
+PROJECT_PLANNING_POST_ROUTES += ("/os/executive/project-planning/prepare_proposal",)
+POST_ROUTES = PRE_PLAN_PROPOSAL_POST_ROUTES + ("/os/executive/project-planning/prepare_proposal",)
+PRE_CONVERSATION_READ_GET_ROUTES = GET_ROUTES
+PRE_CONVERSATION_READ_POST_ROUTES = POST_ROUTES
+PROJECT_CONVERSATION_READ_POST_ROUTES = (
+    "/os/executive/session/history-context", "/os/executive/session/conversations",
+    "/os/executive/session/conversation-read", "/os/executive/session/fresh-conversations",
+    "/os/executive/session/fresh-conversation-read",
+)
+FRESH_CONVERSATION_POST_ROUTES = (
+    "/os/executive/conversation/preview", "/os/executive/conversation/create",
+    "/os/executive/conversation/status", "/os/executive/conversation/read",
+    "/os/executive/conversation/consume", "/os/executive/conversation/turn",
+    "/os/executive/conversation/turn/status", "/os/executive/conversation/turn/read",
+    "/os/executive/conversation/consume/status", "/os/executive/conversation/turn/preview",
+)
+GET_ROUTES = PRE_CONVERSATION_READ_GET_ROUTES + ("/workspace/resources/host-observation/current",)
+POST_ROUTES = PRE_CONVERSATION_READ_POST_ROUTES + PROJECT_CONVERSATION_READ_POST_ROUTES + FRESH_CONVERSATION_POST_ROUTES
+
+PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES = GET_ROUTES
+PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES = POST_ROUTES
+GET_ROUTES = PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES + ("/workspace/mission-result/current",)
+
+# Fixed zero-selector privacy identity read; preserve the complete predecessor.
+PRE_NATIVE_DRAFT_GET_ROUTES = GET_ROUTES
+PRE_NATIVE_DRAFT_POST_ROUTES = POST_ROUTES
+GET_ROUTES = PRE_NATIVE_DRAFT_GET_ROUTES + ("/workspace/native-draft-identity/current",)
+
+# One separately qualified existing-session write, with its complete incumbent
+# profile retained. Authentication, target and original-key authority remain
+# with the existing Session owner; generic submit is unchanged.
+PRE_NATIVE_SESSION_SEND_GET_ROUTES = GET_ROUTES
+PRE_NATIVE_SESSION_SEND_POST_ROUTES = POST_ROUTES
+POST_ROUTES = PRE_NATIVE_SESSION_SEND_POST_ROUTES + ("/os/executive/session/send",)
+
+# Protected f1950e9f: fixed secret-free role metadata READ, with no enrollment
+# or provider operation. Preserve its complete native-SEND predecessor.
+PRE_BYOK_ROLES_GET_ROUTES = GET_ROUTES
+PRE_BYOK_ROLES_POST_ROUTES = POST_ROUTES
+BYOK_READ_ROUTES = ("/workspace/byok/roles/current",)
+GET_ROUTES = PRE_BYOK_ROLES_GET_ROUTES + BYOK_READ_ROUTES
+
+# Project team launch and retained results extend the qualified parent profile.
+# Their existing downstream Executive/Workspace owners still authorize each call.
+PRE_PROJECT_EXECUTION_GET_ROUTES = GET_ROUTES
+PRE_PROJECT_EXECUTION_POST_ROUTES = POST_ROUTES
+PROJECT_EXECUTION_POST_ROUTES = tuple("/os/executive/project-execution/" + name
+    for name in ("preview", "submit", "status")) + (
+    "/os/executive/session/project-executions", "/os/executive/session/project-execution-read")
+# The published project-only source at 2cf4c5e6 predates native SEND and BYOK.
+# Retain that exact complete pair, not arbitrary mixtures of the three groups.
+PROJECT_EXECUTION_PRE_MERGE_GET_ROUTES = PRE_NATIVE_SESSION_SEND_GET_ROUTES
+PROJECT_EXECUTION_PRE_MERGE_POST_ROUTES = PRE_NATIVE_SESSION_SEND_POST_ROUTES + PROJECT_EXECUTION_POST_ROUTES
+POST_ROUTES = PRE_PROJECT_EXECUTION_POST_ROUTES + PROJECT_EXECUTION_POST_ROUTES
 
 # Preserve exactly the profiles admitted by the two predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
@@ -114,8 +178,17 @@ TRANSITION_ROUTE_PROFILES = (
     (SOURCE_CONTEXT_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
     (PRE_PROJECT_INSTRUCTIONS_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
     (PRE_INSTRUCTION_ADMISSION_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
-    (PRE_PROJECT_ACCESS_GET_ROUTES, POST_ROUTES),
-    (PRE_MISSION_RESULT_GET_ROUTES, PRE_MISSION_RESULT_POST_ROUTES),
+    (PRE_PROJECT_ACCESS_GET_ROUTES, PRE_JOURNEY_POST_ROUTES),
+    (PRE_JOURNEY_GET_ROUTES, PRE_JOURNEY_POST_ROUTES),
+    (MISSION_RESULT_GET_ROUTES, PRE_MISSION_RESULT_POST_ROUTES),
+    (PRE_PLAN_PROPOSAL_GET_ROUTES, PRE_PLAN_PROPOSAL_POST_ROUTES),
+    (PRE_CONVERSATION_READ_GET_ROUTES, PRE_CONVERSATION_READ_POST_ROUTES),
+    (PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES, PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES),
+    (PRE_NATIVE_DRAFT_GET_ROUTES, PRE_NATIVE_DRAFT_POST_ROUTES),
+    (PRE_NATIVE_SESSION_SEND_GET_ROUTES, PRE_NATIVE_SESSION_SEND_POST_ROUTES),
+    (PRE_BYOK_ROLES_GET_ROUTES, PRE_BYOK_ROLES_POST_ROUTES),
+    (PRE_PROJECT_EXECUTION_GET_ROUTES, PRE_PROJECT_EXECUTION_POST_ROUTES),
+    (PROJECT_EXECUTION_PRE_MERGE_GET_ROUTES, PROJECT_EXECUTION_PRE_MERGE_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 

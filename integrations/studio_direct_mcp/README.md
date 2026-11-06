@@ -39,6 +39,120 @@ Duplicate `tools/call` JSON-RPC IDs are refused with HTTP 409 for the lifetime o
 
 The gateway logs tool names, timings and outcome classes, without arguments, file contents or bearer tokens. Desktop Commander may itself perform its normal feature-flag, telemetry and browser-dependency activity; this project makes no claim that the engine is network-isolated.
 
+## C1 fleet gateway Git-failure correction
+
+The formatter compiler, the native installer's build validator, and its exact
+retained launcher source are part of the existing thirteen-member control bundle. The original bundle owner can migrate the exact prior ten-member bundle
+under its original digest; the previous lock and bytecode restrictions remain.
+Installed invocation loads the compiler from the authenticated captured bytes.
+An existing `fleet-status-module-successor` record blocks formatter preview and
+apply until that original owner is reconciled; this transition never edits it.
+
+The installed C1 fleet gateway (`chatgpt1`) is an older module than the current
+protected `gateway.mjs`. Its typed-Git handler discarded the thrown exception
+and answered `REFUSED` / `NOT_APPLIED` / `TYPED_GIT_PRECHECK_REFUSED` for every
+thrown status, commit and push. That is false for a mutation: a thrown commit
+or push is not proof that the source ref was never updated, so the effect is
+unknown rather than refused. The correction applies the current protected
+gateway's own failure classification to that exact old module and to nothing
+else.
+
+`fleet_git_failure_compat.py` is the deterministic source compiler for that one
+transition. It is not a runtime listener, an installer, a publisher, a registry,
+a queue or a service, and it never touches a host, an installed directory, a
+credential or a live effect.
+
+| identity | value |
+|---|---|
+| predecessor Git blob | `f87ac012339e82fe46bce5ddc70d1d04183d1b6e` |
+| predecessor SHA-256 | `17157fa5f8739dbe17aae767a335e97dd713a978dde9b192feb1b41a7b036b30` (101068 bytes) |
+| successor SHA-256 | `336de8ed10e7da483d46e93bd98439fd00c3e277111b39b5baa9cf0e68074674` (102141 bytes) |
+| successor Git blob | `c02bcdada5217bbc987099e90ebdce236f023b86` |
+| reference gateway SHA-256 | `c000159636ca5f42b9e91d1d2120f78cd22119711230e264952462e4e2a3f2da` |
+
+The compiler accepts exactly the predecessor bytes. It checks exactly one
+original typed-Git catch and one insertion boundary, preserves every other
+byte, and checks the fixed complete successor hash. There is no prefix-only
+hash, no marker-only qualification, no hash learning and no broad text
+substitution. The two edited regions are byte-exact copies of the current
+protected gateway's own classifier and typed-Git catch, so the classification
+semantics are inherited rather than re-invented.
+
+The successor answers:
+
+| condition | result |
+|---|---|
+| thrown read-only status | `REFUSED` / `NOT_APPLIED` / `TYPED_GIT_READONLY_INSPECTION_REFUSED` |
+| thrown commit or push | `UNKNOWN` / `EFFECT_UNKNOWN` / `TYPED_GIT_EFFECT_UNQUALIFIED`, and the session is tainted |
+| real typed publisher result | unchanged, including its original stage and effect receipt |
+| `selectedHostRef` set | `REFUSED` / `NOT_APPLIED` / `TYPED_GIT_REQUIRES_LOCAL_STUDIO_SESSION`, before any publisher dispatch |
+
+The classifier never inspects or serializes the exception object, the command
+arguments, the credentials, the paths or the stderr. A client-added
+`INVALID_ARGUMENT` is a presentation artifact, not an OS diagnosis.
+
+This repairs effect and classification truth. It does not recover the lost
+inner error and it does not prove that workspace inspection or publication now
+succeeds.
+
+### Finite procedure
+
+The transition lives inside the incumbent `private_service.py` owner. There is
+no second installer, publisher, registry or account.
+
+```sh
+python3 private_service.py upgrade --account chatgpt1 --port PORT \
+  --source ABSOLUTE_SOURCE --node ABSOLUTE_NODE --backend ABSOLUTE_BACKEND \
+  --c1-fleet-git-failure-compat \
+  --publisher-expected-manifest-sha256 OBSERVED_MANIFEST_SHA256 \
+  --publisher-preflight-only
+```
+
+The read-only preflight works while the service is still running. It reports
+the exact before and target hashes, the preserved capabilities, the retained
+native-pool pin state and any real blocker. The same command without
+`--publisher-preflight-only` performs the closed transition once: it requires
+the account lifecycle lock, the original manifest CAS, a positively stopped
+matching launchd service and renewed exact preimages, then replaces only the
+gateway and its manifest digest through the incumbent atomic-write,
+manifest-last transaction.
+
+The administrator supplies the exact observed manifest digest. The gateway hash
+alone never qualifies an installation: the complete existing file map, the
+manifest, config and plist hashes, the dependency seal, the Node and backend
+identity, the account, the port and the actual permitted publisher pair are
+verified first. A foreign account, an unrecognized publisher pair, a config or
+fileset drift, a manifest CAS mismatch, a changed installed gateway, a loaded
+service and a contended lifecycle lock all refuse.
+
+Only `chatgpt1` is eligible. The route does not widen C2, C3 or any other seat
+and creates no enrollment. The successor is compiled from the exact installed
+predecessor bytes, so no caller-supplied source bundle reaches the
+installation.
+
+The transition preserves the installed configuration bytes, the fleet modules,
+routes and scheduling caps, the dependency tree, the package files, the backend
+and Node binaries, the plist, the authorization and the grants. It never runs a
+package manager against an unchanged dependency tree.
+
+The retained native-pool pin is checked by its existing complete transaction
+proof, including the original intent, APPLIED result, selected phase and bridge.
+An already accepted Paper v20 configuration is derived by the existing frozen
+cohort planner and preserved. Apply holds the existing native publication lock
+through its gateway/manifest transaction under the existing lifecycle lock.
+Both new qualification suites run in the required Fabric compatibility gate:
+`private_service_fleet_git_failure_test.py` enters its existing Python discovery,
+and `gateway-fleet-git-failure.test.mjs` exercises status, commit and push through
+the generated gateway. Historical fixture objects are read offline; missing
+objects or an incompatible Git executable fail qualification.
+
+A failure after the manifest commit is `EFFECT_UNKNOWN` until the same
+transaction state is read back. There is no blind repeat, no automatic
+restart, no replacement operation, no forced rollback and no deletion of prior
+evidence. Recovery distinguishes the exact original bytes, the exact target
+bytes and any foreign or mixed bytes. See `PIN_TRANSITION.md` for the retained
+native-pool pin interaction.
+
 ## Build and verification
 
 From this source directory:

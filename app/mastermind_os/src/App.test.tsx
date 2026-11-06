@@ -518,7 +518,7 @@ describe("Executive OS convergence surfaces", () => {
       screen.getByRole("heading", { name: "Activity", level: 1 }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("heading", { name: "Live work", level: 2 }),
+      screen.getByRole("heading", { name: "Recorded work", level: 2 }),
     ).toBeTruthy();
     expect(screen.getByText("JOB-A-CHILD")).toBeTruthy();
     expect(readMission).toHaveBeenCalledTimes(readsBeforeActivity);
@@ -1540,7 +1540,7 @@ describe("result card and same-observation Mission lifecycle", () => {
     expect(
       (await screen.findAllByText(/SOURCE_CHANGED/)).length,
     ).toBeGreaterThan(0);
-    expect(screen.queryByText("Structured role result")).toBeNull();
+    expect(screen.queryByText("Structured result")).toBeNull();
   });
   it("keeps oversize content unavailable while preserving reject and counts", async () => {
     const value = structuredClone(resultContentOverBudget);
@@ -1555,9 +1555,9 @@ describe("result card and same-observation Mission lifecycle", () => {
     resultHost(value);
     render(<App />);
     await openResult();
-    expect(await screen.findByText(/Content omitted by owner/)).toBeTruthy();
+    expect(await screen.findByText(/The source did not supply the result text/)).toBeTruthy();
     expect(screen.getByText(/verdict: reject/)).toBeTruthy();
-    expect(screen.queryByText("Structured role result")).toBeNull();
+    expect(screen.queryByText("Structured result")).toBeNull();
   });
   it("ignores an abort-ignoring detail reply after changing the selected Mission", async () => {
     const pending = deferred<unknown>();
@@ -1570,7 +1570,7 @@ describe("result card and same-observation Mission lifecycle", () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     await act(async () => pending.resolve(resultAvailable));
-    expect(screen.queryByText("Structured role result")).toBeNull();
+    expect(screen.queryByText("Structured result")).toBeNull();
     expect(screen.queryByText("Result detail")).toBeNull();
   });
 });
@@ -1592,7 +1592,7 @@ describe("result permission and detached-read fences", () => {
     );
     await act(async () => pending.resolve(resultAvailable));
     expect(screen.queryByText("Result detail")).toBeNull();
-    expect(screen.queryByText("Structured role result")).toBeNull();
+    expect(screen.queryByText("Structured result")).toBeNull();
   });
   it("aborts pending detail when the component unmounts", async () => {
     const pending = deferred<unknown>();
@@ -2654,7 +2654,7 @@ describe("host-composition repair regressions (R2)", () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Conversation" }));
-    expect(screen.getByText("Session Workspace")).toBeTruthy();
+    expect(screen.getByRole("heading",{name:"Session controls"})).toBeTruthy();
     expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
     // No fabricated session, connection, or dispatch surface.
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();

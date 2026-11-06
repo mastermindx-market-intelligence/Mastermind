@@ -1,0 +1,17 @@
+{
+  "at": "2026-10-14T17:31:19.016121+00:00",
+  "state": "INSTALLED_FRESH_IMPORT_4CHECKS_PASS",
+  "source": {
+    "quota_remote.py": "a1dab11da10264836e6271955b375b8e6508c23f23d0444c99d96464deb70f2b",
+    "lease_broker.py": "d59fed1160403d93c2c46a34b39e0ff87d587f3bc207f74aec3749f658ba20ec"
+  },
+  "candidate_accounts_from_retained_snapshot": [
+    "chairman-max-2",
+    "chairman-max-3"
+  ],
+  "fixture_acquire_account": "chairman-max-2",
+  "explicit_exhausted_account_refused": true,
+  "only_temporary_state": true,
+  "actual_worker_or_quota_entitlement_proof": false,
+  "no_provider_calls": true
+}

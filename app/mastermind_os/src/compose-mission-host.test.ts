@@ -46,14 +46,18 @@ function withExecutiveResource<T>(value: string, run: () => T): T {
   finally { vi.unstubAllEnvs(); }
 }
 describe("actual app host composition", () => {
-  it("does not invent a launch manifest or absent Executive transport", () => {
+  it("mounts the Executive owner without inventing a legacy manifest or absent transport", () => {
     const f = fixture(), factory = new IDBFactory();
-    expect(mount(f.client, factory, false).host.commandBinding).toBeUndefined();
+    const unconfigured = mount(f.client, factory, false).host.commandBinding!;
+    expect(unconfigured).toBeDefined();
+    expect(unconfigured.port.context()).toBeNull();
+    expect(unconfigured.getView()).toEqual({ projects: [], profiles: [], session: null });
+    expect(unconfigured.makeLaunchIntent({ goal: "No static enrollment", projectRef: "research", profileRef: "research_only" })).toBeNull();
     const { executive: _, ...readOnly } = f.client;
     expect(mount(readOnly, factory).host.commandBinding).toBeUndefined();
     expect(f.transport.context).not.toHaveBeenCalled();
   });
-  it("mounts signed out, qualifies on real owner context, then reopens and recovers the exact original operation without resubmit", async () => {
+  it("qualifies signed-out composition then recovers the same original after the legacy manifest is withdrawn", async () => {
     const f = fixture(), factory = new IDBFactory(), c = mount(f.client, factory);
     await c.ready; const binding = c.host.commandBinding!;
     expect(binding.port.context()).toBeNull();
@@ -65,8 +69,10 @@ describe("actual app host composition", () => {
     const lost = await controller.begin(intent); expect(lost.status).toBe("unknown");
     const pointer = lost.pointer!; expect(pointer.targetKey).toBe(config.workstream);
     c.dispose(); expect(f.listeners.size).toBe(0);
-    const reopened = mount(f.client, factory); await reopened.ready;
+    const reopened = mount(f.client, factory, false); await reopened.ready;
     const next = reopened.host.commandBinding!;
+    expect(next.getView()).toEqual({ projects: [], profiles: [], session: null });
+    expect(next.makeLaunchIntent(form)).toBeNull();
     const recovered = await new OperationController(next.port, next.store).recover();
     expect(recovered).toMatchObject({ status: "accepted", pointer: null,
       missionSelection: { workRef: config.workstream, rootJobId: "JOB-731" } });
