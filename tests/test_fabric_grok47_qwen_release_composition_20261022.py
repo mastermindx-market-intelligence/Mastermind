@@ -65,6 +65,11 @@ REVIEWED_QWEN_FORWARD_DIGESTS = {
     "glm_host_account_source.py": "cf2be3503d31d8b3f5d2098ebab5d6c2e61e46842468db73baf2f7d8f8b70855",
 }
 
+# Preserve the exact reviewed pre-busy Qwen broker above. The complete,
+# already-source-bound six-member AUTO prelease epoch supersedes ONLY its
+# current native lease broker. An unrecognized broker hash is still refused.
+BROKER_BUSY_LEASE_BROKER_SHA256 = "06cf44ed3d0b4393c687c4df36e5a2c347a8ccdfd20788852f4d7b8dfd6fed50"
+
 
 def digest(raw):
     return hashlib.sha256(raw).hexdigest()
@@ -357,8 +362,11 @@ def test_protected_qwen_files_and_exact_context_reader_forward():
     manifest = json.loads((NATIVE / "rollout/native-manifest.json").read_text())
     inventory = json.loads((NATIVE / "rollout/native-source-inventory.json").read_text())
     assert set(REVIEWED_QWEN_FORWARD_DIGESTS) == {"glm_host_account_source.py", "lease_broker.py"}
+    assert builder.BROKER_BUSY_PREIMAGES["lease_broker.py"] == REVIEWED_QWEN_FORWARD_DIGESTS["lease_broker.py"]
+    assert builder.BROKER_BUSY_DIGESTS["lease_broker.py"] == BROKER_BUSY_LEASE_BROKER_SHA256
     for name, original in sorted(PROTECTED_QWEN_SOURCE_DIGESTS.items()):
-        expected = REVIEWED_QWEN_FORWARD_DIGESTS.get(name, original)
+        expected = (BROKER_BUSY_LEASE_BROKER_SHA256 if name == "lease_broker.py"
+                    else REVIEWED_QWEN_FORWARD_DIGESTS.get(name, original))
         assert name in builder.BASE_FILES
         candidate = NATIVE / "candidate" / name
         assert candidate.is_file() and not candidate.is_symlink()
