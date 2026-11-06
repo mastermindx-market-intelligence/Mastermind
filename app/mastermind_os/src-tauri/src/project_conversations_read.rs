@@ -3,11 +3,13 @@
 use serde_json::Value;
 
 const INVALID: &str = "REQUEST_INVALID";
-const ROUTES: [(&str, &str); 4] = [
+const ROUTES: [(&str, &str); 6] = [
     ("/os/executive/session/conversations", "catalogue"),
     ("/os/executive/session/conversation-read", "read"),
     ("/os/executive/session/fresh-conversations", "fresh_references"),
     ("/os/executive/session/fresh-conversation-read", "fresh_read"),
+    ("/os/executive/session/project-executions", "execution_references"),
+    ("/os/executive/session/project-execution-read", "execution_read"),
 ];
 pub fn operation(path: &str) -> Option<&'static str> {
     ROUTES.iter().find(|(p, _)| *p == path).map(|(_, op)| *op)
@@ -55,6 +57,16 @@ pub fn validate(op: &str, value: &Value) -> Result<(), String> {
                     && text(row,"request_revision",hex)
                     && text(row,"read_ref",|s|tagged_hex(s,"session-reply-") && seen.insert(s.to_owned())))
             }),
+        "execution_references" => exact(value,&["work_ref"]) && text(value,"work_ref",|s|work(s,false)),
+        "execution_read" => exact(value,&["schema","work_ref","root_job_id","root_event_id",
+            "root_event_sha256","project_execution_source_sha256","principal_scope_sha256"])
+            && value["schema"].as_str()==Some("mastermind.project_execution_reference.v1")
+            && text(value,"work_ref",|s|work(s,false))
+            && text(value,"root_job_id",|s| s.len()<=256 && s.strip_prefix("JOB-").is_some_and(|id|
+                !id.is_empty() && id.bytes().all(|c|c.is_ascii_digit())))
+            && value["root_event_id"].as_u64().is_some_and(|n|(1..=9_007_199_254_740_991).contains(&n))
+            && text(value,"root_event_sha256",hex) && text(value,"project_execution_source_sha256",hex)
+            && text(value,"principal_scope_sha256",hex),
         "fresh_references" => exact(value,&["work_ref"]) && text(value,"work_ref",|s|work(s,true)),
         "fresh_read" => exact(value,&["schema","work_ref","root_job_id","root_event_id","root_event_sha256","principal_scope_sha256"])
             && value["schema"].as_str()==Some("mastermind.fresh_conversation_reference.v1")
@@ -106,6 +118,47 @@ mod tests {
         value=read();value["requests"][0]["request_revision"]="A".repeat(64).into();assert!(validate("read",&value).is_err());
         value=read();value["requests"][0]["extra"]=true.into();assert!(validate("read",&value).is_err());
     }
+
+    fn execution_reference() -> Value {json!({
+        "schema":"mastermind.project_execution_reference.v1","work_ref":"WS:PROJECT-ONE",
+        "root_job_id":"JOB-123","root_event_id":42,"root_event_sha256":"a".repeat(64),
+        "project_execution_source_sha256":"b".repeat(64),"principal_scope_sha256":"c".repeat(64)
+    })}
+    #[test] fn project_execution_reads_are_closed_and_preserve_original_reference() {
+        assert_eq!(path("execution_references"), Some("/os/executive/session/project-executions"));
+        assert_eq!(path("execution_read"), Some("/os/executive/session/project-execution-read"));
+        assert!(validate("execution_references", &json!({"work_ref":"WS:PROJECT-ONE"})).is_ok());
+        assert!(validate("execution_read", &execution_reference()).is_ok());
+        for extra in ["cursor","operation_key","target_ref","principal","send"] {
+            let mut value=execution_reference(); value[extra]=json!("not-a-read-selector");
+            assert!(validate("execution_read", &value).is_err());
+        }
+        assert!(validate("fresh_read", &execution_reference()).is_err());
+        assert!(validate("execution_read", &reference()).is_err());
+        assert!(validate("execution_references", &json!({"work_ref":"WS:PROJECT-ONE","cursor":null})).is_err());
+    }
+    #[test] fn project_execution_read_refuses_foreign_reference_shape_before_dispatch() {
+        for (key,bad) in [
+            ("work_ref",json!("WS:project.a_1")),
+            ("root_job_id",json!("JOB-fabric")),
+            ("root_event_id",json!(true)),
+            ("root_event_id",json!(0)),
+            ("root_event_id",json!(1.0)),
+            ("root_event_id",json!(9_007_199_254_740_992u64)),
+            ("root_event_sha256",json!("A".repeat(64))),
+            ("project_execution_source_sha256",json!("short")),
+            ("principal_scope_sha256",Value::Null),
+        ] {
+            let mut value=execution_reference(); value[key]=bad;
+            assert!(validate("execution_read", &value).is_err());
+        }
+        let mut value=execution_reference();value.as_object_mut().unwrap().remove("project_execution_source_sha256");
+        assert!(validate("execution_read", &value).is_err());
+        for work_ref in ["WS:A","WS:ab","WS:AB--CD","WS:AB.CD"] {
+            assert!(validate("execution_references", &json!({"work_ref":work_ref})).is_err());
+        }
+    }
+
     #[test] fn fresh_reference_int53_and_closed_immutable_identity() {
         for id in [json!(0),json!(-1),json!(1.0),json!(true),json!(9_007_199_254_740_992u64)] {
             let mut value=reference();value["root_event_id"]=id;assert!(validate("fresh_read",&value).is_err());

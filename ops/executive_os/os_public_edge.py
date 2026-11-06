@@ -126,6 +126,15 @@ PRE_NATIVE_DRAFT_GET_ROUTES = GET_ROUTES
 PRE_NATIVE_DRAFT_POST_ROUTES = POST_ROUTES
 GET_ROUTES = PRE_NATIVE_DRAFT_GET_ROUTES + ("/workspace/native-draft-identity/current",)
 
+# Project team launch and retained results use only these fixed routes.
+# Their existing downstream Executive/Workspace owners still authorize each call.
+PRE_PROJECT_EXECUTION_GET_ROUTES = GET_ROUTES
+PRE_PROJECT_EXECUTION_POST_ROUTES = POST_ROUTES
+PROJECT_EXECUTION_POST_ROUTES = tuple("/os/executive/project-execution/" + name
+    for name in ("preview", "submit", "status")) + (
+    "/os/executive/session/project-executions", "/os/executive/session/project-execution-read")
+POST_ROUTES = PRE_PROJECT_EXECUTION_POST_ROUTES + PROJECT_EXECUTION_POST_ROUTES
+
 # Preserve exactly the profiles admitted by the two predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
 # partial upgrades, wildcards and extra paths cannot become transition inputs.
@@ -158,6 +167,7 @@ TRANSITION_ROUTE_PROFILES = (
     (PRE_CONVERSATION_READ_GET_ROUTES, PRE_CONVERSATION_READ_POST_ROUTES),
     (PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES, PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES),
     (PRE_NATIVE_DRAFT_GET_ROUTES, PRE_NATIVE_DRAFT_POST_ROUTES),
+    (PRE_PROJECT_EXECUTION_GET_ROUTES, PRE_PROJECT_EXECUTION_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 

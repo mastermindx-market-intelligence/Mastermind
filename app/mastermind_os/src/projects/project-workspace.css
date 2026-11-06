@@ -266,3 +266,6 @@
     padding: var(--sp-5);
   }
 }
+
+.mm-project-workspace__launch { min-width: 0; }
+.mm-project-workspace__launch:empty { display: none; }

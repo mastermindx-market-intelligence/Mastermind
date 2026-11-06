@@ -346,32 +346,8 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
       }
       data = envelope.data;
     }
-    if (!isPlainObject(data)) {
-      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
-    }
-    if (typeof data.intent_id !== "string") {
-      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
-    }
-    if (data.intent_id !== intentIdForOperationKey(pointer.operationKey)) {
-      return this._receipt(pointer, "unknown", "RECEIPT_MISMATCH");
-    }
-    if (!validPointerTargetKey(pointer.targetKey)) {
-      return this._receipt(pointer, "unknown", "MALFORMED_POINTER");
-    }
-    const schemaOk =
-      typeof data.schema === "string" && RECEIPT_SCHEMAS.has(data.schema);
-    if (!schemaOk || data.accepted !== true || data.dispatched !== false) {
-      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
-    }
-    if (data.schema === DIRECT_RECEIPT_SCHEMA && !validDirectReceipt(data, pointer.targetKey)) {
-      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
-    }
-    if (typeof data.job_id !== "string") {
-      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
-    }
-    if (!JOB_RE.test(data.job_id)) {
-      return this._receipt(pointer, "unknown", "UNKNOWN_RECEIPT");
-    }
+    const receipt = decodeExecutiveLaunchReceipt(pointer, data);
+    if (receipt.disposition === "accepted" && isPlainObject(data)) {
     if(data.schema===DIRECT_RECEIPT_SCHEMA) {
       const owner=this.owner();
       if(owner) {
@@ -379,10 +355,8 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
         this.directJobs.add(JSON.stringify([owner.principalScope,owner.generation,pointer.targetKey,data.job_id]));
       }
     }
-    return this._receipt(pointer, "accepted", "ACCEPTED", {
-      workRef: pointer.targetKey,
-      rootJobId: data.job_id,
-    });
+    }
+    return receipt;
   }
 
   /**
@@ -688,4 +662,44 @@ function isJsonValue(value: unknown): boolean {
 
 function sameJson(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** Canonical accepted-root decoder shared by authenticated launch transports. */
+export function decodeExecutiveLaunchReceipt(pointer: OperationPointer, data: unknown): EffectReceipt {
+    if (!isPlainObject(data)) {
+      return launchReceipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (typeof data.intent_id !== "string") {
+      return launchReceipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (data.intent_id !== intentIdForOperationKey(pointer.operationKey)) {
+      return launchReceipt(pointer, "unknown", "RECEIPT_MISMATCH");
+    }
+    if (!validPointerTargetKey(pointer.targetKey)) {
+      return launchReceipt(pointer, "unknown", "MALFORMED_POINTER");
+    }
+    const schemaOk =
+      typeof data.schema === "string" && RECEIPT_SCHEMAS.has(data.schema);
+    if (!schemaOk || data.accepted !== true || data.dispatched !== false) {
+      return launchReceipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (data.schema === DIRECT_RECEIPT_SCHEMA && !validDirectReceipt(data, pointer.targetKey)) {
+      return launchReceipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (typeof data.job_id !== "string") {
+      return launchReceipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (!JOB_RE.test(data.job_id)) {
+      return launchReceipt(pointer, "unknown", "UNKNOWN_RECEIPT");
+    }
+    return launchReceipt(pointer, "accepted", "ACCEPTED", {
+      workRef: pointer.targetKey,
+      rootJobId: data.job_id,
+    });
+
+}
+function launchReceipt(pointer: OperationPointer, disposition: EffectReceipt["disposition"], reason: string,
+  missionSelection?: {workRef: string; rootJobId: string}): EffectReceipt {
+  return {operationKey:pointer.operationKey,kind:"launch",targetKey:pointer.targetKey,disposition,reason,
+    ...(missionSelection ? {missionSelection} : {})};
 }

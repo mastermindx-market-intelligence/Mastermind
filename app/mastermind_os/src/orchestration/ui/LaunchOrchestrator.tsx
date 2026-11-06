@@ -24,7 +24,25 @@ export interface LaunchForm {
   projectRef: string;
   profileRef: string;
   frontierModelAlias?: string;
+  handoffText?: string;
+  allowedWritePaths?: readonly string[];
+  validation?: { readonly pytest_targets?: readonly string[]; readonly compileall_paths?: readonly string[]; readonly git_diff_check?: boolean };
 }
+
+/** App-owned user input only. These fields never retain a preview or authority. */
+export interface LaunchDetailsDraft {
+  handoffText: string;
+  writePathsText: string;
+  testTargetsText: string;
+  diffCheck: boolean;
+  projectRef: string;
+  profileRef: string;
+}
+
+const emptyLaunchDetails = (): LaunchDetailsDraft => ({
+  handoffText: "", writePathsText: "", testTargetsText: "", diffCheck: true,
+  projectRef: "", profileRef: "",
+});
 
 /** Explicit terminal outcome of one dispatched launch. */
 export type LaunchOutcome = { status: "accepted" } | { status: "refused" };
@@ -65,6 +83,12 @@ export interface LaunchOrchestratorProps {
   workstreamRef?: string;
   onWorkstreamChange?: (ref: string) => void;
   lockWorkstream?: boolean;
+  /** A canonical project launch carries a handoff and explicitly requested code scope. */
+  projectExecution?: boolean;
+  projectFollowUp?: boolean;
+  continuationMode?: "DURABLE" | "ATTENDED" | null;
+  coordinatorModel?: string;
+  executionScope?: { readonly repository: string; readonly commit: string } | null;
   projects: readonly LaunchChoice[];
   profiles: readonly LaunchChoice[];
   frontierModels?: readonly LaunchChoice[];
@@ -77,6 +101,8 @@ export interface LaunchOrchestratorProps {
   /** Optional App-owned presentation draft, never a credential or host state. */
   initialDraft?: string;
   onDraftChange?: (text: string) => void;
+  initialDetails?: LaunchDetailsDraft | null;
+  onDetailsChange?: (draft: LaunchDetailsDraft | null) => void;
   /** Explicit, effect-free owner mapper. Preview never prepares or submits an operation. */
   previewRequest?: (intent: LaunchForm) => LaunchRequestPreviewRead;
   onSubmit: (intent: LaunchForm, onComplete: LaunchCompletion) => void;
@@ -132,18 +158,27 @@ export function LaunchOrchestrator({
   workstreamRef,
   onWorkstreamChange,
   lockWorkstream = false,
+  projectExecution = false,
+  projectFollowUp = false,
+  continuationMode,
+  coordinatorModel,
+  executionScope,
   submitting,
   blocked = false,
   unavailableReason,
   error,
   initialDraft = "",
   onDraftChange,
+  initialDetails,
+  onDetailsChange,
   previewRequest,
   onSubmit,
   onCancel,
 }: LaunchOrchestratorProps) {
   const formId = useId();
   const goalId = `${formId}-goal`;
+  const goalInput = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (projectExecution) goalInput.current?.focus(); }, [projectExecution, projectFollowUp]);
   const workstreamId = `${formId}-workstream`;
   const projectId = `${formId}-project`;
   const profileId = `${formId}-profile`;
@@ -152,6 +187,19 @@ export function LaunchOrchestrator({
   // Draft state — preserved across error and rerender
   const [draftGoal, setDraftGoal] = useState(initialDraft);
   const [draftWorkstream, setDraftWorkstream] = useState("");
+  const [draftDetails, setDraftDetails] = useState<LaunchDetailsDraft>(() =>
+    projectExecution && initialDetails ? { ...initialDetails } : emptyLaunchDetails());
+  const draftDetailsRef = useRef(draftDetails);
+  draftDetailsRef.current = draftDetails;
+  const { handoffText, writePathsText, testTargetsText, diffCheck } = draftDetails;
+  const updateDetails = (change: Partial<LaunchDetailsDraft>) => {
+    const next = { ...draftDetailsRef.current, ...change };
+    draftDetailsRef.current = next;
+    setDraftDetails(next);
+    setRequestPreview(null);
+    if (projectExecution) onDetailsChange?.(next);
+  };
+  const lines = (text: string) => text.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
   const selectedWorkstream = workstreamRef ?? (draftWorkstream || defaultWorkstream);
   const selectedBinding = workstreams?.find(choice => choice.ref === selectedWorkstream);
   // A missing enrollment is unavailable; it never falls back to default choices.
@@ -161,15 +209,22 @@ export function LaunchOrchestrator({
   const workstreamUnavailable = workstreams !== undefined &&
     (!selectedBinding || !!selectedBinding.unavailableReason);
   const [draftChoices, setDraftChoices] = useState({
-    workstream: selectedWorkstream, project: "", profile: "", frontier: "",
+    workstream: selectedWorkstream, project: draftDetails.projectRef,
+    profile: draftDetails.profileRef, frontier: "",
   });
   const choices = draftChoices.workstream === selectedWorkstream ? draftChoices :
     { workstream: selectedWorkstream, project: "", profile: "", frontier: "" };
   const draftProject = choices.project;
   const draftProfile = choices.profile;
   const draftFrontier = choices.frontier;
-  const setDraftProject = (project: string) => setDraftChoices({ ...choices, project });
-  const setDraftProfile = (profile: string) => setDraftChoices({ ...choices, profile });
+  const setDraftProject = (project: string) => {
+    setDraftChoices({ ...choices, project });
+    if (projectExecution) updateDetails({ projectRef: project });
+  };
+  const setDraftProfile = (profile: string) => {
+    setDraftChoices({ ...choices, profile });
+    if (projectExecution) updateDetails({ profileRef: profile });
+  };
   const setDraftFrontier = (frontier: string) => setDraftChoices({ ...choices, frontier });
   const [requestPreview, setRequestPreview] = useState<{
     read: LaunchRequestPreviewRead;
@@ -193,9 +248,10 @@ export function LaunchOrchestrator({
   // Draft goals and exact pending-command handles must survive automatic
   // identity renewal. No form content enters browser credential storage.
   useEffect(() => registerUnsavedNavigationHold(() =>
-    draftGoal.length > 0 || draftWorkstream.length > 0 || draftProject.length > 0 || draftProfile.length > 0 ||
+    draftGoal.length > 0 || handoffText.length > 0 || writePathsText.length > 0 || testTargetsText.length > 0 ||
+    !diffCheck || draftWorkstream.length > 0 || draftProject.length > 0 || draftProfile.length > 0 ||
     launchTokenRef.current !== null || submitting || launchInFlight
-  ), [draftGoal, draftWorkstream, draftProject, draftProfile, submitting, launchInFlight]);
+  ), [draftGoal, handoffText, writePathsText, testTargetsText, diffCheck, draftWorkstream, draftProject, draftProfile, submitting, launchInFlight]);
 
   const launchPending = submitting || launchInFlight;
 
@@ -209,7 +265,14 @@ export function LaunchOrchestrator({
       // Success consumes the goal so the same intent cannot be launched twice
       // by a parent that stays mounted. A refusal keeps the draft.
       setDraftGoal("");
+      const empty = emptyLaunchDetails();
+      draftDetailsRef.current = empty;
+      setDraftDetails(empty);
       onDraftChange?.("");
+      if (projectExecution) {
+        setDraftChoices({ workstream: selectedWorkstream, project: "", profile: "", frontier: "" });
+        onDetailsChange?.(null);
+      }
     }
   };
 
@@ -248,7 +311,14 @@ export function LaunchOrchestrator({
     : undefined;
 
   const goalBytes = utf8ByteLength(draftGoal);
-  const goalTooLong = goalBytes > MAX_GOAL_BYTES;
+  const goalTooLong = goalBytes > MAX_GOAL_BYTES || projectExecution && draftGoal.length > 4000;
+  const codeScope = projectExecution && selectedProfile === "bounded_code_change";
+  const writePaths = lines(writePathsText);
+  const testTargets = lines(testTargetsText);
+  const handoffTooLong = projectExecution && utf8ByteLength(handoffText) > 32768;
+  const scopeMissing = codeScope && (!writePaths.length || (!testTargets.length && !diffCheck));
+  const scopeTooLarge = codeScope && (writePaths.length > 16 || testTargets.length > 8);
+
   const goalBlank = draftGoal.trim().length === 0;
 
   const canSubmit =
@@ -262,12 +332,15 @@ export function LaunchOrchestrator({
     !selectedProjectChoice?.unavailableReason &&
     !selectedProfileChoice?.unavailableReason &&
     !goalBlank &&
-    !goalTooLong;
+    !goalTooLong && !handoffTooLong && !scopeMissing && !scopeTooLarge;
 
   const previewForm: LaunchForm = {
     goal: draftGoal, projectRef: selectedProject, profileRef: selectedProfile,
     ...(selectedWorkstream !== undefined ? { workstreamRef: selectedWorkstream } : {}),
     ...(frontierRequired ? { frontierModelAlias: selectedFrontier } : {}),
+    ...(projectExecution ? { handoffText } : {}),
+    ...(codeScope ? { allowedWritePaths: writePaths,
+      validation: { pytest_targets: testTargets, git_diff_check: diffCheck } } : {}),
   };
   const previewFormKey = JSON.stringify(previewForm);
   const visiblePreview = canSubmit && requestPreview?.formKey === previewFormKey &&
@@ -291,13 +364,7 @@ export function LaunchOrchestrator({
     setLaunchInFlight(true);
     try {
       onSubmit(
-        {
-          goal: draftGoal,
-          projectRef: selectedProject,
-          profileRef: selectedProfile,
-          ...(selectedWorkstream !== undefined ? { workstreamRef: selectedWorkstream } : {}),
-          ...(frontierRequired ? { frontierModelAlias: selectedFrontier } : {}),
-        },
+        previewForm,
         (outcome) => {
           try {
             completeLaunch(token, outcome);
@@ -314,7 +381,9 @@ export function LaunchOrchestrator({
   };
 
   const goalError = goalTooLong
-    ? `Goal exceeds ${MAX_GOAL_BYTES} byte UTF-8 limit.`
+    ? projectExecution && draftGoal.length > 4000
+      ? (locale === "zh-CN" ? "目标最多为 4,000 个字符。" : "Keep the goal within 4,000 characters.")
+      : `Goal exceeds ${MAX_GOAL_BYTES} byte UTF-8 limit.`
     : goalBlank
       ? "Goal is required."
       : undefined;
@@ -323,7 +392,9 @@ export function LaunchOrchestrator({
     <section className={`card launch-orchestrator${presentation === "composer" ? " launch-orchestrator-composer" : ""}`}>
       <div className="section-title">
         <div>
-          <h2>{selectedProfile === "native_research_only" ? (locale === "zh-CN" ? "启动单个原生任务" : "Launch one native task") : (locale === "zh-CN" ? "开始工作" : "Start work")}</h2>
+          <h2>{projectFollowUp ? (locale === "zh-CN" ? "继续此项目" : "Continue this project")
+            : selectedProfile === "native_research_only" ? (locale === "zh-CN" ? "启动单个原生任务" : "Launch one native task")
+            : (locale === "zh-CN" ? "开始工作" : "Start work")}</h2>
         </div>
       </div>
 
@@ -336,7 +407,7 @@ export function LaunchOrchestrator({
           {/* Goal textarea */}
           <div className="form-field launch-goal">
             <label htmlFor={goalId}>
-              <span>{locale === "zh-CN" ? "目标" : "Goal"}</span>
+              <span>{projectFollowUp ? (locale === "zh-CN" ? "下一步消息" : "Follow-up message") : (locale === "zh-CN" ? "目标" : "Goal")}</span>
               {goalTooLong && (
                 <span className="field-error">
                   {" "}
@@ -346,10 +417,12 @@ export function LaunchOrchestrator({
             </label>
             <textarea
               id={goalId}
+              ref={goalInput}
               value={draftGoal}
               onChange={(e) => { setRequestPreview(null); setDraftGoal(e.target.value); onDraftChange?.(e.target.value); }}
               rows={presentation === "composer" ? 2 : 4}
-              placeholder={locale === "zh-CN" ? "描述你希望完成的目标…" : "Describe the objective for this launch…"}
+              placeholder={projectFollowUp ? (locale === "zh-CN" ? "描述希望团队接下来做什么…" : "What should the team do next?")
+                : (locale === "zh-CN" ? "描述你希望完成的目标…" : "Describe the objective for this launch…")}
               disabled={launchPending}
               aria-describedby={goalTooLong ? `${goalId}-length` : undefined}
               aria-invalid={!!goalError}
@@ -468,6 +541,53 @@ export function LaunchOrchestrator({
               {frontierError && <p id={`${frontierId}-error`} className="field-error" role="alert">{frontierError}</p>}
             </div>
           )}
+
+          {projectExecution ? <>
+            {executionScope ? <dl className="project-execution-scope">
+              <dt>{locale === "zh-CN" ? "执行仓库" : "Execution repository"}</dt>
+              <dd>{executionScope.repository}</dd>
+              <dt>{locale === "zh-CN" ? "起始修订" : "Starting revision"}</dt>
+              <dd><code style={{overflowWrap:"anywhere"}}>{executionScope.commit}</code></dd>
+            </dl> : null}
+            <p className="muted" role="status">{continuationMode === "DURABLE"
+              ? (locale === "zh-CN" ? "团队会在后台继续工作，关闭应用后仍可返回查看进展。" : "The team continues in the background. You can close the app and return to its progress.")
+              : (locale === "zh-CN" ? "此主机仅支持在线执行。请保持应用连接；断开后需检查原始任务状态。" : "This host supports an attended run. Keep the app connected; if it disconnects, check the original operation.")}
+              {coordinatorModel ? ` · ${coordinatorModel}` : ""}</p>
+            <div className="form-field">
+              <label htmlFor={`${formId}-handoff`}>{locale === "zh-CN" ? "交接说明（可选）" : "Handoff (optional)"}</label>
+              <textarea id={`${formId}-handoff`} rows={5} value={handoffText}
+                onChange={event => updateDetails({ handoffText: event.target.value })} disabled={launchPending}
+                aria-invalid={handoffTooLong} aria-describedby={`${formId}-handoff-help`} />
+              <p id={`${formId}-handoff-help`} className={handoffTooLong ? "field-error" : "muted"}>
+                {handoffTooLong
+                  ? (locale === "zh-CN" ? "交接说明超过 32 KB，请缩短后再启动。" : "The handoff exceeds 32 KB. Shorten it before launching.")
+                  : (locale === "zh-CN" ? "补充已有进展、约束和验收条件。团队会同时读取当前项目计划与文件。"
+                    : "Add prior progress, constraints and acceptance conditions. The team also receives the current project plan and files.")}
+              </p>
+            </div>
+            {codeScope ? <fieldset disabled={launchPending} className="project-execution-scope">
+              <legend>{locale === "zh-CN" ? "请求的代码修改范围" : "Requested code scope"}</legend>
+              <div className="form-field">
+                <label htmlFor={`${formId}-paths`}>{locale === "zh-CN" ? "可修改的路径" : "Paths to change"}</label>
+                <textarea id={`${formId}-paths`} rows={3} value={writePathsText}
+                  onChange={event => updateDetails({ writePathsText: event.target.value })}
+                  aria-describedby={`${formId}-paths-help`} />
+                <p id={`${formId}-paths-help`} className="muted">{locale === "zh-CN"
+                  ? "每行一个仓库相对路径，最多 16 个。启动前会验证实际权限。"
+                  : "One repository-relative path per line, up to 16. Actual permissions are checked before work starts."}</p>
+              </div>
+              <div className="form-field">
+                <label htmlFor={`${formId}-tests`}>{locale === "zh-CN" ? "Pytest 测试目标（可选）" : "Pytest targets (optional)"}</label>
+                <textarea id={`${formId}-tests`} rows={2} value={testTargetsText}
+                  onChange={event => updateDetails({ testTargetsText: event.target.value })} />
+              </div>
+              <label><input type="checkbox" checked={diffCheck} onChange={event => updateDetails({ diffCheck: event.target.checked })} />
+                {locale === "zh-CN" ? "检查 diff 中的空白错误" : "Check the diff for whitespace errors"}</label>
+              {(scopeMissing || scopeTooLarge) ? <p className="field-error">{locale === "zh-CN"
+                ? "填写 1–16 个路径，并选择至少一项验证（最多 8 个测试目标）。"
+                : "Provide 1–16 paths and at least one validation check, with up to 8 test targets."}</p> : null}
+            </fieldset> : null}
+          </> : null}
 
           {/* Error message */}
           {error && (

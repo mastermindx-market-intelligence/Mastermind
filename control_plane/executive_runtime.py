@@ -13947,6 +13947,7 @@ class JobRegistry:
         _c2_capability: object | None = None,
         _instruction_source: object | None = None,
         _fresh_conversation_source: object | None = None,
+        _project_execution_source: object | None = None,
     ) -> Job:
         """Own the existing Job insert plus immutable creation receipt.
 
@@ -14046,6 +14047,30 @@ class JobRegistry:
             # Existing normalized scalar, privately stamped in the SAME Job
             # and immutable creation transaction. It is a denial, never a grant.
             spec = dataclasses.replace(spec, constraints={**spec.constraints, "task_kind": TASK_KIND})
+        project_fields = isinstance(provenance, Mapping) and any(key in provenance
+            for key in ("project_execution", "project_execution_digest"))
+        if _project_execution_source is not None or project_fields:
+            from control_plane.project_execution_admission import ProjectExecutionSource
+            if (type(_project_execution_source) is not ProjectExecutionSource
+                    or _instruction_source is not None or _c2_capability is not None
+                    or _fresh_conversation_source is not None or spec.parent_job_id is not None
+                    or spec.orchestration_role != "aggregation" or not project_fields
+                    or provenance.get("schema") != "mastermind.ceo_intent.v2"
+                    or not isinstance(spec.orchestration_provenance_source, Mapping)
+                    or spec.orchestration_provenance_source.get("creator") != "ceo_intent"
+                    or spec.orchestration_provenance_source.get("source_id") != provenance.get("intent_id")
+                    or spec.orchestration_provenance_source.get("source_digest") != provenance.get("fingerprint")):
+                raise StateConflict("PROJECT_EXECUTION_SOURCE_REQUIRED")
+            project_material = _project_execution_source.material()
+            if (provenance.get("project_execution") != project_material
+                    or provenance.get("project_execution_digest") != orchestration_digest(project_material)
+                    or provenance.get("workstream") != project_material["work_ref"]
+                    or provenance.get("fingerprint") != project_material["intent_fingerprint"]
+                    or spec.command_id != project_material["command_id"]):
+                raise StateConflict("PROJECT_EXECUTION_SOURCE_MISMATCH")
+            _project_execution_source.check_fresh()
+            from control_plane.project_execution_admission import _check_parent_transaction
+            _check_parent_transaction(_project_execution_source, connection)
         instruction_fields = isinstance(provenance, Mapping) and any(key in provenance for key in ("instruction_source", "instruction_source_digest"))
         if _instruction_source is not None or instruction_fields:
             from control_plane.instruction_work_source import InstructionWorkSource
@@ -14225,6 +14250,10 @@ class JobRegistry:
                 "schema": "mastermind.fresh_conversation_original_request.v1",
                 "operation_key": _fresh_conversation_source.public_operation_key(),
                 "creation_digest": orchestration_digest(fresh_material)}
+        if _project_execution_source is not None:
+            event_payload["project_execution_admission"] = {
+                "schema": "mastermind.project_execution_driven_root.v1",
+                "source": project_material, "source_digest": orchestration_digest(project_material)}
         self.store.append_event(
             connection,
             aggregate_type="job",
@@ -14259,6 +14288,7 @@ class JobRegistry:
         _instruction_source: object | None = None,
         _instruction_admission_guard: Callable[[], None] | None = None,
         _fresh_conversation_source: object | None = None,
+        _project_execution_source: object | None = None,
     ) -> Job:
         """The sole strict v2 intent -> Phase 1F-C aggregation-root boundary.
 
@@ -14342,6 +14372,17 @@ class JobRegistry:
             if orchestration_digest(dialogue_source) != material["dialogue_source_sha256"]:
                 raise StateConflict("FRESH_CONVERSATION_SOURCE_MISMATCH")
             provenance.update(fresh_conversation=material, fresh_conversation_digest=orchestration_digest(material))
+        if _project_execution_source is not None:
+            from control_plane.project_execution_admission import ProjectExecutionSource
+            if (type(_project_execution_source) is not ProjectExecutionSource
+                    or _instruction_source is not None or _fresh_conversation_source is not None):
+                raise StateConflict("PROJECT_EXECUTION_SOURCE_REQUIRED")
+            _project_execution_source.check_intent(normalized)
+            material = _project_execution_source.material()
+            if (orchestration_digest(dialogue_source) != material["dialogue_source_sha256"]
+                    or orchestration_digest(execution_binding) != material["execution_binding_sha256"]):
+                raise StateConflict("PROJECT_EXECUTION_SOURCE_MISMATCH")
+            provenance.update(project_execution=material, project_execution_digest=orchestration_digest(material))
         return self.create_job(
             normalized["objective"],
             department=normalized["department"],
@@ -14368,6 +14409,9 @@ class JobRegistry:
             },
             _v2_root_capability=_V2_ROOT_CREATION_CAPABILITY,
             _fresh_conversation_source=_fresh_conversation_source,
+            _project_execution_source=_project_execution_source,
+            **({"_principal_commit_guard": _project_execution_source.check_fresh}
+               if _project_execution_source is not None else {}),
             **({"_instruction_source": _instruction_source,
                 "_principal_commit_guard": _instruction_admission_guard} if _instruction_source is not None else {}),
         )
@@ -16570,6 +16614,7 @@ class JobRegistry:
         _direct_native_admission: direct_native.DirectNativeAdmission | None = None,
         _instruction_source: object | None = None,
         _fresh_conversation_source: object | None = None,
+        _project_execution_source: object | None = None,
     ) -> Job:
         """Insert one QUEUED Job and its ``JOB_CREATED`` receipt in one transaction.
 
@@ -16585,6 +16630,16 @@ class JobRegistry:
         that must record who asked and on what grounding.  It changes no job
         column and confers no authority.
         """
+        project_fields = isinstance(provenance, Mapping) and any(key in provenance
+            for key in ("project_execution", "project_execution_digest"))
+        if _project_execution_source is not None or project_fields:
+            from control_plane.project_execution_admission import ProjectExecutionSource
+            if (type(_project_execution_source) is not ProjectExecutionSource or not project_fields
+                    or parent_job_id is not None or orchestration_role != "aggregation"
+                    or _v2_root_capability is not _V2_ROOT_CREATION_CAPABILITY
+                    or _instruction_source is not None or _fresh_conversation_source is not None
+                    or _direct_native_admission is not None or _principal_commit_guard is None):
+                raise StateConflict("PROJECT_EXECUTION_SOURCE_REQUIRED")
         instruction_fields = isinstance(provenance, Mapping) and any(key in provenance for key in ("instruction_source", "instruction_source_digest"))
         if instruction_fields:
             raise StateConflict("INSTRUCTION_ADMISSION_SOURCE_REQUIRED")
@@ -17129,6 +17184,7 @@ class JobRegistry:
                 ),
                 **({"_instruction_source": _instruction_source} if _instruction_source is not None else {}),
                 _fresh_conversation_source=_fresh_conversation_source,
+                _project_execution_source=_project_execution_source,
             )
             # Refusal rolls back both the Job and its JOB_CREATED event.
             recheck_principal()

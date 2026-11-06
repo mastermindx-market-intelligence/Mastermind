@@ -1489,6 +1489,7 @@ class ExecutiveSupervisor:
         subscription_canary_binding_id: str | None = None,
         product_acceptance_macro_root: str | Path | None = None,
         product_acceptance_context_reader: Any | None = None,
+        project_input_owner: "ExecutiveSupervisor | None" = None,
     ) -> None:
         self.runtime = runtime
         self._product_acceptance_review_owner = None
@@ -1592,6 +1593,11 @@ class ExecutiveSupervisor:
         if not 0.1 <= self.validation_timeout_seconds <= 3600:
             raise SupervisorError("validation timeout must be between 0.1 and 3600 seconds")
         self.instance_id = instance_id or f"supervisor-{uuid4().hex}"
+        if project_input_owner is not None and (type(project_input_owner) is not ExecutiveSupervisor
+                or project_input_owner.runtime is not runtime or project_input_owner.instance_id != self.instance_id
+                or project_input_owner._project_input_owner is not None):
+            raise SupervisorError("project input requires the original same-service owner")
+        self._project_input_owner = project_input_owner
         self._recovered_runs: dict[str, ActiveRun] = {}
         self._recovered_attempt_ids: set[str] = set()
 
@@ -2123,6 +2129,12 @@ class ExecutiveSupervisor:
                 commission.get("verified_local_path") if commission is not None else None
             ),
         }
+        from control_plane.project_execution_admission import input_for_job, COMMISSION_PATH as PROJECT_EXECUTION_COMMISSION
+        if commission is not None and commission.get("path") == PROJECT_EXECUTION_COMMISSION:
+            project_input = input_for_job(self, job)
+            if project_input is None:
+                raise SupervisorError("project execution original input unavailable")
+            packet["project_execution_input"] = project_input
         if _is_direct_native_job(job):
             admitted=self.runtime.jobs.direct_native_provenance(job.job_id)
             if 'project_planning' in admitted:

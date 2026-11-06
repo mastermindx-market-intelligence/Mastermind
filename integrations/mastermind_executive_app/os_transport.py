@@ -367,6 +367,9 @@ class OsExecutiveTransportApp:
         "/os/executive/direct-native/result",
         "/os/executive/direct-native/consume",
         "/os/executive/direct-native/correction",
+        "/os/executive/project-execution/preview",
+        "/os/executive/project-execution/submit",
+        "/os/executive/project-execution/status",
         "/os/executive/project-planning/submit",
         "/os/executive/project-planning/status",
         "/os/executive/project-planning/result",
@@ -451,7 +454,8 @@ class OsExecutiveTransportApp:
 
         headers = scope.get("headers") or ()
         from integrations.mastermind_executive_app.project_planning_transport import HEADER,ROUTES
-        if any(key.lower()==HEADER for key,_ in headers) and path not in ROUTES:
+        from integrations.mastermind_executive_app.project_execution_transport import ROUTES as EXECUTION_ROUTES
+        if any(key.lower()==HEADER for key,_ in headers) and path not in (ROUTES | EXECUTION_ROUTES):
             await Response(status_code=HTTPStatus.FORBIDDEN,headers=_OS_HTTP_HEADERS)(scope,receive,send)
             return
         hosts = [v for k, v in headers if k.lower() == b"host"]
@@ -599,6 +603,9 @@ class OsExecutiveTransportApp:
                                 headers=_OS_HTTP_HEADERS)
         if path == "/os/executive/submit":
             return await self._dispatch_submit(scope, body_obj, principal, receive=receive)
+        from integrations.mastermind_executive_app.project_execution_transport import ROUTES as EXECUTION_ROUTES,dispatch as dispatch_execution
+        if path in EXECUTION_ROUTES:
+            return await dispatch_execution(self,scope,body_obj,principal,operation=EXECUTION_ROUTES[path],receive=receive)
         from integrations.mastermind_executive_app.project_planning_transport import ROUTES,dispatch
         if path in ROUTES:
             return await dispatch(self,scope,body_obj,principal,operation=ROUTES[path],receive=receive)

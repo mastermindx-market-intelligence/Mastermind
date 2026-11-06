@@ -108,6 +108,7 @@ RECEIPT_SCHEMA_DIRECT = "mastermind.ceo_direct_native_receipt.v1"
 RECEIPT_SCHEMA_SERVICE = "mastermind.executive_service_intent_receipt.v1"
 RECEIPT_SCHEMA_PRINCIPAL = "mastermind.executive_principal_intent_receipt.v1"
 _DIALOGUE_SOURCE_UNSET = object()
+_PROJECT_EXECUTION_SOURCE_UNSET = object()
 _FRONTIER_SELECTION_UNSET = object()
 
 #: Namespace for the durable event ``command_id``.  The prefix keeps CEO intent
@@ -1139,6 +1140,11 @@ def _receipt_from_event(
             raise CeoIntentError(
                 f"intent {intent_id!r} does not resolve to its strict v2 aggregation root"
             )
+        from control_plane.project_execution_admission import read_source as read_project_execution_source
+        try:
+            read_project_execution_source(runtime, job)
+        except StateConflict as exc:
+            raise CeoIntentError("project execution original record is invalid") from exc
         durable_source = provenance.get("dialogue_source")
         from control_plane.fresh_conversation_admission import read_creation_restriction
         try:
@@ -1322,6 +1328,7 @@ def submit_intent(
     fresh_admission_observer: Any = None,
     direct_admission: Any = None,
     fresh_conversation_source: Any = None,
+    project_execution_source: Any = _PROJECT_EXECUTION_SOURCE_UNSET,
 ) -> dict[str, Any]:
     """Validate one intent and turn it into exactly one durable QUEUED Job.
 
@@ -1357,6 +1364,12 @@ def submit_intent(
     # path must provide the canonical fresh mission/binding/effect guard.
     # This sink adds no auth service, deployment, dispatch, or worker lifecycle.
     intent = validate_intent(payload)
+    if project_execution_source is not _PROJECT_EXECUTION_SOURCE_UNSET:
+        from control_plane.project_execution_admission import ProjectExecutionSource
+        if (type(project_execution_source) is not ProjectExecutionSource
+                or intent["schema"] != INTENT_SCHEMA_V2 or fresh_conversation_source is not None):
+            raise CeoIntentError("PROJECT_EXECUTION_SOURCE_REQUIRED")
+        project_execution_source.check_intent(intent)
     if fresh_conversation_source is not None:
         from control_plane.fresh_conversation_admission import FreshConversationCreationSource
         if type(fresh_conversation_source) is not FreshConversationCreationSource or intent["schema"] != INTENT_SCHEMA_V2:
@@ -1425,6 +1438,9 @@ def submit_intent(
 
     existing = runtime.store.find_event_by_command_id(command_id)
     if existing is not None:
+        if project_execution_source is not _PROJECT_EXECUTION_SOURCE_UNSET:
+            from control_plane.project_execution_admission import require_same_source
+            require_same_source(runtime, existing["job_id"], project_execution_source)
         return _receipt_from_event(
             runtime,
             existing,
@@ -1455,6 +1471,8 @@ def submit_intent(
                 dialogue_source=effective_dialogue_source,
                 frontier_selection=effective_selection,
                 _fresh_conversation_source=fresh_conversation_source,
+                _project_execution_source=(None if project_execution_source is _PROJECT_EXECUTION_SOURCE_UNSET
+                    else project_execution_source),
             )
         else:
             if effective_selection is not None:
@@ -1523,6 +1541,9 @@ def submit_intent(
         # the winner's receipt; otherwise the refusal is real and is re-raised.
         settled = runtime.store.find_event_by_command_id(command_id)
         if settled is not None:
+            if project_execution_source is not _PROJECT_EXECUTION_SOURCE_UNSET:
+                from control_plane.project_execution_admission import require_same_source
+                require_same_source(runtime, settled["job_id"], project_execution_source)
             return _receipt_from_event(
                 runtime,
                 settled,

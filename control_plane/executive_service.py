@@ -2067,6 +2067,7 @@ class CeoIngressAppBinding:
     workspace_read_provider_factory: Callable[[Runtime], Any] | None = None
     source_operation_provider_factory: Callable[[Runtime, Any], Any] | None = None
     project_planning_provider_factory: Callable[[Runtime], Any] | None = None
+    project_execution_provider_factory: Callable[[Runtime], Any] | None = None
     session_bridge_provider_factory: Callable[[Runtime], Any] | None = None
     reply_event_provider_factory: Callable[[Runtime], Any] | None = None
     read_schema: str = CEO_APP_READ_SCHEMA
@@ -2099,6 +2100,8 @@ class CeoIngressAppBinding:
             raise ValueError("Session Bridge requires a host provider")
         if self.reply_event_provider_factory is not None and not callable(self.reply_event_provider_factory):
             raise ValueError("reply events require a host provider")
+        if self.project_execution_provider_factory is not None and not callable(self.project_execution_provider_factory):
+            raise ValueError("project execution requires an installed host provider")
         if self.project_planning_provider_factory is not None and not callable(self.project_planning_provider_factory):
             raise ValueError("project planning requires an installed host provider")
         if self.fresh_conversation_provider_factory is not None and not callable(self.fresh_conversation_provider_factory):
@@ -5356,7 +5359,11 @@ class ExecutiveControlService:
             from common import project_planning_private_contract as planning_wire
             selected_planning=(isinstance(parsed,dict) and parsed.get('schema')==planning_wire.SCHEMA and app_peer
                 and callable(app_binding.project_planning_provider_factory))
+            from common import project_execution_private_contract as execution_wire
+            selected_execution=(isinstance(parsed,dict) and parsed.get('schema')==execution_wire.SCHEMA and app_peer
+                and callable(app_binding.project_execution_provider_factory))
             request_ceiling = (source_operation_wire.MAX_REQUEST_BYTES if selected_source_operation else
+                execution_wire.MAX_BYTES if selected_execution else
                 planning_wire.MAX_BYTES if selected_planning else
                 principal_app_protocol.MAX_REQUEST_BYTES if selected_principal_dialogue else ceo_ingress.MAX_REQUEST_BYTES)
             if not is_release and len(raw) > request_ceiling:
@@ -5573,6 +5580,50 @@ class ExecutiveControlService:
                 await self._send_ceo_ingress_response(
                     writer, result, response_ceiling=action_wire.MAX_RESPONSE_BYTES,
                 )
+                return
+            from common import project_execution_private_contract as project_execution_wire
+            if parsed.get('schema') == project_execution_wire.SCHEMA:
+                provider_factory = app_binding.project_execution_provider_factory if app_peer and app_binding is not None else None
+                if not app_peer or not callable(provider_factory):
+                    await self._send_ceo_ingress_error(writer,'peer_denied','Project execution requires its installed App owner')
+                    return
+                runtime=self._require_runtime()
+                from control_plane.foreground_operation import (
+                    _project_execution_foreground_dispatch,_observe_private_request_end,
+                )
+                operation=None
+                try:
+                    parsed=project_execution_wire.decode_frame(raw)
+                    def require_execution_host_current():
+                        if (self._closing or not self._ceo_ingress_ready or self._service_state!='READY'
+                                or self._ceo_ingress_app_binding is not app_binding or not app_binding.armed
+                                or app_binding.project_execution_provider_factory is not provider_factory
+                                or self._require_runtime() is not runtime or writer.get_extra_info('socket') is not connection
+                                or _peer_uid(connection)!=app_binding.peer_uid or reader.at_eof()
+                                or writer.is_closing() or writer.transport.is_closing()):
+                            raise ValueError('project execution original private peer unavailable')
+                        from control_plane.runtime_namespace_custody import ServiceRuntimeNamespaceCustody
+                        if type(self._namespace_custody) is not ServiceRuntimeNamespaceCustody:
+                            raise ValueError('project execution original Runtime namespace unavailable')
+                        self._namespace_custody.bound_runtime(runtime)
+                    require_execution_host_current()
+                    provider=provider_factory(runtime)
+                    if type(provider) is not project_execution_wire.ProjectExecutionIngressOwner:
+                        raise ValueError('project execution nominal installed owner unavailable')
+                    async with _project_execution_foreground_dispatch(runtime,parsed,require_execution_host_current) as operation:
+                        async with _observe_private_request_end(operation,reader):
+                            result=await provider.handle_frame(parsed)
+                    await self._send_ceo_ingress_response(writer,{'ok':True,'result':result},response_ceiling=project_execution_wire.MAX_BYTES)
+                except Exception:
+                    # Every provider launch follows a canonical Job commit. A
+                    # present original event is preserved as unknown; no second
+                    # submission/dispatch or reader is selected here.
+                    event=runtime.store.find_event_by_command_id(operation._command) if operation is not None else None
+                    await self._send_ceo_ingress_response(writer,{'ok':True,'result':dict(schema=project_execution_wire.RESULT_SCHEMA,
+                        operation=parsed.get('operation'),ok=False,data=None,error=dict(
+                            code='effect_unknown' if event is not None else 'refused',
+                            message='Reconcile the original project execution operation' if event is not None else 'Project execution admission refused'))},
+                        response_ceiling=project_execution_wire.MAX_BYTES)
                 return
             from common import project_planning_private_contract as project_planning_wire
             if parsed.get('schema') == project_planning_wire.SCHEMA:
@@ -6016,7 +6067,7 @@ class ExecutiveControlService:
                         source_stamp = (provider._expected_policy, provider._trusted_read_pair)
                     else:
                         provider = require_installed_project_conversations(provider, runtime)
-                        source_stamp = provider.source
+                        source_stamp = (provider.source, provider.execution_source)
                     def require_conversation_read_current():
                         if (self._closing or not self._ceo_ingress_ready
                                 or self._service_state not in {"READY", "QUARANTINED"}
@@ -6037,7 +6088,7 @@ class ExecutiveControlService:
                         else:
                             current = require_installed_project_conversations(current, runtime)
                             provider.check(runtime)
-                            if current.source != source_stamp:
+                            if (current.source, current.execution_source) != source_stamp:
                                 raise ValueError("project conversation source changed")
                         return True
                     require_conversation_read_current()
@@ -6046,6 +6097,10 @@ class ExecutiveControlService:
                         result = provider.catalogue(principal, arguments, guard=require_conversation_read_current)
                     elif frame["operation"] == "read":
                         result = await provider.read(principal, arguments, guard=require_conversation_read_current)
+                    elif frame["operation"] == "execution_references":
+                        result = provider.execution_references(principal, arguments, guard=require_conversation_read_current)
+                    elif frame["operation"] == "execution_read":
+                        result = await provider.execution_read(principal, arguments, guard=require_conversation_read_current)
                     elif frame["operation"] == "fresh_references":
                         result = provider.project_references(principal, arguments)
                     else:
@@ -7718,6 +7773,58 @@ class ExecutiveControlService:
         self._require_shared_git_handoff(workspace)
         return observation
 
+    def _project_workspace_pending(self, root: Job) -> bool:
+        """Recognize only an original project with no workspace or execution history."""
+        from control_plane import ceo_request
+        material = self._require_project_execution_root(root)
+        if material is None:
+            return False
+        workspace = Path(root.worktree or "")
+        if (str(workspace) != ceo_request.derive_worktree(str(self.config.proof_workspace_root), material["intent_id"])
+                or workspace.parent != self.config.proof_workspace_root
+                or root.branch != ceo_request.derive_branch(material["intent_id"])):
+            raise StateConflict("project workspace assignment differs")
+        if self._path_exists(workspace):
+            # Observe the original path, before any resolver could follow a symlink.
+            self._workspace_observation(workspace, require_fresh=False, expected_branch=root.branch)
+            return False
+        if (root.status is not JobStatus.QUEUED or root.attempt_count != 0
+                or root.current_attempt_id is not None):
+            raise StateConflict("started project workspace is unavailable")
+        with self._require_runtime().store.read() as connection:
+            if (connection.execute("SELECT 1 FROM jobs WHERE parent_job_id=? LIMIT 1", (root.job_id,)).fetchone()
+                    or connection.execute("SELECT 1 FROM attempts WHERE job_id=? LIMIT 1", (root.job_id,)).fetchone()):
+                raise StateConflict("project already has execution history")
+        return True
+
+    async def _prepare_project_root_workspace(self, root: Job) -> None:
+        """Reuse the existing allocator, under service custody, including restart recovery."""
+        async with self._workspace_lock:
+            material = self._require_project_execution_root(root)
+            if material is None:
+                raise StateConflict("project workspace requires original source")
+            pending = self._project_workspace_pending(root)
+            if not pending:
+                self._require_initial_coo_workspace(root)
+                return
+            if (self._native_operator_dispatch is not None
+                    or any(not task.done() for task in self._dispatch_tasks.values())):
+                raise StateConflict("another dispatch owns workspace preparation")
+            workspace = Path(root.worktree)
+            binding = self._coo_binding_for_root(root)
+            receipt = await self._run_physical(
+                prepare_credentialless_clone,
+                self.config.proof_source_repository, self.config.proof_workspace_root,
+                job_id=workspace.name, base_sha=binding["base_sha"], branch=root.branch,
+                shared_gid=self.config.proof_shared_gid,
+                shared_write_paths=tuple(root.allowed_write_paths))
+            self._require_project_execution_root(root)
+            if (receipt.workspace_path != str(workspace) or receipt.branch != root.branch
+                    or receipt.base_sha != binding["base_sha"] or receipt.remote_count != 0):
+                raise StateConflict("project workspace receipt differs")
+            self._workspace_observation(workspace, require_fresh=False, expected_branch=root.branch)
+            self._require_initial_coo_workspace(root)
+
     def _maintenance_workspace_pending(self, root: Job) -> bool:
         """Only the exact PASS-qualified untouched root may materialize its path."""
         from ops.executive_os.acceptance_maintenance import descriptor_for
@@ -8034,6 +8141,8 @@ class ExecutiveControlService:
     async def _native_cycle_once(self, root: Job, children: list[Job]) -> CooCycleOutcome | None:
         """Start only the selected private native profile within COO custody."""
         binding = self._coo_binding_for_root(root)
+        if self._require_project_execution_root(root) is not None:
+            return None  # Qualified sealed worker; the native return adapter is not selected.
         if binding["operator_execution_profile_id"] != NATIVE_RETURN_TX5_EXECUTION_PROFILE:
             return None
         # Existing ordinary native G2 planners retain their original lifecycle.
@@ -8235,6 +8344,65 @@ class ExecutiveControlService:
             dispatch.continuation.set_result(value["read_ref"])
         except asyncio.InvalidStateError:
             return  # A settled waiter never grants another provider turn.
+
+    def _project_execution_mode(self):
+        qualification = self._require_attended_qualification()
+        return "DURABLE" if not self.config.coo_foreground_only and not self.config.coo_attended_work_placements and qualification is None else "ATTENDED"
+
+    def _require_project_execution_binding(self):
+        """Qualify the existing sealed worker without promoting native-return."""
+        qualification = self._require_attended_qualification()
+        current = self._require_coo_admission_binding()
+        binding = dict(current, operator_harness_armed=False)
+        if self._closing or self._service_state != "READY" or self.config.coo_autonomy_armed is not True:
+            raise StateConflict("project execution is unavailable")
+        self._require_current_autonomy()
+        self._require_coo_worker_composed()
+        self._require_paid_foreground_placements(binding)
+        if (self._require_attended_qualification() != qualification
+                or self._require_coo_admission_binding() != current):
+            raise StateConflict("project execution qualification changed")
+        return binding
+
+    def _require_project_execution_root(self, root):
+        from common.project_execution_private_contract import digest
+        from common.executive_principal_namespace import principal_scope_from_identity
+        from control_plane.project_execution_admission import read_source
+        material = read_source(self._require_runtime(), root)
+        if material is None:
+            return None
+        binding = self._require_project_execution_binding()
+        if (root.constraints.get("operator_harness_armed") is not False
+                or digest(binding) != material["execution_binding_sha256"]
+                or self._coo_binding_for_root(root) != binding):
+            raise StateConflict("project execution original binding changed")
+        owner = self._foreground_cycle_owner
+        # Admission freezes the continuation mode. A later host setting cannot
+        # promote an attended request into autonomous execution.
+        mode = material["continuation_mode"]
+        if mode == "DURABLE":
+            if self._project_execution_mode() != "DURABLE":
+                raise StateConflict("durable project execution is unavailable")
+            if owner is None:
+                return material
+        if owner is None or owner[0].done():
+            raise StateConflict("project execution original request unavailable")
+        operation = owner[1]
+        operation.require_root(root.job_id)
+        principal = operation._principal
+        scope = principal_scope_from_identity(issuer_digest=principal.issuer_digest,
+            subject_digest=principal.subject_digest, client_ref=principal.client_ref, resource=principal.resource)
+        if (operation._project_execution_operation != "submit"
+                or operation._command != material["command_id"]
+                or operation._operation_key != material["operation_key"]
+                or operation._arguments_sha256 != material["arguments_sha256"]
+                or scope != material["principal_scope_sha256"]
+                or operation._project_execution_work_ref != material["work_ref"]):
+            raise StateConflict("project execution original request differs")
+        guard = getattr(operation, "_project_execution_authorize", None)
+        if not callable(guard) or guard() is not None:
+            raise StateConflict("project execution current authority unavailable")
+        return material
 
     def _foreground_execution_state(self, *, binding=None):
         """Snapshot configured eligibility; a queued mode does not grant driving.
@@ -8441,10 +8609,11 @@ class ExecutiveControlService:
         root = runtime.jobs.get_job(root_id)
         if root is None:
             raise StateConflict("foreground root is unavailable")
+        project_execution = self._require_project_execution_root(root)
         root_binding = self._coo_binding_for_root(root)
-        if root_binding["operator_execution_profile_id"] == NATIVE_RETURN_TX5_EXECUTION_PROFILE:
+        if project_execution is None and root_binding["operator_execution_profile_id"] == NATIVE_RETURN_TX5_EXECUTION_PROFILE:
             raise StateConflict("native no-child return profile is not a paid work cycle")
-        if not self.config.coo_attended_work_placements and not root_binding["operator_harness_armed"]:
+        if project_execution is None and not self.config.coo_attended_work_placements and not root_binding["operator_harness_armed"]:
             # A frozen harness-off root is not promoted by a later host arm.
             return {"state": "NO_ACTION", "root_job_id": root_id, "delivery": "INCOMPLETE"}
         results = {}
@@ -8454,6 +8623,8 @@ class ExecutiveControlService:
         for _ in range(128):
             operation.require_root(root_id)
             self._require_paid_foreground_placements(root_binding)
+            if project_execution is not None:
+                self._require_project_execution_root(root)
             outcome = await self._run_coo_cycle(root_id)
             if outcome.root_job_id != root_id:
                 raise StateConflict("foreground cycle returned a foreign root")
@@ -8472,7 +8643,7 @@ class ExecutiveControlService:
                         "role_result_digest": material.role_result_digest,
                         "result_envelope": material.result_envelope,
                     }
-                if (material is not None and material.job.job_id != root_id
+                if (project_execution is None and material is not None and material.job.job_id != root_id
                         and material.job.orchestration_role == "plan"
                         and not self.config.coo_attended_work_placements
                         and not self.config.coo_paid_work_placements):
@@ -8486,6 +8657,8 @@ class ExecutiveControlService:
             root = runtime.jobs.get_job(root_id)
             if root is None:
                 raise StateConflict("foreground root disappeared")
+            if project_execution is not None:
+                self._require_project_execution_root(root)
             if root.status is JobStatus.COMPLETED:
                 # Root completion must validate independently of any child exit.
                 final = runtime.validated_role_completion(root_id,
@@ -8562,6 +8735,8 @@ class ExecutiveControlService:
         from control_plane.fresh_conversation_admission import read_creation_restriction, require_original_creation_request
         runtime = self._require_runtime()
         root = runtime.jobs.get_job(root_id)
+        if root is not None:
+            self._require_project_execution_root(root)
         if root is not None and read_creation_restriction(runtime, root) is not None:
             # Durable denial survives service restart. Neither the creation
             # receipt nor a later request can recreate its original source.
@@ -8620,7 +8795,10 @@ class ExecutiveControlService:
                 if job.parent_job_id == root_id
             ]
             if not children:
-                await self._prepare_maintenance_root_workspace(root)
+                if self._require_project_execution_root(root) is not None:
+                    await self._prepare_project_root_workspace(root)
+                else:
+                    await self._prepare_maintenance_root_workspace(root)
                 self._require_initial_coo_workspace(root)
             live = {
                 value
@@ -8653,10 +8831,12 @@ class ExecutiveControlService:
                 # The executor thread may begin after its originating request closes.
                 self._require_foreground_only_source(root_id)
                 return CooCycle(self._require_runtime(), dispatcher=dispatch,
-                    planner_plan_schema_version=getattr(
-                        self.operator_supervisor, "fresh_planner_schema_version", None),
+                    planner_plan_schema_version=(None
+                        if self._require_project_execution_root(root) is not None else getattr(
+                            self.operator_supervisor, "fresh_planner_schema_version", None)),
                     before_admission=(require_cycle_admission
                                       if self.config.coo_foreground_only or self._foreground_cycle_owner is not None
+                                      or self._require_project_execution_root(root) is not None
                                       else None)).run_once(root_id)
             outcome = await self._run_physical(run_current_cycle)
             self._coo_last_tick_at = datetime.now(timezone.utc).isoformat(
@@ -8714,6 +8894,10 @@ class ExecutiveControlService:
             try:
                 if read_creation_restriction(runtime, root) is not None:
                     continue  # Explicit fresh conversations are never autonomous candidates.
+                from control_plane.project_execution_admission import read_source as project_source
+                project = project_source(runtime, root)
+                if project is not None and project["continuation_mode"] == "ATTENDED":
+                    continue  # A closed attended project cannot occupy the durable frontier.
             except StateConflict as exc:
                 if prestart_refusals is not None:
                     prestart_refusals[root.job_id] = exc
@@ -8743,7 +8927,10 @@ class ExecutiveControlService:
                 has_existing_child = child is not None
                 if child is None and attempt is None:
                     try:
-                        if not self._maintenance_workspace_pending(root):
+                        pending_project = self._project_workspace_pending(root)
+                        if pending_project:
+                            prestart_ready = True
+                        elif not self._maintenance_workspace_pending(root):
                             self._require_initial_coo_workspace(root)
                             prestart_ready = True
                     except (OSError, ServiceError, StateConflict) as exc:
