@@ -82,6 +82,23 @@ def bind_native_api(module, *, vendor: Path, role_home: Path, role: str,
     module._mastermind_role_api_bound = True
 
 
+def native_git_environment(vendor: Path) -> dict[str, str]:
+    """Trust only the already-qualified root-owned checkout in this process.
+
+    Native version_info uses plain Git to attest its own code. A distinct role
+    UID needs one exact safe.directory. No global configuration is changed;
+    optional index refresh writes and ambient system/user Git config are off.
+    """
+    return {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "safe.directory",
+        "GIT_CONFIG_VALUE_0": str(vendor),
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
+    }
+
+
 def prepare_vendor(vendor: Path) -> None:
     """Select the installed vendor for native imports, never ambient modules."""
     vendor = vendor.resolve(strict=True)
@@ -126,6 +143,8 @@ def run(launch, argv: list[str]) -> int:
     if Path(os.environ.get("HERMES_HOME", "")).resolve() != home:
         raise RuntimeRefusal("NATIVE_PROFILE_HOME_MISMATCH")
     vendor = Path(launch.recipe["vendor_root"])
+    if any(os.environ.get(key) != value for key, value in native_git_environment(vendor).items()):
+        raise RuntimeRefusal("NATIVE_GIT_SELECTION_MISMATCH")
     prepare_vendor(vendor)
     # Preserve the real recognized launcher and command before the native
     # module applies its profile selector at import time.

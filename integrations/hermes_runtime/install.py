@@ -42,9 +42,10 @@ def pinned_fetch_commands(dest: Path) -> list[list[str]]:
     ]
 
 
-def assert_checkout_sha(source: Path) -> None:
+def assert_checkout_sha(source: Path, *, native_environment: dict | None = None) -> None:
     proc = subprocess.run(
         ["git", "-C", str(source), "rev-parse", "HEAD"],
+        **({"env": native_environment} if native_environment is not None else {}),
         capture_output=True,
         text=True,
         check=False,
@@ -119,9 +120,13 @@ def install(
     try:
         if native is not None:
             vendor = Path(native["vendor_root"])
-            assert_checkout_sha(vendor)
+            from .native_gateway_entry import native_git_environment
+            git_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+            git_env.update(native_git_environment(vendor))
+            assert_checkout_sha(vendor, native_environment=git_env)
             clean = subprocess.run(["git", "-C", str(vendor), "status", "--porcelain=v1",
-                                    "--untracked-files=all"], capture_output=True, check=False, timeout=30)
+                                    "--untracked-files=all"], env=git_env, capture_output=True,
+                                   check=False, timeout=30)
             if clean.returncode or clean.stdout:
                 raise RuntimeRefusal("NATIVE_VENDOR_CHECKOUT_DIRTY")
             os.symlink(vendor, release / "upstream")

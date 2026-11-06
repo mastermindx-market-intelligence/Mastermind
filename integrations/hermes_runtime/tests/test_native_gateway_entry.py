@@ -86,3 +86,39 @@ def test_missing_custody_refuses_before_any_credential_or_child(tmp_path, monkey
     with pytest.raises(RuntimeRefusal, match="NATIVE_STARTUP_CUSTODY_REQUIRED"):
         runtime.start()
     assert runtime.child_starts == 0 and runtime.gateway is None
+
+
+def test_native_git_trust_is_exact_and_process_scoped(tmp_path, monkeypatch):
+    from integrations.hermes_runtime import supervisor
+    from integrations.hermes_runtime.secrets import Secrets
+    vendor = tmp_path / "qualified-vendor"
+    selected = replace(profile(tmp_path), gateway_backend=entry.BACKEND)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "safe.directory")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "*")
+    launch = SimpleNamespace(recipe={"vendor_root": str(vendor)})
+    secrets = Secrets("health-credential-value", "hermes", "dashboard-credential-value",
+                      {"PROVIDER_KEY": "model-credential-value"})
+    runtime = supervisor.ServiceRuntime(selected, secrets, Path("/inert/hermes"), native_launch=launch)
+    actual = runtime._registry_env()
+    assert all(actual[key] == value for key, value in entry.native_git_environment(vendor).items())
+    assert actual["GIT_CONFIG_VALUE_0"] == str(vendor)
+    assert actual["GIT_CONFIG_GLOBAL"] == "/dev/null"
+    assert actual["GIT_OPTIONAL_LOCKS"] == "0"
+    assert "model-credential-value" not in actual.values()
+    assert "dashboard-credential-value" not in actual.values()
+    assert "health-credential-value" not in actual.values()
+    assert __import__("os").environ["GIT_CONFIG_VALUE_0"] == "*"
+
+
+def test_native_installer_pin_check_uses_selected_command_environment(tmp_path, monkeypatch):
+    from integrations.hermes_runtime import install as installer
+    seen = []
+    def run(argv, **kwargs):
+        seen.append((argv, kwargs))
+        return SimpleNamespace(returncode=0, stdout=entry.PINNED_UPSTREAM_SHA + "\n")
+    monkeypatch.setattr(installer.subprocess, "run", run)
+    chosen = entry.native_git_environment(tmp_path)
+    installer.assert_checkout_sha(tmp_path, native_environment=chosen)
+    assert seen[0][1]["env"] == chosen
+    assert seen[0][0] == ["git", "-C", str(tmp_path), "rev-parse", "HEAD"]

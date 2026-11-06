@@ -258,10 +258,14 @@ class ServiceRuntime:
         """
         source = self._env()
         required = {"PATH", "HOME", "HERMES_HOME", "LANG"}
-        return {
+        result = {
             key: value for key, value in source.items()
             if key in required or key.startswith("HERMES_STUB_")
         }
+        if self.profile.gateway_backend == "native-session-authority":
+            from .native_gateway_entry import native_git_environment
+            result.update(native_git_environment(Path(self._native_launch.recipe["vendor_root"])))
+        return result
 
     def _model_child_env(self) -> dict[str, str]:
         """Forward only the reviewed primary credential to a pinned BYOK child.
@@ -283,6 +287,9 @@ class ServiceRuntime:
         native = self.profile.hermes_home / "profiles" / self.profile.role / "config.yaml"
         from integrations.hermes_harness.native_byok import render_disarmed_native_byok
         env = self._env()
+        if self.profile.gateway_backend == "native-session-authority":
+            from .native_gateway_entry import native_git_environment
+            env.update(native_git_environment(Path(self._native_launch.recipe["vendor_root"])))
         if native.is_file() and native.read_bytes() == render_disarmed_native_byok(self.profile).encode("utf-8"):
             # load_secrets historically defaults dashboard Basic-Auth password
             # to the gateway token. The model child receives that password;

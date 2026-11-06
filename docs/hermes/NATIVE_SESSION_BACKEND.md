@@ -50,7 +50,10 @@ Native startup normally moves its project root to the front of `sys.path`.
 The release entry establishes precisely that approved order before its existing
 source finder freezes the path. Other native dependency roots are explicit,
 immutable installation inputs. Site startup and ambient package discovery do not
-supply authority.
+supply authority. The distinct role UID receives process-scoped Git trust for
+only the qualified vendor path, so upstream code identity can read the root-owned
+checkout. User/system Git configuration and optional index-refresh writes are
+disabled for these native commands; no global safe-directory setting is changed.
 
 The owned API factory wrapper takes only the original runner and passes the
 selected role address and fixed backend port to the original native factory.
