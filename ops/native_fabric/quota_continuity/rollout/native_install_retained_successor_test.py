@@ -50,7 +50,7 @@ class RetainedNativeStatusProofTests(unittest.TestCase):
         self.write("pool", b"pool bridge", 0o755)
         self.write("task", b"task bridge", 0o755)
         self.write("remote", b"original remote", 0o755)
-        self.write("store/launchers/" + native.SUCCESSOR_TO + ".py",
+        self.write("store/launchers/" + self.to_launcher + ".py",
                    b"sealed successor launcher", 0o555)
 
         self.predecessor = {
@@ -271,6 +271,13 @@ class RetainedNativeStatusProofTests(unittest.TestCase):
         self.assertFalse(self.original.exists())
         self.status()
         self.assertFalse(self.original.exists())
+
+    def test_strict_native_apply_does_not_use_the_retained_reader(self):
+        before = self.snapshot()
+        with self.assertRaises(FileNotFoundError):
+            native.apply_successor(self.bundle)
+        self.assertFalse(self.original.exists())
+        self.assertEqual(self.snapshot(), before)
 
 
 if __name__ == "__main__":

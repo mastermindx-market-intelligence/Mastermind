@@ -339,6 +339,10 @@ C1_GIT_FAILURE_COMPAT_SUCCESSOR_SHA256 = (
     "336de8ed10e7da483d46e93bd98439fd00c3e277111b39b5baa9cf0e68074674")
 C1_GIT_FAILURE_COMPAT_SUCCESSOR_GIT_BLOB = (
     "c02bcdada5217bbc987099e90ebdce236f023b86")
+# Closed internal artifact-verification purpose for the chatgpt1 gateway
+# formatter. Not a CLI flag, config permission, registry, or native operation.
+# The literal is repeated in the native proof script below; both must match.
+C1_GATEWAY_RETAINED_PROOF_PURPOSE = "c1-gateway-preserving-formatter"
 
 # Exact sealed C2 predecessor observed for the one-seat Paper v10 -> v12 repair.
 # These are reviewed installation identity pins, never caller-selectable source or runtime paths.
@@ -1167,10 +1171,14 @@ import native_generation as g
 try:
  p,payload=i.read_successor(Path(sys.argv[2]))
 except FileNotFoundError:
- # Only a READ of an already-completed historical pin may use the fixed,
- # full-byte-pinned retained receipt path when its original bootstrap
- # artifact has been pruned. Never admit new native apply/reconcile here.
- if sys.argv[5]!='status':raise
+ # Status may read one completed historical pin after its bootstrap artifact
+ # was pruned. The same retained reader is the artifact check for the closed
+ # chatgpt1 gateway formatter, on both preview and apply. Generic native
+ # apply/reconcile stay on the strict reader and remain refused.
+ purpose=sys.argv[6] if len(sys.argv)>6 else ''
+ closed=(purpose=='c1-gateway-preserving-formatter' and sys.argv[4]=='chatgpt1' and sys.argv[5] in ('preview','apply'))
+ if purpose and not closed:raise
+ if sys.argv[5]!='status' and not closed:raise
  p,payload=i.read_retained_successor_after_bootstrap_prune(Path(sys.argv[2]))
 assert p['digest']==sys.argv[3]
 store=Path(p['store']);current=g.current(store);old=p['expected_selection']
@@ -1205,11 +1213,20 @@ else:raise ValueError('selection_refused')
 # a sequence-26 -> sequence-27 change could masquerade as identical SELECTED.
 print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_generation'],'expected_selection':old,'pool_target':e['target'],'pool_previous':e['previous'],'pool_bridge':e['bridge'],'store':p['store'],'phase':phase,'selection':current},sort_keys=True))
 """
+    if (C1_GATEWAY_RETAINED_PROOF_PURPOSE not in code
+            or C1_GIT_FAILURE_COMPAT_ACCOUNT not in code):
+        raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
+    purpose = getattr(args, "retained_proof_purpose", None) or ""
+    if purpose and (
+            purpose != C1_GATEWAY_RETAINED_PROOF_PURPOSE
+            or args.account != C1_GIT_FAILURE_COMPAT_ACCOUNT
+            or args.operation not in ("preview", "apply")):
+        raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
     def proof():
         try:
             r = subprocess.run([sys.executable, *python_flags, "-c", code, str(rollout),
                 str(args.successor_bundle), args.successor_plan_sha256, args.account,
-                args.operation],
+                args.operation, purpose],
                 capture_output=True, timeout=30)
         except (OSError, subprocess.SubprocessError):
             raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED") from None
@@ -2703,12 +2720,13 @@ def _upgrade_fleet_v10_publisher_only(
 
 
 @contextmanager
-def _c1_retained_pin_state(account: str, roots: dict, *, operation="status"):
+def _c1_retained_pin_state(account: str, roots: dict, *, operation="preview"):
     """Keep the incumbent selected-pin proof through this closed transition.
 
     The native pin owner verifies its own intent, transformation, result,
-    selected phase and bridge. Its existing publication lock is retained for
-    apply, inside the existing lifecycle lock. No pin operation is replayed.
+    selected phase and bridge. Preview and apply share one retained-proof
+    purpose. Apply keeps the publication lock; preview does not. No pin
+    operation is replayed and the formatter is not relabeled as status.
     """
     # The incumbent fleet-status transaction owns startup while its record
     # exists. This formatter has no authority to rewrite or replay that plan.
@@ -2724,7 +2742,8 @@ def _c1_retained_pin_state(account: str, roots: dict, *, operation="status"):
         raise SystemExit(
             "C1 fleet gateway compatibility: retained native-pool pin is pending")
     with pin.selected_applied_context(
-            sys.modules[__name__], account, roots, operation=operation) as (plan, raw):
+            sys.modules[__name__], account, roots, operation=operation,
+            retained_proof_purpose=C1_GATEWAY_RETAINED_PROOF_PURPOSE) as (plan, raw):
         current = _fabric_release_bytes(roots["config"])
         manifest = _fabric_release_bytes(roots["manifest"])
         original = (current == raw["config.after.json"]

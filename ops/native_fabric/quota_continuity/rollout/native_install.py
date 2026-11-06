@@ -551,9 +551,11 @@ RETAINED_STATUS_PROOF_SHA256 = {
 
 
 def read_retained_successor_after_bootstrap_prune(bundle):
-    """Read one byte-pinned, COMPLETED selection for the Studio pin STATUS path.
+    """Read one byte-pinned COMPLETED selection after its bootstrap was pruned.
 
-    The deleted historical bootstrap is never synthesized. Any unknown chain,
+    Admitted callers are native-pin status and the closed chatgpt1 gateway
+    formatter's artifact check. This is not native apply or reconcile. The
+    deleted historical bootstrap is never synthesized. Any unknown chain,
     foreign byte, incomplete transaction or invalid selected generation refuses.
     Callers must separately prove the enrolled account's original pin and actual
     current/native selected state. This helper never writes a file or a pointer.

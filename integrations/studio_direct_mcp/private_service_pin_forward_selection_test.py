@@ -112,12 +112,13 @@ class NativeSelectionForwardTests(unittest.TestCase):
     def set_selection(self, selected):
         (self.store / "CURRENT.json").write_text(json.dumps(selected))
 
-    def run_proof(self, account="chatgpt4", operation="status"):
-        return subprocess.run(
-            [sys.executable, "-I", "-B", "-c", original_subprocess_proof(),
-             str(self.rollout), str(self.bundle), self.plan["digest"], account, operation],
-            capture_output=True, timeout=8, check=False,
-        )
+    def run_proof(self, account="chatgpt4", operation="status", purpose=None):
+        argv = [sys.executable, "-I", "-B", "-c", original_subprocess_proof(),
+                str(self.rollout), str(self.bundle), self.plan["digest"], account,
+                operation]
+        if purpose is not None:
+            argv.append(purpose)
+        return subprocess.run(argv, capture_output=True, timeout=8, check=False)
 
     def test_reviewed_forward_selection_is_accepted_and_bound_to_pointer(self):
         response = self.run_proof()
@@ -242,7 +243,42 @@ class NativeSelectionForwardTests(unittest.TestCase):
         module.write_text(source.replace(old, replacement))
         self.assertEqual(self.run_proof("chatgpt2-personal", "status").returncode, 0)
         self.assertNotEqual(self.run_proof("chatgpt2-personal", "apply").returncode, 0)
+        self.assertNotEqual(self.run_proof("chatgpt2-personal", "reconcile").returncode, 0)
         self.assertNotEqual(self.run_proof("fabric-design", "status").returncode, 0)
+
+    def test_closed_formatter_purpose_shares_preview_and_apply_proof(self):
+        module = self.rollout / "native_install.py"
+        source = module.read_text()
+        old = ("def read_successor(bundle):\n"
+               " return json.loads((bundle/'PLAN.json').read_text()), {}\n")
+        replacement = (
+            "def read_successor(bundle):\n"
+            " raise FileNotFoundError('historical bootstrap artifact pruned')\n"
+            "def read_retained_successor_after_bootstrap_prune(bundle):\n"
+            " return json.loads((bundle/'PLAN.json').read_text()), {}\n"
+        )
+        self.assertEqual(source.count(old), 1)
+        module.write_text(source.replace(old, replacement))
+        purpose = svc.C1_GATEWAY_RETAINED_PROOF_PURPOSE
+        self.assertIn(purpose, original_subprocess_proof())
+        preview = self.run_proof("chatgpt1", "preview", purpose)
+        apply = self.run_proof("chatgpt1", "apply", purpose)
+        self.assertEqual(preview.returncode, 0, preview.stderr[-250:])
+        self.assertEqual(apply.returncode, 0, apply.stderr[-250:])
+        preview_proof = json.loads(preview.stdout)
+        apply_proof = json.loads(apply.stdout)
+        self.assertEqual(preview_proof, apply_proof)
+        self.assertEqual(preview_proof["phase"], "SELECTED")
+        self.assertEqual(preview_proof["selection"], self.forward)
+        self.assertNotEqual(self.run_proof("chatgpt1", "apply").returncode, 0)
+        self.assertNotEqual(self.run_proof("chatgpt1", "reconcile", purpose).returncode, 0)
+        self.assertNotEqual(self.run_proof("chatgpt1", "status", purpose).returncode, 0)
+        self.assertNotEqual(self.run_proof("chatgpt4", "apply", purpose).returncode, 0)
+        self.assertNotEqual(self.run_proof("chatgpt1", "apply", "foreign-purpose").returncode, 0)
+        self.assertNotEqual(self.run_proof("chatgpt1", "preview", "foreign-purpose").returncode, 0)
+        self.set_selection(dict(self.forward, previous=CURRENT_TARGET))
+        self.assertNotEqual(self.run_proof("chatgpt1", "preview", purpose).returncode, 0)
+        self.assertNotEqual(self.run_proof("chatgpt1", "apply", purpose).returncode, 0)
 
     def test_no_extra_native_or_installer_files_created(self):
         original = sorted(x.relative_to(self.root) for x in self.root.rglob("*")
