@@ -84,7 +84,7 @@ def assessment(value):
 
 def request(value):
     w.exact(value, 'schema action delegation subject assignment input_sha256 pair_sha256')
-    if value['schema'] != REQUEST or value['action'] not in ('read_evaluation_basis', 'authorize_annotation_exposure', 'authorize_adjudication_exposure'):
+    if value['schema'] != REQUEST or value['action'] not in ('read_evaluation_basis', 'authorize_evaluation_subject_read', 'authorize_annotation_exposure', 'authorize_adjudication_exposure'):
         fail()
     delegation(value['delegation'])
     # The source owner matches these exact retained identities to its grant.
@@ -97,6 +97,8 @@ def request(value):
         if value[k] is not None: w.digest(value[k])
     if value['action'] == 'read_evaluation_basis':
         if any(value[k] is not None for k in ('subject', 'assignment', 'input_sha256', 'pair_sha256')): fail()
+    elif value['action'] == 'authorize_evaluation_subject_read':
+        if value['subject'] is None or value['assignment'] is None or value['input_sha256'] is not None: fail()
     elif any(value[k] is None for k in ('subject', 'assignment', 'input_sha256')):
         fail()
     if (value['action'] == 'authorize_adjudication_exposure') != (value['pair_sha256'] is not None):
@@ -169,3 +171,11 @@ def identity_mapping(value):
         seen.append(digest(b))
     if len(seen) != len(set(seen)): fail()
     return value
+
+def evaluation_intent(value):
+    w.exact(value, 'schema subject_attempt_id participant_slot registration_ref reviewer_plan_ref guide_ref')
+    if value['schema'] != 'mastermind.native_memory_evaluation_intent.v1' or value['participant_slot'] not in ROLES: fail()
+    w.token(value['subject_attempt_id'])
+    for k in ('registration_ref', 'reviewer_plan_ref', 'guide_ref'): refs(value[k])
+    if value['guide_ref']['sha256'] != GUIDE_SHA: fail()
+    return json.loads(w.canonical(value))

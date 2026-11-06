@@ -55,6 +55,16 @@ def test_roundtrip_basis_and_both_exact_exposure_shapes():
         r=response(q);r['basis']=None
         assert c.response(r,q)==r
 
+def test_subject_read_precedes_packet_compilation_without_granting_exposure():
+    q=request(action='authorize_evaluation_subject_read')
+    q.update(subject=dict(operation_id='original',attempt_id='original-attempt',input_sha256='1'*64,input_bytes=1,
+        result_sha256='2'*64,result_bytes=2),assignment='3'*64)
+    assert c.request(q)==q
+    r=response(q);r['basis']=None
+    assert c.response(r,q)==r
+    with pytest.raises(ValueError):c.request(dict(q,action='authorize_annotation_exposure'))
+    with pytest.raises(ValueError):c.request(dict(q,pair_sha256='4'*64))
+
 
 @pytest.mark.parametrize('fault',['v3','extra','wrong_purpose','foreign_audience','wrong_request','flags','evidence_hash','wrong_guide','no_pair'])
 def test_schema_scope_and_exact_current_response_fail_closed(fault):
