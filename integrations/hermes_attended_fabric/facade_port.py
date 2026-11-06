@@ -105,12 +105,21 @@ class FabricFacadePort:
                 "effective_run_id": effective}
 
     def submit(self, grant: SessionGrant, run_id: str, task_class: str,
-               complexity: str, packet: str, reason: str) -> Mapping[str, Any]:
+               complexity: str, packet: str, reason: str, *,
+               pool: str | None = None,
+               model: str | None = None) -> Mapping[str, Any]:
         args = {**self._identity(grant, run_id),
                 "task_class": task_class, "task_complexity": complexity,
                 "work_packet": packet}
         if reason:
             args["escalation_reason"] = reason
+        # The incumbent Fabric-only facade owns native strict-pin preview,
+        # qualification, exact-model recheck and zero cross-provider fallback.
+        # This transport is not permitted to interpret credentials or pools.
+        if pool is not None:
+            args["pool"] = pool
+            if model is not None:
+                args["model"] = model
         raw = self._call("fabric_request", args)
         if (raw.get("run_id") != run_id
                 or raw.get("root_id") != grant.root_id
