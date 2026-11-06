@@ -85,6 +85,59 @@ class LinuxCachePreviewTests(unittest.TestCase):
             self.assertEqual(p.read_text(), "original metadata")
             p.unlink()
 
+    def assert_admission_withheld(self, result):
+        self.assertEqual(result["status"], "HELD")
+        self.assertFalse(result["cleanup_authorized"])
+        for row in result["caches"]:
+            self.assertEqual(row["status"], "HELD")
+            self.assertNotIn("logical_bytes", row)
+            self.assertNotIn("inventory_sha256", row)
+
+    def test_marker_inserted_during_live_read_withholds_completed_inventory(self):
+        calls = 0
+        def insert():
+            nonlocal calls
+            calls += 1
+            if calls == 2:  # After pip inventory, before publication.
+                (self.active / "unknown-marker").write_text("held original")
+            return set()
+        result = self.run_preview(live_reader=insert)
+        self.assert_admission_withheld(result)
+        self.assertEqual(result["reasons"], ["active_lane_or_reconciliation_hold"])
+        self.assertEqual((self.active / "unknown-marker").read_text(), "held original")
+
+    def test_replaced_independently_lockable_admission_lock_withholds_preview(self):
+        original = (self.active / ".admission.lock").stat().st_ino
+        calls = 0
+        def replace():
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                path = self.active / ".admission.lock"
+                path.unlink()
+                path.touch(mode=0o600)
+                self.assertNotEqual(path.stat().st_ino, original)
+                with path.open("r+") as stream:
+                    fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return set()
+        result = self.run_preview(live_reader=replace)
+        self.assert_admission_withheld(result)
+        self.assertEqual(result["reasons"], ["admission_lock_identity"])
+
+    def test_active_directory_replacement_withholds_preview_of_old_namespace(self):
+        calls = 0
+        def replace():
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                self.active.rename(self.active.with_name("original-active"))
+                self.active.mkdir(mode=0o700)
+                (self.active / ".admission.lock").touch(mode=0o600)
+            return set()
+        result = self.run_preview(live_reader=replace)
+        self.assert_admission_withheld(result)
+        self.assertEqual(result["reasons"], ["directory_identity"])
+
     def test_live_cwd_or_fd_under_cache_holds(self):
         for path in [str(self.cache), str(self.cache / "http-v2/aa/object.body")]:
             result = self.run_preview(live_reader=lambda: {path})
