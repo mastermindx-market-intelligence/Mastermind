@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import stat
 import tempfile
 import sys
 from types import SimpleNamespace
@@ -183,8 +184,17 @@ class LinuxCachePreviewTests(unittest.TestCase):
 
     def test_symlink_special_or_hardlink_inside_cache_holds(self):
         p = self.cache / "http-v2/aa/danger"
-        p.symlink_to(self.home / "outside")
-        self.assertEqual(self.pip(self.run_preview())["reason"], "symlink_hardlink_or_special")
+        outside = self.home / "outside"
+        outside.write_bytes(b"not cache data")
+        p.symlink_to(outside)
+        row = self.pip(self.run_preview())
+        # Linux reports symlink mode0777: the unchanged ownership/mode guard
+        # refuses it before the special-node guard reached on macOS.
+        self.assertIn(row["reason"], {"ownership_or_write_mode", "symlink_hardlink_or_special"})
+        self.assertEqual(row["status"], "HELD")
+        self.assertNotIn("logical_bytes", row)
+        self.assertNotIn("inventory_sha256", row)
+        self.assertEqual(outside.read_bytes(), b"not cache data")
         p.unlink()
         os.link(self.cache / "http-v2/aa/object.body", p)
         self.assertEqual(self.pip(self.run_preview())["reason"], "symlink_hardlink_or_special")
@@ -193,12 +203,46 @@ class LinuxCachePreviewTests(unittest.TestCase):
         moved = self.home / "not-a-cache"
         self.cache.rename(moved)
         self.cache.symlink_to(moved, target_is_directory=True)
-        self.assertEqual(self.pip(self.run_preview())["status"], "HELD")
+        with mock.patch.object(self.preview, "_inventory", side_effect=AssertionError("must not follow cache symlink")):
+            row = self.pip(self.run_preview())
+        self.assertEqual(row["status"], "HELD")
+        self.assertNotIn("inventory_sha256", row)
         self.cache.unlink()
         parent = self.cache.parent
         parent.rmdir()
         parent.symlink_to(moved, target_is_directory=True)
-        self.assertEqual(self.pip(self.run_preview())["reason"], "directory_identity")
+        with mock.patch.object(self.preview, "_inventory", side_effect=AssertionError("must not follow parent symlink")):
+            row = self.pip(self.run_preview())
+        self.assertIn(row["reason"], {"ownership_or_write_mode", "directory_identity"})
+        self.assertEqual(row["status"], "HELD")
+        self.assertNotIn("logical_bytes", row)
+        self.assertNotIn("inventory_sha256", row)
+        self.assertEqual((moved / "http-v2/aa/object.body").read_bytes(), b"regenerable cached fixture")
+
+    def test_linux_0777_symlink_stat_is_refused_by_unchanged_mode_guard(self):
+        original_owned = self.preview._owned
+        seen = []
+        def linux_symlink_stat(s, uid, *, directory=False):
+            if stat.S_ISLNK(s.st_mode):
+                seen.append(directory)
+                s = SimpleNamespace(st_uid=s.st_uid, st_mode=stat.S_IFLNK | 0o777)
+            return original_owned(s, uid, directory=directory)
+        p = self.cache / "http-v2/aa/danger"
+        p.symlink_to(self.home / "outside")
+        with mock.patch.object(self.preview, "_owned", side_effect=linux_symlink_stat):
+            row = self.pip(self.run_preview())
+            self.assertEqual(row["reason"], "ownership_or_write_mode")
+            self.assertNotIn("inventory_sha256", row)
+            p.unlink()
+            moved = self.home / "not-a-cache"
+            self.cache.rename(moved)
+            self.cache.parent.rmdir()
+            self.cache.parent.symlink_to(moved, target_is_directory=True)
+            with mock.patch.object(self.preview, "_inventory", side_effect=AssertionError("must not follow Linux symlink")):
+                row = self.pip(self.run_preview())
+            self.assertEqual(row["reason"], "ownership_or_write_mode")
+            self.assertNotIn("logical_bytes", row)
+        self.assertEqual(seen, [False, True])
 
     def test_foreign_owner_or_writable_cache_holds(self):
         self.cache.chmod(0o777)
