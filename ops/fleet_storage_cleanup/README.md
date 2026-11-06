@@ -44,3 +44,58 @@ Current program receipt: Mastermind GitHub issue #1632.
 
 A peer lacking the new telemetry field produces TELEMETRY_MISSING (unverified),
 and an unreadable volume policy is an unverified alert, not a healthy reading.
+
+## Linux disposable-cache preview — source candidate, not enrolled
+
+`linux_cache_preview.py` is an extension of this same storage-sweeper owner.
+It has **no apply/delete mode** and starts no worker, network request, process
+control, service or scheduler. Source acceptance does not enroll a Linux host,
+install the module, grant host access, clear admission holds or recover space.
+
+The first narrow subset is the current non-root user's fixed `.cache/pip` and
+`.npm/_cacache` namespaces. Only recognized cache top-level layouts are inventoried.
+No arbitrary root, pathname, credential file, source tree or worktree is accepted.
+Preview counts are observations of candidate bytes, **not deletion authority**.
+Unknown entries, symlinks/hardlinks/special files, foreign ownership, group/world
+write modes, or another filesystem are held. Cached file content is never read.
+
+The helper takes the existing physical `lanes/ext/active/.admission.lock`
+non-blockingly without creating or replacing it. Any lane, reconciliation or
+unknown marker holds the preview. The same-user Linux procfs cwd/executable/open-FD
+census is required before and after inventory; incomplete or changing evidence
+holds. Unresolved PREPARE records in the existing `generated-cache-trim.jsonl`
+also hold. No new effect registry is created. Each cache is bounded by 20,000
+entries, 12 levels, 256 GiB of counted bytes and the five-second inventory budget.
+Only caches on the worker-admission filesystem are counted as preview candidates.
+
+A new mode in the **existing** fleet driver compiles exactly one command using
+its existing transport and a SHA-256-bound installed module. It does not probe,
+sync/install, run the old sweep, retry or fall back. The source integration shape
+for a separately authorized/enrolled operator is:
+
+```
+fleet_remote_sweep.py --linux-cache-preview --hosts ubuntu0 --no-sync --timeout 20
+```
+
+The closed host spelling is addressing validation, not permission to select a
+worker or a new host grant. Current assignment, actual maintenance access, exact
+installed source and host custody must still qualify. A missing or old installed
+helper returns UNAVAILABLE. This command has **not been invoked on a fleet host**
+for source qualification, and no current generation/host profile is changed here.
+
+The helper writes one owner-only, write-once preview receipt beneath the existing
+storage-cleanup state directory. The response contains fixed cache IDs, counts,
+filesystem-available bytes, inventory digest, bounded hold reasons and the receipt
+hash; it excludes file contents and arbitrary file names. The receiver checks the
+closed body and receipt digest. `cleanup_authorized` is always false. Receipts are
+transient evidence and cannot be replayed as apply tokens; a future cleanup effect
+would need its own reviewed custody/source/currentness checks and authorization.
+
+Hermetic checks (temporary directories, simulated procfs and mocked fleet transport):
+
+```
+python3 -m unittest tests.test_linux_cache_preview tests.test_fleet_storage_volume_monitor
+```
+
+Do not run `sweep.main()` or any remote invocation in tests. Existing scheduled
+sweep behavior is unchanged unless the new explicit preview flag is supplied.
