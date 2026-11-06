@@ -6,6 +6,10 @@ from __future__ import annotations
 
 import json
 import unittest
+import sys
+import types
+from contextlib import nullcontext
+from unittest.mock import patch
 
 from integrations.hermes_attended_fabric.native import (
     SCHEMA, TOOL, TOOLSET, SessionGrant, native_handler,
@@ -204,21 +208,105 @@ class TestNativeFabric(unittest.TestCase):
                            authorize_session=lambda s: self.grant,
                            port=None, currentness_guard=lambda g: True)
 
-    def test_actual_native_registration_receipt(self):
+    @staticmethod
+    def make_native_owner():
+        """Stub only Hermes' incumbent registry and replacement coordinator."""
+        import types
+
+        registry = types.SimpleNamespace(installed=None)
+        registry.snapshot_registration = lambda name, scope: registry.installed
+        registry.get_entry = lambda name, scope: registry.installed
+        plugin = types.ModuleType("hermes_cli.plugin_isolation")
+        plugin.HOST_PROCESS_ENV = "_MMX_HERMES_PLUGIN_HOST_TEST_ONLY"
+        plugin.ISOLATION_HOST = "host"
+        plugin.isolation_mode = lambda: "in_process"
+        coordinator = types.ModuleType("registration_lifecycle")
+        coordinator.replacement_coordinator = types.SimpleNamespace(transaction=nullcontext)
+        reg = types.ModuleType("tools.registry")
+        reg.registry = registry
+        tools = types.ModuleType("tools")
+        tools.__path__ = []
+        hermes_cli = types.ModuleType("hermes_cli")
+        hermes_cli.__path__ = []
+        modules = {
+            "tools": tools,
+            "tools.registry": reg,
+            "registration_lifecycle": coordinator,
+            "hermes_cli": hermes_cli,
+            "hermes_cli.plugin_isolation": plugin,
+        }
+        return registry, modules
+
+    def make_native_context(self, registry, *, mismatch=False, raise_after=False):
         class Context:
             profile_name = "main"
+            _manager = types.SimpleNamespace(scope_key="main-scope")
+            manifest = types.SimpleNamespace(source="local")
+
             def register_tool(self, **kwargs):
                 self.registered = kwargs
-                return object()
-        context = Context()
-        receipt = register_native_tool(
-            context, authorize_session=lambda session: self.grant,
-            port=self.port, currentness_guard=lambda grant: True)
+                registry.installed = types.SimpleNamespace(
+                    handler=kwargs["handler"],
+                    schema=kwargs["schema"] if not mismatch else {"bad": True},
+                    toolset=kwargs["toolset"],
+                    check_fn=kwargs["check_fn"])
+                self.disposed = False
+
+                class Handle:
+                    def dispose(instance):
+                        self.disposed = True
+                        registry.installed = None
+
+                if raise_after:
+                    raise OSError("synthetic lost reply after registration")
+                return Handle()
+        return Context()
+
+    def test_actual_native_registration_receipt(self):
+        registry, modules = self.make_native_owner()
+        context = self.make_native_context(registry)
+        with patch.dict(sys.modules, modules):
+            receipt = register_native_tool(
+                context, authorize_session=lambda session: self.grant,
+                port=self.port, currentness_guard=lambda grant: True)
         self.assertIsNotNone(receipt)
         self.assertEqual(context.registered["name"], TOOL)
         self.assertEqual(context.registered["toolset"], TOOLSET)
         self.assertFalse(context.registered["is_async"])
+        self.assertEqual(registry.installed.handler.__name__, "handle")
         self.assertNotIn("root_id", context.registered["schema"]["parameters"]["properties"])
+
+    def test_native_registration_collision_is_no_write(self):
+        registry, modules = self.make_native_owner()
+        registry.installed = object()
+        context = self.make_native_context(registry)
+        with patch.dict(sys.modules, modules):
+            with self.assertRaisesRegex(Exception, "HERMES_NATIVE_TOOL_COLLISION"):
+                register_native_tool(context,
+                    authorize_session=lambda session: self.grant,
+                    port=self.port, currentness_guard=lambda grant: True)
+        self.assertFalse(hasattr(context, "registered"))
+
+    def test_native_registration_wrong_readback_disposes_original_handle(self):
+        registry, modules = self.make_native_owner()
+        context = self.make_native_context(registry, mismatch=True)
+        with patch.dict(sys.modules, modules):
+            with self.assertRaisesRegex(Exception, "HERMES_REGISTRATION_READBACK_MISMATCH"):
+                register_native_tool(context,
+                    authorize_session=lambda session: self.grant,
+                    port=self.port, currentness_guard=lambda grant: True)
+        self.assertTrue(context.disposed)
+        self.assertIsNone(registry.installed)
+
+    def test_native_registration_lost_return_is_unknown_not_refused(self):
+        registry, modules = self.make_native_owner()
+        context = self.make_native_context(registry, raise_after=True)
+        with patch.dict(sys.modules, modules):
+            with self.assertRaisesRegex(Exception, "HERMES_REGISTRATION_EFFECT_UNKNOWN"):
+                register_native_tool(context,
+                    authorize_session=lambda session: self.grant,
+                    port=self.port, currentness_guard=lambda grant: True)
+        self.assertIsNotNone(registry.installed)
 
 
 if __name__ == "__main__":
