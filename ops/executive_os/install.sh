@@ -1633,6 +1633,62 @@ if [ "$STAGE_ADMIN_CHECKOUT_ONLY" = "1" ]; then
 fi
 # --- END admin-checkout-only dispatch ---
 
+# --- BEGIN gateway audit parent provisioning ---
+provision_gateway_audit_parent() {
+  # The normal publisher owns the Studio-identity leaf, not this root-owned
+  # parent. Existing occupants are checked without changing their custody.
+  require_native_no_acl one "$SYSTEM_ROOT" || return 65
+  "$PYTHON_BINARY" -I -S -B - "$SYSTEM_ROOT" <<'MASTERMIND_GATEWAY_AUDIT_PARENT' || return 65
+import os
+import stat
+import sys
+
+flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+def require_directory(info):
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) & 0o022):
+        raise SystemExit("gateway audit parent requires a direct root:wheel directory without group/other write")
+
+def identity(info):
+    return info.st_dev, info.st_ino
+
+base = os.open(sys.argv[1], flags)
+try:
+    base_info = os.fstat(base)
+    require_directory(base_info)
+    created = False
+    try:
+        before = os.stat("audit", dir_fd=base, follow_symlinks=False)
+    except FileNotFoundError:
+        # Exclusive creation under the held sealed parent; a racing occupant
+        # refuses, and no existing directory is chowned or chmodded.
+        os.mkdir("audit", 0o700, dir_fd=base)
+        created = True
+        before = os.stat("audit", dir_fd=base, follow_symlinks=False)
+    audit = os.open("audit", flags, dir_fd=base)
+    try:
+        if identity(os.fstat(audit)) != identity(before):
+            raise SystemExit("gateway audit parent changed during provisioning")
+        if created:
+            os.fchown(audit, 0, 0)
+            os.fchmod(audit, 0o755)
+            os.fsync(audit)
+            os.fsync(base)
+        require_directory(os.fstat(audit))
+        if identity(os.stat("audit", dir_fd=base, follow_symlinks=False)) != identity(before):
+            raise SystemExit("gateway audit parent changed during provisioning")
+    finally:
+        os.close(audit)
+    if identity(os.stat(sys.argv[1], follow_symlinks=False)) != identity(base_info):
+        raise SystemExit("gateway audit base changed during provisioning")
+finally:
+    os.close(base)
+MASTERMIND_GATEWAY_AUDIT_PARENT
+  require_native_no_acl one "$SYSTEM_ROOT/audit" || return 65
+}
+# --- END gateway audit parent provisioning ---
+
 # Cross the mutation boundary only after the identity, runtime, source, auth,
 # and exact-SHA preflight above. From here to process exit the trap keeps all
 # install-owned daemons, including a separately prepared C1 Relay, disabled
@@ -1697,6 +1753,7 @@ wait_for_launchd_absent "$BACKUP_LABEL" backup || exit 65
 wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
 
 stage_sealed_release || exit 65
+provision_gateway_audit_parent || exit 65
 
 # This remains a substep of the existing serialized installer publication.
 # Same-profile occupants verify exactly; missing/changed occupants are not reset.

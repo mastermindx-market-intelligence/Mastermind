@@ -742,3 +742,12 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'a08b20f
 # audit, protected autonomy/initializer/qualification/enrollment sources matched
 # d3f bytes; their sites were read in their owning call context. The current C20
 # enrollment source is bound by its protected exact-postimage review above.
+
+
+# The installer exclusively creates the gateway audit parent with this private
+# initial mode, under its held trusted root, before qualified final0755 mode.
+# Only this new token is reviewed; existing source identities remain visible.
+REVIEWED_FILES['ops/executive_os/install.sh'] = {
+    'sha256': '1764e5f60e6ec90d5361b79486dba2dbb6fa73f15a040bec5ca05c415b350eaf',
+    'sites': ((1666, 26, 31, 'int', '0o700'),),
+}
