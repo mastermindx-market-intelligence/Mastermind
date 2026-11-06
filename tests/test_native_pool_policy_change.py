@@ -146,14 +146,17 @@ def test_identifier_and_pool_count_bounds():
 
 
 def test_paths_never_write_inputs_or_create_state_and_refuse_symlink(tmp_path):
-    current, candidate = tmp_path / "current.yaml", tmp_path / "candidate.yaml"
+    # Isolate operator-owned inputs from pytest/plugin bookkeeping in tmp_path.
+    policy_dir = tmp_path / "policy_inputs"
+    policy_dir.mkdir()
+    current, candidate = policy_dir / "current.yaml", policy_dir / "candidate.yaml"
     current.write_bytes(raw(policy()))
     candidate.write_bytes(raw(policy()))
-    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+    before = {p.name: p.read_bytes() for p in policy_dir.iterdir()}
     result = change.preview_paths(current, candidate, expected_source_sha256=hashlib.sha256(current.read_bytes()).hexdigest())
     assert result["status"] == "UNCHANGED"
-    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
-    link = tmp_path / "link.yaml"
+    assert {p.name: p.read_bytes() for p in policy_dir.iterdir()} == before
+    link = policy_dir / "link.yaml"
     link.symlink_to(current)
     with pytest.raises(change.PolicyChangeError, match="POLICY_SOURCE_UNAVAILABLE"):
         change.observe_path(link)
