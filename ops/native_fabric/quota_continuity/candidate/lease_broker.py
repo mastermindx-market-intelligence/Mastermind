@@ -55,6 +55,45 @@ class ApplicationSelectionError(ApplicationAdmissionError):
     """A selection condition failed before allocation; no new turn was admitted."""
 
 
+def _application_route_scope(value):
+    """An explicit trusted pool restriction; never a grant or transport registry."""
+    if (type(value) is not dict or set(value) != {"schema", "pools"}
+            or value["schema"] != "mastermind.application_route_scope.v1"):
+        raise ApplicationSelectionError("route_scope_invalid")
+    pools = value["pools"]
+    allowed = {"go", "bailian"} | NATIVE_APPLICATION_POOLS
+    if (type(pools) is not list or not 1 <= len(pools) <= len(allowed)
+            or any(type(pool) is not str or pool not in allowed for pool in pools)
+            or pools != sorted(set(pools))):
+        raise ApplicationSelectionError("route_scope_pools_invalid")
+    encoded = _application_json(value)
+    return encoded, hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def _application_record_scope(record):
+    """Validate the closed frozen selection variant without current authority."""
+    fields = {"schema", "purpose", "purpose_digest", "profile", "profile_digest",
+              "identity", "commitments", "quality_records_sha256", "fresh_s"}
+    if type(record) is not dict:
+        raise ApplicationSelectionError("selection_invalid")
+    if record.get("schema") == "mastermind.application_turn_selection.v1":
+        if set(record) != fields:
+            raise ApplicationSelectionError("selection_invalid")
+        return None
+    if (record.get("schema") != "mastermind.application_turn_selection.v2"
+            or set(record) != fields | {"route_scope", "route_scope_digest"}):
+        raise ApplicationSelectionError("selection_invalid")
+    encoded, digest = _application_route_scope(record["route_scope"])
+    identity = record["identity"]
+    if (record["route_scope_digest"] != digest or type(identity) is not dict
+            or identity.get("pool") not in record["route_scope"]["pools"]
+            or type(identity.get("task")) is not dict
+            or "requested_model" not in identity["task"]
+            or identity["task"]["requested_model"] is not None):
+        raise ApplicationSelectionError("selection_scope_invalid")
+    return encoded, digest
+
+
 def _application_selection_purpose(value):
     """Validate the trusted enrollment projection, never an HTTP authority field."""
     if type(value) is not dict or set(value) != {"purpose_id", "source_ref", "task"}:
@@ -478,15 +517,12 @@ def _application_requested_model(turn):
             raise ApplicationAdmissionError("stored_selection_invalid")
         return _application_model(value["model"])
     try:
-        fields = {"schema", "purpose", "purpose_digest", "profile", "profile_digest",
-                  "identity", "commitments", "quality_records_sha256", "fresh_s"}
         if (type(raw) is not str or len(raw.encode("utf-8")) > 32768
                 or hashlib.sha256(raw.encode("utf-8")).hexdigest() != digest):
             raise ValueError("selection digest")
         record = json.loads(raw)
-        if (type(record) is not dict or set(record) != fields
-                or record["schema"] != "mastermind.application_turn_selection.v1"
-                or _application_json(record) != raw):
+        _application_record_scope(record)
+        if _application_json(record) != raw:
             raise ValueError("selection shape")
         identity, profile = record["identity"], record["profile"]
         task = identity["task"]
@@ -2580,15 +2616,15 @@ class Broker:
 
     def _application_check_selection(self, record, *, pool, model, caller_host, grant, grant_digest,
                                      expected_purpose, expected_profile, expected_task,
-                                     existing=False):
+                                     expected_route_scope=None, existing=False):
         """Conditional admission in A's current transaction; never select again."""
         try:
             import pick
-            fields = {"schema", "purpose", "purpose_digest", "profile", "profile_digest",
-                      "identity", "commitments", "quality_records_sha256", "fresh_s"}
-            if (type(record) is not dict or set(record) != fields
-                    or record["schema"] != "mastermind.application_turn_selection.v1"):
-                raise ValueError("invalid selection")
+            frozen_scope = _application_record_scope(record)
+            current_scope = (None if expected_route_scope is None
+                             else _application_route_scope(expected_route_scope))
+            if frozen_scope != current_scope:
+                raise ValueError("route scope changed")
             encoded = _application_json(record)
             if len(encoded.encode()) > 32768:
                 raise ValueError("selection exceeds bound")
@@ -2690,7 +2726,8 @@ class Broker:
                                pool, model, deadline_ns=None, transport_accounts=None,
                                expected_credential_ref=None, application_recipe=None,
                                expected_recipe_digest=None, expected_selection=None,
-                               selection_purpose=None, selection_profile=None, selection_task=None):
+                               selection_purpose=None, selection_profile=None, selection_task=None,
+                               selection_route_scope=None):
         for value in (principal_id, caller_host, workload, turn_id):
             _application_id(value)
         _application_model(model)
@@ -2735,7 +2772,7 @@ class Broker:
                         raise ApplicationSelectionError("stored_selection_invalid") from None
                 elif expected_selection is not None or selection_purpose is not None:
                     raise ApplicationSelectionError("legacy_turn_purpose_changed")
-            elif selection_purpose is not None and selected is None:
+            elif (selection_purpose is not None or selection_route_scope is not None) and selected is None:
                 raise ApplicationSelectionError("selection_required")
             try:
                 document, grant, digest = self._application_grant(
@@ -2756,7 +2793,8 @@ class Broker:
                 selection_json, selection_digest = self._application_check_selection(selected,
                     pool=pool, model=model, caller_host=caller_host, grant=grant, grant_digest=digest,
                     expected_purpose=selection_purpose, expected_profile=selection_profile,
-                    expected_task=selection_task, existing=prior is not None)
+                    expected_task=selection_task, expected_route_scope=selection_route_scope,
+                    existing=prior is not None)
             if prior is not None:
                 if prior["grant_digest"] != digest:
                     raise ApplicationAdmissionError("grant_changed")

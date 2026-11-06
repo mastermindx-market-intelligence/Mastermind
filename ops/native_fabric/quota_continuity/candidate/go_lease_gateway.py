@@ -423,19 +423,43 @@ class GoLeaseGateway:
         from lease_broker import _application_selection_task
         return _application_selection_task(purpose, payload)
 
-    def select_application(self, request, *, principal_id, host, credential_ref, purpose, payload):
-        """Select a registered model in the existing service pool, once per attempt."""
+    def application_registered_routes(self):
+        """Names from the actual startup projections; no eligibility or account read."""
+        pairs = ({("go", model) for model in self._models}
+                 | set(self._application_http_recipes) | set(self._application_native_recipes))
+        return frozenset(pair for pair in pairs if self._application_route(*pair)[0] is not None)
+
+    def select_application(self, request, *, principal_id, host, credential_ref, purpose, payload,
+                           route_scope=None, transport_candidates=None):
+        """Select once from registered, granted routes inside trusted service scope."""
         try:
             import pick
             import pool_ledger
             from lease_broker import (_application_json, _application_selection_purpose,
-                                      _read_application_accounts, _application_native_payload)
+                                      _read_application_accounts, _application_native_payload,
+                                      _application_route_scope, _application_model)
             broker = self._application_owner()
             if (type(request) is not dict or set(request) != {"workload", "turn_id", "pool", "model"}
                     or type(payload) is not dict or "model" not in payload
                     or payload["model"] != request["model"]):
                 raise ValueError("selection request identity")
             requested = request["model"]
+            scope_document = scope_digest = None
+            eligible_pools = {request["pool"]}
+            if route_scope is not None:
+                scope_json, scope_digest = _application_route_scope(route_scope)
+                scope_document = json.loads(scope_json)
+                if (requested is not None or type(transport_candidates) is not frozenset
+                        or len(transport_candidates) > 128):
+                    raise ValueError("invalid AUTO transport projection")
+                for pair in transport_candidates:
+                    if (type(pair) is not tuple or len(pair) != 2
+                            or pair[0] not in ({"go", "bailian"} | NATIVE_APPLICATION_POOLS)):
+                        raise ValueError("invalid AUTO candidate")
+                    _application_model(pair[1])
+                eligible_pools = set(scope_document["pools"])
+            elif transport_candidates is not None:
+                raise ValueError("transport projection requires route scope")
             task = self.application_selection_task(purpose, payload)
             policy = pick.read_application_policy()
             quality = pool_ledger.read_recent(limit=10000, strict=True)
@@ -446,9 +470,7 @@ class GoLeaseGateway:
                 connection.row_factory = sqlite3.Row
                 connection.execute("BEGIN")
                 for pool in pick._APPLICATION_POOL_ORDER:
-                    # Null changes model selection only. Cross-pool authority
-                    # needs the later explicit trusted route-scope contract.
-                    if pool != request["pool"]:
+                    if pool not in eligible_pools:
                         continue
                     if requested is not None:
                         models = (requested,)
@@ -461,6 +483,8 @@ class GoLeaseGateway:
                         models = sorted(model for candidate_pool, model in self._application_native_recipes
                                         if candidate_pool == pool)
                     for model in models:
+                        if transport_candidates is not None and (pool, model) not in transport_candidates:
+                            continue
                         accounts, digest, projection = self._application_route(pool, model)
                         if accounts is None:
                             continue
@@ -503,7 +527,7 @@ class GoLeaseGateway:
                                 previous.pop("mode", None)
             finally:
                 connection.close()
-            expected = {"pool": request["pool"]}
+            expected = None if scope_document is not None else {"pool": request["pool"]}
             if requested is not None:
                 bound = projections.get((request["pool"], requested))
                 if bound is None:
@@ -521,18 +545,23 @@ class GoLeaseGateway:
             if identity["source"] != bound["source"]:
                 raise ValueError("selected source changed")
             purpose_json, purpose_digest = _application_selection_purpose(purpose)
-            return {"schema": "mastermind.application_turn_selection.v1",
+            result = {"schema": "mastermind.application_turn_selection.v1",
                 "purpose": json.loads(purpose_json), "purpose_digest": purpose_digest,
                 "profile": bound, "profile_digest": hashlib.sha256(_application_json(bound).encode()).hexdigest(),
                 "identity": identity, "commitments": selected["commitments"],
                 "quality_records_sha256": hashlib.sha256(_application_json(quality).encode()).hexdigest(),
                 "fresh_s": 5.0}
+            if scope_document is not None:
+                result.update(schema="mastermind.application_turn_selection.v2",
+                              route_scope=scope_document, route_scope_digest=scope_digest)
+            return result
         except Exception:
             raise ApplicationSelectionRefused("application selection unavailable") from None
 
     def begin_application(self, request, *, principal_id, host, deadline_ns=None,
                           expected_credential_ref=None, expected_recipe_digest=None,
-                          expected_selection=None, selection_purpose=None, selection_payload=None):
+                          expected_selection=None, selection_purpose=None, selection_payload=None,
+                          selection_route_scope=None):
         """Internal authenticated service context; never caller-supplied identity."""
         try:
             broker = self._application_owner()
@@ -547,7 +576,7 @@ class GoLeaseGateway:
                 if route is None:
                     raise ApplicationSelectionRefused("application selection condition refused")
                 selection_args = dict(expected_selection=expected_selection, selection_purpose=selection_purpose,
-                    selection_profile=route[2],
+                    selection_profile=route[2], selection_route_scope=selection_route_scope,
                     selection_task=self.application_selection_task(selection_purpose, selection_payload))
             result = broker.begin_application_turn(principal_id=principal_id, caller_host=host,
                 workload=request["workload"], turn_id=request["turn_id"], pool=request["pool"],
