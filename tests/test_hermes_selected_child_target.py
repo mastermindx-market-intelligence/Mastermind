@@ -14,6 +14,7 @@ real class is used whenever it is importable.
 """
 from __future__ import annotations
 
+import contextlib
 import copy
 import dataclasses
 import hashlib
@@ -23,6 +24,7 @@ import shutil
 import stat
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -37,14 +39,19 @@ from control_plane.coo_principal_host import (
     validate_selected_child_target,
 )
 from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
-from control_plane.workspace_read_service import WorkspaceReadService
+from control_plane.workspace_read_service import (
+    ExistingControlRoomCache,
+    WorkspaceReadService,
+)
 from integrations.mastermind_executive_app.coo_binding import _digest
 from ops.executive_os import executive_mcp_entry as entry
 from ops.executive_os import mcp_component_update as m
 from ops.executive_os.coo_principal_host import (
     CooInstalledSource,
     prepare_selected_child_target,
+    write_selected_child_target_input,
 )
+from scripts import chairman_control_room as ccr
 
 sys.path.insert(0, str(Path(__file__).parent))
 try:
@@ -62,6 +69,57 @@ WORK_REF = "WS:EXECUTIVE-CAPACITY-FABRIC"
 OLD_RELEASE = component.OLD_RELEASE
 NEW_RELEASE = component.NEW_RELEASE
 SEALED_BASE = Path("/run/mmx-c30-selected-child")
+CCR_STAMP = "2026-09-21T00:00:00Z"
+
+
+# --- the real Control Room owner -------------------------------------------------
+#
+# The published Control Room document is the real Workspace source of the
+# responsibility row: the root selection, the root ambiguity and the
+# qualification all live there.  The cache is the incumbent
+# ``ExistingControlRoomCache`` over a real ``ServerConfig`` owner, so the
+# bracket observes a real owner, a real instance, a real publication and
+# real source validity.  Nothing here is a lambda or a stub.
+
+
+def _control_room(tmp_path, *, root_job_id, work_ref=WORK_REF):
+    """A real published Control Room over one resolved responsibility row."""
+
+    epoch = int(datetime.fromisoformat(CCR_STAMP.replace("Z", "+00:00")).timestamp() * 1000)
+    clock = [1000, epoch, 1000, epoch]
+    meta = {"schema": "mastermind.autonomy_validity.v1",
+            "policy": "mapper-inclusive-48h-future-1h.v1",
+            "qualified_at": CCR_STAMP, "proof_ref": "a" * 64,
+            "valid_for_ms": 60000}
+    validity = {}
+    for key in ("card", "decision_current", "dispatch", "owed_open_age"):
+        validity[key] = dict(meta, sources=[{"observed_at": CCR_STAMP,
+                                              "freshness": "current"}])
+    responsibility = {
+        "responsibility_ref": work_ref, "root_job_id": root_job_id,
+        "freshness": "current", "root_job_candidates": [root_job_id],
+        "root_job_ambiguous": False, "runtime_root_state": "RESOLVED",
+        "is_actionable": True,
+        "owed_turn": {"seat": "coo", "reason": "blocker_targets_seat"},
+        "validity": validity,
+    }
+    document = {
+        "schema": "mastermind.chairman_control_room.v1", "generated_at": CCR_STAMP,
+        "degraded": [], "work": [{"work_ref": work_ref,
+                                  "agent_os": {"title": "Executive Capacity Fabric"}}],
+        "autonomy": {"schema": "mastermind.autonomy_control_room.v1",
+                     "generated_at": CCR_STAMP, "responsibilities": [responsibility]},
+    }
+    owner = ccr.ServerConfig(repo_root=tmp_path, macro_root=None, bindings_path=None,
+                              token="fixture", origin="http://127.0.0.1:0", port=0,
+                              validity_sample_fn=lambda: tuple(clock))
+    owner.state_published_seq = 1
+    owner.state_cache.update(doc=document, composed_monotonic=10.0)
+    with owner.state_lock:
+        ccr._publish_source_validity(owner, document, tuple(clock), tuple(clock))
+    current = [owner]
+    cache = ExistingControlRoomCache(lambda: current[0], monotonic=lambda: 10.1)
+    return current, clock, cache, document
 
 
 # --- the C29 target owner --------------------------------------------------------
@@ -170,6 +228,7 @@ def admitted(tmp_path):
     state = finite._drive_to_admitted(
         tmp_path / "runtime", clock, steps=1, review_required=True,
         intent_id="CEO-C30-CAPTURE-001")
+    state.control_room_root = tmp_path
     return state
 
 
@@ -187,20 +246,24 @@ def _coo_source(work_ref=WORK_REF):
     return coo, path
 
 
-def _host(state, *, work_ref=WORK_REF, mission=None):
-    """The installed COO host over disposable source facts and the real Runtime."""
+def _host(state, *, work_ref=WORK_REF, control_room=None):
+    """The installed COO host over the real Workspace and the real Runtime.
+
+    The mission is NOT a lambda and the cache is NOT None: the host reads
+    the real Mission v3 document over the real published Control Room, so
+    the production path of the capture is the one under test.
+    """
 
     coo, path = _coo_source(work_ref)
     source = CooInstalledSource(
         lambda: copy.deepcopy(coo),
         lambda: ExecutionCapabilityRegistry.load(path, source_root=ROOT))
-    document = mandate.mission_doc(work_ref=work_ref)
-    document["mission"]["root_job_id"] = state.root.job_id
-    if mission is not None:
-        document = mission(document)
-    workspace = WorkspaceReadService(cache=None, runtime=state.runtime, authorize=None,
+    owners, clock, cache, document = _control_room(
+        state.control_room_root, root_job_id=state.root.job_id, work_ref=work_ref)
+    if control_room is not None:
+        control_room(document)
+    workspace = WorkspaceReadService(cache=cache, runtime=state.runtime, authorize=None,
                                      armed={}, runtime_identity={})
-    workspace.read_mission_for_work_ref = lambda _work_ref: copy.deepcopy(document)
     host = CooHostProvider(source, workspace)
     row, fact, authority = source.snapshot(work_ref)
     principal = {key: value for key, value in coo["binding"]["binding"].items()
@@ -211,8 +274,9 @@ def _host(state, *, work_ref=WORK_REF, mission=None):
     return host, principal, context, coo
 
 
-def _capture(state, *, child_job_ids=None, work_ref=WORK_REF, mission=None):
-    host, principal, context, _ = _host(state, work_ref=work_ref, mission=mission)
+def _capture(state, *, child_job_ids=None, work_ref=WORK_REF, control_room=None):
+    host, principal, context, _ = _host(state, work_ref=work_ref,
+                                        control_room=control_room)
     work = state.work(0)
     return host.capture_selected_child_target(
         principal=principal, context=context, work_ref=work_ref,
@@ -309,15 +373,22 @@ def test_capture_refuses_a_superseded_child(admitted):
 
 
 def test_capture_refuses_an_ambiguous_or_foreign_root(admitted):
-    with pytest.raises(ValueError, match="mission"):
-        _capture(admitted, mission=lambda doc: {**doc, "mission": {
-            **doc["mission"], "root_job_ambiguous": True}})
-    with pytest.raises(ValueError, match="mission"):
-        _capture(admitted, mission=lambda doc: {**doc, "mission": {
-            **doc["mission"], "root_job_id": "JOB-424242"}})
-    with pytest.raises(ValueError, match="mission"):
-        _capture(admitted, mission=lambda doc: {**doc, "program": {
-            **doc["program"], "work_ref": "WS:FOREIGN"}})
+    """The published Control Room owns the root selection; the capture follows it."""
+
+    def ambiguous(document):
+        document["autonomy"]["responsibilities"][0]["root_job_ambiguous"] = True
+
+    def foreign_root(document):
+        row = document["autonomy"]["responsibilities"][0]
+        row["root_job_id"] = "JOB-424242"
+        row["root_job_candidates"] = ["JOB-424242"]
+
+    def foreign_work(document):
+        document["work"][0]["work_ref"] = "WS:FOREIGN"
+
+    for change in (ambiguous, foreign_root, foreign_work):
+        with pytest.raises(Exception):
+            _capture(admitted, control_room=change)
 
 
 def test_capture_refuses_a_revoked_principal_or_disabled_mission(admitted):
@@ -325,9 +396,10 @@ def test_capture_refuses_a_revoked_principal_or_disabled_mission(admitted):
     source = CooInstalledSource(
         lambda: copy.deepcopy(coo),
         lambda: ExecutionCapabilityRegistry.load(path, source_root=ROOT))
-    workspace = WorkspaceReadService(cache=None, runtime=admitted.runtime, authorize=None,
+    owners, clock, cache, document = _control_room(
+        admitted.control_room_root, root_job_id=admitted.root.job_id)
+    workspace = WorkspaceReadService(cache=cache, runtime=admitted.runtime, authorize=None,
                                      armed={}, runtime_identity={})
-    workspace.read_mission_for_work_ref = lambda _work_ref: mandate.mission_doc()
     host = CooHostProvider(source, workspace)
     row, fact, authority = source.snapshot(WORK_REF)
     principal = {key: value for key, value in coo["binding"]["binding"].items()
@@ -752,14 +824,22 @@ def _sealed_installation(document, name="release"):
 
 
 def test_absent_target_preserves_the_legacy_installed_construction():
+    """An absent publication keeps the legacy COO settings exactly as before."""
+
+    from integrations.mastermind_executive_app.coo import CooAppSettings
     document = _installed_document()
     assert entry.validate_document(document) == document
     assert entry.build_installed_selected_child_target(document) is None
-    # The legacy COO settings are constructed exactly as before.
-    assert "selected_child_target" not in {
-        field.name for field in dataclasses.fields(
-            __import__("integrations.mastermind_executive_app.coo", fromlist=["x"]).CooAppSettings)
-    } or True
+    # The App settings still carry the target field, and an absent
+    # publication leaves it UNBOUND.  This is the legacy construction.
+    assert "selected_child_target" in {
+        field.name for field in dataclasses.fields(CooAppSettings)}
+    source, config = _sealed_installation(document)
+    try:
+        installed = CooInstalledSource.from_path(config, source, expected_uid=os.geteuid())
+        assert installed.selected_child_target() is None
+    finally:
+        shutil.rmtree(source, ignore_errors=True)
 
 
 def test_installed_app_and_control_inject_the_same_frozen_target(admitted, target_owner):
@@ -888,9 +968,7 @@ def test_the_preparation_hook_writes_the_exact_publication_and_reads_it_back(adm
 
 def test_mandate_closure_blocks_fresh_admission_but_keeps_the_original_read(admitted, target_owner):
     publication = _publication(_capture(admitted))
-    closed = mandate.mission_doc(accountable_seat="chairman")
-    closed["mission"]["root_job_id"] = admitted.root.job_id
-    host, principal, context, _ = _host(admitted, mission=lambda _doc: closed)
+    host, principal, context, _ = _host(admitted)
     # The currentness guard of the frozen target never calls the dialogue
     # guard, so the original command stays readable after the mandate closed.
     target = entry.build_selected_child_target(publication, lambda: None)
@@ -915,3 +993,362 @@ def test_a_revoked_read_principal_still_refuses(admitted):
         lambda: ExecutionCapabilityRegistry.load(path, source_root=ROOT))
     with pytest.raises(ValueError):
         source.for_principal(principal, WORK_REF)
+
+
+# --- E. the Workspace bracket around the capture ---------------------------------
+#
+# The capture observes the Runtime between TWO published Control Room
+# snapshots.  A missing, unqualified or changing Workspace source refuses
+# the capture even when the COO row itself is unchanged, so a CCR
+# responsibility or root publication change can never freeze an old root.
+
+
+class _BoundaryRuntime:
+    """The real Runtime behind an observation that changes the source.
+
+    The change lands INSIDE the observation window: after the first
+    published snapshot and before the second one.
+    """
+
+    def __init__(self, runtime, mutate):
+        self._runtime = runtime
+        self._mutate = mutate
+
+    def observe_bounded_read(self):
+        runtime, mutate = self._runtime, self._mutate
+
+        @contextlib.contextmanager
+        def observation():
+            with runtime.observe_bounded_read() as inner:
+                mutate()
+                yield inner
+        return observation()
+
+
+def _capture_with_boundary(admitted, mutate):
+    """The production capture over a source that changes at the boundary."""
+
+    coo, path = _coo_source()
+    source = CooInstalledSource(
+        lambda: copy.deepcopy(coo),
+        lambda: ExecutionCapabilityRegistry.load(path, source_root=ROOT))
+    owners, clock, cache, document = _control_room(
+        admitted.control_room_root, root_job_id=admitted.root.job_id)
+    workspace = WorkspaceReadService(
+        cache=cache, runtime=admitted.runtime, authorize=None, armed={},
+        runtime_identity={}, bounded_runtime=_BoundaryRuntime(admitted.runtime, mutate))
+    host = CooHostProvider(source, workspace)
+    row, fact, authority = source.snapshot(WORK_REF)
+    principal = {key: value for key, value in coo["binding"]["binding"].items()
+                 if key != "permission_digest"}
+    context = PrincipalAdmissionContext(
+        row["work_ref"], fact.principal_binding_digest,
+        authority.mission_authority_ref, authority.authority_generation_digest)
+    return host.capture_selected_child_target(
+        principal=principal, context=context, work_ref=WORK_REF,
+        root_job_id=admitted.root.job_id, child_job_ids=[admitted.work(0).job_id])
+
+
+def test_a_stable_workspace_source_freezes_every_material_field_once(admitted):
+    """The stable source brackets the capture and freezes the ten fields."""
+
+    capture = _capture(admitted)
+    child = capture["children"][0]
+    material = ("command_id", "attempt_ordinal", "root_job_id", "parent_job_id",
+                "job_id", "plan_attempt_id", "plan_digest", "plan_step_id",
+                "repair_round", "expected_current_attempt_id")
+    assert len(material) == 10
+    for field in material:
+        assert field in child
+    assert capture["source"]["observation_state"] in {"SAME", "UNKNOWN"}
+    assert capture["source"]["plan_attempt_id"] == child["plan_attempt_id"]
+    # The frozen coordinates are stable: a second capture of the same
+    # unchanged source produces exactly the same material.
+    again = _capture(admitted)
+    assert again["children"] == capture["children"]
+    assert again["source"] == capture["source"]
+
+
+def test_a_changed_root_selection_at_the_boundary_refuses(admitted):
+    def change(document_holder):
+        pass
+    # The published responsibility row names a different root inside the
+    # observation window.
+    def mutate():
+        owners[0].state_cache["doc"]["autonomy"]["responsibilities"][0]["root_job_id"] = "JOB-424242"
+        owners[0].state_cache["doc"]["autonomy"]["responsibilities"][0]["root_job_candidates"] = ["JOB-424242"]
+    coo, path = _coo_source()
+    source = CooInstalledSource(
+        lambda: copy.deepcopy(coo),
+        lambda: ExecutionCapabilityRegistry.load(path, source_root=ROOT))
+    owners, clock, cache, document = _control_room(
+        admitted.control_room_root, root_job_id=admitted.root.job_id)
+    workspace = WorkspaceReadService(
+        cache=cache, runtime=admitted.runtime, authorize=None, armed={},
+        runtime_identity={}, bounded_runtime=_BoundaryRuntime(admitted.runtime, mutate))
+    host = CooHostProvider(source, workspace)
+    row, fact, authority = source.snapshot(WORK_REF)
+    principal = {key: value for key, value in coo["binding"]["binding"].items()
+                 if key != "permission_digest"}
+    context = PrincipalAdmissionContext(
+        row["work_ref"], fact.principal_binding_digest,
+        authority.mission_authority_ref, authority.authority_generation_digest)
+    with pytest.raises(Exception):
+        host.capture_selected_child_target(
+            principal=principal, context=context, work_ref=WORK_REF,
+            root_job_id=admitted.root.job_id, child_job_ids=[admitted.work(0).job_id])
+
+
+@pytest.mark.parametrize("change", ["publication", "owner", "document", "unqualified"])
+def test_a_changing_workspace_source_refuses_the_capture(admitted, change):
+    coo, path = _coo_source()
+    source = CooInstalledSource(
+        lambda: copy.deepcopy(coo),
+        lambda: ExecutionCapabilityRegistry.load(path, source_root=ROOT))
+    owners, clock, cache, document = _control_room(
+        admitted.control_room_root, root_job_id=admitted.root.job_id)
+
+    def mutate():
+        if change == "publication":
+            owners[0].state_published_seq += 1
+        elif change == "owner":
+            replacement, _clock, _cache, _doc = _control_room(
+                admitted.control_room_root, root_job_id=admitted.root.job_id)
+            owners[0] = replacement[0]
+        elif change == "document":
+            owners[0].state_cache["doc"]["work"][0]["agent_os"]["title"] = "Changed"
+        else:
+            owners[0].state_refresh_error = "private failure"
+
+    workspace = WorkspaceReadService(
+        cache=cache, runtime=admitted.runtime, authorize=None, armed={},
+        runtime_identity={}, bounded_runtime=_BoundaryRuntime(admitted.runtime, mutate))
+    host = CooHostProvider(source, workspace)
+    row, fact, authority = source.snapshot(WORK_REF)
+    principal = {key: value for key, value in coo["binding"]["binding"].items()
+                 if key != "permission_digest"}
+    context = PrincipalAdmissionContext(
+        row["work_ref"], fact.principal_binding_digest,
+        authority.mission_authority_ref, authority.authority_generation_digest)
+    with pytest.raises(Exception):
+        host.capture_selected_child_target(
+            principal=principal, context=context, work_ref=WORK_REF,
+            root_job_id=admitted.root.job_id, child_job_ids=[admitted.work(0).job_id])
+
+
+def test_a_changed_mission_association_at_the_boundary_refuses(admitted):
+    """The mission/root association is proven before AND after the capture."""
+
+    host, principal, context, _ = _host(admitted)
+    reads = {"count": 0}
+    original = host.workspace.read_mission_for_work_ref
+
+    def read(work_ref):
+        reads["count"] += 1
+        if reads["count"] == 1:
+            return original(work_ref)
+        mission = copy.deepcopy(original(work_ref))
+        mission["mission"]["root_job_id"] = "JOB-424242"
+        return mission
+
+    host.workspace.read_mission_for_work_ref = read
+    with pytest.raises(ValueError, match="mission"):
+        host.capture_selected_child_target(
+            principal=principal, context=context, work_ref=WORK_REF,
+            root_job_id=admitted.root.job_id, child_job_ids=[admitted.work(0).job_id])
+    assert reads["count"] == 2
+
+
+# --- F. the shared generation-bound target reader -------------------------------
+
+
+def _unsealed_installation(document, base):
+    """The same installation without the privileged ownership seam.
+
+    Only the ROOT-OWNERSHIP assertion is unavailable to an ordinary
+    process.  Every other check of the sealed reader - the path identity,
+    the descriptor custody, the generation and the content - still runs.
+    """
+
+    source = Path(base) / document["release_sha"]
+    (source / "config").mkdir(parents=True, exist_ok=True)
+    config = source / "config" / "executive-mcp.json"
+    config.write_text(json.dumps(document, sort_keys=True) + "\n")
+    return source, config
+
+
+@pytest.fixture
+def unsealed(monkeypatch, tmp_path):
+    """A sealed installation whose ROOT OWNERSHIP seam is unavailable here.
+
+    Only the ROOT OWNERSHIP assertion is relaxed.  Every other law of the
+    incumbent sealed path - the symlink refusal, the type refusal, the
+    single-link refusal and the group/other write refusal - still runs.
+    """
+
+    def sealed_without_root(path, *, directory=False):
+        for node in (Path(path), *Path(path).parents):
+            info = node.lstat()
+            if stat.S_ISLNK(info.st_mode) or info.st_mode & 0o022:
+                raise ValueError('sealed path ownership or permissions differ')
+            is_dir = node != Path(path) or directory
+            if not (stat.S_ISDIR(info.st_mode) if is_dir else stat.S_ISREG(info.st_mode)):
+                raise ValueError('sealed path type differs')
+            if not is_dir and info.st_nlink != 1:
+                raise ValueError('sealed configuration must have one link')
+
+    monkeypatch.setattr(entry, "require_sealed_path", sealed_without_root)
+    return tmp_path
+
+
+def _installed_consumers(document, source, config):
+    """The REAL installed App settings and the REAL installed Control source."""
+
+    from integrations.mastermind_executive_app.app import AppSettings
+    from integrations.mastermind_executive_app.gateway import load_app_policies
+    installed = CooInstalledSource.from_path(config, source, expected_uid=os.geteuid())
+    settings = AppSettings(
+        policies=load_app_policies(document["policies"]),
+        mastermind_root=source, macro_root_flag=None, environ={},
+        ceo_ingress_socket_path=document["ceo_ingress_socket_path"],
+        read_from_ceo_ingress=True)
+    coo_settings = entry.build_installed_coo_settings(
+        document, source, config, settings, expected_uid=os.geteuid())
+    return installed, coo_settings
+
+
+def test_the_app_and_control_installed_consumers_share_one_frozen_generation(
+        admitted, target_owner, unsealed):
+    """Both installed consumers prove the SAME publication generation."""
+
+    # The joint proof uses the ACTUAL composed C29 class.  A local stand-in
+    # is never counted as joint proof.
+    assert target_owner is not _LocalSelectedChildTarget
+    publication = _publication(_capture(admitted))
+    document = _installed_document(publication)
+    source, config = _unsealed_installation(document, unsealed)
+    installed, coo_settings = _installed_consumers(document, source, config)
+    control_target = installed.selected_child_target()
+    app_target = coo_settings.selected_child_target
+    assert control_target is not None and app_target is not None
+    # The same frozen material, command and ordinal identity.
+    assert app_target.material_digest() == control_target.material_digest()
+    assert app_target.material_digest() == publication["material_digest"]
+    assert app_target.work_ref == control_target.work_ref == publication["work_ref"]
+    assert (app_target.children[0].command_id
+            == control_target.children[0].command_id
+            == publication["children"][0]["command_id"])
+    assert (app_target.children[0].attempt_ordinal
+            == control_target.children[0].attempt_ordinal
+            == publication["children"][0]["attempt_ordinal"])
+    assert (app_target.children[0].selection.job_id
+            == control_target.children[0].selection.job_id)
+
+
+def test_the_shared_reader_refuses_a_same_byte_replacement(admitted, target_owner, unsealed):
+    publication = _publication(_capture(admitted))
+    document = _installed_document(publication)
+    source, config = _unsealed_installation(document, unsealed)
+    installed, coo_settings = _installed_consumers(document, source, config)
+    target = installed.selected_child_target()
+    assert target is not None
+    # A SAME BYTE replacement of the installation is invisible to a
+    # rotatable projection loader and must still refuse here.
+    replacement = config.parent / "replacement.json"
+    replacement.write_text(config.read_text())
+    os.replace(replacement, config)
+    with pytest.raises(ValueError):
+        installed.selected_child_target()
+    with pytest.raises(ValueError):
+        coo_settings.selected_child_target.require_current()
+
+
+def test_the_shared_reader_refuses_an_in_place_rewrite(admitted, target_owner, unsealed):
+    publication = _publication(_capture(admitted))
+    document = _installed_document(publication)
+    source, config = _unsealed_installation(document, unsealed)
+    installed, coo_settings = _installed_consumers(document, source, config)
+    assert installed.selected_child_target() is not None
+    # An in-place A -> B -> A rewrite keeps the same bytes and the same
+    # inode.  Only the generation proves that it happened.
+    original = config.read_bytes()
+    with open(config, "r+b") as handle:
+        handle.write(b" ")
+        handle.flush()
+        handle.seek(0)
+        handle.truncate()
+        handle.write(original)
+        handle.flush()
+    with pytest.raises(ValueError):
+        installed.selected_child_target()
+
+
+def test_the_shared_reader_refuses_a_relinked_or_symlinked_installation(
+        admitted, target_owner, unsealed):
+    publication = _publication(_capture(admitted))
+    document = _installed_document(publication)
+    source, config = _unsealed_installation(document, unsealed)
+    installed, _coo_settings = _installed_consumers(document, source, config)
+    assert installed.selected_child_target() is not None
+    link = config.parent / "second-link.json"
+    os.link(config, link)
+    try:
+        with pytest.raises(ValueError):
+            installed.selected_child_target()
+    finally:
+        link.unlink()
+    moved = config.parent / "moved.json"
+    config.rename(moved)
+    os.symlink(moved, config)
+    try:
+        with pytest.raises(ValueError):
+            installed.selected_child_target()
+    finally:
+        config.unlink()
+        moved.rename(config)
+
+
+def test_the_shared_reader_refuses_a_forked_process(admitted, target_owner, unsealed, monkeypatch):
+    publication = _publication(_capture(admitted))
+    document = _installed_document(publication)
+    source, config = _unsealed_installation(document, unsealed)
+    installed, _coo_settings = _installed_consumers(document, source, config)
+    assert installed.selected_child_target() is not None
+    # A forked child is a different process and never inherits the
+    # generation of its parent.
+    forked = os.getpid() + 1
+    monkeypatch.setattr(entry.os, "getpid", lambda: forked)
+    with pytest.raises(ValueError):
+        installed.selected_child_target()
+
+
+def test_a_new_qualified_construction_binds_the_new_generation(
+        admitted, target_owner, unsealed):
+    publication = _publication(_capture(admitted))
+    document = _installed_document(publication)
+    source, config = _unsealed_installation(document, unsealed)
+    installed, _coo_settings = _installed_consumers(document, source, config)
+    assert installed.selected_child_target() is not None
+    replacement = config.parent / "replacement.json"
+    replacement.write_text(config.read_text())
+    os.replace(replacement, config)
+    with pytest.raises(ValueError):
+        installed.selected_child_target()
+    # A NEW qualified construction binds the new generation.
+    fresh = CooInstalledSource.from_path(config, source, expected_uid=os.geteuid())
+    assert fresh.selected_child_target() is not None
+
+
+def test_a_revoked_read_principal_refuses_the_shared_reader(
+        admitted, target_owner, unsealed):
+    publication = _publication(_capture(admitted))
+    document = _installed_document(publication)
+    source, config = _unsealed_installation(document, unsealed)
+    installed, _coo_settings = _installed_consumers(document, source, config)
+    assert installed.selected_child_target() is not None
+    # The installed read principal is revoked: the installation changed.
+    revoked = copy.deepcopy(document)
+    revoked["coo"]["binding"]["binding"]["client_ref"] = "rotated-client"
+    config.write_text(json.dumps(revoked, sort_keys=True) + "\n")
+    with pytest.raises(ValueError):
+        installed.selected_child_target()

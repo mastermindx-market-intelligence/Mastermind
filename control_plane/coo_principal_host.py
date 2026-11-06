@@ -28,6 +28,19 @@ from control_plane.coo_principal_mandate import (
 )
 
 FACT_SCHEMA = "mastermind.ceo_ingress.principal_facts.v1"
+#: The closed, explicitly tagged PREPARATION variant of the existing mission
+#: fact request.  It is the SAME closed four-key frame with ONE extra tag
+#: block, so the Control's own admission-arming gate (which applies to
+#: ``operation == "mission"``) still governs it without any edit to the
+#: Executive Service.  It is not a new operation and it is not unguarded:
+#: the App peer, the exact provider, the ready service, the owned Runtime
+#: and the owned bounded task are all still required by the incumbent
+#: handler.
+FACT_PREPARATION_SCHEMA = "mastermind.ceo_ingress.selected_child_preparation.v1"
+FACT_FRAME_KEYS = frozenset({"schema", "operation", "work_ref", "principal"})
+FACT_PREPARATION_FRAME_KEYS = FACT_FRAME_KEYS | {"preparation"}
+FACT_PREPARATION_KEYS = frozenset({"schema", "root_job_id", "child_job_ids"})
+MAX_FACT_SELECTED_CHILDREN = 16
 MISSION_AUTHORITY_VERSION = 2
 MISSION_KEYS_V1 = frozenset({"enabled", "work_ref", "principal_binding_digest",
     "mission_authority_ref", "outcome_ref", "proof_contract_ref",
@@ -350,6 +363,26 @@ class CooHostProvider:
             raise ValueError("selected child capture authority changed")
         # The owned Workspace mission names the exact root. An ambiguous root
         # is a refusal, never a choice.
+        association = self._mission_association(work_ref, root_job_id)
+        capture = self.workspace.capture_selected_child_target(
+            work_ref=work_ref, root_job_id=root_job_id, child_job_ids=chosen)
+        if self.source.for_principal(principal, work_ref) != before:
+            raise ValueError("selected child capture authority changed")
+        # The association is proven BEFORE and AFTER the Runtime observation:
+        # a mission or root publication change inside the capture window can
+        # never freeze an old root.
+        if self._mission_association(work_ref, root_job_id) != association:
+            raise ValueError("selected child capture mission changed")
+        return capture
+
+    def _mission_association(self, work_ref, root_job_id):
+        """The genuine mission/root association of one owned Workspace read.
+
+        The returned tuple is the association itself, never the whole
+        document: the association is what must be the same before and after
+        the capture, and a change of it is a refusal.
+        """
+
         mission = self.workspace.read_mission_for_work_ref(work_ref)
         program = mission.get("program") if type(mission) is dict else None
         body = mission.get("mission") if type(mission) is dict else None
@@ -361,17 +394,16 @@ class CooHostProvider:
                 or body.get("root_job_id") != root_job_id
                 or body.get("root_job_ambiguous") is not False):
             raise ValueError("selected child capture mission is unavailable")
-        capture = self.workspace.capture_selected_child_target(
-            work_ref=work_ref, root_job_id=root_job_id, child_job_ids=chosen)
-        if self.source.for_principal(principal, work_ref) != before:
-            raise ValueError("selected child capture authority changed")
-        return capture
+        return (mission.get("schema"), program.get("work_ref"),
+                body.get("root_job_id"), body.get("root_job_ambiguous"))
 
     def facts(self, frame):
         validate_facts_frame(frame)
         before = self.source.for_principal(frame["principal"], frame["work_ref"])
         if frame["operation"] == "authority":
             result = dataclasses.asdict(before[2])
+        elif "preparation" in frame:
+            result = self._prepare_selected_child(frame, before)
         else:
             if before[0]["enabled"] is not True:
                 _refuse()
@@ -379,6 +411,30 @@ class CooHostProvider:
         if self.source.for_principal(frame["principal"], frame["work_ref"]) != before:
             _refuse()
         return result
+
+    def _prepare_selected_child(self, frame, before):
+        """One closed preparation of the frozen selected-child capture.
+
+        The authority of this preparation is the installed host's OWN facts:
+        the principal is re-proved against the installed source, the
+        admission context is DERIVED from the installed row, fact and
+        authority, and the capture itself re-proves the mission/root
+        association before and after the Runtime observation.  The frame
+        never supplies an authority and never selects a child.
+        """
+
+        row, fact, authority = before
+        if row["enabled"] is not True:
+            _refuse()
+        context = PrincipalAdmissionContext(
+            row["work_ref"], fact.principal_binding_digest,
+            authority.mission_authority_ref, authority.authority_generation_digest,
+        )
+        preparation = frame["preparation"]
+        return self.capture_selected_child_target(
+            principal=frame["principal"], context=context,
+            work_ref=frame["work_ref"], root_job_id=preparation["root_job_id"],
+            child_job_ids=list(preparation["child_job_ids"]))
 
     def guard(self, envelope):
         if type(envelope) is not dict or envelope.get("schema") != ceo_intent.INTENT_SCHEMA_PRINCIPAL:
@@ -490,6 +546,11 @@ class CooHostProvider:
 
 __all__ = [
     "FACT_SCHEMA",
+    "FACT_FRAME_KEYS",
+    "FACT_PREPARATION_FRAME_KEYS",
+    "FACT_PREPARATION_KEYS",
+    "FACT_PREPARATION_SCHEMA",
+    "MAX_FACT_SELECTED_CHILDREN",
     "MISSION_AUTHORITY_VERSION",
     "MISSION_KEYS_V1",
     "MISSION_KEYS_V2",
@@ -510,10 +571,44 @@ __all__ = [
 FACT_PRINCIPAL_KEYS = frozenset({"policy_id", "issuer_digest", "subject_digest", "client_ref", "resource", "scopes"})
 
 
+def _validate_fact_preparation(preparation):
+    """The closed selector block of one preparation request."""
+
+    if (type(preparation) is not dict or set(preparation) != FACT_PREPARATION_KEYS
+            or preparation["schema"] != FACT_PREPARATION_SCHEMA):
+        _refuse()
+    if not _check_job_id(preparation["root_job_id"]):
+        _refuse()
+    children = preparation["child_job_ids"]
+    if type(children) is not list or not 1 <= len(children) <= MAX_FACT_SELECTED_CHILDREN:
+        _refuse()
+    if any(type(item) is not str or not _check_job_id(item) for item in children):
+        _refuse()
+    if len(set(children)) != len(children):
+        _refuse()
+    return preparation
+
+
 def validate_facts_frame(frame):
-    """Closed read frame; authority still comes from the enrolled host source."""
-    if (type(frame) is not dict or set(frame) != {"schema", "operation", "work_ref", "principal"}
-            or frame["schema"] != FACT_SCHEMA or frame["operation"] not in {"authority", "mission"}
+    """Closed read frame; authority still comes from the enrolled host source.
+
+    The legacy four-key authority/mission frame is preserved exactly, with
+    the same results.  The PREPARATION variant is that same closed frame
+    with ONE explicit tag: it keeps ``operation == "mission"`` so the
+    incumbent admission-arming gate still applies, and it adds exactly the
+    closed selector block.  An extra key, an unsupported tag, a duplicate,
+    empty or oversized selector is refused BEFORE any acquisition.
+    """
+    if type(frame) is not dict:
+        _refuse()
+    keys = set(frame)
+    if "preparation" in keys:
+        if keys != FACT_PREPARATION_FRAME_KEYS or frame["operation"] != "mission":
+            _refuse()
+        _validate_fact_preparation(frame["preparation"])
+    elif keys != FACT_FRAME_KEYS:
+        _refuse()
+    if (frame["schema"] != FACT_SCHEMA or frame["operation"] not in {"authority", "mission"}
             or not _check_work_ref(frame["work_ref"])):
         _refuse()
     principal = frame["principal"]
