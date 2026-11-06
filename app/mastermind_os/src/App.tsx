@@ -3926,6 +3926,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                 liveOwner?.generation === ownerContext?.generation) {
               retainedComposerScope.current = liveComposerScope;
               updateRetainedComposer("launchDetails", details);
+              if (details && !retainedComposerRef.current.launchWorkstream && launchView.defaultWorkstream)
+                updateRetainedComposer("launchWorkstream", launchView.defaultWorkstream);
             }
           }}
           onDraftChange={text => {
