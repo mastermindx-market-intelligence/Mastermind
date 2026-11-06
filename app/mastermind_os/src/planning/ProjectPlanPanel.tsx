@@ -23,6 +23,8 @@ export interface ProjectPlanPanelProps {
   sourceGeneration?: () => number;
   canRead?: () => boolean;
   locale?: "en" | "zh-CN";
+  /** DATA hint only; chooses an actually captured proposal. */
+  initialProposalId?: string|null;
   /** Compose a workspace from this same qualified read, without another cache or read. */
   renderWorkspace?: (view: {
     objective: string | null; panel: ReactNode; inspection: PlanAdoptionInspection | null;
@@ -245,7 +247,7 @@ function AvailablePlanBody({ plan, source, chinese, hasContinuity, continuity }:
 }
 
 export function ProjectPlanPanel({
-  selection, read, sourceGeneration, canRead, locale = "en", renderWorkspace,
+  selection, read, sourceGeneration, canRead, locale = "en", renderWorkspace, initialProposalId,
 }: ProjectPlanPanelProps) {
   const chinese = locale === "zh-CN";
   const [document, setDocument] = useState<ProjectPlanRead | null>(null);
@@ -261,7 +263,8 @@ export function ProjectPlanPanel({
     workRef: string } | null>(null);
   const autoWindow = useRef<{ ready: boolean; work: string | null } | null>(null);
   const selectedWork = selection?.work_ref ?? null;
-  const [proposalHint,setProposalHint]=useState<string|null>(null);
+  const [proposalHint,setProposalHint]=useState<string|null>(initialProposalId??null);
+  useLayoutEffect(()=>setProposalHint(initialProposalId??null),[selectedWork,initialProposalId]);
   const currentOwner=useRef({read,sourceGeneration,canRead,selectedWork});
   currentOwner.current={read,sourceGeneration,canRead,selectedWork};
   const currentProposal=useRef<string|null>(null);

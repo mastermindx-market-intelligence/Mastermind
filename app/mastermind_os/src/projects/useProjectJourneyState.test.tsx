@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import supplier from "../fixtures/project-journey-source-issued-388205.json";
+import {decodePlanProposalOriginal} from "../planning/project-plan-proposal";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthState } from "../host";
@@ -424,3 +426,26 @@ describe("New-project journey presentation state", () => {
 function restoreExternal(value: ProjectJourneySelection | null) {
   history.replaceState(null, "", value === null ? "/os/" : toPath(projectJourneyUrl(window.location.href, value)));
 }
+
+
+describe("safe original planning proposal navigation",()=>{
+  const original=decodePlanProposalOriginal((supplier.samples[12].request as {arguments:unknown}).arguments);
+  const selected:ProjectJourneySelection={createRequestId:supplier.identities.creation_request_id,
+    workRef:original.work_ref,planningOperationKey:original.operation_key,jobId:original.proposal_request.selection.job_id};
+  it("commits metadata before callbacks, retains Back/reopen and never remints an original",()=>{
+    const h=mountAtSelection(selected);
+    act(()=>h.result.current.onProposalOriginalChange(original));
+    expect(h.result.current.proposalOriginal).toEqual(original);
+    const href=location.href;expect(href).not.toContain('Private first request');
+    act(()=>h.result.current.hide());act(()=>{expect(h.result.current.open()).toBe(true);});
+    expect(h.result.current.proposalOriginal).toEqual(original);expect(location.href).toBe(href);
+    h.unmount();const reopened=setup(toPath(href));expect(reopened.result.current.proposalOriginal).toEqual(original);
+  });
+  it("foreign job/CREATE or no-render Host replacement cannot transfer original authority",()=>{
+    const h=mountAtSelection(selected);act(()=>h.result.current.onProposalOriginalChange(original));
+    act(()=>h.result.current.onSelection({...selected,createRequestId:cidB}));expect(h.result.current.proposalOriginal).toBeNull();
+    window.MastermindMissionHost=makeHost().host;
+    expect(()=>h.result.current.onProposalOriginalChange(original)).toThrow();
+    expect(h.result.current.proposalOriginal).toBeNull();
+  });
+});

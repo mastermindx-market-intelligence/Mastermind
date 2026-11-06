@@ -36,6 +36,8 @@
  * preview/publish action and an explicit phase note, never a conversation claim.
  */
 
+import {ProjectPlanProposalWorkflow} from "../planning/ProjectPlanProposalWorkflow";
+import type {PlanProposalOriginal} from "../planning/project-plan-proposal";
 import { decodeSourceOperationContext } from "../source-operations/context";
 import { useEffect, useLayoutEffect, useId, useRef, useState, type ReactNode } from "react";
 import { NewProjectDraft } from "./NewProjectDraft";
@@ -121,6 +123,8 @@ export interface ProjectPlanningJourneyProps {
   onDraftFilesChange?:(files:readonly ProjectDraftFile[])=>void;
   originalFileLookup?:ProjectDraftFileLookup|null;
   onOriginalFileLookupChange?:(value:ProjectDraftFileLookup|null)=>void;
+  proposalOriginal?: PlanProposalOriginal|null;
+  onProposalOriginalChange?: (original:PlanProposalOriginal)=>void;
   /** Parent-qualified proposal controls; rendered only for a readable project. */
   proposalControls?: ReactNode;
   /** Parent-qualified compare panel; rendered only for a readable project. */
@@ -1959,6 +1963,15 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
         </section>
       )}
       {authorized && result !== null && result.selection.work_ref === selection?.workRef && result.selection.job_id === observedJobId && result.result === null && <p>{copy(NOTICE_COPY.RESULT_UNAVAILABLE)}</p>}
+      {authorized && selection?.workRef && selection.planningOperationKey && props.onProposalOriginalChange &&
+        (returnedDeclaration !== null || props.proposalOriginal) && <ProjectPlanProposalWorkflow
+          key={`proposal:${selection.workRef}:${selection.planningOperationKey}`}
+          host={props.host} store={props.store} workRef={selection.workRef}
+          planningOperationKey={selection.planningOperationKey} result={result}
+          consumed={!!result?.result && (record.current.keptDigest === result.result.result_digest || result.consumption?.state === "CONSUMED")}
+          hasDeclaration={returnedDeclaration !== null} executiveOwner={props.executiveOwner}
+          isCurrent={callerCurrent} original={props.proposalOriginal ?? null}
+          onOriginalChange={props.onProposalOriginalChange} locale={locale}/>}
       {proposal !== null && <p>{copy(["Project creation is still pending. Check the original request.", "项目仍在创建中。请查询原始请求。"])}</p>}
       {readable && (proposalControls !== undefined || comparePanel !== undefined) && (
         <>

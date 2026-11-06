@@ -4,6 +4,7 @@ import type { OperationPointer } from "./operation-controller";
 import { parseDirectConsumeTarget } from "../direct-native-result";
 import { canonicalJson, sha256Hex } from "./operation-key";
 import {parseFreshConversationTarget} from './fresh-conversation-target';
+import {parsePlanProposalTarget} from '../planning/project-plan-proposal';
 
 export interface DurablePendingPointerStore {
   read(scope: string, signal?: AbortSignal): Promise<OperationPointer | null>;
@@ -67,6 +68,9 @@ type ClosedRecord = {
 } | {
   /** Project execution keeps only the original opaque operation lookup. */
   readonly v: 12; readonly operationKey: string; readonly kind: "launch"; readonly targetKey: string;
+} | {
+  /** Original PLAN publication lookup only; no private body or preview witness. */
+  readonly v: 13; readonly operationKey: string; readonly kind: "project_source_write"; readonly targetKey: string;
 };
 
 type DurableReservation =
@@ -138,6 +142,7 @@ const KIND_RECORDS = {
  * versa; the prefix grammars are disjoint from every legacy key grammar.
  */
 const KIND_VARIANTS = {
+  project_source_write: [{v:13,key:/^mmos-project-plan-proposal-[0-9a-f]{40}$/,consume:false}],
   project_create: [{ v: 8, key: JOURNEY_CREATE_KEY_RE, consume: false }],
   launch: [{ v: 9, key: PLANNING_KEY_RE, consume: false },
     { v: 12, key: /^mmos-project-execute-[0-9a-f]{40}$/, consume: false }],
@@ -187,6 +192,10 @@ function planningTargetMatches(targetKey: unknown): boolean {
 function validFields(raw: Record<string, unknown>, spec: NonNullable<ReturnType<typeof recordSpec>>, scope: string): boolean {
   if (typeof raw.operationKey !== "string" || !spec.key.test(raw.operationKey)
       || (spec.v !== 1 && spec.key.exec(raw.operationKey)?.[0] !== raw.operationKey)) return false;
+  if (spec.v === 13) {
+    const target=parsePlanProposalTarget(raw.targetKey);
+    return target!==null && target.request_id===raw.operationKey && target.principal_scope===scope;
+  }
   if (spec.v === 5) {
     if (typeof raw.targetKey !== "string") return false;
     const target = parseProjectSourceWriteTarget(raw.targetKey);
