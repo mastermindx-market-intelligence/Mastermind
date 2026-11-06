@@ -89,3 +89,26 @@ describe("NewProjectDraft", () => {
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
   });
 });
+
+it("keeps embedded h2 by default and supplies one route h1 on request",()=>{
+ const change=vi.fn();
+ const view=render(<NewProjectDraft locale="en" goal="Retained goal" onGoalChange={change}/>);
+ const textarea=screen.getByRole("textbox");
+ expect(screen.getByRole("heading",{level:2,name:"What would you like done?"})).toBeTruthy();
+ expect(screen.queryByRole("heading",{level:1})).toBeNull();
+ view.rerender(<NewProjectDraft headingLevel={1} locale="en" goal="Retained goal" onGoalChange={change}/>);
+ expect(screen.getAllByRole("heading",{level:1})).toHaveLength(1);
+ expect(screen.getByRole("textbox")).toBe(textarea);expect(change).not.toHaveBeenCalled();
+});
+
+it('keeps goal label and toolbar outside the field and places concise primary before long feedback',()=>{
+ render(<NewProjectDraft locale="en" goal="Exact goal" onGoalChange={vi.fn()}
+  attachmentsControl={<input aria-label="Retained actual chooser" type="file"/>}
+  attachmentsPanel={<p>Actual staged state</p>} primarySummary={<p>Verified supplied profile</p>}
+  startControl={<button>Create through owner</button>} feedbackPanel={<p>Long original result</p>}/>);
+ const textarea=screen.getByRole('textbox'),toolbar=screen.getByLabelText('Retained actual chooser').closest('.mm-new-project-tools')!;
+ expect(textarea.contains(toolbar)).toBe(false);
+ expect(textarea.compareDocumentPosition(toolbar)&Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+ expect(screen.getByRole('button',{name:'Create through owner'}).compareDocumentPosition(screen.getByText('Long original result'))&Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+ expect(screen.getByText('Verified supplied profile').closest('footer')).toBeTruthy();
+});

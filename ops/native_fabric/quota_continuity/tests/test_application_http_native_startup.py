@@ -85,7 +85,7 @@ def test_http_v2_rejects_selected_purpose_before_enrollment(http_service_owner):
 def test_http_build_adds_only_closed_three_and_keeps_historical_evidence_inert(builds):
     baseline = json.loads((builds.application / "native-manifest.json").read_bytes())
     manifest = json.loads((builds.http / "native-manifest.json").read_bytes())
-    assert len(manifest) == 111 and {key: manifest[key] for key in baseline} == baseline
+    assert len(manifest) == 112 and {key: manifest[key] for key in baseline} == baseline
     assert set(manifest) - set(baseline) == builder.HTTP_GENERATION_MEMBERS == g.HTTP_REQUIRED
     assert all(not path.endswith(".preimage") for path in manifest)
     sources = builder.application_http_sources(ROOT)

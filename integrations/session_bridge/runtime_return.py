@@ -43,6 +43,7 @@ from control_plane.native_continuation import (
     stored_continuation_request,
 )
 from control_plane.principal_projection import NeutralPrincipalProjection
+from control_plane.installed_principal_read_binding import read_matches_original as _read_matches_original
 from integrations.slack_agent_dialogue.contract_v2 import validate_message_v2, validate_parent_v2
 from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2
 from integrations.slack_agent_dialogue.service import CONTROL_VERSION_V2, RELAY_PARENT_ATTESTATION, call_service
@@ -105,31 +106,6 @@ def _trusted_read_pair(policies: AppPolicies | None):
     return read, submit
 
 
-def _read_matches_original(original: dict, current: dict,
-                           principal: NeutralPrincipalProjection, *, trusted_pair) -> bool:
-    """Preserve SEND provenance; admit only its explicitly paired READ policy.
-
-    The original immutable request identifies its admitted submit policy; an
-    independent READ grant may be exercised only when the *current trusted host*
-    explicitly configures that same submit policy and its exact read counterpart.
-    No caller-supplied policy, scope, or identity can manufacture this pairing.
-    """
-    if original == current:
-        return True
-    if trusted_pair is None or type(principal) is not NeutralPrincipalProjection:
-        return False
-    read, submit = trusted_pair
-    return (
-        tuple(principal.scopes) == (READ_SCOPE,)
-        and isinstance(original, dict) and set(original) == set(_IDENTITY)
-        and original.get("policy_id") == submit.policy_id
-        and current.get("policy_id") == read.policy_id
-        and original.get("resource") == read.resource
-        and original.get("issuer_digest") == hashlib.sha256(read.issuer.encode("utf-8")).hexdigest()
-        and original.get("subject_digest") in read.allowed_subject_digests
-        and all(original.get(key) == current.get(key)
-                for key in _IDENTITY if key != "policy_id")
-    )
 
 
 def _validate_original_writer(value, facts) -> None:

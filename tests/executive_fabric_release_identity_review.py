@@ -389,17 +389,21 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # Macro-epoch composition f48d7421 / source-risk review bd9bba4b:
 # same three complete runtime tokens and unchanged original top-level ASTs;
 # only the reviewed digest and shifted lines change. No new identity exemption.
+# PR #1329 accepted-V2 carry: the same complete account-pattern token and
+# attended worker UID/GID bounds move with the qualified maintenance source.
+# Both owning constructs remain byte-identical; no new identity exemption.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": 'f53e9401d28f1053d67a59d375f7380b86271f87278080f7dd972f3d8ff6f7f9',
-    "sites": ((104, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1825, 46, 49, 'int', '400'), (1825, 66, 69, 'int', '500')),
+    "sha256": 'febdc61cc241058c8b5e896290e62e0acc342ddf08010fbd36a6e24399748f56',
+    "sites": ((111, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1861, 46, 49, 'int', '400'), (1861, 66, 69, 'int', '500')),
 }
 
 
-# PR #1813: unchanged independently reviewed migration-evidence helper 8c7f1584.
+# PR #1813 reviewed migration-evidence helper, carried through PR #1329's
+# qualified provenance accessors. The config-namespace function stays exact.
 # This exact token is the Root config-directory permission mode, not a UID.
 # Source, path, AST location and complete token must all match; scanner unchanged.
 REVIEWED_FILES['ops/executive_os/schema_upgrade_evidence.py'] = {
-    "sha256": '1f316e19da3b2d4f362b64928c7ede1aee0b28301a71990455c138589d9cc402',
+    "sha256": '141f4cbb77d3c3eed130025289b1f2cd06805f67cd4a10d7c2462f2d4d49e122',
     "sites": ((347, 46, 51, 'int', '0o755'),),
 }
 
@@ -599,7 +603,7 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Journal source-only read composition: exact unchanged action-handler AST and
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'ed6e016eb9f65121baff9e9e41d5a7aa98c9edf20765d5b34224f4518e5bd5dd', 'sites': ((923, 71, 74, 'int', '400'), (934, 71, 74, 'int', '403'), (942, 71, 74, 'int', '400'), (948, 79, 82, 'int', '400'), (957, 71, 74, 'int', '400'), (967, 71, 74, 'int', '403'), (972, 76, 79, 'int', '503'), (978, 71, 74, 'int', '403'))}
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '22335a6b83924ae3c28eeb8610e1b8bb2a834964e1ba99afc97ebcaa534440ac', 'sites': ((924, 71, 74, 'int', '400'), (935, 71, 74, 'int', '403'), (943, 71, 74, 'int', '400'), (949, 79, 82, 'int', '400'), (958, 71, 74, 'int', '400'), (968, 71, 74, 'int', '403'), (973, 76, 79, 'int', '503'), (979, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -640,7 +644,7 @@ REVIEWED_FILES['app/mastermind_os/src/projects/archive/project-archive-continuat
 
 # Exact Knowledge path/generation bounds and inert synthetic PR fixture numbers.
 # These are not OS identities; full-source drift exposes every token again.
-REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-data-observation.ts'] = {'sha256': '8255d63192da282f52f0f81e2963aa6ff3084e5065d60e8516d483fab3122b79', 'sites': ((91, 97, 100, 'int', '512'),)}
+REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-data-observation.ts'] = {'sha256': 'f6401f32f9dbff8af0f5f235bd0d21bde03d060a0c9e8943ca16dd3c048e676b', 'sites': ((95, 97, 100, 'int', '512'),)}
 REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-knowledge-port.ts'] = {'sha256': '9a41d0f5bafef2ab8168509aaf3ff7e37369b619230c2c380bedb2b586d7eaf2', 'sites': ((46, 64, 67, 'int', '512'),)}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-data-observation-owner.json'] = {'sha256': 'd12878bdff07fcdb6bfa05ba2c1694c7600416c7407a9e84e87e20dcc116f118', 'sites': ((119, 16, 19, 'int', '401'),)}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-write-owner.json'] = {'sha256': 'cb6d4c43fc821993f664a9bc75ccf3f38d76bbaff58e36363c6e700b7e3b6856', 'sites': ((97, 22, 25, 'int', '401'), (413, 22, 25, 'int', '402'))}
@@ -663,14 +667,11 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 # never an OS identity. Exact whole-source hash and token sites only.
 # BYOK/Instructions composition preserves the complete permission handler AST;
 # only its enclosing source and four HTTP denial token positions change.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': 'de69741a1be8c3e980815a284c277da04843f16f34ce303141d482ff7ec64a66', 'sites': ((711, 93, 96, 'int', '403'), (713, 56, 59, 'int', '403'), (720, 46, 49, 'int', '403'), (721, 56, 59, 'int', '403'))}
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': 'b5e717931de280e792c47d9fccba49963f7aec55bb0702d07c2bdb0c43a70790', 'sites': ((712, 93, 96, 'int', '403'), (714, 56, 59, 'int', '403'), (721, 46, 49, 'int', '403'), (722, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
-REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/post_failure_observation.py'] = {
-    'sha256': '80fc9d95068099fb797c9e7a05981a9650d50ec170935d748d92a8e7bcd04337',
-    'sites': ((294, 79, 84, 'int', '0o700'),),
-}
+REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/post_failure_observation.py'] = {'sha256': '80fc9d95068099fb797c9e7a05981a9650d50ec170935d748d92a8e7bcd04337', 'sites': ((294, 79, 84, 'int', '0o700'),)}
 
 
 # PR1890 attended parent classification under the current Chairman source waiver:
@@ -691,6 +692,38 @@ REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/accoun
     ),
 }
 
+# Validated source path bounds; no identity/authority. Exact postimage and sites only.
+# 2026-11-06 attended source audit: accepted-creation navigation preserves both
+# complete bounded-path lines; the optional callback shifts them by three lines.
+# The full-source hash and both spans still reject all path/context/byte drift.
+# This source audit supplies no native runtime or release approval.
+REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'sha256': '95b83a757611e0c5c4930dcce2457b8a6eb4a135565f3cb587ccd29dddac8c30', 'sites': ((363, 26, 29, 'int', '512'), (479, 57, 60, 'int', '512'))}
+
+# fixed HTTP not-found status. Exact full postimage and literal sites only.
+REVIEWED_FILES['integrations/mastermind_executive_app/fresh_conversation_transport.py'] = {'sha256': 'b5fd60efebebc04ea12d1d1976663c74f907dec2f151a2d71a6f442182b5e5b2', 'sites': ((93, 39, 42, 'int', '404'),)}
+
+# fixed HTTP unavailable status. Exact full postimage and literal sites only.
+# 2026-11-06 source audit: the fixed planning/execution pair shares the original
+# authenticated carrier; these are still only its two HTTP unavailable operands.
+REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport.py'] = {'sha256': 'e2bf5510be0196546d95530840827727721912a94a0b2368cc8c5a70bfb61442', 'sites': ((55, 45, 48, 'int', '503'), (81, 81, 84, 'int', '503'))}
+
+# Actual source-issued proposal PR number, never a UID or HTTP/permission grant.
+REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = {'sha256': 'ee715ecbf81efef147491f1cbbea041ba1a62688bd0906b715231156bdacc0e9', 'sites': (), 'utf8_sites': ((1, 36976, 36979, 'int', '403'),)}
+
+# Actual local Programs observation negative-test HTTP statuses, no OS identity.
+# Composed BYOK + qualified Session SEND source audit: the complete Programs
+# observation test body remains byte-identical; this pin supplies no release approval.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '14632b8bbcd42edf5d4e56a0e3f67b077a5777b4548ccb0d57ca8961401d288e', 'sites': ((3469, 68, 71, 'int', '503'), (3474, 69, 72, 'int', '503'), (3478, 67, 70, 'int', '503'))}
+# 2026-11-06 composed-source check against protected c571acc9 + owned dfb94fb4:
+# control_room_action (635 AST nodes) and instruction-permission handler (194)
+# are exactly protected postimages; the native diagnostic test body is unchanged
+# from dfb94fb4. Reviewed host-observation/project READ/BYOK composition displaces
+# only these fixed HTTP status sites. These new complete-source pins record this
+# source audit; they do not inherit a release approval or release native SEND holds.
+
+# Reviewed Session Unicode-scalar input bound, never an OS identity.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'cd31cfc2d232e8d3b432ba059209a8a5f8479fd7dc5a811d1897ca664207645f', 'sites': ((13, 118, 121, 'int', '700'),)}
+
 # BYOK metadata READ re-pin: same eight action literals and unchanged action AST.
 # Attended parent source check under the current Chairman waiver; no formal approval claim.
 
@@ -700,3 +733,12 @@ REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/accoun
 # ensure_directories has the identical AST; its one whole permission token moved
 # by 15 lines. New unit publication consumes the existing canonical identities.
 REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'a08b20f693a9ed10fe110d69469b5cc9155243905890f3a039ac19a2bbbdbed1', 'sites': ((675, 71, 76, 'int', '0o750'),)}
+
+# Historical d3f21fc6 composition audit: native compound Mission/Result READ
+# retained the complete existing Programs diagnostic body; the three exact HTTP
+# operands moved together. The compound READ uses its fixed route/schema,
+# Acquisition generation, bounded body and null-only typed unavailable result.
+# No new numeric exception or native release approval was introduced. At that
+# audit, protected autonomy/initializer/qualification/enrollment sources matched
+# d3f bytes; their sites were read in their owning call context. The current C20
+# enrollment source is bound by its protected exact-postimage review above.

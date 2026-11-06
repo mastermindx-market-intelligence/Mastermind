@@ -1,4 +1,6 @@
 import { bindMissionHost, type RawClient, type SessionHostAttachment } from "./host";
+import { createProjectConversationHistoryReaderFactory } from "./conversations/project-conversation-history-owner";
+import {createProjectConversationCatalogueReaderFactory} from './conversations/project-conversation-catalogue-factory';
 import { readLaunchBindingConfig } from "./launch-config";
 import type { MissionSelection } from "./mission";
 import type { LaunchConfiguration } from "./orchestration/executive-launch-command-port";
@@ -48,10 +50,11 @@ function executiveObservation(transport: OsExecutiveTransport | undefined): {
 }
 
 /**
- * One app instance composes the existing read/auth owner with the fixed
- * launch adapter and — independently — the selected-session continuation
- * host. Session continuation may exist without a Launch catalog; absent
- * Executive configuration/auth keeps it unavailable and it sends no requests.
+ * One app instance composes the existing read/auth owner with the shared
+ * Executive command owner and the independent selected-session continuation
+ * host. A Launch catalog enables only legacy Launch choices; project work and
+ * fresh conversations use the same command context and store without it.
+ * Absent Executive configuration/auth keeps these owners unavailable.
  * The session store is a separate durable namespace: Launch records are never
  * read, migrated or cleared by it.
  */
@@ -62,7 +65,7 @@ export function composeMissionHost(
   hostKind: DiagnosticHostKind = "unknown",
 ) {
   // Mount while signed out: the existing auth owner later qualifies this binding.
-  const executive = config && client.executive
+  const executive = client.executive
     ? createOsExecutiveHost(config, client.executive, createIndexedDbPendingPointerStore(indexedDB))
     : null;
   // Separate session capability/controller and lifecycle; no shared slot with
@@ -73,9 +76,15 @@ export function composeMissionHost(
         createIndexedDbSessionPendingPointerStore(indexedDB),
       )
     : null;
+  const projectHistoryReader = client.executiveSession
+    ? createProjectConversationHistoryReaderFactory(client.executiveSession) : undefined;
+  const projectCatalogueReader = client.executiveSession
+    ? createProjectConversationCatalogueReaderFactory(client.executiveSession) : undefined;
   const sessionAttachment: SessionHostAttachment | undefined = session
     ? {
         binding: session.binding,
+        ...(projectHistoryReader ? {createProjectHistoryReader: projectHistoryReader} : {}),
+        ...(projectCatalogueReader ? {createProjectCatalogueReader: projectCatalogueReader} : {}),
         refresh: (selection) => session.refresh(selection as MissionSelection | null),
         setStopCondition: (provider) => session.setStopCondition(provider),
       }
