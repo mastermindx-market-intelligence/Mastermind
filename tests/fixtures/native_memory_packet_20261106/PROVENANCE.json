@@ -1,0 +1,18 @@
+{
+  "schema": "market_memory.native_packet_source_fixture_vector.v1",
+  "native_path": "synthetic TrustedFileAsKnownAtReader/captures/cohort/features -> build_condition_selections -> build_task_condition_evidence -> disclose_task_condition_view -> build_task_condition_packet",
+  "input_sha256": "f4213c04dc827819ac476859803d462b27ddf4badb3d5855c52dbf701acd641f",
+  "input_bytes": 9856,
+  "selected_descriptor_count": 10,
+  "source_capability": "genuine native task/condition capabilities",
+  "fixture_substitutions": [
+    "temporary synthetic source store/captures",
+    "frozen membership digest pin",
+    "explicit test source-use Policy"
+  ],
+  "native_service_issuer": "NOT_IMPLEMENTED_BY_THIS_COMPONENT",
+  "recipient_or_registration_authenticated": false,
+  "runtime_or_scientific_admission": false,
+  "private_data_read": false,
+  "actual_blinding_established": false
+}
