@@ -516,3 +516,53 @@ def test_review_display_refusals_reach_signed_http(plan_owner, rsa_key, tmp_path
             assert objective not in response.text
             assert len(seen) == 1
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("path,replacement", [
+    (("runtime",), {}),
+    (("control_room",), {}),
+    (("runtime", "state"), "CONFLICT"),
+    (("runtime", "state"), "UNKNOWN"),
+    (("runtime", "schema"), "wrong"),
+    (("runtime", "source_identity"), None),
+    (("runtime", "source_identity"), "not-a-request-identity"),
+    (("runtime", "before"), -1),
+    (("runtime", "after"), -1),
+    (("runtime", "before"), True),
+    (("runtime", "after"), True),
+    (("runtime", "after"), 1.0),
+    (("runtime", "extra"), "private-receipt-marker"),
+    (("control_room", "instance_before"), None),
+    (("control_room", "instance_after"), "different-owner-instance"),
+    (("control_room", "publication_before"), 0),
+    (("control_room", "publication_after"), 0),
+    (("control_room", "publication_before"), True),
+    (("control_room", "publication_after"), True),
+    (("control_room", "publication_after"), 1.0),
+    (("control_room", "document_digest"), "invalid"),
+    (("control_room", "source_validity_digest"), None),
+    (("control_room", "cache_currentness_digest"), "A" * 64),
+    (("control_room", "extra"), "private-receipt-marker"),
+])
+def test_http_edge_refuses_unqualified_plan_receipt(plan_owner, path, replacement):
+    from integrations.mastermind_workspace_app.app import _plan_envelope_response
+    envelope = call(plan_owner)
+    assert envelope["result"]["availability"] == "AVAILABLE"
+    target = envelope["result"]["source_observation"]
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = replacement
+    response = _plan_envelope_response(envelope)
+    assert response.status_code == 503
+    assert "plan_digest" not in response.body.decode()
+    assert "private-receipt-marker" not in response.body.decode()
+
+
+@pytest.mark.parametrize("reason", sorted(wire.PLAN_REFUSAL_REASONS))
+def test_http_edge_preserves_canonical_plan_unavailable(reason):
+    from integrations.mastermind_workspace_app.app import _plan_envelope_response
+    envelope = wire.plan_unavailable(
+        {"work_ref": "WS:RECEIPT-PROOF", "root_job_id": "JOB-123"}, reason)
+    response = _plan_envelope_response(envelope)
+    assert response.status_code == 503
+    assert json.loads(response.body) == envelope["result"]

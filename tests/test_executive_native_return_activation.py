@@ -14,7 +14,7 @@ from integrations.session_bridge.schemas import BridgeError, validate_tool_argum
 NATIVE_ALIAS = "coo.operator.native-return"
 NATIVE_PROFILE = "operator.appserver.interactive.native-return.v1"
 DOCS_PROFILE = "operator.appserver.readonly.docs-mcp.native-helper.v1"
-POLICY_VERSION = "2026-10-11.native-return-host-selection"
+POLICY_VERSION = "2026-10-14.attended-qualification"
 
 
 def _config(tmp_path, **overrides):

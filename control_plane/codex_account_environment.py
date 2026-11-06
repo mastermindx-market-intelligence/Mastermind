@@ -8,6 +8,8 @@ reconciled before a native login file may be seeded onto a serialized stream.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 from contextlib import contextmanager
 from dataclasses import asdict
 import fcntl
@@ -16,6 +18,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import stat
 import sys
 import time
@@ -79,6 +82,40 @@ def _managed_auth(raw: bytes) -> Mapping[str, Any]:
            for k in ("access_token", "refresh_token", "id_token", "account_id")):
         raise CodexAccountError("MANAGED_CHATGPT_AUTH_INCOMPLETE")
     return value
+
+
+def _local_user_claim_sha256(tokens: Mapping[str, Any]) -> str | None:
+    """Hash a bounded OpenAI ID-token user claim, never export token contents.
+
+    This is a local identity discriminator, NOT JWT signature verification,
+    seat entitlement, provider quota proof, or broker admission. Missing or
+    contradictory claims cannot qualify a Business quota comparison.
+    """
+    jwt = tokens.get("id_token")
+    if not isinstance(jwt, str) or len(jwt) > 131072:
+        return None
+    parts = jwt.split(".")
+    if len(parts) != 3 or not 1 <= len(parts[1]) <= 87382:
+        return None
+    try:
+        payload = base64.b64decode(
+            (parts[1] + "=" * (-len(parts[1]) % 4)).encode("ascii"),
+            altchars=b"-_", validate=True,
+        )
+        claims = json.loads(payload)
+    except (ValueError, UnicodeError, binascii.Error):
+        return None
+    if not isinstance(claims, Mapping):
+        return None
+    auth = claims.get("https://api.openai.com/auth")
+    if not isinstance(auth, Mapping):
+        return None
+    workspace = auth.get("chatgpt_account_id")
+    user = auth.get("chatgpt_user_id")
+    if (not isinstance(workspace, str) or workspace != tokens.get("account_id")
+            or not isinstance(user, str) or not 1 <= len(user) <= 256):
+        return None
+    return hashlib.sha256(user.encode()).hexdigest()
 
 
 def _home(path: Path, *, principal_home_admitted: bool = False) -> Path:
@@ -195,9 +232,13 @@ Existing credentials take precedence even when the seed is absent or stale.
     def auth_metadata(self) -> dict[str, Any]:
         self._check()
         value = _managed_auth(_private_file(self.home / "auth.json"))
-        return {"auth_mode": "chatgpt", "has_refresh_token": True,
-                "account_id_sha256": hashlib.sha256(
-                    value["tokens"]["account_id"].encode()).hexdigest()}
+        metadata = {"auth_mode": "chatgpt", "has_refresh_token": True,
+                    "account_id_sha256": hashlib.sha256(
+                        value["tokens"]["account_id"].encode()).hexdigest()}
+        user_hash = _local_user_claim_sha256(value["tokens"])
+        if user_hash is not None:
+            metadata["user_id_sha256"] = user_hash
+        return metadata
 
     def process_environment(self) -> dict[str, str]:
         self.auth_metadata()
@@ -362,9 +403,58 @@ def _failure_kind(error: Exception) -> str:
     return "NATIVE_READ_UNAVAILABLE"
 
 
+_VISIBLE_FRONTIER_MODELS = ("gpt-6-astra", "gpt-6.1-sol")
+_NATIVE_MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}")
+
+
+def native_model_visibility(raw: Any) -> dict[str, Any]:
+    """Sanitize one native model/list response; never infer quota or grant.
+
+    Unrecognized provider model IDs are discarded. An invalid, incomplete, or
+    duplicate catalog does not authorize any model and leaks no provider text.
+    """
+    result = {"state": "UNKNOWN", "supported_models": [],
+              "source": "model/list", "admission_granted": False}
+    if not isinstance(raw, Mapping) or raw.get("nextCursor") is not None:
+        return result
+    values = raw.get("data")
+    if not isinstance(values, list) or len(values) > 100:
+        return result
+    seen: set[str] = set()
+    qualified: set[str] = set()
+    for item in values:
+        if not isinstance(item, Mapping):
+            return result
+        ident = item.get("id")
+        if (type(ident) is not str or _NATIVE_MODEL_ID.fullmatch(ident) is None
+                or ident in seen
+                or any(field in item and type(item[field]) is not bool
+                       for field in ("isHidden", "hidden"))):
+            return result
+        seen.add(ident)
+        if ident in _VISIBLE_FRONTIER_MODELS and not (
+            item.get("isHidden") is True or item.get("hidden") is True
+        ):
+            qualified.add(ident)
+    result["state"] = "OBSERVED"
+    result["supported_models"] = [
+        model for model in _VISIBLE_FRONTIER_MODELS if model in qualified
+    ]
+    return result
+
+
 def probe_native_account(environment: CodexAccountEnvironment, binary: Path,
-                         *, timeout: float = 20) -> dict[str, Any]:
-    """Two native reads in a contained app-server; no thread, turn or model call."""
+                         *, timeout: float = 20,
+                         previous_observation: Mapping[str, Any] | None = None,
+                         include_models: bool = False) -> dict[str, Any]:
+    """Two required native reads, optional bounded model/catalog read.
+
+    The optional native model list is obtained on the SAME locked App Server
+    session and never creates model usage, lease, credit, or dispatch authority.
+
+    The existing observation owner supplies its prior sanitized result. Nothing
+    is persisted here, and a comparison never grants quota or changes admission.
+    """
     from scripts.ohf.laboratory import AppServerClient
     # The explicit provider overrides prevent a saved profile selecting an API
     # route. File storage lets Codex persist its own refreshed managed session.
@@ -373,9 +463,15 @@ def probe_native_account(environment: CodexAccountEnvironment, binary: Path,
                             "home_identity": environment.auth_metadata()}
     stage = "construct"
     try:
+        native_env = environment.process_environment()
+        # The exact attended Homebrew Codex CLI on macOS needs its fixed
+        # executable directory for app-server initialize. Never inherit the
+        # parent PATH or widen the installed Executive pinned-binary path.
+        if Path(binary) == Path("/opt/homebrew/bin/codex"):
+            native_env["PATH"] = "/opt/homebrew/bin:" + native_env["PATH"]
         client = AppServerClient([str(binary), "app-server", "-c",
             'cli_auth_credentials_store="file"', "-c", 'model_provider="openai"'],
-            env=environment.process_environment(), cwd=environment.home,
+            env=native_env, cwd=environment.home,
             start_new_session=True)
         stage = "start"
         client.start()
@@ -391,6 +487,20 @@ def probe_native_account(environment: CodexAccountEnvironment, binary: Path,
         stage = "account/rateLimits/read"
         limits = client.request("account/rateLimits/read", {}, timeout=timeout)
         result["account"] = account_readiness(account, limits)
+        # Model metadata is advisory; quota-state reconciliation remains
+        # independently useful even if model/list is missing or unavailable.
+        # The selector must refuse UNKNOWN, never infer model eligibility.
+        if include_models:
+            result["model_visibility"] = native_model_visibility(None)
+            try:
+                stage = "model/list"
+                models = client.request("model/list",
+                                        {"limit": 100, "includeHidden": False},
+                                        timeout=timeout)
+                result["model_visibility"] = native_model_visibility(models)
+            except Exception:
+                # Provider errors can contain credentials: keep only UNKNOWN.
+                result["model_visibility"] = native_model_visibility(None)
         result["state"] = "NATIVE_READS_COMPLETED"
     except Exception as error:
         # Provider errors can echo tokens/headers. Never return arbitrary errors.
@@ -411,4 +521,8 @@ def probe_native_account(environment: CodexAccountEnvironment, binary: Path,
                                   "private_group_empty": False}
             if result["state"] == "NATIVE_READS_COMPLETED" and not result["stop"].get("private_group_empty"):
                 result["state"] = "NATIVE_CLEANUP_UNPROVEN"
+    # Observe only after the final cleanup disposition is known. An apparently
+    # successful read with uncertain process cleanup cannot become reset proof.
+    from control_plane.codex_quota_observation import compare_native_codex_quota
+    result["quota_change"] = compare_native_codex_quota(previous_observation, result)
     return result

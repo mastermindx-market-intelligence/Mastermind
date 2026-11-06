@@ -18,6 +18,7 @@ from control_plane.principal_dialogue_obligation import read_principal_dialogue_
 from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import CooPrincipalDialogueCaller
 from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2
 from integrations.slack_agent_dialogue.executive_observation_client import ExecutiveDialogueObservationClient
+from integrations.slack_agent_dialogue.host_local_observation import HostLocalDialogueObservationReader
 from integrations.slack_agent_dialogue.principal_current_reader import PrincipalCurrentSourceRead, read_current_principal_source
 from integrations.slack_agent_dialogue.principal_decision_source_fence import PrincipalDecisionSource
 from integrations.slack_agent_dialogue.principal_pending_decision import require_unanswered_principal_decision
@@ -80,7 +81,8 @@ def _canonical_context(runtime, caller, obligation_id):
 
 async def acquire_principal_decision_source(
     *, runtime: Runtime, authority: CooHostProvider, caller: CooPrincipalDialogueCaller,
-    obligation_id: str, socket_path: Path, observation_client: ExecutiveDialogueObservationClient,
+    obligation_id: str, socket_path: Path,
+    observation_client: ExecutiveDialogueObservationClient | HostLocalDialogueObservationReader,
 ) -> AcquiredPrincipalDecision:
     """Derive inputs from one exact obligation, then re-read after source I/O.
 
@@ -92,7 +94,9 @@ async def acquire_principal_decision_source(
     try:
         if (type(runtime) is not Runtime or type(authority) is not CooHostProvider
                 or type(caller) is not CooPrincipalDialogueCaller
-                or type(observation_client) is not ExecutiveDialogueObservationClient
+                or type(observation_client) not in (ExecutiveDialogueObservationClient, HostLocalDialogueObservationReader)
+                or (type(observation_client) is HostLocalDialogueObservationReader
+                    and observation_client.runtime is not runtime)
                 or caller.new_effect_gate is not NewEffectGate.OPEN
                 or caller.accountable_seat != "coo" or caller.owed_seat != "coo"):
             raise PrincipalSourceAcquisitionUnavailable()

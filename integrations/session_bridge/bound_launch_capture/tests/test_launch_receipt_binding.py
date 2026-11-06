@@ -339,7 +339,8 @@ def test_installed_surface_and_signature_preserved():
         "command", "cwd", "timeout", "input_text", "shell", "env", "nice",
         "terminate_grace", "label", "receipt_path", "timeout_returncode",
         "capture_limit_bytes", "receipt_diagnostics", "launch_receipt_path",
-        "launch_receipt_metadata", "launch_receipt_context_sha256")
+        "launch_receipt_metadata", "launch_receipt_context_sha256",
+        "owned_capture_run_dir", "owned_capture_result_schema_json", "owned_capture_assignment")
     assert lr.LAUNCH_RECEIPT_SCHEMA == "mastermind.local_owned_process_launch.v1"
     assert lr._LAUNCH_BINDING_FIELDS == frozenset(BINDING_KEYS)
 

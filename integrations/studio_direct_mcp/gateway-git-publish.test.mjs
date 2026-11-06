@@ -160,14 +160,24 @@ test('configured gateway exposes typed Git tools with exact truthful annotations
     assert.equal(commit.annotations.destructiveHint, true);
     assert.equal(commit.annotations.idempotentHint, true);
     assert.equal(commit.annotations.openWorldHint, false);
-    assert.deepEqual(Object.keys(commit.inputSchema.properties).sort(), ['expected_head_sha', 'message', 'operation_id']);
+    assert.deepEqual(Object.keys(commit.inputSchema.properties).sort(), ['expected_head_sha', 'merge', 'message', 'operation_id']);
+    assert.equal(commit.inputSchema.required.includes('merge'), false);
+    assert.equal(commit.inputSchema.properties.merge.additionalProperties, false);
+    assert.deepEqual(commit.inputSchema.properties.merge.required,
+      ['expected_protected_base_sha', 'expected_tree_sha']);
+    assert.deepEqual(Object.keys(commit.inputSchema.properties.merge.properties),
+      ['expected_protected_base_sha', 'expected_tree_sha']);
     assert.equal(push.annotations.readOnlyHint, false);
     assert.equal(push.annotations.destructiveHint, true);
     assert.equal(push.annotations.idempotentHint, true);
     assert.equal(push.annotations.openWorldHint, true);
-    assert.deepEqual(Object.keys(push.inputSchema.properties).sort(), ['expected_head_sha', 'operation_id']);
+    assert.deepEqual(Object.keys(push.inputSchema.properties).sort(), ['expected_head_sha', 'operation_id', 'recovery']);
+    assert.equal(push.inputSchema.required.includes('recovery'), false);
+    assert.equal(push.inputSchema.properties.recovery.additionalProperties, false);
+    assert.deepEqual(push.inputSchema.properties.recovery.required,
+      ['prior_action_ref', 'prior_intended_head_sha', 'expected_remote_head_sha']);
     const directivePattern =
-      /required workflow|always\b|never\b|only correct tool|must use|do not use|prefer this|critical rule/i;
+      /required workflow|always\b|never (use|call|invoke)|only correct tool|must use|do not use|prefer this|critical rule/i;
     for (const tool of [status, commit, push]) {
       assert.doesNotMatch(
         tool.description ?? '',
@@ -323,4 +333,88 @@ test('enabled multi-repository gateway composes real owner acquisition and local
     }
     assert.equal(gw.stats().requests.backendOps, before, 'workspace tools do not escape to generic Desktop Commander');
   } finally { await closeAll([root, gatewayRoot, gw, c]); }
+});
+
+test('typed merge fences survive the actual MCP gateway and preserve both parents', async () => {
+  const f = await makePublisherFixture();
+  const { root, gw } = await boot({ stateDir: f.stateDir, gitPublish: f.gitPublish });
+  const c = await connect(gw);
+  try {
+    const tree = (await git(f.workspacePath, 'rev-parse', 'HEAD^{tree}')).stdout.trim();
+    const protectedBase = (await git(f.workspacePath, 'commit-tree', tree,
+      '-p', f.head, '-m', 'test: protected successor')).stdout.trim();
+    await git(f.workspacePath, 'update-ref', 'refs/remotes/origin/master', protectedBase);
+    await c.client.listTools();
+    const backendBefore = gw.stats().requests.backendOps;
+    const result = await c.client.callTool({
+      name: 'studio_git_commit_current_changes',
+      arguments: {
+        operation_id: f.operationId, expected_head_sha: f.head,
+        message: 'test: exact merge through MCP',
+        merge: { expected_protected_base_sha: protectedBase, expected_tree_sha: tree },
+      },
+    });
+    assert.equal(result.isError, undefined);
+    assert.equal(result.structuredContent.effect_state, 'APPLIED');
+    const head = result.structuredContent.commit_head_sha;
+    const identity = (await git(f.workspacePath, 'show', '-s', '--format=%T%n%P', head)).stdout.trim().split('\n');
+    assert.deepEqual(identity, [tree, `${f.head} ${protectedBase}`]);
+    assert.equal(gw.stats().requests.backendOps, backendBefore);
+    assert.equal((await git(f.workspacePath, 'status', '--porcelain')).stdout, '');
+    assert.equal((await git(f.workspacePath, 'ls-remote', '--heads', 'origin')).stdout, '');
+  } finally {
+    await closeAll([f.root, root, gw, c]);
+  }
+});
+
+test('gateway distinguishes failed read-only status from an unqualified typed commit return', async () => {
+  const f = await makePublisherFixture();
+  // The canonical CLI is the only status owner. This fixture deliberately
+  // provides malformed stdout; no Git mutation or ref update can have begun.
+  await writeFile(f.workspaceCli, '#!/bin/sh\nprintf "not-json\\n"\n');
+  const { gw } = await boot({ stateDir: f.stateDir, gitPublish: f.gitPublish });
+  const c = await connect(gw);
+  try {
+    const status = await c.client.callTool({
+      name: 'studio_git_publish_status',
+      arguments: { operation_id: f.operationId },
+    });
+    assert.equal(status.isError, true);
+    assert.equal(status.structuredContent.status, 'REFUSED');
+    assert.equal(status.structuredContent.effect_state, 'NOT_APPLIED');
+    assert.equal(status.structuredContent.code, 'TYPED_GIT_READONLY_INSPECTION_REFUSED');
+
+    const commit = await c.client.callTool({
+      name: 'studio_git_commit_current_changes',
+      arguments: { operation_id: f.operationId, expected_head_sha: f.head, message: 'test: uncertain return' },
+    });
+    assert.equal(commit.isError, true);
+    assert.equal(commit.structuredContent.status, 'UNKNOWN');
+    assert.equal(commit.structuredContent.effect_state, 'EFFECT_UNKNOWN');
+    assert.equal(commit.structuredContent.code, 'TYPED_GIT_EFFECT_UNQUALIFIED');
+    assert.equal(gw.stats().requests.backendOps, 0, 'gateway-owned publication tools never reach the Desktop Commander backend');
+  } finally {
+    await closeAll([f.root, gw, c]);
+  }
+});
+
+test('gateway never labels an unqualified typed push exception as a safe retry', async () => {
+  const f = await makePublisherFixture();
+  await writeFile(f.workspaceCli, '#!/bin/sh\nprintf "not-json\\n"\n');
+  const { gw } = await boot({ stateDir: f.stateDir, gitPublish: f.gitPublish });
+  const c = await connect(gw);
+  try {
+    const result = await c.client.callTool({
+      name: 'studio_git_push_current_branch',
+      arguments: { operation_id: f.operationId, expected_head_sha: f.head },
+    });
+    assert.equal(result.isError, true);
+    assert.equal(result.structuredContent.effect_state, 'EFFECT_UNKNOWN');
+    assert.equal(result.structuredContent.status, 'UNKNOWN');
+    assert.equal(result.structuredContent.code, 'TYPED_GIT_EFFECT_UNQUALIFIED');
+    // A lost/unqualified return is not a readiness signal to replay the push.
+    assert.equal(result.structuredContent.retry_allowed, undefined);
+  } finally {
+    await closeAll([f.root, gw, c]);
+  }
 });

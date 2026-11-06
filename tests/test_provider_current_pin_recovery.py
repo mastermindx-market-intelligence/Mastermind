@@ -994,7 +994,10 @@ def test_qualified_chained_adverse_cannot_recover_again(qualified_state, monkeyp
 def test_qualified_success_finalization_and_no_second_allocation(qualified_state, monkeypatch):
     s = qualified_state
     write_observation(s)
-    reserve_qualified(s, monkeypatch)
+    # Reserve and finalize one immutable expiry; independently sampling the
+    # second-granularity clock can otherwise cross a second boundary.
+    expiry = iso(datetime.now(UTC) + timedelta(minutes=55))
+    reserve_qualified(s, monkeypatch, deadline=expiry)
     canary_path = s.tmp / "canary.json"
     write_json(canary_path, canary(True))
     assert r.main([
@@ -1002,7 +1005,7 @@ def test_qualified_success_finalization_and_no_second_allocation(qualified_state
         "--post-identity-command-status", "0", "--canary-json", str(canary_path),
         "--canary-command-status", "0", "--expected-kind", "device-auth",
         "--workspace-binding-class", r.COMPANY_WORKSPACE_BINDING_CLASS,
-        "--credential-expires-at", iso(datetime.now(UTC) + timedelta(minutes=55)),
+        "--credential-expires-at", expiry,
     ]) == 0
     final = json.loads(s.receipt.read_bytes())
     assert final["passed"] is True

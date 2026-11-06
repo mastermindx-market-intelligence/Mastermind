@@ -297,3 +297,45 @@ def test_unknown_unbound_fabric_run_stays_quarantined_without_fence_rotation(tmp
     assert current.status is owner.AttemptStatus.CLAIMED
     assert current.fence_generation == claimed.attempt.fence_generation
     assert runtime.jobs.get_job(job_id).status is owner.JobStatus.RUNNING
+
+
+@pytest.mark.parametrize("from_grant", [False, True])
+def test_empty_fabric_validation_plan_keeps_terminal_readback_without_inventing_validation(
+        composed, tmp_path, from_grant):
+    active = composed.active
+    active.launch_spec = SimpleNamespace(run_dir=tmp_path / "runs" / "ATT-1")
+    active.effective_grant = {"validation_argv": []} if from_grant else None
+    job = composed.supervisor._job(active.lease.attempt.job_id)
+    if not from_grant:
+        job = dataclasses.replace(job, validation_commands=[])
+        composed.supervisor._job = lambda _job_id: job
+    observed = []
+
+    async def prepare(_ref, *, operation, observed_after):
+        observed.append(operation)
+        if operation != "terminal":
+            raise AssertionError("no validation process was assigned or executed")
+        assert observed_after > 0
+
+    composed.adapter.prepare_fabric_cleanup = prepare
+    composed.supervisor._retain_unqualified_fabric_evidence = lambda *_args, **_kwargs: pytest.fail(
+        "empty argv cannot generate unqualified validation execution evidence")
+    receipts, path, error = asyncio.run(
+        composed.supervisor._run_supervisor_validations(active, job))
+    payload = json.loads(path.read_text())
+    assert receipts == () and error is None
+    assert payload["commands"] == []
+    assert "fabric_cleanup" not in payload and "uid_sweep" not in payload
+    assert observed == ["terminal"]
+    # Actual terminal evidence is still independently adjudicated, never
+    # relabelled as validation cleanup.
+    assert composed.supervisor._active_terminal_uid_sweep(active) == composed.package
+
+
+def test_nonempty_fabric_validation_plan_still_requires_actual_cleanup(composed, tmp_path):
+    composed.active.launch_spec = SimpleNamespace(run_dir=tmp_path / "runs" / "ATT-1")
+    composed.active.effective_grant = None
+    # Fixture job has a real argv requirement; its terminal package may not
+    # substitute for validation evidence, even with zero returned receipts.
+    with pytest.raises(SupervisorError):
+        composed.supervisor._persist_validations(composed.active, ())

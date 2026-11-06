@@ -280,7 +280,13 @@ def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
         assert isinstance(kwargs.pop('mdm_reader'), MosyleInventoryClient)
     if profile in {'web_ceo_v3', 'web_ceo_sessions_v1'}:
         from integrations.session_bridge.return_tools import NativeReplyReadTool
-        assert type(kwargs.pop('session_reply_read_tool')) is NativeReplyReadTool
+        from integrations.session_bridge.reference_tools import NativeReplyReferencesTool
+        reply_tool = kwargs.pop('session_reply_read_tool')
+        references_tool = kwargs.pop('session_reply_references_tool')
+        assert type(reply_tool) is NativeReplyReadTool
+        assert type(references_tool) is NativeReplyReferencesTool
+        # One installed client for both READ paths; no extra transport owner.
+        assert references_tool._client is reply_tool._reader.__self__
         assert callable(kwargs.pop('session_target_projector'))
         assert callable(kwargs.pop('session_reply_handler'))
         assert callable(kwargs.pop('session_summon_handler'))
@@ -356,6 +362,173 @@ def test_os_audience_requires_explicit_opt_in_and_rejects_missing_value():
                 {'os_executive_transport': True, 'executive_mcp_profile': 'web_ceo_v3'}):
         with pytest.raises(ValueError, match='OS Executive resource'):
             module.validate_os_executive_resource(raw)
+
+
+def test_installed_os_policy_source_reads_one_sealed_current_gateway_pair(tmp_path, monkeypatch):
+    """Control projects the exact network gateway's existing approved pair."""
+    from ops.executive_os import executive_mcp_entry as entry
+    from tests.test_gateway_refresh_preflight import _config
+    source = tmp_path / ("a" * 40)
+    source.mkdir()
+    path = tmp_path / "executive-mcp.json"
+    initial = _config()
+    initial.update(os_executive_transport=True,
+        os_executive_resource=entry.OS_EXECUTIVE_RESOURCE, os_commission_port=45025)
+    path.write_text(json.dumps(initial))
+    observed = []
+    monkeypatch.setattr(entry, "require_sealed_path",
+        lambda value, **kwargs: observed.append((Path(value), kwargs)))
+    uid = os.geteuid()
+    loader = entry.installed_os_session_policy_source(
+        path, source, expected_uid=uid)
+    pair = loader()
+    assert pair.read.resource == pair.submit.resource == entry.OS_EXECUTIVE_RESOURCE
+    assert pair.read.policy_id == initial["policies"]["read"]["policy_id"]
+    assert pair.submit.policy_id == initial["policies"]["submit"]["policy_id"]
+    assert {source, path} <= {value for value, _ in observed}
+    # No caller-provided policy ID enters this source; the network
+    # gateway's root-sealed installation alone determines both policy IDs.
+    # Gateway policy rotation cannot silently authorize a different principal.
+    changed = json.loads(json.dumps(initial))
+    changed["policies"]["read"]["policy_id"] = "foreign-new-read-policy"
+    path.write_text(json.dumps(changed))
+    with pytest.raises(ValueError, match="installed policy or configuration changed"):
+        loader()
+
+
+@pytest.mark.parametrize("fault", [
+    "disabled", "wrong_release", "wrong_uid", "wrong_resource",
+    "malformed_read_policy", "policy_id_collision", "issuer_mismatch",
+    "subject_mismatch",
+])
+def test_installed_os_policy_source_refuses_unapproved_pair(tmp_path, monkeypatch, fault):
+    from ops.executive_os import executive_mcp_entry as entry
+    from tests.test_gateway_refresh_preflight import _config
+    source = tmp_path / ("a" * 40)
+    source.mkdir()
+    path = tmp_path / "executive-mcp.json"
+    raw = _config()
+    raw.update(os_executive_transport=True,
+        os_executive_resource=entry.OS_EXECUTIVE_RESOURCE, os_commission_port=45025)
+    if fault == "disabled":
+        del raw["os_executive_transport"]
+        del raw["os_executive_resource"]
+        del raw["os_commission_port"]
+    elif fault == "wrong_release":
+        raw["release_sha"] = "b" * 40
+    elif fault == "wrong_resource":
+        raw["os_executive_resource"] = "https://foreign.invalid/os/executive"
+    elif fault == "malformed_read_policy":
+        del raw["policies"]["read"]["jwks_uri"]
+    elif fault == "policy_id_collision":
+        raw["policies"]["read"]["policy_id"] = raw["policies"]["submit"]["policy_id"]
+    elif fault == "issuer_mismatch":
+        raw["policies"]["submit"]["issuer"] = "https://other-issuer.example.test/"
+    elif fault == "subject_mismatch":
+        raw["policies"]["submit"]["allowed_subject_digests"] = ["f" * 64]
+    path.write_text(json.dumps(raw))
+    monkeypatch.setattr(entry, "require_sealed_path", lambda *_a, **_k: None)
+    with pytest.raises(ValueError):
+        entry.installed_os_session_policy_source(
+            path, source, expected_uid=os.geteuid() + int(fault == "wrong_uid"))
+
+
+def test_installed_os_policy_source_normalizes_optional_policy_parse_at_boot(
+    tmp_path, monkeypatch,
+):
+    from integrations.business_mcp_auth.contracts import AuthError, AuthErrorCode
+    from ops.executive_os import executive_mcp_entry as entry
+    from tests.test_gateway_refresh_preflight import _config
+    source = tmp_path / ("a" * 40)
+    source.mkdir()
+    path = tmp_path / "executive-mcp.json"
+    raw = _config()
+    raw.update(os_executive_transport=True,
+        os_executive_resource=entry.OS_EXECUTIVE_RESOURCE, os_commission_port=45025)
+    path.write_text(json.dumps(raw))
+    monkeypatch.setattr(entry, "require_sealed_path", lambda *_a, **_k: None)
+    def refuse_mounted_policy(_raw):
+        raise AuthError(AuthErrorCode.INVALID_POLICY)
+    monkeypatch.setattr(entry, "validate_document", refuse_mounted_policy)
+    with pytest.raises(ValueError, match="installed OS policy pair unavailable"):
+        entry.installed_os_session_policy_source(
+            path, source, expected_uid=os.geteuid())
+
+
+def test_installed_os_policy_source_normalizes_late_optional_policy_refusal(
+    tmp_path, monkeypatch,
+):
+    from integrations.business_mcp_auth.contracts import AuthError, AuthErrorCode
+    from ops.executive_os import executive_mcp_entry as entry
+    from tests.test_gateway_refresh_preflight import _config
+    source = tmp_path / ("a" * 40)
+    source.mkdir()
+    path = tmp_path / "executive-mcp.json"
+    raw = _config()
+    raw.update(os_executive_transport=True,
+        os_executive_resource=entry.OS_EXECUTIVE_RESOURCE, os_commission_port=45025)
+    path.write_text(json.dumps(raw))
+    monkeypatch.setattr(entry, "require_sealed_path", lambda *_a, **_k: None)
+    def changed_optional_policy(*_a, **_k):
+        def reread():
+            raise AuthError(AuthErrorCode.INVALID_POLICY)
+        return reread
+    monkeypatch.setattr(entry, "current_projection_loader", changed_optional_policy)
+    loader = entry.installed_os_session_policy_source(
+        path, source, expected_uid=os.geteuid())
+    with pytest.raises(ValueError, match="installed OS policy pair unavailable"):
+        loader()
+
+
+@pytest.mark.parametrize("phase", ["startup", "late_read"])
+@pytest.mark.parametrize("acl_node", ["gateway_file", "config_directory"])
+def test_installed_os_policy_source_refuses_mac_acl_on_every_read(
+    tmp_path, monkeypatch, phase, acl_node,
+):
+    """A malicious directory ACL cannot substitute a new approved policy."""
+    from control_plane import fs_security
+    from ops.executive_os import executive_mcp_entry as entry
+    from tests.test_gateway_refresh_preflight import _config
+    source = tmp_path / ("a" * 40)
+    source.mkdir()
+    path = tmp_path / "executive-mcp.json"
+    raw = _config()
+    raw.update(os_executive_transport=True,
+        os_executive_resource=entry.OS_EXECUTIVE_RESOURCE, os_commission_port=45025)
+    path.write_text(json.dumps(raw))
+    monkeypatch.setattr(entry, "require_sealed_path", lambda *_a, **_k: None)
+    compromised = path if acl_node == "gateway_file" else path.parent
+    blocked = [phase == "startup"]
+    observed = []
+    def acl(value):
+        observed.append(Path(value))
+        return blocked[0] and Path(value) == compromised
+    monkeypatch.setattr(fs_security, "has_macos_acl", acl)
+    if phase == "startup":
+        with pytest.raises(ValueError, match="installed OS policy seal unavailable"):
+            entry.installed_os_session_policy_source(
+                path, source, expected_uid=os.geteuid())
+    else:
+        loader = entry.installed_os_session_policy_source(
+            path, source, expected_uid=os.geteuid())
+        blocked[0] = True
+        with pytest.raises(ValueError, match="installed OS policy seal unavailable"):
+            loader()
+    assert compromised in observed
+
+
+def test_installed_os_policy_source_rejects_real_unsealed_symlink(tmp_path):
+    """Exercise the real POSIX/symlink seal, not a monkeypatched no-op."""
+    from ops.executive_os import executive_mcp_entry as entry
+    source = tmp_path / ("a" * 40)
+    source.mkdir()
+    path = tmp_path / "executive-mcp.json"
+    path.write_text("{}")
+    link = tmp_path / "linked-executive-mcp.json"
+    link.symlink_to(path)
+    with pytest.raises(ValueError, match="sealed path"):
+        entry.installed_os_session_policy_source(
+            link, source, expected_uid=os.geteuid())
 
 
 def test_os_audience_preserves_existing_tunnels_and_all_policy_grants():
