@@ -1,0 +1,360 @@
+{
+  "backend_readiness_fix": {
+    "contract": "gateway health 200 requires live child AND localhost backend GET /api/health HTTP200",
+    "identity_limitations": "Public commit is a provenance check, not cryptographic process attestation; real model inference remains unverified",
+    "identity_required": "200 HTTP alone cannot qualify backend; require JSON ok is true and commit equals exact pinned Hermes SHA",
+    "local_suites_current": {
+      "hermes_delegate": "25/25 PASS",
+      "hermes_harness": "49/49 PASS",
+      "hermes_models": "22/22 PASS",
+      "hermes_runtime": "29/34 macOS, same 4 Linux-only failures plus one /proc error",
+      "hermes_secretary": "51/51 PASS",
+      "hermes_steward": "34/34 PASS"
+    },
+    "mock_server": "local fixture only: responsive, unhealthy and silent-child cases",
+    "native_upstream_identity_source": "NousResearch/hermes-agent@1c0cd667746d3395fe9e1b6c74f8f85952486f18 hermes_cli/web_routers/status.py and dashboard_auth/public_paths.py",
+    "negative_cases": [
+      "running child without listener remains 503",
+      "running child returning 503 remains 503",
+      "invalid backend port never probed",
+      "startup with 5-second memory sampling no longer times out waiting for HTTP readiness",
+      "HTTP 200 with wrong upstream commit rejected as backend_ready=false",
+      "HTTP 200 with missing commit rejected",
+      "HTTP 200 with malformed JSON rejected",
+      "HTTP 200 with response body larger than 4KiB rejected"
+    ],
+    "no_hermes_process_started": true,
+    "no_live_provider_called": true,
+    "no_model_inference_receipt": true,
+    "positive_local_tests": "49/49 Hermes harness and new targeted 3/3 runtime test methods passed; macOS 28/33 runtime as noted",
+    "positive_test_async_wait": "existing loopback/auth positive test now awaits truly ready backend; immediate process launch is no longer an availability proof",
+    "probe": "http.client to exact 127.0.0.1 child port; no secrets, redirects or external endpoints; 250ms connection timeout",
+    "product_proof": "SOURCE_ONLY_FAIL_CLOSED_READINESS",
+    "sampling": "at most 250ms readiness poll; configured RSS high-water interval unchanged",
+    "unready": "503 starting, backend_ready=false, even if child_running=true"
+  },
+  "candidate_qualification_guard": {
+    "actual_source_advertisement_bytes": 158531,
+    "generic_untrusted_cap_bytes": 131072,
+    "live_provider_or_company_call": false,
+    "local_candidate_unittest": "48/48 PASS",
+    "negative_cases": [
+      "modified large schema fails size+source drift",
+      "source owner changed with matching new advertisement still fails owner drift+size",
+      "new/renamed/write tools continue denied",
+      "no live MCP connection"
+    ],
+    "previous_head": "c2e5897e97a8401eb99dfd5988ce8ef5aa7169db",
+    "previous_head_workflow": "41381723582 FAILURE both Python 3.12 and Python 3.13",
+    "prior_failure": "original source six-tool advertisement exceeds 128KiB generic cap",
+    "rule": "only exact byte-for-byte original source owner can exceed generic cap; all altered or drifted advertisements remain refused",
+    "sha256_exact_pinned_owner": "23f13aa028a564889da10285ecdfd648a9a451fa2635d0251fd2340b45821837",
+    "source_only": true
+  },
+  "company_grounding_consumer": {
+    "auth_owner": "integrations.business_mcp_auth.claims",
+    "authorized_company_call_proven": false,
+    "company_completion_proven": false,
+    "fail_closed": "bad envelope, wrong tool, forged subject, missing predicate, wrong owner, oversized response, changed auth discard data",
+    "function": "integrations.hermes_steward.brief.responsibility_brief",
+    "local_test_evidence": {
+      "existing_secretary_grounding_pytest": "Selected 3 files exit0 on space-free temporary QA copy",
+      "hermes_harness_unittest": "49/49 PASS on space-free temporary QA copy",
+      "real_company_network_or_model_inference": "NOT_RUN",
+      "steward_unittest": "45/45 PASS"
+    },
+    "native_mcp_enabled": false,
+    "new_scheduler_or_queue": false,
+    "schema": "mastermind.hermes_steward_brief.v1",
+    "scope": "ONE_EXACT_RESPONSIBILITY_SOURCE_ONLY",
+    "secret_values_in_source": false,
+    "source_facts": "preserved without model inference, with owner/source_ref/observed_at/freshness",
+    "source_methods": [
+      "get_responsibility",
+      "get_current_runtime",
+      "explain_blocker"
+    ],
+    "strict_receiver": "StewardReadClient.read_grounded",
+    "tool_owner": "integrations.hermes_steward.client.StewardReadClient",
+    "unknown_handling": "UNKNOWN is not NO_ATTENTION or completion; PARTIAL explicitly missing coverage",
+    "upstream_contract": "mastermind.secretary_grounding_mcp_result.v2",
+    "upstream_owner": "integrations.mastermind_secretary_mcp.schemas"
+  },
+  "delegate_original_parent_finalization_fence": {
+    "acceptance_limitations": "All ports synthetic in offline tests. Real Executive admission and review identity, WorkerResult, native tool delivery, user session, model inference and protected release NOT_PROVEN.",
+    "advertised_actions": [
+      "submit",
+      "status",
+      "cancel"
+    ],
+    "executive_original_parent_port_required_for_Bridge_consume": true,
+    "independent_review_port_required_for_Bridge_review": true,
+    "parent_current_source_head": "9c5262dee959c92e0479dedbd8665d494d29a32e",
+    "parent_replay_requires_repeat_identity_and_owner_verification": true,
+    "private_result_reveal_only_verified_parent_consume": true,
+    "public_model_tool": "mmx_delegate",
+    "public_schema_reviewer_verdict_hash_fields": false,
+    "public_status_includes_handoff": false,
+    "public_status_includes_result_text": false,
+    "trusted_parent_owner_injected_default": false,
+    "trusted_review_owner_injected_default": false,
+    "untrusted_model_consume": "REFUSED REVIEW_AND_CONSUME_OWNER_ONLY",
+    "untrusted_model_review": "REFUSED REVIEW_AND_CONSUME_OWNER_ONLY",
+    "verification": {
+      "candidate_qualification_unit": "48/48 PASS on source checkout",
+      "delegate_unit": "28/28 PASS on original source and space-free QA",
+      "harness_unit": "49/49 PASS in existing space-free QA",
+      "live_admitted_child": "NOT_RUN",
+      "steward_unit": "45/45 PASS on source checkout"
+    }
+  },
+  "fixture_only": true,
+  "independent_review": "Historical independent #1885 reviewer returned REQUEST_CHANGES (Slack receipt, not GitHub review); new exact #1917 head still awaits a new nonauthor review",
+  "live_runtime_started": false,
+  "local_runtime_limitations": [
+    "/proc/net/tcp absent on Darwin",
+    "/proc RSS unsupported on Darwin",
+    "Existing runtime fixture /tmp vs /private/tmp identity assertion",
+    "Existing system-unit-directory test uses Linux path resolution",
+    "Five unchanged Linux-specific runtime cases on macOS; detailed failure count retained"
+  ],
+  "modelark_public_docs_check": {
+    "base_url_matches_source": true,
+    "credential_or_model_activation_proven": false,
+    "deepseek_flash_model_id_matches_source": true,
+    "glm_flash_model_id_matches_source": true,
+    "models_source": "https://ai.byteplus.com/ark/region%3Aap-southeast-1/docs/model-list",
+    "region": "ap-southeast-1",
+    "region_source": "https://console.byteplus.com/ark/region%3Aap-southeast-1/docs/region-availability"
+  },
+  "operation": "hermes-byok-role-selection-20261101-sol-001",
+  "owned_path_digests": [
+    {
+      "path": ".github/workflows/hermes-harness.yml",
+      "sha256": "bc47a87b215c76593765014e3728a78f1017a2ddb604266f0343d7c88a59d266"
+    },
+    {
+      "path": "docs/hermes/DEPLOY_UBUNTU1.md",
+      "sha256": "b0f91076aaa3d7871fc431f29f85c702977b68d7d1565bf5b45640666e14c22d"
+    },
+    {
+      "path": "integrations/hermes_delegate/README.md",
+      "sha256": "84a3b104989a4a84d23756aeba717283f3397fb1334040b1242631cbd3b4d2d1"
+    },
+    {
+      "path": "integrations/hermes_delegate/bridge.py",
+      "sha256": "09a78f388589d337f1c7011e5b5bc8eb97e27704ad21650de0203a30854b7f9a"
+    },
+    {
+      "path": "integrations/hermes_delegate/handoff.py",
+      "sha256": "1348c5b50a270007ef1a1bb899e4ab62bfdb41f171e05731f5e8b8bb3ef00051"
+    },
+    {
+      "path": "integrations/hermes_delegate/schema.py",
+      "sha256": "f0be1e2b584a597d574149d0973b62dc9ebdc5c602d4c58e44eb59a0f18f1952"
+    },
+    {
+      "path": "integrations/hermes_delegate/tests/test_delegate.py",
+      "sha256": "6b6a913a9aa0bb26417b24f42206fc3d3fdfa0caa1396c4289c8024693a39ee8"
+    },
+    {
+      "path": "integrations/hermes_delegate/tool.py",
+      "sha256": "0e6815b7ed017774731d30d73629caea2ec9d68d95068ed1a2bba385600c9946"
+    },
+    {
+      "path": "integrations/hermes_harness/cli.py",
+      "sha256": "bb72441f4531eea676f9ac76523eeee582d90200ac4d529c691ccc70007e151f"
+    },
+    {
+      "path": "integrations/hermes_harness/doctor.py",
+      "sha256": "89033939662ad2533d7d627777648946016b576835cdb30883a5f0edd3990e8f"
+    },
+    {
+      "path": "integrations/hermes_harness/native_byok.py",
+      "sha256": "122f11bb49e990648c452b0bb933a100e215f1fcd934134c38fa38cbdd0e9290"
+    },
+    {
+      "path": "integrations/hermes_harness/native_model_credential.py",
+      "sha256": "e3c41d9a12d5e194c9981fd1395304b7741fce753507ebd5c934bf614bbeebf3"
+    },
+    {
+      "path": "integrations/hermes_harness/stack.py",
+      "sha256": "a0521d73dbfdfd623caae69cbe88071b217fc03cd05c3d8d6793ea096df356dd"
+    },
+    {
+      "path": "integrations/hermes_harness/tests/test_e2e.py",
+      "sha256": "a54442809340711969133284ad381af3bc15ca026023cf9d99826767732c86f1"
+    },
+    {
+      "path": "integrations/hermes_harness/tests/test_native_model_selection.py",
+      "sha256": "d1d1e18260e369b30c9c9bf0bb5a611540604bed5671b70ca0716a2e32f85a95"
+    },
+    {
+      "path": "integrations/hermes_models/contract.py",
+      "sha256": "f6bc70e2a8d774510fa2dbf6c1bce78ff5c5ca47f76fda27b392960998ffbab1"
+    },
+    {
+      "path": "integrations/hermes_models/profile_config.py",
+      "sha256": "e8c5da80ca8632b0f490cb014e063689e43488027dd9ff791d208354a0460c88"
+    },
+    {
+      "path": "integrations/hermes_qualification/README.md",
+      "sha256": "89f411eb51584da366c743a35f039e07e2923af83bfe3c46741c792d5fbd13c3"
+    },
+    {
+      "path": "integrations/hermes_qualification/steward_contract.py",
+      "sha256": "fd502ddd4a08543f22739a14988b988c940269dc763edd697a5ad7c112c7b26d"
+    },
+    {
+      "path": "integrations/hermes_qualification/tests/test_steward_contract.py",
+      "sha256": "f329b2bc904ddcd24b1865c9ece0202c98d13dcefd9363d7a2132e8ff2af46ee"
+    },
+    {
+      "path": "integrations/hermes_runtime/profile.py",
+      "sha256": "7b3ed18775409a14d66bd655b330e5450afb9d14e47e72588174a902198b2419"
+    },
+    {
+      "path": "integrations/hermes_runtime/supervisor.py",
+      "sha256": "c45fb511a7cf632885fb24b6e9fb3170bd894720e4c788f89fa6ac84f1dbdfee"
+    },
+    {
+      "path": "integrations/hermes_runtime/tests/fixtures/hermes_stub.py",
+      "sha256": "c46d0419d14b61e0cf8fefedcde1b9760388fcd931122d557e39e09284c51c11"
+    },
+    {
+      "path": "integrations/hermes_runtime/tests/test_gateway_supervisor.py",
+      "sha256": "91a9802b1e5d9e91dbd9dc564d27d2d9ae2936e7d5b343abe7e299f57777c448"
+    },
+    {
+      "path": "integrations/hermes_steward/README.md",
+      "sha256": "7a40ca4a8637df392ac1ab72e8c7529fdb5cc8034a2266f9a4f2dd5da9ad5406"
+    },
+    {
+      "path": "integrations/hermes_steward/brief.py",
+      "sha256": "f2bd3b5336243914de7458ab5206bd30312b7c026a318c5811896cca4b93fa3a"
+    },
+    {
+      "path": "integrations/hermes_steward/client.py",
+      "sha256": "ced88bcda918f75591af4ef44ccf9395f305381438729f37b2fd33d9bc4cca79"
+    },
+    {
+      "path": "integrations/hermes_steward/tests/test_brief.py",
+      "sha256": "3feb4a105f979dad7abfe42e5cb6cd29b6fea02fce56e96c99aee8492f384cc9"
+    },
+    {
+      "path": "integrations/hermes_steward/tests/test_client_grounded.py",
+      "sha256": "e40151bcdadc5c2348590ae41fd453d24d96140dbf82f78a8f7c081b977a5254"
+    },
+    {
+      "path": "tests/test_cap_s1_mastermind_operator_canary.py",
+      "sha256": "b9a9ef1c73fb1fcf2fd020eb82429b6b64003e490ecef86871ddc7a5023fb728"
+    },
+    {
+      "path": "tests/test_executive_autonomy_control.py",
+      "sha256": "3e8f3eadc7ca021fee56900f3acb2ca0484fbc4a345d3602e408dac600b2d9e2"
+    },
+    {
+      "path": "tests/test_h1_input_wrapper.py",
+      "sha256": "d83b6521b7b76efa9fa37f5fe74a5760009ed23321596bd6d7639b322c815d44"
+    },
+    {
+      "path": "tests/test_health_readiness.py",
+      "sha256": "5ab974fbeef3d783ea0577a18ab59847133671cfd55a9fa505c955d89dab0838"
+    }
+  ],
+  "parent_sha": "267e1e00e657ab5a87266b6fb4f19bab4e2a95bc",
+  "previous_head_linux_evidence": {
+    "broad": "41394191275 IN_PROGRESS at last observed",
+    "candidate": "41394191368 SUCCESS",
+    "does_not_qualify_current_postimage": true,
+    "harness": "41394191206 SUCCESS",
+    "head": "9c5262dee959c92e0479dedbd8665d494d29a32e",
+    "runtime": "41394191203 SUCCESS"
+  },
+  "procedure_pin": "19cb00cfed26b68f0a8a5cdc0f2f1a9463a3feec",
+  "product_claim": "SOURCE_ONLY_NATIVE_ROLE_SELECTION",
+  "protected_master_test_fix_sync": {
+    "files": [
+      "tests/test_cap_s1_mastermind_operator_canary.py",
+      "tests/test_h1_input_wrapper.py",
+      "tests/test_executive_autonomy_control.py",
+      "tests/test_health_readiness.py"
+    ],
+    "five_target_test_result": "5/5 PASS Python3.12 in existing no-secret M2 QA tree with exact pinned Macro CI vendor",
+    "original_protected_review_required": true,
+    "previous_head_three_workflows": {
+      "broad": "41382230088 FAILURE: five test-only fixture cases",
+      "candidate": "41382230090 SUCCESS",
+      "harness": "41382230195 SUCCESS",
+      "runtime": "41382230099 SUCCESS"
+    },
+    "prior_hermes_head": "604b9dc6bf060f9a7663bdef5e7ddc40811579ef",
+    "protected_master_source": "19cb00cfed26b68f0a8a5cdc0f2f1a9463a3feec",
+    "qa_dependency": "mastermindx-market-intelligence/macro@256c757b3c4f0ec759571c29a30a71387d0a18f8 (engine, lib)",
+    "qa_shard_total": "not run end-to-end; next exact-head GitHub full CI required",
+    "reason": "Broad exact-head CI workflow 41382230088 failed on five test-only local monkeypatch/fixture cleanup defects already repaired on protected master",
+    "release_or_production_proven": false,
+    "strategy": "Copy four test source blobs byte-for-byte from the exact protected master, not new logic, no global pytest behavior change"
+  },
+  "provider_calls": 0,
+  "python": "3.12.13",
+  "recorded_at": "2026-11-02T06:04:56.307868+00:00",
+  "remaining_acceptance": [
+    "Exact-head Linux suite/CI",
+    "Independent non-author source review",
+    "Protected release",
+    "Authenticated model inference and metering",
+    "Governed company tools and original-parent result",
+    "24h/7d resident acceptance without Grok cutover"
+  ],
+  "results": {
+    "hermes_delegate": {
+      "fixture_only": true,
+      "passed": 28,
+      "tests": 28
+    },
+    "hermes_harness": {
+      "passed": 49,
+      "tests": 49
+    },
+    "hermes_models": {
+      "passed": 22,
+      "tests": 22
+    },
+    "hermes_runtime": {
+      "errors": 1,
+      "failures": 4,
+      "linux_validation_required": true,
+      "passed": 29,
+      "tests": 34
+    },
+    "hermes_secretary": {
+      "passed": 51,
+      "tests": 51
+    },
+    "hermes_steward": {
+      "passed": 45,
+      "tests": 45
+    }
+  },
+  "review_findings": {
+    "current_child_fixes_unreviewed": [
+      "Native BYOK alias policy runs synchronously before any Hermes census subprocess",
+      "Census subprocess environment excludes dashboard/Slack/provider credentials",
+      "Inner-loop unexpected exceptions become failed health and foreground supervisor exit"
+    ],
+    "no_production_receipt": true,
+    "prior_review_head": "bedc2a8fcef5c1722217403f789f2cb06c298b2a",
+    "prior_review_state": "REQUEST_CHANGES_NOT_PUBLISHED_GITHUB",
+    "review_receipt": "https://mastermindxgroup.slack.com/archives/C0CBC6AEAQZ/p1793411234006469?thread_ts=1793398782.443479"
+  },
+  "review_refusal": {
+    "reason": "host_temperature_at_or_above_limit",
+    "response_sha256": "2d31cdc7325e4bfd050d10c337339cf619c6ae77d976836152c4ac0d2c8b29f7",
+    "retry_allowed": false,
+    "run_id": "hermes-role-selection-pr1917-review-20261101-sol-001"
+  },
+  "source_manifest_contract": "sha256 of compact sorted JSON owned_path_digests (path and sha256)",
+  "source_manifest_sha256": "c9677d3e53fb3d39c215ee5950dcc2b33dfd5c50fc490b90256b41c1a3521824",
+  "test_host": "m2studio / macOS"
+}

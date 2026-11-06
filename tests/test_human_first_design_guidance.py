@@ -33,12 +33,15 @@ class HumanFirstDesignGuidanceTests(unittest.TestCase):
         self.assertIn("docs/DESIGN_DOCTRINE.md", text)
         self.assertIn("separately from the Sol Skillpack", text)
         self.assertIn("A candidate PR is not", text)
-        self.assertIn("`APPLIED_RESPONSE_OBSERVED` is not design acceptance", text)
+        self.assertIn("Distinguish CONNECTED, response observed,", text)
+        self.assertIn("visual acceptance, implemented code and production proof.", text)
 
     def test_paper_transport_and_effect_fences_survive(self):
         text = self.read("skills/paper-design-workflow/SKILL.md")
         for phrase in ("INDEPENDENT_RDC_AUTHORIZATION", "A denial is not a fallback invitation",
-                       "On `EFFECT_UNKNOWN`", "one designer assigned"):
+                       "On `EFFECT_UNKNOWN`", "Multiple designers may modify the same exact Paper `fileId`",
+                       "Prefer disjoint board/artboard/node target sets.",
+                       "partition node targets and re-read/re-plan"):
             self.assertIn(phrase, text)
 
 

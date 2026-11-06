@@ -1,0 +1,21 @@
+{
+  "rv-original-tail-risk-review-01a13301-r1": {
+    "root": "01a13301-995f-7631-8cee-d675d7de5671",
+    "parent": "01a13301-995f-7631-8cee-d675d7de5671",
+    "host": "ubuntu0",
+    "mode": "qwen",
+    "requested_model": "qwen3.8-max",
+    "packet_path": "/Volumes/Mastermind/evidence/research-vault-completion-20261012-01a13301/runtime-composition/original-parent-continuation/risk-review-packet.txt",
+    "packet_sha256": "ed6b0c62d2d86b0cb9c292df2ed9db931354cc7bf31409c61ae155070e2d7133",
+    "support_digest": "8172955c737b6f55f83aaebcdea5c22566f06a14320bd3fd967054da0fd6c51c",
+    "source_pins": {
+      "log": "62e5fadda6398d0c33ffc5e531cefc1b672fb7ad8237140fff54c032edfa89a1",
+      "support": "fe7b408aef29aa851ff0710e25bc50cc51002342c369afac0d04c15395b962d2"
+    },
+    "lease_witness": {
+      "path": "/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/state/remote_sub/rv-original-tail-risk-review-01a13301-r1.lease.qyAasS",
+      "sha256": "1828f9ddabff24ba3871a43aa062da4e589acc2db542db95cbe7680c61a93c17"
+    },
+    "destination": "/Volumes/Mastermind/evidence/research-vault-completion-20261012-01a13301/retained-returns/rv-original-tail-risk-review-01a13301-r1-collection-v1"
+  }
+}
