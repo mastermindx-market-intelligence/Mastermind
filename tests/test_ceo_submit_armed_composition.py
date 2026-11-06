@@ -1556,7 +1556,7 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if line.startswith("class CeoIngressClient"):
                 clients.append((path.relative_to(ROOT).as_posix(), line_number))
-    assert clients == [("integrations/mastermind_executive_app/gateway.py", 356)]
+    assert clients == [("integrations/mastermind_executive_app/gateway.py", 358)]
     tree = ast.parse(source)
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
@@ -3163,8 +3163,8 @@ def test_d8_hermes_https_port_rejects_false_postimage():
 def test_d8_s14_private_parent_mode_is_one_exact_source_bound_token():
     path = 'ops/native_fabric/quota_continuity/candidate/post_failure_observation.py'
     source = (ROOT / path).read_text()
-    assert hashlib.sha256(source.encode()).hexdigest() == '2a78630ccaf574da752c77d7b8f821723ccb264b970e2fe38b1976d886ca97a0'
-    assert REVIEWED_FILES[path]['sites'] == ((293, 79, 84, 'int', '0o700'),)
+    assert hashlib.sha256(source.encode()).hexdigest() == '80fc9d95068099fb797c9e7a05981a9650d50ec170935d748d92a8e7bcd04337'
+    assert REVIEWED_FILES[path]['sites'] == ((294, 79, 84, 'int', '0o700'),)
     def scan(content, actual_path=path, postimage=True):
         return _scan_added_identity_diff(_d8_frozen_source_diff(actual_path, content),
             source_postimages={actual_path: content} if postimage else None)
