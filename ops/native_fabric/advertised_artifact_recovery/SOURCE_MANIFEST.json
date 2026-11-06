@@ -1,0 +1,15 @@
+{
+  "protected_source": "58e319d26195e01d1b9c0edc06fe50006a9c9d65",
+  "installed_preimage_generation": "177118be6675cf5a292524610afaaf4d5afc33dc6a150c22291240e3b6245fcd",
+  "files": {
+    "artifact_delivery.py": {
+      "sha256": "81749610b8afd7151dbadb4cbcedbef853fc18ad9de9364fd3b2b1d747d535b1",
+      "bytes": 89975
+    },
+    "artifact_reader.py": {
+      "sha256": "e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469",
+      "bytes": 17909
+    }
+  },
+  "scope": "NEXTCUT source only; no install/read/publication; original operation remains Memory-root-owned"
+}
