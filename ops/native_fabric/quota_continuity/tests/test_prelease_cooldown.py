@@ -342,5 +342,110 @@ class PreleaseCooldownRace(unittest.TestCase):
         self.assertFalse((self.root / "forbidden-transport.jsonl").exists())
 
 
+    def _prepare_busy_minimax(self):
+        # A different retained broker lease consumes the MiniMax slot after
+        # the exact AUTO selection but before the original controller enters.
+        self.accounts["providers"]["minimax"]["concurrency_cap"] = 1
+        self.accounts["providers"]["minimax"]["accounts"][0]["per_account_cap"] = 1
+        (self.root / "accounts.json").write_text(json.dumps(self.accounts))
+
+        def hold_slot():
+            lease = self.br.acquire("other-root", "minimax",
+                model="MiniMax-M2.7", host="fixture",
+                task_class="remote-minimax", ttl=1000, wait=0)
+            self.assertTrue(lease.ok)
+            self.other_lease_id = lease.lease_id
+
+        self.stack.enter_context(patch.object(self, "cool_from_settled_other_commission",
+                                              side_effect=hold_slot))
+
+    def test_broker_busy_no_start_reroutes_using_original_packet(self):
+        self._prepare_busy_minimax()
+
+        def qualified_selection(task, **kwargs):
+            blocked = set(kwargs.get("excluded_pools") or ())
+            for pool, model in (("minimax", "MiniMax-M2.7"), ("glm", "glm-5.3-flash")):
+                if pool not in blocked:
+                    self.route_calls.append({"pool": pool, "reason": "fixture"})
+                    return f"POOL={pool} MODEL={model} HOST=fixture MODE={pool}"
+            return "NONE reason=no_eligible_pool"
+        self.stack.enter_context(patch.object(self, "select", side_effect=qualified_selection))
+
+        rc = fabric_continuation.foreground(api, "origin", "mechanical",
+            cwd="~", packet=None, stdin_bytes=b"immutable busy fixture\\n",
+            root_id="root", parent_run_id="parent",
+            task_complexity="C0_MECHANICAL")
+        first = api.inspect_run("origin")
+        proof = fabric_continuation.eligible(api, self.root, "origin", "root", "parent")
+        resolved = fabric_continuation.resolve(api, "origin")
+        with self.br._conn() as conn:
+            own = conn.execute(
+                "SELECT COUNT(*) FROM leases WHERE orchestrator_id='root' AND pool='minimax'").fetchone()[0]
+            waiter = conn.execute(
+                "SELECT COUNT(*) FROM waiters WHERE orchestrator_id='root' AND pool='minimax'").fetchone()[0]
+        self.assertEqual((first["state"], first["signal"], first["reason"]),
+                         ("TERMINAL_FAILURE", "capacity", "prelease_broker_busy"))
+        self.assertTrue(first["execution_absence_proven"])
+        self.assertEqual((proof["kind"], proof["pool"], proof["broker_reason"]),
+                         ("prelease_broker_busy", "minimax", "cap_full"))
+        self.assertEqual((own, waiter), (0, 0))
+        self.assertFalse(self.path("origin", ".process.jsonl").exists())
+        self.assertEqual([row["pool"] for row in self.route_calls[:2]], ["minimax", "glm"])
+        self.assertEqual(len(resolved["prior_attempts"]), 1)
+        self.assertNotEqual(resolved["effective_run_id"], "origin")
+        self.assertGreaterEqual(len(self.native_calls), 2)
+        self.assertTrue(self.path("origin", ".successor.json").is_file())
+        # The offline controller's forbidden transport is not a worker result;
+        # success/acceptance requires the real installed generation.
+        self.assertNotEqual(rc, 0)
+
+    def test_busy_refusal_requires_exact_broker_and_adapter_receipts(self):
+        self._prepare_busy_minimax()
+        rc = api.request("origin", "mechanical", cwd="~", packet=None,
+            stdin_bytes=b"read-only busy proof fixture\\n", root_id="root",
+            parent_run_id="parent", task_complexity="C0_MECHANICAL",
+            request_capacity_preflight=True, request_remaining_seconds=60,
+            request_deadline_ns=time.monotonic_ns() + 60_000_000_000)
+        self.assertEqual(rc, 75)
+        self.assertEqual(api.inspect_run("origin")["reason"], "prelease_broker_busy")
+        proof = fabric_continuation.eligible(api, self.root, "origin", "root", "parent")
+        self.assertEqual(proof["broker_reason"], "cap_full")
+        for suffix, key, invalid in (
+            (".prelease-quota.json", "broker_reason", "auth_refused"),
+            (".prelease-quota.json", "waiter_cleared", False),
+            (".prelease-quota.json", "task_cli_started", True),
+            (".request-return.json", "controller_rc", 0),
+        ):
+            with self.subTest(suffix=suffix, key=key):
+                path = self.path("origin", suffix)
+                original = path.read_bytes()
+                try:
+                    row = json.loads(original)
+                    row[key] = invalid
+                    path.write_text(json.dumps(row))
+                    self.assertEqual(api.inspect_run("origin")["state"],
+                                     "STATUS_UNREADABLE")
+                    with self.assertRaises(ValueError):
+                        fabric_continuation.eligible(
+                            api, self.root, "origin", "root", "parent")
+                finally:
+                    path.write_bytes(original)
+        returned = self.path("origin", ".request-return.json")
+        original = returned.read_bytes()
+        try:
+            returned.unlink()
+            self.assertEqual(api.inspect_run("origin")["state"], "SETTLING")
+        finally:
+            returned.write_bytes(original)
+
+    def test_pool_exclusion_not_available_to_manual_pins(self):
+        with self.assertRaisesRegex(api.FabricTaskError, "CAPACITY_EXCLUSION"):
+            api.request("pinned", "mechanical", cwd="~", packet=None,
+                stdin_bytes=b"inert", pool="minimax",
+                capacity_excluded_pools=["minimax"],
+                request_capacity_preflight=True)
+        self.assertFalse(self.path("pinned", ".request.json").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
