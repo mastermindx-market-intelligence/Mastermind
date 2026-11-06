@@ -1,0 +1,49 @@
+{
+  "budget_seconds": 60.0,
+  "command": [
+    "/workspace/scratch/16d3df696438/qa-venv/bin/python",
+    "-m",
+    "pytest",
+    "-o",
+    "addopts=",
+    "-q",
+    "--confcutdir=/workspace/scratch/756e91231da1/h24-10/tests/hermes_contract_chaos",
+    "--tb=short",
+    "--durations=10",
+    "--junitxml=/workspace/scratch/756e91231da1/h24-evidence/failures.junit.xml",
+    "/workspace/scratch/756e91231da1/h24-10/tests/hermes_contract_chaos/test_h24_failures.py",
+    "--chaos-seed=0",
+    "--chaos-seed=1",
+    "--chaos-seed=9232"
+  ],
+  "elapsed_seconds": 7.375,
+  "exit_code": 0,
+  "invocation_error": null,
+  "junit": "/workspace/scratch/756e91231da1/h24-evidence/failures.junit.xml",
+  "lane": "failures",
+  "native_service_qualified": false,
+  "platform": "Linux",
+  "pytest_summary": {
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "tests": 33
+  },
+  "python": "3.12.14",
+  "schema": "mastermind.h24_chaos_timing.v1",
+  "scope": "OFFLINE_SOURCE_CONFORMANCE_ONLY",
+  "seeds": [
+    0,
+    1,
+    9232
+  ],
+  "tests_sha256": {
+    "tests/hermes_contract_chaos/__init__.py": "8314f65721c3867f6a8a51f4bddf58e751263318392d4a35a8aad1b365208893",
+    "tests/hermes_contract_chaos/conftest.py": "2c9a5ad5f5bc71babb4ccc46176362fd29a7a2c10b67aae4d9b13bc5a86716d7",
+    "tests/hermes_contract_chaos/fixtures.py": "44819f8d7693eb154f34fc6091506d246fcd65f9ebcaad33d6263075af877a98",
+    "tests/hermes_contract_chaos/run_lane.py": "070c4cf280a871ec696d74eb1a98c443ee0541c9bafd6d06992be8b356c1f690",
+    "tests/hermes_contract_chaos/test_h24_concurrency.py": "0e8bfafe555eebe648845b108da7f0c4b6a42892be7a6818b2b6e7f023a857eb",
+    "tests/hermes_contract_chaos/test_h24_failures.py": "9647e6684b8319c0cba827e5d8173eebba31c5783a58e535a9fee641dcd4ab5c"
+  },
+  "within_budget": true
+}

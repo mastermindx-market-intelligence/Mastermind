@@ -1,0 +1,59 @@
+name: H24 Hermes offline conformance (advisory)
+
+# Deliberately opt-in. No pull_request/push trigger or existing required check
+# changes; another packet's paths cannot launch this lane accidentally.
+on:
+  workflow_dispatch:
+    inputs:
+      seeds:
+        description: 'Deterministic integer seeds, comma-separated (maximum 16)'
+        required: false
+        default: '0,1,0x2410'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: h24-hermes-offline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline:
+    name: H24 ${{ matrix.lane }} / Python ${{ matrix.python }} (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12', '3.13']
+        lane: ['concurrency', 'failures']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Prepare isolated test dependencies only
+        run: python -m pip install --disable-pip-version-check 'PyYAML==6.0.3' 'pytest==9.2.0' 'jsonschema==4.26.0'
+      - name: Run deterministic offline contracts and measure runtime
+        env:
+          H24_SEEDS: ${{ inputs.seeds }}
+          H24_LANE: ${{ matrix.lane }}
+        run: >-
+          python tests/hermes_contract_chaos/run_lane.py
+          --lane "$H24_LANE"
+          --seeds "$H24_SEEDS"
+          --report "$RUNNER_TEMP/h24-${H24_LANE}.json"
+          --budget-seconds 60
+      - name: Retain timing, seeds and actual test conclusion
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: h24-${{ matrix.lane }}-py${{ matrix.python }}
+          path: |
+            ${{ runner.temp }}/h24-${{ matrix.lane }}.json
+            ${{ runner.temp }}/h24-${{ matrix.lane }}.junit.xml
+          if-no-files-found: warn
+          retention-days: 7
