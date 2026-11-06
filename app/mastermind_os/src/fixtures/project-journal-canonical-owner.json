@@ -1,0 +1,71 @@
+{
+  "schema": "mastermind.workspace_project_journal.v1",
+  "selection": {
+    "work_ref": "WS:ONE"
+  },
+  "availability": "AVAILABLE",
+  "source": {
+    "repository": "mastermindx-market-intelligence/macro",
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "journal": {
+    "entries": [
+      {
+        "id": "HND:ONE-2026-11-03",
+        "kind": "HANDOFF",
+        "title": "The original implementation returned.",
+        "why": null,
+        "next_action": "Review the original returned evidence.",
+        "actor": null,
+        "recorded_at": "2026-11-03T12:00:00+00:00",
+        "time_basis": "GIT_RECORD_COMMIT_TIME",
+        "source": {
+          "repository": "mastermindx-market-intelligence/macro",
+          "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "path": "agentos/handoffs/ONE-2026-11-03.md",
+          "content_sha256": "e1942ade5f9cdb38e32d173dbb037de538b68dd58668a3d42951134caf50bc73"
+        }
+      },
+      {
+        "id": "DEC:ONE-CHOICE",
+        "kind": "DECISION",
+        "title": "Keep the original source owner.",
+        "why": "Preserve real evidence custody.",
+        "next_action": null,
+        "actor": "ceo",
+        "recorded_at": "2026-11-02",
+        "time_basis": "DECLARED_DECISION_DATE",
+        "source": {
+          "repository": "mastermindx-market-intelligence/macro",
+          "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "path": "agentos/decisions/DEC-ONE-CHOICE.md",
+          "content_sha256": "c5e31398bd7a27daaa8da5518b00639c9de22246673ab0be7e8310abfdfecd2c"
+        }
+      },
+      {
+        "id": "DSC:ONE-FINDING",
+        "kind": "DISCOVERY",
+        "title": "The source carries its own record dates.",
+        "why": "Keep authored and publication dates separate.",
+        "next_action": null,
+        "actor": null,
+        "recorded_at": "2026-11-01",
+        "time_basis": "DECLARED_VERIFICATION_DATE",
+        "source": {
+          "repository": "mastermindx-market-intelligence/macro",
+          "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "path": "agentos/discoveries/DSC-ONE-FINDING.md",
+          "content_sha256": "6554e1ddcf6ffcb5c3301161bb752dbe17079e2b3f2cf159ba1ab54f7736962e"
+        }
+      }
+    ],
+    "coverage": {
+      "state": "BOUNDED_RECORD_SAMPLE",
+      "scanned": 3,
+      "matched": 3,
+      "omitted": 0,
+      "invalid": 0
+    }
+  },
+  "reason_codes": []
+}

@@ -55,8 +55,11 @@ _CONFIG_FIELDS = frozenset(
         "socket_path",
         "uid_sweep_receipt",
         "operator_harness_armed",
+        "require_assignment_seal",
     }
 )
+# Configs written before the optional finite assignment seal omit that one key.
+_LEGACY_CONFIG_FIELDS = _CONFIG_FIELDS - {"require_assignment_seal"}
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")
 _USER_RE = re.compile(r"^_?[A-Za-z][A-Za-z0-9_-]{0,63}$")
 
@@ -106,7 +109,10 @@ def load_linux_worker_config(
         value = json.loads(lexical.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise LinuxWorkerConfigError("worker config is not valid UTF-8 JSON") from exc
-    if not isinstance(value, dict) or set(value) != _CONFIG_FIELDS:
+    if not isinstance(value, dict) or set(value) not in (
+        _CONFIG_FIELDS,
+        _LEGACY_CONFIG_FIELDS,
+    ):
         raise LinuxWorkerConfigError("worker config fields do not match the schema")
     if value.get("schema_version") != CONFIG_SCHEMA:
         raise LinuxWorkerConfigError("worker config schema version is unsupported")
@@ -158,8 +164,12 @@ def load_linux_worker_config(
         raise LinuxWorkerConfigError("allowed_codex_versions is invalid")
     if value.get("operator_harness_armed") is not False:
         raise LinuxWorkerConfigError("Linux v1 worker cannot arm the Operator Harness")
+    seal = value.get("require_assignment_seal", False)
+    if type(seal) is not bool:
+        raise LinuxWorkerConfigError("require_assignment_seal must be a strict bool")
     normalized["allowed_codex_versions"] = list(versions)
     normalized["operator_harness_armed"] = False
+    normalized["require_assignment_seal"] = seal
     return normalized
 
 
@@ -178,6 +188,55 @@ def _require_worker_directories(config: Mapping[str, Any]) -> None:
             raise LinuxWorkerConfigError(f"{field} is group/other writable")
 
 
+def _sealed_assignment_directory(value: str, *, name: str) -> os.stat_result:
+    path = Path(value)
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise LinuxWorkerConfigError(f"{name} is unavailable") from exc
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise LinuxWorkerConfigError(f"{name} must be a direct directory")
+    if os.path.realpath(path) != os.fspath(path):
+        raise LinuxWorkerConfigError(f"{name} is not a canonical directory path")
+    return info
+
+
+def _require_sealed_assignment_layout(config: Mapping[str, Any]) -> None:
+    """Read-only exact layout gate for the optional finite assignment seal.
+
+    The gate only refuses: it never chmod, chown, create or repair anything.
+    """
+    canonical: dict[str, str] = {}
+    for field in ("workspace_root", "run_root"):
+        info = _sealed_assignment_directory(str(config[field]), name=field)
+        if info.st_uid != int(config["control_uid"]):
+            raise LinuxWorkerConfigError(f"{field} is not owned by the Control principal")
+        if info.st_gid != int(config["worker_gid"]):
+            raise LinuxWorkerConfigError(f"{field} is not group-owned by the worker group")
+        if stat.S_IMODE(info.st_mode) != 0o750:
+            raise LinuxWorkerConfigError(f"{field} mode must be exactly 0750")
+        canonical[field] = os.path.realpath(Path(str(config[field])))
+    home = _sealed_assignment_directory(str(config["provider_home"]), name="provider_home")
+    if home.st_uid != int(config["worker_uid"]):
+        raise LinuxWorkerConfigError("provider_home is not owned by the worker principal")
+    if home.st_gid != int(config["worker_gid"]):
+        raise LinuxWorkerConfigError("provider_home is not group-owned by the worker group")
+    if stat.S_IMODE(home.st_mode) != 0o700:
+        raise LinuxWorkerConfigError("provider_home mode must be exactly 0700")
+    canonical["provider_home"] = os.path.realpath(Path(str(config["provider_home"])))
+
+    fields = ("workspace_root", "run_root", "provider_home")
+    for index, left in enumerate(fields):
+        for right in fields[index + 1 :]:
+            if canonical[left] == canonical[right]:
+                raise LinuxWorkerConfigError(
+                    f"{left} and {right} must be distinct canonical roots"
+                )
+            lower, upper = sorted((canonical[left], canonical[right]))
+            if upper.startswith(lower + os.sep):
+                raise LinuxWorkerConfigError(f"{left} and {right} must not nest or overlap")
+
+
 def build_linux_worker_broker(config: Mapping[str, Any]) -> ExecutiveWorkerBroker:
     """Compose the existing one-worker broker for a dedicated Linux principal."""
 
@@ -188,7 +247,13 @@ def build_linux_worker_broker(config: Mapping[str, Any]) -> ExecutiveWorkerBroke
     observed_groups = set(os.getgroups()) - {worker_gid}
     if observed_groups:
         raise LinuxWorkerConfigError("Linux worker principal has supplementary groups")
-    _require_worker_directories(config)
+    require_seal = config.get("require_assignment_seal", False)
+    if type(require_seal) is not bool:
+        raise LinuxWorkerConfigError("require_assignment_seal must be a strict bool")
+    if require_seal:
+        _require_sealed_assignment_layout(config)
+    else:
+        _require_worker_directories(config)
 
     try:
         binary = attest_codex_binary(
@@ -214,6 +279,7 @@ def build_linux_worker_broker(config: Mapping[str, Any]) -> ExecutiveWorkerBroke
         run_root=Path(str(config["run_root"])),
         provider_home=Path(str(config["provider_home"])),
         require_secret_canary=True,
+        require_assignment_seal=require_seal,
     )
     adapter = CodexWorkerAdapter(
         Path(str(config["codex_binary"])),

@@ -1,0 +1,11 @@
+import {createRoot} from "react-dom/client";
+import {MetaCeoOffice} from "./meta-ceo/MetaCeoOffice";
+import {projectOffice} from "./meta-ceo/projection";
+import {bindMissionHost} from "./host";
+import fixture from "./fabric-catalog-proof.local.json";
+import "./styles.css";
+const context:any={authGeneration:1,selection:null,sessionRef:null,bindingGeneration:null,revisions:{mission:null,programs:null,result:null,conversation:null}};
+const projection=projectOffice({mission:null,programs:null,result:null,conversation:null},context);
+const raw:any={getState:()=>({status:"signed_in",acquisition:true,content:false,reason:null}),invalidationGeneration:()=>1,subscribe:()=>()=>{},signIn:async()=>{},signOut:async()=>{},readPrograms:async()=>null,readWork:async()=>null,readMission:async()=>null,readCurrentWindow:async()=>null,readAttendedFabricCatalog:async()=>fixture,readAttendedFabric:async({runId}:any)=>fixture.items.find(row=>row.run_id===runId)?.status};
+window.MastermindMissionHost=bindMissionHost(raw);
+createRoot(document.getElementById("root")!).render(<div className="shell" data-theme="dark" style={{display:"block",padding:"24px",maxWidth:1280,margin:"auto"}}><p id="proof-warning">CONSUMER FIXTURE · Synthetic catalog · Actual OS components · No backend / live auth / deployment proof</p><MetaCeoOffice projection={projection} draft={{text:"",context}} onDraftChange={()=>{}}/></div>);

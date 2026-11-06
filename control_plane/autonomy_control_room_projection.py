@@ -1925,6 +1925,9 @@ _ACCOUNTABLE_SEAT_BY_OWNER: dict[str, Seat] = {
     "ceo-sol": Seat.CEO,
     "coo-fable": Seat.COO,
     "fable": Seat.COO,
+    # Delegated programme accountability only; never an execution grant.
+    "astra-meta-ceo": Seat.CEO,
+    "fable-meta-ceo": Seat.CEO,
 }
 
 

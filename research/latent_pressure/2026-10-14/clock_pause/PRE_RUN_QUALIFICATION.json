@@ -1,0 +1,22 @@
+{
+  "timing_tests_passed": 18,
+  "competing_incidence_tests_passed": 16,
+  "new_real_data_fit_executed": false,
+  "specifications_frozen_before_this_run": true,
+  "prior_same_day_reuse_disclosed": true,
+  "timestamp_query_repair": {
+    "counterexample_timestamp": "1791208740000000000",
+    "query_one_ns_before": "1791208739999999999",
+    "untyped_search_includes_record": true,
+    "same_dtype_uint64_search_excludes_record": true,
+    "affected_queries_repaired_before_fit": true,
+    "numpy_observed": "2.5.2"
+  },
+  "protocol_clarifications_before_results": [
+    "Positive completed gap median floored at1second for normalized current pause;loggaptrenduses1secondoffset",
+    "Half-hour interval13:00-15:30 usesfiveblocks; final15:30originbelongs to lastblock",
+    "NO_STANDARD_OBSERVATIONrequires knowncompletecapturethroughfuturewindow;otherwise HORIZON_NOT_FULLY_OBSERVED",
+    "AJ fourepisodeexample is recovery.75/depletion.25/unresolved0, notthepre-auditquestionnumbers"
+  ],
+  "real_book_fields": "No access or interpretation of blocked add/modify/delete documentation; originaladapterunchanged"
+}

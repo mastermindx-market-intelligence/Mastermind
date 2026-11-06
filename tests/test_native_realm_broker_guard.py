@@ -189,3 +189,41 @@ def test_revoked_native_realm_retains_cancel_of_previously_started_run(
     assert broker._quarantined_reason == "native_realm_refused"
     assert adapter.cancel_calls == 1
     assert "run_terminal" in sweeper.calls
+
+
+def test_existing_startup_quarantine_precedes_native_realm_check(
+    tmp_path, monkeypatch
+):
+    observations = []
+    broker, recorder, _payload, sweeper = _native_fixture(
+        tmp_path, monkeypatch, lambda: observations.append("guard")
+    )
+    broker._quarantined_reason = "fixture_original_owner_reconciliation"
+
+    with pytest.raises(BrokerStateError, match="original-owner reconciliation"):
+        broker.initialize()
+
+    assert observations == []
+    assert recorder.starts == 0
+    assert sweeper.calls == []
+    assert broker._quarantined_reason == "fixture_original_owner_reconciliation"
+
+
+def test_status_sweep_busy_blocks_native_realm_admission(tmp_path, monkeypatch):
+    observations = []
+    broker, recorder, payload, sweeper = _native_fixture(
+        tmp_path, monkeypatch, lambda: observations.append("guard")
+    )
+    broker._status_sweep_busy = True
+
+    async def scenario():
+        with pytest.raises(BrokerStateError, match="already has active work"):
+            await broker._start(payload)
+
+    asyncio.run(scenario())
+    assert observations == []
+    assert recorder.starts == 0
+    assert sweeper.calls == []
+    assert broker._starting is False
+    assert broker._status_sweep_busy is True
+    assert broker._quarantined_reason is None

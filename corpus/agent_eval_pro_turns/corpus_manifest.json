@@ -1,0 +1,253 @@
+{
+  "corpus_revision": "git:mastermindx-market-intelligence/Mastermind@edd30b4686d3aaf358b4ca6ebd9485b04d15751d",
+  "corpus_tree_digest": "sha256:4c5af1dca6da65733e153a4996255c7cf3204792f99460966c5a51e9a25d0e18",
+  "entries": [
+    {
+      "digest": "sha256:75ce70218e3d97921a871d3e31c3f53b2b8b2d159f17f069847445199cdd08e7",
+      "relative_path": "README.md"
+    },
+    {
+      "digest": "sha256:ff77af79579dfd484c6cb6580c2c7f7abae7d9747d4673d4b9698fd29a8bf94d",
+      "relative_path": "scenarios/carrier_protocol_compliance/checkpoint_then_continue/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:e95dc014a906a4cc5c5f7ac658a52086c0bfe14d4e43d42d76b169353839f690",
+      "relative_path": "scenarios/carrier_protocol_compliance/checkpoint_then_continue/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:d404e976508d06a5c63115d845b400eb4ce2be01e161d432edf853f3d2eedf8a",
+      "relative_path": "scenarios/carrier_protocol_compliance/checkpoint_then_continue/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:cb0faef2c2436425b9913db18d274ca91cd985d59b8b98e6471345c5bceab69b",
+      "relative_path": "scenarios/carrier_protocol_compliance/delivered_not_started/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:c147703aef9faf05346d75e7343060c91b83163498a891c8603dc637d3c4c196",
+      "relative_path": "scenarios/carrier_protocol_compliance/delivered_not_started/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:30251f30b7ff038e64cb1b9a45cf5ac86332cf4acf2b2367c07c141316c8b4e9",
+      "relative_path": "scenarios/carrier_protocol_compliance/delivered_not_started/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:e8fcec43e4d31538d2fa0f060c4eb39376129636ae821b23629b1e9efc6d4b28",
+      "relative_path": "scenarios/carrier_protocol_compliance/dirty_writer_hold/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:84d139fd4a8a84191fe70008f967342de9e96f044c1f8b5d434d8d0c643d0532",
+      "relative_path": "scenarios/carrier_protocol_compliance/dirty_writer_hold/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:fa094e023f23032a15246c42962a186872cb1d5654622f896264d509a456ca6d",
+      "relative_path": "scenarios/carrier_protocol_compliance/dirty_writer_hold/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:37586385e75807fae5c1c0307fedf20e1cdd387dfb4baedee7e308c12304fe05",
+      "relative_path": "scenarios/carrier_protocol_compliance/generic_failure/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:dc8f5a4d051c5c894f6ebd61e910bdb19cbaf29ced563751483db613423d92ca",
+      "relative_path": "scenarios/carrier_protocol_compliance/generic_failure/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:3b90891cba57cbc351d95da0580ab5abe5960d9da9ef429bef74f1e49ef5e3ba",
+      "relative_path": "scenarios/carrier_protocol_compliance/generic_failure/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:4e3caa4fc789095cbeca878acb33e7b6709ae6560e111c0b2e571085675fdb4a",
+      "relative_path": "scenarios/carrier_protocol_compliance/healthy_chunk/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:9c71f135fff019737077c35b1ffd77489765eecdc25bb4f2414d5b7e4be2bb96",
+      "relative_path": "scenarios/carrier_protocol_compliance/healthy_chunk/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:577f2efae17ed9b4df0da631c10cdf6f268c7bf4a7f65373c824340cb0f4864c",
+      "relative_path": "scenarios/carrier_protocol_compliance/healthy_chunk/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:7705e48513b85a6962ef410724ec1de1b25862c412ce5ee026bb6435754dd22b",
+      "relative_path": "scenarios/carrier_protocol_compliance/lane_local_blocker/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:4e107feebe48fd0a435c07a1256af1baf0759c40646e1d8a7155123aeaf6c853",
+      "relative_path": "scenarios/carrier_protocol_compliance/lane_local_blocker/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:9c447924fc56c5026a97fcb24b1014238b62ff1b00b6f09efd6a82fe06b2bec0",
+      "relative_path": "scenarios/carrier_protocol_compliance/lane_local_blocker/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:84c46f8964f6020b58b6e3c466c9b1bcdf87bb6ecb673f59b1094dc85780df8a",
+      "relative_path": "scenarios/carrier_protocol_compliance/milestone_gaming/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:8751a4cbf10ed102f652d1de9247666da8ffd739edaca99cd4e1bfb593080486",
+      "relative_path": "scenarios/carrier_protocol_compliance/milestone_gaming/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:b65f756a9a2401b4604acb9a80cdc0a9620d0174dc99bbf481aef26a46bc624a",
+      "relative_path": "scenarios/carrier_protocol_compliance/milestone_gaming/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:83b67e457fc7ef2e236789ba700ee31cee7d9a91b2e17601ee63230b297e16b9",
+      "relative_path": "scenarios/carrier_protocol_compliance/new_spend_gate/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:b0d26f83c4bad744a1fe96fd140ffea2ff6b540df64fbbb8aab56a6d942af5f6",
+      "relative_path": "scenarios/carrier_protocol_compliance/new_spend_gate/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:a8eeda0f9b841e09ff9abbd5f26dd0690ac5b603dc9c8a5dee7966ec23fba876",
+      "relative_path": "scenarios/carrier_protocol_compliance/new_spend_gate/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:e028479ebe00bfdab6fd95fbab19cbc6951a0dd9e83810143f0a55b3fa5a3426",
+      "relative_path": "scenarios/carrier_protocol_compliance/no_delta_loop/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:1ea5d83ea62e72ef2b84f8bbb553303c4a8e22d6632a95f9995c42e7b15f115f",
+      "relative_path": "scenarios/carrier_protocol_compliance/no_delta_loop/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:9e1b70db6e5cb3811977175e30f9098c508476fbe184d04d9957bb6058c278a7",
+      "relative_path": "scenarios/carrier_protocol_compliance/no_delta_loop/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:40a69f1f5081324fd95d07c6e3225736f2ae59fb76c492eb0ada3a2ab8758c4e",
+      "relative_path": "scenarios/carrier_protocol_compliance/oversized_result/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:999ba7076779ebb9a62c6b770e0d50af64fa0929da6899a4cd22b07c682ede40",
+      "relative_path": "scenarios/carrier_protocol_compliance/oversized_result/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:511b429b85285b93b338b05ed5c8a6622a5ea05e6ed49ecc58ba547fb020bff9",
+      "relative_path": "scenarios/carrier_protocol_compliance/oversized_result/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:1490de3a673ad551cc457bb6d24c5380698c5aeb4b332763013691e46f90e7f6",
+      "relative_path": "scenarios/carrier_protocol_compliance/redundant_confirmation/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:5337fb4f9d28331e6c539b75cfdc2d718e6ab4897cf7e1075229a269db99a7f0",
+      "relative_path": "scenarios/carrier_protocol_compliance/redundant_confirmation/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:7349a56e521478e6f1d8ce3f8b068a455a89e0445167e4cd0cd442a2fd34cb68",
+      "relative_path": "scenarios/carrier_protocol_compliance/redundant_confirmation/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:8b603bd1fc5227934bf2444211d9a01a5c618ff6db6ec839c604b31ba8ef8e52",
+      "relative_path": "scenarios/carrier_protocol_compliance/required_authority_read/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:75da06c531b17ce0ff94644f5c1d514c1856bc46e68ef4a4e5d25a2c3c25fc82",
+      "relative_path": "scenarios/carrier_protocol_compliance/required_authority_read/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:96ba5f2b204f242ba98a33dda4a1265a64cfb3f72e4751b148d0f1aedaa872bc",
+      "relative_path": "scenarios/carrier_protocol_compliance/required_authority_read/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:ab6c599581b014f2c9041ecfcbeddbfab2b84847f308144af531b69e2a43736c",
+      "relative_path": "scenarios/carrier_protocol_compliance/same_chat_summary/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:aa0cbfac2123db141e1f2dd5899f44e0c8225a722c2bf379262c1a07eb2f733d",
+      "relative_path": "scenarios/carrier_protocol_compliance/same_chat_summary/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:4e620f1524fa9f8bc95f34bd791a81497ce730472edfeef0f753cdb216703fdb",
+      "relative_path": "scenarios/carrier_protocol_compliance/same_chat_summary/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:f42912a7aaaa5b9d5f688ec34173705a7cf41f40894fee534c44bf6db074c354",
+      "relative_path": "scenarios/carrier_protocol_compliance/scarce_principal_wait/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:be9ec79f1619d1882a148467d69826ee452f98d6316a91ca1b44ddb37aa03192",
+      "relative_path": "scenarios/carrier_protocol_compliance/scarce_principal_wait/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:36b46cbdfe368a7655317eae12b01bd99cfbc721994caf9fe164dbcc6ebf0068",
+      "relative_path": "scenarios/carrier_protocol_compliance/scarce_principal_wait/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:6959de3e0202e15c490bfcd73d11ff97793f99be634019eef5208e90715254b4",
+      "relative_path": "scenarios/carrier_protocol_compliance/soft_output_target/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:151eb7014fff98f68017153d6b72817134b977d2ca0f9ef21e0f81cfca68884e",
+      "relative_path": "scenarios/carrier_protocol_compliance/soft_output_target/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:4fcdf695d1c50e601f66a165599eac9fecade6a206d95413580381dca8fa6dcd",
+      "relative_path": "scenarios/carrier_protocol_compliance/soft_output_target/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:16ca3ede839ac2861d76bfcb07f41a0134378fe2e25518db604dbb2450cde4bb",
+      "relative_path": "scenarios/carrier_protocol_compliance/unknown_context_meter/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:68ec28c828f97d60073b4c1a50cb34b7eeefd6d9a1aa31b069ccae7612924690",
+      "relative_path": "scenarios/carrier_protocol_compliance/unknown_context_meter/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:0bb8be89247d835bdb5c6cccb4794be901d7ba43ed58aefba0a865246a1c9fdb",
+      "relative_path": "scenarios/carrier_protocol_compliance/unknown_context_meter/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:81e1926d18921bbe9682f1b489e3edb0b7e829bc51b49a5ec65243b99e7df0f9",
+      "relative_path": "scenarios/carrier_protocol_compliance/unknown_effect/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:f0c756ad8bd20f19fe1130c07fe895d21666057a21014f4fb8030eb98bdf2aa2",
+      "relative_path": "scenarios/carrier_protocol_compliance/unknown_effect/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:82534bbb19e2b616f6dddc23ab484d2e9a5d27fee84408e5ef38378f097c8a90",
+      "relative_path": "scenarios/carrier_protocol_compliance/unknown_effect/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:450e4199ddf091ccf529e6c9112b14aa4a05301d06605b7f35c43fd19b482705",
+      "relative_path": "scenarios/carrier_protocol_compliance/unobserved_model/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:2d3ad487e200cec030c6742ecf2ed8938c555d7d4bb2f58701c2413750f3df01",
+      "relative_path": "scenarios/carrier_protocol_compliance/unobserved_model/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:13fdce311343fd9d930985f0076c4c6946480ec6ede4306db3c0b37c33e311a6",
+      "relative_path": "scenarios/carrier_protocol_compliance/unobserved_model/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:09a0f6bc1d3247b091d56b4cca5278de2e6eca64ac45ffc5a739c0f56e0f2290",
+      "relative_path": "scenarios/carrier_protocol_compliance/unusable_session/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:1283e9b17072f32e5614a174fc6ad29d46325f4ed198d6cd61b1f458453efef1",
+      "relative_path": "scenarios/carrier_protocol_compliance/unusable_session/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:9743e34a1b589e08c6b873a27eb9163fa7c94729b8362aa1a97d42f49372d742",
+      "relative_path": "scenarios/carrier_protocol_compliance/unusable_session/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:732f62e784def76497315bcb62b07788907fba290aa2b8927388c3c4c42d51a6",
+      "relative_path": "scenarios/carrier_protocol_compliance/valid_short_completion/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:1cbdc7470cf7d1f8f41e9174401a40ac815902b45e45ba6966ca0ccf20db44ca",
+      "relative_path": "scenarios/carrier_protocol_compliance/valid_short_completion/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:6c9596cfa08699267659416d6141f38d48a70693f9a5ca873674268a33a97a72",
+      "relative_path": "scenarios/carrier_protocol_compliance/valid_short_completion/v1/scenario.json"
+    }
+  ],
+  "generated_at": "2026-09-18T00:45:00Z",
+  "manifest_digest": "sha256:44fd58c93da5669e725ad1bf724a3cfe1fa41126b68aab29f6cc8c9fba09a021",
+  "schema": "mastermind.agent_evaluation_corpus_manifest.v1"
+}

@@ -100,6 +100,7 @@ SOCKET_METADATA_PATHS = (
     "/var/run/mastermind-executive/ceo-ingress.sock",
     "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
     "/var/run/mastermind-agent-relay/agent-relay.sock",
+    "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
 )
 METADATA_PATHS = (
     f"{SYSTEM_ROOT}/config/sol-state-relay.json",
@@ -1001,6 +1002,7 @@ def _agent_relay_prepared_only(
         f"{SYSTEM_ROOT}/config/agent-relay.json",
         f"{SYSTEM_ROOT}/config/agent-relay.token",
         "/var/run/mastermind-agent-relay/agent-relay.sock",
+        "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
     )
     if any(
         metadata_by_path.get(path, {}).get("exists") is not False
@@ -1112,7 +1114,7 @@ def _valid_agent_arguments(arguments: list[Any], release_sha: str) -> bool:
         3: "-B",
         4: f"{release}/scripts/slack_agent_dialogue_service.py",
         5: "--socket-path",
-        6: "/var/run/mastermind-agent-relay/agent-relay.sock",
+        6: "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
         7: "--token-file",
         8: f"{SYSTEM_ROOT}/config/agent-relay.token",
         9: "--workspace-id",
@@ -1340,6 +1342,11 @@ def _metadata_contract(path: str) -> dict[str, int | str | None]:
         ),
         "/var/run/mastermind-agent-relay/agent-relay.sock": (457, 457, 0o660),
     }
+    # Old and durable A2 socket identities are the same security contract;
+    # do not introduce a second principal or independent mode constant.
+    socket_contracts["/var/db/mastermind-agent-relay/socket/agent-relay.sock"] = (
+        socket_contracts["/var/run/mastermind-agent-relay/agent-relay.sock"]
+    )
     if path in socket_contracts:
         uid, gid, mode = socket_contracts[path]
         return {
@@ -2024,6 +2031,7 @@ def _collect_preimage_facts(
             "/var/run/mastermind-executive/ceo-ingress.sock",
             "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
             "/var/run/mastermind-agent-relay/agent-relay.sock",
+            "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
         }
         for item in metadata
     )
