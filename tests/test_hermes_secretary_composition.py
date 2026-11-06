@@ -31,7 +31,7 @@ def document(tmp_path):
                   expected_host_binding_sha256="b" * 64, expected_implementation_sha="c" * 40)
     observation = dict(schema=composition.HERMES_HOST_READ_SCHEMA, **common)
     secretary = dict(schema=composition.HERMES_SECRETARY_HOST_SCHEMA, **common,
-                     root_id="transport-root", root_job_id="JOB-001", work_ref="work:secretary",
+                     root_id="transport-root", root_job_id="JOB-001", work_ref="WS:secretary",
                      session_id="native-session", profile_id="native-profile", principal_id="native-principal")
     return dict(schema_version=composition.SECRETARY_CONFIG_SCHEMA_VERSION, bindings=[],
                 remote_transports=[], hermes_role_metadata_read=observation,
@@ -48,7 +48,7 @@ def test_native_selection_is_separate_from_worker_execution(tmp_path, root_stats
     selection = source.hermes_secretary_selection()
     assert selection.root_id == "transport-root"
     assert selection.root_job_id == "JOB-001"
-    assert selection.work_ref == "work:secretary"
+    assert selection.work_ref == "WS:secretary"
     assert source.has_execution_bindings is False
     assert source.bindings == ()
     client = source.hermes_secretary_client(root_id=selection.root_id, session_id=selection.session_id)
