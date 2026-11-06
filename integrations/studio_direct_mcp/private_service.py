@@ -33,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.request
 from contextlib import contextmanager
 from functools import wraps
@@ -4469,8 +4470,8 @@ def _fabric_public_remaining(deadline: float) -> float:
     return remaining
 
 
-def _fabric_public_bounded_read(url: str, deadline: float) -> bytes:
-    """One pre-deadline canonical read for the child's direct HTTPS transport."""
+def _fabric_public_bounded_read(url: str, deadline: float) -> None:
+    """One canonical read inside the finite child's independent lifetime."""
     _fabric_public_remaining(deadline)
     opener = _fabric_public_opener()
     request = urllib.request.Request(url, headers={
@@ -4483,54 +4484,108 @@ def _fabric_public_bounded_read(url: str, deadline: float) -> bytes:
         response = opener.open(request, timeout=_fabric_public_remaining(deadline))
         if response.status != 200:
             raise SystemExit("Fabric public release: GitHub metadata refused")
-        # The socket timeout is only a secondary inactivity guard. The parent,
-        # not this read, owns the absolute traversal deadline and child reaping.
+        # The socket timeout is a secondary inactivity guard. Both the parent's
+        # kill/wait and the child's process timer enforce the original deadline.
         raw = response.read(FABRIC_PUBLIC_JSON_LIMIT + 1)
         if len(raw) > FABRIC_PUBLIC_JSON_LIMIT:
             raise SystemExit("Fabric public release: GitHub metadata too large")
-        os.write(1, raw)
+        _fabric_public_remaining(deadline)
+        sys.stdout.buffer.write(raw)
+        sys.stdout.buffer.flush()
+    except urllib.error.HTTPError as exc:
+        # HTTPError owns the response even when opener.open never returned it.
+        # Do not depend on exception destruction or include response details.
+        try:
+            exc.close()
+        finally:
+            raise SystemExit("Fabric public release: bounded GitHub metadata unavailable") from None
     except SystemExit:
         raise
-    except Exception as exc:
-        raise SystemExit("Fabric public release: bounded GitHub metadata unavailable") from exc
+    except Exception:
+        raise SystemExit("Fabric public release: bounded GitHub metadata unavailable") from None
     finally:
         if response is not None:
             response.close()
 
 
-def _fabric_public_https_json_child(url: str, deadline: float) -> bytes:
-    """Read one finite qualified-interpreter child under a parent deadline.
+def _fabric_public_child_source() -> tuple[str, str]:
+    """Capture this qualified source; never ask the child to import a path."""
+    context = _INSTALLED_CONTROL_CONTEXT
+    if context is not None:
+        path = context["root"] / "private_service.py"
+        raw = context["files"]["private_service.py"]
+    else:
+        # Genuine source execution remains supported. This is the running
+        # module's exact filename, not a caller-selected repository or module.
+        path = Path(os.path.abspath(__file__))
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        try:
+            before = os.fstat(fd)
+            if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+                    or before.st_nlink != 1 or before.st_mode & 0o022
+                    or before.st_size > 2 * 1024 * 1024):
+                raise SystemExit("Fabric public release: qualified source refused")
+            with os.fdopen(fd, "rb", closefd=False) as source:
+                raw = source.read(2 * 1024 * 1024 + 1)
+            after, named = os.fstat(fd), path.lstat()
+            identity = lambda value: (value.st_dev, value.st_ino, value.st_mode,
+                                     value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+            if (len(raw) > 2 * 1024 * 1024 or identity(before) != identity(after)
+                    or identity(after) != identity(named)):
+                raise SystemExit("Fabric public release: qualified source changed")
+        finally:
+            os.close(fd)
+    return str(path), raw.decode("utf-8")
 
-    The direct HTTPS child covers DNS/connect/TLS/headers/body/cleanup read,
-    isolated/no-bytecode and with no ambient proxy/auth or local checkout.
-    subprocess.run guarantees kill/wait on timeout. On every path the returned
-    result is checked against the same absolute deadline before JSON parsing;
-    no late response can be consumed and no reader/task remains. As documented
-    for subprocess.run, local process creation is not separately claimed to be
+
+def _fabric_public_https_json_child(url: str, deadline: float) -> bytes:
+    """One finite child, captured source, closed environment and absolute TTL.
+
+    The child's process timer bounds DNS/connect/TLS/headers/body/cleanup even
+    if the parent terminates. subprocess.run also guarantees kill/wait on its
+    timeout. Local process creation itself is not separately claimed to be
     interruptible on every platform.
     """
-    document = json.dumps([str(Path(__file__).resolve().parent), url, deadline]).encode("utf-8")
+    _fabric_public_remaining(deadline)
+    source_path, source_text = _fabric_public_child_source()
+    document = json.dumps([source_path, source_text, url]).encode("utf-8")
+    # Python 3.9 on macOS has process-local monotonic origins. Translate the
+    # remaining budget to the shared POSIX clock before crossing a process.
+    child_deadline = time.clock_gettime(time.CLOCK_MONOTONIC) + _fabric_public_remaining(deadline)
     try:
         result = subprocess.run(
-            [sys.executable, "-I", "-S", "-B", "-c", _FABRIC_PUBLIC_READ_CHILD],
+            [sys.executable, "-I", "-S", "-B", "-c", _FABRIC_PUBLIC_READ_CHILD, str(child_deadline)],
             input=document, capture_output=True, check=False,
+            env={"HOME": str(Path.home())},
             timeout=_fabric_public_remaining(deadline))
     except subprocess.TimeoutExpired:
         raise SystemExit("Fabric public release: total GitHub metadata deadline exceeded") from None
-    except Exception as exc:
-        raise SystemExit("Fabric public release: bounded GitHub metadata unavailable") from exc
+    except Exception:
+        raise SystemExit("Fabric public release: bounded GitHub metadata unavailable") from None
     _fabric_public_remaining(deadline)
     if result.returncode != 0:
         raise SystemExit("Fabric public release: bounded GitHub metadata unavailable")
+    if len(result.stdout) > FABRIC_PUBLIC_JSON_LIMIT:
+        raise SystemExit("Fabric public release: GitHub metadata too large")
     return result.stdout
 
 
 _FABRIC_PUBLIC_READ_CHILD = r"""
-import json,sys
-canonical_source = json.loads(sys.stdin.read())
-sys.path.insert(0, canonical_source[0])
-import private_service
-private_service._fabric_public_bounded_read(canonical_source[1], canonical_source[2])
+import signal,sys,time
+remaining = float(sys.argv[1]) - time.clock_gettime(time.CLOCK_MONOTONIC)
+deadline = time.monotonic() + remaining
+if remaining <= 0:
+    raise SystemExit("Fabric public release: total GitHub metadata deadline exceeded")
+signal.signal(signal.SIGALRM, signal.SIG_DFL)
+signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGALRM})
+signal.setitimer(signal.ITIMER_REAL, remaining)
+import json,types
+canonical_source = json.loads(sys.stdin.buffer.read())
+private_service = types.ModuleType("_studio_public_provenance_child")
+private_service.__file__ = canonical_source[0]
+sys.modules[private_service.__name__] = private_service
+exec(compile(canonical_source[1], canonical_source[0], "exec"), private_service.__dict__)
+private_service._fabric_public_bounded_read(canonical_source[2], deadline)
 """
 
 
@@ -4541,6 +4596,8 @@ def _fabric_public_https_json(url: str, *, deadline: float = None) -> dict:
     if deadline is None:
         deadline = time.monotonic() + FABRIC_PUBLIC_TIMEOUT_SECONDS
     raw = _fabric_public_https_json_child(url, deadline)
+    if type(raw) is not bytes or len(raw) > FABRIC_PUBLIC_JSON_LIMIT:
+        raise SystemExit("Fabric public release: GitHub metadata too large")
     try:
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=_fabric_public_json_pairs,
                            parse_constant=lambda value: (_ for _ in ()).throw(ValueError("non-finite JSON")))
@@ -4548,6 +4605,7 @@ def _fabric_public_https_json(url: str, *, deadline: float = None) -> dict:
         raise SystemExit("Fabric public release: strict GitHub JSON required") from exc
     if type(value) is not dict:
         raise SystemExit("Fabric public release: GitHub JSON object required")
+    _fabric_public_remaining(deadline)
     return value
 
 
@@ -4602,6 +4660,7 @@ def _fabric_public_provenance(release_commit: str, expected_sha: str) -> tuple[P
     if (hashlib.sha256(raw).hexdigest() != expected_sha or blob != entry["sha"]
             or len(raw) != entry["size"]):
         raise SystemExit("Fabric release backend differs from the public source or pinned SHA256")
+    _fabric_public_remaining(deadline)
     return backend, {
         "sourceProvenance": FABRIC_RELEASE_PUBLIC_PROVENANCE,
         "repository": FABRIC_PUBLIC_REPOSITORY, "ref": FABRIC_PUBLIC_REF,

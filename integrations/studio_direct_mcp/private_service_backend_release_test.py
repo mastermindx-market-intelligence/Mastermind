@@ -11,7 +11,8 @@ import io
 import json
 import os
 import re
-import re
+import signal
+import sys
 from pathlib import Path
 import socket
 import subprocess
@@ -627,6 +628,25 @@ class BackendReleaseTests(BackendReleaseFixture, unittest.TestCase):
             launcher.chmod(0o700)
 
 
+    def test_final_public_provenance_validation_cannot_cross_deadline(self):
+        self.enable_public()
+        real_read = svc._fabric_release_bytes
+        clock = [100.0]
+        def late_backend(path, **kwargs):
+            value = real_read(path, **kwargs)
+            if path == self.backend:
+                clock[0] = 111.0
+            return value
+        with mock.patch.object(svc.time, 'monotonic', side_effect=lambda: clock[0]), \
+             mock.patch.object(svc, '_fabric_release_bytes', side_effect=late_backend), \
+             mock.patch.object(svc, '_fabric_release_new',
+                               side_effect=AssertionError('transaction writes forbidden')) as intent:
+            with self.assertRaisesRegex(SystemExit, 'deadline exceeded'):
+                self.preview()
+        intent.assert_not_called()
+        self.assertEqual(self.snapshot(), self.before)
+        self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+
     def test_shared_absolute_deadline_exhausts_on_actual_fifth_transport(self):
         self.enable_public()
         self.metadata.stop()
@@ -643,7 +663,7 @@ class BackendReleaseTests(BackendReleaseFixture, unittest.TestCase):
             # Transport-level only: exact finite child with a response which
             # drips below inactivity but > shared TTL. No monkeypatched timeout.
             script = svc._FABRIC_PUBLIC_READ_CHILD.replace(
-                "import private_service\n", """import private_service,time
+                "private_service._fabric_public_bounded_read(canonical_source[2], deadline)", """import time
 class Response:
     status = 200
     def read(self, limit):
@@ -656,6 +676,7 @@ class Opener:
     def open(self, request, timeout):
         return Response()
 private_service._fabric_public_opener = Opener
+private_service._fabric_public_bounded_read(canonical_source[2], deadline)
 """)
             with mock.patch.object(svc, '_FABRIC_PUBLIC_READ_CHILD', script):
                 return actual_https_json(url, deadline=deadline)
@@ -672,7 +693,7 @@ private_service._fabric_public_opener = Opener
         intent_write.assert_not_called()
         self.assertEqual(len(observations), 5)
         self.assertEqual(len(children), 1)
-        self.assertEqual(children[0].returncode, -9)
+        self.assertIn(children[0].returncode, (-signal.SIGKILL, -signal.SIGALRM))
         self.assertEqual(len({item[1] for item in observations}), 1)
         print('FINAL_DOCUMENT_ABSOLUTE_DEADLINE documents=%d child_rc=%d' % (len(observations), children[0].returncode))
         self.assertEqual(self.snapshot(), self.before)
@@ -1029,7 +1050,7 @@ class PublicProvenanceTransportTests(unittest.TestCase):
         self.assertNotIn('http_error_302', opener.handle_open.get('https', {}))
 
     def test_genuine_redirect_handler_response_is_refused_and_closed(self):
-        unexpected = []
+        unexpected, retained_errors = [], []
         class Opener:
             def __init__(self):
                 self.production = svc._fabric_public_opener()
@@ -1040,11 +1061,18 @@ class PublicProvenanceTransportTests(unittest.TestCase):
                 response.code = 302
                 response.msg = 'Found'
                 response.headers = {'Location': 'https://elsewhere.invalid/x'}
-                self.production.error('https', request, response, 302, 'Found', response.headers)
+                try:
+                    self.production.error('https', request, response, 302, 'Found', response.headers)
+                except svc.urllib.error.HTTPError as error:
+                    # Retain the owner: garbage collection cannot satisfy close.
+                    retained_errors.append(error)
+                    raise
         with mock.patch.object(svc, '_fabric_public_opener', return_value=Opener()):
             with self.assertRaisesRegex(SystemExit, 'bounded GitHub metadata unavailable'):
                 svc._fabric_public_bounded_read(self.URL, svc.time.monotonic() + 2)
         self.assertEqual(len(unexpected), 1)
+        self.assertEqual(len(retained_errors), 1)
+        self.assertTrue(retained_errors[0].closed)
         self.assertEqual(unexpected[0].close.call_count, 1)
         self.assertTrue(unexpected[0].closed)
 
@@ -1128,7 +1156,72 @@ class PublicProvenanceTransportTests(unittest.TestCase):
                 svc._fabric_public_https_json(self.URL, deadline=svc.time.monotonic() - 1)
         spawn.assert_not_called()
 
-    def _verified_drip_transport(self, phase):
+    def test_deadline_is_checked_after_strict_parsing(self):
+        real_loads = json.loads
+        def late_parse(*args, **kwargs):
+            value = real_loads(*args, **kwargs)
+            clock[0] = 11.0
+            return value
+        clock = [9.0]
+        with mock.patch.object(svc.time, 'monotonic', side_effect=lambda: clock[0]), \
+             mock.patch.object(svc, '_fabric_public_https_json_child', return_value=b'{}'), \
+             mock.patch.object(svc.json, 'loads', side_effect=late_parse):
+            with self.assertRaisesRegex(SystemExit, 'deadline exceeded'):
+                svc._fabric_public_https_json(self.URL, deadline=10.0)
+
+    def test_captured_source_child_never_imports_matching_bytecode(self):
+        import importlib.util
+        import importlib._bootstrap_external
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'private_service.py'
+            good = Path(svc.__file__).read_bytes()
+            source.write_bytes(good)
+            marker = root / 'bytecode-executed'
+            payload = compile("from pathlib import Path\nPath(%r).write_text('bad')\n" % str(marker),
+                              str(source), 'exec')
+            # Ask the actual isolated interpreter: Apple source-mode Python
+            # can use a cache prefix which -I deliberately ignores.
+            probe = subprocess.run([sys.executable, '-I', '-S', '-B', '-c',
+                                    'import importlib.util,sys;print(importlib.util.cache_from_source(sys.argv[1]))',
+                                    str(source)], capture_output=True, text=True, timeout=4, check=True)
+            cache = Path(probe.stdout.strip())
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_bytes(importlib._bootstrap_external._code_to_timestamp_pyc(
+                payload, int(source.stat().st_mtime), len(good)))
+            # A genuine normal import establishes this exact cache is executable.
+            control = subprocess.run(
+                [sys.executable, '-I', '-S', '-B', '-c',
+                 'import sys;sys.path.insert(0,sys.argv[1]);import private_service', str(root)],
+                capture_output=True, timeout=4, check=False)
+            self.assertEqual(control.returncode, 0, control.stderr)
+            self.assertTrue(marker.exists())
+            marker.unlink()
+            call = 'private_service._fabric_public_bounded_read(canonical_source[2], deadline)'
+            bootstrap = svc._FABRIC_PUBLIC_READ_CHILD.replace(call, 'print(\'{"captured":true}\')')
+            with mock.patch.object(svc, '__file__', str(source)), \
+                 mock.patch.object(svc, '_FABRIC_PUBLIC_READ_CHILD', bootstrap):
+                self.assertEqual(svc._fabric_public_https_json(
+                    self.URL, deadline=svc.time.monotonic() + 4), {'captured': True})
+            self.assertFalse(marker.exists())
+
+    def test_installed_child_uses_captured_bytes_after_named_source_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'private_service.py'
+            captured = Path(svc.__file__).read_bytes()
+            marker = root / 'changed-source-executed'
+            source.write_text("from pathlib import Path\nPath(%r).write_text('bad')\n" % str(marker))
+            call = 'private_service._fabric_public_bounded_read(canonical_source[2], deadline)'
+            bootstrap = svc._FABRIC_PUBLIC_READ_CHILD.replace(call, 'print(\'{"captured":true}\')')
+            context = {'root': root, 'files': {'private_service.py': captured}}
+            with mock.patch.object(svc, '_INSTALLED_CONTROL_CONTEXT', context), \
+                 mock.patch.object(svc, '_FABRIC_PUBLIC_READ_CHILD', bootstrap):
+                self.assertEqual(svc._fabric_public_https_json(
+                    self.URL, deadline=svc.time.monotonic() + 4), {'captured': True})
+            self.assertFalse(marker.exists())
+
+    def _verified_drip_transport(self, phase, *, parent_exit=False, ambient_only=False):
         import ssl
         import threading
         asset = tempfile.TemporaryDirectory()
@@ -1138,97 +1231,186 @@ class PublicProvenanceTransportTests(unittest.TestCase):
                         '-nodes', '-days', '1', '-subj', '/CN=localhost',
                         '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1',
                         '-keyout', str(cert / 'key.pem'), '-out', str(cert / 'cert.pem')],
-                       check=True, capture_output=True)
-        connections = []
+                       check=True, capture_output=True, timeout=10)
+        connections, server_errors = [], []
+        reading = threading.Event()
         def serve(sock):
+            conn = None
             try:
                 conn, _ = sock.accept()
+                conn.settimeout(3)
                 connections.append(conn.getpeername())
                 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                 context.load_cert_chain(str(cert / 'cert.pem'), str(cert / 'key.pem'))
                 with context.wrap_socket(conn, server_side=True) as client:
                     request = b''
                     while b'\r\n\r\n' not in request:
-                        request += client.recv(4096)
+                        part = client.recv(4096)
+                        if not part or len(request) + len(part) > 8192:
+                            return
+                        request += part
+                    reading.set()
                     if phase == 'headers':
                         fragments = b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 440\r\nConnection: close\r\n\r\n'
                     else:
                         client.sendall(b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 440\r\nConnection: close\r\n\r\n')
                         fragments = b'{"slow":true}' * 40
-                    # Drip .02 is below the .60 inactivity ceiling, with total >= 2 sec.
                     for fragment in fragments:
                         client.sendall(bytes([fragment]))
                         svc.time.sleep(0.020)
             except (BrokenPipeError, ConnectionResetError, ssl.SSLError, OSError) as error:
-                # Client disconnect on enforced expiry is expected.
-                pass  # Expected closed transport on enforced-kill response.
+                server_errors.append(type(error).__name__)
             finally:
-                conn.close()
+                if conn is not None:
+                    conn.close()
         server = socket.socket()
+        server.settimeout(3)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind(('127.0.0.1', 0)); server.listen(1)
         thread = threading.Thread(target=serve, args=(server,))
         thread.start()
         root = 'https://localhost:%d' % server.getsockname()[1]
         local = re.compile(re.escape(root) + r'/git/ref/heads/master\Z')
-        client = ssl.create_default_context(cafile=str(cert / 'cert.pem'))
-        pids = []
+        call = 'private_service._fabric_public_bounded_read(canonical_source[2], deadline)'
+        bootstrap = svc._FABRIC_PUBLIC_READ_CHILD
+        if not ambient_only:
+            # Explicit fixture CA only: production bootstrap has no trust override.
+            fixture_opener = (
+                'import ssl\nprivate_service._fabric_public_opener = lambda: '
+                'private_service.urllib.request.build_opener('
+                'private_service.urllib.request.ProxyHandler({}), private_service._FabricNoRedirect(), '
+                'private_service.urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile='
+                + repr(str(cert / 'cert.pem')) + ')))\n')
+            self.assertEqual(bootstrap.count(call), 1)
+            bootstrap = bootstrap.replace(call, fixture_opener + call)
+        pids, child_envs = [], []
         actual_popen = svc.subprocess.Popen
         def observe(*args, **kwargs):
+            child_envs.append(kwargs.get('env'))
             child = actual_popen(*args, **kwargs)
-
-            glibc_reaper = mock.Mock(wraps=child.wait)
-            child.wait = glibc_reaper
-            pids.append((child, glibc_reaper))
+            waiter = mock.Mock(wraps=child.wait)
+            child.wait = waiter
+            pids.append((child, waiter))
             return child
-        start_count = getattr(threading, 'active_count')()
+        parent = None
+        child_pid = None
+        started = svc.time.monotonic()
         try:
-            # Start individually. MagicMock patches may retain child module
-            # objects; the real tls client context must not be a Mock.
-            child_bootstrap = svc._FABRIC_PUBLIC_READ_CHILD
-            # The isolated child needs the loopback CA, while actual production
-            # still uses default system trust. This fixture-only import hook is
-            # private to the test's one executed module, not a trust override.
-            child_bootstrap = 'import ssl,json,sys\n' + child_bootstrap.split('\n', 1)[1]
-            child_bootstrap = child_bootstrap.replace(
-                'import private_service', 'import private_service\n'
-                'private_service._fabric_public_opener = lambda: private_service.urllib.request.build_opener('
-                'private_service.urllib.request.ProxyHandler({}), private_service._FabricNoRedirect(), '
-                'private_service.urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile=' + repr(str(cert / 'cert.pem')) + ')))')
-            with mock.patch.dict(os.environ, {'PR2116_FIXTURE_DEBUG': '1'}), \
-                 mock.patch.object(svc, 'FABRIC_PUBLIC_METADATA_URL_RE', local), \
-                 mock.patch.object(svc, '_FABRIC_PUBLIC_READ_CHILD', child_bootstrap), \
-                 mock.patch.object(svc.subprocess, 'Popen', side_effect=observe), \
-                 mock.patch.object(svc, '_fabric_public_https_json_child', wraps=svc._fabric_public_https_json_child) as finite_child:
-                started = svc.time.monotonic()
-                with self.assertRaisesRegex(SystemExit, 'deadline exceeded'):
-                    svc._fabric_public_https_json(root + '/git/ref/heads/master', deadline=started + 2.0)
+            if parent_exit:
+                pid_file = cert / 'reader.pid'
+                source_path, source_text = svc._fabric_public_child_source()
+                # One real helper parent, then terminate only that parent while
+                # its real child is reading verified TLS. No application runner.
+                parent_code = r"""
+import json,sys,types,re,signal
+from pathlib import Path
+source_path,source_text,url,bootstrap,pid_file,transport_deadline = json.loads(sys.stdin.read())
+svc = types.ModuleType("_parent_fixture")
+svc.__file__ = source_path
+sys.modules[svc.__name__] = svc
+exec(compile(source_text,source_path,"exec"),svc.__dict__)
+# Exercise differing monotonic origins and inherited blocked SIGALRM, both
+# without changing the real TLS traffic or the shared OS deadline.
+original_clock = svc.time.monotonic
+svc.time.monotonic = lambda: original_clock() + 5000.0
+deadline = svc.time.monotonic() + transport_deadline - svc.time.clock_gettime(svc.time.CLOCK_MONOTONIC)
+signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
+svc.FABRIC_PUBLIC_METADATA_URL_RE = re.compile(re.escape(url)+r"\Z")
+svc._FABRIC_PUBLIC_READ_CHILD = bootstrap
+actual = svc.subprocess.Popen
+def observed(*args,**kwargs):
+    child = actual(*args,**kwargs)
+    Path(pid_file).write_text(str(child.pid))
+    return child
+svc.subprocess.Popen = observed
+svc._fabric_public_https_json(url,deadline=deadline)
+"""
+                deadline = started + 2.0
+                parent = actual_popen([sys.executable, '-I', '-S', '-B', '-c', parent_code],
+                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, env={'HOME': str(Path.home())})
+                document = [source_path, source_text, root + '/git/ref/heads/master',
+                            bootstrap, str(pid_file),
+                            svc.time.clock_gettime(svc.time.CLOCK_MONOTONIC) + deadline - svc.time.monotonic()]
+                parent.stdin.write(json.dumps(document).encode())
+                parent.stdin.close()
+                self.assertTrue(reading.wait(timeout=1.5), 'fixture never reached the real TLS read')
+                child_pid = int(pid_file.read_text())
+                parent.kill()
+                parent.wait(timeout=1)
+                self.assertEqual(parent.returncode, -signal.SIGKILL)
+                self.assertLess(svc.time.monotonic(), deadline)
+                # An orphan can briefly be a zombie on Linux; it must cease
+                # execution by the original TTL. Normal parents separately
+                # prove wait/reap. This does not signal or rescue the reader.
+                state = 'RUNNING'
+                while svc.time.monotonic() < deadline + 0.75:
+                    status = subprocess.run(['/bin/ps', '-o', 'stat=', '-p', str(child_pid)],
+                                            capture_output=True, text=True, timeout=1)
+                    state = status.stdout.strip()
+                    if not state or state.startswith('Z'):
+                        break
+                    svc.time.sleep(0.02)
+                self.assertTrue(not state or state.startswith('Z'), 'reader outlived original deadline')
                 elapsed = svc.time.monotonic() - started
-            self.assertEqual(len(pids), 1)
-            self.assertIsNotNone(pids[0][0].returncode)
-            self.assertGreater(pids[0][1].call_count, 0)
-            with self.assertRaisesRegex(OSError, ''):
-                os.kill(pids[0][0].pid, 0)
-            self.assertEqual(finite_child.call_count, 1)
+                self.assertLess(elapsed, 2.8)
+                result = {'phase': phase, 'parent_exit': True, 'elapsed_seconds': round(elapsed, 6),
+                          'child_pid': child_pid, 'child_state': state or 'REAPED'}
+            else:
+                ambient = {'SSL_CERT_FILE': str(cert / 'cert.pem'), 'SSL_CERT_DIR': str(cert),
+                           'SSLKEYLOGFILE': str(cert / 'keylog'), 'PYTHONPATH': str(cert),
+                           'HTTPS_PROXY': 'http://user:password@proxy.invalid:8888'}
+                with mock.patch.dict(os.environ, ambient), \
+                     mock.patch.object(svc, 'FABRIC_PUBLIC_METADATA_URL_RE', local), \
+                     mock.patch.object(svc, '_FABRIC_PUBLIC_READ_CHILD', bootstrap), \
+                     mock.patch.object(svc.subprocess, 'Popen', side_effect=observe):
+                    with self.assertRaisesRegex(SystemExit, 'bounded GitHub metadata unavailable'
+                                                if ambient_only else 'deadline exceeded'):
+                        svc._fabric_public_https_json(root + '/git/ref/heads/master',
+                                                      deadline=started + 2.0)
+                    elapsed = svc.time.monotonic() - started
+                self.assertEqual(child_envs, [{'HOME': str(Path.home())}])
+                self.assertEqual(len(pids), 1)
+                self.assertIsNotNone(pids[0][0].returncode)
+                self.assertGreater(pids[0][1].call_count, 0)
+                with self.assertRaises(OSError):
+                    os.kill(pids[0][0].pid, 0)
+                self.assertFalse((cert / 'keylog').exists())
+                if not ambient_only:
+                    self.assertGreaterEqual(elapsed, 1.9)
+                    self.assertLess(elapsed, 2.8)
+                    self.assertTrue(reading.is_set())
+                else:
+                    self.assertFalse(reading.is_set(), 'ambient CA changed production trust')
+                result = {'phase': phase, 'ambient_only': ambient_only,
+                          'elapsed_seconds': round(elapsed, 6), 'connections': len(connections),
+                          'child_pid': pids[0][0].pid, 'child_returncode': pids[0][0].returncode,
+                          'wait_count': pids[0][1].call_count}
             self.assertEqual(len(connections), 1)
-            self.assertGreater(elapsed, 2.0)
-            self.assertLess(elapsed, 2.80)
-            self.assertEqual(threading.active_count(), start_count)
-            # Every phase is a real drip, not merely startup delay: observed
-            # elapsed must exceed the absolute TTL and one connection was seen.
-            self.assertGreaterEqual(elapsed, 2.0)
         finally:
+            if parent is not None:
+                if parent.poll() is None:
+                    parent.kill()
+                    parent.wait(timeout=1)
+                parent.stdout.close()
+                parent.stderr.close()
             server.close()
-            thread.join(timeout=2)
+            thread.join(timeout=3.5)
         self.assertFalse(thread.is_alive())
-        return {'phase': phase, 'elapsed_seconds': round(elapsed, 6), 'connections': len(connections),
-                'child_pid': pids[0][0].pid, 'child_returncode': pids[0][0].returncode,
-                'wait_count': pids[0][1].call_count}
+        return result
 
     def test_verified_tls_headers_and_body_drip_expire_and_reap(self):
         for phase in ('headers', 'body'):
             with self.subTest(phase=phase):
                 print('DRIP_ABSOLUTE_DEADLINE ' + json.dumps(self._verified_drip_transport(phase)))
+
+    def test_child_has_its_own_deadline_after_parent_termination(self):
+        print('ORPHAN_ABSOLUTE_DEADLINE ' +
+              json.dumps(self._verified_drip_transport('body', parent_exit=True)))
+
+    def test_ambient_ca_and_keylog_do_not_change_actual_child_trust(self):
+        print('AMBIENT_TRUST_REFUSED ' +
+              json.dumps(self._verified_drip_transport('body', ambient_only=True)))
 
 
 if __name__ == '__main__':

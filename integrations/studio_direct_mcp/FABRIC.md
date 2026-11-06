@@ -255,13 +255,20 @@ physical file and inode without downloading or executing it. Provenance and stag
 identity are included in the reviewed plan and revalidated before mutation. Metadata
 is strict JSON with duplicate-key rejection and a 1MiB ceiling. One fixed absolute
 ten-second deadline covers the whole connection/TLS/header/body sequence and all five
-fixed metadata documents; every document gets only the remaining time. Each finite qualified-interpreter/source child is parent-enforced with
-subprocess.run(remaining), which kills/waits it on timeout. Absolute monotonic
-checks refuse late results before intent/config/manifest writes; no future response
-is consumed and no reader/retry/background child remains. Process creation itself is
-not claimed separately interruptible; child-bound teardown is for successful spawn. Explicit
-`ProxyHandler({})` construction disables ambient/system proxy and proxy-credential
-discovery while retaining standard TLS certificate and hostname verification. Only
+fixed metadata documents; every document gets only the remaining time. The finite
+child executes captured qualified source bytes with a controlled module identity,
+never a pathname import or adjacent/tagged bytecode cache. Installed execution uses
+the existing sealed Control capture. A process timer gives the child its own
+absolute lifetime even if its parent exits. The remaining budget crosses processes
+using POSIX CLOCK_MONOTONIC, avoiding Python 3.9 macOS process-local clock origins;
+the child also clears an inherited blocked alarm signal. The parent's `subprocess.run(remaining)`
+also kills/waits on timeout. Checks after JSON parsing and final provenance validation
+refuse late results before intent/config/manifest writes. Process creation itself is
+not claimed separately interruptible. The child receives only the verified owner
+HOME; ambient proxy, CA override, keylog and Python environment settings are absent.
+Explicit `ProxyHandler({})` disables system proxy discovery while retaining standard
+TLS certificate and hostname verification. HTTPError-owned responses are explicitly
+closed before a constant refusal; there is no redirect, retry or persistent reader. Only
 `/git/ref/heads/master`, `/git/commits/<40 lowercase hex>` and
 `/git/trees/<40 lowercase hex>` under the canonical API root can reach transport;
 intermediate tree SHAs are checked before URL construction. Redirects, alternate
