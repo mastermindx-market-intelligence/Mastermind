@@ -71,6 +71,21 @@ worktree and move only the task's deliberate edits there.
 
 ## Complete a change
 
+**Default is one-pass delivery, not a ceremony.** The assigned session implements,
+self-checks the diff, runs available affected tests, opens one Ready PR, requests
+native protected auto-merge once and consumes the resulting merge receipt. Do not
+serialize extra review/approval/handoff rounds, repeated status sweeps, checkpoint
+comments per command or an external publisher just to finish ordinary work.
+Pending CI is an automated release dependency, not a new human assignment.
+
+**Fast queue policy:** verified inert changes get source checks, ordinary code gets
+focused executable tests, and privileged/financial/security/CI or unqualified
+changes get full canonical CI. The protected `test` check stays mandatory, and
+protected-main pushes still run the full suite. Real-world browser/installed proof
+is required when a change affects that surface, not for inert docs. Preserve
+actual protected rules, explicit HOLDs, live writers, denied or uncertain effects;
+these are exceptional barriers, not default workflow steps.
+
 ### One qualification, normal protected release
 
 Ordinary reversible FAST/STANDARD changes use the same session: implement, self-check
