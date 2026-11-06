@@ -187,6 +187,45 @@ def test_initial_loadbar_finishes_before_live_and_deferred_hydration() -> None:
     assert "loadPortfolios().then" in hydrate_fn
 
 
+def test_collapsed_deep_analytics_are_lazy_and_learning_models_toggle_once() -> None:
+    collapsed = HTML[
+        HTML.index("var _collapsed ="):
+        HTML.index("function applyColl(id)")
+    ]
+    assert "'learning-models': true" in collapsed
+    assert "'learning-models'" in collapsed
+
+    toggle = HTML[
+        HTML.index("window.toggleCollapse = function (id)"):
+        HTML.index("function collH2(")
+    ]
+    assert "if (!_collapsed[id]) _ensureDeferredPanel(id);" in toggle
+
+    deferred = HTML[
+        HTML.index("function _ensureDeferredPanel(id)"):
+        HTML.index("function _hydrateShared()")
+    ]
+    for endpoint in (
+        "/api/shadow_books", "/api/predictions", "/api/engine_backtest",
+        "/api/factor_zoo", "/api/fundamentals", "/api/student", "/api/distill",
+    ):
+        assert endpoint in deferred
+
+    hydrate = HTML[
+        HTML.index("function _hydrateShared()"):
+        HTML.index("async function fetchAll(opts)")
+    ]
+    assert "/api/activity" in hydrate
+    assert "/api/research" in hydrate
+    for endpoint in (
+        "/api/shadow_books", "/api/predictions", "/api/engine_backtest",
+        "/api/factor_zoo", "/api/fundamentals", "/api/student", "/api/distill",
+    ):
+        assert endpoint not in hydrate
+    assert "_ensureExpandedDeferredPanels();" in hydrate
+    assert "applyColl('learning-models');" in HTML
+
+
 def test_institutional_shell_is_shared_across_supporting_workspaces() -> None:
     for page in (PORTFOLIO_DESK_HTML, MARKET_VIEW_HTML, AGENDA_HTML):
         assert 'class="mm-product-bar"' in page
