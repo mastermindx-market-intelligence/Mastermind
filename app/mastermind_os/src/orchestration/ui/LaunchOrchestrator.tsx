@@ -127,7 +127,9 @@ function executiveGoal(goal: string): string | null {
 }
 
 /** Requirements in the existing objective, never a product-acceptance verdict. */
-export function composeAcceptanceGoal(goal: string, criteria: string): string | null {
+export function composeAcceptanceGoal(
+  goal: string, criteria: string, preserveUntaggedGoal = false,
+): string | null {
   const lines = criteria.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   if (lines.length > MAX_ACCEPTANCE_ITEMS || lines.some(line =>
     line.length > 500 || /[\p{Cc}\p{Cs}\u2028\u2029]/u.test(line),
@@ -136,7 +138,9 @@ export function composeAcceptanceGoal(goal: string, criteria: string): string | 
   if (!normalizedGoal || [normalizedGoal, ...lines].some(part => part.includes(ACCEPTANCE_MARKER))) return null;
   const composed = lines.length
     ? `${normalizedGoal} ${ACCEPTANCE_MARKER}${JSON.stringify(lines)}]`
-    : normalizedGoal;
+    : preserveUntaggedGoal ? goal : normalizedGoal;
+  // Untagged project objectives retain their exact source text and operation
+  // identity. Ordinary Executive launches still use their normalized wire form.
   // The stricter wire contract belongs only to tagged objectives. Ordinary
   // Unicode goals retain their existing UI and current consumer limits.
   return utf8ByteLength(composed) <= (lines.length ? MAX_TAGGED_GOAL_BYTES : MAX_GOAL_BYTES)
@@ -365,7 +369,7 @@ export function LaunchOrchestrator({
   const scopeTooLarge = codeScope && (writePaths.length > 16 || testTargets.length > 8);
 
   const goalBlank = draftGoal.trim().length === 0;
-  const composedGoal = projectFollowUp ? draftGoal : composeAcceptanceGoal(draftGoal, acceptanceCriteria);
+  const composedGoal = projectFollowUp ? draftGoal : composeAcceptanceGoal(draftGoal, acceptanceCriteria, projectExecution);
   const acceptanceInvalid = !projectFollowUp && acceptanceCriteria.trim().length > 0 && composedGoal === null;
   const goalInvalid = !projectFollowUp && !goalBlank && !goalTooLong && !acceptanceInvalid && composedGoal === null;
 
