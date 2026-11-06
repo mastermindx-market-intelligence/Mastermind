@@ -157,8 +157,8 @@ export interface RawClient extends Partial<HostObservationRawMethods>,Partial<Pr
     signal: AbortSignal;
   }): Promise<unknown>;
   /**
-   * Optional compound acquisition. Absent on native clients: no compound
-   * command is registered there. Signal stays outside the five-field selector.
+   * Optional compound acquisition through the web or fixed native read owner.
+   * Signal stays outside the five-field selector.
    */
   readMissionResult?(request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
   readResultReferences?(request: {
@@ -1144,6 +1144,7 @@ export async function createNativeClient(
       | "read_fabric_catalog"
       | "read_fabric_status"
       | "read_result"
+      | "read_mission_result"
       | "read_result_references"
       | "read_current_window",
     signal: AbortSignal,
@@ -1414,6 +1415,23 @@ export async function createNativeClient(
           job_id: jobId,
           attempt_id: attemptId,
           result_envelope_digest: resultEnvelopeDigest,
+        },
+      });
+    },
+    readMissionResult: ({
+      workRef, rootJobId, jobId, attemptId, resultEnvelopeDigest, signal,
+    }) => {
+      const selected = normalizeResultSelection({
+        workRef, rootJobId, jobId, attemptId, resultEnvelopeDigest,
+      });
+      if (!selected) return Promise.reject(new Error("SELECTION_INVALID"));
+      return read("read_mission_result", signal, {
+        selection: {
+          work_ref: selected.workRef,
+          root_job_id: selected.rootJobId,
+          job_id: selected.jobId,
+          attempt_id: selected.attemptId,
+          result_envelope_digest: selected.resultEnvelopeDigest,
         },
       });
     },
