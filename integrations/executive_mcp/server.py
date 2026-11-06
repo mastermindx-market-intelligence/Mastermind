@@ -66,6 +66,11 @@ from integrations.executive_mcp.schemas import (
     error_envelope,
     validate_tool_arguments,
 )
+from integrations.hermes_delegate.executive import (
+    SELECTED_CHILD_SCHEMA,
+    selected_child_response,
+    validate_selected_child_envelope,
+)
 
 #: Three fixed POST routes served by the OS Executive transport.  These are
 #: exactly the routes enumerated in the integration continuation; nothing
@@ -2296,8 +2301,14 @@ def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target
         return value
 
     def result(payload, challenge=None):
+        # A valid selected-child envelope carries no top-level ``ok``: its
+        # ``state`` is the outcome. It is a valid answer, not a protocol
+        # error, so it is never marked as one here.
+        is_error = payload.get("ok") is not True
+        if isinstance(payload, dict) and payload.get("schema") == SELECTED_CHILD_SCHEMA:
+            is_error = False
         return mcp_types.CallToolResult(content=[mcp_types.TextContent(type="text",
-            text=canonical_json(payload).decode("utf-8"))], isError=payload.get("ok") is not True,
+            text=canonical_json(payload).decode("utf-8"))], isError=is_error,
             _meta={"mcp/www_authenticate": [challenge]} if challenge else None)
 
     @server.call_tool(validate_input=False)
@@ -2310,10 +2321,18 @@ def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target
         except GatewayError as exc:
             return result(error(name, exc.code))
         is_submit = name == "submit_principal_intent"
+        is_selected_child = name == "mmx_delegate"
         has_receipt = is_submit or name == "principal_intent_status"
         request_ref = principal_request_ref(validated) if is_submit else validated.get("request_ref")
         def failed():
             return json.loads(unknown(request_ref).body) if has_receipt else error(name)
+        def selected_child_failed():
+            # The selected-child branch never answers with an E1 envelope.
+            # An unusable answer keeps the original command and reports the
+            # effect as unknown.
+            return selected_child_response(
+                "UNAVAILABLE", "EXECUTIVE_SELECTED_CHILD_UNAVAILABLE",
+                command_id=validated.get("command"))
         challenge = None
         try:
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=inner),
@@ -2328,7 +2347,15 @@ def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target
                 and payload["ok"] is False and isinstance(payload["error"], dict)
                 and payload["error"].get("code") in {"invalid_input", "authority_refused", "scope_refused",
                     "authorization_missing", "authorization_malformed", "identity_unverified", "grounding_unavailable"})
-            if not preflight and has_receipt:
+            if is_selected_child:
+                # A dedicated classification: the C17 envelope is the answer.
+                # It is never an E1 envelope and never a principal receipt.
+                try:
+                    validate_selected_child_envelope(
+                        payload, command_id=validated["command"])
+                except (TypeError, ValueError):
+                    payload = selected_child_failed()
+            elif not preflight and has_receipt:
                 if not _executive_outcome(payload, request_ref, response.status_code):
                     payload = failed()
                 elif payload.get("ok") is True:
@@ -2340,10 +2367,11 @@ def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target
             elif not preflight and (response.status_code != 200 or not _is_e1_envelope(payload, name, COO_SERVER_VERSION)):
                 payload = failed()
         except Exception:
-            payload = failed()
+            payload = selected_child_failed() if is_selected_child else failed()
         reply = result(payload, challenge)
         if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096:
-            reply = result(failed() if has_receipt else error(name, "output_too_large"))
+            reply = result(selected_child_failed() if is_selected_child
+                           else (failed() if has_receipt else error(name, "output_too_large")))
         return reply
 
     manager = StreamableHTTPSessionManager(server, stateless=True, json_response=True,

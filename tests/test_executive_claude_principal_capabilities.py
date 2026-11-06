@@ -28,8 +28,8 @@ POLICY = ROOT / "config/executive_claude_principal_capabilities.json"
 DEFAULT_POLICY = ROOT / "config/executive_agent_capabilities.json"
 PROFILE_ID = "principal.claude-code.executive-coo.v1"
 GRANT_ID = "mastermind-executive-coo-v1"
-EXPECTED_POLICY_DIGEST = "9a244ed31570e1cf24a2c8746e3b97fd5ed2f87aec7f748c88a9bc28053523cf"
-EXPECTED_PROFILE_DIGEST = "9bb045fa01053def3f152f4c17576b8de0e3b17b8c8b5315af444614cb733814"
+EXPECTED_POLICY_DIGEST = "3a900805a88973c168583110762301ea3591f63d3ff47786522686ca9272e532"
+EXPECTED_PROFILE_DIGEST = "5d4a2b7e89c5fee0e34be6a623a4a19e5d91b5d743c7365826ef3384af8bf217"
 
 
 def load(path=POLICY):

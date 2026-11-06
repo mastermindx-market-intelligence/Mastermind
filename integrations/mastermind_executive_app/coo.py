@@ -32,9 +32,15 @@ from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.executive_mcp.coo import COO_READ_NAMES, COO_SERVER_VERSION, COO_TOOL_NAMES, validate_coo_tool_arguments
 from integrations.executive_mcp.schemas import RESULT_SCHEMA, GatewayError, canonical_json
 from integrations.executive_mcp.e1_http import BoundedE1App, MAX_RESPONSE_BYTES
+from integrations.hermes_delegate.executive import (
+    ExecutiveSelectedChildTarget, SELECTED_CHILD_FRAME_SCHEMA,
+    selected_child_response, validate_selected_child_envelope,
+    validate_selected_child_frame,
+)
+from integrations.hermes_delegate.schema import SubmissionError
 from integrations.mastermind_executive_app.app import AppSettings, _authenticate, _outcome_response, _read_body_arguments
 from integrations.mastermind_executive_app.admission import AdmissionOutcome, _classify_send_response
-from integrations.mastermind_executive_app.coo_binding import COO_SCOPES, coo_authorizer
+from integrations.mastermind_executive_app.coo_binding import COO_SCOPES, coo_authorizer, principal_frame
 from integrations.mastermind_executive_app.gateway import (
     CeoIngressClient, CeoIngressResponse, WebCeoV2CeoIngressReadGateway,
     TRANSPORT_SENT_OK, TRANSPORT_NOT_SENT, _default_jwks_cache, _jwks_cache_contract,
@@ -49,6 +55,9 @@ class CooAppSettings:
     load_binding: Callable[[], object]
     authority_provider: Callable[[VerifiedPrincipal, str], AuthorityFact]
     mission_provider: Callable[[VerifiedPrincipal, str], Mapping[str, Any]]
+    # The trusted host's frozen selected-child target. It defaults to unbound:
+    # this App never selects, creates or derives a child on its own.
+    selected_child_target: ExecutiveSelectedChildTarget | None = None
 
     def __post_init__(self):
         policy = validate_resource_policy(self.policy)
@@ -62,6 +71,9 @@ class CooAppSettings:
             raise ValueError("COO must share the Executive resource and JWKS, with distinct exact scopes")
         if not all(callable(x) for x in (self.load_binding, self.authority_provider, self.mission_provider)):
             raise ValueError("COO requires explicit installed binding and canonical fact providers")
+        if (self.selected_child_target is not None
+                and type(self.selected_child_target) is not ExecutiveSelectedChildTarget):
+            raise ValueError("COO requires the exact frozen selected-child target")
         object.__setattr__(self, "policy", policy)
 
 
@@ -267,6 +279,113 @@ class CooApp:
             # An unrecognized post-send failure never proves no effect.
             return unknown(request_ref)
 
+    async def _selected_child(self, request, authenticated, validated):
+        """Submit or observe exactly one host-frozen child.
+
+        The model names a canonical command the trusted host already froze.
+        Every authority field in the private frame comes from this App's own
+        authenticated providers; the model supplies none of them. The frame
+        is sent once. There is no retry, no resubmit, no cancellation, no
+        alternative carrier and no recomputed ordinal.
+        """
+
+        principal, stamp = authenticated
+        command = validated["command"]
+        action = validated["action"]
+        is_submit = action == "selected_child_submit"
+
+        def answer(state, reason, *, job_id=None):
+            return JSONResponse(selected_child_response(
+                state, reason, command_id=command, job_id=job_id,
+                live_submit=None if state in {"EFFECT_UNKNOWN", "UNAVAILABLE"} else False,
+            ), status_code=200)
+
+        def uncertain(reason):
+            # A possible submit stays unknown; a failed status observation is
+            # unavailable. Both retain the original command.
+            state = "EFFECT_UNKNOWN" if is_submit else "UNAVAILABLE"
+            return answer(state, reason)
+
+        target = self.settings.selected_child_target
+        if type(target) is not ExecutiveSelectedChildTarget:
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_NOT_BOUND")
+        try:
+            target.require_current()
+            child = target.child_for(command)
+        except Exception:
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_TARGET_UNAVAILABLE")
+        if child is None:
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_UNKNOWN_COMMAND")
+        job_id = child.selection.job_id
+        work_ref = target.work_ref
+        try:
+            authority, context = await self._authority(principal, work_ref, stamp)
+        except Exception:
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_AUTHORITY_REFUSED", job_id=job_id)
+        try:
+            target.require_current()
+        except Exception:
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_TARGET_UNAVAILABLE", job_id=job_id)
+        if not await self._same_auth(request, authenticated):
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_AUTHORITY_REFUSED", job_id=job_id)
+        frame = {
+            "schema": SELECTED_CHILD_FRAME_SCHEMA,
+            "request": {"action": action, "command": command},
+            "target_digest": target.material_digest(),
+            "principal": principal_frame(principal),
+            "principal_context": dataclasses.asdict(context),
+            "capability_profile_digest": authority.capability_profile_digest,
+        }
+        try:
+            validate_selected_child_frame(frame)
+        except SubmissionError:
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_FRAME_INVALID", job_id=job_id)
+        try:
+            response = await self._client.send_frame(
+                self.settings.executive.ceo_ingress_socket_path, frame)
+        except Exception:
+            # The frame may already have reached the Control. Never prove a
+            # no-effect outcome from an unrecognized post-send failure.
+            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+        if type(response) is not CeoIngressResponse:
+            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+        if response.transport == TRANSPORT_NOT_SENT:
+            # Provably never delivered: a preflight refusal, not an effect.
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_NOT_SENT", job_id=job_id)
+        if response.transport != TRANSPORT_SENT_OK:
+            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+        if response.ok is False:
+            code = (response.error or {}).get("code")
+            if not is_submit:
+                # A failed status observation keeps its original command.
+                return uncertain("EXECUTIVE_SELECTED_CHILD_UNAVAILABLE")
+            if (code not in ingress.ERROR_CODES or code in {
+                    "backend_unavailable", "backend_refused", "internal_error",
+                    "response_too_large"}):
+                # A backend failure may follow a committed effect.
+                return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_REFUSED", job_id=job_id)
+        try:
+            envelope = validate_selected_child_envelope(response.result, command_id=command)
+        except (TypeError, ValueError):
+            # A malformed return after a possible submit is not a no-effect
+            # receipt. Retain the original command.
+            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+        # Recheck the authentication and the target before disclosure.
+        if not await self._same_auth(request, authenticated):
+            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+        try:
+            target.require_current()
+        except Exception:
+            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+        try:
+            body = canonical_json(envelope)
+        except (TypeError, ValueError):
+            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+        if len(body) > MAX_RESPONSE_BYTES:
+            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+        return JSONResponse(envelope, status_code=200)
+
     async def call(self, request: Request):
         name = request.path_params["tool"]
         if name not in COO_TOOL_NAMES:
@@ -292,6 +411,11 @@ class CooApp:
                 return JSONResponse(result)
             except Exception:
                 return refused("backend_unavailable", 503)
+        if name == "mmx_delegate":
+            # The closed selected-child branch runs before the generic
+            # work_ref/principal-intent logic: it has no work_ref, no
+            # request reference and no principal intent.
+            return await self._selected_child(request, authenticated, validated)
         work_ref = validated.get("work_ref", validated.get("workstream"))
         try:
             authority, context = await self._authority(principal, work_ref, stamp)

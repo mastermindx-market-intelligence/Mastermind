@@ -19,6 +19,7 @@ EXPECTED_COO_TOOLS = (
     "executive_fabric",
     "submit_principal_intent",
     "principal_intent_status",
+    "mmx_delegate",
 )
 
 
