@@ -133,6 +133,11 @@ PRE_NATIVE_SESSION_SEND_GET_ROUTES = GET_ROUTES
 PRE_NATIVE_SESSION_SEND_POST_ROUTES = POST_ROUTES
 POST_ROUTES = PRE_NATIVE_SESSION_SEND_POST_ROUTES + ("/os/executive/session/send",)
 
+# Fixed secret-free role metadata READ; no enrollment or provider operation.
+PRE_BYOK_ROLES_GET_ROUTES = GET_ROUTES
+PRE_BYOK_ROLES_POST_ROUTES = POST_ROUTES
+GET_ROUTES = PRE_BYOK_ROLES_GET_ROUTES + ("/workspace/byok/roles/current",)
+
 # Preserve exactly the profiles admitted by the two predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
 # partial upgrades, wildcards and extra paths cannot become transition inputs.
@@ -166,6 +171,7 @@ TRANSITION_ROUTE_PROFILES = (
     (PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES, PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES),
     (PRE_NATIVE_DRAFT_GET_ROUTES, PRE_NATIVE_DRAFT_POST_ROUTES),
     (PRE_NATIVE_SESSION_SEND_GET_ROUTES, PRE_NATIVE_SESSION_SEND_POST_ROUTES),
+    (PRE_BYOK_ROLES_GET_ROUTES, PRE_BYOK_ROLES_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 

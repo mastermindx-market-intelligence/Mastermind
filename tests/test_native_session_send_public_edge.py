@@ -24,7 +24,8 @@ ROUTE = "/os/executive/session/send"
 
 def test_only_one_fixed_post_extends_the_complete_current_predecessor():
     assert ROUTE in edge.POST_ROUTES
-    assert edge.GET_ROUTES == edge.PRE_NATIVE_SESSION_SEND_GET_ROUTES
+    assert edge.PRE_BYOK_ROLES_GET_ROUTES == edge.PRE_NATIVE_SESSION_SEND_GET_ROUTES
+    assert edge.GET_ROUTES == edge.PRE_BYOK_ROLES_GET_ROUTES + ("/workspace/byok/roles/current",)
     assert edge.POST_ROUTES == edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES + (ROUTE,)
     assert ROUTE not in edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES
     assert (edge.PRE_NATIVE_SESSION_SEND_GET_ROUTES,
@@ -40,7 +41,7 @@ def test_only_one_fixed_post_extends_the_complete_current_predecessor():
 
 
 @pytest.mark.parametrize("maker", [prepare_config, final_config])
-def test_real_transition_preserves_predecessor_and_changes_only_post_paths(maker):
+def test_real_transition_preserves_predecessor_and_changes_only_fixed_route_paths(maker):
     assert ROUTE in edge.POST_ROUTES
     old = predecessor()
     routes = method_routes(old)
@@ -51,6 +52,7 @@ def test_real_transition_preserves_predecessor_and_changes_only_post_paths(maker
     result = maker(fullconfig=old, current_manifest=manifest(),
                    candidate_manifest=manifest(), relay_port=49152)
     expected = copy.deepcopy(old)
+    method_routes(expected)[0]["match"][0]["path"] = sorted(set(edge.GET_ROUTES) | set(edge.asset_routes(manifest())))
     method_routes(expected)[1]["match"][0]["path"] = list(edge.POST_ROUTES)
     assert result == expected and old == before
     for suffix in ("/", "-other", "/*"):
