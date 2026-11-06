@@ -170,9 +170,14 @@ adds no manual review. See [session review policy](SESSION_LOCAL_REVIEW_POLICY.m
 
    ```bash
    gh pr merge <PR> --repo mastermindx-market-intelligence/Mastermind \
-     --auto --squash --delete-branch \
+     --auto --squash \
      --match-head-commit <CURRENT_40_HEX_HEAD>
    ```
+
+   GitHub CLI refuses `--delete-branch` when merge queue is enabled. Do not add
+   that flag to the auto-merge request: branch cleanup is an optional separate
+   post-merge step, never a prerequisite for merge-queue admission. Read the
+   actual merged PR/SHA first; preserve occupied or still-live source branches.
 
    Reconcile the actual returned request: pending conditions may create an
    auto-merge request; satisfied conditions may enter the existing protected
