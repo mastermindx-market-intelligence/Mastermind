@@ -68,8 +68,8 @@ GROK47_MERGED_SOURCE_DIGESTS = {
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
     'artifact_delivery.py': '81749610b8afd7151dbadb4cbcedbef853fc18ad9de9364fd3b2b1d747d535b1',
     'remote_sub_exec.py': '710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db',
-    'pick.py': '5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892',
-    'remote_sub.sh': '0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c',
+    'pick.py': 'c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057',
+    'remote_sub.sh': '2b0ac9e218642ed3b1d714164f22b5b16da8bb39597e1069fa9ad3f17937fe09',
     'remote_sub_helpers.py': 'f7d62e9bdfa7388b7f86c0f968a021bf3949141ddcc8515103075ed3a1da2f93',
     'sub.sh': '4956942c77421b9d1015889995ebf0419399ea62c16de608765a0795b5fb551f',
     'native_remote.py': '2beef7dd4de1dab2908970bed48cfd3fdfd99da2d99bc8de72a92d2a1b2418b6',
@@ -115,7 +115,7 @@ GO_SELECTION_SUPPORT_PREIMAGES = {
 }
 GO_SELECTION_SUPPORT_DIGESTS = {
     "pool_ledger.py": "a9ba8724ad1d6f9a78944cd87f95c1cb70a0832d71612402565111fb04100ef2",
-    "quota_circuit.py": "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303",
+    "quota_circuit.py": "ba1f2582505a0350260d0bdc4a00f6374a2e1140bc4b6cead84368b606f9970e",
 }
 
 
@@ -181,6 +181,22 @@ GO_PARTICIPANT_OPERATOR = "90c6eee6bd7f2ca7d36c6b915a4fe2cae42b749d99ec2170fb39f
 GO_PARTICIPANT_OPERATOR_PREIMAGE = "f81b4f053a22ba973b06214f6d06ed2d66e3fc471c781311f074718683cf4675"
 
 
+
+# Approved successor to the exact #2060 native stage; retain its preimages
+# for historical installer fixtures and Go's original base normalization.
+BROKER_BUSY_STAGE_PREIMAGES = {
+    "fabric_continuation.py": "7a4050051378fcacada2f2fe6d056649fb514077aacfb02751d61d6e67dfe405",
+    "fabric_task.py": "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd",
+    "remote_sub.sh": "0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c"
+}
+BROKER_BUSY_STAGE_DIGESTS = {
+    "fabric_continuation.py": "8b3ab69abc6e61bdae98dea026c4dc5075ab7bc0b062624cb205df4a27a98030",
+    "fabric_task.py": "9a087570b7456a1d893fb0f3b73b68abc45b6328e9b2ecacdbe992e74918a1d1",
+    "remote_sub.sh": "2b0ac9e218642ed3b1d714164f22b5b16da8bb39597e1069fa9ad3f17937fe09"
+}
+BROKER_BUSY_PICKER_PREIMAGE = "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892"
+BROKER_BUSY_QUOTA_PREIMAGE = "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303"
+
 def validate_go_base_manifest(manifest, dependency_hashes):
     """Accept exact historical102/prior104/current106 application compositions.
 
@@ -243,7 +259,8 @@ def validate_go_base_manifest(manifest, dependency_hashes):
             raise ValueError("native Go base differs from captured application dependency")
         historical["ext/" + name] = original
     if manifest["ext/pick.py"] not in {
-            GO_BASE_PICKER_SHA256, GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]}:
+            GO_BASE_PICKER_SHA256, BROKER_BUSY_PICKER_PREIMAGE,
+            GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]}:
         raise ValueError("native Go base picker is not the exact composed source")
     historical["ext/pick.py"] = GO_BASE_PICKER_SHA256
     if manifest["ext/remote_sub_exec.py"] not in {
@@ -251,13 +268,20 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         raise ValueError("native Go executor is not the exact composed source")
     historical["ext/remote_sub_exec.py"] = GO_BASE_EXECUTOR_SHA256
     for name, original in GO_SELECTION_SUPPORT_PREIMAGES.items():
-        if manifest["ext/" + name] not in {original, GO_SELECTION_SUPPORT_DIGESTS[name]}:
+        if manifest["ext/" + name] not in {
+                original, GO_SELECTION_SUPPORT_DIGESTS[name],
+                BROKER_BUSY_QUOTA_PREIMAGE if name == "quota_circuit.py" else original}:
             raise ValueError("native Go selection support is not the exact composed source")
         historical["ext/" + name] = original
     if manifest["ext/provider_outcome.py"] not in {
             GO_BASE_PROVIDER_OUTCOME_SHA256, GO_PROTECTED_PROVIDER_OUTCOME_SHA256}:
         raise ValueError("native Go provider outcome is not the exact protected source")
     historical["ext/provider_outcome.py"] = GO_BASE_PROVIDER_OUTCOME_SHA256
+    for name, original in BROKER_BUSY_STAGE_PREIMAGES.items():
+        current = manifest.get("ext/" + name)
+        if current not in (original, BROKER_BUSY_STAGE_DIGESTS[name]):
+            raise ValueError("native broker busy stage source differs: " + name)
+        historical["ext/" + name] = original
     if sha((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) != GO_BASE_MANIFEST_SHA256:
         raise ValueError("native Go base closure is not the reviewed protected composition")
 
