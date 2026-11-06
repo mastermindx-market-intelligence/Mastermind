@@ -7,6 +7,21 @@ these pins are not learned or refreshed by the tests.
 """
 
 REVIEWED_FILES = {
+    # Frozen GLM account-admission evidence: these are elapsed-time bounds,
+    # not user identities. Whole-file hashes and exact sites fail closed on
+    # any changed meaning, added identity, or modified retained traceback.
+    "research/fabric_glm_account_admission_20261014/baseline.quota_remote.py": {
+        "sha256": "80ce4151a5d3f05528bc3c5e9af214d510ad9d9f17803c62f01a4c2d818ec5ff",
+        "sites": ((22, 10, 13, "int", "600"),),
+    },
+    "research/fabric_glm_account_admission_20261014/quota_remote.py": {
+        "sha256": "a1dab11da10264836e6271955b375b8e6508c23f23d0444c99d96464deb70f2b",
+        "sites": ((22, 10, 13, "int", "600"),),
+    },
+    "research/fabric_glm_account_admission_20261014/BASELINE.xml": {
+        "sha256": "538923697693ccd4c5e836de20466cbe2f4d2ae1f0ca189da194a5b0d0d5b64a",
+        "sites": ((19, 46, 49, "int", "600"),),
+    },
     # R2 AEAD source candidate: the existing Control UID remains fixed at this
     # single exact site. Independent source acceptance remains a release gate;
     # these static test pins do not establish it or grant a new identity.
@@ -631,12 +646,16 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha
 
 # C16: fixed observation-only TLS directory; root owner and canonical Control
 # group retain the exact private traversal mode. Whole-source and token-bound.
-REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': '053f801d4b28ed8cbd033c69869f1b12b2ea83c66d6d21f85fbb8d096b97ec03', 'sites': ((660, 71, 76, 'int', '0o750'),)}
+# C20 attended-parent review: archive closure and inert gateway replacement.
+# ensure_directories has the identical AST; its one whole permission token moved
+# by 15 lines. New unit publication consumes the existing canonical identities.
+REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'a08b20f693a9ed10fe110d69469b5cc9155243905890f3a039ac19a2bbbdbed1', 'sites': ((675, 71, 76, 'int', '0o750'),)}
 
-# d3f21fc6 composition audit: native compound Mission/Result READ retains the
-# complete existing Programs diagnostic body; the three exact HTTP operands
-# move together. The compound READ uses its fixed route/schema, Acquisition
-# generation, bounded body and null-only typed unavailable result. No new
-# numeric exception or native release approval is introduced. Protected
-# autonomy/initializer/qualification/enrollment sources are exact d3f bytes;
-# their changed mode/identity sites were read in their owning call context.
+# Historical d3f21fc6 composition audit: native compound Mission/Result READ
+# retained the complete existing Programs diagnostic body; the three exact HTTP
+# operands moved together. The compound READ uses its fixed route/schema,
+# Acquisition generation, bounded body and null-only typed unavailable result.
+# No new numeric exception or native release approval was introduced. At that
+# audit, protected autonomy/initializer/qualification/enrollment sources matched
+# d3f bytes; their sites were read in their owning call context. The current C20
+# enrollment source is bound by its protected exact-postimage review above.
