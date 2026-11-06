@@ -89,14 +89,17 @@ JOB_CLAIMED Event. Its private nominal handle is reread on each use. It does not
 authenticate a protected service or issue source/paid permission. Native source
 locator IDs remain distinct from actual Runtime Job/root/parent/Attempt IDs.
 
-`capture_protected_memory_intent(claim, actual Control socket)` additionally
-requires the root helper, actual kernel peer and fresh fixed installed-Control
-qualification before/after the Runtime read. The new canonical object has schema
+`capture_control_memory_intent(claim, root_observed_owner)` stays in Control450
+with its actual Runtime/opaque lease; it creates only a canonical projection.
+Root's `accept_protected_memory_intent(projection, actual Control socket)`
+independently captures/qualifies the actual peer and compares observed metadata.
+The Runtime handle/token never crosses IPC. Control rereads its original handle
+before/after each exchange; root requalifies the same peer before each use. The new canonical object has schema
 `mastermind.protected_memory_pre_input_intent.v1`, protected owner/mode identity,
 current Runtime admission and its original claim Event ref, original operation,
 and native source locator. It excludes future input/capability/result bytes.
-`require_protected_memory_intent` freshly rechecks the same context and emits
-prepare_case plus `{schema,sha256,bytes}` referring to that exact new object.
+`require_protected_memory_intent` freshly rechecks the root's same-Control peer
+and emits prepare_case plus `{schema,sha256,bytes}` referring to that exact new object.
 
 The wire spelling participant_binding_sha256 is the derived SHA of THIS NEW
 pre-input object, never c82 participant_binding.v1 (whose digest already depends

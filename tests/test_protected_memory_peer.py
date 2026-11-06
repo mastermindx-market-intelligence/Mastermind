@@ -35,12 +35,25 @@ def installed(monkeypatch):
     finally: a.close(); b.close()
 
 
-def test_preinput_is_derived_from_actual_claim_without_future_input_cycle(claimed, installed):
+def prepare(runtime, lease, connection, monkeypatch):
+    # Root's observation is DATA. The opaque Runtime claim remains in Control;
+    # only canonical JSON is sent to the root receiver, which requalifies peer.
+    monkeypatch.setattr(owner.os, 'geteuid', lambda: 0)
+    observed = owner.observe_control_owner(connection)
+    monkeypatch.setattr(owner.os, 'geteuid', lambda: 450)
+    claim = admission.capture_memory_runtime_claim(runtime, lease)
+    control = owner.capture_control_memory_intent(claim, observed)
+    projection = json.loads(owner.canonical(owner.require_control_memory_intent(control)))
+    monkeypatch.setattr(owner.os, 'geteuid', lambda: 0)
+    root = owner.accept_protected_memory_intent(projection, connection)
+    return control, root
+
+
+def test_preinput_is_derived_from_actual_claim_without_future_input_cycle(claimed, installed, monkeypatch):
     runtime, job, lease = claimed
     connection, _ = installed
     before = runtime.events.list_events()
-    claim = admission.capture_memory_runtime_claim(runtime, lease)
-    value = owner.capture_protected_memory_intent(claim, connection)
+    control, value = prepare(runtime, lease, connection, monkeypatch)
     request, ref = owner.require_protected_memory_intent(value)
     raw = owner._ISSUED[value].original
     material = json.loads(raw)
@@ -57,9 +70,9 @@ def test_preinput_is_derived_from_actual_claim_without_future_input_cycle(claime
 
 
 @pytest.mark.parametrize('shape', ['dict', 'clone', 'subclass'])
-def test_claimed_opaque_shape_cannot_issue_source_request(claimed, installed, shape):
+def test_claimed_opaque_shape_cannot_issue_source_request(claimed, installed, monkeypatch, shape):
     runtime, _, lease = claimed
-    cap = owner.capture_protected_memory_intent(admission.capture_memory_runtime_claim(runtime, lease), installed[0])
+    _, cap = prepare(runtime, lease, installed[0], monkeypatch)
     if shape == 'dict': forged = {'schema': owner.SCHEMA}
     elif shape == 'clone': forged = object.__new__(owner.ProtectedMemoryIntent)
     else:
@@ -73,7 +86,7 @@ def test_claimed_opaque_shape_cannot_issue_source_request(claimed, installed, sh
 def test_current_protected_context_loss_refuses_existing_handle(claimed, installed, monkeypatch, change):
     runtime, _, lease = claimed
     connection, current = installed
-    cap = owner.capture_protected_memory_intent(admission.capture_memory_runtime_claim(runtime, lease), connection)
+    _, cap = prepare(runtime, lease, connection, monkeypatch)
     if change == 'unqualified_cli': monkeypatch.setattr(owner.os, 'geteuid', lambda: 501)
     elif change == 'peer_epoch':
         current['observation'] = dataclasses.replace(current['observation'], audit_token=b'B'*32, pidversion=5679)
@@ -87,4 +100,22 @@ def test_non_socket_or_current_uid_alone_never_replaces_peer(claimed, monkeypatc
     claim = admission.capture_memory_runtime_claim(runtime, lease)
     monkeypatch.setattr(owner.os, 'geteuid', lambda: 0)
     for value in ({'uid': 450}, True, None):
-        with pytest.raises(owner.ProtectedMemoryRefused): owner.capture_protected_memory_intent(claim, value)
+        with pytest.raises(owner.ProtectedMemoryRefused): owner.accept_protected_memory_intent({'schema': owner.SCHEMA}, value)
+
+
+def test_control_rereads_actual_runtime_and_does_not_export_opaque_lease(claimed, installed, monkeypatch):
+    runtime, job, lease = claimed
+    control, root = prepare(runtime, lease, installed[0], monkeypatch)
+    assert lease.lease_token not in owner._ISSUED[root].original.decode()
+    with runtime.store.transaction() as con:
+        con.execute("UPDATE jobs SET status='CANCELLED' WHERE job_id=?", (job.job_id,))
+    monkeypatch.setattr(owner.os, 'geteuid', lambda: 450)
+    with pytest.raises(owner.ProtectedMemoryRefused): owner.require_control_memory_intent(control)
+
+
+def test_other_service_cannot_submit_a_copied_control_projection(claimed, installed, monkeypatch):
+    runtime, _, lease = claimed
+    control, root = prepare(runtime, lease, installed[0], monkeypatch)
+    copied = json.loads(owner._ISSUED[root].original)
+    installed[1]['observation'] = dataclasses.replace(installed[1]['observation'], euid=501)
+    with pytest.raises(owner.ProtectedMemoryRefused): owner.accept_protected_memory_intent(copied, installed[0])
