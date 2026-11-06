@@ -29,6 +29,7 @@ def _owner():
 def _selection(owner, root):
     return owner.configured_application_fabric(
         lane=_LANE, workload_profile=_WORKLOAD, root=root,
+        service_mode_id="mastermind_text_fabric",
     )
 
 
