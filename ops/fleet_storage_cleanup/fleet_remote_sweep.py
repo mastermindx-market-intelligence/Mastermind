@@ -104,6 +104,135 @@ def sweep(host: str, timeout: int, attempts: int = 3, retry_wait: int = 150) -> 
     return out
 
 
+
+# Fixed pre-execution source fence. The old/missing remote module is never run
+# merely to discover its version. Execute only the same bounded bytes hashed.
+LINUX_PREVIEW_BOOTSTRAP = """import hashlib,os,stat,sys
+p=os.path.expanduser('~/.local/lib/mastermind/storage-cleanup/linux_cache_preview.py')
+try:
+ f=os.open(p,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+ try:
+  s=os.fstat(f)
+  if not stat.S_ISREG(s.st_mode) or s.st_uid!=os.getuid() or s.st_mode&0o022 or s.st_nlink!=1 or s.st_size>32768:
+   raise ValueError()
+  raw=os.read(f,32769)
+  end=os.fstat(f)
+  if len(raw)!=s.st_size or (s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)!=(end.st_dev,end.st_ino,end.st_size,end.st_mtime_ns,end.st_ctime_ns):
+   raise ValueError()
+ finally:
+  os.close(f)
+ if hashlib.sha256(raw).hexdigest()!=sys.argv[1]:
+  raise ValueError()
+except (OSError,ValueError,IndexError):
+ raise SystemExit(78)
+sys.argv=[p,'--expected-source-sha',sys.argv[1]]
+exec(compile(raw,p,'exec'),{'__name__':'__main__','__file__':p})
+"""
+
+
+def linux_cache_preview_command(source: Path | None = None) -> str:
+    """Fixed installed-owner command, no arbitrary path/argv or install fallback."""
+    import hashlib
+    import stat
+    source = HERE / "linux_cache_preview.py" if source is None else source
+    info = source.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+            or info.st_mode & 0o022 or info.st_size > 32768):
+        raise ValueError("preview source identity refused")
+    with source.open("rb") as stream:
+        raw = stream.read(32769)
+        current = os.fstat(stream.fileno())
+        if (len(raw) != info.st_size or
+                (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns, current.st_ctime_ns) !=
+                (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)):
+            raise ValueError("preview source changed")
+    sha = hashlib.sha256(raw).hexdigest()
+    import shlex
+    return "/usr/bin/python3 -c " + shlex.quote(LINUX_PREVIEW_BOOTSTRAP) + " " + sha
+
+
+def _qualified_linux_preview(body):
+    import hashlib
+    import math
+    import re
+    keys = {"schema", "preview_only", "cleanup_authorized", "observed_at",
+            "status", "reasons", "caches", "receipt", "sha256", "bytes"}
+    if (type(body) is not dict or set(body) != keys
+            or body["schema"] != "mastermind.linux_cache_preview.v1"
+            or body["preview_only"] is not True or body["cleanup_authorized"] is not False
+            or body["status"] not in {"PREVIEWED", "HELD"}
+            or type(body["observed_at"]) not in (float, int)
+            or not math.isfinite(body["observed_at"]) or body["observed_at"] <= 0
+            or type(body["reasons"]) is not list or len(body["reasons"]) > 2
+            or type(body["caches"]) is not list or len(body["caches"]) > 2
+            or type(body["receipt"]) is not str
+            or re.fullmatch(r"linux-cache-preview-[0-9a-f]{32}\.json", body["receipt"]) is None
+            or type(body["bytes"]) is not int or not 0 < body["bytes"] <= 32768
+            or type(body["sha256"]) is not str):
+        raise ValueError("preview body refused")
+    reasons = {"linux_nonroot_owner_required", "ownership_or_write_mode", "directory_identity",
+               "path_identity", "maintenance_journal_unknown", "live_use_unknown", "admission_busy",
+               "admission_lock_identity", "active_lane_or_reconciliation_hold", "owner_or_lock_unavailable"}
+    if any(type(r) is not str or r not in reasons for r in body["reasons"]):
+        raise ValueError("preview reason refused")
+    seen = set()
+    for row in body["caches"]:
+        roots = {"pip": ".cache/pip", "npm": ".npm/_cacache"}
+        if (type(row) is not dict or row.get("cache") not in roots or row["cache"] in seen
+                or row.get("relative_root") != roots[row["cache"]]):
+            raise ValueError("preview cache refused")
+        seen.add(row["cache"])
+        common = {"cache", "relative_root", "status"}
+        if row["status"] == "PREVIEWED":
+            if (set(row) != common | {"entries", "logical_bytes", "allocated_bytes", "inventory_sha256", "filesystem_available_bytes"}
+                    or any(type(row[k]) is not int or row[k] < 0 for k in
+                           ("entries", "logical_bytes", "allocated_bytes", "filesystem_available_bytes"))
+                    or row["entries"] > 20000 or max(row["logical_bytes"], row["allocated_bytes"]) > 256 * 1024 ** 3
+                    or type(row["inventory_sha256"]) is not str
+                    or re.fullmatch("[a-f0-9]{64}", row["inventory_sha256"]) is None):
+                raise ValueError("preview count refused")
+        elif row["status"] == "ABSENT":
+            if set(row) != common:
+                raise ValueError("preview missingness refused")
+        elif row["status"] == "HELD":
+            known = {"maintenance_effect_unknown", "live_use", "inventory_changed", "filesystem_unavailable",
+                     "unrecognized_cache_layout", "inventory_bound", "cache_lock_or_unknown_entry",
+                     "filesystem_changed", "different_worker_filesystem", "symlink_hardlink_or_special", "hardlink_or_duplicate"} | reasons
+            if set(row) != common | {"reason"} or type(row["reason"]) is not str or row["reason"] not in known:
+                raise ValueError("preview hold refused")
+        else:
+            raise ValueError("preview state refused")
+    if (body["status"] == "PREVIEWED") != any(r["status"] == "PREVIEWED" for r in body["caches"]):
+        raise ValueError("preview summary refused")
+    bare = {k: v for k, v in body.items() if k not in {"receipt", "sha256", "bytes"}}
+    raw = (json.dumps(bare, sort_keys=True, allow_nan=False) + "\n").encode()
+    if len(raw) != body["bytes"] or hashlib.sha256(raw).hexdigest() != body["sha256"]:
+        raise ValueError("preview receipt binding refused")
+    return body
+
+
+def preview_linux_caches(host: str, timeout: int = 20) -> dict:
+    """One explicit read/receipt-only call through the EXISTING fleet transport.
+
+    This source extension does not enroll/install a host. Missing/old installed
+    preview source fails closed; never sync, probe, retry or run sweep as fallback.
+    The caller still needs the existing target-host maintenance authorization.
+    """
+    if host not in {"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3", "ubuntu4"}:
+        raise ValueError("Linux maintenance target refused")
+    if type(timeout) is not int or not 1 <= timeout <= 20:
+        raise ValueError("preview timeout refused")
+    rc, out, _ = run(SSH + [host, linux_cache_preview_command()], timeout)
+    if rc not in (0, 3) or len(out.encode()) > 32768:
+        return {"host": host, "state": "UNAVAILABLE", "reason": "preview_transport_or_source_unavailable"}
+    try:
+        body = _qualified_linux_preview(json.loads(out))
+        if (rc == 0) != (body["status"] == "PREVIEWED"):
+            raise ValueError()
+    except (ValueError, TypeError, KeyError, OverflowError, RecursionError):
+        return {"host": host, "state": "UNAVAILABLE", "reason": "preview_body_unqualified"}
+    return {"host": host, "state": body["status"], "preview": body}
+
 def _cleanup_blocker(row: dict) -> dict | None:
     """A successful remote command is not proof that storage cleanup ran.
 
@@ -310,7 +439,19 @@ def main() -> int:
     ap.add_argument('--no-sync', action='store_true', help='do not rsync the toolkit first')
     ap.add_argument('--timeout', type=int, default=1800, help='per-host seconds')
     ap.add_argument('--json', action='store_true')
+    ap.add_argument('--linux-cache-preview', action='store_true',
+                    help='explicit preview only; no sync, sweep, cleanup or retry')
     args = ap.parse_args()
+    if args.linux_cache_preview:
+        hosts = args.hosts.split(',')
+        if not args.no_sync or len(hosts) != 1:
+            ap.error('Linux preview requires --no-sync and exactly one existing authorized host')
+        try:
+            result = preview_linux_caches(hosts[0], timeout=min(args.timeout, 20))
+        except (OSError, ValueError):
+            result = {'state': 'UNAVAILABLE', 'reason': 'preview_configuration_unqualified'}
+        print(json.dumps(result, sort_keys=True))
+        return 0 if result['state'] == 'PREVIEWED' else 3
 
     STATE.mkdir(parents=True, exist_ok=True)
     if LOCK.exists() and time.time() - LOCK.stat().st_mtime < 2 * 3600:
