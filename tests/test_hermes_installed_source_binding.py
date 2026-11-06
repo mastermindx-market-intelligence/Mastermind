@@ -380,7 +380,10 @@ async def test_direct_parent_kill_preimage_leaves_the_owned_descendant_pipe_open
         stderr=asyncio.subprocess.DEVNULL,start_new_session=True)
     assert await process.stdout.readline()==b'READY\n'
     process.kill()  # The previous outer finally, targeting Python only.
-    await process.wait()
+    # asyncio Process.wait also waits for inherited pipes; awaiting it here
+    # would let the descendant's natural timeout erase the leak discriminator.
+    async with asyncio.timeout(1):
+        while process.returncode is None: await asyncio.sleep(0.001)
     try:
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(process.stdout.read(),timeout=0.03)
@@ -390,6 +393,7 @@ async def test_direct_parent_kill_preimage_leaves_the_owned_descendant_pipe_open
         try: os.killpg(process.pid,signal.SIGKILL)
         except ProcessLookupError: pass
         assert await asyncio.wait_for(process.stdout.read(),timeout=1)==b''
+        await process.wait()
 
 
 @pytest.mark.anyio
