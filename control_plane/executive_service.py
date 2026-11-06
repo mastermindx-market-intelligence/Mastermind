@@ -120,7 +120,7 @@ from control_plane.executive_terminal_return import (
     TerminalReturnCandidate,
     TerminalReturnError,
     TerminalReturnProjectionError,
-    reduce_terminal_return,
+    reduce_terminal_return, selected_child_result_capsule,
 )
 from control_plane.model_router import ModelRouter, RoutingPolicyError
 from control_plane.operator_harness_contract import AttemptExecutionMode
@@ -8740,6 +8740,12 @@ class ExecutiveControlService:
             body["session_ref"] = candidate.session_ref
             body["result_envelope_digest"] = candidate.result_envelope_digest
             body["terminal_evidence_digest"] = candidate.terminal_evidence_digest
+            capsule = selected_child_result_capsule(candidate, command_id=command_id)
+            if capsule is not None:
+                body["result_capsule"] = capsule
+            else:
+                # Completion remains true; omitted text is not a complete synopsis.
+                body["reason"] = "EXECUTIVE_RESULT_CONTENT_TOO_LARGE"
             return body
         if attempt.status is AttemptStatus.FAILED:
             body["state"] = "FAILED"

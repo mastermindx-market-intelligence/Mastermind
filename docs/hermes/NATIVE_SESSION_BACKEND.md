@@ -2,11 +2,11 @@
 
 ## Status and consumer
 
-This source slice composes the pinned native Hermes GatewayRunner inside the
-existing Hermes ServiceRuntime child slot. It supplies the native owner and the
-bounded Secretary admission/recovery adapter needed by the Office conversation
-path. It does not claim that Office, the remote gateway, or a production role is
-already using that adapter.
+The source composes the pinned native Hermes GatewayRunner inside the existing
+Hermes ServiceRuntime child slot, the authenticated Secretary gateway and
+SessionBridge/Runtime request family, and Office's explicit native Secretary
+SEND/reply/recovery path. Source composition does not establish installation,
+provider authentication or a production conversation.
 
 The existing role/proxy installation and activation hold remains in force.
 Focused source tests use explicit native-authority and custody doubles. They do
@@ -157,21 +157,51 @@ after role isolation and before upstream bootstrap. This preserves upstream's
 native socket patch without allowing its lazy compatibility finder to precede
 the installed source/YAML owners.
 
+## Selected child result read
+
+The native selected-child tool uses its existing selected_child_status request
+and original frozen command. Executive Control resolves the Attempt owned by that
+command, obtains Runtime.validated_role_completion, and reduces the same
+terminal candidate used by the existing return owner. For a verified completed
+work/repair child, its response can include a closed result_capsule with the
+original command, job, Attempt and root; complete summary and next actions; and
+the existing result, terminal, artifact, validation and grant receipt digests.
+
+The capsule is limited to 32 KiB of serialized UTF-8. No text is sliced. If a
+valid synopsis exceeds that budget, the response preserves completed metadata
+and returns EXECUTIVE_RESULT_CONTENT_TOO_LARGE without a capsule. An absent
+capsule is not evidence that the model has read the full result.
+
+The shared receiving decoder joins the capsule to the outer original
+observation. The native transport and final handler recheck currentness and
+caller lineage after the read before exposing content. A late change withholds
+content and retains the original command. parent_consumed: false means this
+read did not write a consumption, acceptance or acknowledgement; it makes no
+claim about another owner's earlier actions.
+
+This completes a result-reading path inside an already retained native turn.
+It creates no model call, polling loop, wake, new Attempt or acceptance event.
+It does not automatically resume a conversation whose turn has ended.
+
 ## Remaining product integration
 
-The following consumers still need composition before this is the complete
-Office Secretary journey:
+The closed Secretary mTLS request family, Runtime commit/recovery variant and
+explicit Office question/answer consumer are source-composed. The remaining
+installed/product work is:
 
-1. A distinct closed Secretary request family and credential binding on the
-   existing mTLS transport, connecting Control to the role gateway consumer.
-2. The native request/return variant in the existing SessionBridge and Runtime
-   aggregate, including a durable commit-started event before possible native
-   admission and original-request recovery after refresh.
-3. Office's selected mission question/answer flow using those actual receipts,
-   without fabricating Fabric Attempt, worker, Slack, or wake identities.
-4. Qualified host dependency preparation, role isolation witnesses, the
-   selected provider turn, and the authenticated production browser path.
+1. Select the actual protected release and finish qualified host preparation,
+   credential-free role isolation and exact native enrollment.
+2. Supply the existing secure provider inputs, qualify the selected provider
+   turn and prove the authenticated production browser/native journey.
+3. For autonomous return after a native turn ends, capture and rejoin its real
+   originating request/turn through the existing owners. Never choose the latest
+   request for a root or equate native UID/session identity with the Office or
+   COO OAuth principal.
+4. Complete the separately scoped Meta-CEO participant. The current private
+   conversation adapter admits mmsecretary only; a role label does not enroll
+   mmmeta or authorize it as a COO Attempt.
 
-These are integration and execution requirements. Independent review is not a
-blanket prerequisite for this Web-session source work; required source/release
-rules and actual effect reconciliation still apply.
+The installed role/proxy/provider/canary/cutover restrictions remain separate
+from source completion. Independent review is not a blanket prerequisite for
+this Web-session source work; required source/release rules and actual effect
+reconciliation still apply.

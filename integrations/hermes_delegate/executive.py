@@ -437,7 +437,7 @@ SELECTED_CHILD_ENVELOPE_KEYS = frozenset({
     "schema", "state", "reason", "command_id", "job_id", "root_job_id",
     "orchestration_role", "attempt_id", "attempt_number", "attempt_status",
     "job_status", "live_submit", "result_status", "role", "operation_key",
-    "session_ref", "result_envelope_digest", "terminal_evidence_digest",
+    "session_ref", "result_envelope_digest", "terminal_evidence_digest", "result_capsule",
 })
 
 
@@ -495,7 +495,12 @@ def validate_selected_child_envelope(body: Any, *, command_id: str) -> dict[str,
         value = body.get(field_name)
         if value is not None and type(value) is not str:
             raise ValueError("selected child envelope field is invalid")
-    return dict(body)
+    projected = dict(body)
+    if "result_capsule" in body:
+        from control_plane.executive_terminal_return import validate_selected_child_result_capsule
+        projected["result_capsule"] = validate_selected_child_result_capsule(
+            body["result_capsule"], observation=body)
+    return projected
 
 
 # The authenticated ingress adds one equality witness to the legacy C17
@@ -611,7 +616,7 @@ def _envelope(body: Mapping[str, Any], child: ExecutiveSelectedChild) -> dict[st
     merged["schema"] = SELECTED_CHILD_SCHEMA
     merged["live_submit"] = True if attempt is not None else (
         None if body["state"] in {"EFFECT_UNKNOWN", "UNAVAILABLE"} else False)
-    return merged
+    return validate_selected_child_envelope(merged, command_id=child.command_id)
 
 
 @dataclass(frozen=True)
