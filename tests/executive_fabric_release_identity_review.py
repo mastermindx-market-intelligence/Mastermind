@@ -551,15 +551,7 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # exact-CAS publication mode, both with explicit uid=0 and gid=0. They are
 # permissions, not principals; each complete token and enclosing call was
 # inspected on these exact source bytes. No generic numeric rule changes.
-REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': 'c3d96bf994aea0969161b25405db9e3623eb7d5047ebd81e7a06b68757e11e7f',
-    'sites': ((342, 24, 27, 'int', '501'),
-              (6847, 35, 37, 'int', '80'),
-              (6848, 50, 55, 'int', '0o755'),
-              (7385, 41, 46, 'int', '0o644'),
-              (8122, 64, 69, 'int', '0o644'),
-              (9524, 41, 46, 'int', '0o644')),
-}
+REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '9ae22ec9f7b00a268c214d526659719024d3cca640fe2738f94e69888f2830dd', 'sites': ((348, 24, 27, 'int', '501'), (6908, 35, 37, 'int', '80'), (6909, 50, 55, 'int', '0o755'), (7493, 41, 46, 'int', '0o644'), (8232, 64, 69, 'int', '0o644'), (9634, 41, 46, 'int', '0o644'))}
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
@@ -711,15 +703,7 @@ REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = {'sha256': 'ee715ecbf81efef147491f1cbbea041ba1a62688bd0906b715231156bdacc0e9', 'sites': (), 'utf8_sites': ((1, 36976, 36979, 'int', '403'),)}
 
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
-# Composed BYOK + qualified Session SEND source audit: the complete Programs
-# observation test body remains byte-identical; this pin supplies no release approval.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '14632b8bbcd42edf5d4e56a0e3f67b077a5777b4548ccb0d57ca8961401d288e', 'sites': ((3469, 68, 71, 'int', '503'), (3474, 69, 72, 'int', '503'), (3478, 67, 70, 'int', '503'))}
-# 2026-11-06 composed-source check against protected c571acc9 + owned dfb94fb4:
-# control_room_action (635 AST nodes) and instruction-permission handler (194)
-# are exactly protected postimages; the native diagnostic test body is unchanged
-# from dfb94fb4. Reviewed host-observation/project READ/BYOK composition displaces
-# only these fixed HTTP status sites. These new complete-source pins record this
-# source audit; they do not inherit a release approval or release native SEND holds.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'f20b5b399ff9c6ee6c0cef0447156c59994b6db358c14b759b1d8e3e4bd253cc', 'sites': ((3513, 68, 71, 'int', '503'), (3518, 69, 72, 'int', '503'), (3522, 67, 70, 'int', '503'))}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
 REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'cd31cfc2d232e8d3b432ba059209a8a5f8479fd7dc5a811d1897ca664207645f', 'sites': ((13, 118, 121, 'int', '700'),)}
@@ -729,16 +713,36 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha
 
 # C16: fixed observation-only TLS directory; root owner and canonical Control
 # group retain the exact private traversal mode. Whole-source and token-bound.
-# C20 attended-parent review: archive closure and inert gateway replacement.
-# ensure_directories has the identical AST; its one whole permission token moved
-# by 15 lines. New unit publication consumes the existing canonical identities.
-REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'a08b20f693a9ed10fe110d69469b5cc9155243905890f3a039ac19a2bbbdbed1', 'sites': ((675, 71, 76, 'int', '0o750'),)}
+# C21 attended-parent source review combines native composition with the
+# accepted archive closure and inert gateway replacement. ensure_directories
+# retains its exact AST and whole permission token at the accepted moved site.
+REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': '58bfdd19e0a03838f2fd9ead533de5de9b0bd9cecd1687f68756fafc53995601', 'sites': ((675, 71, 76, 'int', '0o750'),)}
 
-# Historical d3f21fc6 composition audit: native compound Mission/Result READ
-# retained the complete existing Programs diagnostic body; the three exact HTTP
-# operands moved together. The compound READ uses its fixed route/schema,
-# Acquisition generation, bounded body and null-only typed unavailable result.
-# No new numeric exception or native release approval was introduced. At that
-# audit, protected autonomy/initializer/qualification/enrollment sources matched
-# d3f bytes; their sites were read in their owning call context. The current C20
-# enrollment source is bound by its protected exact-postimage review above.
+# Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
+# One exact multiplication operand; full-source drift restores the ordinary guard.
+REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
+    "sha256": "f3f84a63b1b966a4d2ece6c3669959e377b2dc929ba9dd2e6fbc6c997f743fbf",
+    "sites": ((23, 17, 20, "int", "512"),),
+}
+
+# Fixed Secretary wire-response byte ceiling, not an OS identity. The complete
+# NUMBER token is the left operand of MAX_SECRETARY_RESPONSE_BYTES = 512 * 1024.
+REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
+    "sha256": "b977481fddffb008064a2760699af3564c1748abea74a381860d5da5ee667280",
+    "sites": ((34, 31, 34, "int", "512"),),
+}
+
+# C22 native-control source pin reconciled at its unchanged published postimage;
+# MAX_WIRE_BYTES retains the single exact multiplication operand above.
+
+# The installer exclusively creates the gateway audit parent with this private
+# initial mode, under its held trusted root, before qualified final0755 mode.
+# Only this new token is reviewed; existing source identities remain visible.
+REVIEWED_FILES['ops/executive_os/install.sh'] = {
+    'sha256': '2bf7475cfc2b133459cbf914b9a9cd7b327121cd40b8f6e3c9ab3428f4ea9860',
+    'sites': ((1668, 26, 31, 'int', '0o700'),),
+}
+
+
+# Fixed MCP audit leaf ownership and modes in the existing gateway transaction.
+REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e40d488bd0c18f6cc422aeb15ce853cba330a8d5c9559cc7a7612b1ce119a3ed', 'sites': ((22, 12, 15, 'int', '458'), (23, 7, 12, 'int', '0o700'), (125, 49, 54, 'int', '0o755'), (128, 60, 65, 'int', '0o755'))}

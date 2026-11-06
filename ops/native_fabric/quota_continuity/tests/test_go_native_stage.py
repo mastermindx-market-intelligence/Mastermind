@@ -106,16 +106,35 @@ def loaded_entry(published, *, clean_yaml=False):
         sys.path[:] = path_before
 
 
-def before_census_runtime(manifest):
+def before_request_refusal_task(manifest):
     prior = dict(manifest)
+    if prior["ext/fabric_task.py"] == builder.GO_REQUEST_REFUSAL_TASK_DIGEST:
+        prior["ext/fabric_task.py"] = builder.GO_REMOTE_CWD_TASK_DIGEST
+    return prior
+
+
+def before_remote_cwd_task(manifest):
+    prior = before_request_refusal_task(manifest)
+    if prior["ext/fabric_task.py"] == builder.GO_REMOTE_CWD_TASK_DIGEST:
+        prior["ext/fabric_task.py"] = builder.GO_UBUNTU4_DIGESTS["fabric_task.py"]
+    return prior
+
+
+def before_census_runtime(manifest):
+    prior = before_remote_cwd_task(manifest)
     assert len(prior) == 107
-    assert prior["ext/lane_runtime.py"] == builder.GO_CENSUS_RUNTIME_DIGEST
+    assert prior["ext/lane_runtime.py"] in (builder.GO_CENSUS_RUNTIME_DIGEST,
+                                            builder.GO_CENSUS_EXIT_RUNTIME_DIGEST)
     prior["ext/lane_runtime.py"] = builder.GO_CENSUS_RUNTIME_PREIMAGE
     return prior
 
 
 def before_original_artifact_recovery(manifest):
     prior = before_census_runtime(manifest)
+    assert prior["ext/original_delivery_collector.py"] in {
+        "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183",
+        "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83"}
+    prior["ext/original_delivery_collector.py"] = "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183"
     assert len(prior) == 107
     assert prior.pop("ext/original_advertised_artifact.py") == "46a06945d0e640794cb52945a5caece440abee6da1c0ba13eaff371d9dc6e3c0"
     assert prior["ext/artifact_delivery.py"] == "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d"
@@ -154,7 +173,9 @@ def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(
     assert default["ext/provider_outcome.py"] == builder.GO_PROTECTED_PROVIDER_OUTCOME_SHA256
     historical["ext/provider_outcome.py"] = builder.GO_BASE_PROVIDER_OUTCOME_SHA256
     for name, original in builder.GO_UBUNTU4_PREIMAGES.items():
-        assert default["ext/" + name] == builder.GO_UBUNTU4_DIGESTS[name]
+        expected = (builder.GO_REQUEST_REFUSAL_TASK_DIGEST if name == "fabric_task.py"
+                    else builder.GO_UBUNTU4_DIGESTS[name])
+        assert default["ext/" + name] == expected
         historical["ext/" + name] = original
     for name, original in builder.GO_PROTECTED_CUSTODY_PREIMAGES.items():
         assert default["ext/" + name] == builder.GO_PROTECTED_CUSTODY_DIGESTS[name]
@@ -207,7 +228,7 @@ def test_exact_historical_picker_remains_a_valid_base_but_no_arbitrary_fourth_me
         builder.validate_go_base_manifest(bad, captured)
 
 
-@pytest.mark.parametrize("corruption", ["handler", "dependency", "base", "picker", "executor", "ubuntu4", "provider-outcome", "post-failure", "post-failure-old-observer", "post-failure-old-delivery", "other-member", "entry-symlink"])
+@pytest.mark.parametrize("corruption", ["handler", "dependency", "base", "picker", "executor", "original-collector", "ubuntu4", "provider-outcome", "post-failure", "post-failure-old-observer", "post-failure-old-delivery", "other-member", "entry-symlink"])
 def test_closed_component_drift_refuses_before_go_pair_creation(builds, tmp_path, corruption):
     output = tmp_path / "copy"
     shutil.copytree(builds.default, output)
@@ -225,6 +246,8 @@ def test_closed_component_drift_refuses_before_go_pair_creation(builds, tmp_path
         manifest["ext/pick.py"] = "0" * 64
     elif corruption == "executor":
         manifest["ext/remote_sub_exec.py"] = "0" * 64
+    elif corruption == "original-collector":
+        manifest["ext/original_delivery_collector.py"] = "0" * 64
     elif corruption == "ubuntu4":
         manifest["ext/fabric_host_qualification.py"] = builder.GO_UBUNTU4_PREIMAGES["fabric_host_qualification.py"]
     elif corruption == "provider-outcome":
@@ -338,9 +361,6 @@ def test_ubuntu4_runtime_cohort_preserves_prior_generation_and_rejects_mixtures(
     previous.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
     builder.validate_go_base_manifest(current, captured)
     builder.validate_go_base_manifest(previous, captured)
-    previous_full = dict(current)
-    previous_full["ext/fabric_task.py"] = builder.GO_UBUNTU4_PRIOR_DIGESTS["fabric_task.py"]
-    builder.validate_go_base_manifest(previous_full, captured)
     names = tuple(builder.GO_UBUNTU4_DIGESTS)
     for count in (1, 2):
         for selected in itertools.combinations(names, count):
@@ -426,6 +446,39 @@ def test_participant_cohort_preserves_prior_104_and_input_identity(builds):
     assert current == original
 
 
+def test_original_collection_successor_preserves_prior_releases_without_backdating(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    key = "ext/original_delivery_collector.py"
+    old = "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183"
+    new = "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83"
+    assert current[key] == new
+    for digest in (old, new):
+        exact = dict(current, **{key: digest})
+        before = dict(exact)
+        builder.validate_go_base_manifest(exact, captured)
+        assert exact == before
+    prior = before_participant_cohort(current)
+    historical = dict(prior)
+    for mapping in (builder.GO_UBUNTU4_PREIMAGES, builder.GO_COMPLETED_POLL_PREIMAGES,
+                    builder.GO_POST_FAILURE_PREIMAGES):
+        historical.update({"ext/" + name: digest for name, digest in mapping.items()})
+    for name in builder.GO_POST_FAILURE_ADDITIONS:
+        del historical["ext/" + name]
+    assert len(prior) == 104 and len(historical) == 102
+    previous = before_original_artifact_recovery(current)
+    assert len(previous) == 106
+    for predecessor in (previous, prior, historical):
+        assert predecessor[key] == old
+        builder.validate_go_base_manifest(predecessor, captured)
+        backdated = dict(predecessor, **{key: new})
+        with pytest.raises(ValueError, match="original collector"):
+            builder.validate_go_base_manifest(backdated, captured)
+    for digest in ("f" * 64, "", None):
+        with pytest.raises(ValueError, match="original collector"):
+            builder.validate_go_base_manifest(dict(current, **{key: digest}), captured)
+
+
 @pytest.mark.parametrize("corruption", ["binding-absent", "owner-absent", "binding-hash",
     "owner-hash", "old-operator-with-pair", "new-operator-without-pair", "participants-without-diagnostics"])
 def test_participant_cohort_cannot_relabel_legacy_namespace(builds, corruption):
@@ -476,10 +529,7 @@ def test_original_artifact_recovery_preserves_exact_previous106_and_raw_identity
         original = dict(manifest)
         builder.validate_go_base_manifest(manifest, captured)
         assert manifest == original
-    assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == "984dee9a0b3f18f4276b00f99ce486f0543f5573da4146b0fdaeeff32702ec6d"
-    prior_frozen = dict(previous)
-    prior_frozen["ext/fabric_task.py"] = builder.GO_UBUNTU4_PRIOR_DIGESTS["fabric_task.py"]
-    assert g.digest((json.dumps(prior_frozen, sort_keys=True, indent=2) + "\n").encode()) == "5721f06f28d39b493a3b1cfc7d37d3ae5741818e0197ef723a23db15f109c295"
+    assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == "5721f06f28d39b493a3b1cfc7d37d3ae5741818e0197ef723a23db15f109c295"
 
 
 @pytest.mark.parametrize("corruption", ["reader-missing", "reader-hash", "delivery-hash",
@@ -515,15 +565,19 @@ def test_original_artifact_pair_cannot_expand_or_relabel_historical_namespace(bu
 
 def test_exact_census_successor_preserves_original_107_without_mutation(builds):
     current = json.loads((builds.default / "native-manifest.json").read_bytes())
-    before = dict(current)
+    assert current["ext/lane_runtime.py"] == builder.GO_CENSUS_EXIT_RUNTIME_DIGEST
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
-    builder.validate_go_base_manifest(current, captured)
-    builder.validate_go_base_manifest(before_census_runtime(current), captured)
-    assert current == before
+    previous = dict(current, **{"ext/lane_runtime.py": builder.GO_CENSUS_RUNTIME_DIGEST})
+    for candidate in (current, previous, before_census_runtime(current)):
+        before = dict(candidate)
+        builder.validate_go_base_manifest(candidate, captured)
+        assert candidate == before
 
 
 @pytest.mark.parametrize("namespace", ["106", "104", "102"])
-def test_census_successor_cannot_be_backdated_to_a_historical_namespace(builds, namespace):
+@pytest.mark.parametrize("runtime_digest", [builder.GO_CENSUS_RUNTIME_DIGEST,
+                                             builder.GO_CENSUS_EXIT_RUNTIME_DIGEST])
+def test_census_successor_cannot_be_backdated_to_a_historical_namespace(builds, namespace, runtime_digest):
     current = json.loads((builds.default / "native-manifest.json").read_bytes())
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     prior = before_original_artifact_recovery(current) if namespace == "106" else before_participant_cohort(current)
@@ -533,9 +587,11 @@ def test_census_successor_cannot_be_backdated_to_a_historical_namespace(builds, 
         for name in builder.GO_POST_FAILURE_ADDITIONS:
             del prior["ext/" + name]
     assert len(prior) == int(namespace)
-    prior["ext/lane_runtime.py"] = builder.GO_CENSUS_RUNTIME_DIGEST
+    prior["ext/lane_runtime.py"] = runtime_digest
+    before = dict(prior)
     with pytest.raises(ValueError, match="census cannot relabel"):
         builder.validate_go_base_manifest(prior, captured)
+    assert prior == before
 
 
 @pytest.mark.parametrize("digest", ["f" * 64, ""])
@@ -545,5 +601,113 @@ def test_unknown_census_bytes_refuse_without_changing_the_manifest(builds, diges
     current["ext/lane_runtime.py"] = digest
     before = dict(current)
     with pytest.raises(ValueError, match="census is not the exact"):
+        builder.validate_go_base_manifest(current, captured)
+    assert current == before
+
+
+def test_exact_remote_cwd_task_preserves_original_107_and_caller_manifest(builds):
+    current = before_request_refusal_task(json.loads((builds.default / "native-manifest.json").read_bytes()))
+    before = dict(current)
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    assert current["ext/fabric_task.py"] == "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037"
+    previous = before_remote_cwd_task(current)
+    previous_before = dict(previous)
+    for task_generation in (current, previous):
+        for runtime in (builder.GO_CENSUS_RUNTIME_DIGEST, builder.GO_CENSUS_EXIT_RUNTIME_DIGEST,
+                        builder.GO_CENSUS_RUNTIME_PREIMAGE):
+            manifest = dict(task_generation)
+            manifest["ext/lane_runtime.py"] = runtime
+            unchanged = dict(manifest)
+            builder.validate_go_base_manifest(manifest, captured)
+            assert manifest == unchanged
+    assert current == before
+    assert previous == previous_before
+
+
+@pytest.mark.parametrize("namespace", ["106", "104", "102"])
+@pytest.mark.parametrize("task_digest,error", [
+    (builder.GO_REMOTE_CWD_TASK_DIGEST, "remote-cwd task cannot relabel"),
+    (builder.GO_REQUEST_REFUSAL_TASK_DIGEST, "refusal task cannot relabel"),
+])
+def test_remote_cwd_task_cannot_be_backdated_to_a_historical_namespace(builds, namespace, task_digest, error):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    prior = before_original_artifact_recovery(current) if namespace == "106" else before_participant_cohort(current)
+    if namespace == "102":
+        prior.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
+        prior.update({"ext/" + name: digest for name, digest in builder.GO_COMPLETED_POLL_PREIMAGES.items()})
+        prior.update({"ext/" + name: digest for name, digest in builder.GO_POST_FAILURE_PREIMAGES.items()})
+        for name in builder.GO_POST_FAILURE_ADDITIONS:
+            del prior["ext/" + name]
+    assert len(prior) == int(namespace)
+    builder.validate_go_base_manifest(prior, captured)
+    prior["ext/fabric_task.py"] = task_digest
+    before = dict(prior)
+    with pytest.raises(ValueError, match=error):
+        builder.validate_go_base_manifest(prior, captured)
+    assert prior == before
+
+
+@pytest.mark.parametrize("members", [
+    ("fabric_host_qualification.py",), ("remote_sub.sh",),
+    ("fabric_host_qualification.py", "remote_sub.sh"),
+])
+@pytest.mark.parametrize("task_digest", [builder.GO_REMOTE_CWD_TASK_DIGEST,
+                                         builder.GO_REQUEST_REFUSAL_TASK_DIGEST])
+def test_remote_cwd_task_still_requires_the_complete_ubuntu4_cohort(builds, members, task_digest):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current["ext/fabric_task.py"] = task_digest
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    for member in members:
+        current["ext/" + member] = builder.GO_UBUNTU4_PREIMAGES[member]
+    before = dict(current)
+    with pytest.raises(ValueError, match="Ubuntu4 cohort"):
+        builder.validate_go_base_manifest(current, captured)
+    assert current == before
+
+
+@pytest.mark.parametrize("digest", ["f" * 64, "",
+    "0a6cb393fc30d978a78686b9e588f6f51b1b9ec191e291aea4ccf96a4d7bdaa0"])
+def test_unknown_remote_cwd_task_bytes_refuse_without_changing_the_manifest(builds, digest):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    current["ext/fabric_task.py"] = digest
+    before = dict(current)
+    with pytest.raises(ValueError):
+        builder.validate_go_base_manifest(current, captured)
+    assert current == before
+
+
+def test_refusal_diagnostics_preserve_exact_remote_cwd_107_and_raw_identity(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    assert len(current) == 107
+    assert current["ext/fabric_task.py"] == builder.GO_REQUEST_REFUSAL_TASK_DIGEST
+    assert current["ext/fabric_task.py"] == g.digest((ROOT / "candidate/fabric_task.py").read_bytes())
+    previous = before_request_refusal_task(current)
+    assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == "c7cf946bc1d8f13ef7b512d071d85097e1ddc58979af76bf367a7707aa90617d"
+    for manifest in (current, previous):
+        before = dict(manifest)
+        builder.validate_go_base_manifest(manifest, captured)
+        assert manifest == before
+
+
+def test_refusal_task_cannot_mix_the_predecessor_poll_helper(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    current["ext/remote_sub_helpers.py"] = builder.GO_COMPLETED_POLL_PREIMAGES["remote_sub_helpers.py"]
+    before = dict(current)
+    with pytest.raises(ValueError, match="completed-poll cohort"):
+        builder.validate_go_base_manifest(current, captured)
+    assert current == before
+
+
+@pytest.mark.parametrize("missing", ["pool", "ext/participant_binding.py"])
+def test_refusal_task_requires_the_complete_raw_namespace(builds, missing):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    del current[missing]
+    before = dict(current)
+    with pytest.raises(ValueError, match="dependency closure"):
         builder.validate_go_base_manifest(current, captured)
     assert current == before

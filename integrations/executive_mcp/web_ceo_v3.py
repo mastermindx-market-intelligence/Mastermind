@@ -236,7 +236,11 @@ def web_ceo_v3_schema_snapshot_sha256() -> str:
 
 
 # Filled from the deterministic snapshot by the implementation test.
-WEB_CEO_V3_SCHEMA_SNAPSHOT_SHA256 = "968205a25e11142a017d7351fbbbc8c579e74e9b1c148af817c83628e375f9ea"
+# The current snapshot inherits the Session Bridge hermes_secretary target
+# (commit 93248c6) through SESSION_TARGETS_SPEC. No other tool, input schema,
+# order, version or validator changed, and the legacy/v1/v2 snapshots remain
+# frozen at their own literals.
+WEB_CEO_V3_SCHEMA_SNAPSHOT_SHA256 = "5c157d1de43d6efef99f6ba9e27e851f0243bbb18d38c23551b94a5c2a4ba2c0"
 
 
 def validate_installed_mcp_profile_current(value: Any = "legacy") -> str:
