@@ -10,10 +10,11 @@ from __future__ import annotations
 import json
 import math
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from starlette.concurrency import run_in_threadpool
 
 from portfolio import global_scenario_account, global_scenario_context
@@ -29,6 +30,19 @@ _FIELDS = frozenset({"schema", "portfolio_id", "account", "prices", "price_evide
                      "snapshot", "mandate", "universe", "alternatives", "scenarios", "as_of"})
 _HEADERS = {"Cache-Control": "private, no-store", "Pragma": "no-cache",
             "X-Robots-Tag": "noindex, noarchive"}
+
+
+@router.get("/portfolio-scenarios.js", include_in_schema=False)
+def scenario_script() -> FileResponse:
+    """Public application code only; never an account or scenario artifact."""
+    return FileResponse(Path(__file__).parent / "static" / "portfolio_scenarios.js",
+                        media_type="application/javascript", headers={"Cache-Control": "public, max-age=300"})
+
+
+@router.get("/portfolio-scenarios.css", include_in_schema=False)
+def scenario_styles() -> FileResponse:
+    return FileResponse(Path(__file__).parent / "static" / "portfolio_scenarios.css",
+                        media_type="text/css", headers={"Cache-Control": "public, max-age=300"})
 
 
 def _now() -> datetime:
