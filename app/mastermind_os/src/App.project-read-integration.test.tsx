@@ -39,7 +39,8 @@ it("opens rootless canonical Plan/Journal through actual host decoders under Pro
   const f=await setup();
   expect(screen.getByRole("heading",{name:"Alpha program",level:1})).toBeTruthy();
   expect(screen.getAllByRole("heading",{level:1})).toHaveLength(1);
-  expect(screen.getByText("No qualified conversation is associated with this project here.")).toBeTruthy();
+  expect(screen.getByRole("heading",{name:"Project team conversation"})).toBeTruthy();
+  expect((screen.getByRole("button",{name:"Read project runs"}) as HTMLButtonElement).disabled).toBe(true);
   expect(await screen.findByText("Deliver the real owner content.")).toBeTruthy();
   expect(f.journalRead).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button",{name:"Project details"}));

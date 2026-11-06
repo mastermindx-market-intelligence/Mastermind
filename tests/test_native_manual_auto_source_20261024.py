@@ -37,7 +37,7 @@ AFTER = {
     "ext/pick.py": "9bbb96c8da84e38bbd802fdd373a0e8ba386395abc5a80bc8628b49d5afd8174",
     "pool": "12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679",
 }
-COMPOSED_PICK = "747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132"
+COMPOSED_PICK = "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892"
 
 
 def _preobserver_picker():

@@ -10,10 +10,11 @@ ROUTE = '/workspace/byok/roles/current'
 
 def test_byok_read_has_one_exact_get_and_no_post_or_source_branch():
     assert edge.GET_ROUTES == edge.PRE_BYOK_ROLES_GET_ROUTES + (ROUTE,)
-    assert edge.POST_ROUTES == edge.PRE_BYOK_ROLES_POST_ROUTES
+    assert edge.PRE_PROJECT_EXECUTION_POST_ROUTES == edge.PRE_BYOK_ROLES_POST_ROUTES
+    assert edge.POST_ROUTES == edge.PRE_PROJECT_EXECUTION_POST_ROUTES + edge.PROJECT_EXECUTION_POST_ROUTES
     assert ROUTE not in edge.POST_ROUTES + edge.SOURCE_POST_ROUTES
     assert (edge.PRE_BYOK_ROLES_GET_ROUTES, edge.PRE_BYOK_ROLES_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
-    assert len(edge.TRANSITION_ROUTE_PROFILES) == 29
+    assert len(edge.TRANSITION_ROUTE_PROFILES) == 31
     text = edge.render(manifest(),49152)
     get = text.split('    @get {',1)[1].split('    }',1)[0]
     assert 'method GET' in get and get.count(ROUTE) == 1
@@ -29,6 +30,7 @@ def test_byok_get_transition_retains_complete_predecessor_and_other_sites(maker)
     before = copy.deepcopy(live)
     expected = copy.deepcopy(live)
     method_routes(expected)[0]['match'][0]['path'] = sorted(set(edge.GET_ROUTES)|set(edge.asset_routes(manifest())))
+    method_routes(expected)[1]['match'][0]['path'] = list(edge.POST_ROUTES)
     result = maker(fullconfig=live,current_manifest=manifest(),candidate_manifest=manifest(),relay_port=49152)
     assert result == expected and live == before
     for bad in (ROUTE+'/',ROUTE+'-other','/workspace/byok/*'):

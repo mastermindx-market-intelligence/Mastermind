@@ -22,7 +22,7 @@ METHOD = next(node for node in OWNER.body
               and node.name == "_handle_ceo_ingress_connection")
 BLOCK = "".join(SOURCE.splitlines(keepends=True)[METHOD.lineno - 1:METHOD.end_lineno])
 FRAGMENT = "class ExecutiveControlService:\n" + BLOCK + "\n"
-STATUS_SITES = ((5856, 66, 69, 'int'), (5869, 74, 77, 'int'), (5871, 75, 78, 'int'))
+STATUS_SITES = ((5907, 66, 69, 'int'), (5920, 74, 77, 'int'), (5922, 75, 78, 'int'))
 
 BACKEND_SITES = (
     (120, 73, 76, "int"),

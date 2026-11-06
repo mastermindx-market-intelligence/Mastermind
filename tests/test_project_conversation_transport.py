@@ -24,11 +24,14 @@ rsa_key = auth.rsa_key
 F = Path(__file__).parents[1] / 'app/mastermind_os/src/fixtures'
 LEGACY = json.loads((F / 'project-conversation-catalogue-owner.json').read_text())
 FRESH = json.loads((F / 'project-fresh-conversation-owner.json').read_text())
+EXECUTION = json.loads((F / 'project-execution-history-owner.json').read_text())
 CASES = {
     'catalogue': ({'work_ref': LEGACY['catalogue']['work_ref']}, LEGACY['catalogue']),
     'read': (LEGACY['selection'], LEGACY['read']),
     'fresh_references': ({'work_ref': FRESH['catalogue']['work_ref']}, FRESH['catalogue']),
     'fresh_read': (FRESH['initial_read']['reference'], FRESH['initial_read']),
+    'execution_references': ({'work_ref': EXECUTION['catalogue']['work_ref']}, EXECUTION['catalogue']),
+    'execution_read': (EXECUTION['completed_read']['reference'], EXECUTION['completed_read']),
 }
 
 
@@ -195,7 +198,7 @@ def test_auth_owner_replacement_during_receive_refuses_before_private_call(rsa_k
 @pytest.mark.parametrize('operation', CASES)
 def test_foreign_work_or_response_selectors_are_withheld(rsa_key, operation):
     bad = copy.deepcopy(CASES[operation][1])
-    if operation == 'fresh_read': bad['reference']['root_event_sha256'] = '0' * 64
+    if operation in {'fresh_read', 'execution_read'}: bad['reference']['root_event_sha256'] = '0' * 64
     else: bad['work_ref'] = 'WS:FOREIGN'
     app, calls, _, _ = setup(rsa_key, operation, result=bad)
     status, result = asyncio.run(exchange(app, auth._read_token(rsa_key), operation))

@@ -42,7 +42,8 @@ class CanonicalFixtureCache:
         self.code = subprocess.check_output(['git', '-C', str(self.root), 'show', self.commit + ':scripts/agentos.py'])
         assert self.code == (self.root / 'scripts/agentos.py').read_bytes()
         self.owner = cache_owner.ServerConfig(repo_root=Path.cwd(), macro_root=str(self.root),
-            bindings_path=None, token='inert-private-fixture', origin='http://127.0.0.1:0', port=0, validity_sample_fn=fixture_clock_sample)
+            bindings_path=None, token='inert-private-fixture', origin='http://127.0.0.1:0', port=0,
+            validity_sample_fn=fixture_clock_sample)
         self.cache = ExistingControlRoomCache(lambda: self.owner)
         self.publish()
 

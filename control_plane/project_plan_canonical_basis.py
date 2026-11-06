@@ -86,6 +86,17 @@ class CanonicalProjectPlanBasis:
    base_adoption=None if current is None else current['decision_ref'],
    adoption_qualification='QUALIFIED_FULL_DEC_INVENTORY',
    executable_macro_commit=self._view.code_commit,canonical_data_commit=self._view.data_commit)
+ def execution_material(self):
+  """Private exact authored/adopted bytes from this qualified full inventory."""
+  self.check()
+  def body(capture):
+   return dict(source=deepcopy(capture['source']),content=capture['raw_bytes'].decode('utf-8',errors='strict'))
+  current=deepcopy(self._current)
+  value=dict(schema='mastermind.project_execution_plan_input.v1',work_ref=self._snapshot['work_ref'],
+   authored_record=body(self._snapshot['workstream']),adoption=current,
+   adopted_plan=None if current is None else body(self._snapshot['base']),
+   decisions=[body(item) for item in self._snapshot['decisions']])
+  self.check();return value
  def qualify_creation_source(self,source):
   """Actual historical CREATE marker + current same-work data qualification.
 

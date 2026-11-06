@@ -17,7 +17,7 @@ EXPECTED = dict(schema_version=1,max_jobs_per_original_request=1,max_attempts_pe
 
 
 def read_protected_blob(root,base_sha,relative):
-    if relative not in {"config/authority_map.yml",COMMISSION_PATH} or type(base_sha) is not str or re.fullmatch('[0-9a-f]{40}',base_sha) is None:
+    if relative not in {"config/authority_map.yml",COMMISSION_PATH,"research/executive_commissions/PROJECT_EXECUTION.md"} or type(base_sha) is not str or re.fullmatch('[0-9a-f]{40}',base_sha) is None:
         raise ValueError("project planning protected source invalid")
     result=bounded_subprocess_runner(["git","--no-optional-locks","--no-replace-objects","-C",str(root),
         "show",base_sha+":"+relative],cwd=root,timeout=5,max_bytes=2*1024*1024)

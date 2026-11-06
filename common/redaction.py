@@ -76,10 +76,10 @@ _MIN_EXACT_SECRET_LEN = 8
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 # Both independently issued resource bearers share the same log boundary.
 # Cover HTTP lines and quoted dict/JSON diagnostics, including short tokens.
-# An optional quote owns its following whitespace; two whitespace repetitions
-# must never meet when the quote is absent (quadratic failed-match backtracking).
+# A present quote separates whitespace runs; an absent quote has just one run.
+# This prevents quadratic repartitioning when an untrusted header lacks Bearer.
 _AUTHORIZATION_RE = re.compile(
-    r"(?i)(\b(?:x-mastermind-workspace-authorization|authorization)[\"']?\s*[:=]\s*(?:[\"']\s*)?bearer\s+)[^\s\"',}\]]+"
+    r"(?i)(\b(?:x-mastermind-workspace-authorization|authorization)[\"']?\s*[:=](?:\s*[\"']\s*|\s*)bearer\s+)[^\s\"',}\]]+"
 )
 
 # Every JWT header is the base64url of ``{"...``, i.e. it starts with ``eyJ``.

@@ -408,6 +408,16 @@ class CeoIngressClient:
             return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail='project planning original foreground unavailable')
         return await self._send_frame(socket_path,frame,keep_write_open=True,foreground_source=source)
 
+    async def send_project_execution_frame(self,socket_path,frame):
+        from common.project_execution_private_contract import frame as validate
+        from integrations.session_bridge.http_foreground import current_request,HttpForegroundClosed
+        try:
+            frame=validate(frame)
+            source=current_request()
+        except (ValueError,HttpForegroundClosed):
+            return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail='project execution original foreground unavailable')
+        return await self._send_frame(socket_path,frame,keep_write_open=True,foreground_source=source)
+
     async def _send_frame(
         self, socket_path: "Path | str", frame: Mapping[str, Any], *,
         keep_write_open: bool,
@@ -445,7 +455,16 @@ class CeoIngressClient:
             request_ceiling = conversation_read_wire.MAX_REQUEST_BYTES
             response_ceiling = conversation_read_wire.MAX_RESPONSE_BYTES
             stream_limit = response_ceiling + 4096
-        strict_response=direct_frame or planning_frame or fresh_frame or conversation_read_frame
+        from common import project_execution_private_contract as execution_wire
+        execution_frame=isinstance(frame,Mapping) and frame.get('schema')==execution_wire.SCHEMA
+        if execution_frame:
+            try:frame=execution_wire.frame(dict(frame))
+            except (ValueError,TypeError):
+                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail='project execution frame invalid')
+            request_ceiling=execution_wire.MAX_BYTES
+            response_ceiling=execution_wire.MAX_BYTES
+            stream_limit=response_ceiling+4096
+        strict_response=direct_frame or planning_frame or execution_frame or fresh_frame or conversation_read_frame
         if planning_frame:
             try: frame=planning_wire.frame(dict(frame))
             except (ValueError,TypeError):

@@ -444,6 +444,7 @@ async def _submit(
     fresh_admission_observer: Any = None,
     direct_admission: Any = None,
     fresh_conversation_source: Any = None,
+    project_execution_source: Any = ceo_intent._PROJECT_EXECUTION_SOURCE_UNSET,
 ) -> dict[str, Any]:
     """Call the one v1 mutation sink; classify a raised refusal per §11.3/§12.1."""
 
@@ -467,6 +468,8 @@ async def _submit(
             submit_kwargs["fresh_admission_observer"] = fresh_admission_observer
         if fresh_conversation_source is not None:
             submit_kwargs["fresh_conversation_source"] = fresh_conversation_source
+        if project_execution_source is not ceo_intent._PROJECT_EXECUTION_SOURCE_UNSET:
+            submit_kwargs["project_execution_source"] = project_execution_source
         if direct_admission is not None:
             submit_kwargs["direct_admission"] = direct_admission
         return await asyncio.to_thread(
@@ -631,6 +634,7 @@ async def _handle_submit_v2(
     admission_guard: "Callable[[Mapping[str, Any]], None] | None" = None,
     fresh_admission_observer: Any = None,
     fresh_conversation_source: Any = None,
+    project_execution_source: Any = ceo_intent._PROJECT_EXECUTION_SOURCE_UNSET,
 ) -> dict[str, Any]:
     """AD-ID1 automated submit with the same load-bearing v1 order.
 
@@ -662,7 +666,7 @@ async def _handle_submit_v2(
         frontier_selection_provider=frontier_selection_provider,
         dialogue_source_provider=dialogue_source_provider,
         admission_guard=admission_guard,
-        fresh_admission_observer=fresh_admission_observer, fresh_conversation_source=fresh_conversation_source,
+        fresh_admission_observer=fresh_admission_observer, fresh_conversation_source=fresh_conversation_source, project_execution_source=project_execution_source,
     )
 
 
@@ -703,6 +707,7 @@ async def _handle_normalized_submit(
     fresh_admission_observer: Any = None,
     direct_admission_provider: Any = None,
     fresh_conversation_source: Any = None,
+    project_execution_source: Any = ceo_intent._PROJECT_EXECUTION_SOURCE_UNSET,
 ) -> dict[str, Any]:
     """Shared replay/grounding/sink law after version-specific validation.
 
@@ -754,7 +759,7 @@ async def _handle_normalized_submit(
             await _submit(runtime, candidate_envelope, workspace_root,
                 principal_context=principal_context, principal_request_ref=principal_request_ref,
                 principal_admission_guard=admission_guard,
-                fresh_admission_observer=fresh_admission_observer, fresh_conversation_source=fresh_conversation_source, direct_admission=direct_admission)
+                fresh_admission_observer=fresh_admission_observer, fresh_conversation_source=fresh_conversation_source, project_execution_source=project_execution_source, direct_admission=direct_admission)
         )
 
     with grounding_observation_scope():
@@ -890,7 +895,7 @@ async def _handle_normalized_submit(
             require_dialogue_source=strict_v2,
             principal_context=principal_context, principal_request_ref=principal_request_ref,
             principal_admission_guard=principal_guard,
-            fresh_admission_observer=fresh_admission_observer, fresh_conversation_source=fresh_conversation_source,
+            fresh_admission_observer=fresh_admission_observer, fresh_conversation_source=fresh_conversation_source, project_execution_source=project_execution_source,
             direct_admission=direct_admission,
         )
         return _finalize_receipt(receipt)
@@ -1067,6 +1072,7 @@ async def handle_frame(
     principal_admission_guard: Any = None,
     fresh_admission_observer: Any = None,
     fresh_conversation_source: Any = None,
+    project_execution_source: Any = ceo_intent._PROJECT_EXECUTION_SOURCE_UNSET,
 ) -> dict[str, Any]:
     """Validate and dispatch one already-parsed JSON frame (§7).
 
@@ -1094,6 +1100,8 @@ async def handle_frame(
     if not isinstance(parsed, Mapping):
         raise CeoIngressError("invalid_input", "request frame must be a JSON object")
     schema = parsed.get("schema")
+    if project_execution_source is not ceo_intent._PROJECT_EXECUTION_SOURCE_UNSET and schema != SUBMIT_SCHEMA_V2:
+        raise _dependency_failure("backend_refused")
     if fresh_conversation_source is not None and schema != SUBMIT_SCHEMA_V2:
         raise _dependency_failure("backend_refused")
     if isinstance(schema, str) and schema in PRINCIPAL_SCHEMAS:
@@ -1131,7 +1139,7 @@ async def handle_frame(
             frontier_selection_provider=frontier_selection_provider,
             dialogue_source_provider=dialogue_source_provider,
             admission_guard=admission_guard,
-            fresh_admission_observer=fresh_admission_observer, fresh_conversation_source=fresh_conversation_source,
+            fresh_admission_observer=fresh_admission_observer, fresh_conversation_source=fresh_conversation_source, project_execution_source=project_execution_source,
         )
     if schema == STATUS_SCHEMA_V2:
         _require_v2_admission(

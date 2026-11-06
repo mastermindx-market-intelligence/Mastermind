@@ -11,16 +11,18 @@ from tests import test_os_public_edge_transition as fixtures
 
 def test_fixed_consumer_routes_reach_renderer_without_widening_incumbent_caps():
     assert set(edge.FRESH_CONVERSATION_POST_ROUTES) == set(fresh.ROUTES) == set(_OS_FRESH_CONVERSATION_ROUTES)
-    assert set(edge.PROJECT_CONVERSATION_READ_POST_ROUTES) == set(ROUTES) | {'/os/executive/session/history-context'}
+    assert set(edge.PROJECT_CONVERSATION_READ_POST_ROUTES) | {
+        '/os/executive/session/project-executions', '/os/executive/session/project-execution-read',
+    } == set(ROUTES) | {'/os/executive/session/history-context'}
     assert '/os/executive/session/history-context' in _OS_SESSION_EXECUTIVE_ROUTES
-    assert edge.POST_ROUTES == edge.PRE_CONVERSATION_READ_POST_ROUTES + edge.PROJECT_CONVERSATION_READ_POST_ROUTES + edge.FRESH_CONVERSATION_POST_ROUTES + ('/os/executive/session/send',)
-    assert edge.GET_ROUTES == edge.PRE_CONVERSATION_READ_GET_ROUTES + ('/workspace/resources/host-observation/current', '/workspace/mission-result/current', '/workspace/native-draft-identity/current', '/workspace/byok/roles/current')
+    assert edge.POST_ROUTES == edge.PRE_CONVERSATION_READ_POST_ROUTES + edge.PROJECT_CONVERSATION_READ_POST_ROUTES + edge.FRESH_CONVERSATION_POST_ROUTES + ('/os/executive/session/send',) + edge.PROJECT_EXECUTION_POST_ROUTES
+    assert edge.GET_ROUTES == edge.PRE_CONVERSATION_READ_GET_ROUTES + ('/workspace/resources/host-observation/current', '/workspace/mission-result/current', '/workspace/native-draft-identity/current') + edge.BYOK_READ_ROUTES
     text = edge.render(manifest(), 49152)
     assert 'path ' + ' '.join(edge.POST_ROUTES) + '\n' in text
     assert 'path ' + ' '.join(edge.GET_ROUTES) + ' ' in text
     assert text.count('max_size 64KB') == 2 and text.count('max_size 98304') == 1
     assert '/os/executive/session/send' not in edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES
-    assert edge.POST_ROUTES == edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES + ('/os/executive/session/send',)
+    assert edge.PRE_BYOK_ROLES_POST_ROUTES == edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES + ('/os/executive/session/send',)
     assert all('*' not in route for route in edge.GET_ROUTES + edge.POST_ROUTES)
 
 
@@ -30,6 +32,10 @@ def test_fixed_consumer_routes_reach_renderer_without_widening_incumbent_caps():
     (edge.MISSION_RESULT_GET_ROUTES, edge.PRE_MISSION_RESULT_POST_ROUTES),
     (edge.PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES, edge.PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES),
     (edge.PRE_NATIVE_DRAFT_GET_ROUTES, edge.PRE_NATIVE_DRAFT_POST_ROUTES),
+    (edge.PRE_BYOK_ROLES_GET_ROUTES, edge.PRE_BYOK_ROLES_POST_ROUTES),
+    (edge.PRE_PROJECT_EXECUTION_GET_ROUTES, edge.PRE_PROJECT_EXECUTION_POST_ROUTES),
+    (edge.PROJECT_EXECUTION_PRE_MERGE_GET_ROUTES, edge.PROJECT_EXECUTION_PRE_MERGE_POST_ROUTES),
+    (edge.PRE_NATIVE_SESSION_SEND_GET_ROUTES, edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES),
     (edge.GET_ROUTES, edge.POST_ROUTES),
 ])
 def test_whole_predecessor_and_current_profiles_transition_without_mutating_input(fixed, posts):
@@ -74,5 +80,5 @@ def test_mission_result_firstcut_and_following_profiles_are_exact():
     assert (edge.PRE_NATIVE_DRAFT_GET_ROUTES, edge.PRE_NATIVE_DRAFT_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
     assert edge.PRE_NATIVE_DRAFT_GET_ROUTES == edge.PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES + ('/workspace/mission-result/current',)
     assert edge.PRE_NATIVE_DRAFT_POST_ROUTES == edge.PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES
-    assert edge.GET_ROUTES == edge.PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES + ('/workspace/mission-result/current', '/workspace/native-draft-identity/current', '/workspace/byok/roles/current')
+    assert edge.GET_ROUTES == edge.PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES + ('/workspace/mission-result/current', '/workspace/native-draft-identity/current') + edge.BYOK_READ_ROUTES
     assert edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES == edge.PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES

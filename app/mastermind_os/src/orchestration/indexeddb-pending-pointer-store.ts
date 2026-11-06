@@ -64,6 +64,9 @@ type ClosedRecord = {
   readonly v: 10; readonly operationKey: string; readonly kind: "conversation_consume"; readonly targetKey: string;
 } | {
   readonly v: 11; readonly operationKey: string; readonly kind: "conversation_turn"; readonly targetKey: string;
+} | {
+  /** Project execution keeps only the original opaque operation lookup. */
+  readonly v: 12; readonly operationKey: string; readonly kind: "launch"; readonly targetKey: string;
 };
 
 type DurableReservation =
@@ -136,7 +139,8 @@ const KIND_RECORDS = {
  */
 const KIND_VARIANTS = {
   project_create: [{ v: 8, key: JOURNEY_CREATE_KEY_RE, consume: false }],
-  launch: [{ v: 9, key: PLANNING_KEY_RE, consume: false }],
+  launch: [{ v: 9, key: PLANNING_KEY_RE, consume: false },
+    { v: 12, key: /^mmos-project-execute-[0-9a-f]{40}$/, consume: false }],
 } as const;
 function recordSpec(kind: unknown, operationKey?: unknown) {
   if (typeof kind !== "string" || !Object.hasOwn(KIND_RECORDS, kind)) return null;
@@ -198,6 +202,8 @@ function validFields(raw: Record<string, unknown>, spec: NonNullable<ReturnType<
   // recomputed from the pointer alone; the issuing port's prepare owns that
   // binding and this store enforces only the exact issued key/target grammar.
   if (spec.v === 9) return planningTargetMatches(raw.targetKey);
+  if (spec.v === 12) return typeof raw.targetKey === "string" && raw.targetKey.length >= 5 && raw.targetKey.length <= 67
+    && CREATE_WORK_RE.exec(raw.targetKey)?.[0] === raw.targetKey;
   if (spec.v === 10 || spec.v === 11) return parseFreshConversationTarget(raw.targetKey)!==null;
   return typeof raw.targetKey === "string"
     && (spec.consume ? parseDirectConsumeTarget(raw.targetKey) !== null : TARGET_KEY_RE.test(raw.targetKey))

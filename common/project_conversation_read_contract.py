@@ -28,7 +28,7 @@ SCHEMA = 'mastermind.project_conversation_read.private.v1'
 MAX_REQUEST_BYTES = 8192
 MAX_RESPONSE_BYTES = 32768
 
-OPERATIONS = ('catalogue', 'read', 'fresh_references', 'fresh_read')
+OPERATIONS = ('catalogue', 'read', 'fresh_references', 'fresh_read', 'execution_references', 'execution_read')
 
 _INVALID = 'invalid_project_conversation_read'
 _MAX_ARGUMENTS_BYTES = 4096
@@ -295,11 +295,36 @@ def _fresh_read(value):
     }
 
 
+def _execution_references(value):
+    _exact_keys(value, frozenset(('work_ref',)))
+    return {'work_ref': _legacy_work_ref(value['work_ref'])}
+
+
+def _execution_read(value):
+    _exact_keys(value, frozenset((
+        'schema', 'work_ref', 'root_job_id', 'root_event_id', 'root_event_sha256',
+        'project_execution_source_sha256', 'principal_scope_sha256',
+    )))
+    if _text(value['schema']) != 'mastermind.project_execution_reference.v1':
+        _fail()
+    return {
+        'schema': value['schema'],
+        'work_ref': _legacy_work_ref(value['work_ref']),
+        'root_job_id': _root_job_id(value['root_job_id']),
+        'root_event_id': _root_event_id(value['root_event_id']),
+        'root_event_sha256': _digest(value['root_event_sha256']),
+        'project_execution_source_sha256': _digest(value['project_execution_source_sha256']),
+        'principal_scope_sha256': _digest(value['principal_scope_sha256']),
+    }
+
+
 _ARGUMENT_BUILDERS = {
     'catalogue': _catalogue,
     'read': _read,
     'fresh_references': _fresh_references,
     'fresh_read': _fresh_read,
+    'execution_references': _execution_references,
+    'execution_read': _execution_read,
 }
 
 
