@@ -85,17 +85,22 @@ decomposition, integration, judgment, and acceptance rather than routine child e
 sub-orchestration, prefer external **GLM or Grok** capacity before consuming another Sol/Astra
 orchestrator; use Sol or another Astra only when the governed Capacity/runtime view says the preferred
 external avenues are unavailable or inadequate for the bounded mission. Luna and Terra are not normal
-project-delivery sub-orchestrators on this path. Native Codex agents are explicit bounded fallback only
+project-delivery sub-orchestrators on this path. The attended Astra profile exposes exactly one named
+native `l2_sol_ceo` role for genuine `SUSTAINED_ORCHESTRATION`; it is an executive exception, not a
+routine worker or reviewer. Generic native Codex worker agents remain explicit bounded fallback only
 when the external Fabric cannot satisfy the required capability **before any effect begins**.
 
 The reviewed attended-parent profile is `mastermind-astra`: install
 `ops/codex_fabric/mastermind-astra.config.toml` as
-`$CODEX_HOME/mastermind-astra.config.toml` and launch with
-`codex -p mastermind-astra`. It selects `gpt-6-astra` at high reasoning effort and
-keeps native agents disabled by default. The repository `.codex/config.toml` remains the
-separate audited worker/portfolio configuration and does not select the attended project-delivery
-parent. If a pre-effect native fallback is explicitly admitted, the named parent profile caps it
-at one Sol/high child; Luna and Terra remain outside normal project-delivery sub-orchestration.
+`$CODEX_HOME/mastermind-astra.config.toml`, install
+`ops/codex_fabric/agents/l2-sol-ceo.toml` as
+`$CODEX_HOME/agents/l2-sol-ceo.toml`, and launch with `codex -p mastermind-astra`.
+It selects `gpt-6-astra` at high reasoning effort and caps native multi-agent concurrency at one.
+That one native lane is the named `l2_sol_ceo` Sol/high executive role; the child role disables
+further native spawning, so it cannot recurse into a native agent tree. The repository
+`.codex/config.toml` remains the separate audited worker/portfolio configuration and does not select
+the attended project-delivery parent. Generic native worker fallback remains pre-effect-only when
+explicitly admitted; Luna and Terra remain outside normal project-delivery sub-orchestration.
 This attended profile does not itself change the Executive `frontier.orchestrator` alias, its
 provider binary, or an existing RuntimeBinding. A production Astra parent requires the existing
 provider/binary-attestation owner to qualify an Astra-capable Codex generation and a real served-model

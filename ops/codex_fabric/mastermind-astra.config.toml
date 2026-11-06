@@ -2,13 +2,18 @@
 # Install as $CODEX_HOME/mastermind-astra.config.toml and launch with:
 #   codex -p mastermind-astra
 #
-# Project delivery delegates through the existing Executive Fabric. Native Codex
-# agents stay off by default so frontier context remains with the Astra parent.
+# Project delivery delegates through the existing Executive Fabric. Multi-agent is
+# enabled only to expose one bounded native L2 Sol CEO; routine native worker
+# fanout remains outside the attended Astra path.
 model = "gpt-6-astra"
 model_reasoning_effort = "high"
 
 [agents]
-enabled = false
+enabled = true
 max_concurrent_threads_per_session = 1
 default_subagent_model = "gpt-5.6-sol"
 default_subagent_reasoning_effort = "high"
+
+[agents.l2_sol_ceo]
+description = "Bounded Level-2 Sol CEO for sustained orchestration and difficult return adjudication; not routine implementation or review."
+config_file = "agents/l2-sol-ceo.toml"
