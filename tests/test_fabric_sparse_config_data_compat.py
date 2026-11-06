@@ -176,6 +176,9 @@ def test_valid_data_does_not_repair_or_admit_a_missing_sparse_cone(repository):
     f = repository
     common = f.original / ".git/config"
     common.write_bytes(common.read_bytes() + DATA_CONFIG.encode())
+    # Isolate the missing cone flag from Git sparse-index/cone consistency.
+    # Expand the disposable fixture index while its cone is still valid.
+    donor_contract._git(f.alternate, "sparse-checkout", "reapply", "--no-sparse-index")
     donor_contract._git(f.alternate, "config", "--worktree", "--unset", "core.sparseCheckoutCone")
     gitdir = Path(donor_contract._git(f.alternate, "rev-parse", "--absolute-git-dir"))
     path = gitdir / "config.worktree"
