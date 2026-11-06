@@ -33,6 +33,14 @@ Two facts this module exists to keep honest:
   cgroup policy restricts *addresses*. The probe therefore records, per case,
   the layer that denies it and the facts that support that attribution.
 
+``--external-address-fixtures`` is one closed boolean for one bounded case:
+the operator supplies the fixture for the two address-denial cases from
+outside the role cgroup, so the probe omits its internal listeners for exactly
+those two cases and still attempts the same derived targets. It supplies no
+host, port, path, command or authority, and it never turns an unwitnessed
+attempt into a denial proof: the outside-cgroup pre/post bracket remains
+separate evidence.
+
 A PASS is bound to the exact observed host identity, role, service context,
 effective cgroup and selected matrix through ``context_fingerprint``. It is
 never granted on a missing resource: an absent witness yields ``UNAVAILABLE``,
@@ -100,6 +108,20 @@ LISTENER_LIFETIME = 600.0
 MAX_PEER_AGE = 900.0
 GUARD_ORDER = ("assert_root_service_cgroup", "assert_role_network_profile",
                "assert_role_credential_isolation", "enforce_role_tcp_ports")
+
+# The two address-denial cases whose fixture listener may be owned outside the
+# role cgroup. Their case identifiers, targets, fixed ports and expectations are
+# unchanged: only the owner of the fixture differs. --external-address-fixtures
+# therefore omits the internal listener for exactly these two listener keys and
+# still attempts the same derived targets through the ordinary bounded connect
+# path. The probe cannot witness or bracket a fixture in another cgroup, so an
+# attempt here is an observation only; the operator's separate outside-cgroup
+# pre/post bracket remains the final acceptance evidence.
+EXTERNAL_ADDRESS_CASES = {
+    "tcp.sibling_alias.gateway_port": "sibling_gateway",
+    "tcp.shared_loopback.gateway_port": "shared_loopback_gateway",
+}
+EXTERNAL_ADDRESS_LISTENERS = frozenset(EXTERNAL_ADDRESS_CASES.values())
 
 STATUS_PASS = "PASS"
 STATUS_FAIL = "FAIL"
@@ -1084,6 +1106,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                         help="bounded connect timeout in seconds")
     parser.add_argument("--only", default="",
                         help="comma-separated subset of case ids to select")
+    parser.add_argument("--external-address-fixtures", action="store_true",
+                        help=("the operator supplies the outside-role-cgroup fixture for the two "
+                              "address-denial cases: the internal listeners for exactly those two "
+                              "cases are omitted, the same fixed targets are still attempted, and "
+                              "no denial is attributed without the separate outside-cgroup bracket"))
     parser.add_argument("--list-cases", action="store_true",
                         help="print the matrix identifiers and exit")
     args = parser.parse_args(argv)
@@ -1211,6 +1238,8 @@ def _run_probe(args: argparse.Namespace) -> int:
     if (not 1024 <= denied_port <= 65535 or denied_port in bind_ports | connect_ports
             or denied_port in ROLE_FIXED_PORTS[peer_role].values()):
         raise RuntimeRefusal('PROBE_DENIED_PORT_INVALID_OR_ALLOWED')
+    # A closed boolean: it names no host, port, path, command or authority.
+    external_address_fixtures = getattr(args, 'external_address_fixtures', False) is True
     identity = _identity_facts(role)
     guards, guards_ok = _run_guards(profile, role)
     guards = [dict(entry) for entry in guards]
@@ -1248,6 +1277,11 @@ def _run_probe(args: argparse.Namespace) -> int:
                     ('sibling_gateway', peer_alias, profile.gateway_port),
                     ('shared_loopback_gateway', '127.0.0.1', profile.gateway_port),
                 ):
+                    if external_address_fixtures and key in EXTERNAL_ADDRESS_LISTENERS:
+                        # The operator's own outside-role-cgroup fixture owns this
+                        # exact target. An internal listener here would collide with
+                        # it and would still not be an outside-cgroup positive.
+                        continue
                     listener(key, host, port)
                     pre_landlock[key] = _pre_landlock_baseline(listeners[key], host, port, args.connect_timeout)
                 exec_pre_listener = _listener_current(listeners['wildcard_denied'], own_alias, denied_port)
@@ -1276,7 +1310,8 @@ def _run_probe(args: argparse.Namespace) -> int:
             elif case.dimension == 'bind':
                 emit(case, _bind_outcome(case, listeners, ephemeral_baseline))
             elif case.dimension == 'tcp':
-                emit(case, _tcp_outcome(case, listeners, pre_landlock, connect_ports, args.connect_timeout))
+                emit(case, _tcp_outcome(case, listeners, pre_landlock, connect_ports, args.connect_timeout,
+                                        external_address_fixtures=external_address_fixtures))
             elif case.dimension == 'exec':
                 key = 'wildcard_denied' if case.expected == OBSERVED_REFUSED else 'own_gateway'
                 emit(case, _exec_outcome(case, exec_baseline, args.connect_timeout,
@@ -1326,9 +1361,71 @@ def _profile_values(value):
 
 
 
+def _tcp_external_address_outcome(case: _Case, landlock_connect: frozenset[int],
+                                  timeout: float) -> _Outcome:
+    """One bounded attempt against an operator-supplied outside-cgroup fixture.
+
+    The required fixture is outside the role cgroup, but this context does
+    not observe its existence or ownership and cannot bracket it before and
+    after the attempt. The attempt is therefore an observation only: it never
+    supplies the external positive, a refusal here stays unattributed, and the
+    case stays UNAVAILABLE. The operator's separate outside-cgroup pre/post
+    connection bracket is the final acceptance evidence.
+    """
+    host = case.host or ''
+    port = case.port or 0
+    target = {'host': host, 'port': port}
+    witness = {
+        'kind': 'external_address_fixture',
+        'sufficient': False,
+        'external_positive_required': True,
+        'external_bracket_required': True,
+        'fixture_owner_expected': 'outside_role_cgroup',
+        'note': ('an external fixture is expected but not observed by this process; this probe can '
+                 'neither witness nor bracket it; the outside-cgroup pre/post connection bracket '
+                 'remains separate acceptance evidence'),
+    }
+    code, symptom = _connect(host, port, timeout)
+    if code is None and symptom == 'connected':
+        # A forbidden target that answers is a real failure, not an unavailable one.
+        return _Outcome(OBSERVED_ALLOWED, symptom=symptom, target=target, witness=witness,
+                        attribution='NONE',
+                        basis='the forbidden external-address target completed the connection',
+                        detail='forbidden external-address target accepted the connection')
+    if code == errno.ECONNREFUSED:
+        return _Outcome(OBSERVED_UNAVAILABLE, errno=code, errno_name=_errno_name(code),
+                        symptom=symptom, target=target, witness=witness,
+                        attribution='UNDETERMINED',
+                        basis='nothing answered at this target; a refused connection is not policy proof',
+                        detail='no external fixture answered; a refused connection is not policy proof')
+    denial_shaped = ((symptom == 'timed_out' and code in {errno.EAGAIN, errno.ETIMEDOUT})
+                     or (symptom == 'refused_immediately' and code == errno.EPERM))
+    if not denial_shaped:
+        return _Outcome(OBSERVED_ERROR, errno=code, errno_name=_errno_name(code),
+                        symptom=symptom, target=target, witness=witness,
+                        attribution='UNDETERMINED',
+                        basis='an unrelated errno or symptom is not IP-policy denial proof',
+                        detail='unrelated error remains an error, not unavailable denial evidence')
+    if port in landlock_connect:
+        attribution = 'UNVERIFIED_CGROUP_IP_POLICY'
+        basis = ("the target port is inside the role's Landlock connect set, so Landlock permits "
+                 'it; the refusal shape is consistent with the cgroup address policy, but no '
+                 'outside-cgroup witness was observed here')
+    else:
+        attribution = 'UNDETERMINED'
+        basis = ("the target port is outside the role's Landlock connect set, so Landlock refuses "
+                 'it independently of the address policy; no outside-cgroup witness was observed here')
+    return _Outcome(OBSERVED_REFUSED, errno=code, errno_name=_errno_name(code), symptom=symptom,
+                    target=target, witness=witness, attribution=attribution, basis=basis,
+                    detail='external current positive witness required')
+
+
 def _tcp_outcome(case: _Case, listeners: dict[str, dict[str, Any]],
                  unconfined: dict[str, dict[str, Any]],
-                 landlock_connect: frozenset[int], timeout: float) -> _Outcome:
+                 landlock_connect: frozenset[int], timeout: float,
+                 *, external_address_fixtures: bool = False) -> _Outcome:
+    if external_address_fixtures and case.case_id in EXTERNAL_ADDRESS_CASES:
+        return _tcp_external_address_outcome(case, landlock_connect, timeout)
     listener = listeners.get(case.listener or '', {})
     before = _listener_current(listener, case.host or '', case.port or 0)
     if before.get('sufficient') is not True:
@@ -1457,6 +1554,7 @@ def _build_report(profile: RuntimeProfile, role: str, peer_role: str,
         status = "PASS"
 
     provenance = getattr(args, '_provenance', {})
+    external_address_fixtures = getattr(args, 'external_address_fixtures', False) is True
     guard_proven = ([entry.get('name') for entry in guards] == list(GUARD_ORDER)
                     and all(entry.get('status') == STATUS_PASS and entry.get('code') is None for entry in guards))
     complete_matrix = (selected == {case.case_id for case in _case_catalog()}
@@ -1484,11 +1582,35 @@ def _build_report(profile: RuntimeProfile, role: str, peer_role: str,
         "landlock_bind_ports": sorted(bind_ports),
         "landlock_connect_ports": sorted(connect_ports),
         "denied_port": denied_port,
+        "external_address_fixtures": external_address_fixtures,
     }
     fingerprint = hashlib.sha256(
         json.dumps({"context": context, "selected": sorted(selected)},
                    sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+
+    limitations = [
+        'Same-cgroup listener fixtures cannot qualify cgroup IP denial; current external positive bracketing is required.',
+        'A copied peer report is an earlier observation. Root pre/post fixture identities and unchanged report hashes are separate acceptance evidence.',
+        "The proxy port is deliberately out of scope: a synthetic listener "
+        "would not be the incumbent hermes-egress.service and cannot stand "
+        "in for final proxy proof.",
+        "The matrix records observations of the selected cgroup and Landlock "
+        "controls; external address-denial proof remains separate. It is not proof of effective BPF "
+        "enforcement on every kernel, of UDP or Unix-domain isolation, or "
+        "of vendor CONNECT ACLs.",
+        "An absent witness yields UNAVAILABLE and never PASS; a missing "
+        "listener, a refused connection or a skipped case is not denial proof.",
+        "A PASS is bound to context_fingerprint. A different host identity, "
+        "role, cgroup, profile or selected matrix is a different result.",
+    ]
+    if external_address_fixtures:
+        limitations.append(
+            "External-address fixture mode was selected. Any selected address case "
+            "requires an outside-role-cgroup fixture that this probe cannot witness or bracket; "
+            "the separate outside-cgroup pre/post connection bracket remains required and "
+            "this report qualifies neither case."
+        )
 
     return {
         "schema": SCHEMA,
@@ -1539,21 +1661,7 @@ def _build_report(profile: RuntimeProfile, role: str, peer_role: str,
                 "provider, TLS, billing, Slack or a cutover."
             ),
         },
-        "limitations": [
-            'Same-cgroup listener fixtures cannot qualify cgroup IP denial; current external positive bracketing is required.',
-            'A copied peer report is an earlier observation. Root pre/post fixture identities and unchanged report hashes are separate acceptance evidence.',
-            "The proxy port is deliberately out of scope: a synthetic listener "
-            "would not be the incumbent hermes-egress.service and cannot stand "
-            "in for final proxy proof.",
-            "The matrix records observations of the selected cgroup and Landlock "
-            "controls; external address-denial proof remains separate. It is not proof of effective BPF "
-            "enforcement on every kernel, of UDP or Unix-domain isolation, or "
-            "of vendor CONNECT ACLs.",
-            "An absent witness yields UNAVAILABLE and never PASS; a missing "
-            "listener, a refused connection or a skipped case is not denial proof.",
-            "A PASS is bound to context_fingerprint. A different host identity, "
-            "role, cgroup, profile or selected matrix is a different result.",
-        ],
+        "limitations": limitations,
     }
 
 
