@@ -2308,14 +2308,55 @@ class TestFleetV10PublisherCompatibility(unittest.TestCase):
             "git-publish.mjs": "badd8a554ae8230808d18a1943aa49edb7ced51391ed2cbadb358cd015d62c3a",
             "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
         })
+        self.assertEqual(svc.FLEET_V10_REJECTION_PUBLISHER_PREDECESSOR_SHA256, {
+            "git-publish.mjs": "10574812f428114314a1529df2d969e52b19d2db8d4f971564a98970d93adc67",
+            "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
+        })
         self.assertEqual(
             svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256["git-publish.mjs"],
-            "10574812f428114314a1529df2d969e52b19d2db8d4f971564a98970d93adc67",
+            "abc3b4dc6f3c9574ebb116e28a44f42136f8d8df3f2b0ec1504668daaf46b6bc",
         )
         self.assertNotEqual(
             svc.FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256["git-publish.mjs"],
             svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256["git-publish.mjs"],
         )
+
+    def test_rejection_diagnostics_sealed_predecessor_is_only_eligible_forward_upgrade(self):
+        # A historical exact closed publisher may gain integrated recovery in
+        # the existing same-owner manifest-CAS transaction, no broad fallback.
+        with self._installed_merge_predecessor_fixture() as (args, roots, _cfg):
+            before = (roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                      self._all_files(roots), roots["plist"].read_bytes())
+            installed_pair = {
+                name: svc._sha256_file(roots["base"] / name)
+                for name in ("git-publish.mjs", "workspace-access.mjs")
+            }
+            denied = {name: "0" * 64 for name in installed_pair}
+            with mock.patch.object(svc, "FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256", denied), \
+                 mock.patch.object(svc, "FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256", denied), \
+                 mock.patch.object(svc, "FLEET_V10_REJECTION_PUBLISHER_PREDECESSOR_SHA256", installed_pair):
+                args.publisher_preflight_only = True
+                with mock.patch.object(svc, "_run", CmdRecorder()):
+                    code, receipt = _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(receipt)["effect"], "NOT_APPLIED")
+                self.assertEqual(before, (
+                    roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                    self._all_files(roots), roots["plist"].read_bytes()))
+                args.publisher_preflight_only = False
+                with mock.patch.object(svc, "_run", CmdRecorder()):
+                    code, receipt = _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(receipt)["effect"], "APPLIED")
+                self.assertEqual(roots["config"].read_bytes(), before[1])
+                self.assertEqual(roots["plist"].read_bytes(), before[3])
+                self.assertEqual(
+                    {name for name in before[2]
+                     if self._all_files(roots)[name] != before[2][name]},
+                    {"git-publish.mjs", "workspace-access.mjs"})
+                svc._verify_staged_install(
+                    "chatgpt1", _label_for("chatgpt1"), roots,
+                    require_runtime_seal=True)
 
     def test_post_merge_publisher_preflight_and_apply_keep_sealed_host_config(self):
         # An installed merge-capable pair can receive the narrow publisher

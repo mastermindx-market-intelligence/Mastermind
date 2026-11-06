@@ -119,6 +119,20 @@ GO_SELECTION_SUPPORT_DIGESTS = {
 }
 
 
+# Protected process-custody and paid eligibility upgrades form one exact
+# source-bound cohort in CURRENT, never a mutation of the frozen 102 baseline.
+# These are SHA-256 members of the already-reviewed protected master closure.
+GO_PROTECTED_CUSTODY_PREIMAGES = {
+    "linux_process_identity.py": "e2cbe24d453116c09af8b25bb936a1e00c9e6999014bc5ea5276edb84b8dcca2",
+    "paid_host_qualification.py": "e4cb143b13324bd5ce4d96af5396054b3c63e1b82c831edae4516f37e495a1b0",
+    "paid_initializer.py": "d203b1363cdc6f926d9542a2ecfb2ec6b24dd1da46c3fd1f527caea232132749",
+}
+GO_PROTECTED_CUSTODY_DIGESTS = {
+    "linux_process_identity.py": "11a0771d7f8fb8c8288303b3d182100341413098c1ee31d12339330dd869e71e",
+    "paid_host_qualification.py": "2a52ba79e6cd38a42ecbd48919704d2c837c65d042707b37640df78f27b8d0c0",
+    "paid_initializer.py": "602893be1fa1ece43862ba889e92af8d8e879cb67f62f16840300b7f21ad2887",
+}
+
 # Exact protected95e diagnostic cohort: three replacements and two additions.
 GO_POST_FAILURE_PREIMAGES = {
     "artifact_delivery.py": "447ab9d65264f46acfe5662d60e38c1f4db97198afc9113c2717109e298db9c3",
@@ -268,6 +282,18 @@ def validate_go_base_manifest(manifest, dependency_hashes):
                 and set(manifest) != expected)):
         raise ValueError("native Go original collector is not the exact current source")
     historical["ext/original_delivery_collector.py"] = GO_BASE_ORIGINAL_COLLECTOR_SHA256
+    # Preserve exact source hashes and deny partial/mixed custody receipts.
+    # The protected/current trio belongs only to the complete current106
+    # namespace, never a relabelled historical102 or prior104 closure.
+    custody = {name: historical["ext/" + name]
+               for name in GO_PROTECTED_CUSTODY_PREIMAGES}
+    if custody == GO_PROTECTED_CUSTODY_DIGESTS:
+        if set(manifest) != expected:
+            raise ValueError("native Go custody cannot relabel historical namespace")
+        historical.update({"ext/" + name: digest
+                           for name, digest in GO_PROTECTED_CUSTODY_PREIMAGES.items()})
+    elif custody != GO_PROTECTED_CUSTODY_PREIMAGES:
+        raise ValueError("native Go protected custody cohort changed")
     if sha((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) != GO_BASE_MANIFEST_SHA256:
         raise ValueError("native Go base closure is not the reviewed protected composition")
 

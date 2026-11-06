@@ -388,6 +388,22 @@ export function resolveConfig(partial = {}) {
     throw new TypeError('config.stateDir must be a string when provided');
   }
 
+  // Validate the copied input before capability resolvers can normalize
+  // disabled or malformed fields. A Fabric-only profile must be explicitly
+  // closed, including direct loads that bypass the private installer.
+  if (Object.hasOwn(cfg, 'fabricOnly') && typeof cfg.fabricOnly !== 'boolean') {
+    throw new TypeError('config.fabricOnly must be boolean when supplied');
+  }
+  if (cfg.fabricOnly === true && (
+    !Object.hasOwn(cfg, 'gitPublish') || cfg.gitPublish !== false ||
+    !Object.hasOwn(cfg, 'paperDesign') || cfg.paperDesign !== false ||
+    Object.hasOwn(cfg, 'fleetStatus') ||
+    Object.hasOwn(cfg, 'repositoryWorkspaces') ||
+    Object.hasOwn(cfg, 'commissionPublication')
+  )) {
+    throw new TypeError('Fabric-only gateway refuses unrelated host capabilities');
+  }
+
   cfg.gitPublish = resolveGitPublishConfig(cfg.gitPublish);
   cfg.repositoryWorkspaces = resolveRepositoryWorkspaceConfig(cfg.repositoryWorkspaces);
   if (cfg.repositoryWorkspaces && !cfg.gitPublish) throw new TypeError('repositoryWorkspaces requires configured typed Git');
@@ -404,9 +420,6 @@ export function resolveConfig(partial = {}) {
   }
   cfg.paperDesign = resolvePaperDesignConfig(cfg.paperDesign);
   cfg.fleetStatus = resolveFleetStatusConfig(cfg.fleetStatus);
-  if (cfg.fabricOnly !== undefined && typeof cfg.fabricOnly !== "boolean") {
-    throw new TypeError("config.fabricOnly must be boolean when supplied");
-  }
   if (cfg.fabricOnly === true && (cfg.gitPublish || cfg.repositoryWorkspaces ||
       cfg.commissionPublication || cfg.paperDesign || cfg.fleetStatus)) {
     throw new TypeError("Fabric-only gateway refuses unrelated host capabilities");
@@ -2483,7 +2496,7 @@ async function main() {
     testMode: cfg.testMode,
   });
 
-  const gateway = await startGateway(cfg, auth);
+  const gateway = await startGateway(raw, auth);
   process.stderr.write(`gateway: listening on ${gateway.url}\n`);
 
   let shuttingDown = false;

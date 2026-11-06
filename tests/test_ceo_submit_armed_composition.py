@@ -812,6 +812,24 @@ def _is_mkdir_mode_literal(line: str, token_text: str) -> bool:
     return modes == 1
 
 
+def _is_js_mkdir_mode_literal(line: str, token_text: str) -> bool:
+    """Admit only an exact JS mkdir(directory, {recursive:true, mode:octal}) statement.
+
+    Like the Python mkdir keyword-mode exemption, this is a permission, not a
+    UID/GID or service-port literal. The exact closed one-statement shape
+    prevents unrelated identities, extra properties, callees or operations
+    from being smuggled through the exemption.
+    """
+    if not re.fullmatch(r"0o[0-7]{3,4}", token_text):
+        return False
+    matched = re.fullmatch(
+        r"\s*await\s+mkdir\(\s*dir\s*,\s*\{\s*recursive\s*:\s*true"
+        r"\s*,\s*mode\s*:\s*(0o[0-7]{3,4})\s*\}\s*\)\s*;\s*",
+        line,
+    )
+    return matched is not None and matched.group(1) == token_text
+
+
 def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bool:
     stripped = line.lstrip()
     if stripped.startswith(_COMMENT_PREFIXES):
@@ -823,6 +841,8 @@ def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bo
         return True
     if _line_mentions_identity_name(line):
         return False
+    if _is_js_mkdir_mode_literal(line, token_text):
+        return True
     # Recognize only the mode slot of this closed shell statement shape.
     # Additional commands, substitutions and unquoted operands stay guarded.
     chmod = re.fullmatch(
@@ -1577,7 +1597,7 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            '0147f1eae70f9e443c9c07876c2c23a4d5aa5fbeac65291e7f2ec89d789ac539'):
+            '8011f9c21e9ca26519f4d015eb0af070d293bead2b4955a6871a511e3b690c39'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
@@ -2455,6 +2475,35 @@ def _d8_lowlevel_mkdir_chain_source(mkdir_line: str) -> str:
         "    descriptor = reopen(descriptor, dir_fd=parent_descriptor)",
         "    " + mkdir_line,
     ])
+
+
+def test_d8_js_mkdir_private_directory_mode_is_not_an_identity():
+    """The Studio publisher's exact private receipt mkdir uses an octal mode."""
+    path = "integrations/studio_direct_mcp/git-publish.mjs"
+    source = "    await mkdir(dir, {recursive:true, mode:0o700});\n"
+    assert _scan_added_identity_diff(_d8_frozen_source_diff(path, source)) == []
+
+
+@pytest.mark.parametrize("source", [
+    "await mkdir(peer_uid, {recursive:true, mode:0o700});",
+    "await makedir(dir, {recursive:true, mode:0o700});",
+    "await mkdir(dir, {recursive:false, mode:0o700});",
+    "await mkdir(dir, {recursive:true, mode:0o700, peer_uid:501});",
+    "await mkdir(dir, {recursive:true, mode:0o700}); peer_uid = 501;",
+    "await mkdir(dir, {recursive:true, mode:0o700}); anotherEffect();",
+    "await mkdir(dir, {recursive:true, mode:0o700});\npeer_uid = 501;",
+])
+def test_d8_js_mkdir_near_misses_remain_guarded(source):
+    path = "integrations/studio_direct_mcp/git-publish.mjs"
+    assert not _is_js_mkdir_mode_literal(source, "0o700")
+    findings = _scan_added_identity_diff(_d8_frozen_source_diff(path, source))
+    # The D8 scanner is contextual; a shape alone is not an identity. Actual
+    # identity-bearing text remains guarded even beside a mkdir mode token.
+    if "peer_uid:501" in source or "peer_uid = 501" in source:
+        assert "501" in findings
+    if "mkdir(peer_uid" in source:
+        assert "0o700" in findings
+
 
 
 def test_d8_lowlevel_mkdir_mode_slot_with_dir_fd_is_not_identity():
