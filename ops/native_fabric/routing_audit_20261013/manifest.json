@@ -1,0 +1,67 @@
+{
+  "protected_sha": "76576d8680bb70cdb9e1cfe7016aefec0fb3286f",
+  "files": {
+    "pick.py": {
+      "sha256": "c2d5420bbaf5b06b47788fecd999b7f920f60fe5f25154f2ab8a22afa2d58b29",
+      "bytes": 103133,
+      "candidate_sha256": "fc493dad696ff89967b10426eff3b7e067b986f0a802dd41a7659d1e227c235a"
+    },
+    "model_tier.py": {
+      "sha256": "507a8aa66015848873f1831dfaa7efabc619362c0dafb28238aa21a1ad8e2d7d",
+      "bytes": 6366
+    },
+    "pool_ledger.py": {
+      "sha256": "d5785307d39d79eaa6dbdba2bdbfc527c9beb06cfeb55d395797b3954ccff0a6",
+      "bytes": 82956
+    },
+    "lease_broker.py": {
+      "sha256": "a72bc031ddb81e559e0cf48fcbf824a959edfcf445c1d3d2d89348c3c66c6f0c",
+      "bytes": 58355,
+      "candidate_sha256": "d3a8dfbcf01e86f0551435ab3c37caf1090376290b9eb99ea5bd3ee9f0f73b5a"
+    },
+    "remote_sub.sh": {
+      "sha256": "e2ec7dfe2efa0680b4bf961ac73ce916adf5f1dc90e510f6c8ff6ed50e069deb",
+      "bytes": 55819,
+      "candidate_sha256": "dbaccc38674c3307ba7abab2b8cc344107784d5bc0df2c2cadfb1358bb05662c"
+    },
+    "fabric_task.py": {
+      "sha256": "bfa5fcdc3df04d76d6c3b0b2dda2dac17ab4539253ec3ffb86fca4e2c4c13207",
+      "bytes": 36983
+    }
+  },
+  "production_modified": false,
+  "schema": "mastermind.native_routing_audit_source/v1",
+  "operation_id": "fabric-routing-deep-audit-20261013-c2-001",
+  "status": "SOURCE_CANDIDATE_NOT_INSTALLED",
+  "review": "NOT_INDEPENDENTLY_REVIEWED",
+  "patches": {
+    "logical_job_priority.patch": {
+      "sha256": "ea97f4b1ca57160a22274dab3249541c282ff8f1eb07985499b435827d20b393",
+      "targets": [
+        "lease_broker.py",
+        "remote_sub.sh"
+      ]
+    },
+    "complexity_invariants.patch": {
+      "sha256": "eaeb4a861c86d9c994efe689a3ca55852feecb026ceb6744f401dc5a43ddf844",
+      "targets": [
+        "pick.py"
+      ]
+    }
+  },
+  "tests": {
+    "red": {
+      "passed": 20,
+      "failed": 30
+    },
+    "candidate": {
+      "passed": 49,
+      "failed": 1
+    },
+    "candidate_failure": "test_glm_pairing_refusal_is_not_bypassed_by_logical_class: fixture provider_disabled before host-account filter; not a proven pairing regression",
+    "legacy": "collection interrupted: missing isolated pool_status dependency; subsequent regression preparation/run blocked before dispatch",
+    "shell_syntax": "bash -n candidate remote_sub.sh succeeded",
+    "complete_suite_pass": false,
+    "denied_actions_retried": false
+  }
+}

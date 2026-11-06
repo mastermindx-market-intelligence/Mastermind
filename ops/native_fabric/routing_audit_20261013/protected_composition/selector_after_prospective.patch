@@ -1,0 +1,161 @@
+--- a/ext/fabric_task.py
++++ b/ext/fabric_task.py
+@@ -395,6 +395,65 @@
+     return fields
+ 
+ 
++
++def _selection_host(value: str | None) -> str:
++    """An explicit host is only a request to the incumbent qualified picker."""
++    if value is None or value == "auto":
++        return "auto"
++    if type(value) is not str or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", value):
++        raise FabricTaskError("INVALID_HOST_SELECTOR")
++    return value
++
++
++def _selection_auto(value: str | None) -> str | None:
++    """Public auto clears preference; it grants no model, host or account."""
++    return None if value is None or value == "auto" else value
++
++
++def preview_route(
++    run_id: str,
++    task_class: str,
++    *,
++    host: str | None = None,
++    pool: str | None = None,
++    prefer: str | None = None,
++    subject_pool: str | None = None,
++    task_complexity: str = "",
++    escalation_reason: str = "",
++    requested_model: str | None = None,
++) -> dict[str, object]:
++    """Advisory only: fresh request rechecks model/host and never inherits a reservation."""
++    rid = validate_run_id(run_id)
++    route = _parse_route(pick.format_pick(
++        task_class,
++        host=_selection_host(host),
++        pool=_selection_auto(pool),
++        prefer=_selection_auto(prefer),
++        **({"subject_pool": subject_pool} if subject_pool is not None else {}),
++        task_complexity=task_complexity,
++        escalation_reason=escalation_reason,
++        requested_model=_selection_auto(requested_model),
++        route_key=rid,
++    ))
++    guard = pick.launch_policy(
++        route["MODE"], task_class, route["MODEL"],
++        escalation_reason=escalation_reason, task_complexity=task_complexity,
++    )
++    if not guard.get("allowed"):
++        raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(guard.get("reason")))
++    return {
++        "state": "PREVIEW_ONLY",
++        "reserved": False,
++        "run_id": rid,
++        "pool": route["POOL"],
++        "model": route["MODEL"],
++        "host": route["HOST"],
++        "mode": route["MODE"],
++        "reason": route.get("REASON") or "",
++        "selection_rechecked_at_request": True,
++    }
++
++
+ def request(
+     run_id: str,
+     task_class: str,
+@@ -414,6 +473,7 @@
+     native_return: bool = False,
+     recoverable_return: bool = False,
+     qualification_host: str | None = None,
++    host: str | None = None,
+ ) -> int:
+     rid = validate_run_id(run_id)
+     if bool(packet) == bool(stdin_bytes is not None):
+@@ -424,7 +484,14 @@
+     # economic metadata. Selection and launch see the same exact witness.
+     complexity = task_complexity if task_complexity is not None else env.get("POOL_TASK_COMPLEXITY", "")
+     reason = escalation_reason if escalation_reason is not None else env.get("POOL_ESCALATION_REASON", "")
++    pool = _selection_auto(pool)
++    prefer = _selection_auto(prefer)
++    requested_model = _selection_auto(requested_model)
++    selected_host = _selection_host(host)
+     if recoverable_return:
++        # The accepted prospective profile retains automatic qualified host selection.
++        if selected_host != "auto":
++            raise FabricTaskError("RECOVERABLE_RETURN_PINNED_HOST_REFUSED")
+         if (artifact_names or qualification_host or task_class == 'domain_orchestration'
+                 or env.get('POOL_OPERATOR_CHILD_BUDGET','0') != '0'):
+             raise FabricTaskError('RECOVERABLE_RETURN_OPTIONS_REFUSED')
+@@ -433,6 +500,8 @@
+     if artifact_names:
+         import artifact_production
+     if qualification_host:
++        if selected_host != "auto":
++            raise FabricTaskError("HOST_QUALIFICATION_CONFLICT")
+         if pool != "grok" or artifact_names or native_return or requested_model or prefer:
+             raise FabricTaskError("QUALIFICATION_OPTIONS_REFUSED")
+         import fabric_host_qualification
+@@ -443,7 +512,7 @@
+         ))
+     else:
+         route = _parse_route(pick.format_pick(
+-            task_class, prefer=prefer, host="auto", pool=pool,
++            task_class, prefer=prefer, host=selected_host, pool=pool,
+             **({"subject_pool": subject_pool} if subject_pool is not None else {}),
+             task_complexity=complexity, escalation_reason=reason,
+             requested_model=requested_model, route_key=rid,
+@@ -576,6 +645,17 @@
+     parser = argparse.ArgumentParser(description=__doc__)
+     sub = parser.add_subparsers(dest="cmd", required=True)
+ 
++    p_preview = sub.add_parser("preview", help="read-only model/pool/host placement")
++    p_preview.add_argument("--id", required=True)
++    p_preview.add_argument("--class", dest="task_class", required=True)
++    p_preview.add_argument("--host", default="auto")
++    p_preview.add_argument("--pool", default="auto")
++    p_preview.add_argument("--prefer")
++    p_preview.add_argument("--subject-pool")
++    p_preview.add_argument("--model", dest="requested_model", default="auto")
++    p_preview.add_argument("--task-complexity", default="")
++    p_preview.add_argument("--escalation-reason", default="")
++
+     p_request = sub.add_parser("request")
+     p_request.add_argument("--id", required=True)
+     p_request.add_argument("--class", dest="task_class", required=True)
+@@ -586,7 +666,8 @@
+     packet_group = p_request.add_mutually_exclusive_group(required=True)
+     packet_group.add_argument("--packet")
+     packet_group.add_argument("--stdin", action="store_true")
+-    p_request.add_argument("--pool")
++    p_request.add_argument("--pool", help="pool or auto (qualified router)")
++    p_request.add_argument("--host", default="auto", help="auto or eligible exact host")
+     p_request.add_argument("--qualification-host", choices=("mb", "m1"), help="Explicit first Grok worker on a pending qualified Mac; no enrollment")
+     p_request.add_argument("--prefer")
+     p_request.add_argument("--subject-pool", help="Author pool for canonical reviewer independence rules")
+@@ -736,6 +817,15 @@
+             command.extend(["--path", path])
+         return subprocess.run(command).returncode
+     try:
++        if args.cmd == "preview":
++            _json(preview_route(
++                args.id, args.task_class, host=args.host, pool=args.pool,
++                prefer=args.prefer, subject_pool=args.subject_pool,
++                task_complexity=args.task_complexity,
++                escalation_reason=args.escalation_reason,
++                requested_model=args.requested_model,
++            ))
++            return 0
+         if args.cmd == "reconcile-completed":
+             try:
+                 _json(completion_reconcile.reconcile(args.run_id, args.root, apply=args.apply))
+@@ -793,6 +883,7 @@
+                 escalation_reason=args.escalation_reason,
+                 requested_model=args.requested_model,
+                 qualification_host=args.qualification_host,
++                host=args.host,
+             )
+         if args.cmd == "status":
+             _json(inspect_run(args.run_id))

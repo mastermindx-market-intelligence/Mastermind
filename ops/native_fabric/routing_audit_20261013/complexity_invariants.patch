@@ -1,0 +1,40 @@
+--- a/ext/pick.py
++++ b/ext/pick.py
+@@ -2229,11 +2229,25 @@
+     }
+     if normalized_complexity:
+         result["task_complexity"] = normalized_complexity
+-    if normalized_mode not in {"grok", "cursor", "glm", "glm-codex",
++    if normalized_mode not in {"minimax", "grok", "cursor", "glm", "glm-codex",
+                                "go", "go-codex", "qwen", "bailian", "codex-native", "claude-native", "oc-free"}:
+         return result
+     if normalized_complexity and normalized_complexity not in TASK_COMPLEXITY_CLASSES:
+         result.update(allowed=False, reason="unknown_task_complexity", tier="unknown")
++        return result
++
++    # Explicit complexity is a cross-provider invariant, not a side effect of
++    # a provider's price or a reviewer/operator label. Go C2/C3 retains its
++    # stricter capability-lifetime refusal below.
++    if (normalized_complexity == "C3_FRONTIER_JUDGMENT"
++            and normalized_mode not in {"go", "go-codex"}
++            and not _economic_witness(escalation_reason)):
++        result.update(allowed=False, reason="frontier_witness_required",
++                      tier=model_tier.CLASS_TIER.get(normalized_task, "unknown"))
++        return result
++    # Preserve MiniMax's ordinary economic scope and lack of I/O; classification
++    # validation above grants neither a model entitlement nor provider capacity.
++    if normalized_mode == "minimax":
+         return result
+ 
+     policy_doc = load_pools() if doc is None else doc
+@@ -2350,6 +2364,10 @@
+         result.update(allowed=False, reason="unknown_task_class", tier="unknown")
+         return result
+     result["tier"] = tier
++    if (normalized_complexity in {"C0_MECHANICAL", "C1_ROUTINE_BOUNDED"}
++            and not _economic_witness(escalation_reason)):
++        result.update(allowed=False, reason="bounded_complexity_requires_escalation")
++        return result
+     if tier != "leaf-labor":
+         result["reason"] = "economic_guard_permitted_class"
+         return result

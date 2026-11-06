@@ -1,0 +1,139 @@
+--- a/ext/lease_broker.py
++++ b/ext/lease_broker.py
+@@ -3,5 +3,19 @@
+     # leases. Only the existing queue priority uses the logical work class.
+     logical = str(job_class or "").strip()
+     return CLASS_PRIORITY.get((logical or task_class or "unknown").strip().lower(), 4)
++
++
++def _request_waiter_id(orch: str, pool: str, request_id: Optional[str]) -> Optional[str]:
++    """Correlate queued demand only; not auth, a lease or execution idempotency."""
++    if request_id is None or request_id == "":
++        return None
++    import hashlib
++    import json
++    import re
++    if (type(request_id) is not str
++            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", request_id)):
++        raise ValueError("invalid_request_id")
++    encoded = json.dumps([orch, pool, request_id], separators=(",", ":")).encode("utf-8")
++    return "rq-" + hashlib.sha256(encoded).hexdigest()
+ 
+ 
+@@ -11,7 +25,7 @@
+         return list(
+             conn.execute(
+                 "SELECT * FROM waiters WHERE pool=? AND id NOT LIKE 'plan-%' "
+-                "ORDER BY priority ASC, enqueued_at ASC",
++                "ORDER BY priority ASC, enqueued_at ASC, rowid ASC",
+                 (pool,),
+             ).fetchall()
+         )
+@@ -56,15 +70,36 @@
+         job_class: Optional[str] = None,
+     ) -> str:
+         now = self.now()
+-        existing = conn.execute(
+-            "SELECT id FROM waiters WHERE orchestrator_id=? AND pool=?",
+-            (orch, pool),
+-        ).fetchone()
++        scoped = bool(waiter_id and waiter_id.startswith("rq-"))
++        if scoped:
++            existing = conn.execute("SELECT * FROM waiters WHERE id=?", (waiter_id,)).fetchone()
++            if existing and (existing["orchestrator_id"] != orch or existing["pool"] != pool):
++                raise ValueError("waiter_scope_mismatch")
++        else:
++            # Old callers still coalesce their legacy demand, never scoped siblings.
++            existing = conn.execute(
++                "SELECT * FROM waiters WHERE orchestrator_id=? AND pool=? "
++                "AND id NOT LIKE 'rq-%'", (orch, pool),
++            ).fetchone()
++        if existing and scoped:
++            priority = _class_priority(task_class, job_class)
++            old_shape = (existing["priority"], existing["account"], existing["task_class"],
++                         existing["host"], existing["need"])
++            new_shape = (priority, account, task_class, host, int(need))
++            if old_shape != new_shape:
++                # Reinsert this exact demand under the incumbent lock so a
++                # repeated clock tick cannot preserve its old rowid/FIFO rank.
++                conn.execute(
++                    "DELETE FROM waiters WHERE id=? AND orchestrator_id=? AND pool=?",
++                    (existing["id"], orch, pool),
++                )
++                existing = None
+         if existing:
+             wid = existing["id"]
++            enqueued_at = existing["enqueued_at"]
+             conn.execute(
+                 "UPDATE waiters SET last_heartbeat=?, task_class=?, priority=?, "
+-                "account=?, host=?, need=? WHERE id=?",
++                "account=?, host=?, need=?, enqueued_at=? WHERE id=?",
+                 (
+                     now,
+                     task_class,
+@@ -72,6 +107,7 @@
+                     account,
+                     host,
+                     int(need),
++                    enqueued_at,
+                     wid,
+                 ),
+             )
+@@ -79,7 +115,7 @@
+             return wid
+         wid = waiter_id or uuid.uuid4().hex[:12]
+         conn.execute(
+-            "INSERT OR REPLACE INTO waiters "
++            "INSERT INTO waiters "
+             "(id, orchestrator_id, pool, account, task_class, host, "
+             "enqueued_at, priority, need, last_heartbeat) "
+             "VALUES (?,?,?,?,?,?,?,?,?,?)",
+@@ -121,26 +157,42 @@
+             conn.commit()
+         return wid
+ 
++    def _clear_acquired_waiter(
++        self, conn: sqlite3.Connection, pool: str, orch: str,
++        waiter_id: Optional[str],
++    ) -> None:
++        if waiter_id and waiter_id.startswith("rq-"):
++            conn.execute(
++                "DELETE FROM waiters WHERE id=? AND orchestrator_id=? AND pool=?",
++                (waiter_id, orch, pool),
++            )
++        else:
++            conn.execute(
++                "DELETE FROM waiters WHERE orchestrator_id=? AND pool=? "
++                "AND id NOT LIKE 'rq-%'", (orch, pool),
++            )
++
+     def _front_of_queue(
+         self, conn: sqlite3.Connection, pool: str, orch: str, task_class: str,
+         job_class: Optional[str] = None,
++        waiter_id: Optional[str] = None,
+     ) -> bool:
+         """True if this orch may take the next slot (priority + oldest-first)."""
+         waiters = self._waiters(conn, pool)
+         if not waiters:
+             return True
+         my_p = _class_priority(task_class, job_class)
+-        # higher-priority (lower number) waiter from someone else blocks us
++        scoped = bool(waiter_id and waiter_id.startswith("rq-"))
++        # A scoped sibling is a separate contender, not this request's FIFO credit.
+         for w in waiters:
+-            if w["orchestrator_id"] == orch:
+-                # A root's waiter may describe a different sibling's urgency.
+-                # Reuse its FIFO position only for the same logical priority.
++            own_row = (w["orchestrator_id"] == orch and
++                       (w["id"] == waiter_id if scoped else not w["id"].startswith("rq-")))
++            if own_row:
+                 if int(w["priority"]) == my_p:
+                     return True
+                 continue
+             if int(w["priority"]) < my_p:
+                 return False
+             if int(w["priority"]) == my_p:
+-                # oldest at this class: if it's us, ok; if someone else, wait
+-                return w["orchestrator_id"] == orch
++                return False
+         return True

@@ -1,0 +1,19 @@
+--- a/ext/lease_broker.py
++++ b/ext/lease_broker.py
+@@ -1132,13 +1132,14 @@
+                 "grok_exhausted",
+             )
+         compatible_accounts = None
+-        if pool == "glm" and task_class == "remote-glm":
++        if (pool == "glm" and task_class == "remote-glm") or (
++                self.provider_name(pool) == "bailian" and task_class == "remote-qwen"):
+             # Pairing precedes capacity demand; no new waiter for an unavailable
+             # host/account configuration. Model/held room stays inside selection.
+             from glm_host_account_source import filter_observed_accounts
+             compatible_accounts, _ = filter_observed_accounts(self.grantable_accounts(pool),
+                 host=host, model=model, now=self.now(), preferred=account,
+-                hosts_path=self.hosts_path)
++                hosts_path=self.hosts_path, mode="glm" if pool == "glm" else "qwen")
+             if not compatible_accounts:
+                 return (AcquireResult(ok=False, reason="host_account_unavailable", pool=pool,
+                                       orchestrator_id=orch), waiter_id, "host_account_unavailable")

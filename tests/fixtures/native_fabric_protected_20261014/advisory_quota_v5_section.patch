@@ -1,0 +1,173 @@
+--- a/ext/quota_remote.py
++++ b/ext/quota_remote.py
+@@ -397,6 +397,31 @@
+     return state
+ 
+ 
++def _advisory_fresh_states(states: Iterable[ProviderQuotaState],
++                           now_ts: float) -> List[ProviderQuotaState]:
++    """Advisory cache authority requires a real, nonfuture, dated observation.
++
++    A recently refreshed cache does not renew an old provider measurement.
++    Fail closed on unknown/stale/malformed observations, without writing or
++    making provider requests. Normal quota refresh behavior remains intact.
++    """
++    accepted = []
++    for state in states:
++        if state.source != "PROVIDER_AUTHORITATIVE":
++            continue
++        observed = _iso(state.observed_at)
++        if not observed:
++            continue
++        try:
++            stamp = datetime.fromisoformat(observed[:-1] + "+00:00").timestamp()
++            age = now_ts - stamp
++            if 0.0 <= age <= FRESH_S:
++                accepted.append(state)
++        except (OSError, OverflowError, ValueError, TypeError):
++            continue
++    return accepted
++
++
+ def _cache_states(entry: Any, reason: str,
+                   keep_authoritative: bool = False) -> List[ProviderQuotaState]:
+     rows = entry.get("states") if isinstance(entry, dict) else None
+@@ -436,7 +461,11 @@
+ 
+ def read_provider(provider: str, force: bool = False,
+                   now_ts: Optional[float] = None,
+-                  cache_path: Optional[str] = None) -> List[ProviderQuotaState]:
++                  cache_path: Optional[str] = None,
++                  *, allow_remote: bool = True) -> List[ProviderQuotaState]:
++    """Cache-only advisory mode cannot refresh remote quotas or write cache."""
++    if type(allow_remote) is not bool or (force and not allow_remote):
++        raise ValueError("quota_refresh_mode_conflict")
+     provider = provider.lower()
+     if provider not in {"glm", "minimax", "bailian"}:
+         raise ValueError("unknown provider")
+@@ -462,7 +491,13 @@
+                 not force and refreshed_at
+                 and now - refreshed_at < REFRESH_INTERVAL_S
+             ):
++                if not allow_remote:
++                    if not 0 <= now - refreshed_at < REFRESH_INTERVAL_S:
++                        return []
++                    return _advisory_fresh_states(cached_states, now)
+                 return [state for state in cached_states if state is not None]
++            if not allow_remote:
++                return []
+             try:
+                 live = READERS["glm"]()
+                 cache = _load_cache(path)
+@@ -484,6 +519,7 @@
+                 return []
+         per_account = glm_accounts_state(
+             now_ts=now, cache_path=path, force=force,
++            allow_remote=allow_remote,
+         )
+         flat: List[ProviderQuotaState] = []
+         for entry in per_account:
+@@ -494,7 +530,13 @@
+     refreshed_at = float((entry or {}).get("refreshed_at") or 0) if isinstance(entry, dict) else 0.0
+     cached_states = _cache_states(entry, "cached", keep_authoritative=True)
+     if not force and refreshed_at and now - refreshed_at < REFRESH_INTERVAL_S:
++        if not allow_remote:
++            if not 0 <= now - refreshed_at < REFRESH_INTERVAL_S:
++                return []
++            return _advisory_fresh_states(cached_states, now)
+         return [state for state in cached_states if state is not None]
++    if not allow_remote and provider != "bailian":
++        return []
+     live: List[ProviderQuotaState]
+     if provider == "bailian":
+         try:
+@@ -580,9 +622,11 @@
+     now_ts: Optional[float] = None,
+     cache_path: Optional[str] = None,
+     force: bool = False,
++    *, allow_remote: bool = True,
+ ) -> List[Dict[str, Any]]:
+     """Per-account GLM quota state (W4-G9).
+ 
++    With allow_remote=False, never calls _live_glm or writes quota state.
+     Returns one entry per account in ``glm_keys.accounts()``:
+ 
+         {
+@@ -597,6 +641,8 @@
+     falls back to ``_live_glm(name, key)`` and writes the result back.
+     Stale-cache entries are preserved on live-read failure.
+     """
++    if type(allow_remote) is not bool or (force and not allow_remote):
++        raise ValueError("quota_refresh_mode_conflict")
+     now = _utc_now().timestamp() if now_ts is None else float(now_ts)
+     path = cache_path or CACHE_PATH
+     cache = _load_cache(path)
+@@ -637,11 +683,20 @@
+         )
+         if fresh_cache:
+             cached_states = _cache_states(cached, "cached", keep_authoritative=True)
+-            states = list(cached_states)
++            states = (_advisory_fresh_states(cached_states, now)
++                      if not allow_remote else list(cached_states))
++            if not allow_remote and not 0 <= cached_age < REFRESH_INTERVAL_S:
++                states = []
+             if states:
+                 source = states[0].source
+                 observed_at = states[0].observed_at
+ 
++        if not states and not allow_remote:
++            out.append({
++                "name": name, "states": [], "source": "UNKNOWN",
++                "observed_at": None, "error": "cached_quota_unavailable",
++            })
++            continue
+         if not states:
+             try:
+                 states = _live_glm(name, key)
+@@ -712,7 +767,8 @@
+                        local_estimate: Optional[Dict[str, Any]] = None,
+                        cache_path: Optional[str] = None,
+                        fallback_reader: Optional[Callable[[Optional[float]], Dict[str, Any]]] = None,
+-                       read_remote: bool = True) -> Dict[str, Any]:
++                       read_remote: bool = True,
++                       *, allow_remote: bool = True) -> Dict[str, Any]:
+     """R29 GLM quota decision (W4-G9 multi-account).
+ 
+     State rules:
+@@ -737,6 +793,7 @@
+             # logic drives both code paths.
+             flat = read_provider(
+                 "glm", now_ts=now, cache_path=cache_path,
++                allow_remote=allow_remote,
+             )
+             if flat:
+                 per_account = [{
+@@ -748,7 +805,27 @@
+                 }]
+         else:
+             # W4-G9 multi-account path.
+-            per_account = glm_accounts_state(now_ts=now, cache_path=cache_path)
++            per_account = glm_accounts_state(
++                now_ts=now, cache_path=cache_path, allow_remote=allow_remote,
++            )
++
++    if not allow_remote and per_account:
++        # It is not authoritative to park a whole multi-account GLM pool
++        # when even one account or required quota window is unobserved.
++        def _complete_observed_account(entry: Dict[str, Any]) -> bool:
++            if entry.get("source") != "PROVIDER_AUTHORITATIVE":
++                return False
++            states = entry.get("states") or []
++            for window in ("5h", "weekly"):
++                state = next((item for item in states if item.window == window), None)
++                if state is None:
++                    return False
++                remaining = _num(state.remaining_pct)
++                if remaining is None or not 0.0 <= remaining <= 100.0:
++                    return False
++            return True
++        if not all(_complete_observed_account(entry) for entry in per_account):
++            per_account = []
+ 
+     if not per_account or all(not entry.get("states") for entry in per_account):
+         if local_estimate is None and fallback_reader is not None:

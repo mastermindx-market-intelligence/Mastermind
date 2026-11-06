@@ -1,0 +1,15 @@
+--- a/ext/lease_broker.py
++++ b/ext/lease_broker.py
+@@ -11,7 +11,11 @@
+         # higher-priority (lower number) waiter from someone else blocks us
+         for w in waiters:
+             if w["orchestrator_id"] == orch:
+-                return True
++                # A root's waiter may describe a different sibling's urgency.
++                # Reuse its FIFO position only for the same logical priority.
++                if int(w["priority"]) == my_p:
++                    return True
++                continue
+             if int(w["priority"]) < my_p:
+                 return False
+             if int(w["priority"]) == my_p:

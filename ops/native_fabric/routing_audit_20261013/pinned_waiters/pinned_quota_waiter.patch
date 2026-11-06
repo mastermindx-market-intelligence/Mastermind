@@ -1,0 +1,54 @@
+--- a/ext/lease_broker.py
++++ b/ext/lease_broker.py
+@@ -560,6 +560,30 @@
+                 OSError, sqlite3.Error):
+             return False
+ 
++    def _waiter_pinned_quota_parked(self, pool: str, waiter: sqlite3.Row) -> bool:
++        """A retained pin may yield only on the incumbent quota owner's proof.
++
++        No rerouting, refresh, new grant or waiter deletion occurs. Missing,
++        ambiguous, stale or unqualified quota data keeps the waiter competing.
++        """
++        try:
++            account = waiter["account"]
++            if (type(account) is not str or not account or not self.external_gates
++                    or self.provider_name(pool) != "glm"):
++                return False
++            spec = self.provider(pool)
++            if spec.get("enabled") is False:
++                return False
++            matches = [row for row in (spec.get("accounts") or [])
++                       if isinstance(row, dict) and row.get("name") == account]
++            if len(matches) != 1:
++                return False
++            from quota_remote import cached_glm_account_parked
++            return cached_glm_account_parked(account, now_ts=self.now()) is True
++        except (AttributeError, KeyError, IndexError, TypeError, ValueError,
++                ImportError, OSError, sqlite3.Error):
++            return False
++
+     def _below_share_waiters(
+         self, conn: sqlite3.Connection, pool: str, except_orch: str, share: int,
+         *, include_full_pins: bool = False,
+@@ -568,7 +592,9 @@
+         for w in self._waiters(conn, pool):
+             # Full pins cannot consume unrelated idle slots, but their demand
+             # must still reclaim borrowed capacity at existing step boundaries.
+-            if not include_full_pins and self._waiter_pinned_account_full(conn, pool, w):
++            if not include_full_pins and (
++                    self._waiter_pinned_account_full(conn, pool, w)
++                    or self._waiter_pinned_quota_parked(pool, w)):
+                 continue
+             if w["orchestrator_id"] == except_orch:
+                 continue
+@@ -856,7 +882,8 @@
+         scoped = bool(waiter_id and waiter_id.startswith("rq-"))
+         # A scoped sibling is a separate contender, not this request's FIFO credit.
+         for w in waiters:
+-            if self._waiter_pinned_account_full(conn, pool, w):
++            if (self._waiter_pinned_account_full(conn, pool, w)
++                    or self._waiter_pinned_quota_parked(pool, w)):
+                 continue
+             own_row = (w["orchestrator_id"] == orch and
+                        (w["id"] == waiter_id if scoped else not w["id"].startswith("rq-")))
