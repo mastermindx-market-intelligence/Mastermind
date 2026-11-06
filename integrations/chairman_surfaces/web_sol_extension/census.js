@@ -18,11 +18,21 @@
   const STATES = Object.freeze({
     OBSERVED: "Cue sampled", DISCARDED: "Discarded", FROZEN: "Frozen", LOADING: "Loading / unknown",
     NAVIGATING: "Navigating", NOT_A_CONVERSATION: "No conversation locator", INVALID_TAB: "Invalid tab identity",
-    OUT_OF_SCOPE: "Outside approved scope", PROBE_UNAVAILABLE: "No reachable content script",
+    OUT_OF_SCOPE: "Outside approved scope", PROBE_UNAVAILABLE: "Content probe unreachable",
     PROBE_TIMEOUT: "Probe timed out", INVALID_PROBE: "Probe rejected", TARGET_CHANGED: "Target changed",
     LOOKUP_UNAVAILABLE: "Tab lookup unavailable", SWEEP_DEADLINE: "Not sampled in deadline",
     PROBE_SLOTS_EXHAUSTED: "Probe slots unavailable",
   });
+  const PROBE_FAILURE_STATES = new Set([
+    "PROBE_UNAVAILABLE", "PROBE_TIMEOUT", "INVALID_PROBE", "LOOKUP_UNAVAILABLE",
+    "SWEEP_DEADLINE", "PROBE_SLOTS_EXHAUSTED",
+  ]);
+  const INSTANCE_CONFIG_KEYS = new Set([
+    "schema", "instanceId", "nativeHost", "protocolMajor",
+    "clientPackageVersion", "nativePackageVersion", "extensionPackageVersion",
+    "capabilityDigest",
+  ]);
+  const EXPECTED_EXTENSION_ID = "kmpbpccecbofdnhpcmjogofgmdodpnko";
   let busy = false;
   let generation = 0;
   if (globalThis.addEventListener) globalThis.addEventListener("pagehide", () => {generation++; clearSnapshot();});
@@ -34,34 +44,123 @@
   }
   function metric(value, label) {
     const node = element("div", "", "metric");
-    node.append(element("strong", Number.isSafeInteger(value) ? String(value) : "—"), element("span", label));
+    const display = Number.isSafeInteger(value) ? String(value) :
+      typeof value === "string" && /^\d+\/\d+$/.test(value) ? value : "—";
+    node.append(element("strong", display), element("span", label));
     return node;
   }
   function clearSnapshot() {
     byId("rows").replaceChildren(); byId("summary").replaceChildren();
     byId("scope").textContent = ""; byId("timestamp").textContent = "";
   }
+  function extensionVersion() {
+    try {
+      const manifest = chrome.runtime.getManifest?.();
+      return manifest && typeof manifest.version === "string" && manifest.version ? manifest.version : null;
+    } catch (_) {
+      return null;
+    }
+  }
+  function exactKeys(object, expected) {
+    if (!object || typeof object !== "object" || Array.isArray(object)) return false;
+    const keys = Object.keys(object);
+    return keys.length === expected.size && keys.every(key => expected.has(key));
+  }
+  function validPackageVersion(value) {
+    return typeof value === "string" &&
+      /^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/.test(value);
+  }
+  function renderAdapterContract() {
+    const node = byId("adapter");
+    // census.html is source-fenced to carry this auxiliary diagnostic node, but
+    // the read-only census must remain usable in older/synthetic DOM harnesses.
+    // Missing presentation space is never upgraded into positive package evidence.
+    if (!node) return;
+    const raw = globalThis.MMX_WEB_SOL_INSTANCE;
+    const manifestVersion = extensionVersion();
+    const boundary = "Configuration evidence only; not a live native-host handshake.";
+    if (raw === undefined || raw === null) {
+      node.className = "status warning";
+      node.textContent = `Profile package declaration: unavailable. ${boundary}`;
+      return;
+    }
+    const structurallyValid =
+      chrome.runtime.id === EXPECTED_EXTENSION_ID &&
+      exactKeys(raw, INSTANCE_CONFIG_KEYS) &&
+      raw.schema === "mastermind.web_sol_instance_config.v1" &&
+      typeof raw.instanceId === "string" && /^[0-9a-f]{64}$/.test(raw.instanceId) &&
+      raw.nativeHost === `com.mastermind.web_sol_surface.${raw.instanceId.slice(0, 24)}` &&
+      raw.protocolMajor === 1 &&
+      validPackageVersion(raw.clientPackageVersion) &&
+      validPackageVersion(raw.nativePackageVersion) &&
+      validPackageVersion(raw.extensionPackageVersion) &&
+      typeof raw.capabilityDigest === "string" && /^[0-9a-f]{64}$/.test(raw.capabilityDigest);
+    if (!structurallyValid) {
+      node.className = "status warning";
+      node.textContent = `Profile package declaration: invalid. ${boundary}`;
+      return;
+    }
+    const versions = [
+      raw.clientPackageVersion, raw.nativePackageVersion, raw.extensionPackageVersion,
+    ];
+    const coherent = validPackageVersion(manifestVersion) &&
+      versions.every(version => version === manifestVersion);
+    if (!coherent) {
+      node.className = "status warning";
+      node.textContent =
+        `Profile package declaration: version mismatch · manifest ${manifestVersion || "unknown"} · ` +
+        `client ${raw.clientPackageVersion} · native ${raw.nativePackageVersion} · ` +
+        `extension pin ${raw.extensionPackageVersion}. ${boundary}`;
+      return;
+    }
+    node.className = "status";
+    node.textContent =
+      `Profile package declaration: coherent · extension ${manifestVersion} · ` +
+      `protocol ${raw.protocolMajor} · capability ${raw.capabilityDigest.slice(0, 8)}…. ${boundary}`;
+  }
+  function observationTime(value) {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(value)) return null;
+    const match = value.match(/T(\d{2}:\d{2}:\d{2})/);
+    return match ? `${match[1]} UTC` : null;
+  }
+  function probeWarning(result) {
+    if (!Number.isSafeInteger(result.initial_tab_count) || !Array.isArray(result.rows)) return null;
+    const failed = result.rows.filter(row => PROBE_FAILURE_STATES.has(row.status));
+    if (!failed.length) return null;
+    const measured = Number.isSafeInteger(result.probed_tab_count) ? result.probed_tab_count : 0;
+    const total = result.initial_tab_count;
+    if (result.rows.length === total && failed.length === result.rows.length &&
+        failed.every(row => row.status === "PROBE_UNAVAILABLE")) {
+      return `Document probes unreachable (${measured}/${total}). If this extension was just installed or updated, reload one affected ChatGPT tab and refresh this snapshot.`;
+    }
+    return `Document probe coverage degraded (${measured}/${total}); ${failed.length} tab${failed.length === 1 ? "" : "s"} could not be sampled. Unknown cue state is not evidence that those chats are idle.`;
+  }
   function render(result) {
     const hasInventory = Number.isSafeInteger(result.initial_tab_count);
     byId("summary").replaceChildren(
       metric(result.initial_tab_count, "Tabs in initial query"),
+      metric(hasInventory ? `${result.probed_tab_count}/${result.initial_tab_count}` : null, "Document probes"),
       metric(hasInventory ? result.generation_cue_count : null, "Generation cues"),
       metric(hasInventory ? result.unknown_cue_count : null, "Unknown cue state"),
-      metric(hasInventory ? result.duplicate_tab_count : null, "Extra conversation views"),
     );
     const status = byId("status");
+    const probeWarningText = probeWarning(result);
     status.className = `status${result.inventory_coverage === "UNAVAILABLE" ? " error" :
-      result.inventory_coverage === "PARTIAL" ? " warning" : ""}`;
-    status.textContent = REASONS[result.reason] || "Observation unavailable.";
+      result.inventory_coverage === "PARTIAL" || probeWarningText ? " warning" : ""}`;
+    const inventoryText = REASONS[result.reason] || "Observation unavailable.";
+    status.textContent = probeWarningText ? `${inventoryText} ${probeWarningText}` : inventoryText;
     const scope = "Normal ChatGPT tabs in this profile only · " + (hasInventory
-      ? `${result.probed_tab_count} sampled · ${result.unique_conversation_count} distinct observed conversation locators`
+      ? `${result.probed_tab_count}/${result.initial_tab_count} document probes sampled · ${result.unique_conversation_count} distinct observed conversation locators`
       : "Inventory unavailable");
-    byId("scope").textContent = scope + (result.excluded_private_count ? ` · ${result.excluded_private_count} private tabs excluded` : "") +
+    byId("scope").textContent = scope +
+      (result.duplicate_tab_count ? ` · ${result.duplicate_tab_count} extra conversation view${result.duplicate_tab_count === 1 ? "" : "s"}` : "") +
+      (result.excluded_private_count ? ` · ${result.excluded_private_count} private tabs excluded` : "") +
       (result.omitted_tab_count ? ` · ${result.omitted_tab_count} returned entries omitted` : "") +
       (result.unobserved_added_count ? ` · ${result.unobserved_added_count} new tabs not sampled` : "");
     const when = typeof result.completed_at === "string" && /^\d{4}-\d{2}-\d{2}T/.test(result.completed_at)
       ? result.completed_at.replace("T", " ").replace("Z", " UTC") : "Time unavailable";
-    byId("timestamp").textContent = `${hasInventory ? "Captured" : "Attempted"} ${when} · ${result.duration_ms} ms · Refresh to resample`;
+    const version = extensionVersion();
+    byId("timestamp").textContent = `${version ? `Extension ${version} · ` : ""}${hasInventory ? "Captured" : "Attempted"} ${when} · ${result.duration_ms} ms · Refresh to resample`;
     const rows = byId("rows"); rows.replaceChildren();
     for (const row of result.rows) {
       const tr = document.createElement("tr");
@@ -80,9 +179,18 @@
       browser.append(element("span", STATES[row.status] || "Unknown"));
       browser.append(element("span", row.selected_in_window === true ? "Selected in its window" :
         row.selected_in_window === false ? "Not selected in its window" : "Window selection unknown", "detail"));
+      if (row.visibility === "VISIBLE" || row.visibility === "HIDDEN") {
+        browser.append(element("span", `Document visibility: ${row.visibility.toLowerCase()}`, "detail"));
+      }
+      const observed = observationTime(row.observed_at);
+      if (observed) browser.append(element("span", `Probe observed: ${observed}`, "detail"));
+      if (row.status === "PROBE_UNAVAILABLE") {
+        browser.append(element("span", "If this tab predates the current extension load, reload it once and refresh.", "detail"));
+      }
       const mode = document.createElement("td");
       mode.append(element("span", "Unverified / Unverified"));
       mode.append(element("span", "Served model: unknown", "detail"));
+      mode.append(element("span", "Model/effort telemetry is not implemented in census v1", "detail"));
       tr.append(surface, cue, browser, mode); rows.append(tr);
     }
     if (!result.rows.length) {
@@ -110,5 +218,6 @@
     } finally { if (current === generation) {busy = false; byId("refresh").disabled = false;} }
   }
   byId("refresh").addEventListener("click", refresh);
+  renderAdapterContract();
   refresh();
 })();

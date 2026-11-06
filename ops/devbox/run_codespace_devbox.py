@@ -26,7 +26,11 @@ from integrations.business_mcp_auth.contracts import (
 from integrations.business_mcp_auth.jwks import BoundedJwksCache, HttpxJwksFetcher
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.devbox_mcp.app import create_authenticated_devbox_server
-from integrations.devbox_mcp.codespace_runtime import CodespaceBinding, CodespaceDevBoxRuntime
+from integrations.devbox_mcp.codespace_runtime import (
+    CodespaceBinding,
+    CodespaceDevBoxRuntime,
+    _open_owned_state_leaf,
+)
 from integrations.devbox_mcp.deployment import BoundDevBoxPort, StableDevBoxLease
 from ops.devbox.codespace_preflight import (
     CodespacePreflight,
@@ -201,24 +205,9 @@ class CodespaceDevBoxService:
 
 
 def _open_audit_sink(state_root: Path, policy_id: str) -> DurableAuthAuditSink:
-    directory = state_root / "auth-audit"
-    try:
-        directory.mkdir(mode=stat.S_IRWXU, exist_ok=True)
-        directory.chmod(stat.S_IRWXU)
-        info = directory.lstat()
-    except OSError as exc:
-        raise DevBoxServiceConfigurationError("audit directory could not be prepared") from exc
-    if (
-        not stat.S_ISDIR(info.st_mode)
-        or info.st_uid != os.geteuid()
-        or stat.S_IMODE(info.st_mode) != stat.S_IRWXU
-        or directory.is_symlink()
-    ):
-        _configuration("audit directory security refused")
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     host_fd = -1
     try:
-        host_fd = os.open(directory, flags)
+        host_fd = _open_owned_state_leaf(state_root, "auth-audit")
         return DurableAuthAuditSink.open(host_fd, policy_id=policy_id)
     except Exception as exc:
         raise DevBoxServiceConfigurationError("durable auth audit could not be opened") from exc

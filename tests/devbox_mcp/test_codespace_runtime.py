@@ -1090,3 +1090,164 @@ def test_supervisor_reconciles_when_primary_effect_receipt_write_is_lost(
         asyncio.run(runtime.read_process({"process_ref": process_ref, "max_bytes": 65536}))
     assert exc_info.value.code == "RECEIPT_UNAVAILABLE"
     real_atomic(terminal_path, valid_terminal)
+
+
+# Startup custody is a filesystem boundary. Model only the immutable Git
+# observations so these cases create no command process or repository checkout.
+@pytest.fixture
+def startup_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    repo_root = tmp_path / "startup-repo"
+    repo_root.mkdir()
+    state_root = tmp_path / "startup-state"
+    committed_head = "a" * 40
+
+    def observe_git(path: Path, *args: str) -> str:
+        assert path == repo_root.resolve()
+        assert args == ("rev-parse", "HEAD")
+        return committed_head
+
+    monkeypatch.setattr(runtime_module, "_git", observe_git)
+    monkeypatch.setattr(runtime_module, "_working_tree_snapshot", lambda path: b"")
+    binding = CodespaceBinding(
+        target_ref="target:" + "1" * 64,
+        generation="generation:" + "2" * 64,
+        owner_ref="owner:" + "3" * 64,
+        repository="mastermindx-market-intelligence/Mastermind",
+        committed_head=committed_head,
+    )
+
+    def open_runtime():
+        return CodespaceDevBoxRuntime.open(
+            repo_root=repo_root,
+            state_root=state_root,
+            binding=binding,
+            platform_name="linux",
+            shell_path=Path("/bin/bash"),
+        )
+
+    return state_root, open_runtime
+
+
+def _startup_directory_snapshot(path: Path):
+    info = path.lstat()
+    return (
+        info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode,
+        (path / "sentinel").read_bytes(),
+        tuple(sorted(child.name for child in path.iterdir())),
+    )
+
+
+@pytest.mark.parametrize("leaf_name", ["operations", "home"])
+def test_startup_leaf_symlink_refuses_without_changing_target(
+    startup_open, tmp_path: Path, leaf_name: str
+) -> None:
+    state, open_runtime = startup_open
+    open_runtime()  # A valid baseline prevents an unrelated missing-baseline refusal.
+    baseline = (state / "baseline.json").read_bytes()
+    leaf = state / leaf_name
+    leaf.rmdir()
+    target = tmp_path / "external"
+    target.mkdir()
+    target.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP)
+    (target / "sentinel").write_bytes(b"external state must remain unchanged")
+    before = _startup_directory_snapshot(target)
+    leaf.symlink_to(target, target_is_directory=True)
+    link_before = leaf.lstat()
+
+    with pytest.raises(DevBoxRuntimeError) as caught:
+        open_runtime()
+
+    assert caught.value.code == "RUNTIME_UNQUALIFIED"
+    assert _startup_directory_snapshot(target) == before
+    assert leaf.is_symlink() and leaf.readlink() == target
+    assert (leaf.lstat().st_dev, leaf.lstat().st_ino) == (
+        link_before.st_dev, link_before.st_ino
+    )
+    assert (state / "baseline.json").read_bytes() == baseline
+
+
+@pytest.mark.parametrize("leaf_name", ["operations", "home"])
+@pytest.mark.parametrize("condition", ["new", "private", "loose"])
+def test_startup_leaf_creation_and_owned_reuse(
+    startup_open, leaf_name: str, condition: str
+) -> None:
+    state, open_runtime = startup_open
+    leaf = state / leaf_name
+    before = None
+    if condition != "new":
+        open_runtime()
+        (leaf / "sentinel").write_bytes(b"preserved owned state")
+        if condition == "loose":
+            leaf.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP)
+        before = _startup_directory_snapshot(leaf)
+
+    open_runtime()
+
+    after = leaf.lstat()
+    assert stat.S_ISDIR(after.st_mode) and not leaf.is_symlink()
+    assert after.st_uid == os.geteuid()
+    assert stat.S_IMODE(after.st_mode) == stat.S_IRWXU
+    if before is not None:
+        assert (after.st_dev, after.st_ino, after.st_uid, after.st_gid) == before[:4]
+        assert (leaf / "sentinel").read_bytes() == before[5]
+        assert tuple(sorted(child.name for child in leaf.iterdir())) == before[6]
+
+
+@pytest.mark.parametrize("leaf_name", ["operations", "home"])
+@pytest.mark.parametrize("replacement", ["directory", "symlink"])
+def test_startup_leaf_replacement_before_open_refuses(
+    startup_open, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    leaf_name: str, replacement: str,
+) -> None:
+    state, open_runtime = startup_open
+    open_runtime()
+    baseline = (state / "baseline.json").read_bytes()
+    leaf = state / leaf_name
+    leaf.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP)
+    (leaf / "sentinel").write_bytes(b"original owned leaf")
+    original = _startup_directory_snapshot(leaf)
+    detached = state / (leaf_name + "-detached")
+    target = tmp_path / "replacement"
+    target.mkdir()
+    target.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP)
+    (target / "sentinel").write_bytes(b"replacement must remain unchanged")
+    target_before = _startup_directory_snapshot(target)
+    real_open = os.open
+    replaced = False
+
+    def replace_before_open(path, flags, *args, **kwargs):
+        nonlocal replaced
+        if path == leaf_name and kwargs.get("dir_fd") is not None and not replaced:
+            replaced = True
+            leaf.rename(detached)
+            if replacement == "symlink":
+                leaf.symlink_to(target, target_is_directory=True)
+            else:
+                target.rename(leaf)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(runtime_module.os, "open", replace_before_open)
+    with pytest.raises(DevBoxRuntimeError) as caught:
+        open_runtime()
+
+    assert caught.value.code == "RUNTIME_UNQUALIFIED"
+    assert replaced
+    assert _startup_directory_snapshot(detached) == original
+    replacement_path = target if replacement == "symlink" else leaf
+    assert _startup_directory_snapshot(replacement_path) == target_before
+    if replacement == "symlink":
+        assert leaf.is_symlink() and leaf.readlink() == target
+    assert (state / "baseline.json").read_bytes() == baseline
+
+
+def test_startup_dirty_source_refuses_before_leaf_creation(
+    startup_open, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state, open_runtime = startup_open
+    monkeypatch.setattr(runtime_module, "_working_tree_snapshot", lambda path: b" M tracked\0")
+    with pytest.raises(DevBoxRuntimeError) as caught:
+        open_runtime()
+    assert caught.value.code == "SOURCE_DIRTY"
+    assert not (state / "operations").exists()
+    assert not (state / "home").exists()
+    assert not (state / "baseline.json").exists()

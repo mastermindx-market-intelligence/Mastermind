@@ -503,3 +503,109 @@ def test_exact_sanitized_marker_environment_is_accepted_without_reexec(
     assert observed["build"]["lease_file"] == "/tmp/lease"
     assert observed["uvicorn"]["host"] == "127.0.0.1"
     assert fake_service.closed is True
+
+
+def _audit_startup_snapshot(path: Path):
+    info = path.lstat()
+    return (
+        info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode,
+        (path / "sentinel").read_bytes(),
+        tuple(sorted(child.name for child in path.iterdir())),
+    )
+
+
+def test_audit_startup_symlink_refuses_without_changing_target(tmp_path: Path) -> None:
+    from ops.devbox import run_codespace_devbox as entrypoint_module
+
+    state = tmp_path / "state"
+    state.mkdir(mode=stat.S_IRWXU)
+    target = tmp_path / "external"
+    target.mkdir()
+    target.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP)
+    (target / "sentinel").write_bytes(b"external audit state must stay untouched")
+    before = _audit_startup_snapshot(target)
+    leaf = state / "auth-audit"
+    leaf.symlink_to(target, target_is_directory=True)
+    link_before = leaf.lstat()
+
+    with pytest.raises(DevBoxServiceConfigurationError):
+        entrypoint_module._open_audit_sink(state, "mastermind.devbox.execute.v1")
+
+    assert _audit_startup_snapshot(target) == before
+    assert leaf.is_symlink() and leaf.readlink() == target
+    assert (leaf.lstat().st_dev, leaf.lstat().st_ino) == (
+        link_before.st_dev, link_before.st_ino
+    )
+
+
+@pytest.mark.parametrize("condition", ["new", "private", "loose"])
+def test_audit_startup_creation_and_owned_reuse(tmp_path: Path, condition: str) -> None:
+    from ops.devbox import run_codespace_devbox as entrypoint_module
+
+    state = tmp_path / "state"
+    state.mkdir(mode=stat.S_IRWXU)
+    leaf = state / "auth-audit"
+    before = None
+    if condition != "new":
+        leaf.mkdir(mode=stat.S_IRWXU)
+        (leaf / "sentinel").write_bytes(b"owned audit marker")
+        if condition == "loose":
+            leaf.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP)
+        before = _audit_startup_snapshot(leaf)
+
+    sink = entrypoint_module._open_audit_sink(state, "mastermind.devbox.execute.v1")
+    sink.close()
+
+    observed = leaf.lstat()
+    assert stat.S_ISDIR(observed.st_mode) and not leaf.is_symlink()
+    assert observed.st_uid == os.geteuid()
+    assert stat.S_IMODE(observed.st_mode) == stat.S_IRWXU
+    if before is not None:
+        assert (observed.st_dev, observed.st_ino, observed.st_uid, observed.st_gid) == before[:4]
+        assert (leaf / "sentinel").read_bytes() == before[5]
+
+
+@pytest.mark.parametrize("replacement", ["directory", "symlink"])
+def test_audit_startup_replacement_before_open_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replacement: str
+) -> None:
+    from integrations.devbox_mcp import codespace_runtime as runtime_module
+    from ops.devbox import run_codespace_devbox as entrypoint_module
+
+    state = tmp_path / "state"
+    state.mkdir(mode=stat.S_IRWXU)
+    leaf = state / "auth-audit"
+    leaf.mkdir()
+    leaf.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP)
+    (leaf / "sentinel").write_bytes(b"original audit state")
+    original = _audit_startup_snapshot(leaf)
+    detached = state / "audit-detached"
+    target = tmp_path / "replacement"
+    target.mkdir()
+    target.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP)
+    (target / "sentinel").write_bytes(b"replacement audit state")
+    target_before = _audit_startup_snapshot(target)
+    real_open = os.open
+    replaced = False
+
+    def replace_before_open(path, flags, *args, **kwargs):
+        nonlocal replaced
+        if path == "auth-audit" and kwargs.get("dir_fd") is not None and not replaced:
+            replaced = True
+            leaf.rename(detached)
+            if replacement == "symlink":
+                leaf.symlink_to(target, target_is_directory=True)
+            else:
+                target.rename(leaf)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(runtime_module.os, "open", replace_before_open)
+    with pytest.raises(DevBoxServiceConfigurationError):
+        entrypoint_module._open_audit_sink(state, "mastermind.devbox.execute.v1")
+
+    assert replaced
+    assert _audit_startup_snapshot(detached) == original
+    replacement_path = target if replacement == "symlink" else leaf
+    assert _audit_startup_snapshot(replacement_path) == target_before
+    if replacement == "symlink":
+        assert leaf.is_symlink() and leaf.readlink() == target

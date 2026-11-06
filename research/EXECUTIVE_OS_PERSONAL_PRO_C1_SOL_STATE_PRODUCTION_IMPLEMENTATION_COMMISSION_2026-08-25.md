@@ -1,5 +1,7 @@
 # Executive OS Personal-Pro C1 — Production SOL_STATE Read Lane Implementation Commission
 
+> **Current amendment (2026-10-06):** `research/SHARED_EXECUTIVE_SLACK_RELAY_CONSOLIDATION_2026-10-06.md` permits the existing Executive Relay Slack app/credential to serve both C1 and A2 with the exact three-scope union while preserving separate native services and channel policy.
+
 **Date:** 2026-08-25  
 **Commissioner:** Sol, AI CEO  
 **Chairman authority:** current directive to finish Autonomy V1 rapidly with Sol program ownership and reduced permission loops  

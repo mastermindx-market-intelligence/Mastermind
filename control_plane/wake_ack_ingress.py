@@ -177,6 +177,18 @@ def acknowledge_consumed_wakes(
 
             existing_count = sum(existing is not None for _, _, existing in prepared)
             if existing_count:
+                for obligation, delivered, existing in prepared:
+                    if existing is not None and existing.ack is not None and existing.ack.native_continuation is not None:
+                        from control_plane.native_continuation import native_continuation_ack_evidence
+                        request_record = next(item for item in repository.list_ledger_records_on_connection(
+                            connection, obligation.obligation_id) if item.phase is LedgerPhase.WAKE_REQUESTED)
+                        try:
+                            current = native_continuation_ack_evidence(runtime, request_record, delivered,
+                                                                     trusted, connection=connection)
+                            if current != existing.ack.native_continuation:
+                                raise ValueError("native continuation ACK changed")
+                        except Exception:
+                            raise WakeAckIngressError("native continuation ACK replay differs") from None
                 if existing_count != len(prepared):
                     raise WakeAckIngressError(
                         "coalesced Wake ACK replay is only partially persisted"
@@ -203,10 +215,6 @@ def acknowledge_consumed_wakes(
             records_to_append = []
             batch_identity = None
             for obligation, delivered, _existing in prepared:
-                if obligation.attempt_id == trusted.target_attempt_id:
-                    raise WakeAckIngressError(
-                        "target Attempt cannot be inferred from the Wake source Attempt"
-                    )
                 try:
                     target = registry.get(str(delivered.session_alias or ""))
                 except SessionTargetError as exc:
@@ -294,6 +302,20 @@ def acknowledge_consumed_wakes(
                     claimed_obligation_ids=claim.obligation_ids,
                     delivered_command_id=delivered.command_id,
                 )
+                if obligation.attempt_id == trusted.target_attempt_id:
+                    # Only the canonical session-return owner can establish this
+                    # explicit self-targeted CONTINUE. Generic source inference
+                    # remains forbidden. The transport already checked the exact
+                    # terminal native turn before creating the trusted projection.
+                    from control_plane.native_continuation import native_continuation_ack_evidence
+                    request_record = next(item for item in repository.list_ledger_records_on_connection(
+                        connection, obligation.obligation_id) if item.phase is LedgerPhase.WAKE_REQUESTED)
+                    try:
+                        evidence = native_continuation_ack_evidence(runtime, request_record, delivered,
+                                                                   trusted, connection=connection)
+                    except Exception:
+                        raise WakeAckIngressError("target Attempt cannot be inferred from the Wake source Attempt") from None
+                    ack = dataclasses.replace(ack, native_continuation=evidence)
                 records_to_append.append((ack_record(obligation, ack), None))
 
             return repository.append_records_on_connection(

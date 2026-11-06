@@ -270,6 +270,92 @@ def _lstat_real_directory(path: Path) -> os.stat_result:
     return observed
 
 
+def _open_owned_state_leaf(
+    state_root: Path,
+    name: str,
+    *,
+    expected_parent: os.stat_result | None = None,
+) -> int:
+    """Prepare a fixed state leaf without chmod following a replacement path.
+
+    The caller owns the returned descriptor. This verifies startup custody; it
+    does not isolate the runtime from an arbitrary concurrent same-UID actor.
+    """
+    if name not in {"operations", "home", "auth-audit"}:
+        raise DevBoxRuntimeError("RUNTIME_UNQUALIFIED", "state leaf is not supported")
+    required = (getattr(os, "O_DIRECTORY", 0), getattr(os, "O_NOFOLLOW", 0),
+                getattr(os, "O_CLOEXEC", 0))
+    if not all(required):
+        raise DevBoxRuntimeError("RUNTIME_UNQUALIFIED", "secure directory open is unavailable")
+    flags = os.O_RDONLY | required[0] | required[1] | required[2]
+
+    def identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
+        return (info.st_dev, info.st_ino, info.st_uid, info.st_gid,
+                stat.S_IFMT(info.st_mode))
+
+    def owned_directory(info: os.stat_result) -> bool:
+        return stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid()
+
+    parent_fd = leaf_fd = -1
+    try:
+        parent = state_root.lstat() if expected_parent is None else expected_parent
+        if not owned_directory(parent) or stat.S_IMODE(parent.st_mode) != stat.S_IRWXU:
+            raise DevBoxRuntimeError("RUNTIME_UNQUALIFIED", "state parent custody refused")
+        parent_fd = os.open(state_root, flags)
+        opened_parent = os.fstat(parent_fd)
+        named_parent = state_root.lstat()
+        if (
+            identity(opened_parent) != identity(parent)
+            or identity(named_parent) != identity(parent)
+            or opened_parent.st_mode != parent.st_mode
+            or named_parent.st_mode != parent.st_mode
+            or os.get_inheritable(parent_fd)
+        ):
+            raise DevBoxRuntimeError("RUNTIME_UNQUALIFIED", "state parent identity changed")
+        try:
+            named = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            # A competing creator is a refusal, not permission to adopt its leaf.
+            os.mkdir(name, mode=stat.S_IRWXU, dir_fd=parent_fd)
+            named = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        if not owned_directory(named):
+            raise DevBoxRuntimeError("RUNTIME_UNQUALIFIED", "state leaf custody refused")
+        leaf_fd = os.open(name, flags, dir_fd=parent_fd)
+        opened = os.fstat(leaf_fd)
+        current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        current_parent = state_root.lstat()
+        if (
+            identity(opened) != identity(named)
+            or identity(current) != identity(named)
+            or opened.st_mode != named.st_mode
+            or current.st_mode != named.st_mode
+            or identity(current_parent) != identity(parent)
+            or current_parent.st_mode != parent.st_mode
+            or os.get_inheritable(leaf_fd)
+        ):
+            raise DevBoxRuntimeError("RUNTIME_UNQUALIFIED", "state leaf identity changed")
+        if stat.S_IMODE(opened.st_mode) != stat.S_IRWXU:
+            os.fchmod(leaf_fd, stat.S_IRWXU)
+        prepared = os.fstat(leaf_fd)
+        current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            identity(prepared) != identity(named)
+            or identity(current) != identity(named)
+            or stat.S_IMODE(prepared.st_mode) != stat.S_IRWXU
+            or current.st_mode != prepared.st_mode
+        ):
+            raise DevBoxRuntimeError("RUNTIME_UNQUALIFIED", "prepared state leaf changed")
+        result, leaf_fd = leaf_fd, -1
+        return result
+    except OSError as exc:
+        raise DevBoxRuntimeError("RUNTIME_UNQUALIFIED", "state leaf could not be prepared") from exc
+    finally:
+        if leaf_fd >= 0:
+            os.close(leaf_fd)
+        if parent_fd >= 0:
+            os.close(parent_fd)
+
+
 def _is_relative_to(path: Path, other: Path) -> bool:
     try:
         path.relative_to(other)
@@ -600,11 +686,9 @@ class CodespaceDevBoxRuntime:
                     "working_tree_dirty": baseline_dirty,
                 },
             )
-        operations.mkdir(mode=stat.S_IRWXU, exist_ok=True)
-        operations.chmod(stat.S_IRWXU)
-        home = state_real / "home"
-        home.mkdir(mode=stat.S_IRWXU, exist_ok=True)
-        home.chmod(stat.S_IRWXU)
+        for name in ("operations", "home"):
+            leaf_fd = _open_owned_state_leaf(state_real, name, expected_parent=state_stat)
+            os.close(leaf_fd)
         return cls(
             repo_root=repo_real,
             state_root=state_real,
