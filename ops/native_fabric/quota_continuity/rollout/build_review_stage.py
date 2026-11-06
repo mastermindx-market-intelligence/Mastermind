@@ -304,10 +304,13 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         raise ValueError("native Go executor is not the exact composed source")
     historical["ext/remote_sub_exec.py"] = GO_BASE_EXECUTOR_SHA256
     for name, original in GO_SELECTION_SUPPORT_PREIMAGES.items():
-        if manifest["ext/" + name] not in {
-                original, GO_SELECTION_SUPPORT_DIGESTS[name],
-                BROKER_BUSY_DIGESTS["quota_circuit.py"]
-                if name == "quota_circuit.py" else original}:
+        allowed = {original, GO_SELECTION_SUPPORT_DIGESTS[name]}
+        if name == "quota_circuit.py":
+            # The complete six-member pre-busy epoch retains the exact
+            # already-published quota-circuit preimage. The busy cohort
+            # guard above rejects any partial/mixed fallback source.
+            allowed.add(BROKER_BUSY_QUOTA_PREIMAGE)
+        if manifest["ext/" + name] not in allowed:
             raise ValueError("native Go selection support is not the exact composed source")
         historical["ext/" + name] = original
     if manifest["ext/provider_outcome.py"] not in {
