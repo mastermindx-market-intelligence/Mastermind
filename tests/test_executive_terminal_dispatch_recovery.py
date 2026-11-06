@@ -115,3 +115,44 @@ def test_terminal_reader_refuses_unbound_or_resolved_history_without_writes(tmp_
         )
     assert _facts(runtime) == before
     assert runtime.events.list_events() == events_before
+
+
+def test_resolved_terminal_reader_requires_exact_reconciliation_and_stays_read_only(tmp_path):
+    runtime, root_id, job_id, command, attempt_id = _failed_planner(tmp_path)
+    with pytest.raises(StateConflict):
+        runtime.attempts.reconciled_terminal_cycle_dispatch_outcome(job_id, command_id=command)
+    receipt = runtime.attempts.terminal_cycle_dispatch_outcome(job_id, command_id=command)
+    runtime.jobs.reconcile_cycle_dispatch_effect(root_id, selected_job_id=job_id,
+                                                dispatch_command_id=command, receipt=receipt)
+    before, events = _facts(runtime), runtime.events.list_events()
+    observed = runtime.attempts.reconciled_terminal_cycle_dispatch_outcome(job_id, command_id=command)
+    assert observed.attempt.attempt_id == attempt_id
+    assert observed.outcome == "TERMINAL" and observed.lease_token is None
+    assert observed.claimed_now is False
+    assert _facts(runtime) == before and runtime.events.list_events() == events
+    with pytest.raises(StateConflict):
+        runtime.attempts.terminal_cycle_dispatch_outcome(job_id, command_id=command)
+
+
+@pytest.mark.parametrize("malformed", [False, True])
+def test_selector_validates_terminal_block_before_current_policy_binding(tmp_path, malformed):
+    runtime, root_id, job_id, command, _attempt_id = _failed_planner(tmp_path)
+    receipt = runtime.attempts.terminal_cycle_dispatch_outcome(job_id, command_id=command)
+    runtime.jobs.reconcile_cycle_dispatch_effect(root_id, selected_job_id=job_id,
+                                                dispatch_command_id=command, receipt=receipt)
+    def forbidden(*args):
+        raise AssertionError("blocked root cannot reach current dispatch binding or provider")
+    assert CooCycle(runtime, dispatcher=forbidden).run_once(root_id).action == "BLOCKED"
+    if malformed:
+        with runtime.store.transaction() as conn:
+            # Test the reader against deliberately corrupted historical bytes.
+            conn.execute("DROP TRIGGER events_are_immutable_update")
+            conn.execute("UPDATE events SET actor='foreign' WHERE event_type='COO_CYCLE_BLOCKED' AND job_id=?", (root_id,))
+    service = ExecutiveControlService(_config(tmp_path / "host"))
+    service.runtime = runtime
+    service._is_bound_coo_root = forbidden
+    if malformed:
+        with pytest.raises(StateConflict):
+            service._next_bound_coo_root()
+    else:
+        assert service._next_bound_coo_root() is None

@@ -710,8 +710,16 @@ def _bind_command_host(runtime: WorkbenchActionRuntime, config: TunnelConfig) ->
     )
 
 
+def load_private_json(path: str, *, maximum: int = MAX_CONFIG_BYTES) -> dict[str, object]:
+    """Read one same-UID private configuration document with tunnel hardening."""
+
+    if type(maximum) is not int or not 1 <= maximum <= 4 * 1024 * 1024:
+        _refuse()
+    return _secure_json(path, maximum=maximum)
+
+
 def load_tunnel_config(path: str) -> TunnelConfig:
-    return parse_tunnel_config(_secure_json(path, maximum=MAX_CONFIG_BYTES))
+    return parse_tunnel_config(load_private_json(path))
 
 
 def _secure_action_key(path: str) -> bytes:
@@ -1506,14 +1514,27 @@ async def _serve_modern_stdio(server: Server, first_line: str) -> None:
         line = await read_bounded_stdio_line()
 
 
-async def run_stdio(runtime: WorkbenchActionRuntime, *, close_timeout_seconds: float) -> None:
-    """Serve one fixed channel over stdio and always close the runtime owner."""
+async def run_server_stdio(
+    runtime: WorkbenchActionRuntime,
+    *,
+    server_factory,
+    close_timeout_seconds: float,
+) -> None:
+    """Serve one fixed-channel MCP server and always close the runtime owner.
+
+    The caller selects only the model-facing tool server. Runtime/lease/audit/
+    artifact/process ownership remains the existing Workbench runtime.
+    """
 
     if not isinstance(runtime, WorkbenchActionRuntime):
         raise ValueError("WORKBENCH_ACTION_RUNTIME_REQUIRED")
+    if not callable(server_factory):
+        raise ValueError("WORKBENCH_STDIO_SERVER_FACTORY_REQUIRED")
     primary: BaseException | None = None
     try:
-        server = create_tunnel_action_server(runtime)
+        server = server_factory(runtime)
+        if not isinstance(server, Server):
+            raise ValueError("WORKBENCH_STDIO_SERVER_REQUIRED")
         options = server.create_initialization_options(
             notification_options=NotificationOptions(),
             experimental_capabilities={},
@@ -1539,6 +1560,16 @@ async def run_stdio(runtime: WorkbenchActionRuntime, *, close_timeout_seconds: f
             if primary is None:
                 raise
             raise close_error from primary
+
+
+async def run_stdio(runtime: WorkbenchActionRuntime, *, close_timeout_seconds: float) -> None:
+    """Serve the existing Action fixed-channel surface over stdio."""
+
+    await run_server_stdio(
+        runtime,
+        server_factory=create_tunnel_action_server,
+        close_timeout_seconds=close_timeout_seconds,
+    )
 
 
 async def _serve(config: TunnelConfig) -> int:
@@ -1575,8 +1606,10 @@ __all__ = [
     "TunnelConfigurationError",
     "create_runtime_channel",
     "create_tunnel_action_server",
+    "load_private_json",
     "load_tunnel_config",
     "parse_tunnel_config",
     "run_configured_stdio",
+    "run_server_stdio",
     "run_stdio",
 ]

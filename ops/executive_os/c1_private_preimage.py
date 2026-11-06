@@ -100,6 +100,7 @@ SOCKET_METADATA_PATHS = (
     "/var/run/mastermind-executive/ceo-ingress.sock",
     "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
     "/var/run/mastermind-agent-relay/agent-relay.sock",
+    "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
 )
 METADATA_PATHS = (
     f"{SYSTEM_ROOT}/config/sol-state-relay.json",
@@ -985,10 +986,12 @@ def _agent_relay_prepared_only(
 ) -> bool:
     """Recognize A2's credential-free prepared-only Agent Relay state.
 
-    The host-preparation owner intentionally creates only the fixed service
-    principal and directories. It creates no plist, config, token or socket
-    and does not load or enable the service. That accepted inert state must
-    not make an otherwise coherent stopped Executive installation ambiguous.
+    The host-preparation owner creates the fixed principal and directories,
+    and now establishes an explicit disabled override after proving the Relay
+    unloaded. It creates no plist, config, token or socket and never loads the
+    service. Legacy preparation without an override remains an inert install
+    preimage; enrollment separately requires an explicit disabled override.
+    Neither prepared-only variant is evidence of enrollment readiness.
     """
 
     label = "com.mastermind.executive.agent-relay"
@@ -999,6 +1002,7 @@ def _agent_relay_prepared_only(
         f"{SYSTEM_ROOT}/config/agent-relay.json",
         f"{SYSTEM_ROOT}/config/agent-relay.token",
         "/var/run/mastermind-agent-relay/agent-relay.sock",
+        "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
     )
     if any(
         metadata_by_path.get(path, {}).get("exists") is not False
@@ -1110,7 +1114,7 @@ def _valid_agent_arguments(arguments: list[Any], release_sha: str) -> bool:
         3: "-B",
         4: f"{release}/scripts/slack_agent_dialogue_service.py",
         5: "--socket-path",
-        6: "/var/run/mastermind-agent-relay/agent-relay.sock",
+        6: "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
         7: "--token-file",
         8: f"{SYSTEM_ROOT}/config/agent-relay.token",
         9: "--workspace-id",
@@ -1338,6 +1342,11 @@ def _metadata_contract(path: str) -> dict[str, int | str | None]:
         ),
         "/var/run/mastermind-agent-relay/agent-relay.sock": (457, 457, 0o660),
     }
+    # Old and durable A2 socket identities are the same security contract;
+    # do not introduce a second principal or independent mode constant.
+    socket_contracts["/var/db/mastermind-agent-relay/socket/agent-relay.sock"] = (
+        socket_contracts["/var/run/mastermind-agent-relay/agent-relay.sock"]
+    )
     if path in socket_contracts:
         uid, gid, mode = socket_contracts[path]
         return {
@@ -2022,6 +2031,7 @@ def _collect_preimage_facts(
             "/var/run/mastermind-executive/ceo-ingress.sock",
             "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
             "/var/run/mastermind-agent-relay/agent-relay.sock",
+            "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
         }
         for item in metadata
     )

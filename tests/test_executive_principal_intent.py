@@ -136,12 +136,17 @@ def test_bounded_code_profile_keeps_runtime_policy_and_zero_attempts(tmp_path):
 
 
 def test_concurrent_submission_uses_existing_event_uniqueness(tmp_path):
-    Runtime.at(tmp_path / "runtime")
+    runtimes = [Runtime.at(tmp_path / "runtime") for _ in range(2)]
     barrier = threading.Barrier(2)
-    def synchronize(_):
-        barrier.wait(timeout=10)
-    def worker(_):
-        return submit(Runtime.at(tmp_path / "runtime"), tmp_path, guard=synchronize)
+    def worker(index):
+        runtime = runtimes[index]
+        create = runtime.jobs.create_job
+        def synchronized_create(*args, **kwargs):
+            # Synchronize creators before either holds the SQLite writer lock.
+            barrier.wait(timeout=10)
+            return create(*args, **kwargs)
+        runtime.jobs.create_job = synchronized_create
+        return submit(runtime, tmp_path)
     with ThreadPoolExecutor(2) as workers:
         receipts = list(workers.map(worker, range(2)))
     assert len({r["job_id"] for r in receipts}) == 1
@@ -231,3 +236,134 @@ def test_guard_must_return_none_not_a_truthy_or_falsy_grant(tmp_path, returned):
     with pytest.raises(sink.CeoIntentError, match="principal admission refused"):
         submit(runtime, tmp_path, guard=lambda _: returned)
     assert runtime.jobs.list_jobs() == []
+
+
+def test_principal_guard_runs_after_sqlite_lock_wait_and_leaves_no_effect(tmp_path):
+    from contextlib import contextmanager
+    holder = Runtime.at(tmp_path / "runtime")
+    writer = Runtime.at(tmp_path / "runtime")
+    entered = threading.Event()
+    current = [True]
+    outcome = []
+    original = writer.store.transaction
+    @contextmanager
+    def waiting_transaction():
+        entered.set()
+        with original() as connection:
+            yield connection
+    writer.store.transaction = waiting_transaction
+    def guard(_):
+        if not current[0]:
+            raise ValueError("private role was relieved")
+    def contender():
+        try:
+            submit(writer, tmp_path, guard=guard)
+        except sink.CeoIntentError:
+            outcome.append("refused")
+        else:
+            outcome.append("accepted")
+    with holder.store.transaction():
+        thread = threading.Thread(target=contender)
+        thread.start()
+        assert entered.wait(10)
+        assert thread.is_alive()
+        current[0] = False
+    thread.join(10)
+    assert not thread.is_alive()
+    assert outcome == ["refused"]
+    assert writer.jobs.list_jobs() == []
+    assert writer.events.list_events() == []
+    with pytest.raises(sink.CeoIntentError):
+        sink.resolve_intent(writer, bundle(tmp_path)["intent_id"])
+
+
+def test_principal_relief_during_insert_rolls_back_job_and_receipt(tmp_path):
+    runtime = Runtime.at(tmp_path / "runtime")
+    current = [True]
+    create = runtime.jobs._create_job_in_transaction
+    def insert_then_relieve(*args, **kwargs):
+        job = create(*args, **kwargs)
+        current[0] = False
+        return job
+    runtime.jobs._create_job_in_transaction = insert_then_relieve
+    def guard(_):
+        if not current[0]:
+            raise ValueError("private owner diagnostic")
+    with pytest.raises(sink.CeoIntentError) as error:
+        submit(runtime, tmp_path, guard=guard)
+    assert "private owner diagnostic" not in str(error.value)
+    assert runtime.jobs.list_jobs() == []
+    assert runtime.events.list_events() == []
+    with pytest.raises(sink.CeoIntentError):
+        sink.resolve_intent(runtime, bundle(tmp_path)["intent_id"])
+
+
+def test_accepted_command_arriving_during_wait_precedes_revoked_guard(tmp_path):
+    from contextlib import contextmanager
+    probe = Runtime.at(tmp_path / "probe")
+    captured = []
+    create = probe.jobs._create_job_in_transaction
+    def capture(connection, *, spec):
+        captured.append(spec)
+        return create(connection, spec=spec)
+    probe.jobs._create_job_in_transaction = capture
+    submit(probe, tmp_path)
+    holder = Runtime.at(tmp_path / "runtime")
+    writer = Runtime.at(tmp_path / "runtime")
+    entered = threading.Event()
+    current = [True]
+    results = []
+    original = writer.store.transaction
+    @contextmanager
+    def waiting_transaction():
+        entered.set()
+        with original() as connection:
+            yield connection
+    writer.store.transaction = waiting_transaction
+    def guard(_):
+        if not current[0]:
+            raise ValueError("role relieved after original admission")
+    def contender():
+        try:
+            results.append(submit(writer, tmp_path, guard=guard))
+        except Exception as error:
+            results.append(error)
+    with holder.store.transaction() as connection:
+        thread = threading.Thread(target=contender)
+        thread.start()
+        assert entered.wait(10)
+        accepted = holder.jobs._create_job_in_transaction(connection, spec=captured[0])
+        current[0] = False
+    thread.join(10)
+    assert not thread.is_alive()
+    assert len(results) == 1 and isinstance(results[0], dict)
+    assert results[0]["duplicate"] is True and results[0]["job_id"] == accepted.job_id
+    assert len(writer.jobs.list_jobs()) == len(writer.events.list_events()) == 1
+
+
+@pytest.mark.parametrize("async_function", [True, False])
+def test_async_principal_guard_refuses_without_leaking_coroutine(tmp_path, async_function):
+    import warnings
+    coroutines = []
+    async def asynchronous(_):
+        return None
+    def returning_coroutine(value):
+        result = asynchronous(value)
+        coroutines.append(result)
+        return result
+    runtime = Runtime.at(tmp_path / "runtime")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        with pytest.raises(sink.CeoIntentError):
+            submit(runtime, tmp_path, guard=asynchronous if async_function else returning_coroutine)
+    assert all(item.cr_frame is None for item in coroutines)
+    assert runtime.jobs.list_jobs() == runtime.events.list_events() == []
+
+
+def test_public_intent_cannot_supply_internal_creation_guard(tmp_path):
+    candidate = bundle(tmp_path)
+    candidate["envelope"]["_principal_commit_guard"] = "caller-forged-ceo-role"
+    runtime = Runtime.at(tmp_path / "runtime")
+    with pytest.raises(sink.CeoIntentError):
+        submit(runtime, tmp_path, candidate)
+    assert runtime.jobs.list_jobs() == runtime.events.list_events() == []

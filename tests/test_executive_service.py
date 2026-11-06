@@ -1092,8 +1092,13 @@ def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit
     generic_v2_history = WakeLedgerRepository(runtime).list_records(
         generic_v2_obligation.obligation_id
     )
-    assert generic_v2_history[0].record.physical_source is None
+    # Generic armed delivery must retain the same physical source as canary
+    # delivery; dropping it leaves the recipient's reply reference stale.
+    assert generic_v2_history[0].record.physical_source == generic_v2_physical
     assert len(operator.calls) == 3
+    assert asyncio.run(production_bridge(runtime, generic_v2_request)) == DialogueWakeResult(
+        "RECORDED", "WAKE_RECORDED")
+    assert len(operator.calls) == 3  # Same physical request, no second native turn.
 
     moved = dataclasses.replace(
         request,
@@ -1336,75 +1341,19 @@ def test_closed_canary_bridge_replays_one_persisted_attempt_without_second_turn(
     assert phases.count(LedgerPhase.DELIVERY_ATTEMPT) == 1
 
 
-def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults(
-    tmp_path: Path,
-    short_socket_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The future composition crosses the socket without replacing either resolver."""
-
-    from contextlib import contextmanager
-    from control_plane.dialogue_wake_canary_activation import (
-        DialogueWakeCanaryActivationGrant,
-        DialogueWakeCanaryProfile,
-        SCHEMA as CANARY_SCHEMA,
-        effective_dialogue_wake_canary_route,
-    )
+def _strict_dialogue_runtime(tmp_path, monkeypatch, *, provider_session_id="PROVIDER-SESSION-1"):
+    """Admit the real CEO root, current OHF writer and immutable dialogue source."""
     from control_plane.ceo_intent import submit_intent
     from control_plane.operator_harness_contract import (
-        AttentionTurnObservation,
-        CapabilityIdentity,
-        CapabilityManifest,
-        ObservedCapabilityIdentity,
-        OperationId,
-        ProcessIdentityObservation,
-        ProcessLiveness,
-        ProviderWriterState,
-        ReconcileObservation,
-        TurnStartObservation,
-        WorkerLocalWakeAckProjection,
+        CapabilityIdentity, CapabilityManifest, ObservedCapabilityIdentity,
+        OperationId, ProcessIdentityObservation,
     )
-    from control_plane.executive_orchestration_principal import (
-        OperatorPrincipalObservation,
-    )
+    from control_plane.executive_orchestration_principal import OperatorPrincipalObservation
     from control_plane.runtime_binding_projection import project_runtime_binding
     from control_plane.session_targets import (
-        SCHEMA as TARGET_SCHEMA,
-        SessionTarget,
-        SessionTargetRegistry,
-        route_digest,
-        route_obligation,
+        SCHEMA as TARGET_SCHEMA, SessionTarget, SessionTargetRegistry,
     )
-    from control_plane.wake_ledger import (
-        AckMode,
-        LedgerPhase,
-        SourceReadHealth,
-        SourceResolution,
-        SourceResolutionCode,
-        TrustedAckContext,
-        WakeLedgerError,
-        WakeRetryPolicy,
-        acknowledge,
-        ack_record,
-        attempt_record,
-        make_delivery_attempt,
-        requested_record,
-        resolved_record,
-    )
-    from control_plane.wake_persist import WakeLedgerRepository
-    from control_plane.wake_events import mint_obligation_id
-    from integrations.executive_wake.codex_app_server import CodexAppServerWakeDispatcher
-    from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
-    from integrations.executive_wake.registry import WakeDispatcherRegistry
-    from integrations.slack_agent_dialogue.contract_v2 import (
-        PARENT_SCHEMA_V2,
-        build_message_v2,
-        build_parent_v2,
-    )
-    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
-        HistoricalWakeContext,
-        PersistedWakeCarrier,
-    )
+    from integrations.slack_agent_dialogue.contract_v2 import PARENT_SCHEMA_V2, build_parent_v2
     from tests import test_wake_ack_ingress as ack_fixtures
 
     source = _terminal_dialogue_source()
@@ -1508,14 +1457,14 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         operation_id=start_operation,
         fence_generation=sealed.fence_generation,
         lease_token=dispatch.lease_token,
-        provider_session_id="PROVIDER-SESSION-1",
+        provider_session_id=provider_session_id,
         process=process,
     )
     principal = OperatorPrincipalObservation(
         attempt_id=sealed.attempt_id,
         worker_id="worker-a",
         process_generation_id=generation.process_generation_id,
-        provider_session_id="PROVIDER-SESSION-1",
+        provider_session_id=provider_session_id,
         process_identity={
             "pid": process.pid,
             "pgid": process.pgid,
@@ -1630,6 +1579,122 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         worker_id=material["worker_id"],
         evidence_digest=material["evidence_digest"],
     )
+    return SimpleNamespace(
+        attestation=attestation,
+        execution_binding=execution_binding,
+        facts_reader=facts_reader,
+        mcp_capability=mcp_capability,
+        principal=principal,
+        profile=profile,
+        source=source,
+        runtime=runtime,
+        root=root,
+        dispatch=dispatch,
+        sealed=sealed,
+        epoch=epoch,
+        generation=generation,
+        process=process,
+        parent=parent,
+        target=target,
+        ceo_target=ceo_target,
+        registry=registry,
+        binding=binding,
+        candidate=candidate,
+    )
+
+
+def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults(
+    tmp_path: Path,
+    short_socket_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The production carrier crosses the socket without replacing either resolver."""
+
+    from contextlib import contextmanager
+    from control_plane.dialogue_wake_canary_activation import (
+        DialogueWakeCanaryActivationGrant,
+        DialogueWakeCanaryProfile,
+        SCHEMA as CANARY_SCHEMA,
+        effective_dialogue_wake_canary_route,
+    )
+    from control_plane.ceo_intent import submit_intent
+    from control_plane.operator_harness_contract import (
+        AttentionTurnObservation,
+        CapabilityIdentity,
+        CapabilityManifest,
+        ObservedCapabilityIdentity,
+        OperationId,
+        ProcessIdentityObservation,
+        ProcessLiveness,
+        ProviderWriterState,
+        ReconcileObservation,
+        TurnStartObservation,
+        WorkerLocalWakeAckProjection,
+    )
+    from control_plane.executive_orchestration_principal import (
+        OperatorPrincipalObservation,
+    )
+    from control_plane.runtime_binding_projection import project_runtime_binding
+    from control_plane.session_targets import (
+        SCHEMA as TARGET_SCHEMA,
+        SessionTarget,
+        SessionTargetRegistry,
+        route_digest,
+        route_obligation,
+    )
+    from control_plane.wake_ledger import (
+        AckMode,
+        LedgerPhase,
+        SourceReadHealth,
+        SourceResolution,
+        SourceResolutionCode,
+        TrustedAckContext,
+        WakeLedgerError,
+        WakeRetryPolicy,
+        acknowledge,
+        ack_record,
+        attempt_record,
+        make_delivery_attempt,
+        requested_record,
+        resolved_record,
+    )
+    from control_plane.wake_persist import WakeLedgerRepository
+    from control_plane.wake_events import mint_obligation_id
+    from integrations.executive_wake.codex_app_server import CodexAppServerWakeDispatcher
+    from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
+    from integrations.executive_wake.registry import WakeDispatcherRegistry
+    from integrations.slack_agent_dialogue.contract_v2 import (
+        PARENT_SCHEMA_V2,
+        build_message_v2,
+        build_parent_v2,
+    )
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        HistoricalWakeContext,
+        PersistedWakeCarrier,
+    )
+    from tests import test_wake_ack_ingress as ack_fixtures
+
+    fixture = _strict_dialogue_runtime(tmp_path, monkeypatch)
+    attestation = fixture.attestation
+    execution_binding = fixture.execution_binding
+    facts_reader = fixture.facts_reader
+    mcp_capability = fixture.mcp_capability
+    principal = fixture.principal
+    profile = fixture.profile
+    source = fixture.source
+    runtime = fixture.runtime
+    root = fixture.root
+    dispatch = fixture.dispatch
+    sealed = fixture.sealed
+    epoch = fixture.epoch
+    generation = fixture.generation
+    process = fixture.process
+    parent = fixture.parent
+    target = fixture.target
+    ceo_target = fixture.ceo_target
+    registry = fixture.registry
+    binding = fixture.binding
+    candidate = fixture.candidate
     obligation = mint_obligation(
         wake_kind="dialogue_turn_pending",
         source_kind="agent_dialogue_attention",
@@ -1765,53 +1830,9 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
 
     operator = Operator()
 
-    def carrier_factory(**kwargs):
-        repository = WakeLedgerRepository(kwargs["runtime"])
-        if kwargs["historical_only"]:
-            def historical_context(attempt):
-                historical = kwargs["historical_context_for"](attempt)
-                client = CodexCurrentWriterWakeClient(
-                    operator_adapter=historical.operator_adapter,
-                    generation=historical.generation,
-                    attempt_id=historical.target_attempt_id,
-                    runtime_binding=historical.runtime_binding,
-                )
-                return HistoricalWakeContext(
-                    dispatchers=WakeDispatcherRegistry(
-                        {"codex-app-server": CodexAppServerWakeDispatcher(client)}
-                    ),
-                    runtime_binding=historical.runtime_binding,
-                    target_registry=registry,
-                )
-
-            return PersistedWakeCarrier(
-                repository=repository,
-                dispatchers=WakeDispatcherRegistry(),
-                current_binding_for=lambda _route: None,
-                retry_policy=kwargs["retry_policy"],
-                canary_profile=kwargs["canary_profile"],
-                historical_context_for=historical_context,
-                physical_source=kwargs.get("physical_source"),
-            )
-        client = CodexCurrentWriterWakeClient(
-            operator_adapter=kwargs["resolved"].operator_adapter,
-            generation=kwargs["generation"],
-            attempt_id=kwargs["resolved"].target_attempt_id,
-            runtime_binding=kwargs["current_binding"],
-            pre_submit_guard=kwargs["pre_submit_guard"],
-        )
-        return PersistedWakeCarrier(
-            repository=repository,
-            dispatchers=WakeDispatcherRegistry(
-                {"codex-app-server": CodexAppServerWakeDispatcher(client)}
-            ),
-            current_binding_for=lambda _route: kwargs["current_binding"],
-            retry_policy=kwargs["retry_policy"],
-            target_registry=kwargs["resolved"].registry,
-            canary_profile=kwargs["canary_profile"],
-            historical_context_for=kwargs["historical_context_for"],
-            physical_source=kwargs.get("physical_source"),
-        )
+    # Exercise the installed composer, including historical conversion and the
+    # final native pre-submit guard. An injected copy hid missing production wiring.
+    carrier_factory = service_cli._build_executive_dialogue_wake_carrier
 
     clock = 1_700_000_100
 
@@ -1827,7 +1848,6 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         canary_profile=DialogueWakeCanaryProfile(grant),
         canary_now_epoch_seconds=now_epoch_seconds,
         installed_release_sha=grant.installed_release_sha,
-        operation_key=grant.operation_key,
     )
     actual_current_facts = bridge._current_canary_facts
 
@@ -7674,7 +7694,7 @@ def test_host_bound_v2_cycle_uses_exact_profile_and_replays_one_attempt(
             root_id = submitted["result"]["job_id"]
             root = service.runtime.jobs.get_job(root_id)
             assert root is not None
-            assert root.constraints["routing_policy_version"] == "2026-08-24.stage4"
+            assert root.constraints["routing_policy_version"] == "2026-10-14.attended-qualification"
             assert root.constraints["execution_profile_id"] == (
                 "sealed.worker.write.no-extensions.v1"
             )
@@ -9370,6 +9390,41 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         ).resolve(strict=False)
         assert observation_loaded["dialogue_observation_peer_uid"] == 457
         assert observation_loaded["dialogue_bridge_armed"] is False
+        assert observation_loaded["dialogue_wake_canary_activation"] is None
+
+        from tests.test_dialogue_wake_canary_activation import valid_wire
+        from control_plane.dialogue_wake_canary_activation import (
+            DialogueWakeCanaryActivationGrant, DialogueWakeCanaryProfile,
+        )
+        grant_wire = valid_wire(installed_release_sha=raw["proof_base_sha"])
+        for suffix, grant_value in (("null", None), ("exact", grant_wire)):
+            canary_path = tmp_path / f"control-dialogue-canary-{suffix}.json"
+            canary_path.write_text(json.dumps({
+                **raw, **observation_fields,
+                "dialogue_wake_canary_activation": grant_value}))
+            canary_path.chmod(0o400)
+            parsed_config = service_cli.load_control_config(canary_path)
+            parsed_grant = parsed_config["dialogue_wake_canary_activation"]
+            if grant_value is None:
+                assert parsed_grant is None
+            else:
+                assert type(parsed_grant) is DialogueWakeCanaryActivationGrant
+                assert parsed_grant.to_dict() == grant_value
+        for index, bad_grant in enumerate((
+            {}, {**grant_wire, "production_armed": True},
+            {**grant_wire, "expires_at_epoch_seconds": grant_wire["valid_from_epoch_seconds"] + 901},
+        )):
+            bad_path = tmp_path / f"control-dialogue-canary-invalid-{index}.json"
+            bad_path.write_text(json.dumps({
+                **raw, **observation_fields, "dialogue_wake_canary_activation": bad_grant}))
+            bad_path.chmod(0o400)
+            with pytest.raises(ServiceError, match="canary activation is invalid"):
+                service_cli.load_control_config(bad_path)
+        orphan_path = tmp_path / "control-dialogue-canary-orphan.json"
+        orphan_path.write_text(json.dumps({**raw, "dialogue_wake_canary_activation": None}))
+        orphan_path.chmod(0o400)
+        with pytest.raises(ServiceError, match="requires the observation configuration"):
+            service_cli.load_control_config(orphan_path)
 
         armed_observation_path = tmp_path / "control-observation-armed.json"
         armed_observation_path.write_text(
@@ -9402,7 +9457,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
                     **raw,
                     "terminal_return_armed": True,
                     "terminal_return_socket_path": (
-                        "/var/run/mastermind-agent-relay/agent-relay.sock"
+                        "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
                     ),
                 }
             ),
@@ -9412,7 +9467,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         terminal_loaded = service_cli.load_control_config(terminal_return_path)
         assert terminal_loaded["terminal_return_armed"] is True
         assert terminal_loaded["terminal_return_socket_path"] == Path(
-            "/var/run/mastermind-agent-relay/agent-relay.sock"
+            "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
         ).resolve(strict=False)
         terminal_unarmed_path = tmp_path / "control-terminal-return-unarmed.json"
         terminal_unarmed_path.write_text(
@@ -9421,7 +9476,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
                     **raw,
                     "terminal_return_armed": False,
                     "terminal_return_socket_path": (
-                        "/var/run/mastermind-agent-relay/agent-relay.sock"
+                        "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
                     ),
                 }
             ),
@@ -9431,6 +9486,74 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         terminal_unarmed_loaded = service_cli.load_control_config(
             terminal_unarmed_path
         )
+
+        # The only alternate terminal socket admitted by the installed
+        # Control loader is historical A2 recovery while ALL return arms are
+        # disabled; arbitrary sockets and armed legacy routes remain refused.
+        legacy_path = tmp_path / "control-old-a2-recovery.json"
+        legacy_raw = {
+            **raw,
+            "terminal_return_armed": False,
+            "terminal_return_socket_path":
+                "/var/run/mastermind-agent-relay/agent-relay.sock",
+            "ceo_submit_armed": False,
+            "coo_autonomy_armed": False,
+            "coo_operator_harness_armed": False,
+            "coo_foreground_only": False,
+        }
+        legacy_path.write_text(json.dumps(legacy_raw))
+        legacy_path.chmod(0o400)
+        old_loaded = service_cli.load_control_config(legacy_path)
+        assert old_loaded["terminal_return_socket_path"] == Path(
+            "/var/run/mastermind-agent-relay/agent-relay.sock"
+        ).resolve(strict=False)
+        # Ordinary clients (including Company Consultation, Session Bridge,
+        # Product Acceptance and Principal Dialogue) must follow exactly the
+        # same reviewed recovery route as the Control return projector.
+        assert service_cli._agent_relay_readside_socket_for_control(
+            SimpleNamespace(
+                terminal_return_armed=False,
+                terminal_return_socket_path=old_loaded["terminal_return_socket_path"],
+            )
+        ) == Path("/var/run/mastermind-agent-relay/agent-relay.sock").resolve(strict=False)
+        assert service_cli._agent_relay_readside_socket_for_control(
+            SimpleNamespace(
+                terminal_return_armed=True,
+                terminal_return_socket_path=old_loaded["terminal_return_socket_path"],
+            )
+        ) == Path("/var/db/mastermind-agent-relay/socket/agent-relay.sock")
+        # Exercise the actual Control composition, not only the selector helper:
+        # this legacy disarmed configuration must still instantiate the native
+        # service and carry the normalized old A2 path into its ServiceConfig.
+        captured_legacy: dict[str, object] = {}
+        with monkeypatch.context() as patch_legacy:
+            patch_legacy.setattr(
+                service_cli, "activate_launchd_socket", lambda _name: listener
+            )
+            patch_legacy.setattr(
+                service_cli, "ExecutiveControlService",
+                lambda service_config, **kwargs: (
+                    captured_legacy.update(config=service_config, kwargs=kwargs),
+                    object(),
+                )[1],
+            )
+            service_cli._service_from_config(
+                old_loaded,
+                initial_canary=json.loads(canary.read_text(encoding="utf-8")),
+            )
+        assert service_cli._agent_relay_readside_socket_for_control(
+            captured_legacy["config"]
+        ) == Path("/var/run/mastermind-agent-relay/agent-relay.sock").resolve(strict=False)
+        for unsafe in (
+            {**legacy_raw, "terminal_return_armed": True},
+            {**legacy_raw, "ceo_submit_armed": True},
+            {**legacy_raw, "terminal_return_socket_path": "/tmp/foreign.sock"},
+        ):
+            legacy_path.chmod(0o600)
+            legacy_path.write_text(json.dumps(unsafe))
+            legacy_path.chmod(0o400)
+            with pytest.raises(ServiceError, match="legacy A2 recovery path"):
+                service_cli.load_control_config(legacy_path)
 
         stale_policy_path = tmp_path / "control-stale-policy.json"
         stale_policy_path.write_text(
@@ -9529,6 +9652,26 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             observation_kwargs["dialogue_wake_handler"],
             ExecutiveDialogueWakeBridge,
         )
+        handler = observation_kwargs["dialogue_wake_handler"]
+        assert type(handler.canary_profile) is DialogueWakeCanaryProfile
+        assert handler.canary_profile.grant is None
+        assert handler._operation_key is None
+        assert handler._installed_release_sha == raw["proof_base_sha"]
+
+        # The factory must consume only the trusted profile produced by the
+        # publication/verification owner. A raw config grant alone is not
+        # sufficient authority to arm the canary lane.
+        trusted_grant = DialogueWakeCanaryActivationGrant.from_dict(grant_wire)
+        with monkeypatch.context() as composition_patch:
+            composition_patch.setattr(service_cli, "activate_launchd_socket", lambda _name: listener)
+            composition_patch.setattr(service_cli, "ExecutiveControlService", capture_service)
+            service_cli._service_from_config(
+                {**armed_observation_loaded, "dialogue_wake_canary_activation": trusted_grant},
+                dialogue_canary_profile=DialogueWakeCanaryProfile(trusted_grant),
+                initial_canary=json.loads(canary.read_text(encoding="utf-8")))
+        handler = captured["kwargs"]["dialogue_wake_handler"]
+        assert handler.canary_profile.grant.to_dict() == grant_wire
+        assert handler._operation_key is None
 
         captured.clear()
         with monkeypatch.context() as composition_patch:
@@ -9547,7 +9690,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         assert isinstance(unarmed_composed_config, ServiceConfig)
         assert unarmed_composed_config.terminal_return_armed is False
         assert unarmed_composed_config.terminal_return_socket_path == Path(
-            "/var/run/mastermind-agent-relay/agent-relay.sock"
+            "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
         ).resolve(strict=False)
         assert isinstance(unarmed_composed_kwargs, dict)
         assert "terminal_return_projector_factory" not in unarmed_composed_kwargs
@@ -9729,7 +9872,7 @@ def test_canary_envelope_binds_live_control_probe_and_inner_receipt(tmp_path: Pa
         )
 
 
-def test_awaiting_canary_quarantine_allows_only_readiness_and_activation(
+def test_awaiting_canary_quarantine_preserves_readiness_and_activation(
     tmp_path: Path, short_socket_root: Path
 ):
     async def exercise():
@@ -9794,6 +9937,225 @@ def test_awaiting_canary_quarantine_allows_only_readiness_and_activation(
             assert repeated["ok"] is False
             assert loader_calls == [True]
         finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_awaiting_canary_allows_provider_independent_backup_and_verify(
+    tmp_path: Path, short_socket_root: Path
+):
+    """DR backup/verify are local-only (real `control_plane.executive_backup`
+    helper, no fake) and must not depend on worker-provider canary
+    readiness: they run while AWAITING_CANARY, leave `service_state`
+    unchanged, and touch no canary/provider/worker surface."""
+
+    async def exercise():
+        service, holder = _service(tmp_path, socket_root=short_socket_root)
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            before = await _request(service, "status")
+            assert before["result"]["service_state"] == "AWAITING_CANARY"
+
+            created = await _request(service, "backup")
+            assert created["ok"] is True, created
+            receipt = created["result"]
+            database_path = Path(receipt["database_path"])
+            assert database_path.is_file()
+            assert database_path.parent == service.config.backup_root.resolve()
+            assert stat.S_IMODE(database_path.stat().st_mode) == 0o600
+            manifest_path = Path(receipt["manifest_path"])
+            assert manifest_path.is_file()
+
+            verified = await _request(
+                service, "verify-backup", {"name": database_path.name}
+            )
+            assert verified["ok"] is True, verified
+            assert (
+                verified["result"]["database_sha256"] == receipt["database_sha256"]
+            )
+
+            after = await _request(service, "status")
+            assert after["result"]["service_state"] == "AWAITING_CANARY"
+            # No canary verdict was ever loaded and the fake supervisor never
+            # observed a restart/requeue call from this path — backup/verify
+            # never reaches the supervisor, canary loader, or any worker.
+            assert holder["supervisor"].requeue_values == []
+            assert holder["supervisor"].started_jobs == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_awaiting_canary_refuses_lifecycle_and_worker_mutations(
+    tmp_path: Path, short_socket_root: Path
+):
+    """Worker and lifecycle mutations stay refused while AWAITING_CANARY,
+    and `service_state` never moves as a side effect of the attempt."""
+
+    async def exercise():
+        service, holder = _service(tmp_path, socket_root=short_socket_root)
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            for command, args in (
+                ("register-worker", {}),
+                ("create-proof-job", {}),
+                ("dispatch", {"job_id": "JOB-nonexistent"}),
+                ("run-coo-cycle", {"root_job_id": "JOB-nonexistent"}),
+                ("reconcile", {}),
+                ("requeue", {"job_id": "JOB-nonexistent"}),
+                ("cancel", {"job_id": "JOB-nonexistent"}),
+            ):
+                denied = await _request(service, command, args)
+                assert denied["ok"] is False, (command, denied)
+                assert "AWAITING_CANARY" in denied["error"]["message"], (
+                    command,
+                    denied,
+                )
+                assert service.service_state == "AWAITING_CANARY"
+            assert holder["supervisor"].requeue_values == []
+            assert holder["supervisor"].started_jobs == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_quarantined_state_refuses_backup_and_verify_backup(
+    tmp_path: Path, short_socket_root: Path
+):
+    """The backup/verify decoupling preserves the QUARANTINED refusal;
+    only READY and AWAITING_CANARY admit the local backup routes."""
+
+    async def exercise():
+        backend = _FakeBackup()
+        service, _holder = _service(
+            tmp_path, socket_root=short_socket_root, backup=backend
+        )
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            service._service_state = "QUARANTINED"
+            denied_backup = await _request(service, "backup")
+            assert denied_backup["ok"] is False
+            assert "QUARANTINED" in denied_backup["error"]["message"]
+            assert "require service state READY or AWAITING_CANARY" in denied_backup["error"]["message"]
+            denied_verify = await _request(
+                service, "verify-backup", {"name": "fixture.sqlite3"}
+            )
+            assert denied_verify["ok"] is False
+            assert "QUARANTINED" in denied_verify["error"]["message"]
+            assert "require service state READY or AWAITING_CANARY" in denied_verify["error"]["message"]
+            assert backend.created == []
+            assert backend.verified == []
+            assert service.service_state == "QUARANTINED"
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_awaiting_canary_backup_stays_confined_to_the_configured_root(
+    tmp_path: Path, short_socket_root: Path
+):
+    """The AWAITING_CANARY admission reuses the existing closed root and name
+    handling rather than a second backup surface: the configured root is
+    created owner-only, a name that is not a simple ``.sqlite3`` file name is
+    refused, and a backup with no canonical manifest is refused before the
+    backend is reached."""
+
+    async def exercise():
+        backend = _FakeBackup()
+        service, _holder = _service(
+            tmp_path, socket_root=short_socket_root, backup=backend
+        )
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            created = await _request(service, "backup")
+            assert created["ok"] is True, created
+            assert Path(created["result"]["database_path"]).parent == service.config.backup_root
+            assert stat.S_IMODE(service.config.backup_root.stat().st_mode) == 0o700
+            assert stat.S_IMODE(backend.created[0].stat().st_mode) == 0o600
+
+            escaped = await _request(
+                service, "verify-backup", {"name": "../executive.sqlite3"}
+            )
+            assert escaped["ok"] is False
+            assert "simple .sqlite3 file name" in escaped["error"]["message"]
+            assert backend.verified == []
+
+            unrestorable = await _request(
+                service, "verify-backup", {"name": "absent.sqlite3"}
+            )
+            assert unrestorable["ok"] is False
+            assert "no canonical manifest" in unrestorable["error"]["message"]
+            assert backend.verified == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+class _BlockingBackup(_FakeBackup):
+    """Blocks inside the physical backup call so the owned-physical-worker
+    registration and the cancellation behaviour stay observable."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def create_online_backup(self, store, destination_dir: Path):
+        self.entered.set()
+        assert self.release.wait(timeout=30)
+        return super().create_online_backup(store, destination_dir)
+
+
+def test_awaiting_canary_backup_keeps_the_owned_physical_effect(
+    tmp_path: Path, short_socket_root: Path
+):
+    """The AWAITING_CANARY backup still runs through the service's owned
+    physical worker (`_run_physical` → `_run_owned_coroutine`): the effect is
+    registered as service-owned while it runs, a cancelled request does not
+    abandon it, and it completes rather than being dropped. A bare
+    `asyncio.to_thread` body would register no owned physical worker and its
+    effect would be abandoned on cancellation."""
+
+    async def exercise():
+        backend = _BlockingBackup()
+        service, _holder = _service(
+            tmp_path, socket_root=short_socket_root, backup=backend
+        )
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            request = {
+                "version": CONTROL_PROTOCOL_VERSION,
+                "command": "backup",
+                "args": {},
+            }
+            task = asyncio.create_task(service._dispatch_request(request))
+            for _ in range(500):
+                if backend.entered.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            assert backend.entered.is_set(), "the backup never reached the backend"
+            # The effect is owned by the service, not by a bare thread.
+            assert len(service._physical_workers) == 1
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            # Cancellation of the request does not abandon the physical effect.
+            assert service._physical_workers
+            backend.release.set()
+            await asyncio.wait(tuple(service._physical_workers), timeout=30)
+            assert (service.config.backup_root / "fixture.sqlite3").is_file()
+        finally:
+            backend.release.set()
             await service.close()
 
     asyncio.run(exercise())
@@ -10768,6 +11130,74 @@ def test_maintenance_workspace_materializes_exact_frozen_root_once(tmp_path, sho
             assert calls[0]["base_sha"]==old_base
             assert calls[0]["branch"]==root.branch
             assert "commission_dependency" not in calls[0]
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+@pytest.mark.parametrize("fault", [
+    None, "parent", "root", "depth", "role", "provenance", "worktree", "branch",
+    "profile", "base", "quota", "binary", "native_to_closed",
+])
+def test_ceo_only_root_keeps_sealed_binding_after_same_release_arm(
+    tmp_path, short_socket_root, monkeypatch, fault
+):
+    from ops.executive_os import acceptance_maintenance as maintenance
+
+    async def scenario():
+        service, _ = _service(tmp_path, socket_root=short_socket_root)
+        await service.start()
+        try:
+            receipt = service._submit_service_intent(_coo_intent(service.config, "same-base"))
+            root = service.runtime.jobs.get_job(receipt["job_id"])
+            admitted = root.to_dict()
+            service.config = dataclasses.replace(
+                service.config, coo_autonomy_armed=True, coo_operator_harness_armed=True
+            )
+            service._coo_execution_binding = service._load_coo_execution_binding()
+            # Same-release roots cannot borrow the maintenance carry exception.
+            def no_maintenance(sha):
+                raise AssertionError("same-base root consulted maintenance evidence")
+            monkeypatch.setattr(maintenance, "descriptor_for", no_maintenance)
+            changes = {
+                "parent": {"parent_job_id": "JOB-other"},
+                "root": {"root_job_id": "JOB-other"},
+                "depth": {"depth": 1},
+                "role": {"orchestration_role": "plan"},
+                "provenance": {"orchestration_provenance": {
+                    **root.orchestration_provenance, "creator": "other"
+                }},
+                "worktree": {"worktree": None},
+                "branch": {"branch": None},
+                "profile": {"constraints": dict(root.constraints, execution_profile_digest="c"*64)},
+                "quota": {"constraints": dict(root.constraints, operator_eligible_quota_classes=["other"])},
+                "binary": {"constraints": dict(root.constraints, operator_harness_binary_digest="c"*64)},
+            }
+            if fault == "base":
+                # A base mismatch must still take the existing maintenance path.
+                monkeypatch.setattr(maintenance, "descriptor_for", lambda sha: None)
+                root = dataclasses.replace(root, constraints=dict(root.constraints, base_sha="c"*40))
+            elif fault == "native_to_closed":
+                root = dataclasses.replace(root, constraints=dict(root.constraints, operator_harness_armed=True))
+                service.config = dataclasses.replace(
+                    service.config, coo_autonomy_armed=False, coo_operator_harness_armed=False
+                )
+                service._coo_execution_binding = service._load_coo_execution_binding()
+            elif fault:
+                root = dataclasses.replace(root, **changes[fault])
+            if fault:
+                assert not service._is_bound_coo_root(root)
+                return
+            assert service._is_bound_coo_root(root)
+            assert service._coo_binding_for_root(root)["operator_harness_armed"] is False
+            planner = service.runtime.jobs.create_cycle_planner(
+                root.job_id, command_id=f"coo-cycle:{root.job_id}:create-planner:0"
+            )
+            assert planner.constraints["execution_profile_id"] == root.constraints["execution_profile_id"]
+            assert planner.constraints["eligible_quota_classes"] == root.constraints["eligible_quota_classes"]
+            assert "harness_binary_digest" not in planner.constraints
+            assert "harness_version" not in planner.constraints
+            assert service._require_bound_coo_job(planner).job_id == root.job_id
+            assert service.runtime.jobs.get_job(root.job_id).to_dict() == admitted
         finally:
             await service.close()
     asyncio.run(scenario())

@@ -1,0 +1,31 @@
+{
+  "status": "VERIFIED_SOURCE_INDEPENDENT_SYNTHETIC_REPLAY_ONLY",
+  "new_tests": {
+    "atomic_recovery": 20,
+    "replay_reader": 28
+  },
+  "affected_existing_tests_rerun": {
+    "old_recovery_contract": 18,
+    "old_censoring_adapter": 16
+  },
+  "total_test_cases_executed_final_sources": 82,
+  "random_order_dictionary_checks": 3200,
+  "cli_runs": 4,
+  "javascript_wire_roundtrip_passed": true,
+  "source_sha256": {
+    "event_recovery/book_recovery.py": "1da1104e9b66f6fc0f85a539a335cff2719357b131b4bb3f572bce90399e0e6a",
+    "clock_pause/recovery_incidence.py": "c30beb3e9d310356b424ce77febe5aa9643b78aedbd974afbb53c9b48464b85a",
+    "replay_integrity/replay_reader.py": "931b8969720a7ca43efed07cf4c5bd1049deda574602deb638e58f8250e3781b",
+    "replay_integrity/test_atomic_recovery.py": "6b39ac6090a63c628fd0a5d65bdfa95eb7d7c38430ae6333eda00e791b6b7aad",
+    "replay_integrity/test_replay_reader.py": "641e41f178bea1529d3514c4fbcf92b094e3814312d39a877ea778ea76d1ad4d",
+    "replay_integrity/verify_wire.mjs": "a7ae65d2f79c15504c7c91f2ffdbcb4b48e441166efaf2ed6f7a26056c9cacf9",
+    "replay_integrity/DEMONSTRATION_FIXTURE.json": "0a452703c33e4059cdca44e5c7cecd7a3acd4d8c41117db54e2895a08f87790e"
+  },
+  "statistical_models_refitted": 0,
+  "real_data_records_reparsed": 0,
+  "raw_archives_rescanned": 0,
+  "action_restrictions_retried": false,
+  "original_blocked_worker_return": "No status/result attempt. Remains unresolved at last verified observation.",
+  "independent_review": "No independent reviewer approval claimed; adversarial fixtures and independent dictionary/fraction reference implementations were executed by the principal.",
+  "acceptance_scope": "Engine and finite research-reader correctness under explicit normalized fixture assumptions. Not IEX mapping, independent-day forecast validation, production deployment or trading authority."
+}

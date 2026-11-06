@@ -399,3 +399,40 @@ def test_malformed_binding_is_pre_send_refusal(bad, after_read):
         asyncio.run(writer(first.target_ref, "Continue.", "Return.", first.continuation_operation_key))
     assert exc.value.code == "binding_unavailable"
     assert [call[1]["operation"] for call in service.calls] == (["read_thread"] if after_read else [])
+
+
+@pytest.mark.parametrize("fault", [None, "unknown", "binding", "callback"])
+def test_commit_hook_runs_after_ready_and_refuses_before_commit(fault):
+    from integrations.slack_agent_dialogue.service import DialogueServiceError
+    resolver, service, order = Resolver(), Service(), []
+    def commit(**facts):
+        order.append("admit")
+        assert facts["message"]["body"]["instruction"] == "Continue."
+        if fault == "callback":
+            raise BridgeError("carrier_effect_unknown", "sticky commit")
+    async def exact_service(path, request, **kwargs):
+        if request["operation"] == "read_thread":
+            order.append("read")
+            assert not kwargs
+            return await service(path, request)
+        assert set(kwargs) == {"before_write"}
+        order.append("ready")
+        if fault == "binding":
+            resolver.binding = dataclasses.replace(resolver.binding, target_generation="changed")
+        await kwargs["before_write"]()
+        order.append("commit")
+        if fault == "unknown":
+            raise DialogueServiceError("SEND_EFFECT_UNKNOWN")
+        return await service(path, request)
+    writer = AgentDialogueContinueWriter(resolver, socket_path=Path("/private/tmp/test.sock"),
+        service_call=exact_service, before_commit=commit)
+    async def run():
+        return await writer(_binding().target_ref, "Continue.", "Return.", _binding().continuation_operation_key)
+    if fault:
+        with pytest.raises(BridgeError):
+            asyncio.run(run())
+    else:
+        assert asyncio.run(run())["reply_committed"]
+    assert order[:3] == ["read", "ready", "read"]
+    assert order.count("commit") == (0 if fault in {"binding", "callback"} else 1)
+    assert order.count("admit") == (0 if fault == "binding" else 1)

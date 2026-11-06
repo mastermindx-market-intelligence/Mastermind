@@ -128,6 +128,8 @@ _MAX_PROCESS_CENSUS_BYTES = 64 * 1024
 _MAX_PROCESS_CENSUS_MEMBERS = 256
 _DARWIN_PROCESS_RUN_STATES = frozenset("IRSTUZ")
 _DARWIN_PROCESS_STATE_FLAGS = frozenset("+<>AELNSsVWX")
+# procps ps state= is one character; Darwin state= may include flags.
+_LINUX_PROCESS_RUN_STATES = frozenset("DIRSTtWXZ")
 _LAUNCH_QUARANTINE_CLEANUP_SECONDS = 0.2
 _LOCAL_TASK_SETTLEMENT_SECONDS = 0.2
 _DENIED_PROVIDER_ENV_KEYS = frozenset(
@@ -664,6 +666,12 @@ def _tool_policy(
     spec: WorkerLaunchSpec,
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     requested = _requested_capabilities(spec)
+    return _compile_tool_policy(requested, write_paths=(
+        _allowed_write_paths(spec) if "WRITE_BRANCH" in requested else ()))
+
+
+def _compile_tool_policy(requested, *, write_paths=()):
+    """Pure policy compiler; callers separately validate actual authority."""
     tools: list[str] = []
     preapproved: list[str] = []
     forbidden = list(_FORBIDDEN_TOOLS)
@@ -672,7 +680,7 @@ def _tool_policy(
         tools.extend(_READ_TOOLS)
         preapproved.extend(f"{tool}(./**)" for tool in _READ_TOOLS)
     if "WRITE_BRANCH" in requested:
-        paths = _allowed_write_paths(spec)
+        paths = write_paths
         if not paths:
             raise ClaudeWorkerContractError("unsupported or unmapped Claude capabilities")
         tools.extend(_WRITE_TOOLS)
@@ -1003,7 +1011,9 @@ def _run_bounded_auth_status(argv: Sequence[str], *, timeout: float, env: Mappin
 def _process_group_member_pids(pgid: int) -> tuple[_ProcessGroupMember, ...]:
     """Observe group membership through the OS, never infer it from a PGID alone."""
 
-    exact_group_query = platform.system() == "Darwin"
+    observed_platform = platform.system()
+    exact_group_query = observed_platform == "Darwin"
+    linux_state_column = observed_platform == "Linux"
     argv = (
         ("/bin/ps", "-g", str(pgid), "-o", "pid=,pgid=,state=")
         if exact_group_query
@@ -1058,11 +1068,14 @@ def _process_group_member_pids(pgid: int) -> tuple[_ProcessGroupMember, ...]:
             if pid > 0 and observed_group == pgid:
                 if (
                     not state_token
-                    or state_token[0] not in _DARWIN_PROCESS_RUN_STATES
-                    or any(
-                        flag not in _DARWIN_PROCESS_STATE_FLAGS
-                        for flag in state_token[1:]
-                    )
+                    or (linux_state_column and (
+                        len(state_token) != 1 or state_token not in _LINUX_PROCESS_RUN_STATES
+                    ))
+                    or (not linux_state_column and (
+                        state_token[0] not in _DARWIN_PROCESS_RUN_STATES
+                        or any(flag not in _DARWIN_PROCESS_STATE_FLAGS
+                               for flag in state_token[1:])
+                    ))
                 ):
                     raise ValueError
                 members.append(_ProcessGroupMember(pid, state_token[0]))

@@ -1,0 +1,72 @@
+{
+  "schema": "mastermind.host_source_dependencies.v1",
+  "scope": "Explicit host-bound inert qualification dependencies; not portable CI or runtime admission",
+  "source_review_sha256": "a984ca5cd2d822580cd7e083b2902badaf3e08799a75000607276b5d6229eafc",
+  "dependencies": [
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/claude/44ff44e73b840f81/fabric-start-publication-20261012-fb76f8a5c8c5e179/integrations/session_bridge/original_validator_compat/test_collector_validator_compat.py",
+      "bytes": 19940,
+      "sha256": "c8ad65366baab24a160918856629d1e86eb6ac06d5a50fd6f5e670b449a78762"
+    },
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/claude/44ff44e73b840f81/fabric-start-publication-20261012-fb76f8a5c8c5e179/integrations/session_bridge/original_validator_compat/artifact_production.c0f17c3e.before.py",
+      "bytes": 19757,
+      "sha256": "c0f17c3e489c83bdb369d6c1ea9adc2757f4732f515cbc76e230fe154a61f67e"
+    },
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/claude/44ff44e73b840f81/fabric-start-publication-20261012-fb76f8a5c8c5e179/integrations/session_bridge/original_validator_compat/artifact_production.py",
+      "bytes": 20239,
+      "sha256": "e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf"
+    },
+    {
+      "path": "/Volumes/Mastermind/agent-workspaces/claude/44ff44e73b840f81/fabric-start-publication-20261012-fb76f8a5c8c5e179/integrations/session_bridge/original_validator_compat/artifact_reader.py",
+      "bytes": 17909,
+      "sha256": "e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469"
+    },
+    {
+      "path": "/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/artifact_reader.py",
+      "bytes": 17909,
+      "sha256": "e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469"
+    },
+    {
+      "path": "/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/original_delivery_collector.py",
+      "bytes": 29434,
+      "sha256": "0781977b0f5f6b7c493211e4a2f7e03d6938fb2ac53c65788f5afc5937dca3a7"
+    },
+    {
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/artifact-generation-adoption-20261014/artifact_delivery.base.py",
+      "bytes": 72411,
+      "sha256": "1cc1c953767320ebc3b30f16d61f7239001ecfa37607fee3e10e6acdd1278dd5"
+    },
+    {
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/artifact-generation-adoption-20261014/proposal/artifact_delivery.py",
+      "bytes": 73249,
+      "sha256": "de4ab879aa71772ccac834672ca5c5e5f6f443422c387c23ce3d35b7ba5422b6"
+    },
+    {
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/artifact-generation-adoption-20261014/proposal/artifact_production.py",
+      "bytes": 20746,
+      "sha256": "0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409"
+    },
+    {
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/artifact-generation-adoption-20261014/pre_adoption/artifact_production.py",
+      "bytes": 20239,
+      "sha256": "e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf"
+    },
+    {
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/artifact-generation-adoption-20261014/RED.log",
+      "bytes": 10607,
+      "sha256": "491b20a32638b9ac6fc0e3c671caa07adbc7b7b6bb0d1558ed74bcd2adec7b6c"
+    },
+    {
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/artifact-generation-adoption-20261014/GREEN.log",
+      "bytes": 2196,
+      "sha256": "696e86cc46b5daea5b32687aaec51687b5fab703ba2b565984a49bf84e67a0c6"
+    },
+    {
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/artifact-generation-adoption-20261014/LEGACY.log",
+      "bytes": 3054,
+      "sha256": "23d47cb3000cd41be4d3d9227d1b0e7e71c1d21b3d8fefb9e563338186b55438"
+    }
+  ]
+}
