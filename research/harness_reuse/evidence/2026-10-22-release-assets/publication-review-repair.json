@@ -1,0 +1,42 @@
+{
+  "authenticated_send": false,
+  "installed": false,
+  "live_client_accepted": false,
+  "merged": false,
+  "negative_proof": "Regression failed at _load_stage asset index topology before source correction; then passed after shared closed-profile repair. No real host, Caddy or provider effect.",
+  "old_reviewed_pr_head": "c5df975c7e4a79da83b510d51855083dcb423804",
+  "original_review": {
+    "decision": "REQUEST_CHANGES",
+    "finding": "unhandled asset stage index cardinality 14",
+    "response_sha256": "1314c17c5d9bc7c7a31141507f8b611c726c1eaf75eeb8c91219e7bbbff50eed",
+    "run_id": "deepseek-os-assets-review-20261022-r1"
+  },
+  "production_parent_consumption": false,
+  "proof_scope": "LOCAL_SOURCE_AND_INERT_PUBLICATION_TEST_ONLY",
+  "schema": "mastermind.deepseek_client.publication_repair.v1",
+  "source_scope": {
+    "branch": "sol/web-deepseek-client-release-assets-20261022-web-001",
+    "file_sha256": {
+      "integrations/mastermind_executive_app/os_assets.py": "8393de6be1522e45bd5a1740681974b88d4d170d85d91d2e99c92915677b34c1",
+      "ops/executive_os/OS_WEB_ASSETS.md": "63b66da60b6a33466852ad492e267762defd5fd509735d4a334127578e92bf7c",
+      "ops/executive_os/os_public_edge_publication.py": "d51417fea73c23beb72ed67a66e0d5f46ec89e30bdc9dac4547cf3ef9166d0d3",
+      "tests/test_os_public_edge_publication.py": "5831b447909f4e51b04029d0d9d61272a1488b6616fe5d699eb7a9f2936a4a59"
+    },
+    "precommit_head": "c5df975c7e4a79da83b510d51855083dcb423804"
+  },
+  "tests": {
+    "collected": 395,
+    "observed_pass_marks": 395,
+    "observed_skips": 0,
+    "selected_modules": {
+      "test_deepseek_os_asset_layout.py": 58,
+      "test_executive_workspace_mount.py": 75,
+      "test_os_public_edge.py": 25,
+      "test_os_public_edge_publication.py": 58,
+      "test_os_public_edge_transition.py": 63,
+      "test_os_release_assets.py": 116
+    },
+    "suite_exit_code": 0,
+    "suite_log_sha256": "8c2dab54c5a5d80d57504f21e4939d09775da8f623ce8d56ebda9bbd2521611f"
+  }
+}

@@ -1,0 +1,173 @@
+{
+  "files": [
+    {
+      "baseline_sha256": "47d30ccd7103e38cec827fb038ac6d6cb31008addecf11939fe56870c534bab6",
+      "change": "modified",
+      "installed_sha256": "e5a398a0a2178abd9a79c9f9693b2528cf3a6d8b21d5829541e01158f952a092",
+      "path": "host_pick.py"
+    },
+    {
+      "baseline_sha256": "bdc1ff38110d4d3b3158e2b21092ee426c58ef0650d5a0d99df801e09297205a",
+      "change": "modified",
+      "installed_sha256": "494bcc3a0115ba98160139bdc1452a8b8850b966844fcc2634fe0fdeffaa9111",
+      "path": "pool_status.py"
+    },
+    {
+      "baseline_sha256": "41608e90a501149a8eae4e77c8bf4933f30ac78ad13dc0bfd1b4f421a9e750f2",
+      "change": "modified",
+      "installed_sha256": "6af1bc15c84d5d22d8ee4b295206a9e5f8698b9df8f4bff6dbe3be04e481ef71",
+      "path": "host_pull_backend.py"
+    },
+    {
+      "baseline_sha256": "aaae84dfd05ce6c6cdfa1c9fbfcc16a025c5ca4cddd9c1a7494f1450fd75b5c5",
+      "change": "modified",
+      "installed_sha256": "5c00f6e544fb7be7c4643d2ee66f98354258873533c90f4c60855b93fd12670c",
+      "path": "remote_lane_v8.sh"
+    },
+    {
+      "baseline_sha256": "5ed3f5d5f1e81acfe3f89e0e3e9f3ccbc0b6868dccf170a802a556581e8fc258",
+      "change": "modified",
+      "installed_sha256": "15e0ba1dd2ef251e3a1b52f39da950ca18a9aafc6cf1b11c91e7be5d7bd3a3d9",
+      "path": "tests/test_hosts_registry.py"
+    },
+    {
+      "baseline_sha256": "c50188ec640c0cb027ab403fa994c102e3d0161e7dc10dbf5061315a004f1a1d",
+      "change": "modified",
+      "installed_sha256": "dee52d469b524a9a468264d971db9d594decdb5a19b8d2470aaf569b9efd26d1",
+      "path": "tests/test_host_pull_selected.py"
+    },
+    {
+      "baseline_sha256": "01a58c7aa7e7db1bb8c89185930e169c02acd0c0aeace78012bb026f29466f7c",
+      "change": "modified",
+      "installed_sha256": "f459738b74de3f2cc398a6b7ff9fc74512fa6d9810750b59c2d1d4eb1fcd3218",
+      "path": "tests/test_host_aware_pick.py"
+    },
+    {
+      "baseline_sha256": "c155db5f730edbd5aa5d991c74b2edbb9f1875a2cb17867755297c311dd7a206",
+      "change": "modified",
+      "installed_sha256": "20d53bc160b1d9b3a8d67362d4dc4065e91392e0d5e6ba6e88ff39a9d4b0e8fd",
+      "path": "tests/test_auto_host_pick.py"
+    },
+    {
+      "baseline_sha256": null,
+      "change": "added",
+      "installed_sha256": "66ccf8220deab9f2fb50048b32239885cc6474fa5d33258c4270d63e83a2662b",
+      "path": "tests/test_registry_metadata_filter.py"
+    },
+    {
+      "baseline_sha256": "f4a4ba4d7f9ec764fb9e07a63436fd5589beb4d460f23cc6fc4d70e236f2cc50",
+      "change": "modified",
+      "installed_sha256": "ebd4e16dce104fc0ab8579577eb71d59b979d17053cf07a113bace6bebadcf1a",
+      "path": "tests/test_five_host_enrollment.py"
+    },
+    {
+      "baseline_sha256": "4ec2b9b83b0f52887040f4233c37d90647a354c710894a42f8d640d4726c193c",
+      "change": "modified",
+      "installed_sha256": "fa607d5dd380ffc5837bebda9af6bb4edf764436b570b04aa3046d464297d39e",
+      "path": "tests/test_sub_host_policy.py"
+    },
+    {
+      "baseline_sha256": "dae3e58324289d57fd7bebc01163cbd185771082bcc7c1d84dea1e879e19b240",
+      "change": "modified",
+      "installed_sha256": "9766f7c445ab430ea5a516e56602baec00a998129395ab85aa04853716d0853f",
+      "path": "lease_broker.py"
+    },
+    {
+      "baseline_sha256": "c038ea43696fec5bf594c98f7c63f09ccded127cdf514881b4204094b5af4bec",
+      "change": "modified",
+      "installed_sha256": "fbad06ea692f59e6410f1bbaa671a8a69b63d3b2070088184d5a051a3ec01c38",
+      "path": "tests/test_host_admitted_grok_cursor_20261012.py"
+    }
+  ],
+  "historical_seal_drift": {
+    "matched": 7,
+    "mismatched": 19,
+    "re_signed": false
+  },
+  "limitations": [
+    "Patch reconstructs M2-installed scripts from their archived original M2 baselines, not directly applicable against protected Mastermind master root.",
+    "No new provider calls, paid workers, host saturation tests, account permissions or existing safety gate changes.",
+    "Even after source record publication, original owner must review/integrate/release and collect representative physical thermal and worker START/acceptance evidence."
+  ],
+  "observational_capacity": {
+    "report": "thermal_capacity_observation_24h_20261015.json",
+    "source_report_sha256": "f56c334b88ee885fd5e2a9f06715a5ba8703a237f667a264f93aae15e1d7eaf8",
+    "summary": {
+      "ubuntu0": {
+        "above_configured_tctl_count": 0,
+        "checkout_reserve_gib": 15,
+        "configured_slots": 12,
+        "configured_tctl_ceiling_c": 85.0,
+        "disk_floor_gib": 300,
+        "hot90_count": 0,
+        "max_active_observed": 5,
+        "max_tctl_c": 72.375,
+        "max_temp_at_8_plus_active": null,
+        "observations_24h": 1324,
+        "observations_at_8_plus": 0,
+        "unique_minutes_24h": 1324
+      },
+      "ubuntu1": {
+        "above_configured_tctl_count": 4,
+        "checkout_reserve_gib": 15,
+        "configured_slots": 18,
+        "configured_tctl_ceiling_c": 80.0,
+        "disk_floor_gib": 150,
+        "hot90_count": 0,
+        "max_active_observed": 9,
+        "max_tctl_c": 86.0,
+        "max_temp_at_8_plus_active": 86.0,
+        "observations_24h": 1324,
+        "observations_at_8_plus": 13,
+        "unique_minutes_24h": 1324
+      },
+      "ubuntu2": {
+        "above_configured_tctl_count": 0,
+        "checkout_reserve_gib": 15,
+        "configured_slots": 12,
+        "configured_tctl_ceiling_c": 80.0,
+        "disk_floor_gib": 150,
+        "hot90_count": 0,
+        "max_active_observed": 3,
+        "max_tctl_c": 73.75,
+        "max_temp_at_8_plus_active": null,
+        "observations_24h": 1324,
+        "observations_at_8_plus": 0,
+        "unique_minutes_24h": 1324
+      },
+      "ubuntu3": {
+        "above_configured_tctl_count": 0,
+        "checkout_reserve_gib": 15,
+        "configured_slots": 12,
+        "configured_tctl_ceiling_c": 80.0,
+        "disk_floor_gib": 300,
+        "hot90_count": 0,
+        "max_active_observed": 4,
+        "max_tctl_c": 72.125,
+        "max_temp_at_8_plus_active": null,
+        "observations_24h": 1324,
+        "observations_at_8_plus": 0,
+        "unique_minutes_24h": 1324
+      }
+    }
+  },
+  "owner_release": {
+    "macro_sparse_pr": 9194,
+    "mastermind_fleet_pr": 1404,
+    "merge_unapproved": true,
+    "same_live_installation_as_original_evidence": true
+  },
+  "protected_master_source_commit": "184e758cb3af32103a541e4b989da6074f04710f",
+  "schema": "mastermind.fabric_installed_m2_source_record.v1",
+  "scope": "Reviewable source record of already-installed M2 Fabric hardening, not deployment permission",
+  "source_patch": "installed-source.patch",
+  "source_patch_bytes": 21704,
+  "source_patch_sha256": "7f80ddfd5a9bb6961e02c2a86bcc1866bd3e92ff4f4222c88fd2b7c5cd976e17",
+  "validation": {
+    "regression_warnings": 2,
+    "replay_byte_exact": true,
+    "source_issues": "metadata-phantom-host; legacy capacity parser discrepancy; missing optional account validator; stale harness; pseudo-host broker capacity",
+    "test_count": 259,
+    "test_log": "regression_integrated.txt"
+  }
+}

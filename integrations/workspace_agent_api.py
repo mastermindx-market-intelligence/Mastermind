@@ -1,10 +1,10 @@
 """Mastermind Workspace Agent trigger-acceptance observation only.
 
-Current official OpenAI sources are not fully aligned on the baseline HTTP 202
-body shape, and the developer trigger documentation separately exposes opt-in
-beta run-status polling. Mastermind's accepted production contract deliberately
-does not request that beta contract: a 202 is queue acceptance only, any success
-body is ignored, and the agent answer is not retrieved through the trigger API.
+Official OpenAI sources observed on 2026-11-05 document HTTP 202 JSON containing
+a possibly null conversation_url and optional beta run-status polling. The
+developer documentation says the agent answer is unavailable through this API.
+Mastermind deliberately ignores the success body and does not request the beta
+contract: a 202 establishes queue acceptance only.
 
 The RunObservation/decode_run/read_run_once names remain as fail-closed
 compatibility surfaces for older callers. They perform no run-status network
@@ -76,9 +76,9 @@ def _timestamp(value: object) -> int:
 def decode_trigger(status: int | None, body: bytes) -> TriggerObservation:
     """Classify one already-received trigger response without trusting a body.
 
-    The supported contract gives no correlation body.  Even if an intermediary or
-    older endpoint supplies bytes, they are intentionally ignored and can never
-    manufacture a run id, conversation identity, completion, result, or Wake ACK.
+    The provider documents response correlation, but Mastermind deliberately
+    ignores successful response bytes. They cannot establish a run id,
+    conversation identity, completion, result, or Wake ACK in this profile.
     """
 
     if type(body) is not bytes:

@@ -34,12 +34,20 @@ from control_plane.sol_ops_restart import (
     preflight_restart,
     validate_request,
 )
-from scripts.mastermind_chatgpt_ops_health import CONTROL_ROOT, read_personal_status
+from scripts.mastermind_chatgpt_ops_health import (
+    CONTROL_ROOT,
+    STUDIO_LAUNCHER,
+    read_personal_status,
+    verify_studio_control_owner,
+)
 
 SERVICE_TO_ACCOUNT = {
     "studio-direct.chatgpt1": "chatgpt1",
-    "studio-direct.chatgpt2": "chatgpt2",
-    "studio-direct.chatgpt3": "chatgpt3",
+    "studio-direct.chatgpt2-personal": "chatgpt2-personal",
+    "studio-direct.chatgpt2-business": "chatgpt2-business",
+    "studio-direct.admin-business": "admin-business",
+    "studio-direct.chatgpt3-w570f6f34": "chatgpt3-w570f6f34",
+    "studio-direct.chatgpt3-wa2a9e6f9": "chatgpt3-wa2a9e6f9",
     "studio-direct.chatgpt4": "chatgpt4",
 }
 PRIVATE_ROOT = Path.home() / ".local" / "share" / "studio-direct-mcp" / "private"
@@ -186,14 +194,20 @@ def observe_exact_service(
         raise ValueError("owner status must be an object")
     manifest = manifest_reader(account)
     gateway = status.get("gateway")
+    tunnel = status.get("tunnel")
     if not isinstance(gateway, dict):
         raise ValueError("owner status gateway is unavailable")
+    if not isinstance(tunnel, dict):
+        raise ValueError("owner status tunnel is unavailable")
     runtime_version = gateway.get("runtimeVersion")
     if runtime_version is not None and not isinstance(runtime_version, str):
         raise ValueError("owner runtime version is invalid")
     issues: tuple[str, ...] = (
         ("CONFIGURATION_DRIFT",)
-        if gateway.get("configurationDrift") is True
+        if (
+            gateway.get("configurationDrift") is True
+            or tunnel.get("configurationDrift") is True
+        )
         else ()
     )
     return RestartObservation(
@@ -211,6 +225,7 @@ def _run_owner_action(account: str, action: str) -> dict[str, object]:
         raise ValueError("account is outside the closed allowlist")
     if action not in {"stop", "start"}:
         raise ValueError("owner action is outside the closed restart sequence")
+    verify_studio_control_owner(control_root=CONTROL_ROOT, launcher=STUDIO_LAUNCHER)
     helper = CONTROL_ROOT / "studio_direct_control.py"
     result = subprocess.run(
         [sys.executable, str(helper), action, "--account", account],

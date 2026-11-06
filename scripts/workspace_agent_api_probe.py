@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Describe Mastermind's accepted Workspace trigger-observation surface.
 
-Current official OpenAI sources disagree on the baseline 202 body shape, and the
-developer docs separately expose beta run-status polling. This probe describes
-Mastermind's deliberately narrower production contract: trigger acceptance only,
+Official OpenAI sources observed on 2026-11-05 document a 202 conversation_url
+response and optional beta run-status polling. This probe describes Mastermind's
+deliberately narrower production contract: trigger acceptance only,
 no beta run observation, no answer retrieval, and zero run-status network I/O.
 Legacy run-observation flags remain only as fail-closed compatibility surfaces.
 """

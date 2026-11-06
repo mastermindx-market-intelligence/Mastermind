@@ -4,13 +4,13 @@ Status: source correction / `BUILT_NOT_PROVEN` / production-disarmed.
 
 ## Current admitted contract
 
-Current official OpenAI sources are not fully aligned on the baseline `202`
-response shape. The Workspace Agents Help Center says the trigger returns
-`202 Accepted` with no response body or run id. The developer trigger
-documentation shows a baseline `conversation_url` response and separately
-documents an opt-in beta run-observation contract using
-`OpenAI-Beta: workspace_agent_runs=v1`. Both sources say the agent's answer is
-not retrieved through the trigger API.
+Official OpenAI sources observed on 2026-11-05 describe a `202 Accepted` JSON
+response containing `conversation_url`; the Help Center permits a null value.
+The developer documentation also describes optional beta run-status polling:
+`OpenAI-Beta: workspace_agent_runs=v1` adds an `agent_trigger_run_id`. That
+developer page states that the agent's answer cannot be retrieved through the
+API. These facts were reconfirmed on 2026-11-06; these are observation dates,
+not inferred publication dates.
 
 Mastermind deliberately chooses a narrower acceptance-only production profile:
 it does not send the beta run-observation header, does not consume a successful
@@ -38,7 +38,7 @@ surfaces only; they return `RUN_OBSERVATION_NOT_ADMITTED` and perform zero
 run-status network I/O. This is a Mastermind scope decision, not a claim that the
 provider lacks the beta endpoint.
 
-Current official references rechecked 2026-09-22:
+Official references observed 2026-11-05 and reconfirmed 2026-11-06:
 https://help.openai.com/en/articles/20001143
 https://developers.openai.com/workspace-agents/trigger-runs
 
@@ -57,9 +57,9 @@ printf '%s' '' |
   python3 scripts/workspace_agent_api_probe.py --decode-trigger --http-status 202
 ```
 
-The decode path never trusts a success body. Even if an intermediary or obsolete
-endpoint supplies correlation-shaped bytes, a `202` remains
-`ACCEPTED_UNCORRELATED`.
+The decode path deliberately ignores the documented success body, including
+correlation-shaped bytes. Under Mastermind's acceptance-only policy, a `202`
+remains `ACCEPTED_UNCORRELATED`.
 
 Legacy run flags fail visibly and perform no network I/O:
 

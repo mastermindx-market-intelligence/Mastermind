@@ -6,11 +6,11 @@ an effectful provider transport primitive for a later reviewed Executive owner.
 
 Important boundary: a provider 202 means only that the trigger was accepted by
 the provider. Mastermind deliberately does not request beta run correlation and
-never depends on a success response body. Current official sources disagree on
-the baseline 202 body shape, while developer docs separately document beta run
-status. Acceptance therefore does not prove that the agent consumed the prompt,
-produced a useful candidate, returned anything to Mastermind, or satisfied a
-canonical Wake acknowledgement.
+never depends on a success response body. Official sources observed on
+2026-11-05 document a 202 conversation_url response and optional beta run status;
+Mastermind's narrower policy deliberately leaves both unconsumed. Acceptance
+does not prove that the agent consumed the prompt, produced a useful candidate,
+returned anything to Mastermind, or satisfied a canonical Wake acknowledgement.
 
 The caller must create and durably reconcile one WorkspaceAgentTriggerPlan
 through the existing Executive operation/event owner before production use.
@@ -232,9 +232,9 @@ def trigger_once(
         response = connection.getresponse()
         status = response.status
         if status == 202:
-            # Acceptance correctness must survive both currently documented
-            # baseline body shapes. We did not request beta run correlation, so
-            # never read or promote success-body bytes into Mastermind authority.
+            # This profile deliberately ignores the documented success body.
+            # We did not request beta run correlation; never read or promote
+            # success-body bytes into Mastermind authority.
             observation = decode_trigger(202, b"")
         else:
             observation = decode_trigger(status, b"")

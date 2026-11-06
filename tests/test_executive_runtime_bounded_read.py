@@ -675,6 +675,7 @@ def test_observation_identity_unique_and_closed_public_surface(observation_fixtu
     for _ in range(2):
         with runtime.observe_bounded_read() as read:
             read.read_job_root_bounded(job_id)
+            assert callable(read.read_root_role_result_bounded)
             for name in ('connection', 'execute', 'cursor', 'token', 'list_events'):
                 assert not hasattr(read, name)
         identities.append(read.receipt.source_identity)
