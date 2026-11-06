@@ -24,6 +24,7 @@ import {
   canNavigateForAutomaticSignIn, explicitLogoutRecorded, registerUnsavedNavigationHold,
 } from "./auth-navigation-guard";
 import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
+import { captureOfficeReadFrame } from "./meta-ceo/office-read-frame";
 import {
   decideOfficeLaunchHandoff, officeLaunchWorkstreamAgrees, previewIsCurrent,
   type DirectionPreview, type OfficeLaunchOutcome,
@@ -1618,6 +1619,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     } | null>(null),
     programSelection = useRef(selection),
     workRequest = useRef(0),
+    officeWorkFrame = useRef<ReturnType<typeof captureOfficeReadFrame> | null>(null),
     missionSelectionState =
       native &&
       !window.MastermindMissionHost?.readPrograms &&
@@ -2826,6 +2828,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     const controller = new AbortController();
     const host = window.MastermindMissionHost;
     const read = host?.readWork;
+    // The Office consumes this existing acquisition, not a second queue read.
+    // Its view stays bound to the exact acquisition-start Host/READ epoch.
+    officeWorkFrame.current = captureOfficeReadFrame(host, authRevision, freshAuthRevision, "readWork");
     if (native && !read) {
       setWorkState({
         kind: "UNAVAILABLE",
@@ -4955,6 +4960,13 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const recordedProjectJournal = projectWorkRef ? <ProjectJournalReader selection={{workRef: projectWorkRef}}
       read={projectReaders.journal} generation={projectReaders.generation?.() ?? "SOURCE_UNAVAILABLE"}
       authGeneration={authRevision} canRead={projectReaders.canRead} locale={locale}/> : null;
+  const officeJournalFrame = useMemo(() => captureOfficeReadFrame(retainedResultHost,
+    authRevision, freshAuthRevision, "readProjectJournal"), [retainedResultHost, retainedHostGeneration, authRevision, freshAuthRevision]);
+  const officeProjectJournal = projectWorkRef ? <ProjectJournalReader selection={{workRef:projectWorkRef}}
+    read={projectReaders.journal} generation={retainedHostGeneration} authGeneration={authRevision}
+    canRead={officeJournalFrame.current} locale={locale}/> : null;
+  const officeWorkRead: WorkState = officeWorkFrame.current?.current() ? workState
+    : {kind:"UNAVAILABLE",reason:"SOURCE_OWNER_NOT_CURRENT"};
   const planAdoptionHostCurrent = useMemo(() => {
     const host=retainedResultHost,revision=authRevision;
     return () => !!host && window.MastermindMissionHost===host && authRevisionRef.current===revision;
@@ -5356,6 +5368,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           programmeDirection={{selection: projectWorkRef ? {work_ref: projectWorkRef} : null,
             read: projectReaders.plan, sourceGeneration: projectReaders.generation, canRead: projectReaders.canRead}}
           acceptedDirection={recordedDirection}
+          workRead={officeWorkRead}
+          onInspectWork={() => {if (officeWorkFrame.current?.current()) setActive("Work");}}
+          projectJournal={officeProjectJournal}
           onOpenProjects={() => { setProjectTab(null); setActive("Projects"); }}
           selectedProject={projectWorkRef && currentProjectCards.length === 1 ? {
             title: currentProjectCards[0].title || projectWorkRef,
