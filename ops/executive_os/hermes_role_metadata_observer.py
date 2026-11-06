@@ -78,13 +78,22 @@ async def _settle_owned_read(process, *, session=False):
 
 async def _await_owned_cleanup(cleanup):
     """Repeated caller cancellation must not abandon the bounded cleanup."""
-    cancelled = False
+    cancelled = isinstance(sys.exception(), asyncio.CancelledError)
     while not cleanup.done():
         try:
             await asyncio.shield(cleanup)
         except asyncio.CancelledError:
             cancelled = True
-    cleanup.result()
+        except Exception:
+            if cancelled:
+                raise asyncio.CancelledError() from None
+            raise
+    try:
+        cleanup.result()
+    except Exception:
+        if cancelled:
+            raise asyncio.CancelledError() from None
+        raise
     if cancelled:
         raise asyncio.CancelledError()
 

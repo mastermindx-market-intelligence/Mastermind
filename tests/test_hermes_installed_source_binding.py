@@ -313,7 +313,7 @@ async def test_source_epoch_changes_during_query_withholds_rows(installed, monke
 
 @pytest.mark.anyio
 @pytest.mark.parametrize('mode', ['timeout', 'cancel', 'cancel-twice'])
-async def test_owned_observation_timeout_and_cancel_settle_waiting_descendant(tmp_path, mode):
+async def test_owned_observation_timeout_and_cancel_settle_waiting_descendant(tmp_path, mode, monkeypatch):
     # Only two newly-created benign fixture processes. The parent owns/reaps
     # its child and reports cleanup; no Hermes, systemctl or host PID is read.
     marker = tmp_path/'settled'
@@ -327,12 +327,19 @@ def stop(sig,frame):
  raise SystemExit(0)
 signal.signal(signal.SIGTERM,stop)
 print('READY',flush=True)
-signal.pause()
+while True: signal.pause()
 '''
     process = await asyncio.create_subprocess_exec(sys.executable, '-I', '-S', '-B', '-c', script, str(marker),
         stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
     assert await process.stdout.readline() == b'READY\n'
+    signals=[]
+    actual_killpg=os.killpg
+    def own_signal(group,sig):
+        signals.append((group,sig))
+        assert group==process.pid
+        return actual_killpg(group,sig)
+    monkeypatch.setattr(observer.os,'killpg',own_signal)
     published = []
     async def request():
         try:
@@ -349,7 +356,7 @@ signal.pause()
         if mode=='cancel-twice': await asyncio.sleep(0);task.cancel()
     with pytest.raises((asyncio.CancelledError,asyncio.TimeoutError)):
         await asyncio.wait_for(task,timeout=3)
-    assert process.returncode is not None and await process.wait()==0
+    assert process.returncode is not None and await process.wait()==0, signals
     assert marker.read_text()=='owned-descendant-reaped' and published==[]
     assert await process.stdout.read()==b''
 
@@ -424,6 +431,25 @@ async def test_exited_parent_with_waiting_descendant_is_bounded_refusal_not_a_gr
         except ProcessLookupError: pass
         assert await asyncio.wait_for(process.stdout.read(),timeout=1)==b''
         await process.wait()
+
+
+@pytest.mark.anyio
+async def test_cleanup_refusal_does_not_turn_gateway_cancellation_into_a_response(monkeypatch):
+    from contextlib import contextmanager
+    from ops.executive_os import release_manifest as m
+    @contextmanager
+    def installed_command(*args): yield ['EXPLICIT_INERT_COMMAND_NOT_EXECUTED']
+    reader=asyncio.StreamReader()
+    process=SimpleNamespace(stdout=reader,returncode=None)
+    monkeypatch.setattr(m,'hermes_observation_command',installed_command)
+    monkeypatch.setattr(observer,'sys',Proxy(sys,platform='linux'))
+    monkeypatch.setattr(observer.asyncio,'create_subprocess_exec',AsyncMock(return_value=process))
+    async def refused(*args,**kwargs): raise RoleStatusError()
+    monkeypatch.setattr(observer,'_settle_owned_read',refused)
+    task=asyncio.create_task(observer.InstalledHermesRoleMetadataObserver(
+        host_binding_sha256=BINDING,implementation_sha=IMPLEMENTATION).read_pair())
+    await asyncio.sleep(0.01);task.cancel()
+    with pytest.raises(asyncio.CancelledError): await task
 
 
 @pytest.mark.anyio
